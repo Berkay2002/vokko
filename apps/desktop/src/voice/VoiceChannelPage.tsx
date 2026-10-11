@@ -1,8 +1,9 @@
 // The page a voice channel opens in the main area: participant tiles, the alone/empty state, the control bar and the
-// text-in-voice side panel. Camera, screen share and activities are later milestones: their buttons open the UI shells.
+// text-in-voice side panel. With peers the stage is a grid that maximises 16:9 tiles; clicking a tile focuses it (one big
+// tile over a strip of the others, which can be hidden). Camera, screen share and activities open their UI shells.
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { ChevronDown, Ellipsis, LayoutGrid, Maximize2, Mic, MicOff, Minimize2, Monitor, MonitorUp, Music, PhoneOff, SquareArrowOutUpRight, UserPlus, Users, Video, VideoOff, Volume2, HeadphoneOff, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { ChevronDown, ChevronUp, Ellipsis, LayoutGrid, Maximize2, Mic, MicOff, Minimize2, Monitor, MonitorUp, Music, PhoneOff, SquareArrowOutUpRight, UserPlus, Users, Video, VideoOff, Volume2, HeadphoneOff, X } from "lucide-react";
 import { Perm } from "../api/permissions";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
@@ -10,8 +11,9 @@ import { Avatar } from "../shell/Avatar";
 import { userContextItems } from "../shell/menus";
 import { openModal } from "../shell/modalStore";
 import { usePermissions } from "../shell/usePermissions";
-import { Tooltip, useContextMenu } from "../ui";
+import { hasOpenLayer, Tooltip, useContextMenu } from "../ui";
 import { useDeviceMenus } from "./deviceMenus";
+import { GRID_GAP, gridLayout } from "./gridLayout";
 import { dismissVideoError, joinVoiceChannel, leaveVoice, setViewerQuality, toggleSelfMute, watchStream } from "./engine";
 import { useMedia, useVideo, type VideoHandle, type VideoSource } from "./mediaStore";
 import { SoundboardPopout } from "./SoundboardPopout";
@@ -42,8 +44,14 @@ function TileVideo({ handle, source, mirror }: { handle: VideoHandle; source: Vi
   return <video ref={element} className={`voice-tile-video ${source}${mirror ? " mirror" : ""}`} autoPlay muted playsInline data-source={source} />;
 }
 
-function Tile({ state, guildId, solo }: { state: VoiceState; guildId: Snowflake | null; solo: boolean }) {
+/** solo: alone in the call. grid / strip / pip: focusable. focused: the big tile of focus mode (click returns to the grid). */
+type TileVariant = "solo" | "grid" | "focused" | "strip" | "pip";
+
+const AVATAR_SIZE: Record<TileVariant, number> = { solo: 100, focused: 100, grid: 80, strip: 48, pip: 48 };
+
+function Tile({ state, guildId, variant, onActivate }: { state: VoiceState; guildId: Snowflake | null; variant: TileVariant; onActivate?: () => void }) {
   const user = useStore(s => s.users[state.user_id]) ?? state.member?.user;
+  const activity = useStore(s => s.presences[state.user_id]?.activities?.[0]?.name);
   const member = useStore(s => (guildId ? s.members[guildId]?.[state.user_id] : undefined)) ?? state.member;
   const speaking = useIsSpeaking(state.user_id);
   const own = useVoice(s => s.meId === state.user_id);
@@ -58,15 +66,27 @@ function Tile({ state, guildId, solo }: { state: VoiceState; guildId: Snowflake 
   const name = displayName(user, member);
   const muted = state.mute || state.self_mute || state.suppress;
   const deaf = state.deaf || state.self_deaf;
+  const small = variant === "strip" || variant === "pip";
+  const focused = variant === "focused";
+  const speakingText = speaking ? ", speaking" : "";
+  const interactive = !!onActivate;
   return (
     <div
       ref={tile}
-      className={`voice-tile${speaking ? " speaking" : ""}${solo ? " solo" : ""}${own ? " own" : ""}`}
+      className={`voice-tile ${variant}${speaking ? " speaking" : ""}${own ? " own" : ""}`}
       data-user-id={state.user_id}
       data-speaking={speaking || undefined}
-      role="group"
-      aria-label={`${name}${speaking ? ", speaking" : ""}`}
+      role={interactive ? "button" : "group"}
+      tabIndex={interactive ? 0 : undefined}
+      aria-pressed={interactive ? focused : undefined}
+      aria-label={interactive ? (focused ? `Return to grid (${name}${speakingText})` : `Focus ${name}${speakingText}`) : `${name}${speakingText}`}
       style={{ background: tileColor(user.id, user.banner_color) } as CSSProperties}
+      onClick={onActivate}
+      onKeyDown={e => {
+        if (!onActivate || e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        onActivate();
+      }}
       onContextMenu={e => menu.open(e, userContextItems(user, { guildId, anchor: tile.current }))}
     >
       {screen ? (
@@ -74,22 +94,30 @@ function Tile({ state, guildId, solo }: { state: VoiceState; guildId: Snowflake 
       ) : camera ? (
         <TileVideo key="camera" handle={camera} source="camera" mirror={own} />
       ) : (
-        <Avatar user={user} member={member} size={solo ? 100 : 80} decoration={false} className="voice-tile-avatar" />
+        <Avatar user={user} member={member} size={AVATAR_SIZE[variant]} decoration={false} className="voice-tile-avatar" />
       )}
       {streaming && <span className="voice-tile-live">LIVE</span>}
-      {streaming && !own && !watching && (
-        <button type="button" className="voice-tile-watch" onClick={() => watchStream(state.user_id, true)}>
+      {streaming && !own && !watching && !small && (
+        <button type="button" className="voice-tile-watch" 
+          onClick={e => {
+            // Watching from the grid also focuses the stream; on the focused tile it must not return to the grid.
+            e.stopPropagation();
+            watchStream(state.user_id, true);
+            if (!focused) onActivate?.();
+          }}
+        >
           <Monitor size={28} aria-hidden="true" />
           Watch Stream
         </button>
       )}
-      {streaming && !own && watching && (
+      {streaming && !own && watching && !small && (
         <div className="voice-tile-tools">
           <button
             type="button"
             className="voice-tile-tool"
             aria-label="Stream quality"
             onClick={e => {
+              e.stopPropagation();
               const rect = e.currentTarget.getBoundingClientRect();
               menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [
                 ...VIEWER_QUALITIES.map((q: ViewerQuality) => ({ id: `quality-${q}`, label: VIEWER_QUALITY_LABEL[q], checked: (quality ?? "auto") === q, onSelect: () => setViewerQuality(state.user_id, "screen", q) })),
@@ -102,11 +130,15 @@ function Tile({ state, guildId, solo }: { state: VoiceState; guildId: Snowflake 
           </button>
         </div>
       )}
-      <span className="voice-tile-name">
-        <span className="voice-tile-name-text">{name}</span>
-        {muted && <MicOff size={14} aria-label="Muted" role="img" />}
-        {deaf && <HeadphoneOff size={14} aria-label="Deafened" role="img" />}
-      </span>
+      <div className="voice-tile-labels">
+        <span className="voice-tile-name">
+          {streaming && <Monitor size={14} aria-label="Streaming" role="img" />}
+          <span className="voice-tile-name-text">{name}</span>
+          {muted && <MicOff size={14} aria-label="Muted" role="img" />}
+          {deaf && <HeadphoneOff size={14} aria-label="Deafened" role="img" />}
+        </span>
+        {activity && !small && <span className="voice-tile-activity">{activity}</span>}
+      </div>
     </div>
   );
 }
@@ -248,6 +280,90 @@ function AloneCard({ channel }: { channel: Channel }) {
   );
 }
 
+/** Content-box size of an element, kept current with a ResizeObserver. */
+function useBoxSize(ref: React.RefObject<HTMLElement | null>): { width: number; height: number } {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setSize(prev => (prev.width === el.clientWidth && prev.height === el.clientHeight ? prev : { width: el.clientWidth, height: el.clientHeight }));
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return size;
+}
+
+/** Grid view: the column count that gives the largest 16:9 tiles, last row centred. */
+function TileGrid({ states, guildId, onFocus }: { states: VoiceState[]; guildId: Snowflake | null; onFocus: (userId: Snowflake) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const { width, height } = useBoxSize(box);
+  const layout = gridLayout(states.length, width, height, GRID_GAP);
+  const style = layout.tileWidth > 0 ? ({ "--voice-tile-w": `${layout.tileWidth}px`, width: `${layout.cols * layout.tileWidth + (layout.cols - 1) * GRID_GAP}px` } as CSSProperties) : undefined;
+  return (
+    <div ref={box} className="voice-tiles grid">
+      <div className="voice-grid" style={style} data-cols={layout.cols || undefined}>
+        {states.map(state => (
+          <Tile key={state.user_id} state={state} guildId={guildId} variant="grid" onActivate={() => onFocus(state.user_id)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MembersToggle({ hidden }: { hidden: boolean }) {
+  const label = hidden ? "Show Members" : "Hide Members";
+  return (
+    <div className={`voice-members-toggle${hidden ? " members-hidden" : ""}`}>
+      <Tooltip content={label} side="top">
+        <button type="button" className="voice-members-pill" aria-label={label} onClick={() => useVoiceUi.getState().setMembersHidden(!hidden)}>
+          {hidden ? <ChevronUp size={16} aria-hidden="true" /> : <ChevronDown size={16} aria-hidden="true" />}
+          <Users size={16} aria-hidden="true" />
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+
+/** Focus view: the focused tile fills the stage over a strip of the others (hideable); a hidden live stream shows as a PiP. */
+function FocusView({ states, focused, guildId }: { states: VoiceState[]; focused: VoiceState; guildId: Snowflake | null }) {
+  const hidden = useVoiceUi(s => s.membersHidden);
+  const setFocusedTile = useVoiceUi(s => s.setFocusedTile);
+  const others = states.filter(s => s.user_id !== focused.user_id);
+  const pip = hidden ? others.find(s => s.self_stream) : undefined;
+  return (
+    <div className={`voice-focus${hidden ? " members-hidden" : ""}`}>
+      <div className="voice-focus-main">
+        <div className="voice-focus-frame">
+          <Tile key={focused.user_id} state={focused} guildId={guildId} variant="focused" onActivate={() => setFocusedTile(null)} />
+          {hidden && <MembersToggle hidden />}
+        </div>
+        {pip && (
+          <div className="voice-pip">
+            <Tile key={pip.user_id} state={pip} guildId={guildId} variant="pip" onActivate={() => setFocusedTile(pip.user_id)} />
+          </div>
+        )}
+      </div>
+      {!hidden && (
+        <div className="voice-strip-wrap">
+          <MembersToggle hidden={false} />
+          <div className="voice-strip" role="group" aria-label="Members">
+            {others.map(state => (
+              <Tile key={state.user_id} state={state} guildId={guildId} variant="strip" onActivate={() => setFocusedTile(state.user_id)} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function isEditable(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
+}
+
 export function VoiceChannelPage({ channel }: { channel: Channel }) {
   const page = useRef<HTMLElement>(null);
   const states = useChannelVoiceStates(channel.id);
@@ -256,6 +372,37 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
   const chatOpen = useVoiceUi(s => s.chatOpen);
   const hasPeers = states.length > 1;
   const empty = !connected && states.length === 0;
+  const focusedId = useVoiceUi(s => s.focusedTile);
+  const focused = hasPeers && focusedId ? states.find(s => s.user_id === focusedId) : undefined;
+
+  // One-shot request from outside the stage ("Watch Stream" in the channel list): focus that stream once it is in this call.
+  const focusStream = useVoiceUi(s => s.focusStream);
+  const requested = connected && focusStream ? states.find(s => s.user_id === focusStream) : undefined;
+  useEffect(() => {
+    if (!requested) return;
+    const ui = useVoiceUi.getState();
+    ui.setFocusedTile(requested.user_id);
+    ui.requestStreamFocus(null);
+  }, [requested]);
+
+  // The focused participant left (or the call shrank to one): back to the grid.
+  useEffect(() => {
+    if (focusedId && !focused) useVoiceUi.getState().setFocusedTile(null);
+  }, [focusedId, focused]);
+
+  // Escape leaves focus mode. Capture phase, so it runs before the shell's Escape (mark as read), which skips prevented events.
+  const inFocus = !!focused;
+  useEffect(() => {
+    if (!inFocus) return;
+    const onKey = (e: KeyboardEvent) => {
+      // Plain Escape only (Shift+Escape marks the server read), and never while a popout, menu or modal owns Escape.
+      if (e.key !== "Escape" || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented || isEditable(e.target) || hasOpenLayer() || document.querySelector('[role="dialog"], [role="menu"]')) return;
+      e.preventDefault();
+      useVoiceUi.getState().setFocusedTile(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [inFocus]);
 
   return (
     <section ref={page} className={`voice-page${empty ? " empty" : ""}`} aria-label={`${channel.name ?? "Voice"} call`}>
@@ -271,11 +418,17 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
         </div>
       ) : (
         <div className="voice-stage">
-          <div className={`voice-tiles${states.length === 1 ? " single" : ""}`}>
-            {states.map(state => (
-              <Tile key={state.user_id} state={state} guildId={channel.guild_id} solo={states.length === 1} />
-            ))}
-          </div>
+          {focused ? (
+            <FocusView states={states} focused={focused} guildId={channel.guild_id} />
+          ) : hasPeers ? (
+            <TileGrid states={states} guildId={channel.guild_id} onFocus={id => useVoiceUi.getState().setFocusedTile(id)} />
+          ) : (
+            <div className="voice-tiles single">
+              {states.map(state => (
+                <Tile key={state.user_id} state={state} guildId={channel.guild_id} variant="solo" />
+              ))}
+            </div>
+          )}
           {connected && <VideoError />}
           {connected && !hasPeers && <AloneCard channel={channel} />}
           {connected ? (

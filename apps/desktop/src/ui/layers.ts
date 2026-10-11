@@ -28,6 +28,11 @@ function install(): void {
   );
 }
 
+/** True while any overlay (modal, popout, context menu) is open: page-level Escape handlers should leave Escape to it. */
+export function hasOpenLayer(): boolean {
+  return stack.length > 0;
+}
+
 /** Register an overlay while `active`. Returns nothing; `onEscape` is called when this layer is on top. */
 export function useLayer(active: boolean, onEscape: () => void): { isTop: () => boolean } {
   const handler = useRef(onEscape);

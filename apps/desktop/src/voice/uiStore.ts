@@ -1,10 +1,12 @@
 // Client-side state the voice UI needs and the wire contract has no field for: whether the text-in-voice panel is open,
-// the instance bitrate ceiling from READY, the recent pings, and a ticking clock for elapsed timers.
+// the instance bitrate ceiling from READY, the recent pings, the call stage focus (focused tile, hidden member strip) and a
+// ticking clock for elapsed timers.
 // (The channel status text is server state now: `useVoice(s => s.channelStatus[id])`, set with `setVoiceChannelStatus`.)
 
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { gateway } from "../api/gateway";
+import type { Snowflake } from "../api/types";
 import { voiceStore } from "./store";
 
 const KEY = "vokko.voiceUi";
@@ -35,7 +37,19 @@ interface VoiceUiStore extends Persisted {
   bitrateCeiling: number;
   /** Ping measurements of the current call, newest last (connection details chart). */
   pingHistory: PingSample[];
+  /** User whose tile fills the call stage (focus mode); null = grid. Reset when the call ends or changes channel. */
+  focusedTile: Snowflake | null;
+  /** Focus mode: the strip of the other tiles is hidden. */
+  membersHidden: boolean;
+  /**
+   * A stream the stage should focus, set by "Watch Stream" outside the stage (the channel list's stream preview card).
+   * The stage reads it, focuses that user's screen share and calls `requestStreamFocus(null)` once it has.
+   */
+  focusStream: Snowflake | null;
   setChatOpen(open: boolean): void;
+  requestStreamFocus(userId: Snowflake | null): void;
+  setFocusedTile(userId: Snowflake | null): void;
+  setMembersHidden(hidden: boolean): void;
 }
 
 function persist(state: Persisted): void {
@@ -50,9 +64,21 @@ export const useVoiceUi = create<VoiceUiStore>()(set => ({
   ...load(),
   bitrateCeiling: DEFAULT_CEILING,
   pingHistory: [],
+  focusedTile: null,
+  membersHidden: false,
+  focusStream: null,
   setChatOpen(open) {
     set({ chatOpen: open });
     persist({ chatOpen: open });
+  },
+  requestStreamFocus(userId) {
+    set({ focusStream: userId });
+  },
+  setFocusedTile(userId) {
+    set({ focusedTile: userId });
+  },
+  setMembersHidden(hidden) {
+    set({ membersHidden: hidden });
   },
 }));
 
@@ -63,7 +89,7 @@ if (typeof window !== "undefined") {
   });
   // The voice store only keeps the latest ping; the connection details popout charts the recent ones.
   voiceStore.subscribe((state, prev) => {
-    if (state.channelId !== prev.channelId) useVoiceUi.setState({ pingHistory: [] });
+    if (state.channelId !== prev.channelId) useVoiceUi.setState({ pingHistory: [], focusedTile: null, membersHidden: false, ...(state.channelId === null ? { focusStream: null } : {}) });
     if (state.channelId && state.pingMs !== null && state.pingMs !== prev.pingMs) {
       const history = [...useVoiceUi.getState().pingHistory, { at: Date.now(), ms: state.pingMs }];
       useVoiceUi.setState({ pingHistory: history.slice(-PING_HISTORY_MAX) });

@@ -678,6 +678,161 @@
   width: min(100cqw, 100cqh * 16 / 9);
 }
 
+.voice-tile[role="button"] {
+  cursor: pointer;
+}
+
+.voice-tile[role="button"]:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--brand-500));
+  outline-offset: 2px;
+}
+
+/* grid view: the measured box centres a wrapper exactly as wide as the chosen columns, so rows wrap there */
+.voice-tiles.grid {
+  align-items: center;
+  overflow: hidden;
+}
+
+.voice-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.voice-grid > .voice-tile {
+  flex: none;
+  width: var(--voice-tile-w, 240px);
+}
+
+/* focus view: one big tile over a strip of the others */
+.voice-focus {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.voice-focus-main {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  container-type: size;
+}
+
+.voice-focus-frame {
+  position: relative;
+  width: min(100cqw, 100cqh * 16 / 9);
+  aspect-ratio: 16 / 9;
+}
+
+.voice-tile.focused {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+}
+
+.voice-strip-wrap {
+  position: relative;
+  flex: none;
+}
+
+.voice-strip {
+  display: flex;
+  justify-content: safe center;
+  gap: 10px;
+  height: 140px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.voice-tile.strip {
+  flex: none;
+  height: 100%;
+  width: auto;
+}
+
+.voice-tile.strip .voice-tile-live,
+.voice-tile.pip .voice-tile-live {
+  left: auto;
+  right: 8px;
+}
+
+.voice-tile.strip .voice-tile-labels,
+.voice-tile.pip .voice-tile-labels {
+  left: 8px;
+  bottom: 8px;
+  max-width: calc(100% - 16px);
+}
+
+.voice-tile.strip .voice-tile-name,
+.voice-tile.pip .voice-tile-name {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.voice-pip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 240px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-high, 0 4px 16px color-mix(in srgb, var(--background-base-lowest) 60%, transparent));
+}
+
+.voice-tile.pip {
+  width: 100%;
+}
+
+/* "Hide Members" pill on the strip's top edge (shown on hover / keyboard focus); "Show Members" at the bottom of the tile */
+.voice-members-toggle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 2;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.voice-members-toggle.members-hidden {
+  top: auto;
+  bottom: 12px;
+  transform: translateX(-50%);
+}
+
+.voice-strip-wrap:hover .voice-members-toggle,
+.voice-focus-frame:hover .voice-members-toggle,
+.voice-members-toggle:focus-within {
+  opacity: 1;
+}
+
+.voice-members-pill {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--background-surface-higher);
+  color: var(--interactive-icon-default);
+  box-shadow: var(--shadow-low, none);
+  cursor: pointer;
+}
+
+.voice-members-pill:hover {
+  background: var(--background-surface-highest);
+  color: var(--interactive-icon-hover);
+}
+
 .voice-tile-avatar {
   border-radius: 50%;
 }
@@ -686,7 +841,7 @@
   border-radius: 50%;
 }
 
-.voice-tile-name {
+.voice-tile-labels {
   position: absolute;
   left: 12px;
   bottom: 12px;
@@ -694,6 +849,27 @@
   align-items: center;
   gap: 6px;
   max-width: calc(100% - 24px);
+}
+
+.voice-tile-activity {
+  overflow: hidden;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--background-base-lowest) 55%, transparent);
+  color: var(--text-default);
+  font-size: 13px;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.voice-tile-name {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   background: rgba(0, 0, 0, 0.55);
