@@ -121,10 +121,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The updater plugin refuses to start without its config, so it is only registered when the build provides it.
     let updater_configured = context.config().plugins.0.contains_key(updates::CONFIG_KEY);
 
+    log::info!("updater configured: {updater_configured}");
+
     // Single-instance must be the first plugin; with its `deep-link` feature it forwards a second launch's
-    // vokko:// argument to the deep-link plugin before this callback runs.
-    let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| window::show_main(app)))
+    // vokko:// argument to the deep-link plugin before this callback runs. The lock is per app identifier, so
+    // dev setups that run several copies side by side (worktrees, e2e) opt out with VOKKO_MULTI_INSTANCE=1.
+    let mut builder = tauri::Builder::default();
+    if std::env::var_os("VOKKO_MULTI_INSTANCE").is_none() {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| window::show_main(app)));
+    }
+    builder = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AUTOSTART_ARG])))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())

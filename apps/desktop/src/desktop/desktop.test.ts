@@ -6,7 +6,7 @@ vi.mock("@tauri-apps/api/core", () => core);
 vi.mock("@tauri-apps/api/event", () => events);
 
 import { getAutostart, setAutostart } from "./autostart";
-import { initDeepLinks, routeDeepLink, type DeepLink } from "./deeplinks";
+import { initDeepLinks, onDeepLink, resetDeepLinks, routeDeepLink, type DeepLink } from "./deeplinks";
 import { DEFAULT_DESKTOP_PREFS, getDesktopPrefs, setDesktopPrefs } from "./prefs";
 import { listShortcuts, onShortcut, registerShortcut } from "./shortcuts";
 import { resetTrayUnread, setTrayUnread } from "./tray";
@@ -17,6 +17,7 @@ beforeEach(() => {
   core.isTauri.mockReset();
   events.listen.mockReset();
   resetTrayUnread();
+  resetDeepLinks();
   useDesktopUpdate.setState({ status: { state: "disabled" } });
 });
 
@@ -39,7 +40,7 @@ describe("outside Tauri (browser build)", () => {
   });
 
   it("subscriptions are inert", async () => {
-    const stop = await initDeepLinks(() => undefined);
+    const stop = await initDeepLinks();
     const stopShortcut = await onShortcut(() => undefined);
     const stopUpdater = await initUpdater();
     stop();
@@ -88,15 +89,45 @@ describe("inside Tauri", () => {
       order.push("listen");
       return () => undefined;
     });
+    const link: DeepLink = { kind: "auth", url: "vokko://auth/callback?code=1&state=2" };
     core.invoke.mockImplementation(async (command: string) => {
       order.push(command);
-      return [{ kind: "invite", code: "abc" }];
+      return [link];
     });
     const seen: DeepLink[] = [];
-    const stop = await initDeepLinks(link => seen.push(link));
+    onDeepLink(l => seen.push(l));
+    const stop = await initDeepLinks();
     expect(order).toEqual(["listen", "desktop_take_pending_links"]);
-    expect(seen).toEqual([{ kind: "invite", code: "abc" }]);
+    expect(seen).toEqual([link]);
     stop();
+  });
+
+  it("replays an auth link that arrived before anyone subscribed", async () => {
+    const link: DeepLink = { kind: "auth", url: "vokko://auth/callback?code=1&state=2" };
+    core.invoke.mockResolvedValue([link]);
+    await initDeepLinks();
+    const seen: DeepLink[] = [];
+    onDeepLink(l => seen.push(l));
+    expect(seen).toEqual([link]);
+    const later: DeepLink[] = [];
+    onDeepLink(l => later.push(l));
+    expect(later).toEqual([]);
+  });
+
+  it("stops delivering after unsubscribe", async () => {
+    let emit: (link: DeepLink) => void = () => undefined;
+    events.listen.mockImplementation(async (_name: string, cb: (event: { payload: DeepLink }) => void) => {
+      emit = link => cb({ payload: link });
+      return () => undefined;
+    });
+    core.invoke.mockResolvedValue([]);
+    await initDeepLinks();
+    const seen: DeepLink[] = [];
+    const off = onDeepLink(l => seen.push(l));
+    emit({ kind: "invite", code: "a", url: "vokko://invite/a" });
+    off();
+    emit({ kind: "auth", url: "vokko://auth/callback" });
+    expect(seen).toEqual([{ kind: "invite", code: "a", url: "vokko://invite/a" }]);
   });
 
   it("stays off when the build has no updater", async () => {
@@ -120,7 +151,7 @@ describe("routeDeepLink", () => {
     const dispatchEvent = vi.fn();
     vi.stubGlobal("window", { location: { pathname: "/channels/@me" }, history: { pushState }, dispatchEvent });
     vi.stubGlobal("PopStateEvent", class {});
-    routeDeepLink({ kind: "invite", code: "abc" });
+    routeDeepLink({ kind: "invite", code: "abc", url: "vokko://invite/abc" });
     expect(pushState).toHaveBeenCalledWith({}, "", "/invite/abc");
     expect(dispatchEvent).toHaveBeenCalledTimes(1);
   });

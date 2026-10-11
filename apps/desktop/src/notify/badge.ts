@@ -2,6 +2,7 @@
 
 import { isTauri } from "@tauri-apps/api/core";
 import iconSvg from "../../assets/icon.svg?raw";
+import { setTrayUnread } from "../desktop/tray";
 import { dmName, type AppState } from "../api/store";
 import { ChannelType } from "../api/types";
 import { compareIds } from "../api/snowflake";
@@ -104,4 +105,5 @@ export function applyUnread(summary: UnreadSummary, enabled: boolean, label: str
   if (document.title !== title) document.title = title;
   setFavicon(faviconSvg(shown));
   void setWindowBadge(shown.mentions);
+  void setTrayUnread(shown.unread || shown.mentions > 0);
 }

@@ -7,29 +7,36 @@ No signing keys, endpoints or secrets are committed; releases supply them at bui
 
 | Feature | Rust | JS adapter (`src/desktop`) |
 |---|---|---|
-| Tray icon: Open / Mute / Deafen (disabled until voice) / Quit; left click opens | `tray.rs` | `setTrayUnread(bool)` draws or clears the red unread dot |
+| Tray icon: Open / Mute / Deafen (disabled until voice) / Quit; left click opens | `tray.rs` | `setTrayUnread(bool)` draws or clears the red unread dot (called from `notify/badge.ts` `applyUnread`) |
 | Close to tray (default on; falls back to quitting if no tray exists) | `prefs.rs`, `on_window_event` in `main.rs` | `getDesktopPrefs()`, `setDesktopPrefs({ closeToTray, startMinimized })` |
 | Run on startup, optional "start minimized" | `tauri-plugin-autostart`, arg `--autostart` | `getAutostart()`, `setAutostart(bool)` |
-| Single instance: a second launch focuses the first (even from the tray) | `tauri-plugin-single-instance` | - |
-| `vokko://invite/<code>` deep link | `links.rs`, `tauri-plugin-deep-link` | `initDeepLinks(handler?)`, default routes to `/invite/<code>` |
+| Single instance: a second launch focuses the first (even from the tray). `VOKKO_MULTI_INSTANCE=1` opts out for side-by-side dev copies | `tauri-plugin-single-instance` | - |
+| `vokko://invite/<code>` and `vokko://auth/callback?...` deep links | `links.rs`, `tauri-plugin-deep-link` | `onDeepLink(cb)`; invites default to routing `/invite/<code>` |
 | Updater, inactive unless configured | `updates.rs`, `tauri-plugin-updater` | `useDesktopUpdate()`, `checkForUpdate()`, `restartToUpdate()` |
 | Global shortcuts registry (nothing registered by default) | `shortcuts.rs`, `tauri-plugin-global-shortcut` | `registerShortcut`, `unregisterShortcut`, `listShortcuts`, `onShortcut` |
-| Notifications | `tauri-plugin-notification`, capability `notification:default` | use `@tauri-apps/plugin-notification` directly |
+| Notifications | `tauri-plugin-notification`, capability `notification:default` | `src/notify/desktop.ts` invokes the plugin commands |
 
-`initDesktop()` (called from `src/main.tsx`) starts deep-link delivery and the updater loop.
+`initDesktop()` (called from `src/main.tsx`) starts deep-link delivery and the updater loop. `isDesktop()` tells a settings page
+whether to show the desktop-only options at all.
 
 Preferences are a JSON file (`desktop.json`) in the app config dir (see `crates/platform/src/app_dirs.rs`) because close-to-tray and
 start-minimized are decided before the webview loads.
 
 ### Deep links
 
+- Supported: `vokko://invite/<code>` (code: letters, digits, `-`, `_`, max 64) and `vokko://auth/callback?code=...&state=...`
+  (OAuth redirect from the system browser; the query is passed through untouched, nothing in it is logged). Everything else is dropped.
+  URLs over 4096 characters or with control characters are dropped.
+- Adapter: `onDeepLink(link => ...)` receives `{ kind: "invite", code, url }` or `{ kind: "auth", url }`, `url` being the full
+  original URL (parse `code`/`state` from it). An auth link that arrives before the first subscriber (cold start) is replayed to it.
+  While at least one listener exists, invites go to the listeners instead of the default `/invite/<code>` routing.
 - The scheme is declared in `tauri.conf.json` under `plugins.deep-link.desktop.schemes`. **The installer registers it** (NSIS/MSI on
   Windows, `.desktop` file on Linux, `Info.plist` on macOS). The app never writes registry keys itself, and bundling is currently
   off (`bundle.active: false`), so an unbundled debug build has no `vokko://` handler registered.
 - Links that arrive before the webview loads (cold start, second-instance argv) queue in Rust and are handed over by
   `desktop_take_pending_links`, which the JS adapter calls once after subscribing.
-- Test without an installer: `vokko-desktop.exe vokko://invite/abc123` (starts the app with the link, or forwards it to the running one).
-- The SPA needs an `/invite/:code` route; until it exists the router's catch-all sends the user to `/channels/@me`.
+- Test without an installer: `vokko-desktop.exe "vokko://invite/abc123"` (starts the app with the link, or forwards it to the running one).
+- The SPA has no `/invite/:code` route yet; until it exists the router's catch-all sends the user to `/channels/@me`.
 
 ### Global shortcuts
 
@@ -40,7 +47,8 @@ Register from JS: `registerShortcut("push-to-talk", "Ctrl+Shift+K")`, then `onSh
 ## Updater
 
 Inactive by default: the updater plugin refuses to start without `pubkey`, so it is only registered when the Tauri config contains a
-`plugins.updater` entry, and every update command then answers `{ "state": "disabled" }`.
+`plugins.updater` entry at compile time, and every update command then answers `{ "state": "disabled" }`. The app logs
+`updater configured: true|false` at startup.
 
 ### One-time setup
 
@@ -53,17 +61,32 @@ The command prints the public key; the private key and its password stay in your
 
 ### Building a release
 
-Supply the config through the `TAURI_CONFIG` environment variable (merged over `tauri.conf.json`), plus the signing key:
+Write the release overlay to a file that is not committed (for example `release.json`) and pass it with `--config`. The CLI hands the
+same JSON to the Rust build through the `TAURI_CONFIG` environment variable, so the updater plugin sees it too.
+
+```json
+{
+  "bundle": { "active": true, "targets": ["nsis"], "createUpdaterArtifacts": true },
+  "plugins": {
+    "updater": {
+      "pubkey": "<public key printed by signer generate>",
+      "endpoints": ["https://updates.example.com/vokko/{{target}}-{{arch}}/{{current_version}}"],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}
+```
 
 ```powershell
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content "$env:USERPROFILE\.vokko\updater.key" -Raw
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "<password>"
-$env:TAURI_CONFIG = '{"bundle":{"active":true,"targets":["nsis"],"createUpdaterArtifacts":true},"plugins":{"updater":{"pubkey":"<public key>","endpoints":["https://updates.example.com/vokko/{{target}}-{{arch}}/{{current_version}}"],"windows":{"installMode":"passive"}}}}'
-npm run desktop:build -w @vokko/desktop   # or: npx tauri build
+cd apps\desktop
+npx tauri build --config release.json
 ```
 
-This produces the installer plus a `.sig` signature next to the updater artifact. Upload both and serve either the dynamic
-endpoint above or a static manifest:
+(`npm run desktop:build` passes `--no-bundle`, so it produces no installer or signature.) The build writes the installer plus a `.sig`
+next to the updater artifact under `target\release\bundle`. Upload both and serve either the dynamic endpoint above or a static
+manifest:
 
 ```json
 {
