@@ -2,10 +2,11 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::routing::get;
-use vokko_protocol::api::{UpdateUserRequest, User};
+use vokko_protocol::api::{GatewayEvent, UpdateUserRequest, User};
 
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
+use crate::events;
 use crate::extract::{ApiJson, parse_id};
 use crate::routes::auth::clean_text;
 use crate::state::AppState;
@@ -43,7 +44,10 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
         let path = owned_attachment_path(&state, attachment_id.db(), user_id).await?;
         sqlx::query("UPDATE users SET avatar_path = $2 WHERE id = $1").bind(user_id).bind(path).execute(&state.db).await?;
     }
-    store::user(&state, user_id).await?.map(Json).ok_or_else(ApiErr::unauthorized)
+    let user = store::user(&state, user_id).await?.ok_or_else(ApiErr::unauthorized)?;
+    let audience = events::user_audience(&state, user_id).await?;
+    state.hub.send(&audience, &GatewayEvent::UserUpdate(user.clone()));
+    Ok(Json(user))
 }
 
 /// `<id>/<filename>` of an attachment uploaded by `user_id` (used for avatars and guild icons).

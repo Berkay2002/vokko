@@ -584,6 +584,7 @@ pub enum GatewayEvent {
     GuildMemberAdd(GuildMemberAdd),
     GuildMemberRemove(GuildMemberRemove),
     PresenceUpdate(Presence),
+    UserUpdate(User),
     MessageAck(MessageAck),
     RelationshipAdd(Relationship),
     RelationshipRemove(IdOnly),
@@ -609,6 +610,7 @@ impl GatewayEvent {
             Self::GuildMemberAdd(_) => "GUILD_MEMBER_ADD",
             Self::GuildMemberRemove(_) => "GUILD_MEMBER_REMOVE",
             Self::PresenceUpdate(_) => "PRESENCE_UPDATE",
+            Self::UserUpdate(_) => "USER_UPDATE",
             Self::MessageAck(_) => "MESSAGE_ACK",
             Self::RelationshipAdd(_) => "RELATIONSHIP_ADD",
             Self::RelationshipRemove(_) => "RELATIONSHIP_REMOVE",
@@ -631,6 +633,7 @@ impl GatewayEvent {
             Self::GuildMemberAdd(value) => serde_json::to_value(value),
             Self::GuildMemberRemove(value) => serde_json::to_value(value),
             Self::PresenceUpdate(value) => serde_json::to_value(value),
+            Self::UserUpdate(value) => serde_json::to_value(value),
             Self::MessageAck(value) => serde_json::to_value(value),
             Self::RelationshipAdd(value) => serde_json::to_value(value),
         };
