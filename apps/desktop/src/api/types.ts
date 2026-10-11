@@ -124,6 +124,8 @@ export interface Attachment {
   url: string; // absolute URL served by the server
   width: number | null;
   height: number | null;
+  description?: string | null; // alt text, max 1024 chars
+  // Spoiler: Discord convention, filename starts with "SPOILER_" (clients blur until clicked).
 }
 
 export interface EmbedMedia {
@@ -224,6 +226,7 @@ export interface CreateMessageRequest {
   nonce?: string;
   message_reference?: { message_id: Snowflake };
   attachment_ids?: Snowflake[]; // ids returned by POST /channels/{id}/attachments; max 10 per message
+  attachments?: PendingAttachmentMeta[]; // same ids with optional rename / alt text; use instead of attachment_ids
   allowed_mentions?: AllowedMentions; // omitted = parse everything, replied_user true
 }
 export interface AllowedMentions {
@@ -241,9 +244,15 @@ export interface RateLimitError {
   retry_after: number; // seconds (float); also sent as the Retry-After header
   global: boolean;
 }
+export interface PendingAttachmentMeta {
+  id: Snowflake; // pending attachment id from POST /channels/{id}/attachments
+  filename?: string; // rename before sending; prefix "SPOILER_" marks a spoiler
+  description?: string; // alt text, max 1024 chars
+}
 export interface EditMessageRequest {
-  content: string;
+  content?: string;
   flags?: number; // 1 << 2 SUPPRESS_EMBEDS
+  attachments?: { id: Snowflake }[]; // attachments to keep; omitted = unchanged; can only remove, not add
 }
 
 export interface EditUserRequest {

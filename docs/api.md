@@ -54,7 +54,7 @@ General rules:
 | POST | /invites/{code} | accept → `Guild` |
 | GET | /channels/{id}/messages?before&after&around&limit | `Message[]` newest first, limit 1-100 (default 50) |
 | POST | /channels/{id}/messages | `CreateMessageRequest` → `Message` |
-| PATCH | /channels/{id}/messages/{mid} | author only, `EditMessageRequest` → `Message` |
+| PATCH | /channels/{id}/messages/{mid} | author only, `EditMessageRequest` → `Message`. `attachments` lists the ones to keep (others are removed and their files deleted); a result with no content and no attachments → 400 50006 |
 | DELETE | /channels/{id}/messages/{mid} | author or MANAGE_MESSAGES, 204 |
 | PUT | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | emoji URL-encoded (unicode or `name:id`), 204 |
 | DELETE | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | 204 |
@@ -64,7 +64,7 @@ General rules:
 | POST | /read-states/ack-bulk | `{read_states: [{channel_id, message_id}]}` → 204 ("mark server as read") |
 | POST | /channels/{id}/typing | 204, emits TYPING_START (expires after 10 s client-side) |
 | POST | /channels/{id}/messages/{mid}/ack | updates read state, 204 |
-| POST | /channels/{id}/attachments | multipart `file` (max 25 MiB, configurable) → `Attachment` (pending until referenced by a message) |
+| POST | /channels/{id}/attachments | multipart `file` (max 25 MiB, configurable) → `Attachment` (pending until referenced by a message). On send, `CreateMessageRequest.attachments` may rename (`filename`, `SPOILER_` prefix = spoiler) and set `description` (alt text ≤1024) per id |
 | GET | /attachments/{id}/{key}/{filename} | serves the file; `key` = 32 hex chars (128-bit random per attachment); wrong key or filename → 404. Avatars/icons use the same URLs. Clients treat `Attachment.url`, `User.avatar`, `Guild.icon` as opaque absolute URLs |
 
 ## Gateway
