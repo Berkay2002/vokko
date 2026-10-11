@@ -54,6 +54,11 @@ async fn status_of(app: &TestApp, url: &str) -> StatusCode {
     app.router.clone().oneshot(Request::builder().uri(path).body(Body::empty()).expect("request")).await.expect("response").status()
 }
 
+/// The key is present and `null`: the client merges update events by spreading, so an omitted key would leave stale data behind.
+fn is_null(object: &Value, key: &str) -> bool {
+    object.as_object().is_some_and(|fields| fields.get(key).is_some_and(Value::is_null))
+}
+
 fn user_id(app_user: &Value) -> String {
     app_user["id"].as_str().expect("id").to_owned()
 }
@@ -66,7 +71,7 @@ async fn user_profile_fields_round_trip_and_clear() {
     // a fresh user has every perk as an explicit null
     let (_, me) = app.get("/users/@me", &owner).await;
     for key in ["banner", "pronouns", "theme_colors", "avatar_decoration", "profile_effect", "primary_guild"] {
-        assert_eq!(me[key], Value::Null, "{key}: {me}");
+        assert!(is_null(&me, key), "{key}: {me}");
     }
 
     let (status, updated) = app
@@ -100,14 +105,14 @@ async fn user_profile_fields_round_trip_and_clear() {
     // absent keys are left alone, null clears just that key
     let (status, partial) = app.patch("/users/@me", &owner, json!({"pronouns": null, "bio": "hello"})).await;
     assert_eq!(status, 200, "{partial}");
-    assert_eq!(partial["pronouns"], Value::Null);
+    assert!(is_null(&partial, "pronouns"), "{partial}");
     assert_eq!(partial["bio"], "hello");
     assert_eq!(partial["banner"], banner["url"]);
     assert_eq!(partial["theme_colors"], json!([0x112233, 0xaabbcc]));
     let (_, cleared) =
         app.patch("/users/@me", &owner, json!({"banner_attachment_id": null, "theme_colors": null, "avatar_decoration": "", "profile_effect": null})).await;
     for key in ["banner", "theme_colors", "avatar_decoration", "profile_effect"] {
-        assert_eq!(cleared[key], Value::Null, "{key}: {cleared}");
+        assert!(is_null(&cleared, key), "{key}: {cleared}");
     }
 }
 
@@ -115,6 +120,8 @@ async fn user_profile_fields_round_trip_and_clear() {
 async fn user_profile_validation_rejects_without_changing_anything() {
     let (app, owner, _, channel, _) = setup().await;
     let text = upload(&app, &owner, &channel, "notes.txt", "text/plain", b"not an image").await;
+    // bytes that are not an image never become one by declaring `image/png` or by their file name
+    let disguised = upload(&app, &owner, &channel, "photo.png", "image/png", b"<html><script>alert(1)</script></html>").await;
     let huge = upload(&app, &owner, &channel, "huge.png", "image/png", &png()).await;
     let numeric: i64 = huge["id"].as_str().expect("id").parse().expect("id");
     sqlx::query("UPDATE attachments SET size = $2 WHERE id = $1").bind(numeric).bind(11_i64 * 1024 * 1024).execute(&app.state.db).await.expect("size");
@@ -125,6 +132,8 @@ async fn user_profile_validation_rejects_without_changing_anything() {
         ("banner_attachment_id", json!(text["id"])),
         ("banner_attachment_id", json!(huge["id"])),
         ("banner_attachment_id", json!("123456789")),
+        ("banner_attachment_id", json!(disguised["id"])),
+        ("avatar_attachment_id", json!(disguised["id"])),
         ("avatar_attachment_id", json!(text["id"])),
         ("pronouns", json!("p".repeat(41))),
         ("bio", json!("b".repeat(191))),
@@ -140,8 +149,8 @@ async fn user_profile_validation_rejects_without_changing_anything() {
     }
     let (_, me) = app.get("/users/@me", &owner).await;
     assert_eq!(me["pronouns"], "she/her");
-    assert_eq!(me["global_name"], Value::Null);
-    assert_eq!(me["banner"], Value::Null);
+    assert!(is_null(&me, "global_name"), "{me}");
+    assert!(is_null(&me, "banner"), "{me}");
 }
 
 #[tokio::test]
@@ -156,6 +165,10 @@ async fn server_tag_and_theme_and_primary_guild() {
         user_id(&me)
     };
     let tag = json!({"tag": "SAM", "badge": "bolt", "color_primary": 0xff0000, "color_secondary": 0x00ff00});
+
+    // a guild without either sends them as explicit nulls
+    let (_, plain) = app.get(&format!("/guilds/{guild}"), &member).await;
+    assert!(is_null(&plain, "tag") && is_null(&plain, "theme"), "{plain}");
 
     // MANAGE_GUILD only
     let (status, _) = app.patch(&format!("/guilds/{guild}"), &member, json!({"tag": tag})).await;
@@ -202,17 +215,17 @@ async fn server_tag_and_theme_and_primary_guild() {
 
     // the owner is not wearing it
     let (_, owner_me) = app.get(&format!("/users/{owner_id}"), &member).await;
-    assert_eq!(owner_me["primary_guild"], Value::Null);
+    assert!(is_null(&owner_me, "primary_guild"), "{owner_me}");
 
     // removing the tag clears it for the wearers
     let (status, no_tag) = app.patch(&format!("/guilds/{guild}"), &owner, json!({"tag": null})).await;
     assert_eq!(status, 200);
-    assert_eq!(no_tag["tag"], Value::Null);
+    assert!(is_null(&no_tag, "tag"), "{no_tag}");
     assert_eq!(no_tag["theme"]["preset"], "ember", "theme untouched");
     let (_, me) = app.get("/users/@me", &member).await;
-    assert_eq!(me["primary_guild"], Value::Null);
+    assert!(is_null(&me, "primary_guild"), "{me}");
     let (_, no_theme) = app.patch(&format!("/guilds/{guild}"), &owner, json!({"theme": null})).await;
-    assert_eq!(no_theme["theme"], Value::Null);
+    assert!(is_null(&no_theme, "theme"), "{no_theme}");
 }
 
 #[tokio::test]
@@ -227,16 +240,16 @@ async fn primary_guild_disappears_when_leaving() {
     let (status, _) = app.delete(&format!("/users/@me/guilds/{guild}"), &member).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let (_, me) = app.get("/users/@me", &member).await;
-    assert_eq!(me["primary_guild"], Value::Null);
+    assert!(is_null(&me, "primary_guild"), "{me}");
     let (_, seen) = app.get(&format!("/users/{id}"), &owner).await;
-    assert_eq!(seen["primary_guild"], Value::Null);
+    assert!(is_null(&seen, "primary_guild"), "{seen}");
     // and it is not silently back after rejoining
     let (_, channels) = app.get(&format!("/guilds/{guild}/channels"), &owner).await;
     let channel = channels.as_array().expect("channels").iter().find(|c| c["name"] == "general").expect("general")["id"].as_str().expect("id").to_owned();
     let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &owner, json!({})).await;
     app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &member, json!({})).await;
     let (_, me) = app.get("/users/@me", &member).await;
-    assert_eq!(me["primary_guild"], Value::Null);
+    assert!(is_null(&me, "primary_guild"), "{me}");
 }
 
 #[tokio::test]
@@ -252,7 +265,7 @@ async fn per_server_member_profile_round_trips() {
     // starts empty (explicit nulls)
     let (_, profile) = app.get(&format!("/users/{member_id}/profile?guild_id={guild}"), &owner).await;
     for key in ["avatar", "banner", "bio", "pronouns", "theme_colors"] {
-        assert_eq!(profile["guild_member"][key], Value::Null, "{key}: {profile}");
+        assert!(is_null(&profile["guild_member"], key), "{key}: {profile}");
     }
 
     let (status, edited) = app
@@ -277,8 +290,8 @@ async fn per_server_member_profile_round_trips() {
     assert_eq!(edited["theme_colors"], json!([1, 2]));
     assert_eq!(edited["nick"], "Ali");
     // the account's own profile is untouched
-    assert_eq!(edited["user"]["avatar"], Value::Null);
-    assert_eq!(edited["user"]["bio"], Value::Null);
+    assert!(is_null(&edited["user"], "avatar"), "{edited}");
+    assert!(is_null(&edited["user"], "bio"), "{edited}");
     assert_eq!(status_of(&app, edited["avatar"].as_str().expect("avatar")).await, 200);
 
     let (_, profile) = app.get(&format!("/users/{member_id}/profile?guild_id={guild}"), &owner).await;
@@ -305,8 +318,8 @@ async fn per_server_member_profile_round_trips() {
     // null falls back to the account's own, absent keys stay
     let (status, cleared) = app.patch(&format!("/guilds/{guild}/members/@me"), &member, json!({"avatar_attachment_id": null, "bio": null})).await;
     assert_eq!(status, 200, "{cleared}");
-    assert_eq!(cleared["avatar"], Value::Null);
-    assert_eq!(cleared["bio"], Value::Null);
+    assert!(is_null(&cleared, "avatar"), "{cleared}");
+    assert!(is_null(&cleared, "bio"), "{cleared}");
     assert_eq!(cleared["banner"], banner["url"]);
     assert_eq!(cleared["nick"], "Ali");
 }

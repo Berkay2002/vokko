@@ -233,6 +233,8 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
         return Err(ApiErr::missing_permissions());
     }
     let members = access::guild_member_ids(&state, id).await?;
+    // The FK clears their primary guild; their audience hears about it as USER_UPDATE once the guild is gone.
+    let adopters: Vec<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE primary_guild_id = $1").bind(id).fetch_all(&state.db).await?;
     let attachments: Vec<(i64,)> = sqlx::query_as("DELETE FROM attachments WHERE channel_id IN (SELECT id FROM channels WHERE guild_id = $1) RETURNING id")
         .bind(id)
         .fetch_all(&state.db)
@@ -240,6 +242,9 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     sqlx::query("DELETE FROM guilds WHERE id = $1").bind(id).execute(&state.db).await?;
     media::remove_files(&state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
     state.hub.send(&members, &GatewayEvent::GuildDelete(IdOnly { id: Snowflake::from(id) }));
+    for (adopter,) in adopters {
+        users::publish_user(&state, adopter).await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
