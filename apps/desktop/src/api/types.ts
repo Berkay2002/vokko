@@ -154,7 +154,23 @@ export interface CreateMessageRequest {
   content?: string;
   nonce?: string;
   message_reference?: { message_id: Snowflake };
-  attachment_ids?: Snowflake[]; // ids returned by POST /channels/{id}/attachments
+  attachment_ids?: Snowflake[]; // ids returned by POST /channels/{id}/attachments; max 10 per message
+  allowed_mentions?: AllowedMentions; // omitted = parse everything, replied_user true
+}
+export interface AllowedMentions {
+  parse?: ("users" | "roles" | "everyone")[];
+  users?: Snowflake[];
+  roles?: Snowflake[];
+  replied_user?: boolean; // false = reply without pinging the replied-to author (the @ON/OFF toggle)
+}
+export interface PinnedMessagesPage {
+  items: { message: Message; pinned_at: ISO8601 }[];
+  has_more: boolean;
+}
+export interface RateLimitError {
+  message: string;
+  retry_after: number; // seconds (float); also sent as the Retry-After header
+  global: boolean;
 }
 export interface EditMessageRequest {
   content: string;
@@ -223,8 +239,13 @@ export interface GatewayEvents {
   CHANNEL_UPDATE: Channel;
   CHANNEL_DELETE: Channel;
   GUILD_CREATE: ReadyEvent["guilds"][number];
+  GUILD_UPDATE: Guild; // roles included, no channels/members
+  GUILD_DELETE: { id: Snowflake };
   GUILD_MEMBER_ADD: GuildMember & { guild_id: Snowflake };
+  GUILD_MEMBER_REMOVE: { guild_id: Snowflake; user: User };
+  RESUMED: Record<string, never>; // after a successful op 6 replay
   PRESENCE_UPDATE: Presence;
+  USER_UPDATE: User; // profile/avatar change; sent to the user and everyone sharing a guild, DM or relationship with them
   MESSAGE_ACK: { channel_id: Snowflake; message_id: Snowflake };
   RELATIONSHIP_ADD: Relationship;
   RELATIONSHIP_REMOVE: { id: Snowflake };

@@ -1,0 +1,181 @@
+/* App shell + auth pages. Milestone A keeps this minimal; milestone B replaces the shell block with the full layout. */
+
+/* ---- shell (temporary plain layout) ---- */
+.shell {
+  display: flex;
+}
+
+.shell-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: var(--rail-width);
+  padding: 12px 0;
+  background: var(--bg-tertiary);
+  overflow-y: auto;
+}
+
+.shell-rail-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background: var(--bg-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.shell-rail-item.active {
+  background: var(--brand);
+  color: #fff;
+  border-radius: 16px;
+}
+
+.shell-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-width);
+  background: var(--bg-secondary);
+}
+
+.shell-sidebar-title {
+  height: var(--header-height);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  color: var(--text-header);
+  box-shadow: var(--shadow-low);
+}
+
+.shell-sidebar-list {
+  flex: 1;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.shell-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+.shell-row img {
+  border-radius: 50%;
+}
+
+.shell-row:hover {
+  background: var(--bg-modifier-hover);
+  color: var(--interactive-hover);
+  text-decoration: none;
+}
+
+.shell-row.active {
+  background: var(--bg-modifier-selected);
+  color: var(--interactive-active);
+}
+
+.shell-userpanel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--user-panel-height);
+  padding: 0 8px;
+  background: #232428;
+}
+
+.shell-userpanel img {
+  border-radius: 50%;
+}
+
+.shell-userpanel span {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-header);
+}
+
+.shell-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-primary);
+  border-top-left-radius: 8px;
+}
+
+.shell-empty {
+  margin: auto;
+  color: var(--text-muted);
+}
+
+/* ---- auth ---- */
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background: radial-gradient(circle at 20% 20%, #4a3fa8 0%, #2b2d6e 35%, #1b1c3a 70%, #131428 100%);
+}
+
+.auth-card {
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  padding: 32px;
+  border-radius: 5px;
+  background: var(--bg-primary);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+.auth-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.auth-logo {
+  margin: 0 auto 12px;
+}
+
+.auth-header h1 {
+  color: var(--text-header);
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+}
+
+.auth-header p {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+.auth-field {
+  margin-bottom: 20px;
+}
+
+.auth-field .input {
+  margin-top: 8px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.field-label-error {
+  font-style: italic;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.auth-footer {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
