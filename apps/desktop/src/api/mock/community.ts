@@ -581,6 +581,10 @@ export function onboardingStartedFor(guildId: string, userId: string): void {
 
 const SMALL_GUILD_MEMBERS = 200;
 const optedOut = new Set<string>();
+/** Seed filler accounts (the members-page demo crowd) stay out of everyone's friend suggestions. */
+export function hideFromSuggestions(ids: Iterable<string>): void {
+  for (const id of ids) optedOut.add(id);
+}
 /** user → people they hid */
 const dismissed = new Map<string, Set<string>>();
 

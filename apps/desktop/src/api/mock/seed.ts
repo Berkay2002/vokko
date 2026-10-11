@@ -1,7 +1,8 @@
 // Seed data mirroring `vokko-server seed`: users sam, carol, alice, bob, nova (password "vokko-dev"),
 // "Sam's server", a 60-message DM sam <-> carol and a few smaller conversations.
 
-import { ChannelFlags, ChannelType, ForumLayout, OverwriteType, RelationshipType, StickerFormat, type Attachment, type Sticker, type User } from "../types";
+import { hideFromSuggestions } from "./community";
+import { ChannelFlags, ChannelType, ForumLayout, JoinSourceType, OverwriteType, RelationshipType, StickerFormat, type Attachment, type Sticker, type User } from "../types";
 import { Perm } from "../permissions";
 import { db, nextId, sortedMessages, type MockChannel, type MockMessage } from "./db";
 import { stickerSvg, svgDataUri } from "./gifs";
@@ -269,6 +270,71 @@ function seedThreads(ctx: { general: MockChannel; announcements: MockChannel; gu
   for (const t of [guide.thread, tagQ.thread, docs]) sam?.readStates.set(t.id, { channel_id: t.id, last_message_id: t.last_message_id, mention_count: 0 });
 }
 
+const DAY = 24 * HOUR;
+
+/**
+ * The members-page crowd: 60 offline filler members in the main guild (65 with the five demo users) with joined_at from minutes to about a
+ * year ago, account ages (snowflake ids) from one day to ~2 years, a join source on about half of them (four invite codes with inviters),
+ * three bots and extra cosmetic roles (no permissions). They stay out of friend suggestions and are never online, so the member list's
+ * online section and the existing e2e expectations about it do not change.
+ */
+function seedMemberCrowd(ctx: { guildId: string; welcomeId: string; memberRole: string; R: string; A: string; Bo: string }): void {
+  const { guildId, welcomeId, memberRole, R, A, Bo } = ctx;
+  const guild = db.guilds.get(guildId);
+  if (!guild) return;
+  const extra = [
+    { name: "Helper", color: 0x1abc9c },
+    { name: "Artist", color: 0xc45bd0 },
+    { name: "Developer", color: 0x3498db },
+    { name: "Event Host", color: 0xe67e22 },
+  ].map(r => ({ id: nextId(), name: r.name, color: r.color, hoist: false, position: 1, permissions: "0", mentionable: false }));
+  guild.guild.roles.push(...extra);
+  const [helper, artist, dev, host] = extra.map(r => r.id) as [string, string, string, string];
+
+  const invites: [string, string][] = [["vokkodev", R], ["launchday", R], ["alicefriends", A], ["gamenight", Bo]];
+  for (const [code, inviter] of invites) {
+    const invite = db.invites.get(code) ?? { code, guild_id: guildId, channel_id: welcomeId, expires_at: null };
+    invite.inviter_id = inviter;
+    db.invites.set(code, invite);
+  }
+
+  const adjectives = ["quiet", "swift", "amber", "cosmic", "lunar", "misty", "rusty", "golden"];
+  const nouns = ["fox", "wren", "owl", "reef", "pine", "comet", "drift", "ember"];
+  const bots = new Set([10, 25, 40]);
+  const ratio = Math.exp(Math.log(525_600 / 5) / 59);
+  const ids: string[] = [];
+  for (let i = 0; i < 60; i++) {
+    const adj = adjectives[i % 8] ?? "quiet";
+    const noun = nouns[Math.floor(i / 8) % 8] ?? "fox";
+    const isBot = bots.has(i);
+    const joinedAgo = Math.round(5 * ratio ** i) * MIN;
+    // Account age: two brand new accounts (1 and 5 days), the rest 9 to ~210 days older than their join.
+    const accountAgo = i === 1 ? DAY : i === 3 ? 5 * DAY : joinedAgo + (((i * 37) % 200) + 9) * DAY;
+    const account = createAccount({
+      id: nextId(Date.now() - accountAgo),
+      username: isBot ? `${noun}bot_${i}` : `${adj}_${noun}`,
+      global_name: i % 2 === 1 ? `${adj.charAt(0).toUpperCase()}${adj.slice(1)} ${noun.charAt(0).toUpperCase()}${noun.slice(1)}` : null,
+      status: "offline",
+    });
+    account.user.bot = isBot;
+    ids.push(account.user.id);
+    const roles: string[] = [];
+    if (i % 3 !== 2) roles.push(memberRole);
+    if (i % 7 === 0) roles.push(helper);
+    if (i % 5 === 0) roles.push(artist);
+    if (i % 4 === 1) roles.push(dev);
+    if (i % 11 === 0) roles.push(host);
+    const via = !isBot && i % 2 === 0 ? invites[(i / 2) % 4] : undefined;
+    guild.members.set(account.user.id, {
+      nick: i % 6 === 4 ? `${noun}-${i}` : null,
+      roles,
+      joined_at: new Date(Date.now() - joinedAgo).toISOString(),
+      ...(via ? { source_invite_code: via[0], inviter_id: via[1], join_source_type: JoinSourceType.Invite } : {}),
+    });
+  }
+  hideFromSuggestions(ids);
+}
+
 /** Populate an empty database. Safe to call once at module load. */
 export function seed(): void {
   if (db.accounts.size > 0) return;
@@ -364,6 +430,7 @@ export function seed(): void {
   });
   // a standing invite, so the /invite/vokkodev page has something to show in mock mode
   db.invites.set("vokkodev", { code: "vokkodev", guild_id: guildId, channel_id: welcome.id, expires_at: null });
+  seedMemberCrowd({ guildId, welcomeId: welcome.id, memberRole: member, R, A, Bo });
   // Private channel: hidden from @everyone, visible to Moderators (and the owner / admins).
   const staff = addChannel(guildId, {
     name: "staff",

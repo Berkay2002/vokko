@@ -1108,6 +1108,107 @@ pub struct MessageSearchResponse {
     pub messages: Vec<Vec<Message>>,
 }
 
+/// `MemberSearchRequest.sort` (Discord's member-safety sort).
+pub mod member_search_sort {
+    pub const MEMBER_SINCE_NEWEST_FIRST: u8 = 1;
+    pub const MEMBER_SINCE_OLDEST_FIRST: u8 = 2;
+    pub const JOINED_VOKKO_NEWEST_FIRST: u8 = 3;
+    pub const JOINED_VOKKO_OLDEST_FIRST: u8 = 4;
+}
+
+/// `SupplementalGuildMember.join_source_type` (Discord's values; Vokko records `INVITE` and leaves the rest `UNSPECIFIED`).
+pub mod join_source_type {
+    pub const UNSPECIFIED: u8 = 0;
+    pub const BOT: u8 = 1;
+    pub const INTEGRATION: u8 = 2;
+    pub const DISCOVERY: u8 = 3;
+    pub const HUB: u8 = 4;
+    pub const INVITE: u8 = 5;
+    pub const VANITY_URL: u8 = 6;
+    pub const MANUAL_MEMBER_VERIFICATION: u8 = 7;
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct OrQuery<T> {
+    pub or_query: Vec<T>,
+}
+
+/// `{and_query}`: every listed value must match; `{or_query}`: any of them.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AndOrQuery<T> {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub and_query: Option<Vec<T>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub or_query: Option<Vec<T>>,
+}
+
+/// Inclusive bounds in unix milliseconds.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimeRange {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gte: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lte: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RangeQuery {
+    pub range: TimeRange,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MemberSearchQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<OrQuery<Snowflake>>,
+    /// Prefix of the username, display name or nickname (case-insensitive), or an exact user id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usernames: Option<OrQuery<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_ids: Option<AndOrQuery<Snowflake>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guild_joined_at: Option<RangeQuery>,
+    /// Account creation, read from the user id (snowflake).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_created_at: Option<RangeQuery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_invite_code: Option<OrQuery<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_source_type: Option<OrQuery<u8>>,
+}
+
+/// `POST /guilds/{id}/members-search`. Vokko pages with `offset` instead of Discord's `before`/`after` cursors.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MemberSearchRequest {
+    /// 1-1000, default 25.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// 0-100000, default 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+    /// `member_search_sort`, default MEMBER_SINCE_NEWEST_FIRST.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<u8>,
+    #[serde(default)]
+    pub and_query: MemberSearchQuery,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SupplementalGuildMember {
+    pub member: GuildMember,
+    /// The invite the member joined through; `null` for members from before tracking, the owner and other join paths.
+    pub source_invite_code: Option<String>,
+    pub join_source_type: u8,
+    pub inviter_id: Option<Snowflake>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MemberSearchResponse {
+    pub guild_id: Snowflake,
+    pub members: Vec<SupplementalGuildMember>,
+    pub page_result_count: u32,
+    pub total_result_count: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RateLimitError {
     pub message: String,
@@ -2885,6 +2986,25 @@ mod tests {
 
     fn user() -> Value {
         json!({"id": "100", "username": "sam", "global_name": null, "avatar": null, "banner_color": "#5865f2", "bio": null, "bot": false, "banner": null, "pronouns": null, "theme_colors": null, "avatar_decoration": null, "profile_effect": null, "primary_guild": null})
+    }
+
+    #[test]
+    fn member_search() {
+        round_trip::<MemberSearchRequest>(json!({
+            "limit": 12, "offset": 24, "sort": 2,
+            "and_query": {
+                "usernames": {"or_query": ["ryz"]}, "user_id": {"or_query": ["100"]}, "role_ids": {"or_query": ["301"]},
+                "guild_joined_at": {"range": {"gte": 1_700_000_000_000_i64}}, "user_created_at": {"range": {"gte": 1, "lte": 2}},
+                "source_invite_code": {"or_query": ["abc"]}, "join_source_type": {"or_query": [5]}
+            }
+        }));
+        round_trip::<MemberSearchRequest>(json!({"and_query": {}}));
+        let member = json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T00:00:00Z", "communication_disabled_until": null,
+            "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null});
+        round_trip::<MemberSearchResponse>(json!({
+            "guild_id": "300", "page_result_count": 1, "total_result_count": 7,
+            "members": [{"member": member, "source_invite_code": "abc", "join_source_type": 5, "inviter_id": "101"}]
+        }));
     }
 
     #[test]

@@ -67,6 +67,7 @@ General rules:
 | PUT | /channels/{id}/voice-status | `{status}` → 204 (guild voice only; ≤500 chars, `null`/empty clears; MANAGE_CHANNELS, or SET_VOICE_CHANNEL_STATUS while connected to that channel), emits VOICE_CHANNEL_STATUS_UPDATE |
 | DELETE | /channels/{id} | 200 + `Channel` (guild) / closes DM; a thread needs MANAGE_THREADS or being its owner (emits THREAD_DELETE) |
 | GET | /guilds/{id}/members?limit&after | `GuildMember[]` |
+| POST | /guilds/{id}/members-search | `MemberSearchRequest` → `MemberSearchResponse` (members page); needs any of ADMINISTRATOR, MANAGE_GUILD, KICK_MEMBERS, BAN_MEMBERS, MODERATE_MEMBERS, MANAGE_ROLES, MANAGE_NICKNAMES (403 50013). See Members page |
 | DELETE | /users/@me/guilds/{id} | leave guild, 204 |
 | DELETE | /guilds/{id}/members/{uid} | kick (KICK_MEMBERS + hierarchy), 204, emits GUILD_MEMBER_REMOVE to the guild and GUILD_DELETE to the kicked user |
 | PATCH | /guilds/{id}/members/{uid} | `EditMemberRequest` → `GuildMember`: nick needs MANAGE_NICKNAMES, roles MANAGE_ROLES (only roles below your highest), timeout MODERATE_MEMBERS (not on admins/owner, max 28 days); only sent keys change; emits GUILD_MEMBER_UPDATE |
@@ -99,7 +100,7 @@ General rules:
 | GET | /channels/{id}/invites | `InviteMetadata[]` of the channel's live invites (MANAGE_CHANNELS on the channel) |
 | GET | /guilds/{id}/invites | `InviteMetadata[]` of the guild's live invites (MANAGE_GUILD) |
 | GET | /invites/{code} | `Invite` preview |
-| POST | /invites/{code} | accept → `Guild` |
+| POST | /invites/{code} | accept → `Guild`; a new member records the invite code, its inviter and join source INVITE (see Members page) |
 | DELETE | /invites/{code} | revoke → `InviteMetadata` (MANAGE_CHANNELS on the invite's channel or MANAGE_GUILD), emits INVITE_DELETE |
 | GET | /users/@me/guild-layout | `GuildLayout` `{guild_folders, guild_positions}` |
 | PATCH | /users/@me/guild-layout | `UpdateGuildLayoutRequest` → `GuildLayout` (only sent keys change), emits GUILD_LAYOUT_UPDATE to the user's own sessions |
@@ -177,6 +178,14 @@ Onboarding (Discord shape): `GuildOnboarding` holds up to 15 prompts (multiple c
 - `PUT /guilds/{id}/onboarding-responses` replaces the caller's answers: option ids must belong to the guild's prompts, `single_select` prompts take at most one, `required` prompts at least one (400 50035 on `option_ids`); with rules configured `rules_accepted` must be true (400 50035 on `rules_accepted`); onboarding disabled → 400 50035. Roles of newly chosen options are added; what onboarding added is remembered per member, so a role is taken back only when no chosen option grants it any more and onboarding was what gave it (a role the member held already is never removed, whatever the options say now); then `COMPLETED_ONBOARDING` is set and GUILD_MEMBER_UPDATE is sent. The answer is atomic. `OnboardingCompletion.channel_ids` lists the default channels that the member can view and, only in `Advanced` mode (1), then the chosen options' channels; `Default` mode (0) lands the member in the default channels alone.
 
 Friend suggestions: candidates are users who share a guild of at most 200 members with the caller, or who are friends of the caller's friends. Never listed: the caller, bots, anyone with any relationship to the caller (friend, pending either way, blocked either way), anyone who blocked the caller, anyone with suggestions switched off, anyone the caller dismissed. Switching suggestions off (default on) empties the caller's own list and removes them from everybody else's, in one setting. Order: mutual friends first, then mutual guilds, then user id; `limit` 1-100 (default 25). `mutual_guilds` lists only guilds the caller is also in.
+
+## Members page (member-safety search)
+
+`POST /guilds/{id}/members-search` is Discord's member-safety search. Access: any of ADMINISTRATOR, MANAGE_GUILD, KICK_MEMBERS, BAN_MEMBERS, MODERATE_MEMBERS, MANAGE_ROLES, MANAGE_NICKNAMES (Discord's member-safety access check), else 403 50013; non-members 403 50001.
+- Body `{limit?, offset?, sort?, and_query}`. `limit` 1-1000 (default 25), `offset` 0-100000 (default 0; Vokko pages by offset so the UI can jump to a page, Discord uses `before`/`after` cursors, which Vokko does not take). `sort`: 1 member since newest first (default), 2 member since oldest first, 3 joined Vokko newest first, 4 joined Vokko oldest first; ties break on user id in the same direction.
+- `and_query` (every present key must match; absent or empty = no filter): `usernames.or_query` (1-10 terms, each 1-100 chars, trimmed): case-insensitive prefix of the username, global name or nickname, or, for an all-digit term, the exact user id; `user_id.or_query` (ids); `role_ids.or_query` (has any) and/or `role_ids.and_query` (has all); `guild_joined_at.range` and `user_created_at.range` `{gte?, lte?}` inclusive unix ms (account creation is read from the snowflake); `source_invite_code.or_query`; `join_source_type.or_query`. Lists hold at most 100 entries. Invalid values → 400 50035.
+- Response `{guild_id, members: [{member, source_invite_code, join_source_type, inviter_id}], page_result_count, total_result_count}`: `total_result_count` counts every match before offset/limit.
+- Join source: accepting an invite as a new member stores `source_invite_code`, `inviter_id` (the invite's creator) and `join_source_type` 5 (INVITE) on the membership. Everyone else (the owner, members from before tracking, seeded members) has `null`, `null`, 0 (UNSPECIFIED), shown as "Unknown". Leaving and rejoining through another invite records the new one.
 
 ## Stickers, GIFs, forward, bookmarks, reminders
 

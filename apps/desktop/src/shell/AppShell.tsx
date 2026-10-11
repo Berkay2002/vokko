@@ -31,6 +31,8 @@ import { useModals, openModal, closeModal } from "./modalStore";
 import { NARROW_QUERY, useNavDrawer } from "./navDrawer";
 import { NavToggle } from "./NavToggle";
 import { useMediaQuery } from "./useMediaQuery";
+import { usePermissions } from "./usePermissions";
+import { MEMBERS_ROUTE, MembersPage, canSeeMembersPage } from "../members";
 import { channelSlots, useRightPanelOpen } from "./slots";
 
 const SIDEBAR_KEY = "vokko.sidebarWidth";
@@ -111,9 +113,12 @@ export function AppShell() {
   const params = useParams();
   const isHome = (params.guildId ?? "@me") === "@me";
   const guildId = isHome ? null : (params.guildId ?? null);
-  const channelId = params.channelId ?? null;
+  // `/channels/:guildId/member-safety` is the Members page, not a channel.
+  const membersPage = !isHome && params.channelId === MEMBERS_ROUTE;
+  const channelId = membersPage ? null : (params.channelId ?? null);
 
   const guild = useStore(s => (guildId ? s.guilds[guildId] : undefined));
+  const { bits } = usePermissions(guildId);
   const channel = useStore(s => (channelId ? s.channels[channelId] : undefined));
   // Only /channels/<guild> (no channel) needs the guild's channels, to pick where to go. Selecting the id, not the channel list, keeps
   // the whole shell from re-rendering whenever any channel in the guild changes (every new message bumps last_message_id).
@@ -230,7 +235,8 @@ export function AppShell() {
   useShortcut("streamerMode", () => setPref("streamerMode", !getPrefs().streamerMode));
 
   if (!isHome && !guild) return <Navigate to="/channels/@me" replace />;
-  if (guildId && !channelId && redirectTarget) return <Navigate to={`/channels/${guildId}/${redirectTarget}`} replace />;
+  if (membersPage && !canSeeMembersPage(bits)) return <Navigate to={`/channels/${guildId}`} replace />;
+  if (guildId && !channelId && !membersPage && redirectTarget) return <Navigate to={`/channels/${guildId}/${redirectTarget}`} replace />;
   if (channelId && !channel) return <Navigate to={guildId ? `/channels/${guildId}` : "/channels/@me"} replace />;
 
   const text = channel && channel.type !== ChannelType.GuildVoice;
@@ -246,9 +252,10 @@ export function AppShell() {
         </div>
         <div className="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize Sidebar" {...handlers} />
         <div className="nav-backdrop" onClick={() => useNavDrawer.getState().close()} />
-        <main className="app-main" aria-label={channel ? (channel.name ?? "Conversation") : "Friends"}>
+        <main className="app-main" aria-label={channel ? (channel.name ?? "Conversation") : membersPage ? "Members" : "Friends"}>
           {!channel && isHome && <FriendsPage />}
-          {!channel && !isHome && (
+          {membersPage && guild && <MembersPage key={guild.id} guild={guild} />}
+          {!channel && !isHome && !membersPage && (
             <>
               <NavToggle className="nav-toggle-floating" />
               <div className="main-empty">There are no text channels in this server yet.</div>

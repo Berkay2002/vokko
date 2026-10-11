@@ -682,6 +682,62 @@ export interface MessageSearchResponse {
   total_results: number; // all matches the caller may read, before offset/limit
   messages: Message[][]; // each hit is a one-element array (Discord's shape)
 }
+
+// ---- Members page: POST /guilds/{id}/members-search (Discord's member-safety search) ----
+
+export enum MemberSearchSort {
+  MemberSinceNewestFirst = 1,
+  MemberSinceOldestFirst = 2,
+  JoinedVokkoNewestFirst = 3,
+  JoinedVokkoOldestFirst = 4,
+}
+export enum JoinSourceType {
+  Unspecified = 0, // members from before tracking, the owner, and every path other than an invite
+  Bot = 1,
+  Integration = 2,
+  Discovery = 3,
+  Hub = 4,
+  Invite = 5,
+  VanityUrl = 6,
+  ManualMemberVerification = 7,
+}
+export interface OrQuery<T> {
+  or_query: T[];
+}
+export interface AndOrQuery<T> {
+  and_query?: T[]; // every listed value
+  or_query?: T[]; // any of them
+}
+export interface RangeQuery {
+  range: { gte?: number; lte?: number }; // inclusive, unix ms
+}
+export interface MemberSearchQuery {
+  user_id?: OrQuery<Snowflake>;
+  usernames?: OrQuery<string>; // case-insensitive prefix of username, display name or nickname, or an exact user id
+  role_ids?: AndOrQuery<Snowflake>;
+  guild_joined_at?: RangeQuery;
+  user_created_at?: RangeQuery; // read from the user id (snowflake)
+  source_invite_code?: OrQuery<string>;
+  join_source_type?: OrQuery<JoinSourceType>;
+}
+export interface MemberSearchRequest {
+  limit?: number; // 1-1000, default 25
+  offset?: number; // 0-100000, default 0 (Vokko pages by offset, not Discord's before/after cursors)
+  sort?: MemberSearchSort; // default MemberSinceNewestFirst
+  and_query: MemberSearchQuery;
+}
+export interface SupplementalGuildMember {
+  member: GuildMember;
+  source_invite_code: string | null; // null: joined before tracking, the owner, or not through an invite
+  join_source_type: JoinSourceType;
+  inviter_id: Snowflake | null;
+}
+export interface MemberSearchResponse {
+  guild_id: Snowflake;
+  members: SupplementalGuildMember[];
+  page_result_count: number;
+  total_result_count: number; // all matches, before offset/limit
+}
 export interface RateLimitError {
   message: string;
   retry_after: number; // seconds (float); also sent as the Retry-After header

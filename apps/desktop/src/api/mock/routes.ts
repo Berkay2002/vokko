@@ -1,6 +1,6 @@
 // Mock REST router: every route of docs/api.md that the UI uses, with the same status codes and error codes.
 
-import { ChannelType, MessageType, RelationshipType, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
+import { ChannelType, JoinSourceType, MessageType, RelationshipType, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
 import { compareIds } from "../snowflake";
 import { Perm, hasBit } from "../permissions";
 import { channelPermsOf } from "./access";
@@ -17,6 +17,7 @@ import { flagsField } from "./memberFlags";
 import { setVoiceChannelStatus } from "./voice";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
 import "./search";
+import "./membersSearch";
 import { dismissEphemeral, mergeEphemerals } from "./apps";
 import "./invites";
 import { assertAcceptsFriendRequest, assertCanOpenDm } from "./settings";

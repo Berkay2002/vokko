@@ -2,7 +2,7 @@
 // (GET/PATCH /users/@me/guild-layout, GUILD_LAYOUT_UPDATE), following docs/api.md "Invites and server folders".
 
 import { Perm, hasBit } from "../permissions";
-import { ChannelType, isThreadType, type GuildFolder, type Invite, type InviteMetadata, type GuildLayout } from "../types";
+import { ChannelType, JoinSourceType, isThreadType,type GuildFolder, type Invite, type InviteMetadata, type GuildLayout } from "../types";
 import { channelPermsOf, guildPermsOf } from "./access";
 import { db, userOf, type MockAccount, type MockInvite } from "./db";
 import { fail, guildAudience, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm } from "./ops";
@@ -126,7 +126,9 @@ route("POST", `/invites/${CODE}`, ({ viewer, params }) => {
   if (db.bans.get(guild.guild.id)?.has(viewer.user.id)) fail(403, 40007, "The user is banned from this guild");
   if (!guild.members.has(viewer.user.id)) {
     const member = { nick: null, roles: [], joined_at: new Date().toISOString() };
-    guild.members.set(viewer.user.id, member);
+    // The join source stays server side (members-search); the gateway event carries the plain member.
+    const inviterId = invite.inviter_id ?? guild.guild.owner_id;
+    guild.members.set(viewer.user.id, { ...member, source_invite_code: invite.code, inviter_id: inviterId, join_source_type: JoinSourceType.Invite });
     invite.uses = (invite.uses ?? 0) + 1;
     if (invite.temporary) (guild.temporary ??= new Set()).add(viewer.user.id);
     onboardingStartedFor(guild.guild.id, viewer.user.id);
