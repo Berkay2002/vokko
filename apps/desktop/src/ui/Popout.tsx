@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useLayer, useOutsideClose } from "./layers";
+import { useFocusTrap, useLayer, useOutsideClose } from "./layers";
 import { placeNear, type Align, type Side } from "./position";
 
 export interface PopoutProps {
@@ -16,6 +16,8 @@ export interface PopoutProps {
   /** Landmark role and name for popouts that are dialogs rather than plain panels. */
   role?: "dialog";
   label?: string;
+  /** Move focus in and keep Tab inside; for a popout opened over a dialog, whose own focus trap would otherwise keep the keyboard out. */
+  trapFocus?: boolean;
   children: ReactNode;
 }
 
@@ -25,11 +27,13 @@ function resolve(anchor: PopoutProps["anchor"]): HTMLElement | null {
 }
 
 /** Floating panel anchored to an element: closes on Escape and on outside clicks (the anchor itself is "inside"). */
-export function Popout({ anchor, open, onClose, side = "bottom", align = "center", gap = 8, className, style, role, label, children }: PopoutProps) {
+export function Popout({ anchor, open, onClose, side = "bottom", align = "center", gap = 8, className, style, role, label, trapFocus, children }: PopoutProps) {
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const layer = useLayer(open, onClose);
   useOutsideClose(open, () => [box.current, resolve(anchor)], onClose, layer.isTop);
+  // Only once placed: the box is visibility:hidden until then and cannot take focus.
+  useFocusTrap(open && !!trapFocus && pos !== null, () => box.current);
 
   useLayoutEffect(() => {
     if (!open) {

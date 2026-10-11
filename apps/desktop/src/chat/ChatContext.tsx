@@ -2,7 +2,8 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { Attachment, Channel, Guild, GuildMember, Message, Role, Snowflake, User } from '../api/types';
 import { ChannelType } from '../api/types';
 import type { MarkdownContext } from './markdown';
-import { AnimatedImage, displayName, roleColor, useStableChannel, useChatDisplayPrefs, useCompactMode, useCustomColorScale, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
+import { AnimatedImage, cacheUser, closeModal, displayName, go, guildPath, openProfile, roleColor, useStableChannel, useChatDisplayPrefs, useCompactMode, useCustomColorScale, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
+import { mentionTarget } from './mentions';
 import { cachedUser } from './userCache';
 import { useEmojiDb } from './emojiData';
 import { EmojiGlyph } from './EmojiInfo';
@@ -76,7 +77,11 @@ export function useChat(): ChatContextValue {
   return v;
 }
 
-export function ChatProvider({ channelId, actions, replyingId = null, children }: { channelId: Snowflake; actions: ChatActions; replyingId?: Snowflake | null; children: ReactNode }) {
+/**
+ * `onNavigate` runs after a mention click moved the app to another channel, so a surface that floats over the chat (the pins popout)
+ * can close itself; open dialogs are closed by the handler.
+ */
+export function ChatProvider({ channelId, actions, replyingId = null, onNavigate, children }: { channelId: Snowflake; actions: ChatActions; replyingId?: Snowflake | null; onNavigate?: () => void; children: ReactNode }) {
   const me = useMe();
   const channel = useStableChannel(channelId);
   const guildId = channel?.guild_id ?? null;
@@ -96,6 +101,7 @@ export function ChatProvider({ channelId, actions, replyingId = null, children }
     const userById = (id: Snowflake): User | undefined => (id === me.id ? me : users[id] ?? members[id]?.user ?? recipients.find(u => u.id === id) ?? cachedUser(id));
     const nameOf = (user: User, member?: Pick<GuildMember, 'nick'> | null): string => displayName(user, guildId ? member ?? members[user.id] : null);
     const roles = guild?.roles ?? [];
+    const mentionEnv = { guildId, channels: guildChannels, hasUser: (uid: Snowflake) => !!userById(uid) };
     const md: MarkdownContext = {
       userName: id => { const u = userById(id); return u ? nameOf(u, members[id]) : null; },
       roleInfo: id => {
@@ -106,6 +112,22 @@ export function ChatProvider({ channelId, actions, replyingId = null, children }
       currentUserId: me.id,
       emojiShortcodes: shortcodes,
       onLink: actions.openLink,
+      mentionActionable: (kind, mentionId) => mentionTarget(kind, mentionId, mentionEnv) !== null,
+      onMention: (kind, mentionId, ev) => {
+        const target = mentionTarget(kind, mentionId, mentionEnv);
+        if (!target) return;
+        if (target.type === 'profile') {
+          // The profile card reads the store; a user known only from a member list, a recipient or the message cache must be in it.
+          const user = userById(target.userId);
+          if (user) cacheUser(user);
+          openProfile(ev.currentTarget as HTMLElement, target.userId, target.guildId);
+          return;
+        }
+        if (!guildId) return;
+        closeModal();
+        go(guildPath(guildId, target.channel.id));
+        onNavigate?.();
+      },
       renderEmoji: (unicode, name) => <EmojiGlyph unicode={unicode} name={name} />,
       renderCustomEmoji: ({ src, name, animated }) => animated
         ? <AnimatedImage kind="emoji" className="md-emoji md-emoji-custom" src={src} alt={`:${name}:`} title={`:${name}:`} draggable={false} loading="lazy" />
@@ -119,7 +141,7 @@ export function ChatProvider({ channelId, actions, replyingId = null, children }
       roleDotOf: m => (guildId && roleColors === 'dot' ? scaleColor(roleColor(guildId, members[m.author.id] ?? m.member ?? null)) : null),
       display: { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat },
     };
-  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, scaleColor]);
+  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, onNavigate, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, scaleColor]);
 
   if (!value) return null;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

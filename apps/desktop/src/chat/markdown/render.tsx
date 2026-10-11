@@ -28,6 +28,8 @@ export interface MarkdownContext {
   /** when given, a link click calls it with preventDefault (leaving-Vokko confirm) */
   onLink?(href: string): void;
   onMention?(kind: 'user' | 'role' | 'channel', id: string, ev: MouseEvent): void;
+  /** whether a click on this mention does anything; when given it decides if the chip is a button (otherwise: it resolved to a name) */
+  mentionActionable?(kind: 'user' | 'role' | 'channel', id: string): boolean;
   formatTimestamp?(unix: number, style: string): { text: string; title: string };
 }
 
@@ -161,23 +163,29 @@ function Mention({
 }) {
   let text: string;
   let color: string | null | undefined;
+  let resolved: boolean;
   if (kind === 'user') {
     const name = ctx.userName(id);
+    resolved = name !== null;
     text = `@${name ?? 'unknown-user'}`;
     color = name !== null ? ctx.userColor?.(id) : undefined;
   } else if (kind === 'role') {
     const info = ctx.roleInfo(id);
+    resolved = !!info;
     text = `@${info ? info.name : 'unknown-role'}`;
     color = info?.color;
   } else {
     const name = ctx.channelName(id);
+    resolved = name !== null;
     text = `#${name ?? 'unknown-channel'}`;
   }
   const self = kind === 'user' && ctx.currentUserId !== null && ctx.currentUserId === id;
   const style = color ? ({ '--md-mention-color': color } as CSSProperties) : undefined;
   const cls = `md-mention md-mention-${kind}`;
   const onMention = ctx.onMention;
-  if (!onMention) {
+  // A chip with nothing to open (unknown user or channel, role, category) stays a plain pill.
+  const actionable = ctx.mentionActionable ? ctx.mentionActionable(kind, id) : resolved;
+  if (!onMention || !actionable) {
     return (
       <span className={cls} data-self={self ? 'true' : undefined} style={style}>
         {text}

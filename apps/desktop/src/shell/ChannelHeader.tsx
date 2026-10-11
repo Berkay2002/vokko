@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Bell, Hash, Lock, Megaphone, MessageCircle, MessagesSquare, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
 import { useVoiceUi } from "../voice";
 import { useShortcut } from "../keyboard";
@@ -51,6 +51,7 @@ export interface ChannelHeaderProps {
 export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOpen, onToggleProfile }: ChannelHeaderProps) {
   const [pinsAnchor, setPinsAnchor] = useState<HTMLElement | null>(null);
   const [pinsOpen, setPinsOpen] = useState(false);
+  const closePins = useCallback(() => setPinsOpen(false), []);
   const menu = useContextMenu();
   const guild = !!channel.guild_id;
   const voice = channel.type === ChannelType.GuildVoice;
@@ -155,7 +156,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
         )}
       </div>
       <Popout anchor={pinsAnchor} open={pinsOpen} onClose={() => setPinsOpen(false)} side="bottom" align="end" gap={8} className="pins-popout-host">
-        <PinnedMessages channelId={channel.id} />
+        <PinnedMessages channelId={channel.id} onNavigate={closePins} />
       </Popout>
     </header>
   );

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pin } from 'lucide-react';
 import type { Message, PinnedMessagesPage, Snowflake } from '../api/types';
 import { ChatProvider, useChat, type ChatActions } from './ChatContext';
+import { LinkModal } from './ChatView';
 import { Avatar } from './Avatar';
 import { Markdown } from './markdown';
 import { Attachments } from './Attachments';
@@ -14,13 +15,18 @@ import './chat.css';
 const PAGE = 50;
 
 /** Body of the header "Pinned Messages" popout. The shell supplies the popout chrome and anchors it to the header button. */
-export function PinnedMessages({ channelId, onJump }: { channelId: Snowflake; onJump?: (messageId: Snowflake) => void }) {
+export function PinnedMessages({ channelId, onJump, onNavigate }: { channelId: Snowflake; onJump?: (messageId: Snowflake) => void; onNavigate?: () => void }) {
+  const [link, setLink] = useState<string | null>(null);
+  // Links ask first ("Leaving Vokko"), like in the chat.
   const actions = useMemo<ChatActions>(() => ({
     reply() {}, edit() {}, requestDelete() {}, togglePin() {}, react() {}, openImage() {}, viewAttachment() {}, deleteAttachment() {}, viewReactions() {},
     jumpTo: id => { void messageStore.jumpToMessage(channelId, id); onJump?.(id); },
-    openLink: href => { window.open(href, '_blank', 'noopener,noreferrer'); },
+    openLink: setLink,
   }), [channelId, onJump]);
-  return <ChatProvider channelId={channelId} actions={actions}><PinnedList channelId={channelId} onJump={onJump} /></ChatProvider>;
+  return <ChatProvider channelId={channelId} actions={actions} onNavigate={onNavigate}>
+    <PinnedList channelId={channelId} onJump={onJump} />
+    <LinkModal href={link} onClose={() => setLink(null)} />
+  </ChatProvider>;
 }
 
 function PinnedList({ channelId, onJump }: { channelId: Snowflake; onJump?: (id: Snowflake) => void }) {

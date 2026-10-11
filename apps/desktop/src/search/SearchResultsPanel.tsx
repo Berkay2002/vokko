@@ -4,6 +4,7 @@ import type { Channel, Message } from '../api/types';
 import { Attachments } from '../chat/Attachments';
 import { Avatar } from '../chat/Avatar';
 import { ChatProvider, useChat, type ChatActions } from '../chat/ChatContext';
+import { LinkModal } from '../chat/ChatView';
 import { Markdown } from '../chat/markdown';
 import { formatMessageTimestamp } from '../chat/util';
 import { clearHighlights, paintHighlights } from './highlight';
@@ -21,12 +22,17 @@ const SORTS: { sort: SearchSort; label: string }[] = [
 
 /** Right-hand panel with the results of the submitted search (replaces the member list / DM profile while open). */
 export function SearchResultsPanel({ channel }: { channel: Channel }) {
+  const [link, setLink] = useState<string | null>(null);
+  // Links ask first ("Leaving Vokko"), like in the chat.
   const actions = useMemo<ChatActions>(() => ({
     reply() {}, edit() {}, requestDelete() {}, togglePin() {}, react() {}, openImage() {}, viewAttachment() {}, deleteAttachment() {}, viewReactions() {},
     jumpTo() {},
-    openLink: href => { window.open(href, '_blank', 'noopener,noreferrer'); },
+    openLink: setLink,
   }), []);
-  return <ChatProvider channelId={channel.id} actions={actions}><Panel channel={channel} /></ChatProvider>;
+  return <ChatProvider channelId={channel.id} actions={actions}>
+    <Panel channel={channel} />
+    <LinkModal href={link} onClose={() => setLink(null)} />
+  </ChatProvider>;
 }
 
 function Panel({ channel }: { channel: Channel }) {

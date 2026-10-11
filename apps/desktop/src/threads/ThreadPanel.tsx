@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Archive, ArchiveRestore, Bell, Copy, Lock, LockOpen, LogIn, LogOut, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Settings, Trash2, Users, X } from "lucide-react";
 import { editChannel, joinThread, leaveThread } from "../api/rest";
 import { appStore, useStore } from "../api/store";
@@ -121,6 +121,7 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
   const [membersOpen, setMembersOpen] = useState(false);
   const [pinsAnchor, setPinsAnchor] = useState<HTMLElement | null>(null);
   const [pinsOpen, setPinsOpen] = useState(false);
+  const closePins = useCallback(() => setPinsOpen(false), []);
   const panelRef = useRef<HTMLElement>(null);
   const panelId = useId();
   const { width, max, handle } = usePanelWidth(panelRef);
@@ -233,7 +234,7 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
           <ThreadMembers thread={thread} rights={rights} />
         </Popout>
         <Popout anchor={pinsAnchor} open={pinsOpen} onClose={() => setPinsOpen(false)} side="bottom" align="end" gap={6} className="pins-popout-host">
-          <PinnedMessages channelId={thread.id} />
+          <PinnedMessages channelId={thread.id} onNavigate={closePins} />
         </Popout>
       </header>
       <ThreadTags thread={thread} parent={parent} />

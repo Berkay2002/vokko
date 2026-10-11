@@ -10,7 +10,8 @@ export { gateway } from '../api/gateway';
 export { displayName, roleColor, avatarUrl, dmName, guildIconUrl, guildInitials } from '../api/store';
 export { markGuildRead, joinGuildWithInvite } from '../shell/actions';
 export { go, guildPath } from '../shell/nav';
-export { openModal } from '../shell/modalStore';
+export { openModal, closeModal } from '../shell/modalStore';
+export { openProfile } from '../shell/profileStore';
 export { usePermissions } from '../shell/usePermissions';
 export { Perm } from '../api/permissions';
 export { Tooltip, Popout, Modal, useContextMenu, useLayer, useOutsideClose, placeAtPoint } from '../ui';
@@ -18,6 +19,9 @@ export { AnimatedImage, AnimatedVideo } from '../ui/AnimatedMedia';
 export type { MenuItem } from '../ui';
 
 const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
+
+/** Puts a user into the shared store (the profile card only opens for users the store holds). */
+export function cacheUser(user: User): void { appStore.getState().cacheUsers([user]); }
 
 export function useMe(): User | null { return useStore(s => s.me); }
 export function useChannel(channelId: Snowflake): Channel | undefined { return useStore(s => s.channels[channelId] ?? s.threads[channelId]); }

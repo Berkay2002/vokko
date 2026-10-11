@@ -1,4 +1,3 @@
-import { create } from "zustand";
 import { Clock, MessageCircle, UserCheck, UserPlus } from "lucide-react";
 import { appStore, displayName, roleColor, useStore } from "../api/store";
 import { request } from "../api/rest";
@@ -13,24 +12,9 @@ import { ActivityCard, usePlaying } from "./ActivityLine";
 import { Avatar } from "./Avatar";
 import { openDirectMessage } from "./actions";
 import { openModal } from "./modalStore";
+import { useProfile } from "./profileStore";
 
-interface ProfileState {
-  anchor: HTMLElement | null;
-  userId: Snowflake | null;
-  guildId: Snowflake | null;
-  open(anchor: HTMLElement, userId: Snowflake, guildId: Snowflake | null): void;
-  close(): void;
-}
-
-const useProfile = create<ProfileState>()(set => ({
-  anchor: null,
-  userId: null,
-  guildId: null,
-  open: (anchor, userId, guildId) => set({ anchor, userId, guildId }),
-  close: () => set({ anchor: null, userId: null, guildId: null }),
-}));
-
-export const openProfile = (anchor: HTMLElement, userId: Snowflake, guildId: Snowflake | null) => useProfile.getState().open(anchor, userId, guildId);
+export { openProfile } from "./profileStore";
 
 /** Small clock next to a name while the member is timed out. */
 export function TimeoutBadge({ until }: { until: string | null | undefined }) {
@@ -60,8 +44,12 @@ export function ProfileCardHost() {
   const look = user ? resolveProfile(user, member) : null;
   const tagGuildName = useStore(s => (user?.primary_guild ? s.guilds[user.primary_guild.guild_id]?.name : undefined));
 
+  // Opened from a mention inside a dialog (the topic dialog): sits above the modal layer and takes the keyboard from its focus trap.
+  const aboveModal = !!anchor?.closest(".modal-layer");
+
   return (
-    <Popout anchor={anchor} open={open} onClose={close} side="right" align="start" gap={8} className={`profile-card${look?.themeColors ? " pv-themed" : ""}`} style={themeVars(look?.themeColors)}>
+    <Popout anchor={anchor} open={open} onClose={close} side="right" align="start" gap={8} className={`profile-card${aboveModal ? " above-modal" : ""}${look?.themeColors ? " pv-themed" : ""}`} style={themeVars(look?.themeColors)}
+      trapFocus={aboveModal} role={aboveModal ? "dialog" : undefined} label={aboveModal && user ? displayName(user, member) : undefined}>
       {user && look && (
         <>
           <ProfileBanner look={look} className="profile-banner" />

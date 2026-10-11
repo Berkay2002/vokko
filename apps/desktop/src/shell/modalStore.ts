@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { ChannelType, Snowflake } from "../api/types";
 import { blockedByUnsaved } from "./settings/unsaved";
+import { useProfile } from "./profileStore";
 
 export type ModalSpec =
   | { type: "createServer" }
@@ -57,6 +58,8 @@ export const useModals = create<ModalStore>()(set => ({
     // dialog; dialogs park it instead, and a dialog opened over a dialog keeps the parked settings.
     const settings = current && SETTINGS_TYPES.has(current.type) ? current : base?.spec;
     if (settings?.type === "userSettings" && !DIALOG_TYPES.has(modal.type) && blockedByUnsaved()) return;
+    // A profile card left open would end up under (or, from a dialog, over) the new modal.
+    useProfile.getState().close();
     set(s => {
       const park = !DIALOG_TYPES.has(modal.type) ? null : s.modal && SETTINGS_TYPES.has(s.modal.type) ? { spec: s.modal, serial: s.serial } : s.base;
       const counter = s.counter + 1;

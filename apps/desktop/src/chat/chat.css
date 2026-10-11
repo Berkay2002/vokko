@@ -484,8 +484,9 @@ html.message-compact { --chat-gutter: 80px; }
 .md-subtext { display: block; font-size: 0.75rem; line-height: 1rem; color: var(--chat-text-muted); }
 .md-list { margin: 4px 0; padding-left: 24px; white-space: normal; list-style: revert; }
 .md-list li { white-space: pre-wrap; }
-.md-mention { padding: 0 2px; border-radius: 3px; background: var(--chat-mention-bg); color: var(--chat-mention-fg); font-weight: 500; cursor: pointer; transition: background-color 0.1s, color 0.1s; }
-.md-mention:hover { background: var(--chat-brand); color: var(--chat-on-brand); }
+.md-mention { padding: 0 2px; border-radius: 3px; background: var(--chat-mention-bg); color: var(--chat-mention-fg); font-weight: 500; transition: background-color 0.1s, color 0.1s; }
+.md-mention[role="button"] { cursor: pointer; }
+.md-mention[role="button"]:hover { background: var(--chat-brand); color: var(--chat-on-brand); }
 .md-mention-everyone { background: var(--chat-mention-bg); }
 .md-spoiler { border-radius: 3px; }
 .md-spoiler[role="button"] { background: var(--chat-spoiler-hidden); color: transparent; cursor: pointer; user-select: none; }

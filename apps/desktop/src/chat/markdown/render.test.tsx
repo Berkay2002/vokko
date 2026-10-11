@@ -99,6 +99,24 @@ describe('Markdown render', () => {
     expect(html('<@2>', { ...ctx, onMention: () => {} })).toContain('role="button"');
   });
 
+  it('unknown users, roles and channels stay plain pills even with onMention', () => {
+    const c = { ...ctx, onMention: () => {} };
+    expect(html('<@99>', c)).not.toContain('role="button"');
+    expect(html('<@&99>', c)).not.toContain('role="button"');
+    expect(html('<#99>', c)).not.toContain('role="button"');
+    expect(html('<@&10> <#20>', c).match(/role="button"/g)).toHaveLength(2);
+  });
+
+  it('mentionActionable decides which chips are buttons, resolved or not', () => {
+    const c = { ...ctx, onMention: () => {}, mentionActionable: (kind: string, id: string) => kind === 'user' && id === '2' };
+    expect(html('<@2>', c)).toContain('role="button"');
+    // known names, but nothing to open (the app has no role popout; the handler skips categories)
+    expect(html('<@1>', c)).not.toContain('role="button"');
+    expect(html('<@&10>', c)).not.toContain('role="button"');
+    expect(html('<#20>', c)).not.toContain('role="button"');
+    expect(html('<@&10>', c)).toContain('@mods');
+  });
+
   it('timestamps', () => {
     const out = html('<t:1700000000:R>');
     expect(out).toContain('<time class="md-timestamp" title="title:1700000000"');

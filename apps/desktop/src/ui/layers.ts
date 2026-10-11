@@ -101,6 +101,8 @@ export function useFocusTrap(active: boolean, container: () => HTMLElement | nul
       const first = items[0] as HTMLElement;
       const last = items[items.length - 1] as HTMLElement;
       const current = document.activeElement;
+      // A popout opened over this dialog (profile card from a mention) traps Tab itself.
+      if (current instanceof Element && !el.contains(current) && current.closest(".popout")) return;
       if (event.shiftKey && (current === first || !el.contains(current))) {
         event.preventDefault();
         last.focus();
