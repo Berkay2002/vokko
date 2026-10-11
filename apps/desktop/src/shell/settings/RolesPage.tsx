@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, GripVertical, Lock, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical, Lock, MoreHorizontal, Plus, X } from "lucide-react";
 import { Perm, basePermissions, canEditRole, canModerate, hasBit, memberLike, parseBits } from "../../api/permissions";
 import { appStore, displayName, useStore } from "../../api/store";
 import { request } from "../../api/rest";
 import type { Guild, GuildMember, Role, RolePositionUpdate, RoleRequest } from "../../api/types";
-import { Modal } from "../../ui";
+import { Modal, useContextMenu } from "../../ui";
 import { Avatar } from "../Avatar";
-import { Category, Divider, Page, SwitchRow } from "./controls";
+import { Category, Divider, Field, Page, RadioGroup, SwitchRow } from "./controls";
+import { useFrameLayout } from "./FullScreenSettings";
 import { PERMISSION_GROUPS } from "./permissions";
 import { SearchBox, errorText, mergeMemberLocal, removeRoleLocal, roleColor, upsertRoles } from "./shared";
 
@@ -89,6 +90,7 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [picker, setPicker] = useState(false);
+  const menu = useContextMenu();
 
   const isEveryone = role.id === guild.id;
   const editable = canEditRole(guild, actor, role);
@@ -98,7 +100,7 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
   const dirty = draft.name !== base.name || draft.color !== base.color || draft.hoist !== base.hoist || draft.mentionable !== base.mentionable || draft.permissions !== base.permissions;
   const isAdmin = hasBit(draft.permissions, Perm.ADMINISTRATOR);
   const needle = permQuery.trim().toLowerCase();
-  const title = isEveryone ? "Default Permissions (@everyone)" : `Edit Role - ${role.name}`;
+  const title = isEveryone ? "Edit Role - @everyone" : `Edit Role - ${role.name}`;
   const tabs: { id: RoleTab; label: string }[] = isEveryone
     ? [{ id: "permissions", label: "Permissions" }]
     : [
@@ -162,10 +164,24 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
   const candidates = members.filter(m => !m.roles.includes(role.id) && canGive(m));
 
   return (
-    <Page title={title}>
-      <button type="button" className="btn btn-link btn-sm ss-back" onClick={onBack}>
-        <ChevronLeft size={16} aria-hidden="true" /> Back to Roles
-      </button>
+    <div className="settings-page">
+      <div className="ss-role-head">
+        <h1 className="ss-role-title">{title}</h1>
+        <button
+          type="button"
+          className="ss-icon-btn ss-role-more"
+          aria-label="Role actions"
+          aria-haspopup="menu"
+          onClick={e =>
+            menu.open(e, [
+              { id: "copy-id", label: "Copy Role ID", onSelect: () => void navigator.clipboard.writeText(role.id).catch(() => undefined) },
+              ...(editable && !isEveryone ? [{ type: "separator" as const }, { id: "delete", label: "Delete Role", danger: true, onSelect: () => setConfirmDelete(true) }] : []),
+            ])
+          }
+        >
+          <MoreHorizontal size={18} aria-hidden="true" />
+        </button>
+      </div>
       <div className="ss-tabs" role="tablist" aria-label="Role sections">
         {tabs.map(t => (
           <button key={t.id} type="button" role="tab" aria-selected={activeTab === t.id} className={`ss-tab${activeTab === t.id ? " selected" : ""}`} onClick={() => setTab(t.id)}>
@@ -181,6 +197,9 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
             <div className="field-label">Role Name</div>
             <input className="input" value={draft.name} maxLength={100} disabled={!editable} aria-label="Role Name" onChange={e => patch({ name: e.target.value })} />
           </div>
+          <Field label="Role Style">
+            <RadioGroup<"solid"> name="Role style" value="solid" options={[{ value: "solid", label: "Solid", note: "A single colour for the role name." }]} onChange={() => undefined} />
+          </Field>
           <div className="settings-field">
             <div className="field-label">Role Color</div>
             <div className="ss-color">
@@ -247,7 +266,7 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
         <div role="tabpanel" aria-label="Permissions">
           <div className="ss-toolbar">
             <SearchBox value={permQuery} onChange={setPermQuery} placeholder="Search permissions" />
-            <button type="button" className="btn btn-secondary btn-sm" disabled={!editable || draft.permissions === 0n} onClick={() => patch({ permissions: 0n })}>
+            <button type="button" className="btn btn-link btn-sm ss-clear-link" disabled={!editable || draft.permissions === 0n} onClick={() => patch({ permissions: 0n })}>
               Clear permissions
             </button>
           </div>
@@ -324,7 +343,7 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
             <button type="button" className="btn btn-link" disabled={busy} onClick={reset}>
               Reset
             </button>
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>
+            <button type="button" className="btn btn-success" disabled={busy} onClick={() => void save()}>
               Save Changes
             </button>
           </div>
@@ -343,7 +362,7 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
         />
       )}
       {confirmDelete && <ConfirmDelete role={role} busy={busy} error={error} onConfirm={() => void remove()} onClose={() => setConfirmDelete(false)} />}
-    </Page>
+    </div>
   );
 }
 
@@ -363,14 +382,7 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
   const roles = useMemo(() => guild.roles.filter(r => r.id !== guild.id).sort((a, b) => b.position - a.position), [guild.roles, guild.id]);
   const active = selected ? guild.roles.find(r => r.id === selected) : undefined;
 
-  if (active) return <RoleEditor key={active.id} guild={guild} role={active} members={memberList} actor={actor} onBack={() => setSelected(null)} />;
-
-  const shown = order ?? roles;
-  const needle = query.trim().toLowerCase();
-  const visible = needle ? shown.filter(r => r.name.toLowerCase().includes(needle)) : shown;
-  const canReorder = !needle;
-  const countOf = (role: Role) => memberList.filter(m => m.roles.includes(role.id)).length;
-  const editableRole = (role: Role) => canEditRole(guild, actor, role);
+  useFrameLayout(active ? "roles" : "narrow");
 
   const create = async () => {
     setCreating(true);
@@ -385,6 +397,44 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
       setCreating(false);
     }
   };
+
+  if (active) {
+    const asideRoles = [...roles, ...(everyone ? [everyone] : [])];
+    return (
+      <div className="ss-roles-layout">
+        <nav className="ss-roles-aside" aria-label="Roles">
+          <div className="ss-aside-head">
+            <button type="button" className="ss-aside-back" onClick={() => setSelected(null)}>
+              <ChevronLeft size={14} aria-hidden="true" /> Back
+            </button>
+            <button type="button" className="ss-icon-btn" aria-label="Create Role" disabled={creating} onClick={() => void create()}>
+              <Plus size={16} aria-hidden="true" />
+            </button>
+          </div>
+          {error && <p className="field-error">{error}</p>}
+          {asideRoles.map(r => {
+            const open = r.id === guild.id || canEditRole(guild, actor, r);
+            return (
+              <button key={r.id} type="button" className={`ss-aside-row${r.id === active.id ? " selected" : ""}`} aria-current={r.id === active.id ? "true" : undefined} disabled={!open} onClick={() => setSelected(r.id)}>
+                <span className="ss-role-dot" style={{ background: roleColor(r) }} aria-hidden="true" />
+                <span className="ss-aside-name">{r.id === guild.id ? "@everyone" : r.name}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <div className="ss-roles-editor">
+          <RoleEditor key={active.id} guild={guild} role={active} members={memberList} actor={actor} onBack={() => setSelected(null)} />
+        </div>
+      </div>
+    );
+  }
+
+  const shown = order ?? roles;
+  const needle = query.trim().toLowerCase();
+  const visible = needle ? shown.filter(r => r.name.toLowerCase().includes(needle)) : shown;
+  const canReorder = !needle;
+  const countOf = (role: Role) => memberList.filter(m => m.roles.includes(role.id)).length;
+  const editableRole = (role: Role) => canEditRole(guild, actor, role);
 
   const drop = async (targetId: string) => {
     const from = dragId;

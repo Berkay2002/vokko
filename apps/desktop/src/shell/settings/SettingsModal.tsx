@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, ReactNode, RefObject, UIEvent } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
@@ -25,14 +25,36 @@ export interface SettingsModalProps {
   pageKey: string;
 }
 
+/** Exit animation length (ms); keep in step with `.sm-layer.closing` in settings-modal.css. */
+const EXIT_MS = 115;
+
+function motionReduced(): boolean {
+  return document.documentElement.classList.contains("reduce-motion") || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 export function SettingsModal({ label, title, side, onClose, children, scrollRef, onScroll, pageKey }: SettingsModalProps) {
   const root = useRef<HTMLDivElement>(null);
-  useLayer(true, onClose);
+  const [closing, setClosing] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  // Esc, the x and a scrim click all play the exit first, then unmount through the real onClose.
+  const requestClose = useCallback(() => {
+    if (timer.current !== undefined) return;
+    if (motionReduced()) {
+      closeRef.current();
+      return;
+    }
+    setClosing(true);
+    timer.current = window.setTimeout(() => closeRef.current(), EXIT_MS);
+  }, []);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useLayer(true, requestClose);
   useFocusTrap(true, () => root.current);
 
   return createPortal(
-    <div className="sm-layer">
-      <div className="sm-backdrop" />
+    <div className={`sm-layer${closing ? " closing" : ""}`}>
+      <div className="sm-backdrop" onClick={requestClose} />
       <div ref={root} className="sm" role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
         <nav className="sm-side" aria-label={`${label} sections`}>
           {side}
@@ -40,8 +62,8 @@ export function SettingsModal({ label, title, side, onClose, children, scrollRef
         <div className="sm-main">
           <header className="sm-header">
             <h1 className="sm-title">{title}</h1>
-            <button type="button" className="sm-close" aria-label="Close" onClick={onClose}>
-              <X size={22} />
+            <button type="button" className="sm-close" aria-label="Close" onClick={requestClose}>
+              <X size={20} />
             </button>
           </header>
           <div ref={scrollRef} key={pageKey} className="sm-scroll" onScroll={onScroll}>
@@ -82,7 +104,7 @@ export function SettingsNavItem({ icon: IconComponent, label, selected, danger, 
       aria-expanded={expanded}
       onClick={onClick}
     >
-      <IconComponent size={18} className="sm-item-icon" />
+      <IconComponent size={20} className="sm-item-icon" />
       <span className="sm-item-label">{label}</span>
     </button>
   );

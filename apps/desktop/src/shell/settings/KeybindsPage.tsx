@@ -1,5 +1,6 @@
 import { Fragment } from "react";
-import { Category, Page, Unavailable } from "./controls";
+import { Info } from "lucide-react";
+import { Category, Page } from "./controls";
 
 interface Bind {
   keys: string[];
@@ -48,7 +49,10 @@ const GROUPS: { title: string; binds: Bind[] }[] = [
 export function KeybindsPage() {
   return (
     <Page title="Keybinds">
-      <Unavailable>Custom keybinds are not available yet. These are the built-in shortcuts.</Unavailable>
+      <div className="sm-banner">
+        <Info size={20} />
+        <span>Custom keybinds are not available yet. These are the built-in shortcuts.</span>
+      </div>
       {GROUPS.map(group => (
         <Category key={group.title} title={group.title}>
           <table className="keybind-table">

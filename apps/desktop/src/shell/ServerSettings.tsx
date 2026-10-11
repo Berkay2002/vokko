@@ -1,16 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Trash2 } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { Perm } from "../api/permissions";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore, useStore } from "../api/store";
 import { ChannelType, type Channel, type Guild } from "../api/types";
-import { useFocusTrap, useLayer } from "../ui";
 import { GuildIcon } from "./Avatar";
 import { firstTextChannel } from "./channels";
 import { closeModal, openModal } from "./modalStore";
 import { Category, Field, Page, Select, Unavailable } from "./settings/controls";
+import { FullScreenSettings, useFrameLayout, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { BansPage } from "./settings/BansPage";
 import { RolesPage } from "./settings/RolesPage";
 import { TagPage } from "./settings/TagPage";
@@ -21,8 +20,8 @@ import { usePermissions } from "./usePermissions";
 interface SectionDef {
   id: string;
   label: string;
-  /** Sidebar block; headings come from GROUP_TITLES, "" or "top"/"misc" render without one. */
-  group: "top" | "expression" | "people" | "apps" | "moderation" | "misc" | "bottom";
+  /** Sidebar block; headings come from GROUP_TITLES, "" renders without one. */
+  group: "top" | "expression" | "people" | "apps" | "moderation" | "bottom";
   /** Category headings shown on pages that are not implemented. */
   outline?: string[];
   /** Any of these permission bits makes the section visible (Q4.6). Empty: MANAGE_GUILD. */
@@ -38,37 +37,30 @@ const GROUP_TITLES: Record<SectionDef["group"], string> = {
   people: "People",
   apps: "Apps",
   moderation: "Moderation",
-  misc: "",
   bottom: "",
 };
 
-const GROUP_ORDER: SectionDef["group"][] = ["top", "expression", "people", "apps", "moderation", "misc", "bottom"];
+const GROUP_ORDER: SectionDef["group"][] = ["top", "expression", "people", "apps", "moderation", "bottom"];
 
 const SECTIONS: SectionDef[] = [
   { id: "profile", label: "Server Profile", group: "top" },
   { id: "tag", label: "Server Tag", group: "top" },
   { id: "theme", label: "Server Theme", group: "top" },
   { id: "engagement", label: "Engagement", group: "top" },
-  { id: "emoji", label: "Emoji", group: "expression", needs: EXPRESSIONS },
-  { id: "stickers", label: "Stickers", group: "expression", needs: EXPRESSIONS },
-  { id: "soundboard", label: "Soundboard", group: "expression", needs: EXPRESSIONS },
-  { id: "official", label: "Official Messages", group: "expression" },
+  { id: "emoji", label: "Emoji", group: "expression", needs: EXPRESSIONS, outline: ["Upload Emoji", "Emoji"] },
+  { id: "stickers", label: "Stickers", group: "expression", needs: EXPRESSIONS, outline: ["Upload Sticker", "Stickers"] },
+  { id: "soundboard", label: "Soundboard", group: "expression", needs: EXPRESSIONS, outline: ["Upload Sound", "Sounds"] },
   { id: "members", label: "Members", group: "people", needs: [Perm.MANAGE_GUILD, Perm.KICK_MEMBERS, Perm.BAN_MEMBERS, Perm.MODERATE_MEMBERS, Perm.MANAGE_NICKNAMES, Perm.MANAGE_ROLES] },
   { id: "roles", label: "Roles", group: "people", needs: [Perm.MANAGE_ROLES] },
   { id: "invites", label: "Invites", group: "people", needs: [Perm.CREATE_INSTANT_INVITE, Perm.MANAGE_GUILD] },
-  { id: "access", label: "Access", group: "people" },
-  { id: "integrations", label: "Integrations", group: "apps" },
-  { id: "directory", label: "App Directory", group: "apps" },
-  { id: "safety", label: "Safety Setup", group: "moderation" },
-  { id: "audit", label: "Audit Log", group: "moderation", needs: [Perm.VIEW_AUDIT_LOG] },
+  { id: "access", label: "Access", group: "people", outline: ["Access Options", "Age-Restricted Server", "Server Rules"] },
+  { id: "integrations", label: "Integrations", group: "apps", outline: ["Webhooks", "Followed Channels", "Bots and Apps"] },
+  { id: "safety", label: "Safety Setup", group: "moderation", outline: ["Verification Level", "Require 2FA", "Sensitive Content Filter", "Activity Alerts"] },
+  { id: "audit", label: "Audit Log", group: "moderation", needs: [Perm.VIEW_AUDIT_LOG], outline: ["Audit Log"] },
   { id: "bans", label: "Bans", group: "moderation", needs: [Perm.BAN_MEMBERS] },
-  { id: "automod", label: "AutoMod", group: "moderation" },
-  { id: "community", label: "Community", group: "misc" },
-  { id: "onboarding", label: "Onboarding", group: "misc" },
-  { id: "insights", label: "Server Insights", group: "misc" },
-  { id: "welcome", label: "Welcome Screen", group: "misc" },
-  { id: "webpage", label: "Server Web Page", group: "misc" },
-  { id: "template", label: "Server Template", group: "bottom" },
+  { id: "automod", label: "AutoMod", group: "moderation", outline: ["Block Mention Spam", "Block Suspected Spam", "Block Commonly Flagged Words", "Block Custom Words"] },
+  { id: "community", label: "Enable Community", group: "bottom", outline: ["Enable Community"] },
+  { id: "template", label: "Server Template", group: "bottom", outline: ["Template Title", "Description"] },
 ];
 
 const ENGAGEMENT_OUTLINE = ["Channel Summaries", "Activity Feed Settings", "Default Notification Settings", "Inactive", "Server Widget"];
@@ -93,6 +85,17 @@ function NotYet({ section }: { section: SectionDef }) {
       ))}
     </Page>
   );
+}
+
+/** Asks the frame for the wide content column while the page is mounted. */
+function WideLayout() {
+  useFrameLayout("wide");
+  return null;
+}
+
+function Wide({ children }: { children: ReactNode }) {
+  useFrameLayout("wide");
+  return <>{children}</>;
 }
 
 function useGuildPatch(guildId: string) {
@@ -156,7 +159,10 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
 
   return (
     <Page title="Server Profile">
+      <WideLayout />
       {!owner && <Unavailable>You need the Manage Server permission to change the server profile.</Unavailable>}
+      <div className="ss-split">
+        <div className="ss-split-main">
       <Field label="Name">
         <div className="account-inline">
           <input className="input" aria-label="Server name" value={name} maxLength={100} readOnly={!owner} disabled={!owner} onChange={e => setName(e.target.value)} />
@@ -194,6 +200,15 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
       {uploadError && <p className="field-error">{uploadError}</p>}
       {error && <p className="field-error">{error}</p>}
       {saved && <p className="settings-saved">Saved.</p>}
+        </div>
+        <aside className="ss-preview-card" aria-label="Server profile preview">
+          <div className="ss-preview-banner" />
+          <div className="ss-preview-icon">
+            <GuildIcon guild={guild} size={56} />
+          </div>
+          <div className="ss-preview-name">{trimmed || guild.name}</div>
+        </aside>
+      </div>
     </Page>
   );
 }
@@ -292,9 +307,6 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
   const meId = useStore(s => s.me?.id);
   const perms = usePermissions(guildId);
   const [current, setCurrent] = useState(section ?? "profile");
-  const root = useRef<HTMLDivElement>(null);
-  useLayer(true, closeModal);
-  useFocusTrap(true, () => root.current);
   const channels = useMemo(() => Object.values(allChannels).filter(c => c.guild_id === guildId), [allChannels, guildId]);
   if (!guild) return null;
 
@@ -316,7 +328,11 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
       case "theme":
         return <ThemePage guildId={guildId} canEdit={canManage} />;
       case "members":
-        return <MembersPage guild={guild} members={members} />;
+        return (
+          <Wide>
+            <MembersPage guild={guild} members={members} />
+          </Wide>
+        );
       case "roles":
         return <RolesPage guild={guild} members={members} />;
       case "invites":
@@ -328,45 +344,29 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
     }
   };
 
-  return createPortal(
-    <div ref={root} className="settings-overlay" role="dialog" aria-modal="true" aria-label="Server Settings" tabIndex={-1}>
-      <nav className="settings-sidebar" aria-label="Server settings sections">
-        <div className="settings-sidebar-inner">
-          <div className="ss-guild-name" title={guild.name}>
-            {guild.name}
-          </div>
-          {GROUP_ORDER.map(group => {
-            const items = visibleSections.filter(s => s.group === group);
-            if (items.length === 0 && !(group === "bottom" && owner)) return null;
-            const title = GROUP_TITLES[group];
-            return (
-              <div key={group} className="settings-group">
-                {title && <div className="settings-group-title">{title}</div>}
-                {items.map(s => (
-                  <button key={s.id} type="button" className={`settings-item${active.id === s.id ? " selected" : ""}`} aria-current={active.id === s.id ? "page" : undefined} onClick={() => setCurrent(s.id)}>
-                    {s.label}
-                  </button>
-                ))}
-                {group === "bottom" && owner && (
-                  <button type="button" className="settings-item danger" onClick={() => openModal({ type: "deleteServer", guildId })}>
-                    Delete Server
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </nav>
-      <main className="settings-content">
-        <div className="settings-content-inner">{page()}</div>
-        <button type="button" className="settings-close" aria-label="Close" onClick={closeModal}>
-          <span className="settings-close-icon">
-            <X size={18} />
-          </span>
-          <span className="settings-close-label">ESC</span>
-        </button>
-      </main>
-    </div>,
-    document.body,
+  const groups: SettingsNavGroup[] = GROUP_ORDER.map(group => ({
+    id: group,
+    title: GROUP_TITLES[group],
+    items: [
+      ...visibleSections.filter(s => s.group === group).map(s => ({ id: s.id, label: s.label })),
+      ...(group === "bottom" && owner
+        ? [{ id: "delete", label: "Delete Server", danger: true, icon: <Trash2 size={16} aria-hidden="true" />, onSelect: () => openModal({ type: "deleteServer", guildId }) }]
+        : []),
+    ],
+  })).filter(g => g.items.length > 0);
+
+  return (
+    <FullScreenSettings
+      label="Server Settings"
+      navLabel="Server settings sections"
+      eyebrow={guild.name}
+      eyebrowTitle={guild.name}
+      groups={groups}
+      current={active.id}
+      onSelect={setCurrent}
+      onClose={closeModal}
+    >
+      {page()}
+    </FullScreenSettings>
   );
 }

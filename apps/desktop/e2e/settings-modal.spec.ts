@@ -43,12 +43,14 @@ test('My Account is one scrolling page: sub-items follow the sections and Displa
   await expect(subs).toHaveText(['Account Info', 'Password & Security', 'Account Status']);
   await expect(subs.first()).toHaveAttribute('aria-current', 'location');
   await subs.nth(1).click();
-  await expect(subs.nth(1)).toHaveAttribute('aria-current', 'location');
+  // the last item takes over once the page has scrolled to its end, so only the count of current items is stable
+  await expect(dialog.locator('.sm-sub[aria-current="location"]')).toHaveCount(1);
   await expect(dialog.getByRole('heading', { name: 'Password & Security', level: 2 })).toBeVisible();
 
-  // another section collapses the sub-items again
+  // another page shows its own sub-items (scroll-spy anchors of that page), never My Account's
   await dialog.getByRole('button', { name: 'Notifications' }).click();
-  await expect(subs).toHaveCount(0);
+  await expect(subs.first()).not.toHaveText('Account Info');
+  await expect(dialog.getByRole('heading', { name: 'Notifications', level: 1 })).toBeVisible();
   await dialog.getByRole('button', { name: 'My Account' }).click();
 
   const row = dialog.locator('.sm-row', { hasText: 'Display Name' });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Check, Lock, Minus, Plus, Search, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Lock, Minus, Plus, Search, X } from "lucide-react";
 import { ApiRequestError } from "../../api/errors";
 import { Perm, TEXT_OVERWRITE_BITS, VOICE_OVERWRITE_BITS, bit, hasBit, parseBits } from "../../api/permissions";
 import { request } from "../../api/rest";
@@ -7,7 +7,7 @@ import { appStore, displayName, useStore } from "../../api/store";
 import { ChannelType, OverwriteType, type Channel, type Guild, type GuildMember, type PermissionOverwrite, type Role } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { usePermissions } from "../usePermissions";
-import { Category, Page, SwitchRow, Unavailable } from "./controls";
+import { Page, SwitchRow, Unavailable } from "./controls";
 import { PERMISSION_GROUPS } from "./permissions";
 import { SaveBar } from "./SaveBar";
 import { roleColor } from "./server-people";
@@ -95,6 +95,7 @@ export function ChannelPermissionsPage({ channel, guild, members }: { channel: C
   const [drafts, setDrafts] = useState<Drafts>(original);
   const [selected, setSelected] = useState<string>(guild.id);
   const [picker, setPicker] = useState(false);
+  const [advanced, setAdvanced] = useState(() => Object.keys(toDrafts(channel.permission_overwrites)).some(id => id !== guild.id));
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -236,7 +237,7 @@ export function ChannelPermissionsPage({ channel, guild, members }: { channel: C
   const noun = channel.type === ChannelType.GuildCategory ? "category" : "channel";
 
   return (
-    <Page title="Permissions">
+    <Page title={`${noun === "category" ? "Category" : "Channel"} Permissions`}>
       {!editable && <Unavailable>You need the Manage Permissions permission to change this {noun}'s permissions.</Unavailable>}
       {category && channel.type !== ChannelType.GuildCategory && (
         <div className="cs-sync" role="status">
@@ -254,8 +255,15 @@ export function ChannelPermissionsPage({ channel, guild, members }: { channel: C
           )}
         </div>
       )}
-      <SwitchRow label="Private Channel" note={`By making a ${noun} private, only select members and roles will be able to view it.`} checked={privateOn} disabled={!editable || !grantable(10)} onChange={setPrivate} />
-      <Category title="Advanced Permissions">
+      <div className="cs-card">
+        <SwitchRow label={`Private ${noun === "category" ? "Category" : "Channel"}`} note={`By making a ${noun} private, only select members and roles will be able to view it.`} checked={privateOn} disabled={!editable || !grantable(10)} onChange={setPrivate} />
+      </div>
+      <section className="settings-category">
+        <button type="button" className="cs-advanced-toggle" aria-expanded={advanced} onClick={() => setAdvanced(a => !a)}>
+          <span>Advanced Permissions</span>
+          {advanced ? <ChevronDown size={20} aria-hidden="true" /> : <ChevronRight size={20} aria-hidden="true" />}
+        </button>
+        {advanced && (
         <div className="cs-perm-editor">
           <div className="cs-targets">
             <div className="cs-targets-head">
@@ -267,10 +275,11 @@ export function ChannelPermissionsPage({ channel, guild, members }: { channel: C
               )}
             </div>
             {picker && (
-              <div className="cs-picker">
+              <div className="cs-picker" role="dialog" aria-label="Add role or member">
+                <div className="cs-picker-title">Add:</div>
                 <div className="ss-search">
                   <Search size={14} aria-hidden="true" />
-                  <input className="ss-search-input" autoFocus placeholder="Search roles and members" aria-label="Search roles and members" value={query} onChange={e => setQuery(e.target.value)} />
+                  <input className="ss-search-input" autoFocus placeholder="Role / Member" aria-label="Search roles and members" value={query} onChange={e => setQuery(e.target.value)} />
                 </div>
                 <div className="cs-picker-list">
                   {available.roles.length > 0 && <div className="cs-picker-title">Roles</div>}
@@ -327,7 +336,8 @@ export function ChannelPermissionsPage({ channel, guild, members }: { channel: C
             ))}
           </div>
         </div>
-      </Category>
+        )}
+      </section>
       {saved && !dirty && <p className="settings-saved">Saved.</p>}
       <SaveBar visible={dirty || !!error} busy={busy} error={error} onReset={reset} onSave={() => void save()} />
     </Page>

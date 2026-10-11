@@ -1,20 +1,11 @@
 /* Channel settings: header group, permissions overwrite editor, unsaved-changes bar. */
 
-.cs-header {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  overflow: hidden;
-}
-
 .cs-header-name {
   display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  color: var(--text-default);
-  font-size: 14px;
-  text-transform: none;
+  min-width: 0;
 }
 
 .cs-header-name > span {
@@ -23,23 +14,102 @@
   white-space: nowrap;
 }
 
-.cs-header-kind {
-  color: var(--channels-default);
-  font-size: 12px;
+.cs-card {
+  margin-bottom: 20px;
+  padding: 4px 16px;
+  background: var(--background-surface-high);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
 }
 
-.cs-content {
-  position: relative;
-  width: 860px;
+.cs-advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: left;
+}
+
+.cs-rich {
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+}
+
+.cs-rich-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cs-rich-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  color: var(--interactive-icon-default);
+  font-size: 14px;
+}
+
+.cs-rich-bold {
+  font-weight: 700;
+}
+
+.cs-rich-italic {
+  font-style: italic;
+}
+
+.cs-rich-underline {
+  text-decoration: underline;
+}
+
+.cs-rich-strike {
+  text-decoration: line-through;
+}
+
+.cs-rich-spacer {
+  flex: 1;
+}
+
+.cs-rich-input {
+  display: block;
+  width: 100%;
+  padding: 10px 12px 0;
+  color: var(--text-default);
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: 16px;
+  resize: vertical;
+}
+
+.cs-rich-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  border-radius: 0 0 8px 8px;
+}
+
+.cs-rich-count {
+  padding: 4px 12px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
 }
 
 .cs-perm-editor {
   display: flex;
   gap: 16px;
-  margin-top: 8px;
+  margin-top: 16px;
 }
 
 .cs-targets {
+  position: relative;
   flex: none;
   width: 200px;
 }
@@ -71,11 +141,16 @@
 }
 
 .cs-picker {
-  margin-bottom: 8px;
+  position: absolute;
+  top: 28px;
+  left: 0;
+  z-index: 2;
+  width: 240px;
   padding: 8px;
-  background: var(--background-surface-high);
+  background: var(--background-surface-highest);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.24);
 }
 
 .cs-picker-list {
@@ -200,8 +275,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 28px;
+  width: 22px;
+  height: 24px;
   color: var(--interactive-icon-default);
 }
 
@@ -231,17 +306,17 @@
 
 .cs-savebar {
   position: sticky;
-  bottom: -40px;
+  bottom: 24px;
   z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
   margin-top: 24px;
-  padding: 10px 10px 10px 16px;
+  padding: 8px 8px 8px 16px;
   color: var(--text-default);
   background: var(--background-surface-highest);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 
