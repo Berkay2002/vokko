@@ -162,7 +162,7 @@ export function AppShell() {
         else if (dmRecipient) toggleProfile();
       } else if (mod && !e.shiftKey && !e.altKey && key === "/") {
         e.preventDefault();
-        openModal({ type: "userSettings", section: "keybinds" });
+        openModal({ type: "shortcuts" });
       } else if (mod && !e.shiftKey && !e.altKey && key === "i") {
         e.preventDefault();
         openModal({ type: "inbox" });

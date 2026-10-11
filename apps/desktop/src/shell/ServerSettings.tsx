@@ -11,6 +11,7 @@ import { closeModal, openModal } from "./modalStore";
 import { Category, Field, Page, Select, Unavailable } from "./settings/controls";
 import { FullScreenSettings, useFrameLayout, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { BansPage } from "./settings/BansPage";
+import { SaveBar } from "./settings/SaveBar";
 import { RolesPage } from "./settings/RolesPage";
 import { TagPage } from "./settings/TagPage";
 import { ThemePage } from "./settings/ThemePage";
@@ -141,6 +142,7 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
   const { busy, error, saved, patch } = useGuildPatch(guild.id);
   const uploadChannel = firstTextChannel(channels)?.id ?? channels[0]?.id;
   const trimmed = name.trim();
+  const dirty = owner && trimmed !== guild.name;
 
   const pick = async (selected: File | undefined) => {
     if (!selected || !uploadChannel) return;
@@ -166,11 +168,6 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
       <Field label="Name">
         <div className="account-inline">
           <input className="input" aria-label="Server name" value={name} maxLength={100} readOnly={!owner} disabled={!owner} onChange={e => setName(e.target.value)} />
-          {owner && (
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy || trimmed.length === 0 || trimmed === guild.name} onClick={() => void patch({ name: trimmed })}>
-              Save
-            </button>
-          )}
         </div>
       </Field>
       <Field label="Icon" note="We recommend an image of at least 512x512 for the server.">
@@ -198,8 +195,8 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
         </div>
       </Field>
       {uploadError && <p className="field-error">{uploadError}</p>}
-      {error && <p className="field-error">{error}</p>}
-      {saved && <p className="settings-saved">Saved.</p>}
+      {error && !dirty && <p className="field-error">{error}</p>}
+      {saved && !dirty && <p className="settings-saved">Saved.</p>}
         </div>
         <aside className="ss-preview-card" aria-label="Server profile preview">
           <div className="ss-preview-banner" />
@@ -209,6 +206,13 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
           <div className="ss-preview-name">{trimmed || guild.name}</div>
         </aside>
       </div>
+      <SaveBar
+        visible={dirty}
+        busy={busy}
+        error={trimmed ? error : "Server name is required."}
+        onReset={() => setName(guild.name)}
+        onSave={() => trimmed && void patch({ name: trimmed })}
+      />
     </Page>
   );
 }
@@ -224,21 +228,20 @@ function EngagementPage({ guild, owner, channels }: { guild: Guild; owner: boole
     <Page title="Engagement">
       <Category title="System Messages Channel">
         <Select<string> label="System Messages Channel" value={value} options={options} disabled={!owner || busy} onChange={setValue} />
-        {owner && (
-          <div className="account-inline ss-actions">
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !dirty} onClick={() => void patch({ system_channel_id: value === "" ? null : value })}>
-              Save
-            </button>
-            {saved && <span className="settings-saved">Saved.</span>}
-          </div>
-        )}
-        {error && <p className="field-error">{error}</p>}
+        {saved && !dirty && <p className="settings-saved">Saved.</p>}
       </Category>
       {ENGAGEMENT_OUTLINE.map(title => (
         <Category key={title} title={title}>
           <p className="settings-todo">Not available yet.</p>
         </Category>
       ))}
+      <SaveBar
+        visible={owner && dirty}
+        busy={busy}
+        error={error}
+        onReset={() => setValue(guild.system_channel_id ?? "")}
+        onSave={() => void patch({ system_channel_id: value === "" ? null : value })}
+      />
     </Page>
   );
 }

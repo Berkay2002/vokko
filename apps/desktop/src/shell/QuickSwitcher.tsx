@@ -1,16 +1,43 @@
 import { useMemo, useState } from "react";
 import { Hash, Volume2 } from "lucide-react";
-import { dmName, useStore } from "../api/store";
+import { appStore, dmName, useStore } from "../api/store";
 import { ChannelType, type Snowflake } from "../api/types";
 import { Modal } from "../ui";
 import { Avatar, GuildIcon } from "./Avatar";
 import { openDirectMessage } from "./actions";
-import { closeModal } from "./modalStore";
+import { closeModal, useModals } from "./modalStore";
 import { dmPath, go, guildPath } from "./nav";
 
 type Scope = "all" | "users" | "text" | "voice" | "servers" | "unavailable";
 
 const PREFIXES: Record<string, Scope> = { "@": "users", "#": "text", "!": "voice", "*": "servers", $: "unavailable" };
+
+const RECENT_KEY = "vokko.recentChannels";
+const RECENT_MAX = 8;
+
+function loadRecent(): Snowflake[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+// Visited channels and DMs, newest first. Recorded at module load so it also covers visits made before the switcher opens.
+let recent = loadRecent();
+appStore.subscribe((state, prev) => {
+  const id = state.route.channelId;
+  if (!id || id === prev.route.channelId) return;
+  recent = [id, ...recent.filter(r => r !== id)].slice(0, RECENT_MAX + 1);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+  } catch {
+    /* storage unavailable: recents last for this session */
+  }
+});
+
+const KIND_TAG: Partial<Record<Result["kind"], string>> = { text: "Text channels", voice: "Voice channels" };
 
 interface Result {
   key: string;
@@ -84,9 +111,23 @@ export function QuickSwitcher() {
       .slice(0, 12);
   }, [all, query, scope]);
 
+  // Empty query: previously visited channels (not the one you are in), like the reference's "Previous channels" list.
+  const current = useStore(s => s.route.channelId);
+  const previous = useMemo(() => {
+    if (scope !== "all" || query.trim()) return [];
+    const byKey = new Map(all.map(r => [r.key, r]));
+    return recent
+      .filter(id => id !== current)
+      .map(id => byKey.get(`ch-${id}`) ?? byKey.get(`dm-${id}`))
+      .filter((r): r is Result => !!r)
+      .slice(0, RECENT_MAX);
+  }, [all, current, query, scope]);
+  const shown = previous.length > 0 ? previous : results;
+
   const choose = (r: Result | undefined) => {
     if (!r) return;
-    closeModal();
+    // Leave parked settings behind too: the result navigates away from them.
+    useModals.setState({ modal: null, base: null });
     r.run();
   };
 
@@ -99,22 +140,24 @@ export function QuickSwitcher() {
         placeholder="Where would you like to go?"
         onChange={e => (setQuery(e.target.value), setIndex(0))}
         onKeyDown={e => {
-          if (e.key === "ArrowDown") (e.preventDefault(), setIndex(i => Math.min(i + 1, results.length - 1)));
+          if (e.key === "ArrowDown") (e.preventDefault(), setIndex(i => Math.min(i + 1, shown.length - 1)));
           else if (e.key === "ArrowUp") (e.preventDefault(), setIndex(i => Math.max(i - 1, 0)));
-          else if (e.key === "Enter") (e.preventDefault(), choose(results[index]));
+          else if (e.key === "Enter") (e.preventDefault(), choose(shown[index]));
         }}
       />
+      {previous.length > 0 && <div className="quick-heading">Previous channels</div>}
       <ul className="quick-results" role="listbox">
-        {results.map((r, i) => (
+        {shown.map((r, i) => (
           <li key={r.key}>
             <button type="button" role="option" aria-selected={i === index} className={`quick-row${i === index ? " selected" : ""}`} onMouseEnter={() => setIndex(i)} onClick={() => choose(r)}>
               <span className="quick-icon">{r.icon}</span>
               <span className="quick-label">{r.label}</span>
+              {KIND_TAG[r.kind] && <span className="quick-tag">{KIND_TAG[r.kind]}</span>}
               {r.sub && <span className="quick-sub">{r.sub}</span>}
             </button>
           </li>
         ))}
-        {results.length === 0 && <li className="quick-empty">{scope === "unavailable" ? "Not available yet." : "No results found. Nobody here but us chickens."}</li>}
+        {shown.length === 0 && <li className="quick-empty">{scope === "unavailable" ? "Not available yet." : "No results found. Nobody here but us chickens."}</li>}
       </ul>
       <div className="quick-tip">
         <span className="quick-tip-label">PROTIP:</span> Start searches with <kbd>@</kbd> <kbd>#</kbd> <kbd>!</kbd> <kbd>*</kbd> <kbd>$</kbd> to narrow results to users, text channels, voice channels, servers and more.

@@ -66,16 +66,16 @@ test('messages that mention me are highlighted, others are not', async ({ page }
   await expect(row(page, 'reading it now')).not.toHaveClass(/mentioned/);
   const bar = await row(page, 'did you see the filing').evaluate(el => { const c = getComputedStyle(el, '::before'); return { w: c.width, bg: c.backgroundColor }; });
   expect(bar.w).toBe('2px'); // the 2px left bar
-  expect(bar.bg).toBe('rgb(206, 129, 0)'); // #ce8100
+  expect(bar.bg).toBe('rgb(234, 152, 0)'); // --text-feedback-warning
 });
 
-test('mention-of-me row tint is #ce8100 at 8% alpha, 4% on hover', async ({ page }) => {
+test('mention-of-me row tint is the mentioned-message token (8% alpha, 4% on hover)', async ({ page }) => {
   await openStockTalk(page);
   const mentioned = row(page, 'did you see the filing');
   await page.mouse.move(0, 0);
-  await expect(mentioned).toHaveCSS('background-color', 'rgba(206, 129, 0, 0.08)');
+  await expect(mentioned).toHaveCSS('background-color', 'rgba(248, 163, 0, 0.08)');
   await mentioned.hover();
-  await expect(mentioned).toHaveCSS('background-color', 'rgba(206, 129, 0, 0.04)');
+  await expect(mentioned).toHaveCSS('background-color', 'rgba(248, 163, 0, 0.04)');
 });
 
 test('guild channels show the per-server avatar on messages and reply previews', async ({ page }) => {
@@ -123,7 +123,11 @@ test.describe('lightbox', () => {
     const box = page.getByRole('dialog');
     await expect(box).toBeVisible();
     await expect(box.locator('.chat-lightbox-name')).toContainText('Sam');
-    for (const name of ['Zoom in', 'Forward', 'Download', 'Open in Browser', 'More', 'Close']) await expect(box.getByRole(name === 'Download' || name === 'Open in Browser' ? 'link' : 'button', { name })).toBeVisible();
+    for (const name of ['Zoom in', 'Forward', 'Open in Browser', 'More', 'Close']) await expect(box.getByRole(name === 'Open in Browser' ? 'link' : 'button', { name })).toBeVisible();
+    await expect(box.getByRole('link', { name: 'Download' })).toHaveCount(0);
+    await box.getByRole('button', { name: 'More' }).click();
+    await expect(box.getByRole('menuitem', { name: 'Download' })).toBeVisible();
+    await page.keyboard.press('Escape');
     await expect(box.locator('.chat-lightbox-thumbs')).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -452,4 +456,77 @@ test('sending from far up lands on the new message, fully above the composer', a
     const c = (await page.locator('.chat-composer').boundingBox())!;
     return c.y - (m.y + m.height);
   }).toBeGreaterThanOrEqual(0);
+});
+
+test('a role mention highlights the row when I hold the role', async ({ page }) => {
+  await openStockTalk(page);
+  await reveal(page, 'can an admin sign off');
+  await expect(row(page, 'can an admin sign off')).toHaveClass(/mentioned/);
+});
+
+test('inline edit has an emoji button that inserts at the caret, and the hint wording', async ({ page }) => {
+  await openStockTalk(page);
+  await row(page, 'reading it now').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Edit Message' }).click();
+  const edit = page.locator('.chat-edit');
+  await expect(edit.locator('.chat-edit-hint')).toHaveText('escape to cancel • enter to save');
+  const area = edit.getByRole('textbox', { name: 'Edit message' });
+  const original = await area.inputValue();
+  await area.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(7, 7)); // after "reading"
+  await edit.getByRole('button', { name: 'Select emoji' }).click();
+  await page.getByRole('dialog', { name: 'Emoji picker' }).locator('.chat-emoji-cell').first().click();
+  const after = await area.inputValue();
+  expect(after.startsWith('reading')).toBe(true);
+  expect(after.endsWith(original.slice(7))).toBe(true);
+  expect(after.length).toBeGreaterThan(original.length);
+  await area.press('Escape');
+  await expect(edit).toHaveCount(0);
+});
+
+test('delete confirmation shows the shift-click PROTIP; Shift+click on Delete skips it', async ({ page }) => {
+  await openStockTalk(page);
+  await row(page, 'reading it now').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Delete Message' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.locator('.chat-protip')).toContainText('hold down shift when clicking delete message');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(row(page, 'reading it now')).toBeVisible();
+  await row(page, 'reading it now').hover();
+  await page.keyboard.down('Shift');
+  await page.mouse.move(10, 10);
+  await row(page, 'reading it now').hover();
+  await page.getByRole('button', { name: 'Delete', exact: true }).click({ modifiers: ['Shift'] });
+  await page.keyboard.up('Shift');
+  await expect(page.locator('.chat-content', { hasText: 'reading it now' })).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('server tag popout shows member counts and created date, Go to Server navigates', async ({ page }) => {
+  await openStockTalk(page);
+  await scrollTop(page);
+  await row(page, 'squeeze watch').locator('.chat-server-tag').first().click();
+  const pop = page.locator('.chat-tag-popout');
+  await expect(pop).toContainText(/\d+ online/);
+  await expect(pop).toContainText(/\d+ members?/);
+  await expect(pop).toContainText('Created:');
+  await pop.getByRole('button', { name: 'Go to Server' }).click();
+  await expect(pop).toHaveCount(0);
+  const guildId = await page.evaluate(() => (window as unknown as { __vokko: { appStore: { getState(): { route: { guildId: string | null } } } } }).__vokko.appStore.getState().route.guildId);
+  await expect(page).toHaveURL(new RegExp(`/channels/${guildId}`));
+});
+
+test('emoji autocomplete shows a footer preview of the highlighted emoji', async ({ page }) => {
+  await openStockTalk(page);
+  const box = page.locator('.chat-textarea');
+  await box.click();
+  await box.pressSequentially(':smile');
+  const panel = page.locator('.chat-autocomplete');
+  await expect(panel.locator('.chat-autocomplete-item').first()).toBeVisible();
+  const preview = panel.locator('.chat-autocomplete-preview');
+  await expect(preview).toBeVisible();
+  await expect(preview.locator('.chat-autocomplete-preview-emoji')).not.toBeEmpty();
+  expect(Math.round((await preview.boundingBox())!.height)).toBe(48);
+  await box.press('ArrowDown');
+  await expect(panel.locator('.chat-autocomplete-item.selected')).toHaveCount(1);
+  await box.press('Escape');
 });

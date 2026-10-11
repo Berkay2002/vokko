@@ -329,6 +329,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           <span className="chat-autocomplete-label" style={s.color ? { color: s.color } : undefined}>{s.label}</span>
           {s.hint && <span className="chat-autocomplete-hint">{s.hint}</span>}
         </div>)}
+        {trigger?.kind === 'emoji' && suggestions[selected]?.emoji && <div className="chat-autocomplete-preview" aria-hidden="true"><span className="chat-autocomplete-preview-emoji">{suggestions[selected]?.emoji}</span><span>{suggestions[selected]?.label}</span></div>}
       </div>}
     </div>
   </div>;

@@ -1,0 +1,79 @@
+/* ---- keyboard shortcuts dialog (Ctrl+/) ---- */
+.modal.shortcuts-modal {
+  width: 949px;
+  max-height: min(645px, calc(100vh - 32px));
+}
+
+.shortcuts-modal .modal-header {
+  justify-content: flex-start;
+  padding: 24px 24px 4px;
+  text-align: left;
+}
+
+.shortcuts-modal .modal-title {
+  font-weight: 500;
+}
+
+.shortcuts-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.shortcuts-heading {
+  margin: 16px 0 8px;
+  color: var(--text-strong);
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.shortcuts-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.shortcut-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 55px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--background-mod-muted);
+}
+
+.shortcut-action {
+  color: var(--text-default);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.shortcut-caps {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.shortcut-plus {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.shortcut-cap {
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--background-mod-normal);
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+}

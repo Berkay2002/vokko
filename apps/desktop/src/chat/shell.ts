@@ -9,6 +9,7 @@ export { request, uploadAttachment, resolveUrl, ApiRequestError } from '../api/r
 export { gateway } from '../api/gateway';
 export { displayName, roleColor, avatarUrl, dmName, guildIconUrl, guildInitials } from '../api/store';
 export { markGuildRead, joinGuildWithInvite } from '../shell/actions';
+export { go, guildPath } from '../shell/nav';
 export { openModal } from '../shell/modalStore';
 export { usePermissions } from '../shell/usePermissions';
 export { Perm } from '../api/permissions';
@@ -25,6 +26,17 @@ export function useUsers(): Record<Snowflake, User> { return useStore(s => s.use
 export function useReadState(channelId: Snowflake): ReadState | undefined { return useStore(s => s.readStates[channelId]); }
 export function useRelationship(userId: Snowflake | null | undefined): Relationship | undefined { return useStore(s => (userId ? s.relationships[userId] : undefined)); }
 export function useGuilds(): Record<Snowflake, Guild> { return useStore(s => s.guilds); }
+
+/** Guild member count (the READY count when known) and how many of the *loaded* members are not offline; `online` is a lower bound for big guilds. */
+export function useGuildCounts(guildId: Snowflake | null | undefined): { total: number; online: number } {
+  const members = useGuildMembers(guildId);
+  const presences = useStore(s => s.presences);
+  const memberCount = useStore(s => (guildId ? s.memberCounts[guildId] : undefined));
+  return useMemo(() => {
+    const ids = Object.keys(members);
+    return { total: memberCount ?? ids.length, online: ids.filter(id => { const st = presences[id]?.status; return st && st !== 'offline' && st !== 'invisible'; }).length };
+  }, [members, presences, memberCount]);
+}
 
 /** The per-server avatar hash of a loaded guild member (null when the user has none or the member is not loaded). */
 export function useMemberAvatar(guildId: Snowflake | null | undefined, userId: Snowflake): string | null {

@@ -8,7 +8,7 @@ interface Bind {
   wired?: boolean;
 }
 
-const GROUPS: { title: string; binds: Bind[] }[] = [
+export const GROUPS: { title: string; binds: Bind[] }[] = [
   {
     title: "Navigation",
     binds: [

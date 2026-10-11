@@ -18,6 +18,7 @@ export type ModalSpec =
   | { type: "notificationSettings"; scopeId: Snowflake; title: string; guild?: boolean }
   | { type: "createDM"; /** Users already in the conversation (the new group DM keeps them). */ base?: Snowflake[] }
   | { type: "quickSwitcher" }
+  | { type: "shortcuts" }
   | { type: "profile"; userId: Snowflake; guildId?: Snowflake | null }
   | { type: "inbox" }
   | { type: "logout" }
@@ -29,7 +30,7 @@ export type ModalSpec =
 
 /** Full-screen settings stay mounted underneath these small dialogs and come back when the dialog closes. */
 const SETTINGS_TYPES = new Set<ModalSpec["type"]>(["serverSettings", "channelSettings", "editChannel", "userSettings"]);
-const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout", "removeFriend", "voiceStatus", "cameraPreview", "screenShare"]);
+const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout", "removeFriend", "quickSwitcher", "shortcuts", "voiceStatus", "cameraPreview", "screenShare"]);
 
 interface ModalStore {
   modal: ModalSpec | null;

@@ -147,8 +147,8 @@ function addDmConversation(channel: MockChannel, ids: Record<"R" | "B", string>)
  * message), a ping-reply and an @everyone that mention sam, a single image, an image grid, emoji-only and inline-emoji lines, and dates old
  * enough (3 days) to show the locale date format plus one yesterday and one today.
  */
-function seedMessageShowcase(ctx: { guildId: string; parentId: string; R: string; A: string; Bo: string; N: string; sam: User; bob: User }): MockChannel {
-  const { guildId, parentId, R, A, Bo, N, sam, bob } = ctx;
+function seedMessageShowcase(ctx: { guildId: string; parentId: string; R: string; A: string; Bo: string; N: string; admin: string; sam: User; bob: User }): MockChannel {
+  const { guildId, parentId, R, A, Bo, N, admin, sam, bob } = ctx;
   sam.primary_guild = { guild_id: guildId, tag: "VKO", badge: "bolt", color_primary: 0x5865f2, color_secondary: 0x3b2f8f };
   bob.primary_guild = { guild_id: guildId, tag: "GG", badge: "leaf", color_primary: 0x3ba55d, color_secondary: 0x1d6b3a };
   const channel = addChannel(guildId, { name: "stock-talk", type: ChannelType.GuildText, parent_id: parentId, topic: "Charts, takes and bad ideas." });
@@ -182,6 +182,8 @@ function seedMessageShowcase(ctx: { guildId: string; parentId: string; R: string
   post(N, "this one is a **solid** setup :eyes: not financial advice 😅", day + HOUR - MIN);
   post(Bo, `@everyone market opens in ten, coffee up`, 2 * HOUR);
   post(A, `<@${R}> did you see the filing? worth a look before the bell`, 90 * MIN);
+  // A role mention of a role sam has (Admin): the row is highlighted for sam, the wire has no mention_roles so the client reads the content.
+  post(A, `<@&${admin}> can an admin sign off the release notes?`, 12 * MIN);
   const status = post(R, "reading it now, will post a summary", 80 * MIN);
   post(Bo, "thanks!", 40 * MIN, { reply: status.id });
   post(N, "the summary will be long, brace yourselves", 20 * MIN, { reply: status.id });
@@ -390,7 +392,7 @@ export function seed(): void {
 
   // Read states for sam: dev-talk partly unread, random has two mentions.
   const state = (channelId: string, last: string | null, mentions = 0) => sam.readStates.set(channelId, { channel_id: channelId, last_message_id: last, mention_count: mentions });
-  const stockTalk = seedMessageShowcase({ guildId, parentId: textCategory.id, R, A, Bo, N, sam: sam.user, bob: bob.user });
+  const stockTalk = seedMessageShowcase({ guildId, parentId: textCategory.id, R, A, Bo, N, admin, sam: sam.user, bob: bob.user });
   for (const c of [welcome, general, stockTalk, announcements]) state(c.id, c.last_message_id);
   state(devTalk.id, g2.id);
   state(random.id, r1.id, 2);

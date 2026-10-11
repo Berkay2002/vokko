@@ -407,7 +407,7 @@
 }
 
 .quick-tip-label {
-  color: var(--text-brand);
+  color: var(--text-feedback-positive);
 }
 
 /* ---- chat text size (Settings > Appearance) ---- */

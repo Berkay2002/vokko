@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../api/types';
-import { buildRows, emptyState, replaceWindow, withLateArrivals } from './messageState';
+import { buildRows, emptyState, mentionsRole, replaceWindow, withLateArrivals } from './messageState';
 import { sameDay } from './util';
 
 const BASE = Date.UTC(2026, 9, 10, 12, 0, 0);
@@ -31,6 +31,23 @@ describe('thread messages', () => {
   it('a thread starter (type 21) and a thread notice (type 18) are not grouped with their neighbours', () => {
     expect(rows([msg('1', 'a', 0, 21), msg('2', 'a', 1)]).map(r => r.grouped)).toEqual([false, false]);
     expect(rows([msg('1', 'a', 0), msg('2', 'a', 1, 18), msg('3', 'a', 2)]).map(r => r.grouped)).toEqual([false, false, false]);
+  });
+});
+
+describe('mentionsRole', () => {
+  it('matches a role mention of one of the viewer roles only', () => {
+    expect(mentionsRole('hey <@&100> and <@&200>', ['200'])).toBe(true);
+    expect(mentionsRole('hey <@&100>', ['200'])).toBe(false);
+    expect(mentionsRole('<@200> <#200> @200', ['200'])).toBe(false);
+    expect(mentionsRole('<@&100>', [])).toBe(false);
+  });
+
+  it('ignores mentions in inline code, fenced blocks and escaped ones', () => {
+    expect(mentionsRole('`<@&100>`', ['100'])).toBe(false);
+    expect(mentionsRole('see ``<@&100>`` here', ['100'])).toBe(false);
+    expect(mentionsRole('```\n<@&100>\n```', ['100'])).toBe(false);
+    expect(mentionsRole('\\<@&100>', ['100'])).toBe(false);
+    expect(mentionsRole('`x` <@&100>', ['100'])).toBe(true);
   });
 });
 

@@ -163,11 +163,11 @@ export function Lightbox({ message, index, onClose }: { message: Message; index:
         <div className="chat-lightbox-actions" role="toolbar" aria-label="Image actions">
           <Tooltip content={zoomed ? 'Zoom out' : 'Zoom in'} side="bottom"><button type="button" className="chat-lightbox-btn" aria-label={zoomed ? 'Zoom out' : 'Zoom in'} aria-pressed={zoomed} onClick={() => setZoomed(z => !z)}><ZoomIn size={20} /></button></Tooltip>
           <Tooltip content="Forward" side="bottom"><button type="button" className="chat-lightbox-btn" aria-label="Forward" onClick={() => openForward(message)}><Forward size={20} /></button></Tooltip>
-          <Tooltip content="Download" side="bottom"><a className="chat-lightbox-btn" href={url} download={cur.filename} aria-label="Download"><Download size={20} /></a></Tooltip>
           <Tooltip content="Open in Browser" side="bottom"><a className="chat-lightbox-btn" href={url} target="_blank" rel="noopener noreferrer" aria-label="Open in Browser"><ExternalLink size={20} /></a></Tooltip>
           <div className="chat-lightbox-more">
             <Tooltip content="More" side="bottom"><button type="button" className="chat-lightbox-btn" aria-label="More" aria-expanded={more} onClick={() => setMore(m => !m)}><MoreHorizontal size={20} /></button></Tooltip>
             {more && <div className="chat-lightbox-menu" role="menu">
+              <a role="menuitem" href={url} download={cur.filename} onClick={() => setMore(false)}><Download size={16} /> Download</a>
               <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(url); setMore(false); }}><Link2 size={16} /> Copy Link</button>
             </div>}
           </div>

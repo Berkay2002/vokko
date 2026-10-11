@@ -14,6 +14,7 @@ import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationMo
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
 import { closeModal, useModals, type ModalSpec } from "./modalStore";
 import { QuickSwitcher } from "./QuickSwitcher";
+import { ShortcutsModal } from "./ShortcutsModal";
 import { ServerSettings } from "./ServerSettings";
 import { RadioGroup, SwitchRow, Toggle } from "./settings/controls";
 import { SERVER_TEMPLATES, type ServerTemplate } from "./templates";
@@ -564,6 +565,8 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
       return <CreateDM key={id} base={spec.base} />;
     case "quickSwitcher":
       return <QuickSwitcher key={id} />;
+    case "shortcuts":
+      return <ShortcutsModal key={id} />;
     case "profile":
       return <FullProfileModal key={id} userId={spec.userId} guildId={spec.guildId} />;
     case "serverSettings":

@@ -11,6 +11,7 @@ import { ChatToasts } from './toast';
 import { ReactionsModal } from './ReactionsModal';
 import { Markdown } from './markdown';
 import { Avatar } from './Avatar';
+import { ServerTag } from './ServerTag';
 import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, addFiles, onUploadNotice } from './draftStore';
 import { messageStore, useChannelState } from './messageStore';
 import { compareIds, formatMessageTimestamp } from './util';
@@ -234,9 +235,9 @@ function DeleteModal({ request, onClose }: { request: DeleteRequest | null; onCl
     setBusy(false);
     onClose();
   }
-  return <Modal open={!!m} onClose={onClose} title="Delete Message"
+  return <Modal open={!!m} onClose={onClose} title="Delete Message" className="chat-delete-modal"
     footer={<>
-      <button type="button" className="chat-btn link" onClick={onClose}>Cancel</button>
+      <button type="button" className="chat-btn secondary" onClick={onClose}>Cancel</button>
       <button ref={confirm} type="button" className="chat-btn danger" disabled={busy} onClick={() => void run()}>Delete</button>
     </>}>
     {m && <>
@@ -244,10 +245,11 @@ function DeleteModal({ request, onClose }: { request: DeleteRequest | null; onCl
       <div className="chat-delete-preview">
         <Avatar user={m.author} size={40} guildId={chat.guildId} />
         <div>
-          <div className="chat-msg-header"><span className="chat-author">{chat.nameOf(m.author, m.member)}</span> <span className="chat-timestamp">{formatMessageTimestamp(new Date(m.timestamp))}</span></div>
+          <div className="chat-msg-header"><span className="chat-author">{chat.nameOf(m.author, m.member)}</span><ServerTag user={chat.userById(m.author.id) ?? m.author} /> <span className="chat-timestamp">{formatMessageTimestamp(new Date(m.timestamp))}</span></div>
           <Markdown content={m.content || '(attachment)'} ctx={chat.md} className="chat-content" />
         </div>
       </div>
+      <p className="chat-protip"><span className="chat-protip-label">PROTIP:</span> You can hold down shift when clicking <b>delete message</b> to bypass this confirmation entirely.</p>
     </>}
   </Modal>;
 }

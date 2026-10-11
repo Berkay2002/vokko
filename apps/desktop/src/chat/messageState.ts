@@ -229,6 +229,18 @@ export const GROUP_WINDOW_MS = 7 * 60 * 1000;
 const SYSTEM_TYPES = new Set<number>([MessageType.RecipientAdd, MessageType.RecipientRemove, MessageType.ChannelNameChange, MessageType.ChannelPinnedMessage, MessageType.UserJoin, MessageType.ThreadCreated]);
 export const isSystemMessage = (m: Message): boolean => SYSTEM_TYPES.has(m.type);
 
+/**
+ * True when the raw content has an `<@&id>` mention of one of `roleIds`. The wire has no mention_roles, so the content is the source
+ * (the mention-of-me row highlight uses this for the viewer's own roles).
+ */
+export function mentionsRole(content: string, roleIds: readonly Snowflake[]): boolean {
+  if (roleIds.length === 0) return false;
+  // Code spans, code blocks and escaped mentions render as plain text, so they do not ping.
+  const live = content.replace(/```[\s\S]*?```|``[\s\S]*?``|`[^`\n]*`/g, '');
+  for (const m of live.matchAll(/(?<!\\)<@&(\d+)>/g)) if (roleIds.includes(m[1]!)) return true;
+  return false;
+}
+
 export function buildRows(s: Pick<ChannelState, 'messages' | 'pending' | 'hasMoreAfter' | 'lastReadAtOpen'>, formatDay: (d: Date) => string, sameDay: (a: Date, b: Date) => boolean, myId: Snowflake | null): Row[] {
   const rows: Row[] = [];
   const all: { m: Message; p: PendingMessage | null }[] = s.messages.map(m => ({ m, p: null }));

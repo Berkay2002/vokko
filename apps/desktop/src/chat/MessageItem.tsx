@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Forward, Pencil, Pin, SmilePlus, MoreHorizontal, Reply, UserPlus, UserMinus, PenLine, Image as ImageIcon, CircleAlert, ArrowRightFromLine, MessageSquareText, Megaphone } from 'lucide-react';
+import { Forward, Pencil, Pin, Smile, SmilePlus, MoreHorizontal, Reply, UserPlus, UserMinus, PenLine, Image as ImageIcon, CircleAlert, ArrowRightFromLine, MessageSquareText, Megaphone } from 'lucide-react';
 import { MessageFlags, MessageReferenceType, MessageType } from '../api/types';
 import type { Message } from '../api/types';
 import { Markdown } from './markdown';
@@ -20,7 +20,7 @@ import { ThreadStarter } from '../threads/ThreadStarter';
 import { useMessageThreadActions } from '../threads/useMessageActions';
 import { quickReactions } from './emojiData';
 import { messageStore } from './messageStore';
-import { isSystemMessage, type PendingMessage } from './messageState';
+import { isSystemMessage, mentionsRole, type PendingMessage } from './messageState';
 import { fromDisplay, toDisplay, type MentionToken } from './mentionText';
 import { formatFullDate, formatMessageTimestamp, formatTime } from './util';
 
@@ -89,6 +89,9 @@ function InlineEdit({ message, onDone }: { message: Message; onDone(): void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
+  const emojiBtn = useRef<HTMLButtonElement>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const caret = useRef<[number, number] | null>(null); // selection saved when the picker takes the focus
   const tokens = useRef<MentionToken[]>(init.tokens);
 
   useLayoutEffect(() => {
@@ -101,6 +104,15 @@ function InlineEdit({ message, onDone }: { message: Message; onDone(): void }) {
     const el = area.current;
     if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
   }, []);
+
+  function insertEmoji(ch: string) {
+    const el = area.current;
+    const [start, end] = caret.current ?? [text.length, text.length];
+    setText(text.slice(0, start) + ch + text.slice(end));
+    setPickerOpen(false);
+    const pos = start + ch.length;
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); });
+  }
 
   async function save() {
     if (busy) return;
@@ -120,6 +132,9 @@ function InlineEdit({ message, onDone }: { message: Message; onDone(): void }) {
           if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); }
           else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void save(); }
         }} />
+      <button ref={emojiBtn} type="button" className="chat-edit-emoji" aria-label="Select emoji" aria-expanded={pickerOpen} disabled={busy}
+        onClick={() => { const el = area.current; caret.current = el ? [el.selectionStart, el.selectionEnd] : null; setPickerOpen(o => !o); }}><Smile size={24} /></button>
+      <EmojiPickerPopout anchor={emojiBtn} open={pickerOpen} onClose={() => { setPickerOpen(false); area.current?.focus(); }} onPick={e => insertEmoji(e.name)} />
     </div>
     <div className="chat-edit-hint">
       {error ? <span className="chat-edit-error">{error}</span> : <>escape to <button type="button" onClick={onDone}>cancel</button> • enter to <button type="button" onClick={() => void save()}>save</button></>}
@@ -143,7 +158,8 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const color = chat.colorOf(message);
   const dot = chat.roleDotOf(message);
   const compact = chat.compact;
-  const mentionsMe = !isMine && (message.mentions.some(u => u.id === chat.me.id) || message.mention_everyone);
+  const myRoles = chat.members[chat.me.id]?.roles;
+  const mentionsMe = !isMine && (message.mentions.some(u => u.id === chat.me.id) || message.mention_everyone || (!!myRoles && mentionsRole(message.content, myRoles)));
   const failed = pending?.state === 'failed';
   const gif = system ? null : gifMessageMedia(message);
 

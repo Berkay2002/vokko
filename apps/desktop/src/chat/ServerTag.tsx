@@ -2,7 +2,8 @@ import { useRef, useState } from 'react';
 import { Hexagon, type LucideIcon } from 'lucide-react';
 import type { User, UserPrimaryGuild } from '../api/types';
 import { BADGES } from '../perks/catalog';
-import { Popout, guildIconUrl, guildInitials, useGuild } from './shell';
+import { Popout, go, guildIconUrl, guildInitials, guildPath, useGuild, useGuildCounts } from './shell';
+import { snowflakeToMs } from './util';
 
 /** Vokko's own open badge set (src/perks/catalog.ts). `UserPrimaryGuild.badge` is one of these ids; an unknown id renders the fallback hexagon. */
 export const SERVER_TAG_BADGES: Record<string, LucideIcon> = Object.fromEntries(BADGES.map(b => [b.id, b.Icon]));
@@ -16,6 +17,8 @@ export function ServerTagBadge({ badge, size = 12, color }: { badge: string; siz
 
 function TagCard({ tag, onClose }: { tag: UserPrimaryGuild; onClose(): void }) {
   const guild = useGuild(tag.guild_id);
+  const counts = useGuildCounts(tag.guild_id);
+  const created = new Date(snowflakeToMs(tag.guild_id)).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const icon = guild ? guildIconUrl(guild) : null;
   const banner = hex(tag.color_primary) ?? 'var(--chat-brand)';
   return <div className="chat-tag-card" role="dialog" aria-label={`${guild?.name ?? 'Server'} tag`}>
@@ -23,11 +26,16 @@ function TagCard({ tag, onClose }: { tag: UserPrimaryGuild; onClose(): void }) {
     <span className="chat-tag-card-icon">{icon ? <img src={icon} alt="" /> : guildInitials(guild?.name ?? tag.tag)}</span>
     <div className="chat-tag-card-body">
       <div className="chat-tag-card-name">{guild?.name ?? 'Unknown server'}</div>
+      {guild && <div className="chat-tag-card-stats">
+        <span><i className="online" aria-hidden="true" />{counts.online} online</span>
+        <span><i aria-hidden="true" />{counts.total} {counts.total === 1 ? 'member' : 'members'}</span>
+      </div>}
+      <div className="chat-tag-card-sub">Created: {created}</div>
       <div className="chat-tag-card-sub">Members of this server can wear its tag next to their name.</div>
       <div className="chat-tag-card-chip"><span className="chat-server-tag static"><ServerTagBadge badge={tag.badge} color={hex(tag.color_primary)} /><span>{tag.tag}</span></span></div>
     </div>
     <div className="chat-tag-card-actions">
-      <button type="button" className="chat-tag-card-go" onClick={onClose}>Go to Server</button>
+      <button type="button" className="chat-tag-card-go" disabled={!guild} onClick={() => { onClose(); if (guild) go(guildPath(guild.id)); }}>Go to Server</button>
     </div>
   </div>;
 }
