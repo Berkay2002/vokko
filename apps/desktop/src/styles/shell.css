@@ -128,7 +128,7 @@
   flex-direction: column;
   align-items: center;
   width: var(--rail-width);
-  padding: 4px 0 74px;
+  padding: 0 0 74px;
   gap: 8px;
   overflow-y: auto;
   scrollbar-width: none;
@@ -326,7 +326,7 @@
   align-items: center;
   gap: 12px;
   height: 38px;
-  margin: 1px 8px;
+  margin: 0 8px 2px;
   padding: 0 8px;
   border-radius: var(--radius-sm);
   color: var(--interactive-text-default);
@@ -395,7 +395,7 @@
 
 .dm-row-wrap {
   position: relative;
-  margin: 1px 8px;
+  margin: 0 8px 2px;
 }
 
 .dm-row {
