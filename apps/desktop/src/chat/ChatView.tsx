@@ -14,6 +14,8 @@ import { messageStore, useChannelState } from './messageStore';
 import { compareIds, formatMessageTimestamp } from './util';
 import './chat.css';
 
+const ACK_DEBOUNCE_MS = 3000;
+
 interface DeleteRequest { message: Message }
 interface ImageView { message: Message; index: number }
 
@@ -121,6 +123,7 @@ function ChatBody(p: BodyProps) {
   // Ack on view: newest server message, only while the window is at the present, scrolled to the bottom, and focused.
   const newest = state.messages[state.messages.length - 1]?.id;
   const read = readState?.last_message_id ?? null;
+  const mentionCount = readState?.mention_count ?? 0;
   const [focused, setFocused] = useState(() => document.hasFocus());
   useEffect(() => {
     const on = () => setFocused(true), off = () => setFocused(false);
@@ -130,9 +133,24 @@ function ChatBody(p: BodyProps) {
   useEffect(() => {
     if (!newest || state.hasMoreAfter || !p.atBottom || !focused) return;
     if (read && compareIds(newest, read) <= 0) return;
-    const t = setTimeout(() => messageStore.ack(p.channelId, newest), 250);
+    // Discord debounces the ack by 3 s, immediately when the channel has mentions.
+    const t = setTimeout(() => messageStore.ack(p.channelId, newest), mentionCount > 0 ? 0 : ACK_DEBOUNCE_MS);
     return () => clearTimeout(t);
-  }, [newest, read, state.hasMoreAfter, p.atBottom, focused, p.channelId]);
+  }, [newest, read, state.hasMoreAfter, p.atBottom, focused, p.channelId, mentionCount]);
+
+  // Escape (outside editing/dialogs): mark the channel read and jump to the present.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.shiftKey) return;
+      if (document.querySelector('[role="dialog"], [role="menu"], .chat-edit, .chat-autocomplete')) return;
+      const last = state.messages[state.messages.length - 1];
+      if (state.hasMoreAfter) void messageStore.jumpToPresent(p.channelId);
+      else p.list.current?.scrollToBottom();
+      if (last) messageStore.ack(p.channelId, last.id);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [p.channelId, p.list, state.messages, state.hasMoreAfter]);
 
   const editLast = useCallback(() => {
     for (let i = state.messages.length - 1; i >= 0; i--) {

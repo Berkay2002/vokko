@@ -77,6 +77,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   const focusId = state.focus?.messageId;
   useEffect(() => {
     if (!focusId) return;
+    stick.current = false; // a programmatic jump is not "at the bottom"; don't let list growth drag us back down
     const index = rowsRef.current.findIndex(r => r.message.id === focusId);
     if (index >= 0) virtuoso.current?.scrollToIndex({ index, align: 'center', behavior: 'auto' });
     setHighlightId(focusId);

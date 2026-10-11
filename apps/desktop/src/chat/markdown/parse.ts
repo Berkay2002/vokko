@@ -33,7 +33,7 @@ export function isJumbo(blocks: Block[]): boolean {
   for (const n of b.c) {
     if (n.t === 'emoji' || n.t === 'customEmoji') {
       count++;
-      if (count > 27) return false;
+      if (count > 30) return false; // Discord: 31+ emoji render at normal size
     } else if (n.t === 'br') {
       // newlines count as whitespace
     } else if (n.t === 'text') {

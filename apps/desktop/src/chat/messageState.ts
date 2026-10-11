@@ -222,6 +222,7 @@ export function buildRows(s: Pick<ChannelState, 'messages' | 'pending' | 'hasMor
   if (!s.hasMoreAfter) for (const p of s.pending) all.push({ m: p.message, p });
   let prev: Message | null = null;
   let prevDate: Date | null = null;
+  let groupStartMs = 0;
   let dividerPlaced = false;
   for (const { m, p } of all) {
     const d = new Date(m.timestamp);
@@ -234,7 +235,8 @@ export function buildRows(s: Pick<ChannelState, 'messages' | 'pending' | 'hasMor
     const grouped = !!prev && !newDay && !unread &&
       !isSystemMessage(m) && !isSystemMessage(prev) &&
       prev.author.id === m.author.id && m.type !== MessageType.Reply &&
-      d.getTime() - new Date(prev.timestamp).getTime() < GROUP_WINDOW_MS;
+      d.getTime() - groupStartMs < GROUP_WINDOW_MS; // measured from the group's FIRST message, not the previous one
+    if (!grouped) groupStartMs = d.getTime();
     rows.push({ key: m.nonce ?? m.id, message: m, pending: p, grouped, dayLabel: newDay ? formatDay(d) : null, unreadDivider: unread });
     prev = m;
     prevDate = d;

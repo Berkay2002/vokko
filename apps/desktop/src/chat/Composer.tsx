@@ -10,11 +10,33 @@ import { useEmojiDb, pushRecentEmoji } from './emojiData';
 import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, useDraft } from './draftStore';
 import { fromDisplay, type MentionToken } from './mentionText';
 import { messageStore } from './messageStore';
+import { activeTypers } from './messageState';
 import { formatBytes } from './util';
 
 const MAX_LEN = 2000;
+// Discord client timings: POST at most every 8 s; the first one waits 1.5 s unless the previous was 16+ s ago;
+// nothing is sent while 5+ other people are typing.
 const TYPING_INTERVAL_MS = 8000;
+const TYPING_FIRST_DELAY_MS = 1500;
+const TYPING_IMMEDIATE_AFTER_MS = 16000;
+const MANY_TYPERS = 5;
 const lastTyping = new Map<Snowflake, number>();
+const typingTimers = new Map<Snowflake, ReturnType<typeof setTimeout>>();
+
+function postTyping(channelId: Snowflake): void {
+  typingTimers.delete(channelId);
+  lastTyping.set(channelId, Date.now());
+  void request<null>('POST', `/channels/${channelId}/typing`).catch(() => undefined);
+}
+
+function notifyTyping(channelId: Snowflake, myId: Snowflake): void {
+  const now = Date.now();
+  const since = now - (lastTyping.get(channelId) ?? 0);
+  if (since < TYPING_INTERVAL_MS || typingTimers.has(channelId)) return;
+  if (activeTypers(messageStore.getState(channelId), now, myId).length >= MANY_TYPERS) return;
+  if (since >= TYPING_IMMEDIATE_AFTER_MS) postTyping(channelId);
+  else typingTimers.set(channelId, setTimeout(() => postTyping(channelId), TYPING_FIRST_DELAY_MS));
+}
 
 interface Suggestion {
   key: string;
@@ -150,6 +172,8 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       mention: mentionReply,
     });
     clearDraft(channelId);
+    clearTimeout(typingTimers.get(channelId));
+    typingTimers.delete(channelId);
     lastTyping.delete(channelId);
     setCaret(0);
     onCancelReply();
@@ -173,13 +197,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     setDraftText(channelId, value);
     const pos = area.current?.selectionStart ?? value.length;
     setCaret(pos);
-    if (value.trim()) {
-      const now = Date.now();
-      if (now - (lastTyping.get(channelId) ?? 0) >= TYPING_INTERVAL_MS) {
-        lastTyping.set(channelId, now);
-        void request<null>('POST', `/channels/${channelId}/typing`).catch(() => undefined);
-      }
-    }
+    if (value.trim()) notifyTyping(channelId, chat.me.id);
   }
 
   function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {

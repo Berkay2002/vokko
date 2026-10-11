@@ -24,12 +24,12 @@ export const formatTime = (d: Date): string => timeFmt.format(d);
 export const formatFullDate = (d: Date): string => longFmt.format(d);
 export const formatDivider = (d: Date): string => dividerFmt.format(d);
 
-/** "Today at 3:42 PM" / "Yesterday at 3:42 PM" / "10/09/2026". */
+/** Header time: "3:42 PM" today (the reference shows no "Today at"), "Yesterday at 3:42 PM", "10/09/2026 3:42 PM". */
 export function formatMessageTimestamp(d: Date, now = new Date()): string {
-  if (sameDay(d, now)) return `Today at ${formatTime(d)}`;
+  if (sameDay(d, now)) return formatTime(d);
   const y = new Date(now); y.setDate(y.getDate() - 1);
   if (sameDay(d, y)) return `Yesterday at ${formatTime(d)}`;
-  return shortDateFmt.format(d);
+  return `${shortDateFmt.format(d)} ${formatTime(d)}`;
 }
 
 export function formatBytes(n: number): string {

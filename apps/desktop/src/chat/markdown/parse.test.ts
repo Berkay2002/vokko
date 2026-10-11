@@ -390,12 +390,12 @@ describe('isJumbo', () => {
     expect(jumbo('> 😀')).toBe(false);
     expect(jumbo('😀 <@1>')).toBe(false);
     expect(jumbo('😀\n# x')).toBe(false);
-    expect(jumbo('😀'.repeat(28))).toBe(false);
+    expect(jumbo('😀'.repeat(31))).toBe(false);
     expect(jumbo(':smile:')).toBe(false); // no map: literal text
   });
 
-  it('27 emoji is still jumbo', () => {
-    expect(jumbo('😀'.repeat(27))).toBe(true);
+  it('up to 30 emoji is still jumbo', () => {
+    expect(jumbo('😀'.repeat(30))).toBe(true);
   });
 });
 

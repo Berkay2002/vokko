@@ -17,7 +17,8 @@ type Listener = () => void;
 const states = new Map<Snowflake, ChannelState>();
 const touched = new Map<Snowflake, number>();
 const listeners = new Map<Snowflake, Set<Listener>>();
-const reactionChains = new Map<string, { tail: Promise<void>; pending: number; timer: ReturnType<typeof setTimeout> | null }>();
+const AROUND_LIMIT = 30;
+const reactionChains =new Map<string, { tail: Promise<void>; pending: number; timer: ReturnType<typeof setTimeout> | null }>();
 const reactionGuard = (messageId: Snowflake, emoji: ReactionEmoji): string => `${messageId}:${emojiKey(emoji)}`;
 let currentUserId: Snowflake | null = null;
 let bound = false;
@@ -72,7 +73,8 @@ function bindGateway(): void {
 }
 
 async function fetchPage(channelId: Snowflake, params: Record<string, string>): Promise<Message[]> {
-  const q = new URLSearchParams({ limit: String(PAGE_SIZE), ...params });
+  // The jump-to-message window is 30 (contract); paging is PAGE_SIZE.
+  const q = new URLSearchParams({ limit: String('around' in params ? AROUND_LIMIT : PAGE_SIZE), ...params });
   const page = await request<Message[]>('GET', `/channels/${channelId}/messages?${q}`);
   rememberMessages(page);
   return page;
