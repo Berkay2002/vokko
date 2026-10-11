@@ -25,7 +25,7 @@ const GROUPS: { title: string; binds: Bind[] }[] = [
     binds: [
       { keys: ["Ctrl", "U"], action: "Toggle member list / user profile", wired: true },
       { keys: ["Ctrl", "P"], action: "Toggle pinned messages" },
-      { keys: ["Up"], action: "Edit your last message" },
+      { keys: ["Up"], action: "Edit your last message", wired: true },
     ],
   },
   {

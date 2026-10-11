@@ -419,3 +419,21 @@ html .chat-autocomplete,
 html .chat-attach-menu {
   --chat-font-size: var(--user-chat-font-size, 16px);
 }
+
+/* ---- Settings > Appearance / Accessibility classes owned by the shell ---- */
+.density-compact {
+  --member-list-width: 256px;
+}
+
+.density-cozy {
+  --member-list-width: 268px;
+}
+
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
