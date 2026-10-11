@@ -80,6 +80,7 @@ const ready = (threads: Channel[]): ReadyEvent => ({
   presences: [],
   read_states: [],
   relationships: [],
+  guild_layout: { guild_folders: [], guild_positions: [] },
 });
 
 beforeEach(() => {

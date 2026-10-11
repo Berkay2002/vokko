@@ -2,7 +2,7 @@
 
 import { DEFAULT_EVERYONE } from "../permissions";
 import { timestampToSnowflake } from "../snowflake";
-import type { Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageSnapshot, MessageType, Presence, ReadState, Relationship, RelationshipType, Reminder, Role, Sticker, StickerItem, User } from "../types";
+import type { Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageSnapshot, MessageType, Presence, ReadState, Relationship, RelationshipType, Reminder, Role, Sticker, StickerItem, User, GuildLayout } from "../types";
 
 export interface MockAccount {
   user: User;
@@ -12,6 +12,8 @@ export interface MockAccount {
   /** other user id → relationship type from this user's point of view */
   relationships: Map<string, RelationshipType>;
   readStates: Map<string, ReadState>;
+  /** GET/PATCH /users/@me/guild-layout; absent = defaults. */
+  guildLayout?: GuildLayout;
 }
 
 export interface MockChannel extends Channel {
@@ -64,6 +66,8 @@ export interface MockReminder extends Omit<Reminder, "message"> {
 
 export interface MockGuild {
   guild: Guild;
+  /** Members who joined through a temporary invite (docs/api.md "Invites"); the mock keeps the flag but never removes them. */
+  temporary?: Set<string>;
   members: Map<string, Pick<GuildMember, "nick" | "roles" | "joined_at" | "communication_disabled_until" | "avatar" | "banner" | "bio" | "pronouns" | "theme_colors">>;
 }
 
@@ -72,6 +76,13 @@ export interface MockInvite {
   guild_id: string;
   channel_id: string;
   expires_at: string | null;
+  /** Absent on seeded invites: the guild owner, 0 uses, no limits, created at seed time. */
+  inviter_id?: string;
+  uses?: number;
+  max_uses?: number;
+  max_age?: number;
+  temporary?: boolean;
+  created_at?: string;
 }
 
 /** An announcement channel followed into another channel (`id` is the follow, the API's webhook id). */

@@ -7,7 +7,8 @@ import { appStore, displayName, useStore } from "../api/store";
 import { ChannelType, OverwriteType, RelationshipType } from "../api/types";
 import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
-import { createChannel, createGroupDM, createGuild, createInvite, deleteGuild, joinGuildWithInvite, leaveGuild, type Invite } from "./actions";
+import { createChannel, createGroupDM, createGuild, deleteGuild, joinGuildWithInvite, leaveGuild } from "./actions";
+import { InviteModal } from "../invites/InviteModal";
 import { ChannelSettings } from "./ChannelSettings";
 import { FullProfileModal } from "./DmProfilePanel";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
@@ -271,60 +272,6 @@ function CreateServer() {
   );
 }
 
-function InviteModal({ channelId }: { channelId: string }) {
-  const channel = useStore(s => s.channels[channelId]);
-  const guild = useStore(s => (channel?.guild_id ? s.guilds[channel.guild_id] : undefined));
-  const [invite, setInvite] = useState<Invite | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    let live = true;
-    createInvite(channelId)
-      .then(i => live && setInvite(i))
-      .catch(e => live && setError(errorText(e)));
-    return () => {
-      live = false;
-    };
-  }, [channelId]);
-  const link = invite ? `vokko.gg/${invite.code}` : "";
-  return (
-    <Modal open onClose={closeModal} title={guild ? `Invite friends to ${guild.name}` : "Invite friends"}>
-      <p className="modal-subtle">
-        {channel?.type === ChannelType.GuildVoice ? "Recipients will land in " : "Sending invite to "}
-        {channel?.type === ChannelType.GuildVoice ? <Volume2 size={14} className="inline-icon" /> : <Hash size={14} className="inline-icon" />} {channel?.name}
-      </p>
-      <label className="field-label" htmlFor="invite-link">
-        Or send a server invite link to a friend
-      </label>
-      <div className="copy-field">
-        <input id="invite-link" className="input" readOnly value={invite ? link : error ? "" : "Generating…"} onFocus={e => e.currentTarget.select()} />
-        <button
-          type="button"
-          className={`btn ${copied ? "btn-success" : "btn-primary"}`}
-          disabled={!invite}
-          onClick={() => {
-            void navigator.clipboard?.writeText(link);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          }}
-        >
-          {copied ? (
-            <>
-              <Check size={16} /> Copied
-            </>
-          ) : (
-            <>
-              <Copy size={16} /> Copy
-            </>
-          )}
-        </button>
-      </div>
-      <p className="modal-subtle">Your invite link expires in 24 hours.</p>
-      {error && <p className="field-error">{error}</p>}
-    </Modal>
-  );
-}
-
 function CreateChannelModal({ guildId, parentId, channelType }: { guildId: string; parentId?: string | null; channelType?: ChannelType }) {
   const [type, setType] = useState<ChannelType>(channelType ?? ChannelType.GuildText);
   const [name, setName] = useState("");
@@ -522,7 +469,7 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
     case "createServer":
       return <CreateServer key={id} />;
     case "invite":
-      return <InviteModal key={id} channelId={spec.channelId} />;
+      return <InviteModal key={id} channelId={spec.channelId} onClose={closeModal} />;
     case "createChannel":
       return <CreateChannelModal key={id} guildId={spec.guildId} parentId={spec.parentId} channelType={spec.channelType} />;
     case "leaveServer":

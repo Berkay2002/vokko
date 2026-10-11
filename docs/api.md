@@ -92,9 +92,14 @@ General rules:
 | DELETE | /guilds/{id}/roles/{rid} | 204 (not @everyone), removes it from members, GUILD_ROLE_DELETE |
 | PUT | /channels/{id}/permissions/{oid} | `OverwriteRequest`, 204 (MANAGE_ROLES on the channel; can't grant/deny bits you lack there), emits CHANNEL_UPDATE |
 | DELETE | /channels/{id}/permissions/{oid} | 204, emits CHANNEL_UPDATE |
-| POST | /channels/{id}/invites | `{max_age?, max_uses?}` → `{code, guild, channel, expires_at}` |
-| GET | /invites/{code} | invite preview |
+| POST | /channels/{id}/invites | `CreateInviteRequest` `{max_age?, max_uses?, temporary?, unique?}` → `InviteMetadata` (CREATE_INSTANT_INVITE; see Invites) |
+| GET | /channels/{id}/invites | `InviteMetadata[]` of the channel's live invites (MANAGE_CHANNELS on the channel) |
+| GET | /guilds/{id}/invites | `InviteMetadata[]` of the guild's live invites (MANAGE_GUILD) |
+| GET | /invites/{code} | `Invite` preview |
 | POST | /invites/{code} | accept → `Guild` |
+| DELETE | /invites/{code} | revoke → `InviteMetadata` (MANAGE_CHANNELS on the invite's channel or MANAGE_GUILD), emits INVITE_DELETE |
+| GET | /users/@me/guild-layout | `GuildLayout` `{guild_folders, guild_positions}` |
+| PATCH | /users/@me/guild-layout | `UpdateGuildLayoutRequest` → `GuildLayout` (only sent keys change), emits GUILD_LAYOUT_UPDATE to the user's own sessions |
 | GET | /channels/{id}/messages?before&after&around&limit | `Message[]` newest first, limit 1-100 (default 50) |
 | GET | /guilds/{id}/messages/search | `MessageSearchResponse`; guild members only (403 50001 otherwise). Filters below; searches every channel of the guild where the caller has VIEW_CHANNEL + READ_MESSAGE_HISTORY |
 | GET | /channels/{id}/messages/search | `MessageSearchResponse`; same filters minus `channel_id`; works for guild channels, DMs and group DMs. Caller without READ_MESSAGE_HISTORY gets an empty result |
@@ -145,6 +150,14 @@ General rules:
 | POST | /users/@me/reminders | `CreateReminderRequest` → `Reminder`; one reminder per user and message (a second call moves it and rearms it); max 50 pending per user (30091); emits REMINDER_CREATE |
 | DELETE | /users/@me/reminders/{id} | cancel or dismiss, 204, emits REMINDER_DELETE |
 | GET | /attachments/{id}/{key}/{filename} | serves the file; `key` = 32 hex chars (128-bit random per attachment); wrong key or filename → 404. Avatars/icons use the same URLs. Clients treat `Attachment.url`, `User.avatar`, `Guild.icon` as opaque absolute URLs |
+
+## Invites and server folders
+
+- **Create.** `max_age` 0..604800 s (0 = never, default 86400; the client offers 30 min, 1 h, 6 h, 12 h, 1 d, 7 d, never), `max_uses` 0..100 (0 = no limit, default 0; the client offers 1, 5, 10, 25, 50, 100), `temporary` (default false), `unique` (default false). Out of range → 400 50035. Without `unique: true` the server returns an existing live invite of the same inviter and channel with identical `max_age`, `max_uses` and `temporary` (no INVITE_CREATE then). Threads and DMs cannot have invites (400 50035).
+- **Expiry and uses.** An invite past `expires_at` or with `uses >= max_uses` (when `max_uses > 0`) is gone: preview/accept/revoke → 404 10006, and it is not listed. Accepting counts a use in the same transaction as the member insert with a conditional update, so concurrent accepts never exceed `max_uses`; an existing member accepting does not use it up.
+- **Temporary membership.** Joining through a `temporary` invite marks the membership temporary. When the user's last gateway connection closes, every temporary membership of theirs that has no role is removed like a kick (GUILD_DELETE to them, GUILD_MEMBER_REMOVE to the guild). A member who has any role at that moment stays (still temporary); accepting a normal invite makes the membership permanent. A user who never connects to the gateway is not removed until a connection of theirs closes.
+- **Listing and revoking.** `GET /guilds/{id}/invites` needs MANAGE_GUILD, `GET /channels/{id}/invites` MANAGE_CHANNELS on that channel; `DELETE /invites/{code}` either of the two. Lists are oldest first, live invites only, with `inviter`, `uses` and `created_at`. INVITE_CREATE / INVITE_DELETE go to guild members who could list the invite (MANAGE_GUILD, or MANAGE_CHANNELS on its channel); an invite that expires or is used up sends nothing.
+- **Guild layout (server folders).** `guild_folders`: up to 100 `{id, name, color, guild_ids}`, `id` chosen by the client (snowflake string, unique), `name` 1-32 chars or null (blank → null), `color` RGB int or null, `guild_ids` 1-200 with no guild in two folders and at most 1000 guild ids across all folders. `guild_positions`: up to 1000 guild ids, no duplicates, the rail order (guilds missing from it follow in join order; a folder sits where its first guild is). Guild ids are not checked against membership (stale ones are ignored by the client). Invalid → 400 50035 and nothing changes. READY carries `guild_layout`; PATCH sends GUILD_LAYOUT_UPDATE (the full layout) to all of the user's sessions.
 
 ## Community features (scheduled events, onboarding, friend suggestions)
 

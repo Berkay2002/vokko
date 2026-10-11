@@ -8,8 +8,9 @@ mod channels;
 mod follows;
 mod forums;
 mod gifs;
+pub mod guild_layout;
 mod guilds;
-mod invites;
+pub mod invites;
 pub mod messages;
 pub mod moderation;
 mod onboarding;
@@ -29,6 +30,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(auth::routes())
         .merge(crate::account::routes())
         .merge(users::routes())
+        .merge(guild_layout::routes())
         .merge(guilds::routes())
         .merge(moderation::routes())
         .merge(channels::routes())

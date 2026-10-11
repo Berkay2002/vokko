@@ -12,7 +12,7 @@ import { pendingInvite } from "./pendingInvite";
 
 interface InviteInfo {
   code: string;
-  guild: { id: Snowflake; name: string; icon: string | null };
+  guild: { id: Snowflake; name: string; icon: string | null; member_count?: number };
   member_count?: number;
   approximate_member_count?: number;
   approximate_presence_count?: number;
@@ -118,7 +118,7 @@ export function InvitePage() {
   }
 
   const icon = guildIconUrl(info.guild);
-  const members = info.approximate_member_count ?? info.member_count;
+  const members = info.approximate_member_count ?? info.guild.member_count ?? info.member_count;
   const online = info.approximate_presence_count;
   const joined = !!memberOf[info.guild.id];
 

@@ -15,6 +15,7 @@ import { unreadLabel } from "./DmSidebar";
 import { guildContextItems } from "./menus";
 import { guildPath } from "./nav";
 import { openModal } from "./modalStore";
+import { RailGuilds } from "../rail/RailGuilds";
 
 function RailItem({ state, mentions, tooltip, muted, voice, children }: { state: "selected" | "unread" | "idle"; mentions?: number; tooltip: ReactNode; muted?: boolean; voice?: boolean; children: ReactNode }) {
   return (
@@ -119,7 +120,6 @@ function useLeavingDms(dms: Channel[]): { list: { channel: Channel; leaving: boo
 
 export function ServerRail() {
   const location = useLocation();
-  const guilds = useStore(s => s.guildOrder.map(id => s.guilds[id]).filter((g): g is Guild => !!g));
   // privateChannels is already newest first; every unread DM / group DM gets its own rail item.
   const unreadDms = useStore(s => s.privateChannels.map(id => s.channels[id]).filter((c): c is Channel => !!c && (c.type === ChannelType.DM || c.type === ChannelType.GroupDM) && isChannelUnread(s, c.id)));
   // Home's own badge counts incoming friend requests (DM mentions sit on the DMs' own items below it).
@@ -142,9 +142,7 @@ export function ServerRail() {
         <DmRailItem key={channel.id} channel={channel} leaving={leaving} onGone={dms.gone} />
       ))}
       <div className="rail-separator" />
-      {guilds.map(g => (
-        <GuildRailItem key={g.id} guild={g} />
-      ))}
+      <RailGuilds renderGuild={g => <GuildRailItem guild={g} />} />
       <RailItem state="idle" tooltip="Add a Server">
         <button type="button" className="rail-tile rail-action rail-add" aria-label="Add a Server" onClick={() => openModal({ type: "createServer" })}>
           <Plus size={20} />

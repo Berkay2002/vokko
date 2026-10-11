@@ -15,6 +15,7 @@ import { useVoiceUi } from "../voice";
 import { FullScreenSettings, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { SaveBar } from "./settings/SaveBar";
 import { usePermissions } from "./usePermissions";
+import { InviteList } from "../invites/InviteList";
 
 type SectionId = "overview" | "forum" | "permissions" | "invites" | "integrations";
 
@@ -242,7 +243,7 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
         return (
           <Page title="Invites">
             <p className="settings-todo">Invite links for this channel let people join your server straight into it.</p>
-            <Unavailable>Not available yet.</Unavailable>
+            <InviteList guildId={guild.id} channelId={channel.id} canManage={canManage} />
           </Page>
         );
       case "integrations":

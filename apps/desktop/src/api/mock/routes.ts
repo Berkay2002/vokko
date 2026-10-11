@@ -17,6 +17,7 @@ import { flagsField } from "./memberFlags";
 import { setVoiceChannelStatus } from "./voice";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
 import "./search";
+import "./invites";
 import "./community";
 import "./status";
 
@@ -308,49 +309,6 @@ route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
   db.channels.delete(channel.id);
   db.messages.delete(channel.id);
   return payload;
-});
-
-// ---- invites ----
-
-function invitePreview(code: string) {
-  const invite = db.invites.get(code);
-  const guild = invite && db.guilds.get(invite.guild_id);
-  const channel = invite && db.channels.get(invite.channel_id);
-  if (!invite || !guild || !channel) fail(404, 10006, "Unknown Invite");
-  return {
-    code,
-    guild: { id: guild.guild.id, name: guild.guild.name, icon: guild.guild.icon },
-    channel: { id: channel.id, name: channel.name },
-    expires_at: invite.expires_at,
-    member_count: guild.members.size,
-  };
-}
-
-route("POST", `/channels/${ID}/invites`, ({ viewer, params, body }) => {
-  const channel = requireChannel(params[0] ?? "", viewer.user.id);
-  if (!channel.guild_id) fail(400, 50003, "Cannot execute action on a DM channel");
-  requireChannelPerm(channel, viewer.user.id, Perm.CREATE_INSTANT_INVITE);
-  const maxAge = typeof body.max_age === "number" ? body.max_age : 86_400;
-  const code = Math.random().toString(36).slice(2, 10);
-  db.invites.set(code, { code, guild_id: channel.guild_id, channel_id: channel.id, expires_at: maxAge > 0 ? new Date(Date.now() + maxAge * 1000).toISOString() : null });
-  return invitePreview(code);
-});
-
-route("GET", "/invites/([a-z0-9]+)", ({ params }) => invitePreview(params[0] ?? ""));
-
-route("POST", "/invites/([a-z0-9]+)", ({ viewer, params }) => {
-  const preview = invitePreview(params[0] ?? "");
-  const guild = db.guilds.get(preview.guild.id);
-  if (!guild) fail(404, 10006, "Unknown Invite");
-  if (db.bans.get(guild.guild.id)?.has(viewer.user.id)) fail(403, 40007, "The user is banned from this guild");
-  if (!guild.members.has(viewer.user.id)) {
-    const member = { nick: null, roles: [], joined_at: new Date().toISOString() };
-    guild.members.set(viewer.user.id, member);
-    onboardingStartedFor(guild.guild.id, viewer.user.id);
-    emit([viewer.user.id], "GUILD_CREATE", guildPayload(guild.guild.id, viewer.user.id));
-    emit([...guild.members.keys()].filter(id => id !== viewer.user.id), "GUILD_MEMBER_ADD", { guild_id: guild.guild.id, user: viewer.user, ...member, ...flagsField(guild.guild.id, viewer.user.id) });
-  }
-  return guild.guild;
 });
 
 // ---- messages ----

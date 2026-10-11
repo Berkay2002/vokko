@@ -11,7 +11,7 @@ import { formatFullDate } from './util';
 
 interface InviteInfo {
   code: string;
-  guild: { id: Snowflake; name: string; icon: string | null };
+  guild: { id: Snowflake; name: string; icon: string | null; member_count?: number };
   member_count?: number;
 }
 
@@ -55,6 +55,7 @@ function InviteEmbed({ code, own }: { code: string; own: boolean }) {
 
   const joined = !!guilds[info.guild.id];
   const icon = guildIconUrl(info.guild);
+  const memberCount = info.guild.member_count ?? info.member_count;
   async function join() {
     if (busy || joined) return;
     setBusy(true);
@@ -69,7 +70,7 @@ function InviteEmbed({ code, own }: { code: string; own: boolean }) {
       <span className="chat-invite-icon">{icon ? <img src={resolveUrl(icon)} alt="" draggable={false} /> : <span>{guildInitials(info.guild.name)}</span>}</span>
       <div className="chat-invite-text">
         <div className="chat-invite-name">{info.guild.name}</div>
-        {info.member_count !== undefined && <div className="chat-invite-sub"><Users size={12} /> {info.member_count} Member{info.member_count === 1 ? '' : 's'}</div>}
+        {memberCount !== undefined && <div className="chat-invite-sub"><Users size={12} /> {memberCount} Member{memberCount === 1 ? '' : 's'}</div>}
         {error && <div className="chat-invite-error" role="alert">{error}</div>}
       </div>
       <button type="button" className="chat-invite-join" disabled={busy || joined} onClick={() => void join()}>{joined ? 'Joined' : 'Join'}</button>

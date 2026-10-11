@@ -126,6 +126,9 @@ async fn handle(state: AppState, socket: WebSocket, slot: PreauthSlot) {
     let remaining = if detached { state.hub.clear_session_activities(user_id, &session.id) } else { None };
     if state.hub.connection_closed(user_id) {
         let _ = presence::disconnected(&state, user_id).await;
+        if let Err(error) = crate::routes::invites::remove_temporary_memberships(&state, user_id).await {
+            tracing::warn!("removing temporary memberships failed: {error:?}");
+        }
     } else if let Some(shown) = remaining {
         let _ = presence::update(&state, user_id, None, None, Some(shown), true).await;
     }
@@ -366,6 +369,7 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
         }
     }
 
+    let guild_layout = crate::routes::guild_layout::load(state, user_id).await?;
     Ok(ReadyEvent {
         v: 1,
         user,
@@ -375,6 +379,7 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
         presences,
         read_states,
         relationships,
+        guild_layout,
         media: voice::media_config(&state.config),
     })
 }

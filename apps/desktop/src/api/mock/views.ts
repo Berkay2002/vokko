@@ -163,6 +163,7 @@ export function readyFor(viewerId: string, sessionId: string): ReadyEvent {
     presences,
     read_states: readStatesFor(account, guilds, privateChannels),
     relationships: relationshipsFor(viewerId).filter(r => r.type !== RelationshipType.Blocked || true),
+    guild_layout: account.guildLayout ?? { guild_folders: [], guild_positions: [] },
     media: { voice_enabled: true, voice_bitrate_ceiling: 128000, screenshare_qualities: ["720p30"], video_enabled: false },
   };
 }

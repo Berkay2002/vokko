@@ -18,6 +18,7 @@ import { TagPage } from "./settings/TagPage";
 import { ThemePage } from "./settings/ThemePage";
 import { MembersPage } from "./settings/server-people";
 import { usePermissions } from "./usePermissions";
+import { InviteList } from "../invites/InviteList";
 
 interface SectionDef {
   id: string;
@@ -248,59 +249,18 @@ function EngagementPage({ guild, owner, channels }: { guild: Guild; owner: boole
   );
 }
 
-function InvitesPage({ canCreate, channels }: { canCreate: boolean; channels: Channel[] }) {
-  const [code, setCode] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, copy] = useCopy();
+function InvitesPage({ guildId, canCreate, canList, channels }: { guildId: string; canCreate: boolean; canList: boolean; channels: Channel[] }) {
   const target = firstTextChannel(channels) ?? channels[0];
-
-  const create = async () => {
-    if (!target) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const invite = await request<{ code: string; expires_at: string | null }>("POST", `/channels/${target.id}/invites`, { max_age: 86_400 });
-      setCode(invite.code);
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const link = code ? `vokko.gg/${code}` : "";
-
   return (
     <Page title="Invites">
-      <p className="settings-todo">Invite links let people join your server.</p>
+      <p className="settings-todo">Here's a list of all active invite links. You can revoke any one or create one.</p>
       <div className="account-inline">
-        <button type="button" className="btn btn-primary" disabled={busy || !target || !canCreate} onClick={() => void create()}>
+        <button type="button" className="btn btn-primary" disabled={!target || !canCreate} onClick={() => target && openModal({ type: "invite", channelId: target.id })}>
           Create Invite Link
         </button>
       </div>
       {!canCreate && <p className="settings-todo">You do not have permission to create invite links.</p>}
-      {error && <p className="field-error">{error}</p>}
-      {code && (
-        <div className="ss-invite" role="status">
-          <code className="ss-id">{link}</code>
-          <button type="button" className="btn btn-primary btn-sm" onClick={() => copy(link)}>
-            {copied ? "Copied" : "Copy"}
-          </button>
-          <span className="ss-invite-note">expires in 24 hours</span>
-        </div>
-      )}
-      <table className="ss-table">
-        <thead>
-          <tr>
-            <th scope="col">Inviter</th>
-            <th scope="col">Invite Code</th>
-            <th scope="col">Uses</th>
-            <th scope="col">Expires</th>
-          </tr>
-        </thead>
-      </table>
-      <p className="settings-todo">No active invite links. Listing existing invites is not available yet.</p>
+      <InviteList guildId={guildId} canManage={canList} />
     </Page>
   );
 }
@@ -341,7 +301,7 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
       case "roles":
         return <RolesPage guild={guild} members={members} />;
       case "invites":
-        return <InvitesPage canCreate={canInvite} channels={channels} />;
+        return <InvitesPage guildId={guildId} canCreate={canInvite} canList={canManage} channels={channels} />;
       case "bans":
         return <BansPage guild={guild} />;
       case "onboarding":

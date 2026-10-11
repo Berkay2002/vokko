@@ -1,12 +1,12 @@
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
-use axum::routing::{patch, post};
-use vokko_protocol::api::permissions::{CREATE_INSTANT_INVITE, MANAGE_CHANNELS};
-use vokko_protocol::api::{Channel, ChannelType, CreateInviteRequest, GatewayEvent, Invite, InviteChannel, InviteGuild, Snowflake, UpdateChannelRequest};
+use axum::routing::patch;
+use vokko_protocol::api::permissions::MANAGE_CHANNELS;
+use vokko_protocol::api::{Channel, ChannelType, GatewayEvent, UpdateChannelRequest};
 
 use crate::access::{self, channel_access};
-use crate::auth::{AuthUser, random_hex};
+use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
 use crate::extract::{ApiJson, parse_id};
@@ -16,11 +16,11 @@ use crate::routes::guilds::channel_name;
 use crate::routes::overwrites;
 use crate::routes::threads as threads_routes;
 use crate::state::AppState;
-use crate::store::{self, iso};
+use crate::store;
 use crate::threads;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/channels/{id}", patch(update_channel).delete(delete_channel)).route("/channels/{id}/invites", post(create_invite))
+    Router::new().route("/channels/{id}", patch(update_channel).delete(delete_channel))
 }
 
 fn channel_id(raw: &str) -> ApiResult<i64> {
@@ -166,79 +166,14 @@ async fn delete_channel(State(state): State<AppState>, AuthUser(user_id): AuthUs
     sqlx::query("UPDATE channels SET parent_id = NULL WHERE parent_id = $1").bind(id).execute(&state.db).await?;
     sqlx::query("UPDATE guilds SET system_channel_id = NULL WHERE id = $1 AND system_channel_id = $2").bind(guild_id).bind(id).execute(&state.db).await?;
     crate::routes::scheduled_events::channel_removed(&state, id).await?;
-    sqlx::query("DELETE FROM channels WHERE id = $1").bind(id).execute(&state.db).await?;
+    // Its invites lead nowhere now (no INVITE_DELETE: CHANNEL_DELETE already tells the same audience). One transaction with the
+    // channel delete, so no invite outlives its channel.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("DELETE FROM channels WHERE id = $1").bind(id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM invites WHERE channel_id = $1").bind(id).execute(&mut *tx).await?;
+    tx.commit().await?;
     crate::media::remove_files(&state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
     crate::stickers::sweep_assets(&state).await;
     state.hub.send(&viewers, &GatewayEvent::ChannelDelete(channel.clone()));
     Ok(Json(channel))
-}
-
-pub fn invite_code() -> String {
-    // 8 alphanumerics drawn from random hex pairs mapped onto the alphabet.
-    const ALPHABET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
-    let hex = random_hex(8);
-    (0..8)
-        .map(|index| {
-            let byte = u8::from_str_radix(&hex[index * 2..index * 2 + 2], 16).unwrap_or(0);
-            ALPHABET[byte as usize % ALPHABET.len()] as char
-        })
-        .collect()
-}
-
-pub async fn invite_view(state: &AppState, code: &str) -> ApiResult<Option<Invite>> {
-    #[derive(sqlx::FromRow)]
-    struct Row {
-        guild_id: i64,
-        channel_id: i64,
-        guild_name: String,
-        icon_path: Option<String>,
-        channel_name: Option<String>,
-        expires_at: Option<time::OffsetDateTime>,
-    }
-    let row: Option<Row> = sqlx::query_as(
-        "SELECT i.guild_id, i.channel_id, g.name AS guild_name, g.icon_path, c.name AS channel_name, i.expires_at \
-         FROM invites i JOIN guilds g ON g.id = i.guild_id LEFT JOIN channels c ON c.id = i.channel_id WHERE i.code = $1",
-    )
-    .bind(code)
-    .fetch_optional(&state.db)
-    .await?;
-    let Some(row) = row else { return Ok(None) };
-    let member_count = store::member_count(state, row.guild_id).await?;
-    Ok(Some(Invite {
-        code: code.to_owned(),
-        guild: InviteGuild { id: Snowflake::from(row.guild_id), name: row.guild_name, icon: row.icon_path.map(|path| state.asset_url(&path)), member_count },
-        channel: InviteChannel { id: Snowflake::from(row.channel_id), name: row.channel_name },
-        expires_at: row.expires_at.map(iso),
-    }))
-}
-
-async fn create_invite(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>, body: axum::body::Bytes) -> ApiResult<Json<Invite>> {
-    let id = channel_id(&id)?;
-    let access = channel_access(&state, user_id, id).await?;
-    let Some(guild_id) = access.channel.guild_id else { return Err(ApiErr::invalid("channel_id", "Invites need a guild channel.")) };
-    if access.channel.is_thread() {
-        return Err(ApiErr::invalid("channel_id", "Invites need a text, voice, announcement or forum channel."));
-    }
-    access.require(CREATE_INSTANT_INVITE)?;
-    let request: CreateInviteRequest = if body.is_empty() {
-        CreateInviteRequest::default()
-    } else {
-        serde_json::from_slice(&body).map_err(|error| ApiErr::invalid("body", &error.to_string()))?
-    };
-    let max_age = request.max_age.unwrap_or(86_400).min(604_800) as i32;
-    let max_uses = request.max_uses.unwrap_or(0).min(100) as i32;
-    let code = invite_code();
-    sqlx::query(
-        "INSERT INTO invites (code, guild_id, channel_id, inviter_id, max_age, max_uses, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $5::int > 0 THEN now() + ($5::int * interval '1 second') END)",
-    )
-    .bind(&code)
-    .bind(guild_id)
-    .bind(id)
-    .bind(user_id)
-    .bind(max_age)
-    .bind(max_uses)
-    .execute(&state.db)
-    .await?;
-    invite_view(&state, &code).await?.map(Json).ok_or_else(ApiErr::internal)
 }

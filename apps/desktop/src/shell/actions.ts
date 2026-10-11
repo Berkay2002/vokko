@@ -78,15 +78,6 @@ export async function deleteGuild(guildId: Snowflake): Promise<void> {
   go(dmPath());
 }
 
-export interface Invite {
-  code: string;
-  expires_at: string | null;
-}
-
-export function createInvite(channelId: Snowflake, maxAgeSeconds = 86_400): Promise<Invite> {
-  return request<Invite>("POST", `/channels/${channelId}/invites`, { max_age: maxAgeSeconds });
-}
-
 /** Open (or create) the DM with `userId` and navigate to it. */
 export async function openDirectMessage(userId: Snowflake): Promise<void> {
   const channel = await request<Channel>("POST", "/users/@me/channels", { recipient_id: userId });

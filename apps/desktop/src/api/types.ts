@@ -978,6 +978,55 @@ export interface CreateChannelRequest {
   user_limit?: number; // voice only
 }
 
+// ---- Invites ----
+export type InviteMaxAge = 0 | 1800 | 3600 | 21600 | 43200 | 86400 | 604800; // seconds the client offers; 0 = never expires
+export type InviteMaxUses = 0 | 1 | 5 | 10 | 25 | 50 | 100; // the client offers these; 0 = no limit
+export interface CreateInviteRequest {
+  max_age?: number; // 0..604800 seconds, default 86400 (the server accepts any value in range)
+  max_uses?: number; // 0..100, default 0
+  temporary?: boolean; // members who join through it are removed when their last gateway connection closes, unless given a role
+  unique?: boolean; // false (default): the server returns a live invite of the same inviter + channel with the same settings if one exists
+}
+export interface InviteGuild {
+  id: Snowflake;
+  name: string;
+  icon: string | null;
+  member_count: number;
+}
+export interface InviteChannel {
+  id: Snowflake;
+  name: string | null;
+}
+/** GET /invites/{code} (preview). */
+export interface Invite {
+  code: string;
+  guild: InviteGuild;
+  channel: InviteChannel;
+  expires_at: ISO8601 | null;
+}
+/** POST /channels/{id}/invites, GET /channels/{id}/invites, GET /guilds/{id}/invites, DELETE /invites/{code}, INVITE_CREATE. */
+export interface InviteMetadata extends Invite {
+  inviter: User | null; // null when the inviter's account is gone
+  uses: number;
+  max_uses: number; // 0 = no limit
+  max_age: number; // seconds, 0 = never
+  temporary: boolean;
+  created_at: ISO8601;
+}
+
+// ---- Guild layout: server folders and rail order (GET/PATCH /users/@me/guild-layout, READY guild_layout, GUILD_LAYOUT_UPDATE) ----
+export interface GuildFolder {
+  id: Snowflake; // chosen by the client, unique among the user's folders
+  name: string | null; // 1-32 chars; null = unnamed (the client shows the server names)
+  color: number | null; // RGB int; null = default folder colour
+  guild_ids: Snowflake[]; // 1-200, in display order
+}
+export interface GuildLayout {
+  guild_folders: GuildFolder[]; // max 100 folders, a guild in at most one
+  guild_positions: Snowflake[]; // rail order of guild ids (folder members in place, contiguous, in folder order); max 200, no duplicates
+}
+export type UpdateGuildLayoutRequest = Partial<GuildLayout>; // only sent keys change
+
 export interface ApiError {
   code: number; // Discord-like numeric code, e.g. 10003 unknown channel, 50001 missing access, 50035 invalid form body
   message: string;
@@ -1016,6 +1065,7 @@ export interface ReadyEvent {
   presences: Presence[];
   read_states: ReadState[];
   relationships: Relationship[];
+  guild_layout: GuildLayout;
   media?: InstanceMediaConfig; // always sent by the server; absent = voice unavailable
 }
 
@@ -1082,4 +1132,7 @@ export interface GatewayEvents {
   THREAD_DELETE: { id: Snowflake; guild_id: Snowflake; parent_id: Snowflake; type: ChannelType };
   THREAD_MEMBER_UPDATE: ThreadMember & { guild_id: Snowflake }; // the current user joined a thread
   THREAD_MEMBERS_UPDATE: { id: Snowflake; guild_id: Snowflake; member_count: number; added_members?: ThreadMember[]; removed_member_ids?: Snowflake[] };
+  INVITE_CREATE: InviteMetadata; // to members who can list it: MANAGE_GUILD, or MANAGE_CHANNELS on the invite's channel
+  INVITE_DELETE: { code: string; guild_id: Snowflake; channel_id: Snowflake }; // same audience; revoked (not on expiry or last use)
+  GUILD_LAYOUT_UPDATE: GuildLayout; // the user's own sessions only
 }

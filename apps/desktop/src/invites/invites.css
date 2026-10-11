@@ -1,0 +1,122 @@
+/* Invite modal (friends list, link settings) and invite tables (src/invites). */
+.invite-modal .invite-search {
+  margin: 8px 0;
+}
+
+.invite-friends {
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+  margin: 0 -8px 12px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.invite-friend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.invite-friend:hover {
+  background: var(--background-mod-subtle);
+}
+
+.invite-friend-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.invite-friend-name {
+  overflow: hidden;
+  color: var(--text-default);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.invite-friend-username {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.invite-friend .invite-friend-button {
+  min-width: 64px;
+  border: 1px solid var(--status-online);
+  background: transparent;
+  color: var(--text-default);
+}
+
+.invite-friend .invite-friend-button:hover:not(:disabled) {
+  background: var(--status-online);
+  color: #fff;
+}
+
+.invite-friend .invite-friend-button.sent {
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.invite-no-friends {
+  margin-bottom: 12px;
+}
+
+.invite-link-label {
+  margin-top: 4px;
+}
+
+.invite-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.invite-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.invite-table .invite-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--background-mod-normal);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.invite-muted {
+  color: var(--text-muted);
+}
+
+.invite-revoke-cell {
+  width: 32px;
+  text-align: right;
+}
+
+.invite-revoke {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.invite-revoke:hover:not(:disabled) {
+  background: var(--status-danger, #da373c);
+  color: #fff;
+}

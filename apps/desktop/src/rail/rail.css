@@ -1,0 +1,135 @@
+/* Server folders and drag-and-drop on the rail (src/rail). */
+.rail-drag {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: var(--rail-width);
+}
+
+.rail-drag[data-dragging] {
+  opacity: 0.4;
+}
+
+.rail-drag[data-drop="before"]::before,
+.rail-drag[data-drop="after"]::after,
+.rail-drop-end[data-drop]::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--status-online);
+  pointer-events: none;
+}
+
+.rail-drag[data-drop="before"]::before {
+  top: -5px;
+}
+
+.rail-drag[data-drop="after"]::after {
+  bottom: -5px;
+}
+
+.rail-drag[data-drop="middle"] > .rail-item .rail-tile {
+  box-shadow: 0 0 0 2px var(--status-online);
+}
+
+.rail-drop-end {
+  position: relative;
+  flex: none;
+  width: var(--rail-width);
+  height: 16px;
+}
+
+.rail-drop-end[data-drop]::before {
+  top: 7px;
+}
+
+.rail-folder {
+  --folder-color: var(--brand-500);
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: var(--rail-width);
+}
+
+.rail-folder.open {
+  position: relative;
+  isolation: isolate;
+  padding-bottom: 8px;
+}
+
+.rail-folder.open::after {
+  content: "";
+  position: absolute;
+  inset: 0 12px 0;
+  border-radius: var(--radius-md);
+  background: var(--background-mod-normal);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.rail-folder-tile {
+  background: color-mix(in srgb, var(--folder-color) 40%, var(--background-surface-high));
+}
+
+.rail-folder-tile.expanded {
+  background: transparent;
+}
+
+.rail-folder-glyph {
+  color: var(--folder-color);
+  fill: currentColor;
+}
+
+.rail-folder-grid {
+  display: grid;
+  grid-template-columns: 16px 16px;
+  grid-auto-rows: 16px;
+  gap: 2px;
+}
+
+.rail-folder-grid .rail-folder-mini {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 7px !important;
+  background: var(--background-surface-higher);
+  overflow: hidden;
+}
+
+.folder-color-label {
+  margin-top: 16px;
+}
+
+.folder-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.folder-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  color: #fff;
+  cursor: pointer;
+}
+
+.folder-swatch-default {
+  background: var(--brand-500);
+  box-shadow: inset 0 0 0 2px var(--background-surface-higher);
+}
+
+.folder-swatch[aria-checked="true"] {
+  outline: 2px solid var(--text-default);
+  outline-offset: 2px;
+}

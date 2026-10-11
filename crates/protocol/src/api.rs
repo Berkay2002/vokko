@@ -1471,12 +1471,72 @@ pub struct OverwriteRequest {
     pub deny: String,
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+/// Body of `POST /channels/{id}/invites`; every key is optional.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CreateInviteRequest {
-    #[serde(default)]
+    /// Seconds until it expires, 0..=604800 (0 = never); default 86400.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_age: Option<u32>,
-    #[serde(default)]
+    /// 0..=100 (0 = no limit); default 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_uses: Option<u32>,
+    /// Members who join through it are removed when their last gateway connection closes, unless they were given a role.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temporary: Option<bool>,
+    /// `false` (default) returns a live invite of the same inviter and channel with the same settings when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unique: Option<bool>,
+}
+
+/// An invite with its settings and counters: the create response, the invite lists and INVITE_CREATE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InviteMetadata {
+    #[serde(flatten)]
+    pub invite: Invite,
+    /// `null` when the inviter's account is gone.
+    pub inviter: Option<User>,
+    pub uses: u32,
+    pub max_uses: u32,
+    pub max_age: u32,
+    pub temporary: bool,
+    pub created_at: String,
+}
+
+/// INVITE_DELETE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InviteDelete {
+    pub code: String,
+    pub guild_id: Snowflake,
+    pub channel_id: Snowflake,
+}
+
+/// A server folder on the rail. `id` is chosen by the client (any snowflake-shaped string, unique among the user's folders).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildFolder {
+    pub id: Snowflake,
+    pub name: Option<String>,
+    /// RGB int, `null` = the default folder colour.
+    pub color: Option<u32>,
+    pub guild_ids: Vec<Snowflake>,
+}
+
+/// Per-user server folders and rail order stored on the server (`GET/PATCH /users/@me/guild-layout`, READY `guild_layout`, GUILD_LAYOUT_UPDATE).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct GuildLayout {
+    #[serde(default)]
+    pub guild_folders: Vec<GuildFolder>,
+    /// Rail order of guild ids (folder members in place, in folder order).
+    #[serde(default)]
+    pub guild_positions: Vec<Snowflake>,
+}
+
+/// Body of `PATCH /users/@me/guild-layout`: only sent keys change.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UpdateGuildLayoutRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guild_folders: Option<Vec<GuildFolder>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guild_positions: Option<Vec<Snowflake>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1912,6 +1972,8 @@ pub struct ReadyEvent {
     pub presences: Vec<Presence>,
     pub read_states: Vec<ReadState>,
     pub relationships: Vec<Relationship>,
+    #[serde(default)]
+    pub guild_layout: GuildLayout,
     pub media: InstanceMediaConfig,
 }
 
@@ -2056,6 +2118,9 @@ pub enum GatewayEvent {
     ThreadDelete(ThreadDelete),
     ThreadMemberUpdate(ThreadMemberUpdate),
     ThreadMembersUpdate(ThreadMembersUpdate),
+    InviteCreate(Box<InviteMetadata>),
+    InviteDelete(InviteDelete),
+    GuildLayoutUpdate(GuildLayout),
 }
 
 impl GatewayEvent {
@@ -2108,6 +2173,9 @@ impl GatewayEvent {
             Self::ThreadDelete(_) => "THREAD_DELETE",
             Self::ThreadMemberUpdate(_) => "THREAD_MEMBER_UPDATE",
             Self::ThreadMembersUpdate(_) => "THREAD_MEMBERS_UPDATE",
+            Self::InviteCreate(_) => "INVITE_CREATE",
+            Self::InviteDelete(_) => "INVITE_DELETE",
+            Self::GuildLayoutUpdate(_) => "GUILD_LAYOUT_UPDATE",
         }
     }
 
@@ -2150,6 +2218,9 @@ impl GatewayEvent {
             Self::ThreadDelete(value) => serde_json::to_value(value),
             Self::ThreadMemberUpdate(value) => serde_json::to_value(value),
             Self::ThreadMembersUpdate(value) => serde_json::to_value(value),
+            Self::InviteCreate(value) => serde_json::to_value(value),
+            Self::InviteDelete(value) => serde_json::to_value(value),
+            Self::GuildLayoutUpdate(value) => serde_json::to_value(value),
         };
         result.unwrap_or(Value::Null)
     }
@@ -2371,6 +2442,7 @@ mod tests {
         round_trip::<GuildWithState>(with_state.clone());
         round_trip::<ReadyEvent>(json!({
             "v": 1, "user": user(), "session_id": "abc", "guilds": [with_state], "private_channels": [], "presences": [], "read_states": [], "relationships": [],
+            "guild_layout": {"guild_folders": [{"id": "9", "name": "games", "color": 5793266, "guild_ids": ["300"]}], "guild_positions": ["300"]},
             "media": {"voice_enabled": true, "voice_bitrate_ceiling": 128000, "screenshare_qualities": ["720p30", "1080p60"], "video_enabled": false}
         }));
         round_trip::<GuildMemberAdd>(
@@ -2555,6 +2627,37 @@ mod tests {
             .name(),
             "THREAD_CREATE"
         );
+    }
+
+    #[test]
+    fn invite_and_settings_shapes_match_types_ts() {
+        let invite = json!({
+            "code": "abc", "guild": {"id": "300", "name": "g", "icon": null, "member_count": 2}, "channel": {"id": "200", "name": "general"},
+            "expires_at": "2026-10-12T10:00:00.000Z"
+        });
+        round_trip::<Invite>(invite.clone());
+        let mut metadata = invite;
+        metadata["inviter"] = user();
+        metadata["uses"] = json!(1);
+        metadata["max_uses"] = json!(5);
+        metadata["max_age"] = json!(86400);
+        metadata["temporary"] = json!(false);
+        metadata["created_at"] = json!("2026-10-11T10:00:00.000Z");
+        round_trip::<InviteMetadata>(metadata.clone());
+        round_trip::<CreateInviteRequest>(json!({"max_age": 1800, "max_uses": 10, "temporary": true, "unique": true}));
+        round_trip::<CreateInviteRequest>(json!({}));
+        let created = GatewayEvent::InviteCreate(Box::new(serde_json::from_value(metadata).expect("metadata")));
+        assert_eq!((created.name(), created.data()["inviter"]["id"].clone()), ("INVITE_CREATE", json!("100")));
+        let deleted = GatewayEvent::InviteDelete(InviteDelete { code: "abc".to_owned(), guild_id: Snowflake(300), channel_id: Snowflake(200) });
+        assert_eq!((deleted.name(), deleted.data()), ("INVITE_DELETE", json!({"code": "abc", "guild_id": "300", "channel_id": "200"})));
+        round_trip::<GuildLayout>(
+            json!({"guild_folders": [{"id": "9", "name": null, "color": null, "guild_ids": ["300", "301"]}], "guild_positions": ["301", "300"]}),
+        );
+        round_trip::<UpdateGuildLayoutRequest>(json!({"guild_positions": ["300"]}));
+        let empty: GuildLayout = serde_json::from_value(json!({})).expect("defaults");
+        assert!(empty.guild_folders.is_empty() && empty.guild_positions.is_empty());
+        let update = GatewayEvent::GuildLayoutUpdate(empty);
+        assert_eq!((update.name(), update.data()), ("GUILD_LAYOUT_UPDATE", json!({"guild_folders": [], "guild_positions": []})));
     }
 
     #[test]
