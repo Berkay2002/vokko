@@ -332,6 +332,8 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         states.insert(user_id, entry.clone())
     };
 
+    // Joining or moving into the channel (not another device re-binding in place) plays the entrance sound.
+    let entered = previous.as_ref().is_none_or(|previous| previous.channel_id != channel_id);
     send_server_update(session, guild_id, target, &livekit.url, livekit_token, &session_id);
     if row.is_dm() {
         // Starts the call (CALL_CREATE, ringing) or adds us to it.
@@ -342,6 +344,11 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         moved_away(state, &previous, viewers).await;
     }
     spawn_connect_timeout(state.clone(), user_id, session_id, nonce, issued);
+    // Entrance sounds are a guild feature: none in DM calls.
+    if entered && let Some(guild_id) = guild_id {
+        let state = state.clone();
+        tokio::spawn(async move { crate::soundboard::play_entrance(&state, user_id, guild_id, channel_id, permissions).await });
+    }
 }
 
 /// Guild voice: the channel's permissions need VIEW_CHANNEL + CONNECT, and a timed-out member stays out.

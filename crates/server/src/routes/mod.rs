@@ -24,6 +24,7 @@ pub mod relationships;
 mod saved;
 pub mod scheduled_events;
 mod search;
+mod soundboard;
 mod stickers;
 mod suggestions;
 mod threads;
@@ -53,6 +54,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(saved::routes())
         .merge(gifs::routes())
         .merge(stickers::routes())
+        .merge(soundboard::routes())
         .merge(crate::voice::status::routes())
         .merge(crate::voice::calls::routes())
         .merge(crate::voice::stage::routes())

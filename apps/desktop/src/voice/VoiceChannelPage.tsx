@@ -17,6 +17,7 @@ import { GRID_GAP, gridLayout } from "./gridLayout";
 import { dismissVideoError, joinVoiceChannel, leaveVoice, setViewerQuality, toggleSelfMute, watchStream } from "./engine";
 import { useMedia, useVideo, type VideoHandle, type VideoSource } from "./mediaStore";
 import { SoundboardPopout } from "./SoundboardPopout";
+import { SoundEffectBadge, useSoundFlashClass } from "../soundboard";
 import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
 import { useVoiceUi } from "./uiStore";
 import { VoiceChatPanel } from "./VoiceChatPanel";
@@ -54,6 +55,7 @@ export function Tile({ state, guildId, variant, onActivate }: { state: VoiceStat
   const activity = useStore(s => s.presences[state.user_id]?.activities?.[0]?.name);
   const member = useStore(s => (guildId ? s.members[guildId]?.[state.user_id] : undefined)) ?? state.member;
   const speaking = useIsSpeaking(state.user_id);
+  const flash = useSoundFlashClass(state.user_id);
   const own = useVoice(s => s.meId === state.user_id);
   const menu = useContextMenu();
   const tile = useRef<HTMLDivElement>(null);
@@ -73,7 +75,7 @@ export function Tile({ state, guildId, variant, onActivate }: { state: VoiceStat
   return (
     <div
       ref={tile}
-      className={`voice-tile ${variant}${speaking ? " speaking" : ""}${own ? " own" : ""}`}
+      className={`voice-tile ${variant}${speaking ? " speaking" : ""}${own ? " own" : ""}${flash}`}
       data-user-id={state.user_id}
       data-speaking={speaking || undefined}
       role={interactive ? "button" : "group"}
@@ -96,6 +98,7 @@ export function Tile({ state, guildId, variant, onActivate }: { state: VoiceStat
       ) : (
         <Avatar user={user} member={member} size={AVATAR_SIZE[variant]} decoration={false} className="voice-tile-avatar" />
       )}
+      <SoundEffectBadge userId={state.user_id} />
       {streaming && <span className="voice-tile-live">LIVE</span>}
       {streaming && !own && !watching && !small && (
         <button type="button" className="voice-tile-watch" 

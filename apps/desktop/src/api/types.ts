@@ -343,6 +343,66 @@ export interface EditStickerRequest {
   tags?: string;
 }
 
+// ---- Soundboard and entrance sounds (every guild gets the top tier; using other servers' sounds is free) ----
+export const SOUNDBOARD_MAX_BYTES = 512 * 1024; // MP3, OGG or WAV
+export const SOUNDBOARD_MAX_DURATION_MS = 5200;
+export const SOUNDBOARD_SOUNDS_PER_GUILD = 48;
+export interface SoundboardSound {
+  sound_id: Snowflake; // default sounds have small fixed ids
+  name: string; // 2-32 chars
+  volume: number; // 0..1
+  emoji_id: Snowflake | null;
+  emoji_name: string | null; // unicode emoji on the tile
+  guild_id?: Snowflake; // absent for default sounds
+  available: boolean;
+  user?: User; // uploader (guild sounds)
+  url: string; // Vokko addition: absolute URL of the audio file, opaque
+}
+export interface SoundboardSoundList {
+  items: SoundboardSound[]; // GET /guilds/{id}/soundboard-sounds
+}
+export interface CreateSoundboardSoundRequest {
+  name: string;
+  attachment_id: Snowflake; // pending upload from POST /channels/{id}/attachments: MP3/OGG/WAV, ≤512 KiB, ≤5.2 s
+  volume?: number; // default 1
+  emoji_id?: Snowflake;
+  emoji_name?: string;
+}
+export interface EditSoundboardSoundRequest {
+  name?: string;
+  volume?: number;
+  emoji_id?: Snowflake | null;
+  emoji_name?: string | null;
+}
+export interface SendSoundboardSoundRequest {
+  sound_id: Snowflake;
+  source_guild_id?: Snowflake; // absent = a default sound or a sound of the channel's guild
+}
+export interface EntranceSound {
+  guild_id: Snowflake | null; // scope: a guild, or null = every guild without its own
+  sound_id: Snowflake;
+  source_guild_id: Snowflake | null; // null = a default sound
+}
+export interface SetEntranceSoundRequest {
+  guild_id: Snowflake | null;
+  sound_id: Snowflake | null; // null clears this scope
+  source_guild_id?: Snowflake | null;
+}
+export interface EntranceSounds {
+  entrance_sounds: EntranceSound[]; // GET/PUT /users/@me/entrance-sounds, ENTRANCE_SOUNDS_UPDATE
+}
+export interface VoiceChannelEffectSend {
+  channel_id: Snowflake;
+  guild_id: Snowflake;
+  user_id: Snowflake;
+  sound_id: Snowflake;
+  sound_volume: number;
+  emoji: { id: Snowflake | null; name: string | null } | null;
+  source_guild_id: Snowflake | null; // Vokko addition; null = a default sound
+  sound_url: string; // Vokko addition: the audio file, playable by members outside the source guild
+  entrance?: true; // Vokko addition: the sender's entrance sound on joining
+}
+
 // ---- GIFs (proxied by the server; the provider key never reaches clients) ----
 export type GifProvider = "klipy" | "giphy" | "tenor" | "none"; // none = picker shows favourites only
 export interface Gif {
@@ -1219,7 +1279,7 @@ export interface ReadyEvent {
   user: User;
   session_id: string;
   // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels); emojis absent = none
-  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[] })[]; // stage_instances: live stages the user can see, omitted when none
+  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[] })[]; // stage_instances: live stages the user can see, omitted when none
   private_channels: Channel[]; // DMs and group DMs
   presences: Presence[];
   read_states: ReadState[];
@@ -1304,6 +1364,11 @@ export interface GatewayEvents {
   CALL_DELETE: { channel_id: Snowflake }; // the last participant left
   MESSAGE_POLL_VOTE_ADD: PollVoteEvent; // to everyone who can see the channel
   MESSAGE_POLL_VOTE_REMOVE: PollVoteEvent;
+  GUILD_SOUNDBOARD_SOUND_CREATE: SoundboardSound & { guild_id: Snowflake }; // to the guild's members
+  GUILD_SOUNDBOARD_SOUND_UPDATE: SoundboardSound & { guild_id: Snowflake };
+  GUILD_SOUNDBOARD_SOUND_DELETE: { sound_id: Snowflake; guild_id: Snowflake };
+  VOICE_CHANNEL_EFFECT_SEND: VoiceChannelEffectSend; // only to the users connected to that voice channel
+  ENTRANCE_SOUNDS_UPDATE: EntranceSounds; // to the user's own sessions
   INVITE_CREATE: InviteMetadata; // to members who can list it: MANAGE_GUILD, or MANAGE_CHANNELS on the invite's channel
   INVITE_DELETE: { code: string; guild_id: Snowflake; channel_id: Snowflake }; // same audience; revoked (not on expiry or last use)
   GUILD_LAYOUT_UPDATE: GuildLayout; // the user's own sessions only

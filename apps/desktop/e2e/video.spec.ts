@@ -239,8 +239,8 @@ test('Voice & Video settings: six sections, persisted choices, sounds and reset'
   await settings.getByRole('button', { name: /Show \d+ more/ }).click();
   await expect(settings.getByRole('switch', { name: 'Camera On' })).toBeVisible();
 
-  // Soundboard entrance sound waits for the server routes.
-  await expect(settings.getByText(/coming soon/i)).toBeVisible();
+  // The soundboard block holds the soundboard volume and the global entrance sound picker.
+  await expect(settings.getByRole('combobox', { name: 'Entrance sound', exact: true })).toBeVisible();
   if (SHOTS) {
     await settings.locator('.settings-category-title', { hasText: 'Sounds' }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${SHOTS}/settings-sounds.png` });

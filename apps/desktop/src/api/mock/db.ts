@@ -2,7 +2,7 @@
 
 import { DEFAULT_EVERYONE } from "../permissions";
 import { timestampToSnowflake } from "../snowflake";
-import type { Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageInteractionMetadata, MessageSnapshot, MessageType, Presence, ReactionEmoji, ReadState, Relationship, RelationshipType, Reminder, Role, Sticker, StickerItem, User, GuildLayout } from "../types";
+import type { Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageInteractionMetadata, MessageSnapshot, MessageType, Presence, ReactionEmoji, ReadState, Relationship, RelationshipType, Reminder, Role, SoundboardSound, Sticker, StickerItem, User, GuildLayout } from "../types";
 import type { MockEmoji } from "./emojis";
 
 export interface MockAccount {
@@ -116,6 +116,8 @@ export interface Db {
   emojis: Map<string, MockEmoji>;
   /** guild id -> stickers, oldest first */
   stickers: Map<string, Sticker[]>;
+  /** guild id -> soundboard sounds, oldest first */
+  soundboard: Map<string, SoundboardSound[]>;
   /** user id -> favourite GIFs, newest first */
   gifFavorites: Map<string, Gif[]>;
   /** user id -> "channel:message" -> saved_at ISO */
@@ -137,6 +139,7 @@ export const db: Db = {
   followers: new Map(),
   emojis: new Map(),
   stickers: new Map(),
+  soundboard: new Map(),
   gifFavorites: new Map(),
   bookmarks: new Map(),
   reminders: new Map(),

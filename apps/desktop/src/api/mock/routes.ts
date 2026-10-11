@@ -27,6 +27,7 @@ import "./invites";
 import "./stage";
 import "./community";
 import "./status";
+import "./soundboard";
 
 export { route, str, requireGuildMember };
 

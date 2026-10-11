@@ -10,6 +10,7 @@ use crate::gifs::GifProxy;
 use crate::hub::Hub;
 use crate::ids::SnowflakeGenerator;
 use crate::ratelimit::RateLimiter;
+use crate::soundboard::Plays;
 use crate::unfurl::Unfurler;
 use crate::voice::{self, Voice, livekit::RoomService};
 
@@ -23,6 +24,10 @@ pub struct Inner {
     pub accounts: Accounts,
     pub gifs: GifProxy,
     pub voice: Voice,
+    /// Soundboard plays, for the per-channel play limit.
+    pub soundboard: Plays,
+    /// Entrance sound plays, for their own per-user and channel limit.
+    pub entrances: Plays,
 }
 
 #[derive(Clone)]
@@ -48,7 +53,19 @@ impl AppState {
         let accounts = Accounts::new(&config.accounts);
         let gifs = GifProxy::new(config.gif.clone());
         let voice = Voice::new(rooms);
-        Self(Arc::new(Inner { db, config, ids: SnowflakeGenerator::new(1), hub, limiter: RateLimiter::default(), unfurler, accounts, gifs, voice }))
+        Self(Arc::new(Inner {
+            db,
+            config,
+            ids: SnowflakeGenerator::new(1),
+            hub,
+            limiter: RateLimiter::default(),
+            unfurler,
+            accounts,
+            gifs,
+            voice,
+            soundboard: Plays::default(),
+            entrances: Plays::default(),
+        }))
     }
 
     /// Absolute URL of a stored asset path (`<attachment id>/<filename>`).

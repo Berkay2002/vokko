@@ -117,7 +117,8 @@ export function guildPayload(guildId: string, viewerId: string): GatewayEvents["
   });
   const stickers = (db.stickers.get(guildId) ?? []).map(s => ({ ...s }));
   const emojis = guildEmojis(guildId);
-  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, voice_states: voiceStatesFor(guildId, viewerId), stage_instances: stageInstancesFor(guildId, viewerId) };
+  const soundboard_sounds = (db.soundboard.get(guildId) ?? []).map(s => ({ ...s }));
+  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, soundboard_sounds, voice_states: voiceStatesFor(guildId, viewerId), stage_instances: stageInstancesFor(guildId, viewerId) };
 }
 
 export function guildIdsFor(viewerId: string): string[] {

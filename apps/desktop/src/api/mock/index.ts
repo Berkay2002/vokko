@@ -19,7 +19,8 @@ import { setMockMaintenance } from "./status";
 import { sweepArchivedThreads } from "./threads";
 import { sweepExpiredPolls } from "./polls";
 import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromToken } from "./socket";
-import { setMockVoice } from "./voice";
+import { setMockVoice, voiceStates } from "./voice";
+import { noteAudioUpload, seedGuildSounds } from "./soundboard";
 import { ringTimeout } from "./calls";
 import { ChannelType } from "../types";
 
@@ -30,6 +31,9 @@ setInternalRouter((method, path, body) => handleRoute(method, path, body, null))
 
 if (MOCK) {
   seed();
+  // A few generated sounds in the first seeded server (the default sounds are synthesized on first use).
+  const first = [...db.guilds.values()][0];
+  if (first) seedGuildSounds(first.guild.id, first.guild.owner_id);
   // `?seed=big` adds the perf harness server (200 channels, 5,000 members, 20,000 messages in #firehose).
   try {
     if (new URLSearchParams(window.location.search).get("seed") === "big") seedBig();
@@ -114,6 +118,7 @@ export async function mockUpload(channelId: string, file: File, onProgress: ((fr
     height: size?.height ?? null,
   };
   db.pending.set(attachment.id, { attachment, owner: userId });
+  await noteAudioUpload(attachment, file);
   return attachment;
 }
 
@@ -150,6 +155,10 @@ interface MockHooks {
   seedOnboardingGuild(owner?: string): SeededGuild;
   /** Show (or with null clear) the maintenance banner served by `GET /status`; the client re-reads it at once. */
   maintenance(message: string | null, startsAt?: string | null): void;
+  /** Another user plays a soundboard sound in the voice channel they are in (goes through the real mock route). */
+  playSound(username: string, soundId: string, sourceGuildId?: string): void;
+  /** Another user sets (or with null clears) their global entrance sound. */
+  entranceSound(username: string, soundId: string | null, sourceGuildId?: string): void;
   reset(): void;
 }
 
@@ -220,6 +229,15 @@ const hooks: MockHooks = {
     return executeWebhook(hook, username ? { content, username } : { content }).id;
   },
   seedOnboardingGuild: owner => seedOnboardingGuild(owner),
+  playSound: (username, soundId, sourceGuildId) => {
+    const userId = userByName(username);
+    const channelId = voiceStates.get(userId)?.channel_id;
+    if (!channelId) throw new Error(`${username} is not in a voice channel`);
+    handleRoute("POST", `/channels/${channelId}/send-soundboard-sound`, sourceGuildId ? { sound_id: soundId, source_guild_id: sourceGuildId } : { sound_id: soundId }, userId);
+  },
+  entranceSound: (username, soundId, sourceGuildId) => {
+    handleRoute("PUT", "/users/@me/entrance-sounds", { guild_id: null, sound_id: soundId, source_guild_id: sourceGuildId ?? null }, userByName(username));
+  },
   maintenance: (message, startsAt = null) => {
     setMockMaintenance(message ? { message, starts_at: startsAt } : null);
     window.dispatchEvent(new Event("vokko:status-changed"));

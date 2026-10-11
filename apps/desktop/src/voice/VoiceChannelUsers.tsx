@@ -11,6 +11,7 @@ import { openModal } from "../shell/modalStore";
 import { openProfile } from "../shell/ProfileCard";
 import { isChannelFull } from "./engine";
 import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
+import { SoundEffectBadge, useSoundFlashClass } from "../soundboard";
 import { LivePill, StreamCard } from "./StreamCard";
 
 function StateIcon({ label, server, children }: { label: string; server?: boolean; children: ReactNode }) {
@@ -130,6 +131,7 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
   const member = useStore(s => s.members[guildId]?.[state.user_id]) ?? state.member;
   const tagGuildName = useStore(s => (user?.primary_guild ? s.guilds[user.primary_guild.guild_id]?.name : undefined));
   const speaking = useIsSpeaking(state.user_id);
+  const flash = useSoundFlashClass(state.user_id);
   const localMuted = useVoice(s => !!s.localMutes[state.user_id]);
   // Other people's rows dim while you are not in their call and they are not talking (reference spec 1).
   const away = useVoice(s => s.channelId !== state.channel_id);
@@ -145,7 +147,7 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
   const item = (
     <li
       ref={row}
-      className={`voice-occupant voice-user${speaking ? " speaking" : ""}${away && !speaking ? " away" : ""}`}
+      className={`voice-occupant voice-user${speaking ? " speaking" : ""}${away && !speaking ? " away" : ""}${flash}`}
       data-user-id={state.user_id}
       data-speaking={speaking || undefined}
       tabIndex={0}
@@ -169,6 +171,7 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
     >
       <span className="voice-user-avatar">
         <Avatar user={user} member={member} size={24} decoration={false} />
+        <SoundEffectBadge userId={state.user_id} />
       </span>
       <span className="voice-occupant-name">{name}</span>
       <TagChip tag={user.primary_guild} guildName={tagGuildName} />

@@ -330,7 +330,7 @@ pub mod permissions {
         ("BYPASS_SLOWMODE", BYPASS_SLOWMODE),
         ("MANAGE_OFFICIAL_MESSAGES", MANAGE_OFFICIAL_MESSAGES),
     ];
-    /// What the @everyone role of a new guild grants: the 26-bit default set of the Discord client.
+    /// What the @everyone role of a new guild grants: the 27-bit default set of the Discord client.
     pub const DEFAULT_EVERYONE: u64 = CREATE_INSTANT_INVITE
         | CHANGE_NICKNAME
         | VIEW_CHANNEL
@@ -341,6 +341,7 @@ pub mod permissions {
         | MENTION_EVERYONE
         | USE_EXTERNAL_EMOJIS
         | USE_EXTERNAL_STICKERS
+        | USE_EXTERNAL_SOUNDS
         | ADD_REACTIONS
         | CREATE_PUBLIC_THREADS
         | CREATE_PRIVATE_THREADS
@@ -2092,6 +2093,131 @@ pub struct EditStickerRequest {
     pub tags: Option<String>,
 }
 
+// ---- Soundboard and entrance sounds ----
+
+/// Soundboard upload limits: MP3, OGG or WAV, at most 512 KiB and 5.2 s; Vokko gives every guild the top tier.
+pub const SOUNDBOARD_MAX_BYTES: u64 = 512 * 1024;
+pub const SOUNDBOARD_MAX_DURATION_MS: u32 = 5_200;
+pub const SOUNDBOARD_SOUNDS_PER_GUILD: usize = 48;
+
+/// A soundboard sound: a guild's own (`guild_id` set) or one of the instance's default sounds (no `guild_id`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SoundboardSound {
+    pub sound_id: Snowflake,
+    /// 2-32 chars.
+    pub name: String,
+    /// 0..=1.
+    pub volume: f64,
+    /// Custom emoji id (Vokko has no custom emoji yet, so always `null` in practice).
+    pub emoji_id: Option<Snowflake>,
+    /// Unicode emoji shown on the tile.
+    pub emoji_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<Snowflake>,
+    pub available: bool,
+    /// Uploader (guild sounds only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<User>,
+    /// Vokko addition: absolute URL of the audio file (clients treat it as opaque).
+    pub url: String,
+}
+
+/// `GET /guilds/{id}/soundboard-sounds` (Discord's shape).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SoundboardSoundList {
+    pub items: Vec<SoundboardSound>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateSoundboardSoundRequest {
+    pub name: String,
+    /// Pending upload from `POST /channels/{id}/attachments` (MP3, OGG or WAV, at most 512 KiB and 5.2 s).
+    pub attachment_id: Snowflake,
+    /// Default 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji_id: Option<Snowflake>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji_name: Option<String>,
+}
+
+/// Only sent keys change; `null` clears the emoji.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct EditSoundboardSoundRequest {
+    pub name: Option<String>,
+    pub volume: Option<f64>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub emoji_id: Option<Option<Snowflake>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub emoji_name: Option<Option<String>>,
+}
+
+/// `POST /channels/{id}/send-soundboard-sound`. `source_guild_id` absent: a default sound, or a sound of the channel's guild.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SendSoundboardSoundRequest {
+    pub sound_id: Snowflake,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_guild_id: Option<Snowflake>,
+}
+
+/// The user's entrance sound for one scope: a guild (`guild_id`) or every guild without its own (`guild_id: null`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EntranceSound {
+    pub guild_id: Option<Snowflake>,
+    pub sound_id: Snowflake,
+    /// Guild the sound belongs to; `null` = a default sound.
+    pub source_guild_id: Option<Snowflake>,
+}
+
+/// `PUT /users/@me/entrance-sounds`: sets (or with `sound_id: null` clears) the entrance sound of one scope.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SetEntranceSoundRequest {
+    #[serde(default)]
+    pub guild_id: Option<Snowflake>,
+    #[serde(default)]
+    pub sound_id: Option<Snowflake>,
+    #[serde(default)]
+    pub source_guild_id: Option<Snowflake>,
+}
+
+/// `GET`/`PUT /users/@me/entrance-sounds` and ENTRANCE_SOUNDS_UPDATE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EntranceSounds {
+    pub entrance_sounds: Vec<EntranceSound>,
+}
+
+/// GUILD_SOUNDBOARD_SOUND_DELETE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SoundboardSoundDelete {
+    pub sound_id: Snowflake,
+    pub guild_id: Snowflake,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EffectEmoji {
+    pub id: Option<Snowflake>,
+    pub name: Option<String>,
+}
+
+/// VOICE_CHANNEL_EFFECT_SEND: someone played a sound; sent only to the users connected to that voice channel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VoiceChannelEffectSend {
+    pub channel_id: Snowflake,
+    pub guild_id: Snowflake,
+    pub user_id: Snowflake,
+    pub sound_id: Snowflake,
+    pub sound_volume: f64,
+    pub emoji: Option<EffectEmoji>,
+    /// Vokko addition: `null` = a default sound.
+    pub source_guild_id: Option<Snowflake>,
+    /// Vokko addition: the audio file, so members who are not in the source guild can play it.
+    pub sound_url: String,
+    /// Vokko addition: the sender's entrance sound on joining the channel.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub entrance: bool,
+}
+
 /// Which provider answers `/gifs/*`; `none` = picker shows favourites only.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -2235,6 +2361,9 @@ pub struct GuildWithState {
     pub members: Vec<GuildMember>,
     pub member_count: u32,
     pub stickers: Vec<Sticker>,
+    /// The guild's own soundboard sounds; omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub soundboard_sounds: Vec<SoundboardSound>,
     /// Active threads the user can see (they are not part of `channels`); omitted when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub threads: Vec<Channel>,
@@ -2840,6 +2969,11 @@ pub enum GatewayEvent {
     CallDelete(CallDelete),
     MessagePollVoteAdd(PollVote),
     MessagePollVoteRemove(PollVote),
+    GuildSoundboardSoundCreate(Box<SoundboardSound>),
+    GuildSoundboardSoundUpdate(Box<SoundboardSound>),
+    GuildSoundboardSoundDelete(SoundboardSoundDelete),
+    VoiceChannelEffectSend(VoiceChannelEffectSend),
+    EntranceSoundsUpdate(EntranceSounds),
     InviteCreate(Box<InviteMetadata>),
     InviteDelete(InviteDelete),
     GuildLayoutUpdate(GuildLayout),
@@ -2908,6 +3042,11 @@ impl GatewayEvent {
             Self::CallDelete(_) => "CALL_DELETE",
             Self::MessagePollVoteAdd(_) => "MESSAGE_POLL_VOTE_ADD",
             Self::MessagePollVoteRemove(_) => "MESSAGE_POLL_VOTE_REMOVE",
+            Self::GuildSoundboardSoundCreate(_) => "GUILD_SOUNDBOARD_SOUND_CREATE",
+            Self::GuildSoundboardSoundUpdate(_) => "GUILD_SOUNDBOARD_SOUND_UPDATE",
+            Self::GuildSoundboardSoundDelete(_) => "GUILD_SOUNDBOARD_SOUND_DELETE",
+            Self::VoiceChannelEffectSend(_) => "VOICE_CHANNEL_EFFECT_SEND",
+            Self::EntranceSoundsUpdate(_) => "ENTRANCE_SOUNDS_UPDATE",
             Self::InviteCreate(_) => "INVITE_CREATE",
             Self::InviteDelete(_) => "INVITE_DELETE",
             Self::GuildLayoutUpdate(_) => "GUILD_LAYOUT_UPDATE",
@@ -2963,6 +3102,10 @@ impl GatewayEvent {
             Self::CallUpdate(value) => serde_json::to_value(value),
             Self::CallDelete(value) => serde_json::to_value(value),
             Self::MessagePollVoteAdd(value) | Self::MessagePollVoteRemove(value) => serde_json::to_value(value),
+            Self::GuildSoundboardSoundCreate(value) | Self::GuildSoundboardSoundUpdate(value) => serde_json::to_value(value),
+            Self::GuildSoundboardSoundDelete(value) => serde_json::to_value(value),
+            Self::VoiceChannelEffectSend(value) => serde_json::to_value(value),
+            Self::EntranceSoundsUpdate(value) => serde_json::to_value(value),
             Self::InviteCreate(value) => serde_json::to_value(value),
             Self::InviteDelete(value) => serde_json::to_value(value),
             Self::GuildLayoutUpdate(value) => serde_json::to_value(value),
@@ -3090,7 +3233,7 @@ mod tests {
         assert_eq!(seen, ALL);
         assert_eq!(ALL & (1 << 47), 0, "bit 47 is unassigned");
         assert_eq!(NAMED.last().map(|(_, bit)| bit.trailing_zeros()), Some(53));
-        assert_eq!(DEFAULT_EVERYONE.count_ones(), 26);
+        assert_eq!(DEFAULT_EVERYONE.count_ones(), 27);
         assert_eq!(DEFAULT_EVERYONE & !ALL, 0);
         assert_eq!(DEFAULT_EVERYONE & ADMINISTRATOR, 0);
         assert_ne!(DEFAULT_EVERYONE & VIEW_CHANNEL, 0);
@@ -3546,6 +3689,53 @@ mod tests {
             "edited_timestamp": null, "type": 3, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false,
             "message_reference": null, "referenced_message": null, "nonce": null, "call": {"participants": ["100"], "ended_timestamp": null}
         }));
+    }
+
+    #[test]
+    fn soundboard_and_entrance_sounds() {
+        let sound = json!({
+            "sound_id": "80", "name": "airhorn", "volume": 0.5, "emoji_id": null, "emoji_name": "📯", "guild_id": "300",
+            "available": true, "user": user(), "url": "http://x/a.ogg"
+        });
+        round_trip::<SoundboardSound>(sound.clone());
+        let default =
+            json!({"sound_id": "1", "name": "chime", "volume": 1.0, "emoji_id": null, "emoji_name": null, "available": true, "url": "http://x/1.wav"});
+        round_trip::<SoundboardSound>(default.clone());
+        round_trip::<SoundboardSoundList>(json!({"items": [sound.clone()]}));
+        round_trip::<CreateSoundboardSoundRequest>(json!({"name": "airhorn", "attachment_id": "9", "volume": 0.5, "emoji_name": "📯"}));
+        let edit: EditSoundboardSoundRequest = serde_json::from_value(json!({"emoji_name": null, "volume": 0.2})).expect("edit");
+        assert_eq!((edit.name, edit.volume, edit.emoji_id, edit.emoji_name), (None, Some(0.2), None, Some(None)));
+        round_trip::<SendSoundboardSoundRequest>(json!({"sound_id": "80", "source_guild_id": "300"}));
+        round_trip::<SendSoundboardSoundRequest>(json!({"sound_id": "1"}));
+        round_trip::<EntranceSounds>(json!({"entrance_sounds": [
+            {"guild_id": null, "sound_id": "1", "source_guild_id": null},
+            {"guild_id": "300", "sound_id": "80", "source_guild_id": "300"}
+        ]}));
+        let set: SetEntranceSoundRequest = serde_json::from_value(json!({"sound_id": null})).expect("clear");
+        assert_eq!((set.guild_id, set.sound_id, set.source_guild_id), (None, None, None));
+        let effect = VoiceChannelEffectSend {
+            channel_id: Snowflake(201),
+            guild_id: Snowflake(300),
+            user_id: Snowflake(100),
+            sound_id: Snowflake(80),
+            sound_volume: 0.5,
+            emoji: Some(EffectEmoji { id: None, name: Some("📯".to_owned()) }),
+            source_guild_id: Some(Snowflake(300)),
+            sound_url: "http://x/a.ogg".to_owned(),
+            entrance: false,
+        };
+        let event = GatewayEvent::VoiceChannelEffectSend(effect);
+        assert_eq!(
+            (event.name(), event.data()),
+            (
+                "VOICE_CHANNEL_EFFECT_SEND",
+                json!({"channel_id": "201", "guild_id": "300", "user_id": "100", "sound_id": "80", "sound_volume": 0.5,
+                       "emoji": {"id": null, "name": "📯"}, "source_guild_id": "300", "sound_url": "http://x/a.ogg"})
+            )
+        );
+        let delete = GatewayEvent::GuildSoundboardSoundDelete(SoundboardSoundDelete { sound_id: Snowflake(80), guild_id: Snowflake(300) });
+        assert_eq!((delete.name(), delete.data()), ("GUILD_SOUNDBOARD_SOUND_DELETE", json!({"sound_id": "80", "guild_id": "300"})));
+        assert_ne!(permissions::DEFAULT_EVERYONE & permissions::USE_EXTERNAL_SOUNDS, 0, "the Nitro gate is free");
     }
 
     #[test]

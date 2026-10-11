@@ -25,6 +25,10 @@ export const MOCK_VOICE_ENDPOINT = "mock://voice";
 
 /** userId → voice state (a user is in at most one channel). */
 export const voiceStates = new Map<string, VoiceState>();
+/** Called after a user enters a channel (join or move, not a toggle or a reconnect): the soundboard plays entrance sounds. */
+export const voiceJoinListeners: ((userId: string, channel: MockChannel) => void)[] = [];
+const entered = (userId: string, channel: MockChannel): void => voiceJoinListeners.forEach(listener => listener(userId, channel));
+
 /** userId → gateway session that owns the voice state. */
 const owners = new Map<string, string>();
 let counter = 0;
@@ -202,6 +206,7 @@ export function handleVoiceStateUpdate(sessionId: string, userId: string, cmd: V
   }
   broadcast(emit, next, channel);
   if (current && current.channel_id !== channel.id) releaseChannel(emit, current.channel_id);
+  if (current?.channel_id !== channel.id) entered(userId, channel);
 }
 
 let nonce = 0;
@@ -230,6 +235,7 @@ export function setMockVoice(userId: string, channelId: string | null, emit: Emi
   if (current?.channel_id && !same) broadcastLeave(emit, current, new Set(audience(channel)));
   broadcast(emit, next, channel);
   if (current?.channel_id && !same) releaseChannel(emit, current.channel_id);
+  if (!same) entered(userId, channel);
 }
 
 /** Seed: users already in voice before anyone connects (no events). */

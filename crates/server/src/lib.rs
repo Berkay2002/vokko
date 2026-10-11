@@ -22,6 +22,7 @@ pub mod ratelimit;
 pub mod reminders;
 pub mod routes;
 pub mod seed;
+pub mod soundboard;
 pub mod state;
 pub mod stickers;
 pub mod store;

@@ -12,6 +12,7 @@ import { Field, Select } from "./controls";
 import { SaveBar } from "./SaveBar";
 import { blockedByUnsaved } from "./unsaved";
 import { mergeMemberLocal } from "./shared";
+import { EntranceSoundField } from "../../soundboard";
 
 const BANNER_COLORS = ["#5865f2", "#3d9e60", "#ffcb6e", "#dc4247", "#c45bd0", "#2b8fb5", "#6d7380", "#1e1f22"];
 const DEFAULT_THEME: [number, number] = [hexToInt("#5865f2"), hexToInt("#8d96f7")];
@@ -369,6 +370,7 @@ function ServerForm({ me, guild }: { me: User; guild: Guild }) {
           <ImageField label="Server banner" hint="Up to 10 MiB, shown at 17:6" current={member?.banner ?? null} staged={draft.banner} onStage={banner => set({ banner })} />
           <ThemeField value={draft.theme} onChange={theme => set({ theme })} note="Clear a field to fall back to your main profile." />
           <TextFields pronouns={draft.pronouns} bio={draft.bio} onPronouns={pronouns => set({ pronouns })} onBio={bio => set({ bio })} />
+          <EntranceSoundField guildId={guild.id} />
         </div>
         <PreviewCard user={me} look={look} tag={mine} guildName={mine ? guild.name : undefined} />
       </div>

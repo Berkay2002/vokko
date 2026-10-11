@@ -6,7 +6,7 @@ import { VOICE_SOUNDS, isSoundEnabled, withSoundEnabled, type VoiceSoundId } fro
 import { fromSuppressionChoice, resolveAudio, suppressionChoice, type InputProfile } from "../../voice/audioProfile";
 import { useMicTest } from "../../voice/micTest";
 import { PttSettings } from "../../voice/PttSettings";
-import { SOUNDBOARD_ROUTES_AVAILABLE } from "../../voice/soundboardSupport";
+import { SoundboardVoiceSettings } from "../../soundboard";
 import { useVoice } from "../../voice/store";
 import { sensitivityToDb } from "../../voice/vad";
 import { useCameraPreview } from "../../voice/video/useCameraPreview";
@@ -181,7 +181,6 @@ export function VoiceVideoPage() {
   const attenuation = usePrefs(s => s.streamAttenuation);
   const attenuationStrength = usePrefs(s => s.streamAttenuationStrength);
   const disabledSounds = usePrefs(s => s.disabledSounds);
-  const soundboardVolume = usePrefs(s => s.soundboardVolume);
   const debugLogging = usePrefs(s => s.debugLogging);
 
   const voiceStatus = useVoice(s => s.status);
@@ -450,20 +449,7 @@ export function VoiceVideoPage() {
         </div>
       </Category>
 
-      <Category title="Soundboard">
-        <Field label="Soundboard volume">
-          <Slider label="Soundboard volume" value={soundboardVolume} min={0} max={100} onChange={v => setPref("soundboardVolume", v)} format={v => `${v}%`} />
-        </Field>
-        <div className="vv-columns">
-          <Field label="Server">
-            <Select<string> label="Entrance sound server" value="all" options={[{ value: "all", label: "All servers" }]} disabled={!SOUNDBOARD_ROUTES_AVAILABLE} onChange={() => undefined} />
-          </Field>
-          <Field label="Sound">
-            <Select<string> label="Entrance sound" value="none" options={[{ value: "none", label: "None" }]} disabled={!SOUNDBOARD_ROUTES_AVAILABLE} onChange={() => undefined} />
-          </Field>
-        </div>
-        {!SOUNDBOARD_ROUTES_AVAILABLE && <div className="settings-field-note">Entrance sounds are coming soon.</div>}
-      </Category>
+      <SoundboardVoiceSettings />
 
       <Category title="Advanced">
         <Expander label="Show diagnostic settings" open={diagnostics} onToggle={() => setDiagnostics(o => !o)} controls={`${ids}-diag`} />

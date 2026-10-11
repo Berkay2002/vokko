@@ -107,6 +107,7 @@ pub fn spawn(state: AppState) {
             ticks += 1;
             if ticks.is_multiple_of(sweep_every) {
                 crate::stickers::sweep_assets(&state).await;
+                crate::soundboard::sweep_assets(&state).await;
             }
         }
     });

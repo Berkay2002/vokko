@@ -17,6 +17,7 @@ import { RolesPage } from "./settings/RolesPage";
 import { TagPage } from "./settings/TagPage";
 import { ThemePage } from "./settings/ThemePage";
 import { MembersPage } from "./settings/server-people";
+import { SoundboardSettingsPage } from "../soundboard";
 import { usePermissions } from "./usePermissions";
 import { IntegrationsPage } from "../apps/IntegrationsPage";
 import { EmojiSettingsPage } from "../emoji/EmojiSettingsPage";
@@ -54,7 +55,7 @@ const SECTIONS: SectionDef[] = [
   { id: "engagement", label: "Engagement", group: "top" },
   { id: "emoji", label: "Emoji", group: "expression", needs: EXPRESSIONS },
   { id: "stickers", label: "Stickers", group: "expression", needs: EXPRESSIONS, outline: ["Upload Sticker", "Stickers"] },
-  { id: "soundboard", label: "Soundboard", group: "expression", needs: EXPRESSIONS, outline: ["Upload Sound", "Sounds"] },
+  { id: "soundboard", label: "Soundboard", group: "expression", needs: [...EXPRESSIONS, Perm.CREATE_GUILD_EXPRESSIONS] },
   { id: "members", label: "Members", group: "people", needs: [Perm.MANAGE_GUILD, Perm.KICK_MEMBERS, Perm.BAN_MEMBERS, Perm.MODERATE_MEMBERS, Perm.MANAGE_NICKNAMES, Perm.MANAGE_ROLES] },
   { id: "roles", label: "Roles", group: "people", needs: [Perm.MANAGE_ROLES] },
   { id: "invites", label: "Invites", group: "people", needs: [Perm.CREATE_INSTANT_INVITE, Perm.MANAGE_GUILD] },
@@ -312,6 +313,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         return <EmojiSettingsPage guildId={guildId} canEdit={owner || perms.can(Perm.MANAGE_GUILD_EXPRESSIONS)} channels={channels} />;
       case "onboarding":
         return <OnboardingSettings guildId={guildId} />;
+      case "soundboard":
+        return <SoundboardSettingsPage guildId={guildId} />;
       default:
         return <NotYet section={active} />;
     }

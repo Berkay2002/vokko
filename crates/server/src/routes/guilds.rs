@@ -255,6 +255,7 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     files.extend(removed.into_iter().map(|(attachment,)| attachment));
     media::remove_files(&state, &files).await;
     crate::stickers::sweep_assets(&state).await;
+    crate::soundboard::sweep_assets(&state).await;
     state.hub.send(&members, &GatewayEvent::GuildDelete(IdOnly { id: Snowflake::from(id) }));
     for (adopter,) in adopters {
         users::publish_user(&state, adopter).await?;
