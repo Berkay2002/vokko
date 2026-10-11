@@ -7,7 +7,7 @@ import { LoginPage, OAuthCallbackPage, RegisterPage, ResetPage, VerifyPage } fro
 import { NotifyBanners, Splash } from "./notify";
 import { invitePath, onDeepLink } from "./desktop";
 import { InvitePage } from "./shell/InvitePage";
-import { pendingInvite } from "./shell/pendingInvite";
+import { afterSignInPath } from "./shell/pendingInvite";
 import { AuthorizePage } from "./apps/AuthorizePage";
 import { WindowFrame } from "./shell/WindowControls";
 import { setNavigator } from "./shell/nav";
@@ -22,10 +22,7 @@ function Protected() {
 
 function Guest({ children }: { children: React.ReactNode }) {
   const token = useStore(s => s.token);
-  if (token) {
-    const invite = pendingInvite.get();
-    return <Navigate to={invite ? `/invite/${invite}` : "/channels/@me"} replace />;
-  }
+  if (token) return <Navigate to={afterSignInPath()} replace />;
   return <>{children}</>;
 }
 

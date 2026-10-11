@@ -25,3 +25,9 @@ export const pendingInvite = {
     }
   },
 };
+
+/** Where a user lands right after signing in or registering: the invite they arrived with, else home. */
+export const afterSignInPath = (): string => {
+  const code = pendingInvite.get();
+  return code ? `/invite/${encodeURIComponent(code)}` : "/channels/@me";
+};

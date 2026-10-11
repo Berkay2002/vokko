@@ -1,33 +1,28 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { MailX } from "lucide-react";
+import { MailX, TriangleAlert } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
-import { request } from "../api/rest";
+import { request, resolveUrl } from "../api/rest";
 import { guildIconUrl, guildInitials, useStore } from "../api/store";
-import type { Snowflake } from "../api/types";
-import { resolveUrl } from "../api/rest";
+import type { Invite } from "../api/types";
 import { joinGuildWithInvite } from "./actions";
+import { errorText, loadFailed, shownLoad, type InviteLoad } from "./inviteView";
 import { guildPath } from "./nav";
 import { pendingInvite } from "./pendingInvite";
 
-interface InviteInfo {
-  code: string;
-  guild: { id: Snowflake; name: string; icon: string | null; member_count?: number };
-  member_count?: number;
-  approximate_member_count?: number;
-  approximate_presence_count?: number;
-}
-
-/** `/invite/:code`: Discord's "You've been invited to join" confirmation, for logged-in and logged-out visitors. */
+/**
+ * `/invite/:code`: Discord's "You've been invited to join" confirmation.
+ * The preview carries only the server's name, icon, member count and the invite's channel (no inviter, online count,
+ * banner or badge yet). The mock previews without an account; a server that answers 401 gets the generic "locked" card.
+ */
 export function InvitePage() {
   const { code = "" } = useParams();
   const navigate = useNavigate();
   const token = useStore(s => s.token);
   const ready = useStore(s => s.ready);
   const memberOf = useStore(s => s.guilds);
-  const [info, setInfo] = useState<InviteInfo | null | undefined>(undefined);
-  /** The server wants an account even to preview the invite: show the card without details. */
-  const [locked, setLocked] = useState(false);
+  const [load, setLoad] = useState<InviteLoad>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,43 +34,26 @@ export function InvitePage() {
 
   useEffect(() => {
     let live = true;
-    setInfo(undefined);
-    setLocked(false);
-    request<InviteInfo>("GET", `/invites/${encodeURIComponent(code)}`)
-      .then(result => live && setInfo(result))
-      .catch(e => {
-        if (!live) return;
-        if (e instanceof ApiRequestError && e.status === 401) setLocked(true);
-        setInfo(null);
-      });
+    setLoad({ status: "loading" });
+    setError(null);
+    request<Invite>("GET", `/invites/${encodeURIComponent(code)}`).then(
+      invite => live && setLoad({ status: "ok", invite }),
+      failure => live && setLoad(loadFailed(failure)),
+    );
     return () => {
       live = false;
     };
-  }, [code]);
-
-  const accept = async () => {
-    if (!token) {
-      void navigate("/login");
-      return;
-    }
-    if (info && memberOf[info.guild.id]) {
-      void navigate(guildPath(info.guild.id));
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const guild = await joinGuildWithInvite(code);
-      void navigate(guildPath(guild.id));
-    } catch (e) {
-      setError(e instanceof ApiRequestError ? e.message : "Could not join this server. Try again.");
-      setBusy(false);
-    }
-  };
+  }, [code, token, attempt]);
 
   const home = token ? "/channels/@me" : "/login";
+  const shown = shownLoad(load, !!token, ready);
+  const leave = (
+    <Link className="btn btn-primary invite-button" to={home} onClick={() => pendingInvite.clear()}>
+      Continue to Vokko
+    </Link>
+  );
 
-  if (info === undefined) {
+  if (shown.status === "loading") {
     return (
       <div className="auth-page">
         <div className="auth-card invite-card" aria-busy="true">
@@ -85,7 +63,7 @@ export function InvitePage() {
     );
   }
 
-  if (info === null && locked) {
+  if (shown.status === "locked") {
     return (
       <div className="auth-page">
         <div className="auth-card invite-card">
@@ -95,12 +73,15 @@ export function InvitePage() {
           <button type="button" className="btn btn-primary invite-button" onClick={() => void navigate("/login")}>
             Accept Invite
           </button>
+          <Link className="invite-skip" to="/register">
+            Create an account
+          </Link>
         </div>
       </div>
     );
   }
 
-  if (info === null) {
+  if (shown.status === "invalid") {
     return (
       <div className="auth-page">
         <div className="auth-card invite-card">
@@ -109,7 +90,27 @@ export function InvitePage() {
           </span>
           <h1 className="invite-name">Invite Invalid</h1>
           <p className="invite-sub">This invite may be expired, or you might not have permission to join.</p>
-          <Link className="btn btn-primary invite-button" to={home}>
+          {leave}
+        </div>
+      </div>
+    );
+  }
+
+  if (shown.status === "failed") {
+    return (
+      <div className="auth-page">
+        <div className="auth-card invite-card">
+          <span className="invite-icon invite-icon-bad">
+            <TriangleAlert size={32} aria-hidden />
+          </span>
+          <h1 className="invite-name">Couldn't load this invite</h1>
+          <p className="invite-sub" role="alert">
+            {shown.message}
+          </p>
+          <button type="button" className="btn btn-primary invite-button" onClick={() => setAttempt(n => n + 1)}>
+            Try again
+          </button>
+          <Link className="invite-skip" to={home}>
             Continue to Vokko
           </Link>
         </div>
@@ -117,43 +118,64 @@ export function InvitePage() {
     );
   }
 
-  const icon = guildIconUrl(info.guild);
-  const members = info.approximate_member_count ?? info.guild.member_count ?? info.member_count;
-  const online = info.approximate_presence_count;
-  const joined = !!memberOf[info.guild.id];
+  const { guild, channel } = shown.invite;
+  const icon = guildIconUrl(guild);
+  const joined = !!memberOf[guild.id];
+
+  const accept = async () => {
+    if (!token) {
+      void navigate("/login");
+      return;
+    }
+    const target = guildPath(guild.id, channel.id);
+    if (joined) {
+      void navigate(target);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await joinGuildWithInvite(code);
+      void navigate(target);
+    } catch (failure) {
+      // Revoked or used up since the preview: the card no longer applies.
+      if (failure instanceof ApiRequestError && failure.status === 404) setLoad({ status: "invalid" });
+      else setError(errorText(failure, "Could not join this server. Try again."));
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="auth-page">
       <div className="auth-card invite-card" role="main" aria-label="Server invite">
         <p className="invite-eyebrow">{joined ? "You are already in" : "You've been invited to join"}</p>
-        <span className="invite-icon">{icon ? <img src={resolveUrl(icon)} alt="" draggable={false} /> : <span>{guildInitials(info.guild.name)}</span>}</span>
-        <h1 className="invite-name">{info.guild.name}</h1>
-        {(online !== undefined || members !== undefined) && (
-          <p className="invite-counts">
-            {online !== undefined && (
-              <span className="invite-count">
-                <i className="invite-dot invite-dot-online" /> {online} Online
-              </span>
-            )}
-            {members !== undefined && (
-              <span className="invite-count">
-                <i className="invite-dot" /> {members} Member{members === 1 ? "" : "s"}
-              </span>
-            )}
-          </p>
-        )}
+        <span className="invite-icon">{icon ? <img src={resolveUrl(icon)} alt="" draggable={false} /> : <span>{guildInitials(guild.name)}</span>}</span>
+        <h1 className="invite-name">{guild.name}</h1>
+        <p className="invite-counts">
+          <span className="invite-count">
+            <i className="invite-dot" /> {guild.member_count} Member{guild.member_count === 1 ? "" : "s"}
+          </span>
+        </p>
         {error && (
           <p className="field-error invite-error" role="alert">
             {error}
           </p>
         )}
-        <button type="button" className="btn btn-primary invite-button" disabled={busy || (!!token && !ready)} onClick={() => void accept()}>
-          {joined ? "Continue to Server" : "Accept Invite"}
+        <button type="button" className="btn btn-primary invite-button" disabled={busy} aria-busy={busy} onClick={() => void accept()}>
+          {busy ? "Joining…" : joined ? "Continue to Server" : "Accept Invite"}
         </button>
-        {!token && <p className="invite-sub">You will be asked to log in or register first.</p>}
-        <Link className="invite-skip" to={home}>
-          No thanks
-        </Link>
+        {token ? (
+          <Link className="invite-skip" to={home} onClick={() => pendingInvite.clear()}>
+            No thanks
+          </Link>
+        ) : (
+          <>
+            <p className="invite-sub">You will be asked to log in or register first.</p>
+            <Link className="invite-skip" to="/register">
+              Create an account
+            </Link>
+          </>
+        )}
       </div>
     </div>
   );

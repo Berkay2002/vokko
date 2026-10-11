@@ -74,10 +74,6 @@
   background: var(--text-muted);
 }
 
-.invite-dot-online {
-  background: var(--status-online);
-}
-
 .invite-sub {
   margin: 12px 0 0;
   color: var(--text-muted);

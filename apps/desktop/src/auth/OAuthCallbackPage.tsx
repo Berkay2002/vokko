@@ -1,8 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, Navigate, useNavigate } from "react-router";
 import { acceptLogin } from "../api/auth";
 import { request } from "../api/rest";
+import { useStore } from "../api/store";
 import type { AuthResponse, InstanceInfo, MfaRequiredResponse, OAuthCompleteResponse, OAuthRegistration } from "../api/types";
+import { afterSignInPath } from "../shell/pendingInvite";
 import { fetchInstance } from "./api";
 import { DateOfBirth, EMPTY_DATE, isoDate, type DateParts } from "./DateOfBirth";
 import { MfaStep } from "./LoginPage";
@@ -51,7 +53,7 @@ function FinishSignUp({ registration }: { registration: OAuthRegistration }) {
         ...(instance?.terms ? { consent } : {}),
       };
       acceptLogin(await request<AuthResponse>("POST", "/auth/oauth/register", body));
-      void navigate("/channels/@me", { replace: true });
+      void navigate(afterSignInPath(), { replace: true });
     } catch (error) {
       setErrors(fieldErrors(error));
       setBusy(false);
@@ -106,6 +108,7 @@ type View =
 export function OAuthCallbackPage() {
   const [view, setView] = useState<View>({ state: "busy" });
   const navigate = useNavigate();
+  const token = useStore(s => s.token);
   useEffect(() => {
     const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
     const code = params.get("code");
@@ -119,7 +122,7 @@ export function OAuthCallbackPage() {
         if (result.kind === "login") {
           const step = acceptLogin(result.login);
           if (step) setView({ state: "mfa", ticket: step });
-          else void navigate("/channels/@me", { replace: true });
+          else void navigate(afterSignInPath(), { replace: true });
         } else if (result.kind === "register") setView({ state: "register", registration: result.registration });
         else if (result.kind === "reauthenticated") setView({ state: "reauthenticated", provider: result.provider });
         else setView({ state: "linked", provider: result.provider });
@@ -135,6 +138,8 @@ export function OAuthCallbackPage() {
     case "busy":
       return <Frame title="Signing you in...">{null}</Frame>;
     case "mfa":
+      // This route is not behind Guest, and MfaStep only sets the session: leave once it exists.
+      if (token) return <Navigate to={afterSignInPath()} replace />;
       return <MfaStep ticket={view.ticket} onBack={() => void navigate("/login", { replace: true })} />;
     case "register":
       return <FinishSignUp registration={view.registration} />;
