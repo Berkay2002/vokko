@@ -46,11 +46,12 @@ General rules:
 | PUT | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | emoji URL-encoded (unicode or `name:id`), 204 |
 | DELETE | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | 204 |
 | GET | /channels/{id}/messages/{mid}/reactions/{emoji} | `User[]` who reacted |
-| GET | /channels/{id}/pins | `Message[]` |
-| PUT/DELETE | /channels/{id}/pins/{mid} | 204 |
+| GET | /channels/{id}/messages/pins?limit&before | `PinnedMessagesPage` (newest pin first, limit 1-50, `before` = pinned_at ISO) |
+| PUT/DELETE | /channels/{id}/messages/pins/{mid} | 204; max 250 pins per channel → 400 code 30003 |
+| POST | /read-states/ack-bulk | `{read_states: [{channel_id, message_id}]}` → 204 ("mark server as read") |
 | POST | /channels/{id}/typing | 204, emits TYPING_START (expires after 10 s client-side) |
 | POST | /channels/{id}/messages/{mid}/ack | updates read state, 204 |
-| POST | /channels/{id}/attachments | multipart `file` (max 25 MiB) → `Attachment` (pending until referenced by a message) |
+| POST | /channels/{id}/attachments | multipart `file` (max 10 MiB, Discord's default) → `Attachment` (pending until referenced by a message) |
 | GET | /attachments/{id}/{filename} | serves the file (no auth required in v1; unguessable id) |
 
 ## Gateway
@@ -68,3 +69,8 @@ Events are delivered only to users who can see the channel/guild. Event names an
 Semantics notes: a reply puts the replied-to author in `mentions` (Discord default). Pinning emits MESSAGE_UPDATE for the pinned message plus a type 6 system message (MESSAGE_CREATE). `referenced_message.reactions` is always `[]`. Role mentions only drive `mention_count` (no `mention_roles` field).
 
 Read states: READY includes a read state for every channel the user can see that has messages. When a user joins a guild or a DM is created, their read state starts at the channel's latest message (nothing is unread). A channel without a read state counts as unread on the client.
+
+## Adopted from Discord client facts (docs/research/discord-client-facts.md)
+We match Discord's user-visible behaviour, not its wire protocol byte for byte. Adopted: `allowed_mentions` on send (reply ping toggle), paginated pins with `pinned_at` and the 250-pin cap, 10 files per message and 10 MiB per file, bulk ack, 429 responses with `RateLimitError` + `Retry-After` header (code 20016 for slowmode later).
+Client gateway behaviour (shell): first heartbeat after `random() * interval`, then every interval; no ACK before the next beat → close and reconnect; Hello must arrive within 30 s; resume only if the last ACK is under 3 minutes old, else identify; reconnect backoff 1 s doubling to 60 s with jitter; stop reconnecting only on close 4004 (bad token); the client closes its own sockets with 4000.
+Not adopted for now: op 40 QoS heartbeat, ETF encoding, zstd/zlib compression, capabilities/client_state in Identify, the cloud upload flow (resumable PUT to an upload URL), ack tokens.
