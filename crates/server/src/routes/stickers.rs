@@ -96,7 +96,7 @@ async fn create(
     if size > MAX_STICKER_BYTES {
         return Err(ApiErr::invalid("attachment_id", "A sticker can be at most 512 KiB."));
     }
-    let bytes = tokio::fs::read(media::file_path(&state, attachment)).await.map_err(|_| ApiErr::invalid("attachment_id", "Unknown attachment."))?;
+    let bytes = state.storage.read(attachment).await.map_err(|_| ApiErr::invalid("attachment_id", "Unknown attachment."))?;
     let sniffed = media::sniff_image(&bytes);
     let format = sniffed
         .and_then(|image| stickers::detect_format(image.content_type, &bytes))

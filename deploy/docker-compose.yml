@@ -38,6 +38,16 @@ services:
       VOKKO_PUBLIC_URL: ${VOKKO_PUBLIC_URL:-http://localhost:8710}
       VOKKO_MAX_UPLOAD_MB: ${VOKKO_MAX_UPLOAD_MB:-25}
       VOKKO_UNFURL: ${VOKKO_UNFURL:-on}
+      VOKKO_STORAGE: ${VOKKO_STORAGE:-local}
+      VOKKO_S3_ENDPOINT: ${VOKKO_S3_ENDPOINT:-}
+      VOKKO_S3_BUCKET: ${VOKKO_S3_BUCKET:-}
+      VOKKO_S3_REGION: ${VOKKO_S3_REGION:-auto}
+      VOKKO_S3_ACCESS_KEY_ID: ${VOKKO_S3_ACCESS_KEY_ID:-}
+      VOKKO_S3_SECRET_ACCESS_KEY: ${VOKKO_S3_SECRET_ACCESS_KEY:-}
+      VOKKO_S3_SERVE: ${VOKKO_S3_SERVE:-proxy}
+      VOKKO_S3_PREFIX: ${VOKKO_S3_PREFIX:-attachments/}
+      VOKKO_S3_PRESIGN_TTL_SECS: ${VOKKO_S3_PRESIGN_TTL_SECS:-300}
+      VOKKO_DB_MAX_CONNECTIONS: ${VOKKO_DB_MAX_CONNECTIONS:-10}
       VOKKO_GIF_PROVIDER: ${VOKKO_GIF_PROVIDER:-none}
       VOKKO_GIF_API_KEY: ${VOKKO_GIF_API_KEY:-}
       # `on` only when every request arrives through a reverse proxy that appends the client address (the bundled Caddy does).

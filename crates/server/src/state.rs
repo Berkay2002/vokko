@@ -10,6 +10,7 @@ use crate::gifs::GifProxy;
 use crate::hub::Hub;
 use crate::ids::SnowflakeGenerator;
 use crate::ratelimit::RateLimiter;
+use crate::storage::{self, Storage};
 use crate::unfurl::Unfurler;
 use crate::voice::{self, Voice, livekit::RoomService};
 
@@ -23,6 +24,8 @@ pub struct Inner {
     pub accounts: Accounts,
     pub gifs: GifProxy,
     pub voice: Voice,
+    /// Attachment bytes (`storage::StorageConfig`).
+    pub storage: Arc<dyn Storage>,
 }
 
 #[derive(Clone)]
@@ -48,7 +51,8 @@ impl AppState {
         let accounts = Accounts::new(&config.accounts);
         let gifs = GifProxy::new(config.gif.clone());
         let voice = Voice::new(rooms);
-        Self(Arc::new(Inner { db, config, ids: SnowflakeGenerator::new(1), hub, limiter: RateLimiter::default(), unfurler, accounts, gifs, voice }))
+        let storage = storage::build(&config.storage, &config.data_dir);
+        Self(Arc::new(Inner { db, config, ids: SnowflakeGenerator::new(1), hub, limiter: RateLimiter::default(), unfurler, accounts, gifs, voice, storage }))
     }
 
     /// Absolute URL of a stored asset path (`<attachment id>/<filename>`).
@@ -56,6 +60,7 @@ impl AppState {
         format!("{}/api/v1/attachments/{path}", self.config.public_url)
     }
 
+    /// Where the local backend keeps files (unused by the other backends).
     pub fn attachments_dir(&self) -> PathBuf {
         self.config.data_dir.join("attachments")
     }

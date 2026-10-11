@@ -1,4 +1,4 @@
-//! Attachment storage (`<data dir>/attachments/<attachment id>`), content-type sniffing and image dimensions.
+//! Attachment keys and file cleanup (bytes live in `storage`), content-type sniffing and image dimensions.
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -25,15 +25,44 @@ pub fn asset_path(id: i64, key: &str, filename: &str) -> String {
     format!("{id}/{key}/{}", encode_filename(filename))
 }
 
+/// Where the local backend keeps an attachment's bytes.
 pub fn file_path(state: &AppState, attachment_id: i64) -> PathBuf {
     state.attachments_dir().join(attachment_id.to_string())
 }
 
-/// Best-effort removal of stored files (rows are removed by the caller).
+/// Parallel deletes per batch handed to a remote backend.
+const REMOTE_DELETE_CONCURRENCY: usize = 8;
+
+/// Best-effort removal of stored files (rows are removed by the caller). Local disk deletes before returning; a remote
+/// backend (one request per file) deletes in a detached task, so a big guild or account delete neither holds the request
+/// open nor stops halfway when the client gives up.
 pub async fn remove_files(state: &AppState, attachment_ids: &[i64]) {
-    for id in attachment_ids {
-        let _ = tokio::fs::remove_file(file_path(state, *id)).await;
+    if attachment_ids.is_empty() {
+        return;
     }
+    if state.storage.deletes_inline() {
+        for id in attachment_ids {
+            if let Err(error) = state.storage.delete(*id).await {
+                tracing::warn!("cannot remove attachment file {id}: {error}");
+            }
+        }
+        return;
+    }
+    let storage = state.storage.clone();
+    let ids = attachment_ids.to_vec();
+    tokio::spawn(async move {
+        use futures_util::StreamExt;
+        futures_util::stream::iter(ids)
+            .for_each_concurrent(REMOTE_DELETE_CONCURRENCY, |id| {
+                let storage = storage.clone();
+                async move {
+                    if let Err(error) = storage.delete(id).await {
+                        tracing::warn!("cannot remove attachment file {id}: {error}");
+                    }
+                }
+            })
+            .await;
+    });
 }
 
 /// Deletes pending uploads (`message_id IS NULL AND claimed_at IS NULL`) older than `max_age`, rows and files; returns how many.

@@ -3,11 +3,10 @@ use axum::Router;
 use axum::body::Body;
 use axum::extract::multipart::MultipartError;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, State};
-use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE, HeaderName};
+use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE, HeaderName, LOCATION};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
-use tokio_util::io::ReaderStream;
 use vokko_protocol::api::Attachment;
 use vokko_protocol::api::permissions::ATTACH_FILES;
 
@@ -18,6 +17,7 @@ use crate::error::{ApiErr, ApiResult};
 use crate::extract::parse_id;
 use crate::media::{self, encode_filename, plain_content_type, sanitize_filename, sniff_image};
 use crate::state::AppState;
+use crate::storage::Presign;
 use crate::store::attachment_api;
 
 /// Hitting the body limit surfaces as a multipart error carrying 413; everything else is a malformed form.
@@ -57,8 +57,8 @@ async fn upload(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
             None => (plain_content_type(declared.as_deref(), &filename), None, None),
         };
         let attachment_id = state.ids.next();
-        tokio::fs::create_dir_all(state.attachments_dir()).await?;
-        tokio::fs::write(media::file_path(&state, attachment_id), &bytes).await?;
+        let size = bytes.len();
+        state.storage.put(attachment_id, bytes.into()).await?;
         let key = media::new_key();
         // Quota check and insert in one statement so concurrent uploads cannot both slip under the limit.
         let inserted = sqlx::query(
@@ -69,7 +69,7 @@ async fn upload(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
         .bind(user_id)
         .bind(&filename)
         .bind(&content_type)
-        .bind(bytes.len() as i64)
+        .bind(size as i64)
         .bind(width)
         .bind(height)
         .bind(&key)
@@ -89,7 +89,7 @@ async fn upload(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
                 return Err(error.into());
             }
         }
-        return Ok(Json(attachment_api(&state, attachment_id, &key, filename, Some(content_type), bytes.len() as i64, width, height)));
+        return Ok(Json(attachment_api(&state, attachment_id, &key, filename, Some(content_type), size as i64, width, height)));
     }
     Err(ApiErr::invalid("file", "Missing `file` part."))
 }
@@ -103,8 +103,6 @@ async fn download(State(state): State<AppState>, Path((id, key, url_filename)): 
     if !media::keys_match(&stored_key, &key) || url_filename != filename {
         return Err(ApiErr::unknown_attachment());
     }
-    let file = tokio::fs::File::open(media::file_path(&state, id)).await.map_err(|_| ApiErr::unknown_attachment())?;
-    let length = file.metadata().await.map_err(|_| ApiErr::unknown_attachment())?.len();
     let content_type = content_type.unwrap_or_else(|| "application/octet-stream".to_owned());
     let inline = matches!(content_type.as_str(), "image/png" | "image/jpeg" | "image/gif" | "image/webp");
     let disposition = format!(
@@ -113,12 +111,28 @@ async fn download(State(state): State<AppState>, Path((id, key, url_filename)): 
         filename.replace(['"', '\\'], "_").replace(|c: char| !c.is_ascii(), "_"),
         encode_filename(&filename)
     );
-    let mut response = Response::new(Body::from_stream(ReaderStream::new(file)));
+    // Presigned mode: the key and filename were checked above, so the bucket only sees callers that passed the same rules.
+    if let Some(url) = state.storage.presigned_url(id, &Presign { content_type: &content_type, disposition: &disposition }) {
+        let mut response = Response::new(Body::empty());
+        *response.status_mut() = StatusCode::FOUND;
+        let headers = response.headers_mut();
+        headers.insert(LOCATION, HeaderValue::from_str(&url).map_err(|_| ApiErr::internal())?);
+        // The URL expires, so the redirect itself is not cached.
+        headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        return Ok(response);
+    }
+    let object = state.storage.open(id).await.map_err(|error| {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!("cannot read attachment {id}: {error}");
+        }
+        ApiErr::unknown_attachment()
+    })?;
+    let mut response = Response::new(object.body);
     *response.status_mut() = StatusCode::OK;
     let headers = response.headers_mut();
     headers.insert(CONTENT_TYPE, HeaderValue::from_str(&content_type).map_err(|_| ApiErr::internal())?);
     headers.insert(CONTENT_DISPOSITION, HeaderValue::from_str(&disposition).map_err(|_| ApiErr::internal())?);
-    headers.insert(CONTENT_LENGTH, HeaderValue::from(length));
+    headers.insert(CONTENT_LENGTH, HeaderValue::from(object.length));
     headers.insert(CACHE_CONTROL, HeaderValue::from_static("private, max-age=86400"));
     headers.insert(HeaderName::from_static("x-content-type-options"), HeaderValue::from_static("nosniff"));
     Ok(response)
