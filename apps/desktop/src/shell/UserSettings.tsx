@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import type { UIEvent } from "react";
 import { Accessibility, Bell, Gamepad2, Keyboard, Languages, LogOut, Mic, MessagesSquare, Palette, Pencil, Plug, Search, ShieldCheck, User as UserIcon } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
-import { request, uploadAttachment } from "../api/rest";
+import { request } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
 import type { User } from "../api/types";
 import { Avatar } from "./Avatar";
@@ -12,6 +12,7 @@ import { AppearancePage } from "./settings/AppearancePage";
 import { Category, Page, Select, Unavailable } from "./settings/controls";
 import { KeybindsPage } from "./settings/KeybindsPage";
 import { NotificationsPage } from "./settings/NotificationsPage";
+import { ProfilesPage } from "./settings/ProfilesPage";
 import { SettingsBlock, SettingsModal, SettingsNavGroup, SettingsNavItem, SettingsNavSub, SettingsNavSubs, SettingsRow } from "./settings/SettingsModal";
 import { VoiceVideoPage } from "./settings/VoiceVideoPage";
 
@@ -76,8 +77,6 @@ function LanguageTime() {
     </Page>
   );
 }
-
-const BANNER_COLORS = ["#5865f2", "#3d9e60", "#ffcb6e", "#dc4247", "#c45bd0", "#2b8fb5", "#6d7380", "#1e1f22"];
 
 function errorText(error: unknown): string {
   return error instanceof ApiRequestError ? error.message : "Something went wrong. Try again.";
@@ -172,88 +171,6 @@ function MyAccount({ me }: { me: User }) {
   );
 }
 
-function Profiles({ me }: { me: User }) {
-  const [bio, setBio] = useState(me.bio ?? "");
-  const [color, setColor] = useState(me.banner_color ?? "#5865f2");
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const file = useRef<HTMLInputElement>(null);
-  const uploadChannel = useStore(s => s.privateChannels[0] ?? Object.values(s.channels).find(c => c.guild_id)?.id);
-  const { busy, error, saved, save } = useSave();
-  const dirty = bio.trim() !== (me.bio ?? "") || color !== (me.banner_color ?? "#5865f2");
-
-  const pick = async (selected: File | undefined) => {
-    if (!selected || !uploadChannel) return;
-    setUploading(true);
-    setUploadError(null);
-    try {
-      const attachment = await uploadAttachment(uploadChannel, selected);
-      await save({ avatar_attachment_id: attachment.id });
-    } catch (e) {
-      setUploadError(errorText(e));
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  return (
-    <div className="settings-page profiles-page">
-      <div className="profiles-layout">
-        <div className="profiles-form">
-          <div className="field-label">Avatar</div>
-          <div className="account-inline">
-            <button type="button" className="btn btn-primary btn-sm" disabled={uploading || !uploadChannel} onClick={() => file.current?.click()}>
-              {uploading ? "Uploading…" : "Change Avatar"}
-            </button>
-            <button type="button" className="btn btn-link btn-sm" disabled={busy || !me.avatar} onClick={() => void save({ avatar_attachment_id: null })}>
-              Remove Avatar
-            </button>
-            <input ref={file} type="file" accept="image/*" hidden onChange={e => void pick(e.target.files?.[0])} />
-          </div>
-          {uploadError && <p className="field-error">{uploadError}</p>}
-          <div className="field-label">Banner Color</div>
-          <div className="swatches">
-            {BANNER_COLORS.map(c => (
-              <button key={c} type="button" className={`swatch${color === c ? " selected" : ""}`} style={{ background: c }} aria-label={c} onClick={() => setColor(c)} />
-            ))}
-          </div>
-          <label className="field-label" htmlFor="bio">
-            About Me
-          </label>
-          <textarea id="bio" className="input textarea" rows={4} maxLength={190} value={bio} onChange={e => setBio(e.target.value)} />
-          <div className="char-count">{190 - bio.length}</div>
-          <div className="account-inline">
-            <button type="button" className="btn btn-primary" disabled={busy || !dirty} onClick={() => void save({ bio: bio.trim(), banner_color: color })}>
-              Save Changes
-            </button>
-            {saved && <span className="settings-saved">Saved.</span>}
-          </div>
-          {error && <p className="field-error">{error}</p>}
-        </div>
-        <div className="profile-preview">
-          <div className="field-label">Preview</div>
-          <div className="profile-card static">
-            <div className="profile-banner" style={{ background: color }} />
-            <div className="profile-avatar">
-              <Avatar user={me} size={80} />
-            </div>
-            <div className="profile-body">
-              <div className="profile-name">{displayName(me)}</div>
-              <div className="profile-username">{me.username}</div>
-              {bio.trim() && (
-                <section className="profile-section">
-                  <h3>About Me</h3>
-                  <p>{bio}</p>
-                </section>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export function UserSettings({ section }: { section?: string }) {
   const me = useStore(s => s.me);
   const [current, setCurrent] = useState(SECTIONS.some(s => s.id === section) ? (section as string) : "account");
@@ -301,7 +218,7 @@ export function UserSettings({ section }: { section?: string }) {
       case "account":
         return <MyAccount me={me} />;
       case "profiles":
-        return <Profiles me={me} />;
+        return <ProfilesPage me={me} />;
       case "notifications":
         return <NotificationsPage />;
       case "voice":

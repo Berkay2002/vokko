@@ -1,0 +1,192 @@
+/* Profile perks: avatar decorations, profile effects, server tag chips, themed profile cards. Assets are Vokko's own (src/perks/catalog.ts). */
+
+/* ---- avatar decoration: a ring around the avatar, 12.5% bigger on every side ---- */
+.avatar-deco {
+  position: absolute;
+  inset: -12.5%;
+  width: 125%;
+  height: 125%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.avatar-deco-spin {
+  transform-origin: 50px 50px;
+  animation: avatar-deco-spin 12s linear infinite;
+}
+
+.avatar-deco.pulse {
+  animation: avatar-deco-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes avatar-deco-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes avatar-deco-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ---- profile effects: particles over the banner ---- */
+.pv-banner {
+  position: relative;
+  overflow: hidden;
+}
+
+.profile-effect {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.pe-particle {
+  position: absolute;
+  display: block;
+  background: var(--pe-color);
+  animation-iteration-count: infinite;
+  animation-timing-function: linear;
+  opacity: 0.85;
+}
+
+.pe-dot,
+.pe-flake {
+  border-radius: 50%;
+}
+
+.pe-ring {
+  border-radius: 50%;
+  background: transparent;
+  border: 1.5px solid var(--pe-color);
+}
+
+.pe-streak {
+  width: 2px !important;
+  border-radius: 1px;
+  transform: rotate(14deg);
+}
+
+.pe-spark {
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+}
+
+.pe-rise .pe-particle {
+  animation-name: pe-rise;
+}
+
+.pe-fall .pe-particle {
+  animation-name: pe-fall;
+}
+
+.pe-drift .pe-particle {
+  animation-name: pe-drift;
+  animation-timing-function: ease-in-out;
+  animation-direction: alternate;
+}
+
+.pe-twinkle .pe-particle {
+  animation-name: pe-twinkle;
+  animation-timing-function: ease-in-out;
+}
+
+@keyframes pe-rise {
+  from {
+    transform: translate(0, 40px);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.9;
+  }
+  to {
+    transform: translate(var(--pe-sway), -90px);
+    opacity: 0;
+  }
+}
+
+@keyframes pe-fall {
+  from {
+    transform: translate(0, -60px) rotate(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.9;
+  }
+  to {
+    transform: translate(var(--pe-sway), 140px) rotate(var(--pe-rot));
+    opacity: 0.1;
+  }
+}
+
+@keyframes pe-drift {
+  from {
+    transform: translate(calc(var(--pe-sway) * -1), 6px) rotate(0);
+    opacity: 0.3;
+  }
+  to {
+    transform: translate(var(--pe-sway), -14px) rotate(var(--pe-rot));
+    opacity: 1;
+  }
+}
+
+@keyframes pe-twinkle {
+  0%,
+  100% {
+    transform: scale(0.3) rotate(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1) rotate(45deg);
+    opacity: 1;
+  }
+}
+
+.reduce-motion .pe-particle,
+.reduce-motion .avatar-deco,
+.reduce-motion .avatar-deco-spin {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pe-particle,
+  .avatar-deco,
+  .avatar-deco-spin {
+    animation: none !important;
+  }
+}
+
+/* ---- themed profile card: --pv-primary fades into --pv-accent behind the body ---- */
+.pv-themed {
+  background: linear-gradient(180deg, var(--pv-primary) 0, color-mix(in srgb, var(--pv-primary) 55%, var(--pv-accent)) 38%, var(--pv-accent) 100%) !important;
+}
+
+.pv-themed .profile-avatar {
+  background: transparent;
+}
+
+.pv-pronouns {
+  color: var(--text-default);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.pv-name-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pv-pronouns + .profile-section,
+.pv-pronouns + .dm-profile-bio {
+  margin-top: 12px;
+}
+
+.profile-preview {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+}

@@ -23,6 +23,9 @@ import "./styles/settings-modal.css";
 import "./styles/menus.css";
 import "./styles/server-settings.css";
 import "./styles/channel-settings.css";
+import "./styles/perks.css";
+import "./styles/profiles.css";
+import "./styles/server-perks.css";
 import "./ui/prefs";
 
 bootstrap();

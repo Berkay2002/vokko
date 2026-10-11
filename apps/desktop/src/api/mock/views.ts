@@ -4,6 +4,7 @@ import { RelationshipType, type Channel, type GatewayEvents, type GuildMember, t
 import { compareIds } from "../snowflake";
 import { canView } from "./access";
 import { db, sortedMessages, userOf, type MockChannel, type MockMessage } from "./db";
+import { memberProfileFields } from "./perks";
 
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
   const guild = m.guild_id ? db.guilds.get(m.guild_id) : undefined;
@@ -60,6 +61,7 @@ export function membersOf(guildId: string): (GuildMember & { guild_id?: never })
     roles: [...m.roles],
     joined_at: m.joined_at,
     ...(m.communication_disabled_until ? { communication_disabled_until: m.communication_disabled_until } : {}),
+    ...memberProfileFields(m),
   }));
 }
 

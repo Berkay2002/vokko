@@ -3,6 +3,9 @@ import { request } from "../api/rest";
 import { snowflakeToTimestamp } from "../api/snowflake";
 import { displayName, useStore } from "../api/store";
 import type { Snowflake, User, UserProfile } from "../api/types";
+import { ProfileBanner } from "../perks/ProfileBanner";
+import { resolveProfile, themeVars } from "../perks/profile";
+import { TagChip } from "../perks/TagChip";
 import { Modal } from "../ui";
 import { Avatar, GuildIcon } from "./Avatar";
 import { closeModal, openModal } from "./modalStore";
@@ -32,17 +35,23 @@ export function useProfileData(userId: Snowflake, guildId?: Snowflake | null) {
 export function DmProfilePanel({ user }: { user: User }) {
   const { mutual, memberSince } = useProfileData(user.id);
   const count = mutual.length;
+  const look = resolveProfile(user);
+  const tagGuildName = useStore(s => (user.primary_guild ? s.guilds[user.primary_guild.guild_id]?.name : undefined));
   return (
     <aside className="dm-profile" aria-label="User Profile">
-      <div className="dm-profile-card">
-        <div className="dm-profile-banner" style={{ background: user.banner_color ?? "var(--brand-500)" }} />
+      <div className={`dm-profile-card${look.themeColors ? " pv-themed" : ""}`} style={themeVars(look.themeColors)}>
+        <ProfileBanner look={look} className="dm-profile-banner" />
         <div className="dm-profile-avatar">
           <Avatar user={user} size={80} status />
         </div>
         <div className="dm-profile-body">
           <div className="dm-profile-name">{displayName(user)}</div>
-          <div className="dm-profile-username">{user.username}</div>
-          {user.bio && <p className="dm-profile-bio">{user.bio}</p>}
+          <div className="pv-name-row">
+            <span className="dm-profile-username">{user.username}</span>
+            <TagChip tag={user.primary_guild} guildName={tagGuildName} />
+          </div>
+          {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
+          {look.bio && <p className="dm-profile-bio">{look.bio}</p>}
           <div className="dm-profile-mutual">
             <span className="dm-profile-mutual-icons">
               {mutual.slice(0, 3).map(g => (
@@ -73,7 +82,9 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
   const member = useStore(s => (guildId ? s.members[guildId]?.[userId] : undefined));
   const [tab, setTab] = useState<"about" | "servers" | "friends">("about");
   const { profile, mutual, memberSince } = useProfileData(userId, guildId);
+  const tagGuildName = useStore(s => (user?.primary_guild ? s.guilds[user.primary_guild.guild_id]?.name : undefined));
   if (!user) return null;
+  const look = resolveProfile(user, member);
   const tabs = [
     { id: "about" as const, label: "About" },
     { id: "servers" as const, label: `Mutual Servers — ${mutual.length}` },
@@ -81,13 +92,17 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
   ];
   return (
     <Modal open onClose={closeModal} title={displayName(user, member)} className="modal-medium">
-      <div className="full-profile">
-        <div className="dm-profile-banner" style={{ background: user.banner_color ?? "var(--brand-500)" }} />
+      <div className={`full-profile${look.themeColors ? " pv-themed" : ""}`} style={themeVars(look.themeColors)}>
+        <ProfileBanner look={look} className="dm-profile-banner" />
         <div className="full-profile-head">
-          <Avatar user={user} size={80} status />
+          <Avatar user={user} member={member} size={80} status />
           <div>
             <div className="dm-profile-name">{displayName(user, member)}</div>
-            <div className="dm-profile-username">{user.username}</div>
+            <div className="pv-name-row">
+              <span className="dm-profile-username">{user.username}</span>
+              <TagChip tag={user.primary_guild} guildName={tagGuildName} />
+            </div>
+            {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
           </div>
         </div>
         <div className="full-profile-tabs" role="tablist">
@@ -99,10 +114,10 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
         </div>
         {tab === "about" && (
           <div className="full-profile-body">
-            {user.bio && (
+            {look.bio && (
               <section>
                 <div className="dm-profile-label">About Me</div>
-                <p className="dm-profile-bio">{user.bio}</p>
+                <p className="dm-profile-bio">{look.bio}</p>
               </section>
             )}
             <section>
