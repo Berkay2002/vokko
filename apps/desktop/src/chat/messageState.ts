@@ -79,6 +79,17 @@ export function replaceWindow(s: ChannelState, page: Message[], opts: { hasMoreB
   };
 }
 
+/**
+ * `page` is a fetch of the latest messages. Anything the gateway delivered while the request was in flight and that is newer
+ * than the whole page would be dropped by replaceWindow, so carry it over.
+ */
+export function withLateArrivals(s: ChannelState, page: Message[]): Message[] {
+  let newest: Snowflake | null = null;
+  for (const m of page) if (!newest || compareIds(m.id, newest) > 0) newest = m.id;
+  const late = s.messages.filter(m => !newest || compareIds(m.id, newest) > 0);
+  return late.length ? [...page, ...late] : page;
+}
+
 export function prependPage(s: ChannelState, page: Message[], limit = PAGE_SIZE): ChannelState {
   const oldest = s.messages[0]?.id;
   const fresh = page.filter(m => !oldest || compareIds(m.id, oldest) < 0).sort((a, b) => compareIds(a.id, b.id));

@@ -6,7 +6,7 @@ import type { CreateMessageRequest, EditMessageRequest, Message, ReactionEmoji, 
 import { gateway, request } from './shell';
 import {
   PAGE_SIZE, TYPING_TTL_MS, appendPage, applyReaction, deleteMessage, emojiKey, emptyState, indexOfId, prependPage, replaceWindow, setTyping,
-  applyUserUpdate, updateIfPresent, upsertMessage, type ChannelState, type PendingMessage,
+  applyUserUpdate, updateIfPresent, upsertMessage, withLateArrivals, type ChannelState, type PendingMessage,
 } from './messageState';
 import { rememberMessage, rememberMessages } from './userCache';
 import { newNonce } from './util';
@@ -83,7 +83,7 @@ async function fetchPage(channelId: Snowflake, params: Record<string, string>): 
 async function refreshLatest(channelId: Snowflake): Promise<void> {
   try {
     const page = await fetchPage(channelId, {});
-    update(channelId, s => ({ ...replaceWindow(s, page, { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false }) }));
+    update(channelId, s => ({ ...replaceWindow(s, withLateArrivals(s, page), { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false }) }));
   } catch { /* the next open retries */ }
 }
 
@@ -105,7 +105,7 @@ export const messageStore = {
     void (async () => {
       try {
         const page = await fetchPage(channelId, {});
-        update(channelId, s => replaceWindow(s, page, { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false }));
+        update(channelId, s => replaceWindow(s, withLateArrivals(s, page), { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false }));
       } catch {
         update(channelId, s => ({ ...s, status: 'error' }));
       }
@@ -148,7 +148,7 @@ export const messageStore = {
   async jumpToPresent(channelId: Snowflake): Promise<void> {
     const page = await fetchPage(channelId, {});
     update(channelId, s => {
-      const next = replaceWindow(s, page, { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false });
+      const next = replaceWindow(s, withLateArrivals(s, page), { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false });
       return { ...next, focus: null };
     });
   },
