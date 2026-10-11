@@ -97,8 +97,55 @@ macro_rules! numeric_enum {
     };
 }
 
-numeric_enum!(ChannelType { GuildText = 0, Dm = 1, GuildVoice = 2, GroupDm = 3, GuildCategory = 4 });
-numeric_enum!(MessageType { Default = 0, RecipientAdd = 1, RecipientRemove = 2, ChannelNameChange = 4, ChannelPinnedMessage = 6, UserJoin = 7, Reply = 19 });
+numeric_enum!(ChannelType {
+    GuildText = 0,
+    Dm = 1,
+    GuildVoice = 2,
+    GroupDm = 3,
+    GuildCategory = 4,
+    GuildAnnouncement = 5,
+    AnnouncementThread = 10,
+    PublicThread = 11,
+    PrivateThread = 12,
+    GuildStage = 13,
+    GuildForum = 15,
+});
+numeric_enum!(MessageType {
+    Default = 0,
+    RecipientAdd = 1,
+    RecipientRemove = 2,
+    ChannelNameChange = 4,
+    ChannelPinnedMessage = 6,
+    UserJoin = 7,
+    ThreadCreated = 18,
+    Reply = 19,
+    ThreadStarterMessage = 21,
+});
+
+impl ChannelType {
+    pub fn is_thread(self) -> bool {
+        matches!(self, Self::AnnouncementThread | Self::PublicThread | Self::PrivateThread)
+    }
+}
+
+/// Auto-archive durations a thread accepts, in minutes of inactivity.
+pub const THREAD_AUTO_ARCHIVE_DURATIONS: [u32; 4] = [60, 1440, 4320, 10080];
+pub const DEFAULT_AUTO_ARCHIVE_DURATION: u32 = 1440;
+
+/// `Channel::flags` bits.
+pub mod channel_flags {
+    /// Forum post pinned to the top of the post list.
+    pub const PINNED: u32 = 1 << 1;
+    /// Forum channel: every post needs at least one tag.
+    pub const REQUIRE_TAG: u32 = 1 << 4;
+}
+
+/// `Message::flags` bits.
+pub mod message_flags {
+    pub const CROSSPOSTED: u32 = 1 << 0;
+    pub const IS_CROSSPOST: u32 = 1 << 1;
+    pub const SUPPRESS_EMBEDS: u32 = 1 << 2;
+}
 numeric_enum!(OverwriteType { Role = 0, Member = 1 });
 numeric_enum!(RelationshipType { Friend = 1, Blocked = 2, IncomingRequest = 3, OutgoingRequest = 4 });
 numeric_enum!(GatewayOp {
@@ -359,6 +406,73 @@ pub struct Channel {
     /// Guild channels only (always present there, `[]` when there are none); absent on DMs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_overwrites: Option<Vec<PermissionOverwrite>>,
+    /// Threads only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_metadata: Option<ThreadMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_count: Option<u32>,
+    /// Threads: the receiving user's membership, when they joined.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<ThreadMember>,
+    /// Forum posts only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_tags: Option<Vec<Snowflake>>,
+    /// THREAD_CREATE and start-thread responses only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub newly_created: Option<bool>,
+    /// `channel_flags` bits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u32>,
+    /// Forum channels only (always present there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_tags: Option<Vec<ForumTag>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_reaction_emoji: Option<DefaultReaction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_sort_order: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_forum_layout: Option<u32>,
+    /// Text, announcement and forum channels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_auto_archive_duration: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThreadMetadata {
+    pub archived: bool,
+    pub auto_archive_duration: u32,
+    pub archive_timestamp: String,
+    pub locked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invitable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub create_timestamp: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThreadMember {
+    /// Thread id.
+    pub id: Snowflake,
+    pub user_id: Snowflake,
+    pub join_timestamp: String,
+    pub flags: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ForumTag {
+    pub id: Snowflake,
+    pub name: String,
+    pub moderated: bool,
+    pub emoji_id: Option<Snowflake>,
+    pub emoji_name: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DefaultReaction {
+    pub emoji_id: Option<Snowflake>,
+    pub emoji_name: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -589,6 +703,12 @@ pub struct Message {
     pub message_reference: Option<MessageReference>,
     pub referenced_message: Option<Box<Message>>,
     pub nonce: Option<String>,
+    /// `message_flags` bits; absent = 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u32>,
+    /// Present when a thread was started from this message (the thread id equals the message id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<Box<Channel>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -819,6 +939,32 @@ pub struct CreateChannelRequest {
     /// copies the category's overwrites.
     #[serde(default)]
     pub permission_overwrites: Option<Vec<PermissionOverwrite>>,
+    #[serde(default)]
+    pub available_tags: Option<Vec<ForumTagRequest>>,
+    #[serde(default)]
+    pub default_reaction_emoji: Option<DefaultReaction>,
+    #[serde(default)]
+    pub default_sort_order: Option<u32>,
+    #[serde(default)]
+    pub default_forum_layout: Option<u32>,
+    #[serde(default)]
+    pub default_auto_archive_duration: Option<u32>,
+    #[serde(default)]
+    pub flags: Option<u32>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct ForumTagRequest {
+    /// An existing tag to keep or rename; absent = a new tag.
+    #[serde(default)]
+    pub id: Option<Snowflake>,
+    pub name: String,
+    #[serde(default)]
+    pub moderated: Option<bool>,
+    #[serde(default)]
+    pub emoji_id: Option<Snowflake>,
+    #[serde(default)]
+    pub emoji_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -835,6 +981,128 @@ pub struct UpdateChannelRequest {
     /// With `parent_id`: `true` replaces the channel's overwrites with the new parent's, `false`/absent keeps them.
     #[serde(default)]
     pub lock_permissions: Option<bool>,
+    // ---- threads ----
+    #[serde(default)]
+    pub archived: Option<bool>,
+    #[serde(default)]
+    pub locked: Option<bool>,
+    #[serde(default)]
+    pub auto_archive_duration: Option<u32>,
+    #[serde(default)]
+    pub invitable: Option<bool>,
+    #[serde(default)]
+    pub applied_tags: Option<Vec<Snowflake>>,
+    #[serde(default)]
+    pub flags: Option<u32>,
+    // ---- forum channels ----
+    /// Full replacement list; ids not listed are deleted.
+    #[serde(default)]
+    pub available_tags: Option<Vec<ForumTagRequest>>,
+    /// `Some(None)` (explicit `null`) clears the default reaction.
+    #[serde(default, deserialize_with = "double_option")]
+    pub default_reaction_emoji: Option<Option<DefaultReaction>>,
+    #[serde(default)]
+    pub default_sort_order: Option<u32>,
+    #[serde(default)]
+    pub default_forum_layout: Option<u32>,
+    #[serde(default)]
+    pub default_auto_archive_duration: Option<u32>,
+}
+
+// ---- Threads, forums, announcements ----
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct StartThreadFromMessageRequest {
+    pub name: String,
+    #[serde(default)]
+    pub auto_archive_duration: Option<u32>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct StartThreadRequest {
+    pub name: String,
+    #[serde(default)]
+    pub auto_archive_duration: Option<u32>,
+    /// Public (default), private or announcement thread.
+    #[serde(default, rename = "type")]
+    pub kind: Option<ChannelType>,
+    #[serde(default)]
+    pub invitable: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct StartForumPostRequest {
+    pub name: String,
+    #[serde(default)]
+    pub auto_archive_duration: Option<u32>,
+    #[serde(default)]
+    pub applied_tags: Option<Vec<Snowflake>>,
+    /// The first message; its id becomes the thread id.
+    pub message: CreateMessageRequest,
+}
+
+/// Response of `POST /channels/{forum}/threads`: the thread plus its first message.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ForumPost {
+    #[serde(flatten)]
+    pub channel: Channel,
+    pub message: Message,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThreadListResponse {
+    pub threads: Vec<Channel>,
+    /// The caller's memberships among `threads`.
+    pub members: Vec<ThreadMember>,
+    /// Archived lists only; always `false` for active lists.
+    pub has_more: bool,
+}
+
+/// Query of `GET /channels/{id}/threads/search` (array filters use repeated keys, so the server parses the raw query).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ThreadSearchQuery {
+    pub name: Option<String>,
+    pub tag: Vec<Snowflake>,
+    /// `match_all` when true, `match_some` (default) otherwise.
+    pub match_all: bool,
+    pub archived: Option<bool>,
+    /// `creation_time` when true, `last_message_time` otherwise; `None` = the forum's default_sort_order.
+    pub sort_by_creation: Option<bool>,
+    pub ascending: bool,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThreadSearchResponse {
+    pub threads: Vec<Channel>,
+    pub members: Vec<ThreadMember>,
+    /// Starter message of each thread, same order (a deleted starter is left out).
+    pub first_messages: Vec<Message>,
+    pub has_more: bool,
+    pub total_results: u32,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct FollowChannelRequest {
+    pub webhook_channel_id: Snowflake,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FollowedChannel {
+    pub channel_id: Snowflake,
+    pub webhook_id: Snowflake,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChannelFollower {
+    pub id: Snowflake,
+    pub channel_id: Snowflake,
+    pub guild_id: Snowflake,
+    pub source_channel_id: Snowflake,
+    pub source_channel_name: String,
+    pub source_guild_id: Snowflake,
+    pub source_guild_name: String,
 }
 
 // ---- Moderation ----
@@ -994,6 +1262,9 @@ pub struct GuildWithState {
     pub channels: Vec<Channel>,
     pub members: Vec<GuildMember>,
     pub member_count: u32,
+    /// Active threads the user can see (they are not part of `channels`); omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threads: Vec<Channel>,
     /// Only on GUILD_CREATE: the presences of the guild's members that are not offline (READY has its own list).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presences: Option<Vec<Presence>>,
@@ -1065,6 +1336,36 @@ pub struct MessageAck {
     pub message_id: Snowflake,
 }
 
+/// THREAD_DELETE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThreadDelete {
+    pub id: Snowflake,
+    pub guild_id: Snowflake,
+    pub parent_id: Snowflake,
+    #[serde(rename = "type")]
+    pub kind: ChannelType,
+}
+
+/// THREAD_MEMBER_UPDATE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThreadMemberUpdate {
+    #[serde(flatten)]
+    pub member: ThreadMember,
+    pub guild_id: Snowflake,
+}
+
+/// THREAD_MEMBERS_UPDATE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThreadMembersUpdate {
+    pub id: Snowflake,
+    pub guild_id: Snowflake,
+    pub member_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_members: Option<Vec<ThreadMember>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removed_member_ids: Option<Vec<Snowflake>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IdOnly {
     pub id: Snowflake,
@@ -1102,6 +1403,11 @@ pub enum GatewayEvent {
     MessageAck(MessageAck),
     RelationshipAdd(Relationship),
     RelationshipRemove(IdOnly),
+    ThreadCreate(Channel),
+    ThreadUpdate(Channel),
+    ThreadDelete(ThreadDelete),
+    ThreadMemberUpdate(ThreadMemberUpdate),
+    ThreadMembersUpdate(ThreadMembersUpdate),
 }
 
 impl GatewayEvent {
@@ -1134,6 +1440,11 @@ impl GatewayEvent {
             Self::MessageAck(_) => "MESSAGE_ACK",
             Self::RelationshipAdd(_) => "RELATIONSHIP_ADD",
             Self::RelationshipRemove(_) => "RELATIONSHIP_REMOVE",
+            Self::ThreadCreate(_) => "THREAD_CREATE",
+            Self::ThreadUpdate(_) => "THREAD_UPDATE",
+            Self::ThreadDelete(_) => "THREAD_DELETE",
+            Self::ThreadMemberUpdate(_) => "THREAD_MEMBER_UPDATE",
+            Self::ThreadMembersUpdate(_) => "THREAD_MEMBERS_UPDATE",
         }
     }
 
@@ -1159,6 +1470,10 @@ impl GatewayEvent {
             Self::UserUpdate(value) => serde_json::to_value(value),
             Self::MessageAck(value) => serde_json::to_value(value),
             Self::RelationshipAdd(value) => serde_json::to_value(value),
+            Self::ThreadCreate(value) | Self::ThreadUpdate(value) => serde_json::to_value(value),
+            Self::ThreadDelete(value) => serde_json::to_value(value),
+            Self::ThreadMemberUpdate(value) => serde_json::to_value(value),
+            Self::ThreadMembersUpdate(value) => serde_json::to_value(value),
         };
         result.unwrap_or(Value::Null)
     }
@@ -1391,6 +1706,84 @@ mod tests {
         assert_eq!(GatewayEvent::GuildBanRemove(removed).data()["user"]["username"], "sam");
         round_trip::<Presence>(json!({"user_id": "100", "status": "invisible", "custom_status": "brb"}));
         assert_eq!(PresenceStatus::parse("invisible"), Some(PresenceStatus::Invisible));
+    }
+
+    #[test]
+    fn thread_and_forum_shapes_match_types_ts() {
+        let tag = json!({"id": "900", "name": "bug", "moderated": false, "emoji_id": null, "emoji_name": "🐛"});
+        round_trip::<ForumTag>(tag.clone());
+        round_trip::<Channel>(json!({
+            "id": "210", "type": 15, "guild_id": "300", "name": "help", "topic": null, "position": 2, "parent_id": null, "last_message_id": null,
+            "permission_overwrites": [], "available_tags": [tag], "default_reaction_emoji": {"emoji_id": null, "emoji_name": "👍"},
+            "default_sort_order": 1, "default_forum_layout": 2, "default_auto_archive_duration": 4320, "flags": 16
+        }));
+        let thread = json!({
+            "id": "11", "type": 11, "guild_id": "300", "name": "a thread", "topic": null, "position": 0, "parent_id": "200", "last_message_id": "12",
+            "owner_id": "100", "permission_overwrites": [], "message_count": 3, "member_count": 2, "newly_created": true, "applied_tags": ["900"],
+            "member": {"id": "11", "user_id": "100", "join_timestamp": "2026-10-11T10:00:00.000Z", "flags": 0},
+            "thread_metadata": {"archived": false, "auto_archive_duration": 1440, "archive_timestamp": "2026-10-11T10:00:00.000Z", "locked": false, "invitable": true, "create_timestamp": "2026-10-11T10:00:00.000Z"}
+        });
+        round_trip::<Channel>(thread.clone());
+        round_trip::<ThreadListResponse>(json!({"threads": [thread.clone()], "members": [], "has_more": false}));
+        let message = json!({
+            "id": "11", "channel_id": "200", "guild_id": "300", "author": user(), "content": "start", "timestamp": "2026-10-11T10:00:00.000Z",
+            "edited_timestamp": null, "type": 0, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false,
+            "message_reference": null, "referenced_message": null, "nonce": null, "flags": 1, "thread": thread.clone()
+        });
+        round_trip::<Message>(message.clone());
+        round_trip::<ThreadSearchResponse>(
+            json!({"threads": [thread.clone()], "members": [], "first_messages": [message], "has_more": false, "total_results": 1}),
+        );
+        assert_eq!(MessageType::from_u8(18), Some(MessageType::ThreadCreated));
+        assert_eq!(MessageType::from_u8(21), Some(MessageType::ThreadStarterMessage));
+        assert!(ChannelType::PrivateThread.is_thread() && !ChannelType::GuildForum.is_thread());
+        round_trip::<ChannelFollower>(json!({
+            "id": "5", "channel_id": "200", "guild_id": "300", "source_channel_id": "400", "source_channel_name": "news", "source_guild_id": "500", "source_guild_name": "Other"
+        }));
+        round_trip::<FollowedChannel>(json!({"channel_id": "400", "webhook_id": "5"}));
+        let clear: UpdateChannelRequest =
+            serde_json::from_value(json!({"default_reaction_emoji": null, "archived": true, "auto_archive_duration": 60})).expect("edit");
+        assert_eq!(clear.default_reaction_emoji, Some(None));
+        assert_eq!((clear.archived, clear.auto_archive_duration), (Some(true), Some(60)));
+        assert!(serde_json::from_value::<UpdateChannelRequest>(json!({})).expect("empty").default_reaction_emoji.is_none());
+        let post: StartForumPostRequest = serde_json::from_value(json!({"name": "q", "applied_tags": ["900"], "message": {"content": "hi"}})).expect("post");
+        assert_eq!((post.name.as_str(), post.message.content.as_deref()), ("q", Some("hi")));
+        let start: StartThreadRequest = serde_json::from_value(json!({"name": "t", "type": 12, "invitable": false})).expect("start");
+        assert_eq!(start.kind, Some(ChannelType::PrivateThread));
+    }
+
+    #[test]
+    fn thread_events_match_the_contract() {
+        let member = ThreadMember { id: Snowflake(11), user_id: Snowflake(100), join_timestamp: "2026-10-11T10:00:00.000Z".to_owned(), flags: 0 };
+        let deleted = GatewayEvent::ThreadDelete(ThreadDelete {
+            id: Snowflake(11),
+            guild_id: Snowflake(300),
+            parent_id: Snowflake(200),
+            kind: ChannelType::PublicThread,
+        });
+        assert_eq!((deleted.name(), deleted.data()), ("THREAD_DELETE", json!({"id": "11", "guild_id": "300", "parent_id": "200", "type": 11})));
+        let update = GatewayEvent::ThreadMemberUpdate(ThreadMemberUpdate { member: member.clone(), guild_id: Snowflake(300) });
+        assert_eq!(update.name(), "THREAD_MEMBER_UPDATE");
+        assert_eq!(update.data(), json!({"id": "11", "user_id": "100", "join_timestamp": "2026-10-11T10:00:00.000Z", "flags": 0, "guild_id": "300"}));
+        let members = GatewayEvent::ThreadMembersUpdate(ThreadMembersUpdate {
+            id: Snowflake(11),
+            guild_id: Snowflake(300),
+            member_count: 2,
+            added_members: Some(vec![member]),
+            removed_member_ids: None,
+        });
+        assert_eq!(members.name(), "THREAD_MEMBERS_UPDATE");
+        assert!(members.data().get("removed_member_ids").is_none());
+        assert_eq!(
+            GatewayEvent::ThreadCreate(
+                serde_json::from_value(json!({
+                    "id": "11", "type": 11, "guild_id": "300", "name": "t", "topic": null, "position": 0, "parent_id": "200", "last_message_id": null
+                }))
+                .expect("channel")
+            )
+            .name(),
+            "THREAD_CREATE"
+        );
     }
 
     #[test]

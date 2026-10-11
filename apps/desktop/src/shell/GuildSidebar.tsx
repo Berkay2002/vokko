@@ -1,7 +1,7 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { intToHex } from "../perks/catalog";
 import { NavLink, useLocation } from "react-router";
-import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Plus, Settings, UserPlus, Volume2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Megaphone, MessagesSquare, Plus, Radio, Settings, UserPlus, Volume2 } from "lucide-react";
 import { channelMentionCount, displayName, isChannelUnread, useStore } from "../api/store";
 import { useVoiceOccupants } from "../api/voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
@@ -11,6 +11,7 @@ import { groupChannels } from "./channels";
 import { useIsMuted, useLocalState } from "./localState";
 import { channelContextItems, guildDropdownItems } from "./menus";
 import { Perm } from "../api/permissions";
+import { ChannelThreads } from "../threads/ChannelThreads";
 import { isPrivateChannel } from "./channelPrivacy";
 import { guildPath } from "./nav";
 import { usePermissions } from "./usePermissions";
@@ -59,7 +60,19 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
   const className = `channel-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}${voice ? " voice" : ""}`;
   const items = () => channelContextItems(channel, guild);
 
-  const icon = isPrivateChannel(channel, guild.id) ? <Lock size={20} className="channel-icon" /> : voice ? <Volume2 size={20} className="channel-icon" /> : <Hash size={20} className="channel-icon" />;
+  const icon = isPrivateChannel(channel, guild.id) ? (
+    <Lock size={20} className="channel-icon" />
+  ) : voice ? (
+    <Volume2 size={20} className="channel-icon" />
+  ) : channel.type === ChannelType.GuildAnnouncement ? (
+    <Megaphone size={20} className="channel-icon" />
+  ) : channel.type === ChannelType.GuildForum ? (
+    <MessagesSquare size={20} className="channel-icon" />
+  ) : channel.type === ChannelType.GuildStage ? (
+    <Radio size={20} className="channel-icon" />
+  ) : (
+    <Hash size={20} className="channel-icon" />
+  );
   const actions = (
     <span className="channel-actions">
       {can(Perm.CREATE_INSTANT_INVITE) && (
@@ -96,6 +109,7 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
         </NavLink>
       )}
       {voice && <VoiceOccupants channelId={channel.id} guildId={guild.id} />}
+      {!voice && <ChannelThreads channel={channel} />}
     </li>
   );
 }

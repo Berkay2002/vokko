@@ -182,6 +182,11 @@ async fn delete_member(tx: &mut Transaction<'_, Postgres>, guild_id: i64, user_i
         .execute(&mut **tx)
         .await?;
     }
+    sqlx::query("DELETE FROM thread_members WHERE user_id = $2 AND thread_id IN (SELECT id FROM channels WHERE guild_id = $1 AND kind IN (10, 11, 12))")
+        .bind(guild_id)
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
     let deleted = sqlx::query("DELETE FROM guild_members WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).execute(&mut **tx).await?;
     Ok(deleted.rows_affected() > 0)
 }

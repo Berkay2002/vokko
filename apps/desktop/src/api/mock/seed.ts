@@ -1,10 +1,11 @@
 // Seed data mirroring `vokko-server seed`: users sam, carol, alice, bob, nova (password "vokko-dev"),
 // "Sam's server", a 60-message DM sam <-> carol and a few smaller conversations.
 
-import { ChannelType, OverwriteType, RelationshipType, type Attachment, type User } from "../types";
+import { ChannelFlags, ChannelType, ForumLayout, OverwriteType, RelationshipType, type Attachment, type User } from "../types";
 import { Perm } from "../permissions";
-import { db, nextId, sortedMessages, type MockChannel } from "./db";
+import { db, nextId, sortedMessages, type MockChannel, type MockMessage } from "./db";
 import { addChannel, addMessage, createAccount, createGuildRecord, openDM, openGroupDM } from "./ops";
+import { createForumPost, initChannelFields, startThreadFromMessage } from "./threads";
 import { voiceStore } from "../voice";
 import { setRelationship } from "./views";
 
@@ -191,6 +192,66 @@ function seedMessageShowcase(ctx: { guildId: string; parentId: string; R: string
   return channel;
 }
 
+/**
+ * Threads, an announcement channel with news, and a forum channel with tags and posts. Times are relative to now; the forum posts use
+ * the 7 day auto-archive so a long-open mock session does not archive them under the user's feet.
+ */
+function seedThreads(ctx: { general: MockChannel; announcements: MockChannel; guildId: string; textCategory: string; docsQuestion: MockMessage; replayBuffer: MockMessage; R: string; A: string; B: string; Bo: string; N: string }): void {
+  const { general, announcements, guildId, textCategory, docsQuestion, replayBuffer, R, A, B, Bo, N } = ctx;
+  const ago = (minutes: number): number => Date.now() - minutes * MIN;
+  const reply = (channel: MockChannel, who: string, text: string, minutesAgo: number) => addMessage({ channel, author_id: who, content: text, timestamp: ago(minutesAgo), silent: true });
+
+  // An active thread (sam is in it) and an archived one under #general.
+  const docs = startThreadFromMessage(general, docsQuestion, "gateway docs", N, 1440, Date.parse(docsQuestion.timestamp));
+  reply(docs, R, "the resume section is the part to read first", 232);
+  reply(docs, A, "I'll add a sequence diagram next week", 225);
+  reply(docs, N, "great, thanks both", 221);
+  const buffer = startThreadFromMessage(general, replayBuffer, "replay buffer sizing", B, 1440, Date.parse(replayBuffer.timestamp));
+  reply(buffer, Bo, "is 500 enough for a laptop that sleeps?", 118);
+  reply(buffer, B, "if not it just re-identifies, no harm done", 115);
+  if (buffer.thread_metadata) {
+    buffer.thread_metadata.archived = true;
+    buffer.thread_metadata.archive_timestamp = new Date(ago(60 * 30)).toISOString();
+  }
+
+  // Announcements: a couple of news posts (publish them to followers from the message menu).
+  const news = (who: string, text: string, minutesAgo: number) => addMessage({ channel: announcements, author_id: who, content: text, timestamp: ago(minutesAgo), silent: true });
+  news(R, "**Vokko 0.4** is out: threads, forum channels and announcement follows.", 60 * 26);
+  news(A, "The docs site now has a page for the gateway protocol. Feedback welcome in #dev-talk.", 60 * 5);
+
+  // Forum channel.
+  const forum = addChannel(guildId, { name: "support", type: ChannelType.GuildForum, parent_id: textCategory, topic: "Ask for help or share ideas. One post per topic." });
+  forum.position = 5;
+  initChannelFields(forum, {
+    available_tags: [
+      { name: "Question", emoji_name: "❓" },
+      { name: "Bug", emoji_name: "🐛" },
+      { name: "Feature", emoji_name: "💡" },
+      { name: "Docs", emoji_name: "📖" },
+      { name: "Solved", moderated: true, emoji_name: "✅" },
+    ],
+    default_reaction_emoji: { emoji_id: null, emoji_name: "👍" },
+    default_forum_layout: ForumLayout.List,
+    default_auto_archive_duration: 10080,
+  });
+  const tag = (name: string): string => forum.available_tags?.find(t => t.name === name)?.id ?? "";
+  const post = (name: string, who: string, content: string, tags: string[], minutesAgo: number) =>
+    createForumPost({ forum, name, author_id: who, content, tags: tags.map(tag), auto_archive_duration: 10080, now: ago(minutesAgo), silent: true });
+
+  const guide = post("Read this before posting", R, "Search first, pick a tag, and keep one topic per post. Be kind.", [], 60 * 72);
+  guide.thread.flags = ChannelFlags.Pinned;
+  reply(guide.thread, A, "pinned for newcomers", 60 * 71);
+  const loop = post("Gateway reconnect loop after resume", Bo, "After my laptop wakes up the client reconnects every second and never settles. Anything I can check?", ["Bug"], 60 * 20);
+  reply(loop.thread, B, "which build? the backoff fix landed last week", 60 * 19);
+  reply(loop.thread, Bo, "0.3.2, I'll update and report back", 60 * 18);
+  reply(loop.thread, R, "if it still loops, attach the console log", 60 * 17);
+  const tagQ = post("How do I change my server tag?", N, "I joined a server with a tag and I'd like to switch to another one. Where is that setting?", ["Question"], 60 * 9);
+  reply(tagQ.thread, A, "User Settings, then Profiles, then Server Tag", 60 * 8);
+  const contrast = post("Member list contrast in light theme", A, "The offline group header is hard to read on the light theme.", ["Bug", "Docs"], 60 * 4);
+  reply(contrast.thread, R, "confirmed, will fix with the next token pass", 60 * 3);
+  post("Idea: show joined threads under their channel", Bo, "Would be nice to see the threads I joined right in the channel list.", ["Feature"], 45);
+}
+
 /** Populate an empty database. Safe to call once at module load. */
 export function seed(): void {
   if (db.accounts.size > 0) return;
@@ -230,7 +291,7 @@ export function seed(): void {
       color: 0x3ba55d,
       hoist: true,
       position: 2,
-      permissions: (Perm.KICK_MEMBERS | Perm.BAN_MEMBERS | Perm.MODERATE_MEMBERS | Perm.MANAGE_MESSAGES | Perm.MANAGE_NICKNAMES).toString(),
+      permissions: (Perm.KICK_MEMBERS | Perm.BAN_MEMBERS | Perm.MODERATE_MEMBERS | Perm.MANAGE_MESSAGES | Perm.MANAGE_NICKNAMES | Perm.MANAGE_THREADS).toString(),
       mentionable: true,
     },
     { id: member, name: "Member", color: 0x5865f2, hoist: false, position: 1, permissions: "0", mentionable: false },
@@ -255,7 +316,7 @@ export function seed(): void {
   textCategory.position = 1;
   voiceCategory.position = 2;
   const welcome = addChannel(guildId, { name: "welcome", type: ChannelType.GuildText, parent_id: info.id, topic: "Say hi and read the rules." });
-  addChannel(guildId, { name: "announcements", type: ChannelType.GuildText, parent_id: info.id, topic: "Release notes and news." });
+  const announcements = addChannel(guildId, { name: "announcements", type: ChannelType.GuildAnnouncement, parent_id: info.id, topic: "Release notes and news." });
   // a standing invite, so the /invite/vokkodev page has something to show in mock mode
   db.invites.set("vokkodev", { code: "vokkodev", guild_id: guildId, channel_id: welcome.id, expires_at: null });
   // Private channel: hidden from @everyone, visible to Moderators (and the owner / admins).
@@ -287,11 +348,11 @@ export function seed(): void {
   say(welcome, A, "Glad to be here 👋", 60 * 24 * 7 - 3);
   say(general, A, "morning everyone", 300);
   say(general, Bo, "morning ☕", 296);
-  say(general, N, "has anyone looked at the new gateway docs?", 240);
+  const docsQuestion = say(general, N, "has anyone looked at the new gateway docs?", 240);
   say(general, R, "yes, resume replays missed dispatches and ends with RESUMED", 235);
   say(general, A, `<@${R}> nice, I'll add that to the docs page`, 230);
   say(general, N, "thanks!", 229);
-  say(general, B, "the replay buffer holds 500 events per session", 120);
+  const replayBuffer = say(general, B, "the replay buffer holds 500 events per session", 120);
   say(general, Bo, "that should be plenty", 118);
   say(devTalk, B, "pushed the migration for read states", 90);
   const g2 = say(devTalk, R, "```rust\nlet unread = channel.last_message_id > read.last_message_id;\n```", 80);
@@ -301,10 +362,12 @@ export function seed(): void {
   say(random, N, `<@${R}> you in?`, 150);
   say(random, N, `<@${R}> I'm making popcorn 🍿`, 149);
 
+  seedThreads({ general, announcements, guildId, textCategory: textCategory.id, docsQuestion, replayBuffer, R, A, B, Bo, N });
+
   // Read states for sam: dev-talk partly unread, random has two mentions.
   const state = (channelId: string, last: string | null, mentions = 0) => sam.readStates.set(channelId, { channel_id: channelId, last_message_id: last, mention_count: mentions });
   const stockTalk = seedMessageShowcase({ guildId, parentId: textCategory.id, R, A, Bo, N, sam: sam.user, bob: bob.user });
-  for (const c of [welcome, general, stockTalk]) state(c.id, c.last_message_id);
+  for (const c of [welcome, general, stockTalk, announcements]) state(c.id, c.last_message_id);
   state(devTalk.id, g2.id);
   state(random.id, r1.id, 2);
 

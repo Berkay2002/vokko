@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  AppWindow, Bell, Bookmark, ChevronRight, Copy, CornerUpLeft, Fingerprint, Flag, Forward, Link2, MailOpen, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
+  AppWindow, Bell, Bookmark, ChevronRight, Copy, CornerUpLeft, Fingerprint, Flag, Forward, Link2, MailOpen, Megaphone, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
 } from 'lucide-react';
 import { MessageType } from '../api/types';
 import type { Message } from '../api/types';
@@ -13,6 +13,7 @@ import { toDisplay } from './mentionText';
 import { useLayer, useOutsideClose } from './shell';
 import { comingSoon } from './toast';
 import { isShiftDown } from './util';
+import { useMessageThreadActions } from '../threads/useMessageActions';
 
 export interface MessageMenuTarget {
   message: Message;
@@ -54,6 +55,7 @@ function placeAtPointer(x: number, y: number, width: number, height: number): { 
 export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageMenuTarget; onClose(): void; onMoreEmoji(message: Message): void }) {
   const chat = useChat();
   const { message, pending } = target;
+  const threadActions = useMessageThreadActions(message, !!pending);
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -88,7 +90,13 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     if (!system) {
       out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={ICON} />, onSelect: () => chat.actions.reply(message) });
       if (!pending) out.push({ id: 'forward', label: 'Forward', icon: <Forward size={ICON} />, onSelect: () => comingSoon('Forwarding messages') });
-      if (!pending && chat.guildId) out.push({ id: 'thread', label: 'Create Thread', icon: <MessageSquareText size={ICON} />, onSelect: () => comingSoon('Creating threads') });
+      if (!pending && chat.guildId) {
+        if (threadActions.thread) out.push({ id: 'thread', label: 'Open Thread', icon: <MessageSquareText size={ICON} />, onSelect: threadActions.openThread });
+        else if (threadActions.canCreateThread) out.push({ id: 'thread', label: 'Create Thread', icon: <MessageSquareText size={ICON} />, onSelect: threadActions.createThread });
+      }
+      if (!pending && threadActions.announcement && (threadActions.published || threadActions.canPublish)) {
+        out.push({ id: 'publish', label: threadActions.published ? 'Published' : 'Publish', icon: <Megaphone size={ICON} />, disabled: threadActions.published, onSelect: threadActions.publish });
+      }
     }
     sep();
     if (message.content) out.push({ id: 'copy-text', label: 'Copy Text', icon: <Copy size={ICON} />, onSelect: () => void navigator.clipboard?.writeText(message.content) });
@@ -130,7 +138,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     out.push({ id: 'copy-id', label: 'Copy Message ID', icon: <Fingerprint size={ICON} />, onSelect: () => void navigator.clipboard?.writeText(message.id) });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message, pending, chat.guildId, chat.canManage, chat.isDm, chat.me.id]);
+  }, [message, pending, chat.guildId, chat.canManage, chat.isDm, chat.me.id, threadActions.thread?.id, threadActions.canCreateThread, threadActions.canPublish, threadActions.published, threadActions.announcement]);
 
   useLayoutEffect(() => {
     const el = box.current;

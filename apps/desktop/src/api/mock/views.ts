@@ -1,6 +1,6 @@
 // Per-viewer JSON builders: the mock stores neutral rows and renders them like the server would.
 
-import { RelationshipType, type Channel, type GatewayEvents, type GuildMember, type Message, type Reaction, type ReadyEvent, type Relationship } from "../types";
+import { MessageType, RelationshipType, isThreadType, type Channel, type GatewayEvents, type GuildMember, type Message, type Reaction, type ReadyEvent, type Relationship } from "../types";
 import { compareIds } from "../snowflake";
 import { canView } from "./access";
 import { db, sortedMessages, userOf, type MockChannel, type MockMessage } from "./db";
@@ -9,7 +9,12 @@ import { memberProfileFields } from "./perks";
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
   const guild = m.guild_id ? db.guilds.get(m.guild_id) : undefined;
   const member = guild?.members.get(m.author_id);
-  const reference = m.reference_id ? sortedMessages(m.channel_id).find(x => x.id === m.reference_id) : undefined;
+  // Thread starters and published copies point at a message in another channel.
+  const refChannelId = m.reference_channel_id ?? m.channel_id;
+  const reference = m.reference_id ? sortedMessages(refChannelId).find(x => x.id === m.reference_id) : undefined;
+  // A thread started from this message (thread.id == message id) rides along for the viewers who can see it.
+  const thread = depth === 0 ? db.channels.get(m.id) : undefined;
+  const startedThread = thread && isThreadType(thread.type) && thread.parent_id === m.channel_id && canView(thread, viewerId) ? channelFor(thread, viewerId) : undefined;
   const reactions: Reaction[] = m.reactions
     .filter(r => r.user_ids.length > 0)
     .map(r => ({ emoji: { ...r.emoji }, count: r.user_ids.length, me: r.user_ids.includes(viewerId) }));
@@ -29,18 +34,34 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     embeds: [],
     reactions,
     pinned: m.pinned,
-    message_reference: m.reference_id ? { message_id: m.reference_id, channel_id: m.channel_id, guild_id: m.guild_id } : null,
-    referenced_message: reference && depth === 0 ? messageFor(reference, viewerId, 1) : null,
+    message_reference: m.reference_id ? { message_id: m.reference_id, channel_id: refChannelId, guild_id: db.channels.get(refChannelId)?.guild_id ?? m.guild_id } : null,
+    referenced_message: reference && depth === 0 && m.type !== MessageType.ThreadCreated ? messageFor(reference, viewerId, 1) : null,
     nonce: m.nonce,
+    ...(m.flags ? { flags: m.flags } : {}),
+    ...(startedThread ? { thread: startedThread } : {}),
   };
 }
 
+/** Message count of a thread: everything after the starter (the type 21 pointer, or a forum post's first message). */
+function threadMessageCount(thread: MockChannel): number {
+  return sortedMessages(thread.id).filter(m => m.id !== thread.id && m.type !== MessageType.ThreadStarterMessage).length;
+}
+
 export function channelFor(ch: MockChannel, viewerId: string): Channel {
-  const { participant_ids, hidden_for, ...rest } = ch;
+  const { participant_ids, hidden_for, thread_members, ...rest } = ch;
   void hidden_for;
   const last = sortedMessages(ch.id).at(-1);
   const out: Channel = { ...rest, last_message_id: last?.id ?? null };
   if (rest.permission_overwrites) out.permission_overwrites = rest.permission_overwrites.map(o => ({ ...o }));
+  if (rest.thread_metadata) out.thread_metadata = { ...rest.thread_metadata };
+  if (rest.available_tags) out.available_tags = rest.available_tags.map(t => ({ ...t }));
+  if (rest.applied_tags) out.applied_tags = [...rest.applied_tags];
+  if (isThreadType(ch.type)) {
+    out.member_count = thread_members?.size ?? 0;
+    out.message_count = threadMessageCount(ch);
+    const joined = thread_members?.get(viewerId);
+    if (joined) out.member = { id: ch.id, user_id: viewerId, join_timestamp: joined, flags: 0 };
+  }
   if (participant_ids) out.recipients = participant_ids.filter(id => id !== viewerId).map(userOf);
   return out;
 }
@@ -68,13 +89,16 @@ export function membersOf(guildId: string): (GuildMember & { guild_id?: never })
 export function guildPayload(guildId: string, viewerId: string): GatewayEvents["GUILD_CREATE"] {
   const g = db.guilds.get(guildId);
   if (!g) throw new Error("unknown guild");
-  const channels = [...db.channels.values()].filter(c => c.guild_id === guildId && canView(c, viewerId)).map(c => channelFor(c, viewerId));
+  const channels = [...db.channels.values()].filter(c => c.guild_id === guildId && !isThreadType(c.type) && canView(c, viewerId)).map(c => channelFor(c, viewerId));
+  const threads = [...db.channels.values()]
+    .filter(c => c.guild_id === guildId && isThreadType(c.type) && !c.thread_metadata?.archived && canView(c, viewerId))
+    .map(c => channelFor(c, viewerId));
   const members = membersOf(guildId);
   const presences = members.flatMap(m => {
     const p = db.accounts.get(m.user.id)?.presence;
     return p && p.status !== "offline" ? [{ ...p }] : [];
   });
-  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, members, member_count: members.length, presences };
+  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, presences };
 }
 
 export function guildIdsFor(viewerId: string): string[] {

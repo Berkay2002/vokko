@@ -19,6 +19,8 @@ export interface MockChannel extends Channel {
   participant_ids?: string[];
   /** Users who closed this DM; it comes back on the next message. */
   hidden_for?: Set<string>;
+  /** Threads: joined members (user id → join timestamp). */
+  thread_members?: Map<string, string>;
 }
 
 export interface MockReaction {
@@ -43,6 +45,10 @@ export interface MockMessage {
   /** ISO time of the (latest) pin; null while unpinned. */
   pinned_at: string | null;
   reference_id: string | null;
+  /** Channel of `reference_id` when it is not this one (thread starters, published copies, thread-created notices). */
+  reference_channel_id?: string | null;
+  /** MessageFlags; absent = 0. */
+  flags?: number;
   nonce: string | null;
 }
 
@@ -58,6 +64,14 @@ export interface MockInvite {
   expires_at: string | null;
 }
 
+/** An announcement channel followed into another channel (`id` is the follow, the API's webhook id). */
+export interface MockFollower {
+  id: string;
+  source_channel_id: string;
+  target_channel_id: string;
+  created_by: string;
+}
+
 export interface Db {
   accounts: Map<string, MockAccount>;
   channels: Map<string, MockChannel>;
@@ -67,6 +81,7 @@ export interface Db {
   /** guild id → banned user id → reason */
   bans: Map<string, Map<string, string | null>>;
   pending: Map<string, { attachment: Attachment; owner: string }>;
+  followers: Map<string, MockFollower>;
 }
 
 export const db: Db = {
@@ -77,6 +92,7 @@ export const db: Db = {
   invites: new Map(),
   bans: new Map(),
   pending: new Map(),
+  followers: new Map(),
 };
 
 let lastNow = 0;

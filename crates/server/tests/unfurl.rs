@@ -137,7 +137,8 @@ async fn editing_keeps_suppresses_and_restores_embeds() {
 
     // clearing the flag fetches again
     let (_, restored) = app.patch(&path, &token, json!({"content": format!("second {url} and more"), "flags": 0})).await;
-    assert_eq!(restored["embeds"], json!([]));
+    // the background unfurl may already have finished by the time the reply is built, so only the polled state is asserted
+    assert!(restored["embeds"].as_array().expect("embeds").len() <= 1);
     wait_for_embeds(&app, &token, &channel, &id, 1).await;
     assert_eq!(pages.count("/page"), 2);
 

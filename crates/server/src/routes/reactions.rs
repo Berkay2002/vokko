@@ -61,6 +61,7 @@ async fn add_reaction(
     let (access, message_id) = locate(&state, user_id, &id, &mid).await?;
     access.require(READ_MESSAGE_HISTORY)?;
     access.require(ADD_REACTIONS)?;
+    access.require_unarchived()?;
     let emoji_id = emoji.id.map(Snowflake::db).unwrap_or(0);
     let (distinct, existing): (i64, bool) = sqlx::query_as(
         "SELECT count(DISTINCT (emoji_name, emoji_id)), COALESCE(bool_or(emoji_name = $2 AND emoji_id = $3), FALSE) FROM reactions WHERE message_id = $1",

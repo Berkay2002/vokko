@@ -3,6 +3,9 @@ import { Navigate, useNavigate, useParams } from "react-router";
 import { ChatView } from "../chat/ChatView";
 import { appStore, useStore } from "../api/store";
 import { ChannelType } from "../api/types";
+import { ForumChannel } from "../forum/ForumChannel";
+import { ThreadHost } from "../threads/ThreadHost";
+import { ThreadPanelHost, useThreadPanelOpen } from "../threads/ThreadPanel";
 import { ChannelHeader } from "./ChannelHeader";
 import { DmProfilePanel } from "./DmProfilePanel";
 import { DmSidebar } from "./DmSidebar";
@@ -95,6 +98,7 @@ export function AppShell() {
   const isGroupDm = channel?.type === ChannelType.GroupDM;
   const dmRecipient = channel && !guild && !isGroupDm ? channel.recipients?.[0] : undefined;
   const panelOpen = useRightPanelOpen(channelId ?? "");
+  const threadOpen = useThreadPanelOpen(channelId ?? "");
 
   useEffect(() => {
     appStore.getState().setRoute({ guildId, channelId });
@@ -219,8 +223,20 @@ export function AppShell() {
             <>
               <ChannelHeader channel={channel} membersOpen={membersVisible && !!guild} onToggleMembers={toggleMembers} profileOpen={profileVisible && !!dmRecipient} onToggleProfile={toggleProfile} />
               <div className="channel-body">
-                <div className="channel-chat">{text ? <ChatView key={channel.id} channelId={channel.id} /> : <div className="main-empty">Voice channels are not supported yet.</div>}</div>
-                {panelOpen && channelSlots.RightPanel ? (
+                <div className="channel-chat">
+                  {channel.type === ChannelType.GuildForum ? (
+                    <ForumChannel key={channel.id} channel={channel} />
+                  ) : channel.type === ChannelType.GuildStage ? (
+                    <div className="main-empty">Stage channels are not supported yet.</div>
+                  ) : text ? (
+                    <ChatView key={channel.id} channelId={channel.id} />
+                  ) : (
+                    <div className="main-empty">Voice channels are not supported yet.</div>
+                  )}
+                </div>
+                {threadOpen ? (
+                  <ThreadPanelHost channel={channel} />
+                ) : panelOpen && channelSlots.RightPanel ? (
                   <channelSlots.RightPanel channel={channel} />
                 ) : (
                   <>
@@ -236,6 +252,7 @@ export function AppShell() {
       </div>
       <ProfileCardHost />
       <ModalHost />
+      <ThreadHost />
     </div>
   );
 }

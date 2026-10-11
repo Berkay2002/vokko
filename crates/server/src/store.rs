@@ -11,6 +11,7 @@ use vokko_protocol::api::{
 
 use crate::error::ApiResult;
 use crate::state::AppState;
+use crate::threads;
 
 pub fn iso(time: OffsetDateTime) -> String {
     time.format(&Rfc3339).unwrap_or_default()
@@ -304,9 +305,25 @@ pub struct ChannelRow {
     pub owner_id: Option<i64>,
     pub icon_path: Option<String>,
     pub last_message_id: Option<i64>,
+    pub archived: bool,
+    pub locked: bool,
+    pub invitable: bool,
+    pub auto_archive_duration: Option<i32>,
+    pub default_auto_archive_duration: Option<i32>,
+    pub archive_timestamp: Option<OffsetDateTime>,
+    pub last_activity_at: Option<OffsetDateTime>,
+    pub flags: i32,
+    pub applied_tags: Vec<i64>,
+    pub default_reaction_emoji_id: Option<i64>,
+    pub default_reaction_emoji_name: Option<String>,
+    pub default_sort_order: i32,
+    pub default_forum_layout: i32,
+    pub created_at: OffsetDateTime,
 }
 
-pub const CHANNEL_COLS: &str = "id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id";
+pub const CHANNEL_COLS: &str = "id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, \
+     auto_archive_duration, default_auto_archive_duration, archive_timestamp, last_activity_at, flags, applied_tags, default_reaction_emoji_id, \
+     default_reaction_emoji_name, default_sort_order, default_forum_layout, created_at";
 
 impl ChannelRow {
     pub fn channel_type(&self) -> ChannelType {
@@ -315,6 +332,10 @@ impl ChannelRow {
 
     pub fn is_dm(&self) -> bool {
         matches!(self.channel_type(), ChannelType::Dm | ChannelType::GroupDm)
+    }
+
+    pub fn is_thread(&self) -> bool {
+        self.channel_type().is_thread()
     }
 }
 
@@ -343,12 +364,14 @@ pub async fn channels_to_api(state: &AppState, rows: Vec<ChannelRow>, viewer: Op
     }
     let guild_channel_ids: Vec<i64> = rows.iter().filter(|row| !row.is_dm()).map(|row| row.id).collect();
     let mut overwrites = overwrites_of(state, &guild_channel_ids).await?;
+    let mut extras = threads::load_extras(state, &rows, viewer).await?;
     Ok(rows
         .into_iter()
         .map(|row| {
             let kind = row.channel_type();
             let is_dm = row.is_dm();
-            Channel {
+            let decoration = threads::decoration(&row, &mut extras);
+            let mut channel = Channel {
                 permission_overwrites: (!is_dm).then(|| overwrites.remove(&row.id).unwrap_or_default()),
                 id: flake(row.id),
                 kind,
@@ -361,7 +384,21 @@ pub async fn channels_to_api(state: &AppState, rows: Vec<ChannelRow>, viewer: Op
                 last_message_id: row.last_message_id.map(flake),
                 owner_id: (kind == ChannelType::GroupDm).then_some(row.owner_id.map(flake)),
                 icon: (kind == ChannelType::GroupDm).then(|| row.icon_path.map(|path| state.asset_url(&path))),
-            }
+                thread_metadata: None,
+                member_count: None,
+                message_count: None,
+                member: None,
+                applied_tags: None,
+                newly_created: None,
+                flags: None,
+                available_tags: None,
+                default_reaction_emoji: None,
+                default_sort_order: None,
+                default_forum_layout: None,
+                default_auto_archive_duration: None,
+            };
+            decoration.apply(&mut channel);
+            channel
         })
         .collect())
 }
@@ -410,10 +447,13 @@ pub struct MessageRow {
     /// JSON array of `Embed`.
     pub embeds: String,
     pub flags: i32,
+    /// Set when the reference points into another channel (thread starters, thread announcements, published copies).
+    pub reference_channel_id: Option<i64>,
+    pub reference_guild_id: Option<i64>,
 }
 
 pub const MESSAGE_SELECT: &str = "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.reference_message_id, m.mention_everyone, \
-     m.created_at, m.edited_at, m.embeds::text AS embeds, m.flags FROM messages m JOIN channels c ON c.id = m.channel_id";
+     m.created_at, m.edited_at, m.embeds::text AS embeds, m.flags, m.reference_channel_id, m.reference_guild_id FROM messages m JOIN channels c ON c.id = m.channel_id";
 
 #[derive(FromRow)]
 struct AttachmentRow {
@@ -540,6 +580,8 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
         }
     }
 
+    let mut started_threads = threads::started_threads(state, rows, viewer).await?;
+
     let mut views = Vec::with_capacity(rows.len());
     for row in rows {
         let Some(author) = lookup.get(&row.author_id).cloned() else { continue };
@@ -567,11 +609,13 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
             pinned: row.pinned,
             message_reference: row.reference_message_id.map(|message_id| MessageReference {
                 message_id: flake(message_id),
-                channel_id: flake(row.channel_id),
-                guild_id: row.guild_id.map(flake),
+                channel_id: flake(row.reference_channel_id.unwrap_or(row.channel_id)),
+                guild_id: if row.reference_channel_id.is_some() { row.reference_guild_id } else { row.guild_id }.map(flake),
             }),
             referenced_message: None,
             nonce: None,
+            flags: (row.flags != 0).then_some(row.flags as u32),
+            thread: started_threads.remove(&row.id).map(Box::new),
         };
         views.push(MessageView { message, reaction_users });
     }
@@ -581,7 +625,10 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
 /// Full messages including one level of `referenced_message` (its own reactions are always empty).
 pub async fn load_messages(state: &AppState, rows: Vec<MessageRow>, viewer: Option<i64>) -> ApiResult<Vec<MessageView>> {
     let mut views = load_flat(state, &rows, viewer).await?;
-    let mut reference_ids: Vec<i64> = rows.iter().filter_map(|row| row.reference_message_id).collect();
+    // Only same-channel references (and a thread's starter, whose parent the viewer can read) are expanded: following a reference
+    // into another channel would hand out messages and attachments the viewer may not see (published copies point at their source).
+    let expands = |row: &MessageRow| row.reference_channel_id.is_none() || row.kind == MessageType::ThreadStarterMessage.as_u8() as i16;
+    let mut reference_ids: Vec<i64> = rows.iter().filter(|row| expands(row)).filter_map(|row| row.reference_message_id).collect();
     reference_ids.sort_unstable();
     reference_ids.dedup();
     if reference_ids.is_empty() {
@@ -595,7 +642,8 @@ pub async fn load_messages(state: &AppState, rows: Vec<MessageRow>, viewer: Opti
         referenced.insert(message.id.db(), message);
     }
     for view in &mut views {
-        if let Some(reference) = &view.message.message_reference {
+        let same_channel = view.message.message_reference.as_ref().is_some_and(|reference| reference.channel_id == view.message.channel_id);
+        if let Some(reference) = view.message.message_reference.as_ref().filter(|_| same_channel || view.message.kind == MessageType::ThreadStarterMessage) {
             view.message.referenced_message = referenced.get(&reference.message_id.db()).cloned().map(Box::new);
         }
     }

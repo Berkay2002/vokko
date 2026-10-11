@@ -309,6 +309,7 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
             guild
                 .channels
                 .iter()
+                .chain(&guild.threads)
                 .filter(|channel| channel.kind != vokko_protocol::api::ChannelType::GuildCategory)
                 .map(|channel| (channel.id.db(), channel.last_message_id.map(Snowflake::db))),
         );

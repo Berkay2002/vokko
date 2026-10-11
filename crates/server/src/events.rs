@@ -5,6 +5,7 @@ use crate::access;
 use crate::error::{ApiErr, ApiResult};
 use crate::state::AppState;
 use crate::store::{self, ChannelRow};
+use crate::threads;
 
 /// A guild with the channels `viewer` can see, all members and the member count (READY entries and GUILD_CREATE).
 pub async fn guild_with_state(state: &AppState, guild_id: i64, viewer: i64) -> ApiResult<GuildWithState> {
@@ -13,7 +14,9 @@ pub async fn guild_with_state(state: &AppState, guild_id: i64, viewer: i64) -> A
     let channels = store::channels_to_api(state, rows, Some(viewer)).await?;
     let members = store::members(state, guild_id, 10_000, None).await?;
     let member_count = store::member_count(state, guild_id).await?;
-    Ok(GuildWithState { guild, channels, members, member_count, presences: None })
+    let thread_rows = threads::active_threads(state, viewer, guild_id).await?;
+    let threads = store::channels_to_api(state, thread_rows, Some(viewer)).await?;
+    Ok(GuildWithState { guild, channels, members, member_count, threads, presences: None })
 }
 
 /// Sends a channel-shaped event (CREATE/UPDATE/DELETE) to everyone who can see the channel; DM recipient lists are per receiver.

@@ -17,6 +17,7 @@
 - `typing[channelId]` is pruned by the store 10 s after the last `TYPING_START`; use `typingUserIds(state, channelId)`.
 - Pins are paginated: `GET /channels/{id}/messages/pins?limit&before` → `{items:[{message,pinned_at}], has_more}`; `PUT/DELETE .../pins/{messageId}` (250 max → 400 / 30003). Bulk ack: `POST /read-states/ack-bulk` (the shell's "Mark server as read" chunks by 100).
 - The store never holds messages: the message cache per channel belongs to `src/chat`.
+- Threads (types 10-12) live in `threads` (by id), not in `channels`: READY / GUILD_CREATE `threads`, THREAD_CREATE / UPDATE / DELETE and the member events keep them current (`thread.member` = the current user's membership, `upsertThread` keeps it when an update omits it). Archived threads are fetched on demand (`listArchivedThreads`, `searchThreads` in `rest.ts`) and added when opened. There is no thread list sync: `refreshActiveThreads(guildId)` refetches `GET /guilds/{id}/threads/active` after own role / role / overwrite changes. `useChannel(id)` in `src/chat/shell.ts` falls back to `threads`, so the chat view works on a thread id. Permissions inside a thread: `threadPermissions(parentBits)` in `permissions.ts` (SEND_MESSAGES replaced by SEND_MESSAGES_IN_THREADS).
 
 ## Mock mode
 
@@ -25,3 +26,4 @@
 - `?as=<username>` signs in without the form; `?mockLatency=0` removes the simulated 25 ms request latency.
 - `window.__vokkoMock`: `say(channelId, username, text, {replyTo})`, `typing`, `presence`, `dropConnections()` (client must resume), `offline(true|false)` (drop everything and refuse new sockets, the reconnecting banner shows; false lets the client back in), `rateLimit(count, retryAfter)` (next N requests answer 429), `addUser`, `messageTimestamp`, `channelIdByName`, `tokenFor`, `reset`. Mock snowflakes are time based: a page reload re-seeds the DB and invalidates the stored token.
 - `window.__vokko`: `gateway`, `request`, `appStore` and the store helpers, for Playwright scripts.
+- Threads, forums and announcements (`mock/threads.ts`): every route of docs/api.md with the server's error codes and THREAD_* events; threads are `MockChannel`s of type 10-12 in `db.channels` (hidden from the guild channel lists, resolved through their parent in `access.ts`), follows are in `db.followers`. The seed gives "Sam's server" two threads in #general (one archived), the announcement channel #announcements and the forum #support with five tags and five posts. Idle threads are archived by `sweepArchivedThreads` (every 30 s and before each list).

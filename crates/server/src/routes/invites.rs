@@ -87,7 +87,7 @@ async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
     }
     tx.commit().await?;
     if inserted.rows_affected() > 0 {
-        sqlx::query("INSERT INTO read_states (user_id, channel_id, last_message_id) SELECT $1, id, last_message_id FROM channels WHERE guild_id = $2 AND kind IN (0, 2) ON CONFLICT DO NOTHING")
+        sqlx::query("INSERT INTO read_states (user_id, channel_id, last_message_id) SELECT $1, id, last_message_id FROM channels WHERE guild_id = $2 AND kind IN (0, 2, 5) ON CONFLICT DO NOTHING")
             .bind(user_id)
             .bind(guild_id)
             .execute(&state.db)

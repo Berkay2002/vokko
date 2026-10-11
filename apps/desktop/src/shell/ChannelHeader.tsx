@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Bell, Hash, Lock, MessageSquareText, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
+import { Bell, Hash, Lock, Megaphone, MessagesSquare, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
 import { dmName } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
 import { PinnedMessages } from "../chat/PinnedMessages";
+import { ThreadsToolbar } from "../threads/ThreadsToolbar";
 import { Popout, Tooltip, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
 import { isPrivateChannel } from "./channelPrivacy";
@@ -51,6 +52,8 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
   const menu = useContextMenu();
   const guild = !!channel.guild_id;
   const voice = channel.type === ChannelType.GuildVoice;
+  const announcement = channel.type === ChannelType.GuildAnnouncement;
+  const forum = channel.type === ChannelType.GuildForum;
   const first = channel.recipients?.[0];
   const group = channel.type === ChannelType.GroupDM;
   const oneToOne = !guild && !group && !!first;
@@ -66,7 +69,17 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
         <NavToggle />
         {guild ? (
           <>
-            {isPrivateChannel(channel, channel.guild_id) ? <Lock size={24} className="channel-header-icon" /> : voice ? <Volume2 size={24} className="channel-header-icon" /> : <Hash size={24} className="channel-header-icon" />}
+            {isPrivateChannel(channel, channel.guild_id) ? (
+              <Lock size={24} className="channel-header-icon" />
+            ) : voice ? (
+              <Volume2 size={24} className="channel-header-icon" />
+            ) : announcement ? (
+              <Megaphone size={24} className="channel-header-icon" />
+            ) : forum ? (
+              <MessagesSquare size={24} className="channel-header-icon" />
+            ) : (
+              <Hash size={24} className="channel-header-icon" />
+            )}
             <h1 className="channel-header-name">{channel.name}</h1>
             {channel.topic && (
               <>
@@ -87,9 +100,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
       <div className="channel-header-toolbar">
         {guild ? (
           <>
-            <ToolbarButton label="Threads" disabled>
-              <MessageSquareText size={24} />
-            </ToolbarButton>
+            <ThreadsToolbar channel={channel} />
             <ToolbarButton label="Notification Settings" onClick={bell}>
               <Bell size={24} />
             </ToolbarButton>
@@ -104,9 +115,11 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             </ToolbarButton>
           </>
         )}
-        <ToolbarButton label="Pinned Messages" active={pinsOpen} onClick={() => setPinsOpen(o => !o)} buttonRef={setPinsAnchor}>
-          <Pin size={24} />
-        </ToolbarButton>
+        {!forum && (
+          <ToolbarButton label="Pinned Messages" active={pinsOpen} onClick={() => setPinsOpen(o => !o)} buttonRef={setPinsAnchor}>
+            <Pin size={24} />
+          </ToolbarButton>
+        )}
         {!guild && (
           <ToolbarButton label="Add Friends to DM" onClick={() => openModal({ type: "createDM", base: (channel.recipients ?? []).map(r => r.id) })}>
             <UserPlus size={24} />

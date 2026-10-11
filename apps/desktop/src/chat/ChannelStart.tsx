@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Hash } from 'lucide-react';
-import { ChannelType, RelationshipType } from '../api/types';
+import { Hash, MessageSquareText } from 'lucide-react';
+import { ChannelType, RelationshipType, isThreadType } from '../api/types';
 import type { Guild, Snowflake, User, UserProfile } from '../api/types';
 import { Modal, guildIconUrl, guildInitials, request, resolveUrl, useGuilds, useMutualGuildsFromStore, useRelationship, Tooltip } from './shell';
 import { useChat } from './ChatContext';
@@ -104,6 +104,13 @@ export function ChannelStart() {
   if (ch && ch.type === ChannelType.GroupDM) {
     const names = (ch.recipients ?? []).map(u => chat.nameOf(u)).join(', ');
     return <div className="chat-start"><h1>{names}</h1><p>Welcome to the beginning of the group.</p></div>;
+  }
+  if (ch && isThreadType(ch.type)) {
+    return <div className="chat-start">
+      <div className="chat-start-icon"><MessageSquareText size={42} /></div>
+      <h1>{ch.name}</h1>
+      <p>This is the start of the thread.</p>
+    </div>;
   }
   return <div className="chat-start">
     <div className="chat-start-icon"><Hash size={42} /></div>

@@ -1,12 +1,13 @@
 // Mock REST router: every route of docs/api.md that the UI uses, with the same status codes and error codes.
 
-import { ChannelType, MessageType, RelationshipType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
+import { ChannelType, MessageType, RelationshipType, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
 import { compareIds } from "../snowflake";
 import { Perm, hasBit } from "../permissions";
 import { channelPermsOf } from "./access";
 import { db, nextId, sortedMessages, userOf, type MockAccount, type MockChannel } from "./db";
 import { pendingAttachment, addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, openDM, openGroupDM, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm, requireMessage, emitVisibilityChanges, visibilityOf } from "./ops";
 import { parseOverwrites } from "./moderation";
+import { applyChannelFields, assertCanPost, assertThreadOpen, deleteThread, dropChannelExtras, editThread, initChannelFields } from "./threads";
 import { applyGuildPerks, applyUserPerks, dropTagOnLeave, memberProfileFields } from "./perks";
 import { ID, route, routes, str } from "./router";
 import { emit } from "./socket";
@@ -236,14 +237,15 @@ route("DELETE", `/guilds/${ID}`, ({ viewer, params }) => {
 route("GET", `/guilds/${ID}/channels`, ({ viewer, params }) => {
   const guildId = params[0] ?? "";
   requireGuildMember(guildId, viewer.user.id);
-  return [...db.channels.values()].filter(c => c.guild_id === guildId && canAccess(c, viewer.user.id)).map(c => channelFor(c, viewer.user.id));
+  return [...db.channels.values()].filter(c => c.guild_id === guildId && !isThreadType(c.type) && canAccess(c, viewer.user.id)).map(c => channelFor(c, viewer.user.id));
 });
 
 route("POST", `/guilds/${ID}/channels`, ({ viewer, params, body }) => {
   const guildId = params[0] ?? "";
   requireGuildPerm(guildId, viewer.user.id, Perm.MANAGE_CHANNELS);
   const type = body.type;
-  if (type !== ChannelType.GuildText && type !== ChannelType.GuildVoice && type !== ChannelType.GuildCategory) fail(400, 50035, "Invalid Form Body", { type: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 2, 4)." } });
+  const creatable = [ChannelType.GuildText, ChannelType.GuildVoice, ChannelType.GuildCategory, ChannelType.GuildAnnouncement, ChannelType.GuildStage, ChannelType.GuildForum];
+  if (typeof type !== "number" || !creatable.includes(type)) fail(400, 50035, "Invalid Form Body", { type: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 2, 4, 5, 13, 15)." } });
   const name = (str(body.name) ?? "").trim().toLowerCase().replace(/\s+/g, "-");
   if (name.length < 1 || name.length > 100) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 1 and 100 in length." } });
   const parent = str(body.parent_id) ?? null;
@@ -251,6 +253,7 @@ route("POST", `/guilds/${ID}/channels`, ({ viewer, params, body }) => {
   const permission_overwrites = parseOverwrites(guildId, viewer.user.id, body.permission_overwrites);
   const explicit = body.permission_overwrites !== undefined && body.permission_overwrites !== null;
   const channel = addChannel(guildId, { name, type, parent_id: type === ChannelType.GuildCategory ? null : parent, topic: str(body.topic) ?? null, permission_overwrites: explicit ? permission_overwrites : undefined });
+  initChannelFields(channel, body);
   for (const id of channelAudience(channel)) emit([id], "CHANNEL_CREATE", channelFor(channel, id));
   return channelFor(channel, viewer.user.id);
 });
@@ -270,7 +273,9 @@ route("GET", `/guilds/${ID}/members`, ({ viewer, params, query }) => {
 
 route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  if (isThreadType(channel.type)) return editThread(channel, viewer.user.id, body);
   if (channel.guild_id) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
+  applyChannelFields(channel, body);
   if (typeof body.name === "string") channel.name = body.name.trim().toLowerCase().replace(/\s+/g, "-") || channel.name;
   if ("topic" in body) channel.topic = str(body.topic)?.trim() || null;
   if (typeof body.position === "number") channel.position = body.position;
@@ -291,6 +296,7 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
 
 route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  if (isThreadType(channel.type)) return deleteThread(channel, viewer.user.id);
   const payload = channelFor(channel, viewer.user.id);
   if (!channel.guild_id) {
     (channel.hidden_for ??= new Set()).add(viewer.user.id);
@@ -298,6 +304,7 @@ route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
     return payload;
   }
   requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
+  dropChannelExtras(channel);
   for (const id of channelAudience(channel)) emit([id], "CHANNEL_DELETE", channelFor(channel, id));
   db.channels.delete(channel.id);
   db.messages.delete(channel.id);
@@ -374,7 +381,7 @@ route("GET", `/channels/${ID}/messages`, ({ viewer, params, query }) => {
 
 route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
-  if (channel.type === ChannelType.GuildCategory || channel.type === ChannelType.GuildVoice) fail(400, 50024, "Cannot execute action on this channel type");
+  assertCanPost(channel, viewer.user.id);
   requireChannelPerm(channel, viewer.user.id, Perm.SEND_MESSAGES);
   const content = (str(body.content) ?? "").trim();
   // `attachments` (id + optional rename / alt text) replaces `attachment_ids`; a "SPOILER_" filename prefix marks a spoiler.
@@ -413,6 +420,7 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   if (message.author_id !== viewer.user.id) fail(403, 50005, "Cannot edit a message authored by another user");
+  assertThreadOpen(channel);
   // `content` is optional now; `attachments` lists the ones to keep (omitted = unchanged, can only remove).
   const content = (str(body.content) ?? message.content).trim();
   if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });
@@ -448,6 +456,7 @@ route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, 
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   requireChannelPerm(channel, viewer.user.id, Perm.ADD_REACTIONS);
+  assertThreadOpen(channel);
   const emoji = parseEmoji(params[2] ?? "");
   let reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
   if (!reaction) message.reactions.push((reaction = { emoji, user_ids: [] }));

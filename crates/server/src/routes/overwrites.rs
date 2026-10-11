@@ -232,6 +232,10 @@ async fn manageable(state: &AppState, user_id: i64, raw_channel: &str) -> ApiRes
         Some(guild_id) if !access.is_dm() => guild_id,
         _ => return Err(ApiErr::missing_permissions()),
     };
+    // Threads inherit their parent's permissions and have no overwrites of their own.
+    if access.channel.is_thread() {
+        return Err(ApiErr::wrong_channel_type());
+    }
     access.require(MANAGE_ROLES)?;
     Ok((access, guild_id))
 }

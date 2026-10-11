@@ -1,7 +1,25 @@
 import { API_ORIGIN, MOCK, REST_BASE, getToken } from "./config";
 import { ApiRequestError, RateLimitedError } from "./errors";
 import { mockRequest, mockUpload } from "./mock";
-import type { ApiError, Attachment } from "./types";
+import type {
+  ApiError,
+  Attachment,
+  Channel,
+  ChannelFollower,
+  EditChannelRequest,
+  FollowChannelRequest,
+  FollowedChannel,
+  ForumPost,
+  Message,
+  Snowflake,
+  StartForumPostRequest,
+  StartThreadFromMessageRequest,
+  StartThreadRequest,
+  ThreadListResponse,
+  ThreadMember,
+  ThreadSearchQuery,
+  ThreadSearchResponse,
+} from "./types";
 
 export { ApiRequestError, RateLimitedError };
 
@@ -128,3 +146,40 @@ export function uploadAttachment(channelId: string, file: File, onProgress?: (fr
     xhr.send(form);
   });
 }
+
+// ---- Threads, forums and announcements (docs/api.md) ----
+
+/** `?a=1&b=2` from a flat object; array values repeat the key (`tag=1&tag=2`), undefined entries are left out. */
+function queryString(params: Record<string, string | number | boolean | readonly string[] | undefined>): string {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined) continue;
+    if (typeof value === "object") for (const item of value) q.append(key, item);
+    else q.set(key, String(value));
+  }
+  const text = q.toString();
+  return text ? `?${text}` : "";
+}
+
+export const startThreadFromMessage = (channelId: Snowflake, messageId: Snowflake, body: StartThreadFromMessageRequest): Promise<Channel> => request("POST", `/channels/${channelId}/messages/${messageId}/threads`, body);
+export const startThread = (channelId: Snowflake, body: StartThreadRequest): Promise<Channel> => request("POST", `/channels/${channelId}/threads`, body);
+export const startForumPost = (forumId: Snowflake, body: StartForumPostRequest): Promise<ForumPost> => request("POST", `/channels/${forumId}/threads`, body);
+export const joinThread = (threadId: Snowflake): Promise<void> => request("PUT", `/channels/${threadId}/thread-members/@me`);
+export const leaveThread = (threadId: Snowflake): Promise<void> => request("DELETE", `/channels/${threadId}/thread-members/@me`);
+export const addThreadMember = (threadId: Snowflake, userId: Snowflake): Promise<void> => request("PUT", `/channels/${threadId}/thread-members/${userId}`);
+export const removeThreadMember = (threadId: Snowflake, userId: Snowflake): Promise<void> => request("DELETE", `/channels/${threadId}/thread-members/${userId}`);
+export const listThreadMembers = (threadId: Snowflake): Promise<ThreadMember[]> => request("GET", `/channels/${threadId}/thread-members`);
+export const getThreadMember = (threadId: Snowflake, userId: Snowflake): Promise<ThreadMember> => request("GET", `/channels/${threadId}/thread-members/${userId}`);
+export const listActiveThreads = (guildId: Snowflake): Promise<ThreadListResponse> => request("GET", `/guilds/${guildId}/threads/active`);
+/** Archived threads, newest archive first; `before` is the ISO `archive_timestamp` of the last row of the previous page. */
+export const listArchivedThreads = (channelId: Snowflake, kind: "public" | "private" | "joined-private", page: { before?: string; limit?: number } = {}): Promise<ThreadListResponse> =>
+  request("GET", `${kind === "joined-private" ? `/channels/${channelId}/users/@me/threads/archived/private` : `/channels/${channelId}/threads/archived/${kind}`}${queryString(page)}`);
+export const searchThreads = (channelId: Snowflake, query: ThreadSearchQuery = {}): Promise<ThreadSearchResponse> => request("GET", `/channels/${channelId}/threads/search${queryString({ ...query })}`);
+/** Rename, archive, lock, tags, pin: any thread field of EditChannelRequest. Forum channel fields go through the same call. */
+export const editChannel = (channelId: Snowflake, body: EditChannelRequest): Promise<Channel> => request("PATCH", `/channels/${channelId}`, body);
+export const deleteThread = (threadId: Snowflake): Promise<Channel> => request("DELETE", `/channels/${threadId}`);
+export const followChannel = (channelId: Snowflake, body: FollowChannelRequest): Promise<FollowedChannel> => request("POST", `/channels/${channelId}/followers`, body);
+export const listFollowers = (channelId: Snowflake): Promise<ChannelFollower[]> => request("GET", `/channels/${channelId}/followers`);
+export const unfollowChannel = (channelId: Snowflake, followId: Snowflake): Promise<void> => request("DELETE", `/channels/${channelId}/followers/${followId}`);
+/** Publish an announcement message to every follower. */
+export const crosspostMessage = (channelId: Snowflake, messageId: Snowflake): Promise<Message> => request("POST", `/channels/${channelId}/messages/${messageId}/crosspost`);

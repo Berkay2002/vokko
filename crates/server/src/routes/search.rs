@@ -7,9 +7,9 @@ use axum::extract::{Path, RawQuery, State};
 use axum::routing::get;
 use sqlx::{Postgres, QueryBuilder};
 use vokko_protocol::api::MessageSearchResponse;
-use vokko_protocol::api::permissions::{READ_MESSAGE_HISTORY, VIEW_CHANNEL};
+use vokko_protocol::api::permissions::{MANAGE_THREADS, READ_MESSAGE_HISTORY, VIEW_CHANNEL};
 
-use crate::access::{self, Overwrite, channel_access};
+use crate::access::{self, channel_access};
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::parse_id;
@@ -53,7 +53,7 @@ struct Params {
     ascending: bool,
 }
 
-fn percent_decode(raw: &str) -> String {
+pub fn percent_decode(raw: &str) -> String {
     let bytes = raw.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut index = 0;
@@ -215,32 +215,26 @@ async fn run(state: &AppState, user_id: i64, params: &Params, channels: Vec<i64>
     Ok(Json(MessageSearchResponse { total_results: total.max(0) as u64, messages }))
 }
 
-/// Channels of the guild where `user_id` has VIEW_CHANNEL and READ_MESSAGE_HISTORY after overwrites and timeout.
+/// Channels of the guild where `user_id` has VIEW_CHANNEL and READ_MESSAGE_HISTORY after overwrites and timeout, plus the threads
+/// of those channels (archived ones too): private threads only when the caller is a member or holds MANAGE_THREADS.
 async fn readable_guild_channels(state: &AppState, user_id: i64, guild_id: i64) -> ApiResult<Vec<i64>> {
-    let guild = access::guild_access(state, user_id, guild_id).await?;
-    let channels: Vec<(i64,)> = sqlx::query_as("SELECT id FROM channels WHERE guild_id = $1").bind(guild_id).fetch_all(&state.db).await?;
-    let rows: Vec<(i64, i64, i16, i64, i64)> = sqlx::query_as(
-        "SELECT o.channel_id, o.target_id, o.target_type, o.allow, o.deny FROM permission_overwrites o JOIN channels c ON c.id = o.channel_id WHERE c.guild_id = $1",
-    )
-    .bind(guild_id)
-    .fetch_all(&state.db)
-    .await?;
-    let mut overwrites: HashMap<i64, Vec<Overwrite>> = HashMap::new();
-    for (channel_id, target_id, target_type, allow, deny) in rows {
-        overwrites.entry(channel_id).or_default().push(Overwrite { target_id, target_type, allow: allow as u64, deny: deny as u64 });
-    }
     let wanted = VIEW_CHANNEL | READ_MESSAGE_HISTORY;
-    Ok(channels
+    let parents: HashMap<i64, u64> = access::guild_channels_with_permissions(state, user_id, guild_id)
+        .await?
         .into_iter()
-        .map(|(id,)| id)
-        .filter(|id| {
-            let list = overwrites.get(id).map(Vec::as_slice).unwrap_or(&[]);
-            let resolved = access::channel_permissions(guild.permissions, guild_id, user_id, &guild.roles, list);
-            // Same as `channel_access`: overwrites may allow more than the timeout clamp lets through.
-            let permissions = if guild.owner_id == user_id { resolved } else { access::clamp_timeout(resolved, guild.timed_out) };
-            permissions & wanted == wanted
-        })
-        .collect())
+        .filter(|(_, permissions)| permissions & wanted == wanted)
+        .map(|(row, permissions)| (row.id, permissions))
+        .collect();
+    let threads: Vec<(i64, Option<i64>, i16)> =
+        sqlx::query_as("SELECT id, parent_id, kind FROM channels WHERE guild_id = $1 AND kind IN (10, 11, 12)").bind(guild_id).fetch_all(&state.db).await?;
+    let joined: Vec<(i64,)> = sqlx::query_as("SELECT thread_id FROM thread_members WHERE user_id = $1").bind(user_id).fetch_all(&state.db).await?;
+    let joined: std::collections::HashSet<i64> = joined.into_iter().map(|(id,)| id).collect();
+    let mut readable: Vec<i64> = parents.keys().copied().collect();
+    readable.extend(threads.into_iter().filter_map(|(id, parent, kind)| {
+        let permissions = parents.get(&parent?)?;
+        (kind != 12 || permissions & MANAGE_THREADS != 0 || joined.contains(&id)).then_some(id)
+    }));
+    Ok(readable)
 }
 
 async fn search_guild(

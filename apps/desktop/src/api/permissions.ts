@@ -34,6 +34,10 @@ export const PermBit = {
   MANAGE_ROLES: 28,
   MANAGE_WEBHOOKS: 29,
   MANAGE_GUILD_EXPRESSIONS: 30,
+  MANAGE_THREADS: 34,
+  CREATE_PUBLIC_THREADS: 35,
+  CREATE_PRIVATE_THREADS: 36,
+  SEND_MESSAGES_IN_THREADS: 38,
   CREATE_GUILD_EXPRESSIONS: 43,
   MODERATE_MEMBERS: 40,
   PIN_MESSAGES: 51,
@@ -51,7 +55,7 @@ export const ALL_PERMISSIONS: bigint = (() => {
 })();
 
 /** Q4.4 fallback @everyone set, used when a guild has no @everyone role. */
-export const DEFAULT_EVERYONE: bigint = [0, 26, 10, 11, 14, 15, 16, 17, 18, 6, 20, 21, 25, 9, 43].reduce((acc, n) => acc | bit(n), 0n);
+export const DEFAULT_EVERYONE: bigint = [0, 26, 10, 11, 14, 15, 16, 17, 18, 6, 20, 21, 25, 9, 43, 35, 36, 38].reduce((acc, n) => acc | bit(n), 0n);
 
 export function parseBits(value: string | bigint | undefined | null): bigint {
   if (typeof value === "bigint") return value;
@@ -98,6 +102,16 @@ export function channelPermissions(guild: GuildLike, member: MemberLike, channel
   const until = member.communication_disabled_until ? Date.parse(member.communication_disabled_until) : 0;
   if (until > now) bits &= Perm.VIEW_CHANNEL | Perm.READ_MESSAGE_HISTORY;
   return bits;
+}
+
+/**
+ * Permissions inside a thread: the parent channel's resolved bits with SEND_MESSAGES replaced by SEND_MESSAGES_IN_THREADS
+ * (the thread's own SEND_MESSAGES is on exactly when the parent grants SEND_MESSAGES_IN_THREADS; the original bit stays readable).
+ * Joining a private thread or being a member is a separate rule (docs/api.md, Threads, forums and announcements).
+ */
+export function threadPermissions(parentBits: bigint): bigint {
+  const bits = parentBits & ~Perm.SEND_MESSAGES;
+  return hasBit(parentBits, Perm.SEND_MESSAGES_IN_THREADS) ? bits | Perm.SEND_MESSAGES : bits;
 }
 
 export const rolePosition = (guild: GuildLike, roleId: Snowflake): number => guild.roles.find(r => r.id === roleId)?.position ?? 0;

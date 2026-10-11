@@ -10,11 +10,16 @@ import { db, nextId } from "./db";
 import { addMessage, createAccount } from "./ops";
 import { handleRoute } from "./routes";
 import { seed } from "./seed";
+import { sweepArchivedThreads } from "./threads";
 import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromToken } from "./socket";
 
 export { MockSocket };
 
-if (MOCK) seed();
+if (MOCK) {
+  seed();
+  // Threads without a message for their auto-archive duration are archived (THREAD_UPDATE), like the server's minute sweep.
+  setInterval(() => sweepArchivedThreads(), 30_000);
+}
 
 /** Simulated network latency in ms; `?mockLatency=0` in the URL (or localStorage `vokko.mock.latency`) overrides it. */
 function latency(): number {

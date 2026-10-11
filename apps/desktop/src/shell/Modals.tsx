@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpen, Camera, MessagesSquare, Check, ChevronRight, Copy, Gamepad2, GraduationCap, Hash, Heart, MapPin, Palette, Plus, Users, Volume2, type LucideIcon } from "lucide-react";
+import { BookOpen, Camera, MessagesSquare, Check, ChevronRight, Copy, Gamepad2, GraduationCap, Hash, Heart, MapPin, Megaphone, Palette, Plus, Radio, Users, Volume2, type LucideIcon } from "lucide-react";
 import { logout } from "../api/auth";
 import { ApiRequestError } from "../api/errors";
 import { request, uploadAttachment } from "../api/rest";
@@ -393,7 +393,9 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
           <div role="radiogroup" className="radio-group">
             {option(ChannelType.GuildText, <Hash size={16} />, "Text", "Send messages, images, GIFs, emoji, opinions, and puns")}
             {option(ChannelType.GuildVoice, <Volume2 size={16} />, "Voice", "Hang out together with voice, video, and screen share")}
-            {option(ChannelType.GuildText, <MessagesSquare size={16} />, "Forum", "Create a space for organized discussions", true)}
+            {option(ChannelType.GuildAnnouncement, <Megaphone size={16} />, "Announcement", "Important updates for people in and out of the server, which other servers can follow")}
+            {option(ChannelType.GuildForum, <MessagesSquare size={16} />, "Forum", "Create a space for organized discussions")}
+            {option(ChannelType.GuildStage, <Radio size={16} />, "Stage", "Host events with speakers and an audience (not available yet)")}
           </div>
         </>
       )}
@@ -401,7 +403,7 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
         {category ? "Category name" : "Channel name"}
       </label>
       <div className="input-prefixed">
-        {!category && (type === ChannelType.GuildVoice ? <Volume2 size={16} /> : <Hash size={16} />)}
+        {!category && (type === ChannelType.GuildVoice ? <Volume2 size={16} /> : type === ChannelType.GuildAnnouncement ? <Megaphone size={16} /> : type === ChannelType.GuildForum ? <MessagesSquare size={16} /> : type === ChannelType.GuildStage ? <Radio size={16} /> : <Hash size={16} />)}
         <input id="channel-name" className="input" value={name} maxLength={100} autoFocus placeholder={category ? "New Category" : "new-channel"} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
       </div>
       <div className="switch-row">

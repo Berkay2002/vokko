@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Forward, Pencil, Pin, SmilePlus, MoreHorizontal, Reply, UserPlus, UserMinus, PenLine, Image as ImageIcon, CircleAlert, ArrowRightFromLine } from 'lucide-react';
-import { MessageType } from '../api/types';
+import { Forward, Pencil, Pin, SmilePlus, MoreHorizontal, Reply, UserPlus, UserMinus, PenLine, Image as ImageIcon, CircleAlert, ArrowRightFromLine, MessageSquareText, Megaphone } from 'lucide-react';
+import { MessageFlags, MessageType } from '../api/types';
 import type { Message } from '../api/types';
 import { Markdown } from './markdown';
 import { Tooltip } from './shell';
@@ -12,6 +12,10 @@ import { Embeds } from './Embeds';
 import { Reactions } from './Reactions';
 import { EmojiPickerPopout } from './EmojiPicker';
 import { MessageMenu } from './MessageMenu';
+import { ThreadChip } from '../threads/ThreadChip';
+import { ThreadCreatedNotice } from '../threads/ThreadNotice';
+import { ThreadStarter } from '../threads/ThreadStarter';
+import { useMessageThreadActions } from '../threads/useMessageActions';
 import { comingSoon } from './toast';
 import { quickReactions } from './emojiData';
 import { messageStore } from './messageStore';
@@ -43,6 +47,8 @@ function SystemBody({ message, name }: { message: Message; name: string }) {
       return <><UserMinus size={18} className="chat-system-icon leave" /><span className="chat-system-text"><b>{name}</b> removed <b>{other}</b> from the group.</span></>;
     case MessageType.ChannelNameChange:
       return <><PenLine size={18} className="chat-system-icon" /><span className="chat-system-text"><b>{name}</b> changed the channel name: <b>{message.content}</b></span></>;
+    case MessageType.ThreadCreated:
+      return <ThreadCreatedNotice message={message} name={name} />;
     default:
       return <span className="chat-system-text">{message.content}</span>;
   }
@@ -55,7 +61,7 @@ function SystemBody({ message, name }: { message: Message; name: string }) {
 function ReplyPreview({ message }: { message: Message }) {
   const chat = useChat();
   const ref = message.referenced_message;
-  if (!message.message_reference) return null;
+  if (!message.message_reference || ((message.flags ?? 0) & MessageFlags.IsCrosspost) !== 0) return null; // a published copy points at its source, it is not a reply
   if (!ref) {
     const text = ref === null ? 'Original message was deleted' : 'Message could not be loaded';
     return <div className="chat-reply missing"><span className="chat-reply-spine" /><span className="chat-reply-text"><Reply size={14} className="chat-reply-missing-icon" aria-hidden="true" />{text}</span></div>;
@@ -122,6 +128,8 @@ function InlineEdit({ message, onDone }: { message: Message; onDone(): void }) {
 
 function MessageItemImpl({ message, pending, grouped, editing, highlighted, onStopEditing }: MessageItemProps) {
   const chat = useChat();
+  const threadActions = useMessageThreadActions(message, !!pending);
+  const crosspost = ((message.flags ?? 0) & MessageFlags.IsCrosspost) !== 0;
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [menuPickerOpen, setMenuPickerOpen] = useState(false);
@@ -152,7 +160,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   if (failed) cls.push('failed');
   if (editing) cls.push('editing');
   if (highlighted) cls.push('flash');
-  if (message.message_reference && !system) cls.push('has-reply');
+  if (message.message_reference && !system && !crosspost) cls.push('has-reply');
   if (system) cls.push('system');
   if (chat.replyingId === message.id) cls.push('replying');
 
@@ -185,6 +193,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
         {message.author.bot && <span className="chat-bot-tag">BOT</span>}
         {!compact && <Tooltip content={formatFullDate(date)}><time className="chat-timestamp" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>}
       </h3>}
+      {crosspost && <div className="chat-crosspost-tag"><Megaphone size={14} aria-hidden="true" /> Published from an announcement channel</div>}
       {editing ? <InlineEdit message={message} onDone={onStopEditing} /> : <>
         {message.content && <Markdown content={message.content} ctx={chat.md} className="chat-content" suffix={message.edited_timestamp
           ? <Tooltip content={formatFullDate(new Date(message.edited_timestamp))}><span className="chat-edited">(edited)</span></Tooltip> : undefined} />}
@@ -193,6 +202,8 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
           : <Attachments message={message} />}
         <Embeds message={message} />
         <Reactions message={message} />
+        {message.thread && <ThreadChip message={message} />}
+        {threadActions.published && <div className="chat-crosspost-tag published"><Megaphone size={14} aria-hidden="true" /> Published</div>}
       </>}
       {failed && <div className="chat-failed" role="alert">
         <CircleAlert size={14} /> Your message could not be delivered.
@@ -209,6 +220,8 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
       {canEdit && <Tooltip content="Edit" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Edit" onClick={() => chat.actions.edit(message)}><Pencil size={20} /></button></Tooltip>}
       {!isMine && <Tooltip content="Reply" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Reply" onClick={() => chat.actions.reply(message)}><Reply size={20} /></button></Tooltip>}
       {canDelete && shift && <Tooltip content="Delete" side="top"><button type="button" className="chat-toolbar-btn danger" aria-label="Delete" onClick={e => chat.actions.requestDelete(message, e.shiftKey)}><Trash /></button></Tooltip>}
+      {threadActions.canCreateThread && <Tooltip content="Create Thread" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Create Thread" onClick={threadActions.createThread}><MessageSquareText size={20} /></button></Tooltip>}
+      {threadActions.canPublish && !threadActions.published && <Tooltip content="Publish" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Publish" onClick={threadActions.publish}><Megaphone size={20} /></button></Tooltip>}
       <Tooltip content="Forward" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Forward" onClick={() => comingSoon('Forwarding messages')}><Forward size={20} /></button></Tooltip>
       <Tooltip content="More" side="top"><button type="button" className="chat-toolbar-btn" aria-label="More" onClick={e => {
         const r = e.currentTarget.getBoundingClientRect();
@@ -223,4 +236,10 @@ function Trash() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14" /></svg>;
 }
 
-export const MessageItem = memo(MessageItemImpl);
+/** A thread's first message (type 21) is the message the thread started from, drawn as that message; everything else is a regular row. */
+function MessageItemRow(props: MessageItemProps) {
+  if (props.message.type === MessageType.ThreadStarterMessage) return <ThreadStarter message={props.message} />;
+  return <MessageItemImpl {...props} />;
+}
+
+export const MessageItem = memo(MessageItemRow);

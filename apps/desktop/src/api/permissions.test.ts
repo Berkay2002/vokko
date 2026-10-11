@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALL_PERMISSIONS, DEFAULT_EVERYONE, Perm, basePermissions, canEditRole, canModerate, channelPermissions, hasBit, highestPosition, outranks } from "./permissions";
+import { ALL_PERMISSIONS, DEFAULT_EVERYONE, Perm, basePermissions, canEditRole, canModerate, channelPermissions, hasBit, highestPosition, outranks, threadPermissions } from "./permissions";
 import { OverwriteType, type Role } from "./types";
 
 const GUILD = "100";
@@ -108,5 +108,27 @@ describe("hierarchy", () => {
     expect(canEditRole(guild, mod, guild.roles[2]!)).toBe(false);
     expect(canEditRole(guild, helper, guild.roles[1]!)).toBe(false);
     expect(canEditRole(guild, owner, guild.roles[3]!)).toBe(true);
+  });
+});
+
+describe("threadPermissions", () => {
+  it("uses the Discord bit values", () => {
+    expect([Perm.MANAGE_THREADS, Perm.CREATE_PUBLIC_THREADS, Perm.CREATE_PRIVATE_THREADS, Perm.SEND_MESSAGES_IN_THREADS]).toEqual([1n << 34n, 1n << 35n, 1n << 36n, 1n << 38n]);
+    for (const bit of [Perm.CREATE_PUBLIC_THREADS, Perm.CREATE_PRIVATE_THREADS, Perm.SEND_MESSAGES_IN_THREADS]) expect(hasBit(DEFAULT_EVERYONE, bit)).toBe(true);
+    expect(hasBit(DEFAULT_EVERYONE, Perm.MANAGE_THREADS)).toBe(false);
+  });
+
+  it("SEND_MESSAGES in a thread follows SEND_MESSAGES_IN_THREADS of the parent", () => {
+    const parent = DEFAULT_EVERYONE;
+    expect(hasBit(threadPermissions(parent), Perm.SEND_MESSAGES)).toBe(true);
+    expect(hasBit(threadPermissions(parent & ~Perm.SEND_MESSAGES), Perm.SEND_MESSAGES)).toBe(true); // may write in threads, not in the channel
+    expect(hasBit(threadPermissions(parent & ~Perm.SEND_MESSAGES_IN_THREADS), Perm.SEND_MESSAGES)).toBe(false);
+    expect(hasBit(threadPermissions(parent & ~Perm.SEND_MESSAGES_IN_THREADS), Perm.VIEW_CHANNEL)).toBe(true);
+  });
+
+  it("resolves through the parent's overwrites", () => {
+    const channel = { parent_id: null, permission_overwrites: [{ id: GUILD, type: OverwriteType.Role, allow: "0", deny: Perm.SEND_MESSAGES_IN_THREADS.toString() }] };
+    expect(hasBit(threadPermissions(channelPermissions(guild, user("m"), channel)), Perm.SEND_MESSAGES)).toBe(false);
+    expect(hasBit(threadPermissions(channelPermissions(guild, user("a", ["admin"]), channel)), Perm.SEND_MESSAGES)).toBe(true);
   });
 });

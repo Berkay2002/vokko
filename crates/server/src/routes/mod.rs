@@ -5,6 +5,8 @@ use crate::state::AppState;
 mod attachments;
 mod auth;
 mod channels;
+mod follows;
+mod forums;
 mod guilds;
 mod invites;
 pub mod messages;
@@ -13,6 +15,7 @@ mod overwrites;
 mod reactions;
 pub mod relationships;
 mod search;
+mod threads;
 mod users;
 
 pub fn api(max_upload_bytes: usize) -> Router<AppState> {
@@ -28,5 +31,8 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(messages::routes())
         .merge(reactions::routes())
         .merge(search::routes())
+        .merge(threads::routes())
+        .merge(forums::routes())
+        .merge(follows::routes())
         .merge(attachments::routes(max_upload_bytes))
 }

@@ -23,13 +23,13 @@ Status as of main at 11ae952
 | DM | 10 | 8 | 1 | 1 | 0 | 2 |
 | MSG | 33 | 20 | 8 | 4 | 1 | 10 |
 | CMP | 14 | 6 | 4 | 4 | 0 | 2 |
-| GLD | 18 | 4 | 8 | 6 | 0 | 1 |
+| GLD | 18 | 4 | 11 | 3 | 0 | 1 |
 | POP | 6 | 2 | 4 | 0 | 0 | 0 |
 | MOD | 11 | 6 | 4 | 1 | 0 | 0 |
 | SET | 7 | 2 | 5 | 0 | 0 | 0 |
 | REST | 6 | 2 | 3 | 1 | 0 | 0 |
 | DESK | 8 | 2 | 3 | 3 | 0 | 0 |
-| **Total** | **135** | **61** | **52** | **21** | **1** | **18** |
+| **Total** | **135** | **61** | **55** | **18** | **1** | **18** |
 
 ## SHELL: app shell, rail, DM sidebar, title bar
 
@@ -151,9 +151,9 @@ Status as of main at 11ae952
 | GLD-010 | New-server welcome checklist | - | - | Not built |
 | GLD-011 | Member list: role groups, online/offline, presence dots, activity line, role colours | done | done | MemberList.tsx, tokens.css (264 px, rows 248x42); GET /guilds/{id}/members, presence via gateway |
 | GLD-012 | Channel, category and server-icon right-click menus | partial | partial | menus.tsx channelContextItems and guildContextItems work (edit, duplicate, delete, invite, ID); privacy and profile entries disabled; mute is local |
-| GLD-013 | Threads: list popout, side panel, starter message | - | - | Threads button disabled; no thread routes |
-| GLD-014 | Forum channel: post list, tags, create-post flow | - | - | Forum option disabled in the create-channel modal |
-| GLD-015 | Announcement channel and stage channel | - | - | Only text, voice and category channel types |
+| GLD-013 | Threads: list popout, side panel, starter message | partial | partial | src/threads: Threads button + popout (active/archived tabs, search, Create, last-message line), side panel next to the channel (Edit/Join/Leave/Archive/Lock/Delete by permission, members with add/remove), thread chip, type 18 notice, type 21 starter, Create Thread in the message menu and hover toolbar, joined threads under their channel in the sidebar; REST in api/rest.ts, THREAD_* in api/store.ts, mock in api/mock/threads.ts with e2e/threads.spec.ts. Paths match crates/server routes (threads.rs, forums.rs); not run against the real server, nothing compared visually (no reference capture) |
+| GLD-014 | Forum channel: post list, tags, create-post flow | partial | partial | src/forum: post cards (title, tags, first-message preview, author, replies, last activity), tag filter chips, sort, list/gallery, search box (GET threads/search), pinned first, New Post composer (title, up to 5 tags, message; no attachments yet), posts open in the thread panel, forum section in channel settings (tags editor, default sort/layout/reaction, require tag); mock and mock e2e done; not run against the real server |
+| GLD-015 | Announcement channel and stage channel | partial | partial | Announcement (type 5): megaphone icon, Follow dialog (server and channel you can manage webhooks in, POST followers), Publish in the message menu and toolbar with a Published state (flags), published copies marked; stage (type 13) can be created and listed, the page says it is not supported (no voice); mock and mock e2e done; not run against the real server |
 | GLD-016 | Server folder and server context menu in the rail | partial | partial | Rail context menu exists (menus.tsx guildContextItems); no folders |
 | GLD-017 | Member-list profile popout on click | partial | done | ProfileCard.tsx opens from the member list; roles, member-since, message and add-friend actions |
 | GLD-018 | Invite modal: link, copy, expiry settings, friends list | partial | partial | Modals.tsx InviteModal creates and copies a link (POST /channels/{id}/invites, fixed 24 h); no expiry settings, no friends list although the server accepts max_age and max_uses |
@@ -176,7 +176,7 @@ Status as of main at 11ae952
 | MOD-001 | Create-server step 1: templates and join with invite | partial | done | Modals.tsx CreateServer: template list and Join a Server (POST /invites/{code}); modal size not checked against 443x560 |
 | MOD-002 | Create-server step 2: purpose question with skip | partial | done | Modals.tsx purpose step with skip link |
 | MOD-003 | Create-server step 3: icon uploader, name input, guidelines link, Back and Create | partial | done | Modals.tsx customize step (POST /guilds, icon via attachment upload); no guidelines link |
-| MOD-004 | Create-channel modal: type radios, name with prefix, private switch, buttons | partial | done | Modals.tsx CreateChannelModal; private creates an @everyone VIEW_CHANNEL deny overwrite; forum radio disabled |
+| MOD-004 | Create-channel modal: type radios, name with prefix, private switch, buttons | partial | done | Modals.tsx CreateChannelModal; private creates an @everyone VIEW_CHANNEL deny overwrite; Text, Voice, Announcement, Forum and Stage radios (Stage is a type stub, no stage behaviour) |
 | MOD-005 | Quick switcher: input, recent channels, tips footer | partial | partial | QuickSwitcher.tsx: prefixes and PROTIP footer; searches loaded data only, no recents list |
 | MOD-006 | Keyboard shortcuts dialog with key-cap cards | partial | partial | Ctrl+/ opens the Keybinds settings page (KeybindsPage.tsx), a table rather than a dialog; some listed shortcuts are not wired |
 | MOD-007 | Confirmation modals: delete message, leave server, unsaved-changes bar | partial | partial | Delete message and leave server confirms work; the unsaved bar exists in channel settings only (see SET-007) |

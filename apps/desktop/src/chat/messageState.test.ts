@@ -27,6 +27,13 @@ describe('buildRows grouping', () => {
   });
 });
 
+describe('thread messages', () => {
+  it('a thread starter (type 21) and a thread notice (type 18) are not grouped with their neighbours', () => {
+    expect(rows([msg('1', 'a', 0, 21), msg('2', 'a', 1)]).map(r => r.grouped)).toEqual([false, false]);
+    expect(rows([msg('1', 'a', 0), msg('2', 'a', 1, 18), msg('3', 'a', 2)]).map(r => r.grouped)).toEqual([false, false, false]);
+  });
+});
+
 describe('withLateArrivals', () => {
   const state = (messages: Message[]) => ({ ...emptyState(), messages });
 

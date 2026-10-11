@@ -15,7 +15,7 @@ export type { MenuItem } from '../ui';
 const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
 
 export function useMe(): User | null { return useStore(s => s.me); }
-export function useChannel(channelId: Snowflake): Channel | undefined { return useStore(s => s.channels[channelId]); }
+export function useChannel(channelId: Snowflake): Channel | undefined { return useStore(s => s.channels[channelId] ?? s.threads[channelId]); }
 export function useGuild(guildId: Snowflake | null | undefined): Guild | undefined { return useStore(s => (guildId ? s.guilds[guildId] : undefined)); }
 export function useGuildMembers(guildId: Snowflake | null | undefined): Record<Snowflake, GuildMember> { return useStore(s => (guildId ? s.members[guildId] : undefined)) ?? NO_MEMBERS; }
 export function useUsers(): Record<Snowflake, User> { return useStore(s => s.users); }

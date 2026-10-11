@@ -7,10 +7,12 @@ import { create } from "zustand";
 import { shallow } from "zustand/shallow";
 import { gateway, type GatewayStatus } from "./gateway";
 import { go, guildPath } from "../shell/nav";
-import { request, resolveUrl } from "./rest";
+import { channelPermissions, hasBit, Perm } from "./permissions";
+import { listActiveThreads, request, resolveUrl } from "./rest";
 import { compareIds, maxId } from "./snowflake";
 import {
   ChannelType,
+  MessageType,
   type Channel,
   type Guild,
   type GuildMember,
@@ -41,6 +43,12 @@ export interface AppState {
   guildOrder: Snowflake[];
   /** Guild channels and DMs together. */
   channels: Record<Snowflake, Channel>;
+  /**
+   * Threads (types 10-12) by id: the active ones from READY / GUILD_CREATE / THREAD_* events plus any archived thread the UI opened.
+   * They are kept apart from `channels` so the channel list, unread dots and the quick switcher never see them.
+   * `thread.member` is the current user's membership.
+   */
+  threads: Record<Snowflake, Channel>;
   /** DM / group DM ids ordered by last_message_id (newest first). */
   privateChannels: Snowflake[];
   presences: Record<Snowflake, Presence>;
@@ -59,6 +67,8 @@ export interface AppState {
   applyReady(ready: ReadyEvent): void;
   upsertChannel(channel: Channel): void;
   removeChannel(id: Snowflake): void;
+  upsertThread(thread: Channel): void;
+  removeThread(id: Snowflake): void;
   removeGuild(id: Snowflake): void;
   setReadState(state: ReadState): void;
   setMe(user: User): void;
@@ -89,6 +99,7 @@ const initial = {
   guilds: {},
   guildOrder: [],
   channels: {},
+  threads: {},
   privateChannels: [],
   presences: {},
   readStates: {},
@@ -135,14 +146,16 @@ export const appStore = create<AppState>()((set, get) => ({
     const guilds: Record<Snowflake, Guild> = {};
     const guildOrder: Snowflake[] = [];
     const channels: Record<Snowflake, Channel> = {};
+    const threads: Record<Snowflake, Channel> = {};
     const members: Record<Snowflake, Record<Snowflake, GuildMember>> = {};
     const memberCounts: Record<Snowflake, number> = {};
     for (const entry of ready.guilds) {
-      const { channels: guildChannels, members: guildMembers, member_count, ...guild } = entry;
+      const { channels: guildChannels, members: guildMembers, member_count, threads: guildThreads, ...guild } = entry;
       guilds[guild.id] = guild;
       guildOrder.push(guild.id);
       memberCounts[guild.id] = member_count;
       for (const channel of guildChannels) channels[channel.id] = channel;
+      for (const thread of guildThreads ?? []) threads[thread.id] = thread;
       members[guild.id] = {};
       for (const member of guildMembers) {
         members[guild.id]![member.user.id] = member;
@@ -164,12 +177,15 @@ export const appStore = create<AppState>()((set, get) => ({
       relationships[relationship.id] = relationship;
       users[relationship.user.id] = relationship.user;
     }
+    // Archived threads are not in READY: keep the ones the UI opened (a reconnect must not close the panel).
+    for (const [id, thread] of Object.entries(get().threads)) if (thread.thread_metadata?.archived && thread.guild_id && guilds[thread.guild_id] && !threads[id]) threads[id] = thread;
     set({
       ready: true,
       me: ready.user,
       guilds,
       guildOrder,
       channels,
+      threads,
       privateChannels: sortPrivate(channels, privateIds),
       presences,
       readStates,
@@ -201,6 +217,22 @@ export const appStore = create<AppState>()((set, get) => ({
     set({ channels, privateChannels: state.privateChannels.filter(c => c !== id) });
   },
 
+  upsertThread(thread) {
+    const state = get();
+    const prev = state.threads[thread.id];
+    // Updates for other members may omit the viewer's own membership: keep what we know.
+    const next = prev?.member && !thread.member ? { ...thread, member: prev.member } : thread;
+    set({ threads: { ...state.threads, [thread.id]: next } });
+  },
+
+  removeThread(id) {
+    const state = get();
+    if (!state.threads[id]) return;
+    const { [id]: _removed, ...threads } = state.threads;
+    void _removed;
+    set({ threads });
+  },
+
   removeGuild(id) {
     const state = get();
     if (!state.guilds[id]) return;
@@ -210,7 +242,9 @@ export const appStore = create<AppState>()((set, get) => ({
     void _m;
     const channels: Record<Snowflake, Channel> = {};
     for (const [cid, channel] of Object.entries(state.channels)) if (channel.guild_id !== id) channels[cid] = channel;
-    set({ guilds, members, channels, guildOrder: state.guildOrder.filter(g => g !== id) });
+    const threads: Record<Snowflake, Channel> = {};
+    for (const [tid, thread] of Object.entries(state.threads)) if (thread.guild_id !== id) threads[tid] = thread;
+    set({ guilds, members, channels, threads, guildOrder: state.guildOrder.filter(g => g !== id) });
   },
 
   setReadState(readState) {
@@ -252,11 +286,26 @@ function clearTyping(channelId: Snowflake, userId: Snowflake): void {
   appStore.setState({ typing: { ...state.typing, [channelId]: rest } });
 }
 
+/** A message in a thread: keep its counters and read state current (threads are not in `channels`). */
+function onThreadMessage(thread: Channel, message: Message): void {
+  const state = appStore.getState();
+  const counted = message.type !== MessageType.ThreadStarterMessage && message.id !== thread.id;
+  state.upsertThread({ ...thread, last_message_id: message.id, message_count: (thread.message_count ?? 0) + (counted ? 1 : 0) });
+  const read = state.readStates[thread.id] ?? { channel_id: thread.id, last_message_id: thread.last_message_id, mention_count: 0 };
+  if (state.me?.id === message.author.id) state.setReadState({ ...read, last_message_id: message.id, mention_count: 0 });
+  else if (message.mention_everyone || message.mentions.some(u => u.id === state.me?.id)) state.setReadState({ ...read, mention_count: read.mention_count + 1 });
+}
+
 function onMessageCreate(message: Message): void {
   const state = appStore.getState();
   const channel = state.channels[message.channel_id];
   state.cacheUsers([message.author, ...message.mentions]);
   clearTyping(message.channel_id, message.author.id);
+  const thread = channel ? undefined : state.threads[message.channel_id];
+  if (thread) {
+    onThreadMessage(thread, message);
+    return;
+  }
   if (!channel) {
     // A DM we have not seen yet (or a guild we have not joined locally): refresh the DM list.
     if (!message.guild_id) void refreshPrivateChannels();
@@ -320,18 +369,21 @@ export function wireStoreToGateway(): void {
     if (open && c.guild_id) go(guildPath(c.guild_id), { replace: true });
   });
   gateway.on("GUILD_CREATE", entry => {
-    const { channels, members, member_count, presences, ...guild } = entry;
+    const { channels, members, member_count, presences, threads, ...guild } = entry;
     const state = s();
     const nextPresences = { ...state.presences };
     for (const p of presences ?? []) nextPresences[p.user_id] = p;
     const nextChannels = { ...state.channels };
     for (const channel of channels) nextChannels[channel.id] = channel;
+    const nextThreads = { ...state.threads };
+    for (const thread of threads ?? []) nextThreads[thread.id] = thread;
     const memberMap: Record<Snowflake, GuildMember> = {};
     for (const member of members) memberMap[member.user.id] = member;
     appStore.setState({
       guilds: { ...state.guilds, [guild.id]: guild },
       guildOrder: state.guildOrder.includes(guild.id) ? state.guildOrder : [...state.guildOrder, guild.id],
       channels: nextChannels,
+      threads: nextThreads,
       members: { ...state.members, [guild.id]: memberMap },
       memberCounts: { ...state.memberCounts, [guild.id]: member_count },
       presences: nextPresences,
@@ -426,6 +478,96 @@ export function wireStoreToGateway(): void {
 }
 
 wireStoreToGateway();
+
+// ---- threads ----
+
+const threadRefresh = new Map<Snowflake, ReturnType<typeof setTimeout>>();
+
+/**
+ * The server sends no thread list sync: after something that can change which threads the user sees (own roles, a role or a channel's
+ * overwrites) the active list of the guild is fetched again and replaces the unarchived threads the store holds for it.
+ */
+export function refreshActiveThreads(guildId: Snowflake): void {
+  const pending = threadRefresh.get(guildId);
+  if (pending) clearTimeout(pending);
+  threadRefresh.set(
+    guildId,
+    setTimeout(() => {
+      threadRefresh.delete(guildId);
+      listActiveThreads(guildId)
+        .then(({ threads }) => {
+          const state = appStore.getState();
+          if (!state.guilds[guildId]) return;
+          const next: Record<Snowflake, Channel> = {};
+          for (const [id, thread] of Object.entries(state.threads)) if (thread.guild_id !== guildId || thread.thread_metadata?.archived) next[id] = thread;
+          for (const thread of threads) next[thread.id] = state.threads[thread.id]?.member && !thread.member ? { ...thread, member: state.threads[thread.id]!.member } : thread;
+          appStore.setState({ threads: next });
+        })
+        .catch(() => undefined);
+    }, 150),
+  );
+}
+
+/** Whether the current user may manage threads of this thread's parent (MANAGE_THREADS, owner and administrators included). */
+export function canManageThreadsIn(thread: Channel): boolean {
+  const state = appStore.getState();
+  const guild = thread.guild_id ? state.guilds[thread.guild_id] : undefined;
+  const me = state.me;
+  if (!guild || !me) return false;
+  const member = state.members[guild.id]?.[me.id];
+  const parent = thread.parent_id ? state.channels[thread.parent_id] : undefined;
+  return hasBit(channelPermissions(guild, { id: me.id, roles: member?.roles ?? [] }, parent), Perm.MANAGE_THREADS);
+}
+
+function wireThreadEvents(): void {
+  const s = () => appStore.getState();
+  gateway.on("THREAD_CREATE", thread => s().upsertThread(thread));
+  gateway.on("THREAD_UPDATE", thread => s().upsertThread(thread));
+  gateway.on("THREAD_DELETE", ({ id }) => s().removeThread(id));
+  gateway.on("THREAD_MEMBER_UPDATE", ({ guild_id: _guild, ...member }) => {
+    void _guild;
+    const thread = s().threads[member.id];
+    if (thread) s().upsertThread({ ...thread, member });
+  });
+  gateway.on("THREAD_MEMBERS_UPDATE", ({ id, guild_id, member_count, added_members, removed_member_ids }) => {
+    const thread = s().threads[id];
+    if (!thread) return;
+    const meId = s().me?.id;
+    const mine = added_members?.find(m => m.user_id === meId);
+    let next: Channel = { ...thread, member_count };
+    if (mine) next = { ...next, member: mine };
+    if (meId && removed_member_ids?.includes(meId)) {
+      const { member: _member, ...rest } = next;
+      void _member;
+      next = rest;
+      // A private thread is gone for a member who left it (unless they can manage threads: the refetch brings it back).
+      if (thread.type === ChannelType.PrivateThread) {
+        s().removeThread(id);
+        refreshActiveThreads(guild_id);
+        return;
+      }
+      // Not upsertThread: that keeps the membership it knew about.
+      appStore.setState({ threads: { ...s().threads, [id]: next } });
+      return;
+    }
+    s().upsertThread(next);
+  });
+  const refreshMine = (guildId: Snowflake) => refreshActiveThreads(guildId);
+  gateway.on("GUILD_MEMBER_UPDATE", ({ guild_id, user }) => {
+    if (user.id === s().me?.id) refreshMine(guild_id);
+  });
+  gateway.on("GUILD_ROLE_UPDATE", ({ guild_id }) => refreshMine(guild_id));
+  gateway.on("GUILD_ROLE_DELETE", ({ guild_id }) => refreshMine(guild_id));
+  gateway.on("CHANNEL_UPDATE", channel => {
+    if (channel.guild_id && channel.permission_overwrites) refreshMine(channel.guild_id);
+  });
+  // The server deletes a channel's threads first (THREAD_DELETE each); drop any stragglers.
+  gateway.on("CHANNEL_DELETE", channel => {
+    for (const thread of Object.values(s().threads)) if (thread.parent_id === channel.id) s().removeThread(thread.id);
+  });
+}
+
+wireThreadEvents();
 
 // ---- helpers ----
 

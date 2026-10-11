@@ -102,6 +102,37 @@ impl ApiErr {
         Self::new(StatusCode::BAD_REQUEST, code, message)
     }
 
+    /// 400 / 50024: the action does not apply to this channel type.
+    pub fn wrong_channel_type() -> Self {
+        Self::new(StatusCode::BAD_REQUEST, 50024, "Cannot execute action on this channel type")
+    }
+
+    /// 403 / 50083: archived threads are read-only until they are unarchived.
+    pub fn thread_archived() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 50083, "Thread is archived")
+    }
+
+    /// 403 / 160005: only MANAGE_THREADS can act in a locked thread.
+    pub fn thread_locked() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 160005, "Thread is locked")
+    }
+
+    pub fn thread_exists() -> Self {
+        Self::new(StatusCode::BAD_REQUEST, 160004, "A thread has already been created for this message")
+    }
+
+    pub fn tag_required() -> Self {
+        Self::new(StatusCode::BAD_REQUEST, 220003, "A tag is required to create a forum post in this channel")
+    }
+
+    pub fn unknown_thread_member() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10065, "Unknown thread member")
+    }
+
+    pub fn already_published() -> Self {
+        Self::new(StatusCode::BAD_REQUEST, 40033, "This message has already been crossposted")
+    }
+
     pub fn payload_too_large() -> Self {
         Self::new(StatusCode::PAYLOAD_TOO_LARGE, 40005, "Request entity too large")
     }

@@ -16,6 +16,7 @@ pub mod routes;
 pub mod seed;
 pub mod state;
 pub mod store;
+pub mod threads;
 pub mod unfurl;
 
 use std::time::Duration;

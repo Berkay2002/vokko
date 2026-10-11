@@ -17,6 +17,7 @@ use crate::events;
 use crate::extract::{ApiJson, ApiQuery, parse_id};
 use crate::media;
 use crate::routes::auth::clean_text;
+use crate::routes::forums;
 use crate::routes::moderation;
 use crate::routes::overwrites;
 use crate::routes::users::{self, ImageKind, owned_image_path};
@@ -48,8 +49,11 @@ fn guild_name(value: &str) -> ApiResult<String> {
 /// Text channel names follow Discord's rules: lowercase, spaces become dashes.
 pub fn channel_name(kind: ChannelType, value: &str) -> ApiResult<String> {
     let trimmed = value.trim();
-    let name =
-        if matches!(kind, ChannelType::GuildText) { trimmed.to_lowercase().split_whitespace().collect::<Vec<_>>().join("-") } else { trimmed.to_owned() };
+    let name = if matches!(kind, ChannelType::GuildText | ChannelType::GuildAnnouncement | ChannelType::GuildForum) {
+        trimmed.to_lowercase().split_whitespace().collect::<Vec<_>>().join("-")
+    } else {
+        trimmed.to_owned()
+    };
     if !(1..=100).contains(&name.chars().count()) {
         return Err(ApiErr::invalid("name", "Must be between 1 and 100 in length."));
     }
@@ -263,11 +267,24 @@ async fn create_channel(
     let id = guild_id(&id)?;
     let guild = guild_access(&state, user_id, id).await?;
     guild.require(MANAGE_CHANNELS)?;
-    if !matches!(body.kind, ChannelType::GuildText | ChannelType::GuildVoice | ChannelType::GuildCategory) {
+    if !matches!(
+        body.kind,
+        ChannelType::GuildText
+            | ChannelType::GuildVoice
+            | ChannelType::GuildCategory
+            | ChannelType::GuildAnnouncement
+            | ChannelType::GuildStage
+            | ChannelType::GuildForum
+    ) {
         return Err(ApiErr::invalid("type", "Unsupported channel type."));
     }
     let name = channel_name(body.kind, &body.name)?;
-    let topic = if matches!(body.kind, ChannelType::GuildText) { clean_text(body.topic, 1024, "topic")? } else { None };
+    let forum_fields = forums::ParentFields::from_create(&body)?;
+    let topic = if matches!(body.kind, ChannelType::GuildText | ChannelType::GuildAnnouncement | ChannelType::GuildForum) {
+        clean_text(body.topic, 1024, "topic")?
+    } else {
+        None
+    };
     let parent = match body.parent_id {
         Some(parent) if parent.0 != 0 => {
             if matches!(body.kind, ChannelType::GuildCategory) {
@@ -331,6 +348,7 @@ async fn create_channel(
             .execute(&mut *tx)
             .await?;
     }
+    forum_fields.apply(&state, &mut tx, channel_id).await?;
     tx.commit().await?;
     let row = store::channel_row(&state, channel_id).await?.ok_or_else(ApiErr::internal)?;
     events::dispatch_channel(&state, &row, GatewayEvent::ChannelCreate).await?;

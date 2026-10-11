@@ -11,10 +11,13 @@ use crate::error::{ApiErr, ApiResult};
 use crate::events;
 use crate::extract::{ApiJson, parse_id};
 use crate::routes::auth::clean_text;
+use crate::routes::forums;
 use crate::routes::guilds::channel_name;
 use crate::routes::overwrites;
+use crate::routes::threads as threads_routes;
 use crate::state::AppState;
 use crate::store::{self, iso};
+use crate::threads;
 
 pub fn routes() -> Router<AppState> {
     Router::new().route("/channels/{id}", patch(update_channel).delete(delete_channel)).route("/channels/{id}/invites", post(create_invite))
@@ -33,6 +36,9 @@ async fn update_channel(
     let id = channel_id(&id)?;
     let access = channel_access(&state, user_id, id).await?;
     let kind = access.channel.channel_type();
+    if kind.is_thread() {
+        return threads_routes::edit_thread(&state, user_id, access, body).await;
+    }
     if access.is_dm() {
         if kind != ChannelType::GroupDm || body.topic.is_some() || body.position.is_some() || body.parent_id.is_some() {
             return Err(ApiErr::missing_permissions());
@@ -54,6 +60,7 @@ async fn update_channel(
         }),
         None => None,
     };
+    let parent_fields = forums::ParentFields::from_update(kind, &body)?;
     let topic = if body.topic.is_some() { Some(clean_text(body.topic, 1024, "topic")?) } else { None };
     let parent = match body.parent_id {
         Some(parent) if parent.0 == 0 => Some(None),
@@ -95,18 +102,23 @@ async fn update_channel(
     if let Some(parent) = lock_to {
         overwrites::lock_to_parent(&mut tx, &access, parent).await?;
     }
+    let changed_posts = parent_fields.apply(&state, &mut tx, id).await?;
     tx.commit().await?;
     let row = store::channel_row(&state, id).await?.ok_or_else(ApiErr::unknown_channel)?;
     match viewers_before {
         Some(before) => overwrites::dispatch_visibility(&state, &row, &before).await?,
         None => events::dispatch_channel(&state, &row, GatewayEvent::ChannelUpdate).await?,
     }
+    forums::announce_changed_posts(&state, &changed_posts).await?;
     store::channel(&state, id, Some(user_id)).await?.map(Json).ok_or_else(ApiErr::unknown_channel)
 }
 
 async fn delete_channel(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<Channel>> {
     let id = channel_id(&id)?;
     let access = channel_access(&state, user_id, id).await?;
+    if access.channel.is_thread() {
+        return threads_routes::delete_thread(&state, user_id, access).await;
+    }
     let channel = store::channel(&state, id, Some(user_id)).await?.ok_or_else(ApiErr::unknown_channel)?;
     if access.is_dm() {
         // Closing a DM hides it for this user only; leaving a group DM removes the user.
@@ -125,6 +137,8 @@ async fn delete_channel(State(state): State<AppState>, AuthUser(user_id): AuthUs
         return Ok(Json(channel));
     }
     access.require(MANAGE_CHANNELS)?;
+    // The threads of a channel go with it, each announced before the channel itself.
+    threads::delete_children(&state, id).await?;
     let viewers = access::channel_viewers(&state, &access.channel).await?;
     let guild_id = access.channel.guild_id;
     let attachments: Vec<(i64,)> = sqlx::query_as("DELETE FROM attachments WHERE channel_id = $1 RETURNING id").bind(id).fetch_all(&state.db).await?;
@@ -180,6 +194,9 @@ async fn create_invite(State(state): State<AppState>, AuthUser(user_id): AuthUse
     let id = channel_id(&id)?;
     let access = channel_access(&state, user_id, id).await?;
     let Some(guild_id) = access.channel.guild_id else { return Err(ApiErr::invalid("channel_id", "Invites need a guild channel.")) };
+    if access.channel.is_thread() {
+        return Err(ApiErr::invalid("channel_id", "Invites need a text, voice, announcement or forum channel."));
+    }
     access.require(CREATE_INSTANT_INVITE)?;
     let request: CreateInviteRequest = if body.is_empty() {
         CreateInviteRequest::default()

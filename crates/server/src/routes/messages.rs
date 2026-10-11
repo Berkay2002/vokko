@@ -11,7 +11,7 @@ use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::permissions::{ATTACH_FILES, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES};
 use vokko_protocol::api::{
     AckBulkRequest, AllowedMentions, CreateMessageRequest, EditMessageRequest, Embed, GatewayEvent, Message, MessageAck, MessageDelete, MessageType,
-    PendingAttachmentMeta, PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart,
+    PendingAttachmentMeta, PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart, message_flags::IS_CROSSPOST,
 };
 
 use crate::access::{self, ChannelAccess, channel_access};
@@ -23,6 +23,7 @@ use crate::ids::now_ms;
 use crate::media;
 use crate::state::AppState;
 use crate::store::{self, ChannelRow, MESSAGE_SELECT, MessageRow, MessageView};
+use crate::threads;
 use crate::unfurl;
 
 pub const MAX_CONTENT_CHARS: usize = 2000;
@@ -84,7 +85,7 @@ pub fn parse_mentions(content: &str) -> ParsedMentions {
     parsed
 }
 
-fn validate_content(content: &str, has_attachments: bool) -> ApiResult<String> {
+pub fn validate_content(content: &str, has_attachments: bool) -> ApiResult<String> {
     let content = content.trim().to_owned();
     if content.chars().count() > MAX_CONTENT_CHARS {
         return Err(ApiErr::invalid("content", "Must be 2000 or fewer in length."));
@@ -102,7 +103,7 @@ pub struct Resolved {
 }
 
 /// Drops mentions of people/roles that do not exist in the channel's scope, and `@everyone` without permission.
-async fn resolve_mentions(state: &AppState, access: &ChannelAccess, parsed: ParsedMentions) -> ApiResult<Resolved> {
+pub async fn resolve_mentions(state: &AppState, access: &ChannelAccess, parsed: ParsedMentions) -> ApiResult<Resolved> {
     let everyone = parsed.everyone && access.permissions & MENTION_EVERYONE != 0;
     let channel = &access.channel;
     let users: Vec<i64> = if parsed.users.is_empty() {
@@ -145,13 +146,13 @@ pub struct DraftAttachment {
 }
 
 impl DraftAttachment {
-    fn plain(id: i64) -> Self {
+    pub fn plain(id: i64) -> Self {
         Self { id, filename: None, description: None }
     }
 
     /// Validates a `CreateMessageRequest.attachments` entry: 1-255 character filename (then cleaned like an upload name),
     /// alt text up to 1024 characters (empty = none).
-    fn from_meta(meta: &PendingAttachmentMeta) -> ApiResult<Self> {
+    pub fn from_meta(meta: &PendingAttachmentMeta) -> ApiResult<Self> {
         let filename = match meta.filename.as_deref().map(str::trim) {
             None => None,
             Some(name) if name.is_empty() || name.chars().count() > MAX_FILENAME_CHARS => {
@@ -182,7 +183,7 @@ pub struct Draft {
 }
 
 /// Applies `allowed_mentions` to what the content parsed to. Omitted = everything pings.
-fn apply_allowed(resolved: Resolved, allowed: Option<&AllowedMentions>) -> Resolved {
+pub fn apply_allowed(resolved: Resolved, allowed: Option<&AllowedMentions>) -> Resolved {
     let Some(allowed) = allowed else { return resolved };
     let parse = |kind: &str| match &allowed.parse {
         Some(list) => list.iter().any(|entry| entry == kind),
@@ -202,9 +203,30 @@ fn apply_allowed(resolved: Resolved, allowed: Option<&AllowedMentions>) -> Resol
     }
 }
 
+/// What the thread and announcement features add to a message beyond a `Draft`; the default changes nothing.
+#[derive(Default)]
+pub struct Extras {
+    /// Use this id instead of a fresh one (a forum post's first message has the id of its thread).
+    pub id: Option<i64>,
+    /// `message_flags` bits stored with the message.
+    pub flags: i32,
+    /// Where `Draft::reference` lives when it is not in the message's own channel.
+    pub reference_channel: Option<i64>,
+    pub reference_guild: Option<i64>,
+    /// Unarchive the (archived) thread in the same transaction as the insert, then announce THREAD_UPDATE.
+    pub reopen_thread: bool,
+    /// Embeds to store as they are (a published copy keeps its source's); no unfurl runs for these.
+    pub embeds: Option<String>,
+}
+
 /// Stores a message, updates read states / unread counters, reopens closed DMs and fans MESSAGE_CREATE out.
 pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i64, draft: Draft) -> ApiResult<MessageView> {
-    let message_id = state.ids.next();
+    insert_message_with(state, channel, author_id, draft, Extras::default()).await
+}
+
+pub async fn insert_message_with(state: &AppState, channel: &ChannelRow, author_id: i64, draft: Draft, extras: Extras) -> ApiResult<MessageView> {
+    let message_id = extras.id.unwrap_or_else(|| state.ids.next());
+    let crosspost = extras.flags & IS_CROSSPOST as i32 != 0;
     let viewers = access::channel_viewers(state, channel).await?;
 
     // Reply targets count as mentions of their author.
@@ -242,16 +264,23 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
     notify.retain(|user| viewers.contains(user));
 
     let mut tx = state.db.begin().await?;
-    sqlx::query("INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone) VALUES ($1, $2, $3, $4, $5, $6, $7)")
-        .bind(message_id)
-        .bind(channel.id)
-        .bind(author_id)
-        .bind(&draft.content)
-        .bind(draft.kind.as_u8() as i16)
-        .bind(draft.reference)
-        .bind(draft.mentions.everyone)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]')::jsonb)",
+    )
+    .bind(message_id)
+    .bind(channel.id)
+    .bind(author_id)
+    .bind(&draft.content)
+    .bind(draft.kind.as_u8() as i16)
+    .bind(draft.reference)
+    .bind(draft.mentions.everyone)
+    .bind(extras.flags)
+    .bind(extras.reference_channel)
+    .bind(extras.reference_guild)
+    .bind(&extras.embeds)
+    .execute(&mut *tx)
+    .await?;
     for user in &mentioned {
         sqlx::query("INSERT INTO message_mentions (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
             .bind(message_id)
@@ -285,16 +314,27 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
             return Err(ApiErr::invalid("attachment_ids", "Unknown or already used attachment."));
         }
     }
-    sqlx::query("UPDATE channels SET last_message_id = $2 WHERE id = $1").bind(channel.id).bind(message_id).execute(&mut *tx).await?;
-    sqlx::query(
-        "INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES ($1, $2, $3, 0) \
-         ON CONFLICT (user_id, channel_id) DO UPDATE SET last_message_id = EXCLUDED.last_message_id, mention_count = 0",
-    )
-    .bind(author_id)
-    .bind(channel.id)
-    .bind(message_id)
-    .execute(&mut *tx)
-    .await?;
+    // Every message restarts a thread's inactivity clock. This statement takes the row lock first, so the sweep can no longer archive the
+    // thread behind our back and the reopen below sees its final state.
+    sqlx::query("UPDATE channels SET last_message_id = $2, last_activity_at = now() WHERE id = $1").bind(channel.id).bind(message_id).execute(&mut *tx).await?;
+    let reopened_thread = extras.reopen_thread
+        && sqlx::query("UPDATE channels SET archived = FALSE, archive_timestamp = now() WHERE id = $1 AND archived")
+            .bind(channel.id)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected()
+            > 0;
+    if !crosspost {
+        sqlx::query(
+            "INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES ($1, $2, $3, 0) \
+             ON CONFLICT (user_id, channel_id) DO UPDATE SET last_message_id = EXCLUDED.last_message_id, mention_count = 0",
+        )
+        .bind(author_id)
+        .bind(channel.id)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await?;
+    }
     for user in &notify {
         sqlx::query(
             "INSERT INTO read_states (user_id, channel_id, mention_count) VALUES ($1, $2, 1) \
@@ -315,6 +355,9 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
     };
     tx.commit().await?;
 
+    if reopened_thread && let Some(row) = store::channel_row(state, channel.id).await? {
+        threads::dispatch(state, &row, "THREAD_UPDATE", false).await?;
+    }
     for (user,) in reopened {
         if let Some(dm) = store::channel(state, channel.id, Some(user)).await? {
             state.hub.send(&[user], &GatewayEvent::ChannelCreate(dm));
@@ -323,7 +366,7 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
     let mut view = store::message_view(state, message_id, None).await?.ok_or_else(ApiErr::internal)?;
     view.message.nonce = draft.nonce;
     state.hub.send_with(&viewers, "MESSAGE_CREATE", |user| serde_json::to_value(view.for_viewer(user)).unwrap_or_default());
-    if matches!(draft.kind, MessageType::Default | MessageType::Reply) {
+    if matches!(draft.kind, MessageType::Default | MessageType::Reply) && extras.embeds.is_none() {
         unfurl::spawn(state, channel.clone(), message_id, draft.content, Vec::new());
     }
     Ok(view)
@@ -388,6 +431,7 @@ async fn create_message(
         return Err(ApiErr::invalid("channel_id", "Cannot send messages in a category."));
     }
     access.require(SEND_MESSAGES)?;
+    threads::check_send(&access)?;
     if access.channel.channel_type() == vokko_protocol::api::ChannelType::Dm {
         // A block in either direction closes the 1:1 DM for new messages.
         let (blocked,): (bool,) = sqlx::query_as(
@@ -433,7 +477,14 @@ async fn create_message(
     let ping_replied = body.allowed_mentions.as_ref().and_then(|allowed| allowed.replied_user).unwrap_or(true);
     let kind = if reference.is_some() { MessageType::Reply } else { MessageType::Default };
     let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied };
-    let view = insert_message(&state, &access.channel, user_id, draft).await?;
+    // Everything is validated: a message into a thread reopens it if it is archived (the UPDATE's `AND archived` guards it, and
+    // deciding inside the transaction closes the race with the auto-archive sweep) together with the insert.
+    let extras = Extras { reopen_thread: access.channel.is_thread(), ..Extras::default() };
+    let view = insert_message_with(&state, &access.channel, user_id, draft, extras).await?;
+    if access.channel.is_thread() {
+        // Talking in a thread joins it.
+        threads::add_member(&state, &access.channel, user_id).await?;
+    }
     Ok(Json(view.for_viewer(user_id)))
 }
 
@@ -460,12 +511,16 @@ async fn edit_message(
     let id = channel_id(&id)?;
     let mid = message_id(&mid)?;
     let access = channel_access(&state, user_id, id).await?;
+    access.require_unarchived()?;
     let row = message_in_channel(&state, id, mid).await?;
     if row.author_id != user_id {
         return Err(ApiErr::not_author());
     }
     if !matches!(MessageType::from_u8(row.kind as u8), Some(MessageType::Default | MessageType::Reply)) {
         return Err(ApiErr::invalid("message_id", "Cannot edit a system message."));
+    }
+    if row.flags & IS_CROSSPOST as i32 != 0 {
+        return Err(ApiErr::invalid("message_id", "Cannot edit a published copy."));
     }
     let existing: Vec<(i64,)> = sqlx::query_as("SELECT id FROM attachments WHERE message_id = $1 ORDER BY id").bind(mid).fetch_all(&state.db).await?;
     let existing: Vec<i64> = existing.into_iter().map(|(id,)| id).collect();

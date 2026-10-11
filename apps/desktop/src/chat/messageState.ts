@@ -226,7 +226,7 @@ export interface Row {
 
 export const GROUP_WINDOW_MS = 7 * 60 * 1000;
 
-const SYSTEM_TYPES = new Set<number>([MessageType.RecipientAdd, MessageType.RecipientRemove, MessageType.ChannelNameChange, MessageType.ChannelPinnedMessage, MessageType.UserJoin]);
+const SYSTEM_TYPES = new Set<number>([MessageType.RecipientAdd, MessageType.RecipientRemove, MessageType.ChannelNameChange, MessageType.ChannelPinnedMessage, MessageType.UserJoin, MessageType.ThreadCreated]);
 export const isSystemMessage = (m: Message): boolean => SYSTEM_TYPES.has(m.type);
 
 export function buildRows(s: Pick<ChannelState, 'messages' | 'pending' | 'hasMoreAfter' | 'lastReadAtOpen'>, formatDay: (d: Date) => string, sameDay: (a: Date, b: Date) => boolean, myId: Snowflake | null): Row[] {
@@ -247,6 +247,7 @@ export function buildRows(s: Pick<ChannelState, 'messages' | 'pending' | 'hasMor
     }
     const grouped = !!prev && !newDay && !unread &&
       !isSystemMessage(m) && !isSystemMessage(prev) &&
+      m.type !== MessageType.ThreadStarterMessage && prev.type !== MessageType.ThreadStarterMessage && // a thread's starter stands on its own
       prev.author.id === m.author.id && m.type !== MessageType.Reply &&
       d.getTime() - groupStartMs < GROUP_WINDOW_MS; // measured from the group's FIRST message, not the previous one
     if (!grouped) groupStartMs = d.getTime();

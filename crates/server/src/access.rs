@@ -8,6 +8,7 @@ use vokko_protocol::api::permissions::{ADD_REACTIONS, ADMINISTRATOR, ALL, ATTACH
 use crate::error::{ApiErr, ApiResult};
 use crate::state::AppState;
 use crate::store::{self, ChannelRow};
+use crate::threads;
 
 /// What participants of a DM or group DM may do.
 pub const DM_PERMISSIONS: u64 = VIEW_CHANNEL | SEND_MESSAGES | ATTACH_FILES | ADD_REACTIONS | READ_MESSAGE_HISTORY;
@@ -144,6 +145,8 @@ impl GuildAccess {
 pub struct ChannelAccess {
     pub channel: ChannelRow,
     pub permissions: u64,
+    /// Threads: the parent channel the permissions were resolved on.
+    pub parent: Option<ChannelRow>,
 }
 
 impl ChannelAccess {
@@ -153,6 +156,11 @@ impl ChannelAccess {
 
     pub fn is_dm(&self) -> bool {
         self.channel.is_dm()
+    }
+
+    /// Archived threads are read-only: editing, reacting, joining and adding members need them unarchived first.
+    pub fn require_unarchived(&self) -> ApiResult<()> {
+        if self.channel.is_thread() && self.channel.archived { Err(ApiErr::thread_archived()) } else { Ok(()) }
     }
 }
 
@@ -176,8 +184,17 @@ pub async fn channel_access(state: &AppState, user_id: i64, channel_id: i64) -> 
         if member.is_none() {
             return Err(ApiErr::missing_access());
         }
-        return Ok(ChannelAccess { channel, permissions: DM_PERMISSIONS });
+        return Ok(ChannelAccess { channel, permissions: DM_PERMISSIONS, parent: None });
     }
+    if channel.is_thread() {
+        return threads::thread_access(state, user_id, channel).await;
+    }
+    guild_channel_access(state, user_id, channel).await
+}
+
+/// `channel_access` for a guild channel that is not a thread (threads resolve on their parent).
+pub async fn guild_channel_access(state: &AppState, user_id: i64, channel: ChannelRow) -> ApiResult<ChannelAccess> {
+    let channel_id = channel.id;
     let guild_id = channel.guild_id.ok_or_else(ApiErr::unknown_channel)?;
     let guild = guild_access(state, user_id, guild_id).await?;
     let overwrites = overwrites_for(state, channel_id).await?;
@@ -187,7 +204,7 @@ pub async fn channel_access(state: &AppState, user_id: i64, channel_id: i64) -> 
     if permissions & VIEW_CHANNEL == 0 {
         return Err(ApiErr::missing_access());
     }
-    Ok(ChannelAccess { channel, permissions })
+    Ok(ChannelAccess { channel, permissions, parent: None })
 }
 
 /// Which of `channel_ids` `user_id` can see (same rules as `channel_access`, VIEW_CHANNEL after overwrites), in a
@@ -195,8 +212,16 @@ pub async fn channel_access(state: &AppState, user_id: i64, channel_id: i64) -> 
 pub async fn viewable_channels(state: &AppState, user_id: i64, channel_ids: &[i64]) -> ApiResult<std::collections::HashSet<i64>> {
     use std::collections::HashSet;
     let mut visible = HashSet::new();
+    let all: Vec<(i64, Option<i64>, i16)> =
+        sqlx::query_as("SELECT id, guild_id, kind FROM channels WHERE id = ANY($1)").bind(channel_ids).fetch_all(&state.db).await?;
+    // Threads resolve on their parent (and membership), which the batch below does not know about.
+    for (id, _, kind) in &all {
+        if threads::is_thread_kind(*kind) && channel_access(state, user_id, *id).await.is_ok() {
+            visible.insert(*id);
+        }
+    }
     let channels: Vec<(i64, Option<i64>)> =
-        sqlx::query_as("SELECT id, guild_id FROM channels WHERE id = ANY($1)").bind(channel_ids).fetch_all(&state.db).await?;
+        all.into_iter().filter(|(_, _, kind)| !threads::is_thread_kind(*kind)).map(|(id, guild_id, _)| (id, guild_id)).collect();
     let dm_ids: Vec<i64> = channels.iter().filter(|(_, guild_id)| guild_id.is_none()).map(|(id, _)| *id).collect();
     if !dm_ids.is_empty() {
         let rows: Vec<(i64,)> = sqlx::query_as("SELECT channel_id FROM channel_recipients WHERE user_id = $1 AND channel_id = ANY($2)")
@@ -259,24 +284,39 @@ pub async fn viewable_channels(state: &AppState, user_id: i64, channel_ids: &[i6
     Ok(visible)
 }
 
-/// Everyone who may see the channel: DM recipients, or guild members with VIEW_CHANNEL after overwrites.
+/// Everyone who may see the channel: DM recipients, or guild members with VIEW_CHANNEL after overwrites. A thread is seen by
+/// everyone who sees its parent, private ones only by their members and holders of MANAGE_THREADS.
 pub async fn channel_viewers(state: &AppState, channel: &ChannelRow) -> ApiResult<Vec<i64>> {
     if channel.is_dm() {
         let rows: Vec<(i64,)> = sqlx::query_as("SELECT user_id FROM channel_recipients WHERE channel_id = $1").bind(channel.id).fetch_all(&state.db).await?;
         return Ok(rows.into_iter().map(|(id,)| id).collect());
     }
+    if channel.is_thread() {
+        return threads::thread_viewers(state, channel).await;
+    }
+    Ok(viewer_permissions(state, channel).await?.into_iter().map(|(user_id, _)| user_id).collect())
+}
+
+/// Guild members who can see a (non-thread) guild channel, with their permissions in it.
+pub async fn viewer_permissions(state: &AppState, channel: &ChannelRow) -> ApiResult<Vec<(i64, u64)>> {
     let Some(guild_id) = channel.guild_id else { return Ok(Vec::new()) };
     let owner: Option<(i64,)> = sqlx::query_as("SELECT owner_id FROM guilds WHERE id = $1").bind(guild_id).fetch_optional(&state.db).await?;
     let Some((owner_id,)) = owner else { return Ok(Vec::new()) };
     let role_permissions = role_permissions(state, guild_id).await?;
     let overwrites = overwrites_for(state, channel.id).await?;
     let (members, roles) = guild_members_with_roles(state, guild_id).await?;
+    let timed_out: Vec<(i64,)> =
+        sqlx::query_as("SELECT user_id FROM guild_members WHERE guild_id = $1 AND timeout_until > now()").bind(guild_id).fetch_all(&state.db).await?;
+    let timed_out: std::collections::HashSet<i64> = timed_out.into_iter().map(|(id,)| id).collect();
     Ok(members
         .into_iter()
-        .filter(|user_id| {
-            let member_roles = roles.get(user_id).map(Vec::as_slice).unwrap_or(&[]);
-            let base = base_permissions(guild_id, owner_id, *user_id, &role_permissions, member_roles);
-            channel_permissions(base, guild_id, *user_id, member_roles, &overwrites) & VIEW_CHANNEL != 0
+        .filter_map(|user_id| {
+            let member_roles = roles.get(&user_id).map(Vec::as_slice).unwrap_or(&[]);
+            let base = base_permissions(guild_id, owner_id, user_id, &role_permissions, member_roles);
+            let resolved = channel_permissions(base, guild_id, user_id, member_roles, &overwrites);
+            // A timed-out member keeps only view + history (the owner is never clamped), so e.g. MANAGE_THREADS does not apply.
+            let permissions = if owner_id == user_id { resolved } else { clamp_timeout(resolved, timed_out.contains(&user_id)) };
+            (permissions & VIEW_CHANNEL != 0).then_some((user_id, permissions))
         })
         .collect())
 }
@@ -297,13 +337,24 @@ pub async fn guild_member_ids(state: &AppState, guild_id: i64) -> ApiResult<Vec<
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
-/// Guild channels `user_id` can see (VIEW_CHANNEL after overwrites), ordered by position.
+/// Guild channels `user_id` can see (VIEW_CHANNEL after overwrites), ordered by position. Threads are never listed here.
 pub async fn visible_guild_channels(state: &AppState, user_id: i64, guild_id: i64) -> ApiResult<Vec<ChannelRow>> {
+    Ok(guild_channels_with_permissions(state, user_id, guild_id)
+        .await?
+        .into_iter()
+        .filter(|(_, permissions)| permissions & VIEW_CHANNEL != 0)
+        .map(|(row, _)| row)
+        .collect())
+}
+
+/// Every non-thread channel of the guild with what `user_id` may do in it (0 when it is hidden), ordered by position.
+pub async fn guild_channels_with_permissions(state: &AppState, user_id: i64, guild_id: i64) -> ApiResult<Vec<(ChannelRow, u64)>> {
     let guild = guild_access(state, user_id, guild_id).await?;
-    let rows: Vec<ChannelRow> = sqlx::query_as(&format!("SELECT {} FROM channels WHERE guild_id = $1 ORDER BY position, id", store::CHANNEL_COLS))
-        .bind(guild_id)
-        .fetch_all(&state.db)
-        .await?;
+    let rows: Vec<ChannelRow> =
+        sqlx::query_as(&format!("SELECT {} FROM channels WHERE guild_id = $1 AND kind NOT IN (10, 11, 12) ORDER BY position, id", store::CHANNEL_COLS))
+            .bind(guild_id)
+            .fetch_all(&state.db)
+            .await?;
     let overwrite_rows: Vec<(i64, i64, i16, i64, i64)> = sqlx::query_as(
         "SELECT o.channel_id, o.target_id, o.target_type, o.allow, o.deny FROM permission_overwrites o JOIN channels c ON c.id = o.channel_id WHERE c.guild_id = $1",
     )
@@ -316,9 +367,11 @@ pub async fn visible_guild_channels(state: &AppState, user_id: i64, guild_id: i6
     }
     Ok(rows
         .into_iter()
-        .filter(|row| {
+        .map(|row| {
             let overwrites = by_channel.get(&row.id).map(Vec::as_slice).unwrap_or(&[]);
-            channel_permissions(guild.permissions, guild_id, user_id, &guild.roles, overwrites) & VIEW_CHANNEL != 0
+            let resolved = channel_permissions(guild.permissions, guild_id, user_id, &guild.roles, overwrites);
+            let permissions = if guild.owner_id == user_id { resolved } else { clamp_timeout(resolved, guild.timed_out) };
+            (row, permissions)
         })
         .collect())
 }

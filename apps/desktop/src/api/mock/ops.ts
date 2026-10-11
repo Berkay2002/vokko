@@ -1,6 +1,6 @@
 // Domain operations on the mock database, shared by the REST router, the seed and the dev hooks.
 
-import { ChannelType, MessageType, type Attachment, type PermissionOverwrite, type PresenceStatus, type Role, type User } from "../types";
+import { ChannelType, MessageType, isThreadType, type Attachment, type PermissionOverwrite, type PresenceStatus, type Role, type User } from "../types";
 import { ApiRequestError } from "../errors";
 import { hasBit } from "../permissions";
 import { canView, channelPermsOf, guildPermsOf } from "./access";
@@ -82,7 +82,7 @@ export function requireChannelPerm(channel: MockChannel, viewerId: string, permi
 /** channel id -> users who can see it, for every channel of the guild. */
 export function visibilityOf(guildId: string): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
-  for (const channel of db.channels.values()) if (channel.guild_id === guildId) out.set(channel.id, new Set(channelAudience(channel)));
+  for (const channel of db.channels.values()) if (channel.guild_id === guildId && !isThreadType(channel.type)) out.set(channel.id, new Set(channelAudience(channel)));
   return out;
 }
 
@@ -196,12 +196,17 @@ export function openGroupDM(viewerId: string, otherIds: string[]): MockChannel {
 }
 
 export interface NewMessage {
+  /** Explicit id (a forum post's first message shares its id with the thread). */
+  id?: string;
   channel: MockChannel;
   author_id: string;
   content: string;
   type?: MessageType;
   attachments?: Attachment[];
   reference_id?: string | null;
+  /** Channel of `reference_id` when it is not `channel`. */
+  reference_channel_id?: string | null;
+  flags?: number;
   nonce?: string | null;
   timestamp?: number;
   /** Seed mode: don't emit events. */
@@ -217,15 +222,18 @@ function parseMentions(content: string, referenceAuthor: string | null): { ids: 
   return { ids: [...ids], everyone: /(^|\s)@(everyone|here)\b/.test(content) };
 }
 
+/** Called after every appended message (threads.ts: unarchive and join on send). */
+export const messageHooks: ((channel: MockChannel, message: MockMessage) => void)[] = [];
+
 /** Append a message, advance read states like the server does, and fan the event out. */
 export function addMessage(input: NewMessage): MockMessage {
   const { channel } = input;
-  const referenced = input.reference_id ? sortedMessages(channel.id).find(m => m.id === input.reference_id) : undefined;
+  const referenced = input.reference_id && !input.reference_channel_id ? sortedMessages(channel.id).find(m => m.id === input.reference_id) : undefined;
   const mentions = parseMentions(input.content, referenced?.author_id ?? null);
   if (input.allowEveryone === false) mentions.everyone = false;
   const ms = input.timestamp ?? Date.now();
   const message: MockMessage = {
-    id: nextId(ms),
+    id: input.id ?? nextId(ms),
     channel_id: channel.id,
     guild_id: channel.guild_id,
     author_id: input.author_id,
@@ -240,12 +248,15 @@ export function addMessage(input: NewMessage): MockMessage {
     pinned: false,
     pinned_at: null,
     reference_id: referenced ? referenced.id : (input.reference_id ?? null),
+    ...(input.reference_channel_id ? { reference_channel_id: input.reference_channel_id } : {}),
+    ...(input.flags ? { flags: input.flags } : {}),
     nonce: input.nonce ?? null,
   };
   const list = sortedMessages(channel.id);
   const previousLast = list.at(-1)?.id ?? null;
   list.push(message);
   channel.last_message_id = message.id;
+  for (const hook of messageHooks) hook(channel, message);
   const audience = channelAudience(channel);
   for (const userId of audience) {
     const account = db.accounts.get(userId);

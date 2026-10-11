@@ -6,6 +6,7 @@ import { Perm } from "../api/permissions";
 import { request } from "../api/rest";
 import { appStore, useStore } from "../api/store";
 import { ChannelType, type Channel, type Snowflake } from "../api/types";
+import { ForumSettingsPage } from "../forum/ForumSettings";
 import { isPrivateChannel } from "./channelPrivacy";
 import { closeModal, openModal } from "./modalStore";
 import { ChannelPermissionsPage } from "./settings/ChannelPermissions";
@@ -14,10 +15,11 @@ import { FullScreenSettings, type SettingsNavGroup } from "./settings/FullScreen
 import { SaveBar } from "./settings/SaveBar";
 import { usePermissions } from "./usePermissions";
 
-type SectionId = "overview" | "permissions" | "invites" | "integrations";
+type SectionId = "overview" | "forum" | "permissions" | "invites" | "integrations";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "overview", label: "Overview" },
+  { id: "forum", label: "Forum" },
   { id: "permissions", label: "Permissions" },
   { id: "invites", label: "Invites" },
   { id: "integrations", label: "Integrations" },
@@ -169,7 +171,8 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
   const members = useStore(s => (channel?.guild_id ? s.members[channel.guild_id] : undefined));
   const { can } = usePermissions(channel?.guild_id, channelId);
   const isCategory = channel?.type === ChannelType.GuildCategory;
-  const sections = isCategory ? SECTIONS.filter(s => s.id === "overview" || s.id === "permissions") : SECTIONS;
+  const isForum = channel?.type === ChannelType.GuildForum;
+  const sections = isCategory ? SECTIONS.filter(s => s.id === "overview" || s.id === "permissions") : SECTIONS.filter(s => s.id !== "forum" || isForum);
   const initial = sections.some(s => s.id === section) ? (section as SectionId) : "overview";
   const [current, setCurrent] = useState<SectionId>(initial);
   const privateChannel = useMemo(() => isPrivateChannel(channel, channel?.guild_id), [channel]);
@@ -182,6 +185,8 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
     switch (current) {
       case "overview":
         return <OverviewPage key={channel.id} channel={channel} editable={canManage} />;
+      case "forum":
+        return <ForumSettingsPage key={channel.id} channel={channel} editable={canManage} />;
       case "permissions":
         return <ChannelPermissionsPage key={channel.id} channel={channel} guild={guild} members={members} />;
       case "invites":
