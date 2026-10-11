@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Headphones, HeadphoneOff, Mic, MicOff, Settings, Volume2 } from "lucide-react";
+import { ChevronDown, Headphones, HeadphoneOff, Mic, MicOff, Monitor, Settings, Volume2 } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import { Tooltip, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
@@ -33,6 +33,7 @@ export function UserPanel() {
   const [selected, setSelected] = useState<SelectableStatus>(stored.current.status);
   const menu = useContextMenu();
   const inVoice = useVoice(s => s.meId !== null && s.states[s.meId]?.channel_id != null);
+  const sharing = useVoice(s => s.meId !== null && !!s.states[s.meId]?.self_stream);
   const { micItems, headphoneItems } = useDeviceMenus();
 
   // Re-apply the user's chosen status after every (re)identify: the server starts a session as "online".
@@ -60,8 +61,9 @@ export function UserPanel() {
           <span className="user-panel-name">{displayName(me)}</span>
           <span className="user-panel-sub">
             <span className="user-panel-sub-status">
-              {inVoice && <Volume2 size={12} className="user-panel-voice-icon" aria-hidden="true" />}
-              {inVoice ? "In voice channel" : subtitle}
+              {inVoice && sharing && <Monitor size={12} className="user-panel-voice-icon user-panel-stream-icon" aria-hidden="true" />}
+              {inVoice && !sharing && <Volume2 size={12} className="user-panel-voice-icon" aria-hidden="true" />}
+              {inVoice ? (sharing ? "Sharing Your Screen" : "In voice channel") : subtitle}
             </span>
             <span className="user-panel-sub-username">{me.username}</span>
           </span>

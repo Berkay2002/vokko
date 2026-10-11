@@ -42,8 +42,10 @@ interface VoiceUiStore extends Persisted {
   /** Focus mode: the strip of the other tiles is hidden. */
   membersHidden: boolean;
   /**
-   * A stream the stage should focus, set by "Watch Stream" outside the stage (the channel list's stream preview card).
-   * The stage reads it, focuses that user's screen share and calls `requestStreamFocus(null)` once it has.
+   * One-shot request from "Watch Stream" in the channel list's stream card: the streamer whose tile should be focused.
+   * VoiceChannelPage turns it into `focusedTile` once that user is in the connected call, then clears it with
+   * `requestStreamFocus(null)`. (A request rather than setting `focusedTile` directly, because `focusedTile` resets when the
+   * call changes channel, and the stage only knows when the streamer's tile exists.)
    */
   focusStream: Snowflake | null;
   setChatOpen(open: boolean): void;

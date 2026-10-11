@@ -1,0 +1,205 @@
+/* LIVE pill on voice user rows and the "Streaming now" hover card (StreamCard.tsx). */
+
+.voice-live-pill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: var(--radius-xl);
+  background: var(--control-critical-primary-background-default);
+  color: var(--white);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.voice-user-live {
+  margin-left: 2px;
+}
+
+.voice-user-game {
+  display: flex;
+  flex: none;
+  color: var(--interactive-icon-default);
+}
+
+.popout.stream-card-popout {
+  width: 330px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--background-surface-high);
+}
+
+.stream-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.stream-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stream-card-heading {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.stream-card-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--background-base-lowest);
+}
+
+.stream-card-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--background-base-lowest);
+}
+
+.stream-card-placeholder {
+  display: flex;
+  color: var(--interactive-icon-default);
+}
+
+.stream-card-activity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.stream-card-game-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--background-mod-subtle);
+  color: var(--text-normal);
+}
+
+.stream-card-activity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stream-card-game {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.stream-card-time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stream-card-time-icon {
+  color: var(--text-feedback-positive);
+}
+
+.btn.stream-card-watch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  border-radius: var(--radius-sm);
+}
+
+/* Our own screen share in the voice connection panel (VoiceConnectionPanel.tsx) and the user panel status line. */
+
+.voice-panel-stream {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.voice-panel-stream-icon {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--background-surface-high);
+  color: var(--interactive-icon-default);
+}
+
+.voice-panel-stream-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--background-base-lowest);
+  border-radius: 50%;
+  background: var(--control-critical-primary-background-default);
+  color: var(--white);
+}
+
+.voice-panel-stream-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.voice-panel-actions .voice-panel-wide.streaming,
+.voice-panel-actions .voice-panel-wide.streaming:hover {
+  background: var(--background-feedback-positive);
+  color: var(--icon-feedback-positive);
+}
+
+/* The extra row makes the card taller: keep the channel list's bottom space in step. voice.css's in-call height (92px)
+   plus this row: 40px icon, 8px padding-bottom, 1px divider, 8px panel gap. */
+.app-body:has(.voice-panel.in-call .voice-panel-stream) {
+  --voice-panel-height: calc(92px + 40px + 8px + 1px + 8px);
+}
+
+.user-panel-voice-icon.user-panel-stream-icon {
+  color: var(--icon-feedback-positive);
+}

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { AudioLines, Bug, LayoutGrid, Lock, Music, MonitorUp, PhoneOff, Signal, SignalHigh, SignalLow, SignalMedium, Upload, Video, VideoOff, X } from "lucide-react";
+import { AudioLines, Bug, LayoutGrid, Lock, Monitor, MonitorUp, MonitorX, Music, PhoneOff, Signal, SignalHigh, SignalLow, SignalMedium, Upload, Video, VideoOff, X } from "lucide-react";
 import { useStore } from "../api/store";
 import { Popout, Tooltip, setPref, usePrefs } from "../ui";
 import { resolveAudio } from "./audioProfile";
@@ -10,6 +10,7 @@ import type { ConnectionQuality, VoiceErrorReason, VoiceStatus } from "./reducer
 import { SoundboardPopout } from "./SoundboardPopout";
 import { useVoice } from "./store";
 import { useVoiceUi, type PingSample } from "./uiStore";
+import "./stream.css";
 
 const STATUS_LABEL: Record<VoiceStatus, string> = {
   idle: "Voice Disconnected",
@@ -137,6 +138,29 @@ function ConnectionPopout({ anchor, open, onClose }: { anchor: HTMLElement | nul
   );
 }
 
+/**
+ * Our own screen share, above the connection status: what is shared and a stop button. The capture's window / app name
+ * is not tracked by the media store, so it reads "Your Screen" with a monitor icon.
+ */
+function OwnStreamRow() {
+  return (
+    <div className="voice-panel-stream" data-testid="voice-panel-stream">
+      <span className="voice-panel-stream-icon" aria-hidden="true">
+        <Monitor size={22} />
+        <span className="voice-panel-stream-badge">
+          <Video size={10} />
+        </span>
+      </span>
+      <span className="voice-panel-stream-name">Your Screen</span>
+      <Tooltip content="Stop Streaming" side="top">
+        <button type="button" className="voice-panel-tool" aria-label="Stop Streaming" onClick={toggleScreenShare}>
+          <MonitorX size={20} />
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
+
 /** Voice section of the user card: status, where you are, noise suppression, disconnect and the four call tools. */
 export function VoiceConnectionPanel() {
   const channelId = useVoice(s => s.channelId);
@@ -172,6 +196,7 @@ export function VoiceConnectionPanel() {
 
   return (
     <section className={`voice-panel${inCall ? " in-call" : ""}`} aria-label="Voice connection">
+      {inCall && screenOn && <OwnStreamRow />}
       <div className="voice-panel-head">
         <Tooltip content={details || label} side="top" disabled={!inCall}>
           <button ref={setQualityAnchor} type="button" className={`voice-panel-signal ${tone}`} aria-label="Connection details" aria-haspopup="dialog" aria-expanded={qualityOpen} disabled={!inCall} onClick={() => setQualityOpen(o => !o)}>
@@ -219,8 +244,8 @@ export function VoiceConnectionPanel() {
             </button>
           </Tooltip>
           <Tooltip content={screenOn ? "Stop Streaming" : "Share Your Screen"} side="top">
-            <button type="button" className={`voice-panel-wide${screenOn ? " active" : ""}`} aria-label={screenOn ? "Stop Streaming" : "Share Your Screen"} aria-pressed={screenOn} onClick={toggleScreenShare}>
-              <MonitorUp size={20} />
+            <button type="button" className={`voice-panel-wide${screenOn ? " active streaming" : ""}`} aria-label={screenOn ? "Stop Streaming" : "Share Your Screen"} aria-pressed={screenOn} onClick={toggleScreenShare}>
+              {screenOn ? <MonitorX size={20} /> : <MonitorUp size={20} />}
             </button>
           </Tooltip>
           <Tooltip content="Activities aren't available yet" side="top">
