@@ -961,3 +961,17 @@
   font-size: 14px;
   color: var(--text-default);
 }
+
+/* the rail styles the guild icon tile; the settings page draws its own */
+.ss-icon-row .guild-icon,
+.ss-preview-icon .guild-icon {
+  flex: none;
+  border-radius: 16px;
+  background: var(--background-surface-high);
+  font-size: 24px;
+}
+
+.ss-preview-icon .guild-icon {
+  border: 4px solid var(--background-surface-high);
+  box-sizing: content-box;
+}
