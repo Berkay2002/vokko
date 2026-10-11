@@ -1,10 +1,11 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { UIEvent } from "react";
-import { Accessibility, Bell, Code, Gamepad2, Keyboard, Languages, LogOut, Mic, MessagesSquare, Palette, Pencil, Plug, Search, ShieldCheck, User as UserIcon, X } from "lucide-react";
+import { Accessibility, Bell, Code, Gamepad2, Keyboard, Languages, LogOut, Mic, MessagesSquare, Monitor, Palette, Pencil, Plug, Search, ShieldCheck, User as UserIcon, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
 import type { User } from "../api/types";
+import { isDesktop } from "../desktop";
 import { Avatar } from "./Avatar";
 import { closeModal, openModal } from "./modalStore";
 import { AccessibilityPage } from "./settings/AccessibilityPage";
@@ -16,6 +17,7 @@ import { ProfilesPage } from "./settings/ProfilesPage";
 import { SettingsBlock, SettingsModal, SettingsNavGroup, SettingsNavItem, SettingsNavSub, SettingsNavSubs, SettingsRow } from "./settings/SettingsModal";
 import { settingsSlots } from "./settings/slots";
 import { VoiceVideoPage } from "./settings/VoiceVideoPage";
+import { WindowsPage } from "./settings/WindowsPage";
 
 type NavIcon = typeof UserIcon;
 
@@ -27,6 +29,8 @@ interface SectionDef {
   group: string;
   /** Not listed in the sidebar: reached from the profile header. */
   hidden?: boolean;
+  /** Only exists in the desktop (Tauri) shell. */
+  desktopOnly?: boolean;
   /** Category headings shown on pages that are not implemented, in Discord's order. */
   outline?: string[];
   /** Extra words the sidebar search matches besides the label and the outline. */
@@ -35,7 +39,7 @@ interface SectionDef {
 
 // Order and grouping follow Discord's User Settings sidebar (research/discord-ui-inventory.md S1, settings-modal reference).
 // The Billing group (Nitro, Server Boost, Subscriptions, Gift Inventory, Billing) and the desktop-only game pages are left out on purpose.
-const SECTIONS: SectionDef[] = [
+const ALL_SECTIONS: SectionDef[] = [
   { id: "account", label: "My Account", icon: UserIcon, group: "", outline: ["Account Info", "Password & Security", "Account Status"], keywords: ["username", "display name", "email", "phone", "password", "security", "devices", "disable", "delete"] },
   { id: "privacy", label: "Data & Privacy", icon: ShieldCheck, group: "", outline: ["How Vokko Uses My Data", "Profile Privacy"], keywords: ["data", "personalization", "analytics", "profile"] },
   { id: "content", label: "Content & Social", icon: MessagesSquare, group: "", outline: ["Content Filters", "Spam Filters", "Direct Message (DM) Permissions", "Friend Request Permissions", "Ignore & Block"], keywords: ["messages", "dm", "friends", "block", "filter", "explicit", "spam", "permissions"] },
@@ -45,11 +49,14 @@ const SECTIONS: SectionDef[] = [
   { id: "accessibility", label: "Accessibility", icon: Accessibility, group: "Experience", keywords: ["text", "readability", "density", "contrast", "motion", "screen reader", "saturation", "theme"] },
   { id: "keybinds", label: "Keybinds", icon: Keyboard, group: "Experience", keywords: ["shortcuts", "hotkeys", "keyboard", "system"] },
   { id: "language", label: "Language & Time", icon: Languages, group: "Experience", keywords: ["language", "locale", "time format", "12-hour", "24-hour", "clock"] },
+  { id: "windows", label: "Windows Settings", icon: Monitor, group: "Experience", desktopOnly: true, keywords: ["startup", "tray", "minimize", "close", "autostart", "login", "open on startup"] },
   { id: "activity", label: "Activity Privacy", icon: Gamepad2, group: "Games & Apps", outline: ["What Activity I Share", "Where I Share Activity"], keywords: ["status", "games", "share", "join"] },
   { id: "connections", label: "Connected Apps", icon: Plug, group: "Games & Apps", outline: ["Connections", "Authorized Apps"], keywords: ["connections", "accounts", "authorized", "integrations"] },
   { id: "developer", label: "Developer", icon: Code, group: "Other", keywords: ["developer mode", "application test mode", "ids", "api"] },
   { id: "profiles", label: "Profiles", icon: UserIcon, group: "", hidden: true },
 ];
+
+const SECTIONS = ALL_SECTIONS.filter(s => !s.desktopOnly || isDesktop());
 
 /** Build string at the bottom of the sidebar; click copies it. */
 const BUILD = `Vokko ${String(import.meta.env.VITE_APP_BUILD ?? import.meta.env.MODE)}`;
@@ -268,6 +275,8 @@ export function UserSettings({ section }: { section?: string }) {
         return <ProfilesPage me={me} />;
       case "notifications":
         return <NotificationsPage />;
+      case "windows":
+        return <WindowsPage />;
       case "voice":
         return <VoiceVideoPage />;
       case "appearance":

@@ -114,6 +114,18 @@ describe("inside Tauri", () => {
     expect(later).toEqual([]);
   });
 
+  it("keeps links a kind-filtered subscriber did not ask for queued for the next one", async () => {
+    const auth: DeepLink = { kind: "auth", url: "vokko://auth/callback?code=1&state=2" };
+    core.invoke.mockResolvedValue([auth]);
+    await initDeepLinks();
+    const invites: DeepLink[] = [];
+    onDeepLink(l => invites.push(l), { kinds: ["invite"] });
+    expect(invites).toEqual([]);
+    const later: DeepLink[] = [];
+    onDeepLink(l => later.push(l));
+    expect(later).toEqual([auth]);
+  });
+
   it("stops delivering after unsubscribe", async () => {
     let emit: (link: DeepLink) => void = () => undefined;
     events.listen.mockImplementation(async (_name: string, cb: (event: { payload: DeepLink }) => void) => {
