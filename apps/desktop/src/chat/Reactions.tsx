@@ -48,7 +48,7 @@ export function Reactions({ message }: { message: Message }) {
   const chat = useChat();
   const anchor = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  if (message.reactions.length === 0) return null;
+  if (message.reactions.length === 0 || !chat.display.showReactions) return null;
   return <div className="chat-reactions" role="group" aria-label="Reactions">
     {message.reactions.map(r => <ReactionPill key={emojiKey(r.emoji)} message={message} reaction={r} />)}
     <button ref={anchor} type="button" className="chat-reaction chat-reaction-add" aria-label="Add Reaction" onClick={() => setOpen(true)}><SmilePlus size={16} /></button>

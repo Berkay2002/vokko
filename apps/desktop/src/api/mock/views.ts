@@ -68,7 +68,11 @@ export function guildPayload(guildId: string, viewerId: string): GatewayEvents["
   if (!g) throw new Error("unknown guild");
   const channels = [...db.channels.values()].filter(c => c.guild_id === guildId && canView(c, viewerId)).map(c => channelFor(c, viewerId));
   const members = membersOf(guildId);
-  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, members, member_count: members.length };
+  const presences = members.flatMap(m => {
+    const p = db.accounts.get(m.user.id)?.presence;
+    return p && p.status !== "offline" ? [{ ...p }] : [];
+  });
+  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, members, member_count: members.length, presences };
 }
 
 export function guildIdsFor(viewerId: string): string[] {

@@ -124,6 +124,8 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const system = isSystemMessage(message);
   const name = chat.nameOf(message.author, message.member);
   const color = chat.colorOf(message);
+  const dot = chat.roleDotOf(message);
+  const compact = chat.compact;
   const mentionsMe = !isMine && (message.mentions.some(u => u.id === chat.me.id) || message.mention_everyone);
   const failed = pending?.state === 'failed';
 
@@ -176,6 +178,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const showToolbar = !pending && !editing;
   const cls = ['chat-msg'];
   if (grouped) cls.push('grouped');
+  if (compact && !system) cls.push('compact');
   if (mentionsMe) cls.push('mentioned');
   if (pending) cls.push('pending');
   if (failed) cls.push('failed');
@@ -200,15 +203,17 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
     onContextMenu={e => { if (!pending && !(e.target instanceof HTMLAnchorElement)) menu.open(e, items()); }}>
     {!grouped && <ReplyPreview message={message} />}
     <div className="chat-msg-gutter">
-      {grouped
+      {grouped || compact
         ? <Tooltip content={formatFullDate(date)}><time className="chat-timestamp compact" dateTime={message.timestamp}>{formatTime(date)}</time></Tooltip>
         : <Avatar user={message.author} size={40} />}
     </div>
     <div className="chat-msg-body">
-      {!grouped && <h3 className="chat-msg-header">
+      {(!grouped || compact) && <h3 className="chat-msg-header">
+        {dot && <span className="chat-role-dot" style={{ background: dot }} aria-hidden="true" />}
+        {compact && chat.display.showCompactAvatars && <Avatar user={message.author} size={16} className="chat-compact-avatar" />}
         <span className="chat-author" style={color ? { color } : undefined}>{name}</span>
         {message.author.bot && <span className="chat-bot-tag">BOT</span>}
-        <Tooltip content={formatFullDate(date)}><time className="chat-timestamp" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>
+        {!compact && <Tooltip content={formatFullDate(date)}><time className="chat-timestamp" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>}
       </h3>}
       {editing ? <InlineEdit message={message} onDone={onStopEditing} /> : <>
         {message.content && <Markdown content={message.content} ctx={chat.md} className="chat-content" suffix={message.edited_timestamp

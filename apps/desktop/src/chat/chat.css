@@ -55,7 +55,8 @@
   --chat-gutter: 72px;
   --chat-pad-right: 24px; /* reference: row padding 2px 24px 2px 72px */
   --chat-avatar: 40px;
-  --chat-font-size: 16px;
+  /* The shell sets --user-chat-font-size on <html> (Settings > Appearance); line heights are rem-based and scale with the root size. */
+  --chat-font-size: var(--user-chat-font-size, 16px);
   --chat-line-height: 1.375rem;
   --chat-radius: 8px;
   --chat-composer-margin: 16px;
@@ -97,7 +98,8 @@
 .chat-new-divider span { position: relative; top: -9px; height: 13px; padding: 0 4px; border-radius: 0 4px 4px 4px; background: var(--chat-notification); color: var(--chat-on-brand); font-size: 10px; font-weight: 700; line-height: 13px; letter-spacing: 0.02em; text-transform: uppercase; }
 
 /* ---- message ---- */
-.chat-msg { position: relative; padding: 2px var(--chat-pad-right) 2px var(--chat-gutter); margin-top: 17px; min-height: 22px; line-height: var(--chat-line-height); word-wrap: break-word; user-select: text; }
+/* margin-top = the shell's "space between message groups" (--message-group-gap, 16px by default) + the 1px the reference has */
+.chat-msg { position: relative; padding: 2px var(--chat-pad-right) 2px var(--chat-gutter); margin-top: calc(var(--message-group-gap, 16px) + 1px); min-height: 22px; line-height: var(--chat-line-height); word-wrap: break-word; user-select: text; }
 .chat-msg.grouped { margin-top: 0; }
 .chat-row:first-child .chat-msg { margin-top: 0; }
 .chat-day-divider + .chat-msg, .chat-new-divider + .chat-msg { margin-top: 0; }
@@ -114,7 +116,7 @@
 .chat-msg.has-reply:not(.grouped) .chat-msg-gutter { top: 24px; }
 .chat-avatar { display: block; width: var(--chat-avatar); height: var(--chat-avatar); border-radius: 50%; object-fit: cover; background: var(--chat-bg-tertiary); user-select: none; }
 .chat-msg-body { min-width: 0; }
-.chat-msg-header { margin: 0; display: block; font-size: 16px; font-weight: 500; line-height: var(--chat-line-height); min-height: var(--chat-line-height); }
+.chat-msg-header { margin: 0; display: block; font-size: var(--chat-font-size); font-weight: 500; line-height: var(--chat-line-height); min-height: var(--chat-line-height); }
 .chat-author { color: var(--chat-text-strong); font-weight: 500; cursor: pointer; }
 .chat-author:hover { text-decoration: underline; }
 .chat-timestamp { margin-left: 0.25rem; font-size: 0.75rem; font-weight: 500; line-height: 1.375rem; color: var(--chat-text-muted); cursor: default; vertical-align: baseline; }
@@ -137,14 +139,14 @@
 .chat-system-icon { position: absolute; left: -36px; top: 2px; }
 .chat-system-icon.pin, .chat-system-icon.leave { color: var(--chat-text-muted); }
 .chat-system-icon.join { color: var(--chat-green); }
-.chat-system-text { color: var(--chat-text-muted); font-size: 16px; line-height: var(--chat-line-height); }
+.chat-system-text { color: var(--chat-text-muted); font-size: var(--chat-font-size); line-height: var(--chat-line-height); }
 .chat-system-text b { color: var(--chat-text-strong); font-weight: 500; }
 .chat-system-link { color: var(--chat-text-strong); font-weight: 600; }
 .chat-system-link:hover { text-decoration: underline; }
 .chat-system-link-static { color: var(--chat-text-strong); font-weight: 600; }
 
 /* reply preview */
-.chat-reply { position: relative; display: flex; align-items: center; gap: 4px; margin-left: -56px; padding-left: 56px; height: 20px; margin-bottom: 2px; font-size: 14px; color: var(--chat-text-muted); white-space: nowrap; user-select: none; }
+.chat-reply { position: relative; display: flex; align-items: center; gap: 4px; margin-left: calc(16px - var(--chat-gutter)); padding-left: calc(var(--chat-gutter) - 16px); height: 20px; margin-bottom: 2px; font-size: 14px; color: var(--chat-text-muted); white-space: nowrap; user-select: none; }
 .chat-reply-spine { position: absolute; left: 34px; top: 50%; width: 29px; height: 10px; margin-top: 0; border-left: 2px solid var(--chat-divider); border-top: 2px solid var(--chat-divider); border-top-left-radius: 6px; }
 .chat-reply-avatar { width: 16px; height: 16px; flex: none; margin-right: 0; }
 .chat-reply-name { flex: none; font-weight: 500; max-width: 200px; overflow: hidden; text-overflow: ellipsis; opacity: 0.64; color: var(--chat-text-strong); }
@@ -153,6 +155,16 @@
 .chat-reply-name:hover { opacity: 1; }
 .chat-reply.deleted { font-style: italic; }
 .chat-reply.deleted .chat-reply-text { display: inline-flex; gap: 4px; }
+
+/* compact display (Settings > Appearance): html.message-compact, rows get .compact. One line per message: time in the gutter, then name, then text. */
+html.message-compact { --chat-gutter: 80px; }
+.chat-msg.compact:not(.grouped) .chat-msg-gutter, .chat-msg.compact .chat-msg-gutter { top: 2px; }
+.chat-msg.compact.has-reply:not(.grouped) .chat-msg-gutter { top: 24px; }
+.chat-msg.compact .chat-timestamp.compact { display: block; margin: 0; width: calc(var(--chat-gutter) - 24px); text-align: left; }
+.chat-msg.compact .chat-msg-header { display: inline; margin: 0 6px 0 0; min-height: 0; }
+.chat-msg.compact .chat-content, .chat-msg.compact .chat-content > .md-p:first-child { display: inline; }
+.chat-compact-avatar { display: inline-block; width: 16px; height: 16px; margin-right: 4px; vertical-align: -3px; border-radius: 50%; }
+.chat-role-dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; vertical-align: middle; }
 
 /* hover toolbar */
 .chat-toolbar { position: absolute; right: 14px; top: -16px; z-index: 2; display: none; align-items: center; gap: 1px; padding: 2px; border: 1px solid var(--chat-edge); border-radius: 8px; background: var(--chat-surface-high); box-shadow: var(--chat-shadow-low); }
@@ -166,7 +178,7 @@
 /* inline edit */
 .chat-edit { margin-top: 2px; }
 .chat-edit-box { background: var(--chat-input-bg); border-radius: 8px; padding: 17px 12px 17px 15px; min-height: 56px; }
-.chat-edit textarea { display: block; width: 100%; resize: none; border: 0; outline: 0; background: transparent; color: var(--chat-text); font: inherit; font-size: 16px; line-height: var(--chat-line-height); min-height: 22px; max-height: 320px; overflow-y: auto; }
+.chat-edit textarea { display: block; width: 100%; resize: none; border: 0; outline: 0; background: transparent; color: var(--chat-text); font: inherit; font-size: var(--chat-font-size); line-height: var(--chat-line-height); min-height: 22px; max-height: 320px; overflow-y: auto; }
 .chat-edit-hint { padding: 7px 0; font-size: 12px; line-height: 12px; color: var(--chat-text-muted); }
 .chat-edit-hint button { color: var(--chat-link); font-size: 12px; }
 .chat-edit-hint button:hover { text-decoration: underline; }
