@@ -76,16 +76,24 @@ pub fn handle_url<R: Runtime>(app: &AppHandle<R>, url: &str) {
         return;
     };
     crate::window::show_main(app);
-    if let Some(link) = app.state::<LinkState>().deliver(link)
-        && let Err(error) = app.emit(LINK_EVENT, link)
-    {
-        log::warn!("cannot emit deep link: {error}");
+    match app.state::<LinkState>().deliver(link) {
+        Some(link) => {
+            log::info!("deep link: emitting to the frontend");
+            if let Err(error) = app.emit(LINK_EVENT, link) {
+                log::warn!("cannot emit deep link: {error}");
+            }
+        }
+        None => log::info!("deep link: queued until the frontend is ready"),
     }
 }
 
 #[tauri::command]
 pub fn desktop_take_pending_links(state: tauri::State<'_, LinkState>) -> Vec<DeepLink> {
-    state.take()
+    let links = state.take();
+    if !links.is_empty() {
+        log::info!("deep link: handing {} queued link(s) to the frontend", links.len());
+    }
+    links
 }
 
 #[cfg(test)]
