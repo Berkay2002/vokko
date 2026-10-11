@@ -33,14 +33,14 @@ test('run /echo from the picker and see the ephemeral reply, then dismiss it', a
   await expect(picker.getByRole('option', { name: /\/echo/ })).toBeVisible();
   await expect(picker.locator('.apps-picker-group', { hasText: 'Echo' })).toBeVisible();
   await box.press('Enter'); // picks /echo and fills in its required option
-  await expect(box).toHaveValue('/echo text:');
+  await expect(box).toHaveText('/echo text:');
   await expect(page.locator('.apps-command-bar .apps-option-chip', { hasText: 'text' })).toHaveClass(/active/);
   await box.press('Enter'); // the required option is still empty
   await expect(page.locator('.apps-command-error')).toContainText('text');
   const secret = `psst ${Date.now()}`;
   await box.pressSequentially(secret);
   await box.press('Enter');
-  await expect(box).toHaveValue('');
+  await expect(box).toHaveText('');
 
   const reply = row(page, secret);
   await expect(reply).toBeVisible();
@@ -60,7 +60,7 @@ test('a deferred /roll thinks first, then shows the result to everyone', async (
   const options = page.getByRole('listbox', { name: 'Command options' });
   await expect(options.getByRole('option', { name: /sides/ })).toBeVisible();
   await box.press('Tab');
-  await expect(box).toHaveValue('/roll sides:');
+  await expect(box).toHaveText('/roll sides:');
   await box.pressSequentially('500');
   await box.press('Enter');
   await expect(page.locator('.apps-command-error')).toContainText('at most 100');
@@ -82,12 +82,12 @@ test('choices and autocomplete fill option values from the picker', async ({ pag
   const choices = page.getByRole('listbox', { name: 'Command options' });
   await expect(choices.getByRole('option', { name: 'mango' })).toBeVisible(); // from the bot's autocomplete answer
   await box.press('Enter');
-  await expect(box).toHaveValue('/pick fruit:mango ');
+  await expect(box).toHaveText('/pick fruit:mango ');
   await box.pressSequentially('size:');
   await expect(choices.getByRole('option', { name: 'Large' })).toBeVisible();
   await box.press('ArrowDown');
   await box.press('Enter');
-  await expect(box).toHaveValue('/pick fruit:mango size:Large ');
+  await expect(box).toHaveText('/pick fruit:mango size:Large ');
   await box.press('Enter');
   await expect(row(page, 'You picked mango.')).toBeVisible();
 });
@@ -138,7 +138,7 @@ test('developer settings: create an application and see its token once', async (
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.getByRole('button', { name: 'User Settings' }).click();
   const settings = page.getByRole('dialog', { name: 'User Settings' });
-  await settings.getByRole('button', { name: 'Developer', exact: true }).click();
+  await settings.getByRole('button', { name: 'Advanced', exact: true }).click();
   await expect(settings.getByRole('list', { name: 'Your applications' })).toContainText('Echo');
   await settings.getByRole('button', { name: 'New Application' }).click();
   await page.getByRole('dialog', { name: 'Create an application' }).getByLabel('Name').fill('Weather');
