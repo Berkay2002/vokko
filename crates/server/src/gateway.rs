@@ -19,7 +19,7 @@ use vokko_protocol::api::{GatewayEvent, GatewayOp, GatewayPayload, Hello, Identi
 use crate::auth::{hash_token, random_hex, user_for_token};
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
-use crate::hub::{Link, LinkReceiver, ReplayOutcome, Session};
+use crate::hub::{Link, LinkReceiver, ResumeOutcome, Session};
 use crate::net::client_ip;
 use crate::presence;
 use crate::routes::relationships::{open_dms, relationships_of};
@@ -153,9 +153,8 @@ async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, l
                         return None;
                     }
                 };
-                let session = state.hub.create_session(user_id, session_id, hash_token(&identify.token));
-                let generation = session.attach(link);
-                session.dispatch("READY", GatewayEvent::Ready(Box::new(ready)).data());
+                let (session, generation) =
+                    state.hub.open_session(user_id, session_id, hash_token(&identify.token), link, GatewayEvent::Ready(Box::new(ready)).data());
                 return Some((session, generation));
             }
             GatewayOp::Resume => {
@@ -168,14 +167,10 @@ async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, l
                     }
                     continue;
                 };
-                let generation = session.attach(link.clone());
-                match session.replay_after(resume.seq) {
-                    ReplayOutcome::Replayed(_) => {
-                        session.dispatch("RESUMED", GatewayEvent::Resumed.data());
-                        return Some((session, generation));
-                    }
-                    ReplayOutcome::Gap => {
-                        session.detach(generation);
+                // Gap check, attach, replay and the RESUMED frame happen under one session lock (see `Session::resume`).
+                match session.resume(link.clone(), resume.seq, ("RESUMED", GatewayEvent::Resumed.data())) {
+                    ResumeOutcome::Resumed { generation, .. } => return Some((session, generation)),
+                    ResumeOutcome::Gap => {
                         state.hub.remove_session(&session.id);
                         if !writer.frame(GatewayOp::InvalidSession, Value::Bool(false)).await {
                             return None;

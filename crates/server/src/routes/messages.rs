@@ -11,7 +11,7 @@ use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::permissions::{ATTACH_FILES, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES};
 use vokko_protocol::api::{
     AckBulkRequest, AllowedMentions, CreateMessageRequest, EditMessageRequest, Embed, GatewayEvent, Message, MessageAck, MessageDelete, MessageType,
-    PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart,
+    PendingAttachmentMeta, PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart,
 };
 
 use crate::access::{self, ChannelAccess, channel_access};
@@ -26,6 +26,8 @@ use crate::store::{self, ChannelRow, MESSAGE_SELECT, MessageRow, MessageView};
 use crate::unfurl;
 
 pub const MAX_CONTENT_CHARS: usize = 2000;
+const MAX_FILENAME_CHARS: usize = 255;
+const MAX_DESCRIPTION_CHARS: usize = 1024;
 const MAX_PINS: i64 = 250;
 
 pub fn routes() -> Router<AppState> {
@@ -135,11 +137,44 @@ async fn resolve_mentions(state: &AppState, access: &ChannelAccess, parsed: Pars
     Ok(Resolved { users, roles, everyone })
 }
 
+/// A pending upload attached to a new message, with the rename / alt text chosen at send time.
+pub struct DraftAttachment {
+    pub id: i64,
+    pub filename: Option<String>,
+    pub description: Option<String>,
+}
+
+impl DraftAttachment {
+    fn plain(id: i64) -> Self {
+        Self { id, filename: None, description: None }
+    }
+
+    /// Validates a `CreateMessageRequest.attachments` entry: 1-255 character filename (then cleaned like an upload name),
+    /// alt text up to 1024 characters (empty = none).
+    fn from_meta(meta: &PendingAttachmentMeta) -> ApiResult<Self> {
+        let filename = match meta.filename.as_deref().map(str::trim) {
+            None => None,
+            Some(name) if name.is_empty() || name.chars().count() > MAX_FILENAME_CHARS => {
+                return Err(ApiErr::invalid("attachments", "Filename must be 1 to 255 characters."));
+            }
+            Some(name) => Some(media::sanitize_filename(name)),
+        };
+        let description = match meta.description.as_deref() {
+            Some(text) if text.chars().count() > MAX_DESCRIPTION_CHARS => {
+                return Err(ApiErr::invalid("attachments", "Description must be 1024 or fewer in length."));
+            }
+            Some(text) if !text.trim().is_empty() => Some(text.trim().to_owned()),
+            _ => None,
+        };
+        Ok(Self { id: meta.id.db(), filename, description })
+    }
+}
+
 pub struct Draft {
     pub content: String,
     pub kind: MessageType,
     pub reference: Option<i64>,
-    pub attachments: Vec<i64>,
+    pub attachments: Vec<DraftAttachment>,
     pub nonce: Option<String>,
     pub mentions: Resolved,
     /// Whether the replied-to author counts as mentioned (`allowed_mentions.replied_user`, default true).
@@ -232,13 +267,20 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
             .await?;
     }
     if !draft.attachments.is_empty() {
-        let claimed = sqlx::query("UPDATE attachments SET message_id = $1 WHERE id = ANY($2) AND channel_id = $3 AND uploader_id = $4 AND message_id IS NULL")
-            .bind(message_id)
-            .bind(&draft.attachments)
-            .bind(channel.id)
-            .bind(author_id)
-            .execute(&mut *tx)
-            .await?;
+        let ids: Vec<i64> = draft.attachments.iter().map(|attachment| attachment.id).collect();
+        let filenames: Vec<Option<String>> = draft.attachments.iter().map(|attachment| attachment.filename.clone()).collect();
+        let descriptions: Vec<Option<String>> = draft.attachments.iter().map(|attachment| attachment.description.clone()).collect();
+        let claimed = sqlx::query(
+            "UPDATE attachments a SET message_id = $1, filename = COALESCE(m.filename, a.filename), description = m.description              FROM UNNEST($2::bigint[], $3::text[], $4::text[]) AS m(id, filename, description)              WHERE a.id = m.id AND a.channel_id = $5 AND a.uploader_id = $6 AND a.message_id IS NULL",
+        )
+        .bind(message_id)
+        .bind(&ids)
+        .bind(&filenames)
+        .bind(&descriptions)
+        .bind(channel.id)
+        .bind(author_id)
+        .execute(&mut *tx)
+        .await?;
         if claimed.rows_affected() != draft.attachments.len() as u64 {
             return Err(ApiErr::invalid("attachment_ids", "Unknown or already used attachment."));
         }
@@ -361,11 +403,15 @@ async fn create_message(
             return Err(ApiErr::cannot_message_user());
         }
     }
-    let attachments: Vec<i64> = body.attachment_ids.unwrap_or_default().into_iter().map(Snowflake::db).collect();
+    // `attachments` (rename / alt text per id) wins over the plain `attachment_ids` list.
+    let (attachments, attachments_field): (Vec<DraftAttachment>, &str) = match &body.attachments {
+        Some(list) => (list.iter().map(DraftAttachment::from_meta).collect::<ApiResult<_>>()?, "attachments"),
+        None => (body.attachment_ids.unwrap_or_default().into_iter().map(|id| DraftAttachment::plain(id.db())).collect(), "attachment_ids"),
+    };
     if !attachments.is_empty() {
         access.require(ATTACH_FILES)?;
         if attachments.len() > MAX_ATTACHMENTS_PER_MESSAGE {
-            return Err(ApiErr::invalid("attachment_ids", "A message can have at most 10 attachments."));
+            return Err(ApiErr::invalid(attachments_field, "A message can have at most 10 attachments."));
         }
     }
     let content = validate_content(body.content.as_deref().unwrap_or(""), !attachments.is_empty())?;
@@ -421,8 +467,21 @@ async fn edit_message(
     if !matches!(MessageType::from_u8(row.kind as u8), Some(MessageType::Default | MessageType::Reply)) {
         return Err(ApiErr::invalid("message_id", "Cannot edit a system message."));
     }
-    let (attachment_count,): (i64,) = sqlx::query_as("SELECT count(*) FROM attachments WHERE message_id = $1").bind(mid).fetch_one(&state.db).await?;
-    let content = validate_content(&body.content, attachment_count > 0)?;
+    let existing: Vec<(i64,)> = sqlx::query_as("SELECT id FROM attachments WHERE message_id = $1 ORDER BY id").bind(mid).fetch_all(&state.db).await?;
+    let existing: Vec<i64> = existing.into_iter().map(|(id,)| id).collect();
+    // `attachments` is the keep-list: omitted = unchanged, ids that are not on the message are ignored, the rest are removed.
+    let removed: Vec<i64> = match &body.attachments {
+        Some(keep) => existing.iter().copied().filter(|id| !keep.iter().any(|entry| entry.id.db() == *id)).collect(),
+        None => Vec::new(),
+    };
+    let remaining = existing.len() - removed.len();
+    let content = match body.content.as_deref() {
+        Some(text) => validate_content(text, true)?,
+        None => row.content.clone(),
+    };
+    if content.is_empty() && remaining == 0 {
+        return Err(ApiErr::empty_message());
+    }
     let content_changed = content != row.content;
     // `flags` only carries SUPPRESS_EMBEDS; omitting it keeps the current state.
     let suppress_bit = SUPPRESS_EMBEDS as i32;
@@ -431,7 +490,7 @@ async fn edit_message(
         Some(flags) => (old_flags & !suppress_bit) | (flags as i32 & suppress_bit),
         None => old_flags,
     };
-    if content_changed || new_flags != old_flags {
+    if content_changed || new_flags != old_flags || !removed.is_empty() {
         let suppressed = new_flags & suppress_bit != 0;
         let current: Vec<Embed> = serde_json::from_str(&row.embeds).unwrap_or_default();
         let urls: Vec<String> = unfurl::extract_urls(&content).iter().map(ToString::to_string).collect();
@@ -443,7 +502,7 @@ async fn edit_message(
         sqlx::query("UPDATE messages SET content = $2, edited_at = $3, mention_everyone = $4, flags = $5, embeds = $6::jsonb WHERE id = $1")
             .bind(mid)
             .bind(&content)
-            .bind(if content_changed { Some(OffsetDateTime::now_utc()) } else { row.edited_at })
+            .bind(if content_changed || !removed.is_empty() { Some(OffsetDateTime::now_utc()) } else { row.edited_at })
             .bind(mentions.as_ref().map_or(row.mention_everyone, |mentions| mentions.everyone))
             .bind(new_flags)
             .bind(serde_json::to_string(&kept).map_err(|_| ApiErr::internal())?)
@@ -467,7 +526,11 @@ async fn edit_message(
                     .await?;
             }
         }
+        if !removed.is_empty() {
+            sqlx::query("DELETE FROM attachments WHERE id = ANY($1) AND message_id = $2").bind(&removed).bind(mid).execute(&mut *tx).await?;
+        }
         tx.commit().await?;
+        media::remove_files(&state, &removed).await;
         broadcast_update(&state, &access.channel, mid).await?;
         if !suppressed {
             unfurl::spawn(&state, access.channel.clone(), mid, content, kept);

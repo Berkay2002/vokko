@@ -52,6 +52,8 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_MAX_UPLOAD_MB` | `25` | Per-file upload limit in MiB (whole number, at least 1). |
 | `VOKKO_UNFURL` | on | `off`/`0`/`false`/`no` disables link previews (no outbound requests at all). |
 | `VOKKO_TRUST_PROXY` | off | `on`/`1`/`true`/`yes`: take the client address from the last `X-Forwarded-For` entry. Only behind a proxy that sets it (the bundled Caddy does), otherwise clients can spoof their address and dodge rate limits. |
+| `VOKKO_CORS_ORIGINS` | unset (localhost on any port) | Comma-separated exact origins allowed to call the API from a browser, e.g. `https://chat.example.com,https://web.example.com`. Scheme and host (and port if not default), no path, no `*`. When set it replaces the localhost defaults; the Tauri origins stay allowed. Bad entries stop the server at start. |
+| `VOKKO_REGISTRATION` | `open` | `closed`: `POST /api/v1/auth/register` answers 403 (code 40002). Existing accounts, login and `seed` are unaffected, so create the accounts you need first, then close it. Anything else than `open`/`closed` stops the server at start. |
 | `RUST_LOG` | `vokko_server=info,warn` | Log filter. |
 
 Compose-only variables (`deploy/.env.example`): `POSTGRES_PASSWORD`, `VOKKO_SERVER_LISTEN` (host publish address for the server, default `127.0.0.1:8710`), `VOKKO_SITE_ADDRESS`, `VOKKO_WEB_HTTP_PORT`, `VOKKO_WEB_HTTPS_PORT`.
@@ -103,7 +105,11 @@ chat.example.com {
 
 Caddy upgrades the `/gateway` websocket and appends `X-Forwarded-For` without extra settings. With nginx, add the usual `Upgrade`/`Connection` headers for `/gateway`, set `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`, and raise `client_max_body_size` above the upload limit.
 
-Serve the web client from the same origin as the API. The server's CORS allowlist is only `http://localhost[:port]`, `http://127.0.0.1[:port]` and the Tauri origins, so a web client on another origin will be blocked by the browser.
+Serve the web client from the same origin as the API where you can: same-origin requests need no CORS at all. A web client on another origin must be listed in `VOKKO_CORS_ORIGINS`; without it the allowlist is only `http://localhost[:port]`, `http://127.0.0.1[:port]` and the Tauri origins, and the browser blocks everything else. CORS does not apply to the websocket gateway (it is authenticated by the token in Identify).
+
+## Health check
+
+`GET /healthz` needs no authentication and is not rate limited. It runs a `SELECT 1` against the database (2 second limit) and answers `200 {"status":"ok","version":"<server version>","db":"ok"}`, or `503 {"status":"unavailable","version":"...","db":"error"}` when the database does not answer. Point an uptime monitor or a compose healthcheck at it, e.g. `curl -fsS http://127.0.0.1:8710/healthz`. Through the reverse proxy it is only reachable if the proxy forwards `/healthz` (the sample Caddyfile above forwards `/api/*` and `/gateway` only, so add `/healthz` to the matcher if you want it public).
 
 ## Upload limit
 
@@ -111,10 +117,10 @@ Serve the web client from the same origin as the API. The server's CORS allowlis
 
 ## Not production-ready yet
 
-- No health endpoint; the container healthcheck only proves the port accepts connections.
+- The bundled container healthcheck still only proves the port accepts connections; `GET /healthz` (see above) is the real check, but `deploy/` does not use it yet.
 - Single instance only: the gateway hub, replay buffers, presence and rate limiters live in process memory. No horizontal scaling; a restart drops every websocket (clients resume or reconnect).
 - Uploads are on local disk (no S3 or object storage), and there is no built-in backup, retention or admin tooling.
-- Registration is open to anyone who can reach the server, and there is no email verification or password reset. Keep it private (VPN/LAN, or an auth layer in the proxy) until that exists.
+- Registration is open by default, and there is no email verification or password reset. Set `VOKKO_REGISTRATION=closed` once your accounts exist, or keep the server private (VPN/LAN, or an auth layer in the proxy).
 - `seed` creates accounts with a published password; development only.
 - The server speaks plain HTTP; TLS comes from the proxy. No audit logs, metrics endpoint or log rotation beyond Docker's own.
 - Link previews fetch URLs from the server's network (private and loopback addresses are blocked); turn them off with `VOKKO_UNFURL=off` if you do not want outbound requests.
