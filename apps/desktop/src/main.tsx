@@ -11,6 +11,7 @@ import "@fontsource/noto-sans/latin-ext-700.css";
 import { App } from "./App";
 import { bootstrap } from "./api/auth";
 import { MOCK } from "./api/config";
+import { initDesktop } from "./desktop";
 import { gateway } from "./api/gateway";
 import * as rest from "./api/rest";
 import * as store from "./api/store";
@@ -25,6 +26,7 @@ import "./styles/channel-settings.css";
 import "./ui/prefs";
 
 bootstrap();
+void initDesktop(); // deep links + updater; no-op outside the Tauri webview
 
 // Mock mode only: expose internals to Playwright scripts and the console (no effect in real builds).
 if (MOCK) (window as unknown as { __vokko: unknown }).__vokko = { gateway, ...rest, ...store };
