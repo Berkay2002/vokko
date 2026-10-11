@@ -231,6 +231,15 @@ await shot("40-bans-page");
 await page.click('.settings-item:has-text("Members")');
 await page.waitForTimeout(400);
 await shot("41-members-page");
+// A dialog opened from settings stacks above it; closing it returns to the same page.
+await page.click('.ss-icon-btn[aria-label^="Actions for nova"]');
+await page.click('.context-menu-item:has(.context-menu-label:has-text("Kick"))');
+await page.waitForSelector(".modal");
+await shot("41b-kick-over-settings");
+await page.keyboard.press("Escape");
+await page.waitForTimeout(200);
+const stillMembers = await page.locator('.settings-item.selected:has-text("Members"), .settings-item[aria-current="page"]:has-text("Members")').count();
+console.log("members page kept after dialog:", stillMembers > 0 || (await page.locator(".ss-icon-btn").count()) > 0);
 await page.keyboard.press("Escape");
 
 // Channel settings + private channel
@@ -253,6 +262,13 @@ await nav(`/channels/${alice.guild}/${alice.text}`);
 await page.waitForSelector(".member-row");
 await memberMenu("Nova");
 await shot("45-member-menu-as-moderator");
+await page.keyboard.press("Escape");
+await page.click(".guild-header");
+await page.waitForSelector(".guild-menu-item");
+await shot("46-guild-menu-as-moderator");
+await page.click('.guild-menu-item:has-text("Server Settings")');
+await page.waitForSelector(".settings-overlay");
+await shot("47-server-settings-as-moderator");
 await page.keyboard.press("Escape");
 
 if (problems.length) console.log("browser problems:\n" + problems.join("\n"));

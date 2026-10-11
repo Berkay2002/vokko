@@ -4,7 +4,7 @@ import { ChannelType, MessageType, RelationshipType, type Attachment, type Chann
 import { compareIds } from "../snowflake";
 import { Perm } from "../permissions";
 import { db, nextId, sortedMessages, userOf, type MockAccount } from "./db";
-import { addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, openDM, openGroupDM, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm, requireMessage } from "./ops";
+import { addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, openDM, openGroupDM, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm, requireMessage, emitVisibilityChanges, visibilityOf } from "./ops";
 import { parseOverwrites } from "./moderation";
 import { ID, route, routes, str } from "./router";
 import { emit } from "./socket";
@@ -250,7 +250,8 @@ route("POST", `/guilds/${ID}/channels`, ({ viewer, params, body }) => {
   const parent = str(body.parent_id) ?? null;
   if (parent && db.channels.get(parent)?.guild_id !== guildId) fail(400, 50035, "Invalid Form Body", { parent_id: { code: "INVALID", message: "Unknown category" } });
   const permission_overwrites = parseOverwrites(guildId, viewer.user.id, body.permission_overwrites);
-  const channel = addChannel(guildId, { name, type, parent_id: type === ChannelType.GuildCategory ? null : parent, topic: str(body.topic) ?? null, permission_overwrites });
+  const explicit = body.permission_overwrites !== undefined && body.permission_overwrites !== null;
+  const channel = addChannel(guildId, { name, type, parent_id: type === ChannelType.GuildCategory ? null : parent, topic: str(body.topic) ?? null, permission_overwrites: explicit ? permission_overwrites : undefined });
   for (const id of channelAudience(channel)) emit([id], "CHANNEL_CREATE", channelFor(channel, id));
   return channelFor(channel, viewer.user.id);
 });
@@ -274,9 +275,18 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   if (typeof body.name === "string") channel.name = body.name.trim().toLowerCase().replace(/\s+/g, "-") || channel.name;
   if ("topic" in body) channel.topic = str(body.topic)?.trim() || null;
   if (typeof body.position === "number") channel.position = body.position;
-  if ("parent_id" in body) channel.parent_id = str(body.parent_id) ?? null;
+  const before = channel.guild_id ? visibilityOf(channel.guild_id) : null;
+  if ("parent_id" in body) {
+    const parent = str(body.parent_id) ?? null;
+    const category = parent ? db.channels.get(parent) : undefined;
+    if (parent && (!category || category.guild_id !== channel.guild_id || category.type !== ChannelType.GuildCategory)) fail(400, 50035, "Invalid Form Body", { parent_id: { code: "INVALID", message: "Unknown category" } });
+    channel.parent_id = parent;
+    // lock_permissions: true copies the new parent's overwrites; false/absent keeps the channel's own.
+    if (body.lock_permissions === true && category) channel.permission_overwrites = (category.permission_overwrites ?? []).map(o => ({ ...o }));
+  }
   const payload = channelFor(channel, viewer.user.id);
-  emit(channelAudience(channel), "CHANNEL_UPDATE", payload);
+  if (channel.guild_id && before) emitVisibilityChanges(channel.guild_id, before, [channel.id]);
+  else emit(channelAudience(channel), "CHANNEL_UPDATE", payload);
   return payload;
 });
 

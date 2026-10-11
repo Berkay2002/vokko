@@ -503,8 +503,8 @@ export function ModalHost() {
   if (!modal || goneModal) return null;
   return (
     <>
-      {base && !gone(base.spec) && <ModalView spec={base.spec} id={`${base.spec.type}-${base.serial}`} />}
-      <ModalView spec={modal} id={`${modal.type}-${serial}`} />
+      {base && !gone(base.spec) && <ModalView key={`${base.spec.type}-${base.serial}`} spec={base.spec} id={`${base.spec.type}-${base.serial}`} />}
+      <ModalView key={`${modal.type}-${serial}`} spec={modal} id={`${modal.type}-${serial}`} />
     </>
   );
 }

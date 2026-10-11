@@ -97,6 +97,26 @@ export function emitVisibilityChanges(guildId: string, before: Map<string, Set<s
   }
 }
 
+/** Same set of (id, type, allow, deny), order ignored ("synced" with a category). */
+export function sameOverwrites(a: PermissionOverwrite[] | undefined, b: PermissionOverwrite[] | undefined): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  return left.every(o => right.some(p => p.id === o.id && p.type === o.type && p.allow === o.allow && p.deny === o.deny));
+}
+
+/** After a category's overwrites changed from `previous`: children that were synced follow it. Returns their ids. */
+export function syncCategoryChildren(category: MockChannel, previous: PermissionOverwrite[]): string[] {
+  const synced: string[] = [];
+  for (const child of db.channels.values()) {
+    if (child.guild_id !== category.guild_id || child.parent_id !== category.id) continue;
+    if (!sameOverwrites(child.permission_overwrites, previous)) continue;
+    child.permission_overwrites = (category.permission_overwrites ?? []).map(o => ({ ...o }));
+    synced.push(child.id);
+  }
+  return synced;
+}
+
 export function requireChannel(channelId: string, viewerId: string): MockChannel {
   const channel = db.channels.get(channelId);
   if (!channel) fail(404, 10003, "Unknown Channel");
@@ -140,7 +160,7 @@ export function addChannel(guildId: string, init: { name: string; type: ChannelT
     position: siblings.length,
     parent_id: init.parent_id ?? null,
     last_message_id: null,
-    permission_overwrites: (init.permission_overwrites ?? []).map(o => ({ ...o })),
+    permission_overwrites: (init.permission_overwrites ?? (init.parent_id ? db.channels.get(init.parent_id)?.permission_overwrites : undefined) ?? []).map(o => ({ ...o })),
   };
   db.channels.set(channel.id, channel);
   return channel;

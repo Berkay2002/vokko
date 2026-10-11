@@ -89,6 +89,7 @@ export function BanModal({ guildId, userId }: { guildId: Snowflake; userId: Snow
       }}
     >
       <p className="modal-text">Are you sure you want to ban {name}? They will not be able to rejoin until unbanned.</p>
+      <div className="field-label mod-reason-label">Delete message history</div>
       <div className="mod-field">
         <Select label="Delete message history" value={history} options={DELETE_OPTIONS} onChange={setHistory} />
       </div>

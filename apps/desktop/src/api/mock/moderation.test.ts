@@ -277,6 +277,59 @@ describe("channel overwrites and visibility", () => {
   });
 });
 
+describe("category sync", () => {
+  const deny = { type: OverwriteType.Role, allow: "0", deny: Perm.VIEW_CHANNEL.toString() };
+  const ow = (channelId: string) => db.channels.get(channelId)!.permission_overwrites ?? [];
+  const makeCategory = () => call("owner", "POST", `/guilds/${guildId}/channels`, { name: "cat", type: ChannelType.GuildCategory }) as Channel;
+
+  it("a channel created under a category copies its overwrites unless it gives its own", () => {
+    const cat = makeCategory();
+    call("owner", "PUT", `/channels/${cat.id}/permissions/${ids.helper}`, { type: OverwriteType.Member, allow: Perm.VIEW_CHANNEL.toString(), deny: "0" });
+    const copied = call("owner", "POST", `/guilds/${guildId}/channels`, { name: "a", type: ChannelType.GuildText, parent_id: cat.id }) as Channel;
+    expect(ow(copied.id)).toEqual(ow(cat.id));
+    expect(ow(copied.id)).toHaveLength(1);
+    const own = call("owner", "POST", `/guilds/${guildId}/channels`, { name: "b", type: ChannelType.GuildText, parent_id: cat.id, permission_overwrites: [] }) as Channel;
+    expect(ow(own.id)).toEqual([]);
+  });
+
+  it("PATCH with parent_id copies the new parent's overwrites only with lock_permissions", () => {
+    const cat = makeCategory();
+    call("owner", "PUT", `/channels/${cat.id}/permissions/${guildId}`, { ...deny });
+    const kept = call("owner", "POST", `/guilds/${guildId}/channels`, { name: "k", type: ChannelType.GuildText }) as Channel;
+    const locked = call("owner", "POST", `/guilds/${guildId}/channels`, { name: "l", type: ChannelType.GuildText }) as Channel;
+    call("owner", "PATCH", `/channels/${kept.id}`, { parent_id: cat.id });
+    expect(ow(kept.id)).toEqual([]);
+    events.length = 0;
+    call("owner", "PATCH", `/channels/${locked.id}`, { parent_id: cat.id, lock_permissions: true });
+    expect(ow(locked.id)).toEqual(ow(cat.id));
+    expect(eventsOf("CHANNEL_DELETE").flatMap(e => e.users)).toContain(ids.plain);
+    expect(eventsOf("CHANNEL_UPDATE").flatMap(e => e.users)).toContain(ids.owner);
+  });
+
+  it("PUT/DELETE on a category follow only synced children and emit CHANNEL_UPDATE per child", () => {
+    const cat = makeCategory();
+    call("owner", "PUT", `/channels/${cat.id}/permissions/${ids.helper}`, { type: OverwriteType.Member, allow: Perm.VIEW_CHANNEL.toString(), deny: "0" });
+    const synced = call("owner", "POST", `/guilds/${guildId}/channels`, { name: "s", type: ChannelType.GuildText, parent_id: cat.id }) as Channel;
+    const custom = call("owner", "POST", `/guilds/${guildId}/channels`, { name: "c", type: ChannelType.GuildText, parent_id: cat.id }) as Channel;
+    call("owner", "PUT", `/channels/${custom.id}/permissions/${ids.plain}`, { type: OverwriteType.Member, allow: "0", deny: Perm.SEND_MESSAGES.toString() });
+    events.length = 0;
+    call("owner", "PUT", `/channels/${cat.id}/permissions/${guildId}`, { ...deny });
+    expect(ow(synced.id)).toEqual(ow(cat.id));
+    expect(ow(custom.id)).toHaveLength(2);
+    const updated = eventsOf("CHANNEL_UPDATE").filter(e => e.users.includes(ids.owner)).map(e => (e.d as Channel).id);
+    expect(updated).toContain(synced.id);
+    expect(updated).not.toContain(custom.id);
+    expect(eventsOf("CHANNEL_DELETE").flatMap(e => e.users)).toContain(ids.plain);
+    call("owner", "DELETE", `/channels/${cat.id}/permissions/${guildId}`);
+    expect(ow(synced.id).some(o => o.id === guildId)).toBe(false);
+  });
+
+  it("ignores ADMINISTRATOR in an overwrite", () => {
+    call("owner", "PUT", `/channels/${generalId}/permissions/${ids.plain}`, { type: OverwriteType.Member, allow: bits(Perm.ADMINISTRATOR, Perm.SEND_MESSAGES), deny: Perm.ADMINISTRATOR.toString() });
+    expect(ow(generalId).find(o => o.id === ids.plain)).toMatchObject({ allow: Perm.SEND_MESSAGES.toString(), deny: "0" });
+  });
+});
+
 describe("seed", () => {
   it("has a private #staff channel, a banned account and reduced rights for the Moderator", async () => {
     const { seed } = await import("./seed");

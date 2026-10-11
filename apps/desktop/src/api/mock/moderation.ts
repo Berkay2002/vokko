@@ -2,10 +2,10 @@
 // Registered by import side effect (routes.ts imports `parseOverwrites` from here).
 
 import { ALL_PERMISSIONS, Perm, basePermissions, canEditRole, hasBit, highestPosition, outranks, parseBits } from "../permissions";
-import { OverwriteType, type Ban, type Guild, type GuildMember, type PermissionOverwrite, type Role, type User } from "../types";
+import { ChannelType, OverwriteType, type Ban, type Guild, type GuildMember, type PermissionOverwrite, type Role, type User } from "../types";
 import { guildPermsOf, channelPermsOf } from "./access";
 import { db, nextId, sortedMessages, userOf, type MockGuild } from "./db";
-import { MISSING_PERMISSIONS, channelAudience, emitVisibilityChanges, fail, requireChannel, requireChannelPerm, requireGuildMember, visibilityOf } from "./ops";
+import { MISSING_PERMISSIONS, channelAudience, emitVisibilityChanges, fail, requireChannel, requireChannelPerm, requireGuildMember, syncCategoryChildren, visibilityOf } from "./ops";
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
 
@@ -349,8 +349,9 @@ function overwriteFrom(guild: MockGuild, entry: unknown, actorBits: bigint): Per
   } else if (!guild.members.has(id)) {
     fail(404, 10007, "Unknown Member");
   }
-  const allow = bitsOf(e.allow ?? "0", "allow");
-  const deny = bitsOf(e.deny ?? "0", "deny");
+  // ADMINISTRATOR in an overwrite is ignored.
+  const allow = bitsOf(e.allow ?? "0", "allow") & ~Perm.ADMINISTRATOR;
+  const deny = bitsOf(e.deny ?? "0", "deny") & ~Perm.ADMINISTRATOR;
   if (((allow | deny) & ~actorBits) !== 0n) forbidden();
   return { id, type: e.type, allow: allow.toString(), deny: deny.toString() };
 }
@@ -376,11 +377,13 @@ route("PUT", `/channels/${ID}/permissions/${ID}`, ({ viewer, params, body }) => 
   const guild = requireGuildMember(channel.guild_id, viewer.user.id);
   const overwrite = overwriteFrom(guild, { ...body, id: params[1] }, channelPermsOf(channel, viewer.user.id));
   const before = visibilityOf(channel.guild_id);
+  const previous = (channel.permission_overwrites ?? []).map(o => ({ ...o }));
   const list = (channel.permission_overwrites ??= []);
   const index = list.findIndex(o => o.id === overwrite.id && o.type === overwrite.type);
   if (index >= 0) list[index] = overwrite;
   else list.push(overwrite);
-  emitVisibilityChanges(channel.guild_id, before, [channel.id]);
+  const synced = channel.type === ChannelType.GuildCategory ? syncCategoryChildren(channel, previous) : [];
+  emitVisibilityChanges(channel.guild_id, before, [channel.id, ...synced]);
   return undefined;
 });
 
@@ -389,7 +392,9 @@ route("DELETE", `/channels/${ID}/permissions/${ID}`, ({ viewer, params }) => {
   if (!channel.guild_id) fail(400, 50003, "Cannot execute action on a DM channel");
   requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_ROLES);
   const before = visibilityOf(channel.guild_id);
-  channel.permission_overwrites = (channel.permission_overwrites ?? []).filter(o => o.id !== params[1]);
-  emitVisibilityChanges(channel.guild_id, before, [channel.id]);
+  const previous = (channel.permission_overwrites ?? []).map(o => ({ ...o }));
+  channel.permission_overwrites = previous.filter(o => o.id !== params[1]);
+  const synced = channel.type === ChannelType.GuildCategory ? syncCategoryChildren(channel, previous) : [];
+  emitVisibilityChanges(channel.guild_id, before, [channel.id, ...synced]);
   return undefined;
 });
