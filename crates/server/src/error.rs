@@ -35,6 +35,11 @@ impl ApiErr {
         Self::new(StatusCode::BAD_REQUEST, 50006, "Cannot send an empty message")
     }
 
+    /// 403 / 40002: `VOKKO_REGISTRATION=closed`; the message tells the client why it cannot sign up.
+    pub fn registration_closed() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 40002, "Registration is closed on this server")
+    }
+
     pub fn cannot_message_user() -> Self {
         Self::new(StatusCode::FORBIDDEN, 50007, "Cannot send messages to this user")
     }

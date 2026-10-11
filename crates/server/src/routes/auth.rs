@@ -37,6 +37,9 @@ async fn issue_token(state: &AppState, user_id: i64) -> ApiResult<String> {
 }
 
 async fn register(State(state): State<AppState>, ApiJson(body): ApiJson<RegisterRequest>) -> ApiResult<Json<AuthResponse>> {
+    if !state.config.registration_open {
+        return Err(ApiErr::registration_closed());
+    }
     let username = body.username.trim().to_lowercase();
     if !valid_username(&username) {
         return Err(ApiErr::invalid("username", "Must be 2-32 characters: lowercase letters, numbers, '_' and '.'."));

@@ -7,7 +7,11 @@ General rules:
 - IDs are 64-bit snowflakes (Discord epoch 2015-01-01, worker/process bits, increment) serialized as strings.
 - Errors: HTTP status + `ApiError` body. 400 → 50035, 401 → 0 "401: Unauthorized", 403 → 50001/50013, 404 → 10003 (channel), 10008 (message), 10004 (guild), 10013 (user).
 - Server is authoritative for every permission check. Message content max 2000 chars, trimmed, not empty unless attachments exist.
-- CORS allows `http://localhost:*`, `http://127.0.0.1:*` and `tauri://localhost` / `http://tauri.localhost` in dev.
+- CORS allows `http://localhost:*`, `http://127.0.0.1:*` and `tauri://localhost` / `http://tauri.localhost` in dev. `VOKKO_CORS_ORIGINS` (comma-separated exact origins) replaces the localhost part; the Tauri origins always stay allowed.
+- `GET /healthz` (outside `/api/v1`, no auth, no rate limit): `200 {status: "ok", version, db: "ok"}`, or `503 {status: "unavailable", version, db: "error"}` when the database does not answer within 2 s.
+- With `VOKKO_REGISTRATION=closed`, `POST /auth/register` answers `403` with code `40002` ("Registration is closed on this server"); login and existing sessions are unaffected.
+- Profile images (avatar, banner, server icon, per-server avatar/banner) must be PNG, JPEG, GIF or WebP; the server stores them as uploaded (no resize): avatar/icon at most 8 MiB (animated GIF 2 MiB), banner at most 10 MiB (animated GIF 4 MiB), otherwise 400 / 50035 on the `*_attachment_id` field. `pronouns` ≤ 40 characters, `bio` ≤ 190, server tag 1-4 non-space characters, decoration / effect / badge / preset ids are 1-64 characters of `a-z 0-9 _ -`, colours are RGB ints (0..16777215).
+- A user's `primary_guild` is only reported while they are still in that guild and the guild still has a tag; leaving, being kicked or banned, or the tag being removed clears it and sends USER_UPDATE (editing a tag sends USER_UPDATE for everyone wearing it).
 
 ## REST
 
