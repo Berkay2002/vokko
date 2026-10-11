@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 import type { Message, Snowflake } from '../api/types';
-import { Modal, useMe, useReadState } from './shell';
+import { ApiRequestError, Modal, useMe, useReadState } from './shell';
 import { ChatProvider, useChat, type ChatActions } from './ChatContext';
 import { Composer } from './Composer';
 import { MessageList, type MessageListHandle } from './MessageList';
@@ -9,7 +9,7 @@ import { TypingIndicator } from './TypingIndicator';
 import { Lightbox } from './Attachments';
 import { Markdown } from './markdown';
 import { Avatar } from './Avatar';
-import { addFiles } from './draftStore';
+import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, addFiles, onUploadNotice } from './draftStore';
 import { messageStore, useChannelState } from './messageStore';
 import { compareIds, formatMessageTimestamp } from './util';
 import './chat.css';
@@ -37,6 +37,11 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
 
   useEffect(() => { messageStore.setCurrentUser(me?.id ?? null); }, [me?.id]);
 
+  const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
+  useEffect(() => onUploadNotice(n => setNotice(n.kind === 'too-large'
+    ? { title: 'Your files are too powerful', body: `Max file size is ${MAX_UPLOAD_BYTES / (1024 * 1024)} MiB. Please upload something smaller.` }
+    : { title: 'Too many uploads', body: `You can only upload ${MAX_ATTACHMENTS} files at a time.` })), []);
+
   // Open the channel once per mount; the read pointer is captured at that moment for the "new" divider.
   const lastReadRef = useRef(lastRead);
   lastReadRef.current = lastRead;
@@ -55,7 +60,13 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     reply: m => { setReplyTo(m); setMentionReply(true); setEditingId(null); setFocusToken(n => n + 1); },
     edit: m => setEditingId(m.id),
     requestDelete,
-    togglePin: m => { void messageStore.setPinned(m.channel_id, m.id, !m.pinned); },
+    togglePin: m => {
+      messageStore.setPinned(m.channel_id, m.id, !m.pinned).catch((e: unknown) => {
+        if (e instanceof ApiRequestError && e.code === 30003) {
+          setNotice({ title: 'Pin limit reached', body: 'This channel already has 250 pinned messages. Unpin one to make room for another.' });
+        }
+      });
+    },
     react: (m, emoji) => { void messageStore.toggleReaction(m.channel_id, m.id, emoji); },
     jumpTo: id => { void messageStore.jumpToMessage(channelId, id); },
     openLink: href => setLink(href),
@@ -76,6 +87,10 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     />
     <DeleteModal request={deleting} onClose={() => { setDeleting(null); setFocusToken(n => n + 1); }} />
     <LinkModal href={link} onClose={() => setLink(null)} />
+    <Modal open={!!notice} onClose={() => setNotice(null)} title={notice?.title ?? ''}
+      footer={<button type="button" className="chat-btn primary" onClick={() => setNotice(null)}>Okay</button>}>
+      <p className="chat-modal-text">{notice?.body}</p>
+    </Modal>
     {image && <Lightbox message={image.message} index={image.index} onClose={() => setImage(null)} />}
   </ChatProvider>;
 }

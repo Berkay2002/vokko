@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pin } from 'lucide-react';
-import type { Message, Snowflake } from '../api/types';
+import type { Message, PinnedMessagesPage, Snowflake } from '../api/types';
 import { ChatProvider, useChat, type ChatActions } from './ChatContext';
 import { Avatar } from './Avatar';
 import { Markdown } from './markdown';
@@ -10,6 +10,8 @@ import { messageStore } from './messageStore';
 import { formatMessageTimestamp } from './util';
 import { rememberMessages } from './userCache';
 import './chat.css';
+
+const PAGE = 50;
 
 /** Body of the header "Pinned Messages" popout. The shell supplies the popout chrome and anchors it to the header button. */
 export function PinnedMessages({ channelId, onJump }: { channelId: Snowflake; onJump?: (messageId: Snowflake) => void }) {
@@ -23,17 +25,37 @@ export function PinnedMessages({ channelId, onJump }: { channelId: Snowflake; on
 
 function PinnedList({ channelId, onJump }: { channelId: Snowflake; onJump?: (id: Snowflake) => void }) {
   const chat = useChat();
-  const [pins, setPins] = useState<Message[] | null>(null);
+  const [items, setItems] = useState<PinnedMessagesPage['items'] | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
+  const pins: Message[] | null = useMemo(() => items?.map(i => i.message) ?? null, [items]);
+
+  // Newest pin first, 50 per page; `before` is the pinned_at of the last item shown.
+  const fetchPage = useCallback((before?: string) => request<PinnedMessagesPage>(
+    'GET', `/channels/${channelId}/messages/pins?limit=${PAGE}${before ? `&before=${encodeURIComponent(before)}` : ''}`,
+  ), [channelId]);
 
   useEffect(() => {
     let live = true;
-    setPins(null); setError(false);
-    request<Message[]>('GET', `/channels/${channelId}/pins`)
-      .then(list => { if (live) { rememberMessages(list); setPins(list); } })
+    setItems(null); setHasMore(false); setError(false);
+    fetchPage()
+      .then(page => { if (live) { rememberMessages(page.items.map(i => i.message)); setItems(page.items); setHasMore(page.has_more); } })
       .catch(() => { if (live) setError(true); });
     return () => { live = false; };
-  }, [channelId]);
+  }, [fetchPage]);
+
+  async function loadMore() {
+    const last = items?.[items.length - 1];
+    if (!last || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchPage(last.pinned_at);
+      rememberMessages(page.items.map(i => i.message));
+      setItems(cur => [...(cur ?? []), ...page.items.filter(n => !cur?.some(c => c.message.id === n.message.id))]);
+      setHasMore(page.has_more);
+    } catch { setError(true); } finally { setLoadingMore(false); }
+  }
 
   return <div className="chat-pins" role="dialog" aria-label="Pinned Messages">
     <header className="chat-pins-header"><h2>Pinned Messages</h2></header>
@@ -55,7 +77,7 @@ function PinnedList({ channelId, onJump }: { channelId: Snowflake; onJump?: (id:
         {m.content && <Markdown content={m.content} ctx={chat.md} className="chat-content" />}
         <Attachments message={m} />
       </article>)}
+      {hasMore && <button type="button" className="chat-btn chat-pins-more" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? 'Loading…' : 'Load more'}</button>}
     </div>
-    {onJump === undefined && null}
   </div>;
 }

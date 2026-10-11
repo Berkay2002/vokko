@@ -4,7 +4,7 @@ import type { Attachment, Snowflake } from '../api/types';
 import { uploadAttachment } from './shell';
 import type { MentionToken } from './mentionText';
 
-export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // docs/api.md: 10 MiB per file, 10 files per message
 export const MAX_ATTACHMENTS = 10;
 
 export interface Upload {
@@ -63,18 +63,28 @@ function setUpload(channelId: Snowflake, localId: string, fn: (u: Upload) => Upl
   patch(channelId, d => ({ ...d, uploads: d.uploads.map(u => (u.localId === localId ? fn(u) : u)) }));
 }
 
+/** Files refused before upload; the view shows Discord-style "files are too powerful" / "too many uploads" modals. */
+export type UploadNotice = { kind: 'too-large'; names: string[] } | { kind: 'too-many' };
+const noticeListeners = new Set<(n: UploadNotice) => void>();
+export function onUploadNotice(listener: (n: UploadNotice) => void): () => void {
+  noticeListeners.add(listener);
+  return () => { noticeListeners.delete(listener); };
+}
+const notify = (n: UploadNotice): void => noticeListeners.forEach(l => l(n));
+
 export function addFiles(channelId: Snowflake, files: File[]): void {
-  const room = MAX_ATTACHMENTS - getDraft(channelId).uploads.length;
-  for (const file of files.slice(0, Math.max(0, room))) {
+  const tooBig = files.filter(f => f.size > MAX_UPLOAD_BYTES);
+  const fits = files.filter(f => f.size <= MAX_UPLOAD_BYTES);
+  const room = Math.max(0, MAX_ATTACHMENTS - getDraft(channelId).uploads.length);
+  if (tooBig.length > 0) notify({ kind: 'too-large', names: tooBig.map(f => f.name) });
+  else if (fits.length > room) notify({ kind: 'too-many' });
+  for (const file of fits.slice(0, room)) {
     const localId = `u${++seq}`;
-    const tooBig = file.size > MAX_UPLOAD_BYTES;
     const abort = new AbortController();
     const upload: Upload = {
-      localId, file, abort, previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null, progress: 0,
-      status: tooBig ? 'error' : 'uploading', error: tooBig ? 'File is larger than 25 MB.' : undefined,
+      localId, file, abort, previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null, progress: 0, status: 'uploading',
     };
     patch(channelId, d => ({ ...d, uploads: [...d.uploads, upload] }));
-    if (tooBig) continue;
     uploadAttachment(channelId, file, p => setUpload(channelId, localId, u => ({ ...u, progress: p })), abort.signal)
       .then(attachment => setUpload(channelId, localId, u => ({ ...u, status: 'done', progress: 1, attachment })))
       .catch(e => {

@@ -174,6 +174,7 @@ export const messageStore = {
     const req: CreateMessageRequest = { content, nonce };
     if (input.attachments?.length) req.attachment_ids = input.attachments.map(a => a.id);
     if (input.reply) req.message_reference = { message_id: input.reply.id };
+    if (input.reply && input.mention === false) req.allowed_mentions = { replied_user: false };
     const message: Message = {
       id: `pending:${nonce}`, channel_id: channelId, guild_id: input.reply?.guild_id ?? null, author: me, content, timestamp: new Date().toISOString(), edited_timestamp: null,
       type: input.reply ? MessageType.Reply : MessageType.Default, mentions: input.reply && input.mention !== false ? [input.reply.author] : [], mention_everyone: false,
@@ -190,10 +191,7 @@ export const messageStore = {
     if (!p) return;
     update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'sending', error: undefined } : x)) }));
     try {
-      // `mention_replied_user` is not in the v1 contract yet (proposed to the orchestrator); servers that don't know it ignore it.
-      const body: CreateMessageRequest & { mention_replied_user?: boolean } = { ...p.request };
-      if (p.message.type === MessageType.Reply && p.message.mentions.length === 0) body.mention_replied_user = false;
-      const m = await request<Message>('POST', `/channels/${channelId}/messages`, body);
+      const m = await request<Message>('POST', `/channels/${channelId}/messages`, p.request);
       update(channelId, s => upsertMessage(s, m));
     } catch (e) {
       const error = e instanceof Error ? e.message : 'Failed to send';
@@ -247,7 +245,7 @@ export const messageStore = {
   },
 
   async setPinned(channelId: Snowflake, messageId: Snowflake, pinned: boolean): Promise<void> {
-    await request<null>(pinned ? 'PUT' : 'DELETE', `/channels/${channelId}/pins/${messageId}`);
+    await request<null>(pinned ? 'PUT' : 'DELETE', `/channels/${channelId}/messages/pins/${messageId}`);
     update(channelId, s => {
       const i = indexOfId(s.messages, messageId);
       const m = s.messages[i];
