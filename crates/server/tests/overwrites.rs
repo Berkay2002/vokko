@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Channel permission overwrites: PUT/DELETE, their effect on access, creation/move inheritance and category sync.
 mod common;
 

@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Chosen status persistence, invisible, and presence announcements around joining and leaving guilds.
 mod common;
 
