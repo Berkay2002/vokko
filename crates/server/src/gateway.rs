@@ -68,6 +68,7 @@ async fn handshake(state: &AppState, sink: &mut Sink, stream: &mut Stream, tx: m
     while let Some(Ok(message)) = stream.next().await {
         let Message::Text(text) = message else {
             if matches!(message, Message::Close(_)) {
+                let _ = sink.close().await;
                 return None;
             }
             continue;
@@ -154,7 +155,12 @@ async fn run(state: &AppState, session: &Arc<Session>, sink: &mut Sink, stream: 
                         _ => {}
                     }
                 }
-                Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
+                Some(Ok(Message::Close(_))) => {
+                    // complete the close handshake so the client sees a clean 1000
+                    let _ = sink.close().await;
+                    break;
+                }
+                Some(Err(_)) | None => break,
                 Some(Ok(_)) => {}
             },
             outgoing = rx.recv() => match outgoing {

@@ -248,3 +248,18 @@ async fn presence_follows_connections_and_typing_is_relayed() {
     };
     assert_eq!(update["d"]["custom_status"], Value::Null);
 }
+
+#[tokio::test]
+async fn client_close_is_answered_with_a_close_frame() {
+    let w = world().await;
+    let mut client = Client::connect(&w.address).await;
+    client.identify(&w.member).await;
+    client.ws.send(Message::Close(None)).await.expect("send close");
+    loop {
+        match tokio::time::timeout(Duration::from_secs(5), client.ws.next()).await.expect("server answers") {
+            Some(Ok(Message::Close(_))) => break,
+            Some(Ok(_)) => continue,
+            other => panic!("expected a close frame, got {other:?}"),
+        }
+    }
+}
