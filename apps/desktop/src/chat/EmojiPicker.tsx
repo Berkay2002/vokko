@@ -15,7 +15,7 @@ function variant(e: EmojiEntry, tone: number): string {
   return e.skins.find(s => s.tone === tone)?.emoji ?? e.emoji;
 }
 
-export function EmojiPicker({ onPick, autoFocus = true }: { onPick: (e: PickedEmoji) => void; autoFocus?: boolean }) {
+export function EmojiPicker({ onPick, autoFocus = true, embedded = false }: { onPick: (e: PickedEmoji) => void; autoFocus?: boolean; /** Inside ExpressionPicker: fills its parent and drops the popout chrome. */ embedded?: boolean }) {
   const db = useEmojiDb();
   const [query, setQuery] = useState('');
   const [tone, setTone] = useState(getSkinTone);
@@ -54,7 +54,7 @@ export function EmojiPicker({ onPick, autoFocus = true }: { onPick: (e: PickedEm
     return <button key={e.order} type="button" className="chat-emoji-cell" aria-label={e.label} onMouseEnter={() => setHover({ emoji: ch, label: e.shortcodes[0] ? `:${e.shortcodes[0]}:` : e.label })} onClick={() => pick(ch)}>{ch}</button>;
   };
 
-  return <div className="chat-emoji-picker" role="dialog" aria-label="Emoji picker">
+  return <div className={`chat-emoji-picker${embedded ? ' embedded' : ''}`} role={embedded ? 'tabpanel' : 'dialog'} aria-label="Emoji picker">
     <div className="chat-emoji-top">
       <div className="chat-emoji-search">
         <input ref={input} value={query} onChange={e => setQuery(e.target.value)} placeholder="Find the perfect emoji" aria-label="Search emoji" spellCheck={false} />

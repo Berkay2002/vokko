@@ -155,3 +155,91 @@ test('acceptance screenshots', async ({ page }) => {
   await expect(page.locator('.chat-jump-bar')).toBeVisible();
   await shot(page, '14-jump-to-present');
 });
+
+test('round 2 screenshots: intro, pickers, reactions, embeds', async ({ page }) => {
+  type W = {
+    __vokko: { request(m: string, p: string, b?: unknown): Promise<unknown>; gateway: { dispatch(t: string, d: unknown): void } };
+    __vokkoMock: { channelIdByName(n: string): string | null };
+  };
+  await openDm(page);
+  const channelId = new URL(page.url()).pathname.split('/').filter(Boolean).pop()!;
+
+  // 15. start-of-DM intro: mutual servers, friend and block buttons, bottom-anchored
+  await page.mouse.move(5, 5);
+  await shot(page, '15-dm-intro-relations');
+
+  // 16-19. expression picker tabs and the apps popout
+  await page.getByRole('button', { name: 'Open GIF picker' }).click();
+  await expect(page.getByRole('dialog', { name: 'Expression picker' })).toBeVisible();
+  await shot(page, '16-gif-picker');
+  await page.getByRole('tab', { name: 'Stickers' }).click();
+  await shot(page, '17-sticker-picker');
+  await page.getByRole('tab', { name: 'Emoji' }).click();
+  await shot(page, '18-expression-emoji-tab');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Apps' }).click();
+  await shot(page, '19-apps-popout');
+  await page.keyboard.press('Escape');
+
+  // 20-21. Add Reaction submenu and View Reactions modal
+  await send(page, 'react to me');
+  const m = message(page, 'react to me');
+  await expect(m).not.toHaveClass(/pending/);
+  await m.click({ button: 'right', position: { x: 120, y: 12 } });
+  await page.getByRole('menuitem', { name: 'Add Reaction' }).hover();
+  await expect(page.getByRole('menuitem', { name: 'View More' })).toBeVisible();
+  await shot(page, '20-add-reaction-submenu');
+  await page.getByRole('menuitem', { name: /^:/ }).first().click();
+  await expect(m.locator('.chat-reaction.me')).toHaveCount(1);
+  await m.click({ button: 'right', position: { x: 120, y: 12 } });
+  await page.getByRole('menuitem', { name: 'View Reactions' }).click();
+  await expect(page.getByRole('dialog', { name: 'Reactions' })).toBeVisible();
+  await shot(page, '21-view-reactions');
+  await page.keyboard.press('Escape');
+
+  // 22. invite embeds: an invalid code (as in the reference) and a real invite
+  await send(page, 'https://discord.gg/MXuWj96Fr');
+  const code = await page.evaluate(async () => {
+    const w = window as unknown as W;
+    const general = w.__vokkoMock.channelIdByName('general')!;
+    return (await w.__vokko.request('POST', `/channels/${general}/invites`, { max_age: 0 }) as { code: string }).code;
+  });
+  await send(page, `http://127.0.0.1:1422/invite/${code}`);
+  await expect(page.locator('.chat-invite:not(.loading)')).toHaveCount(2);
+  await page.mouse.move(5, 5);
+  await shot(page, '22-invite-embeds');
+
+  // 23. server-supplied rich embed
+  await send(page, 'a link https://example.org/post');
+  const linkMsg = message(page, 'a link https://example.org/post');
+  await expect(linkMsg).not.toHaveClass(/pending/);
+  const id = await linkMsg.getAttribute('data-message-id');
+  await page.evaluate(async ([cid, mid]) => {
+    const w = window as unknown as W;
+    const list = await w.__vokko.request('GET', `/channels/${cid}/messages?limit=20`) as { id: string }[];
+    w.__vokko.gateway.dispatch('MESSAGE_UPDATE', {
+      ...list.find(x => x.id === mid)!,
+      embeds: [{
+        type: 'rich', title: 'Release notes: Vokko 0.2', url: 'https://example.org/post', color: 0x5865f2,
+        provider: { name: 'Example Blog' }, author: { name: 'Sam' },
+        description: 'Embeds, invites and **expression pickers** landed. See the [changelog](https://example.org/changelog).',
+        fields: [
+          { name: 'Added', value: 'Embeds', inline: true },
+          { name: 'Fixed', value: 'Bottom anchoring', inline: true },
+          { name: 'Notes', value: 'Block and unblock from the DM intro.' },
+        ],
+        footer: { text: 'example.org' },
+      }],
+    });
+  }, [channelId, id] as const);
+  await expect(linkMsg.locator('.chat-embed-rich')).toBeVisible();
+  await page.mouse.move(5, 5);
+  await shot(page, '23-rich-embed');
+
+  // 24. block confirmation from the intro row
+  await page.locator('.chat-scroller').hover();
+  await page.mouse.wheel(0, -5000);
+  await page.locator('.chat-start-relation').getByRole('button', { name: 'Block' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await shot(page, '24-block-modal');
+});

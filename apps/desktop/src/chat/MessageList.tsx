@@ -1,10 +1,9 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { ArrowDown, Hash, Loader2 } from 'lucide-react';
-import { ChannelType } from '../api/types';
+import { ArrowDown, Loader2 } from 'lucide-react';
 import type { Snowflake } from '../api/types';
 import { useChat } from './ChatContext';
-import { Avatar } from './Avatar';
+import { ChannelStart } from './ChannelStart';
 import { MessageItem } from './MessageItem';
 import { messageStore, useChannelState } from './messageStore';
 import { buildRows, type Row } from './messageState';
@@ -21,33 +20,11 @@ interface Props {
   onAtBottomChange(atBottom: boolean): void;
 }
 
-function ChannelStart() {
-  const chat = useChat();
-  const ch = chat.channel;
-  if (ch && (ch.type === ChannelType.DM)) {
-    const other = ch.recipients?.[0];
-    const name = other ? chat.nameOf(other) : 'this user';
-    return <div className="chat-start">
-      {other && <Avatar user={other} size={80} className="chat-start-avatar" />}
-      <h1>{name}</h1>
-      <h2>{other?.username}</h2>
-      <p>This is the beginning of your direct message history with <b>{name}</b>.</p>
-    </div>;
-  }
-  if (ch && ch.type === ChannelType.GroupDM) {
-    const names = (ch.recipients ?? []).map(u => chat.nameOf(u)).join(', ');
-    return <div className="chat-start"><h1>{names}</h1><p>Welcome to the beginning of the group.</p></div>;
-  }
-  return <div className="chat-start">
-    <div className="chat-start-icon"><Hash size={42} /></div>
-    <h1>Welcome to #{ch?.name}!</h1>
-    <p>This is the start of the #{ch?.name} channel.{ch?.topic ? ` ${ch.topic}` : ''}</p>
-  </div>;
-}
-
+// The start-of-channel intro is not the list header: it is rendered inside the first row, directly above the oldest message, so
+// short conversations stay anchored to the bottom with no gap between the intro and the first message.
 const Header = memo(function Header({ context }: { context?: { hasMoreBefore: boolean; loading: boolean } }) {
-  if (context?.hasMoreBefore) return <div className="chat-list-spinner" role="status" aria-label="Loading older messages">{context.loading && <Loader2 className="spin" size={24} />}</div>;
-  return <ChannelStart />;
+  if (!context?.hasMoreBefore) return null;
+  return <div className="chat-list-spinner" role="status" aria-label="Loading older messages">{context.loading && <Loader2 className="spin" size={24} />}</div>;
 });
 const Footer = memo(function Footer({ context }: { context?: { hasMoreAfter: boolean; loading: boolean } }) {
   return <div className="chat-list-footer">{context?.hasMoreAfter && context.loading && <Loader2 className="spin" size={24} />}</div>;
@@ -130,6 +107,10 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     </div>;
   }
 
+  if (rows.length === 0 && !state.hasMoreBefore) {
+    return <div className="chat-list chat-list-empty"><ChannelStart /></div>;
+  }
+
   const showJump = state.hasMoreAfter || !atBottom;
   const showUnread = unreadCount > 0 && !seenBottom && !!firstUnread;
 
@@ -170,7 +151,8 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       endReached={() => { void messageStore.loadNewer(channelId); }}
       computeItemKey={(_, row) => row.key}
       components={{ Header, Footer }}
-      itemContent={(_, row) => <div className="chat-row" role="listitem">
+      itemContent={(index, row) => <div className="chat-row" role="listitem">
+        {index === state.firstItemIndex && !state.hasMoreBefore && <ChannelStart />}
         {row.dayLabel && <div className="chat-day-divider" role="separator"><span>{row.dayLabel}</span></div>}
         {row.unreadDivider && <div className="chat-new-divider" role="separator"><span>NEW</span></div>}
         <MessageItem

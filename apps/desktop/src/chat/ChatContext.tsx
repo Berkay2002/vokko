@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { Channel, Guild, GuildMember, Message, Role, Snowflake, User } from '../api/types';
 import { ChannelType } from '../api/types';
 import type { MarkdownContext } from './markdown';
-import { displayName, roleColor, useChannel, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers } from './shell';
+import { displayName, roleColor, useChannel, useCompactMode, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers } from './shell';
 import { cachedUser } from './userCache';
 import { useEmojiDb } from './emojiData';
 
@@ -43,6 +43,8 @@ export interface ChatContextValue {
   actions: ChatActions;
   /** Message the composer is currently replying to; its row gets the "replying" highlight. */
   replyingId: Snowflake | null;
+  /** Compact message display (from the shell's appearance setting, once it exists). */
+  compact: boolean;
 }
 
 export interface ChatActions {
@@ -54,6 +56,7 @@ export interface ChatActions {
   jumpTo(messageId: Snowflake): void;
   openLink(href: string): void;
   openImage(message: Message, index: number): void;
+  viewReactions(m: Message): void;
 }
 
 const Ctx = createContext<ChatContextValue | null>(null);
@@ -74,6 +77,7 @@ export function ChatProvider({ channelId, actions, replyingId = null, children }
   const guildChannels = useGuildChannels(guildId);
   const emoji = useEmojiDb();
   const shortcodes = emoji?.shortcodes;
+  const compact = useCompactMode();
 
   const value = useMemo<ChatContextValue | null>(() => {
     if (!me) return null;
@@ -93,12 +97,12 @@ export function ChatProvider({ channelId, actions, replyingId = null, children }
       onLink: actions.openLink,
     };
     return {
-      channelId, channel, guild, guildId, me, md, roles, members, channels: guildChannels, actions, userById, nameOf, replyingId,
+      channelId, channel, guild, guildId, me, md, roles, members, channels: guildChannels, actions, userById, nameOf, replyingId, compact,
       isDm: channel?.type === ChannelType.DM || channel?.type === ChannelType.GroupDM,
       canManage: canManageMessages(guild, me, members[me.id]),
       colorOf: m => (guildId ? roleColor(guildId, members[m.author.id] ?? m.member ?? null) : null),
     };
-  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, replyingId]);
+  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, replyingId, compact]);
 
   if (!value) return null;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

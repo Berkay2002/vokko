@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
-import { AtSign, CircleAlert, FileUp, Hash, Plus, Smile, X } from 'lucide-react';
+import { AtSign, CircleAlert, FileUp, Hash, LayoutGrid, Plus, Smile, Sticker, X } from 'lucide-react';
 import { ChannelType } from '../api/types';
 import type { Message, Snowflake } from '../api/types';
 import { request, Popout, Tooltip } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
-import { EmojiPickerPopout } from './EmojiPicker';
+import { AppsPopout, ExpressionPickerPopout, type ExpressionTab } from './ExpressionPicker';
 import { useEmojiDb, pushRecentEmoji } from './emojiData';
 import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, useDraft } from './draftStore';
 import { fromDisplay, type MentionToken } from './mentionText';
@@ -79,11 +79,15 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const draft = useDraft(channelId);
   const area = useRef<HTMLTextAreaElement>(null);
   const plusBtn = useRef<HTMLButtonElement>(null);
+  const gifBtn = useRef<HTMLButtonElement>(null);
+  const stickerBtn = useRef<HTMLButtonElement>(null);
   const emojiBtn = useRef<HTMLButtonElement>(null);
+  const appsBtn = useRef<HTMLButtonElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [caret, setCaret] = useState(0);
   const [plusOpen, setPlusOpen] = useState(false);
-  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [expr, setExpr] = useState<ExpressionTab | null>(null);
+  const [appsOpen, setAppsOpen] = useState(false);
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const emojiDb = useEmojiDb();
@@ -247,9 +251,14 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           onSelect={e => setCaret(e.currentTarget.selectionStart)} onClick={e => setCaret(e.currentTarget.selectionStart)} />
         <div className="chat-composer-actions">
           {remaining <= 200 && hasText && <span className={`chat-counter${remaining < 0 ? ' over' : ''}`} aria-live="polite">{remaining}</span>}
-          <Tooltip content="Select Emoji" side="top"><button ref={emojiBtn} type="button" className="chat-composer-btn" aria-label="Select emoji" onClick={() => setEmojiOpen(v => !v)}><Smile size={24} /></button></Tooltip>
+          <Tooltip content="Open GIF picker" side="top"><button ref={gifBtn} type="button" className="chat-composer-btn" aria-label="Open GIF picker" aria-expanded={expr === 'gif'} onClick={() => setExpr(v => (v === 'gif' ? null : 'gif'))}><span className="chat-gif-glyph" aria-hidden="true">GIF</span></button></Tooltip>
+          <Tooltip content="Open sticker picker" side="top"><button ref={stickerBtn} type="button" className="chat-composer-btn" aria-label="Open sticker picker" aria-expanded={expr === 'sticker'} onClick={() => setExpr(v => (v === 'sticker' ? null : 'sticker'))}><Sticker size={24} /></button></Tooltip>
+          <Tooltip content="Select Emoji" side="top"><button ref={emojiBtn} type="button" className="chat-composer-btn" aria-label="Select emoji" aria-expanded={expr === 'emoji'} onClick={() => setExpr(v => (v === 'emoji' ? null : 'emoji'))}><Smile size={24} /></button></Tooltip>
+          <Tooltip content="Apps" side="top"><button ref={appsBtn} type="button" className="chat-composer-btn" aria-label="Apps" aria-expanded={appsOpen} onClick={() => setAppsOpen(v => !v)}><LayoutGrid size={24} /></button></Tooltip>
         </div>
-        <EmojiPickerPopout anchor={emojiBtn} open={emojiOpen} onClose={() => setEmojiOpen(false)} onPick={e => { setEmojiOpen(false); insertEmoji(e.name); }} />
+        <ExpressionPickerPopout anchor={expr === 'gif' ? gifBtn : expr === 'sticker' ? stickerBtn : emojiBtn} open={expr !== null} initialTab={expr ?? 'emoji'}
+          onClose={() => setExpr(null)} onPickEmoji={e => { setExpr(null); insertEmoji(e.name); }} />
+        <AppsPopout anchor={appsBtn} open={appsOpen} onClose={() => setAppsOpen(false)} />
       </div>
       {suggestions.length > 0 && <div className="chat-autocomplete" role="listbox" aria-label="Suggestions">
         <div className="chat-autocomplete-title">{trigger?.kind === 'user' ? 'Members' : trigger?.kind === 'channel' ? 'Text Channels' : `Emoji matching :${trigger?.query}`}</div>
