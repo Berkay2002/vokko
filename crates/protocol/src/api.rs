@@ -301,6 +301,34 @@ pub struct User {
     pub banner_color: Option<String>,
     pub bio: Option<String>,
     pub bot: bool,
+    // Profile perks (free for everyone). Always sent, `null` when not set, so a merge on the client clears them.
+    /// Banner image URL (static or animated).
+    #[serde(default)]
+    pub banner: Option<String>,
+    /// Up to 40 characters.
+    #[serde(default)]
+    pub pronouns: Option<String>,
+    /// Profile theme primary and accent colour (RGB ints).
+    #[serde(default)]
+    pub theme_colors: Option<[u32; 2]>,
+    /// Id of an asset in the client's open decoration set.
+    #[serde(default)]
+    pub avatar_decoration: Option<String>,
+    #[serde(default)]
+    pub profile_effect: Option<String>,
+    /// Server tag shown next to the name.
+    #[serde(default)]
+    pub primary_guild: Option<UserPrimaryGuild>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UserPrimaryGuild {
+    pub guild_id: Snowflake,
+    /// 1-4 characters.
+    pub tag: String,
+    pub badge: String,
+    pub color_primary: u32,
+    pub color_secondary: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -363,6 +391,28 @@ pub struct Guild {
     pub owner_id: Snowflake,
     pub roles: Vec<Role>,
     pub system_channel_id: Option<Snowflake>,
+    /// Server tag members can adopt (MANAGE_GUILD edits it); always sent, `null` when none.
+    #[serde(default)]
+    pub tag: Option<GuildTag>,
+    #[serde(default)]
+    pub theme: Option<GuildTheme>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildTag {
+    /// 1-4 characters.
+    pub tag: String,
+    pub badge: String,
+    pub color_primary: u32,
+    pub color_secondary: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildTheme {
+    /// Preset id in the client's asset set, `null` for a custom theme.
+    pub preset: Option<String>,
+    pub primary: u32,
+    pub accent: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -374,6 +424,17 @@ pub struct GuildMember {
     /// End of a communication timeout; always sent, `null` when the member is not timed out.
     #[serde(default)]
     pub communication_disabled_until: Option<String>,
+    // Per-server profile: overrides the user's inside this guild, `null` = use the user's.
+    #[serde(default)]
+    pub avatar: Option<String>,
+    #[serde(default)]
+    pub banner: Option<String>,
+    #[serde(default)]
+    pub bio: Option<String>,
+    #[serde(default)]
+    pub pronouns: Option<String>,
+    #[serde(default)]
+    pub theme_colors: Option<[u32; 2]>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -653,16 +714,32 @@ pub struct EditMessageRequest {
     pub attachments: Option<Vec<IdOnly>>,
 }
 
+/// `PATCH /users/@me`. Only the keys that are present change; `null` clears (an empty string clears the text fields too).
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct UpdateUserRequest {
-    #[serde(default)]
-    pub global_name: Option<String>,
-    #[serde(default)]
-    pub bio: Option<String>,
-    #[serde(default)]
-    pub banner_color: Option<String>,
-    #[serde(default)]
-    pub avatar_attachment_id: Option<Snowflake>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub global_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub bio: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub banner_color: Option<Option<String>>,
+    /// PNG/JPEG/WebP/GIF (animated allowed), at most 8 MiB.
+    #[serde(default, deserialize_with = "double_option")]
+    pub avatar_attachment_id: Option<Option<Snowflake>>,
+    /// At most 10 MiB.
+    #[serde(default, deserialize_with = "double_option")]
+    pub banner_attachment_id: Option<Option<Snowflake>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub pronouns: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub theme_colors: Option<Option<[u32; 2]>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub avatar_decoration: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub profile_effect: Option<Option<String>>,
+    /// Adopt that guild's tag (must be a member of a guild that has one); `null` clears.
+    #[serde(default, deserialize_with = "double_option")]
+    pub primary_guild_id: Option<Option<Snowflake>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -715,6 +792,11 @@ pub struct UpdateGuildRequest {
     pub icon_attachment_id: Option<Snowflake>,
     #[serde(default)]
     pub system_channel_id: Option<Snowflake>,
+    /// `null` removes the server tag.
+    #[serde(default, deserialize_with = "double_option")]
+    pub tag: Option<Option<GuildTag>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub theme: Option<Option<GuildTheme>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -782,6 +864,17 @@ pub struct EditMemberRequest {
 pub struct EditOwnMemberRequest {
     #[serde(default, deserialize_with = "double_option")]
     pub nick: Option<Option<String>>,
+    /// Per-server profile; each is `null` to fall back to the user's own.
+    #[serde(default, deserialize_with = "double_option")]
+    pub avatar_attachment_id: Option<Option<Snowflake>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub banner_attachment_id: Option<Option<Snowflake>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub bio: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub pronouns: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub theme_colors: Option<Option<[u32; 2]>>,
 }
 
 /// Create and update of a role; every key is optional.
@@ -1076,7 +1169,7 @@ mod tests {
     }
 
     fn user() -> Value {
-        json!({"id": "100", "username": "sam", "global_name": null, "avatar": null, "banner_color": "#5865f2", "bio": null, "bot": false})
+        json!({"id": "100", "username": "sam", "global_name": null, "avatar": null, "banner_color": "#5865f2", "bio": null, "bot": false, "banner": null, "pronouns": null, "theme_colors": null, "avatar_decoration": null, "profile_effect": null, "primary_guild": null})
     }
 
     #[test]
@@ -1106,10 +1199,39 @@ mod tests {
     fn guild_role_and_member() {
         let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false});
         round_trip::<Role>(role.clone());
-        round_trip::<Guild>(json!({"id": "300", "name": "Sam's server", "icon": null, "owner_id": "100", "roles": [role], "system_channel_id": "200"}));
-        round_trip::<GuildMember>(
-            json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null}),
+        round_trip::<Guild>(
+            json!({"id": "300", "name": "Sam's server", "icon": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null}),
         );
+        round_trip::<Guild>(json!({
+            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null,
+            "tag": {"tag": "VKO", "badge": "bolt", "color_primary": 5793266, "color_secondary": 3878800}, "theme": {"preset": null, "primary": 1, "accent": 2}
+        }));
+        round_trip::<GuildMember>(
+            json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}),
+        );
+    }
+
+    #[test]
+    fn profile_perks_shapes() {
+        let mut perks = user();
+        perks["banner"] = json!("http://x/banner.gif");
+        perks["pronouns"] = json!("they/them");
+        perks["theme_colors"] = json!([1, 2]);
+        perks["avatar_decoration"] = json!("sparkle");
+        perks["profile_effect"] = json!("snow");
+        perks["primary_guild"] = json!({"guild_id": "300", "tag": "VKO", "badge": "bolt", "color_primary": 1, "color_secondary": 2});
+        round_trip::<User>(perks);
+        let edit: UpdateUserRequest = serde_json::from_value(json!({"pronouns": null, "theme_colors": [5, 6], "banner_attachment_id": "7"})).expect("edit");
+        assert_eq!(edit.pronouns, Some(None));
+        assert_eq!(edit.theme_colors, Some(Some([5, 6])));
+        assert_eq!(edit.banner_attachment_id, Some(Some(Snowflake(7))));
+        assert!(edit.bio.is_none() && edit.primary_guild_id.is_none());
+        assert!(serde_json::from_value::<UpdateUserRequest>(json!({"theme_colors": [1, 2, 3]})).is_err());
+        let own: EditOwnMemberRequest = serde_json::from_value(json!({"bio": null, "avatar_attachment_id": null})).expect("own");
+        assert_eq!((own.bio, own.avatar_attachment_id), (Some(None), Some(None)));
+        let guild: UpdateGuildRequest = serde_json::from_value(json!({"tag": null})).expect("guild");
+        assert_eq!(guild.tag, Some(None));
+        assert!(guild.theme.is_none());
     }
 
     #[test]
@@ -1178,7 +1300,7 @@ mod tests {
         round_trip::<UserProfile>(json!({"user": user(), "mutual_guilds": [{"id": "300", "nick": null}], "mutual_friends_count": 2}));
         round_trip::<UserProfile>(json!({
             "user": user(), "mutual_guilds": [], "mutual_friends_count": 0,
-            "guild_member": {"user": user(), "nick": "R", "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null}
+            "guild_member": {"user": user(), "nick": "R", "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}
         }));
         round_trip::<CreateMessageRequest>(json!({"content": "x", "allowed_mentions": {"parse": ["users"], "users": ["5"], "replied_user": false}}));
         round_trip::<AckBulkRequest>(json!({"read_states": [{"channel_id": "1", "message_id": "2"}]}));
@@ -1198,12 +1320,11 @@ mod tests {
 
     #[test]
     fn ready_and_flattened_guild_events() {
-        let guild = json!({"id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null});
+        let guild = json!({"id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null});
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
-            value["members"] =
-                json!([{"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null}]);
+            value["members"] = json!([{"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}]);
             value["member_count"] = json!(1);
             value
         };
@@ -1212,7 +1333,7 @@ mod tests {
             "v": 1, "user": user(), "session_id": "abc", "guilds": [with_state], "private_channels": [], "presences": [], "read_states": [], "relationships": []
         }));
         round_trip::<GuildMemberAdd>(
-            json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": "2026-10-12T10:00:00.000Z", "guild_id": "300"}),
+            json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": "2026-10-12T10:00:00.000Z", "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null, "guild_id": "300"}),
         );
         round_trip::<MessageDelete>(json!({"id": "1", "channel_id": "2", "guild_id": null}));
         round_trip::<MessageReaction>(json!({"user_id": "1", "channel_id": "2", "message_id": "3", "emoji": {"id": null, "name": "🎉"}}));

@@ -5,8 +5,8 @@ use sqlx::FromRow;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::{
-    Attachment, Channel, ChannelType, Guild, GuildMember, Message, MessageMember, MessageReference, MessageType, OverwriteType, PermissionOverwrite, Reaction,
-    ReactionEmoji, Role, Snowflake, User,
+    Attachment, Channel, ChannelType, Guild, GuildMember, GuildTag, GuildTheme, Message, MessageMember, MessageReference, MessageType, OverwriteType,
+    PermissionOverwrite, Reaction, ReactionEmoji, Role, Snowflake, User, UserPrimaryGuild,
 };
 
 use crate::error::ApiResult;
@@ -31,12 +31,45 @@ pub struct UserRow {
     pub banner_color: Option<String>,
     pub bio: Option<String>,
     pub bot: bool,
+    pub banner_path: Option<String>,
+    pub pronouns: Option<String>,
+    pub theme_primary: Option<i32>,
+    pub theme_accent: Option<i32>,
+    pub avatar_decoration: Option<String>,
+    pub profile_effect: Option<String>,
+    /// The adopted server tag, present only while the user still belongs to a guild that has one.
+    pub tag_guild_id: Option<i64>,
+    pub tag_text: Option<String>,
+    pub tag_badge: Option<String>,
+    pub tag_color_primary: Option<i32>,
+    pub tag_color_secondary: Option<i32>,
 }
 
-pub const USER_COLS: &str = "id, username, global_name, avatar_path, banner_color, bio, bot";
+/// Columns of [`UserRow`]; select them `FROM {USER_FROM}` (aliases `u` and `pg`).
+pub const USER_COLS: &str = "u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, \
+     u.theme_accent, u.avatar_decoration, u.profile_effect, pg.id AS tag_guild_id, pg.tag AS tag_text, pg.tag_badge, pg.tag_color_primary, \
+     pg.tag_color_secondary";
+
+/// `users u` joined to the guild whose tag the user adopted, while they still belong to it and it still has a tag.
+pub const USER_FROM: &str = "users u LEFT JOIN guilds pg ON pg.id = u.primary_guild_id AND pg.tag IS NOT NULL \
+     AND EXISTS (SELECT 1 FROM guild_members pm WHERE pm.guild_id = pg.id AND pm.user_id = u.id)";
+
+fn theme_colors(primary: Option<i32>, accent: Option<i32>) -> Option<[u32; 2]> {
+    Some([primary?.max(0) as u32, accent?.max(0) as u32])
+}
 
 impl UserRow {
     pub fn into_api(self, state: &AppState) -> User {
+        let primary_guild = match (self.tag_guild_id, self.tag_text, self.tag_badge, self.tag_color_primary, self.tag_color_secondary) {
+            (Some(guild_id), Some(tag), Some(badge), Some(color_primary), Some(color_secondary)) => Some(UserPrimaryGuild {
+                guild_id: flake(guild_id),
+                tag,
+                badge,
+                color_primary: color_primary.max(0) as u32,
+                color_secondary: color_secondary.max(0) as u32,
+            }),
+            _ => None,
+        };
         User {
             id: flake(self.id),
             username: self.username,
@@ -45,12 +78,18 @@ impl UserRow {
             banner_color: self.banner_color,
             bio: self.bio,
             bot: self.bot,
+            banner: self.banner_path.map(|path| state.asset_url(&path)),
+            pronouns: self.pronouns,
+            theme_colors: theme_colors(self.theme_primary, self.theme_accent),
+            avatar_decoration: self.avatar_decoration,
+            profile_effect: self.profile_effect,
+            primary_guild,
         }
     }
 }
 
 pub async fn user(state: &AppState, id: i64) -> ApiResult<Option<User>> {
-    let row: Option<UserRow> = sqlx::query_as(&format!("SELECT {USER_COLS} FROM users WHERE id = $1")).bind(id).fetch_optional(&state.db).await?;
+    let row: Option<UserRow> = sqlx::query_as(&format!("SELECT {USER_COLS} FROM {USER_FROM} WHERE u.id = $1")).bind(id).fetch_optional(&state.db).await?;
     Ok(row.map(|row| row.into_api(state)))
 }
 
@@ -58,7 +97,7 @@ pub async fn users(state: &AppState, ids: &[i64]) -> ApiResult<HashMap<i64, User
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let rows: Vec<UserRow> = sqlx::query_as(&format!("SELECT {USER_COLS} FROM users WHERE id = ANY($1)")).bind(ids).fetch_all(&state.db).await?;
+    let rows: Vec<UserRow> = sqlx::query_as(&format!("SELECT {USER_COLS} FROM {USER_FROM} WHERE u.id = ANY($1)")).bind(ids).fetch_all(&state.db).await?;
     Ok(rows.into_iter().map(|row| (row.id, row.into_api(state))).collect())
 }
 
@@ -83,9 +122,17 @@ pub struct GuildRow {
     pub icon_path: Option<String>,
     pub owner_id: i64,
     pub system_channel_id: Option<i64>,
+    pub tag: Option<String>,
+    pub tag_badge: Option<String>,
+    pub tag_color_primary: Option<i32>,
+    pub tag_color_secondary: Option<i32>,
+    pub theme_preset: Option<String>,
+    pub theme_primary: Option<i32>,
+    pub theme_accent: Option<i32>,
 }
 
-pub const GUILD_COLS: &str = "id, name, icon_path, owner_id, system_channel_id";
+pub const GUILD_COLS: &str = "id, name, icon_path, owner_id, system_channel_id, tag, tag_badge, tag_color_primary, tag_color_secondary, theme_preset, \
+     theme_primary, theme_accent";
 
 pub async fn guilds_from_rows(state: &AppState, rows: Vec<GuildRow>) -> ApiResult<Vec<Guild>> {
     let ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
@@ -108,13 +155,27 @@ pub async fn guilds_from_rows(state: &AppState, rows: Vec<GuildRow>) -> ApiResul
     }
     Ok(rows
         .into_iter()
-        .map(|row| Guild {
-            id: flake(row.id),
-            name: row.name,
-            icon: row.icon_path.map(|path| state.asset_url(&path)),
-            owner_id: flake(row.owner_id),
-            roles: by_guild.remove(&row.id).unwrap_or_default(),
-            system_channel_id: row.system_channel_id.map(flake),
+        .map(|row| {
+            let tag = match (row.tag, row.tag_badge, row.tag_color_primary, row.tag_color_secondary) {
+                (Some(tag), Some(badge), Some(primary), Some(secondary)) => {
+                    Some(GuildTag { tag, badge, color_primary: primary.max(0) as u32, color_secondary: secondary.max(0) as u32 })
+                }
+                _ => None,
+            };
+            let theme = match (row.theme_primary, row.theme_accent) {
+                (Some(primary), Some(accent)) => Some(GuildTheme { preset: row.theme_preset, primary: primary.max(0) as u32, accent: accent.max(0) as u32 }),
+                _ => None,
+            };
+            Guild {
+                id: flake(row.id),
+                name: row.name,
+                icon: row.icon_path.map(|path| state.asset_url(&path)),
+                owner_id: flake(row.owner_id),
+                roles: by_guild.remove(&row.id).unwrap_or_default(),
+                system_channel_id: row.system_channel_id.map(flake),
+                tag,
+                theme,
+            }
         })
         .collect())
 }
@@ -129,7 +190,8 @@ pub async fn guild(state: &AppState, id: i64) -> ApiResult<Option<Guild>> {
 
 pub async fn guilds_of_user(state: &AppState, user_id: i64) -> ApiResult<Vec<Guild>> {
     let rows: Vec<GuildRow> = sqlx::query_as(
-        "SELECT g.id, g.name, g.icon_path, g.owner_id, g.system_channel_id FROM guilds g JOIN guild_members m ON m.guild_id = g.id WHERE m.user_id = $1 ORDER BY m.joined_at, g.id",
+        "SELECT g.id, g.name, g.icon_path, g.owner_id, g.system_channel_id, g.tag, g.tag_badge, g.tag_color_primary, g.tag_color_secondary, g.theme_preset, \
+         g.theme_primary, g.theme_accent FROM guilds g JOIN guild_members m ON m.guild_id = g.id WHERE m.user_id = $1 ORDER BY m.joined_at, g.id",
     )
     .bind(user_id)
     .fetch_all(&state.db)
@@ -144,21 +206,41 @@ struct MemberRow {
     nick: Option<String>,
     joined_at: OffsetDateTime,
     timeout_until: Option<OffsetDateTime>,
+    member_avatar_path: Option<String>,
+    member_banner_path: Option<String>,
+    member_bio: Option<String>,
+    member_pronouns: Option<String>,
+    member_theme_primary: Option<i32>,
+    member_theme_accent: Option<i32>,
 }
+
+/// Member columns after [`USER_COLS`] (alias `m` = `guild_members`).
+const MEMBER_COLS: &str = "m.nick, m.joined_at, m.timeout_until, m.avatar_path AS member_avatar_path, m.banner_path AS member_banner_path, \
+     m.bio AS member_bio, m.pronouns AS member_pronouns, m.theme_primary AS member_theme_primary, m.theme_accent AS member_theme_accent";
 
 impl MemberRow {
     fn into_api(self, state: &AppState, roles: Vec<Snowflake>) -> GuildMember {
         // an expired timeout reads as none
         let timeout = self.timeout_until.filter(|until| *until > OffsetDateTime::now_utc());
-        GuildMember { user: self.user.into_api(state), nick: self.nick, roles, joined_at: iso(self.joined_at), communication_disabled_until: timeout.map(iso) }
+        GuildMember {
+            user: self.user.into_api(state),
+            nick: self.nick,
+            roles,
+            joined_at: iso(self.joined_at),
+            communication_disabled_until: timeout.map(iso),
+            avatar: self.member_avatar_path.map(|path| state.asset_url(&path)),
+            banner: self.member_banner_path.map(|path| state.asset_url(&path)),
+            bio: self.member_bio,
+            pronouns: self.member_pronouns,
+            theme_colors: theme_colors(self.member_theme_primary, self.member_theme_accent),
+        }
     }
 }
 
 pub async fn members(state: &AppState, guild_id: i64, limit: i64, after: Option<i64>) -> ApiResult<Vec<GuildMember>> {
-    let rows: Vec<MemberRow> = sqlx::query_as(
-        "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, m.nick, m.joined_at, m.timeout_until \
-         FROM guild_members m JOIN users u ON u.id = m.user_id WHERE m.guild_id = $1 AND u.id > $2 ORDER BY u.id LIMIT $3",
-    )
+    let rows: Vec<MemberRow> = sqlx::query_as(&format!(
+        "SELECT {USER_COLS}, {MEMBER_COLS} FROM guild_members m JOIN {USER_FROM} ON u.id = m.user_id WHERE m.guild_id = $1 AND u.id > $2 ORDER BY u.id LIMIT $3"
+    ))
     .bind(guild_id)
     .bind(after.unwrap_or(0))
     .bind(limit)
@@ -176,10 +258,9 @@ pub async fn members(state: &AppState, guild_id: i64, limit: i64, after: Option<
 }
 
 pub async fn member(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<Option<GuildMember>> {
-    let rows: Vec<MemberRow> = sqlx::query_as(
-        "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, m.nick, m.joined_at, m.timeout_until \
-         FROM guild_members m JOIN users u ON u.id = m.user_id WHERE m.guild_id = $1 AND u.id = $2",
-    )
+    let rows: Vec<MemberRow> = sqlx::query_as(&format!(
+        "SELECT {USER_COLS}, {MEMBER_COLS} FROM guild_members m JOIN {USER_FROM} ON u.id = m.user_id WHERE m.guild_id = $1 AND u.id = $2"
+    ))
     .bind(guild_id)
     .bind(user_id)
     .fetch_all(&state.db)

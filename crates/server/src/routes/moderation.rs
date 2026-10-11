@@ -6,7 +6,7 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch, put};
-use sqlx::{Postgres, Transaction};
+use sqlx::{Postgres, QueryBuilder, Transaction};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 use vokko_protocol::api::permissions::{ADMINISTRATOR, ALL, BAN_MEMBERS, CHANGE_NICKNAME, KICK_MEMBERS, MANAGE_NICKNAMES, MANAGE_ROLES, MODERATE_MEMBERS};
@@ -22,6 +22,7 @@ use crate::events;
 use crate::extract::{ApiJson, parse_id};
 use crate::media;
 use crate::routes::auth::clean_text;
+use crate::routes::users::{self, ImageKind};
 use crate::state::AppState;
 use crate::store;
 
@@ -187,6 +188,15 @@ async fn delete_member(tx: &mut Transaction<'_, Postgres>, guild_id: i64, user_i
 
 /// What follows the member row going away: read states, GUILD_DELETE to them, GUILD_MEMBER_REMOVE to the rest.
 async fn announce_removal(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
+    // The user no longer shows this guild's tag: forget the choice (so it does not reappear on a rejoin) and tell their audience.
+    let dropped_tag: Option<(i64,)> = sqlx::query_as("UPDATE users SET primary_guild_id = NULL WHERE id = $1 AND primary_guild_id = $2 RETURNING id")
+        .bind(user_id)
+        .bind(guild_id)
+        .fetch_optional(&state.db)
+        .await?;
+    if dropped_tag.is_some() {
+        crate::routes::users::publish_user(state, user_id).await?;
+    }
     let user = store::user(state, user_id).await?.ok_or_else(ApiErr::unknown_user)?;
     sqlx::query("DELETE FROM read_states WHERE user_id = $1 AND channel_id IN (SELECT id FROM channels WHERE guild_id = $2)")
         .bind(user_id)
@@ -367,10 +377,63 @@ async fn edit_own_member(
 ) -> ApiResult<Json<GuildMember>> {
     let guild = guild_id(&id)?;
     let access = guild_access(&state, user_id, guild).await?;
-    if let Some(nick) = body.nick {
-        access.require(CHANGE_NICKNAME)?;
-        let nick = clean_nick(nick)?;
-        sqlx::query("UPDATE guild_members SET nick = $3 WHERE guild_id = $1 AND user_id = $2").bind(guild).bind(user_id).bind(nick).execute(&state.db).await?;
+    // Validate every key first so a rejected request changes nothing. Outer `None` = key absent, inner `None` = clear.
+    let nick = match body.nick {
+        Some(nick) => {
+            access.require(CHANGE_NICKNAME)?;
+            Some(clean_nick(nick)?)
+        }
+        None => None,
+    };
+    let bio = body.bio.map(|value| clean_text(value, users::MAX_BIO_CHARS, "bio")).transpose()?;
+    let pronouns = body.pronouns.map(|value| clean_text(value, users::MAX_PRONOUNS_CHARS, "pronouns")).transpose()?;
+    let theme = match body.theme_colors {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(colors)) => Some(Some(users::theme_pair(colors, "theme_colors")?)),
+    };
+    let avatar = match body.avatar_attachment_id {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(id)) => Some(Some(users::owned_image_path(&state, id.db(), user_id, ImageKind::Avatar, "avatar_attachment_id").await?)),
+    };
+    let banner = match body.banner_attachment_id {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(id)) => Some(Some(users::owned_image_path(&state, id.db(), user_id, ImageKind::Banner, "banner_attachment_id").await?)),
+    };
+
+    let mut update = QueryBuilder::<Postgres>::new("UPDATE guild_members SET ");
+    let mut sets = update.separated(", ");
+    let mut any = false;
+    if let Some(value) = nick {
+        sets.push("nick = ").push_bind_unseparated(value);
+        any = true;
+    }
+    if let Some(value) = avatar {
+        sets.push("avatar_path = ").push_bind_unseparated(value);
+        any = true;
+    }
+    if let Some(value) = banner {
+        sets.push("banner_path = ").push_bind_unseparated(value);
+        any = true;
+    }
+    if let Some(value) = bio {
+        sets.push("bio = ").push_bind_unseparated(value);
+        any = true;
+    }
+    if let Some(value) = pronouns {
+        sets.push("pronouns = ").push_bind_unseparated(value);
+        any = true;
+    }
+    if let Some(value) = theme {
+        sets.push("theme_primary = ").push_bind_unseparated(value.map(|(primary, _)| primary));
+        sets.push("theme_accent = ").push_bind_unseparated(value.map(|(_, accent)| accent));
+        any = true;
+    }
+    if any {
+        update.push(" WHERE guild_id = ").push_bind(guild).push(" AND user_id = ").push_bind(user_id);
+        update.build().execute(&state.db).await?;
     }
     Ok(Json(publish_member(&state, guild, user_id).await?))
 }
