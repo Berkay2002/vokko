@@ -72,7 +72,7 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | MSG-016 | Bookmark / reminder submenu | REF: none |
 | MSG-017 | Markdown rendering: bold, italic, underline, strike, spoiler, inline code, code block, headings 1-3, subtext, lists, block quote, masked link, auto link, timestamps, emoji shortcodes | dm-chat/17-rendered-markdown.jpg, dm-chat/19-spoiler-revealed.png, dm-chat/spec.md "Rendered message" |
 | MSG-018 | Link embeds (invite embed incl. expired state, URL previews, image/video embeds) | dm-chat/01-dm-view.png (expired invite only) |
-| MSG-019 | Attachments: single image max 550x350 radius 8 (cover), 3-image grid 364x350 + 2x 182x173, lightbox (scrim .92, top bar with author and 4 actions, prev/next, thumbnail strip); files, video/audio, spoiler attachments not captured | messages-states/spec.md §7, messages-states/03, 12, 13, 14 |
+| MSG-019 | Attachments: single image max 550x350 radius 8 (cover), 2-image grid 2x 273x273 (gap 4), 3-image grid 364x350 + 2x 182x173, 4-image grid 2x2 of 273x173, own-image hover pencil + trash (64x32 group), lightbox (scrim .92, top bar with author and 4 actions, prev/next, thumbnail strip); files, video/audio, spoiler attachments not captured | messages-states/spec.md §7, messages-states/03, 12, 13, 14, 20-23 |
 | MSG-020 | Stickers and GIFs in messages | REF: none |
 | MSG-021 | Message selection / long-press mobile gestures | out of scope (desktop web) |
 | MSG-022 | Mentions render as chips (user captured; role and channel chips not) and the row gets a mention highlight with a 2 px bar | dm-chat/21-grouped-and-mention-highlight.jpg, guild/05-mention-autocomplete.jpg |
@@ -83,6 +83,9 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | MSG-027 | Timestamp formats (sv): today `HH:mm`, older `YYYY-MM-DD HH:mm`, gutter `HH:mm` on hover, tooltip `söndag 11 oktober 2026 kl. 12:38`; yesterday not observed | messages-states/spec.md §1, messages-states/04, 05 |
 | MSG-028 | Mention-of-me row: gold bg alpha .078 (hover .039), 2 px #ce8100 bar; jump-to-message flash uses brand .16 for ~2 s | messages-states/spec.md §2-3, messages-states/01, 11 |
 | MSG-029 | Server-scoped search field in the channel header and its filter popout (from:, in:, has:, mentions:, more filters) | messages-states/spec.md §9, messages-states/15 |
+| MSG-030 | Unread state in a DM: top bar "1 nytt meddelande sedan 11:13" (brand `#5865f2`, ~34 px, "Markera som läst" right) and the day divider turned red `#d22d39` with a "NYTT" pill at the right end; screenshot-derived (user client dpr 1.25) | messages-states/spec.md §10, messages-states/18, 19 |
+| MSG-031 | Jumbo emoji: an emoji-only message renders the emoji 48x48 (row 52 high); hover tooltip with the shortcode + "Klicka för att ta reda på mer", click opens a 288x106 popout (48 px emoji, name, description) | messages-states/spec.md §7 end, messages-states/28-31 |
+| MSG-032 | Attachment upload and edit flow: tray above the composer with preview tiles (eye/spoiler, pencil, trash), "Laddar upp N filer" card with progress and cancel, "Modifiera bifogad fil" modal (filename, alt text, spoiler, Avbryt/Spara), delete-attachment confirm ("Radera den bifogade filen"); screenshot-derived | messages-states/spec.md §7 end, messages-states/24-27 |
 
 ## CMP: composer
 | Id | Acceptance | REF |
