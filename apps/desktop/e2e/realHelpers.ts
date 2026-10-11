@@ -1,5 +1,7 @@
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { execFileSync, spawn } from 'node:child_process';
+import { openSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 // Helpers for e2e/real.spec.ts: a real vokko-server, sessions injected through localStorage.
@@ -114,7 +116,8 @@ export async function restartServer(): Promise<void> {
   for (const pid of out.split(/\s+/).filter(Boolean)) execFileSync('taskkill', ['/PID', pid, '/F']);
   const script = process.env.VOKKO_SERVER_SCRIPT;
   if (!script) throw new Error('set VOKKO_SERVER_SCRIPT to the script that starts the server (it receives the command `serve`)');
-  const child = spawn('powershell', ['-NoProfile', '-File', path.resolve(script), 'serve'], { detached: true, stdio: 'ignore' });
+  const log = openSync(path.join(tmpdir(), 'vokko-e2e-server.log'), 'a');
+  const child = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.resolve(script), 'serve'], { detached: true, stdio: ['ignore', log, log] });
   child.unref();
   for (let i = 0; i < 60; i++) {
     try { const r = await fetch(`${REST}/auth/login`, { method: 'POST' }); if (r.status) return; } catch { /* not up yet */ }

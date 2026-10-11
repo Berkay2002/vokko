@@ -82,7 +82,9 @@ test('an invite link in chat renders a card the guest can join from', async () =
 });
 
 test('creating a channel shows it live for members, deleting it removes it', async () => {
-  await owner.page.getByRole('button', { name: /^Create Channel$/ }).first().click();
+  // the "+" next to a category only shows while its header is hovered
+  await owner.page.locator('.category-header', { hasText: 'Text Channels' }).hover();
+  await owner.page.getByRole('button', { name: /^Create Channel$/ }).first().click({ timeout: 10_000 });
   await owner.page.locator('#channel-name').fill(`e2e-${RUN}`);
   await owner.page.getByRole('button', { name: 'Create Channel' }).last().click();
   await expect(row(owner.page, `e2e-${RUN}`)).toBeVisible();
