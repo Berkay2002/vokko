@@ -32,6 +32,7 @@ html.has-top-banner #root {
 
 .notify-banner-brand {
   background: var(--background-brand);
+  color: var(--text-on-brand);
 }
 
 .notify-banner-text {
@@ -45,7 +46,7 @@ html.has-top-banner #root {
   flex: none;
   height: 22px;
   padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.7);
+  border: 1px solid color-mix(in srgb, currentColor 70%, transparent);
   border-radius: 4px;
   background: transparent;
   color: inherit;
@@ -56,7 +57,7 @@ html.has-top-banner #root {
 }
 
 .notify-banner-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.16);
+  background: color-mix(in srgb, currentColor 16%, transparent);
 }
 
 .notify-banner-button:disabled {
@@ -104,7 +105,7 @@ html.has-top-banner #root {
   border: 0;
   border-radius: 4px;
   background: var(--background-brand);
-  color: #fff;
+  color: var(--text-on-brand);
   font: inherit;
   font-size: 14px;
   font-weight: 600;

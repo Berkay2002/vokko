@@ -1,0 +1,78 @@
+/** Small colour helpers shared by the community-theme palettes, the generator and the contrast tests. Pure functions, no DOM. */
+
+export type Rgb = readonly [number, number, number];
+export interface Rgba {
+  rgb: Rgb;
+  a: number;
+}
+
+const clamp = (n: number, lo = 0, hi = 255): number => Math.min(hi, Math.max(lo, n));
+
+/** Parses `#rgb`, `#rrggbb`, `#rrggbbaa` and `rgb()/rgba()` (comma syntax). Throws on anything else, so a typo in a palette fails loudly. */
+export function parseColor(input: string): Rgba {
+  const s = input.trim().toLowerCase();
+  if (s.startsWith("#")) {
+    const h = s.slice(1);
+    const full = h.length === 3 ? [...h].map(c => c + c).join("") : h;
+    if (!/^[0-9a-f]{6}([0-9a-f]{2})?$/.test(full)) throw new Error(`bad hex colour: ${input}`);
+    const n = (i: number): number => parseInt(full.slice(i, i + 2), 16);
+    return { rgb: [n(0), n(2), n(4)], a: full.length === 8 ? n(6) / 255 : 1 };
+  }
+  const m = s.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/);
+  if (!m) throw new Error(`bad colour: ${input}`);
+  return { rgb: [Number(m[1]), Number(m[2]), Number(m[3])], a: m[4] === undefined ? 1 : Number(m[4]) };
+}
+
+export function toHex(rgb: Rgb): string {
+  return `#${rgb.map(c => clamp(Math.round(c)).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** `t` = 0 returns `a`, `t` = 1 returns `b`. Opaque colours only. */
+export function mix(a: string, b: string, t: number): string {
+  const x = parseColor(a).rgb;
+  const y = parseColor(b).rgb;
+  return toHex([x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t, x[2] + (y[2] - x[2]) * t]);
+}
+
+/** `rgba(r, g, b, a)` in the spacing the existing token sets use. */
+export function rgba(color: string, alpha: number): string {
+  const [r, g, b] = parseColor(color).rgb;
+  return `rgba(${r}, ${g}, ${b}, ${Number(alpha.toFixed(3))})`;
+}
+
+/** WCAG relative luminance. */
+export function luminance(color: string): number {
+  const lin = parseColor(color).rgb.map(v => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * lin[0]! + 0.7152 * lin[1]! + 0.0722 * lin[2]!;
+}
+
+/** WCAG contrast ratio of two opaque colours (1..21). */
+export function contrast(a: string, b: string): number {
+  const la = luminance(a);
+  const lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+/** Flattens a (possibly translucent) colour over an opaque backdrop. */
+export function over(color: string, backdrop: string): string {
+  const c = parseColor(color);
+  const b = parseColor(backdrop).rgb;
+  return toHex([c.rgb[0] * c.a + b[0] * (1 - c.a), c.rgb[1] * c.a + b[1] * (1 - c.a), c.rgb[2] * c.a + b[2] * (1 - c.a)]);
+}
+
+/**
+ * Moves `color` towards `towards` in 2% steps until it reaches `min` contrast on every background in `backgrounds`.
+ * Returns `color` untouched when it already passes; the result stays on the line between the palette colour and `towards`.
+ */
+export function ensureContrast(color: string, backgrounds: readonly string[], min: number, towards: string): string {
+  const worst = (c: string): number => Math.min(...backgrounds.map(bg => contrast(c, bg)));
+  if (worst(color) >= min) return color;
+  for (let t = 0.02; t <= 1.0001; t += 0.02) {
+    const candidate = mix(color, towards, t);
+    if (worst(candidate) >= min) return candidate;
+  }
+  return towards;
+}

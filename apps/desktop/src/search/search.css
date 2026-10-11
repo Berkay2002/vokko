@@ -112,8 +112,8 @@
 
 .search-panel-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 16px; }
 .search-panel-count { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; margin: 0; font-size: 16px; line-height: 20px; font-weight: 600; color: var(--chat-text-strong); }
-.search-panel-btn { display: inline-flex; align-items: center; gap: 8px; height: 31.5px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(151, 151, 159, 0.16); background: rgba(151, 151, 159, 0.12); font-size: 14px; font-weight: 500; color: var(--chat-text); }
-.search-panel-btn:hover, .search-panel-btn[aria-expanded='true'] { background: rgba(151, 151, 159, 0.2); color: var(--chat-text-strong); }
+.search-panel-btn { display: inline-flex; align-items: center; gap: 8px; height: 31.5px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-subtle); background: var(--background-mod-subtle); font-size: 14px; font-weight: 500; color: var(--chat-text); }
+.search-panel-btn:hover, .search-panel-btn[aria-expanded='true'] { background: var(--background-mod-strong); color: var(--chat-text-strong); }
 .search-spin { animation: search-spin 0.9s linear infinite; color: var(--chat-icon); }
 @keyframes search-spin { to { transform: rotate(360deg); } }
 
@@ -132,7 +132,7 @@
 .search-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-group-category { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--chat-text-muted); }
 
-.search-hit { position: relative; margin: 0 0 8px; padding: 8px 16px; border: 1px solid rgba(151, 151, 159, 0.2); border-radius: 8px; background: var(--background-base-low); cursor: pointer; outline: none; }
+.search-hit { position: relative; margin: 0 0 8px; padding: 8px 16px; border: 1px solid var(--border-normal); border-radius: 8px; background: var(--background-base-low); cursor: pointer; outline: none; }
 .search-hit:hover, .search-hit:focus-visible { background: var(--chat-message-hover); }
 .search-hit-main { display: flex; align-items: flex-start; gap: 12px; }
 .search-hit-main > .chat-avatar { flex: none; border-radius: 50%; }
@@ -152,7 +152,7 @@
 .search-hit-reply-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* The search term: CSS Custom Highlight API, so no markup is injected into message content. */
-::highlight(search-hit) { background-color: rgba(253, 184, 51, 0.3); color: inherit; }
+::highlight(search-hit) { background-color: color-mix(in srgb, var(--chat-mentioned-bar, rgb(253, 184, 51)) 30%, transparent); color: inherit; }
 
 .search-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 40px; width: 280px; max-width: 100%; margin: 120px auto 0; text-align: center; }
 .search-empty-art { display: grid; place-items: center; width: 160px; height: 160px; border-radius: 50%; background: var(--chat-bg-secondary); color: var(--chat-icon); }

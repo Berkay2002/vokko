@@ -96,7 +96,8 @@
 .chat-start-icon { width: 68px; height: 68px; border-radius: 50%; background: var(--background-accent); color: var(--chat-on-brand); display: grid; place-items: center; }
 .chat-start-avatar { border-radius: 50%; }
 
-.chat-row { position: relative; }
+/* flow-root keeps the row's margin-top (the group gap) inside the list item, so the list measures it (it used to collapse out of the item). */
+.chat-row { position: relative; display: flow-root; }
 .chat-day-divider { position: relative; display: flex; align-items: center; justify-content: center; margin: 24px 14px 8px 16px; height: 0; border-top: 1px solid var(--chat-divider); color: var(--chat-text-muted); font-size: 12px; font-weight: 600; line-height: 13px; }
 .chat-day-divider span { position: relative; background: var(--chat-bg); padding: 2px 4px; }
 .chat-new-divider { position: relative; margin: 8px 14px 0 8px; height: 0; border-top: 1px solid var(--chat-danger); display: flex; justify-content: flex-end; }
@@ -105,10 +106,10 @@
 .chat-new-pill { position: relative; top: -9px; height: 13px; padding: 0 4px; border-radius: 0 4px 4px 4px; background: var(--chat-notification); color: var(--chat-on-brand); font-size: 10px; font-weight: 700; line-height: 13px; letter-spacing: 0.02em; text-transform: uppercase; }
 
 /* ---- message ---- */
-/* margin-top = the shell's "space between message groups" (--message-group-gap, 16px by default) + the 1px the reference has */
-.chat-msg { position: relative; padding: 2px var(--chat-pad-right) 2px var(--chat-gutter); margin-top: calc(var(--message-group-gap, 16px) + 1px); min-height: 22px; line-height: var(--chat-line-height); word-wrap: break-word; user-select: text; }
+/* margin-top = the shell's "space between message groups" (--message-group-gap, set from Appearance > Message spacing) + the 1px the reference has.
+   Row padding is --message-pad-y (2px = the reference; the Roomy preset raises it), and the gutter offsets below follow it. */
+.chat-msg { position: relative; padding: var(--message-pad-y, 2px) var(--chat-pad-right) var(--message-pad-y, 2px) var(--chat-gutter); margin-top: calc(var(--message-group-gap, 16px) + 1px); min-height: 22px; line-height: var(--chat-line-height); word-wrap: break-word; user-select: text; }
 .chat-msg.grouped { margin-top: 0; }
-.chat-row:first-child .chat-msg { margin-top: 0; }
 .chat-day-divider + .chat-msg, .chat-new-divider + .chat-msg { margin-top: 0; }
 .chat-msg:hover, .chat-msg.editing { background: var(--chat-message-hover); }
 .chat-msg.mentioned { background: var(--chat-mentioned-bg); border-radius: 0 4px 4px 0; }
@@ -121,9 +122,9 @@
 @keyframes chat-flash { 0%, 60% { background: var(--chat-flash-bg); } 100% { background: transparent; } }
 .chat-msg.pending .chat-content, .chat-msg.pending .chat-attachments { opacity: 0.5; }
 .chat-msg.failed .chat-content { color: var(--chat-danger); opacity: 1; }
-.chat-msg-gutter { position: absolute; left: 0; top: 2px; width: var(--chat-gutter); padding-left: 16px; }
-.chat-msg:not(.grouped) .chat-msg-gutter { top: 4px; }
-.chat-msg.has-reply:not(.grouped) .chat-msg-gutter { top: 26px; }
+.chat-msg-gutter { position: absolute; left: 0; top: var(--message-pad-y, 2px); width: var(--chat-gutter); padding-left: 16px; }
+.chat-msg:not(.grouped) .chat-msg-gutter { top: calc(var(--message-pad-y, 2px) + 2px); }
+.chat-msg.has-reply:not(.grouped) .chat-msg-gutter { top: calc(var(--message-pad-y, 2px) + 24px); }
 .chat-avatar { display: block; width: var(--chat-avatar); height: var(--chat-avatar); border-radius: 50%; object-fit: cover; background: var(--chat-bg-tertiary); user-select: none; }
 .chat-msg-body { min-width: 0; }
 .chat-msg-header { margin: 0; display: block; font-size: var(--chat-font-size); font-weight: 500; line-height: var(--chat-line-height); min-height: var(--chat-line-height); }
@@ -159,7 +160,7 @@
 /* reply preview */
 .chat-reply { position: relative; display: flex; align-items: center; gap: 4px; margin-left: calc(16px - var(--chat-gutter)); padding-left: calc(var(--chat-gutter) - 16px); height: 20px; margin-bottom: 2px; font-size: 14px; line-height: 18px; color: var(--chat-text-muted); white-space: nowrap; user-select: none; cursor: pointer; }
 /* measured on the user shot (1.25 scale): 2px stroke in --spine-default, vertical at the avatar centre, ends 5px above the avatar and 4px before the mini avatar */
-.chat-reply-spine { position: absolute; left: 19px; top: 8px; width: 33px; height: 12px; border-left: 2px solid var(--chat-quote-bar); border-top: 2px solid var(--chat-quote-bar); border-top-left-radius: 6px; }
+.chat-reply-spine { position: absolute; left: 19px; top: calc(var(--message-pad-y, 2px) + 6px); width: 33px; height: 12px; border-left: 2px solid var(--chat-quote-bar); border-top: 2px solid var(--chat-quote-bar); border-top-left-radius: 6px; }
 .chat-reply:hover .chat-reply-spine { border-color: var(--chat-icon); }
 .chat-reply-avatar { width: 16px; height: 16px; flex: none; margin-right: 0; }
 .chat-reply-name { flex: none; font-weight: 500; max-width: 200px; overflow: hidden; text-overflow: ellipsis; opacity: 0.64; color: var(--chat-text-strong); }
@@ -200,8 +201,8 @@
 
 /* compact display (Settings > Appearance): html.message-compact, rows get .compact. One line per message: time in the gutter, then name, then text. */
 html.message-compact { --chat-gutter: 80px; }
-.chat-msg.compact:not(.grouped) .chat-msg-gutter, .chat-msg.compact .chat-msg-gutter { top: 2px; }
-.chat-msg.compact.has-reply:not(.grouped) .chat-msg-gutter { top: 24px; }
+.chat-msg.compact:not(.grouped) .chat-msg-gutter, .chat-msg.compact .chat-msg-gutter { top: var(--message-pad-y, 2px); }
+.chat-msg.compact.has-reply:not(.grouped) .chat-msg-gutter { top: calc(var(--message-pad-y, 2px) + 22px); }
 .chat-msg.compact .chat-timestamp.compact { display: block; margin: 0; width: calc(var(--chat-gutter) - 24px); text-align: left; }
 .chat-msg.compact .chat-msg-header { display: inline; margin: 0 6px 0 0; min-height: 0; }
 .chat-msg.compact .chat-content, .chat-msg.compact .chat-content > .md-p:first-child { display: inline; }

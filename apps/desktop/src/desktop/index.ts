@@ -6,6 +6,7 @@ export { isDesktop } from "./tauri";
 export { DEFAULT_DESKTOP_PREFS, getDesktopPrefs, setDesktopPrefs, type DesktopPrefs } from "./prefs";
 export { getAutostart, setAutostart } from "./autostart";
 export { setTrayUnread } from "./tray";
+export { syncWindowTheme } from "./window";
 export { initDeepLinks, invitePath, onDeepLink, routeDeepLink, type DeepLink, type DeepLinkHandler } from "./deeplinks";
 export { checkForUpdate, downloadUpdate, initUpdater, restartToUpdate, useDesktopUpdate, type UpdateStatus } from "./updater";
 export { listShortcuts, onShortcut, registerShortcut, unregisterShortcut, type ShortcutBinding, type ShortcutEvent } from "./shortcuts";

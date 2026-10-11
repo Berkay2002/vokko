@@ -1260,6 +1260,7 @@
   --red-hover: #b52a33;
   --red-active: #99222a;
   --green-hover: #00703a;
+  --green-active: #168a42;
   --focus-ring: var(--border-focus);
   --status-offline: var(--text-status-offline);
   --status-idle: var(--text-status-idle);

@@ -7,7 +7,7 @@
   height: 18px;
   border: 1px solid var(--interactive-text-default);
   border-radius: var(--radius-xs);
-  color: #fff;
+  color: var(--text-on-brand);
 }
 
 .guild-menu-check.on {

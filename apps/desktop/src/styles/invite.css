@@ -27,7 +27,7 @@
   overflow: hidden;
   border-radius: 20px;
   background: var(--brand-500);
-  color: #fff;
+  color: var(--text-on-brand);
   font-size: 22px;
   font-weight: 600;
 }

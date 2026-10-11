@@ -198,7 +198,8 @@ test.describe('context menu', () => {
   test('menu opens at the pointer: top-left at the click, lifted above it when it would not fit below', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 1200 });
     await openStockTalk(page);
-    const target = row(page, 'did you see the filing');
+    // the last row is always at the bottom of the window, whatever the message spacing preset puts above it
+    const target = page.locator('.chat-msg').last();
     const box = (await target.boundingBox())!;
     // low in the window there is no room below for the ~640px menu but enough above: it flips up and ends at the pointer
     await target.click({ button: 'right', position: { x: 40, y: 8 } });

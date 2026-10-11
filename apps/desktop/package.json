@@ -9,6 +9,7 @@
     "desktop": "tauri dev",
     "desktop:build": "tauri build --no-bundle",
     "test": "vitest run",
+    "themes": "node scripts/gen-themes.mjs",
     "e2e": "playwright test"
   },
   "dependencies": {

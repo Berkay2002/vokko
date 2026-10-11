@@ -113,7 +113,7 @@ img {
 
 .scroller-auto {
   scrollbar-width: auto;
-  scrollbar-color: #1a1b1e var(--bg-secondary);
+  scrollbar-color: var(--scrollbar-auto-scrollbar-color-thumb) var(--bg-secondary);
 }
 
 .scroller-auto::-webkit-scrollbar {
@@ -121,7 +121,7 @@ img {
 }
 
 .scroller-auto::-webkit-scrollbar-thumb {
-  background: #1a1b1e;
+  background: var(--scrollbar-auto-scrollbar-color-thumb);
   border: 3px solid var(--bg-primary);
   border-radius: 8px;
   background-clip: padding-box;

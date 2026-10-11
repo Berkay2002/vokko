@@ -479,7 +479,7 @@
 .sm-btn.primary {
   border-color: transparent;
   background: var(--brand-500);
-  color: #fff;
+  color: var(--text-on-brand);
 }
 
 .sm-btn.primary:hover:not(:disabled) {

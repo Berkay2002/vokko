@@ -18,6 +18,7 @@ import * as rest from "./api/rest";
 import * as store from "./api/store";
 import { startNotify } from "./notify";
 import "./styles/tokens.css";
+import "./styles/themes.generated.css";
 import "./styles/base.css";
 import "./styles/ui.css";
 import "./styles/shell.css";

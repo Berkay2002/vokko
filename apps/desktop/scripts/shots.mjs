@@ -1,8 +1,10 @@
 // Screenshots of the app shell in mock mode (1440x900), one PNG per state.
 //   npm run dev -- --port 1421        (in another terminal)
 //   node scripts/shots.mjs [outDir] [baseUrl]
+//   THEME=dracula node scripts/shots.mjs artifacts/shell-dracula     (any theme id of src/ui/prefs.ts; default onyx)
 // Needs Playwright with a Chromium: PLAYWRIGHT_CHROMIUM picks an executable, otherwise the newest
-// chromium_headless_shell under %LOCALAPPDATA%\ms-playwright (or ~/.cache/ms-playwright) is used.
+// chromium_headless_shell under PLAYWRIGHT_BROWSERS_PATH, %LOCALAPPDATA%\ms-playwright or ~/.cache/ms-playwright is used.
+// User settings is the .sm modal (.sm-item rows); server and channel settings are the full-screen .fss (.fss-item rows).
 
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -15,7 +17,7 @@ mkdirSync(out, { recursive: true });
 
 function findChromium() {
   if (process.env.PLAYWRIGHT_CHROMIUM) return process.env.PLAYWRIGHT_CHROMIUM;
-  const roots = [process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "ms-playwright"), join(homedir(), ".cache", "ms-playwright"), join(homedir(), "Library", "Caches", "ms-playwright")].filter(Boolean);
+  const roots = [process.env.PLAYWRIGHT_BROWSERS_PATH, process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "ms-playwright"), join(homedir(), ".cache", "ms-playwright"), join(homedir(), "Library", "Caches", "ms-playwright")].filter(Boolean);
   for (const root of roots) {
     if (!existsSync(root)) continue;
     const dirs = readdirSync(root).filter(d => d.startsWith("chromium_headless_shell-")).sort().reverse();
@@ -31,7 +33,7 @@ function findChromium() {
 
 const browser = await chromium.launch({ executablePath: findChromium() });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-// Onyx is the account theme of the reference captures; THEME=dark|ash|onyx|light overrides.
+// Onyx is the account theme of the reference captures; THEME=<id> (dark, ash, onyx, light or a community theme) overrides.
 const theme = process.env.THEME ?? "onyx";
 await context.addInitScript(t => localStorage.setItem("vokko.prefs", JSON.stringify({ theme: t })), theme);
 const page = await context.newPage();
@@ -167,9 +169,9 @@ await nav(`/channels/${ids.guild}/${ids.text}`);
 await page.waitForSelector(".member-row");
 await page.click(".guild-header");
 await page.click('.guild-menu-item:has-text("Server Settings")');
-await page.waitForSelector(".settings-overlay");
+await page.waitForSelector(".fss");
 await shot("22-server-settings-overview");
-await page.click('.settings-item:has-text("Roles")');
+await page.click('.fss-item:has-text("Roles")');
 await shot("23-server-settings-roles");
 await page.keyboard.press("Escape");
 
@@ -187,9 +189,9 @@ await shot("26-quick-switcher-channels");
 await page.keyboard.press("Escape");
 
 await page.click('.user-panel-button[aria-label="User Settings"]');
-await page.waitForSelector(".settings-overlay");
+await page.waitForSelector(".sm");
 for (const [id, label] of [["27-settings-appearance", "Appearance"], ["28-settings-voice", "Voice & Video"], ["29-settings-keybinds", "Keybinds"], ["30-settings-notifications", "Notifications"]]) {
-  await page.click(`.settings-item:has-text("${label}")`);
+  await page.click(`.sm-item:has-text("${label}")`);
   await shot(id);
 }
 await page.keyboard.press("Escape");
@@ -221,8 +223,8 @@ for (const [id, label, ready] of [["33-kick-modal", "Kick Nova", ".modal"], ["34
 // Server settings: roles editor, bans page, members actions
 await page.click(".guild-header");
 await page.click('.guild-menu-item:has-text("Server Settings")');
-await page.waitForSelector(".settings-overlay");
-await page.click('.settings-item:has-text("Roles")');
+await page.waitForSelector(".fss");
+await page.click('.fss-item:has-text("Roles")');
 await page.waitForTimeout(300);
 await shot("37-roles-list");
 await page.click(".ss-role-row.ss-role-draggable >> nth=0");
@@ -230,10 +232,10 @@ await page.waitForTimeout(300);
 await shot("38-role-editor-display");
 await page.click('.ss-tab:has-text("Permissions")');
 await shot("39-role-editor-permissions");
-await page.click('.settings-item:has-text("Bans")');
+await page.click('.fss-item:has-text("Bans")');
 await page.waitForTimeout(400);
 await shot("40-bans-page");
-await page.click('.settings-item:has-text("Members")');
+await page.click('.fss-item:has-text("Members")');
 await page.waitForTimeout(400);
 await shot("41-members-page");
 // A dialog opened from settings stacks above it; closing it returns to the same page.
@@ -243,16 +245,16 @@ await page.waitForSelector(".modal");
 await shot("41b-kick-over-settings");
 await page.keyboard.press("Escape");
 await page.waitForTimeout(200);
-const stillMembers = await page.locator('.settings-item.selected:has-text("Members"), .settings-item[aria-current="page"]:has-text("Members")').count();
-console.log("members page kept after dialog:", stillMembers > 0 || (await page.locator(".ss-icon-btn").count()) > 0);
+const stillMembers = await page.locator('.fss-item[aria-current="page"]:has-text("Members")').count();
+console.log("members page kept after dialog:", stillMembers > 0);
 await page.keyboard.press("Escape");
 
 // Channel settings + private channel
 await page.hover(".channel-row.selected");
 await page.click('.channel-row.selected button[aria-label="Edit Channel"]');
-await page.waitForSelector(".settings-overlay");
+await page.waitForSelector(".fss");
 await shot("42-channel-settings-overview");
-await page.click('.settings-item:has-text("Permissions")');
+await page.click('.fss-item:has-text("Permissions")');
 await page.waitForTimeout(400);
 await shot("43-channel-permissions");
 await page.keyboard.press("Escape");
@@ -262,18 +264,18 @@ await shot("44-sidebar-private-channel");
 // ---- milestone E: server tag / theme, sync with category ----
 await page.click(".guild-header");
 await page.click('.guild-menu-item:has-text("Server Settings")');
-await page.waitForSelector(".settings-overlay");
-await page.click('.settings-item:has-text("Server Tag")');
+await page.waitForSelector(".fss");
+await page.click('.fss-item:has-text("Server Tag")');
 await page.waitForTimeout(300);
 await shot("48-server-tag");
-await page.click('.settings-item:has-text("Server Theme")');
+await page.click('.fss-item:has-text("Server Theme")');
 await page.waitForTimeout(300);
 await shot("49-server-theme");
 await page.keyboard.press("Escape");
 await page.hover(".channel-row.selected");
 await page.click('.channel-row.selected button[aria-label="Edit Channel"]');
-await page.waitForSelector(".settings-overlay");
-await page.click('.settings-item:has-text("Permissions")');
+await page.waitForSelector(".fss");
+await page.click('.fss-item:has-text("Permissions")');
 await page.waitForTimeout(400);
 await shot("50-channel-permissions-synced");
 await page.keyboard.press("Escape");
@@ -291,7 +293,7 @@ await page.click(".guild-header");
 await page.waitForSelector(".guild-menu-item");
 await shot("46-guild-menu-as-moderator");
 await page.click('.guild-menu-item:has-text("Server Settings")');
-await page.waitForSelector(".settings-overlay");
+await page.waitForSelector(".fss");
 await shot("47-server-settings-as-moderator");
 await page.keyboard.press("Escape");
 

@@ -166,7 +166,7 @@
   height: 18px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--interactive-normal);
-  color: #fff;
+  color: var(--text-on-brand);
 }
 
 .context-menu-check.on {
@@ -324,19 +324,21 @@
 }
 
 .btn-secondary {
-  background: #4e5058;
+  background: var(--control-secondary-background-default);
+  color: var(--control-secondary-text-default);
 }
 
 .btn-secondary:hover {
-  background: #6d6f78;
+  background: var(--background-mod-strong);
 }
 
 .btn-secondary:active {
-  background: #80848e;
+  background: var(--border-strong);
 }
 
 .btn-danger {
   background: var(--red-hover);
+  color: #fff;
 }
 
 .btn-danger:hover {
@@ -345,10 +347,11 @@
 
 .btn-success {
   background: var(--green-hover);
+  color: #fff;
 }
 
 .btn-success:hover {
-  background: #168a42;
+  background: var(--green-active);
 }
 
 .btn-link {

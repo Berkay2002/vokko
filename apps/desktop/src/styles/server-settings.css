@@ -73,7 +73,7 @@
 }
 
 .fss-item.selected {
-  background: rgba(151, 151, 159, 0.24);
+  background: var(--interactive-background-selected);
 }
 
 .fss-item.danger {
@@ -302,7 +302,7 @@
 }
 
 .ss-aside-row.selected {
-  background: rgba(151, 151, 159, 0.24);
+  background: var(--interactive-background-selected);
 }
 
 .ss-aside-row:disabled {

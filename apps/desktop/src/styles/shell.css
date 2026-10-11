@@ -214,7 +214,7 @@
 }
 
 .rail-action:hover {
-  color: #fff;
+  color: var(--text-on-brand);
 }
 
 .rail-add:hover {
@@ -1504,7 +1504,7 @@
 
 .friends-tab.add-friend-tab {
   background: var(--brand-500);
-  color: #fff;
+  color: var(--text-on-brand);
 }
 
 .friends-tab.add-friend-tab:hover {
@@ -1512,7 +1512,7 @@
 }
 
 .friends-tab.add-friend-tab.selected {
-  background: rgba(88, 101, 242, 0.24);
+  background: color-mix(in srgb, var(--brand-500) 24%, transparent);
   color: var(--text-brand);
 }
 
@@ -2002,7 +2002,7 @@
   height: 24px;
   border-radius: 50%;
   background: var(--brand-500);
-  color: #fff;
+  color: var(--text-on-brand);
 }
 
 .choice-row > span:nth-child(2) {
@@ -2017,7 +2017,7 @@
   height: 48px;
   border-radius: var(--radius-sm);
   background: var(--brand-500);
-  color: #fff;
+  color: var(--text-on-brand);
 }
 
 .copy-field {
@@ -2496,7 +2496,7 @@
 }
 
 .swatch.selected {
-  border-color: #fff;
+  border-color: var(--text-strong);
 }
 
 .textarea {
@@ -2517,7 +2517,14 @@
   align-items: center;
   justify-content: center;
   height: 100%;
-  background: radial-gradient(circle at 20% 20%, #4a3fa8 0%, #2b2d6e 35%, #1b1c3a 70%, #131428 100%);
+  /* the theme's accent fading into its darkest surface, so the login page follows the chosen theme */
+  background: radial-gradient(
+    circle at 20% 20%,
+    color-mix(in srgb, var(--brand-500) 55%, var(--background-base-lowest)) 0%,
+    color-mix(in srgb, var(--brand-500) 28%, var(--background-base-lowest)) 35%,
+    color-mix(in srgb, var(--brand-500) 10%, var(--background-base-lowest)) 70%,
+    var(--background-base-lowest) 100%
+  );
 }
 
 .auth-card {

@@ -240,7 +240,7 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--icon-voice-connected);
+  background: var(--control-connected-background-default);
   box-shadow: 0 0 0 3px var(--app-frame-background);
   color: #fff;
   pointer-events: none;
@@ -450,7 +450,7 @@
   display: block;
   width: 100%;
   margin-bottom: 12px;
-  background: #000;
+  background: var(--background-base-lowest);
   color: var(--brand-500, #5865f2);
 }
 
@@ -816,14 +816,14 @@
   height: 40px;
   padding: 0 16px;
   border-radius: var(--radius-md);
-  background: #fff;
-  color: #000;
+  background: var(--text-strong);
+  color: var(--background-base-lowest);
   font-size: 16px;
   line-height: 20px;
 }
 
 .voice-empty-join:hover {
-  background: #e3e5e8;
+  background: var(--text-default);
 }
 
 /* own tile: only the state icons until the pointer is over it */
