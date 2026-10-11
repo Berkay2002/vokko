@@ -152,9 +152,9 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | SET-002 | My Account page: Kontoinfo rows with Change buttons, password + MFA + devices chevron rows, account status banner, family center, danger zone (disable/delete) | settings-modal/account/01-03.jpg (contains masked account data) |
 | SET-003 | Appearance page: theme swatches, app icon, message display, chat input, search, streamer mode sections (some options Nitro-gated: see Perks) | settings-modal/appearance/01-06.jpg |
 | SET-004 | Pages with full scroll series: Data and privacy, Message permissions, Notifications, Voice & video, Accessibility, System (shortcuts), Language and time, Activity privacy. NOT captured: Connected apps (renderer hung), Developer, Edit profiles + per-server tab | settings-modal/{data-privacy,message-permissions,notifications,voice-video,accessibility,system,language-time,activity-privacy}/NN.jpg |
-| SET-005 | Server settings: Overview, Roles, Emoji, Stickers, Soundboard, Integrations, Moderation, Audit log, Safety setup, Bans, Invites, Onboarding, Community | REF: none |
-| SET-006 | Channel settings: Overview, Permissions, Invites, Integrations | REF: none |
-| SET-007 | Unsaved-changes bar (shake animation, reset/save) | REF: none |
+| SET-005 | Server settings is a FULL-SCREEN PAGE layer (no scrim; 238 px nav at x=410.9, 660 px content column at x=702.9, 36 px circular ESC close at x=1402.9): Serverprofil, Servertagg, Engagemang, Emoji, Dekaler, Ljudskärm, Medlemmar (table), Roller (+ @everyone permission editor), Inbjudningar, Åtkomst, Integrationer, Säkerhetsinställningar, Granskningslogg, Bannlysningar, AutoMod (inline rule editor), Servermall; Community pages only after enabling | settings-modal/spec.md, settings-modal/server-settings/ |
+| SET-006 | Channel settings and category settings are the same full-screen page shell: channel = Översikt, Behörigheter (private switch + collapsible advanced overwrite editor with role/member list, add picker and 3-state toggles), Inbjudningar, Integrationer; category = Översikt (name), Behörigheter | settings-modal/channel-settings/ |
+| SET-007 | Unsaved-changes bar: floating bottom bar with text, "Avbryt" and green "Spara ändringar" (seen on the AutoMod rule editor; shake animation not captured) | settings-modal/server-settings/automod/02.jpg |
 
 ## REST: remaining
 | Id | Acceptance | REF |
