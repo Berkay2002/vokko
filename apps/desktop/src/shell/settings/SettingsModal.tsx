@@ -30,7 +30,8 @@ export interface SettingsModalProps {
 const EXIT_MS = 115;
 
 function motionReduced(): boolean {
-  return document.documentElement.classList.contains("reduce-motion") || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  // The class already folds in the OS setting and Accessibility > Reduced Motion > "Sync with computer".
+  return document.documentElement.classList.contains("reduce-motion");
 }
 
 export function SettingsModal({ label, title, side, onClose, children, scrollRef, onScroll, pageKey }: SettingsModalProps) {

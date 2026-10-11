@@ -42,6 +42,7 @@ export function AppearancePage() {
   const showReactions = usePrefs(s => s.showReactions);
   const previewMarkdown = usePrefs(s => s.previewMarkdown);
   const convertEmoticons = usePrefs(s => s.convertEmoticons);
+  const legacyChatInput = usePrefs(s => s.legacyChatInput);
   const streamerMode = usePrefs(s => s.streamerMode);
   const hideInvites = usePrefs(s => s.streamerHideInvites);
   const disableSounds = usePrefs(s => s.streamerDisableSounds);
@@ -167,8 +168,20 @@ export function AppearancePage() {
       <Category title="Chat Box">
         <SwitchRow label="Show embeds and link previews" checked={showEmbeds} onChange={v => setPref("showEmbeds", v)} />
         <SwitchRow label="Show reactions on messages" checked={showReactions} onChange={v => setPref("showReactions", v)} />
-        <SwitchRow label="Preview Markdown as you type" checked={previewMarkdown} onChange={v => setPref("previewMarkdown", v)} />
-        <SwitchRow label="Convert emoticons to emoji" note="For example, :) becomes a smiley." checked={convertEmoticons} onChange={v => setPref("convertEmoticons", v)} />
+        <SwitchRow
+          label="Preview Markdown as you type"
+          note={legacyChatInput ? "Off while Use legacy chat input is on (Accessibility)." : undefined}
+          checked={previewMarkdown && !legacyChatInput}
+          disabled={legacyChatInput}
+          onChange={v => setPref("previewMarkdown", v)}
+        />
+        <SwitchRow
+          label="Convert emoticons to emoji"
+          note={legacyChatInput ? "Off while Use legacy chat input is on (Accessibility)." : "For example, :) becomes a smiley."}
+          checked={convertEmoticons && !legacyChatInput}
+          disabled={legacyChatInput}
+          onChange={v => setPref("convertEmoticons", v)}
+        />
       </Category>
 
       <Category title="Streamer Mode">

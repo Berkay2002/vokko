@@ -250,7 +250,7 @@ export function UserSettings({ section }: { section?: string }) {
       case "appearance":
         return <AppearancePage />;
       case "accessibility":
-        return <AccessibilityPage />;
+        return <AccessibilityPage onOpenSection={open} />;
       case "keybinds":
         return <KeybindsPage />;
       case "language":

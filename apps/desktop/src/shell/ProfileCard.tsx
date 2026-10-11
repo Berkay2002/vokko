@@ -6,6 +6,7 @@ import { RelationshipType, type Snowflake } from "../api/types";
 import { ProfileBanner } from "../perks/ProfileBanner";
 import { resolveProfile, themeVars } from "../perks/profile";
 import { TagChip } from "../perks/TagChip";
+import { useCustomColor } from "../ui/useCustomColor";
 import { Popout } from "../ui";
 import { InVoiceCard } from "../voice";
 import { ActivityCard, usePlaying } from "./ActivityLine";
@@ -55,7 +56,7 @@ export function ProfileCardHost() {
   const relationship = useStore(s => (userId ? s.relationships[userId] : undefined));
   const open = !!anchor && !!user;
   const roles = member && guild ? guild.roles.filter(r => member.roles.includes(r.id) && r.id !== guild.id).sort((a, b) => b.position - a.position) : [];
-  const color = guildId ? roleColor(guildId, member) : null;
+  const color = useCustomColor(guildId ? roleColor(guildId, member) : null);
   const look = user ? resolveProfile(user, member) : null;
   const tagGuildName = useStore(s => (user?.primary_guild ? s.guilds[user.primary_guild.guild_id]?.name : undefined));
 

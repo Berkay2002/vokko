@@ -194,9 +194,9 @@ img {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  html:not(.full-motion) *,
+  html:not(.full-motion) *::before,
+  html:not(.full-motion) *::after {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }

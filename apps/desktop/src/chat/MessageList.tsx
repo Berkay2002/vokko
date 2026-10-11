@@ -3,6 +3,7 @@ import { Virtuoso, type ItemProps, type ListProps, type VirtuosoHandle } from 'r
 import { CheckCheck, Loader2 } from 'lucide-react';
 import type { Snowflake } from '../api/types';
 import { useChat } from './ChatContext';
+import { scrollBehavior } from './shell';
 import { ChannelStart } from './ChannelStart';
 import { MessageItem } from './MessageItem';
 import { messageStore, useChannelState } from './messageStore';
@@ -136,7 +137,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     {showUnread && <div className="chat-unread-bar" role="status">
       <button type="button" className="chat-unread-bar-main" onClick={() => {
         const i = rows.findIndex(r => r.message.id === firstUnread!.id);
-        if (i >= 0) virtuoso.current?.scrollToIndex({ index: i, align: 'start', behavior: 'smooth' });
+        if (i >= 0) virtuoso.current?.scrollToIndex({ index: i, align: 'start', behavior: scrollBehavior() });
       }}>{unreadCount}{state.hasMoreBefore ? '+' : ''} new message{unreadCount === 1 ? '' : 's'} since {unreadSince}</button>
       <button type="button" className="chat-unread-bar-mark" onClick={() => { const last = state.messages[state.messages.length - 1]; if (last) messageStore.markRead(channelId, last.id); setSeenBottom(true); }}>Mark As Read <CheckCheck size={18} aria-hidden="true" /></button>
     </div>}
@@ -189,7 +190,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       <span>You're viewing older messages</span>
       <button type="button" onClick={() => {
         if (state.hasMoreAfter) void messageStore.jumpToPresent(channelId);
-        else virtuoso.current?.scrollToIndex({ index: Math.max(0, rows.length - 1), align: 'end', behavior: 'smooth' });
+        else virtuoso.current?.scrollToIndex({ index: Math.max(0, rows.length - 1), align: 'end', behavior: scrollBehavior() });
       }}>Jump To Present</button>
     </div>}
   </div>;

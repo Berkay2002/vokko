@@ -4,6 +4,7 @@ import { displayName, roleColor, useStore } from "../api/store";
 import { appStore } from "../api/store";
 import type { GuildMember, Role, Snowflake } from "../api/types";
 import { useContextMenu } from "../ui";
+import { useCustomColor } from "../ui/useCustomColor";
 import { ActivityLine, usePlaying } from "./ActivityLine";
 import { Avatar } from "./Avatar";
 import { userContextItems } from "./menus";
@@ -18,7 +19,7 @@ interface Section {
 
 function MemberRow({ member, guildId, offline }: { member: GuildMember; guildId: Snowflake; offline: boolean }) {
   const menu = useContextMenu();
-  const color = useStore(() => roleColor(guildId, member));
+  const color = useCustomColor(useStore(() => roleColor(guildId, member)));
   const custom = useStore(s => s.presences[member.user.id]?.custom_status);
   const playing = usePlaying(member.user.id);
   return (

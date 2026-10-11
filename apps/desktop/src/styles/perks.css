@@ -151,9 +151,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pe-particle,
-  .avatar-deco,
-  .avatar-deco-spin {
+  html:not(.full-motion) .pe-particle,
+  html:not(.full-motion) .avatar-deco,
+  html:not(.full-motion) .avatar-deco-spin {
     animation: none !important;
   }
 }

@@ -1,13 +1,13 @@
 import { useRef, useState } from 'react';
 import { SmilePlus } from 'lucide-react';
 import type { Message, Reaction, ReactionEmoji, User } from '../api/types';
-import { request, Tooltip } from './shell';
+import { AnimatedImage, request, Tooltip } from './shell';
 import { useChat } from './ChatContext';
 import { emojiKey } from './messageState';
 import { EmojiPickerPopout } from './EmojiPicker';
 
 function emojiNode(e: ReactionEmoji, customUrl?: string) {
-  if (e.id) return <img className="chat-reaction-emoji" src={customUrl ?? ''} alt={`:${e.name}:`} draggable={false} />;
+  if (e.id) return <AnimatedImage kind="emoji" className="chat-reaction-emoji" src={customUrl ?? ''} alt={`:${e.name}:`} draggable={false} />;
   return <span className="chat-reaction-emoji" role="img" aria-label={e.name}>{e.name}</span>;
 }
 

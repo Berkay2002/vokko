@@ -209,7 +209,7 @@ export function NotifyBanners() {
     if (wasShown.current && !showConnection && loggedIn && connection.status === "ready" && online) {
       setFlash(true);
       if (flashTimer.current) clearTimeout(flashTimer.current);
-      flashTimer.current = setTimeout(() => setFlash(false), CONNECTED_FLASH_MS);
+      flashTimer.current = setTimeout(() => setFlash(false), Math.max(CONNECTED_FLASH_MS, usePrefs.getState().minNotificationDuration * 1000));
     }
     wasShown.current = showConnection;
   }, [showConnection, loggedIn, connection.status, online]);

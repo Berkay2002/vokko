@@ -34,6 +34,7 @@ import "./styles/server-perks.css";
 import "./styles/invite.css";
 import "./styles/shortcuts.css";
 import "./styles/responsive.css";
+import "./styles/a11y.css";
 import "./ui/prefs";
 import "./appicon/apply";
 import "./search";

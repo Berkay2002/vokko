@@ -7,3 +7,4 @@ export { go, guildPath, dmPath } from '../shell/nav';
 export { messageStore } from '../chat/messageStore';
 export { chatToast } from '../chat/toast';
 export { Modal, Popout, Tooltip } from '../ui';
+export { AnimatedImage, AnimatedVideo } from '../ui/AnimatedMedia';

@@ -14,6 +14,7 @@ export { openModal } from '../shell/modalStore';
 export { usePermissions } from '../shell/usePermissions';
 export { Perm } from '../api/permissions';
 export { Tooltip, Popout, Modal, useContextMenu, useLayer, useOutsideClose, placeAtPoint } from '../ui';
+export { AnimatedImage, AnimatedVideo } from '../ui/AnimatedMedia';
 export type { MenuItem } from '../ui';
 
 const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
@@ -73,6 +74,18 @@ export function useChatDisplayPrefs(): ChatDisplayPrefs {
     timeFormat: usePrefs(s => s.timeFormat),
   };
 }
+
+/** Settings > Accessibility > "Show image descriptions": alt text is also drawn under images and attachments that have it. */
+export function useShowImageDescriptions(): boolean { return usePrefs(s => s.showImageDescriptions); }
+
+/** Settings > Accessibility > "Use legacy chat input": a plain text box without live formatting or emoticon conversion (autocomplete stays). */
+export function useLegacyChatInput(): boolean { return usePrefs(s => s.legacyChatInput); }
+
+/** A custom (role) colour, scaled by Settings > Accessibility > Saturation when "apply to custom colours" is on. */
+export { useCustomColor, useCustomColorScale } from '../ui/useCustomColor';
+
+/** `smooth` unless Accessibility > Reduced Motion is in effect (CSS scroll-behavior does not reach explicit JS requests). */
+export function scrollBehavior(): 'auto' | 'smooth' { return document.documentElement.classList.contains('reduce-motion') ? 'auto' : 'smooth'; }
 
 /** Current clock choice outside React (formatTime in util.ts). */
 export function timeFormatPref(): 'auto' | '12' | '24' { return usePrefs.getState().timeFormat; }

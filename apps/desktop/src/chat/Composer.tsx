@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent,
 import { AtSign, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
-import { request, Popout, Tooltip, useConvertEmoticons } from './shell';
+import { request, Popout, Tooltip, useConvertEmoticons, useLegacyChatInput } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { AppsPopout, ExpressionPickerPopout, type ExpressionTab } from './ExpressionPicker';
@@ -95,8 +95,9 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [modifying, setModifying] = useState<string | null>(null); // localId of the tray card whose "Modify Attachment" dialog is open
+  const legacyInput = useLegacyChatInput(); // Settings > Accessibility > "Use legacy chat input": plain text box
   const emojiDb = useEmojiDb();
-  const convert = useConvertEmoticons();
+  const convert = useConvertEmoticons() && !legacyInput;
   const { text, uploads } = draft;
   const name = chat.channel?.name ? (chat.channel.type === ChannelType.GuildVoice ? chat.channel.name : `#${chat.channel.name}`) :chat.channel?.recipients?.map(u => chat.nameOf(u)).join(', ') ?? '';
   const placeholder = chat.isDm ? `Message @${chat.channel?.recipients?.[0] ? chat.nameOf(chat.channel.recipients[0]) : ''}` : `Message ${name}`;

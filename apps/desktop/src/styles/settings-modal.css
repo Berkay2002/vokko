@@ -75,8 +75,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sm-backdrop,
-  .sm {
+  html:not(.full-motion) .sm-backdrop,
+  html:not(.full-motion) .sm {
     animation: none;
   }
 }
@@ -394,11 +394,10 @@
 }
 
 .sm-column {
-  width: 696px;
-  max-width: 100%;
+  width: min(728px, 100%);
   margin: 0 auto;
   padding: 54px 16px 120px;
-  box-sizing: content-box;
+  box-sizing: border-box;
 }
 
 /* ---- single-page blocks and rows ---- */
@@ -662,7 +661,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sm .cs-savebar[data-shake] {
+  html:not(.full-motion) .sm .cs-savebar[data-shake] {
     animation: none;
     background: var(--control-critical-primary-background-default);
   }

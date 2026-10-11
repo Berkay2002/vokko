@@ -3,7 +3,7 @@
 
 import { useMemo, useState } from 'react';
 import { Forward, ImageOff } from 'lucide-react';
-import { ChannelType, type Message, type StickerItem } from '../api/types';
+import { ChannelType, StickerFormat, type Message, type StickerItem } from '../api/types';
 import { Attachments } from '../chat/Attachments';
 import { useChat } from '../chat/ChatContext';
 import { Embeds } from '../chat/Embeds';
@@ -11,7 +11,7 @@ import { Markdown } from '../chat/markdown';
 import { formatFullDate, formatMessageTimestamp } from '../chat/util';
 import { gifMessageMedia, type GifMedia } from './helpers';
 import { isKnownChannel, jumpToMessage } from './jump';
-import { Tooltip, dmName, resolveUrl, useStore } from './shell';
+import { AnimatedImage, AnimatedVideo, Tooltip, dmName, resolveUrl, useStore } from './shell';
 
 export { gifMessageMedia };
 
@@ -19,7 +19,9 @@ export { gifMessageMedia };
 export function StickerItems({ items }: { items: StickerItem[] | undefined }) {
   if (!items?.length) return null;
   return <div className="media-stickers">
-    {items.map(s => <img key={s.id} className="media-sticker" src={resolveUrl(s.url)} alt={`Sticker: ${s.name}`} title={s.name} width={160} height={160} loading="lazy" draggable={false} />)}
+    {items.map(s => s.format_type === StickerFormat.PNG
+      ? <img key={s.id} className="media-sticker" src={resolveUrl(s.url)} alt={`Sticker: ${s.name}`} title={s.name} width={160} height={160} loading="lazy" draggable={false} />
+      : <AnimatedImage key={s.id} kind="sticker" className="media-sticker" src={resolveUrl(s.url)} alt={`Sticker: ${s.name}`} title={s.name} width={160} height={160} loading="lazy" draggable={false} />)}
   </div>;
 }
 
@@ -41,8 +43,8 @@ export function GifMessage({ message, media }: { message: Pick<Message, 'id' | '
   }
   return <div className="media-gif" style={size}>
     {media.video
-      ? <video src={resolveUrl(media.video)} poster={media.src ? resolveUrl(media.src) : undefined} autoPlay loop muted playsInline onError={() => setFailed(true)} />
-      : <img src={resolveUrl(media.src ?? '')} alt="GIF" loading="lazy" draggable={false} onError={() => setFailed(true)} />}
+      ? <AnimatedVideo src={resolveUrl(media.video)} poster={media.src ? resolveUrl(media.src) : undefined} loop muted playsInline onError={() => setFailed(true)} />
+      : <AnimatedImage kind="gif" src={resolveUrl(media.src ?? '')} alt="GIF" loading="lazy" draggable={false} onError={() => setFailed(true)} />}
     <span className="media-gif-badge" aria-hidden="true">GIF</span>
   </div>;
 }

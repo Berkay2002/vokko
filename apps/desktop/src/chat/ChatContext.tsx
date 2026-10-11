@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { Attachment, Channel, Guild, GuildMember, Message, Role, Snowflake, User } from '../api/types';
 import { ChannelType } from '../api/types';
 import type { MarkdownContext } from './markdown';
-import { displayName, roleColor, useChannel, useChatDisplayPrefs, useCompactMode, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
+import { AnimatedImage, displayName, roleColor, useChannel, useChatDisplayPrefs, useCompactMode, useCustomColorScale, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
 import { cachedUser } from './userCache';
 import { useEmojiDb } from './emojiData';
 import { EmojiGlyph } from './EmojiInfo';
@@ -88,6 +88,7 @@ export function ChatProvider({ channelId, actions, replyingId = null, children }
   const shortcodes = emoji?.shortcodes;
   const compact = useCompactMode();
   const { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat } = useChatDisplayPrefs();
+  const scaleColor = useCustomColorScale();
 
   const value = useMemo<ChatContextValue | null>(() => {
     if (!me) return null;
@@ -99,23 +100,26 @@ export function ChatProvider({ channelId, actions, replyingId = null, children }
       userName: id => { const u = userById(id); return u ? nameOf(u, members[id]) : null; },
       roleInfo: id => {
         const r = roles.find(x => x.id === id);
-        return r ? { name: r.name, color: r.color ? `#${r.color.toString(16).padStart(6, '0')}` : null } : null;
+        return r ? { name: r.name, color: r.color ? scaleColor(`#${r.color.toString(16).padStart(6, '0')}`) : null } : null;
       },
       channelName: id => guildChannels.find(c => c.id === id)?.name ?? null,
       currentUserId: me.id,
       emojiShortcodes: shortcodes,
       onLink: actions.openLink,
       renderEmoji: (unicode, name) => <EmojiGlyph unicode={unicode} name={name} />,
+      renderCustomEmoji: ({ src, name, animated }) => animated
+        ? <AnimatedImage kind="emoji" className="md-emoji md-emoji-custom" src={src} alt={`:${name}:`} title={`:${name}:`} draggable={false} loading="lazy" />
+        : <img className="md-emoji md-emoji-custom" src={src} alt={`:${name}:`} title={`:${name}:`} draggable={false} loading="lazy" />,
     };
     return {
       channelId, channel, guild, guildId, me, md, roles, members, channels: guildChannels, actions, userById, nameOf, replyingId, compact,
       isDm: channel?.type === ChannelType.DM || channel?.type === ChannelType.GroupDM,
       canManage: canManageMessages(guild, me, members[me.id]),
-      colorOf: m => (guildId && roleColors === 'name' ? roleColor(guildId, members[m.author.id] ?? m.member ?? null) : null),
-      roleDotOf: m => (guildId && roleColors === 'dot' ? roleColor(guildId, members[m.author.id] ?? m.member ?? null) : null),
+      colorOf: m => (guildId && roleColors === 'name' ? scaleColor(roleColor(guildId, members[m.author.id] ?? m.member ?? null)) : null),
+      roleDotOf: m => (guildId && roleColors === 'dot' ? scaleColor(roleColor(guildId, members[m.author.id] ?? m.member ?? null)) : null),
       display: { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat },
     };
-  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat]);
+  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, scaleColor]);
 
   if (!value) return null;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

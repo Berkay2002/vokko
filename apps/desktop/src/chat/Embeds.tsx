@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MailX, Play, Users } from 'lucide-react';
 import type { Embed, Message, Snowflake } from '../api/types';
-import { guildIconUrl, guildInitials, joinGuildWithInvite, request, resolveUrl, useGuilds } from './shell';
+import { AnimatedVideo, guildIconUrl, guildInitials, joinGuildWithInvite, request, resolveUrl, useGuilds } from './shell';
 import { useChat } from './ChatContext';
 import { Markdown } from './markdown';
 import { embedColor, findInviteCodes, isVideoUrl, safeHttpUrl } from './embedUtil';
@@ -127,8 +127,9 @@ function EmbedCard({ embed }: { embed: Embed }) {
       </div>
       {thumb && !image && hasText && <Media className="chat-embed-thumb" url={thumb} alt="" />}
     </div>
-    {inlineVideo && <video className="chat-embed-video" src={resolveUrl(videoUrl)} poster={image ?? thumb ?? undefined}
-      {...(embed.type === 'gifv' ? { autoPlay: true, loop: true, muted: true } : { controls: true, preload: 'metadata' as const })} playsInline />}
+    {inlineVideo && (embed.type === 'gifv'
+      ? <AnimatedVideo className="chat-embed-video" src={resolveUrl(videoUrl)} poster={image ?? thumb ?? undefined} loop muted playsInline />
+      : <video className="chat-embed-video" src={resolveUrl(videoUrl)} poster={image ?? thumb ?? undefined} controls preload="metadata" playsInline />)}
     {showVideoPoster && <a className="chat-embed-poster" href={link ?? videoUrl} onClick={e => open(e, link ?? videoUrl)} aria-label="Open video">
       {(image ?? thumb) && <Media className="chat-embed-image" url={image ?? thumb} alt="" />}
       <span className="chat-embed-play"><Play size={28} /></span>

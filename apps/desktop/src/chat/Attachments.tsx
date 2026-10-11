@@ -5,12 +5,14 @@ import type { Attachment, Message } from '../api/types';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { ServerTag } from './ServerTag';
-import { Tooltip, resolveUrl } from './shell';
+import { AnimatedImage, Tooltip, resolveUrl, useShowImageDescriptions } from './shell';
 import { openForward } from '../media/store';
 import { formatBytes, formatFullDate, formatMessageTimestamp, isSpoilerName } from './util';
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
 const isVideo = (a: Attachment): boolean => !!a.content_type?.startsWith('video/');
+/** Formats that can animate: they follow Settings > Accessibility > "Play GIFs when Vokko is focused". */
+const isAnimatable = (a: Attachment): boolean => /^image\/(gif|apng|webp)$/.test(a.content_type ?? '') || /\.(gif|apng|webp)$/i.test(a.filename);
 
 // Discord's message media box: 550 x 400 CSS px, aspect-fit, never upscaled (measured: a 2.16:1 screenshot renders 550 x 254).
 const MAX_SINGLE_W = 550;
@@ -37,7 +39,9 @@ function ImageTile({ message, attachment, index, style, className }: { message: 
   return <div className={`chat-image-wrap${className ? ` ${className}` : ''}`} style={style}>
     <button type="button" className={`chat-image${spoiler ? ' spoiler' : ''}${loaded ? ' loaded' : ''}${failed ? ' failed' : ''}`} aria-label={`Open image ${attachment.filename}`}
       onClick={() => (spoiler ? setSpoiled(true) : chat.actions.openImage(message, index))}>
-      <img src={url} alt={attachment.description || attachment.filename} loading="lazy" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+      {isAnimatable(attachment)
+        ? <AnimatedImage kind="gif" src={url} alt={attachment.description || attachment.filename} loading="lazy" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+        : <img src={url} alt={attachment.description || attachment.filename} loading="lazy" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />}
       {spoiler && <span className="chat-image-spoiler-label">SPOILER</span>}
       {failed && <span className="chat-image-failed"><ImageOff size={24} /></span>}
     </button>
@@ -105,6 +109,7 @@ export function PendingUpload({ files, onCancel }: { files: Attachment[]; onCanc
 }
 
 export function Attachments({ message }: { message: Message }) {
+  const showDescriptions = useShowImageDescriptions();
   if (message.attachments.length === 0) return null;
   const images: { a: Attachment; index: number }[] = [];
   const others: Attachment[] = [];
@@ -114,6 +119,7 @@ export function Attachments({ message }: { message: Message }) {
     {others.map(a => isVideo(a)
       ? <video key={a.id} className="chat-video" src={resolveUrl(a.url)} controls preload="metadata" />
       : <FileCard key={a.id} attachment={a} />)}
+    {showDescriptions && message.attachments.filter(a => a.description).map(a => <p key={a.id} className="chat-attachment-alt"><span className="chat-attachment-alt-tag">ALT</span>{a.description}</p>)}
   </div>;
 }
 

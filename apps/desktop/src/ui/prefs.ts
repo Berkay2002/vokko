@@ -2,6 +2,9 @@ import { create } from "zustand";
 import { GRADIENT_THEMES, gradientCss, type GradientThemeId } from "../styles/themes/gradients";
 import { COMMUNITY_THEMES, type CommunityThemeId } from "../styles/themes/palettes";
 import { syncWindowTheme } from "../desktop/window";
+import { applyAccessibility, watchSystemContrast } from "./a11yApply";
+import { installZoomShortcuts } from "./zoom";
+import { migrateStoredPrefs, sanitizeA11y, type StickerAnimation } from "./a11y";
 import { DEFAULT_APP_ICON, isAppIconId, type AppIconId } from "../appicon/variants";
 
 /** Client-side settings, persisted in localStorage under `vokko.prefs` and applied to <html> immediately (also on the login page). */
@@ -14,7 +17,6 @@ export type MessageDisplay = "cozy" | "compact";
 export type Density = "compact" | "default" | "cozy";
 /** How much air the chat gets: "compact" is the original tight layout, "roomy" also pads the lines inside a group. */
 export type MessageSpacing = "compact" | "balanced" | "roomy";
-export type ReducedMotion = "system" | "on" | "off";
 export type RoleColors = "name" | "dot" | "none";
 export type SpoilerContent = "click" | "always" | "moderated";
 export type InputMode = "vad" | "ptt";
@@ -41,13 +43,36 @@ export interface Prefs {
   spoilerContent: SpoilerContent;
   previewMarkdown: boolean;
   convertEmoticons: boolean;
-  // Accessibility
-  reducedMotion: ReducedMotion;
+  // Accessibility (Settings > Accessibility; styles/a11y.css and src/ui/a11yApply.ts act on these)
+  /** "Enable reduced motion". Effective when on, or when `syncReducedMotion` is on and the OS asks for it. */
+  reducedMotionEnabled: boolean;
+  /** "Sync with computer": follow the OS reduced-motion setting. */
+  syncReducedMotion: boolean;
   underlineLinks: boolean;
+  /** Off: names render plain (no name fonts, effects or gradients). */
+  displayNameStyles: boolean;
   roleColors: RoleColors;
+  /** Interface zoom in percent (50..200); Ctrl +/-/0 change it. */
+  zoom: number;
+  /** Saturation of the app chrome in percent (0..100). Never applied to images, video or message content. */
+  saturation: number;
+  /** Also scale custom colours (role colours) with `saturation`. */
+  saturateCustomColors: boolean;
+  highContrast: boolean;
+  /** "Sync contrast settings": prefers-contrast: more turns high contrast on. */
+  syncContrast: boolean;
+  showSwitchIndicators: boolean;
+  /** Pop-up notifications stay on screen at least this many seconds. */
+  minNotificationDuration: number;
+  /** Play GIFs on their own while the window is focused (off: on hover only). */
   playGifs: boolean;
   playAnimatedEmoji: boolean;
+  stickerAnimation: StickerAnimation;
+  /** Text-to-speech rate multiplier (0.5..2). */
+  ttsRate: number;
   showImageDescriptions: boolean;
+  /** Plain chat box: no autocomplete, emoticon conversion or live Markdown. */
+  legacyChatInput: boolean;
   // Streamer mode
   streamerMode: boolean;
   streamerHideInvites: boolean;
@@ -118,12 +143,24 @@ export const DEFAULT_PREFS: Prefs = {
   spoilerContent: "click",
   previewMarkdown: true,
   convertEmoticons: true,
-  reducedMotion: "system",
+  reducedMotionEnabled: false,
+  syncReducedMotion: true,
   underlineLinks: false,
+  displayNameStyles: true,
   roleColors: "name",
+  zoom: 100,
+  saturation: 100,
+  saturateCustomColors: false,
+  highContrast: false,
+  syncContrast: true,
+  showSwitchIndicators: false,
+  minNotificationDuration: 3,
   playGifs: true,
   playAnimatedEmoji: true,
+  stickerAnimation: "always",
+  ttsRate: 1,
   showImageDescriptions: false,
+  legacyChatInput: false,
   streamerMode: false,
   streamerHideInvites: true,
   streamerDisableSounds: true,
@@ -229,7 +266,8 @@ const nearestGap = (value: number): number => GROUP_GAPS.reduce((best, g) => (Ma
 const KEY = "vokko.prefs";
 
 /** Saved JSON (any age) -> prefs. Unknown or mistyped values fall back to the defaults. */
-export function migratePrefs(parsed: Partial<Record<keyof Prefs, unknown>>): Prefs {
+export function migratePrefs(stored: Partial<Record<keyof Prefs, unknown>>): Prefs {
+  const parsed = migrateStoredPrefs(stored) as Partial<Record<keyof Prefs, unknown>>; // the old single reducedMotion value
   const merged = { ...DEFAULT_PREFS } as Record<string, unknown>;
   for (const key of Object.keys(DEFAULT_PREFS) as (keyof Prefs)[]) {
     // Only accept values of the same type as the default, so an old or hand-edited file can't break the UI.
@@ -260,7 +298,7 @@ export function migratePrefs(parsed: Partial<Record<keyof Prefs, unknown>>): Pre
   } else {
     merged.messageGroupGap = nearestGap(merged.messageGroupGap as number);
   }
-  return merged as unknown as Prefs;
+  return sanitizeA11y(merged) as unknown as Prefs;
 }
 
 function load(): Prefs {
@@ -293,7 +331,7 @@ export function resetPrefs(keys?: (keyof Prefs)[]): void {
   usePrefs.setState(patch);
 }
 
-export const FONT_SIZES = [12, 15, 16, 18, 20, 24] as const;
+export const FONT_SIZES = [12, 14, 15, 16, 18, 20, 24] as const;
 
 const systemDark = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
 const systemMotion = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
@@ -314,9 +352,7 @@ export function previewThemeChoice(theme: ThemeName | null): void {
 }
 
 export function reducedMotionActive(prefs: Prefs): boolean {
-  if (prefs.reducedMotion === "on") return true;
-  if (prefs.reducedMotion === "off") return false;
-  return !!systemMotion?.matches;
+  return prefs.reducedMotionEnabled || (prefs.syncReducedMotion && !!systemMotion?.matches);
 }
 
 /**
@@ -364,6 +400,7 @@ function apply(prefs: Prefs): void {
   root.style.setProperty("--user-chat-font-size", `${prefs.fontSize}px`);
   root.style.setProperty("--message-group-gap", `${prefs.messageGroupGap}px`);
   root.style.setProperty("--message-pad-y", `${SPACING_PRESETS[prefs.messageSpacing].padY}px`);
+  applyAccessibility(prefs);
 }
 
 if (typeof document !== "undefined") {
@@ -379,6 +416,9 @@ if (typeof document !== "undefined") {
   const reapply = () => apply(getPrefs());
   systemDark?.addEventListener("change", reapply);
   systemMotion?.addEventListener("change", reapply);
+  watchSystemContrast(reapply);
+  window.addEventListener("load", reapply); // the stylesheets are all in by now (saturation reads their tokens)
+  installZoomShortcuts(() => getPrefs().zoom, zoom => setPref("zoom", zoom));
   // Another window of the app changed a setting.
   window.addEventListener("storage", event => {
     if (event.key === KEY) usePrefs.setState(load());

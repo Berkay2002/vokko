@@ -18,9 +18,12 @@ export interface ComposerInputProps {
   onCaret(offset: number): void;
 }
 
-/** The composer's text input: the styled live editor, or a plain <textarea> when "Preview Markdown as you type" is off. */
+/**
+ * The composer's text input: the styled live editor, or a plain <textarea> when "Preview Markdown as you type" is off or
+ * Settings > Accessibility > "Use legacy chat input" is on (Composer.tsx also skips emoticon conversion then; autocomplete stays).
+ */
 export function ComposerInput(props: ComposerInputProps) {
-  const live = usePrefs(s => s.previewMarkdown);
+  const live = usePrefs(s => s.previewMarkdown && !s.legacyChatInput);
   return live ? <LiveEditor {...props} /> : <PlainInput {...props} />;
 }
 

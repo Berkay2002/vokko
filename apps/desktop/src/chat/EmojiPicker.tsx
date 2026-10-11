@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Clock, Dog, Flag, Hand, Lightbulb, Pizza, Plane, Search, Smile, Trophy, Hash, X } from 'lucide-react';
-import { Popout } from './shell';
+import { Popout, scrollBehavior } from './shell';
 import { getRecentEmoji, getSkinTone, pushRecentEmoji, setSkinTone, useEmojiDb, type EmojiEntry } from './emojiData';
 
 export interface PickedEmoji { id: null; name: string }
@@ -37,7 +37,7 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false }: { on
 
   function scrollTo(id: string) {
     const el = scroller.current?.querySelector<HTMLElement>(`[data-cat="${id}"]`);
-    if (el && scroller.current) scroller.current.scrollTo({ top: el.offsetTop - scroller.current.offsetTop, behavior: 'smooth' });
+    if (el && scroller.current) scroller.current.scrollTo({ top: el.offsetTop - scroller.current.offsetTop, behavior: scrollBehavior() });
   }
 
   function onScroll() {

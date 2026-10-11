@@ -244,9 +244,9 @@ html.has-top-banner #root {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .notify-splash-logo,
-  .notify-splash-sheen,
-  .notify-splash-tip {
+  html:not(.full-motion) .notify-splash-logo,
+  html:not(.full-motion) .notify-splash-sheen,
+  html:not(.full-motion) .notify-splash-tip {
     animation: none;
   }
 }

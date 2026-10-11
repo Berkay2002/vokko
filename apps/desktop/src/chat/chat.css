@@ -655,7 +655,7 @@ span.md-emoji { width: auto; height: auto; line-height: inherit; }
 .chat-view .chat-pending-upload-cancel { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 4px; color: var(--chat-icon); }
 .chat-view .chat-pending-upload-cancel:hover { color: var(--chat-icon-hover); background: var(--chat-hover); }
 @keyframes chat-upload-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
-@media (prefers-reduced-motion: reduce) { .chat-pending-upload-bar > div { animation: none; width: 100%; opacity: 0.5; } }
+@media (prefers-reduced-motion: reduce) { html:not(.full-motion) .chat-pending-upload-bar > div { animation: none; width: 100%; opacity: 0.5; } }
 
 /* Modify Attachment / delete-attachment dialogs: Cancel (grey) and Save / Delete as two equal-width buttons. */
 .chat-modal-split { display: flex; gap: 8px; width: 100%; }

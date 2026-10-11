@@ -1,0 +1,507 @@
+/*
+ * Accessibility settings (Settings > Accessibility): the page's own pieces, plus the app-wide effects of those settings that are
+ * pure CSS. The prefs become html classes in src/ui/prefs.ts and src/ui/a11yApply.ts: density-*, high-contrast,
+ * switch-indicators, plain-names, ui-zoomed, reduce-motion. Tokens only, no colour literals; loaded after the other stylesheets.
+ */
+
+/* ---- preview card (sticky at the top of the page) ---- */
+.a11y-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: -16px 0 32px;
+  padding: 16px 0 12px;
+  background: var(--background-base-lowest);
+}
+
+.a11y-preview-label {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.a11y-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 6px 16px 8px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--chat-bg);
+  color: var(--chat-text);
+  font-family: var(--chat-font);
+  font-size: var(--chat-font-size);
+}
+
+.a11y-preview-messages {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.a11y-preview .chat-msg {
+  padding-right: 0;
+}
+
+.a11y-preview .chat-msg:first-child {
+  margin-top: 0;
+}
+
+.a11y-preview .chat-msg:hover {
+  background: transparent;
+}
+
+.a11y-preview .chat-author {
+  cursor: default;
+}
+
+.a11y-preview .chat-author:hover {
+  text-decoration: none;
+}
+
+.a11y-preview-side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.a11y-preview-avatars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.a11y-sample-avatar {
+  position: relative;
+  display: block;
+  width: 40px;
+  height: 40px;
+}
+
+.a11y-sample-avatar .avatar-img {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.a11y-sample-avatar .avatar-status {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+}
+
+.a11y-sample-button {
+  height: 32px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  background: var(--brand-500);
+  color: var(--text-on-brand);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: default;
+}
+
+/* The sample name wears a name style (gradient); "Display name styles" off puts the role colour or plain text back. */
+.a11y-sample-name[data-name-style="gradient"] {
+  background: linear-gradient(90deg, var(--brand-360), var(--text-feedback-positive));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 700;
+}
+
+.plain-names .a11y-sample-name[data-name-style] {
+  background: none;
+  -webkit-text-fill-color: currentColor;
+  font-weight: 500;
+}
+
+.a11y-sample-name.role[data-name-style] {
+  color: var(--a11y-sample-role, var(--chat-text-strong));
+}
+
+.a11y-sample-role {
+  background: var(--a11y-sample-role, var(--chat-text-strong));
+}
+
+/* ---- page layout ---- */
+.a11y-field > .settings-field-note {
+  margin: 0 0 12px;
+}
+
+.a11y-tts-preview {
+  margin-top: 16px;
+}
+
+.a11y-related {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--background-base-low);
+  color: var(--interactive-text-default);
+  text-align: left;
+}
+
+.a11y-related:hover {
+  background: var(--interactive-background-hover);
+  color: var(--interactive-text-hover);
+}
+
+.a11y-related-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.a11y-related-title {
+  color: var(--text-strong);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.a11y-related-note {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* ---- marker slider (src/shell/settings/MarkerSlider.tsx) ---- */
+.ms {
+  padding-bottom: 4px;
+}
+
+.ms-rail {
+  position: relative;
+  margin: 0 12px;
+  padding-top: 24px;
+}
+
+.ms-labels {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 20px;
+}
+
+.ms-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ms-label.first {
+  transform: translateX(-12px);
+}
+
+.ms-label.last {
+  transform: translateX(calc(-100% + 12px));
+}
+
+.ms-label.active {
+  color: var(--text-feedback-positive);
+  font-weight: 700;
+}
+
+.ms-track {
+  position: relative;
+  height: 24px;
+  cursor: pointer;
+  outline: 0;
+  touch-action: none;
+  user-select: none;
+}
+
+.ms-line {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  left: 0;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+  background: var(--slider-track-background);
+}
+
+.ms-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--brand-500);
+}
+
+.ms-tick {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 10px;
+  margin: -5px 0 0 -1px;
+  border-radius: 1px;
+  background: var(--border-strong);
+  pointer-events: none;
+}
+
+.ms-knob {
+  position: absolute;
+  top: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: var(--text-overlay-light);
+  box-shadow: var(--shadow-medium);
+  pointer-events: none;
+}
+
+.ms-track:focus-visible .ms-knob {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.ms.disabled {
+  opacity: 0.5;
+}
+
+.ms.disabled .ms-track {
+  cursor: not-allowed;
+}
+
+/* ---- visual density: server list, channel list and member list ---- */
+html.density-compact .server-rail {
+  gap: 4px;
+}
+
+html.density-compact .rail-item {
+  height: 36px;
+}
+
+html.density-compact .channel-row {
+  height: 28px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+html.density-compact .channel-row-wrap {
+  margin-top: 0;
+}
+
+html.density-compact .member-row {
+  height: 36px;
+  margin-top: 0;
+}
+
+html.density-cozy .server-rail {
+  gap: 12px;
+}
+
+html.density-cozy .rail-item {
+  height: 44px;
+}
+
+html.density-cozy .channel-row {
+  height: 36px;
+}
+
+html.density-cozy .channel-row-wrap {
+  margin-top: 2px;
+}
+
+html.density-cozy .member-row {
+  height: 48px;
+  margin-top: 2px;
+}
+
+/* ---- images and media: the first-frame canvases of AnimatedImage take the img's place ---- */
+.chat-image canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-image-grid.single .chat-image canvas {
+  object-fit: contain;
+}
+
+.chat-image.spoiler canvas {
+  filter: blur(44px);
+}
+
+.media-gif canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-sticker {
+  display: block;
+}
+
+.chat-attachment-alt {
+  max-width: min(550px, 100%);
+  margin: 0;
+  color: var(--chat-text-muted);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.chat-attachment-alt-tag {
+  margin-right: 6px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--background-mod-normal);
+  color: var(--chat-text-strong);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  vertical-align: 1px;
+}
+
+/* ---- show switch indicators: a check on switches that are on, a cross on switches that are off ---- */
+html.switch-indicators .switch-knob::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  background: var(--text-invert);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 2.5l7 7m0-7l-7 7' stroke='black' stroke-width='1.8' stroke-linecap='round' fill='none'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 2.5l7 7m0-7l-7 7' stroke='black' stroke-width='1.8' stroke-linecap='round' fill='none'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+html.switch-indicators .switch.on .switch-knob::after {
+  background: var(--brand-500);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6.5l2.6 2.6L10 3.4' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6.5l2.6 2.6L10 3.4' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+}
+
+/* ---- high contrast: a token layer on top of whatever theme is active (built-in or community) ----
+ * Text and borders are built from --hc-fg: white on dark themes (Dark, Ash, Onyx and the dark community themes), black on
+ * the ones whose base is Light (they carry the theme-light class). The selector is repeated so it outranks the theme
+ * selectors (:root.theme-dark.theme-name has specificity 0,3,0). Do not make a token refer to itself here (that is a cycle
+ * and the token becomes invalid); the unit tests check this and the contrast on every theme. */
+:root:root:root.high-contrast {
+  --hc-fg: var(--text-overlay-light);
+}
+
+:root:root:root.high-contrast.theme-light {
+  --hc-fg: var(--text-overlay-dark);
+}
+
+:root:root:root.high-contrast {
+  --hc-link: color-mix(in srgb, var(--brand-360) 30%, var(--hc-fg));
+
+  --text-default: var(--hc-fg);
+  --text-strong: var(--hc-fg);
+  --text-muted: var(--hc-fg);
+  --text-subtle: var(--hc-fg);
+  --text-link: var(--hc-link);
+  --chat-text-muted: var(--hc-fg);
+  --interactive-text-hover: var(--hc-fg);
+  --interactive-text-active: var(--hc-fg);
+  --channels-default: var(--hc-fg);
+  --channel-icon: var(--hc-fg);
+  --channel-text-area-placeholder: var(--hc-fg);
+  --input-placeholder-text-default: var(--hc-fg);
+  --textbox-markdown-syntax: var(--hc-fg);
+  --interactive-text-default: var(--hc-fg);
+  --interactive-icon-default: var(--hc-fg);
+  --icon-default: var(--hc-fg);
+  --icon-muted: var(--hc-fg);
+  --icon-subtle: var(--hc-fg);
+  --reaction-text-default: var(--hc-fg);
+
+  --border-muted: color-mix(in srgb, var(--hc-fg) 45%, transparent);
+  --border-subtle: color-mix(in srgb, var(--hc-fg) 55%, transparent);
+  --border-normal: color-mix(in srgb, var(--hc-fg) 70%, transparent);
+  --border-strong: color-mix(in srgb, var(--hc-fg) 85%, transparent);
+  --border-focus: var(--hc-fg);
+  --input-border-default: var(--border-strong);
+  --input-border-hover: var(--border-strong);
+  --card-border-default: var(--border-normal);
+  --chat-border: var(--border-normal);
+  --app-frame-border: var(--border-normal);
+  --switch-border-default: var(--border-strong);
+  --switch-border-hover: var(--border-strong);
+  --checkbox-border-default: var(--border-strong);
+  --checkbox-border-hover: var(--border-strong);
+  --radio-border-default: var(--border-strong);
+  --reaction-border-default: var(--border-normal);
+  --slider-track-background: var(--border-normal);
+
+  /* gradient themes veil a picture at 65-95% opacity; drop it so text sits on the solid surface tokens the 7:1 check covers
+   * (`initial` makes the var() fallbacks in the layout CSS apply) */
+  --background-gradient-lowest: initial;
+  --background-gradient-lower: initial;
+  --background-gradient-low: initial;
+  --background-gradient-high: initial;
+  --background-gradient-higher: initial;
+  --background-gradient-chat: initial;
+  --background-gradient-app-frame: initial;
+  --background-gradient-highest: initial;
+
+  --brand-500: var(--brand-600);
+  --background-brand: var(--brand-600);
+  --control-primary-background-default: var(--brand-600);
+  --switch-background-selected-default: var(--brand-600);
+}
+
+:root:root:root.high-contrast a,
+:root:root:root.high-contrast .md-link,
+:root:root:root.high-contrast .chat-link {
+  text-decoration: underline;
+}
+
+:root:root:root.high-contrast :focus-visible {
+  outline: 3px solid var(--hc-fg);
+  outline-offset: 2px;
+}
+
+:root:root:root.high-contrast .switch {
+  box-shadow: inset 0 0 0 2px var(--border-strong);
+}
+
+:root:root:root.high-contrast .ms-label {
+  font-weight: 700;
+}
+
+/* ---- a row with the control on the right (Role colors): label and note on the left, select 310 px wide ---- */
+.a11y-field-inline {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  column-gap: 24px;
+  align-items: center;
+}
+
+.a11y-field-inline > .a11y-field-control {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+/* ---- zoom in a plain browser tab (CSS zoom on <body>): keep the page filling the window ---- */
+html.ui-zoomed,
+html.ui-zoomed body {
+  overflow: hidden;
+}
+
+html.ui-zoomed body {
+  width: calc(100vw / var(--ui-zoom, 1));
+  height: calc(100vh / var(--ui-zoom, 1));
+}
