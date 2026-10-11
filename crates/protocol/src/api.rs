@@ -385,6 +385,9 @@ pub struct Attachment {
     pub url: String,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// Alt text, up to 1024 characters. A filename starting with `SPOILER_` marks a spoiler.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -580,8 +583,23 @@ pub struct CreateMessageRequest {
     pub message_reference: Option<MessageReferenceRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment_ids: Option<Vec<Snowflake>>,
+    /// The same ids with an optional rename and alt text each; wins over `attachment_ids` when both are sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<PendingAttachmentMeta>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_mentions: Option<AllowedMentions>,
+}
+
+/// One pending upload referenced by `CreateMessageRequest.attachments`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PendingAttachmentMeta {
+    pub id: Snowflake,
+    /// Rename before sending (1-255 characters); the prefix `SPOILER_` marks a spoiler.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    /// Alt text, up to 1024 characters; empty clears.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Which mentions of a new message actually ping. Omitted entirely = everything is parsed and the replied-to author is pinged.
@@ -625,9 +643,14 @@ pub struct AckBulkRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EditMessageRequest {
-    pub content: String,
+    /// Omitted = unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flags: Option<u32>,
+    /// The attachments to keep: omitted = unchanged, the others are removed (and their files deleted). Cannot add.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<IdOnly>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1145,6 +1168,11 @@ mod tests {
         round_trip::<CreateMessageRequest>(json!({"content": "x", "nonce": "1", "message_reference": {"message_id": "5"}, "attachment_ids": ["6"]}));
         round_trip::<EditMessageRequest>(json!({"content": "x"}));
         round_trip::<EditMessageRequest>(json!({"content": "x", "flags": SUPPRESS_EMBEDS}));
+        round_trip::<EditMessageRequest>(json!({"attachments": [{"id": "6"}]}));
+        round_trip::<CreateMessageRequest>(json!({"attachments": [{"id": "6", "filename": "SPOILER_a.png", "description": "a cat"}, {"id": "7"}]}));
+        round_trip::<Attachment>(
+            json!({"id": "6", "filename": "a.png", "content_type": "image/png", "size": 3, "url": "http://x/a", "width": 1, "height": 2, "description": "a cat"}),
+        );
         round_trip::<PutRelationshipRequest>(json!({}));
         round_trip::<PutRelationshipRequest>(json!({"type": 2}));
         round_trip::<UserProfile>(json!({"user": user(), "mutual_guilds": [{"id": "300", "nick": null}], "mutual_friends_count": 2}));

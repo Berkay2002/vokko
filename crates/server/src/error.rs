@@ -30,6 +30,11 @@ impl ApiErr {
         Self::new(StatusCode::FORBIDDEN, 50013, "You lack permissions to perform that action")
     }
 
+    /// 400 / 50006: a message edit that would leave neither content nor attachments.
+    pub fn empty_message() -> Self {
+        Self::new(StatusCode::BAD_REQUEST, 50006, "Cannot send an empty message")
+    }
+
     pub fn cannot_message_user() -> Self {
         Self::new(StatusCode::FORBIDDEN, 50007, "Cannot send messages to this user")
     }
