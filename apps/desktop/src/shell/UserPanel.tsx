@@ -5,6 +5,7 @@ import { Popout, Tooltip, setPref, useContextMenu, usePrefs, type MenuItem } fro
 import { Avatar, StatusBadge } from "./Avatar";
 import { loadStoredStatus, setOwnStatus, type SelectableStatus } from "./actions";
 import { openModal } from "./modalStore";
+import { inputDeviceMenu, outputDeviceMenu, refreshVoiceDevices, toggleSelfDeaf, toggleSelfMute, useVoice } from "../voice";
 
 const OPTIONS: { value: SelectableStatus; label: string; hint?: string; badge: "online" | "idle" | "dnd" | "offline" }[] = [
   { value: "online", label: "Online", badge: "online" },
@@ -15,26 +16,13 @@ const OPTIONS: { value: SelectableStatus; label: string; hint?: string; badge: "
 
 const LABEL: Record<string, string> = { online: "Online", idle: "Idle", dnd: "Do Not Disturb", offline: "Invisible" };
 
-/** Device menus behind the chevrons: visual only, the choice is stored in prefs (no audio engine yet). */
+/** Device menus behind the chevrons. Devices, mute and deafen come from the voice engine (src/voice). */
 function useDeviceMenus(muted: boolean, deafened: boolean, toggleMute: () => void, toggleDeafen: () => void) {
   const prefs = usePrefs();
-  const [devices, setDevices] = useState<{ input: string[]; output: string[] }>({ input: [], output: [] });
-  useEffect(() => {
-    const media = navigator.mediaDevices;
-    if (!media?.enumerateDevices) return;
-    media
-      .enumerateDevices()
-      .then(list => {
-        const labels = (kind: MediaDeviceKind) => list.filter(d => d.kind === kind && d.label).map(d => d.label);
-        setDevices({ input: labels("audioinput"), output: labels("audiooutput") });
-      })
-      .catch(() => undefined);
-  }, []);
+  useEffect(() => void refreshVoiceDevices(), []);
   const voiceSettings = (): MenuItem => ({ id: "voice-settings", label: "Voice Settings", onSelect: () => openModal({ type: "userSettings", section: "voice" }) });
-  const deviceItems = (key: "inputDevice" | "outputDevice", names: string[]): MenuItem[] =>
-    ["Default", ...names].map(name => ({ id: `${key}-${name}`, label: name, checked: (prefs[key] === "default" ? "Default" : prefs[key]) === name, onSelect: () => setPref(key, name === "Default" ? "default" : name) }));
   const micItems = (): MenuItem[] => [
-    { id: "input-device", label: "Input Device", children: deviceItems("inputDevice", devices.input) },
+    ...inputDeviceMenu(),
     {
       id: "input-mode",
       label: "Input Mode",
@@ -49,7 +37,7 @@ function useDeviceMenus(muted: boolean, deafened: boolean, toggleMute: () => voi
     voiceSettings(),
   ];
   const headphoneItems = (): MenuItem[] => [
-    { id: "output-device", label: "Output Device", children: deviceItems("outputDevice", devices.output) },
+    ...outputDeviceMenu(),
     { id: "output-volume", label: "Output Volume", hint: `${prefs.outputVolume}%`, onSelect: () => openModal({ type: "userSettings", section: "voice" }) },
     { type: "separator" },
     { id: "deafen", label: deafened ? "Undeafen" : "Deafen", onSelect: toggleDeafen },
@@ -74,18 +62,13 @@ export function UserPanel() {
   const presence = useStore(s => (s.me ? s.presences[s.me.id] : undefined));
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [muted, setMuted] = useState(false);
-  const [deafened, setDeafened] = useState(false);
+  const muted = useVoice(s => s.selfMute);
+  const deafened = useVoice(s => s.selfDeaf);
   const stored = useRef(loadStoredStatus());
   const [custom, setCustom] = useState(stored.current.custom);
   const [selected, setSelected] = useState<SelectableStatus>(stored.current.status);
   const menu = useContextMenu();
-  const { micItems, headphoneItems } = useDeviceMenus(
-    muted,
-    deafened,
-    () => setMuted(m => !m),
-    () => setDeafened(d => !d),
-  );
+  const { micItems, headphoneItems } = useDeviceMenus(muted, deafened, toggleSelfMute, toggleSelfDeaf);
 
   // Re-apply the user's chosen status after every (re)identify: the server starts a session as "online".
   useEffect(() => {
@@ -119,7 +102,7 @@ export function UserPanel() {
       <div className="user-panel-buttons">
         <div className="user-panel-split">
           <Tooltip content={muted ? "Unmute" : "Mute"} side="top">
-            <button type="button" className={`user-panel-button${muted ? " muted" : ""}`} aria-pressed={muted} aria-label={muted ? "Unmute" : "Mute"} onClick={() => setMuted(m => !m)}>
+            <button type="button" className={`user-panel-button${muted ? " muted" : ""}`} aria-pressed={muted} aria-label={muted ? "Unmute" : "Mute"} onClick={toggleSelfMute}>
               {muted ? <MicOff size={20} /> : <Mic size={20} />}
             </button>
           </Tooltip>
@@ -127,7 +110,7 @@ export function UserPanel() {
         </div>
         <div className="user-panel-split">
           <Tooltip content={deafened ? "Undeafen" : "Deafen"} side="top">
-            <button type="button" className={`user-panel-button${deafened ? " muted" : ""}`} aria-pressed={deafened} aria-label={deafened ? "Undeafen" : "Deafen"} onClick={() => setDeafened(d => !d)}>
+            <button type="button" className={`user-panel-button${deafened ? " muted" : ""}`} aria-pressed={deafened} aria-label={deafened ? "Undeafen" : "Deafen"} onClick={toggleSelfDeaf}>
               {deafened ? <HeadphoneOff size={20} /> : <Headphones size={20} />}
             </button>
           </Tooltip>

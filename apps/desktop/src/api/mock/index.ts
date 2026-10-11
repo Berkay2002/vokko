@@ -12,6 +12,7 @@ import { handleRoute } from "./routes";
 import { seed } from "./seed";
 import { sweepArchivedThreads } from "./threads";
 import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromToken } from "./socket";
+import { setMockVoice } from "./voice";
 
 export { MockSocket };
 
@@ -104,6 +105,8 @@ interface MockHooks {
   /** Create a DM with `username` for the signed-in `as` user. */
   addUser(username: string, globalName?: string): string;
   channelIdByName(name: string): string | null;
+  /** Another user joins (or with null leaves) a voice channel, optionally self-muted / deafened. */
+  voice(username: string, channelId: string | null, opts?: { selfMute?: boolean; selfDeaf?: boolean }): void;
   messageTimestamp(id: string): number;
   reset(): void;
 }
@@ -144,6 +147,7 @@ const hooks: MockHooks = {
   },
   addUser: (username, globalName) => createAccount({ username, global_name: globalName ?? null }).user.id,
   channelIdByName: name => [...db.channels.values()].find(c => c.name === name)?.id ?? null,
+  voice: (username, channelId, opts) => setMockVoice(userByName(username), channelId, emit, opts),
   messageTimestamp: id => snowflakeToTimestamp(id),
   reset: () => {
     window.localStorage.removeItem("vokko.token");

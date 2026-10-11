@@ -42,6 +42,15 @@ impl TestApp {
 
     /// `adjust` runs on a config with rate limiting disabled.
     pub async fn with_config(adjust: impl FnOnce(&mut Config)) -> Self {
+        Self::build(adjust, AppState::new).await
+    }
+
+    /// Like `with_config`, with a LiveKit RoomService of the test's choosing (voice tests pass a fake).
+    pub async fn with_room_service(adjust: impl FnOnce(&mut Config), rooms: std::sync::Arc<dyn vokko_server::voice::livekit::RoomService>) -> Self {
+        Self::build(adjust, move |pool, config| AppState::with_room_service(pool, config, rooms)).await
+    }
+
+    async fn build(adjust: impl FnOnce(&mut Config), make: impl FnOnce(sqlx::PgPool, Config) -> AppState) -> Self {
         let admin_options = PgConnectOptions::from_str(&test_database_url()).expect("valid TEST_DATABASE_URL");
         // VOKKO_TEST_DB_PREFIX (e.g. `vokko_test_search`) lets parallel workers keep their databases apart.
         let prefix = std::env::var("VOKKO_TEST_DB_PREFIX").unwrap_or_else(|_| "vokko_test".to_owned());
@@ -59,7 +68,7 @@ impl TestApp {
         config.rate_limit = None;
         config.unfurl.enabled = false; // tests that exercise link previews opt in
         adjust(&mut config);
-        let state = AppState::new(pool, config);
+        let state = make(pool, config);
         let router = vokko_server::router(state.clone());
         Self { state, router, admin_options, db_name, data_dir }
     }

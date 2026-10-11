@@ -17,6 +17,7 @@ import { ProfileCardHost } from "./ProfileCard";
 import { ServerRail } from "./ServerRail";
 import { TitleBar } from "./TitleBar";
 import { UserPanel } from "./UserPanel";
+import { VoiceConnectionPanel } from "../voice";
 import { markChannelRead, markGuildRead } from "./actions";
 import { firstTextChannel, groupChannels } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
@@ -248,6 +249,7 @@ export function AppShell() {
             </>
           )}
         </main>
+        <VoiceConnectionPanel />
         <UserPanel />
       </div>
       <ProfileCardHost />

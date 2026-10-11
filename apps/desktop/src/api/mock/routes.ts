@@ -11,6 +11,7 @@ import { applyChannelFields, assertCanPost, assertThreadOpen, deleteThread, drop
 import { applyGuildPerks, applyUserPerks, dropTagOnLeave, memberProfileFields } from "./perks";
 import { ID, route, routes, str } from "./router";
 import { emit } from "./socket";
+import { setVoiceChannelStatus } from "./voice";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
 import "./search";
 
@@ -292,6 +293,12 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   if (channel.guild_id && before) emitVisibilityChanges(channel.guild_id, before, [channel.id]);
   else emit(channelAudience(channel), "CHANNEL_UPDATE", payload);
   return payload;
+});
+
+route("PUT", `/channels/${ID}/voice-status`, ({ viewer, params, body }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  setVoiceChannelStatus(viewer.user.id, channel, body.status, emit);
+  return undefined;
 });
 
 route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {

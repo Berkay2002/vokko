@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use vokko_protocol::api::{VOICE_BITRATE_CEILING_MAX, VOICE_BITRATE_GUILD_MAX, VOICE_BITRATE_MIN};
+
 use crate::unfurl::UnfurlConfig;
 
 #[derive(Clone, Debug)]
@@ -38,6 +40,38 @@ pub struct Config {
     pub cors_origins: Option<Vec<String>>,
     /// `VOKKO_REGISTRATION=open|closed`: with `closed`, `POST /auth/register` answers 403 (existing users and the seed are unaffected).
     pub registration_open: bool,
+    /// LiveKit (`VOKKO_LIVEKIT_URL`, `VOKKO_LIVEKIT_API_KEY`, `VOKKO_LIVEKIT_API_SECRET`); `None` disables voice.
+    pub livekit: Option<LiveKitConfig>,
+    /// Highest channel bitrate (`VOKKO_VOICE_BITRATE_MAX`, default 128000, at most 384000).
+    pub voice_bitrate_max: u32,
+    /// A joined state without LiveKit's `participant_joined` within this window is dropped.
+    pub voice_connect_timeout: Duration,
+    /// A voice state outlives its gateway session (or, after a restart, waits for its client) this long.
+    pub voice_gateway_grace: Duration,
+    pub voice_reconcile_interval: Duration,
+}
+
+#[derive(Clone, Debug)]
+pub struct LiveKitConfig {
+    /// Public signal URL handed to clients (`wss://lk.example.org`).
+    pub url: String,
+    /// Where vokko-server reaches LiveKit's RoomService (`VOKKO_LIVEKIT_API_URL`, default: `url` with http(s)).
+    pub api_url: String,
+    pub api_key: String,
+    pub api_secret: String,
+}
+
+impl LiveKitConfig {
+    /// `wss://host` → `https://host`, `ws://host` → `http://host`.
+    pub fn derive_api_url(url: &str) -> String {
+        if let Some(rest) = url.strip_prefix("wss://") {
+            format!("https://{rest}")
+        } else if let Some(rest) = url.strip_prefix("ws://") {
+            format!("http://{rest}")
+        } else {
+            url.to_owned()
+        }
+    }
 }
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:8710";
@@ -140,6 +174,23 @@ impl Config {
                 _ => return Err(format!("VOKKO_REGISTRATION must be `open` or `closed`, got {value}")),
             };
         }
+        let livekit = (env.get("VOKKO_LIVEKIT_URL"), env.get("VOKKO_LIVEKIT_API_KEY"), env.get("VOKKO_LIVEKIT_API_SECRET"));
+        config.livekit = match livekit {
+            (Some(url), Some(api_key), Some(api_secret)) => {
+                let url = url.trim_end_matches('/').to_owned();
+                let api_url = env.get("VOKKO_LIVEKIT_API_URL").unwrap_or_else(|| LiveKitConfig::derive_api_url(&url));
+                Some(LiveKitConfig { url, api_url, api_key, api_secret })
+            }
+            (None, None, None) => None,
+            _ => return Err("voice needs all of VOKKO_LIVEKIT_URL, VOKKO_LIVEKIT_API_KEY and VOKKO_LIVEKIT_API_SECRET (or none of them)".to_owned()),
+        };
+        if let Some(value) = env.get("VOKKO_VOICE_BITRATE_MAX") {
+            let bitrate: u32 = value.trim().parse().map_err(|_| format!("VOKKO_VOICE_BITRATE_MAX must be bps, got {value}"))?;
+            if !(VOICE_BITRATE_MIN..=VOICE_BITRATE_CEILING_MAX).contains(&bitrate) {
+                return Err(format!("VOKKO_VOICE_BITRATE_MAX must be between {VOICE_BITRATE_MIN} and {VOICE_BITRATE_CEILING_MAX}"));
+            }
+            config.voice_bitrate_max = bitrate;
+        }
         Ok(config)
     }
 
@@ -164,6 +215,11 @@ impl Config {
             trust_proxy: false,
             cors_origins: None,
             registration_open: true,
+            livekit: None,
+            voice_bitrate_max: VOICE_BITRATE_GUILD_MAX,
+            voice_connect_timeout: Duration::from_secs(15),
+            voice_gateway_grace: Duration::from_secs(60),
+            voice_reconcile_interval: Duration::from_secs(60),
         }
     }
 }
@@ -185,6 +241,12 @@ fn parse_cors_origins(value: &str) -> Result<Option<Vec<String>>, String> {
 #[cfg(test)]
 mod tests {
     use super::parse_cors_origins;
+
+    #[test]
+    fn livekit_api_url_is_derived_from_the_signal_url() {
+        assert_eq!(super::LiveKitConfig::derive_api_url("wss://lk.example.org"), "https://lk.example.org");
+        assert_eq!(super::LiveKitConfig::derive_api_url("ws://127.0.0.1:7880"), "http://127.0.0.1:7880");
+    }
 
     #[test]
     fn cors_origins_are_trimmed_and_exact() {

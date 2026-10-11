@@ -153,6 +153,7 @@ numeric_enum!(GatewayOp {
     Heartbeat = 1,
     Identify = 2,
     PresenceUpdate = 3,
+    VoiceStateUpdate = 4,
     Resume = 6,
     Reconnect = 7,
     InvalidSession = 9,
@@ -406,6 +407,15 @@ pub struct Channel {
     /// Guild channels only (always present there, `[]` when there are none); absent on DMs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_overwrites: Option<Vec<PermissionOverwrite>>,
+    /// Guild voice only: Opus bitrate in bps (8000..=guild max, default 64000); absent on other channels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bitrate: Option<u32>,
+    /// Guild voice only: 0 = unlimited, max 99.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_limit: Option<u32>,
+    /// Guild voice only: the shared channel status (max 500 chars), `null` when none.
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub status: Option<Option<String>>,
     /// Threads only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_metadata: Option<ThreadMetadata>,
@@ -726,6 +736,115 @@ pub struct Relationship {
     pub user: User,
 }
 
+/// Default bitrate of a new voice channel (Discord's default).
+pub const VOICE_BITRATE_DEFAULT: u32 = 64_000;
+pub const VOICE_BITRATE_MIN: u32 = 8_000;
+/// Default instance ceiling (and per-guild maximum); `VOKKO_VOICE_BITRATE_MAX` may raise it up to `VOICE_BITRATE_CEILING_MAX`.
+pub const VOICE_BITRATE_GUILD_MAX: u32 = 128_000;
+pub const VOICE_BITRATE_CEILING_MAX: u32 = 384_000;
+pub const VOICE_USER_LIMIT_MAX: u32 = 99;
+
+/// Who is in which voice channel. `channel_id: null` = left voice.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VoiceState {
+    /// `null` for DM / group DM calls.
+    pub guild_id: Option<Snowflake>,
+    pub channel_id: Option<Snowflake>,
+    pub user_id: Snowflake,
+    /// Guild only, on VOICE_STATE_UPDATE (READY / GUILD_CREATE already carry the members).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<GuildMember>,
+    /// Voice session (not the gateway session id); changes on every new binding, e.g. a join from another device.
+    pub session_id: String,
+    /// Server deafened / muted.
+    pub deaf: bool,
+    pub mute: bool,
+    pub self_deaf: bool,
+    pub self_mute: bool,
+    /// Camera / screen share published (truth from LiveKit).
+    pub self_video: bool,
+    pub self_stream: bool,
+    /// No SPEAK in this channel (or stage audience).
+    pub suppress: bool,
+    pub request_to_speak_timestamp: Option<String>,
+    pub connected_at: String,
+}
+
+/// Instance-wide media settings, in READY so clients can hide what the instance does not offer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InstanceMediaConfig {
+    pub voice_enabled: bool,
+    /// bps; default 128000, configurable up to 384000.
+    pub voice_bitrate_ceiling: u32,
+    pub screenshare_qualities: Vec<String>,
+    pub video_enabled: bool,
+}
+
+/// Op 4, client → server. `channel_id: null` leaves voice.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VoiceStateUpdateCommand {
+    #[serde(default)]
+    pub guild_id: Option<Snowflake>,
+    pub channel_id: Option<Snowflake>,
+    #[serde(default)]
+    pub self_mute: bool,
+    #[serde(default)]
+    pub self_deaf: bool,
+    /// Hint only; the truth comes from LiveKit.
+    #[serde(default)]
+    pub self_video: bool,
+}
+
+/// VOICE_SERVER_UPDATE: sent only to the gateway session that asked to join.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VoiceServerUpdate {
+    pub guild_id: Option<Snowflake>,
+    pub channel_id: Snowflake,
+    /// LiveKit signal URL (wss://...).
+    pub endpoint: String,
+    /// LiveKit access token (JWT).
+    pub token: String,
+    /// The voice session this token belongs to (matches `VoiceState.session_id`).
+    pub session_id: String,
+}
+
+/// Max length of a voice channel status.
+pub const VOICE_STATUS_MAX_CHARS: usize = 500;
+
+/// `PUT /channels/{id}/voice-status`; `null` or an empty string clears it.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct VoiceStatusRequest {
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+/// VOICE_CHANNEL_STATUS_UPDATE, to everyone who can see the channel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VoiceChannelStatusUpdate {
+    pub id: Snowflake,
+    pub guild_id: Snowflake,
+    pub status: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceConnectFailure {
+    MissingPermissions,
+    ChannelFull,
+    VideoFull,
+    Blocked,
+    TimedOut,
+    MediaUnavailable,
+}
+
+/// VOICE_CONNECT_FAILED (Vokko-only): op 4 was refused; sent only to the requesting session.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VoiceConnectFailed {
+    pub guild_id: Option<Snowflake>,
+    pub channel_id: Snowflake,
+    pub reason: VoiceConnectFailure,
+}
+
 // ---- REST payloads ----
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -939,6 +1058,11 @@ pub struct CreateChannelRequest {
     /// copies the category's overwrites.
     #[serde(default)]
     pub permission_overwrites: Option<Vec<PermissionOverwrite>>,
+    /// Voice channels only.
+    #[serde(default)]
+    pub bitrate: Option<u32>,
+    #[serde(default)]
+    pub user_limit: Option<u32>,
     #[serde(default)]
     pub available_tags: Option<Vec<ForumTagRequest>>,
     #[serde(default)]
@@ -981,6 +1105,11 @@ pub struct UpdateChannelRequest {
     /// With `parent_id`: `true` replaces the channel's overwrites with the new parent's, `false`/absent keeps them.
     #[serde(default)]
     pub lock_permissions: Option<bool>,
+    /// Voice channels only (MANAGE_CHANNELS); above the guild maximum → 400 50035.
+    #[serde(default)]
+    pub bitrate: Option<u32>,
+    #[serde(default)]
+    pub user_limit: Option<u32>,
     // ---- threads ----
     #[serde(default)]
     pub archived: Option<bool>,
@@ -1268,6 +1397,9 @@ pub struct GuildWithState {
     /// Only on GUILD_CREATE: the presences of the guild's members that are not offline (READY has its own list).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presences: Option<Vec<Presence>>,
+    /// Who is in the guild's voice channels the receiver can see.
+    #[serde(default)]
+    pub voice_states: Vec<VoiceState>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1280,6 +1412,7 @@ pub struct ReadyEvent {
     pub presences: Vec<Presence>,
     pub read_states: Vec<ReadState>,
     pub relationships: Vec<Relationship>,
+    pub media: InstanceMediaConfig,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1403,6 +1536,10 @@ pub enum GatewayEvent {
     MessageAck(MessageAck),
     RelationshipAdd(Relationship),
     RelationshipRemove(IdOnly),
+    VoiceStateUpdate(Box<VoiceState>),
+    VoiceServerUpdate(VoiceServerUpdate),
+    VoiceConnectFailed(VoiceConnectFailed),
+    VoiceChannelStatusUpdate(VoiceChannelStatusUpdate),
     ThreadCreate(Channel),
     ThreadUpdate(Channel),
     ThreadDelete(ThreadDelete),
@@ -1440,6 +1577,10 @@ impl GatewayEvent {
             Self::MessageAck(_) => "MESSAGE_ACK",
             Self::RelationshipAdd(_) => "RELATIONSHIP_ADD",
             Self::RelationshipRemove(_) => "RELATIONSHIP_REMOVE",
+            Self::VoiceStateUpdate(_) => "VOICE_STATE_UPDATE",
+            Self::VoiceServerUpdate(_) => "VOICE_SERVER_UPDATE",
+            Self::VoiceConnectFailed(_) => "VOICE_CONNECT_FAILED",
+            Self::VoiceChannelStatusUpdate(_) => "VOICE_CHANNEL_STATUS_UPDATE",
             Self::ThreadCreate(_) => "THREAD_CREATE",
             Self::ThreadUpdate(_) => "THREAD_UPDATE",
             Self::ThreadDelete(_) => "THREAD_DELETE",
@@ -1470,6 +1611,10 @@ impl GatewayEvent {
             Self::UserUpdate(value) => serde_json::to_value(value),
             Self::MessageAck(value) => serde_json::to_value(value),
             Self::RelationshipAdd(value) => serde_json::to_value(value),
+            Self::VoiceStateUpdate(value) => serde_json::to_value(value),
+            Self::VoiceServerUpdate(value) => serde_json::to_value(value),
+            Self::VoiceConnectFailed(value) => serde_json::to_value(value),
+            Self::VoiceChannelStatusUpdate(value) => serde_json::to_value(value),
             Self::ThreadCreate(value) | Self::ThreadUpdate(value) => serde_json::to_value(value),
             Self::ThreadDelete(value) => serde_json::to_value(value),
             Self::ThreadMemberUpdate(value) => serde_json::to_value(value),
@@ -1649,11 +1794,13 @@ mod tests {
             value["channels"] = json!([]);
             value["members"] = json!([{"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}]);
             value["member_count"] = json!(1);
+            value["voice_states"] = json!([]);
             value
         };
         round_trip::<GuildWithState>(with_state.clone());
         round_trip::<ReadyEvent>(json!({
-            "v": 1, "user": user(), "session_id": "abc", "guilds": [with_state], "private_channels": [], "presences": [], "read_states": [], "relationships": []
+            "v": 1, "user": user(), "session_id": "abc", "guilds": [with_state], "private_channels": [], "presences": [], "read_states": [], "relationships": [],
+            "media": {"voice_enabled": true, "voice_bitrate_ceiling": 128000, "screenshare_qualities": ["720p30", "1080p60"], "video_enabled": false}
         }));
         round_trip::<GuildMemberAdd>(
             json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": "2026-10-12T10:00:00.000Z", "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null, "guild_id": "300"}),
@@ -1791,6 +1938,45 @@ mod tests {
         let event = GatewayEvent::MessageAck(MessageAck { channel_id: Snowflake(2), message_id: Snowflake(3) });
         assert_eq!(event.name(), "MESSAGE_ACK");
         assert_eq!(event.data(), json!({"channel_id": "2", "message_id": "3"}));
+    }
+
+    #[test]
+    fn voice_shapes_match_types_ts() {
+        let state = json!({
+            "guild_id": "300", "channel_id": "201", "user_id": "100", "session_id": "abc", "deaf": false, "mute": false, "self_deaf": false,
+            "self_mute": true, "self_video": false, "self_stream": false, "suppress": false, "request_to_speak_timestamp": null,
+            "connected_at": "2026-10-11T10:00:00.000Z"
+        });
+        round_trip::<VoiceState>(state.clone());
+        let mut left = state.clone();
+        left["channel_id"] = Value::Null;
+        round_trip::<VoiceState>(left);
+        round_trip::<Channel>(json!({
+            "id": "201", "type": 2, "guild_id": "300", "name": "General", "topic": null, "position": 0, "parent_id": null, "last_message_id": null,
+            "permission_overwrites": [], "bitrate": 64000, "user_limit": 0, "status": null
+        }));
+        let command: VoiceStateUpdateCommand = serde_json::from_value(json!({"guild_id": "300", "channel_id": null})).expect("op 4");
+        assert_eq!((command.channel_id, command.self_mute, command.self_deaf), (None, false, false));
+        round_trip::<VoiceStateUpdateCommand>(json!({"guild_id": null, "channel_id": "201", "self_mute": true, "self_deaf": false, "self_video": false}));
+        let server = GatewayEvent::VoiceServerUpdate(VoiceServerUpdate {
+            guild_id: Some(Snowflake(300)),
+            channel_id: Snowflake(201),
+            endpoint: "wss://lk.example.org".to_owned(),
+            token: "t".to_owned(),
+            session_id: "abc".to_owned(),
+        });
+        assert_eq!(
+            (server.name(), server.data()),
+            ("VOICE_SERVER_UPDATE", json!({"guild_id": "300", "channel_id": "201", "endpoint": "wss://lk.example.org", "token": "t", "session_id": "abc"}))
+        );
+        let status = GatewayEvent::VoiceChannelStatusUpdate(VoiceChannelStatusUpdate { id: Snowflake(201), guild_id: Snowflake(300), status: None });
+        assert_eq!((status.name(), status.data()), ("VOICE_CHANNEL_STATUS_UPDATE", json!({"id": "201", "guild_id": "300", "status": null})));
+        let failed =
+            GatewayEvent::VoiceConnectFailed(VoiceConnectFailed { guild_id: None, channel_id: Snowflake(5), reason: VoiceConnectFailure::ChannelFull });
+        assert_eq!((failed.name(), failed.data()), ("VOICE_CONNECT_FAILED", json!({"guild_id": null, "channel_id": "5", "reason": "channel_full"})));
+        let parsed: VoiceState = serde_json::from_value(state).expect("state");
+        assert_eq!(GatewayEvent::VoiceStateUpdate(Box::new(parsed)).name(), "VOICE_STATE_UPDATE");
+        assert_eq!(serde_json::to_value(GatewayOp::VoiceStateUpdate).expect("op"), json!(4));
     }
 
     #[test]

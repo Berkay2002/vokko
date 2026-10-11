@@ -243,6 +243,7 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
         .bind(id)
         .fetch_all(&state.db)
         .await?;
+    let _eviction = crate::voice::state::guild_deleted(&state, id).await;
     sqlx::query("DELETE FROM guilds WHERE id = $1").bind(id).execute(&state.db).await?;
     media::remove_files(&state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
     state.hub.send(&members, &GatewayEvent::GuildDelete(IdOnly { id: Snowflake::from(id) }));
@@ -279,6 +280,7 @@ async fn create_channel(
         return Err(ApiErr::invalid("type", "Unsupported channel type."));
     }
     let name = channel_name(body.kind, &body.name)?;
+    crate::voice::validate_channel_settings(&state.config, body.kind == ChannelType::GuildVoice, body.bitrate, body.user_limit)?;
     let forum_fields = forums::ParentFields::from_create(&body)?;
     let topic = if matches!(body.kind, ChannelType::GuildText | ChannelType::GuildAnnouncement | ChannelType::GuildForum) {
         clean_text(body.topic, 1024, "topic")?
@@ -322,7 +324,7 @@ async fn create_channel(
             .await?;
     let channel_id = state.ids.next();
     let mut tx = state.db.begin().await?;
-    sqlx::query("INSERT INTO channels (id, kind, guild_id, name, topic, position, parent_id) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+    sqlx::query("INSERT INTO channels (id, kind, guild_id, name, topic, position, parent_id, bitrate, user_limit) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)")
         .bind(channel_id)
         .bind(body.kind.as_u8() as i16)
         .bind(id)
@@ -330,6 +332,8 @@ async fn create_channel(
         .bind(&topic)
         .bind(position)
         .bind(parent)
+        .bind(body.bitrate.map(|value| value as i32))
+        .bind(body.user_limit.map(|value| value as i32))
         .execute(&mut *tx)
         .await?;
     match (&body.permission_overwrites, parent) {

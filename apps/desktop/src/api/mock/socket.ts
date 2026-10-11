@@ -1,9 +1,10 @@
 // Mock gateway: speaks the same Hello / Identify / READY / heartbeat / Resume protocol as the real server so the
 // client gateway code (and everything above it) cannot tell the difference.
 
-import { GatewayOp, type GatewayEvents, type GatewayPayload, type PresenceStatus } from "../types";
+import { GatewayOp, type GatewayEvents, type GatewayPayload, type PresenceStatus, type VoiceStateUpdateCommand } from "../types";
 import { db } from "./db";
 import { readyFor } from "./views";
+import { handleVoiceStateUpdate } from "./voice";
 
 const HEARTBEAT_MS = 41_250;
 const BUFFER = 500;
@@ -42,6 +43,19 @@ export function emit<K extends keyof GatewayEvents>(userIds: Iterable<string>, t
       if (session.buffer.length > BUFFER) session.buffer.shift();
       session.socket?.deliver(payload);
     }
+  }, 0);
+}
+
+/** Deliver a dispatch to one gateway session only (VOICE_SERVER_UPDATE, VOICE_CONNECT_FAILED). */
+export function emitToSession<K extends keyof GatewayEvents>(sessionId: string, t: K, d: GatewayEvents[K]): void {
+  setTimeout(() => {
+    const session = sessions.get(sessionId);
+    if (!session) return;
+    session.seq += 1;
+    const payload: GatewayPayload = { op: GatewayOp.Dispatch, d, s: session.seq, t };
+    session.buffer.push(payload);
+    if (session.buffer.length > BUFFER) session.buffer.shift();
+    session.socket?.deliver(payload);
   }, 0);
 }
 
@@ -109,6 +123,9 @@ export class MockSocket {
         break;
       case GatewayOp.PresenceUpdate:
         this.presence(payload.d as { status: PresenceStatus; custom_status?: string | null });
+        break;
+      case GatewayOp.VoiceStateUpdate:
+        if (this.session) handleVoiceStateUpdate(this.session.id, this.session.userId, payload.d as VoiceStateUpdateCommand, emit, emitToSession);
         break;
       default:
         break;

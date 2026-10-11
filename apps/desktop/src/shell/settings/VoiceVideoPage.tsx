@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { setPref, usePrefs } from "../../ui";
 import type { InputMode } from "../../ui/prefs";
 import { Category, Divider, Field, Page, RadioGroup, Select, Slider, SwitchRow, Unavailable } from "./controls";
+import { PttSettings } from "../../voice/PttSettings";
 
 interface Device {
   value: string;
@@ -234,6 +235,7 @@ export function VoiceVideoPage() {
             ]}
           />
         </Field>
+        {inputMode === "ptt" && <PttSettings />}
         <SwitchRow label="Automatically determine input sensitivity" checked={autoSensitivity} onChange={v => setPref("autoSensitivity", v)} />
         <Field label="Input sensitivity">
           <Slider label="Input sensitivity" value={sensitivity} min={0} max={100} disabled={autoSensitivity} onChange={v => setPref("inputSensitivity", v)} format={v => `${v}%`} />

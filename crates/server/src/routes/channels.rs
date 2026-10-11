@@ -40,7 +40,13 @@ async fn update_channel(
         return threads_routes::edit_thread(&state, user_id, access, body).await;
     }
     if access.is_dm() {
-        if kind != ChannelType::GroupDm || body.topic.is_some() || body.position.is_some() || body.parent_id.is_some() {
+        if kind != ChannelType::GroupDm
+            || body.topic.is_some()
+            || body.position.is_some()
+            || body.parent_id.is_some()
+            || body.bitrate.is_some()
+            || body.user_limit.is_some()
+        {
             return Err(ApiErr::missing_permissions());
         }
     } else {
@@ -60,6 +66,7 @@ async fn update_channel(
         }),
         None => None,
     };
+    crate::voice::validate_channel_settings(&state.config, kind == ChannelType::GuildVoice, body.bitrate, body.user_limit)?;
     let parent_fields = forums::ParentFields::from_update(kind, &body)?;
     let topic = if body.topic.is_some() { Some(clean_text(body.topic, 1024, "topic")?) } else { None };
     let parent = match body.parent_id {
@@ -92,6 +99,12 @@ async fn update_channel(
     }
     if let Some(topic) = topic {
         sqlx::query("UPDATE channels SET topic = $2 WHERE id = $1").bind(id).bind(topic).execute(&mut *tx).await?;
+    }
+    if let Some(bitrate) = body.bitrate {
+        sqlx::query("UPDATE channels SET bitrate = $2 WHERE id = $1").bind(id).bind(bitrate as i32).execute(&mut *tx).await?;
+    }
+    if let Some(user_limit) = body.user_limit {
+        sqlx::query("UPDATE channels SET user_limit = $2 WHERE id = $1").bind(id).bind(user_limit as i32).execute(&mut *tx).await?;
     }
     if let Some(position) = body.position {
         sqlx::query("UPDATE channels SET position = $2 WHERE id = $1").bind(id).bind(position).execute(&mut *tx).await?;
@@ -141,6 +154,7 @@ async fn delete_channel(State(state): State<AppState>, AuthUser(user_id): AuthUs
     threads::delete_children(&state, id).await?;
     let viewers = access::channel_viewers(&state, &access.channel).await?;
     let guild_id = access.channel.guild_id;
+    let _eviction = crate::voice::state::channel_deleted(&state, id).await;
     let attachments: Vec<(i64,)> = sqlx::query_as("DELETE FROM attachments WHERE channel_id = $1 RETURNING id").bind(id).fetch_all(&state.db).await?;
     // Children of a deleted category move to the top level.
     sqlx::query("UPDATE channels SET parent_id = NULL WHERE parent_id = $1").bind(id).execute(&state.db).await?;

@@ -13,6 +13,7 @@ import { isMutedAt, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setN
 import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
 import { openProfile } from "./ProfileCard";
+import { voiceUserMenuItems } from "../voice/voiceMenus";
 
 export const UNAVAILABLE = "Not available yet";
 
@@ -293,6 +294,7 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
       { id: "message", label: "Message", disabled: isMe, onSelect: () => void openDirectMessage(user.id) },
       unavailable("call", "Start a Call"),
     ],
+    voiceUserMenuItems(user.id),
     isMe
       ? [unavailable("per-server-profile", "Edit Per-server Profile"), ...(mayNick ? [{ id: "change-nickname", label: "Change Nickname", onSelect: () => openModal({ type: "nickname", ...target }) } satisfies MenuItem] : [])]
       : [

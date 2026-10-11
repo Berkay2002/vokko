@@ -6,8 +6,8 @@ import { Perm } from "../permissions";
 import { db, nextId, sortedMessages, type MockChannel, type MockMessage } from "./db";
 import { addChannel, addMessage, createAccount, createGuildRecord, openDM, openGroupDM } from "./ops";
 import { createForumPost, initChannelFields, startThreadFromMessage } from "./threads";
-import { voiceStore } from "../voice";
 import { setRelationship } from "./views";
+import { seedVoiceState } from "./voice";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -335,9 +335,14 @@ export function seed(): void {
   const devTalk = addChannel(guildId, { name: "dev-talk", type: ChannelType.GuildText, parent_id: textCategory.id, topic: "Rust, TypeScript and gateway protocol nerdery." });
   addChannel(guildId, { name: "memes", type: ChannelType.GuildText, parent_id: textCategory.id });
   const gaming = addChannel(guildId, { name: "Gaming", type: ChannelType.GuildVoice, parent_id: voiceCategory.id });
-  voiceStore.getState().setOccupants(generalVoice.id, [A, Bo]);
-  voiceStore.getState().setOccupants(gaming.id, [N]);
+  // Already in voice when anyone signs in: Alice and Bob in General (the mock transport makes them "speak"), Nova in Gaming.
+  // "Solo" (limit 1) is full, so the channel list shows its lock.
+  seedVoiceState(A, generalVoice.id, 25);
+  seedVoiceState(Bo, generalVoice.id, 12);
+  seedVoiceState(N, gaming.id, 40);
   addChannel(guildId, { name: "AFK", type: ChannelType.GuildVoice, parent_id: voiceCategory.id });
+  const solo = addChannel(guildId, { name: "Solo", type: ChannelType.GuildVoice, parent_id: voiceCategory.id, user_limit: 1 });
+  seedVoiceState(B, solo.id, 5);
 
   const say = (channel: MockChannel, who: string, text: string, minutesAgo: number) =>
     addMessage({ channel, author_id: who, content: text, timestamp: Date.now() - minutesAgo * MIN, silent: true });

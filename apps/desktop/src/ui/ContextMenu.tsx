@@ -20,6 +20,8 @@ export type MenuItem =
       tooltip?: string;
       onSelect?: () => void;
       children?: MenuItem[];
+      /** Custom row content (e.g. a volume slider) instead of the label; not keyboard-selectable, clicks stay inside. */
+      render?: () => ReactNode;
     }
   | { type: "separator" };
 
@@ -56,7 +58,7 @@ export function useContextMenu(): { open: (event: ReactMouseEvent | MouseEvent |
   return useMemo(() => ({ open, close: hide }), [open, hide]);
 }
 
-const isSelectable = (item: MenuItem): item is Exclude<MenuItem, { type: "separator" }> => !("type" in item) && !item.disabled;
+const isSelectable = (item: MenuItem): item is Exclude<MenuItem, { type: "separator" }> => !("type" in item) && !item.disabled && !item.render;
 
 function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: MenuItem[]; onClose: () => void; level?: number; x?: number; y?: number; anchorRect?: DOMRect }) {
   const box = useRef<HTMLDivElement>(null);
@@ -132,6 +134,13 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
       <div ref={box} className="context-menu" role="menu" style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }} onContextMenu={e => e.preventDefault()}>
         {items.map((item, index) => {
           if ("type" in item) return <div key={`sep-${index}`} className="context-menu-separator" role="separator" />;
+          if (item.render) {
+            return (
+              <div key={item.id} data-menu-row className="context-menu-custom" role="none" onMouseEnter={() => (setActive(-1), setSub(null))}>
+                {item.render()}
+              </div>
+            );
+          }
           const submenu = !!item.children?.length;
           return (
             <div

@@ -18,6 +18,7 @@ pub mod state;
 pub mod store;
 pub mod threads;
 pub mod unfurl;
+pub mod voice;
 
 use std::time::Duration;
 
@@ -78,6 +79,7 @@ pub fn router(state: AppState) -> Router {
         .nest("/api/v1", routes::api(state.config.max_upload_bytes).layer(axum::middleware::from_fn_with_state(state.clone(), ratelimit::middleware)))
         .route("/healthz", axum::routing::get(healthz))
         .route("/gateway", axum::routing::get(gateway::upgrade))
+        .route("/internal/livekit/webhook", axum::routing::post(voice::webhook::receive))
         .fallback(|| async { error::ApiErr::not_found() })
         .layer(cors)
         .with_state(state)

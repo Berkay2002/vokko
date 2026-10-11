@@ -203,6 +203,11 @@ impl Session {
         ResumeOutcome::Resumed { generation, replayed }
     }
 
+    /// How long the session has been without a connection (`None` while one is attached).
+    pub fn detached_for(&self) -> Option<Duration> {
+        lock(&self.inner).detached_at.map(|since| since.elapsed())
+    }
+
     pub fn dispatch(&self, name: &str, data: Value) {
         self.push(name, data);
     }

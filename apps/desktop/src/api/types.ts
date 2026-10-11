@@ -105,6 +105,9 @@ export interface Channel {
   owner_id?: Snowflake | null; // group DM
   icon?: string | null; // group DM
   permission_overwrites?: PermissionOverwrite[]; // guild channels only
+  bitrate?: number; // guild voice only: bps, 8000..guild max (default 64000)
+  user_limit?: number; // guild voice only: 0 = unlimited, max 99
+  status?: string | null; // guild voice only: shared channel status (max 500 chars), null when none
   // Threads (types 10-12; parent_id = the text/announcement/forum channel; owner_id = creator; id == starter message id when started from a message or forum post)
   thread_metadata?: ThreadMetadata;
   member_count?: number; // threads: members joined (max shown 50 in Discord, exact here)
@@ -274,6 +277,55 @@ export interface ReadState {
   last_message_id: Snowflake | null; // last message the user has read
   mention_count: number;
 }
+
+// ---- Voice (docs/design/voice.md §2) ----
+
+export const VOICE_BITRATE_DEFAULT = 64000; // new voice channels
+export const VOICE_BITRATE_MIN = 8000;
+
+export interface VoiceState {
+  guild_id: Snowflake | null; // null for DM / group DM calls
+  channel_id: Snowflake | null; // null = left voice
+  user_id: Snowflake;
+  member?: GuildMember; // guild VOICE_STATE_UPDATE only (READY/GUILD_CREATE already carry members)
+  session_id: string; // voice session (not the gateway session id); changes on every new binding (e.g. another device)
+  deaf: boolean; // server deafened
+  mute: boolean; // server muted
+  self_deaf: boolean;
+  self_mute: boolean;
+  self_video: boolean; // camera published (truth from LiveKit)
+  self_stream: boolean; // screen share published (truth from LiveKit)
+  suppress: boolean; // no SPEAK in this channel (or stage audience)
+  request_to_speak_timestamp: ISO8601 | null; // stage raised hand
+  connected_at: ISO8601;
+}
+
+export type ScreenshareQuality = "720p30" | "1080p60";
+export interface InstanceMediaConfig {
+  voice_enabled: boolean; // false when the server has no LiveKit configured
+  voice_bitrate_ceiling: number; // default 128000, configurable up to 384000
+  screenshare_qualities: ScreenshareQuality[];
+  video_enabled: boolean;
+}
+
+// op 4, client → server
+export interface VoiceStateUpdateCommand {
+  guild_id: Snowflake | null;
+  channel_id: Snowflake | null; // null = leave
+  self_mute: boolean;
+  self_deaf: boolean;
+  self_video: boolean; // hint only; truth comes from LiveKit
+}
+export interface VoiceStatusRequest {
+  status: string | null; // PUT /channels/{id}/voice-status; null or "" clears
+}
+export type VoiceConnectFailure =
+  | "missing_permissions"
+  | "channel_full"
+  | "video_full"
+  | "blocked"
+  | "timed_out"
+  | "media_unavailable";
 
 // ---- REST payloads ----
 
@@ -490,6 +542,9 @@ export interface EditChannelRequest {
   default_sort_order?: ForumSortOrder;
   default_forum_layout?: ForumLayout;
   default_auto_archive_duration?: ThreadAutoArchiveDuration;
+  // ---- voice channels (MANAGE_CHANNELS) ----
+  bitrate?: number; // 8000..guild max (else 400 50035)
+  user_limit?: number; // 0..99
 }
 export interface CreateChannelRequest {
   name: string;
@@ -503,6 +558,8 @@ export interface CreateChannelRequest {
   default_forum_layout?: ForumLayout;
   default_auto_archive_duration?: ThreadAutoArchiveDuration;
   flags?: number;
+  bitrate?: number; // voice only
+  user_limit?: number; // voice only
 }
 
 export interface ApiError {
@@ -518,6 +575,7 @@ export enum GatewayOp {
   Heartbeat = 1,
   Identify = 2,
   PresenceUpdate = 3,
+  VoiceStateUpdate = 4,
   Resume = 6,
   Reconnect = 7,
   InvalidSession = 9,
@@ -536,11 +594,13 @@ export interface ReadyEvent {
   v: 1;
   user: User;
   session_id: string;
-  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; threads?: Channel[] })[]; // threads = active threads the user can see (not in channels)
+  // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels)
+  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; voice_states?: VoiceState[]; threads?: Channel[] })[];
   private_channels: Channel[]; // DMs and group DMs
   presences: Presence[];
   read_states: ReadState[];
   relationships: Relationship[];
+  media?: InstanceMediaConfig; // always sent by the server; absent = voice unavailable
 }
 
 export enum RelationshipType {
@@ -584,6 +644,10 @@ export interface GatewayEvents {
   MESSAGE_ACK: { channel_id: Snowflake; message_id: Snowflake };
   RELATIONSHIP_ADD: Relationship;
   RELATIONSHIP_REMOVE: { id: Snowflake };
+  VOICE_STATE_UPDATE: VoiceState; // to everyone who can see the channel
+  VOICE_SERVER_UPDATE: { guild_id: Snowflake | null; channel_id: Snowflake; endpoint: string; token: string; session_id: string }; // requesting session only; session_id = the VoiceState.session_id this token is for
+  VOICE_CONNECT_FAILED: { guild_id: Snowflake | null; channel_id: Snowflake; reason: VoiceConnectFailure }; // Vokko-only, requesting session only
+  VOICE_CHANNEL_STATUS_UPDATE: { id: Snowflake; guild_id: Snowflake; status: string | null }; // to viewers of the channel; cleared (null) when the channel empties
   THREAD_CREATE: Channel; // newly_created: true for a fresh thread; also sent when the user gains access to a private thread
   THREAD_UPDATE: Channel; // archive/lock/rename/tags/pin changes, auto-archive
   THREAD_DELETE: { id: Snowflake; guild_id: Snowflake; parent_id: Snowflake; type: ChannelType };

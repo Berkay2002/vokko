@@ -23,6 +23,8 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 argon2 = "0.5"
 rand = "0.9"
 sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
 time = { version = "0.3", features = ["formatting", "parsing"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

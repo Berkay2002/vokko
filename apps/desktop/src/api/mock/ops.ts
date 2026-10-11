@@ -1,6 +1,6 @@
 // Domain operations on the mock database, shared by the REST router, the seed and the dev hooks.
 
-import { ChannelType, MessageType, isThreadType, type Attachment, type PermissionOverwrite, type PresenceStatus, type Role, type User } from "../types";
+import { ChannelType, MessageType, isThreadType, VOICE_BITRATE_DEFAULT, type Attachment, type PermissionOverwrite, type PresenceStatus, type Role, type User } from "../types";
 import { ApiRequestError } from "../errors";
 import { hasBit } from "../permissions";
 import { canView, channelPermsOf, guildPermsOf } from "./access";
@@ -153,11 +153,11 @@ export function createGuildRecord(ownerId: string, name: string, iconUrl: string
   add({ ...base, id: text, type: ChannelType.GuildCategory, name: "Text Channels", position: 0, parent_id: null });
   add({ ...base, id: voice, type: ChannelType.GuildCategory, name: "Voice Channels", position: 1, parent_id: null });
   add({ ...base, id: general, type: ChannelType.GuildText, name: "general", position: 0, parent_id: text });
-  add({ ...base, id: generalVoice, type: ChannelType.GuildVoice, name: "General", position: 0, parent_id: voice });
+  add({ ...base, id: generalVoice, type: ChannelType.GuildVoice, name: "General", position: 0, parent_id: voice, bitrate: VOICE_BITRATE_DEFAULT, user_limit: 0, status: null });
   return id;
 }
 
-export function addChannel(guildId: string, init: { name: string; type: ChannelType; parent_id?: string | null; topic?: string | null; id?: string; permission_overwrites?: PermissionOverwrite[] }): MockChannel {
+export function addChannel(guildId: string, init: { name: string; type: ChannelType; parent_id?: string | null; topic?: string | null; id?: string; permission_overwrites?: PermissionOverwrite[]; bitrate?: number; user_limit?: number }): MockChannel {
   const siblings = [...db.channels.values()].filter(c => c.guild_id === guildId && c.parent_id === (init.parent_id ?? null) && c.type === init.type);
   const channel: MockChannel = {
     id: init.id ?? nextId(),
@@ -169,6 +169,7 @@ export function addChannel(guildId: string, init: { name: string; type: ChannelT
     parent_id: init.parent_id ?? null,
     last_message_id: null,
     permission_overwrites: (init.permission_overwrites ?? (init.parent_id ? db.channels.get(init.parent_id)?.permission_overwrites : undefined) ?? []).map(o => ({ ...o })),
+    ...(init.type === ChannelType.GuildVoice ? { bitrate: init.bitrate ?? VOICE_BITRATE_DEFAULT, user_limit: init.user_limit ?? 0, status: null } : {}),
   };
   db.channels.set(channel.id, channel);
   return channel;

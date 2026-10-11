@@ -1,0 +1,241 @@
+/* Voice: connected users in the channel list, the RTC panel above the user panel, the user-volume menu row. */
+
+:root {
+  --status-speaking: var(--icon-voice-speaking, #3d9e60);
+  --voice-panel-height: 52px;
+}
+
+/* ---- users under a voice channel ---- */
+.voice-user {
+  cursor: pointer;
+}
+
+.voice-user-avatar {
+  position: relative;
+  display: flex;
+  flex: none;
+  border-radius: 50%;
+}
+
+/* Speaking ring: drawn outside the avatar so the layout never moves. */
+.voice-user-avatar::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--status-speaking);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  pointer-events: none;
+}
+
+.voice-user.speaking .voice-user-avatar::after {
+  opacity: 1;
+}
+
+.voice-user.speaking .voice-occupant-name {
+  color: var(--interactive-text-active, var(--text-strong));
+}
+
+.voice-user .voice-occupant-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.voice-user-icons {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--interactive-icon-default);
+}
+
+.voice-user-icon {
+  display: flex;
+}
+
+.voice-user-icon.server {
+  color: var(--icon-voice-muted);
+}
+
+/* user_limit pill: "02 | 05", red with a lock when full */
+.voice-limit {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0;
+  margin-left: auto;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-limit-count,
+.voice-limit-max {
+  padding: 0 4px;
+}
+
+.voice-limit-count {
+  background: var(--background-mod-subtle, rgba(255, 255, 255, 0.06));
+  color: var(--text-muted);
+}
+
+.voice-limit-max {
+  background: var(--background-mod-strong, rgba(255, 255, 255, 0.12));
+  color: var(--text-default, var(--text-strong));
+}
+
+.voice-limit.full {
+  gap: 2px;
+  color: var(--icon-voice-muted);
+}
+
+.voice-limit.full .voice-limit-count {
+  color: var(--icon-voice-muted);
+}
+
+/* ---- RTC panel above the user panel ---- */
+.voice-panel {
+  position: absolute;
+  left: 8px;
+  bottom: calc(8px + var(--user-panel-height) + 4px);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(var(--rail-width) + var(--sidebar-width) - 16px);
+  min-height: var(--voice-panel-height);
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--background-base-lowest);
+}
+
+/* Keep the bottom of the channel list and the rail reachable while the panel is up. */
+.app-body:has(.voice-panel) .sidebar-scroller,
+.app-body:has(.voice-panel) .server-rail {
+  padding-bottom: calc(74px + var(--voice-panel-height) + 4px);
+}
+
+.voice-panel-info {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.voice-panel-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.voice-panel-status.ok {
+  color: var(--icon-voice-connected);
+}
+
+.voice-panel-status.ok.q-poor,
+.voice-panel-status.ok.q-lost,
+.voice-panel-status.warn,
+.voice-panel-status.pending {
+  color: var(--text-feedback-warning, #f0b232);
+}
+
+.voice-panel-status.error {
+  color: var(--icon-voice-disconnected);
+}
+
+.voice-panel-where,
+.voice-panel-error {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.voice-panel-error {
+  white-space: normal;
+  color: var(--text-default, var(--text-muted));
+}
+
+.voice-panel-button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  color: var(--interactive-icon-default);
+}
+
+.voice-panel-button:hover {
+  background: var(--interactive-background-hover);
+  color: var(--interactive-icon-hover);
+}
+
+.voice-panel-button.danger:hover {
+  color: var(--status-danger);
+}
+
+/* ---- user volume row in the user context menu ---- */
+.context-menu-custom {
+  margin: 2px 8px;
+  padding: 6px 8px;
+}
+
+.voice-volume {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px 8px;
+  color: var(--interactive-text-default);
+  font-size: 14px;
+}
+
+.voice-volume-label {
+  grid-column: 1 / -1;
+}
+
+.voice-volume-range {
+  width: 100%;
+  accent-color: var(--brand-500);
+}
+
+.voice-volume-value {
+  min-width: 40px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-volume.muted .voice-volume-range {
+  opacity: 0.5;
+}
+
+/* ---- push-to-talk keybind (Voice & Video settings) ---- */
+.ptt-key {
+  min-width: 120px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--background-base-lowest);
+  color: var(--text-strong);
+  font-family: inherit;
+  font-size: 14px;
+  text-align: center;
+}
+
+.ptt-key.recording {
+  border-color: var(--status-danger);
+  color: var(--status-danger);
+}

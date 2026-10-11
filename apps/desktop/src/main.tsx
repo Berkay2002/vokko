@@ -33,6 +33,7 @@ import "./styles/invite.css";
 import "./styles/responsive.css";
 import "./ui/prefs";
 import "./search";
+import "./voice";
 
 bootstrap();
 startNotify();

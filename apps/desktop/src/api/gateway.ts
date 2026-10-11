@@ -1,6 +1,6 @@
 import { GATEWAY_URL, MOCK } from "./config";
 import { MockSocket } from "./mock";
-import { GatewayOp, type GatewayEvents, type GatewayPayload } from "./types";
+import { GatewayOp, type GatewayEvents, type GatewayPayload, type VoiceStateUpdateCommand } from "./types";
 
 export type GatewayStatus = "disconnected" | "connecting" | "ready" | "reconnecting";
 
@@ -90,6 +90,11 @@ class GatewayClient {
       const frame: GatewayPayload = { op, d, s: null, t: null };
       this.socket.send(JSON.stringify(frame));
     }
+  }
+
+  /** op 4: join, move, leave (`channel_id: null`) or toggle self mute/deafen. Dropped while the socket is down (re-sent after READY). */
+  sendVoiceStateUpdate(command: VoiceStateUpdateCommand): void {
+    this.send(GatewayOp.VoiceStateUpdate, command);
   }
 
   on<K extends keyof GatewayEvents>(t: K, fn: (d: GatewayEvents[K]) => void): () => void {

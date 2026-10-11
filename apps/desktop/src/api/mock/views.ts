@@ -5,6 +5,7 @@ import { compareIds } from "../snowflake";
 import { canView } from "./access";
 import { db, sortedMessages, userOf, type MockChannel, type MockMessage } from "./db";
 import { memberProfileFields } from "./perks";
+import { voiceStatesFor } from "./voice";
 
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
   const guild = m.guild_id ? db.guilds.get(m.guild_id) : undefined;
@@ -98,7 +99,7 @@ export function guildPayload(guildId: string, viewerId: string): GatewayEvents["
     const p = db.accounts.get(m.user.id)?.presence;
     return p && p.status !== "offline" ? [{ ...p }] : [];
   });
-  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, presences };
+  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, presences, voice_states: voiceStatesFor(guildId, viewerId) };
 }
 
 export function guildIdsFor(viewerId: string): string[] {
@@ -141,5 +142,6 @@ export function readyFor(viewerId: string, sessionId: string): ReadyEvent {
     presences,
     read_states: [...account.readStates.values()],
     relationships: relationshipsFor(viewerId).filter(r => r.type !== RelationshipType.Blocked || true),
+    media: { voice_enabled: true, voice_bitrate_ceiling: 128000, screenshare_qualities: ["720p30"], video_enabled: false },
   };
 }

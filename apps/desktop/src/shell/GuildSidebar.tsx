@@ -2,11 +2,10 @@ import { useMemo, useState, type CSSProperties } from "react";
 import { intToHex } from "../perks/catalog";
 import { NavLink, useLocation } from "react-router";
 import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Megaphone, MessagesSquare, Plus, Radio, Settings, UserPlus, Volume2 } from "lucide-react";
-import { channelMentionCount, displayName, isChannelUnread, useStore } from "../api/store";
-import { useVoiceOccupants } from "../api/voice";
+import { channelMentionCount, isChannelUnread, useStore } from "../api/store";
+import { VoiceChannelBadge, VoiceChannelUsers, joinVoiceChannel } from "../voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
 import { Popout, Tooltip, useContextMenu } from "../ui";
-import { Avatar } from "./Avatar";
 import { groupChannels } from "./channels";
 import { useIsMuted, useLocalState } from "./localState";
 import { channelContextItems, guildDropdownItems } from "./menus";
@@ -25,27 +24,6 @@ function loadCollapsed(): Set<Snowflake> {
   } catch {
     return new Set();
   }
-}
-
-function VoiceOccupants({ channelId, guildId }: { channelId: Snowflake; guildId: Snowflake }) {
-  const occupants = useVoiceOccupants(channelId);
-  const users = useStore(s => s.users);
-  const members = useStore(s => s.members[guildId]);
-  if (occupants.length === 0) return null;
-  return (
-    <ul className="voice-occupants">
-      {occupants.map(id => {
-        const user = users[id];
-        if (!user) return null;
-        return (
-          <li key={id} className="voice-occupant">
-            <Avatar user={user} size={24} />
-            <span className="voice-occupant-name">{displayName(user, members?.[id])}</span>
-          </li>
-        );
-      })}
-    </ul>
-  );
 }
 
 function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
@@ -95,9 +73,18 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
   return (
     <li className="channel-row-wrap">
       {voice ? (
-        <div className={className} role="button" tabIndex={0} aria-label={`${channel.name} voice channel`} onContextMenu={e => menu.open(e, items())}>
+        <div
+          className={className}
+          role="button"
+          tabIndex={0}
+          aria-label={`${channel.name} voice channel`}
+          onClick={e => !(e.target as HTMLElement).closest(".channel-actions") && joinVoiceChannel(channel)}
+          onKeyDown={e => e.key === "Enter" && e.target === e.currentTarget && joinVoiceChannel(channel)}
+          onContextMenu={e => menu.open(e, items())}
+        >
           {icon}
           <span className="channel-name">{channel.name}</span>
+          <VoiceChannelBadge channel={channel} />
           {actions}
         </div>
       ) : (
@@ -108,7 +95,7 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
           {actions}
         </NavLink>
       )}
-      {voice && <VoiceOccupants channelId={channel.id} guildId={guild.id} />}
+      {voice && <VoiceChannelUsers channel={channel} guildId={guild.id} />}
       {!voice && <ChannelThreads channel={channel} />}
     </li>
   );

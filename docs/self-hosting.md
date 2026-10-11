@@ -54,11 +54,99 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_TRUST_PROXY` | off | `on`/`1`/`true`/`yes`: take the client address from the last `X-Forwarded-For` entry. Only behind a proxy that sets it (the bundled Caddy does), otherwise clients can spoof their address and dodge rate limits. |
 | `VOKKO_CORS_ORIGINS` | unset (localhost on any port) | Comma-separated exact origins allowed to call the API from a browser, e.g. `https://chat.example.com,https://web.example.com`. Scheme and host (and port if not default), no path, no `*`. When set it replaces the localhost defaults; the Tauri origins stay allowed. Bad entries stop the server at start. |
 | `VOKKO_REGISTRATION` | `open` | `closed`: `POST /api/v1/auth/register` answers 403 (code 40002). Existing accounts, login and `seed` are unaffected, so create the accounts you need first, then close it. Anything else than `open`/`closed` stops the server at start. |
+| `VOKKO_LIVEKIT_URL` | unset | Public LiveKit signal URL handed to clients, e.g. `wss://lk.example.com`. Voice needs this and the two below; with none of them set voice is off (joining a voice channel fails with `media_unavailable`); setting only some stops the server at start. See [Voice](#voice-livekit). |
+| `VOKKO_LIVEKIT_API_KEY` | unset | LiveKit API key name (the key in `livekit.yaml` `keys:`). |
+| `VOKKO_LIVEKIT_API_SECRET` | unset | Its secret. Only vokko-server holds it; it signs every voice token and verifies LiveKit's webhooks. |
+| `VOKKO_LIVEKIT_API_URL` | derived from `VOKKO_LIVEKIT_URL` (`wss` → `https`) | Where vokko-server reaches LiveKit's RoomService, e.g. `http://127.0.0.1:7880` when both run on one host. |
+| `VOKKO_VOICE_BITRATE_MAX` | `128000` | Highest voice channel bitrate in bps (8000-384000). New channels start at 64000. |
 | `RUST_LOG` | `vokko_server=info,warn` | Log filter. |
 
 Compose-only variables (`deploy/.env.example`): `POSTGRES_PASSWORD`, `VOKKO_SERVER_LISTEN` (host publish address for the server, default `127.0.0.1:8710`), `VOKKO_SITE_ADDRESS`, `VOKKO_WEB_HTTP_PORT`, `VOKKO_WEB_HTTPS_PORT`.
 
 The binary has two subcommands: `serve` (default) and `seed`. Both connect and migrate first.
+
+## Voice (LiveKit)
+
+Voice channels use a self-hosted [LiveKit](https://livekit.io) server (Apache-2.0, a single Go binary). Media flows between clients and LiveKit; vokko-server only checks permissions, mints short-lived tokens and listens to LiveKit's webhooks. Clients need `https` for the API (browsers only allow microphone access in a secure context; plain HTTP works on `localhost` only), `wss://` to LiveKit's signal port, and direct UDP/TCP to its media ports.
+
+Ports (forward the "yes" rows on your router):
+
+| Port | Proto | Purpose | Forward |
+| --- | --- | --- | --- |
+| 443 | TCP | Caddy: API, gateway, LiveKit signal (`lk.example.com` → 7880) | yes |
+| 7881 | TCP | ICE over TCP (fallback when UDP is blocked) | yes |
+| 7882 | UDP | all WebRTC media on one port | yes |
+| 3478 | UDP | embedded TURN/UDP | yes |
+| 5349 | TCP | embedded TURN/TLS (strict networks) | optional |
+| 7880 | TCP | LiveKit HTTP/websocket + RoomService, behind Caddy only | no |
+
+Behind CGNAT (no public IPv4) calls from outside the LAN cannot reach a home server; run LiveKit (or only its TURN) on a small VPS instead.
+
+`livekit.yaml` (key names follow LiveKit's sample config; check them against the release you install):
+
+```yaml
+port: 7880
+bind_addresses: ["0.0.0.0"]
+rtc:
+  tcp_port: 7881
+  udp_port: 7882            # single muxed UDP port: easy to forward
+  use_external_ip: true     # discover the public IP via STUN, or set node_ip
+keys:
+  vokko: <a long random secret>   # name = VOKKO_LIVEKIT_API_KEY, value = VOKKO_LIVEKIT_API_SECRET
+room:
+  auto_create: true
+  empty_timeout: 60
+  departure_timeout: 20
+  max_participants: 100
+audio:
+  update_interval: 200      # speaking rings follow speech within ~200 ms
+turn:
+  enabled: true
+  domain: turn.example.com
+  udp_port: 3478
+  tls_port: 5349
+  cert_file: /path/to/turn.crt
+  key_file: /path/to/turn.key
+webhook:
+  api_key: vokko
+  urls: ["http://127.0.0.1:8710/internal/livekit/webhook"]
+limit:
+  bytes_per_sec: 12500000   # ~100 Mbit/s egress backstop; set it below your upload bandwidth
+```
+
+The webhook URL is how LiveKit reaches vokko-server, not a public URL: keep `/internal/*` off the reverse proxy (the sample Caddyfile only forwards `/api/*` and `/gateway`). Webhooks are signed with the API secret; anything unsigned gets 401.
+
+**macOS (recommended for a home server): run LiveKit natively.** Docker Desktop on macOS forwards UDP through a VM in userspace, which adds latency and CPU for every packet. Install the native binary (`brew install livekit`, or the release binary from GitHub) and run it under launchd, keeping vokko-server and PostgreSQL in Docker:
+
+```sh
+livekit-server --config /usr/local/etc/livekit.yaml     # test in the foreground first
+```
+
+A minimal `~/Library/LaunchAgents/io.livekit.server.plist` runs the same command with `RunAtLoad` and `KeepAlive` set to true (`launchctl load` it). vokko-server in Docker reaches the host's LiveKit at `http://host.docker.internal:7880` (`VOKKO_LIVEKIT_API_URL`), and LiveKit reaches vokko-server's published port at `http://127.0.0.1:8710/internal/livekit/webhook`.
+
+**Linux: Docker Compose alternative.** Add to `deploy/docker-compose.yml` (host networking avoids Docker's UDP proxy):
+
+```yaml
+services:
+  livekit:
+    image: livekit/livekit-server:v1.9      # pin the exact tag you tested
+    command: --config /etc/livekit.yaml
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+  server:
+    environment:
+      VOKKO_LIVEKIT_URL: wss://lk.example.com
+      VOKKO_LIVEKIT_API_URL: http://host.docker.internal:7880
+      VOKKO_LIVEKIT_API_KEY: vokko
+      VOKKO_LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+```
+
+Caddy for the signal websocket: `lk.example.com { reverse_proxy 127.0.0.1:7880 }`. TURN needs its own hostname with a certificate (`turn.example.com`; point `cert_file`/`key_file` at a copy of Caddy's certificate).
+
+Sizing: the SFU forwards and never transcodes, so CPU stays low (a 10-person voice room is well under 10 % of a core); upload bandwidth is the limit. Each speaker costs about 70 kbit/s per listener (silence ~1 kbit/s), so a 20 Mbit/s uplink carries dozens of voice users. Voice states live in vokko-server's memory and are rebuilt from LiveKit after a restart, so restarting vokko-server does not drop calls.
 
 ## Backups
 
@@ -118,6 +206,7 @@ Serve the web client from the same origin as the API where you can: same-origin 
 ## Not production-ready yet
 
 - The bundled container healthcheck still only proves the port accepts connections; `GET /healthz` (see above) is the real check, but `deploy/` does not use it yet.
+- Voice V1 has no server mute/deafen, moves or DM calls yet; camera and screen share are not available (later milestones in `docs/design/voice.md`).
 - Single instance only: the gateway hub, replay buffers, presence and rate limiters live in process memory. No horizontal scaling; a restart drops every websocket (clients resume or reconnect).
 - Uploads are on local disk (no S3 or object storage), and there is no built-in backup, retention or admin tooling.
 - Registration is open by default, and there is no email verification or password reset. Set `VOKKO_REGISTRATION=closed` once your accounts exist, or keep the server private (VPN/LAN, or an auth layer in the proxy).

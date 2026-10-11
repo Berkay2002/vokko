@@ -193,6 +193,7 @@ async fn delete_member(tx: &mut Transaction<'_, Postgres>, guild_id: i64, user_i
 
 /// What follows the member row going away: read states, GUILD_DELETE to them, GUILD_MEMBER_REMOVE to the rest.
 async fn announce_removal(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
+    crate::voice::state::member_removed(state, guild_id, user_id).await;
     // The user no longer shows this guild's tag: forget the choice (so it does not reappear on a rejoin) and tell their audience.
     let dropped_tag: Option<(i64,)> = sqlx::query_as("UPDATE users SET primary_guild_id = NULL WHERE id = $1 AND primary_guild_id = $2 RETURNING id")
         .bind(user_id)

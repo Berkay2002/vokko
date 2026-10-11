@@ -14,7 +14,9 @@ use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use vokko_protocol::api::{GatewayEvent, GatewayOp, GatewayPayload, Hello, Identify, PresenceUpdateRequest, ReadState, ReadyEvent, Resume, Snowflake};
+use vokko_protocol::api::{
+    GatewayEvent, GatewayOp, GatewayPayload, Hello, Identify, PresenceUpdateRequest, ReadState, ReadyEvent, Resume, Snowflake, VoiceStateUpdateCommand,
+};
 
 use crate::auth::{hash_token, random_hex, user_for_token};
 use crate::error::{ApiErr, ApiResult};
@@ -25,6 +27,7 @@ use crate::presence;
 use crate::routes::relationships::{open_dms, relationships_of};
 use crate::state::AppState;
 use crate::store;
+use crate::voice;
 
 type Sink = SplitSink<WebSocket, Message>;
 type Stream = SplitStream<WebSocket>;
@@ -41,6 +44,9 @@ pub const MAX_CUSTOM_STATUS_CHARS: usize = 128;
 /// Presence updates (op 3) allowed per session per window.
 const PRESENCE_UPDATES: usize = 5;
 const PRESENCE_WINDOW: Duration = Duration::from_secs(60);
+/// Voice state updates (op 4, mute toggles included) allowed per session per window.
+const VOICE_UPDATES: usize = 30;
+const VOICE_WINDOW: Duration = Duration::from_secs(60);
 
 /// A reserved pre-auth socket of one client address, released on drop.
 struct PreauthSlot {
@@ -111,7 +117,9 @@ async fn handle(state: AppState, socket: WebSocket, slot: PreauthSlot) {
         let _ = presence::connected(&state, user_id).await;
     }
     run(&state, &session, &mut writer, &mut stream, &mut receiver).await;
-    session.detach(generation);
+    if session.detach(generation) {
+        voice::state::gateway_detached(&state, session.id.clone());
+    }
     if state.hub.connection_closed(user_id) {
         let _ = presence::disconnected(&state, user_id).await;
     }
@@ -220,6 +228,7 @@ async fn run(state: &AppState, session: &Arc<Session>, writer: &mut Writer, stre
     let mut beat_since_tick = true;
     let mut missed = 0_u32;
     let mut presence_updates = Allowance::new(PRESENCE_UPDATES, PRESENCE_WINDOW);
+    let mut voice_updates = Allowance::new(VOICE_UPDATES, VOICE_WINDOW);
     loop {
         tokio::select! {
             code = receiver.signal.wait() => {
@@ -247,6 +256,14 @@ async fn run(state: &AppState, session: &Arc<Session>, writer: &mut Writer, stre
                                 break;
                             }
                             let _ = presence::update(state, session.user_id, Some(update.status), Some(update.custom_status), true).await;
+                        }
+                        GatewayOp::VoiceStateUpdate => {
+                            let Ok(command) = serde_json::from_value::<VoiceStateUpdateCommand>(payload.d) else { continue };
+                            if !voice_updates.allow(Instant::now()) {
+                                writer.close(CLOSE_RATE_LIMITED).await;
+                                break;
+                            }
+                            voice::handle_command(state, session, command).await;
                         }
                         _ => {}
                     }
@@ -337,7 +354,17 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
         }
     }
 
-    Ok(ReadyEvent { v: 1, user, session_id: session_id.to_owned(), guilds, private_channels, presences, read_states, relationships })
+    Ok(ReadyEvent {
+        v: 1,
+        user,
+        session_id: session_id.to_owned(),
+        guilds,
+        private_channels,
+        presences,
+        read_states,
+        relationships,
+        media: voice::media_config(&state.config),
+    })
 }
 
 #[cfg(test)]
