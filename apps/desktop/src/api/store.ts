@@ -314,8 +314,10 @@ export function wireStoreToGateway(): void {
   gateway.on("CHANNEL_UPDATE", c => s().upsertChannel(c));
   gateway.on("CHANNEL_DELETE", c => s().removeChannel(c.id));
   gateway.on("GUILD_CREATE", entry => {
-    const { channels, members, member_count, ...guild } = entry;
+    const { channels, members, member_count, presences, ...guild } = entry;
     const state = s();
+    const nextPresences = { ...state.presences };
+    for (const p of presences ?? []) nextPresences[p.user_id] = p;
     const nextChannels = { ...state.channels };
     for (const channel of channels) nextChannels[channel.id] = channel;
     const memberMap: Record<Snowflake, GuildMember> = {};
@@ -326,6 +328,7 @@ export function wireStoreToGateway(): void {
       channels: nextChannels,
       members: { ...state.members, [guild.id]: memberMap },
       memberCounts: { ...state.memberCounts, [guild.id]: member_count },
+      presences: nextPresences,
     });
     state.cacheUsers(members.map(m => m.user));
   });
