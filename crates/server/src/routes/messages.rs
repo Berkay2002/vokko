@@ -6,11 +6,17 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post, put};
 use serde::Deserialize;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::permissions::{ATTACH_FILES, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES};
-use vokko_protocol::api::{CreateMessageRequest, EditMessageRequest, GatewayEvent, Message, MessageAck, MessageDelete, MessageType, Snowflake, TypingStart};
+use vokko_protocol::api::{
+    AckBulkRequest, AllowedMentions, CreateMessageRequest, EditMessageRequest, GatewayEvent, Message, MessageAck, MessageDelete, MessageType, PinnedMessage,
+    PinnedMessagesPage, Snowflake, TypingStart,
+};
 
 use crate::access::{self, ChannelAccess, channel_access};
 use crate::auth::AuthUser;
+use crate::config::MAX_ATTACHMENTS_PER_MESSAGE;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, ApiQuery, parse_id};
 use crate::ids::now_ms;
@@ -19,15 +25,16 @@ use crate::state::AppState;
 use crate::store::{self, ChannelRow, MESSAGE_SELECT, MessageRow, MessageView};
 
 pub const MAX_CONTENT_CHARS: usize = 2000;
-const MAX_PINS: i64 = 50;
+const MAX_PINS: i64 = 250;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/channels/{id}/messages", get(list_messages).post(create_message))
         .route("/channels/{id}/messages/{mid}", axum::routing::patch(edit_message).delete(delete_message))
         .route("/channels/{id}/messages/{mid}/ack", post(ack_message))
-        .route("/channels/{id}/pins", get(list_pins))
-        .route("/channels/{id}/pins/{mid}", put(pin_message).delete(unpin_message))
+        .route("/channels/{id}/messages/pins", get(list_pins))
+        .route("/channels/{id}/messages/pins/{mid}", put(pin_message).delete(unpin_message))
+        .route("/read-states/ack-bulk", post(ack_bulk))
         .route("/channels/{id}/typing", post(typing))
 }
 
@@ -134,6 +141,29 @@ pub struct Draft {
     pub attachments: Vec<i64>,
     pub nonce: Option<String>,
     pub mentions: Resolved,
+    /// Whether the replied-to author counts as mentioned (`allowed_mentions.replied_user`, default true).
+    pub ping_replied: bool,
+}
+
+/// Applies `allowed_mentions` to what the content parsed to. Omitted = everything pings.
+fn apply_allowed(resolved: Resolved, allowed: Option<&AllowedMentions>) -> Resolved {
+    let Some(allowed) = allowed else { return resolved };
+    let parse = |kind: &str| match &allowed.parse {
+        Some(list) => list.iter().any(|entry| entry == kind),
+        // `{}` and `{replied_user}` keep the defaults; explicit user/role lists narrow their kind.
+        None => match kind {
+            "users" => allowed.users.is_none(),
+            "roles" => allowed.roles.is_none(),
+            _ => true,
+        },
+    };
+    let listed = |list: &Option<Vec<Snowflake>>| -> Vec<i64> { list.iter().flatten().map(|id| id.db()).collect() };
+    let (allowed_users, allowed_roles) = (listed(&allowed.users), listed(&allowed.roles));
+    Resolved {
+        users: resolved.users.into_iter().filter(|id| parse("users") || allowed_users.contains(id)).collect(),
+        roles: resolved.roles.into_iter().filter(|id| parse("roles") || allowed_roles.contains(id)).collect(),
+        everyone: resolved.everyone && parse("everyone"),
+    }
 }
 
 /// Stores a message, updates read states / unread counters, reopens closed DMs and fans MESSAGE_CREATE out.
@@ -146,7 +176,7 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
     if let Some(reference) = draft.reference {
         let author: Option<(i64,)> = sqlx::query_as("SELECT author_id FROM messages WHERE id = $1").bind(reference).fetch_optional(&state.db).await?;
         if let Some((replied,)) = author {
-            if replied != author_id && !mentioned.contains(&replied) && viewers.contains(&replied) {
+            if draft.ping_replied && replied != author_id && !mentioned.contains(&replied) && viewers.contains(&replied) {
                 mentioned.push(replied);
             }
         }
@@ -312,7 +342,7 @@ async fn create_message(
     let attachments: Vec<i64> = body.attachment_ids.unwrap_or_default().into_iter().map(Snowflake::db).collect();
     if !attachments.is_empty() {
         access.require(ATTACH_FILES)?;
-        if attachments.len() > 10 {
+        if attachments.len() > MAX_ATTACHMENTS_PER_MESSAGE {
             return Err(ApiErr::invalid("attachment_ids", "A message can have at most 10 attachments."));
         }
     }
@@ -331,9 +361,10 @@ async fn create_message(
         }
         None => None,
     };
-    let mentions = resolve_mentions(&state, &access, parse_mentions(&content)).await?;
+    let mentions = apply_allowed(resolve_mentions(&state, &access, parse_mentions(&content)).await?, body.allowed_mentions.as_ref());
+    let ping_replied = body.allowed_mentions.as_ref().and_then(|allowed| allowed.replied_user).unwrap_or(true);
     let kind = if reference.is_some() { MessageType::Reply } else { MessageType::Default };
-    let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions };
+    let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied };
     let view = insert_message(&state, &access.channel, user_id, draft).await?;
     Ok(Json(view.for_viewer(user_id)))
 }
@@ -427,13 +458,49 @@ async fn delete_message(State(state): State<AppState>, AuthUser(user_id): AuthUs
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn list_pins(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<Vec<Message>>> {
+#[derive(Deserialize)]
+struct PinsQuery {
+    limit: Option<i64>,
+    before: Option<String>,
+}
+
+/// Newest pin first; `before` is the `pinned_at` of the last item of the previous page.
+async fn list_pins(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(id): Path<String>,
+    ApiQuery(query): ApiQuery<PinsQuery>,
+) -> ApiResult<Json<PinnedMessagesPage>> {
     let id = channel_id(&id)?;
     channel_access(&state, user_id, id).await?.require(READ_MESSAGE_HISTORY)?;
-    let rows: Vec<MessageRow> =
-        sqlx::query_as(&format!("{MESSAGE_SELECT} WHERE m.channel_id = $1 AND m.pinned ORDER BY m.id DESC")).bind(id).fetch_all(&state.db).await?;
-    let views = store::load_messages(&state, rows, Some(user_id)).await?;
-    Ok(Json(views.into_iter().map(|view| view.message).collect()))
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=50).contains(&limit) {
+        return Err(ApiErr::invalid("limit", "Must be between 1 and 50."));
+    }
+    let before = match query.before.as_deref() {
+        Some(raw) => Some(OffsetDateTime::parse(raw, &Rfc3339).map_err(|_| ApiErr::invalid("before", "Must be an ISO 8601 timestamp."))?),
+        None => None,
+    };
+    let mut pins: Vec<(i64, OffsetDateTime)> = sqlx::query_as(
+        "SELECT id, pinned_at FROM messages WHERE channel_id = $1 AND pinned AND pinned_at IS NOT NULL AND ($2::timestamptz IS NULL OR pinned_at < $2) \
+         ORDER BY pinned_at DESC, id DESC LIMIT $3",
+    )
+    .bind(id)
+    .bind(before)
+    .bind(limit + 1)
+    .fetch_all(&state.db)
+    .await?;
+    let has_more = pins.len() as i64 > limit;
+    pins.truncate(limit as usize);
+    let ids: Vec<i64> = pins.iter().map(|(message, _)| *message).collect();
+    let rows: Vec<MessageRow> = sqlx::query_as(&format!("{MESSAGE_SELECT} WHERE m.id = ANY($1)")).bind(&ids).fetch_all(&state.db).await?;
+    let mut messages: std::collections::HashMap<i64, Message> =
+        store::load_messages(&state, rows, Some(user_id)).await?.into_iter().map(|view| (view.message.id.db(), view.message)).collect();
+    let items = pins
+        .into_iter()
+        .filter_map(|(message, pinned_at)| messages.remove(&message).map(|message| PinnedMessage { message, pinned_at: store::iso(pinned_at) }))
+        .collect();
+    Ok(Json(PinnedMessagesPage { items, has_more }))
 }
 
 fn can_pin(access: &ChannelAccess) -> bool {
@@ -453,9 +520,9 @@ async fn pin_message(State(state): State<AppState>, AuthUser(user_id): AuthUser,
     }
     let (pins,): (i64,) = sqlx::query_as("SELECT count(*) FROM messages WHERE channel_id = $1 AND pinned").bind(id).fetch_one(&state.db).await?;
     if pins >= MAX_PINS {
-        return Err(ApiErr::conflict(30003, "Maximum number of pins reached for the channel (50)"));
+        return Err(ApiErr::conflict(30003, "Maximum number of pins reached for the channel (250)"));
     }
-    sqlx::query("UPDATE messages SET pinned = TRUE WHERE id = $1").bind(mid).execute(&state.db).await?;
+    sqlx::query("UPDATE messages SET pinned = TRUE, pinned_at = now() WHERE id = $1").bind(mid).execute(&state.db).await?;
     broadcast_update(&state, &access.channel, mid).await?;
     let notice = Draft {
         content: String::new(),
@@ -464,6 +531,7 @@ async fn pin_message(State(state): State<AppState>, AuthUser(user_id): AuthUser,
         attachments: Vec::new(),
         nonce: None,
         mentions: Resolved { users: Vec::new(), roles: Vec::new(), everyone: false },
+        ping_replied: false,
     };
     insert_message(&state, &access.channel, user_id, notice).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -478,7 +546,7 @@ async fn unpin_message(State(state): State<AppState>, AuthUser(user_id): AuthUse
     }
     let row = message_in_channel(&state, id, mid).await?;
     if row.pinned {
-        sqlx::query("UPDATE messages SET pinned = FALSE WHERE id = $1").bind(mid).execute(&state.db).await?;
+        sqlx::query("UPDATE messages SET pinned = FALSE, pinned_at = NULL WHERE id = $1").bind(mid).execute(&state.db).await?;
         broadcast_update(&state, &access.channel, mid).await?;
     }
     Ok(StatusCode::NO_CONTENT)
@@ -494,11 +562,8 @@ async fn typing(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn ack_message(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, mid)): Path<(String, String)>) -> ApiResult<StatusCode> {
-    let id = channel_id(&id)?;
-    let mid = message_id(&mid)?;
-    channel_access(&state, user_id, id).await?;
-    message_in_channel(&state, id, mid).await?;
+/// Moves a read state forward and tells the user's other sessions.
+async fn ack(state: &AppState, user_id: i64, id: i64, mid: i64) -> ApiResult<()> {
     // The mention counter only resets when the user has caught up with the newest message.
     sqlx::query(
         "INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES ($1, $2, $3, 0) \
@@ -513,6 +578,29 @@ async fn ack_message(State(state): State<AppState>, AuthUser(user_id): AuthUser,
     .await?;
     let event = GatewayEvent::MessageAck(MessageAck { channel_id: Snowflake::from(id), message_id: Snowflake::from(mid) });
     state.hub.send(&[user_id], &event);
+    Ok(())
+}
+
+async fn ack_message(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, mid)): Path<(String, String)>) -> ApiResult<StatusCode> {
+    let id = channel_id(&id)?;
+    let mid = message_id(&mid)?;
+    channel_access(&state, user_id, id).await?;
+    message_in_channel(&state, id, mid).await?;
+    ack(&state, user_id, id, mid).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// "Mark server as read": entries the caller cannot see, or whose message is gone, are skipped.
+async fn ack_bulk(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiJson(body): ApiJson<AckBulkRequest>) -> ApiResult<StatusCode> {
+    if body.read_states.len() > 200 {
+        return Err(ApiErr::invalid("read_states", "At most 200 read states per request."));
+    }
+    for entry in body.read_states {
+        let (id, mid) = (entry.channel_id.db(), entry.message_id.db());
+        if channel_access(&state, user_id, id).await.is_ok() && message_in_channel(&state, id, mid).await.is_ok() {
+            ack(&state, user_id, id, mid).await?;
+        }
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

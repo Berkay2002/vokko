@@ -37,6 +37,11 @@ impl TestApp {
     }
 
     pub async fn with_heartbeat(heartbeat_interval_ms: u64) -> Self {
+        Self::with_config(|config| config.heartbeat_interval_ms = heartbeat_interval_ms).await
+    }
+
+    /// `adjust` runs on a config with rate limiting disabled.
+    pub async fn with_config(adjust: impl FnOnce(&mut Config)) -> Self {
         let admin_options = PgConnectOptions::from_str(&test_database_url()).expect("valid TEST_DATABASE_URL");
         let db_name = format!("vokko_test_{}_{}", unix_seconds(), vokko_server::auth::random_hex(4));
         assert!(db_name.starts_with("vokko_test"));
@@ -48,7 +53,9 @@ impl TestApp {
         let data_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("target").join("test-data").join(&db_name);
         std::fs::create_dir_all(data_dir.join("attachments")).expect("data dir");
         let mut config = Config::new("unused".to_owned(), "127.0.0.1:0".to_owned(), data_dir.clone(), "http://test.local".to_owned());
-        config.heartbeat_interval_ms = heartbeat_interval_ms;
+        config.heartbeat_interval_ms = 60_000;
+        config.rate_limit = None;
+        adjust(&mut config);
         let state = AppState::new(pool, config);
         let router = vokko_server::router(state.clone());
         Self { state, router, admin_options, db_name, data_dir }

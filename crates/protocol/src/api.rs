@@ -352,6 +352,47 @@ pub struct CreateMessageRequest {
     pub message_reference: Option<MessageReferenceRequest>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachment_ids: Option<Vec<Snowflake>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_mentions: Option<AllowedMentions>,
+}
+
+/// Which mentions of a new message actually ping. Omitted entirely = everything is parsed and the replied-to author is pinged.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AllowedMentions {
+    /// Subset of `users`, `roles`, `everyone`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parse: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub users: Option<Vec<Snowflake>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roles: Option<Vec<Snowflake>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replied_user: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PinnedMessage {
+    pub message: Message,
+    pub pinned_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PinnedMessagesPage {
+    pub items: Vec<PinnedMessage>,
+    pub has_more: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RateLimitError {
+    pub message: String,
+    /// Seconds (float); also sent as the `Retry-After` header.
+    pub retry_after: f64,
+    pub global: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AckBulkRequest {
+    pub read_states: Vec<MessageAck>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -712,6 +753,10 @@ mod tests {
         round_trip::<AuthResponse>(json!({"token": "t", "user": user()}));
         round_trip::<CreateMessageRequest>(json!({"content": "x", "nonce": "1", "message_reference": {"message_id": "5"}, "attachment_ids": ["6"]}));
         round_trip::<EditMessageRequest>(json!({"content": "x"}));
+        round_trip::<CreateMessageRequest>(json!({"content": "x", "allowed_mentions": {"parse": ["users"], "users": ["5"], "replied_user": false}}));
+        round_trip::<AckBulkRequest>(json!({"read_states": [{"channel_id": "1", "message_id": "2"}]}));
+        round_trip::<RateLimitError>(json!({"message": "You are being rate limited.", "retry_after": 1.5, "global": false}));
+        round_trip::<PinnedMessagesPage>(json!({"items": [], "has_more": false}));
         round_trip::<ApiError>(json!({"code": 50035, "message": "Invalid Form Body", "errors": {"content": ["too long"]}}));
         round_trip::<ApiError>(json!({"code": 0, "message": "401: Unauthorized"}));
     }

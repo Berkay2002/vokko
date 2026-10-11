@@ -110,6 +110,7 @@ CREATE TABLE messages (
     content TEXT NOT NULL DEFAULT '',
     kind SMALLINT NOT NULL DEFAULT 0,
     pinned BOOLEAN NOT NULL DEFAULT FALSE,
+    pinned_at TIMESTAMPTZ,
     reference_message_id BIGINT,
     mention_everyone BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

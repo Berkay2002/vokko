@@ -139,11 +139,28 @@ async fn upload_and_serve_attachments() {
 #[tokio::test]
 async fn oversized_upload_is_rejected() {
     let (app, owner, _, channel, _) = setup().await;
-    let big = vec![b'a'; 25 * 1024 * 1024 + 1];
+    let big = vec![b'a'; 10 * 1024 * 1024 + 1];
     let (status, body) = upload(&app, &owner, &channel, "big.bin", "application/octet-stream", &big).await;
     assert_eq!(status, 413, "{body}");
     assert_eq!(body["code"], 40005);
     let ok = vec![b'a'; 1024 * 1024];
     let (status, _) = upload(&app, &owner, &channel, "ok.bin", "application/octet-stream", &ok).await;
     assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn ten_attachments_per_message() {
+    let (app, owner, _, channel, _) = setup().await;
+    let mut ids = Vec::new();
+    for index in 0..11 {
+        let (status, attachment) = upload(&app, &owner, &channel, &format!("p{index}.png"), "image/png", &png(2, 2)).await;
+        assert_eq!(status, 200);
+        ids.push(attachment["id"].clone());
+    }
+    let (status, _) = app.post(&format!("/channels/{channel}/messages"), &owner, json!({"attachment_ids": ids})).await;
+    assert_eq!(status, 400);
+    ids.pop();
+    let (status, message) = app.post(&format!("/channels/{channel}/messages"), &owner, json!({"attachment_ids": ids})).await;
+    assert_eq!(status, 200);
+    assert_eq!(message["attachments"].as_array().expect("attachments").len(), 10);
 }

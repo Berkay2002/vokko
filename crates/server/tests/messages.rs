@@ -53,7 +53,7 @@ async fn permission_denial_for_non_members() {
     for (label, (status, error)) in [
         ("list", s.app.get(&format!("{base}/messages"), &s.outsider).await),
         ("send", s.app.post(&format!("{base}/messages"), &s.outsider, json!({"content": "hi"})).await),
-        ("pins", s.app.get(&format!("{base}/pins"), &s.outsider).await),
+        ("pins", s.app.get(&format!("{base}/messages/pins"), &s.outsider).await),
         ("typing", s.app.post(&format!("{base}/typing"), &s.outsider, json!({})).await),
         ("edit", s.app.patch(&format!("{base}/messages/{mid}"), &s.outsider, json!({"content": "x"})).await),
         ("delete", s.app.delete(&format!("{base}/messages/{mid}"), &s.outsider).await),
@@ -68,7 +68,7 @@ async fn permission_denial_for_non_members() {
     let (status, error) = s.app.delete(&format!("{base}/messages/{mid}"), &s.member).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(error["code"], 50013);
-    assert_eq!(s.app.put(&format!("{base}/pins/{mid}"), &s.member).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(s.app.put(&format!("{base}/messages/pins/{mid}"), &s.member).await.0, StatusCode::FORBIDDEN);
     // SEND_MESSAGES denied by overwrite
     sqlx::query("INSERT INTO permission_overwrites (channel_id, target_id, target_type, allow, deny) VALUES ($1, $2, 0, 0, $3)")
         .bind(s.channel.parse::<i64>().expect("id"))
@@ -203,15 +203,17 @@ async fn pins_read_state_and_mention_counts() {
     let first = send(&s, &s.owner, "pin me").await;
     let fid = first["id"].as_str().expect("id").to_owned();
 
-    assert_eq!(s.app.put(&format!("{base}/pins/{fid}"), &s.owner).await.0, StatusCode::NO_CONTENT);
-    let (_, pins) = s.app.get(&format!("{base}/pins"), &s.member).await;
-    assert_eq!(pins.as_array().expect("pins").len(), 1);
-    assert_eq!(pins[0]["pinned"], true);
+    assert_eq!(s.app.put(&format!("{base}/messages/pins/{fid}"), &s.owner).await.0, StatusCode::NO_CONTENT);
+    let (_, pins) = s.app.get(&format!("{base}/messages/pins"), &s.member).await;
+    assert_eq!(pins["items"].as_array().expect("pins").len(), 1);
+    assert_eq!(pins["has_more"], false);
+    assert_eq!(pins["items"][0]["message"]["pinned"], true);
+    assert!(pins["items"][0]["pinned_at"].as_str().expect("pinned_at").contains('T'));
     let (_, latest) = s.app.get(&format!("{base}/messages?limit=1"), &s.member).await;
     assert_eq!(latest[0]["type"], 6, "pin notice");
     assert_eq!(latest[0]["message_reference"]["message_id"], fid);
-    assert_eq!(s.app.delete(&format!("{base}/pins/{fid}"), &s.owner).await.0, StatusCode::NO_CONTENT);
-    assert_eq!(s.app.get(&format!("{base}/pins"), &s.member).await.1, json!([]));
+    assert_eq!(s.app.delete(&format!("{base}/messages/pins/{fid}"), &s.owner).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(s.app.get(&format!("{base}/messages/pins"), &s.member).await.1, json!({"items": [], "has_more": false}));
 
     // a mention raises alice's counter, her own ack lowers it
     send(&s, &s.owner, &format!("hey <@{}>", s.member_id)).await;
@@ -233,4 +235,80 @@ async fn pins_read_state_and_mention_counts() {
         .expect("read state");
     assert_eq!(last, Some(nid.parse::<i64>().expect("id")));
     assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn pins_are_paginated_newest_pin_first() {
+    let s = setup().await;
+    let base = format!("/channels/{}", s.channel);
+    let mut ids = Vec::new();
+    for index in 0..3 {
+        let message = send(&s, &s.owner, &format!("pin {index}")).await;
+        ids.push(message["id"].as_str().expect("id").to_owned());
+    }
+    // pin order differs from message order
+    for index in [1, 0, 2] {
+        assert_eq!(s.app.put(&format!("{base}/messages/pins/{}", ids[index]), &s.owner).await.0, StatusCode::NO_CONTENT);
+    }
+    let (_, first) = s.app.get(&format!("{base}/messages/pins?limit=2"), &s.member).await;
+    assert_eq!(first["has_more"], true);
+    let order: Vec<&str> = first["items"].as_array().expect("items").iter().map(|item| item["message"]["id"].as_str().expect("id")).collect();
+    assert_eq!(order, vec![ids[2].as_str(), ids[0].as_str()]);
+    let cursor = first["items"][1]["pinned_at"].as_str().expect("pinned_at").replace('+', "%2B");
+    let (_, second) = s.app.get(&format!("{base}/messages/pins?limit=2&before={cursor}"), &s.member).await;
+    assert_eq!(second["has_more"], false);
+    assert_eq!(second["items"][0]["message"]["id"], ids[1]);
+    assert_eq!(s.app.get(&format!("{base}/messages/pins?limit=51"), &s.member).await.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn allowed_mentions_limit_who_gets_pinged() {
+    let s = setup().await;
+    let base = format!("/channels/{}/messages", s.channel);
+    let original = send(&s, &s.member, "question").await;
+    let oid = original["id"].as_str().expect("id").to_owned();
+    // owner replies without pinging the replied-to author
+    let (status, quiet) =
+        s.app.post(&base, &s.owner, json!({"content": "answer", "message_reference": {"message_id": oid}, "allowed_mentions": {"replied_user": false}})).await;
+    assert_eq!(status, StatusCode::OK, "{quiet}");
+    assert_eq!(quiet["type"], 19);
+    assert_eq!(quiet["mentions"], json!([]));
+    // parse: [] drops explicit mentions too; an explicit users list keeps only those
+    let content = format!("<@{}> and <@{}>", s.member_id, s.owner_id);
+    let (_, none) = s.app.post(&base, &s.owner, json!({"content": content, "allowed_mentions": {"parse": []}})).await;
+    assert_eq!(none["mentions"], json!([]));
+    let (_, only) = s.app.post(&base, &s.owner, json!({"content": content, "allowed_mentions": {"users": [s.member_id]}})).await;
+    let mentioned: Vec<&str> = only["mentions"].as_array().expect("mentions").iter().map(|user| user["id"].as_str().expect("id")).collect();
+    assert_eq!(mentioned, vec![s.member_id.as_str()]);
+    let (_, everyone) = s.app.post(&base, &s.owner, json!({"content": "@everyone hi", "allowed_mentions": {"parse": ["users"]}})).await;
+    assert_eq!(everyone["mention_everyone"], false);
+    // the default still pings
+    let (_, loud) = s.app.post(&base, &s.owner, json!({"content": "@everyone hi"})).await;
+    assert_eq!(loud["mention_everyone"], true);
+}
+
+#[tokio::test]
+async fn bulk_ack_marks_channels_read() {
+    let s = setup().await;
+    let base = format!("/channels/{}/messages", s.channel);
+    send(&s, &s.owner, &format!("hey <@{}>", s.member_id)).await;
+    let newest = send(&s, &s.owner, "latest").await;
+    let nid = newest["id"].as_str().expect("id");
+    let (status, _) = s
+        .app
+        .post(
+            "/read-states/ack-bulk",
+            &s.member,
+            json!({"read_states": [{"channel_id": s.channel, "message_id": nid}, {"channel_id": "4242", "message_id": "1"}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (last, count): (Option<i64>, i32) = sqlx::query_as("SELECT last_message_id, mention_count FROM read_states WHERE user_id = $1 AND channel_id = $2")
+        .bind(s.member_id.parse::<i64>().expect("id"))
+        .bind(s.channel.parse::<i64>().expect("id"))
+        .fetch_one(&s.app.state.db)
+        .await
+        .expect("read state");
+    assert_eq!((last, count), (Some(nid.parse::<i64>().expect("id")), 0));
+    assert_eq!(s.app.get(&format!("{base}?limit=1"), &s.member).await.0, StatusCode::OK);
 }

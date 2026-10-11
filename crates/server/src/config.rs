@@ -14,10 +14,28 @@ pub struct Config {
     pub heartbeat_misses: u32,
     pub session_ttl: Duration,
     pub replay_capacity: usize,
+    /// `None` disables REST rate limiting.
+    pub rate_limit: Option<RateLimit>,
 }
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:8710";
-pub const MAX_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
+pub const MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
+pub const MAX_ATTACHMENTS_PER_MESSAGE: usize = 10;
+
+/// Token buckets: one per (caller, route) and one per caller across all routes. Deliberately lenient.
+#[derive(Clone, Copy, Debug)]
+pub struct RateLimit {
+    pub route_burst: f64,
+    pub route_per_second: f64,
+    pub global_burst: f64,
+    pub global_per_second: f64,
+}
+
+impl Default for RateLimit {
+    fn default() -> Self {
+        Self { route_burst: 30.0, route_per_second: 10.0, global_burst: 200.0, global_per_second: 50.0 }
+    }
+}
 
 /// Parsed `KEY=VALUE` lines of the nearest `.env.dev`.
 pub struct DotEnv(HashMap<String, String>);
@@ -82,6 +100,7 @@ impl Config {
             heartbeat_misses: 2,
             session_ttl: Duration::from_secs(300),
             replay_capacity: 1000,
+            rate_limit: Some(RateLimit::default()),
         }
     }
 }
