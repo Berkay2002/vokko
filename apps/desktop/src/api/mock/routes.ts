@@ -99,6 +99,10 @@ route("PATCH", "/users/@me", ({ viewer, body }) => {
     const attachment = pendingAttachment(str(body.avatar_attachment_id), user.id);
     user.avatar = attachment ? attachment.url : null;
   }
+  const audience = new Set<string>([user.id, ...viewer.relationships.keys()]);
+  for (const guild of db.guilds.values()) if (guild.members.has(user.id)) for (const id of guild.members.keys()) audience.add(id);
+  for (const channel of db.channels.values()) if (channel.participant_ids?.includes(user.id)) for (const id of channel.participant_ids) audience.add(id);
+  emit(audience, "USER_UPDATE", { ...user });
   return user;
 });
 

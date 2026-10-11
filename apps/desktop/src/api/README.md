@@ -2,7 +2,7 @@
 
 | Module | What |
 | --- | --- |
-| `config.ts` | `MOCK` (no `VITE_VOKKO_API` → in-memory backend), `REST_BASE` (`<origin>/api/v1`), `GATEWAY_URL` (`<origin as ws>/api/v1/gateway`, override with `VITE_VOKKO_GATEWAY`), token storage (`localStorage["vokko.token"]`). |
+| `config.ts` | `MOCK` (no `VITE_VOKKO_API` → in-memory backend), `REST_BASE` (`<origin>/api/v1`), `GATEWAY_URL` (`<origin as ws>/gateway`, server root, not under /api/v1, override with `VITE_VOKKO_GATEWAY`), token storage (`localStorage["vokko.token"]`). |
 | `rest.ts` | `request<T>(method, path, body?)`, `uploadAttachment(channelId, file, onProgress?, signal?)`, `ApiRequestError` (`.status`, `.api`, `.code`), `resolveUrl`. A 401 on any non-`/auth/` call drops the session. |
 | `gateway.ts` | `gateway.connect/disconnect/send/on/onStatus`. Heartbeat, zombie detection, resume with backoff, InvalidSession → re-identify, close 4004 → session cleared. |
 | `store.ts` | `useStore(selector)` (shallow-compared, safe to return fresh arrays/objects), `appStore` (raw zustand store), `displayName`, `roleColor`, `defaultAvatarUrl`, `avatarUrl`, `dmName`, `guildInitials`, unread selectors (`isChannelUnread`, `channelMentionCount`, `guildUnread`), `typingUserIds`, `useUser`. |

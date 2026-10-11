@@ -4,6 +4,7 @@
 import { ChannelType, RelationshipType, type Attachment } from "../types";
 import { db, nextId, type MockChannel } from "./db";
 import { addChannel, addMessage, createAccount, createGuildRecord, openDM, openGroupDM } from "./ops";
+import { voiceStore } from "../voice";
 import { setRelationship } from "./views";
 
 const MIN = 60_000;
@@ -191,7 +192,9 @@ export function seed(): void {
   const random = addChannel(guildId, { name: "random", type: ChannelType.GuildText, parent_id: textCategory.id, topic: "Off-topic." });
   const devTalk = addChannel(guildId, { name: "dev-talk", type: ChannelType.GuildText, parent_id: textCategory.id, topic: "Rust, TypeScript and gateway protocol nerdery." });
   addChannel(guildId, { name: "memes", type: ChannelType.GuildText, parent_id: textCategory.id });
-  addChannel(guildId, { name: "Gaming", type: ChannelType.GuildVoice, parent_id: voiceCategory.id });
+  const gaming = addChannel(guildId, { name: "Gaming", type: ChannelType.GuildVoice, parent_id: voiceCategory.id });
+  voiceStore.getState().setOccupants(generalVoice.id, [A, Bo]);
+  voiceStore.getState().setOccupants(gaming.id, [N]);
   addChannel(guildId, { name: "AFK", type: ChannelType.GuildVoice, parent_id: voiceCategory.id });
 
   const say = (channel: MockChannel, who: string, text: string, minutesAgo: number) =>
