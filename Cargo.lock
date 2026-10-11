@@ -4882,6 +4882,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vokko-loadtest"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "rand 0.9.5",
+ "reqwest",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "vokko-platform"
 version = "0.1.0"
 dependencies = [

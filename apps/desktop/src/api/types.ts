@@ -14,6 +14,20 @@ export interface User {
   banner_color: string | null; // "#rrggbb"
   bio: string | null;
   bot: boolean;
+  // Profile perks (free for everyone in Vokko; Discord gates them behind Nitro). Absent = not set.
+  banner?: string | null; // banner image URL (static or animated)
+  pronouns?: string | null; // max 40 chars
+  theme_colors?: [number, number] | null; // profile theme primary/accent (RGB ints)
+  avatar_decoration?: string | null; // id of a Vokko-owned decoration asset
+  profile_effect?: string | null; // id of a Vokko-owned profile effect
+  primary_guild?: UserPrimaryGuild | null; // server tag shown next to the name
+}
+export interface UserPrimaryGuild {
+  guild_id: Snowflake;
+  tag: string; // 1-4 chars
+  badge: string; // badge id (Vokko asset set)
+  color_primary: number;
+  color_secondary: number;
 }
 
 export interface Presence {
@@ -73,6 +87,19 @@ export interface Guild {
   owner_id: Snowflake;
   roles: Role[];
   system_channel_id: Snowflake | null;
+  tag?: GuildTag | null; // server tag members can adopt (MANAGE_GUILD edits it)
+  theme?: GuildTheme | null;
+}
+export interface GuildTag {
+  tag: string; // 1-4 chars
+  badge: string;
+  color_primary: number;
+  color_secondary: number;
+}
+export interface GuildTheme {
+  preset: string | null; // Vokko theme preset id, or null for custom
+  primary: number;
+  accent: number;
 }
 
 export interface GuildMember {
@@ -81,6 +108,12 @@ export interface GuildMember {
   roles: Snowflake[];
   joined_at: ISO8601;
   communication_disabled_until?: ISO8601 | null; // timeout end; null/absent = not timed out
+  // Per-server profile (overrides the user profile inside this guild). Absent/null = use the user's.
+  avatar?: string | null;
+  banner?: string | null;
+  bio?: string | null;
+  pronouns?: string | null;
+  theme_colors?: [number, number] | null;
 }
 
 export interface Attachment {
@@ -91,6 +124,8 @@ export interface Attachment {
   url: string; // absolute URL served by the server
   width: number | null;
   height: number | null;
+  description?: string | null; // alt text, max 1024 chars
+  // Spoiler: Discord convention, filename starts with "SPOILER_" (clients blur until clicked).
 }
 
 export interface EmbedMedia {
@@ -191,6 +226,7 @@ export interface CreateMessageRequest {
   nonce?: string;
   message_reference?: { message_id: Snowflake };
   attachment_ids?: Snowflake[]; // ids returned by POST /channels/{id}/attachments; max 10 per message
+  attachments?: PendingAttachmentMeta[]; // same ids with optional rename / alt text; use instead of attachment_ids
   allowed_mentions?: AllowedMentions; // omitted = parse everything, replied_user true
 }
 export interface AllowedMentions {
@@ -208,9 +244,36 @@ export interface RateLimitError {
   retry_after: number; // seconds (float); also sent as the Retry-After header
   global: boolean;
 }
+export interface PendingAttachmentMeta {
+  id: Snowflake; // pending attachment id from POST /channels/{id}/attachments
+  filename?: string; // rename before sending; prefix "SPOILER_" marks a spoiler
+  description?: string; // alt text, max 1024 chars
+}
 export interface EditMessageRequest {
-  content: string;
+  content?: string;
   flags?: number; // 1 << 2 SUPPRESS_EMBEDS
+  attachments?: { id: Snowflake }[]; // attachments to keep; omitted = unchanged; can only remove, not add
+}
+
+export interface EditUserRequest {
+  global_name?: string | null;
+  bio?: string | null;
+  banner_color?: string | null;
+  avatar_attachment_id?: Snowflake | null; // PNG/JPEG/WebP/GIF (animated allowed), ≤8 MiB in, stored as 512x512
+  banner_attachment_id?: Snowflake | null; // ≤10 MiB in, ≤1360x480 out
+  pronouns?: string | null;
+  theme_colors?: [number, number] | null;
+  avatar_decoration?: string | null;
+  profile_effect?: string | null;
+  primary_guild_id?: Snowflake | null; // adopt that guild's tag (must be a member and the guild must have a tag); null clears
+}
+export interface EditOwnMemberRequest {
+  nick?: string | null;
+  avatar_attachment_id?: Snowflake | null;
+  banner_attachment_id?: Snowflake | null;
+  bio?: string | null;
+  pronouns?: string | null;
+  theme_colors?: [number, number] | null;
 }
 
 export interface UserProfile {

@@ -84,6 +84,8 @@ test('context menu Add Reaction submenu and View Reactions modal', async ({ page
   await openDm(page);
   await send(page, 'react to me through the menu');
   const m = message(page, 'react to me through the menu');
+  // a pending (unsent) message has no context menu
+  await expect(m).not.toHaveClass(/pending/);
   await m.click({ button: 'right', position: { x: 120, y: 12 } });
   await expect(page.getByRole('menuitem', { name: 'View Reactions' })).toHaveCount(0);
   await page.getByRole('menuitem', { name: 'Add Reaction' }).hover();

@@ -379,9 +379,21 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   if (channel.type === ChannelType.GuildCategory || channel.type === ChannelType.GuildVoice) fail(400, 50024, "Cannot execute action on this channel type");
   requireChannelPerm(channel, viewer.user.id, Perm.SEND_MESSAGES);
   const content = (str(body.content) ?? "").trim();
-  const ids = Array.isArray(body.attachment_ids) ? body.attachment_ids.filter((v): v is string => typeof v === "string") : [];
+  // `attachments` (id + optional rename / alt text) replaces `attachment_ids`; a "SPOILER_" filename prefix marks a spoiler.
+  const metas = Array.isArray(body.attachments)
+    ? body.attachments.filter((v): v is Record<string, unknown> => typeof v === "object" && v !== null && typeof (v as { id?: unknown }).id === "string")
+    : (Array.isArray(body.attachment_ids) ? body.attachment_ids.filter((v): v is string => typeof v === "string") : []).map(id => ({ id }) as Record<string, unknown>);
+  const ids = metas.map(m => String(m.id));
   if (ids.length > 10) fail(400, 50035, "Invalid Form Body", { attachment_ids: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be 10 or fewer in length." } });
-  const attachments = ids.map(id => pendingAttachment(id, viewer.user.id)).filter((a): a is Attachment => a !== null);
+  const attachments = metas.map(meta => {
+    const found = pendingAttachment(String(meta.id), viewer.user.id);
+    if (!found) return null;
+    const filename = str(meta.filename)?.trim();
+    const description = str(meta.description);
+    if (filename !== undefined && (filename === "" || filename.length > 255)) fail(400, 50035, "Invalid Form Body", { attachments: { code: "BASE_TYPE_BAD_LENGTH", message: "Filename must be 1 to 255 characters." } });
+    if (description !== undefined && description.length > 1024) fail(400, 50035, "Invalid Form Body", { attachments: { code: "BASE_TYPE_MAX_LENGTH", message: "Description must be 1024 or fewer in length." } });
+    return { ...found, ...(filename !== undefined ? { filename } : {}), ...(description !== undefined ? { description: description === "" ? null : description } : {}) };
+  }).filter((a): a is Attachment => a !== null);
   if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });
   if (content === "" && attachments.length === 0) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
   const reference = body.message_reference as { message_id?: string } | undefined;
@@ -403,10 +415,17 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   if (message.author_id !== viewer.user.id) fail(403, 50005, "Cannot edit a message authored by another user");
-  const content = (str(body.content) ?? "").trim();
+  // `content` is optional now; `attachments` lists the ones to keep (omitted = unchanged, can only remove).
+  const content = (str(body.content) ?? message.content).trim();
   if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });
-  if (content === "" && message.attachments.length === 0) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
+  let attachments = message.attachments;
+  if (Array.isArray(body.attachments)) {
+    const keep = new Set(body.attachments.map(a => (typeof a === "object" && a !== null ? str((a as { id?: unknown }).id) : undefined)).filter((id): id is string => id !== undefined));
+    attachments = message.attachments.filter(a => keep.has(a.id));
+  }
+  if (content === "" && attachments.length === 0) fail(400, 50006, "Cannot send an empty message");
   message.content = content;
+  message.attachments = attachments;
   message.edited_timestamp = new Date().toISOString();
   message.mention_ids = [...new Set([...content.matchAll(/<@!?(\d+)>/g)].map(m => m[1] ?? "").filter(id => db.accounts.has(id)))];
   message.mention_everyone = /(^|\s)@(everyone|here)\b/.test(content) && hasBit(channelPermsOf(channel, viewer.user.id), Perm.MENTION_EVERYONE);

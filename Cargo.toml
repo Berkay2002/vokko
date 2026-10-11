@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/desktop/src-tauri", "apps/cli", "xtask"]
+members = ["crates/*", "apps/desktop/src-tauri", "apps/cli", "tools/*", "xtask"]
 default-members = ["crates/*", "apps/cli", "xtask"]
 
 [workspace.package]

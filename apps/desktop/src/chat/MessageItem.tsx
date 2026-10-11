@@ -1,20 +1,23 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { CornerUpLeft, Pencil, Pin, SmilePlus, MoreHorizontal, Reply, UserPlus, UserMinus, PenLine, Image as ImageIcon, CircleAlert, ArrowRightFromLine } from 'lucide-react';
+import { Forward, Pencil, Pin, SmilePlus, MoreHorizontal, Reply, UserPlus, UserMinus, PenLine, Image as ImageIcon, CircleAlert, ArrowRightFromLine } from 'lucide-react';
 import { MessageType } from '../api/types';
 import type { Message } from '../api/types';
 import { Markdown } from './markdown';
-import { Tooltip, useContextMenu, type MenuItem } from './shell';
+import { Tooltip } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
-import { Attachments } from './Attachments';
+import { ServerTag } from './ServerTag';
+import { Attachments, PendingUpload } from './Attachments';
 import { Embeds } from './Embeds';
 import { Reactions } from './Reactions';
 import { EmojiPickerPopout } from './EmojiPicker';
-import { emojiShortcodeLabel, frequentEmoji, quickReactions } from './emojiData';
+import { MessageMenu } from './MessageMenu';
+import { comingSoon } from './toast';
+import { quickReactions } from './emojiData';
 import { messageStore } from './messageStore';
 import { isSystemMessage, type PendingMessage } from './messageState';
 import { fromDisplay, toDisplay, type MentionToken } from './mentionText';
-import { formatFullDate, formatMessageTimestamp, formatTime, isShiftDown } from './util';
+import { formatFullDate, formatMessageTimestamp, formatTime } from './util';
 
 export interface MessageItemProps {
   message: Message;
@@ -45,25 +48,30 @@ function SystemBody({ message, name }: { message: Message; name: string }) {
   }
 }
 
+/**
+ * The line above a reply: curved connector from the avatar column, 16 px avatar, "@name" in the author's role colour, one-line preview.
+ * `referenced_message` null = the original was deleted (contract), undefined = it was not part of the payload (could not be loaded).
+ */
 function ReplyPreview({ message }: { message: Message }) {
   const chat = useChat();
   const ref = message.referenced_message;
-  const hasRef = !!message.message_reference;
-  if (!hasRef) return null;
+  if (!message.message_reference) return null;
   if (!ref) {
-    return <div className="chat-reply deleted"><span className="chat-reply-spine" /><span className="chat-reply-text"><CircleAlert size={14} /> Original message was deleted</span></div>;
+    const text = ref === null ? 'Original message was deleted' : 'Message could not be loaded';
+    return <div className="chat-reply missing"><span className="chat-reply-spine" /><span className="chat-reply-text"><CircleAlert size={14} />{text}</span></div>;
   }
   const text = toDisplay(ref.content, { user: id => chat.md.userName(id), role: id => chat.md.roleInfo(id)?.name ?? null, channel: id => chat.md.channelName(id) }).text.replace(/\s+/g, ' ').trim();
   const color = chat.colorOf(ref);
-  const mentioned = message.mentions.some(u => u.id === ref.author.id);
-  return <div className="chat-reply">
+  const author = chat.userById(ref.author.id) ?? ref.author;
+  return <div className="chat-reply" role="button" tabIndex={0} aria-label={`Jump to the message by ${chat.nameOf(ref.author, ref.member)}`} onClick={() => chat.actions.jumpTo(ref.id)}
+    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chat.actions.jumpTo(ref.id); } }}>
     <span className="chat-reply-spine" />
     <Avatar user={ref.author} size={16} className="chat-reply-avatar" />
-    <span className="chat-reply-name" style={color ? { color } : undefined}>{mentioned ? '@' : ''}{chat.nameOf(ref.author)}</span>
-    <button type="button" className="chat-reply-text" onClick={() => chat.actions.jumpTo(ref.id)} aria-label="Jump to replied message">
-      {text || (ref.attachments.length ? <><ImageIcon size={14} /> Click to see attachment</> : '')}
-      {!text && ref.attachments.length === 0 && <i>Click to see attachment</i>}
-    </button>
+    <span className="chat-reply-name" style={color ? { color } : undefined}>@{chat.nameOf(ref.author, ref.member)}</span>
+    <ServerTag user={author} className="small" />
+    <span className="chat-reply-text">
+      {text || (ref.attachments.length ? <><i>Click to see attachment</i><ImageIcon size={20} aria-hidden="true" /></> : <i>Click to see attachment</i>)}
+    </span>
   </div>;
 }
 
@@ -114,7 +122,7 @@ function InlineEdit({ message, onDone }: { message: Message; onDone(): void }) {
 
 function MessageItemImpl({ message, pending, grouped, editing, highlighted, onStopEditing }: MessageItemProps) {
   const chat = useChat();
-  const menu = useContextMenu();
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [menuPickerOpen, setMenuPickerOpen] = useState(false);
   const addBtn = useRef<HTMLButtonElement>(null);
@@ -124,51 +132,13 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const system = isSystemMessage(message);
   const name = chat.nameOf(message.author, message.member);
   const color = chat.colorOf(message);
+  const dot = chat.roleDotOf(message);
+  const compact = chat.compact;
   const mentionsMe = !isMine && (message.mentions.some(u => u.id === chat.me.id) || message.mention_everyone);
   const failed = pending?.state === 'failed';
 
   const canEdit = isMine && !system && !pending;
   const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
-  const canPin = !pending && !system && (chat.isDm || chat.canManage);
-
-  function items(): MenuItem[] {
-    const out: MenuItem[] = [];
-    // Order follows discord-ui-inventory A2: G3 add/view reactions | G4 edit, reply, forward, thread | G5 copy text, pin, mark unread,
-    // copy link | G6 delete | G7 id. Features that don't exist yet are listed disabled.
-    if (!pending && !system) {
-      out.push({
-        id: 'add-reaction', label: 'Add Reaction', icon: <SmilePlus size={16} />,
-        children: [
-          ...frequentEmoji(12).map((ch): MenuItem => ({ id: `react-${ch}`, label: emojiShortcodeLabel(ch), icon: <span className="chat-menu-emoji">{ch}</span>, onSelect: () => chat.actions.react(message, { id: null, name: ch }) })),
-          { type: 'separator' },
-          { id: 'react-more', label: 'View More', onSelect: () => setMenuPickerOpen(true) },
-        ],
-      });
-      if (message.reactions.length > 0) out.push({ id: 'view-reactions', label: 'View Reactions', onSelect: () => chat.actions.viewReactions(message) });
-      out.push({ type: 'separator' });
-    }
-    if (canEdit) out.push({ id: 'edit', label: 'Edit Message', icon: <Pencil size={16} />, onSelect: () => chat.actions.edit(message) });
-    if (!system) {
-      out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={16} />, onSelect: () => chat.actions.reply(message) });
-      if (!pending) out.push({ id: 'forward', label: 'Forward', disabled: true });
-      if (!pending && chat.guildId) out.push({ id: 'thread', label: 'Create Thread', disabled: true });
-    }
-    out.push({ type: 'separator' });
-    if (message.content) out.push({ id: 'copy-text', label: 'Copy Text', onSelect: () => void navigator.clipboard?.writeText(message.content) });
-    if (canPin) out.push({ id: 'pin', label: message.pinned ? 'Unpin Message' : 'Pin Message', icon: <Pin size={16} />, onSelect: () => chat.actions.togglePin(message) });
-    if (!pending) out.push({ id: 'mark-unread', label: 'Mark Unread', disabled: true });
-    out.push({
-      id: 'copy-link', label: 'Copy Message Link',
-      onSelect: () => void navigator.clipboard?.writeText(`${window.location.origin}/channels/${chat.guildId ?? '@me'}/${message.channel_id}/${message.id}`),
-    });
-    if (canDelete) {
-      out.push({ type: 'separator' });
-      out.push({ id: 'delete', label: 'Delete Message', danger: true, icon: <Trash />, onSelect: () => chat.actions.requestDelete(message, isShiftDown()) });
-    }
-    out.push({ type: 'separator' });
-    out.push({ id: 'copy-id', label: 'Copy Message ID', onSelect: () => void navigator.clipboard?.writeText(message.id) });
-    return out;
-  }
 
   const quick = useMemo(() => quickReactions().slice(0, 3), []);
   const [shift, setShift] = useState(false);
@@ -176,6 +146,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const showToolbar = !pending && !editing;
   const cls = ['chat-msg'];
   if (grouped) cls.push('grouped');
+  if (compact && !system) cls.push('compact');
   if (mentionsMe) cls.push('mentioned');
   if (pending) cls.push('pending');
   if (failed) cls.push('failed');
@@ -186,34 +157,40 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   if (chat.replyingId === message.id) cls.push('replying');
 
   if (system) {
-    return <div className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id} onContextMenu={e => items().length && menu.open(e, items())}>
+    return <div className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id} onContextMenu={e => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
       <div className="chat-msg-gutter"><span /></div>
       <div className="chat-msg-body system">
         <SystemBody message={message} name={name} />
         <Tooltip content={formatFullDate(date)}><time className="chat-timestamp inline" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>
       </div>
+      {menuAt && <MessageMenu target={{ message, pending, ...menuAt }} onClose={() => setMenuAt(null)} onMoreEmoji={() => setMenuPickerOpen(true)} />}
     </div>;
   }
 
   return <div ref={rowRef} className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id}
     onMouseMove={e => { if (e.shiftKey !== shift) setShift(e.shiftKey); }} onMouseLeave={() => shift && setShift(false)}
-    onContextMenu={e => { if (!pending && !(e.target instanceof HTMLAnchorElement)) menu.open(e, items()); }}>
+    onContextMenu={e => { if (pending || e.target instanceof HTMLAnchorElement) return; e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
     {!grouped && <ReplyPreview message={message} />}
     <div className="chat-msg-gutter">
-      {grouped
+      {grouped || compact
         ? <Tooltip content={formatFullDate(date)}><time className="chat-timestamp compact" dateTime={message.timestamp}>{formatTime(date)}</time></Tooltip>
         : <Avatar user={message.author} size={40} />}
     </div>
     <div className="chat-msg-body">
-      {!grouped && <h3 className="chat-msg-header">
+      {(!grouped || compact) && <h3 className="chat-msg-header">
+        {dot && <span className="chat-role-dot" style={{ background: dot }} aria-hidden="true" />}
+        {compact && chat.display.showCompactAvatars && <Avatar user={message.author} size={16} className="chat-compact-avatar" />}
         <span className="chat-author" style={color ? { color } : undefined}>{name}</span>
+        <ServerTag user={chat.userById(message.author.id) ?? message.author} />
         {message.author.bot && <span className="chat-bot-tag">BOT</span>}
-        <Tooltip content={formatFullDate(date)}><time className="chat-timestamp" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>
+        {!compact && <Tooltip content={formatFullDate(date)}><time className="chat-timestamp" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>}
       </h3>}
       {editing ? <InlineEdit message={message} onDone={onStopEditing} /> : <>
         {message.content && <Markdown content={message.content} ctx={chat.md} className="chat-content" suffix={message.edited_timestamp
           ? <Tooltip content={formatFullDate(new Date(message.edited_timestamp))}><span className="chat-edited">(edited)</span></Tooltip> : undefined} />}
-        <Attachments message={message} />
+        {pending && !failed && message.attachments.length > 0
+          ? <PendingUpload files={message.attachments} onCancel={() => messageStore.discardPending(message.channel_id, pending.nonce)} />
+          : <Attachments message={message} />}
         <Embeds message={message} />
         <Reactions message={message} />
       </>}
@@ -223,6 +200,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
         <button type="button" onClick={() => messageStore.discardPending(message.channel_id, pending.nonce)}>Delete</button>
       </div>}
     </div>
+    {menuAt && <MessageMenu target={{ message, pending, ...menuAt }} onClose={() => setMenuAt(null)} onMoreEmoji={() => setMenuPickerOpen(true)} />}
     <EmojiPickerPopout anchor={rowRef} open={menuPickerOpen} onClose={() => setMenuPickerOpen(false)} onPick={e => { setMenuPickerOpen(false); chat.actions.react(message, e); }} />
     {showToolbar && <div className={`chat-toolbar${pickerOpen ? ' open' : ''}`} role="toolbar" aria-label="Message actions">
       {quick.map(e => <Tooltip key={e} content="React" side="top"><button type="button" className="chat-toolbar-btn emoji" aria-label={`React with ${e}`} onClick={() => chat.actions.react(message, { id: null, name: e })}>{e}</button></Tooltip>)}
@@ -231,9 +209,10 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
       {canEdit && <Tooltip content="Edit" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Edit" onClick={() => chat.actions.edit(message)}><Pencil size={20} /></button></Tooltip>}
       {!isMine && <Tooltip content="Reply" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Reply" onClick={() => chat.actions.reply(message)}><Reply size={20} /></button></Tooltip>}
       {canDelete && shift && <Tooltip content="Delete" side="top"><button type="button" className="chat-toolbar-btn danger" aria-label="Delete" onClick={e => chat.actions.requestDelete(message, e.shiftKey)}><Trash /></button></Tooltip>}
+      <Tooltip content="Forward" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Forward" onClick={() => comingSoon('Forwarding messages')}><Forward size={20} /></button></Tooltip>
       <Tooltip content="More" side="top"><button type="button" className="chat-toolbar-btn" aria-label="More" onClick={e => {
         const r = e.currentTarget.getBoundingClientRect();
-        menu.open({ clientX: r.left, clientY: r.bottom + 4, preventDefault() { e.preventDefault(); } }, items());
+        setMenuAt({ x: r.left, y: r.bottom + 4 });
       }}><MoreHorizontal size={20} /></button></Tooltip>
       <EmojiPickerPopout anchor={addBtn} open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={e => { setPickerOpen(false); chat.actions.react(message, e); }} />
     </div>}

@@ -143,8 +143,11 @@ function EmbedCard({ embed }: { embed: Embed }) {
 
 export function Embeds({ message }: { message: Message }) {
   const chat = useChat();
-  const embeds = message.embeds ?? [];
-  const codes = useMemo(() => findInviteCodes(message.content, [window.location.host]), [message.content]);
+  const { showEmbeds, hideInvites } = chat.display;
+  const embeds = showEmbeds ? message.embeds ?? [] : [];
+  const found = useMemo(() => findInviteCodes(message.content, [window.location.host]), [message.content]);
+  // "Show embeds" hides link previews only; invite cards stay unless streamer mode hides invites.
+  const codes = hideInvites ? [] : found;
   if (embeds.length === 0 && codes.length === 0) return null;
   const own = message.author.id === chat.me.id;
   return <div className="chat-embeds">

@@ -2,11 +2,11 @@
 // components subscribe with useChannelState().
 import { useSyncExternalStore } from 'react';
 import { MessageType } from '../api/types';
-import type { CreateMessageRequest, EditMessageRequest, Message, ReactionEmoji, Snowflake, User } from '../api/types';
-import { gateway, request } from './shell';
+import type { CreateMessageRequest, EditMessageRequest, Message, PendingAttachmentMeta, ReactionEmoji, Snowflake, User } from '../api/types';
+import { gateway, request, setLocalReadPointer } from './shell';
 import {
   PAGE_SIZE, TYPING_TTL_MS, appendPage, applyReaction, deleteMessage, emojiKey, emptyState, indexOfId, prependPage, replaceWindow, setTyping,
-  applyUserUpdate, updateIfPresent, upsertMessage, type ChannelState, type PendingMessage,
+  applyUserUpdate, updateIfPresent, upsertMessage, withLateArrivals, type ChannelState, type PendingMessage,
 } from './messageState';
 import { rememberMessage, rememberMessages } from './userCache';
 import { newNonce } from './util';
@@ -18,8 +18,12 @@ const states = new Map<Snowflake, ChannelState>();
 const touched = new Map<Snowflake, number>();
 const listeners = new Map<Snowflake, Set<Listener>>();
 const AROUND_LIMIT = 30;
+/** Nonces of sends cancelled while the POST was in flight: the created message is deleted again when the response arrives. */
+const cancelled = new Set<string>();
 const reactionChains =new Map<string, { tail: Promise<void>; pending: number; timer: ReturnType<typeof setTimeout> | null }>();
 const reactionGuard = (messageId: Snowflake, emoji: ReactionEmoji): string => `${messageId}:${emojiKey(emoji)}`;
+/** Channels the user marked unread by hand: the automatic ack stays off until they read it again on purpose, send, or leave. */
+const heldUnread = new Set<Snowflake>();
 let currentUserId: Snowflake | null = null;
 let bound = false;
 
@@ -83,7 +87,7 @@ async function fetchPage(channelId: Snowflake, params: Record<string, string>): 
 async function refreshLatest(channelId: Snowflake): Promise<void> {
   try {
     const page = await fetchPage(channelId, {});
-    update(channelId, s => ({ ...replaceWindow(s, page, { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false }) }));
+    update(channelId, s => ({ ...replaceWindow(s, withLateArrivals(s, page), { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false }) }));
   } catch { /* the next open retries */ }
 }
 
@@ -105,7 +109,7 @@ export const messageStore = {
     void (async () => {
       try {
         const page = await fetchPage(channelId, {});
-        update(channelId, s => replaceWindow(s, page, { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false }));
+        update(channelId, s => replaceWindow(s, withLateArrivals(s, page), { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false }));
       } catch {
         update(channelId, s => ({ ...s, status: 'error' }));
       }
@@ -148,7 +152,7 @@ export const messageStore = {
   async jumpToPresent(channelId: Snowflake): Promise<void> {
     const page = await fetchPage(channelId, {});
     update(channelId, s => {
-      const next = replaceWindow(s, page, { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false });
+      const next = replaceWindow(s, withLateArrivals(s, page), { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false });
       return { ...next, focus: null };
     });
   },
@@ -170,11 +174,12 @@ export const messageStore = {
 
   // ---- sending ----
 
-  send(channelId: Snowflake, me: User, input: { content: string; attachments?: Message['attachments']; reply?: Message | null; mention?: boolean }): void {
+  send(channelId: Snowflake, me: User, input: { content: string; attachments?: Message['attachments']; meta?: PendingAttachmentMeta[]; reply?: Message | null; mention?: boolean }): void {
     const nonce = newNonce();
     const content = input.content.trim();
     const req: CreateMessageRequest = { content, nonce };
-    if (input.attachments?.length) req.attachment_ids = input.attachments.map(a => a.id);
+    if (input.meta?.length) req.attachments = input.meta;
+    else if (input.attachments?.length) req.attachment_ids = input.attachments.map(a => a.id);
     if (input.reply) req.message_reference = { message_id: input.reply.id };
     if (input.reply && input.mention === false) req.allowed_mentions = { replied_user: false };
     const message: Message = {
@@ -184,7 +189,8 @@ export const messageStore = {
       message_reference: input.reply ? { message_id: input.reply.id, channel_id: channelId, guild_id: input.reply.guild_id } : null,
       referenced_message: input.reply ?? null, nonce,
     };
-    update(channelId, s => ({ ...s, pending: [...s.pending, { nonce, message, state: 'sending', request: req }] }));
+    // Sending is an ack of everything above: the new-messages divider and the unread banner go away at once.
+    update(channelId, s => ({ ...s, lastReadAtOpen: null, markedUnread: false, pending: [...s.pending, { nonce, message, state: 'sending', request: req }] }));
     void this.dispatchPending(channelId, nonce);
   },
 
@@ -194,7 +200,12 @@ export const messageStore = {
     update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'sending', error: undefined } : x)) }));
     try {
       const m = await request<Message>('POST', `/channels/${channelId}/messages`, p.request);
+      if (cancelled.delete(nonce)) { // cancelled while in flight: the server has it already, so take it back
+        void request<null>('DELETE', `/channels/${channelId}/messages/${m.id}`).catch(() => undefined);
+        return;
+      }
       update(channelId, s => upsertMessage(s, m));
+      this.ack(channelId, m.id);
     } catch (e) {
       const error = e instanceof Error ? e.message : 'Failed to send';
       update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'failed', error } : x)) }));
@@ -204,6 +215,8 @@ export const messageStore = {
   retry(channelId: Snowflake, nonce: string): void { void this.dispatchPending(channelId, nonce); },
 
   discardPending(channelId: Snowflake, nonce: string): void {
+    const inFlight = states.get(channelId)?.pending.find(p => p.nonce === nonce)?.state === 'sending';
+    if (inFlight) cancelled.add(nonce);
     update(channelId, s => ({ ...s, pending: s.pending.filter(p => p.nonce !== nonce) }));
   },
 
@@ -255,8 +268,44 @@ export const messageStore = {
     });
   },
 
+  /** Automatic ack (viewing the present). Does nothing while the channel is held unread. */
   ack(channelId: Snowflake, messageId: Snowflake): void {
+    if (heldUnread.has(channelId)) return;
     void request<null>('POST', `/channels/${channelId}/messages/${messageId}/ack`).catch(() => undefined);
+  },
+
+  /** Remove one attachment from a sent message (PATCH with the ones to keep); the last one of a text-less message deletes the message. */
+  async removeAttachment(channelId: Snowflake, message: Message, attachmentId: Snowflake): Promise<void> {
+    const keep = message.attachments.filter(a => a.id !== attachmentId);
+    if (keep.length === 0 && message.content.trim() === '') { await this.remove(channelId, message.id); return; }
+    const body: EditMessageRequest = { attachments: keep.map(a => ({ id: a.id })) };
+    const m = await request<Message>('PATCH', `/channels/${channelId}/messages/${message.id}`, body);
+    update(channelId, s => updateIfPresent(s, m));
+  },
+
+  /** A deliberate "mark as read" (Escape, the unread bar): releases the hold, then acks. */
+  markRead(channelId: Snowflake, messageId: Snowflake): void {
+    heldUnread.delete(channelId);
+    update(channelId, s => (s.markedUnread ? { ...s, markedUnread: false } : s));
+    this.ack(channelId, messageId);
+  },
+
+  /** Mark Unread (client only, no server contract): everything from this message on becomes unread and the auto-ack is held. */
+  markUnread(channelId: Snowflake, messageId: Snowflake): void {
+    let before: Snowflake;
+    try { before = (BigInt(messageId) - 1n).toString(); } catch { return; }
+    heldUnread.add(channelId);
+    setLocalReadPointer(channelId, before);
+    update(channelId, s => ({ ...s, lastReadAtOpen: before, markedUnread: true }));
+  },
+
+  /**
+   * Sending a message or leaving the channel ends a manual "unread" hold and the banner that goes with it. The new-messages divider
+   * (lastReadAtOpen) stays for the rest of the visit and is recomputed from the acked pointer at the next open.
+   */
+  releaseHold(channelId: Snowflake): void {
+    heldUnread.delete(channelId);
+    update(channelId, s => (s.markedUnread ? { ...s, markedUnread: false } : s));
   },
 
   getState(channelId: Snowflake): ChannelState { return states.get(channelId) ?? EMPTY; },

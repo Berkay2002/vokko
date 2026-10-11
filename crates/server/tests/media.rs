@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod common;
 
 use axum::body::Body;
@@ -9,7 +10,11 @@ use tower::ServiceExt;
 const THUMBS_UP: &str = "%F0%9F%91%8D";
 
 async fn setup() -> (TestApp, String, String, String, String) {
-    let app = TestApp::new().await;
+    setup_with(|_| {}).await
+}
+
+async fn setup_with(adjust: impl FnOnce(&mut vokko_server::Config)) -> (TestApp, String, String, String, String) {
+    let app = TestApp::with_config(adjust).await;
     let (owner, _) = app.register("sam").await;
     let (member, _) = app.register("alice").await;
     let (_, guild) = app.post("/guilds", &owner, json!({"name": "Media guild"})).await;
@@ -138,13 +143,13 @@ async fn upload_and_serve_attachments() {
 
 #[tokio::test]
 async fn oversized_upload_is_rejected() {
-    let (app, owner, _, channel, _) = setup().await;
-    let big = vec![b'a'; 10 * 1024 * 1024 + 1];
+    let (app, owner, _, channel, _) = setup_with(|config| config.max_upload_bytes = 2 * 1024 * 1024).await;
+    let big = vec![b'a'; 2 * 1024 * 1024 + 1];
     let (status, body) = upload(&app, &owner, &channel, "big.bin", "application/octet-stream", &big).await;
     assert_eq!(status, 413, "{body}");
     assert_eq!(body["code"], 40005);
     // far beyond the body limit: still 413 / 40005, not a generic 400
-    let huge = vec![b'a'; 16 * 1024 * 1024];
+    let huge = vec![b'a'; 6 * 1024 * 1024];
     let (status, body) = upload(&app, &owner, &channel, "huge.bin", "application/octet-stream", &huge).await;
     assert_eq!((status, body["code"].clone()), (StatusCode::PAYLOAD_TOO_LARGE, json!(40005)), "{body}");
     let ok = vec![b'a'; 1024 * 1024];

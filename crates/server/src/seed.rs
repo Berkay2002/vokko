@@ -280,12 +280,15 @@ async fn populate(state: &AppState, gen_: &mut Gen, tx: &mut sqlx::Transaction<'
             .bind(hash)
             .execute(&mut *c)
             .await?;
-        sqlx::query("INSERT INTO presences (user_id, status, custom_status, pinned) VALUES ($1, $2, $3, TRUE)")
-            .bind(user_ids[index])
-            .bind(status)
-            .bind(custom)
-            .execute(&mut *c)
-            .await?;
+        sqlx::query(
+            "INSERT INTO presences (user_id, status, preferred, custom_status, pinned) \
+             VALUES ($1, $2, CASE WHEN $2 = 'offline' THEN 'online' ELSE $2 END, $3, TRUE)",
+        )
+        .bind(user_ids[index])
+        .bind(status)
+        .bind(custom)
+        .execute(&mut *c)
+        .await?;
     }
     let (sam, carol, alice, bob, nova) = (user_ids[SAM], user_ids[CAROL], user_ids[ALICE], user_ids[BOB], user_ids[NOVA]);
 

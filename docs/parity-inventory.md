@@ -61,10 +61,10 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | MSG-005 | Context menu with quick reactions, reaction submenu, edit, reply, forward, (guild: create thread), copy text, pin, bookmark, remind, apps, mark unread, copy link, TTS, delete, copy ID | dm-chat/11-message-context-menu.jpg, guild/06-message-context-menu.jpg |
 | MSG-006 | Context-menu item hover/focus state; destructive item in danger colour | dm-chat/12-context-menu-item-hover.png |
 | MSG-007 | Reply flow: bar above composer ("Replying to NAME", close), target row highlighted with 2 px brand bar + 16% tint, Escape cancels | dm-chat/13-reply-bar.png |
-| MSG-008 | Reply reference line above a message that replies (avatar 16, name, snippet, curved connector, click jumps to target) | dm-chat/26-reply-reference-line.jpg |
+| MSG-008 | Reply reference line above a message that replies (avatar 16, name, snippet, curved connector 33x12 with 2 px border and 6 px radius, click jumps to target and flashes it brand 16%); deleted target shows an arrow badge and italic "Originalmeddelandet har raderats" | dm-chat/26-reply-reference-line.jpg, messages-states/spec.md §2, messages-states/17-deleted-target-reply.jpg |
 | MSG-009 | Inline edit: textarea in place, "escape cancels • enter saves" hint, emoji button | dm-chat/14-inline-edit.png |
 | MSG-010 | "(edited)" marker after edited content, 10/10 muted | dm-chat/24-edited-marker.jpg |
-| MSG-011 | Delete confirmation modal with message preview | REF: none (not opened) |
+| MSG-011 | Delete confirmation modal with message preview, shift-click tip, red "Ta bort" | messages-states/16-delete-confirm.jpg, messages-states/spec.md §6 |
 | MSG-012 | Reactions: pills under message (emoji + count, own highlighted), + button on hover, tooltip with reactors | dm-chat/20-reaction-pill.jpg (reactor tooltip not measured) |
 | MSG-013 | Reaction picker from the hover bar: emoji picker anchored left of the button, search focused | dm-chat/15-reaction-picker.jpg |
 | MSG-014 | Pin from the menu: confirm modal, then a system row "X pinned a message" with pin icon in the gutter | dm-chat/22-pin-system-message.jpg, modals/05-pin-confirm.jpg |
@@ -72,13 +72,21 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | MSG-016 | Bookmark / reminder submenu | REF: none |
 | MSG-017 | Markdown rendering: bold, italic, underline, strike, spoiler, inline code, code block, headings 1-3, subtext, lists, block quote, masked link, auto link, timestamps, emoji shortcodes | dm-chat/17-rendered-markdown.jpg, dm-chat/19-spoiler-revealed.png, dm-chat/spec.md "Rendered message" |
 | MSG-018 | Link embeds (invite embed incl. expired state, URL previews, image/video embeds) | dm-chat/01-dm-view.png (expired invite only) |
-| MSG-019 | Attachments: images grid with lightbox, files with download, video/audio players, spoiler attachments | REF: none |
+| MSG-019 | Attachments: single image max 550x350 radius 8 (cover), 2-image grid 2x 273x273 (gap 4), 3-image grid 364x350 + 2x 182x173, 4-image grid 2x2 of 273x173, own-image hover pencil + trash (64x32 group), lightbox (scrim .92, top bar with author and 4 actions, prev/next, thumbnail strip); files, video/audio, spoiler attachments not captured | messages-states/spec.md §7, messages-states/03, 12, 13, 14, 20-23 |
 | MSG-020 | Stickers and GIFs in messages | REF: none |
 | MSG-021 | Message selection / long-press mobile gestures | out of scope (desktop web) |
 | MSG-022 | Mentions render as chips (user captured; role and channel chips not) and the row gets a mention highlight with a 2 px bar | dm-chat/21-grouped-and-mention-highlight.jpg, guild/05-mention-autocomplete.jpg |
 | MSG-023 | Slash-command output and application messages (bot badge, ephemeral "only you can see this") | REF: none |
 | MSG-024 | System messages with icon and muted style (pin captured; join, call not) | dm-chat/22-pin-system-message.jpg |
 | MSG-025 | Message length limit 2000 with character counter and block | REF: none |
+| MSG-026 | Server tag chip next to the name (43x15, radius 4, badge 14 + 12 w600 text), also in reply line, member list, DM list and lightbox header; click opens a guild profile popout (hover has no tooltip) | messages-states/spec.md §5, messages-states/06, 07 |
+| MSG-027 | Timestamp formats (sv): today `HH:mm`, older `YYYY-MM-DD HH:mm`, gutter `HH:mm` on hover, tooltip `söndag 11 oktober 2026 kl. 12:38`; yesterday not observed | messages-states/spec.md §1, messages-states/04, 05 |
+| MSG-028 | Mention-of-me row: gold bg alpha .078 (hover .039), 2 px #ce8100 bar; jump-to-message flash uses brand .16 for ~2 s | messages-states/spec.md §2-3, messages-states/01, 11 |
+| MSG-029 | Server-scoped search field in the channel header and its filter popout (from:, in:, has:, mentions:, more filters) | messages-states/spec.md §9, messages-states/15 |
+| MSG-030 | Unread state in a DM: top bar "1 nytt meddelande sedan 11:13" (brand `#5865f2`, ~34 px, "Markera som läst" right) and the day divider turned red `#d22d39` with a "NYTT" pill at the right end; screenshot-derived (user client dpr 1.25); jump-to-present bar ("Du visar äldre meddelanden" + "Hoppa till senaste", 341x49, radius 16, bottom 28, centred, `#17181b`) live-measured | messages-states/spec.md §10, messages-states/18, 19, 36, 37 |
+| MSG-031 | Jumbo emoji: an emoji-only message renders the emoji 48x48 (row 52 high); hover tooltip with the shortcode + "Klicka för att ta reda på mer", click opens a 288x106 popout (48 px emoji, name, description) | messages-states/spec.md §7 end, messages-states/28-31 |
+| MSG-032 | Attachment upload and edit flow: tray above the composer with preview tiles (eye/spoiler, pencil, trash), "Laddar upp N filer" card with progress and cancel, "Modifiera bifogad fil" modal (filename, alt text, spoiler, Avbryt/Spara), delete-attachment confirm ("Radera den bifogade filen"); screenshot-derived | messages-states/spec.md §7 end, messages-states/24-27 |
+| MSG-033 | Reply to an attachment-only message: reference line shows italic "Klicka för att visa bifogad fil" + 20 px image icon (same 20 px line, spine, avatar, tag chip); replying state = brand .16 tint `#0e1027` + 2 px `#5865f2` bar on the target row and a "Svarar <name>" bar (37 px, `#121214`, circular ✕) above the composer | messages-states/spec.md §2 end, messages-states/32-35 |
 
 ## CMP: composer
 | Id | Acceptance | REF |
@@ -148,13 +156,13 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 ## SET: settings
 | Id | Acceptance | REF |
 |---|---|---|
-| SET-001 | User settings opens as a large centred modal (~1400x665 in the web build): left nav 253 px with search and section labels, content column with title strip, close button + Esc | settings/01-appearance.jpg, settings/spec.md |
-| SET-002 | My Account page: info rows with Change buttons, password and security rows (other pages not opened) | settings/02-account.jpg (contains masked account data) |
-| SET-003 | Appearance page: theme toggle, default theme swatches (light/dark/darker/onyx/sync); other sub-pages not opened | settings/01-appearance.jpg |
-| SET-004 | Accessibility, Voice & Video, Chat, Notifications, Keybinds, Language, Streamer mode, Advanced | REF: none |
-| SET-005 | Server settings: Overview, Roles, Emoji, Stickers, Soundboard, Integrations, Moderation, Audit log, Safety setup, Bans, Invites, Onboarding, Community | REF: none |
-| SET-006 | Channel settings: Overview, Permissions, Invites, Integrations | REF: none |
-| SET-007 | Unsaved-changes bar (shake animation, reset/save) | REF: none |
+| SET-001 | User settings is a centred MODAL over the app (not a page, URL unchanged): 1400x699 max, radius 12, 72 px top/bottom inset at 843 px viewport, scrim rgba(0,0,0,.72), scale 0.9->1 + fade in ~180 ms; sidebar 253 px (profile header, 220x40 search, 220x36 nav items radius 8 with hover/selected tints, group headings, scroll-spy sub-items, build footer); content: 48.7 px header strip with breadcrumb + 31.5 px close button, 696 px column. Esc, close button and scrim click all close it | settings-modal/spec.md, settings-modal/shell/01-03.jpg |
+| SET-002 | My Account page: Kontoinfo rows with Change buttons, password + MFA + devices chevron rows, account status banner, family center, danger zone (disable/delete) | settings-modal/account/01-03.jpg (contains masked account data) |
+| SET-003 | Appearance page: theme swatches, app icon, message display, chat input, search, streamer mode sections (some options Nitro-gated: see Perks) | settings-modal/appearance/01-06.jpg |
+| SET-004 | Pages with full scroll series: Data and privacy, Message permissions, Notifications, Voice & video, Accessibility, System (shortcuts), Language and time, Activity privacy. NOT captured: Connected apps (renderer hung), Developer, Edit profiles + per-server tab | settings-modal/{data-privacy,message-permissions,notifications,voice-video,accessibility,system,language-time,activity-privacy}/NN.jpg |
+| SET-005 | Server settings is a FULL-SCREEN PAGE layer (no scrim; 238 px nav at x=410.9, 660 px content column at x=702.9, 36 px circular ESC close at x=1402.9): Serverprofil, Servertagg, Engagemang, Emoji, Dekaler, Ljudskärm, Medlemmar (table), Roller (+ @everyone permission editor), Inbjudningar, Åtkomst, Integrationer, Säkerhetsinställningar, Granskningslogg, Bannlysningar, AutoMod (inline rule editor), Servermall; Community pages only after enabling | settings-modal/spec.md, settings-modal/server-settings/ |
+| SET-006 | Channel settings and category settings are the same full-screen page shell: channel = Översikt, Behörigheter (private switch + collapsible advanced overwrite editor with role/member list, add picker and 3-state toggles), Inbjudningar, Integrationer; category = Översikt (name), Behörigheter | settings-modal/channel-settings/ |
+| SET-007 | Unsaved-changes bar: floating bottom bar with text, "Avbryt" and green "Spara ändringar" (seen on the AutoMod rule editor; shake animation not captured) | settings-modal/server-settings/automod/02.jpg |
 
 ## REST: remaining
 | Id | Acceptance | REF |

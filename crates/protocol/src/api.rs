@@ -99,6 +99,7 @@ macro_rules! numeric_enum {
 
 numeric_enum!(ChannelType { GuildText = 0, Dm = 1, GuildVoice = 2, GroupDm = 3, GuildCategory = 4 });
 numeric_enum!(MessageType { Default = 0, RecipientAdd = 1, RecipientRemove = 2, ChannelNameChange = 4, ChannelPinnedMessage = 6, UserJoin = 7, Reply = 19 });
+numeric_enum!(OverwriteType { Role = 0, Member = 1 });
 numeric_enum!(RelationshipType { Friend = 1, Blocked = 2, IncomingRequest = 3, OutgoingRequest = 4 });
 numeric_enum!(GatewayOp {
     Dispatch = 0,
@@ -118,6 +119,8 @@ pub enum PresenceStatus {
     Online,
     Idle,
     Dnd,
+    /// A chosen status: shown as `Offline` to everyone but the user's own sessions.
+    Invisible,
     Offline,
 }
 
@@ -127,6 +130,7 @@ impl PresenceStatus {
             Self::Online => "online",
             Self::Idle => "idle",
             Self::Dnd => "dnd",
+            Self::Invisible => "invisible",
             Self::Offline => "offline",
         }
     }
@@ -136,6 +140,7 @@ impl PresenceStatus {
             "online" => Some(Self::Online),
             "idle" => Some(Self::Idle),
             "dnd" => Some(Self::Dnd),
+            "invisible" => Some(Self::Invisible),
             "offline" => Some(Self::Offline),
             _ => None,
         }
@@ -323,6 +328,20 @@ pub struct Channel {
     pub owner_id: Option<Option<Snowflake>>,
     #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
     pub icon: Option<Option<String>>,
+    /// Guild channels only (always present there, `[]` when there are none); absent on DMs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_overwrites: Option<Vec<PermissionOverwrite>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PermissionOverwrite {
+    /// Role id or user id.
+    pub id: Snowflake,
+    #[serde(rename = "type")]
+    pub kind: OverwriteType,
+    /// Permission bitfield as a decimal string.
+    pub allow: String,
+    pub deny: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -352,6 +371,9 @@ pub struct GuildMember {
     pub nick: Option<String>,
     pub roles: Vec<Snowflake>,
     pub joined_at: String,
+    /// End of a communication timeout; always sent, `null` when the member is not timed out.
+    #[serde(default)]
+    pub communication_disabled_until: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -681,6 +703,10 @@ pub struct CreateChannelRequest {
     pub parent_id: Option<Snowflake>,
     #[serde(default)]
     pub topic: Option<String>,
+    /// Initial overwrites (a private channel is an @everyone deny of VIEW_CHANNEL); when absent a channel inside a category
+    /// copies the category's overwrites.
+    #[serde(default)]
+    pub permission_overwrites: Option<Vec<PermissionOverwrite>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -694,6 +720,76 @@ pub struct UpdateChannelRequest {
     /// `Some(None)` is not expressible with plain `Option`; send `"0"` to move a channel out of its category.
     #[serde(default)]
     pub parent_id: Option<Snowflake>,
+    /// With `parent_id`: `true` replaces the channel's overwrites with the new parent's, `false`/absent keeps them.
+    #[serde(default)]
+    pub lock_permissions: Option<bool>,
+}
+
+// ---- Moderation ----
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct BanRequest {
+    /// 0..=604800: also deletes the user's messages of that many seconds back in the guild.
+    #[serde(default)]
+    pub delete_message_seconds: Option<u32>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Ban {
+    pub user: User,
+    pub reason: Option<String>,
+}
+
+/// Only the keys that are present change; `nick` and `communication_disabled_until` accept `null` to clear.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct EditMemberRequest {
+    #[serde(default, deserialize_with = "double_option")]
+    pub nick: Option<Option<String>>,
+    /// Full replacement list, without @everyone.
+    #[serde(default)]
+    pub roles: Option<Vec<Snowflake>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub communication_disabled_until: Option<Option<String>>,
+}
+
+/// `PATCH /guilds/{id}/members/@me`
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct EditOwnMemberRequest {
+    #[serde(default, deserialize_with = "double_option")]
+    pub nick: Option<Option<String>>,
+}
+
+/// Create and update of a role; every key is optional.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct RoleRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub color: Option<u32>,
+    #[serde(default)]
+    pub hoist: Option<bool>,
+    /// Bitfield as a decimal string.
+    #[serde(default)]
+    pub permissions: Option<String>,
+    #[serde(default)]
+    pub mentionable: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RolePositionUpdate {
+    pub id: Snowflake,
+    pub position: i32,
+}
+
+/// Body of `PUT /channels/{id}/permissions/{oid}`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct OverwriteRequest {
+    #[serde(rename = "type")]
+    pub kind: OverwriteType,
+    pub allow: String,
+    pub deny: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -775,6 +871,9 @@ pub struct GuildWithState {
     pub channels: Vec<Channel>,
     pub members: Vec<GuildMember>,
     pub member_count: u32,
+    /// Only on GUILD_CREATE: the presences of the guild's members that are not offline (READY has its own list).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presences: Option<Vec<Presence>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -824,6 +923,19 @@ pub struct GuildMemberRemove {
     pub user: User,
 }
 
+/// GUILD_ROLE_CREATE and GUILD_ROLE_UPDATE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildRoleEvent {
+    pub guild_id: Snowflake,
+    pub role: Role,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildRoleDelete {
+    pub guild_id: Snowflake,
+    pub role_id: Snowflake,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MessageAck {
     pub channel_id: Snowflake,
@@ -854,6 +966,14 @@ pub enum GatewayEvent {
     GuildDelete(IdOnly),
     GuildMemberAdd(GuildMemberAdd),
     GuildMemberRemove(GuildMemberRemove),
+    /// Same payload as GUILD_MEMBER_ADD.
+    GuildMemberUpdate(GuildMemberAdd),
+    GuildRoleCreate(GuildRoleEvent),
+    GuildRoleUpdate(GuildRoleEvent),
+    GuildRoleDelete(GuildRoleDelete),
+    /// Same payload as GUILD_MEMBER_REMOVE.
+    GuildBanAdd(GuildMemberRemove),
+    GuildBanRemove(GuildMemberRemove),
     PresenceUpdate(Presence),
     UserUpdate(User),
     MessageAck(MessageAck),
@@ -880,6 +1000,12 @@ impl GatewayEvent {
             Self::GuildDelete(_) => "GUILD_DELETE",
             Self::GuildMemberAdd(_) => "GUILD_MEMBER_ADD",
             Self::GuildMemberRemove(_) => "GUILD_MEMBER_REMOVE",
+            Self::GuildMemberUpdate(_) => "GUILD_MEMBER_UPDATE",
+            Self::GuildRoleCreate(_) => "GUILD_ROLE_CREATE",
+            Self::GuildRoleUpdate(_) => "GUILD_ROLE_UPDATE",
+            Self::GuildRoleDelete(_) => "GUILD_ROLE_DELETE",
+            Self::GuildBanAdd(_) => "GUILD_BAN_ADD",
+            Self::GuildBanRemove(_) => "GUILD_BAN_REMOVE",
             Self::PresenceUpdate(_) => "PRESENCE_UPDATE",
             Self::UserUpdate(_) => "USER_UPDATE",
             Self::MessageAck(_) => "MESSAGE_ACK",
@@ -902,7 +1028,10 @@ impl GatewayEvent {
             Self::GuildUpdate(value) => serde_json::to_value(value),
             Self::GuildDelete(value) | Self::RelationshipRemove(value) => serde_json::to_value(value),
             Self::GuildMemberAdd(value) => serde_json::to_value(value),
-            Self::GuildMemberRemove(value) => serde_json::to_value(value),
+            Self::GuildMemberRemove(value) | Self::GuildBanAdd(value) | Self::GuildBanRemove(value) => serde_json::to_value(value),
+            Self::GuildMemberUpdate(value) => serde_json::to_value(value),
+            Self::GuildRoleCreate(value) | Self::GuildRoleUpdate(value) => serde_json::to_value(value),
+            Self::GuildRoleDelete(value) => serde_json::to_value(value),
             Self::PresenceUpdate(value) => serde_json::to_value(value),
             Self::UserUpdate(value) => serde_json::to_value(value),
             Self::MessageAck(value) => serde_json::to_value(value),
@@ -955,7 +1084,9 @@ mod tests {
         let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false});
         round_trip::<Role>(role.clone());
         round_trip::<Guild>(json!({"id": "300", "name": "Sam's server", "icon": null, "owner_id": "100", "roles": [role], "system_channel_id": "200"}));
-        round_trip::<GuildMember>(json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z"}));
+        round_trip::<GuildMember>(
+            json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null}),
+        );
     }
 
     #[test]
@@ -1019,7 +1150,7 @@ mod tests {
         round_trip::<UserProfile>(json!({"user": user(), "mutual_guilds": [{"id": "300", "nick": null}], "mutual_friends_count": 2}));
         round_trip::<UserProfile>(json!({
             "user": user(), "mutual_guilds": [], "mutual_friends_count": 0,
-            "guild_member": {"user": user(), "nick": "R", "roles": [], "joined_at": "2026-10-11T10:00:00.000Z"}
+            "guild_member": {"user": user(), "nick": "R", "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null}
         }));
         round_trip::<CreateMessageRequest>(json!({"content": "x", "allowed_mentions": {"parse": ["users"], "users": ["5"], "replied_user": false}}));
         round_trip::<AckBulkRequest>(json!({"read_states": [{"channel_id": "1", "message_id": "2"}]}));
@@ -1043,7 +1174,8 @@ mod tests {
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
-            value["members"] = json!([{"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z"}]);
+            value["members"] =
+                json!([{"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null}]);
             value["member_count"] = json!(1);
             value
         };
@@ -1051,11 +1183,57 @@ mod tests {
         round_trip::<ReadyEvent>(json!({
             "v": 1, "user": user(), "session_id": "abc", "guilds": [with_state], "private_channels": [], "presences": [], "read_states": [], "relationships": []
         }));
-        round_trip::<GuildMemberAdd>(json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "guild_id": "300"}));
+        round_trip::<GuildMemberAdd>(
+            json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": "2026-10-12T10:00:00.000Z", "guild_id": "300"}),
+        );
         round_trip::<MessageDelete>(json!({"id": "1", "channel_id": "2", "guild_id": null}));
         round_trip::<MessageReaction>(json!({"user_id": "1", "channel_id": "2", "message_id": "3", "emoji": {"id": null, "name": "🎉"}}));
         round_trip::<TypingStart>(json!({"channel_id": "2", "user_id": "1", "timestamp": 1_760_000_000}));
         round_trip::<MessageAck>(json!({"channel_id": "2", "message_id": "3"}));
+    }
+
+    #[test]
+    fn moderation_shapes_match_types_ts() {
+        let overwrite = json!({"id": "301", "type": 0, "allow": "0", "deny": "1024"});
+        round_trip::<PermissionOverwrite>(overwrite.clone());
+        round_trip::<PermissionOverwrite>(json!({"id": "100", "type": 1, "allow": "2048", "deny": "0"}));
+        round_trip::<Channel>(json!({
+            "id": "200", "type": 0, "guild_id": "300", "name": "mods", "topic": null, "position": 1, "parent_id": null, "last_message_id": null,
+            "permission_overwrites": [overwrite]
+        }));
+        round_trip::<Ban>(json!({"user": user(), "reason": null}));
+        let edit: EditMemberRequest = serde_json::from_value(json!({"nick": null, "communication_disabled_until": "2026-10-12T10:00:00.000Z"})).expect("edit");
+        assert_eq!(edit.nick, Some(None));
+        assert_eq!(edit.communication_disabled_until, Some(Some("2026-10-12T10:00:00.000Z".to_owned())));
+        assert!(edit.roles.is_none());
+        let untouched: EditMemberRequest = serde_json::from_value(json!({})).expect("empty edit");
+        assert!(untouched.nick.is_none() && untouched.communication_disabled_until.is_none());
+        let ban: BanRequest = serde_json::from_value(json!({"delete_message_seconds": 60, "reason": "spam"})).expect("ban");
+        assert_eq!((ban.delete_message_seconds, ban.reason.as_deref()), (Some(60), Some("spam")));
+        let role: RoleRequest = serde_json::from_value(json!({"name": "mod", "color": 255, "permissions": "8192"})).expect("role");
+        assert_eq!((role.name.as_deref(), role.color, role.permissions.as_deref(), role.hoist), (Some("mod"), Some(255), Some("8192"), None));
+        round_trip::<RolePositionUpdate>(json!({"id": "301", "position": 2}));
+        let request: OverwriteRequest = serde_json::from_value(json!({"type": 1, "allow": "1", "deny": "2"})).expect("overwrite");
+        assert_eq!(request.kind, OverwriteType::Member);
+        assert!(serde_json::from_value::<OverwriteRequest>(json!({"type": 2, "allow": "0", "deny": "0"})).is_err());
+        let own: EditOwnMemberRequest = serde_json::from_value(json!({"nick": "R"})).expect("own nick");
+        assert_eq!(own.nick, Some(Some("R".to_owned())));
+    }
+
+    #[test]
+    fn moderation_events_and_invisible_presence() {
+        let role = Role { id: Snowflake(301), name: "mod".to_owned(), color: 0, hoist: false, position: 1, permissions: "8192".to_owned(), mentionable: false };
+        let created = GatewayEvent::GuildRoleCreate(GuildRoleEvent { guild_id: Snowflake(300), role: role.clone() });
+        assert_eq!(created.name(), "GUILD_ROLE_CREATE");
+        assert_eq!(created.data()["role"]["name"], "mod");
+        assert_eq!(GatewayEvent::GuildRoleUpdate(GuildRoleEvent { guild_id: Snowflake(300), role }).name(), "GUILD_ROLE_UPDATE");
+        let deleted = GatewayEvent::GuildRoleDelete(GuildRoleDelete { guild_id: Snowflake(300), role_id: Snowflake(301) });
+        assert_eq!((deleted.name(), deleted.data()), ("GUILD_ROLE_DELETE", json!({"guild_id": "300", "role_id": "301"})));
+        let removed = GuildMemberRemove { guild_id: Snowflake(300), user: serde_json::from_value(user()).expect("user") };
+        assert_eq!(GatewayEvent::GuildBanAdd(removed.clone()).name(), "GUILD_BAN_ADD");
+        assert_eq!(GatewayEvent::GuildBanRemove(removed).data()["user"]["username"], "sam");
+        round_trip::<Presence>(json!({"user_id": "100", "status": "invisible", "custom_status": "brb"}));
+        assert_eq!(PresenceStatus::parse("invisible"), Some(PresenceStatus::Invisible));
     }
 
     #[test]

@@ -358,7 +358,7 @@ mod tests {
         let deny_everyone = Overwrite { target_id: GUILD, target_type: 0, allow: 0, deny: SEND_MESSAGES };
         let allow_role = Overwrite { target_id: MOD_ROLE, target_type: 0, allow: SEND_MESSAGES, deny: 0 };
         let deny_member = Overwrite { target_id: USER, target_type: 1, allow: 0, deny: ADD_REACTIONS };
-        let denied = channel_permissions(base, GUILD, USER, &[], &[deny_everyone.clone()]);
+        let denied = channel_permissions(base, GUILD, USER, &[], std::slice::from_ref(&deny_everyone));
         assert_eq!(denied & SEND_MESSAGES, 0);
         let regained = channel_permissions(base, GUILD, USER, &[MOD_ROLE], &[deny_everyone.clone(), allow_role]);
         assert_ne!(regained & SEND_MESSAGES, 0);
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn hidden_channel_grants_nothing() {
         let hide = Overwrite { target_id: GUILD, target_type: 0, allow: 0, deny: VIEW_CHANNEL };
-        assert_eq!(channel_permissions(DEFAULT_EVERYONE, GUILD, USER, &[], &[hide.clone()]), 0);
+        assert_eq!(channel_permissions(DEFAULT_EVERYONE, GUILD, USER, &[], std::slice::from_ref(&hide)), 0);
         assert_eq!(channel_permissions(ALL, GUILD, OWNER, &[], &[hide]), ALL);
     }
 }

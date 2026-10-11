@@ -30,6 +30,8 @@ export interface ChannelState {
   focus: { messageId: Snowflake; token: number } | null;
   /** Read pointer captured when the channel was opened; drives the "new messages" divider. */
   lastReadAtOpen: Snowflake | null;
+  /** Set by "Mark Unread": the unread bar shows even though the list is at the bottom, until marked read. */
+  markedUnread?: boolean;
   /** user id → client-side expiry (ms epoch). */
   typing: Record<Snowflake, number>;
 }
@@ -77,6 +79,17 @@ export function replaceWindow(s: ChannelState, page: Message[], opts: { hasMoreB
     focus: opts.focusId ? { messageId: opts.focusId, token: s.windowId + 1 } : null,
     pending: dedup.length ? s.pending.filter(p => !dedup.some(m => m.nonce && m.nonce === p.nonce)) : s.pending,
   };
+}
+
+/**
+ * `page` is a fetch of the latest messages. Anything the gateway delivered while the request was in flight and that is newer
+ * than the whole page would be dropped by replaceWindow, so carry it over.
+ */
+export function withLateArrivals(s: ChannelState, page: Message[]): Message[] {
+  let newest: Snowflake | null = null;
+  for (const m of page) if (!newest || compareIds(m.id, newest) > 0) newest = m.id;
+  const late = s.messages.filter(m => !newest || compareIds(m.id, newest) > 0);
+  return late.length ? [...page, ...late] : page;
 }
 
 export function prependPage(s: ChannelState, page: Message[], limit = PAGE_SIZE): ChannelState {

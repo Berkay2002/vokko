@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod common;
 
 use axum::http::StatusCode;
@@ -141,7 +142,10 @@ async fn pagination_is_newest_first_in_every_mode() {
         ids.push(send(&s, &s.owner, &format!("message {index}")).await["id"].as_str().expect("id").to_owned());
     }
     let base = format!("/channels/{}/messages", s.channel);
-    let list = |value: Value| -> Vec<String> { value.as_array().expect("array").iter().map(|m| m["id"].as_str().expect("id").to_owned()).collect() };
+    // the member's join notice (type 7) sits below the test messages
+    let list = |value: Value| -> Vec<String> {
+        value.as_array().expect("array").iter().filter(|m| m["type"] != 7).map(|m| m["id"].as_str().expect("id").to_owned()).collect()
+    };
     let newest_first: Vec<String> = ids.iter().rev().cloned().collect();
 
     let (_, all) = s.app.get(&base, &s.member).await;
