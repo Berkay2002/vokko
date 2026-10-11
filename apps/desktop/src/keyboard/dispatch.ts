@@ -19,6 +19,13 @@ const isEditable = (t: EventTarget | null): t is HTMLElement =>
   typeof HTMLElement !== "undefined" &&
   t instanceof HTMLElement && (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
 
+/** Chats and the panels around them: a key from inside one belongs to that chat's handler, never to a shell fallback. */
+const CHAT_PANEL = ".chat-view, .thread-panel, .voice-chat";
+
+export function inChatPanel(target: EventTarget | null | undefined): boolean {
+  return !!(target as Element | null | undefined)?.closest?.(CHAT_PANEL);
+}
+
 const modalOpen = () => useModals.getState().modal !== null || document.querySelector('[aria-modal="true"]') !== null;
 
 export interface DispatchEnv {

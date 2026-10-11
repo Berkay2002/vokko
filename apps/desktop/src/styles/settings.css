@@ -420,11 +420,6 @@
   text-align: center;
 }
 
-.keybind-plus {
-  margin: 0 4px;
-  color: var(--text-muted);
-}
-
 .keybind-status {
   width: 110px;
   padding-left: 12px !important;

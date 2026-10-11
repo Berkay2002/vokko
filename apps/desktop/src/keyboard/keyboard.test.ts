@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AppState } from "../api/store";
 import { ChannelType, type Channel, type ReadState } from "../api/types";
-import { BINDINGS, keyCaps, matches, matchIndex } from "./bindings";
-import { handleKeyDown, registerShortcut, runShortcut } from "./dispatch";
+import { BINDINGS, SHORTCUT_GROUPS, bindingGroups, keyCaps, matches, matchIndex } from "./bindings";
+import { handleKeyDown, inChatPanel, registerShortcut, runShortcut } from "./dispatch";
 import { allChannelOrder, channelOrder, mentioned, step, unread } from "./navigation";
 import { fuzzyScore, parseQuery, rank } from "./switcher";
 
@@ -45,6 +45,52 @@ describe("binding table", () => {
     expect(keyCaps("Mod+Shift+Alt+ArrowUp", true)).toEqual(["⌘", "⇧", "⌥", "↑"]);
     expect(keyCaps("Mod+Shift+Alt+ArrowUp", false)).toEqual(["Ctrl", "Shift", "Alt", "↑"]);
     expect(keyCaps("Shift+PageUp", false)).toEqual(["Shift", "Page Up"]);
+  });
+});
+
+describe("binding groups", () => {
+  const find = (mac: boolean, id: string) => bindingGroups(mac).flatMap(g => g.binds).find(b => b.id === id)!;
+
+  it("lists every binding once, grouped in dialog order", () => {
+    const groups = bindingGroups(true);
+    expect(groups.map(g => g.title)).toEqual([...SHORTCUT_GROUPS]);
+    expect(groups.flatMap(g => g.binds)).toHaveLength(BINDINGS.length);
+  });
+
+  it("shows the keys of the OS, and shares modifiers across an Up/Down pair", () => {
+    expect(find(true, "quickSwitcher").keys).toEqual(["⌘", "K"]);
+    expect(find(false, "quickSwitcher").keys).toEqual(["Ctrl", "K"]);
+    expect(find(true, "server").keys).toEqual(["⌘", "⌥", "↑ ↓"]);
+    expect(find(false, "server").keys).toEqual(["Ctrl", "Alt", "↑ ↓"]);
+    expect(find(true, "markServerRead").keys).toEqual(["⇧", "Esc"]);
+  });
+});
+
+describe("chat panel vs shell fallback", () => {
+  // A first load mounts the panel and the shell together: child effects run first, so the shell's fallback registers last and is asked first.
+  const inside = { closest: () => ({}) } as unknown as KeyboardEvent["target"];
+  const outside = { closest: () => null } as unknown as KeyboardEvent["target"];
+  const press = (target: KeyboardEvent["target"]) => ({ target }) as KeyboardEvent;
+
+  for (const order of ["panel first", "fallback first"] as const) {
+    it(`the panel that holds the key wins whatever the registration order (${order})`, () => {
+      const calls: string[] = [];
+      const panel = () => (calls.push("panel"), true);
+      const fallback = (_: number, e?: KeyboardEvent) => (inChatPanel(e?.target) ? false : (calls.push("fallback"), true));
+      const offs = order === "panel first" ? [registerShortcut("markChannelRead", panel), registerShortcut("markChannelRead", fallback)] : [registerShortcut("markChannelRead", fallback), registerShortcut("markChannelRead", panel)];
+      expect(runShortcut("markChannelRead", 0, press(inside))).toBe(true);
+      expect(calls).toEqual(["panel"]);
+      offs.forEach(off => off());
+    });
+  }
+
+  it("the fallback runs when the key comes from outside any chat", () => {
+    const calls: string[] = [];
+    const off = registerShortcut("markChannelRead", (_, e) => (inChatPanel(e?.target) ? false : (calls.push("fallback"), true)));
+    expect(runShortcut("markChannelRead", 0, press(outside))).toBe(true);
+    expect(runShortcut("markChannelRead", 0, press(inside))).toBe(false);
+    expect(calls).toEqual(["fallback"]);
+    off();
   });
 });
 

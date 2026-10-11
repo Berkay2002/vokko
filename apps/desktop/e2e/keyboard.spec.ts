@@ -1,10 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { openDm } from './helpers';
+import { openChannel as openForum, panel } from './threadHelpers';
 
 // Keyboard parity (MOD-005, MOD-006): one test per shortcut group. ControlOrMeta is Cmd on macOS, like the bindings.
 test.use({ viewport: { width: 1440, height: 900 } });
 
-type St = { threads: Record<string, { id: string; name?: string }>; channels: Record<string, { id: string; name?: string; guild_id: string | null; last_message_id?: string | null }>; readStates: Record<string, { channel_id: string; last_message_id: string | null; mention_count: number }> };
+type St = { route: { channelId: string | null }; threads: Record<string, { id: string; name?: string }>; channels: Record<string, { id: string; name?: string; guild_id: string | null; last_message_id?: string | null }>; readStates: Record<string, { channel_id: string; last_message_id: string | null; mention_count: number }> };
 type Win = { __vokko: { appStore: { getState(): St; setState(p: Partial<St>): void } } };
 
 const selected = (page: Page) => page.locator('.channel-row.selected').first();
@@ -41,7 +42,16 @@ test('navigation: Alt+Up/Down channels, Mod+Alt servers, Alt+Shift unread, Mod+S
   // Mentions across the app first: visiting #random (two mentions in the seed) acks them, and Alt+Down can pass through it.
   await page.keyboard.press('ControlOrMeta+Alt+ArrowUp');
   await atFriends(page);
-  await page.keyboard.press('ControlOrMeta+Shift+Alt+ArrowDown');
+  // DMs come first in rail order and carry mentions too (every DM message counts): step past them to #random.
+  const path = () => new URL(page.url()).pathname;
+  for (let i = 0; i < 4 && path().startsWith('/channels/@me'); i++) {
+    const from = path();
+    await page.keyboard.press('ControlOrMeta+Shift+Alt+ArrowDown');
+    await expect.poll(path).not.toBe(from);
+    // The URL changes before the shell re-renders; the next press must see the new place.
+    const to = path().split('/').pop()!;
+    await page.waitForFunction(id => (window as unknown as Win).__vokko.appStore.getState().route.channelId === id, to);
+  }
   await expect(selected(page)).toContainText('random');
 
   // Compare links, not text: the row's mention badge disappears once the channel is read.
@@ -77,7 +87,8 @@ test('read state: Esc marks the channel read, Shift+Esc the server, Shift+PageUp
   await page.locator('.chat-textarea').focus();
   await page.keyboard.press('Escape');
   await expect.poll(() => mentions(page, random)).toBe(0);
-  await expect(page.locator('.rail-badge')).toHaveCount(0);
+  // The server's own badge is gone; the unread DMs keep theirs in the rail.
+  await expect(page.locator('.rail-item', { has: page.getByRole('link', { name: /^Sam's server/ }) }).locator('.rail-badge')).toHaveCount(0);
 
   await page.keyboard.press('Shift+Escape');
   await expect(page.locator('.channel-row.unread')).toHaveCount(0);
@@ -207,6 +218,16 @@ test('dialog: Mod+/ lists every shortcut with OS keys; shortcuts stay off while 
   await expect(dialog).toHaveCount(0);
 });
 
+const pointer = (page: Page, id: string) => page.evaluate(c => (window as unknown as Win).__vokko.appStore.getState().readStates[c]?.last_message_id ?? null, id);
+// A blurred window does not auto-ack (ChatView's `focused`), so a moved read pointer below comes from the key alone.
+const blurWindow = (page: Page) => page.evaluate(() => window.dispatchEvent(new Event('blur')));
+const setPointers = (page: Page, ids: string[]) =>
+  page.evaluate(list => {
+    const st = (window as unknown as Win).__vokko.appStore;
+    const s = st.getState();
+    st.setState({ readStates: { ...s.readStates, ...Object.fromEntries(list.map(c => [c, { channel_id: c, last_message_id: '1', mention_count: 0 }])) } });
+  }, ids);
+
 test('read state with a thread panel open: Esc in the channel composer marks the channel, not the thread', async ({ page }) => {
   const general = await openChannel(page, 'general');
   await page.locator('.chat-msg .thread-chip', { hasText: 'gateway docs' }).click();
@@ -220,10 +241,10 @@ test('read state with a thread panel open: Esc in the channel composer marks the
     return { thread, threadRead: s.readStates[thread]?.last_message_id ?? null, last: s.channels[g]!.last_message_id };
   }, general);
   await page.locator('.channel-chat .chat-textarea').focus();
+  await blurWindow(page);
   await page.keyboard.press('Escape');
-  const pointer = (id: string) => page.evaluate(c => (window as unknown as Win).__vokko.appStore.getState().readStates[c]?.last_message_id ?? null, id);
-  await expect.poll(() => pointer(general)).toBe(ids.last);
-  expect(await pointer(ids.thread)).toBe(ids.threadRead);
+  await expect.poll(() => pointer(page, general)).toBe(ids.last);
+  expect(await pointer(page, ids.thread)).toBe(ids.threadRead);
 });
 
 test('Esc on a route without a channel chat (voice page, chat closed) still marks it read; Alt+Down stays in other inputs', async ({ page }) => {
@@ -255,3 +276,49 @@ test('Esc on a route without a channel chat (voice page, chat closed) still mark
   await page.keyboard.press('Alt+ArrowDown');
   await expect(page).toHaveURL(url);
 });
+
+test('read state with a thread panel open: Esc in the thread composer marks the thread, not the channel', async ({ page }) => {
+  const general = await openChannel(page, 'general');
+  await page.locator('.chat-msg .thread-chip', { hasText: 'gateway docs' }).click();
+  await expect(page.locator('.thread-panel .chat-msg').first()).toBeVisible();
+  const thread = await page.evaluate(() => Object.values((window as unknown as Win).__vokko.appStore.getState().threads).find(c => c.name === 'gateway docs')!.id);
+  await setPointers(page, [general, thread]);
+  await page.locator('.thread-panel .chat-textarea').focus();
+  await blurWindow(page);
+  await page.keyboard.press('Escape');
+  await expect.poll(() => pointer(page, thread)).not.toBe('1');
+  expect(await pointer(page, general)).toBe('1');
+});
+
+test('read state in a forum: Esc in the post panel marks the post, not the forum', async ({ page }) => {
+  const forum = await openForum(page, 'support');
+  await page.locator('.forum-post').first().click();
+  await expect(page.locator('.thread-panel .chat-msg').first()).toBeVisible();
+  const label = (await panel(page).getAttribute('aria-label'))!.replace('Thread: ', '');
+  const post = await page.evaluate(n => Object.values((window as unknown as Win).__vokko.appStore.getState().threads).find(c => c.name === n)!.id, label);
+  await setPointers(page, [forum, post]);
+  await page.locator('.thread-panel .chat-textarea').focus();
+  await blurWindow(page);
+  await page.keyboard.press('Escape');
+  await expect.poll(() => pointer(page, post)).not.toBe('1');
+  expect(await pointer(page, forum)).toBe('1');
+});
+
+// Settings > Keybinds renders the binding table with the keys of the platform (IS_MAC is read at module load, so override before the app).
+for (const [platform, mod, alt] of [['MacIntel', '⌘', '⌥'], ['Win32', 'Ctrl', 'Alt']] as const) {
+  test(`Settings > Keybinds lists the binding table with ${platform} keys, no "Not wired yet"`, async ({ page }) => {
+    await page.addInitScript(p => Object.defineProperty(Navigator.prototype, 'platform', { get: () => p }), platform);
+    await openGuild(page);
+    await page.getByRole('button', { name: 'User Settings' }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByRole('button', { name: 'Keybinds', exact: true }).click();
+    await expect(dialog.getByRole('heading', { name: 'Default Keybinds', level: 2 })).toBeVisible();
+    await expect(dialog.locator('.sm-keys-group h3')).toHaveText(['Navigation', 'Unreads', 'Chat', 'Voice', 'Panels']);
+    await expect(dialog.locator('.sm-keys-row')).toHaveCount(21);
+    await expect(dialog.getByText('Not wired yet')).toHaveCount(0);
+    const caps = (action: string) => dialog.locator('.sm-keys-row', { hasText: action }).locator('.shortcut-cap');
+    await expect(caps('Quick switcher')).toHaveText([mod, 'K']);
+    await expect(caps('Navigate between channels')).toHaveText([alt, '↑ ↓']);
+    await expect(caps('Toggle mute')).toHaveText([mod, platform === 'MacIntel' ? '⇧' : 'Shift', 'M']);
+  });
+}

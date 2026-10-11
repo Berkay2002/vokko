@@ -989,30 +989,11 @@
   line-height: 20px;
 }
 
-.sm-keys-tag {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
 .sm-keys-caps {
   display: flex;
   flex: none;
   align-items: center;
   gap: 4px;
-}
-
-.sm-keys-cap {
-  min-width: 20px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: var(--background-mod-normal);
-  color: var(--text-default);
-  font-family: inherit;
-  font-size: 11px;
-  line-height: 16px;
-  font-weight: 700;
-  text-align: center;
-  text-transform: uppercase;
 }
 
 /* voice & video: buttons and the segmented mic meter follow the reference (voice-video/01) */

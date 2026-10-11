@@ -22,7 +22,7 @@ import { NativeMenuBridge } from "./NativeMenuBridge";
 import { TitleBar } from "./TitleBar";
 import { UserPanel } from "./UserPanel";
 import { toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
-import { useShortcut } from "../keyboard";
+import { inChatPanel, useShortcut } from "../keyboard";
 import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } from "../keyboard/navigation";
 import { markChannelRead, markGuildRead } from "./actions";
 import { firstTextChannel } from "./channels";
@@ -217,9 +217,10 @@ export function AppShell() {
     const s = appStore.getState();
     return go(step(allChannelOrder(s), channelId, dirOf(i), mentioned(s)));
   });
-  // Routes without a channel chat (forum, voice page, its chat closed) still mark the channel read on Esc.
-  useShortcut("markChannelRead", () => {
-    if (!channelId || document.querySelector(".channel-chat > .chat-view")) return false;
+  // Routes without a channel chat (forum, voice page, its chat closed) still mark the channel read on Esc. A chat or panel that holds
+  // the key (its ChatBody may decline for an open menu) is never overridden here, whatever the registration order.
+  useShortcut("markChannelRead", (_, e) => {
+    if (!channelId || document.querySelector(".channel-chat > .chat-view") || inChatPanel(e ? e.target : document.activeElement)) return false;
     void markChannelRead(channelId).catch(() => undefined);
   });
   useShortcut("markServerRead", () => (guildId ? void markGuildRead(guildId).catch(() => undefined) : false));

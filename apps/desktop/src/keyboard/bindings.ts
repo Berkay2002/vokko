@@ -93,3 +93,27 @@ export function keyCaps(spec: string, mac: boolean): string[] {
   const mods = parts.map(m => (mac ? MAC_CAPS : PC_CAPS)[m] ?? m);
   return [...mods, KEY_CAPS[key] ?? (key.length === 1 ? key.toUpperCase() : key)];
 }
+
+/** Groups in display order: the shortcuts dialog and Settings > Keybinds list them the same way. */
+export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = ["Navigation", "Unreads", "Chat", "Voice", "Panels"];
+
+/** Caps of a binding; an Up/Down pair shows its shared modifiers once, then both arrows: ⌥ + ↑ ↓. */
+export function bindingCaps(b: Pick<Binding, "keys">, mac: boolean): string[] {
+  const caps = keyCaps(b.keys[0]!, mac);
+  if (b.keys.length < 2) return caps;
+  return [...caps.slice(0, -1), b.keys.map(k => keyCaps(k, mac).at(-1)).join(" ")];
+}
+
+export interface ShortcutRow {
+  id: string;
+  action: string;
+  keys: string[];
+}
+
+/** The binding table by group, with the keys this OS shows. */
+export function bindingGroups(mac: boolean = IS_MAC): { title: ShortcutGroup; binds: ShortcutRow[] }[] {
+  return SHORTCUT_GROUPS.map(title => ({
+    title,
+    binds: (BINDINGS as readonly Binding[]).filter(b => b.group === title).map(b => ({ id: b.id, action: b.label, keys: bindingCaps(b, mac) })),
+  }));
+}

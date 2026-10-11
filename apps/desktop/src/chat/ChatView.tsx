@@ -169,7 +169,7 @@ function ChatBody(p: BodyProps) {
   // A message marked unread keeps the channel unread while it is open; leaving it lets the normal ack resume.
   useEffect(() => () => messageStore.releaseHold(p.channelId), [p.channelId]);
 
-  // Several chats can be mounted (channel, thread panel, voice chat): a key belongs to the one holding focus; with focus on the
+  // Several chats can be mounted (channel, thread panel, voice chat): a key belongs to the one holding focus (its panel counts); with focus on the
   // page body, to the channel's main chat. The others decline so the dispatcher asks the next handler.
   const root = useRef<HTMLDivElement>(null);
   const owns = (e?: KeyboardEvent) => {
@@ -177,7 +177,7 @@ function ChatBody(p: BodyProps) {
     if (!el) return false;
     const t = e?.target;
     if (!(t instanceof Node) || t === document.body || t === document.documentElement) return !!el.parentElement?.classList.contains('channel-chat');
-    return el.contains(t);
+    return (el.closest('.thread-panel, .voice-chat') ?? el).contains(t);
   };
 
   // Escape (outside editing and menus): mark the channel read and jump to the present. Shift+Escape (server read) lives in the shell.
