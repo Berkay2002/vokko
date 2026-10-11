@@ -1,0 +1,511 @@
+// Mock REST router: every route of docs/api.md that the UI uses, with the same status codes and error codes.
+
+import { ChannelType, MessageType, RelationshipType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
+import { compareIds } from "../snowflake";
+import { db, nextId, sortedMessages, userOf, type MockAccount } from "./db";
+import { addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, guildAudience, openDM, openGroupDM, requireChannel, requireMessage } from "./ops";
+import { emit } from "./socket";
+import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
+
+type Handler = (ctx: Ctx) => unknown;
+
+interface Ctx {
+  viewer: MockAccount;
+  params: string[];
+  query: URLSearchParams;
+  body: Record<string, unknown>;
+}
+
+const routes: { method: string; pattern: RegExp; handler: Handler }[] = [];
+function route(method: string, pattern: string, handler: Handler): void {
+  routes.push({ method, pattern: new RegExp(`^${pattern}$`), handler });
+}
+
+const ID = "(\\d+)";
+const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+
+function requireGuildMember(guildId: string, viewerId: string) {
+  const guild = db.guilds.get(guildId);
+  if (!guild) fail(404, 10004, "Unknown Guild");
+  if (!guild.members.has(viewerId)) fail(403, 50001, "Missing Access");
+  return guild;
+}
+
+function pendingAttachment(id: string | undefined, owner: string): Attachment | null {
+  if (!id) return null;
+  const entry = db.pending.get(id);
+  if (!entry || entry.owner !== owner) fail(400, 50035, "Invalid Form Body", { attachment: { code: "ATTACHMENT_NOT_FOUND", message: "Unknown attachment" } });
+  return entry.attachment;
+}
+
+function parseEmoji(raw: string): ReactionEmoji {
+  const decoded = decodeURIComponent(raw);
+  const idx = decoded.lastIndexOf(":");
+  if (idx > 0 && /^\d+$/.test(decoded.slice(idx + 1))) return { id: decoded.slice(idx + 1), name: decoded.slice(0, idx) };
+  return { id: null, name: decoded };
+}
+
+const sameEmoji = (a: ReactionEmoji, b: ReactionEmoji) => a.id === b.id && a.name === b.name;
+
+// ---- auth ----
+
+route("POST", "/auth/register", ({ body }) => {
+  const email = str(body.email)?.trim() ?? "";
+  const username = str(body.username)?.trim().toLowerCase() ?? "";
+  const password = str(body.password) ?? "";
+  const errors: Record<string, unknown> = {};
+  if (!/^[^@\s]+@[^@\s]+$/.test(email)) errors.email = { code: "BASE_TYPE_BAD_FORMAT", message: "Not a well formed email address." };
+  if (!/^[a-z0-9_.]{2,32}$/.test(username)) errors.username = { code: "USERNAME_INVALID", message: "Username must be 2-32 characters: a-z, 0-9, _ and ." };
+  else if ([...db.accounts.values()].some(a => a.user.username === username)) errors.username = { code: "USERNAME_ALREADY_TAKEN", message: "Username is already taken" };
+  if (password.length < 6) errors.password = { code: "BASE_TYPE_MIN_LENGTH", message: "Must be 6 or more in length." };
+  if (Object.keys(errors).length > 0) fail(400, 50035, "Invalid Form Body", errors);
+  const account = createAccount({ username, email, password, global_name: str(body.global_name)?.trim() || null });
+  return { token: `mock:${account.user.id}`, user: account.user };
+});
+
+route("POST", "/auth/login", ({ body }) => {
+  const login = (str(body.login) ?? "").trim().toLowerCase();
+  const account = [...db.accounts.values()].find(a => a.user.username === login || a.email.toLowerCase() === login);
+  if (!account || account.password !== str(body.password)) {
+    fail(400, 50035, "Invalid Form Body", { login: { code: "INVALID_LOGIN", message: "Login or password is invalid." } });
+  }
+  return { token: `mock:${account.user.id}`, user: account.user };
+});
+
+route("POST", "/auth/logout", () => undefined);
+
+// ---- users ----
+
+route("GET", "/users/@me", ({ viewer }) => viewer.user);
+
+route("PATCH", "/users/@me", ({ viewer, body }) => {
+  const user = viewer.user;
+  if ("global_name" in body) {
+    const value = str(body.global_name)?.trim() ?? "";
+    if (value.length > 32) fail(400, 50035, "Invalid Form Body", { global_name: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 32 or fewer in length." } });
+    user.global_name = value === "" ? null : value;
+  }
+  if ("bio" in body) {
+    const value = str(body.bio)?.trim() ?? "";
+    if (value.length > 190) fail(400, 50035, "Invalid Form Body", { bio: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 190 or fewer in length." } });
+    user.bio = value === "" ? null : value;
+  }
+  if ("banner_color" in body) {
+    const value = body.banner_color;
+    if (value !== null && !(typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value))) fail(400, 50035, "Invalid Form Body", { banner_color: { code: "COLOR_TYPE_CONVERT", message: "Not a valid color." } });
+    user.banner_color = value as string | null;
+  }
+  if ("avatar_attachment_id" in body) {
+    const attachment = pendingAttachment(str(body.avatar_attachment_id), user.id);
+    user.avatar = attachment ? attachment.url : null;
+  }
+  return user;
+});
+
+route("GET", `/users/${ID}`, ({ params }) => {
+  const account = db.accounts.get(params[0] ?? "");
+  if (!account) fail(404, 10013, "Unknown User");
+  return account.user;
+});
+
+route("GET", "/users/@me/guilds", ({ viewer }) =>
+  [...db.guilds.values()].filter(g => g.members.has(viewer.user.id)).map((g): Guild => ({ ...g.guild })),
+);
+
+route("DELETE", `/users/@me/guilds/${ID}`, ({ viewer, params }) => {
+  const guildId = params[0] ?? "";
+  const guild = requireGuildMember(guildId, viewer.user.id);
+  if (guild.guild.owner_id === viewer.user.id) fail(400, 50035, "Invalid Form Body", { guild: { code: "OWNER_CANNOT_LEAVE", message: "Owners cannot leave their server. Transfer ownership or delete it." } });
+  guild.members.delete(viewer.user.id);
+  emit([viewer.user.id], "GUILD_DELETE", { id: guildId });
+  emit(guild.members.keys(), "GUILD_MEMBER_REMOVE", { guild_id: guildId, user: viewer.user });
+  return undefined;
+});
+
+route("GET", "/users/@me/channels", ({ viewer }) => privateChannelsFor(viewer.user.id));
+
+route("POST", "/users/@me/channels", ({ viewer, body }) => {
+  const recipient = str(body.recipient_id);
+  if (recipient) {
+    if (!db.accounts.has(recipient)) fail(404, 10013, "Unknown User");
+    if (recipient === viewer.user.id) fail(400, 50035, "Invalid Form Body", { recipient_id: { code: "CANNOT_DM_SELF", message: "Cannot send messages to yourself" } });
+    return channelFor(openDM(viewer.user.id, recipient), viewer.user.id);
+  }
+  const recipients = Array.isArray(body.recipient_ids) ? body.recipient_ids.filter((v): v is string => typeof v === "string") : [];
+  if (recipients.length === 0 || recipients.some(id => !db.accounts.has(id))) fail(400, 50035, "Invalid Form Body", { recipient_ids: { code: "INVALID", message: "Invalid recipients" } });
+  if (recipients.length === 1 && recipients[0]) return channelFor(openDM(viewer.user.id, recipients[0]), viewer.user.id);
+  return channelFor(openGroupDM(viewer.user.id, recipients), viewer.user.id);
+});
+
+// ---- relationships ----
+
+route("GET", "/users/@me/relationships", ({ viewer }) => relationshipsFor(viewer.user.id));
+
+function addRelationship(viewerId: string, otherId: string): void {
+  if (viewerId === otherId) fail(400, 80007, "You cannot send yourself a friend request.");
+  const current = relationship(viewerId, otherId)?.type;
+  if (current === RelationshipType.Friend || current === RelationshipType.OutgoingRequest) return;
+  if (relationship(otherId, viewerId)?.type === RelationshipType.Blocked) fail(403, 80000, "Cannot send friend request to this user");
+  const accept = current === RelationshipType.IncomingRequest;
+  const mine = accept ? RelationshipType.Friend : RelationshipType.OutgoingRequest;
+  const theirs = accept ? RelationshipType.Friend : RelationshipType.IncomingRequest;
+  setRelationship(viewerId, otherId, mine, theirs);
+  const toMe: Relationship = { id: otherId, type: mine, user: userOf(otherId) };
+  const toThem: Relationship = { id: viewerId, type: theirs, user: userOf(viewerId) };
+  emit([viewerId], "RELATIONSHIP_ADD", toMe);
+  emit([otherId], "RELATIONSHIP_ADD", toThem);
+}
+
+route("PUT", `/users/@me/relationships/${ID}`, ({ viewer, params }) => {
+  const id = params[0] ?? "";
+  if (!db.accounts.has(id)) fail(404, 10013, "Unknown User");
+  addRelationship(viewer.user.id, id);
+  return undefined;
+});
+
+route("POST", "/users/@me/relationships", ({ viewer, body }) => {
+  const username = (str(body.username) ?? "").trim().toLowerCase();
+  const target = [...db.accounts.values()].find(a => a.user.username === username);
+  if (!target) fail(404, 10013, "Unknown User");
+  addRelationship(viewer.user.id, target.user.id);
+  return undefined;
+});
+
+route("DELETE", `/users/@me/relationships/${ID}`, ({ viewer, params }) => {
+  const id = params[0] ?? "";
+  const current = relationship(viewer.user.id, id);
+  if (!current) return undefined;
+  const theirs = relationship(id, viewer.user.id);
+  const dropsTheirs = current.type !== RelationshipType.Blocked && theirs && theirs.type !== RelationshipType.Blocked;
+  setRelationship(viewer.user.id, id, null, dropsTheirs ? null : (theirs?.type ?? null));
+  emit([viewer.user.id], "RELATIONSHIP_REMOVE", { id });
+  if (dropsTheirs) emit([id], "RELATIONSHIP_REMOVE", { id: viewer.user.id });
+  return undefined;
+});
+
+// ---- guilds ----
+
+route("POST", "/guilds", ({ viewer, body }) => {
+  const name = (str(body.name) ?? "").trim();
+  if (name.length < 2 || name.length > 100) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 2 and 100 in length." } });
+  const icon = pendingAttachment(str(body.icon_attachment_id), viewer.user.id);
+  const id = createGuildRecord(viewer.user.id, name, icon?.url ?? null);
+  emit([viewer.user.id], "GUILD_CREATE", guildPayload(id, viewer.user.id));
+  return db.guilds.get(id)?.guild;
+});
+
+route("GET", `/guilds/${ID}`, ({ viewer, params }) => requireGuildMember(params[0] ?? "", viewer.user.id).guild);
+
+route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
+  const guild = requireGuildMember(params[0] ?? "", viewer.user.id);
+  if (guild.guild.owner_id !== viewer.user.id) fail(403, 50013, "Missing Permissions");
+  if (typeof body.name === "string") {
+    const name = body.name.trim();
+    if (name.length < 2 || name.length > 100) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 2 and 100 in length." } });
+    guild.guild.name = name;
+  }
+  if ("icon_attachment_id" in body) guild.guild.icon = pendingAttachment(str(body.icon_attachment_id), viewer.user.id)?.url ?? null;
+  if ("system_channel_id" in body) guild.guild.system_channel_id = str(body.system_channel_id) ?? null;
+  emit(guild.members.keys(), "GUILD_UPDATE", { ...guild.guild });
+  return guild.guild;
+});
+
+route("DELETE", `/guilds/${ID}`, ({ viewer, params }) => {
+  const guildId = params[0] ?? "";
+  const guild = requireGuildMember(guildId, viewer.user.id);
+  if (guild.guild.owner_id !== viewer.user.id) fail(403, 50013, "Missing Permissions");
+  emit(guild.members.keys(), "GUILD_DELETE", { id: guildId });
+  db.guilds.delete(guildId);
+  for (const channel of [...db.channels.values()]) {
+    if (channel.guild_id !== guildId) continue;
+    db.channels.delete(channel.id);
+    db.messages.delete(channel.id);
+  }
+  return undefined;
+});
+
+route("GET", `/guilds/${ID}/channels`, ({ viewer, params }) => {
+  const guildId = params[0] ?? "";
+  requireGuildMember(guildId, viewer.user.id);
+  return [...db.channels.values()].filter(c => c.guild_id === guildId).map(c => channelFor(c, viewer.user.id));
+});
+
+route("POST", `/guilds/${ID}/channels`, ({ viewer, params, body }) => {
+  const guildId = params[0] ?? "";
+  const guild = requireGuildMember(guildId, viewer.user.id);
+  if (guild.guild.owner_id !== viewer.user.id) fail(403, 50013, "Missing Permissions");
+  const type = body.type;
+  if (type !== ChannelType.GuildText && type !== ChannelType.GuildVoice && type !== ChannelType.GuildCategory) fail(400, 50035, "Invalid Form Body", { type: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 2, 4)." } });
+  const name = (str(body.name) ?? "").trim().toLowerCase().replace(/\s+/g, "-");
+  if (name.length < 1 || name.length > 100) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 1 and 100 in length." } });
+  const parent = str(body.parent_id) ?? null;
+  if (parent && db.channels.get(parent)?.guild_id !== guildId) fail(400, 50035, "Invalid Form Body", { parent_id: { code: "INVALID", message: "Unknown category" } });
+  const channel = addChannel(guildId, { name, type, parent_id: type === ChannelType.GuildCategory ? null : parent, topic: str(body.topic) ?? null });
+  const payload = channelFor(channel, viewer.user.id);
+  emit(guild.members.keys(), "CHANNEL_CREATE", payload);
+  return payload;
+});
+
+route("GET", `/guilds/${ID}/members`, ({ viewer, params, query }) => {
+  const guildId = params[0] ?? "";
+  requireGuildMember(guildId, viewer.user.id);
+  const limit = Math.min(1000, Math.max(1, Number(query.get("limit") ?? 100) || 100));
+  const after = query.get("after");
+  return membersOf(guildId)
+    .sort((a, b) => compareIds(a.user.id, b.user.id))
+    .filter((m): m is GuildMember => (after ? compareIds(m.user.id, after) > 0 : true))
+    .slice(0, limit);
+});
+
+// ---- channels ----
+
+route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  if (channel.guild_id) {
+    const guild = db.guilds.get(channel.guild_id);
+    if (guild?.guild.owner_id !== viewer.user.id) fail(403, 50013, "Missing Permissions");
+  }
+  if (typeof body.name === "string") channel.name = body.name.trim().toLowerCase().replace(/\s+/g, "-") || channel.name;
+  if ("topic" in body) channel.topic = str(body.topic)?.trim() || null;
+  if (typeof body.position === "number") channel.position = body.position;
+  if ("parent_id" in body) channel.parent_id = str(body.parent_id) ?? null;
+  const payload = channelFor(channel, viewer.user.id);
+  emit(channelAudience(channel), "CHANNEL_UPDATE", payload);
+  return payload;
+});
+
+route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const payload = channelFor(channel, viewer.user.id);
+  if (!channel.guild_id) {
+    (channel.hidden_for ??= new Set()).add(viewer.user.id);
+    emit([viewer.user.id], "CHANNEL_DELETE", payload);
+    return payload;
+  }
+  const guild = db.guilds.get(channel.guild_id);
+  if (guild?.guild.owner_id !== viewer.user.id) fail(403, 50013, "Missing Permissions");
+  emit(guildAudience(channel.guild_id), "CHANNEL_DELETE", payload);
+  db.channels.delete(channel.id);
+  db.messages.delete(channel.id);
+  return payload;
+});
+
+// ---- invites ----
+
+function invitePreview(code: string) {
+  const invite = db.invites.get(code);
+  const guild = invite && db.guilds.get(invite.guild_id);
+  const channel = invite && db.channels.get(invite.channel_id);
+  if (!invite || !guild || !channel) fail(404, 10006, "Unknown Invite");
+  return {
+    code,
+    guild: { id: guild.guild.id, name: guild.guild.name, icon: guild.guild.icon },
+    channel: { id: channel.id, name: channel.name },
+    expires_at: invite.expires_at,
+    member_count: guild.members.size,
+  };
+}
+
+route("POST", `/channels/${ID}/invites`, ({ viewer, params, body }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  if (!channel.guild_id) fail(400, 50003, "Cannot execute action on a DM channel");
+  const maxAge = typeof body.max_age === "number" ? body.max_age : 86_400;
+  const code = Math.random().toString(36).slice(2, 10);
+  db.invites.set(code, { code, guild_id: channel.guild_id, channel_id: channel.id, expires_at: maxAge > 0 ? new Date(Date.now() + maxAge * 1000).toISOString() : null });
+  return invitePreview(code);
+});
+
+route("GET", "/invites/([a-z0-9]+)", ({ params }) => invitePreview(params[0] ?? ""));
+
+route("POST", "/invites/([a-z0-9]+)", ({ viewer, params }) => {
+  const preview = invitePreview(params[0] ?? "");
+  const guild = db.guilds.get(preview.guild.id);
+  if (!guild) fail(404, 10006, "Unknown Invite");
+  if (!guild.members.has(viewer.user.id)) {
+    const member = { nick: null, roles: [], joined_at: new Date().toISOString() };
+    guild.members.set(viewer.user.id, member);
+    emit([viewer.user.id], "GUILD_CREATE", guildPayload(guild.guild.id, viewer.user.id));
+    emit([...guild.members.keys()].filter(id => id !== viewer.user.id), "GUILD_MEMBER_ADD", { guild_id: guild.guild.id, user: viewer.user, ...member });
+  }
+  return guild.guild;
+});
+
+// ---- messages ----
+
+route("GET", `/channels/${ID}/messages`, ({ viewer, params, query }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const all = sortedMessages(channel.id);
+  const limit = Math.min(100, Math.max(1, Number(query.get("limit") ?? 50) || 50));
+  const before = query.get("before");
+  const after = query.get("after");
+  const around = query.get("around");
+  let slice: typeof all;
+  if (around) {
+    const index = all.findIndex(m => compareIds(m.id, around) >= 0);
+    const center = index === -1 ? all.length : index;
+    const start = Math.max(0, center - Math.floor(limit / 2));
+    slice = all.slice(start, start + limit);
+  } else if (after) {
+    slice = all.filter(m => compareIds(m.id, after) > 0).slice(0, limit);
+  } else if (before) {
+    slice = all.filter(m => compareIds(m.id, before) < 0).slice(-limit);
+  } else {
+    slice = all.slice(-limit);
+  }
+  return slice.map(m => messageFor(m, viewer.user.id)).reverse();
+});
+
+route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  if (channel.type === ChannelType.GuildCategory || channel.type === ChannelType.GuildVoice) fail(400, 50024, "Cannot execute action on this channel type");
+  const content = (str(body.content) ?? "").trim();
+  const ids = Array.isArray(body.attachment_ids) ? body.attachment_ids.filter((v): v is string => typeof v === "string") : [];
+  const attachments = ids.map(id => pendingAttachment(id, viewer.user.id)).filter((a): a is Attachment => a !== null);
+  if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });
+  if (content === "" && attachments.length === 0) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
+  const reference = body.message_reference as { message_id?: string } | undefined;
+  if (reference?.message_id) requireMessage(channel.id, reference.message_id);
+  for (const id of ids) db.pending.delete(id);
+  const message = addMessage({
+    channel,
+    author_id: viewer.user.id,
+    content,
+    attachments,
+    reference_id: reference?.message_id ?? null,
+    nonce: str(body.nonce) ?? null,
+  });
+  return messageFor(message, viewer.user.id);
+});
+
+route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
+  if (message.author_id !== viewer.user.id) fail(403, 50005, "Cannot edit a message authored by another user");
+  const content = (str(body.content) ?? "").trim();
+  if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });
+  if (content === "" && message.attachments.length === 0) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
+  message.content = content;
+  message.edited_timestamp = new Date().toISOString();
+  message.mention_ids = [...new Set([...content.matchAll(/<@!?(\d+)>/g)].map(m => m[1] ?? "").filter(id => db.accounts.has(id)))];
+  message.mention_everyone = /(^|\s)@(everyone|here)\b/.test(content);
+  for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));
+  return messageFor(message, viewer.user.id);
+});
+
+route("DELETE", `/channels/${ID}/messages/${ID}`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
+  const owner = channel.guild_id ? db.guilds.get(channel.guild_id)?.guild.owner_id === viewer.user.id : false;
+  if (message.author_id !== viewer.user.id && !owner) fail(403, 50013, "Missing Permissions");
+  const list = sortedMessages(channel.id);
+  list.splice(list.indexOf(message), 1);
+  channel.last_message_id = list.at(-1)?.id ?? null;
+  emit(channelAudience(channel), "MESSAGE_DELETE", { id: message.id, channel_id: channel.id, guild_id: channel.guild_id });
+  return undefined;
+});
+
+// ---- reactions ----
+
+route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
+  const emoji = parseEmoji(params[2] ?? "");
+  let reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
+  if (!reaction) message.reactions.push((reaction = { emoji, user_ids: [] }));
+  if (!reaction.user_ids.includes(viewer.user.id)) {
+    reaction.user_ids.push(viewer.user.id);
+    emit(channelAudience(channel), "MESSAGE_REACTION_ADD", { user_id: viewer.user.id, channel_id: channel.id, message_id: message.id, emoji });
+  }
+  return undefined;
+});
+
+route("DELETE", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
+  const emoji = parseEmoji(params[2] ?? "");
+  const reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
+  if (reaction?.user_ids.includes(viewer.user.id)) {
+    reaction.user_ids = reaction.user_ids.filter(id => id !== viewer.user.id);
+    if (reaction.user_ids.length === 0) message.reactions = message.reactions.filter(r => r !== reaction);
+    emit(channelAudience(channel), "MESSAGE_REACTION_REMOVE", { user_id: viewer.user.id, channel_id: channel.id, message_id: message.id, emoji });
+  }
+  return undefined;
+});
+
+route("GET", `/channels/${ID}/messages/${ID}/reactions/([^/]+)`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
+  const emoji = parseEmoji(params[2] ?? "");
+  return (message.reactions.find(r => sameEmoji(r.emoji, emoji))?.user_ids ?? []).map((id): User => userOf(id));
+});
+
+// ---- pins, typing, ack ----
+
+route("GET", `/channels/${ID}/pins`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  return sortedMessages(channel.id)
+    .filter(m => m.pinned)
+    .map(m => messageFor(m, viewer.user.id))
+    .reverse();
+});
+
+route("PUT", `/channels/${ID}/pins/${ID}`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
+  if (message.pinned) return undefined;
+  if (sortedMessages(channel.id).filter(m => m.pinned).length >= 50) fail(400, 30003, "Maximum number of pins reached (50)");
+  message.pinned = true;
+  for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));
+  addMessage({ channel, author_id: viewer.user.id, content: "", type: MessageType.ChannelPinnedMessage, reference_id: message.id });
+  return undefined;
+});
+
+route("DELETE", `/channels/${ID}/pins/${ID}`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
+  if (!message.pinned) return undefined;
+  message.pinned = false;
+  for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));
+  return undefined;
+});
+
+route("POST", `/channels/${ID}/typing`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  emit(
+    channelAudience(channel).filter(id => id !== viewer.user.id),
+    "TYPING_START",
+    { channel_id: channel.id, user_id: viewer.user.id, timestamp: Math.floor(Date.now() / 1000) },
+  );
+  return undefined;
+});
+
+route("POST", `/channels/${ID}/messages/${ID}/ack`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
+  const state = viewer.readStates.get(channel.id) ?? { channel_id: channel.id, last_message_id: null, mention_count: 0 };
+  if (!state.last_message_id || compareIds(message.id, state.last_message_id) > 0) state.last_message_id = message.id;
+  state.mention_count = 0;
+  viewer.readStates.set(channel.id, state);
+  emit([viewer.user.id], "MESSAGE_ACK", { channel_id: channel.id, message_id: state.last_message_id ?? message.id });
+  return undefined;
+});
+
+// ---- entry point ----
+
+const PUBLIC = new Set(["POST /auth/register", "POST /auth/login"]);
+
+export function handleRoute(method: string, rawPath: string, body: unknown, viewerId: string | null): unknown {
+  const url = new URL(rawPath, "http://mock.local");
+  const key = `${method} ${url.pathname}`;
+  const viewer = viewerId ? db.accounts.get(viewerId) : undefined;
+  if (!viewer && !PUBLIC.has(key) && !url.pathname.startsWith("/auth/")) fail(401, 0, "401: Unauthorized");
+  for (const r of routes) {
+    if (r.method !== method) continue;
+    const match = r.pattern.exec(url.pathname);
+    if (!match) continue;
+    const ctx = { viewer: viewer as MockAccount, params: match.slice(1), query: url.searchParams, body: (body && typeof body === "object" ? body : {}) as Record<string, unknown> };
+    return r.handler(ctx);
+  }
+  return fail(404, 0, "404: Not Found");
+}
+
