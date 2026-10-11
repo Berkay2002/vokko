@@ -172,6 +172,8 @@ function apply(prefs: Prefs): void {
   root.classList.toggle("streamer-mode", prefs.streamerMode);
   root.style.fontSize = `${(prefs.fontSize / 16) * 100}%`;
   root.style.setProperty("--chat-font-size", `${prefs.fontSize}px`);
+  // chat.css redeclares --chat-font-size on its own roots, so menus.css maps this one onto them.
+  root.style.setProperty("--user-chat-font-size", `${prefs.fontSize}px`);
   root.style.setProperty("--message-group-gap", `${prefs.messageGroupGap}px`);
 }
 
@@ -193,3 +195,9 @@ if (typeof document !== "undefined") {
     if (event.key === KEY) usePrefs.setState(load());
   });
 }
+
+/** Message layout for src/chat: "cozy" (avatars, grouped) or "compact" (one line, no avatars). Also on <html> as `.message-compact`. */
+export const useMessageDisplay = (): MessageDisplay => usePrefs(s => s.messageDisplay);
+
+/** Chat text size relative to the 16px default (0.75 .. 1.5). The px value itself is `--user-chat-font-size` on <html>. */
+export const useChatFontScale = (): number => usePrefs(s => s.fontSize / 16);

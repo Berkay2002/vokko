@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { AtSign, Bookmark, CalendarClock, Hash, Inbox as InboxIcon, Bell } from "lucide-react";
 import { channelMentionCount, dmName, isChannelUnread, useStore } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
@@ -26,15 +26,20 @@ const EMPTY: Record<Exclude<Tab, "unreads" | "mentions">, { icon: ReactNode; tit
 /** Inbox popout under the title-bar button. Unreads and Mentions are real; the other tabs are visual. */
 export function InboxPopout({ anchor, open }: { anchor: HTMLElement | null; open: boolean }) {
   const [tab, setTab] = useState<Tab>("unreads");
-  const rows = useStore(s => {
+  const channels = useStore(s => s.channels);
+  const readStates = useStore(s => s.readStates);
+  const guilds = useStore(s => s.guilds);
+  const rows = useMemo(() => {
+    if (!open) return [];
+    const state = { channels, readStates } as Parameters<typeof isChannelUnread>[0];
     const out: { channel: Channel; guildName: string | null; mentions: number }[] = [];
-    for (const channel of Object.values(s.channels)) {
+    for (const channel of Object.values(channels)) {
       if (channel.type === ChannelType.GuildCategory || channel.type === ChannelType.GuildVoice) continue;
-      if (!isChannelUnread(s, channel.id)) continue;
-      out.push({ channel, guildName: channel.guild_id ? (s.guilds[channel.guild_id]?.name ?? null) : null, mentions: channelMentionCount(s, channel.id) });
+      if (!isChannelUnread(state, channel.id)) continue;
+      out.push({ channel, guildName: channel.guild_id ? (guilds[channel.guild_id]?.name ?? null) : null, mentions: channelMentionCount(state, channel.id) });
     }
     return out;
-  });
+  }, [open, channels, readStates, guilds]);
   const list = tab === "mentions" ? rows.filter(r => r.mentions > 0) : rows;
 
   return (

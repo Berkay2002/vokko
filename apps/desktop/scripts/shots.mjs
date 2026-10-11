@@ -31,6 +31,9 @@ function findChromium() {
 
 const browser = await chromium.launch({ executablePath: findChromium() });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+// Onyx is the account theme of the reference captures; THEME=dark|ash|onyx|light overrides.
+const theme = process.env.THEME ?? "onyx";
+await context.addInitScript(t => localStorage.setItem("vokko.prefs", JSON.stringify({ theme: t })), theme);
 const page = await context.newPage();
 const problems = [];
 page.on("pageerror", e => problems.push(`pageerror: ${e.message}`));
@@ -134,6 +137,57 @@ await nav("/channels/@me");
 await page.waitForSelector(".dm-row");
 await page.hover(".dm-row-wrap:nth-child(2) .dm-row");
 await shot("17-dm-row-hover");
+
+// ---- milestone C ----
+await nav(`/channels/@me/${ids.dm}`);
+await page.waitForSelector(".dm-profile");
+await page.waitForTimeout(800);
+await shot("18-dm-profile-panel");
+await page.click(".dm-profile-footer button");
+await page.waitForSelector(".full-profile");
+await shot("19-full-profile-modal");
+await page.keyboard.press("Escape");
+
+await page.click('button[aria-label="Inbox"]');
+await page.waitForSelector(".inbox-popout");
+await shot("20-inbox");
+await page.keyboard.press("Escape");
+
+await page.click(".user-panel-chevron >> nth=0");
+await page.waitForSelector(".context-menu");
+await shot("21-mic-menu");
+await page.keyboard.press("Escape");
+
+await nav(`/channels/${ids.guild}/${ids.text}`);
+await page.waitForSelector(".member-row");
+await page.click(".guild-header");
+await page.click('.guild-menu-item:has-text("Server Settings")');
+await page.waitForSelector(".settings-overlay");
+await shot("22-server-settings-overview");
+await page.click('.settings-item:has-text("Roles")');
+await shot("23-server-settings-roles");
+await page.keyboard.press("Escape");
+
+await page.click(".rail-guild", { button: "right" });
+await shot("24-rail-context-menu");
+await page.keyboard.press("Escape");
+
+await page.click(".member-row", { button: "right" });
+await shot("25-member-context-menu");
+await page.keyboard.press("Escape");
+
+await page.keyboard.press("Control+k");
+await page.fill(".quick-input", "#gen");
+await shot("26-quick-switcher-channels");
+await page.keyboard.press("Escape");
+
+await page.click('.user-panel-button[aria-label="User Settings"]');
+await page.waitForSelector(".settings-overlay");
+for (const [id, label] of [["27-settings-appearance", "Appearance"], ["28-settings-voice", "Voice & Video"], ["29-settings-keybinds", "Keybinds"], ["30-settings-notifications", "Notifications"]]) {
+  await page.click(`.settings-item:has-text("${label}")`);
+  await shot(id);
+}
+await page.keyboard.press("Escape");
 
 if (problems.length) console.log("browser problems:\n" + problems.join("\n"));
 await browser.close();
