@@ -423,6 +423,13 @@ html.message-compact { --chat-gutter: 80px; }
 .modal.chat-delete-modal .chat-btn.secondary:hover { background: var(--background-mod-normal); }
 .modal.chat-delete-modal .chat-btn.danger { background: var(--background-feedback-notification); color: var(--white); }
 .modal.chat-delete-modal .chat-btn.danger:hover { background: color-mix(in srgb, var(--background-feedback-notification) 85%, var(--black)); }
+.modal.chat-pin-modal { width: 480px; }
+.chat-pin-preview { margin-top: 12px; max-height: 240px; overflow: hidden; pointer-events: none; }
+.chat-pin-preview .chat-delete-preview { max-height: none; }
+.chat-pin-preview-body { min-width: 0; }
+.chat-pin-preview-thumb { display: block; margin-top: 4px; max-width: 160px; max-height: 120px; border-radius: 4px; object-fit: cover; }
+.chat-pin-preview-file { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; padding: 6px 10px; border-radius: 4px; background: var(--chat-bg-tertiary); font-size: 14px; max-width: 100%; }
+.chat-pin-preview-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* emoji picker */
 .chat-emoji-picker { display: flex; flex-direction: column; width: 498px; height: 440px; max-width: calc(100vw - 16px); border-radius: 8px; background: var(--chat-bg-secondary); box-shadow: var(--chat-shadow-popout); border: 1px solid var(--chat-bg-tertiary); overflow: hidden; color: var(--chat-text); font-family: var(--chat-font); }

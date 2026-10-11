@@ -544,33 +544,6 @@ select.input {
   color: var(--interactive-icon-default);
 }
 
-/* ---- pin confirmation ---- */
-.modal.cm-pin-modal {
-  width: 480px;
-}
-
-.cm-pin-text {
-  margin-top: 8px;
-  text-align: center;
-}
-
-.cm-pin-preview {
-  max-height: 200px;
-  overflow: hidden;
-  padding: 12px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-secondary);
-  pointer-events: none;
-}
-
-.cm-pin-preview .chat-delete-preview {
-  max-height: none;
-  padding: 0;
-  border: 0;
-  box-shadow: none;
-}
-
 /* ---- onboarding ---- */
 .cm-onboarding-body {
   min-height: 160px;

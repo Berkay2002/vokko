@@ -260,7 +260,7 @@ test('pinning asks first and shows the message', async ({ page }) => {
 
   const dialog = page.getByRole('dialog', { name: 'Pin this message?' });
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('.cm-pin-preview')).toContainText(text.slice(0, 20));
+  await expect(dialog.locator('.chat-pin-preview')).toContainText(text.slice(0, 20));
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
   const pinned = () => page.evaluate(id => (window as unknown as Win).__vokko.request('GET', `/channels/${id}/messages/pins`) as Promise<{ items: unknown[] }>, channelId);
@@ -268,7 +268,7 @@ test('pinning asks first and shows the message', async ({ page }) => {
 
   await target.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Pin Message' }).click();
-  await page.getByRole('dialog', { name: 'Pin this message?' }).getByRole('button', { name: 'Pin message' }).click();
+  await page.getByRole('dialog', { name: 'Pin this message?' }).getByRole('button', { name: 'Pin it' }).click();
   await expect(page.getByRole('dialog', { name: 'Pin this message?' })).toHaveCount(0);
   await expect.poll(async () => (await pinned()).items.length).toBe(before + 1);
 });
