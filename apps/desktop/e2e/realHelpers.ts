@@ -1,6 +1,5 @@
 import type { Browser, BrowserContext, Page } from '@playwright/test';
-import { execFileSync, spawn } from 'node:child_process';
-import { openSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -116,9 +115,11 @@ export async function restartServer(): Promise<void> {
   for (const pid of out.split(/\s+/).filter(Boolean)) execFileSync('taskkill', ['/PID', pid, '/F']);
   const script = process.env.VOKKO_SERVER_SCRIPT;
   if (!script) throw new Error('set VOKKO_SERVER_SCRIPT to the script that starts the server (it receives the command `serve`)');
-  const log = openSync(path.join(tmpdir(), 'vokko-e2e-server.log'), 'a');
-  const child = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.resolve(script), 'serve'], { detached: true, stdio: ['ignore', log, log] });
-  child.unref();
+  // Start-Process: a plain detached spawn of powershell from node exits at once on this machine without running the script.
+  const log = path.join(tmpdir(), 'vokko-e2e-server.log');
+  const start = `Start-Process powershell -WindowStyle Hidden -RedirectStandardOutput '${log}' -RedirectStandardError '${log}.err' -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${path.resolve(script)}','serve'`;
+  // stdio ignored: with pipes, execFileSync would wait for the server (which inherits them) to exit.
+  execFileSync('powershell', ['-NoProfile', '-Command', start], { stdio: 'ignore' });
   for (let i = 0; i < 60; i++) {
     try { const r = await fetch(`${REST}/auth/login`, { method: 'POST' }); if (r.status) return; } catch { /* not up yet */ }
     await new Promise(r => setTimeout(r, 500));

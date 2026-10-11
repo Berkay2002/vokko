@@ -59,6 +59,9 @@ test('a message with a mention is delivered live and highlights for the mentione
   await composer(sam.page).press('Tab');
   await composer(sam.page).pressSequentially(` standup ${RUN}`);
   await composer(sam.page).press('Enter');
+  // told apart on purpose: "the send failed" and "the send worked but the other client did not show it" are different bugs
+  await expect(msg(sam.page, `standup ${RUN}`)).toBeVisible();
+  await expect(msg(sam.page, `standup ${RUN}`)).not.toHaveClass(/pending|failed/);
   const theirs = msg(carol.page, `standup ${RUN}`);
   await expect(theirs).toBeVisible();
   await expect(theirs.locator('.md-mention')).toContainText('@');
@@ -76,8 +79,11 @@ test('edit and delete in a guild channel propagate', async () => {
   await edit.pressSequentially(' (edited)');
   await edit.press('Enter');
   await expect(msg(carol.page, `standup ${RUN}`)).toContainText('(edited)');
-  await mine.hover();
-  await mine.getByRole('button', { name: 'More' }).click();
+  // the toolbar only exists while the row is hovered, and the row may still be settling after leaving edit mode
+  await expect(async () => {
+    await mine.hover();
+    await mine.getByRole('button', { name: 'More' }).click({ timeout: 2_000 });
+  }).toPass({ timeout: 15_000 });
   await sam.page.getByRole('menuitem', { name: 'Delete Message' }).click();
   await sam.page.getByRole('dialog').getByRole('button', { name: 'Delete' }).click();
   await expect(carol.page.locator('.chat-msg', { hasText: `standup ${RUN}` })).toHaveCount(0);

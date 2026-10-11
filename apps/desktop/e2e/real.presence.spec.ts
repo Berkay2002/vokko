@@ -45,6 +45,9 @@ test('a member who is already connected shows as online after the owner loads', 
 
 // Keep last: a failure restarts the worker and drops the state above.
 test('a connected user who joins the guild shows as online for the owner without a reload', async ({ browser }) => {
+  // Expected to fail until vokko-server sends PRESENCE_UPDATE to existing members on join (contract ecd0e81).
+  // When it starts passing Playwright reports it as an unexpected pass: delete this line then.
+  test.fail(process.env.VOKKO_PRESENCE_ON_JOIN !== '1', 'server: no PRESENCE_UPDATE for a connected joiner yet');
   const o = await registerUser('jo');
   const joiner = await registerUser('jj');
   const guild = await api<{ id: string }>(o.token, 'POST', '/guilds', { name: `Joiner ${RUN}` });
