@@ -30,6 +30,10 @@ impl ApiErr {
         Self::new(StatusCode::FORBIDDEN, 50013, "You lack permissions to perform that action")
     }
 
+    pub fn not_author() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 50005, "Cannot edit a message authored by another user")
+    }
+
     pub fn unknown_channel() -> Self {
         Self::new(StatusCode::NOT_FOUND, 10003, "Unknown Channel")
     }
