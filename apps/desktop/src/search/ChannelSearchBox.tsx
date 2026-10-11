@@ -202,7 +202,7 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
   const header = keyword?.kind === 'from' ? 'From user' : keyword?.kind === 'mentions' ? 'Mentions user' : keyword?.kind === 'has' ? 'Message includes' : keyword?.kind === 'in' ? 'In channel'
     : keyword?.kind === 'pinned' ? 'Pinned' : dateMode ? `${keyword!.kind[0]!.toUpperCase()}${keyword!.kind.slice(1)} date` : more ? 'More filters' : 'Filter';
 
-  return <div className="header-search search-box" ref={setAnchor} role="search" data-search-active={active || undefined}>
+  return <div className="header-search search-box" ref={setAnchor} role="search" aria-label="Search messages" data-search-active={active || undefined}>
     {mine && filters.map((f, i) => <FilterChip key={`${f.kind}:${f.value}`} filter={f} onRemove={() => searchActions.removeFilter(i)} />)}
     <input ref={input} className="header-search-input" placeholder={placeholder} aria-label="Search" role="combobox" aria-expanded={open} aria-autocomplete="list" value={text}
       autoComplete="off" spellCheck={false}

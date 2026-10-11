@@ -130,6 +130,27 @@ test('DM search is scoped to the conversation and the panel replaces the profile
   await expect(page.locator('.chat-msg').filter({ has: page.locator('.chat-content', { hasText: 'second zebra here' }) }).last()).toHaveClass(/flash/);
 });
 
+test('pagination: 30 hits are two pages of 25 and 5', async ({ page }) => {
+  await openDm(page, 'alice');
+  const channelId = channelIdOf(page);
+  await page.evaluate(async id => {
+    const { request } = (window as unknown as { __vokko: { request(method: string, path: string, body?: unknown): Promise<unknown> } }).__vokko;
+    for (let i = 1; i <= 30; i++) await request('POST', `/channels/${id}/messages`, { content: `quokka number ${i}` });
+  }, channelId);
+  await run(page, 'quokka');
+  await expect(panel(page).locator('.search-panel-count')).toHaveText('30 results');
+  await expect(hits(page)).toHaveCount(25);
+  const pager = panel(page).locator('.search-pager');
+  await expect(pager).toBeVisible();
+  await pager.getByRole('button', { name: '2', exact: true }).click();
+  await expect(hits(page)).toHaveCount(5);
+  await expect(pager.getByRole('button', { name: '2', exact: true })).toHaveAttribute('aria-current', 'page');
+  // Newest first: page 2 holds the oldest five.
+  await expect(hits(page).last()).toContainText('quokka number 1');
+  await pager.getByRole('button', { name: 'Previous page' }).click();
+  await expect(hits(page)).toHaveCount(25);
+});
+
 test('axe: suggestions popout and results panel have no violations besides the known muted-text contrast finding', async ({ page }, info) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await openStockTalk(page);

@@ -6,7 +6,9 @@ const PORT = 1425;
 
 export default defineConfig({
   testDir: '.',
-  testMatch: /e2e[\\/]search[^\\/]*\.spec\.ts$/,
+  // VOKKO_E2E_ALL=1 runs every mock-backend spec on this port (regression check of the shell with the search slots filled).
+  testMatch: process.env.VOKKO_E2E_ALL ? /\.spec\.ts$/ : /e2e[\\/]search[^\\/]*\.spec\.ts$/,
+  testIgnore: [/real(\..+)?\.spec\.ts$/],
   timeout: 60_000,
   fullyParallel: false,
   workers: 1,
