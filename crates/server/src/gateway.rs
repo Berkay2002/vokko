@@ -1,23 +1,28 @@
 //! WebSocket gateway: Hello → Identify/Resume → READY → heartbeats and dispatches (see `docs/api.md`).
-use std::collections::HashSet;
+//!
+//! Hardening: frames are capped at 16 KiB, every socket write has a timeout, outgoing events go through a bounded queue
+//! (see `hub`), op 3 is limited per session, Identify per user, and unidentified sockets per client address.
+use std::collections::{HashSet, VecDeque};
+use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use axum::extract::State;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
-use axum::response::Response;
+use axum::extract::{Request, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use tokio::sync::mpsc::{self, UnboundedReceiver};
 use vokko_protocol::api::{
     GatewayEvent, GatewayOp, GatewayPayload, Hello, Identify, Presence, PresenceStatus, PresenceUpdateRequest, ReadState, ReadyEvent, Resume, Snowflake,
 };
 
-use crate::auth::{random_hex, user_for_token};
+use crate::auth::{hash_token, random_hex, user_for_token};
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
-use crate::hub::{Outgoing, ReplayOutcome, Session};
+use crate::hub::{Link, LinkReceiver, ReplayOutcome, Session};
+use crate::net::client_ip;
 use crate::routes::relationships::{open_dms, relationships_of};
 use crate::state::AppState;
 use crate::store;
@@ -25,11 +30,38 @@ use crate::store;
 type Sink = SplitSink<WebSocket, Message>;
 type Stream = SplitStream<WebSocket>;
 
+pub const CLOSE_DECODE_ERROR: u16 = 4002;
 pub const CLOSE_AUTH_FAILED: u16 = 4004;
+pub const CLOSE_RATE_LIMITED: u16 = 4008;
 pub const CLOSE_HEARTBEAT_TIMEOUT: u16 = 4009;
+const CLOSE_INTERNAL_ERROR: u16 = 1011;
 
-pub async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(move |socket| handle(state, socket))
+/// Largest message or frame a client may send.
+pub const MAX_CLIENT_MESSAGE_BYTES: usize = 16 * 1024;
+pub const MAX_CUSTOM_STATUS_CHARS: usize = 128;
+/// Presence updates (op 3) allowed per session per window.
+const PRESENCE_UPDATES: usize = 5;
+const PRESENCE_WINDOW: Duration = Duration::from_secs(60);
+
+/// A reserved pre-auth socket of one client address, released on drop.
+struct PreauthSlot {
+    state: AppState,
+    ip: IpAddr,
+}
+
+impl Drop for PreauthSlot {
+    fn drop(&mut self) {
+        self.state.hub.preauth_release(self.ip);
+    }
+}
+
+pub async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade, request: Request) -> Response {
+    let ip = client_ip(request.extensions(), request.headers(), state.config.trust_proxy);
+    if state.hub.preauth_acquire(ip, state.config.max_preauth_per_ip).is_none() {
+        return (StatusCode::TOO_MANY_REQUESTS, "Too many gateway connections.").into_response();
+    }
+    let slot = PreauthSlot { state: state.clone(), ip };
+    ws.max_message_size(MAX_CLIENT_MESSAGE_BYTES).max_frame_size(MAX_CLIENT_MESSAGE_BYTES).on_upgrade(move |socket| handle(state, socket, slot))
 }
 
 fn frame(op: GatewayOp, data: Value) -> Message {
@@ -37,26 +69,49 @@ fn frame(op: GatewayOp, data: Value) -> Message {
     Message::Text(serde_json::to_string(&payload).unwrap_or_default().into())
 }
 
-async fn close(sink: &mut Sink, code: u16) {
-    let _ = sink.send(Message::Close(Some(CloseFrame { code, reason: "".into() }))).await;
+/// The socket's write half; no write may block the task for longer than `limit`.
+struct Writer {
+    sink: Sink,
+    limit: Duration,
 }
 
-async fn handle(state: AppState, socket: WebSocket) {
-    let (mut sink, mut stream) = socket.split();
+impl Writer {
+    /// False when the socket is gone or too slow.
+    async fn send(&mut self, message: Message) -> bool {
+        matches!(tokio::time::timeout(self.limit, self.sink.send(message)).await, Ok(Ok(())))
+    }
+
+    async fn frame(&mut self, op: GatewayOp, data: Value) -> bool {
+        self.send(frame(op, data)).await
+    }
+
+    async fn close(&mut self, code: u16) {
+        self.send(Message::Close(Some(CloseFrame { code, reason: "".into() }))).await;
+    }
+
+    /// Completes the client's close handshake so it sees a clean 1000.
+    async fn finish(&mut self) {
+        let _ = tokio::time::timeout(self.limit, self.sink.close()).await;
+    }
+}
+
+async fn handle(state: AppState, socket: WebSocket, slot: PreauthSlot) {
+    let (sink, mut stream) = socket.split();
+    let mut writer = Writer { sink, limit: state.config.write_timeout };
     let hello = Hello { heartbeat_interval: state.config.heartbeat_interval_ms };
-    if sink.send(frame(GatewayOp::Hello, serde_json::to_value(hello).unwrap_or_default())).await.is_err() {
+    if !writer.frame(GatewayOp::Hello, serde_json::to_value(hello).unwrap_or_default()).await {
         return;
     }
-    let (tx, mut rx) = mpsc::unbounded_channel::<Outgoing>();
-    let handshake_timeout = Duration::from_millis((state.config.heartbeat_interval_ms * 2).max(5000));
-    let Ok(Some((session, generation))) = tokio::time::timeout(handshake_timeout, handshake(&state, &mut sink, &mut stream, tx)).await else {
+    let (link, mut receiver) = state.hub.new_link();
+    let Ok(Some((session, generation))) = tokio::time::timeout(state.config.handshake_timeout, handshake(&state, &mut writer, &mut stream, link)).await else {
         return;
     };
+    drop(slot);
     let user_id = session.user_id;
     if state.hub.connection_opened(user_id) {
         let _ = set_presence(&state, user_id, Some(PresenceStatus::Online), None).await;
     }
-    run(&state, &session, &mut sink, &mut stream, &mut rx).await;
+    run(&state, &session, &mut writer, &mut stream, &mut receiver).await;
     session.detach(generation);
     if state.hub.connection_closed(user_id) {
         let _ = set_presence(&state, user_id, Some(PresenceStatus::Offline), None).await;
@@ -64,11 +119,11 @@ async fn handle(state: AppState, socket: WebSocket) {
 }
 
 /// Waits for Identify or Resume. `None` means the connection is over (bad token, socket closed).
-async fn handshake(state: &AppState, sink: &mut Sink, stream: &mut Stream, tx: mpsc::UnboundedSender<Outgoing>) -> Option<(Arc<Session>, u64)> {
+async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, link: Link) -> Option<(Arc<Session>, u64)> {
     while let Some(Ok(message)) = stream.next().await {
         let Message::Text(text) = message else {
             if matches!(message, Message::Close(_)) {
-                let _ = sink.close().await;
+                writer.finish().await;
                 return None;
             }
             continue;
@@ -77,26 +132,30 @@ async fn handshake(state: &AppState, sink: &mut Sink, stream: &mut Stream, tx: m
         match payload.op {
             GatewayOp::Identify => {
                 let Ok(identify) = serde_json::from_value::<Identify>(payload.d) else {
-                    close(sink, CLOSE_AUTH_FAILED).await;
+                    writer.close(CLOSE_AUTH_FAILED).await;
                     return None;
                 };
                 let user_id = match user_for_token(state, &identify.token).await {
                     Ok(Some(user_id)) => user_id,
                     _ => {
-                        close(sink, CLOSE_AUTH_FAILED).await;
+                        writer.close(CLOSE_AUTH_FAILED).await;
                         return None;
                     }
                 };
+                if !state.hub.allow_identify(user_id, state.config.identify_per_minute) {
+                    writer.close(CLOSE_RATE_LIMITED).await;
+                    return None;
+                }
                 let session_id = random_hex(16);
                 let ready = match build_ready(state, user_id, &session_id).await {
                     Ok(ready) => ready,
                     Err(_) => {
-                        close(sink, 1011).await;
+                        writer.close(CLOSE_INTERNAL_ERROR).await;
                         return None;
                     }
                 };
-                let session = state.hub.create_session(user_id, session_id);
-                let generation = session.attach(tx);
+                let session = state.hub.create_session(user_id, session_id, hash_token(&identify.token));
+                let generation = session.attach(link);
                 session.dispatch("READY", GatewayEvent::Ready(Box::new(ready)).data());
                 return Some((session, generation));
             }
@@ -105,10 +164,12 @@ async fn handshake(state: &AppState, sink: &mut Sink, stream: &mut Stream, tx: m
                 let owner = user_for_token(state, &resume.token).await.ok().flatten();
                 let session = state.hub.session(&resume.session_id).filter(|session| Some(session.user_id) == owner);
                 let Some(session) = session else {
-                    let _ = sink.send(frame(GatewayOp::InvalidSession, Value::Bool(false))).await;
+                    if !writer.frame(GatewayOp::InvalidSession, Value::Bool(false)).await {
+                        return None;
+                    }
                     continue;
                 };
-                let generation = session.attach(tx.clone());
+                let generation = session.attach(link.clone());
                 match session.replay_after(resume.seq) {
                     ReplayOutcome::Replayed(_) => {
                         session.dispatch("RESUMED", GatewayEvent::Resumed.data());
@@ -117,12 +178,17 @@ async fn handshake(state: &AppState, sink: &mut Sink, stream: &mut Stream, tx: m
                     ReplayOutcome::Gap => {
                         session.detach(generation);
                         state.hub.remove_session(&session.id);
-                        let _ = sink.send(frame(GatewayOp::InvalidSession, Value::Bool(false))).await;
+                        if !writer.frame(GatewayOp::InvalidSession, Value::Bool(false)).await {
+                            return None;
+                        }
                     }
                 }
             }
             GatewayOp::Heartbeat => {
-                let _ = sink.send(frame(GatewayOp::HeartbeatAck, Value::Null)).await;
+                let acked = writer.frame(GatewayOp::HeartbeatAck, Value::Null).await;
+                if !acked {
+                    return None;
+                }
             }
             _ => {}
         }
@@ -130,50 +196,87 @@ async fn handshake(state: &AppState, sink: &mut Sink, stream: &mut Stream, tx: m
     None
 }
 
-async fn run(state: &AppState, session: &Arc<Session>, sink: &mut Sink, stream: &mut Stream, rx: &mut UnboundedReceiver<Outgoing>) {
+/// At most `limit` events per `window`.
+struct Allowance {
+    limit: usize,
+    window: Duration,
+    times: VecDeque<Instant>,
+}
+
+impl Allowance {
+    fn new(limit: usize, window: Duration) -> Self {
+        Self { limit, window, times: VecDeque::new() }
+    }
+
+    fn allow(&mut self, now: Instant) -> bool {
+        while self.times.front().is_some_and(|first| now.saturating_duration_since(*first) >= self.window) {
+            self.times.pop_front();
+        }
+        if self.times.len() >= self.limit {
+            return false;
+        }
+        self.times.push_back(now);
+        true
+    }
+}
+
+async fn run(state: &AppState, session: &Arc<Session>, writer: &mut Writer, stream: &mut Stream, receiver: &mut LinkReceiver) {
     let period = Duration::from_millis(state.config.heartbeat_interval_ms.max(50));
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
     let mut beat_since_tick = true;
     let mut missed = 0_u32;
+    let mut presence_updates = Allowance::new(PRESENCE_UPDATES, PRESENCE_WINDOW);
     loop {
         tokio::select! {
+            code = receiver.signal.wait() => {
+                writer.close(code).await;
+                break;
+            }
             incoming = stream.next() => match incoming {
                 Some(Ok(Message::Text(text))) => {
                     let Ok(payload) = serde_json::from_str::<GatewayPayload>(&text) else { continue };
                     match payload.op {
                         GatewayOp::Heartbeat => {
                             beat_since_tick = true;
-                            if sink.send(frame(GatewayOp::HeartbeatAck, Value::Null)).await.is_err() {
+                            if !writer.frame(GatewayOp::HeartbeatAck, Value::Null).await {
                                 break;
                             }
                         }
                         GatewayOp::PresenceUpdate => {
-                            if let Ok(update) = serde_json::from_value::<PresenceUpdateRequest>(payload.d) {
-                                let _ = set_presence(state, session.user_id, Some(update.status), Some(update.custom_status)).await;
+                            let Ok(update) = serde_json::from_value::<PresenceUpdateRequest>(payload.d) else { continue };
+                            if update.custom_status.as_ref().is_some_and(|text| text.chars().count() > MAX_CUSTOM_STATUS_CHARS) {
+                                writer.close(CLOSE_DECODE_ERROR).await;
+                                break;
                             }
+                            if !presence_updates.allow(Instant::now()) {
+                                writer.close(CLOSE_RATE_LIMITED).await;
+                                break;
+                            }
+                            let _ = set_presence(state, session.user_id, Some(update.status), Some(update.custom_status)).await;
                         }
                         _ => {}
                     }
                 }
                 Some(Ok(Message::Close(_))) => {
-                    // complete the close handshake so the client sees a clean 1000
-                    let _ = sink.close().await;
+                    writer.finish().await;
                     break;
                 }
                 Some(Err(_)) | None => break,
                 Some(Ok(_)) => {}
             },
-            outgoing = rx.recv() => match outgoing {
-                Some(Outgoing::Text(text)) => {
-                    if sink.send(Message::Text(text.into())).await.is_err() {
+            queued = receiver.queue.recv() => match queued {
+                Some(text) => {
+                    if !writer.send(Message::Text(text.into())).await {
                         break;
                     }
                 }
-                Some(Outgoing::Close(code)) => {
-                    close(sink, code).await;
+                None => {
+                    // the hub dropped its end: either a close was requested (the code is set first) or the session is gone
+                    if let Some(code) = receiver.signal.fired() {
+                        writer.close(code).await;
+                    }
                     break;
                 }
-                None => break,
             },
             _ = ticker.tick() => {
                 if beat_since_tick {
@@ -183,7 +286,7 @@ async fn run(state: &AppState, session: &Arc<Session>, sink: &mut Sink, stream: 
                     missed += 1;
                 }
                 if missed >= state.config.heartbeat_misses {
-                    close(sink, CLOSE_HEARTBEAT_TIMEOUT).await;
+                    writer.close(CLOSE_HEARTBEAT_TIMEOUT).await;
                     break;
                 }
             }
@@ -270,4 +373,18 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
     }
 
     Ok(ReadyEvent { v: 1, user, session_id: session_id.to_owned(), guilds, private_channels, presences, read_states, relationships })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn presence_allowance_is_a_sliding_window() {
+        let mut allowance = Allowance::new(2, Duration::from_secs(60));
+        let start = Instant::now();
+        assert!(allowance.allow(start) && allowance.allow(start + Duration::from_secs(1)));
+        assert!(!allowance.allow(start + Duration::from_secs(2)));
+        assert!(allowance.allow(start + Duration::from_secs(61)), "the first one left the window");
+    }
 }

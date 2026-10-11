@@ -91,7 +91,11 @@ async fn world() -> World {
 }
 
 async fn world_with_heartbeat(interval_ms: u64) -> World {
-    let app = TestApp::with_heartbeat(interval_ms).await;
+    world_with_config(move |config| config.heartbeat_interval_ms = interval_ms).await
+}
+
+async fn world_with_config(adjust: impl FnOnce(&mut vokko_server::Config)) -> World {
+    let app = TestApp::with_config(adjust).await;
     let address = app.serve().await;
     let (owner, _) = app.register("sam").await;
     let (member, _) = app.register("alice").await;
@@ -310,6 +314,163 @@ async fn link_embeds_follow_the_message_as_message_update() {
     assert_eq!(updated["embeds"][0]["title"], "Vokko & friends");
     assert_eq!(updated["embeds"][0]["url"], pages.url("/page"));
     assert_eq!(updated["edited_timestamp"], Value::Null, "an unfurl is not an edit");
+}
+
+/// Waits for the server to close the connection; returns the close code.
+async fn closed_with(client: &mut Client) -> Option<u16> {
+    loop {
+        match client.recv().await {
+            Ok(_) => continue,
+            Err(code) => return code,
+        }
+    }
+}
+
+fn presence(status: &str, custom_status: &str) -> Value {
+    json!({"op": 3, "d": {"status": status, "custom_status": custom_status}})
+}
+
+#[tokio::test]
+async fn presence_updates_are_bounded_in_size_and_rate() {
+    let w = world().await;
+    let mut client = Client::connect(&w.address).await;
+    client.identify(&w.member).await;
+
+    // the longest allowed custom status is accepted and echoed to the user's own sessions
+    client.send(presence("idle", &"x".repeat(128))).await;
+    let update = loop {
+        let update = client.wait_for("PRESENCE_UPDATE").await;
+        if update["status"] == "idle" {
+            break update;
+        }
+    };
+    assert_eq!(update["custom_status"].as_str().map(str::len), Some(128));
+    // one more character is a decode error
+    client.send(presence("idle", &"x".repeat(129))).await;
+    assert_eq!(closed_with(&mut client).await, Some(4002));
+
+    // a frame beyond 16 KiB ends the connection before it is parsed
+    let mut big = Client::connect(&w.address).await;
+    big.identify(&w.member).await;
+    big.send(presence("online", &"y".repeat(20 * 1024))).await;
+    // (a dispatch of the other session's update may still arrive first)
+    closed_with(&mut big).await;
+
+    // five updates per minute per session, the sixth is rate limited (4008)
+    let mut chatty = Client::connect(&w.address).await;
+    chatty.identify(&w.member).await;
+    for n in 0..6 {
+        chatty.send(presence("online", &format!("round {n}"))).await;
+    }
+    assert_eq!(closed_with(&mut chatty).await, Some(4008));
+}
+
+#[tokio::test]
+async fn identifies_are_throttled_per_user() {
+    let w = world_with_config(|config| config.identify_per_minute = 2).await;
+    for _ in 0..2 {
+        let mut client = Client::connect(&w.address).await;
+        client.identify(&w.member).await;
+    }
+    let mut third = Client::connect(&w.address).await;
+    third.hello().await;
+    third.send(json!({"op": 2, "d": {"token": w.member}})).await;
+    assert_eq!(third.recv().await.expect_err("closed"), Some(4008));
+    // another user has their own allowance
+    let mut other = Client::connect(&w.address).await;
+    other.identify(&w.owner).await;
+}
+
+#[tokio::test]
+async fn unidentified_sockets_are_capped_per_address_and_time_out() {
+    let w = world_with_config(|config| {
+        config.max_preauth_per_ip = 2;
+        config.handshake_timeout = Duration::from_millis(1500);
+    })
+    .await;
+    let mut first = Client::connect(&w.address).await;
+    first.hello().await;
+    let mut second = Client::connect(&w.address).await;
+    second.hello().await;
+    let refused = connect_async(format!("ws://{}/gateway", w.address)).await;
+    assert!(refused.is_err(), "the third unidentified socket is refused");
+
+    // identifying frees the slot
+    first.send(json!({"op": 2, "d": {"token": w.member}})).await;
+    first.wait_for("READY").await;
+    let mut third = loop {
+        match connect_async(format!("ws://{}/gateway", w.address)).await {
+            Ok((ws, _)) => break Client { ws },
+            Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+        }
+    };
+    third.hello().await;
+
+    // and a socket that never identifies is dropped when the window ends
+    assert!(second.recv().await.is_err());
+}
+
+#[tokio::test]
+async fn logout_closes_that_tokens_gateway_sessions_only() {
+    let w = world().await;
+    let (status, login) = w.app.send(axum::http::Method::POST, "/auth/login", None, Some(json!({"login": "alice", "password": "correct horse battery"}))).await;
+    assert_eq!(status, 200);
+    let second_token = login["token"].as_str().expect("token").to_owned();
+
+    let mut kept = Client::connect(&w.address).await;
+    kept.identify(&w.member).await;
+    let mut ended = Client::connect(&w.address).await;
+    let ready = ended.identify(&second_token).await;
+    let ended_session = ready["session_id"].as_str().expect("session").to_owned();
+
+    assert_eq!(w.app.post("/auth/logout", &second_token, json!({})).await.0, 204);
+    assert_eq!(closed_with(&mut ended).await, Some(4004));
+    assert!(w.app.state.hub.session(&ended_session).is_none(), "the session cannot be resumed either");
+
+    w.app.post(&format!("/channels/{}/messages", w.channel), &w.owner, json!({"content": "still here"})).await;
+    assert_eq!(kept.wait_for("MESSAGE_CREATE").await["content"], "still here");
+}
+
+#[tokio::test]
+async fn a_client_that_stops_reading_is_dropped_without_blocking_the_server() {
+    let w = world_with_config(|config| config.write_timeout = Duration::from_millis(500)).await;
+    let (_, member) = w.app.get("/users/@me", &w.member).await;
+    let member_id: i64 = member["id"].as_str().expect("id").parse().expect("snowflake");
+
+    // a client with a tiny receive buffer that reads READY and then never reads again
+    let socket = tokio::net::TcpSocket::new_v4().expect("socket");
+    socket.set_recv_buffer_size(4096).expect("buffer size");
+    let stream = socket.connect(w.address.parse().expect("address")).await.expect("connect");
+    let (ws, _) = tokio_tungstenite::client_async(format!("ws://{}/gateway", w.address), MaybeTlsStream::Plain(stream)).await.expect("handshake");
+    let mut slow = Client { ws };
+    slow.identify(&w.member).await;
+    for _ in 0..100 {
+        if w.app.state.hub.is_online(member_id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(w.app.state.hub.is_online(member_id));
+
+    // the rest of the server keeps working while events pile up for it
+    let filler = "x".repeat(2000);
+    let mut dropped = false;
+    for _ in 0..1500 {
+        let (status, _) = w.app.post(&format!("/channels/{}/messages", w.channel), &w.owner, json!({"content": filler})).await;
+        assert_eq!(status, 200);
+        if !w.app.state.hub.is_online(member_id) {
+            dropped = true;
+            break;
+        }
+    }
+    for _ in 0..100 {
+        if dropped || !w.app.state.hub.is_online(member_id) {
+            dropped = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(dropped, "the stalled connection was closed by the write timeout");
 }
 
 #[tokio::test]

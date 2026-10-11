@@ -35,7 +35,8 @@ async fn serve(state: AppState) -> Result<(), String> {
     let bind = state.config.bind.clone();
     let listener = tokio::net::TcpListener::bind(&bind).await.map_err(|error| format!("cannot bind {bind}: {error}"))?;
     tracing::info!("vokko-server listening on http://{bind}");
-    axum::serve(listener, vokko_server::router(state))
+    // Connection info feeds the per-client-address limits (auth routes, gateway sockets).
+    axum::serve(listener, vokko_server::router(state).into_make_service_with_connect_info::<std::net::SocketAddr>())
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })

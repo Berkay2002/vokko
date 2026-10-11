@@ -9,6 +9,7 @@ use vokko_protocol::api::{AuthRequest, AuthResponse, PresenceStatus, RegisterReq
 use crate::auth::{AuthUser, hash_password, hash_token, new_token, verify_password};
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::ApiJson;
+use crate::gateway::CLOSE_AUTH_FAILED;
 use crate::state::AppState;
 use crate::store;
 
@@ -99,7 +100,10 @@ async fn login(State(state): State<AppState>, ApiJson(body): ApiJson<AuthRequest
 
 async fn logout(State(state): State<AppState>, AuthUser(_): AuthUser, headers: HeaderMap) -> ApiResult<StatusCode> {
     if let Some(token) = headers.get(AUTHORIZATION).and_then(|value| value.to_str().ok()) {
-        sqlx::query("DELETE FROM sessions WHERE token_hash = $1").bind(hash_token(token.trim())).execute(&state.db).await?;
+        let hash = hash_token(token.trim());
+        sqlx::query("DELETE FROM sessions WHERE token_hash = $1").bind(&hash).execute(&state.db).await?;
+        // live gateway connections of this token end now (4004: the client must not reconnect with it)
+        state.hub.close_token_sessions(&hash, CLOSE_AUTH_FAILED);
     }
     Ok(StatusCode::NO_CONTENT)
 }
