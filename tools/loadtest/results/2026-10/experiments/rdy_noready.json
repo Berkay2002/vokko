@@ -1,0 +1,174 @@
+{
+  "meta": {
+    "label": "noready big",
+    "run": "cb8193",
+    "url": "http://127.0.0.1:8710"
+  },
+  "config": {
+    "connections": 1000,
+    "guild_size": 1000,
+    "duration": 30,
+    "send_rate": 1.0,
+    "sender_fraction": 0.2,
+    "typing_fraction": 0.3,
+    "presence_fraction": 0.5,
+    "history_fraction": 0.2,
+    "history_pages": 10,
+    "storm_fraction": 0.5,
+    "storm_offline_ms": 2000,
+    "spoof": true,
+    "scenarios": [
+      "connect"
+    ]
+  },
+  "scenarios": [
+    {
+      "name": "setup:register",
+      "seconds": 6.33989096,
+      "histograms": {
+        "rest:register": {
+          "count": 1000,
+          "mean": 200432,
+          "p50": 206353,
+          "p95": 239219,
+          "p99": 253788,
+          "max": 282356
+        }
+      },
+      "counters": {},
+      "errors": {},
+      "derived": {
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 342.43473101990526,
+          "cpu_max": 353.096885195038,
+          "rss_max_mib": 201.015625
+        },
+        "postgres": null,
+        "loadgen": {
+          "cpu_avg": 2.681432716415656,
+          "cpu_max": 3.0022232844444017,
+          "rss_max_mib": 7.22265625
+        }
+      }
+    },
+    {
+      "name": "setup:guilds",
+      "seconds": 3.800584737,
+      "histograms": {
+        "rest:accept_invite": {
+          "count": 999,
+          "mean": 119326,
+          "p50": 121210,
+          "p95": 153546,
+          "p99": 167783,
+          "max": 169768
+        },
+        "rest:create_channel": {
+          "count": 2,
+          "mean": 10267,
+          "p50": 10120,
+          "p95": 10522,
+          "p99": 10522,
+          "max": 10522
+        },
+        "rest:create_guild": {
+          "count": 1,
+          "mean": 14842,
+          "p50": 14842,
+          "p95": 14842,
+          "p99": 14842,
+          "max": 14842
+        },
+        "rest:create_invite": {
+          "count": 1,
+          "mean": 5355,
+          "p50": 5355,
+          "p95": 5355,
+          "p99": 5355,
+          "max": 5355
+        },
+        "rest:list_channels": {
+          "count": 1,
+          "mean": 6553,
+          "p50": 6553,
+          "p95": 6553,
+          "p99": 6553,
+          "max": 6553
+        }
+      },
+      "counters": {},
+      "errors": {},
+      "derived": {
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 122.08327714838589,
+          "cpu_max": 131.02392588603428,
+          "rss_max_mib": 213.68359375
+        },
+        "postgres": null,
+        "loadgen": {
+          "cpu_avg": 3.6835471553392307,
+          "cpu_max": 4.533584659147424,
+          "rss_max_mib": 8.01171875
+        }
+      }
+    },
+    {
+      "name": "connect",
+      "seconds": 9.978009054,
+      "histograms": {
+        "identify_ready": {
+          "count": 1000,
+          "mean": 737749,
+          "p50": 735549,
+          "p95": 1080178,
+          "p99": 1112584,
+          "max": 1146498
+        },
+        "size:ready_bytes": {
+          "count": 1000,
+          "mean": 316393,
+          "p50": 316878,
+          "p95": 316878,
+          "p99": 316878,
+          "max": 316878
+        },
+        "ws_connect": {
+          "count": 1000,
+          "mean": 13596,
+          "p50": 11059,
+          "p95": 35024,
+          "p99": 51435,
+          "max": 59019
+        }
+      },
+      "counters": {
+        "recv:presence_other": 518855
+      },
+      "errors": {},
+      "derived": {
+        "connected": 1000.0,
+        "limit_hits": 0.0,
+        "requested": 1000.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 154.33738094369463,
+          "cpu_max": 203.96475489035493,
+          "rss_max_mib": 740.28125
+        },
+        "postgres": null,
+        "loadgen": {
+          "cpu_avg": 57.826408314618035,
+          "cpu_max": 102.01631842827948,
+          "rss_max_mib": 395.69140625
+        }
+      }
+    }
+  ]
+}
