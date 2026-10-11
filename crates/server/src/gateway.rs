@@ -14,15 +14,14 @@ use axum::response::{IntoResponse, Response};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
-use vokko_protocol::api::{
-    GatewayEvent, GatewayOp, GatewayPayload, Hello, Identify, Presence, PresenceStatus, PresenceUpdateRequest, ReadState, ReadyEvent, Resume, Snowflake,
-};
+use vokko_protocol::api::{GatewayEvent, GatewayOp, GatewayPayload, Hello, Identify, PresenceUpdateRequest, ReadState, ReadyEvent, Resume, Snowflake};
 
 use crate::auth::{hash_token, random_hex, user_for_token};
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
 use crate::hub::{Link, LinkReceiver, ReplayOutcome, Session};
 use crate::net::client_ip;
+use crate::presence;
 use crate::routes::relationships::{open_dms, relationships_of};
 use crate::state::AppState;
 use crate::store;
@@ -109,12 +108,12 @@ async fn handle(state: AppState, socket: WebSocket, slot: PreauthSlot) {
     drop(slot);
     let user_id = session.user_id;
     if state.hub.connection_opened(user_id) {
-        let _ = set_presence(&state, user_id, Some(PresenceStatus::Online), None).await;
+        let _ = presence::connected(&state, user_id).await;
     }
     run(&state, &session, &mut writer, &mut stream, &mut receiver).await;
     session.detach(generation);
     if state.hub.connection_closed(user_id) {
-        let _ = set_presence(&state, user_id, Some(PresenceStatus::Offline), None).await;
+        let _ = presence::disconnected(&state, user_id).await;
     }
 }
 
@@ -252,7 +251,7 @@ async fn run(state: &AppState, session: &Arc<Session>, writer: &mut Writer, stre
                                 writer.close(CLOSE_RATE_LIMITED).await;
                                 break;
                             }
-                            let _ = set_presence(state, session.user_id, Some(update.status), Some(update.custom_status)).await;
+                            let _ = presence::update(state, session.user_id, Some(update.status), Some(update.custom_status), true).await;
                         }
                         _ => {}
                     }
@@ -294,27 +293,6 @@ async fn run(state: &AppState, session: &Arc<Session>, writer: &mut Writer, stre
     }
 }
 
-/// Stores a presence change and tells everyone who shares a guild, DM or relationship with the user.
-pub async fn set_presence(state: &AppState, user_id: i64, status: Option<PresenceStatus>, custom_status: Option<Option<String>>) -> ApiResult<()> {
-    let row: (String, Option<String>) = sqlx::query_as(
-        "INSERT INTO presences (user_id, status, custom_status) VALUES ($1, COALESCE($2, 'online'), $3) \
-         ON CONFLICT (user_id) DO UPDATE SET status = COALESCE($2, presences.status), \
-           custom_status = CASE WHEN $4 THEN $3 ELSE presences.custom_status END \
-         RETURNING status, custom_status",
-    )
-    .bind(user_id)
-    .bind(status.map(PresenceStatus::as_str))
-    .bind(custom_status.clone().flatten())
-    .bind(custom_status.is_some())
-    .fetch_one(&state.db)
-    .await?;
-    let presence =
-        Presence { user_id: Snowflake::from(user_id), status: PresenceStatus::parse(&row.0).unwrap_or(PresenceStatus::Offline), custom_status: row.1 };
-    let audience = events::user_audience(state, user_id).await?;
-    state.hub.send(&audience, &GatewayEvent::PresenceUpdate(presence));
-    Ok(())
-}
-
 pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> ApiResult<ReadyEvent> {
     let user = store::user(state, user_id).await?.ok_or_else(ApiErr::unauthorized)?;
     let guild_ids: Vec<(i64,)> =
@@ -327,16 +305,7 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
     let relationships = relationships_of(state, user_id).await?;
 
     let audience = events::user_audience(state, user_id).await?;
-    let presence_rows: Vec<(i64, String, Option<String>)> =
-        sqlx::query_as("SELECT user_id, status, custom_status FROM presences WHERE user_id = ANY($1)").bind(&audience).fetch_all(&state.db).await?;
-    let presences = presence_rows
-        .into_iter()
-        .map(|(id, status, custom_status)| Presence {
-            user_id: Snowflake::from(id),
-            status: PresenceStatus::parse(&status).unwrap_or(PresenceStatus::Offline),
-            custom_status,
-        })
-        .collect();
+    let presences = presence::presences_for(state, user_id, &audience).await?;
 
     // A read state for every visible channel that has messages (a missing one reads as unread on the client).
     let mut visible: Vec<(i64, Option<i64>)> = Vec::new();

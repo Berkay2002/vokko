@@ -12,6 +12,7 @@ use crate::events;
 use crate::extract::{ApiJson, parse_id};
 use crate::routes::auth::clean_text;
 use crate::routes::guilds::channel_name;
+use crate::routes::overwrites;
 use crate::state::AppState;
 use crate::store::{self, iso};
 
@@ -39,8 +40,10 @@ async fn update_channel(
     } else {
         access.require(MANAGE_CHANNELS)?;
     }
-    if let Some(name) = &body.name {
-        let name = if access.is_dm() {
+    // Validate everything first, then write in one transaction: a rejected request (including a lock_permissions the actor
+    // may not apply) changes nothing.
+    let name = match &body.name {
+        Some(name) => Some(if access.is_dm() {
             let trimmed = name.trim();
             if trimmed.chars().count() > 100 {
                 return Err(ApiErr::invalid("name", "Must be 100 or fewer in length."));
@@ -48,20 +51,13 @@ async fn update_channel(
             trimmed.to_owned()
         } else {
             channel_name(kind, name)?
-        };
-        sqlx::query("UPDATE channels SET name = $2 WHERE id = $1").bind(id).bind((!name.is_empty()).then_some(name)).execute(&state.db).await?;
-    }
-    if body.topic.is_some() {
-        let topic = clean_text(body.topic, 1024, "topic")?;
-        sqlx::query("UPDATE channels SET topic = $2 WHERE id = $1").bind(id).bind(topic).execute(&state.db).await?;
-    }
-    if let Some(position) = body.position {
-        sqlx::query("UPDATE channels SET position = $2 WHERE id = $1").bind(id).bind(position).execute(&state.db).await?;
-    }
-    if let Some(parent) = body.parent_id {
-        let parent = if parent.0 == 0 {
-            None
-        } else {
+        }),
+        None => None,
+    };
+    let topic = if body.topic.is_some() { Some(clean_text(body.topic, 1024, "topic")?) } else { None };
+    let parent = match body.parent_id {
+        Some(parent) if parent.0 == 0 => Some(None),
+        Some(parent) => {
             if kind == ChannelType::GuildCategory {
                 return Err(ApiErr::invalid("parent_id", "Categories cannot be nested."));
             }
@@ -73,12 +69,38 @@ async fn update_channel(
             if found.is_none() {
                 return Err(ApiErr::invalid("parent_id", "Must be a category of this guild."));
             }
-            Some(parent.db())
-        };
-        sqlx::query("UPDATE channels SET parent_id = $2 WHERE id = $1").bind(id).bind(parent).execute(&state.db).await?;
+            Some(Some(parent.db()))
+        }
+        None => None,
+    };
+    // Moving under a category with lock_permissions adopts its overwrites; without a parent there is nothing to adopt.
+    let lock_to = parent.flatten().filter(|_| body.lock_permissions == Some(true));
+    let viewers_before = match lock_to {
+        Some(_) => Some(access::channel_viewers(&state, &access.channel).await?),
+        None => None,
+    };
+    let mut tx = state.db.begin().await?;
+    if let Some(name) = name {
+        sqlx::query("UPDATE channels SET name = $2 WHERE id = $1").bind(id).bind((!name.is_empty()).then_some(name)).execute(&mut *tx).await?;
     }
+    if let Some(topic) = topic {
+        sqlx::query("UPDATE channels SET topic = $2 WHERE id = $1").bind(id).bind(topic).execute(&mut *tx).await?;
+    }
+    if let Some(position) = body.position {
+        sqlx::query("UPDATE channels SET position = $2 WHERE id = $1").bind(id).bind(position).execute(&mut *tx).await?;
+    }
+    if let Some(parent) = parent {
+        sqlx::query("UPDATE channels SET parent_id = $2 WHERE id = $1").bind(id).bind(parent).execute(&mut *tx).await?;
+    }
+    if let Some(parent) = lock_to {
+        overwrites::lock_to_parent(&mut tx, &access, parent).await?;
+    }
+    tx.commit().await?;
     let row = store::channel_row(&state, id).await?.ok_or_else(ApiErr::unknown_channel)?;
-    events::dispatch_channel(&state, &row, GatewayEvent::ChannelUpdate).await?;
+    match viewers_before {
+        Some(before) => overwrites::dispatch_visibility(&state, &row, &before).await?,
+        None => events::dispatch_channel(&state, &row, GatewayEvent::ChannelUpdate).await?,
+    }
     store::channel(&state, id, Some(user_id)).await?.map(Json).ok_or_else(ApiErr::unknown_channel)
 }
 

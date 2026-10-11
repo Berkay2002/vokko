@@ -10,6 +10,7 @@ pub mod hub;
 pub mod ids;
 pub mod media;
 pub mod net;
+pub mod presence;
 pub mod ratelimit;
 pub mod routes;
 pub mod seed;
@@ -52,7 +53,7 @@ pub fn router(state: AppState) -> Router {
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
         .expose_headers([header::CONTENT_DISPOSITION, header::RETRY_AFTER]);
     Router::new()
-        .nest("/api/v1", routes::api().layer(axum::middleware::from_fn_with_state(state.clone(), ratelimit::middleware)))
+        .nest("/api/v1", routes::api(state.config.max_upload_bytes).layer(axum::middleware::from_fn_with_state(state.clone(), ratelimit::middleware)))
         .route("/gateway", axum::routing::get(gateway::upgrade))
         .fallback(|| async { error::ApiErr::not_found() })
         .layer(cors)

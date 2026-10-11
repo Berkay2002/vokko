@@ -43,6 +43,8 @@ Requirements: a reachable PostgreSQL (14+). Configuration comes from the environ
 | `VOKKO_DATA_DIR` | `<repo>/data/server-dev` | attachments are stored in `<dir>/attachments` |
 | `VOKKO_PUBLIC_URL` | `http://<bind>` | origin used in absolute attachment URLs |
 | `VOKKO_UNFURL` | `on` | `off` disables link previews (the server then makes no outbound requests) |
+| `VOKKO_MAX_UPLOAD_MB` | `25` | largest accepted attachment, in MiB (a user can hold at most 100 MiB of unsent uploads) |
+| `VOKKO_TRUST_PROXY` | `off` | `on` behind a reverse proxy that appends the client address to `X-Forwarded-For`; the rate limiter and gateway caps then key on that address instead of the socket peer |
 | `TEST_DATABASE_URL` | tests only | server URL whose role may `CREATE DATABASE`; every test creates and drops its own `vokko_test_*` database |
 
 ```powershell
@@ -60,7 +62,7 @@ $login = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8710/api/v1/auth/l
 Invoke-RestMethod -Uri http://127.0.0.1:8710/api/v1/users/@me -Headers @{ Authorization = $login.token }
 ```
 
-Authentication is the raw token in the `Authorization` header (no `Bearer`). The gateway is `ws://127.0.0.1:8710/gateway`. Uploads are limited to 10 MiB per file and 10 per message; REST calls are rate limited per route with `429` and `Retry-After`.
+Authentication is the raw token in the `Authorization` header (no `Bearer`). The gateway is `ws://127.0.0.1:8710/gateway`. Uploads are limited to 25 MiB per file (`VOKKO_MAX_UPLOAD_MB`) and 10 per message; REST calls are rate limited per route with `429` and `Retry-After`.
 
 Link previews: up to 5 http(s) URLs per message (not in code, not `<url>`, not invite links) are fetched in the background (5 s, 1 MiB, 3 redirects) and arrive as `MESSAGE_UPDATE` with `embeds` filled from Open Graph / Twitter card tags; editing with `flags: 4` (SUPPRESS_EMBEDS) clears them. Loopback, private, link-local and other non-public addresses are refused for the URL and after DNS resolution on every redirect hop, and no proxy is used. Image and video URLs in embeds are passed through unproxied, so clients load them directly from the origin.
 
