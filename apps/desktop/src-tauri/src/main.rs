@@ -3,6 +3,8 @@
 mod appicon;
 mod games;
 mod links;
+#[cfg(target_os = "macos")]
+mod macos;
 mod prefs;
 mod shortcuts;
 mod tray;
@@ -78,6 +80,11 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let autostarted = std::env::args().any(|arg| arg == AUTOSTART_ARG);
     let stay_hidden = autostarted && handle.state::<PrefsStore>().get().start_minimized && handle.state::<tray::TrayState>().present();
+    #[cfg(target_os = "macos")]
+    if let Err(error) = macos::install(&handle) {
+        log::warn!("macOS menu bar unavailable: {error}");
+    }
+
     if !stay_hidden {
         window::show_main(&handle);
     }
@@ -108,6 +115,13 @@ fn debug_popup_tray_menu(app: &AppHandle) {
             }
         });
     });
+}
+
+fn run_event(app: &AppHandle, event: tauri::RunEvent) {
+    #[cfg(target_os = "macos")]
+    macos::on_run_event(app, &event);
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, event);
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -174,6 +188,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             window::desktop_window_chrome,
             games::desktop_list_processes,
             appicon::desktop_set_app_icon,
+            #[cfg(target_os = "macos")]
+            macos::desktop_request_attention,
             links::desktop_take_pending_links,
             updates::desktop_update_status,
             updates::desktop_update_check,
@@ -183,6 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             shortcuts::desktop_shortcut_unregister,
             shortcuts::desktop_shortcut_list,
         ])
-        .run(context)?;
+        .build(context)?
+        .run(run_event);
     Ok(())
 }

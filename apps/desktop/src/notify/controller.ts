@@ -9,7 +9,8 @@ import { dmPath, go, guildPath } from "../shell/nav";
 import { useLocalState } from "../shell/localState";
 import { getPrefs, usePrefs } from "../ui/prefs";
 import { applyUnread, pageLabel, summarizeUnread } from "./badge";
-import { decide, type NotifyInput } from "./decide";
+import { requestAttention } from "../desktop/attention";
+import { decide, shouldBounce, type NotifyInput } from "./decide";
 import { notificationAdapter } from "./desktop";
 import { playSound, wireAudioUnlock } from "./sounds";
 import { notificationTitle, plainBody } from "./text";
@@ -107,6 +108,7 @@ async function onMessage(message: Message): Promise<void> {
   const decision = decide(input);
   if (!decision.kind || stale) return;
   if (decision.sound) playSound(decision.sound === "mention" ? "mention" : "message");
+  if (shouldBounce(decision, input.focused)) void requestAttention();
   if (decision.desktop && (await notificationAdapter().permission()) === "granted") show(message);
 }
 

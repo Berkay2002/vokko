@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MessageType, type User } from "../api/types";
-import { decide, effectiveLevel, isMutedAt, mentionsMyRole, type NotifyInput, type NotifyLocalState } from "./decide";
+import { decide, effectiveLevel, isMutedAt, mentionsMyRole, shouldBounce, type NotifyInput, type NotifyLocalState } from "./decide";
 
 const ME = "100";
 const user = (id: string): User => ({ id, username: `u${id}`, global_name: null, avatar: null }) as unknown as User;
@@ -111,6 +111,31 @@ describe("decide", () => {
     expect(decide(input({ prefs: { ...base, notificationSounds: false } }))).toMatchObject({ desktop: true, sound: null });
     expect(decide(input({ prefs: { ...base, streamerMode: true } }))).toMatchObject({ desktop: false, sound: null });
     expect(decide(input({ prefs: { ...base, streamerMode: true, streamerDisableSounds: false } }))).toMatchObject({ desktop: false, sound: "message" });
+  });
+});
+
+describe("shouldBounce", () => {
+  const mention = { message: { mentions: [user(ME)] } };
+  const bounces = (patch: Parameters<typeof input>[0], focused = false) => shouldBounce(decide(input({ ...patch, focused })), focused);
+
+  it("bounces for a mention or a DM while the window is in the background", () => {
+    expect(bounces(mention)).toBe(true);
+    expect(bounces({ dm: "dm", scopes: ["c1"] })).toBe(true);
+  });
+
+  it("stays still for a plain message, a focused window and the user's own pings", () => {
+    expect(bounces({})).toBe(false);
+    expect(bounces(mention, true)).toBe(false);
+    expect(bounces({ message: { author: user(ME), mentions: [user(ME)] } })).toBe(false);
+  });
+
+  it("respects DND, mutes, the nothing level and the desktop-notifications pref", () => {
+    const base = input().prefs;
+    expect(bounces({ ...mention, status: "dnd" })).toBe(false);
+    expect(bounces({ ...mention, local: { ...emptyLocal(), mutedUntil: { g1: -1 } } })).toBe(false);
+    expect(bounces({ ...mention, local: { ...emptyLocal(), notify: { c1: "none" } } })).toBe(false);
+    expect(bounces({ ...mention, prefs: { ...base, desktopNotifications: false } })).toBe(false);
+    expect(bounces({ ...mention, prefs: { ...base, streamerMode: true } })).toBe(false);
   });
 });
 

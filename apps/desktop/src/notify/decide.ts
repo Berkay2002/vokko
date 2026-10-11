@@ -104,3 +104,11 @@ export function decide(input: NotifyInput): NotifyDecision {
   const desktopAllowed = prefs.desktopNotifications && !(prefs.streamerMode && prefs.streamerDisableNotifications) && !(input.focused && input.viewing);
   return { desktop: desktopAllowed, sound: soundAllowed ? kind : null, kind, reason };
 }
+
+/**
+ * Whether the Dock should bounce: something addressed to me (a mention or a DM) that would also raise an OS notification
+ * (so DND, mutes, "nothing" levels, the desktop-notifications pref and streamer mode all apply), while the window is in the background.
+ */
+export function shouldBounce(decision: Pick<NotifyDecision, "kind" | "desktop">, focused: boolean): boolean {
+  return decision.kind === "mention" && decision.desktop && !focused;
+}

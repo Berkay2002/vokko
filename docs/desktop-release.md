@@ -46,6 +46,33 @@ Register from JS: `registerShortcut("push-to-talk", "Ctrl+Shift+K")`, then `onSh
 (push-to-talk needs both). A binding must include a non-modifier key; mouse buttons and bare modifiers can't be bound with the OS hotkey APIs
 (Discord uses low-level hooks for those; out of scope for this groundwork).
 
+## macOS
+
+Everything macOS-specific is in `src-tauri/src/macos.rs` (`#[cfg(target_os = "macos")]`).
+
+- **Native chrome**: the base window config has native decorations, and `window.rs` removes them at runtime only off macOS (the
+  page draws its own controls there), so macOS keeps its traffic lights. The startup log prints `main window decorated: Ok(true)`.
+- **Menu bar**: Vokko (About, Settings… Cmd+, , Services, Hide, Hide Others, Show All, Quit), Edit (Undo, Redo, Cut, Copy, Paste,
+  Select All; the predefined items are what make text fields work), View (Toggle Full Screen; Reload in debug builds), Go
+  (Quick Switcher, Inbox), Window (Minimize, Zoom, Close Window, Bring All to Front), Help (Vokko Help, Keyboard Shortcuts).
+  There are no zoom items because the app has no zoom setting. Custom items bring the window forward and emit the
+  `desktop-menu` event; `src/shell/NativeMenuBridge.tsx` maps the action onto a modal that already exists. Cmd+K and Cmd+I
+  have no menu accelerator on purpose: the webview handles them and a menu key equivalent would swallow them.
+- **Dock badge**: `notify/badge.ts` sets the tile label to mentions plus unread DM conversations (`dockBadgeLabel`: "99+" past 99,
+  cleared at 0), through `Window.setBadgeLabel` (permissions in `capabilities/macos.json`, macOS only). The same summary feeds the tray dot, and it follows the "unread badge" preference.
+- **Dock bounce**: `notify/controller.ts` asks for an informational bounce (`desktop_request_attention`) when `shouldBounce`
+  holds: the message is a mention or DM, it would raise an OS notification (DND, mutes, "nothing" level, desktop notifications off
+  and streamer mode all apply) and the window is not focused.
+- **Dock click**: with the window hidden to the tray, clicking the Dock icon shows it again (`RunEvent::Reopen`).
+- **Notification permission**: `tauri-plugin-notification` on desktop always answers "granted" and never prompts, so the
+  "enable desktop notifications" banner never shows in the macOS app and a denial in System Settings can't be detected. macOS
+  asks on the first notification of a bundled app; an unbundled dev binary is attributed to the terminal that started it.
+  `desktopNotifications` defaults to off, so `needsPermissionPrompt` (notify/Banners.tsx) offers the "Enable Desktop Notifications"
+  bar in the desktop shell while the pref is off; that is what turns notifications and the bounce on. A Notifications settings
+  page should show the pref and, on macOS, point to System Settings, Notifications for the OS-level permission.
+- **Debugging without screen capture** (debug builds): `VOKKO_DEBUG_DOCK=1` logs the Dock tile's badge label whenever it
+  changes; the menu bar and window decoration state are logged once at startup.
+
 ## Updater
 
 Inactive by default: the updater plugin refuses to start without `pubkey`, so it is only registered when the Tauri config contains a

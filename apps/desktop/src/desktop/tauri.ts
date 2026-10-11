@@ -1,6 +1,9 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+/** True on macOS (browser or desktop shell). */
+export const IS_MAC = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
+
 /** True inside the Tauri webview. Every desktop adapter is a no-op (or returns its documented fallback) when this is false. */
 export function isDesktop(): boolean {
   return isTauri();

@@ -2,6 +2,7 @@
 
 import { isTauri } from "@tauri-apps/api/core";
 import iconSvg from "../../assets/icon.svg?raw";
+import { IS_MAC } from "../desktop/tauri";
 import { setTrayUnread } from "../desktop/tray";
 import { dmName, type AppState } from "../api/store";
 import { ChannelType } from "../api/types";
@@ -13,12 +14,15 @@ export interface UnreadSummary {
   mentions: number;
   /** Something unread that is worth a dot (not muted, level not "only mentions" / "nothing"). */
   unread: boolean;
+  /** Unread DM conversations that carry no mention count (the Dock badge counts them like mentions). */
+  dms: number;
 }
 
 /** Counts what the user should be told about. Muted channels, categories and servers contribute nothing. */
 export function summarizeUnread(state: Pick<AppState, "channels" | "readStates">, local: NotifyLocalState, now: number): UnreadSummary {
   let mentions = 0;
   let unread = false;
+  let dms = 0;
   for (const channel of Object.values(state.channels)) {
     if (channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildCategory) continue;
     const scopes = [channel.id, channel.parent_id, channel.guild_id].filter((id): id is string => !!id);
@@ -27,14 +31,23 @@ export function summarizeUnread(state: Pick<AppState, "channels" | "readStates">
     if (level === "none") continue;
     const read = state.readStates[channel.id];
     mentions += read?.mention_count ?? 0;
-    if (!unread && (level === "all" || level === "unreads-mentions") && channel.last_message_id) {
-      if (!read?.last_message_id || compareIds(channel.last_message_id, read.last_message_id) > 0) unread = true;
-    }
+    const unreadHere = !!channel.last_message_id && (!read?.last_message_id || compareIds(channel.last_message_id, read.last_message_id) > 0);
+    const dotLevel = level === "all" || level === "unreads-mentions";
+    if (!unread && dotLevel && unreadHere) unread = true;
+    // A 1:1 DM is always addressed to me; a group DM only when its level would notify.
+    const isDm = channel.type === ChannelType.DM || (channel.type === ChannelType.GroupDM && dotLevel);
+    if (isDm && unreadHere && !read?.mention_count) dms += 1;
   }
-  return { mentions, unread };
+  return { mentions, unread, dms };
 }
 
 const countText = (n: number): string => (n > 99 ? "99+" : String(n));
+
+/** Dock tile label: the number of mentions plus unread DMs, "99+" past 99, undefined (no badge) at 0. */
+export function dockBadgeLabel(summary: Pick<UnreadSummary, "mentions" | "dms">): string | undefined {
+  const count = summary.mentions + summary.dms;
+  return count > 0 ? countText(count) : undefined;
+}
 
 /** What the tab names: "#general | Vokko Lab", "@alice", "Friends"; null when signed out. */
 export function pageLabel(state: Pick<AppState, "me" | "route" | "channels" | "guilds">): string | null {
@@ -47,7 +60,7 @@ export function pageLabel(state: Pick<AppState, "me" | "route" | "channels" | "g
 }
 
 /** "(3) Vokko | #general | Lab" with mentions, "• Vokko | …" with plain unread, "Vokko | …" otherwise (Discord's own format). */
-export function formatTitle(base: string, summary: UnreadSummary, label?: string | null): string {
+export function formatTitle(base: string, summary: Pick<UnreadSummary, "mentions" | "unread">, label?: string | null): string {
   const name = label ? `${base} | ${label}` : base;
   if (summary.mentions > 0) return `(${countText(summary.mentions)}) ${name}`;
   if (summary.unread) return `• ${name}`;
@@ -55,7 +68,7 @@ export function formatTitle(base: string, summary: UnreadSummary, label?: string
 }
 
 /** Our own icon with a badge: red with the count for mentions, a plain white dot for unread. */
-export function faviconSvg(summary: UnreadSummary): string {
+export function faviconSvg(summary: Pick<UnreadSummary, "mentions" | "unread">): string {
   const base = iconSvg.trim().replace(/<\/svg>\s*$/, "");
   let badge = "";
   if (summary.mentions > 0) {
@@ -70,7 +83,7 @@ export function faviconSvg(summary: UnreadSummary): string {
 let faviconLink: HTMLLinkElement | null = null;
 let lastFavicon = "";
 let baseTitle = "";
-let lastBadge = -1;
+let lastBadge: string | undefined | null = null;
 
 function setFavicon(svg: string): void {
   if (svg === lastFavicon || typeof document === "undefined") return;
@@ -84,15 +97,19 @@ function setFavicon(svg: string): void {
   faviconLink.href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
-/** Tauri only (macOS / Linux dock badge); Windows has no numeric badge API and rejects, which is fine. */
-async function setWindowBadge(count: number): Promise<void> {
-  if (!isTauri() || count === lastBadge) return;
-  lastBadge = count;
+/**
+ * Tauri on macOS only. The Dock takes a text label ("99+"), granted to the window in `capabilities/macos.json`; other platforms
+ * are not granted a badge permission, so the call is skipped there. `lastBadge` only moves after a success, so a
+ * failed call is retried on the next refresh instead of leaving the badge stale.
+ */
+async function setWindowBadge(label: string | undefined): Promise<void> {
+  if (!isTauri() || !IS_MAC || label === lastBadge) return;
   try {
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().setBadgeCount(count > 0 ? count : undefined);
+    await getCurrentWindow().setBadgeLabel(label);
+    lastBadge = label;
   } catch {
-    /* unsupported platform */
+    /* the call failed: retried on the next refresh */
   }
 }
 
@@ -100,10 +117,10 @@ async function setWindowBadge(count: number): Promise<void> {
 export function applyUnread(summary: UnreadSummary, enabled: boolean, label: string | null = null): void {
   if (typeof document === "undefined") return;
   if (!baseTitle) baseTitle = document.title || "Vokko";
-  const shown: UnreadSummary = enabled ? summary : { mentions: 0, unread: false };
+  const shown: UnreadSummary = enabled ? summary : { mentions: 0, unread: false, dms: 0 };
   const title = formatTitle(baseTitle, shown, label);
   if (document.title !== title) document.title = title;
   setFavicon(faviconSvg(shown));
-  void setWindowBadge(shown.mentions);
+  void setWindowBadge(dockBadgeLabel(shown));
   void setTrayUnread(shown.unread || shown.mentions > 0);
 }

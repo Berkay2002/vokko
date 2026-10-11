@@ -17,6 +17,7 @@ import { MemberList } from "./MemberList";
 import { ModalHost } from "./Modals";
 import { ProfileCardHost } from "./ProfileCard";
 import { ServerRail } from "./ServerRail";
+import { NativeMenuBridge } from "./NativeMenuBridge";
 import { TitleBar } from "./TitleBar";
 import { UserPanel } from "./UserPanel";
 import { VoiceChannelPage, VoiceConnectionPanel } from "../voice";
@@ -208,6 +209,7 @@ export function AppShell() {
   return (
     <div className={`app-frame${navOpen ? " nav-open" : ""}`} style={{ ["--sidebar-width" as string]: `${width}px` }}>
       <NavigatorBridge />
+      <NativeMenuBridge />
       <TitleBar />
       <div className="app-body">
         <ServerRail />

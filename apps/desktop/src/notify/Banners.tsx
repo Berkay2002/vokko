@@ -140,7 +140,32 @@ function UpdateBar({ version }: { version: string }) {
   );
 }
 
-function PermissionBar({ onDone }: { onDone(): void }) {
+/**
+ * The desktop shell's notification plugin never prompts and always reports "granted", so the pref (off by default) is the only
+ * switch: offer it there too. In a browser the prompt is for the real permission and only shows while it is undecided.
+ */
+export function needsPermissionPrompt(kind: "web" | "tauri", permission: PermissionState): boolean {
+  return permission === "default" || (kind === "tauri" && permission === "granted");
+}
+
+/** Dismissing the permission bar is permanent (no expiry): the pref in Settings is the way back. */
+export function isPromptDismissed(): boolean {
+  try {
+    return localStorage.getItem(DISMISSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function dismissPrompt(): void {
+  try {
+    localStorage.setItem(DISMISSED_KEY, "1");
+  } catch {
+    /* the banner returns next session */
+  }
+}
+
+function PermissionBar({ onDone, desktopShell }: { onDone(): void; desktopShell: boolean }) {
   const [busy, setBusy] = useState(false);
   const enable = async () => {
     setBusy(true);
@@ -150,17 +175,13 @@ function PermissionBar({ onDone }: { onDone(): void }) {
     onDone();
   };
   const dismiss = () => {
-    try {
-      localStorage.setItem(DISMISSED_KEY, "1");
-    } catch {
-      /* the banner returns next session */
-    }
+    dismissPrompt();
     onDone();
   };
   return (
     <div className="notify-banner notify-banner-brand" role="region" aria-label="Desktop notifications" data-testid="permission-banner">
       <BellRing size={16} aria-hidden />
-      <span className="notify-banner-text">Vokko needs your permission to enable desktop notifications.</span>
+      <span className="notify-banner-text">{desktopShell ? "Desktop notifications are off. Turn them on to hear about mentions and DMs." : "Vokko needs your permission to enable desktop notifications."}</span>
       <button type="button" className="notify-banner-button" disabled={busy} onClick={() => void enable()}>
         Enable Desktop Notifications
       </button>
@@ -208,13 +229,7 @@ export function NotifyBanners() {
   const showMaintenance = !showConnection && !flash && notice !== null && dismissedNotice !== notice.message;
 
   const [permission, setPermission] = useState<PermissionState>("granted");
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(DISMISSED_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [dismissed, setDismissed] = useState(isPromptDismissed);
   useEffect(() => {
     if (!loggedIn) return;
     let cancelled = false;
@@ -233,7 +248,7 @@ export function NotifyBanners() {
   const showUpdate = quiet && readyVersion !== null;
   const showDownloading = quiet && downloading !== null;
 
-  const showPermission = loggedIn && quiet && !showUpdate && !showDownloading && !dismissed && !desktopPref && permission === "default";
+  const showPermission = loggedIn && quiet && !showUpdate && !showDownloading && !dismissed && !desktopPref && needsPermissionPrompt(notificationAdapter().kind, permission);
   const visible = showConnection || flash || showMaintenance || showUpdate || showDownloading || showPermission;
   useEffect(() => {
     document.documentElement.classList.toggle("has-top-banner", visible);
@@ -245,6 +260,6 @@ export function NotifyBanners() {
   if (showMaintenance && notice) return <MaintenanceBar notice={notice} onDismiss={() => setDismissedNotice(notice.message)} />;
   if (showUpdate && readyVersion !== null) return <UpdateBar version={readyVersion} />;
   if (showDownloading && downloading) return <DownloadingBar version={downloading.version} fraction={downloading.total ? downloading.downloaded / downloading.total : null} />;
-  if (showPermission) return <PermissionBar onDone={() => setDismissed(true)} />;
+  if (showPermission) return <PermissionBar desktopShell={notificationAdapter().kind === "tauri"} onDone={() => setDismissed(true)} />;
   return null;
 }

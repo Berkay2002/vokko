@@ -7,6 +7,8 @@ export { DEFAULT_DESKTOP_PREFS, getDesktopPrefs, setDesktopPrefs, type DesktopPr
 export { getAutostart, setAutostart } from "./autostart";
 export { setTrayUnread } from "./tray";
 export { getAppVersion, syncWindowTheme } from "./window";
+export { requestAttention } from "./attention";
+export { onNativeMenu, type NativeMenuId } from "./menu";
 export { initDeepLinks, invitePath, onDeepLink, routeDeepLink, type DeepLink, type DeepLinkHandler } from "./deeplinks";
 export { checkForUpdate, downloadUpdate, initUpdater, restartToUpdate, useDesktopUpdate, type UpdateStatus } from "./updater";
 export { minimizeWindow, toggleMaximizeWindow, closeWindow, getWindowChrome, useWindowChrome, type WindowChrome } from "./windowControls";

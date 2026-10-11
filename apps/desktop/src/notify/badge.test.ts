@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ChannelType, type Channel, type ReadState } from "../api/types";
-import { faviconSvg, formatTitle, pageLabel, summarizeUnread } from "./badge";
+import { dockBadgeLabel, faviconSvg, formatTitle, pageLabel, summarizeUnread } from "./badge";
 import type { NotifyLocalState } from "./decide";
 import { notificationTitle, plainBody } from "./text";
 
@@ -13,30 +13,61 @@ const read = (channel_id: string, last_message_id: string | null, mention_count 
 describe("summarizeUnread", () => {
   it("counts mentions and flags unread channels", () => {
     const state = { channels: { a: channel("a"), b: channel("b") }, readStates: { a: read("a", "10", 2), b: read("b", "50", 0) } };
-    expect(summarizeUnread(state, local(), NOW)).toEqual({ mentions: 2, unread: true });
+    expect(summarizeUnread(state, local(), NOW)).toEqual({ mentions: 2, unread: true, dms: 0 });
   });
 
   it("is quiet when everything is read", () => {
     const state = { channels: { a: channel("a") }, readStates: { a: read("a", "50") } };
-    expect(summarizeUnread(state, local(), NOW)).toEqual({ mentions: 0, unread: false });
+    expect(summarizeUnread(state, local(), NOW)).toEqual({ mentions: 0, unread: false, dms: 0 });
   });
 
   it("ignores muted channels (own, category or guild), 'Nothing' channels and voice channels", () => {
     const channels = { a: channel("a"), b: channel("b", { parent_id: "cat" }), c: channel("c"), v: channel("v", { type: ChannelType.GuildVoice }) };
     const readStates = { a: read("a", "1", 1), b: read("b", "1", 1), c: read("c", "1", 1), v: read("v", "1", 1) };
     const muted = local({ mutedUntil: { a: -1, cat: NOW + 1000 }, notify: { c: "none" } });
-    expect(summarizeUnread({ channels, readStates }, muted, NOW)).toEqual({ mentions: 0, unread: false });
+    expect(summarizeUnread({ channels, readStates }, muted, NOW)).toEqual({ mentions: 0, unread: false, dms: 0 });
     // an expired mute counts again
-    expect(summarizeUnread({ channels: { a: channels.a }, readStates }, local({ mutedUntil: { a: NOW - 1 } }), NOW)).toEqual({ mentions: 1, unread: true });
+    expect(summarizeUnread({ channels: { a: channels.a }, readStates }, local({ mutedUntil: { a: NOW - 1 } }), NOW)).toEqual({ mentions: 1, unread: true, dms: 0 });
   });
 
   it("'only mentions' channels count mentions but never the plain unread dot", () => {
     const state = { channels: { a: channel("a") }, readStates: { a: read("a", "1", 0) } };
-    expect(summarizeUnread(state, local({ notify: { a: "mentions" } }), NOW)).toEqual({ mentions: 0, unread: false });
+    expect(summarizeUnread(state, local({ notify: { a: "mentions" } }), NOW)).toEqual({ mentions: 0, unread: false, dms: 0 });
   });
 
   it("a channel without any read state is unread", () => {
     expect(summarizeUnread({ channels: { a: channel("a") }, readStates: {} }, local(), NOW).unread).toBe(true);
+  });
+});
+
+describe("Dock badge", () => {
+  const dm = (id: string, patch: Partial<Channel> = {}) => channel(id, { type: ChannelType.DM, guild_id: undefined, ...patch });
+
+  it("counts unread DMs that carry no mention count, next to mentions", () => {
+    const state = { channels: { a: channel("a"), d1: dm("d1"), d2: dm("d2") }, readStates: { a: read("a", "1", 2), d1: read("d1", "1", 0), d2: read("d2", "50", 0) } };
+    const summary = summarizeUnread(state, local(), NOW);
+    expect(summary).toEqual({ mentions: 2, unread: true, dms: 1 });
+    expect(dockBadgeLabel(summary)).toBe("3");
+  });
+
+  it("does not count a DM twice when the server already counted it as a mention", () => {
+    const state = { channels: { d: dm("d") }, readStates: { d: read("d", "1", 4) } };
+    expect(dockBadgeLabel(summarizeUnread(state, local(), NOW))).toBe("4");
+  });
+
+  it("skips muted DMs and group DMs set to only mentions, but a 1:1 DM at 'only mentions' still counts", () => {
+    const channels = { m: dm("m"), g: dm("g", { type: ChannelType.GroupDM }), o: dm("o") };
+    const readStates = { m: read("m", "1"), g: read("g", "1"), o: read("o", "1") };
+    const state = { channels, readStates };
+    const summary = summarizeUnread(state, local({ mutedUntil: { m: -1 }, notify: { g: "mentions", o: "mentions" } }), NOW);
+    expect(summary.dms).toBe(1);
+  });
+
+  it("has no label at 0 and caps at 99+", () => {
+    expect(dockBadgeLabel({ mentions: 0, dms: 0 })).toBeUndefined();
+    expect(dockBadgeLabel({ mentions: 1, dms: 0 })).toBe("1");
+    expect(dockBadgeLabel({ mentions: 90, dms: 9 })).toBe("99");
+    expect(dockBadgeLabel({ mentions: 90, dms: 10 })).toBe("99+");
   });
 });
 

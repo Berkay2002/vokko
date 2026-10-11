@@ -8,6 +8,7 @@ vi.mock("@tauri-apps/api/event", () => events);
 import { getAutostart, setAutostart } from "./autostart";
 import { initDeepLinks, onDeepLink, resetDeepLinks, routeDeepLink, type DeepLink } from "./deeplinks";
 import { DEFAULT_DESKTOP_PREFS, getDesktopPrefs, setDesktopPrefs } from "./prefs";
+import { onNativeMenu } from "./menu";
 import { listShortcuts, onShortcut, registerShortcut } from "./shortcuts";
 import { resetTrayUnread, setTrayUnread } from "./tray";
 import { checkForUpdate, initUpdater, restartToUpdate, useDesktopUpdate } from "./updater";
@@ -39,6 +40,12 @@ describe("outside Tauri (browser build)", () => {
     expect(core.invoke).not.toHaveBeenCalled();
   });
 
+  it("native menu subscription is inert", async () => {
+    const stop = await onNativeMenu(() => undefined);
+    stop();
+    expect(events.listen).not.toHaveBeenCalled();
+  });
+
   it("subscriptions are inert", async () => {
     const stop = await initDeepLinks();
     const stopShortcut = await onShortcut(() => undefined);
@@ -55,6 +62,16 @@ describe("inside Tauri", () => {
   beforeEach(() => {
     core.isTauri.mockReturnValue(true);
     events.listen.mockResolvedValue(() => undefined);
+  });
+
+  it("forwards known macOS menu actions and drops unknown ones", async () => {
+    const seen: string[] = [];
+    await onNativeMenu(id => seen.push(id));
+    const deliver = events.listen.mock.calls[0]?.[1] as (event: { payload: string }) => void;
+    expect(events.listen.mock.calls[0]?.[0]).toBe("desktop-menu");
+    deliver({ payload: "settings" });
+    deliver({ payload: "format-disk" });
+    expect(seen).toEqual(["settings"]);
   });
 
   it("passes prefs patches to the Rust command", async () => {
