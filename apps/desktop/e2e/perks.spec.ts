@@ -48,7 +48,8 @@ test('a per-server profile overrides the global fields only in that server', asy
   await dialog.getByRole('tab', { name: 'Per-server profiles' }).click();
   await dialog.getByRole('textbox', { name: 'Pronouns' }).fill('server/pronouns');
   await dialog.getByRole('button', { name: 'Save Changes' }).click();
-  await expect(dialog.getByRole('button', { name: 'Save Changes' })).toHaveCount(0);
+  // the button reads "Saving…" while the request is in flight, so wait for the save bar itself to go away
+  await expect(dialog.getByRole('alert').filter({ hasText: 'unsaved changes' })).toHaveCount(0);
 
   const stored = await page.evaluate(() => {
     const s = (window as unknown as { __vokko: { appStore: { getState(): { me: { id: string; pronouns?: string | null }; members: Record<string, Record<string, { pronouns?: string | null }>> } } } }).__vokko.appStore.getState();
