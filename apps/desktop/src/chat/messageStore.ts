@@ -180,7 +180,7 @@ export const messageStore = {
     const message: Message = {
       id: `pending:${nonce}`, channel_id: channelId, guild_id: input.reply?.guild_id ?? null, author: me, content, timestamp: new Date().toISOString(), edited_timestamp: null,
       type: input.reply ? MessageType.Reply : MessageType.Default, mentions: input.reply && input.mention !== false ? [input.reply.author] : [], mention_everyone: false,
-      attachments: input.attachments ?? [], reactions: [], pinned: false,
+      attachments: input.attachments ?? [], embeds: [], reactions: [], pinned: false,
       message_reference: input.reply ? { message_id: input.reply.id, channel_id: channelId, guild_id: input.reply.guild_id } : null,
       referenced_message: input.reply ?? null, nonce,
     };
