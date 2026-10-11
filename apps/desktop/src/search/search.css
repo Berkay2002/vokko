@@ -117,7 +117,7 @@
 .search-spin { animation: search-spin 0.9s linear infinite; color: var(--chat-icon); }
 @keyframes search-spin { to { transform: rotate(360deg); } }
 
-.search-sort-popout { width: 144px; padding: 8px; background: var(--background-surface-high); border: 1px solid var(--border-subtle); box-shadow: var(--elevation-high); }
+.search-sort-popout { width: 164px; white-space: nowrap; padding: 8px; background: var(--background-surface-high); border: 1px solid var(--border-subtle); box-shadow: var(--elevation-high); }
 .search-sort-menu { display: flex; flex-direction: column; gap: 2px; }
 .search-sort-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; padding: 0 8px; border-radius: 8px; font-size: 14px; font-weight: 500; color: var(--text-default); text-align: left; }
 .search-sort-option:hover { background: var(--interactive-background-hover); color: var(--text-strong); }
