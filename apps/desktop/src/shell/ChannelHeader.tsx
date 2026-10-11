@@ -8,6 +8,7 @@ import { Avatar } from "./Avatar";
 import { isPrivateChannel } from "./channelPrivacy";
 import { muteItem, notificationItem, UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
+import { channelSlots } from "./slots";
 
 function ToolbarButton({
   label,
@@ -119,10 +120,14 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             <UserRound size={24} />
           </ToolbarButton>
         )}
-        <div className="header-search">
-          <input className="header-search-input" placeholder={"Search"} aria-label="Search" />
-          <Search size={16} />
-        </div>
+        {channelSlots.HeaderSearch ? (
+          <channelSlots.HeaderSearch channel={channel} />
+        ) : (
+          <div className="header-search">
+            <input className="header-search-input" placeholder={"Search"} aria-label="Search" />
+            <Search size={16} />
+          </div>
+        )}
       </div>
       <Popout anchor={pinsAnchor} open={pinsOpen} onClose={() => setPinsOpen(false)} side="bottom" align="end" gap={8} className="pins-popout-host">
         <PinnedMessages channelId={channel.id} />

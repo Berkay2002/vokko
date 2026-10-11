@@ -127,10 +127,15 @@ await shot("14-quick-switcher");
 await page.keyboard.press("Escape");
 
 await page.click('.user-panel-button[aria-label="User Settings"]');
-await page.waitForSelector(".settings-overlay");
+await page.waitForSelector(".sm");
 await shot("15-user-settings-account");
-await page.click('.settings-item:has-text("Profiles")');
+await page.click('.sm-sub:has-text("Password")');
+await page.waitForTimeout(600);
+await shot("15b-user-settings-security");
+await page.click(".sm-profile-edit");
 await shot("16-user-settings-profiles");
+await page.click('.sm-item:has-text("Appearance")');
+await shot("16b-user-settings-appearance");
 await page.keyboard.press("Escape");
 
 await nav("/channels/@me");

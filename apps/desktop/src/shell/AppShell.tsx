@@ -18,6 +18,7 @@ import { markChannelRead, markGuildRead } from "./actions";
 import { firstTextChannel, groupChannels } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
 import { setNavigator } from "./nav";
+import { channelSlots, useRightPanelOpen } from "./slots";
 
 const SIDEBAR_KEY = "vokko.sidebarWidth";
 const MEMBERS_KEY = "vokko.membersOpen";
@@ -88,6 +89,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const isGroupDm = channel?.type === ChannelType.GroupDM;
   const dmRecipient = channel && !guild && !isGroupDm ? channel.recipients?.[0] : undefined;
+  const panelOpen = useRightPanelOpen(channelId ?? "");
 
   useEffect(() => {
     appStore.getState().setRoute({ guildId, channelId });
@@ -182,8 +184,14 @@ export function AppShell() {
               <ChannelHeader channel={channel} membersOpen={membersOpen && !!guild} onToggleMembers={toggleMembers} profileOpen={profileOpen && !!dmRecipient} onToggleProfile={toggleProfile} />
               <div className="channel-body">
                 <div className="channel-chat">{text ? <ChatView key={channel.id} channelId={channel.id} /> : <div className="main-empty">Voice channels are not supported yet.</div>}</div>
-                {guild && membersOpen && <MemberList guildId={guild.id} />}
-                {dmRecipient && profileOpen && <DmProfilePanel user={dmRecipient} />}
+                {panelOpen && channelSlots.RightPanel ? (
+                  <channelSlots.RightPanel channel={channel} />
+                ) : (
+                  <>
+                    {guild && membersOpen && <MemberList guildId={guild.id} />}
+                    {dmRecipient && profileOpen && <DmProfilePanel user={dmRecipient} />}
+                  </>
+                )}
               </div>
             </>
           )}

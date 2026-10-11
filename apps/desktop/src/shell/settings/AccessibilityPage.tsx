@@ -17,6 +17,12 @@ export function AccessibilityPage() {
 
   return (
     <Page title="Accessibility">
+      <div className="sm-sticky">
+        <div className="sm-sticky-card">
+          <div className="sm-sticky-label">Preview</div>
+          <p style={{ fontSize: `${fontSize}px` }}>This is how chat text looks at {fontSize}px.</p>
+        </div>
+      </div>
       <Category title="Text Readability">
         <Field label="Chat text size">
           <Slider

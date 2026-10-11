@@ -5,20 +5,15 @@ import { compareIds } from "../snowflake";
 import { Perm, hasBit } from "../permissions";
 import { channelPermsOf } from "./access";
 import { db, nextId, sortedMessages, userOf, type MockAccount, type MockChannel } from "./db";
-import { addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, openDM, openGroupDM, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm, requireMessage, emitVisibilityChanges, visibilityOf } from "./ops";
+import { pendingAttachment, addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, openDM, openGroupDM, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm, requireMessage, emitVisibilityChanges, visibilityOf } from "./ops";
 import { parseOverwrites } from "./moderation";
+import { applyGuildPerks, applyUserPerks, dropTagOnLeave, memberProfileFields } from "./perks";
 import { ID, route, routes, str } from "./router";
 import { emit } from "./socket";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
+import "./search";
 
 export { route, str, requireGuildMember };
-
-function pendingAttachment(id: string | undefined, owner: string): Attachment | null {
-  if (!id) return null;
-  const entry = db.pending.get(id);
-  if (!entry || entry.owner !== owner) fail(400, 50035, "Invalid Form Body", { attachment: { code: "ATTACHMENT_NOT_FOUND", message: "Unknown attachment" } });
-  return entry.attachment;
-}
 
 function parseEmoji(raw: string): ReactionEmoji {
   const decoded = decodeURIComponent(raw);
@@ -81,6 +76,7 @@ route("PATCH", "/users/@me", ({ viewer, body }) => {
     const attachment = pendingAttachment(str(body.avatar_attachment_id), user.id);
     user.avatar = attachment ? attachment.url : null;
   }
+  applyUserPerks(user, body, id => pendingAttachment(id, user.id));
   const audience = new Set<string>([user.id, ...viewer.relationships.keys()]);
   for (const guild of db.guilds.values()) if (guild.members.has(user.id)) for (const id of guild.members.keys()) audience.add(id);
   for (const channel of db.channels.values()) if (channel.participant_ids?.includes(user.id)) for (const id of channel.participant_ids) audience.add(id);
@@ -105,7 +101,7 @@ route("GET", `/users/${ID}/profile`, ({ viewer, params, query }) => {
   const guildId = query.get("guild_id");
   const record = guildId ? db.guilds.get(guildId)?.members.get(other.user.id) : undefined;
   const guild_member: GuildMember | undefined = record
-    ? { user: other.user, nick: record.nick, roles: record.roles, joined_at: record.joined_at, ...(record.communication_disabled_until ? { communication_disabled_until: record.communication_disabled_until } : {}) }
+    ? { user: other.user, nick: record.nick, roles: record.roles, joined_at: record.joined_at, ...(record.communication_disabled_until ? { communication_disabled_until: record.communication_disabled_until } : {}), ...memberProfileFields(record) }
     : undefined;
   return { user: other.user, mutual_guilds, mutual_friends_count, ...(guild_member ? { guild_member } : {}) };
 });
@@ -119,6 +115,7 @@ route("DELETE", `/users/@me/guilds/${ID}`, ({ viewer, params }) => {
   const guild = requireGuildMember(guildId, viewer.user.id);
   if (guild.guild.owner_id === viewer.user.id) fail(400, 50035, "Invalid Form Body", { guild: { code: "OWNER_CANNOT_LEAVE", message: "Owners cannot leave their server. Transfer ownership or delete it." } });
   guild.members.delete(viewer.user.id);
+  dropTagOnLeave(guild, viewer.user.id);
   emit([viewer.user.id], "GUILD_DELETE", { id: guildId });
   emit(guild.members.keys(), "GUILD_MEMBER_REMOVE", { guild_id: guildId, user: viewer.user });
   return undefined;
@@ -217,6 +214,7 @@ route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
   }
   if ("icon_attachment_id" in body) guild.guild.icon = pendingAttachment(str(body.icon_attachment_id), viewer.user.id)?.url ?? null;
   if ("system_channel_id" in body) guild.guild.system_channel_id = str(body.system_channel_id) ?? null;
+  applyGuildPerks(guild, body);
   emit(guild.members.keys(), "GUILD_UPDATE", { ...guild.guild });
   return guild.guild;
 });

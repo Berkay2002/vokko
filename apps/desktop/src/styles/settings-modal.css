@@ -1,0 +1,573 @@
+/*
+ * Settings modal frame (src/shell/settings/SettingsModal.tsx). Tokens only.
+ * Numbers come from the measured Discord web modal: scrim .72 over the whole viewport, dialog max 1400 wide with a 72px top and
+ * bottom inset, radius 12, sidebar 253, header strip 49, content column 696, nav items 220x36, block headings 24/30.
+ */
+.sm-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+}
+
+.sm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  animation: sm-scrim-in 90ms linear;
+}
+
+.sm {
+  position: absolute;
+  inset: 72px 40px;
+  display: flex;
+  max-width: 1400px;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--background-base-lowest);
+  box-shadow: 0 12px 24px 0 rgba(0, 0, 0, 0.24);
+  animation: sm-dialog-in 180ms var(--ease-out);
+}
+
+.sm:focus {
+  outline: none;
+}
+
+@keyframes sm-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sm-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes sm-scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes sm-dialog-out {
+  to {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+.sm-layer.closing .sm-backdrop {
+  animation: sm-scrim-out 115ms linear forwards;
+}
+
+.sm-layer.closing .sm {
+  animation: sm-dialog-out 115ms var(--ease-out) forwards;
+  pointer-events: none;
+}
+
+.reduce-motion .sm-backdrop,
+.reduce-motion .sm {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sm-backdrop,
+  .sm {
+    animation: none;
+  }
+}
+
+/* ---- sidebar: fixed profile header and search, scrolling list ---- */
+.sm-side {
+  display: flex;
+  flex: 0 0 253px;
+  flex-direction: column;
+  width: 253px;
+  min-height: 0;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.sm-profile {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 16px 0 24px;
+}
+
+.sm-profile-names {
+  min-width: 0;
+}
+
+.sm-profile-name {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-profile-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.sm-profile-edit:hover {
+  color: var(--text-strong);
+}
+
+.sm-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: 221px;
+  height: 40px;
+  margin: 16px 16px 8px;
+  padding: 0 8px 0 12px;
+  border: 1px solid var(--input-border-default);
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.sm-search:focus-within {
+  border-color: var(--input-border-active);
+}
+
+.sm-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-default);
+  font-size: 16px;
+  outline: none;
+}
+
+.sm-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.sm-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.sm-search-clear {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.sm-search-clear:hover {
+  color: var(--text-strong);
+}
+
+.sm-side-list {
+  flex: 1;
+  min-height: 0;
+  padding: 0 16px 16px;
+  overflow-y: auto;
+}
+
+.sm-group + .sm-group {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sm-group-title {
+  height: 30px;
+  margin: 8px 8px 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 30px;
+  font-weight: 500;
+}
+
+.sm-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 36px;
+  margin-bottom: 4px;
+  padding: 8px;
+  border-radius: 8px;
+  color: var(--interactive-text-default);
+  font-size: 16px;
+  line-height: 20px;
+  text-align: left;
+}
+
+.sm-item:hover {
+  background: var(--interactive-background-default);
+  color: var(--text-default);
+}
+
+.sm-item.selected {
+  background: var(--interactive-background-selected);
+  color: var(--text-default);
+  font-weight: 500;
+}
+
+.sm-item.danger {
+  color: var(--text-feedback-critical);
+}
+
+.sm-item-icon {
+  flex: none;
+}
+
+.sm-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* sub-items hang on a 2px rail under the parent's icon; the current one is brighter and carries a white bar over it */
+.sm-subs {
+  position: relative;
+  margin-top: -4px;
+  margin-bottom: 8px;
+}
+
+.sm-subs::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 17px;
+  width: 2px;
+  background: var(--border-normal);
+}
+
+.sm-sub {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px 0 36px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 400;
+  text-align: left;
+}
+
+.sm-sub:hover {
+  color: var(--text-default);
+}
+
+.sm-sub.active {
+  color: var(--text-strong);
+}
+
+.sm-sub.active::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 17px;
+  width: 2px;
+  background: var(--text-strong);
+}
+
+.sm-side-empty {
+  padding: 32px 8px;
+  text-align: center;
+}
+
+.sm-side-empty strong {
+  display: block;
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.sm-side-empty span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.sm-side-footer {
+  margin: 16px 8px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.sm-build {
+  display: block;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+}
+
+.sm-build:hover {
+  color: var(--text-default);
+}
+
+.sm-side-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 4px;
+  margin-top: 4px;
+}
+
+.sm-side-links button {
+  color: inherit;
+  font-size: inherit;
+}
+
+.sm-side-links button:hover {
+  color: var(--text-default);
+  text-decoration: underline;
+}
+
+/* ---- header and content ---- */
+.sm-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sm-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 49px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sm-title {
+  color: var(--text-default);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.sm-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.sm-close:hover {
+  background: var(--interactive-background-default);
+  color: var(--text-strong);
+}
+
+.sm-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+.sm-column {
+  width: 696px;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 54px 16px 120px;
+  box-sizing: content-box;
+}
+
+/* ---- single-page blocks and rows ---- */
+.sm-block {
+  padding-bottom: 48px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sm-block + .sm-block {
+  padding-top: 48px;
+}
+
+.sm-block:last-child {
+  border-bottom: 0;
+}
+
+.sm-block-title {
+  margin-bottom: 16px;
+  color: var(--text-default);
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 400;
+}
+
+.sm-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 72px;
+}
+
+.sm-row-label {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-default);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.sm-row-value {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-default);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-row-input {
+  flex: 0 1 280px;
+  height: 40px;
+}
+
+.sm-btn {
+  flex: none;
+  min-width: 100px;
+  height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--border-normal);
+  border-radius: 8px;
+  background: var(--interactive-background-hover);
+  color: var(--text-default);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.sm-btn:hover:not(:disabled) {
+  background: var(--interactive-background-active);
+}
+
+.sm-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.sm-btn.primary {
+  border-color: transparent;
+  background: var(--brand-500);
+  color: #fff;
+}
+
+.sm-btn.primary:hover:not(:disabled) {
+  background: var(--brand-560);
+}
+
+.sm-note {
+  margin: -8px 0 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* pages built for the full-screen layout: the header carries the title, headings get the larger scale */
+.sm-column .settings-page > h1 {
+  display: none;
+}
+
+.sm-column .settings-category {
+  margin-bottom: 0;
+  padding-bottom: 48px;
+}
+
+.sm-column .settings-category + .settings-category {
+  padding-top: 48px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sm-column .settings-category-title {
+  padding-bottom: 0;
+  margin-bottom: 16px;
+  border-bottom: 0;
+  color: var(--text-default);
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 400;
+}
+
+.sm-muted {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.sm-column .profile-preview .profile-body {
+  padding-top: 64px;
+}
+
+/* sticky preview card pinned at the top of the page scroller (Accessibility) */
+.sm-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -16px 0 32px;
+  padding: 16px 0;
+  background: var(--background-base-lowest);
+}
+
+.sm-sticky-card {
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--background-base-low);
+}
+
+.sm-sticky-label {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sm-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 32px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-feedback-info);
+  border-radius: 8px;
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.sm-banner svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-feedback-info);
+}

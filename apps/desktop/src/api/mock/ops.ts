@@ -14,6 +14,14 @@ export function fail(status: number, code: number, message: string, errors?: Rec
   throw new ApiRequestError(status, { code, message, errors });
 }
 
+/** An uploaded, not yet referenced attachment owned by `owner` (400 50035 otherwise). */
+export function pendingAttachment(id: string | undefined, owner: string): Attachment | null {
+  if (!id) return null;
+  const entry = db.pending.get(id);
+  if (!entry || entry.owner !== owner) fail(400, 50035, "Invalid Form Body", { attachment: { code: "ATTACHMENT_NOT_FOUND", message: "Unknown attachment" } });
+  return entry.attachment;
+}
+
 export function createAccount(init: { id?: string; username: string; global_name?: string | null; email?: string; password?: string; status?: PresenceStatus; custom_status?: string | null; banner_color?: string | null; bio?: string | null }): MockAccount {
   const id = init.id ?? nextId();
   const user: User = {

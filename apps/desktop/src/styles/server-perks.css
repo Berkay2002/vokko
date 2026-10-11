@@ -1,0 +1,59 @@
+/* Server tag and server theme pages and the themed server sidebar header. */
+
+.ss-tag-name {
+  text-transform: none;
+}
+
+.ss-color-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ss-color-picker {
+  flex: none;
+  width: 40px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  background: none;
+  cursor: pointer;
+}
+
+.ss-color-picker:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* The server name header and its settings preview share one tint: the theme gradient at a modest strength over the surface. */
+.guild-header.themed,
+.ss-theme-preview-strip.themed {
+  --guild-theme-veil: color-mix(in srgb, var(--background-base-low) 55%, transparent);
+  background:
+    linear-gradient(var(--guild-theme-veil), var(--guild-theme-veil)),
+    var(--guild-theme-gradient);
+}
+
+.ss-theme-preview-header {
+  max-width: 280px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--background-base-low);
+  border: 0.67px solid var(--border-subtle);
+}
+
+.ss-theme-preview-strip {
+  display: flex;
+  align-items: center;
+  height: 49px;
+  padding: 8px 16px;
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.ss-theme-preview-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

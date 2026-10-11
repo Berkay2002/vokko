@@ -306,7 +306,7 @@ test.describe('attachments', () => {
     await sent.getByRole('button', { name: 'Remove Attachment From Message' }).click();
     const dialog = page.getByRole('dialog', { name: 'Are you sure?' });
     await expect(dialog).toContainText('permanently delete the attachment');
-    await page.mouse.click(5, 5); // backdrop
+    await page.mouse.click(5, 100); // backdrop (clear of the permission banner pinned to the top edge)
     await expect(dialog).toHaveCount(0);
     await expect(sent.locator('.chat-image')).toHaveCount(1);
     await sent.locator('.chat-image-wrap').hover();

@@ -1,13 +1,11 @@
 import { useRef, useState } from 'react';
-import { Anchor, Cat, Crown, Flame, Flower2, Gem, Ghost, Heart, Hexagon, Leaf, Moon, Rocket, Shield, Skull, Snowflake, Star, Sun, Swords, Zap, type LucideIcon } from 'lucide-react';
+import { Hexagon, type LucideIcon } from 'lucide-react';
 import type { User, UserPrimaryGuild } from '../api/types';
+import { BADGES } from '../perks/catalog';
 import { Popout, guildIconUrl, guildInitials, useGuild } from './shell';
 
-/** Vokko's own open badge set (lucide glyphs). `UserPrimaryGuild.badge` is one of these ids; an unknown id renders the fallback hexagon. */
-export const SERVER_TAG_BADGES: Record<string, LucideIcon> = {
-  bolt: Zap, leaf: Leaf, star: Star, heart: Heart, shield: Shield, flame: Flame, moon: Moon, skull: Skull, swords: Swords, crown: Crown,
-  gem: Gem, ghost: Ghost, cat: Cat, flower: Flower2, anchor: Anchor, rocket: Rocket, sun: Sun, snowflake: Snowflake,
-};
+/** Vokko's own open badge set (src/perks/catalog.ts). `UserPrimaryGuild.badge` is one of these ids; an unknown id renders the fallback hexagon. */
+export const SERVER_TAG_BADGES: Record<string, LucideIcon> = Object.fromEntries(BADGES.map(b => [b.id, b.Icon]));
 
 const hex = (n: number): string | undefined => (n > 0 ? `#${(n & 0xffffff).toString(16).padStart(6, '0')}` : undefined);
 

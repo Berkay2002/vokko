@@ -69,6 +69,13 @@ class GatewayClient {
     this.open();
   }
 
+  /** "Reconnect now" on the connection banner / splash: drop the current attempt (or its backoff wait) and open a socket immediately. */
+  retryNow(): void {
+    if (!this.wanted || this.current === "ready") return;
+    this.teardown();
+    this.open();
+  }
+
   disconnect(): void {
     this.wanted = false;
     this.teardown();

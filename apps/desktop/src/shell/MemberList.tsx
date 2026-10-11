@@ -26,7 +26,7 @@ function MemberRow({ member, guildId, offline }: { member: GuildMember; guildId:
         onClick={e => openProfile(e.currentTarget, member.user.id, guildId)}
         onContextMenu={e => menu.open(e, userContextItems(member.user, { guildId, anchor: e.currentTarget }))}
       >
-        <Avatar user={member.user} size={32} status dim={offline} />
+        <Avatar user={member.user} member={member} size={32} status dim={offline} />
         <span className="member-text">
           <span className="member-name" style={color ? { color } : undefined}>
             {displayName(member.user, member)}

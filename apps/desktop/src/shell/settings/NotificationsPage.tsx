@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { notificationAdapter, playSound } from "../../notify";
 import { setPref, usePrefs } from "../../ui";
 import { Category, Field, Page, RadioGroup, SwitchRow } from "./controls";
 
@@ -21,9 +22,9 @@ export function NotificationsPage() {
     }
     // Optimistic: flip now, revert if the permission is refused.
     setPref("desktopNotifications", true);
-    let result: NotificationPermission = "denied";
+    let result: string = "denied";
     try {
-      if (typeof Notification !== "undefined") result = await Notification.requestPermission();
+      result = await notificationAdapter().request();
     } catch {
       result = "denied";
     }
@@ -61,6 +62,16 @@ export function NotificationsPage() {
       <Category title="Sounds">
         <SwitchRow label="Play notification sounds" checked={sounds} onChange={v => setPref("notificationSounds", v)} />
         <SwitchRow label="Play sounds for the channel you are viewing" checked={soundCurrent} onChange={v => setPref("soundCurrentChannel", v)} />
+        <Field label="Preview sound">
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => playSound("message")}>
+              Message
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => playSound("mention")}>
+              Mention
+            </button>
+          </div>
+        </Field>
       </Category>
 
       <Category title="Badges">

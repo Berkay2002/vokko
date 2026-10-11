@@ -1,17 +1,16 @@
 // Full-screen channel settings: Overview + Permissions (Invites and Integrations are placeholders).
-import { useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Hash, Lock, Volume2, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Eye, Hash, Lock, Smile, Trash2, Volume2 } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { Perm } from "../api/permissions";
 import { request } from "../api/rest";
 import { appStore, useStore } from "../api/store";
 import { ChannelType, type Channel, type Snowflake } from "../api/types";
-import { useFocusTrap, useLayer } from "../ui";
 import { isPrivateChannel } from "./channelPrivacy";
 import { closeModal, openModal } from "./modalStore";
 import { ChannelPermissionsPage } from "./settings/ChannelPermissions";
-import { Category, Field, Page, Unavailable } from "./settings/controls";
+import { Category, Field, Page, RadioGroup, Select, Unavailable } from "./settings/controls";
+import { FullScreenSettings, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { SaveBar } from "./settings/SaveBar";
 import { usePermissions } from "./usePermissions";
 
@@ -28,7 +27,12 @@ function errorText(error: unknown): string {
   return error instanceof ApiRequestError ? error.message : "Something went wrong. Try again.";
 }
 
-const kindTitle = (type: ChannelType): string => (type === ChannelType.GuildVoice ? "Voice Channels" : type === ChannelType.GuildCategory ? "Category" : "Text Channels");
+const TOPIC_MAX = 1024;
+
+/** Disabled select used for settings that have no backend yet. */
+function LockedSelect({ label, value }: { label: string; value: string }) {
+  return <Select<string> label={label} value="current" options={[{ value: "current", label: value }]} disabled onChange={() => undefined} />;
+}
 
 function NotAvailable({ label, note }: { label: string; note?: string }) {
   return (
@@ -91,26 +95,60 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
       </Field>
       {!category && (
         <Field label="Channel Topic">
-          <textarea
-            className="input textarea"
-            aria-label="Channel topic"
-            rows={4}
-            maxLength={1024}
-            value={topic}
-            disabled={!editable}
-            placeholder="Let everyone know how to use this channel!"
-            onChange={e => {
-              setSaved(false);
-              setTopic(e.target.value);
-            }}
-          />
+          <div className="cs-rich">
+            <div className="cs-rich-toolbar" aria-hidden="true">
+              <span className="cs-rich-btn cs-rich-bold">B</span>
+              <span className="cs-rich-btn cs-rich-italic">I</span>
+              <span className="cs-rich-btn cs-rich-underline">U</span>
+              <span className="cs-rich-btn cs-rich-strike">S</span>
+              <span className="cs-rich-btn">
+                <Eye size={16} />
+              </span>
+              <span className="cs-rich-spacer" />
+              <span className="cs-rich-btn">
+                <Smile size={16} />
+              </span>
+            </div>
+            <textarea
+              className="cs-rich-input"
+              aria-label="Channel topic"
+              rows={4}
+              maxLength={TOPIC_MAX}
+              value={topic}
+              disabled={!editable}
+              placeholder="Let everyone know how to use this channel!"
+              onChange={e => {
+                setSaved(false);
+                setTopic(e.target.value);
+              }}
+            />
+            <div className="cs-rich-count" aria-label="Characters remaining">
+              {TOPIC_MAX - topic.length}
+            </div>
+          </div>
         </Field>
       )}
       {!category && !voice && (
         <>
-          <NotAvailable label="Slowmode" note="Not available yet." />
-          <NotAvailable label="Age-Restricted Channel" note="Not available yet." />
-          <NotAvailable label="Hide After Inactivity" note="Not available yet." />
+          <Field label="Slowmode" note="Not available yet.">
+            <LockedSelect label="Slowmode" value="Off" />
+          </Field>
+          <Field label="Content Visibility" note="Not available yet.">
+            <RadioGroup<string>
+              name="Content visibility"
+              value="default"
+              disabled
+              options={[
+                { value: "default", label: "Default" },
+                { value: "spoiler", label: "Spoiler Channel", note: "Media posted in this channel is hidden until revealed." },
+                { value: "age", label: "Age-Restricted Channel", note: "Members must confirm they are an adult to view this channel." },
+              ]}
+              onChange={() => undefined}
+            />
+          </Field>
+          <Field label="Hide After Inactivity" note="Not available yet.">
+            <LockedSelect label="Hide after inactivity" value="3 Days" />
+          </Field>
         </>
       )}
       {voice && (
@@ -130,11 +168,10 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
   const guild = useStore(s => (channel?.guild_id ? s.guilds[channel.guild_id] : undefined));
   const members = useStore(s => (channel?.guild_id ? s.members[channel.guild_id] : undefined));
   const { can } = usePermissions(channel?.guild_id, channelId);
-  const initial = SECTIONS.some(s => s.id === section) ? (section as SectionId) : "overview";
+  const isCategory = channel?.type === ChannelType.GuildCategory;
+  const sections = isCategory ? SECTIONS.filter(s => s.id === "overview" || s.id === "permissions") : SECTIONS;
+  const initial = sections.some(s => s.id === section) ? (section as SectionId) : "overview";
   const [current, setCurrent] = useState<SectionId>(initial);
-  const root = useRef<HTMLDivElement>(null);
-  useLayer(true, closeModal);
-  useFocusTrap(true, () => root.current);
   const privateChannel = useMemo(() => isPrivateChannel(channel, channel?.guild_id), [channel]);
   if (!channel || !guild) return null;
 
@@ -150,6 +187,7 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
       case "invites":
         return (
           <Page title="Invites">
+            <p className="settings-todo">Invite links for this channel let people join your server straight into it.</p>
             <Unavailable>Not available yet.</Unavailable>
           </Page>
         );
@@ -159,49 +197,46 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
             <Category title="Webhooks">
               <p className="settings-todo">Not available yet.</p>
             </Category>
+            <Category title="Followed Channels">
+              <p className="settings-todo">Not available yet.</p>
+            </Category>
           </Page>
         );
     }
   };
 
-  return createPortal(
-    <div ref={root} className="settings-overlay" role="dialog" aria-modal="true" aria-label="Channel Settings" tabIndex={-1}>
-      <nav className="settings-sidebar" aria-label="Channel settings sections">
-        <div className="settings-sidebar-inner">
-          <div className="settings-group">
-            <div className="settings-group-title cs-header" title={channel.name ?? undefined}>
-              <span className="cs-header-name">
-                {category ? null : privateChannel ? <Lock size={12} /> : channel.type === ChannelType.GuildVoice ? <Volume2 size={12} /> : <Hash size={12} />}
-                <span>{channel.name}</span>
-              </span>
-              <span className="cs-header-kind">{kindTitle(channel.type)}</span>
-            </div>
-            {SECTIONS.map(s => (
-              <button key={s.id} type="button" className={`settings-item${current === s.id ? " selected" : ""}`} aria-current={current === s.id ? "page" : undefined} onClick={() => setCurrent(s.id)}>
-                {s.label}
-              </button>
-            ))}
-            {canManage && (
-              <>
-                <div className="settings-separator" />
-                <button type="button" className="settings-item danger" onClick={() => openModal({ type: "deleteChannel", channelId })}>
-                  Delete {category ? "Category" : "Channel"}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </nav>
-      <main className="settings-content">
-        <div className="settings-content-inner cs-content">{page()}</div>
-        <button type="button" className="settings-close" aria-label="Close" onClick={closeModal}>
-          <span className="settings-close-icon">
-            <X size={18} />
-          </span>
-          <span className="settings-close-label">ESC</span>
-        </button>
-      </main>
-    </div>,
-    document.body,
+  const eyebrow = category ? (
+    channel.name
+  ) : (
+    <span className="cs-header-name">
+      {privateChannel ? <Lock size={12} aria-hidden="true" /> : channel.type === ChannelType.GuildVoice ? <Volume2 size={12} aria-hidden="true" /> : <Hash size={12} aria-hidden="true" />}
+      <span>{channel.name}</span>
+    </span>
+  );
+  const groups: SettingsNavGroup[] = [
+    { id: "main", items: sections.map(s => ({ id: s.id, label: s.label })) },
+    ...(canManage
+      ? [
+          {
+            id: "danger",
+            items: [{ id: "delete", label: `Delete ${category ? "Category" : "Channel"}`, danger: true, icon: <Trash2 size={16} aria-hidden="true" />, onSelect: () => openModal({ type: "deleteChannel", channelId }) }],
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <FullScreenSettings
+      label="Channel Settings"
+      navLabel="Channel settings sections"
+      eyebrow={eyebrow}
+      eyebrowTitle={channel.name ?? undefined}
+      groups={groups}
+      current={current}
+      onSelect={id => setCurrent(id as SectionId)}
+      onClose={closeModal}
+    >
+      {page()}
+    </FullScreenSettings>
   );
 }
