@@ -12,6 +12,7 @@ export type ModalSpec =
   | { type: "serverSettings"; guildId: Snowflake; section?: string }
   | { type: "editChannel"; channelId: Snowflake }
   | { type: "channelSettings"; channelId: Snowflake; section?: string }
+  | { type: "channelTopic"; channelId: Snowflake }
   | { type: "kickMember"; guildId: Snowflake; userId: Snowflake }
   | { type: "banMember"; guildId: Snowflake; userId: Snowflake }
   | { type: "timeoutMember"; guildId: Snowflake; userId: Snowflake }
@@ -31,7 +32,7 @@ export type ModalSpec =
 
 /** Full-screen settings stay mounted underneath these small dialogs and come back when the dialog closes. */
 const SETTINGS_TYPES = new Set<ModalSpec["type"]>(["serverSettings", "channelSettings", "editChannel", "userSettings"]);
-const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout", "removeFriend", "quickSwitcher", "shortcuts", "voiceStatus", "cameraPreview", "screenShare"]);
+const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout", "removeFriend", "channelTopic", "quickSwitcher", "shortcuts", "voiceStatus", "cameraPreview", "screenShare"]);
 
 interface ModalStore {
   modal: ModalSpec | null;

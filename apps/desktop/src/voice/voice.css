@@ -283,7 +283,7 @@
 /* Keep the bottom of the channel list and the rail reachable while the card is up. */
 .app-body:has(.voice-panel) .sidebar-scroller,
 .app-body:has(.voice-panel) .server-rail {
-  padding-bottom: calc(74px + var(--voice-panel-height) + 4px);
+  margin-bottom: calc(var(--user-panel-height) - 8px + var(--voice-panel-height) + 4px);
 }
 
 .voice-panel-head {

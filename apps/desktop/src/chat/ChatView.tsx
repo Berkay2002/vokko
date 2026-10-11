@@ -294,7 +294,7 @@ function PinModal({ message, onConfirm, onCancel }: { message: Message | null; o
   </PinConfirmModal>;
 }
 
-function LinkModal({ href, onClose }: { href: string | null; onClose(): void }) {
+export function LinkModal({ href, onClose }: { href: string | null; onClose(): void }) {
   return <Modal open={!!href} onClose={onClose} title="Leaving Vokko"
     footer={<>
       <button type="button" className="chat-btn link" onClick={onClose}>Cancel</button>

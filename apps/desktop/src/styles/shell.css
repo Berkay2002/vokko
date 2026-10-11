@@ -179,8 +179,12 @@
   flex-direction: column;
   align-items: center;
   width: var(--rail-width);
-  padding: 0 0 74px;
+  /* The floating user panel covers the bottom of rail and list (app-shell spec): the scroller ends under it and keeps 16 px
+     of padding, so the last item stops at the panel top and nothing shows below or beside the panel. */
+  margin-bottom: calc(var(--user-panel-height) - 8px);
+  padding: 0 0 16px;
   gap: 8px;
+  mask-image: linear-gradient(to bottom, black calc(100% - 16px), transparent);
   overflow-y: auto;
   scrollbar-width: none;
 }
@@ -432,7 +436,10 @@
 .sidebar-scroller {
   flex: 1;
   min-height: 0;
-  padding: 8px 0 74px;
+  margin-bottom: calc(var(--user-panel-height) - 8px);
+  padding: 8px 0 16px;
+  /* Rows fade out in the 16 px under the user panel instead of showing at its rounded corners. */
+  mask-image: linear-gradient(to bottom, black calc(100% - 16px), transparent);
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thin-thumb) transparent;
@@ -1209,6 +1216,8 @@
 }
 
 .channel-header-name {
+  flex-shrink: 0;
+  max-width: 100%;
   overflow: hidden;
   color: var(--text-strong);
   font-size: 16px;
@@ -1234,6 +1243,21 @@
   line-height: 18px;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* The topic opens a dialog with the full text (a button, so it is keyboard reachable). */
+button.channel-header-topic {
+  min-width: 0;
+  text-align: left;
+}
+
+button.channel-header-topic:hover {
+  color: var(--text-default);
+}
+
+.topic-modal-text {
+  max-height: 50vh;
+  overflow-y: auto;
 }
 
 .channel-header-toolbar {

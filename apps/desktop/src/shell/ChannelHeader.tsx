@@ -88,9 +88,9 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             {channel.topic && (
               <>
                 <span className="channel-header-divider" />
-                <span className="channel-header-topic" title={channel.topic}>
+                <button type="button" className="channel-header-topic" title={channel.topic} aria-haspopup="dialog" aria-label={`Channel topic: ${channel.topic.length > 120 ? `${channel.topic.slice(0, 120)}...` : channel.topic}`} onClick={() => openModal({ type: "channelTopic", channelId: channel.id })}>
                   {channel.topic}
-                </span>
+                </button>
               </>
             )}
           </>

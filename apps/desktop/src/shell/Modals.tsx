@@ -16,6 +16,7 @@ import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLe
 import { closeModal, useModals, type ModalSpec } from "./modalStore";
 import { QuickSwitcher } from "./QuickSwitcher";
 import { ShortcutsModal } from "./ShortcutsModal";
+import { TopicModal } from "./TopicModal";
 import { ServerSettings } from "./ServerSettings";
 import { RadioGroup, SwitchRow, Toggle } from "./settings/controls";
 import { SERVER_TEMPLATES, type ServerTemplate } from "./templates";
@@ -522,6 +523,8 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
       return <ChannelSettings key={id} channelId={spec.channelId} />;
     case "channelSettings":
       return <ChannelSettings key={id} channelId={spec.channelId} section={spec.section} />;
+    case "channelTopic":
+      return <TopicModal key={id} channelId={spec.channelId} />;
     case "kickMember":
       return <KickModal key={id} guildId={spec.guildId} userId={spec.userId} />;
     case "banMember":

@@ -33,7 +33,10 @@ export function VoiceChannelRow({ channel, guild }: { channel: Channel; guild: G
   const location = useLocation();
   const menu = useContextMenu();
   const { can } = usePermissions(guild.id, channel.id);
-  const muted = useIsMuted(channel.id) || useIsMuted(channel.parent_id);
+  // Both hooks run on every render: `a || b` would skip the second hook while the channel itself is muted.
+  const mutedSelf = useIsMuted(channel.id);
+  const mutedParent = useIsMuted(channel.parent_id);
+  const muted = mutedSelf || mutedParent;
   const inVoice = useVoice(s => s.channelId === channel.id || (s.meId !== null && s.states[s.meId]?.channel_id === channel.id));
   const statusText = useVoice(s => s.channelStatus[channel.id]);
   // Messages in the channel's text-in-voice chat.

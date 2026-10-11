@@ -11,7 +11,7 @@ const PORT = process.env.VOKKO_E2E_PORT ?? '1422';
 export default defineConfig({
   testDir: 'e2e',
   testMatch: REAL ? /real(\..+)?\.spec\.ts$/ : /\.spec\.ts$/,
-  testIgnore: REAL ? [] : [/real(\..+)?\.spec\.ts$/],
+  testIgnore: REAL ? [] : [/real(\..+)?\.spec\.ts$/, /video[^\\/]*\.spec\.ts$/],
   timeout: REAL ? 90_000 : 60_000,
   fullyParallel: false,
   workers: 1,

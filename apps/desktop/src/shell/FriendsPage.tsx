@@ -9,7 +9,7 @@ import { Tooltip, useContextMenu } from "../ui";
 import { FriendSuggestionsTab } from "../community";
 import { Avatar } from "./Avatar";
 import { copyText, openDirectMessage } from "./actions";
-import { UNAVAILABLE } from "./menus";
+import { blockUser, UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
 
 type Tab = "online" | "all" | "pending" | "suggestions" | "blocked" | "add";
@@ -54,7 +54,12 @@ function PersonRow({ relationship, mode }: { relationship: Relationship; mode: "
         menu.open(e, [
           { id: "message", label: "Message", onSelect: () => void openDirectMessage(user.id) },
           { type: "separator" },
-          ...(mode === "friend" ? [{ id: "remove", label: "Remove Friend", danger: true, onSelect: () => openModal({ type: "removeFriend", userId: user.id }) }] : []),
+          ...(mode === "friend"
+            ? [
+                { id: "remove", label: "Remove Friend", danger: true, onSelect: () => openModal({ type: "removeFriend", userId: user.id }) },
+                { id: "block", label: "Block", danger: true, onSelect: () => void blockUser(user.id) },
+              ]
+            : []),
           { id: "copy", label: "Copy User ID", onSelect: () => copyText(user.id) },
         ])
       }

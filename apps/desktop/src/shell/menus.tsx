@@ -241,6 +241,8 @@ async function duplicateChannel(channel: Channel): Promise<void> {
 
 // ---- DMs and users (A3) ----
 
+export const blockUser = (userId: Snowflake): Promise<void> => request<void>("PUT", `/users/@me/relationships/${userId}`, { type: RelationshipType.Blocked });
+
 function relationshipItems(user: User): MenuItem[] {
   const state = appStore.getState();
   const type = state.relationships[user.id]?.type;
@@ -253,7 +255,7 @@ function relationshipItems(user: User): MenuItem[] {
     items.push({ id: "add-friend", label: "Add Friend", onSelect: () => void request("PUT", `/users/@me/relationships/${user.id}`, {}) });
   }
   if (type === RelationshipType.Blocked) items.push({ id: "unblock", label: "Unblock", onSelect: () => void request("DELETE", `/users/@me/relationships/${user.id}`) });
-  else items.push({ id: "block", label: "Block", danger: true, onSelect: () => void request("PUT", `/users/@me/relationships/${user.id}`, { type: RelationshipType.Blocked }) });
+  else items.push({ id: "block", label: "Block", danger: true, onSelect: () => void blockUser(user.id) });
   return items;
 }
 
