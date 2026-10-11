@@ -1,90 +1,176 @@
-/* Design tokens: every colour, size and radius used by the UI lives here so themes and reference corrections only touch this file.
-   Values are the dark ("Dark") theme. Source: our own measurements of Discord's dark theme (reference set pending). */
-:root {
-  --font-sans: "Noto Sans", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "Consolas", "Andale Mono WT", "Andale Mono", "Lucida Console", "DejaVu Sans Mono", Monaco, "Courier New", monospace;
+/* Design tokens: every colour, size and radius used by the UI lives here so themes and corrections only touch this file.
+   Names and Dark-theme values come from the Discord reference capture (tokens.md, 2026-10-11, `visual-refresh` Dark).
+   Our own additions are marked "vokko". Translucent overlays are written as rgba() of #97979f. */
+:root,
+.theme-dark {
+  --font-primary: "Noto Sans", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-code: "Source Code Pro", Consolas, "Andale Mono WT", "Andale Mono", "Lucida Console", "DejaVu Sans Mono", Monaco, "Courier New", monospace;
 
   /* Surfaces */
-  --bg-primary: #313338;
-  --bg-secondary: #2b2d31;
-  --bg-tertiary: #1e1f22;
-  --bg-floating: #111214;
-  --bg-input: #383a40;
-  --bg-code: #2b2d31;
-  --bg-mention: rgba(88, 101, 242, 0.3);
-  --bg-mention-hover: #5865f2;
-  --bg-message-hover: rgba(2, 2, 2, 0.06);
-  --bg-message-mentioned: rgba(250, 166, 26, 0.1);
-  --bg-message-mentioned-hover: rgba(250, 166, 26, 0.08);
-  --bg-message-highlight: rgba(88, 101, 242, 0.12);
-  --bg-modifier-hover: rgba(78, 80, 88, 0.3);
-  --bg-modifier-active: rgba(78, 80, 88, 0.48);
-  --bg-modifier-selected: rgba(78, 80, 88, 0.6);
-  --bg-accent: #4e5058;
-  --scrim: rgba(0, 0, 0, 0.7);
+  --background-base-lowest: #2c2d32;
+  --background-base-low: #36373e;
+  --background-base-lower: #323339;
+  --chat-background: #323339;
+  --channel-background-default: #323339;
+  --background-surface-high: #393a41;
+  --background-surface-higher: #3c3d45;
+  --background-surface-highest: #3f4048;
+  --modal-background: #393a41;
+  --card-background-default: #393a41;
+  --embed-background: #393a41;
+  --chat-background-default: #393a41;
+  --background-secondary-alt: #242429;
+  --background-accent: #41424a;
+  --app-frame-background: #25262a;
+  --home-background: #292a2f;
 
-  /* Text */
-  --text-normal: #dbdee1;
-  --text-muted: #949ba4;
-  --text-faint: #80848e;
-  --text-header: #f2f3f5;
-  --text-link: #00a8fc;
-  --text-on-brand: #ffffff;
-  --text-danger: #fa777c;
+  /* Translucent overlays */
+  --background-mod-muted: rgba(151, 151, 159, 0.08);
+  --background-mod-subtle: rgba(151, 151, 159, 0.12);
+  --background-mod-normal: rgba(151, 151, 159, 0.16);
+  --background-mod-strong: rgba(151, 151, 159, 0.2);
+  --interactive-background-default: rgba(151, 151, 159, 0.08);
+  --interactive-background-hover: rgba(151, 151, 159, 0.12);
+  --interactive-background-active: rgba(151, 151, 159, 0.16);
+  --interactive-background-selected: rgba(151, 151, 159, 0.2);
+  --message-background-hover: rgba(151, 151, 159, 0.12);
+  --message-highlight-background-default: rgba(88, 101, 242, 0.16);
+  --message-highlight-background-hover: rgba(88, 101, 242, 0.12);
+  --message-mentioned-background-default: rgba(248, 163, 0, 0.08);
+  --message-mentioned-background-hover: rgba(248, 163, 0, 0.04);
+  --background-scrim: rgba(0, 0, 0, 0.72);
+  --background-scrim-lightbox: rgba(0, 0, 0, 0.92);
+  --input-background-default: rgba(0, 0, 0, 0.08);
+  --background-voice-muted: rgba(210, 45, 57, 0.12);
+  --mention-background: rgba(88, 101, 242, 0.24);
+  --mention-foreground: #cdd7ff;
+  --background-code: rgba(88, 101, 242, 0.08);
 
-  /* Interactive */
-  --interactive-normal: #b5bac1;
-  --interactive-hover: #dbdee1;
-  --interactive-active: #ffffff;
-  --interactive-muted: #4e5058;
-  --channel-icon: #80848e;
+  /* Text and icons */
+  --text-strong: #ffffff;
+  --text-default: #f3f3f4;
+  --text-subtle: #c5c6ca;
+  --text-muted: #abacb2;
+  --text-invert: #2f3035;
+  --text-link: #76aff6;
+  --text-brand: #94a8ff;
+  --text-feedback-critical: #ffa09b;
+  --text-feedback-positive: #7ecb94;
+  --text-feedback-warning: #fcb529;
+  --text-feedback-info: #8ebefa;
+  --icon-strong: #ffffff;
+  --icon-default: #f3f3f4;
+  --icon-subtle: #c5c6ca;
+  --icon-muted: #abacb2;
+  --interactive-text-default: #c5c6ca;
+  --interactive-text-hover: #ffffff;
+  --interactive-text-active: #ffffff;
+  --interactive-icon-default: #c5c6ca;
+  --interactive-icon-hover: #ffffff;
+  --interactive-icon-active: #ffffff;
+  --interactive-muted: #4f505a;
+  --channels-default: #999aa1;
+  --channel-icon: #999aa1;
+  --channel-text-area-placeholder: #6c6d76;
+  --chat-text-muted: #9d9ea5;
+  --input-placeholder-text-default: #a4a5ab;
+  --textbox-markdown-syntax: #999aa1;
+  --spine-default: #595a63;
 
   /* Brand + status */
-  --brand: #5865f2;
-  --brand-hover: #4752c4;
-  --brand-active: #3c45a5;
-  --green: #23a55a;
-  --green-hover: #1a8a49;
-  --yellow: #f0b232;
-  --red: #f23f43;
-  --red-hover: #da373c;
-  --red-active: #a12828;
-  --status-online: #23a55a;
-  --status-idle: #f0b232;
-  --status-dnd: #f23f43;
-  --status-offline: #80848e;
+  --brand-360: #8ca0fd;
+  --brand-400: #7487f8;
+  --brand-500: #5865f2;
+  --brand-530: #505ddb;
+  --brand-560: #4654c0;
+  --brand-600: #3a48a3;
+  --background-brand: #5865f2;
+  --status-online: #3d9e60;
+  --text-status-idle: #ffcb6e;
+  --text-status-dnd: #dc4247;
+  --text-status-offline: #9d9ea5;
+  --status-danger: #da3e44;
+  --status-warning: #fdb833;
+  --status-positive-background: #008043;
+  --background-feedback-notification: #d22d39;
+  --icon-voice-muted: #da3e44;
+  --text-voice-connected: #73c48b;
+  --border-focus: #6aa8f4;
 
   /* Borders */
-  --divider: rgba(78, 80, 88, 0.48);
-  --border-header: #26272b;
-  --border-input: #1e1f22;
-  --focus-ring: #00a8fc;
+  --border-muted: rgba(151, 151, 159, 0.04);
+  --border-subtle: rgba(151, 151, 159, 0.12);
+  --border-normal: rgba(151, 151, 159, 0.2);
+  --border-strong: rgba(151, 151, 159, 0.44);
+  --chat-border: rgba(151, 151, 159, 0.12);
+  --input-border-default: rgba(151, 151, 159, 0.2);
+  --input-border-active: #5865f2;
+  --input-border-error-default: #ffa09b;
 
-  /* Layout */
-  --rail-width: 72px;
-  --sidebar-width: 240px;
-  --header-height: 48px;
-  --user-panel-height: 52px;
-  --member-list-width: 240px;
-  --guild-header-height: 48px;
+  /* Scrollbars */
+  --scrollbar-auto-thumb: #7d7e87;
+  --scrollbar-thin-thumb: #767780;
 
   /* Radii */
-  --radius-xs: 3px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
+  --radius-none: 0;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
   --radius-lg: 16px;
+  --radius-xl: 24px;
 
-  /* Elevation */
-  --shadow-low: 0 1px 0 rgba(0, 0, 0, 0.2), 0 1.5px 0 rgba(0, 0, 0, 0.05), 0 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-high: 0 8px 16px rgba(0, 0, 0, 0.24);
-  --shadow-border: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  /* Shadows */
+  --shadow-low: 0 1px 4px 0 rgba(0, 0, 0, 0.14);
+  --shadow-medium: 0 4px 8px 0 rgba(0, 0, 0, 0.16);
+  --shadow-high: 0 12px 24px 0 rgba(0, 0, 0, 0.24);
+  --shadow-ledge: 0 2px 0 0 rgba(0, 0, 0, 0.05), 0 1.5px 0 0 rgba(0, 0, 0, 0.05), 0 1px 0 0 rgba(0, 0, 0, 0.16);
+  --shadow-border: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --elevation-high: 0 8px 16px 0 rgba(0, 0, 0, 0.24);
+  --elevation-stroke: 0 0 0 1px rgba(0, 0, 0, 0.16);
 
-  /* Motion */
+  /* Layout (measured in the reference at 100 % zoom) */
+  --title-bar-height: 32px;
+  --rail-width: 72px;
+  --sidebar-width: 240px; /* user-resizable in Discord; the captured client was resized to 302.7 */
+  --header-height: 48px;
+  --user-panel-height: 57px;
+  --active-now-width: 420px;
+  --member-list-width: 240px;
+  --guildbar-avatar-size: 40px;
+  --chat-avatar-size: 40px;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
-  /* Layers */
+  /* Layers (vokko) */
   --z-popout: 1000;
   --z-modal: 1100;
   --z-context: 1200;
   --z-tooltip: 1300;
+
+  /* Legacy short names used by the shared primitives (vokko): aliases only, do not add values here. */
+  --font-sans: var(--font-primary);
+  --font-mono: var(--font-code);
+  --bg-primary: var(--background-base-lower);
+  --bg-secondary: var(--background-base-low);
+  --bg-tertiary: var(--background-base-lowest);
+  --bg-floating: var(--background-surface-high);
+  --bg-modifier-hover: var(--interactive-background-hover);
+  --bg-modifier-selected: var(--interactive-background-selected);
+  --divider: var(--border-subtle);
+  --text-normal: var(--text-default);
+  --text-header: var(--text-strong);
+  --text-danger: var(--text-feedback-critical);
+  --text-on-brand: #ffffff;
+  --interactive-normal: var(--interactive-text-default);
+  --interactive-hover: var(--interactive-text-hover);
+  --interactive-active: var(--interactive-text-active);
+  --brand: var(--brand-500);
+  --brand-hover: var(--brand-560);
+  --brand-active: var(--brand-600);
+  --red-hover: #b52a33;
+  --red-active: #99222a;
+  --green-hover: #00703a;
+  --focus-ring: var(--border-focus);
+  --status-offline: var(--text-status-offline);
+  --status-idle: var(--text-status-idle);
+  --status-dnd: var(--text-status-dnd);
 }

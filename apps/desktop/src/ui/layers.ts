@@ -79,7 +79,8 @@ export function useFocusTrap(active: boolean, container: () => HTMLElement | nul
     if (!active) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const root = containerRef.current();
-    if (root) {
+    // An input with `autoFocus` has already taken focus by the time this effect runs: keep it.
+    if (root && !root.contains(document.activeElement)) {
       const first = root.querySelector<HTMLElement>("[data-autofocus]") ?? root.querySelector<HTMLElement>(FOCUSABLE);
       (first ?? root).focus({ preventScroll: true });
     }
