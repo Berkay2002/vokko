@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { GRADIENT_THEMES, gradientCss, type GradientThemeId } from "../styles/themes/gradients";
 import { COMMUNITY_THEMES, type CommunityThemeId } from "../styles/themes/palettes";
 import { syncWindowTheme } from "../desktop/window";
+import { DEFAULT_APP_ICON, isAppIconId, type AppIconId } from "../appicon/variants";
 
 /** Client-side settings, persisted in localStorage under `vokko.prefs` and applied to <html> immediately (also on the login page). */
 
@@ -74,6 +75,8 @@ export interface Prefs {
   // Language & time (settings modal)
   /** Clock of message timestamps: the locale's own ("auto"), 12-hour or 24-hour. Read by src/chat/util.ts. */
   timeFormat: TimeFormat;
+  // App icon (src/appicon): window, tray and Dock icon of the desktop app
+  appIcon: AppIconId;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -118,6 +121,7 @@ export const DEFAULT_PREFS: Prefs = {
   inputSensitivity: 40,
   alwaysPreviewVideo: false,
   timeFormat: "auto",
+  appIcon: DEFAULT_APP_ICON,
 };
 
 export interface ThemeCard {
@@ -192,6 +196,8 @@ export function migratePrefs(parsed: Partial<Record<keyof Prefs, unknown>>): Pre
   // A theme id from a newer or older build must not leave the app without a theme class.
   if (!isThemeChoice(merged.theme)) merged.theme = DEFAULT_PREFS.theme;
   if (!["auto", "12", "24"].includes(merged.timeFormat as string)) merged.timeFormat = DEFAULT_PREFS.timeFormat;
+  // An icon id from another build must not reach the desktop shell.
+  if (!isAppIconId(merged.appIcon)) merged.appIcon = DEFAULT_PREFS.appIcon;
   const spacing = parsed.messageSpacing;
   const hasSpacing = spacing === "compact" || spacing === "balanced" || spacing === "roomy";
   if (!hasSpacing) {

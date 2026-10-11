@@ -1,5 +1,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod appicon;
 mod links;
 mod prefs;
 mod shortcuts;
@@ -167,6 +168,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             desktop_autostart_status,
             desktop_autostart_set,
             desktop_set_unread,
+            appicon::desktop_set_app_icon,
             links::desktop_take_pending_links,
             updates::desktop_update_status,
             updates::desktop_update_check,

@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { COMMUNITY_THEME_CARDS, FONT_SIZES, GRADIENT_THEME_CARDS, THEMES, previewThemeChoice, resetPrefs, setPref, usePrefs } from "../../ui";
+import { AppIconSection } from "../../appicon/AppIconSection";
 import { GROUP_GAPS, SPACING_PRESETS, setMessageSpacing } from "../../ui/prefs";
 import type { MessageDisplay, MessageSpacing, ThemeCard } from "../../ui/prefs";
 import { Category, Divider, Field, Page, RadioGroup, Select, Slider, SwitchRow, Unavailable } from "./controls";
@@ -119,6 +120,8 @@ export function AppearancePage() {
           })}
         </div>
       </Category>
+
+      <AppIconSection />
 
       <Category title="Messages">
         <Field label="Message display">

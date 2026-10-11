@@ -10,6 +10,7 @@
     "desktop:build": "tauri build --no-bundle",
     "test": "vitest run",
     "themes": "node scripts/gen-themes.mjs",
+    "app-icons": "node scripts/gen-app-icons.mjs",
     "e2e": "playwright test"
   },
   "dependencies": {

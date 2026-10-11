@@ -1,5 +1,6 @@
 //! System tray: Open / Mute / Deafen / Quit menu, click-to-open, and an unread dot composited onto the icon.
 
+use crate::appicon::{self, Variant};
 use std::sync::Mutex;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -7,7 +8,6 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, Tray
 use tauri::{AppHandle, Manager, Runtime};
 
 pub const TRAY_ID: &str = "vokko-main";
-const ICON_PNG: &[u8] = include_bytes!("../icons/64x64.png");
 const TOOLTIP: &str = "Vokko";
 const TOOLTIP_UNREAD: &str = "Vokko: unread messages";
 /// Discord's "danger" red, used for the unread dot.
@@ -28,6 +28,8 @@ pub struct TrayState {
 struct TrayFlags {
     present: bool,
     unread: bool,
+    /// The app icon the user picked; the default one until the webview says otherwise.
+    variant: Option<&'static Variant>,
 }
 
 impl TrayState {
@@ -48,6 +50,20 @@ impl TrayState {
             Err(_) => false,
         }
     }
+
+    fn variant(&self) -> &'static Variant {
+        self.inner.lock().ok().and_then(|flags| flags.variant).unwrap_or_else(appicon::default_variant)
+    }
+
+    fn set_variant(&self, variant: &'static Variant) {
+        if let Ok(mut flags) = self.inner.lock() {
+            flags.variant = Some(variant);
+        }
+    }
+
+    fn unread(&self) -> bool {
+        self.inner.lock().map(|flags| flags.unread).unwrap_or(false)
+    }
 }
 
 pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
@@ -64,7 +80,7 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 pub fn install<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<TrayIcon<R>> {
     let menu = build_menu(app)?;
     let tray = TrayIconBuilder::with_id(TRAY_ID)
-        .icon(Image::from_bytes(ICON_PNG)?)
+        .icon(Image::from_bytes(app.state::<TrayState>().variant().tray)?)
         .tooltip(TOOLTIP)
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -90,7 +106,23 @@ pub fn set_unread<R: Runtime>(app: &AppHandle<R>, unread: bool) -> Result<(), St
         return Ok(());
     }
     let tray = app.tray_by_id(TRAY_ID).ok_or_else(|| "tray icon is gone".to_owned())?;
-    let base = Image::from_bytes(ICON_PNG).map_err(|error| error.to_string())?;
+    show(&tray, state.variant(), unread)?;
+    tray.set_tooltip(Some(if unread { TOOLTIP_UNREAD } else { TOOLTIP })).map_err(|error| error.to_string())
+}
+
+/// Switches the tray icon to another app icon variant, keeping the unread dot as it is.
+pub fn set_variant<R: Runtime>(app: &AppHandle<R>, variant: &'static Variant) -> Result<(), String> {
+    let state = app.state::<TrayState>();
+    state.set_variant(variant);
+    if !state.present() {
+        return Ok(());
+    }
+    let tray = app.tray_by_id(TRAY_ID).ok_or_else(|| "tray icon is gone".to_owned())?;
+    show(&tray, variant, state.unread())
+}
+
+fn show<R: Runtime>(tray: &TrayIcon<R>, variant: &Variant, unread: bool) -> Result<(), String> {
+    let base = Image::from_bytes(variant.tray).map_err(|error| error.to_string())?;
     let icon = if unread {
         let mut rgba = base.rgba().to_vec();
         overlay_dot(&mut rgba, base.width(), base.height());
@@ -98,8 +130,7 @@ pub fn set_unread<R: Runtime>(app: &AppHandle<R>, unread: bool) -> Result<(), St
     } else {
         base
     };
-    tray.set_icon(Some(icon)).map_err(|error| error.to_string())?;
-    tray.set_tooltip(Some(if unread { TOOLTIP_UNREAD } else { TOOLTIP })).map_err(|error| error.to_string())
+    tray.set_icon(Some(icon)).map_err(|error| error.to_string())
 }
 
 /// Composites an anti-aliased red dot over the bottom-right of an RGBA buffer.
