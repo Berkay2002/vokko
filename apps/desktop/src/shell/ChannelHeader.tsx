@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Bell, Hash, Lock, Megaphone, MessageCircle, MessagesSquare, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
 import { useVoiceUi } from "../voice";
+import { useShortcut } from "../keyboard";
 import { dmName } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
 import { PinnedMessages } from "../chat/PinnedMessages";
@@ -58,6 +59,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
   const forum = channel.type === ChannelType.GuildForum;
   const first = channel.recipients?.[0];
   const group = channel.type === ChannelType.GroupDM;
+  useShortcut("pins", () => setPinsOpen(o => !o), !voice && !forum);
   const oneToOne = !guild && !group && !!first;
 
   const bell = (event: React.MouseEvent<HTMLButtonElement>) => {

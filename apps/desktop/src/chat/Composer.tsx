@@ -16,6 +16,7 @@ import { TypingIndicator } from './TypingIndicator';
 import { activeTypers } from './messageState';
 import { isSpoilerName, stripSpoiler } from './util';
 import { ComposerInput, type ComposerField } from './composer/ComposerInput';
+import { useShortcut } from '../keyboard';
 
 const MAX_LEN = 2000;
 // Discord client timings: POST at most every 8 s; the first one waits 1.5 s unless the previous was 16+ s ago;
@@ -103,6 +104,19 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const placeholder = chat.isDm ? `Message @${chat.channel?.recipients?.[0] ? chat.nameOf(chat.channel.recipients[0]) : ''}` : `Message ${name}`;
 
   useEffect(() => { area.current?.focus(); }, [channelId, focusToken]);
+
+  // Shortcuts go to the composer holding focus, else to the newest mounted one (a thread panel's over the channel's).
+  const root = useRef<HTMLDivElement>(null);
+  const mine = () => { const f = document.activeElement?.closest('.chat-composer'); return !f || f === root.current; };
+  const toggleExpr = (tab: ExpressionTab) => () => { if (!mine()) return false; setExpr(v => (v === tab ? null : tab)); };
+  useShortcut('emoji', toggleExpr('emoji'));
+  useShortcut('gif', toggleExpr('gif'));
+  useShortcut('sticker', toggleExpr('sticker'));
+  useShortcut('upload', () => { if (!mine()) return false; fileInput.current?.click(); });
+  useShortcut('editLast', (_, e) => {
+    if (!(e?.target instanceof Node) || !root.current?.contains(e.target) || text !== '' || uploads.length > 0) return false;
+    onEditLast();
+  });
 
   // ---- autocomplete ----
   const trigger = useMemo(() => detectTrigger(text, caret), [text, caret]);
@@ -220,7 +234,6 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); return; }
     if (e.key === 'Escape' && replyTo) { e.preventDefault(); onCancelReply(); return; }
-    if (e.key === 'ArrowUp' && text === '' && uploads.length === 0 && !e.shiftKey) { e.preventDefault(); onEditLast(); }
   }
 
   function onChange(value: string) {
@@ -261,7 +274,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const replyName = replyTo ? chat.nameOf(replyTo.author, replyTo.member) : '';
   const hasText = text.length > 0;
 
-  return <div className="chat-composer">
+  return <div className="chat-composer" ref={root}>
     <TypingIndicator channelId={channelId} />
     {replyTo && <div className="chat-reply-bar">
       <span className="chat-reply-bar-text">Replying to <b>{replyName}</b></span>

@@ -20,9 +20,11 @@ import { ServerRail } from "./ServerRail";
 import { NativeMenuBridge } from "./NativeMenuBridge";
 import { TitleBar } from "./TitleBar";
 import { UserPanel } from "./UserPanel";
-import { VoiceChannelPage, VoiceConnectionPanel } from "../voice";
+import { toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
+import { useShortcut } from "../keyboard";
+import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } from "../keyboard/navigation";
 import { markChannelRead, markGuildRead } from "./actions";
-import { firstTextChannel, groupChannels } from "./channels";
+import { firstTextChannel } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
 import { setNavigator } from "./nav";
 import { NARROW_QUERY, useNavDrawer } from "./navDrawer";
@@ -47,8 +49,10 @@ function readNumber(key: string, fallback: number): number {
   return Math.min(SIDEBAR_MAX, Math.max(SIDEBAR_MIN, value));
 }
 
-const isEditable = (target: EventTarget | null) =>
-  target instanceof HTMLElement && (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
+// Set by a pointer press, cleared when something takes focus: see the focusComposer shortcut.
+let clickedBlank = false;
+document.addEventListener("pointerdown", () => (clickedBlank = true), true);
+document.addEventListener("focusin", () => (clickedBlank = false), true);
 
 function NavigatorBridge() {
   const navigate = useNavigate();
@@ -150,52 +154,51 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [narrow, navOpen]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
-      if (mod && !e.shiftKey && !e.altKey && key === "k") {
-        e.preventDefault();
-        if (switcherOpen) closeModal();
-        else openModal({ type: "quickSwitcher" });
-      } else if (mod && !e.shiftKey && !e.altKey && key === "u") {
-        e.preventDefault();
-        if (guildId) toggleMembers();
-        else if (dmRecipient) toggleProfile();
-      } else if (mod && !e.shiftKey && !e.altKey && key === "/") {
-        e.preventDefault();
-        openModal({ type: "shortcuts" });
-      } else if (mod && !e.shiftKey && !e.altKey && key === "i") {
-        e.preventDefault();
-        openModal({ type: "inbox" });
-      } else if (mod && e.shiftKey && key === "n") {
-        e.preventDefault();
-        openModal({ type: "createServer" });
-      } else if (mod && e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-        e.preventDefault();
-        const order = appStore.getState().guildOrder;
-        const index = guildId ? order.indexOf(guildId) : -1;
-        const step = e.key === "ArrowUp" ? -1 : 1;
-        const next = order[index + step];
-        if (next) void navigate(`/channels/${next}`);
-        else if (index + step < 0) void navigate("/channels/@me");
-      } else if (e.altKey && !mod && !e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && guildId) {
-        e.preventDefault();
-        const text = groupChannels(guildChannels)
-          .flatMap(g => g.channels)
-          .filter(c => c.type === ChannelType.GuildText);
-        const index = text.findIndex(c => c.id === channelId);
-        const next = text[index + (e.key === "ArrowUp" ? -1 : 1)];
-        if (next) void navigate(`/channels/${guildId}/${next.id}`);
-      } else if (e.key === "Escape" && !e.defaultPrevented && !isEditable(e.target) && !useModals.getState().modal) {
-        if (e.shiftKey) {
-          if (guildId) void markGuildRead(guildId);
-        } else if (channelId) void markChannelRead(channelId);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [switcherOpen, guildId, channelId, guildChannels, dmRecipient, navigate, toggleMembers, toggleProfile]);
+  // Keyboard shortcuts owned by the shell (the table is in src/keyboard/bindings.ts).
+  const go = (p: Place | undefined) => (p ? (void navigate(p.guildId ? `/channels/${p.guildId}/${p.channelId}` : `/channels/@me/${p.channelId}`), true) : false);
+  const dirOf = (i: number) => (i === 0 ? -1 : 1);
+  useShortcut("quickSwitcher", () => (switcherOpen ? closeModal() : openModal({ type: "quickSwitcher" })));
+  useShortcut("shortcuts", () => (useModals.getState().modal?.type === "shortcuts" ? closeModal() : openModal({ type: "shortcuts" })));
+  useShortcut("inbox", () => (useModals.getState().modal?.type === "inbox" ? closeModal() : openModal({ type: "inbox" })));
+  useShortcut("createServer", () => openModal({ type: "createServer" }));
+  useShortcut("members", () => {
+    if (guildId) toggleMembers();
+    else if (dmRecipient) toggleProfile();
+    else return false;
+  });
+  useShortcut("server", i => {
+    const { guildOrder, guilds } = appStore.getState();
+    const order = guildOrder.filter(id => guilds[id]);
+    const index = guildId ? order.indexOf(guildId) : -1;
+    const next = order[index + dirOf(i)];
+    if (next) void navigate(`/channels/${next}`);
+    else if (index + dirOf(i) < 0 && guildId) void navigate("/channels/@me");
+  });
+  useShortcut("channel", i => go(step(channelOrder(appStore.getState(), guildId), channelId, dirOf(i))));
+  useShortcut("unreadChannel", i => {
+    const s = appStore.getState();
+    return go(step(channelOrder(s, guildId), channelId, dirOf(i), unread(s)));
+  });
+  useShortcut("mentionChannel", i => {
+    const s = appStore.getState();
+    return go(step(allChannelOrder(s), channelId, dirOf(i), mentioned(s)));
+  });
+  // Routes without a channel chat (forum, voice page, its chat closed) still mark the channel read on Esc.
+  useShortcut("markChannelRead", () => {
+    if (!channelId || document.querySelector(".channel-chat > .chat-view")) return false;
+    void markChannelRead(channelId).catch(() => undefined);
+  });
+  useShortcut("markServerRead", () => (guildId ? void markGuildRead(guildId).catch(() => undefined) : false));
+  useShortcut("mute", () => toggleSelfMute());
+  useShortcut("deafen", () => toggleSelfDeaf());
+  // Tab with focus lost (a closed dialog, a blur) lands in the message box. After a click on blank space Tab keeps the browser's
+  // sequential order from the click point, and Tab from a control always moves focus normally.
+  useShortcut("focusComposer", () => {
+    const lost = !clickedBlank && (document.activeElement === document.body || !document.activeElement);
+    const box = lost ? document.querySelector<HTMLElement>(".channel-chat .chat-textarea") : null;
+    if (!box) return false;
+    box.focus();
+  });
 
   if (!isHome && !guild) return <Navigate to="/channels/@me" replace />;
   if (guildId && !channelId) {

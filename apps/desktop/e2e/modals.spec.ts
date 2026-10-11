@@ -9,7 +9,7 @@ test('quick switcher lists previously visited channels first and the PROTIP labe
   const aliceUrl = page.url();
   await page.locator('.dm-row').filter({ hasNotText: /alice/i }).first().click();
   await page.locator('.chat-msg').first().waitFor();
-  await page.keyboard.press('Control+k');
+  await page.keyboard.press('ControlOrMeta+k');
   const dialog = page.getByRole('dialog');
   await expect(dialog.locator('.quick-heading')).toHaveText('Previous channels');
   await expect(dialog.getByRole('option').first()).toContainText(/alice/i);
@@ -26,12 +26,12 @@ test('quick switcher lists previously visited channels first and the PROTIP labe
 
 test('Ctrl+/ opens the shortcuts dialog with key-cap cards, Escape closes it', async ({ page }) => {
   await openDm(page, 'alice');
-  await page.keyboard.press('Control+/');
+  await page.keyboard.press('ControlOrMeta+/');
   const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('.shortcuts-heading').first()).toHaveText('Navigation');
   const card = dialog.locator('.shortcut-card', { hasText: 'Quick switcher' });
-  await expect(card.locator('.shortcut-cap')).toHaveText([/^(Ctrl|Cmd)$/, 'K']);
+  await expect(card.locator('.shortcut-cap')).toHaveText([/^(Ctrl|⌘)$/, 'K']);
   expect(await dialog.locator('.shortcuts-grid').first().evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(4);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
@@ -51,12 +51,20 @@ test('server profile name shows the unsaved-changes bar; Reset reverts, Save Cha
   await name.fill(`${before} 2`);
   await expect(bar).toContainText('unsaved changes');
   // a small dialog on top (Ctrl+/, Ctrl+K) parks the settings instead of dropping the edit
-  await page.keyboard.press('Control+/');
+  await page.keyboard.press('ControlOrMeta+/');
   await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(name).toHaveValue(`${before} 2`);
   await expect(bar).toBeVisible();
-  await page.keyboard.press('Control+k');
+  // a dialog over a dialog keeps the parked settings: Mod+/ then Mod+K, then Esc returns to the edit
+  await page.keyboard.press('ControlOrMeta+/');
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(page.locator('.quick-input')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(name).toHaveValue(`${before} 2`);
+  await expect(bar).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+k');
   await expect(page.locator('.quick-input')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(name).toHaveValue(`${before} 2`);

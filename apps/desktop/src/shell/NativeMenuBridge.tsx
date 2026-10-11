@@ -1,6 +1,10 @@
 import { useEffect } from "react";
 import { onNativeMenu, type NativeMenuId } from "../desktop/menu";
-import { closeModal, openModal, useModals, type ModalSpec } from "./modalStore";
+import { runShortcut, type ShortcutId } from "../keyboard";
+import { openModal, type ModalSpec } from "./modalStore";
+
+/** Menu items that are also key bindings: they run the binding's handler, so the menu and the keys share one path. */
+const MENU_SHORTCUT: Partial<Record<NativeMenuId, ShortcutId>> = { "quick-switcher": "quickSwitcher", inbox: "inbox", shortcuts: "shortcuts" };
 
 /** The modal a macOS menu item opens: the same ones the title bar, the sidebar and the shortcuts open. */
 export function menuModal(id: NativeMenuId): ModalSpec {
@@ -22,10 +26,9 @@ export function menuModal(id: NativeMenuId): ModalSpec {
 export function NativeMenuBridge() {
   useEffect(() => {
     const unlisten = onNativeMenu(id => {
-      const modal = menuModal(id);
-      // Same toggle as Cmd+K, so the menu item and the key behave alike.
-      if (modal.type === "quickSwitcher" && useModals.getState().modal?.type === "quickSwitcher") closeModal();
-      else openModal(modal);
+      const shortcut = MENU_SHORTCUT[id];
+      // Settings and Help have no key binding; a binding with no handler mounted falls back to opening its modal.
+      if (!shortcut || !runShortcut(shortcut)) openModal(menuModal(id));
     });
     return () => void unlisten.then(stop => stop());
   }, []);

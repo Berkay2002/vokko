@@ -107,7 +107,7 @@ test('unsaved changes on Profiles block Esc, the close button and page switches 
 
   // shortcuts and the tab strip must not drop the draft either
   const second = await bar.getAttribute('data-shake');
-  await page.keyboard.press('Control+i');
+  await page.keyboard.press('ControlOrMeta+i');
   await expect(page.locator('.inbox-popout')).toHaveCount(0);
   await expect(dialog).toBeVisible();
   await expect(bar).not.toHaveAttribute('data-shake', second!);

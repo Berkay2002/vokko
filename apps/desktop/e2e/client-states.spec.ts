@@ -328,10 +328,10 @@ test.describe('CMP-011 live markdown composer', () => {
     const box = composer(page);
     await box.click();
     await box.pressSequentially('draft', { delay: 5 });
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('ControlOrMeta+k');
     await expect(page.locator('.quick-input')).toBeFocused();
     await page.keyboard.press('Escape');
-    await page.keyboard.press('Control+/');
+    await page.keyboard.press('ControlOrMeta+/');
     await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);

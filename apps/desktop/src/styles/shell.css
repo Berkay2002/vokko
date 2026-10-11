@@ -2388,11 +2388,11 @@
 }
 
 /* ---- quick switcher ---- */
+/* Reference modals/06: 682 wide, 20 px padding, 70 px input, a fixed 228 px list (so the dialog keeps its size), rows 32 + 2. */
 .modal.quick-switcher {
-  width: 540px;
-  align-self: flex-start;
-  margin-top: 100px;
-  padding: 16px;
+  width: 682px;
+  padding: 20px;
+  overflow: visible;
 }
 
 .modal.quick-switcher .modal-content {
@@ -2400,19 +2400,36 @@
   overflow: visible;
 }
 
+.quick-title {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 12px);
+  color: var(--text-strong);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+  text-align: center;
+}
+
 .quick-input {
   width: 100%;
-  height: 48px;
-  padding: 0 16px;
+  height: 70px;
+  padding: 0 12px;
   border-radius: var(--radius-sm);
   background: var(--background-base-lowest);
   color: var(--text-default);
-  font-size: 20px;
+  font-size: 24px;
+}
+
+.quick-scroller {
+  height: 228px;
+  margin-top: 20px;
+  overflow-y: auto;
 }
 
 .quick-heading {
-  margin-top: 12px;
-  padding: 0 12px;
+  padding: 8px;
   color: var(--text-muted);
   font-size: 12px;
   line-height: 16px;
@@ -2420,23 +2437,19 @@
   text-transform: uppercase;
 }
 
-.quick-heading + .quick-results {
-  margin-top: 4px;
-}
-
 .quick-results {
-  max-height: 340px;
-  margin-top: 8px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .quick-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   width: 100%;
-  height: 40px;
-  padding: 0 12px;
+  height: 32px;
+  padding: 0 8px;
   border-radius: var(--radius-sm);
   color: var(--interactive-text-default);
   text-align: left;
@@ -2447,28 +2460,42 @@
   color: var(--interactive-text-active);
 }
 
+.quick-row.unread {
+  color: var(--interactive-text-active);
+}
+
+.quick-badge {
+  margin-left: auto;
+}
+
+.quick-sub + .quick-badge {
+  margin-left: 8px;
+}
+
 .quick-icon {
   display: flex;
-  width: 24px;
+  width: 20px;
   justify-content: center;
 }
 
 .quick-label {
   font-size: 16px;
-  font-weight: 600;
+  line-height: 20px;
+  font-weight: 500;
 }
 
 .quick-tag {
   color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
 }
 
 .quick-sub {
   margin-left: auto;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .quick-empty {
@@ -2478,11 +2505,10 @@
 }
 
 .quick-tip {
-  margin-top: 12px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-subtle);
+  margin-top: 20px;
   color: var(--text-muted);
   font-size: 12px;
+  line-height: 18px;
   font-weight: 600;
 }
 

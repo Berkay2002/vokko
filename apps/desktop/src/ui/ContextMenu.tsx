@@ -125,7 +125,8 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
         setSub(null);
       } else if (event.key === "Tab") {
         // The menu has no focusable rows: let Tab move on and close the menu behind it (ARIA menu pattern).
-        onClose();
+        // A custom row (a volume slider) does hold focus; Tab there moves within the menu.
+        if (!document.activeElement?.closest(".context-menu")) onClose();
       }
     };
     document.addEventListener("keydown", onKey);
@@ -183,7 +184,8 @@ export function ContextMenuHost() {
     // Shift+F10 and the Menu key: Chromium on Windows/Linux may turn them into a native `contextmenu` event (Windows: on keyup),
     // macOS and Tauri's WKWebView do not. Dispatch one ourselves at the focused element so every onContextMenu handler works from
     // the keyboard, and swallow a trusted native one that follows on the same target so the menu does not open twice.
-    let swallow: { target: Element; until: number } | null = null;
+    // The swallow lasts until the key is released (Windows sends its native event on keyup, however long the key was held).
+    let swallow: Element | null = null;
     const isMenuKey = (event: KeyboardEvent) => event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey);
     const onKey = (event: KeyboardEvent) => {
       if (!isMenuKey(event) || event.repeat || event.isComposing) return;
@@ -195,22 +197,31 @@ export function ContextMenuHost() {
       // Same outcome as a right click on that element: a handler took it (menu opened) or nobody did and the native menu stays.
       if (!target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }))) {
         event.preventDefault();
-        swallow = { target, until: performance.now() + 500 };
+        swallow = target;
       }
     };
     const onNative = (event: Event) => {
-      if (!swallow || !event.isTrusted || event.target !== swallow.target || performance.now() > swallow.until) return;
+      if (!swallow || !event.isTrusted || event.target !== swallow) return;
       swallow = null;
       event.preventDefault();
       event.stopPropagation();
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (swallow && isMenuKey(event) && performance.now() <= swallow.until) event.preventDefault();
+      if (!swallow || !isMenuKey(event)) return;
+      event.preventDefault();
+      // The native event follows this keyup in the same input task; drop the swallow after it.
+      setTimeout(() => (swallow = null));
     };
+    // A keyup that never arrives (focus left the window) must not eat a later right click on the same element.
+    const reset = () => (swallow = null);
     document.addEventListener("keydown", onKey);
     document.addEventListener("keyup", onKeyUp);
     document.addEventListener("contextmenu", onNative, true);
+    document.addEventListener("pointerdown", reset, true);
+    window.addEventListener("blur", reset);
     return () => {
+      document.removeEventListener("pointerdown", reset, true);
+      window.removeEventListener("blur", reset);
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("keyup", onKeyUp);
       document.removeEventListener("contextmenu", onNative, true);

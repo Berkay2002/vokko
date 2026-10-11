@@ -104,7 +104,7 @@ test.describe('axe: main screens', () => {
 
   test('quick switcher', async ({ page }, info) => {
     await openGuild(page);
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('ControlOrMeta+k');
     await expect(page.locator('.quick-input')).toBeFocused();
     expectOnlyKnown(info, await scan(page, '.modal'), {
       'color-contrast': 'A11Y-07 .quick-sub on the selected row is 3.96:1',
@@ -252,6 +252,7 @@ test.describe('keyboard: menus', () => {
     await openGuild(page);
     await page.getByRole('link', { name: 'general' }).focus();
     await page.keyboard.press('Shift+F10');
+    await expect(page.getByRole('menu')).toBeVisible();
     await page.keyboard.press('Tab');
     const open = (await page.getByRole('menu').count()) > 0;
     const insideMenu = (await focusInfo(page, '.context-menu')).inside;
@@ -300,7 +301,7 @@ test.describe('keyboard: menus', () => {
   test('Esc closes the top layer first (dialog over menu)', async ({ page }) => {
     await openGuild(page);
     await page.locator('.chat-msg').first().click({ button: 'right' });
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('ControlOrMeta+k');
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -364,7 +365,7 @@ test.describe('keyboard: dialogs', () => {
 test.describe('keyboard: shortcuts', () => {
   test('Ctrl+K opens the quick switcher with the input focused, arrows select, Enter navigates, Ctrl+K toggles', async ({ page }) => {
     await openGuild(page);
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('ControlOrMeta+k');
     const input = page.locator('.quick-input');
     await expect(input).toBeFocused();
     await page.keyboard.type('rand');
@@ -376,9 +377,9 @@ test.describe('keyboard: shortcuts', () => {
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page).toHaveURL(/\/channels\/\d+\/\d+/);
     await expect(page.locator('.channel-row.selected')).toContainText(/random/i);
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('ControlOrMeta+k');
     await expect(input).toBeFocused();
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('ControlOrMeta+k');
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
@@ -387,7 +388,7 @@ test.describe('keyboard: shortcuts', () => {
     await openGuild(page);
     const opener = page.getByRole('button', { name: 'Inbox' });
     await opener.focus();
-    await page.keyboard.press('Control+k');
+    await page.keyboard.press('ControlOrMeta+k');
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(opener).toBeFocused();

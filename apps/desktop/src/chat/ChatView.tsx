@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 import type { Attachment, Message, Snowflake } from '../api/types';
-import { ApiRequestError, Modal, markGuildRead, resolveUrl, useMe, useReadState } from './shell';
+import { ApiRequestError, Modal, resolveUrl, useMe, useReadState } from './shell';
+import { useShortcut } from '../keyboard';
 import { DeleteAttachmentModal, ModifyAttachmentModal } from './AttachmentModals';
 import { ChatProvider, useChat, type ChatActions } from './ChatContext';
 import { Composer } from './Composer';
@@ -168,23 +169,37 @@ function ChatBody(p: BodyProps) {
   // A message marked unread keeps the channel unread while it is open; leaving it lets the normal ack resume.
   useEffect(() => () => messageStore.releaseHold(p.channelId), [p.channelId]);
 
-  // Escape (outside editing/dialogs): mark the channel read and jump to the present. Shift+Escape: mark the whole server read.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
-      if (document.querySelector('[role="dialog"], [role="menu"], .chat-edit, .chat-autocomplete')) return;
-      if (e.shiftKey) {
-        if (chat.guildId) void markGuildRead(chat.guildId).catch(() => undefined);
-        return;
-      }
-      const last = state.messages[state.messages.length - 1];
-      if (state.hasMoreAfter) void messageStore.jumpToPresent(p.channelId);
-      else p.list.current?.scrollToBottom();
-      if (last) messageStore.markRead(p.channelId, last.id);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [p.channelId, p.list, state.messages, state.hasMoreAfter, chat.guildId]);
+  // Several chats can be mounted (channel, thread panel, voice chat): a key belongs to the one holding focus; with focus on the
+  // page body, to the channel's main chat. The others decline so the dispatcher asks the next handler.
+  const root = useRef<HTMLDivElement>(null);
+  const owns = (e?: KeyboardEvent) => {
+    const el = root.current;
+    if (!el) return false;
+    const t = e?.target;
+    if (!(t instanceof Node) || t === document.body || t === document.documentElement) return !!el.parentElement?.classList.contains('channel-chat');
+    return el.contains(t);
+  };
+
+  // Escape (outside editing and menus): mark the channel read and jump to the present. Shift+Escape (server read) lives in the shell.
+  useShortcut('markChannelRead', (_, e) => {
+    if (!owns(e) || document.querySelector('[role="menu"], .chat-edit, .chat-autocomplete')) return false;
+    const last = state.messages[state.messages.length - 1];
+    if (state.hasMoreAfter) void messageStore.jumpToPresent(p.channelId);
+    else p.list.current?.scrollToBottom();
+    if (last) messageStore.markRead(p.channelId, last.id);
+  });
+
+  // Shift+PageUp: the first message after the read pointer; when that is older than the loaded window, load around the pointer.
+  useShortcut('oldestUnread', (_, e) => {
+    if (!owns(e)) return false;
+    const pointer = state.lastReadAtOpen ?? read;
+    if (!pointer) return false;
+    const oldest = state.messages[0];
+    const inWindow = !!oldest && compareIds(oldest.id, pointer) <= 0;
+    const first = inWindow ? state.messages.find(m => compareIds(m.id, pointer) > 0) : undefined;
+    if (inWindow && !first && !state.hasMoreAfter) return false;
+    void messageStore.jumpToMessage(p.channelId, first?.id ?? pointer);
+  });
 
   const editLast = useCallback(() => {
     for (let i = state.messages.length - 1; i >= 0; i--) {
@@ -196,7 +211,7 @@ function ChatBody(p: BodyProps) {
 
   function hasFiles(e: React.DragEvent): boolean { return [...e.dataTransfer.types].includes('Files'); }
 
-  return <div className="chat-view"
+  return <div className="chat-view" ref={root}
     onDragEnter={e => { if (!hasFiles(e)) return; e.preventDefault(); p.dragDepth.current += 1; p.setDragging(true); }}
     onDragOver={e => { if (hasFiles(e)) e.preventDefault(); }}
     onDragLeave={e => { if (!hasFiles(e)) return; p.dragDepth.current = Math.max(0, p.dragDepth.current - 1); if (p.dragDepth.current === 0) p.setDragging(false); }}

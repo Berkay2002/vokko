@@ -25,7 +25,7 @@ test('friends page tabs list the seeded relationships', async ({ browser }) => {
 });
 
 test('quick switcher finds a DM and a channel', async () => {
-  await s.page.keyboard.press('Control+k');
+  await s.page.keyboard.press('ControlOrMeta+k');
   const dialog = s.page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await dialog.getByRole('textbox').fill('carol');

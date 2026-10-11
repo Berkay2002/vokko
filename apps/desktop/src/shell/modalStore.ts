@@ -51,11 +51,13 @@ export const useModals = create<ModalStore>()(set => ({
   counter: 0,
   base: null,
   open: modal => {
-    const current = useModals.getState().modal;
-    // Shortcuts (Ctrl+I, Ctrl+Shift+N) must not replace User Settings while it has unsaved changes; dialogs park it instead.
-    if (current?.type === "userSettings" && !DIALOG_TYPES.has(modal.type) && blockedByUnsaved()) return;
+    const { modal: current, base } = useModals.getState();
+    // Shortcuts (Ctrl+I, Ctrl+Shift+N) must not replace User Settings while it has unsaved changes, also when it is parked under a
+    // dialog; dialogs park it instead, and a dialog opened over a dialog keeps the parked settings.
+    const settings = current && SETTINGS_TYPES.has(current.type) ? current : base?.spec;
+    if (settings?.type === "userSettings" && !DIALOG_TYPES.has(modal.type) && blockedByUnsaved()) return;
     set(s => {
-      const park = s.modal && SETTINGS_TYPES.has(s.modal.type) && DIALOG_TYPES.has(modal.type) ? { spec: s.modal, serial: s.serial } : null;
+      const park = !DIALOG_TYPES.has(modal.type) ? null : s.modal && SETTINGS_TYPES.has(s.modal.type) ? { spec: s.modal, serial: s.serial } : s.base;
       const counter = s.counter + 1;
       return { modal, serial: counter, counter, base: park };
     });
