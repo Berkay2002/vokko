@@ -260,7 +260,10 @@ export function AppShell() {
                   ) : channel.type === ChannelType.GuildStage ? (
                     <div className="main-empty">Stage channels are not supported yet.</div>
                   ) : text ? (
-                    <Messages key={channel.id} channelId={channel.id} />
+                    <>
+                      {!channel.guild_id && channelSlots.ChannelTop && <channelSlots.ChannelTop channel={channel} />}
+                      <Messages key={channel.id} channelId={channel.id} />
+                    </>
                   ) : (
                     <VoiceChannelPage key={channel.id} channel={channel} />
                   )}
@@ -287,6 +290,7 @@ export function AppShell() {
       <CommunityHost />
       <MediaHost />
       <ThreadHost />
+      {channelSlots.AppOverlay && <channelSlots.AppOverlay />}
     </div>
   );
 }

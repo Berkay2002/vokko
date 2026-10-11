@@ -263,6 +263,7 @@ export enum MessageType {
   Default = 0,
   RecipientAdd = 1,
   RecipientRemove = 2,
+  Call = 3, // DM / group DM call; author = who started it, `call` carries participants and ended_timestamp
   ChannelNameChange = 4,
   ChannelPinnedMessage = 6,
   UserJoin = 7,
@@ -414,6 +415,12 @@ export interface Message {
   webhook_id?: Snowflake; // posted by a webhook (or an interaction response: then == application_id); author is then the webhook identity
   application_id?: Snowflake; // interaction responses and followups
   interaction_metadata?: MessageInteractionMetadata; // interaction responses: who used which command
+  call?: MessageCall; // type 3 only
+}
+
+export interface MessageCall {
+  participants: Snowflake[]; // everyone who joined the call (the starter first)
+  ended_timestamp: ISO8601 | null; // null while the call goes on; nobody but the starter joined = a missed call for the others
 }
 
 export interface ReadState {
@@ -471,6 +478,26 @@ export type VoiceConnectFailure =
   | "blocked"
   | "timed_out"
   | "media_unavailable";
+
+// ---- DM and group DM calls (docs/api.md "DM calls") ----
+
+export const CALL_PARTICIPANT_MAX = 10; // people in one call
+export const CALL_VIDEO_MAX = 25; // cameras + screen shares in one call
+export const CALL_RING_TIMEOUT_MS = 180_000; // ringing stops after 3 minutes (missed call)
+
+export interface Call {
+  channel_id: Snowflake; // DM or group DM
+  message_id: Snowflake; // the type 3 message recording the call
+  region: string | null; // preferred media region, null = automatic (stored and echoed only: one media server)
+  ringing: Snowflake[]; // users being rung right now
+  voice_states: VoiceState[]; // who is in the call (guild_id null)
+}
+export interface CallRingRequest {
+  recipients?: Snowflake[] | null; // POST /call/ring: absent = every recipient not in the call; POST /call/stop-ringing: absent = yourself
+}
+export interface EditCallRequest {
+  region: string | null; // PATCH /channels/{id}/call
+}
 
 // ---- REST payloads ----
 
@@ -1168,6 +1195,9 @@ export interface GatewayEvents {
   INTERACTION_FAILURE: { id: Snowflake; nonce: string | null; channel_id: Snowflake; application_id: Snowflake }; // to the invoking user: no callback within 3 s
   APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE: { id: Snowflake; nonce: string | null; choices: ApplicationCommandOptionChoice[] }; // to the invoking user
   WEBHOOKS_UPDATE: { guild_id: Snowflake; channel_id: Snowflake }; // a webhook of the channel was created, edited or deleted (to MANAGE_WEBHOOKS holders)
+  CALL_CREATE: Call; // to the DM's recipients when a call starts, and after READY for every ongoing call in the user's DMs
+  CALL_UPDATE: Omit<Call, "voice_states">; // ringing or region changed
+  CALL_DELETE: { channel_id: Snowflake }; // the last participant left
   INVITE_CREATE: InviteMetadata; // to members who can list it: MANAGE_GUILD, or MANAGE_CHANNELS on the invite's channel
   INVITE_DELETE: { code: string; guild_id: Snowflake; channel_id: Snowflake }; // same audience; revoked (not on expiry or last use)
   GUILD_LAYOUT_UPDATE: GuildLayout; // the user's own sessions only

@@ -19,6 +19,8 @@ import { setMockMaintenance } from "./status";
 import { sweepArchivedThreads } from "./threads";
 import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromToken } from "./socket";
 import { setMockVoice } from "./voice";
+import { ringTimeout } from "./calls";
+import { ChannelType } from "../types";
 
 export { MockSocket };
 
@@ -132,6 +134,10 @@ interface MockHooks {
   channelIdByName(name: string): string | null;
   /** Another user joins (or with null leaves) a voice channel, optionally self-muted / deafened. */
   voice(username: string, channelId: string | null, opts?: { selfMute?: boolean; selfDeaf?: boolean; selfVideo?: boolean; selfStream?: boolean }): void;
+  /** `username` calls the 1:1 DM they share with `other` (joins its voice, which rings `other`); `other` null hangs up. Returns the DM id. */
+  call(username: string, other: string | null): string | null;
+  /** How long mock calls ring before they count as missed (default 3 minutes). */
+  ringTimeout(ms: number): void;
   messageTimestamp(id: string): number;
   /** Add the seeded Echo bot (/echo, /roll, /pick, Wave at, Quote) to a server, by name (default "Sam's server"). */
   installEchoBot(guildName?: string): string;
@@ -184,6 +190,21 @@ const hooks: MockHooks = {
   addUser: (username, globalName) => createAccount({ username, global_name: globalName ?? null }).user.id,
   channelIdByName: name => [...db.channels.values()].find(c => c.name === name)?.id ?? null,
   voice: (username, channelId, opts) => setMockVoice(userByName(username), channelId, emit, opts),
+  call: (username, other) => {
+    const userId = userByName(username);
+    if (other === null) {
+      setMockVoice(userId, null, emit);
+      return null;
+    }
+    const otherId = userByName(other);
+    const dm = [...db.channels.values()].find(c => c.type === ChannelType.DM && c.participant_ids?.includes(userId) && c.participant_ids.includes(otherId));
+    if (!dm) throw new Error(`no DM between ${username} and ${other}`);
+    setMockVoice(userId, dm.id, emit);
+    return dm.id;
+  },
+  ringTimeout: ms => {
+    ringTimeout.ms = ms;
+  },
   messageTimestamp: id => snowflakeToTimestamp(id),
   installEchoBot: (guildName = "Sam's server") => {
     const guild = [...db.guilds.values()].find(g => g.guild.name === guildName);

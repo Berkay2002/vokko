@@ -114,6 +114,7 @@ numeric_enum!(MessageType {
     Default = 0,
     RecipientAdd = 1,
     RecipientRemove = 2,
+    Call = 3,
     ChannelNameChange = 4,
     ChannelPinnedMessage = 6,
     UserJoin = 7,
@@ -919,6 +920,16 @@ pub struct Message {
     /// Interaction responses: who ran which command.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interaction_metadata: Option<Box<MessageInteractionMetadata>>,
+    /// Type 3 (call) messages only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call: Option<MessageCall>,
+}
+
+/// `Message::call` of a type 3 message: who joined the DM call, and when it ended (`null` while it goes on).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MessageCall {
+    pub participants: Vec<Snowflake>,
+    pub ended_timestamp: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1043,6 +1054,56 @@ pub struct VoiceConnectFailed {
     pub guild_id: Option<Snowflake>,
     pub channel_id: Snowflake,
     pub reason: VoiceConnectFailure,
+}
+
+/// Most people in one DM / group DM call (Discord's group DM cap).
+pub const CALL_PARTICIPANT_MAX: usize = 10;
+/// Most cameras + screen shares published in one DM call.
+pub const CALL_VIDEO_MAX: usize = 25;
+/// How long a recipient is rung before the call shows as missed for them.
+pub const CALL_RING_TIMEOUT_SECS: u64 = 180;
+
+/// An ongoing DM / group DM call (CALL_CREATE). The `voice_states` are the people in it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Call {
+    pub channel_id: Snowflake,
+    /// The type 3 message that records the call.
+    pub message_id: Snowflake,
+    /// Preferred media region; `null` = automatic. Vokko has one media server, so this is stored and echoed only.
+    pub region: Option<String>,
+    /// Users being rung right now.
+    pub ringing: Vec<Snowflake>,
+    pub voice_states: Vec<VoiceState>,
+}
+
+/// CALL_UPDATE: a `Call` without its voice states (those travel as VOICE_STATE_UPDATE).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CallUpdate {
+    pub channel_id: Snowflake,
+    pub message_id: Snowflake,
+    pub region: Option<String>,
+    pub ringing: Vec<Snowflake>,
+}
+
+/// CALL_DELETE: the call ended.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CallDelete {
+    pub channel_id: Snowflake,
+}
+
+/// `POST /channels/{id}/call/ring` and `/call/stop-ringing`. Absent / `null` = every recipient not in the call (ring) or
+/// yourself (stop-ringing).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct CallRingRequest {
+    #[serde(default)]
+    pub recipients: Option<Vec<Snowflake>>,
+}
+
+/// `PATCH /channels/{id}/call`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct EditCallRequest {
+    #[serde(default)]
+    pub region: Option<String>,
 }
 
 // ---- REST payloads ----
@@ -2599,6 +2660,9 @@ pub enum GatewayEvent {
     InteractionFailure(InteractionFailure),
     AutocompleteResponse(AutocompleteResponse),
     WebhooksUpdate(WebhooksUpdate),
+    CallCreate(Box<Call>),
+    CallUpdate(CallUpdate),
+    CallDelete(CallDelete),
     InviteCreate(Box<InviteMetadata>),
     InviteDelete(InviteDelete),
     GuildLayoutUpdate(GuildLayout),
@@ -2659,6 +2723,9 @@ impl GatewayEvent {
             Self::InteractionFailure(_) => "INTERACTION_FAILURE",
             Self::AutocompleteResponse(_) => "APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE",
             Self::WebhooksUpdate(_) => "WEBHOOKS_UPDATE",
+            Self::CallCreate(_) => "CALL_CREATE",
+            Self::CallUpdate(_) => "CALL_UPDATE",
+            Self::CallDelete(_) => "CALL_DELETE",
             Self::InviteCreate(_) => "INVITE_CREATE",
             Self::InviteDelete(_) => "INVITE_DELETE",
             Self::GuildLayoutUpdate(_) => "GUILD_LAYOUT_UPDATE",
@@ -2709,6 +2776,9 @@ impl GatewayEvent {
             Self::InteractionFailure(value) => serde_json::to_value(value),
             Self::AutocompleteResponse(value) => serde_json::to_value(value),
             Self::WebhooksUpdate(value) => serde_json::to_value(value),
+            Self::CallCreate(value) => serde_json::to_value(value),
+            Self::CallUpdate(value) => serde_json::to_value(value),
+            Self::CallDelete(value) => serde_json::to_value(value),
             Self::InviteCreate(value) => serde_json::to_value(value),
             Self::InviteDelete(value) => serde_json::to_value(value),
             Self::GuildLayoutUpdate(value) => serde_json::to_value(value),
@@ -3224,6 +3294,32 @@ mod tests {
         let parsed: VoiceState = serde_json::from_value(state).expect("state");
         assert_eq!(GatewayEvent::VoiceStateUpdate(Box::new(parsed)).name(), "VOICE_STATE_UPDATE");
         assert_eq!(serde_json::to_value(GatewayOp::VoiceStateUpdate).expect("op"), json!(4));
+    }
+
+    #[test]
+    fn call_shapes_match_types_ts() {
+        let state = json!({
+            "guild_id": null, "channel_id": "202", "user_id": "100", "session_id": "abc", "deaf": false, "mute": false, "self_deaf": false,
+            "self_mute": false, "self_video": false, "self_stream": false, "suppress": false, "request_to_speak_timestamp": null,
+            "connected_at": "2026-10-12T18:00:00.000Z"
+        });
+        round_trip::<Call>(json!({"channel_id": "202", "message_id": "9", "region": null, "ringing": ["101"], "voice_states": [state]}));
+        let update =
+            GatewayEvent::CallUpdate(CallUpdate { channel_id: Snowflake(202), message_id: Snowflake(9), region: Some("eu".to_owned()), ringing: vec![] });
+        assert_eq!((update.name(), update.data()), ("CALL_UPDATE", json!({"channel_id": "202", "message_id": "9", "region": "eu", "ringing": []})));
+        let delete = GatewayEvent::CallDelete(CallDelete { channel_id: Snowflake(202) });
+        assert_eq!((delete.name(), delete.data()), ("CALL_DELETE", json!({"channel_id": "202"})));
+        let ring: CallRingRequest = serde_json::from_value(json!({})).expect("ring");
+        assert_eq!(ring.recipients, None);
+        round_trip::<CallRingRequest>(json!({"recipients": ["101", "102"]}));
+        round_trip::<EditCallRequest>(json!({"region": null}));
+        round_trip::<MessageCall>(json!({"participants": ["100", "101"], "ended_timestamp": "2026-10-12T18:05:00.000Z"}));
+        assert_eq!(serde_json::to_value(MessageType::Call).expect("type"), json!(3));
+        round_trip::<Message>(json!({
+            "id": "9", "channel_id": "202", "guild_id": null, "author": user(), "content": "", "timestamp": "2026-10-12T18:00:00.000Z",
+            "edited_timestamp": null, "type": 3, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false,
+            "message_reference": null, "referenced_message": null, "nonce": null, "call": {"participants": ["100"], "ended_timestamp": null}
+        }));
     }
 
     #[test]

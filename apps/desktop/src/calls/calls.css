@@ -1,0 +1,248 @@
+/* DM calls: call panel above the DM chat, incoming-call overlay, DM list / rail markers. Tokens only (themes swap them). */
+
+.dm-call {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 16px 12px;
+  background: var(--background-base-lowest);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dm-call-stage {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 960px;
+}
+
+.dm-call-tile {
+  display: flex;
+  flex: 0 1 240px;
+  min-width: 160px;
+}
+
+.dm-call-tile .voice-tile {
+  flex: 1 1 auto;
+}
+
+.dm-call-ringing {
+  position: relative;
+  display: flex;
+  flex: 0 1 240px;
+  align-items: center;
+  justify-content: center;
+  min-width: 160px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+  background: var(--background-mod-subtle);
+}
+
+.dm-call-ringing-avatar {
+  opacity: 0.6;
+}
+
+.dm-call-ringing-avatar.pulse,
+.incoming-call-avatar.pulse {
+  animation: dm-call-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes dm-call-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dm-call-ringing-avatar.pulse,
+  .incoming-call-avatar.pulse {
+    animation: none;
+  }
+}
+
+.dm-call-ring {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--background-surface-high);
+  color: var(--text-strong);
+}
+
+.dm-call-ring:hover {
+  background: var(--interactive-background-hover);
+}
+
+.dm-call-status {
+  min-height: 18px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.dm-call-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dm-call-hangup,
+.dm-call-join {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+}
+
+.dm-call-hangup {
+  width: 56px;
+  background: var(--status-danger);
+  color: var(--text-on-brand);
+}
+
+.dm-call-join {
+  padding: 0 16px;
+  background: var(--status-positive);
+  color: var(--text-on-brand);
+}
+
+.dm-call-hangup:hover,
+.dm-call-join:hover {
+  filter: brightness(1.1);
+}
+
+/* Incoming call */
+
+.incoming-calls {
+  position: fixed;
+  top: 48px;
+  right: 16px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.incoming-call {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 232px;
+  padding: 24px 16px 16px;
+  border-radius: var(--radius-lg);
+  background: var(--background-surface-higher);
+  box-shadow: var(--shadow-high);
+  color: var(--text-default);
+}
+
+.incoming-call-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  color: var(--icon-muted);
+}
+
+.incoming-call-close:hover {
+  color: var(--icon-strong);
+}
+
+.incoming-call-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: var(--background-mod-subtle);
+  color: var(--icon-default);
+}
+
+.incoming-call-name {
+  max-width: 100%;
+  margin-top: 12px;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.incoming-call-sub {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.incoming-call-actions {
+  display: flex;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.incoming-call-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--text-on-brand);
+}
+
+.incoming-call-button.decline {
+  background: var(--status-danger);
+}
+
+.incoming-call-button.accept,
+.incoming-call-button.video {
+  background: var(--status-positive);
+}
+
+.incoming-call-button:hover {
+  filter: brightness(1.1);
+}
+
+/* DM list and rail */
+
+.dm-call-badge {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 4px;
+  border-radius: 50%;
+  color: var(--icon-muted);
+}
+
+.dm-call-badge.here {
+  color: var(--status-positive);
+}
+
+.chat-system-icon.call-missed {
+  color: var(--status-danger);
+}

@@ -45,6 +45,7 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     ...(m.flags ? { flags: m.flags } : {}),
     ...(startedThread ? { thread: startedThread } : {}),
     ...(m.stickers?.length ? { sticker_items: m.stickers.map(s => ({ ...s })) } : {}),
+    ...(m.call ? { call: { participants: [...m.call.participants], ended_timestamp: m.call.ended_timestamp } } : {}),
     ...(m.forward ? { message_snapshots: [JSON.parse(JSON.stringify(m.forward.snapshot)) as MessageSnapshot] } : {}),
     ...(m.webhook_id ? { webhook_id: m.webhook_id } : {}),
     ...(m.application_id ? { application_id: m.application_id } : {}),

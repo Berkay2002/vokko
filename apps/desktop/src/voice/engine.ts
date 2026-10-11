@@ -66,6 +66,8 @@ let boundPtt: string | null = null;
 export function joinRefusal(channel: Channel): VoiceErrorReason | null {
   const model = getVoice();
   if (!model.enabled) return "media_unavailable";
+  // DM calls (src/calls): every recipient may join; the server checks blocks and the 10-person cap.
+  if (channel.type === ChannelType.DM || channel.type === ChannelType.GroupDM) return null;
   if (channel.type !== ChannelType.GuildVoice || !channel.guild_id) return "missing_permissions";
   const state = appStore.getState();
   const guild = state.guilds[channel.guild_id];

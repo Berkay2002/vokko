@@ -65,6 +65,8 @@ export interface MockMessage {
   embeds?: Embed[];
   /** Forward (message_reference.type 1): the source ids and the frozen copy. */
   forward?: { message_id: string; channel_id: string; guild_id: string | null; snapshot: MessageSnapshot };
+  /** Type 3 call messages (calls.ts). */
+  call?: { participants: string[]; ended_timestamp: string | null };
 }
 
 export interface MockReminder extends Omit<Reminder, "message"> {

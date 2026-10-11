@@ -11,6 +11,7 @@ import { useIsMuted } from "./localState";
 import { ActivityLine, usePlaying } from "./ActivityLine";
 import { dmContextItems } from "./menus";
 import { openModal } from "./modalStore";
+import { channelSlots } from "./slots";
 
 const STATUS_LABEL: Record<PresenceStatus, string> = { online: "online", idle: "idle", dnd: "do not disturb", invisible: "offline", offline: "offline" };
 
@@ -81,6 +82,7 @@ function DmRow({ channel }: { channel: Channel }) {
             custom && <span className="dm-sub dm-activity">{custom}</span>
           )}
         </span>
+        {channelSlots.DmBadge && <channelSlots.DmBadge channelId={channel.id} />}
       </NavLink>
       <Tooltip content="Close DM" side="top">
         <button type="button" className="dm-close" aria-label="Close DM" onClick={() => void closeDirectMessage(channel.id)}>

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AudioLines, Bug, LayoutGrid, Lock, Monitor, MonitorUp, MonitorX, Music, PhoneOff, Signal, SignalHigh, SignalLow, SignalMedium, Upload, Video, VideoOff, X } from "lucide-react";
-import { useStore } from "../api/store";
+import { dmName, useStore } from "../api/store";
+import { openModal } from "../shell/modalStore";
 import { Popout, Tooltip, setPref, usePrefs } from "../ui";
 import { resolveAudio } from "./audioProfile";
 import { dismissVoiceError, leaveVoice } from "./engine";
@@ -209,7 +210,7 @@ export function VoiceConnectionPanel() {
           </span>
           {inCall && (
             <span className="voice-panel-where">
-              {channel?.name ?? "Voice"}
+              {channel && !channel.guild_id ? dmName(channel) : (channel?.name ?? "Voice")}
               {guild ? ` / ${guild.name}` : ""}
             </span>
           )}

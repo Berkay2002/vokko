@@ -52,6 +52,8 @@ pub struct Config {
     /// A voice state outlives its gateway session (or, after a restart, waits for its client) this long.
     pub voice_gateway_grace: Duration,
     pub voice_reconcile_interval: Duration,
+    /// How long a DM call rings a recipient before it shows as missed for them (3 minutes; tests shorten it).
+    pub call_ring_timeout: Duration,
     /// Stickers per guild (one owner-editable block instead of boost levels).
     pub max_stickers_per_guild: usize,
     /// GIF proxy: provider, API key and an optional override of the provider's API origin.
@@ -267,6 +269,7 @@ impl Config {
             voice_connect_timeout: Duration::from_secs(15),
             voice_gateway_grace: Duration::from_secs(60),
             voice_reconcile_interval: Duration::from_secs(60),
+            call_ring_timeout: Duration::from_secs(vokko_protocol::api::CALL_RING_TIMEOUT_SECS),
         }
     }
 }

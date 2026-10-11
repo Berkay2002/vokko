@@ -11,9 +11,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
-use vokko_protocol::api::permissions::{ADMINISTRATOR, CONNECT, MOVE_MEMBERS, PRIORITY_SPEAKER, SPEAK, USE_VAD, VIEW_CHANNEL};
+use vokko_protocol::api::permissions::{ADMINISTRATOR, CONNECT, MOVE_MEMBERS, PRIORITY_SPEAKER, SPEAK, STREAM, USE_VAD, VIEW_CHANNEL};
 use vokko_protocol::api::{
-    ChannelType, GatewayEvent, Snowflake, VoiceConnectFailed, VoiceConnectFailure, VoiceServerUpdate, VoiceState, VoiceStateUpdateCommand,
+    CALL_PARTICIPANT_MAX, ChannelType, GatewayEvent, Snowflake, VoiceConnectFailed, VoiceConnectFailure, VoiceServerUpdate, VoiceState, VoiceStateUpdateCommand,
 };
 
 use super::livekit::{Participant, RoomService};
@@ -24,7 +24,10 @@ use crate::auth::random_hex;
 use crate::config::LiveKitConfig;
 use crate::hub::Session;
 use crate::state::AppState;
-use crate::store::{self, iso};
+use crate::store::{self, ChannelRow, iso};
+
+/// What every recipient may do in a DM / group DM call (no permission bits in DMs, no Nitro gates).
+pub const DM_CALL_PERMISSIONS: u64 = VIEW_CHANNEL | CONNECT | SPEAK | STREAM | USE_VAD;
 
 #[derive(Clone, Debug)]
 pub struct VoiceEntry {
@@ -85,6 +88,8 @@ pub struct Voice {
     /// Joins hold it shared from their access check to their insert; evictions (channel/guild delete, member removal) hold it
     /// exclusively, so a join that passed its checks before an eviction cannot insert a state after it.
     admission: tokio::sync::RwLock<()>,
+    /// DM and group DM calls riding on these states.
+    pub calls: super::calls::Calls,
 }
 
 /// A user's serial lock; dropping it forgets the per-user mutex once nobody else holds or waits for it.
@@ -111,7 +116,13 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl Voice {
     pub fn new(rooms: Arc<dyn RoomService>) -> Self {
-        Self { rooms, states: Mutex::new(HashMap::new()), users: Mutex::new(HashMap::new()), admission: tokio::sync::RwLock::new(()) }
+        Self {
+            rooms,
+            states: Mutex::new(HashMap::new()),
+            users: Mutex::new(HashMap::new()),
+            admission: tokio::sync::RwLock::new(()),
+            calls: Default::default(),
+        }
     }
 
     async fn user_lock(&self, user_id: i64) -> UserSerial<'_> {
@@ -177,19 +188,13 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
     };
     let channel_id = target.db();
     let row = match store::channel_row(state, channel_id).await {
-        Ok(Some(row)) if row.channel_type() == ChannelType::GuildVoice => row,
+        Ok(Some(row)) if row.channel_type() == ChannelType::GuildVoice || row.is_dm() => row,
         _ => return fail(session, &command, target, VoiceConnectFailure::MissingPermissions),
     };
-    let Some(guild_id) = row.guild_id else { return fail(session, &command, target, VoiceConnectFailure::MissingPermissions) };
-    let Ok(guild) = access::guild_access(state, user_id, guild_id).await else {
-        return fail(session, &command, target, VoiceConnectFailure::MissingPermissions);
-    };
-    if guild.timed_out && guild.owner_id != user_id && guild.permissions & ADMINISTRATOR == 0 {
-        return fail(session, &command, target, VoiceConnectFailure::TimedOut);
-    }
-    let permissions = match access::channel_access(state, user_id, channel_id).await {
-        Ok(channel) if channel.permissions & (VIEW_CHANNEL | CONNECT) == VIEW_CHANNEL | CONNECT => channel.permissions,
-        _ => return fail(session, &command, target, VoiceConnectFailure::MissingPermissions),
+    let admitted = if row.is_dm() { admit_dm(state, user_id, &row).await } else { admit_guild(state, user_id, &row).await };
+    let (guild_id, permissions) = match admitted {
+        Ok(admitted) => admitted,
+        Err(reason) => return fail(session, &command, target, reason),
     };
 
     // The same gateway session in the same channel: a self mute/deafen toggle (no new token), or, when nothing changes, a
@@ -231,8 +236,12 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         return;
     }
 
-    let (_, user_limit) = super::channel_settings(row.bitrate, row.user_limit);
-    let limited = user_limit > 0 && permissions & MOVE_MEMBERS == 0;
+    let (user_limit, limited) = if row.is_dm() {
+        (CALL_PARTICIPANT_MAX as u32, true)
+    } else {
+        let (_, user_limit) = super::channel_settings(row.bitrate, row.user_limit);
+        (user_limit, user_limit > 0 && permissions & MOVE_MEMBERS == 0)
+    };
 
     let session_id = random_hex(16);
     let nonce = random_hex(8);
@@ -240,7 +249,7 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         return fail(session, &command, target, VoiceConnectFailure::MediaUnavailable);
     };
     let entry = VoiceEntry {
-        guild_id: Some(guild_id),
+        guild_id,
         channel_id,
         user_id,
         session_id: session_id.clone(),
@@ -268,6 +277,10 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
     };
 
     send_server_update(session, guild_id, target, &livekit.url, livekit_token, &session_id);
+    if row.is_dm() {
+        // Starts the call (CALL_CREATE, ringing) or adds us to it.
+        super::calls::joined(state, &row, user_id).await;
+    }
     let viewers = broadcast(state, &entry, false).await;
     if let Some(previous) = previous.filter(|previous| previous.channel_id != channel_id) {
         // Moved: leave the old room, and tell whoever could only see the old channel.
@@ -282,6 +295,33 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         release_channel(state, previous.channel_id).await;
     }
     spawn_connect_timeout(state.clone(), user_id, session_id, nonce);
+}
+
+/// Guild voice: the channel's permissions need VIEW_CHANNEL + CONNECT, and a timed-out member stays out.
+async fn admit_guild(state: &AppState, user_id: i64, row: &ChannelRow) -> Result<(Option<i64>, u64), VoiceConnectFailure> {
+    let guild_id = row.guild_id.ok_or(VoiceConnectFailure::MissingPermissions)?;
+    let guild = access::guild_access(state, user_id, guild_id).await.map_err(|_| VoiceConnectFailure::MissingPermissions)?;
+    if guild.timed_out && guild.owner_id != user_id && guild.permissions & ADMINISTRATOR == 0 {
+        return Err(VoiceConnectFailure::TimedOut);
+    }
+    match access::channel_access(state, user_id, row.id).await {
+        Ok(channel) if channel.permissions & (VIEW_CHANNEL | CONNECT) == VIEW_CHANNEL | CONNECT => Ok((Some(guild_id), channel.permissions)),
+        _ => Err(VoiceConnectFailure::MissingPermissions),
+    }
+}
+
+/// DM call: recipients only; a block in either direction closes a 1:1 DM's call like its messages.
+async fn admit_dm(state: &AppState, user_id: i64, row: &ChannelRow) -> Result<(Option<i64>, u64), VoiceConnectFailure> {
+    access::channel_access(state, user_id, row.id).await.map_err(|_| VoiceConnectFailure::MissingPermissions)?;
+    if row.channel_type() == ChannelType::Dm {
+        let others: Vec<i64> = access::channel_viewers(state, row).await.unwrap_or_default().into_iter().filter(|id| *id != user_id).collect();
+        match super::calls::blocked_with(state, user_id, &others).await {
+            Ok(blocked) if blocked.is_empty() => {}
+            Ok(_) => return Err(VoiceConnectFailure::Blocked),
+            Err(_) => return Err(VoiceConnectFailure::MissingPermissions),
+        }
+    }
+    Ok((None, DM_CALL_PERMISSIONS))
 }
 
 /// A LiveKit token for `session_id`'s binding in the channel, grants from `permissions`.
@@ -312,9 +352,9 @@ async fn mint(state: &AppState, livekit: &LiveKitConfig, user_id: i64, permissio
     token::sign(&livekit.api_secret, &claims)
 }
 
-fn send_server_update(session: &Session, guild_id: i64, channel_id: Snowflake, endpoint: &str, token: String, session_id: &str) {
+fn send_server_update(session: &Session, guild_id: Option<i64>, channel_id: Snowflake, endpoint: &str, token: String, session_id: &str) {
     let event = GatewayEvent::VoiceServerUpdate(VoiceServerUpdate {
-        guild_id: Some(Snowflake::from(guild_id)),
+        guild_id: guild_id.map(Snowflake::from),
         channel_id,
         endpoint: endpoint.to_owned(),
         token,
@@ -411,6 +451,16 @@ pub async fn member_removed(state: &AppState, guild_id: i64, user_id: i64) {
     evict(state, |entry| entry.user_id == user_id && entry.guild_id == Some(guild_id)).await;
 }
 
+/// A recipient left the group DM `channel_id`: out of its call, and no longer rung. Keep the returned guard until the recipient
+/// row is deleted, so the leaver cannot rejoin the call in between.
+#[must_use = "hold the guard until the recipient row is deleted"]
+pub async fn dm_recipient_removed(state: &AppState, channel_id: i64, user_id: i64) -> Eviction<'_> {
+    let guard = state.voice.admission.write().await;
+    evict(state, |entry| entry.user_id == user_id && entry.channel_id == channel_id).await;
+    super::calls::recipient_removed(state, channel_id, user_id).await;
+    guard
+}
+
 /// VOICE_STATE_UPDATE to everyone who can see the channel (`left`: with `channel_id: null`). Returns the receivers.
 pub(crate) async fn broadcast(state: &AppState, entry: &VoiceEntry, left: bool) -> Vec<i64> {
     let Ok(Some(row)) = store::channel_row(state, entry.channel_id).await else { return Vec::new() };
@@ -426,11 +476,12 @@ pub(crate) async fn broadcast(state: &AppState, entry: &VoiceEntry, left: bool) 
     viewers
 }
 
-/// The last person left `channel_id`: its voice status goes (VOICE_CHANNEL_STATUS_UPDATE with `null`).
+/// The last person left `channel_id`: its voice status goes (VOICE_CHANNEL_STATUS_UPDATE with `null`), a DM call ends.
 async fn release_channel(state: &AppState, channel_id: i64) {
     if state.voice.all().iter().any(|entry| entry.channel_id == channel_id) {
         return;
     }
+    super::calls::release(state, channel_id).await;
     let cleared: Result<Option<(Option<i64>,)>, _> =
         sqlx::query_as("UPDATE channels SET voice_status = NULL WHERE id = $1 AND voice_status IS NOT NULL RETURNING guild_id")
             .bind(channel_id)
@@ -544,10 +595,13 @@ pub async fn reconcile(state: &AppState) {
 /// Restores from LiveKit, then reconciles every `voice_reconcile_interval`. Does nothing when voice is off.
 pub fn spawn_tasks(state: AppState) {
     if state.config.livekit.is_none() {
+        // No voice: no call can still be going on.
+        tokio::spawn(async move { super::calls::recover(&state).await });
         return;
     }
     tokio::spawn(async move {
         restore(&state).await;
+        super::calls::recover(&state).await;
         let period = state.config.voice_reconcile_interval;
         let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
         loop {

@@ -1,5 +1,6 @@
 //! Voice channels (docs/design/voice.md, milestone V1): permission checks, LiveKit tokens, the in-memory voice-state table,
 //! LiveKit webhooks and reconciliation. Media never passes through vokko-server.
+pub mod calls;
 pub mod livekit;
 pub mod state;
 pub mod status;

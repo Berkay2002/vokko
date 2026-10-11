@@ -14,11 +14,13 @@ import { ID, route, routes, str } from "./router";
 import { emit } from "./socket";
 import { onboardingStartedFor, eventsChannelRemoved } from "./community";
 import { flagsField } from "./memberFlags";
-import { setVoiceChannelStatus } from "./voice";
+import { setMockVoice, setVoiceChannelStatus, voiceStates } from "./voice";
+import { callRecipientRemoved } from "./calls";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
 import "./search";
 import { dismissEphemeral, mergeEphemerals } from "./apps";
 import { resolveReactionEmoji, sameReactionEmoji } from "./emojis";
+import "./calls";
 import "./invites";
 import "./community";
 import "./status";
@@ -300,6 +302,11 @@ route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
   const payload = channelFor(channel, viewer.user.id);
   if (!channel.guild_id) {
     (channel.hidden_for ??= new Set()).add(viewer.user.id);
+    if (channel.type === ChannelType.GroupDM) {
+      // Leaving a group DM also leaves its call and stops ringing that user.
+      if (voiceStates.get(viewer.user.id)?.channel_id === channel.id) setMockVoice(viewer.user.id, null, emit);
+      callRecipientRemoved(channel.id, viewer.user.id);
+    }
     emit([viewer.user.id], "CHANNEL_DELETE", payload);
     return payload;
   }

@@ -5,7 +5,7 @@ use sqlx::FromRow;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::{
-    Attachment, Channel, ChannelType, Guild, GuildMember, GuildTag, GuildTheme, Message, MessageMember, MessageReference, MessageReferenceType,
+    Attachment, Channel, ChannelType, Guild, GuildMember, GuildTag, GuildTheme, Message, MessageCall, MessageMember, MessageReference, MessageReferenceType,
     MessageSnapshot, MessageType, OverwriteType, PermissionOverwrite, Reaction, ReactionEmoji, Role, Snowflake, StickerFormat, StickerItem, User,
     UserPrimaryGuild,
 };
@@ -642,6 +642,7 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
     }
 
     let mut started_threads = threads::started_threads(state, rows, viewer).await?;
+    let mut calls = call_records(state, rows).await?;
 
     let mut views = Vec::with_capacity(rows.len());
     for row in rows {
@@ -697,10 +698,28 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
             webhook_id: row.webhook_id.map(flake),
             application_id: row.application_id.map(flake),
             interaction_metadata: row.interaction_metadata.as_deref().and_then(|raw| serde_json::from_str(raw).ok()).map(Box::new),
+            call: (row.kind == MessageType::Call.as_u8() as i16).then(|| {
+                // No row yet: the MESSAGE_CREATE of a call that just started (only its author is in it).
+                calls.remove(&row.id).unwrap_or_else(|| MessageCall { participants: vec![flake(row.author_id)], ended_timestamp: None })
+            }),
         };
         views.push(MessageView { message, reaction_users });
     }
     Ok(views)
+}
+
+/// `Message::call` of the type 3 messages among `rows`.
+async fn call_records(state: &AppState, rows: &[MessageRow]) -> ApiResult<HashMap<i64, MessageCall>> {
+    let ids: Vec<i64> = rows.iter().filter(|row| row.kind == MessageType::Call.as_u8() as i16).map(|row| row.id).collect();
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let records: Vec<(i64, Vec<i64>, Option<OffsetDateTime>)> =
+        sqlx::query_as("SELECT message_id, participants, ended_at FROM message_calls WHERE message_id = ANY($1)").bind(&ids).fetch_all(&state.db).await?;
+    Ok(records
+        .into_iter()
+        .map(|(id, participants, ended)| (id, MessageCall { participants: participants.into_iter().map(flake).collect(), ended_timestamp: ended.map(iso) }))
+        .collect())
 }
 
 /// Full messages including one level of `referenced_message` (its own reactions are always empty).

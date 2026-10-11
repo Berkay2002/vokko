@@ -13,6 +13,14 @@ export interface ChannelSlots {
   RightPanel?: ComponentType<{ channel: Channel }>;
   /** True while `RightPanel` is showing for this channel; the member list and the DM profile panel step aside then. */
   useRightPanelOpen?: (channelId: string) => boolean;
+  /** DM header: the start voice / video call buttons (src/calls). Absent = disabled placeholders. */
+  DmCallButtons?: ComponentType<{ channel: Channel }>;
+  /** Above the chat of a DM (the call panel). Renders nothing when there is nothing to show. */
+  ChannelTop?: ComponentType<{ channel: Channel }>;
+  /** Small marker after a DM row / on a rail DM avatar (in-call state). */
+  DmBadge?: ComponentType<{ channelId: string }>;
+  /** Mounted once next to the modal host (incoming call overlay). */
+  AppOverlay?: ComponentType;
 }
 
 export const channelSlots: ChannelSlots = {};

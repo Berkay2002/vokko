@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router";
+import { useShallow } from "zustand/react/shallow";
 import { Compass, Download, Plus, Users, Volume2 } from "lucide-react";
 import { useVoice } from "../voice";
+import { useCalls } from "../calls/store";
 import logo from "../../assets/icon.svg";
 import { avatarUrl, channelMentionCount, dmName, guildUnread, isChannelUnread, useStore } from "../api/store";
 import { ChannelType, RelationshipType, type Channel, type Guild, type Snowflake } from "../api/types";
@@ -68,6 +70,7 @@ function DmRailItem({ channel, leaving, onGone }: { channel: Channel; leaving: b
   const first = channel.recipients?.[0];
   const group = channel.type === ChannelType.GroupDM || !first;
   const label = dmName(channel);
+  const inCall = useCalls(s => !!s.calls[channel.id]);
   const slot = useRef<HTMLDivElement>(null);
   // A leaving item turns inert; if it held focus (opened with the keyboard), focus follows the conversation to its DM list row.
   useLayoutEffect(() => {
@@ -84,8 +87,8 @@ function DmRailItem({ channel, leaving, onGone }: { channel: Channel; leaving: b
         if (leaving && e.target === e.currentTarget) onGone(channel.id);
       }}
     >
-      <RailItem state={selected ? "selected" : "unread"} mentions={leaving ? 0 : mentions} tooltip={label}>
-        <NavLink to={`/channels/@me/${channel.id}`} className="rail-tile rail-dm" aria-label={[label, unreadLabel(mentions, true)].join(", ")}>
+      <RailItem state={selected ? "selected" : "unread"} mentions={leaving ? 0 : mentions} tooltip={label} voice={inCall}>
+        <NavLink to={`/channels/@me/${channel.id}`} className="rail-tile rail-dm" aria-label={[label, unreadLabel(mentions, true), inCall ? "Call active" : null].filter(Boolean).join(", ")}>
           {group ? (
             <span className="rail-dm-group">
               <Users size={20} />
@@ -132,7 +135,10 @@ export function ServerRail() {
   // Muted DMs and DMs set to "Nothing" stay out of the rail, like the Dock / taskbar badge (notify/badge.ts).
   const local = useLocalState(s => s);
   const now = Date.now();
-  const dms = useLeavingDms(unreadDms.filter(c => !isMutedAt(local, c.id, now) && effectiveLevel(local, [c.id]) !== "none"));
+  // DMs with an ongoing call stay on the rail too, with the voice marker (calls are never muted away).
+  const callIds = useCalls(useShallow(s => Object.keys(s.calls)));
+  const callDms = useStore(useShallow(s => callIds.map(id => s.channels[id]).filter((c): c is Channel => !!c && (c.type === ChannelType.DM || c.type === ChannelType.GroupDM))));
+  const dms = useLeavingDms([...callDms, ...unreadDms.filter(c => !callIds.includes(c.id) && !isMutedAt(local, c.id, now) && effectiveLevel(local, [c.id]) !== "none")]);
 
   return (
     <nav className="server-rail" aria-label="Servers sidebar">

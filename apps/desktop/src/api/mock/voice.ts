@@ -8,6 +8,7 @@ import { canView, channelPermsOf } from "./access";
 import { fail, MISSING_PERMISSIONS } from "./ops";
 import { db, type MockChannel } from "./db";
 import { membersOf } from "./views";
+import { callJoined, callReleased, dmRefusal } from "./calls";
 
 export const MOCK_VOICE_ENDPOINT = "mock://voice";
 
@@ -24,6 +25,7 @@ const newSessionId = () => `mock-voice-${(counter += 1)}-${Math.random().toStrin
 
 /** Users who can see a guild channel. */
 function audience(channel: MockChannel): string[] {
+  if (!channel.guild_id) return channel.participant_ids ?? [];
   const guild = channel.guild_id ? db.guilds.get(channel.guild_id) : undefined;
   return guild ? [...guild.members.keys()].filter(id => canView(channel, id)) : [];
 }
@@ -67,6 +69,7 @@ function stateFor(
 }
 
 function refusal(channel: MockChannel | undefined, userId: string): VoiceConnectFailure | null {
+  if (channel && (channel.type === ChannelType.DM || channel.type === ChannelType.GroupDM)) return dmRefusal(channel, userId);
   if (!channel || channel.type !== ChannelType.GuildVoice || !channel.guild_id) return "missing_permissions";
   const perms = channelPermsOf(channel, userId);
   if (!hasBit(perms, Perm.VIEW_CHANNEL)) return "missing_permissions";
@@ -95,6 +98,7 @@ function emitStatus(emit: Emit, channel: MockChannel): void {
 /** The last person left `channelId`: its status ends with the session (event with null), like the server. */
 function releaseChannel(emit: Emit, channelId: string | null): void {
   if (!channelId) return;
+  callReleased(channelId);
   const channel = db.channels.get(channelId);
   if (!channel?.status || [...voiceStates.values()].some(s => s.channel_id === channelId)) return;
   channel.status = null;
@@ -165,6 +169,7 @@ export function handleVoiceStateUpdate(sessionId: string, userId: string, cmd: V
   voiceStates.set(userId, next);
   owners.set(userId, sessionId);
   emitToSession(sessionId, "VOICE_SERVER_UPDATE", serverUpdate(channel, userId, next.session_id));
+  if (!channel.guild_id) callJoined(channel, userId);
   if (current && current.channel_id && current.channel_id !== channel.id) {
     // Those who could see the old channel but not the new one see the user leave.
     broadcastLeave(emit, current, new Set(audience(channel)));
@@ -195,6 +200,7 @@ export function setMockVoice(userId: string, channelId: string | null, emit: Emi
   const same = current?.channel_id === channelId;
   const next = stateFor(userId, channel, same && current ? current.session_id : newSessionId(), { self_mute: !!opts.selfMute, self_deaf: !!opts.selfDeaf, self_video: !!opts.selfVideo, self_stream: !!opts.selfStream }, same ? current?.connected_at : undefined);
   voiceStates.set(userId, next);
+  if (!channel.guild_id && !same) callJoined(channel, userId);
   if (current?.channel_id && !same) broadcastLeave(emit, current, new Set(audience(channel)));
   broadcast(emit, next, channel);
   if (current?.channel_id && !same) releaseChannel(emit, current.channel_id);

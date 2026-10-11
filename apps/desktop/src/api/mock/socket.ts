@@ -6,6 +6,7 @@ import { db } from "./db";
 import { tokenUserId } from "./sessions";
 import { readyFor } from "./views";
 import { handleVoiceStateUpdate } from "./voice";
+import { sendActiveCalls } from "./calls";
 
 const HEARTBEAT_MS = 41_250;
 const BUFFER = 500;
@@ -165,6 +166,7 @@ export class MockSocket {
     this.session = session;
     session.seq += 1;
     this.out({ op: GatewayOp.Dispatch, d: readyFor(userId, session.id), s: session.seq, t: "READY" });
+    sendActiveCalls(session.id, userId);
     this.sync(userId);
   }
 

@@ -138,6 +138,8 @@ async fn delete_channel(State(state): State<AppState>, AuthUser(user_id): AuthUs
         if access.channel.channel_type() == ChannelType::Dm {
             sqlx::query("UPDATE channel_recipients SET closed = TRUE WHERE channel_id = $1 AND user_id = $2").bind(id).bind(user_id).execute(&state.db).await?;
         } else {
+            // Out of the group's call first, so the leaver still hears about it.
+            let _eviction = crate::voice::state::dm_recipient_removed(&state, id, user_id).await;
             sqlx::query("DELETE FROM channel_recipients WHERE channel_id = $1 AND user_id = $2").bind(id).bind(user_id).execute(&state.db).await?;
             let (left,): (i64,) = sqlx::query_as("SELECT count(*) FROM channel_recipients WHERE channel_id = $1").bind(id).fetch_one(&state.db).await?;
             if left == 0 {

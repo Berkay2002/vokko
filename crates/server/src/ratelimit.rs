@@ -29,6 +29,9 @@ const ADDRESS_FLOOR_FACTOR: f64 = 10.0;
 const GIF_ROUTE: &str = "GET /gifs";
 const GIF_BURST: f64 = 10.0;
 const GIF_PER_SECOND: f64 = 2.0;
+/// `POST /channels/{id}/call/ring` re-rings the other people of a DM: a few rings, then one every 5 s.
+const CALL_RING_BURST: f64 = 5.0;
+const CALL_RING_PER_SECOND: f64 = 0.2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Caller {
@@ -182,7 +185,14 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
     let is_gif = request.method() == axum::http::Method::GET && route.contains("/gifs/");
     let route = if is_gif { GIF_ROUTE.to_owned() } else { format!("{} {route}", request.method()) };
     // The limits are never raised above the configured route bucket (tests and operators may set it lower).
-    let bucket = is_gif.then(|| (GIF_BURST.min(limit.route_burst), GIF_PER_SECOND.min(limit.route_per_second)));
+    let is_ring = request.method() == axum::http::Method::POST && route.ends_with("/call/ring");
+    let bucket = if is_gif {
+        Some((GIF_BURST.min(limit.route_burst), GIF_PER_SECOND.min(limit.route_per_second)))
+    } else if is_ring {
+        Some((CALL_RING_BURST.min(limit.route_burst), CALL_RING_PER_SECOND.min(limit.route_per_second)))
+    } else {
+        None
+    };
     match state.limiter.check_with(caller, &route, &limit, auth, bucket) {
         Ok(()) => next.run(request).await,
         Err(limited) => limited_response(limited),

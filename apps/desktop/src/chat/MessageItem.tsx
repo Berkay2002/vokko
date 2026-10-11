@@ -16,6 +16,7 @@ import { ForwardedBlock, GifMessage, StickerItems, gifMessageMedia } from '../me
 import { openForward } from '../media/store';
 import { ThreadChip } from '../threads/ThreadChip';
 import { ThreadCreatedNotice } from '../threads/ThreadNotice';
+import { CallNotice } from '../calls/CallNotice';
 import { ThreadStarter } from '../threads/ThreadStarter';
 import { useMessageThreadActions } from '../threads/useMessageActions';
 import { AppTag, EphemeralFooter, InteractionHeader, ThinkingBody, isEphemeral } from '../apps/InteractionMessage';
@@ -51,6 +52,8 @@ function SystemBody({ message, name }: { message: Message; name: string }) {
       return <><PenLine size={18} className="chat-system-icon" /><span className="chat-system-text"><b>{name}</b> changed the channel name: <b>{message.content}</b></span></>;
     case MessageType.ThreadCreated:
       return <ThreadCreatedNotice message={message} name={name} />;
+    case MessageType.Call:
+      return <CallNotice message={message} name={name} />;
     default:
       return <span className="chat-system-text">{message.content}</span>;
   }

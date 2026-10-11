@@ -117,14 +117,18 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             </ToolbarButton>
           </>
         ) : (
-          <>
-            <ToolbarButton label="Start Voice Call" disabled>
-              <Phone size={24} />
-            </ToolbarButton>
-            <ToolbarButton label="Start Video Call" disabled>
-              <Video size={24} />
-            </ToolbarButton>
-          </>
+          channelSlots.DmCallButtons ? (
+            <channelSlots.DmCallButtons channel={channel} />
+          ) : (
+            <>
+              <ToolbarButton label="Start Voice Call" disabled>
+                <Phone size={24} />
+              </ToolbarButton>
+              <ToolbarButton label="Start Video Call" disabled>
+                <Video size={24} />
+              </ToolbarButton>
+            </>
+          )
         )}
         {!voice && !forum && (
           <ToolbarButton label="Pinned Messages" active={pinsOpen} onClick={() => setPinsOpen(o => !o)} buttonRef={setPinsAnchor}>

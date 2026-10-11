@@ -172,6 +172,7 @@ async fn handshake(state: &AppState, writer: &mut Writer, stream: &mut Stream, l
                 };
                 let (session, generation) =
                     state.hub.open_session(user_id, session_id, hash_token(&identify.token), link, GatewayEvent::Ready(Box::new(ready)).data());
+                voice::calls::send_active(state, &session).await;
                 return Some((session, generation));
             }
             GatewayOp::Resume => {

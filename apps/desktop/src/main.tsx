@@ -46,6 +46,7 @@ import "./community";
 import "./account";
 import "./media";
 import "./voice";
+import "./calls";
 
 // Mock mode only: expose internals to Playwright scripts and the console (no effect in real builds).
 if (MOCK) (window as unknown as { __vokko: unknown }).__vokko = { gateway, desktop, messageStore, ...rest, ...store };

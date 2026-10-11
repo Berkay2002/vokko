@@ -45,11 +45,11 @@ function TileVideo({ handle, source, mirror }: { handle: VideoHandle; source: Vi
 }
 
 /** solo: alone in the call. grid / strip / pip: focusable. focused: the big tile of focus mode (click returns to the grid). */
-type TileVariant = "solo" | "grid" | "focused" | "strip" | "pip";
+export type TileVariant = "solo" | "grid" | "focused" | "strip" | "pip";
 
 const AVATAR_SIZE: Record<TileVariant, number> = { solo: 100, focused: 100, grid: 80, strip: 48, pip: 48 };
 
-function Tile({ state, guildId, variant, onActivate }: { state: VoiceState; guildId: Snowflake | null; variant: TileVariant; onActivate?: () => void }) {
+export function Tile({ state, guildId, variant, onActivate }: { state: VoiceState; guildId: Snowflake | null; variant: TileVariant; onActivate?: () => void }) {
   const user = useStore(s => s.users[state.user_id]) ?? state.member?.user;
   const activity = useStore(s => s.presences[state.user_id]?.activities?.[0]?.name);
   const member = useStore(s => (guildId ? s.members[guildId]?.[state.user_id] : undefined)) ?? state.member;
@@ -143,7 +143,7 @@ function Tile({ state, guildId, variant, onActivate }: { state: VoiceState; guil
   );
 }
 
-function BarButton({ label, tooltip, active, danger, disabled, onClick, buttonRef, children }: { label: string; tooltip?: string; active?: boolean; danger?: boolean; disabled?: boolean; onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void; buttonRef?: (el: HTMLButtonElement | null) => void; children: React.ReactNode }) {
+export function BarButton({ label, tooltip, active, danger, disabled, onClick, buttonRef, children }: { label: string; tooltip?: string; active?: boolean; danger?: boolean; disabled?: boolean; onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void; buttonRef?: (el: HTMLButtonElement | null) => void; children: React.ReactNode }) {
   return (
     <Tooltip content={tooltip ?? label} side="top">
       <button
