@@ -49,7 +49,7 @@ Status as of main at 1ff4677 (messages round, composer alignment). The settings 
 | SHELL-012 | Floating user panel with avatar, status dot, name, status text, mute, deafen, settings | done | partial | UserPanel.tsx, shell.css (x=8, 359 wide, 57 high, radius 8); the composer box ends on the same line (e2e layout-align.spec.ts); status via gateway op 3; mute and deafen are local toggles with no audio behind them |
 | SHELL-013 | Mute and deafen split caret opens input and output device menus | partial | partial | UserPanel.tsx device menus list devices from enumerateDevices; choice only stored in local prefs, no audio engine |
 | SHELL-014 | User-panel popout: profile card, edit profile, status submenu, switch account, copy ID | partial | partial | UserPanel.tsx popout has status list and custom status (persisted via gateway); no profile card, edit profile, switch account or copy ID rows |
-| SHELL-015 | 4 px resize handle; layout at about 1000 px and minimum width | partial | partial | AppShell.tsx sidebar-resize (4 px, clamped, stored locally); no responsive layout rules (no media queries) |
+| SHELL-015 | 4 px resize handle; layout at about 1000 px and minimum width | partial | partial | AppShell.tsx sidebar-resize (4 px, clamped, stored locally); styles/responsive.css: member list and DM profile panel start hidden at <= 1000 px (toggle stays), rail + sidebar become a drawer behind a header menu button at <= 767 px; Tauri minimum 940x500. The 1000/767 thresholds are Vokko's: the reference window could not be resized |
 
 ## FRIEND: Friends page
 
@@ -206,7 +206,7 @@ Status as of main at 1ff4677 (messages round, composer alignment). The settings 
 | REST-003 | Onboarding flow for new members | - | - | Not built; settings page is a placeholder |
 | REST-004 | Loading screen, connection-lost banner, update and maintenance banners | partial | partial | App.tsx Splash loading dots; store tracks gateway status but no banner is shown; no update banners |
 | REST-005 | Notification sounds and desktop notifications | - | - | Preference toggles only (NotificationsPage.tsx); no Notification or audio calls anywhere |
-| REST-006 | Responsive layouts at about 1000 px and minimum width | - | - | No media queries in apps/desktop/src/styles; Tauri window has a minimum size only |
+| REST-006 | Responsive layouts at about 1000 px and minimum width | partial | partial | styles/responsive.css (see SHELL-015); User Settings modal: tighter insets at <= 780 px, fullscreen section list / page drill-down at <= 485 px (measured breakpoints); server/channel settings 30/70 at <= 780 px; e2e/responsive.spec.ts and layout-align at 780 px |
 
 ## DESK: desktop-only
 

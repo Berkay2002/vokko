@@ -430,7 +430,6 @@ test.describe('screen-reader structure', () => {
   });
 
   test('settings sidebar marks the current section', async ({ page }) => {
-    test.fail(true, 'A11Y-15: UserSettings.tsx:260 sets a "selected" class but no aria-current (server and channel settings do)');
     await openUserSettings(page, 'Appearance');
     await expect(page.getByRole('button', { name: 'Appearance', exact: true })).toHaveAttribute('aria-current', /.+/);
   });

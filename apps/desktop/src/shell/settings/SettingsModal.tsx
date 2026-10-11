@@ -62,7 +62,7 @@ export function SettingsModal({ label, title, side, onClose, children, scrollRef
           {side}
         </nav>
         <div className="sm-main">
-          <header className="sm-header">
+          <div className="sm-header">
             <button type="button" className="sm-back" aria-label="Back to sections" onClick={() => setPane("nav")}>
               <ChevronLeft size={20} />
             </button>
@@ -70,7 +70,7 @@ export function SettingsModal({ label, title, side, onClose, children, scrollRef
             <button type="button" className="sm-close" aria-label="Close" onClick={requestClose}>
               <X size={20} />
             </button>
-          </header>
+          </div>
           <div ref={scrollRef} key={pageKey} className="sm-scroll" onScroll={onScroll}>
             <div className="sm-column">{children}</div>
           </div>
