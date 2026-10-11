@@ -131,7 +131,10 @@ function addDmConversation(channel: MockChannel, ids: Record<"R" | "B", string>)
     });
     created.push(message.id);
     if (line.edited) message.edited_timestamp = new Date(Date.parse(message.timestamp) + 3 * MIN).toISOString();
-    if (line.pin) message.pinned = true;
+    if (line.pin) {
+      message.pinned = true;
+      message.pinned_at = new Date(Date.parse(message.timestamp) + MIN).toISOString();
+    }
     for (const [name, who] of line.react ?? []) message.reactions.push({ emoji: { id: null, name }, user_ids: who.map(w => ids[w]) });
   });
 }

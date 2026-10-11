@@ -156,6 +156,7 @@ export function addMessage(input: NewMessage): MockMessage {
     attachments: input.attachments ?? [],
     reactions: [],
     pinned: false,
+    pinned_at: null,
     reference_id: referenced ? referenced.id : (input.reference_id ?? null),
     nonce: input.nonce ?? null,
   };

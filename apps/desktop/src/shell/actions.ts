@@ -3,7 +3,7 @@
 
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
-import { appStore, type AppState } from "../api/store";
+import { appStore, isChannelUnread, type AppState } from "../api/store";
 import { ChannelType, GatewayOp, type Channel, type Guild, type PresenceStatus, type Snowflake } from "../api/types";
 import { dmPath, go, guildPath } from "./nav";
 import { firstTextChannel } from "./channels";
@@ -99,8 +99,10 @@ export async function markChannelRead(channelId: Snowflake): Promise<void> {
 
 export async function markGuildRead(guildId: Snowflake): Promise<void> {
   const state = appStore.getState();
-  const unread = Object.values(state.channels).filter(c => c.guild_id === guildId && c.type === ChannelType.GuildText && c.last_message_id);
-  await Promise.all(unread.map(c => markChannelRead(c.id)));
+  const read_states = Object.values(state.channels)
+    .filter(c => c.guild_id === guildId && c.type === ChannelType.GuildText && c.last_message_id && isChannelUnread(state, c.id))
+    .map(c => ({ channel_id: c.id, message_id: c.last_message_id as Snowflake }));
+  for (let i = 0; i < read_states.length; i += 100) await request<void>("POST", "/read-states/ack-bulk", { read_states: read_states.slice(i, i + 100) });
 }
 
 // ---- own presence ----

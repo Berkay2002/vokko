@@ -2,7 +2,8 @@ import { useEffect, useState, type ComponentType } from "react";
 import { AtSign, Bell, Hash, MessageSquareText, Pin, Search, Users, Volume2 } from "lucide-react";
 import { request } from "../api/rest";
 import { dmName, displayName, useStore } from "../api/store";
-import { ChannelType, type Channel, type Message } from "../api/types";
+import { ChannelType, type Channel, type PinnedMessagesPage } from "../api/types";
+import type { Message } from "../api/types";
 import { Popout, Tooltip } from "../ui";
 import { Avatar } from "./Avatar";
 
@@ -14,8 +15,8 @@ function FallbackPins({ channelId }: { channelId: string }) {
   const [messages, setMessages] = useState<Message[] | null>(null);
   useEffect(() => {
     let live = true;
-    request<Message[]>("GET", `/channels/${channelId}/pins`)
-      .then(list => live && setMessages(list))
+    request<PinnedMessagesPage>("GET", `/channels/${channelId}/messages/pins?limit=50`)
+      .then(page => live && setMessages(page.items.map(item => item.message)))
       .catch(() => live && setMessages([]));
     return () => {
       live = false;
