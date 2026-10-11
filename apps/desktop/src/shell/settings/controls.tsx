@@ -78,11 +78,11 @@ export function Slider({ value, min, max, step = 1, onChange, label, format, dis
 }
 
 /** Radio list in Discord's settings style (round dot, label, optional description). */
-export function RadioGroup<T extends string>({ value, options, onChange, name }: { value: T; options: { value: T; label: string; note?: string }[]; onChange(next: T): void; name: string }) {
+export function RadioGroup<T extends string>({ value, options, onChange, name, disabled }: { value: T; options: { value: T; label: string; note?: string }[]; onChange(next: T): void; name: string; disabled?: boolean }) {
   return (
     <div className="sr-group" role="radiogroup" aria-label={name}>
       {options.map(o => (
-        <button key={o.value} type="button" role="radio" aria-checked={value === o.value} className={`sr-row${value === o.value ? " selected" : ""}`} onClick={() => onChange(o.value)}>
+        <button key={o.value} type="button" role="radio" aria-checked={value === o.value} disabled={disabled} className={`sr-row${value === o.value ? " selected" : ""}`} onClick={() => onChange(o.value)}>
           <span className="sr-dot" />
           <span className="sr-text">
             <span className="sr-label">{o.label}</span>
