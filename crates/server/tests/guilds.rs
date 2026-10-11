@@ -147,3 +147,43 @@ async fn channel_management_and_overwrites() {
     assert_eq!(app.delete(&format!("/guilds/{guild_id}"), &owner).await.0, StatusCode::NO_CONTENT);
     assert_eq!(app.get(&format!("/guilds/{guild_id}"), &owner).await.1["code"], 10004);
 }
+
+#[tokio::test]
+async fn concurrent_accepts_consume_a_single_use_exactly_once() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("sam").await;
+    let (first, _) = app.register("alice").await;
+    let (second, _) = app.register("bob").await;
+    let (_, channel_id) = app.guild_with_channel(&owner).await;
+    let (_, invite) = app.post(&format!("/channels/{channel_id}/invites"), &owner, json!({"max_uses": 1})).await;
+    let code = invite["code"].as_str().expect("code").to_owned();
+    let path = format!("/invites/{code}");
+
+    let ((status_a, _), (status_b, _)) = tokio::join!(app.post(&path, &first, json!({})), app.post(&path, &second, json!({})));
+    let mut statuses = [status_a, status_b];
+    statuses.sort();
+    assert_eq!(statuses, [StatusCode::OK, StatusCode::NOT_FOUND]);
+    let (uses,): (i32,) = sqlx::query_as("SELECT uses FROM invites WHERE code = $1").bind(&code).fetch_one(&app.state.db).await.expect("invite");
+    assert_eq!(uses, 1);
+    let (members,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM guild_members WHERE guild_id = (SELECT guild_id FROM invites WHERE code = $1)")
+        .bind(&code)
+        .fetch_one(&app.state.db)
+        .await
+        .expect("members");
+    assert_eq!(members, 2, "owner plus exactly one joiner");
+}
+
+#[tokio::test]
+async fn accepting_again_does_not_consume_a_use() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("sam").await;
+    let (member, _) = app.register("alice").await;
+    let (_, channel_id) = app.guild_with_channel(&owner).await;
+    let (_, invite) = app.post(&format!("/channels/{channel_id}/invites"), &owner, json!({"max_uses": 5})).await;
+    let code = invite["code"].as_str().expect("code").to_owned();
+    for _ in 0..2 {
+        assert_eq!(app.post(&format!("/invites/{code}"), &member, json!({})).await.0, StatusCode::OK);
+    }
+    let (uses,): (i32,) = sqlx::query_as("SELECT uses FROM invites WHERE code = $1").bind(&code).fetch_one(&app.state.db).await.expect("invite");
+    assert_eq!(uses, 1);
+}
