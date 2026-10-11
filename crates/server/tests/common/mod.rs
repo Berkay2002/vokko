@@ -94,6 +94,21 @@ impl TestApp {
         self.send(Method::PUT, path, Some(token), None).await
     }
 
+    pub async fn put_json(&self, path: &str, token: &str, body: Value) -> (StatusCode, Value) {
+        self.send(Method::PUT, path, Some(token), Some(body)).await
+    }
+
+    /// A guild with a `#general` channel owned by `token`; returns (guild id, channel id).
+    pub async fn guild_with_channel(&self, token: &str) -> (String, String) {
+        let (status, guild) = self.post("/guilds", token, json!({"name": "Test guild"})).await;
+        assert_eq!(status, StatusCode::OK, "create guild: {guild}");
+        let guild_id = guild["id"].as_str().expect("guild id").to_owned();
+        let (_, channels) = self.get(&format!("/guilds/{guild_id}/channels"), token).await;
+        let channel =
+            channels.as_array().expect("channels").iter().find(|c| c["name"] == "general").expect("general channel")["id"].as_str().expect("id").to_owned();
+        (guild_id, channel)
+    }
+
     pub async fn delete(&self, path: &str, token: &str) -> (StatusCode, Value) {
         self.send(Method::DELETE, path, Some(token), None).await
     }
@@ -129,6 +144,96 @@ async fn sweep_stale(admin: &mut PgConnection) {
             let _ = admin.execute(format!("DROP DATABASE IF EXISTS \"{name}\" WITH (FORCE)").as_str()).await;
         }
     }
+}
+
+/// A tiny HTTP server on an ephemeral loopback port that plays web pages for the unfurler tests.
+pub struct PageServer {
+    pub address: String,
+    hits: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl PageServer {
+    pub async fn start() -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind ephemeral port");
+        let address = listener.local_addr().expect("address").to_string();
+        let hits = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = hits.clone();
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let seen = seen.clone();
+                tokio::spawn(async move {
+                    let _ = serve_page(stream, seen).await;
+                });
+            }
+        });
+        Self { address, hits }
+    }
+
+    pub fn url(&self, path: &str) -> String {
+        format!("http://{}{path}", self.address)
+    }
+
+    /// How many requests for `path` arrived so far.
+    pub fn count(&self, path: &str) -> usize {
+        self.hits.lock().expect("hits").iter().filter(|hit| hit.as_str() == path).count()
+    }
+
+    pub fn total(&self) -> usize {
+        self.hits.lock().expect("hits").len()
+    }
+}
+
+async fn serve_page(mut stream: tokio::net::TcpStream, hits: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> std::io::Result<()> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut head = Vec::new();
+    let mut buffer = [0_u8; 1024];
+    while !head.windows(4).any(|window| window == b"\r\n\r\n") {
+        let read = stream.read(&mut buffer).await?;
+        if read == 0 {
+            return Ok(());
+        }
+        head.extend_from_slice(&buffer[..read]);
+    }
+    let text = String::from_utf8_lossy(&head).into_owned();
+    let path = text.split_whitespace().nth(1).unwrap_or("/").to_owned();
+    hits.lock().expect("hits").push(path.clone());
+    let base = format!("http://{}", stream.local_addr()?);
+    let (status, content_type, extra, body): (&str, &str, String, Vec<u8>) = match path.as_str() {
+        "/page" => (
+            "200 OK",
+            "text/html; charset=utf-8",
+            String::new(),
+            format!(
+                "<!doctype html><html><head><title>Fallback</title>\
+                 <meta property=\"og:title\" content=\"Vokko &amp; friends\">\
+                 <meta property=\"og:description\" content=\"An open source chat app\">\
+                 <meta property=\"og:image\" content=\"/card.png\">\
+                 <meta property=\"og:site_name\" content=\"Vokko\">\
+                 <meta name=\"theme-color\" content=\"#5865f2\"></head><body>{base}</body></html>"
+            )
+            .into_bytes(),
+        ),
+        "/redirect" => ("302 Found", "text/plain", "Location: /page\r\n".to_owned(), Vec::new()),
+        "/loop" => ("302 Found", "text/plain", "Location: /loop\r\n".to_owned(), Vec::new()),
+        "/image.png" => ("200 OK", "image/png", String::new(), vec![0x89, b'P', b'N', b'G']),
+        "/text" => ("200 OK", "text/plain", String::new(), b"just text".to_vec()),
+        "/late" => {
+            // The Open Graph tags start after the 1 MiB cap.
+            let mut html = String::from("<html><head>");
+            html.push_str(&" ".repeat(1_100_000));
+            html.push_str("<meta property=\"og:title\" content=\"Too late\"></head></html>");
+            ("200 OK", "text/html", String::new(), html.into_bytes())
+        }
+        "/slow" => {
+            tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+            ("200 OK", "text/html", String::new(), b"<title>slow</title>".to_vec())
+        }
+        _ => ("404 Not Found", "text/plain", String::new(), b"nope".to_vec()),
+    };
+    let header = format!("HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n", body.len());
+    stream.write_all(header.as_bytes()).await?;
+    stream.write_all(&body).await?;
+    stream.shutdown().await
 }
 
 impl Drop for TestApp {

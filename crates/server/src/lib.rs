@@ -14,6 +14,7 @@ pub mod routes;
 pub mod seed;
 pub mod state;
 pub mod store;
+pub mod unfurl;
 
 use axum::Router;
 use axum::http::{HeaderValue, Method, header};

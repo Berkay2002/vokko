@@ -10,8 +10,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::permissions::{ATTACH_FILES, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES};
 use vokko_protocol::api::{
-    AckBulkRequest, AllowedMentions, CreateMessageRequest, EditMessageRequest, GatewayEvent, Message, MessageAck, MessageDelete, MessageType, PinnedMessage,
-    PinnedMessagesPage, Snowflake, TypingStart,
+    AckBulkRequest, AllowedMentions, CreateMessageRequest, EditMessageRequest, Embed, GatewayEvent, Message, MessageAck, MessageDelete, MessageType,
+    PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart,
 };
 
 use crate::access::{self, ChannelAccess, channel_access};
@@ -23,6 +23,7 @@ use crate::ids::now_ms;
 use crate::media;
 use crate::state::AppState;
 use crate::store::{self, ChannelRow, MESSAGE_SELECT, MessageRow, MessageView};
+use crate::unfurl;
 
 pub const MAX_CONTENT_CHARS: usize = 2000;
 const MAX_PINS: i64 = 250;
@@ -280,6 +281,9 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
     let mut view = store::message_view(state, message_id, None).await?.ok_or_else(ApiErr::internal)?;
     view.message.nonce = draft.nonce;
     state.hub.send_with(&viewers, "MESSAGE_CREATE", |user| serde_json::to_value(view.for_viewer(user)).unwrap_or_default());
+    if matches!(draft.kind, MessageType::Default | MessageType::Reply) {
+        unfurl::spawn(state, channel.clone(), message_id, draft.content, Vec::new());
+    }
     Ok(view)
 }
 
@@ -342,6 +346,21 @@ async fn create_message(
         return Err(ApiErr::invalid("channel_id", "Cannot send messages in a category."));
     }
     access.require(SEND_MESSAGES)?;
+    if access.channel.channel_type() == vokko_protocol::api::ChannelType::Dm {
+        // A block in either direction closes the 1:1 DM for new messages.
+        let (blocked,): (bool,) = sqlx::query_as(
+            "SELECT EXISTS (SELECT 1 FROM channel_recipients r JOIN relationships rel ON rel.kind = 2 \
+             AND ((rel.user_id = $2 AND rel.other_id = r.user_id) OR (rel.other_id = $2 AND rel.user_id = r.user_id)) \
+             WHERE r.channel_id = $1 AND r.user_id <> $2)",
+        )
+        .bind(id)
+        .bind(user_id)
+        .fetch_one(&state.db)
+        .await?;
+        if blocked {
+            return Err(ApiErr::cannot_message_user());
+        }
+    }
     let attachments: Vec<i64> = body.attachment_ids.unwrap_or_default().into_iter().map(Snowflake::db).collect();
     if !attachments.is_empty() {
         access.require(ATTACH_FILES)?;
@@ -404,33 +423,55 @@ async fn edit_message(
     }
     let (attachment_count,): (i64,) = sqlx::query_as("SELECT count(*) FROM attachments WHERE message_id = $1").bind(mid).fetch_one(&state.db).await?;
     let content = validate_content(&body.content, attachment_count > 0)?;
-    if content != row.content {
-        let mentions = resolve_mentions(&state, &access, parse_mentions(&content)).await?;
+    let content_changed = content != row.content;
+    // `flags` only carries SUPPRESS_EMBEDS; omitting it keeps the current state.
+    let suppress_bit = SUPPRESS_EMBEDS as i32;
+    let old_flags = row.flags;
+    let new_flags = match body.flags {
+        Some(flags) => (old_flags & !suppress_bit) | (flags as i32 & suppress_bit),
+        None => old_flags,
+    };
+    if content_changed || new_flags != old_flags {
+        let suppressed = new_flags & suppress_bit != 0;
+        let current: Vec<Embed> = serde_json::from_str(&row.embeds).unwrap_or_default();
+        let urls: Vec<String> = unfurl::extract_urls(&content).iter().map(ToString::to_string).collect();
+        // Embeds whose URL is gone from the content disappear at once; new URLs are unfurled in the background.
+        let kept: Vec<Embed> =
+            if suppressed { Vec::new() } else { current.into_iter().filter(|embed| embed.url.as_ref().is_some_and(|url| urls.contains(url))).collect() };
+        let mentions = if content_changed { Some(resolve_mentions(&state, &access, parse_mentions(&content)).await?) } else { None };
         let mut tx = state.db.begin().await?;
-        sqlx::query("UPDATE messages SET content = $2, edited_at = now(), mention_everyone = $3 WHERE id = $1")
+        sqlx::query("UPDATE messages SET content = $2, edited_at = $3, mention_everyone = $4, flags = $5, embeds = $6::jsonb WHERE id = $1")
             .bind(mid)
             .bind(&content)
-            .bind(mentions.everyone)
+            .bind(if content_changed { Some(OffsetDateTime::now_utc()) } else { row.edited_at })
+            .bind(mentions.as_ref().map_or(row.mention_everyone, |mentions| mentions.everyone))
+            .bind(new_flags)
+            .bind(serde_json::to_string(&kept).map_err(|_| ApiErr::internal())?)
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM message_mentions WHERE message_id = $1").bind(mid).execute(&mut *tx).await?;
-        sqlx::query("DELETE FROM message_role_mentions WHERE message_id = $1").bind(mid).execute(&mut *tx).await?;
-        for user in &mentions.users {
-            sqlx::query("INSERT INTO message_mentions (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-                .bind(mid)
-                .bind(user)
-                .execute(&mut *tx)
-                .await?;
-        }
-        for role in &mentions.roles {
-            sqlx::query("INSERT INTO message_role_mentions (message_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-                .bind(mid)
-                .bind(role)
-                .execute(&mut *tx)
-                .await?;
+        if let Some(mentions) = &mentions {
+            sqlx::query("DELETE FROM message_mentions WHERE message_id = $1").bind(mid).execute(&mut *tx).await?;
+            sqlx::query("DELETE FROM message_role_mentions WHERE message_id = $1").bind(mid).execute(&mut *tx).await?;
+            for user in &mentions.users {
+                sqlx::query("INSERT INTO message_mentions (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+                    .bind(mid)
+                    .bind(user)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            for role in &mentions.roles {
+                sqlx::query("INSERT INTO message_role_mentions (message_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+                    .bind(mid)
+                    .bind(role)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
         tx.commit().await?;
         broadcast_update(&state, &access.channel, mid).await?;
+        if !suppressed {
+            unfurl::spawn(&state, access.channel.clone(), mid, content, kept);
+        }
     }
     store::message_view(&state, mid, Some(user_id)).await?.map(|view| Json(view.message)).ok_or_else(ApiErr::unknown_message)
 }
