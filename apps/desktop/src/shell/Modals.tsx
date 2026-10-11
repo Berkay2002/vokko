@@ -281,12 +281,14 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
   };
   const option = (value: ChannelType, icon: ReactNode, label: string, description: string) => (
     <button key={value} type="button" role="radio" aria-checked={type === value} className={`radio-row${type === value ? " selected" : ""}`} onClick={() => setType(value)}>
-      <span className="radio-icon">{icon}</span>
+      <span className="radio-dot" />
       <span className="radio-text">
-        <span className="radio-label">{label}</span>
+        <span className="radio-label">
+          {icon}
+          {label}
+        </span>
         <span className="radio-desc">{description}</span>
       </span>
-      <span className="radio-dot" />
     </button>
   );
   return (
@@ -297,7 +299,7 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
       className="modal-compact"
       footer={
         <>
-          <button type="button" className="btn btn-link" onClick={closeModal}>
+          <button type="button" className="btn btn-secondary" onClick={closeModal}>
             Cancel
           </button>
           <button type="button" className="btn btn-primary" disabled={busy || !slug.trim()} onClick={submit}>
@@ -311,8 +313,8 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
         <>
           <div className="field-label">Channel type</div>
           <div role="radiogroup" className="radio-group">
-            {option(ChannelType.GuildText, <Hash size={24} />, "Text", "Send messages, images, GIFs, emoji, opinions, and puns")}
-            {option(ChannelType.GuildVoice, <Volume2 size={24} />, "Voice", "Hang out together with voice, video, and screen share")}
+            {option(ChannelType.GuildText, <Hash size={16} />, "Text", "Send messages, images, GIFs, emoji, opinions, and puns")}
+            {option(ChannelType.GuildVoice, <Volume2 size={16} />, "Voice", "Hang out together with voice, video, and screen share")}
           </div>
         </>
       )}

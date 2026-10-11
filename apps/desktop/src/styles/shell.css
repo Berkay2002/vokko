@@ -731,7 +731,7 @@
   display: flex;
   flex: 1;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   min-width: 0;
   height: 32px;
@@ -782,8 +782,10 @@
 
 .guild-menu-item {
   display: flex;
+  flex-direction: row-reverse;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  gap: 8px;
   width: calc(100% - 16px);
   height: 36px;
   margin: 2px 8px;
@@ -799,10 +801,6 @@
 .guild-menu-item:hover:not(:disabled) {
   background: var(--interactive-background-hover);
   color: var(--text-default);
-}
-
-.guild-menu-item.brand {
-  color: var(--text-brand);
 }
 
 .guild-menu-item.danger {
@@ -1772,6 +1770,68 @@
   font-size: 20px;
   line-height: 24px;
   font-weight: 600;
+}
+
+.modal-compact .modal-header {
+  padding: 16px 16px 8px 16px;
+}
+
+.modal-compact .modal-content {
+  padding: 0 16px 8px;
+}
+
+.modal-compact .field-label {
+  margin: 12px 0 8px;
+  text-transform: none;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.modal-compact .modal-footer {
+  gap: 8px;
+  padding: 8px 16px 16px;
+  background: transparent;
+}
+
+.modal-compact .modal-footer .btn {
+  flex: 1;
+  height: 39px;
+}
+
+.modal-compact .radio-group {
+  gap: 0;
+  margin-bottom: 8px;
+}
+
+.modal-compact .radio-row,
+.modal-compact .radio-row.selected {
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  border-radius: 0;
+  background: none;
+}
+
+.modal-compact .radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 20px;
+}
+
+.modal-compact .radio-label svg {
+  color: var(--interactive-icon-default);
+}
+
+.modal-compact .radio-desc {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.modal-compact .radio-dot {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
 }
 
 .modal-text {

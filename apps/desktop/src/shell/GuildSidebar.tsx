@@ -122,7 +122,7 @@ function GuildHeader({ guild }: { guild: Guild }) {
       </div>
       <Popout anchor={anchor} open={open} onClose={() => setOpen(false)} side="bottom" align="center" gap={4} className="guild-menu" style={{ width: 220 }}>
         <div role="menu" className="guild-menu-list">
-          <button type="button" role="menuitem" className="guild-menu-item brand" disabled={!firstText} onClick={run(invite)}>
+          <button type="button" role="menuitem" className="guild-menu-item" disabled={!firstText} onClick={run(invite)}>
             <span>Invite People</span>
             <UserPlus size={20} />
           </button>
