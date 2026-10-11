@@ -20,6 +20,7 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${PORT}`,
     viewport: { width: 1440, height: 900 },
     colorScheme: 'dark',
+    permissions: ['notifications'], // system Chrome starts at 'default', which shows the notification prompt bar over the top of every page
     launchOptions: process.env.VOKKO_CHROMIUM ? { executablePath: process.env.VOKKO_CHROMIUM } : {},
   },
   webServer: {

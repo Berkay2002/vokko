@@ -409,6 +409,17 @@ test.describe('attachments', () => {
     expect(Math.abs(boxes[1]!.x + boxes[1]!.width - boxes[0]!.x - total)).toBeLessThan(1.5);
     expect(boxes[2]!.y).toBeGreaterThan(boxes[0]!.y + 100);
   });
+
+  test('an audio file shows its file card with a player', async ({ page }) => {
+    await openStockTalk(page);
+    await page.locator('input[type=file]').setInputFiles({ name: 'clip.ogg', mimeType: 'audio/ogg', buffer: Buffer.from('OggS') });
+    await settled(page);
+    await stockBox(page).fill('have a listen');
+    await page.keyboard.press('Enter');
+    const card = row(page, 'have a listen').locator('.chat-file.audio');
+    await expect(card.locator('.chat-file-name')).toHaveText('clip.ogg');
+    await expect(card.getByLabel('clip.ogg', { exact: true })).toHaveAttribute('controls', '');
+  });
 });
 
 test.describe('emoji', () => {

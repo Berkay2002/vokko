@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { NavToggle } from "./NavToggle";
-import { Check, MessageCircle, MoreVertical, Search, Users, X } from "lucide-react";
+import { Check, MessageCircle, MoreVertical, Search, Users, Volume2, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
 import { RelationshipType, type Relationship } from "../api/types";
+import { useVoice } from "../voice/store";
+import { activeFriends, type ActiveEntry } from "./activeNow";
 import { Tooltip, useContextMenu } from "../ui";
 import { getPrefs } from "../ui/prefs";
 import { FriendSuggestionsTab } from "../community";
@@ -148,7 +150,12 @@ function AddFriend() {
 }
 
 function ActiveNow() {
-  const active = useStore(s => Object.values(s.relationships).filter(r => r.type === RelationshipType.Friend && s.presences[r.id]?.custom_status));
+  const relationships = useStore(s => s.relationships);
+  const presences = useStore(s => s.presences);
+  const channels = useStore(s => s.channels);
+  const guilds = useStore(s => s.guilds);
+  const voice = useVoice(s => s.states);
+  const active = useMemo(() => activeFriends(relationships, presences, voice, channels, guilds), [relationships, presences, voice, channels, guilds]);
   return (
     <aside className="active-now" aria-label="Active Now">
       <h2>Active Now</h2>
@@ -158,21 +165,22 @@ function ActiveNow() {
           <div className="active-now-empty-text">When a friend starts an activity, like playing a game or hanging out on voice, we&apos;ll show it here!</div>
         </div>
       ) : (
-        active.map(r => <ActiveCard key={r.id} relationship={r} />)
+        active.map(e => <ActiveCard key={e.relationship.id} entry={e} />)
       )}
     </aside>
   );
 }
 
-function ActiveCard({ relationship }: { relationship: Relationship }) {
-  const custom = useStore(s => s.presences[relationship.id]?.custom_status);
+function ActiveCard({ entry }: { entry: ActiveEntry }) {
+  const { relationship } = entry;
   return (
     <button type="button" className="active-card" onClick={() => void openDirectMessage(relationship.id)}>
       <Avatar user={relationship.user} size={32} status />
       <span className="active-card-text">
         <span className="active-card-name">{displayName(relationship.user)}</span>
-        <span className="active-card-sub">{custom}</span>
+        <span className="active-card-sub">{entry.text}</span>
       </span>
+      {entry.voice && <Volume2 size={16} className="active-card-voice" aria-label="In a voice channel" />}
     </button>
   );
 }

@@ -273,6 +273,8 @@ html.message-compact { --chat-gutter: 80px; }
 .chat-file-size { color: var(--chat-text-muted); font-size: 12px; line-height: 16px; }
 .chat-file-download { flex: none; color: var(--chat-icon); display: grid; place-items: center; padding: 4px; border-radius: 4px; }
 .chat-file-download:hover { color: var(--chat-icon-hover); }
+.chat-file.audio { flex-wrap: wrap; }
+.chat-audio { flex-basis: 100%; height: 32px; }
 
 .chat-lightbox { position: fixed; inset: 0; z-index: 10000; background: var(--chat-lightbox-scrim); }
 /* Measured in Discord: the modal is the viewport minus 36px top/bottom and 24px left/right; the image is centred in all of it, the top bar floats over it. */

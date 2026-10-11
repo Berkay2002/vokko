@@ -11,6 +11,7 @@ import { formatBytes, formatFullDate, formatMessageTimestamp, isSpoilerName } fr
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
 const isVideo = (a: Attachment): boolean => !!a.content_type?.startsWith('video/');
+const isAudio = (a: Attachment): boolean => !!a.content_type?.startsWith('audio/') || /\.(mp3|ogg|oga|wav|flac|m4a|opus)$/i.test(a.filename);
 /** Formats that can animate: they follow Settings > Accessibility > "Play GIFs when Vokko is focused". */
 const isAnimatable = (a: Attachment): boolean => /^image\/(gif|apng|webp)$/.test(a.content_type ?? '') || /\.(gif|apng|webp)$/i.test(a.filename);
 
@@ -128,13 +129,15 @@ export function Attachments({ message }: { message: Message }) {
 
 export function FileCard({ attachment }: { attachment: Attachment }) {
   const Icon = fileIcon(attachment);
-  return <div className="chat-file">
+  const audio = isAudio(attachment);
+  return <div className={`chat-file${audio ? ' audio' : ''}`}>
     <Icon className="chat-file-icon" size={40} aria-hidden="true" />
     <div className="chat-file-meta">
       <a className="chat-file-name" href={resolveUrl(attachment.url)} target="_blank" rel="noopener noreferrer" title={attachment.filename}>{attachment.filename}</a>
       <span className="chat-file-size">{formatBytes(attachment.size)}</span>
     </div>
     <a className="chat-file-download" href={resolveUrl(attachment.url)} download={attachment.filename} aria-label={`Download ${attachment.filename}`} title="Download"><Download size={24} /></a>
+    {audio && <audio className="chat-audio" src={resolveUrl(attachment.url)} controls preload="metadata" aria-label={attachment.filename} />}
   </div>;
 }
 
