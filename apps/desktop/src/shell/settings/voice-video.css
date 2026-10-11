@@ -342,7 +342,13 @@
 }
 
 .vv-sound-row {
+  align-items: center;
   gap: 12px;
+}
+
+/* The label takes the slack, so Preview sits beside the toggle at the same spot on every row. */
+.vv-sound-row .switch-row-text {
+  flex: 1;
 }
 
 .vv-preview {

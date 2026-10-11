@@ -438,7 +438,9 @@
   font-weight: 500;
 }
 
+/* The value hugs the action, so every row's button lines up on the right edge. */
 .sm-row-value {
+  margin-left: auto;
   min-width: 0;
   overflow: hidden;
   color: var(--text-default);
@@ -447,6 +449,10 @@
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sm-row-label + .sm-btn {
+  margin-left: auto;
 }
 
 .sm-row-input {
