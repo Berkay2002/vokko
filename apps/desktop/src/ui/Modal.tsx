@@ -22,12 +22,13 @@ export interface ModalProps {
 /** Centered dialog with backdrop, Escape / backdrop close, focus trap and focus restore. */
 export function Modal({ open, onClose, title, children, footer, className, hideClose, persistent, labelledBy }: ModalProps) {
   const dialog = useRef<HTMLDivElement>(null);
-  useLayer(open, onClose);
+  const layer = useLayer(open, onClose);
   useFocusTrap(open, () => dialog.current);
   if (!open) return null;
   return createPortal(
     <div className="modal-layer">
-      <div className="modal-backdrop" onMouseDown={persistent ? undefined : onClose} />
+      {/* Only when this modal is the top layer: a click outside an open dropdown or popout closes just that. */}
+      <div className="modal-backdrop" onMouseDown={persistent ? undefined : () => layer.isTop() && onClose()} />
       <div ref={dialog} className={`modal ${className ?? ""}`} role="dialog" aria-modal="true" aria-label={typeof title === "string" ? title : undefined} aria-labelledby={labelledBy} tabIndex={-1}>
         {(title !== undefined || !hideClose) && (
           <div className="modal-header">

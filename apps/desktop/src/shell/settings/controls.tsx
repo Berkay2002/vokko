@@ -1,5 +1,5 @@
-import { useId, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import type { ReactNode } from "react";
+import { Dropdown } from "../../ui";
 
 /** Building blocks shared by the user/server settings pages. Styles in src/styles/settings.css. */
 
@@ -51,20 +51,9 @@ export function Field({ label, note, children }: { label: string; note?: ReactNo
   );
 }
 
+/** Settings dropdown: the shared custom listbox, boxed like the old native select (`.select`). */
 export function Select<T extends string>({ value, options, onChange, disabled, label }: { value: T; options: { value: T; label: string }[]; onChange(next: T): void; disabled?: boolean; label: string }) {
-  const id = useId();
-  return (
-    <div className="select-wrap">
-      <select id={id} aria-label={label} className="select" value={value} disabled={disabled} onChange={e => onChange(e.target.value as T)}>
-        {options.map(o => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown size={18} className="select-chevron" />
-    </div>
-  );
+  return <Dropdown<T> className="select-wrap" triggerClassName="select" label={label} value={value} options={options} onChange={onChange} disabled={disabled} />;
 }
 
 export function Slider({ value, min, max, step = 1, onChange, label, format, disabled }: { value: number; min: number; max: number; step?: number; onChange(next: number): void; label: string; format?: (v: number) => string; disabled?: boolean }) {

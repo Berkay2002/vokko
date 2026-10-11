@@ -344,13 +344,8 @@
 /* Compact select: 28 px tall, 14 px text, so it fits the 38 px tab row. */
 .threads-sort .select {
   height: 28px;
-  padding: 0 32px 0 10px;
+  padding: 0 8px 0 10px;
   font-size: 14px;
-}
-
-.threads-sort .select-chevron {
-  top: 5px;
-  right: 8px;
 }
 
 /* "2 Joined Threads" / "3 Other Active Threads": Discord's 12/16 w600 uppercase list headers. */

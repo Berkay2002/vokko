@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { pickOption } from './helpers';
 
 // Server folders on the rail and invite link settings (mock mode; docs/api.md "Invites and user settings").
 
@@ -69,8 +70,14 @@ test('the invite modal creates a limited invite and lists friends to send it to'
 
   await dialog.getByRole('button', { name: 'Edit invite link.' }).click();
   const settings = page.getByRole('dialog', { name: 'Server invite link settings' });
-  await settings.getByLabel('Expire After').selectOption({ label: '30 minutes' });
-  await settings.getByLabel('Max Number of Uses').selectOption({ label: '5 uses' });
+  // A backdrop click while a dropdown is open closes only the dropdown, not the dialog.
+  await settings.getByRole('combobox', { name: 'Expire After' }).click();
+  await expect(settings.getByRole('listbox', { name: 'Expire After' })).toBeVisible(); // portalled inside the aria-modal dialog
+  await page.mouse.click(5, 5);
+  await expect(page.getByRole('listbox', { name: 'Expire After' })).toHaveCount(0);
+  await expect(settings).toBeVisible();
+  await pickOption(page, settings.getByRole('combobox', { name: 'Expire After' }), '30 minutes');
+  await pickOption(page, settings.getByRole('combobox', { name: 'Max Number of Uses' }), '5 uses');
   await settings.getByRole('button', { name: 'Generate a New Link' }).click();
 
   const main = page.getByRole('dialog', { name: /Invite friends to/ });

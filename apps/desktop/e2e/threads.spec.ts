@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { composer, send } from './helpers';
+import { composer, pickOption, send } from './helpers';
 import { openChannel, panel } from './threadHelpers';
 
 // Threads, forum channels and announcement channels against the in-memory mock (?as=sam&mockLatency=0: sam is an administrator).
@@ -146,10 +146,10 @@ test('forum: gallery layout, sort and the create-channel dialog offers Forum, An
   await openChannel(page, 'support');
   await page.getByRole('button', { name: 'Gallery view' }).click();
   await expect(page.locator('.forum-posts.gallery')).toBeVisible();
-  await page.getByLabel('Sort posts').selectOption('creation_time');
+  await pickOption(page, page.getByRole('combobox', { name: 'Sort posts' }), 'Date Posted');
   await expect(page.locator('.forum-post').first()).toContainText('Read this before posting'); // pinned stays first
   await expect(page.locator('.forum-post').nth(1)).toContainText('Idea: show joined threads'); // newest post of the seed
-  await page.getByLabel('Sort posts').selectOption('last_message_time');
+  await pickOption(page, page.getByRole('combobox', { name: 'Sort posts' }), 'Recent Activity');
   await page.getByRole('button', { name: 'List view' }).click();
 
   await page.locator('.category-header').first().hover(); // the + button shows on hover
@@ -171,7 +171,7 @@ test('announcements: follow into another channel, publish a message, the copy ar
   await page.getByRole('button', { name: 'Follow', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Follow Announcement Channel' });
   await expect(dialog.getByLabel('Server')).toContainText("Sam's server");
-  await dialog.getByLabel('Channel').selectOption({ label: '# general' });
+  await pickOption(page, dialog.getByRole('combobox', { name: 'Channel' }), '# general');
   await dialog.getByRole('button', { name: 'Follow', exact: true }).click();
   await expect(dialog.getByRole('status')).toContainText('#general');
   await dialog.getByRole('button', { name: 'Done' }).click();

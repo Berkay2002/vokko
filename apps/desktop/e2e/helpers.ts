@@ -1,4 +1,12 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+
+/** Picks `option` in one of the app's custom dropdowns (ui/Dropdown.tsx): opens the combobox, then clicks the option.
+ * The listbox is portalled out of the trigger's parent, so the option is looked up on the page, not inside the dialog. */
+export async function pickOption(page: Page, combobox: Locator, option: string): Promise<void> {
+  await combobox.click();
+  const name = (await combobox.getAttribute('aria-label')) ?? undefined;
+  await page.getByRole('listbox', { name, exact: true }).getByRole('option', { name: option, exact: true }).click();
+}
 
 /** Signs in to the mock backend as sam and opens the DM with `name`. */
 export async function openDm(page: Page, name = 'alice'): Promise<void> {

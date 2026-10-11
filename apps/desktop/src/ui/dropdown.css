@@ -1,0 +1,95 @@
+/* Shared custom dropdown (ui/Dropdown.tsx). Theme tokens only.
+ * .dropdown-trigger is layout (icon left, label, greyed detail, chevron right); .dropdown-box is the default box.
+ * Callers can swap the box for their own class (settings `.select`, the camera modal's `.voice-camera-device`). */
+
+.dropdown {
+  position: relative;
+  min-width: 0;
+}
+
+.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dropdown-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dropdown-box {
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--background-surface-higher);
+  color: var(--text-default);
+  font-size: 14px;
+}
+
+.dropdown-icon {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.dropdown-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdown-detail {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.dropdown-chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+/* Portalled into the nearest aria-modal dialog (or <body>) and placed with fixed coordinates, so no ancestor overflow clips it. */
+.dropdown-list {
+  position: fixed;
+  z-index: var(--z-context);
+  max-height: 240px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--background-surface-higher);
+  outline: none;
+}
+
+.dropdown-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-default);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.dropdown-option.active {
+  background: var(--interactive-background-hover);
+}
+
+.dropdown-option.selected .dropdown-name {
+  color: var(--brand-500);
+  font-weight: 600;
+}

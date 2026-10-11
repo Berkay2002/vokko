@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { pickOption } from './helpers';
 import { openChannel, openThreadFromPopout, panel } from './threadHelpers';
 
 // Threads popout (GLD-013): joined / other active / archived sections, search and sort.
@@ -44,7 +45,7 @@ test('search filters by name and sort switches between activity and creation tim
   const popout = page.getByRole('dialog', { name: 'Threads' });
   const joined = popout.getByRole('region', { name: 'Joined Threads' }).locator('.thread-row-name');
   await expect(joined).toHaveText(['gateway docs', 'fresh talk']);
-  await popout.getByLabel('Sort threads').selectOption('created');
+  await pickOption(page, popout.getByRole('combobox', { name: 'Sort threads' }), 'Date Created');
   await expect(joined).toHaveText(['fresh talk', 'gateway docs']);
 
   await popout.getByLabel('Search for thread name').fill('COFFEE');

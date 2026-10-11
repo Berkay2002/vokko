@@ -127,12 +127,13 @@
   opacity: 0.5;
 }
 
-.select-chevron {
-  position: absolute;
-  top: 11px;
-  right: 12px;
+/* The select is the shared Dropdown (ui/Dropdown.tsx): its chevron sits in the trigger's flex row, 12px from the edge. */
+.select.dropdown-trigger {
+  padding-right: 12px;
+}
+
+.select .dropdown-chevron {
   color: var(--interactive-text-default);
-  pointer-events: none;
 }
 
 /* slider */

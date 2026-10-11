@@ -1,6 +1,6 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import { Camera, ChevronDown, ChevronRight, Mic, Volume2, type LucideIcon } from "lucide-react";
-import { Modal, resetPrefs, setPref, usePrefs, type Prefs } from "../../ui";
+import { Dropdown, Modal, resetPrefs, setPref, usePrefs, type Prefs } from "../../ui";
 import { previewSound } from "../../notify/sounds";
 import { VOICE_SOUNDS, isSoundEnabled, withSoundEnabled, type VoiceSoundId } from "../../notify/soundCatalog";
 import { fromSuppressionChoice, resolveAudio, suppressionChoice, type InputProfile } from "../../voice/audioProfile";
@@ -88,74 +88,13 @@ const STATUS_LABEL: Record<string, string> = {
   disconnected: "Disconnected",
 };
 
-/** Device picker: a listbox so each entry can carry an icon and a greyed driver / group name (a native <select> cannot). */
-function DeviceSelect({ label, value, options, onChange, disabled, icon: Icon }: { label: string; value: string; options: DeviceOption[]; onChange(next: string): void; disabled?: boolean; icon: LucideIcon }) {
-  const id = useId();
-  const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
-  const root = useRef<HTMLDivElement>(null);
-  const list = useRef<HTMLUListElement>(null);
-  const selected = Math.max(0, options.findIndex(o => o.value === value));
-  const current = splitDeviceLabel(options[selected]?.label ?? "Default");
-
-  useEffect(() => {
-    if (!open) return;
-    list.current?.focus();
-    const onDown = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", onDown, true);
-    return () => document.removeEventListener("pointerdown", onDown, true);
-  }, [open]);
-
-  const show = () => {
-    setActive(selected);
-    setOpen(true);
-  };
-  const choose = (index: number) => {
-    const option = options[index];
-    if (option) onChange(option.value);
-    setOpen(false);
-    (root.current?.querySelector("button") as HTMLButtonElement | null)?.focus();
-  };
-  const onListKey = (event: KeyboardEvent) => {
-    if (event.key === "ArrowDown") setActive(a => Math.min(options.length - 1, a + 1));
-    else if (event.key === "ArrowUp") setActive(a => Math.max(0, a - 1));
-    else if (event.key === "Home") setActive(0);
-    else if (event.key === "End") setActive(options.length - 1);
-    else if (event.key === "Enter" || event.key === " ") choose(active);
-    else if (event.key === "Escape" || event.key === "Tab") {
-      setOpen(false);
-      if (event.key === "Escape") (root.current?.querySelector("button") as HTMLButtonElement | null)?.focus();
-    } else return;
-    if (event.key !== "Tab") event.preventDefault();
-    event.stopPropagation();
-  };
-
-  return (
-    <div className="vv-select" ref={root}>
-      <button type="button" className="vv-select-button" aria-label={label} aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={() => (open ? setOpen(false) : show())}>
-        <Icon size={18} aria-hidden className="vv-select-icon" />
-        <span className="vv-device-name">{current.name}</span>
-        {current.detail && <span className="vv-device-detail">({current.detail})</span>}
-        <ChevronDown size={18} aria-hidden className="vv-select-chevron" />
-      </button>
-      {open && (
-        <ul ref={list} className="vv-select-list" role="listbox" tabIndex={-1} aria-label={label} aria-activedescendant={`${id}-${active}`} onKeyDown={onListKey}>
-          {options.map((o, i) => {
-            const parts = splitDeviceLabel(o.label);
-            return (
-              <li key={o.value} id={`${id}-${i}`} role="option" aria-selected={i === selected} className={`vv-select-option${i === active ? " active" : ""}${i === selected ? " selected" : ""}`} onPointerEnter={() => setActive(i)} onClick={() => choose(i)}>
-                <Icon size={16} aria-hidden className="vv-select-icon" />
-                <span className="vv-device-name">{parts.name}</span>
-                {parts.detail && <span className="vv-device-detail">({parts.detail})</span>}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
+/** Device picker: the shared dropdown, with each device's driver / group name split off and greyed. */
+function DeviceSelect({ label, value, options, onChange, disabled, icon }: { label: string; value: string; options: DeviceOption[]; onChange(next: string): void; disabled?: boolean; icon: LucideIcon }) {
+  const items = options.map(o => {
+    const parts = splitDeviceLabel(o.label);
+    return { value: o.value, label: parts.name, detail: parts.detail || undefined };
+  });
+  return <Dropdown label={label} value={value} options={items} onChange={onChange} disabled={disabled} icon={icon} />;
 }
 
 /** Segmented level meter; with `threshold` set a slider sits over it so the sensitivity is set against the live signal. */

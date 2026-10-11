@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import { message, openDm, send } from './helpers';
+import { message, openDm, pickOption, send } from './helpers';
 
 // Settings > Accessibility (src/shell/settings/AccessibilityPage.tsx): every control must change a computed style or a behaviour
 // somewhere in the app, and survive a reload. Runs on the mock backend. Set VOKKO_SHOTS=<dir> to write the page screenshots there.
@@ -236,7 +236,7 @@ test.describe('color and contrast', () => {
   test('saturation of custom colours is a separate switch, disabled at 100%', async ({ page }) => {
     const dialog = await openAccessibility(page);
     await expect(toggle(dialog, 'Apply saturation to custom colors')).toBeDisabled();
-    await dialog.getByRole('combobox', { name: 'Role colors' }).selectOption('name');
+    await pickOption(page, dialog.getByRole('combobox', { name: 'Role colors' }), 'In names');
     await toggle(dialog, 'Display name styles').click();
     const sample = dialog.locator('.a11y-preview .a11y-sample-name').first();
     const full = channelRgb(await style(sample, 'color'));
@@ -335,12 +335,13 @@ test.describe('color and contrast', () => {
   test('role colours: in names, next to names, hide', async ({ page }) => {
     const dialog = await openAccessibility(page);
     const select = dialog.getByRole('combobox', { name: 'Role colors' });
-    await expect(select.locator('option')).toHaveText(['In names', 'Next to names', 'Hide']);
-    await select.selectOption('dot');
+    await select.click();
+    await expect(page.getByRole('listbox', { name: 'Role colors' }).getByRole('option')).toHaveText(['In names', 'Next to names', 'Hide']);
+    await page.getByRole('option', { name: 'Next to names', exact: true }).click();
     await expect(dialog.locator('.a11y-preview .a11y-sample-role')).toHaveCount(2);
-    await select.selectOption('none');
+    await pickOption(page, select, 'Hide');
     await expect(dialog.locator('.a11y-preview .a11y-sample-role')).toHaveCount(0);
-    await select.selectOption('name');
+    await pickOption(page, select, 'In names');
     await expect(dialog.locator('.a11y-preview .a11y-sample-name.role').first()).toBeVisible();
     expect((await storedPrefs(page)).roleColors).toBe('name');
   });

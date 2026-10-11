@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { pickOption } from './helpers';
 
 // Video perks against the mock backend (FakeTransport paints the remote pictures; the camera preview uses Chromium's fake
 // device, see video.config.ts): Go Live quality picker, camera preview and backgrounds, watching a stream, the Voice & Video
@@ -44,10 +45,12 @@ test('Go Live: every resolution and frame rate is offered, the choice goes live 
   const share = dialog(page, 'Share your screen');
   await expect(share).toBeVisible();
 
-  await expect(share.getByRole('combobox', { name: 'Resolution' }).locator('option')).toHaveText(['720p', '1080p', '1440p', 'Source']);
-  await expect(share.getByRole('combobox', { name: 'Frame rate' }).locator('option')).toHaveText(['15 fps', '30 fps', '60 fps']);
-  await share.getByRole('combobox', { name: 'Resolution' }).selectOption('1440p');
-  await share.getByRole('combobox', { name: 'Frame rate' }).selectOption('60');
+  await share.getByRole('combobox', { name: 'Resolution' }).click();
+  await expect(page.getByRole('listbox', { name: 'Resolution' }).getByRole('option')).toHaveText(['720p', '1080p', '1440p', 'Source']);
+  await page.getByRole('option', { name: '1440p', exact: true }).click();
+  await share.getByRole('combobox', { name: 'Frame rate' }).click();
+  await expect(page.getByRole('listbox', { name: 'Frame rate' }).getByRole('option')).toHaveText(['15 fps', '30 fps', '60 fps']);
+  await page.getByRole('option', { name: '60 fps', exact: true }).click();
   await expect(share.getByText(/^1440p · 60 fps · /)).toBeVisible();
   if (SHOTS) {
     mkdirSync(SHOTS, { recursive: true });
@@ -68,8 +71,8 @@ test('Go Live: every resolution and frame rate is offered, the choice goes live 
 
   // The next dialog starts from the remembered choice.
   await bar.getByRole('button', { name: 'Share your screen' }).click();
-  await expect(dialog(page, 'Share your screen').getByRole('combobox', { name: 'Resolution' })).toHaveValue('1440p');
-  await expect(dialog(page, 'Share your screen').getByRole('combobox', { name: 'Frame rate' })).toHaveValue('60');
+  await expect(dialog(page, 'Share your screen').getByRole('combobox', { name: 'Resolution' })).toHaveText('1440p');
+  await expect(dialog(page, 'Share your screen').getByRole('combobox', { name: 'Frame rate' })).toHaveText('60 fps');
 });
 
 test('watching someone else\'s stream: Watch Stream, then the quality menu', async ({ page }) => {
@@ -222,8 +225,8 @@ test('Voice & Video settings: six sections, persisted choices, sounds and reset'
 
   // Streaming defaults.
   await settings.getByRole('button', { name: 'Show advanced stream settings' }).click();
-  await settings.getByRole('combobox', { name: 'Stream resolution' }).selectOption('1440p');
-  await settings.getByRole('combobox', { name: 'Stream frame rate' }).selectOption('60');
+  await pickOption(page, settings.getByRole('combobox', { name: 'Stream resolution' }), '1440p');
+  await pickOption(page, settings.getByRole('combobox', { name: 'Stream frame rate' }), '60 fps');
   expect(await prefs(page)).toMatchObject({ streamResolution: '1440p', streamFps: 60 });
   if (SHOTS) {
     await settings.getByRole('combobox', { name: 'Stream resolution' }).scrollIntoViewIfNeeded();

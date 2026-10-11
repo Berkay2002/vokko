@@ -2,10 +2,10 @@
 // here, background included) and Go Live (quality choice, then the system's own picker chooses the screen or window).
 
 import { useState } from "react";
-import { Camera, ChevronDown, Monitor, SmilePlus, VideoOff } from "lucide-react";
+import { Camera, Monitor, SmilePlus, VideoOff } from "lucide-react";
 import { useStore } from "../api/store";
 import { closeModal } from "../shell/modalStore";
-import { Modal, setPref, usePrefs } from "../ui";
+import { Dropdown, Modal, setPref, usePrefs } from "../ui";
 import { ApiRequestError } from "../api/rest";
 import { screenChoiceFromPrefs, setVoiceChannelStatus, startCamera, startScreenShare } from "./engine";
 import { useMedia } from "./mediaStore";
@@ -131,31 +131,25 @@ export function CameraPreviewModal() {
           </div>
         )}
       </div>
-      <div className="voice-camera-device">
-        <Camera size={16} aria-hidden="true" />
-        <select aria-label="Camera" className="voice-camera-select" value={deviceId === "default" ? "" : deviceId} onChange={e => setPref("cameraDevice", e.target.value || "default")}>
-          <option value="">Default camera</option>
-          {preview.devices
-            .filter(d => d.deviceId && d.deviceId !== "default")
-            .map((d, i) => (
-              <option key={d.deviceId} value={d.deviceId}>
-                {d.label || `Camera ${i + 1}`}
-              </option>
-            ))}
-        </select>
-        <ChevronDown size={16} aria-hidden="true" />
-      </div>
-      <div className="voice-camera-device">
-        <Monitor size={16} aria-hidden="true" />
-        <select aria-label="Camera resolution" className="voice-camera-select" value={resolution} onChange={e => isCameraResolution(e.target.value) && setPref("cameraResolution", e.target.value)}>
-          {CAMERA_RESOLUTIONS.map(r => (
-            <option key={r} value={r}>
-              {r === "720p" ? "720p (default)" : r}
-            </option>
-          ))}
-        </select>
-        <ChevronDown size={16} aria-hidden="true" />
-      </div>
+      <Dropdown
+        label="Camera"
+        icon={Camera}
+        triggerClassName="voice-camera-device"
+        value={deviceId === "default" ? "" : deviceId}
+        options={[
+          { value: "", label: "Default camera" },
+          ...preview.devices.filter(d => d.deviceId && d.deviceId !== "default").map((d, i) => ({ value: d.deviceId, label: d.label || `Camera ${i + 1}` })),
+        ]}
+        onChange={next => setPref("cameraDevice", next || "default")}
+      />
+      <Dropdown
+        label="Camera resolution"
+        icon={Monitor}
+        triggerClassName="voice-camera-device"
+        value={resolution}
+        options={CAMERA_RESOLUTIONS.map(r => ({ value: r, label: r === "720p" ? "720p (default)" : r }))}
+        onChange={next => isCameraResolution(next) && setPref("cameraResolution", next)}
+      />
       <h3 className="voice-camera-heading">Video Background</h3>
       <VideoBackgroundPicker value={background} onChange={next => setPref("videoBackground", next)} error={preview.backgroundError} />
     </Modal>
@@ -207,26 +201,14 @@ export function ScreenSharePickerModal() {
     >
       <p className="modal-subtle">Pick the quality, then choose the screen or window to share in the next step.</p>
       <div className="golive-grid">
-        <label className="settings-field">
+        <div className="settings-field">
           <span className="field-label">Resolution</span>
-          <select aria-label="Resolution" className="voice-camera-select" value={resolution} onChange={e => isScreenResolution(e.target.value) && setResolution(e.target.value)}>
-            {SCREEN_RESOLUTIONS.map(r => (
-              <option key={r} value={r}>
-                {RESOLUTION_LABEL[r]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="settings-field">
+          <Dropdown label="Resolution" className="select-wrap" triggerClassName="select" value={resolution} options={SCREEN_RESOLUTIONS.map(r => ({ value: r, label: RESOLUTION_LABEL[r] }))} onChange={next => isScreenResolution(next) && setResolution(next)} />
+        </div>
+        <div className="settings-field">
           <span className="field-label">Frame rate</span>
-          <select aria-label="Frame rate" className="voice-camera-select" value={fps} onChange={e => isScreenFps(Number(e.target.value)) && setFps(Number(e.target.value) as ScreenFps)}>
-            {SCREEN_FPS.map(f => (
-              <option key={f} value={f}>
-                {f} fps
-              </option>
-            ))}
-          </select>
-        </label>
+          <Dropdown label="Frame rate" className="select-wrap" triggerClassName="select" value={String(fps)} options={SCREEN_FPS.map(f => ({ value: String(f), label: `${f} fps` }))} onChange={next => isScreenFps(Number(next)) && setFps(Number(next) as ScreenFps)} />
+        </div>
       </div>
       <div className="voice-share-options">
         <div className="voice-share-mode" role="radiogroup" aria-label="Stream mode">
