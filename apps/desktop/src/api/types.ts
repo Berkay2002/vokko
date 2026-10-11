@@ -42,6 +42,18 @@ export interface Channel {
   last_message_id: Snowflake | null;
   owner_id?: Snowflake | null; // group DM
   icon?: string | null; // group DM
+  permission_overwrites?: PermissionOverwrite[]; // guild channels only
+}
+
+export enum OverwriteType {
+  Role = 0,
+  Member = 1,
+}
+export interface PermissionOverwrite {
+  id: Snowflake; // role id or user id
+  type: OverwriteType;
+  allow: string; // bitfield as decimal string
+  deny: string;
 }
 
 export interface Role {
@@ -68,6 +80,7 @@ export interface GuildMember {
   nick: string | null;
   roles: Snowflake[];
   joined_at: ISO8601;
+  communication_disabled_until?: ISO8601 | null; // timeout end; null/absent = not timed out
 }
 
 export interface Attachment {
@@ -207,6 +220,37 @@ export interface UserProfile {
   guild_member?: GuildMember; // when ?guild_id= is given and the user is a member
 }
 
+// ---- Moderation payloads ----
+export interface BanRequest {
+  delete_message_seconds?: number; // 0..604800, deletes the user's recent messages in the guild
+  reason?: string;
+}
+export interface Ban {
+  user: User;
+  reason: string | null;
+}
+export interface EditMemberRequest {
+  nick?: string | null;
+  roles?: Snowflake[]; // full replacement list (without @everyone)
+  communication_disabled_until?: ISO8601 | null; // max 28 days ahead
+}
+export interface RoleRequest {
+  name?: string;
+  color?: number;
+  hoist?: boolean;
+  permissions?: string;
+  mentionable?: boolean;
+}
+export interface RolePositionUpdate {
+  id: Snowflake;
+  position: number;
+}
+export interface OverwriteRequest {
+  type: OverwriteType;
+  allow: string;
+  deny: string;
+}
+
 export interface ApiError {
   code: number; // Discord-like numeric code, e.g. 10003 unknown channel, 50001 missing access, 50035 invalid form body
   message: string;
@@ -274,6 +318,12 @@ export interface GatewayEvents {
   GUILD_DELETE: { id: Snowflake };
   GUILD_MEMBER_ADD: GuildMember & { guild_id: Snowflake };
   GUILD_MEMBER_REMOVE: { guild_id: Snowflake; user: User };
+  GUILD_MEMBER_UPDATE: GuildMember & { guild_id: Snowflake };
+  GUILD_BAN_ADD: { guild_id: Snowflake; user: User };
+  GUILD_BAN_REMOVE: { guild_id: Snowflake; user: User };
+  GUILD_ROLE_CREATE: { guild_id: Snowflake; role: Role };
+  GUILD_ROLE_UPDATE: { guild_id: Snowflake; role: Role };
+  GUILD_ROLE_DELETE: { guild_id: Snowflake; role_id: Snowflake };
   RESUMED: Record<string, never>; // after a successful op 6 replay
   PRESENCE_UPDATE: Presence;
   USER_UPDATE: User; // profile/avatar change; sent to the user and everyone sharing a guild, DM or relationship with them

@@ -32,11 +32,23 @@ General rules:
 | PATCH | /guilds/{id} | `{name?, icon_attachment_id?, system_channel_id?}` → `Guild` |
 | DELETE | /guilds/{id} | owner only, 204 |
 | GET | /guilds/{id}/channels | `Channel[]` |
-| POST | /guilds/{id}/channels | `{name, type, parent_id?, topic?}` → `Channel` |
+| POST | /guilds/{id}/channels | `{name, type, parent_id?, topic?, permission_overwrites?}` → `Channel` (private channel = @everyone deny VIEW_CHANNEL overwrite) |
 | PATCH | /channels/{id} | `{name?, topic?, position?, parent_id?}` → `Channel` |
 | DELETE | /channels/{id} | 200 + `Channel` (guild) / closes DM |
 | GET | /guilds/{id}/members?limit&after | `GuildMember[]` |
 | DELETE | /users/@me/guilds/{id} | leave guild, 204 |
+| DELETE | /guilds/{id}/members/{uid} | kick (KICK_MEMBERS + hierarchy), 204, emits GUILD_MEMBER_REMOVE |
+| PATCH | /guilds/{id}/members/{uid} | `EditMemberRequest` → `GuildMember`: nick needs MANAGE_NICKNAMES, roles MANAGE_ROLES (only roles below your highest), timeout MODERATE_MEMBERS; emits GUILD_MEMBER_UPDATE |
+| PATCH | /guilds/{id}/members/@me | `{nick}` (CHANGE_NICKNAME) → `GuildMember` |
+| GET | /guilds/{id}/bans | `Ban[]` (BAN_MEMBERS) |
+| PUT | /guilds/{id}/bans/{uid} | `BanRequest`, 204; removes the member, emits GUILD_BAN_ADD + GUILD_MEMBER_REMOVE; banned users can't rejoin via invite (403 40007) |
+| DELETE | /guilds/{id}/bans/{uid} | unban, 204, emits GUILD_BAN_REMOVE |
+| POST | /guilds/{id}/roles | `RoleRequest` → `Role` (MANAGE_ROLES; new role at position 1; can't grant bits you lack) |
+| PATCH | /guilds/{id}/roles | `RolePositionUpdate[]` → `Role[]` (only roles below your highest) |
+| PATCH | /guilds/{id}/roles/{rid} | `RoleRequest` → `Role` |
+| DELETE | /guilds/{id}/roles/{rid} | 204 (not @everyone) |
+| PUT | /channels/{id}/permissions/{oid} | `OverwriteRequest`, 204 (MANAGE_ROLES on the channel), emits CHANNEL_UPDATE |
+| DELETE | /channels/{id}/permissions/{oid} | 204, emits CHANNEL_UPDATE |
 | POST | /channels/{id}/invites | `{max_age?, max_uses?}` → `{code, guild, channel, expires_at}` |
 | GET | /invites/{code} | invite preview |
 | POST | /invites/{code} | accept → `Guild` |
@@ -77,3 +89,5 @@ Client gateway behaviour (shell): first heartbeat after `random() * interval`, t
 Not adopted for now: op 40 QoS heartbeat, ETF encoding, zstd/zlib compression, capabilities/client_state in Identify, the cloud upload flow (resumable PUT to an upload URL), ack tokens.
 
 Embeds: on message create/edit the server extracts up to 5 http(s) URLs (not inside code, not `<url>`-wrapped), fetches each with a 5 s timeout, 1 MiB cap, no private/loopback addresses (SSRF guard), and parses Open Graph / Twitter card / oEmbed-less HTML meta into `Embed` (type link/article/image/video). Results arrive via MESSAGE_UPDATE after the create. Editing with flags SUPPRESS_EMBEDS (1<<2) clears them. Invite links are rendered client-side from GET /invites/{code}, not unfurled.
+
+Moderation: missing permission → 403 50013; acting on someone at or above your highest role (or the owner) → 403 50013. Role/role-position edits are limited to roles below the actor's highest role (owner exempt). Channel overwrites resolve in Discord's order (@everyone, roles combined, member); ADMINISTRATOR in an overwrite is ignored. On guild join the server posts a UserJoin (type 7) system message in `system_channel_id` when set.
