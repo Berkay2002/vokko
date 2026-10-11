@@ -8,6 +8,7 @@ mod channels;
 mod guilds;
 mod invites;
 pub mod messages;
+mod moderation;
 mod overwrites;
 mod reactions;
 pub mod relationships;
@@ -18,6 +19,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(auth::routes())
         .merge(users::routes())
         .merge(guilds::routes())
+        .merge(moderation::routes())
         .merge(channels::routes())
         .merge(overwrites::routes())
         .merge(invites::routes())
