@@ -23,9 +23,10 @@ General rules:
 | GET | /users/@me/channels | DM + group DM `Channel[]` |
 | POST | /users/@me/channels | `{recipient_id}` → existing or new DM `Channel`; `{recipient_ids: []}` → group DM |
 | GET | /users/@me/relationships | `Relationship[]` |
-| PUT | /users/@me/relationships/{user_id} | send/accept friend request (204) |
+| PUT | /users/@me/relationships/{user_id} | body `{}` or `{type: 1}` = send/accept friend request; `{type: 2}` = block (removes any friendship/request, emits RELATIONSHIP_ADD type 2 to the blocker only; the blocked user gets RELATIONSHIP_REMOVE if they had a relationship). 204 |
+| GET | /users/{id}/profile | `UserProfile`: user, mutual guilds, mutual friend count, guild member info when `?guild_id=` |
 | POST | /users/@me/relationships | `{username}` → send friend request by username (204) |
-| DELETE | /users/@me/relationships/{user_id} | remove friend / cancel / decline (204) |
+| DELETE | /users/@me/relationships/{user_id} | remove friend / cancel / decline / unblock (204) |
 | POST | /guilds | `{name, icon_attachment_id?}` → `Guild` (creates @everyone role, "Text Channels"/"Voice Channels" categories, #general, General voice) |
 | GET | /guilds/{id} | `Guild` |
 | PATCH | /guilds/{id} | `{name?, icon_attachment_id?, system_channel_id?}` → `Guild` |

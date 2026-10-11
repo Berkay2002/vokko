@@ -200,6 +200,13 @@ export interface EditMessageRequest {
   flags?: number; // 1 << 2 SUPPRESS_EMBEDS
 }
 
+export interface UserProfile {
+  user: User;
+  mutual_guilds: { id: Snowflake; nick: string | null }[];
+  mutual_friends_count: number;
+  guild_member?: GuildMember; // when ?guild_id= is given and the user is a member
+}
+
 export interface ApiError {
   code: number; // Discord-like numeric code, e.g. 10003 unknown channel, 50001 missing access, 50035 invalid form body
   message: string;
