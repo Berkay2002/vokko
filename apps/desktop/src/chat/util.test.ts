@@ -1,5 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { formatFullDate, formatMessageTimestamp, formatTime } from './util';
+import { ApiRequestError } from '../api/errors';
+import { MAX_UPLOAD_BYTES } from '../api/limits';
+import { formatFullDate, formatMessageTimestamp, formatTime, uploadErrorMessage } from './util';
+
+describe('upload limit', () => {
+  it('is 25 MiB, the server default', () => {
+    expect(MAX_UPLOAD_BYTES).toBe(25 * 1024 * 1024);
+  });
+
+  it('413 / 40005 names the limit instead of the bare server message', () => {
+    const e = new ApiRequestError(413, { code: 40005, message: 'Request entity too large' });
+    expect(uploadErrorMessage(e, MAX_UPLOAD_BYTES + 1)).toBe("This file is larger than the server's limit of 25 MiB per file.");
+    expect(uploadErrorMessage(e, 1024)).toMatch(/size quota .*25 MiB/);
+    expect(uploadErrorMessage(new Error('boom'))).toBe('boom');
+    expect(uploadErrorMessage('x')).toBe('Upload failed');
+  });
+});
 
 // Explicit locales: the output of Intl depends on the machine's default, the tests must not.
 describe('formatMessageTimestamp', () => {

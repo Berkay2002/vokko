@@ -1,11 +1,12 @@
 // Composer drafts and upload tray, kept per channel outside React so they survive channel switches.
 import { useSyncExternalStore } from 'react';
 import type { Attachment, Snowflake } from '../api/types';
+import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES } from '../api/limits';
 import { uploadAttachment } from './shell';
+import { uploadErrorMessage } from './util';
 import type { MentionToken } from './mentionText';
 
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // docs/api.md: 10 MiB per file, 10 files per message
-export const MAX_ATTACHMENTS = 10;
+export { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES };
 
 export interface Upload {
   localId: string;
@@ -89,7 +90,7 @@ export function addFiles(channelId: Snowflake, files: File[]): void {
       .then(attachment => setUpload(channelId, localId, u => ({ ...u, status: 'done', progress: 1, attachment })))
       .catch(e => {
         if (abort.signal.aborted) return;
-        setUpload(channelId, localId, u => ({ ...u, status: 'error', error: e instanceof Error ? e.message : 'Upload failed' }));
+        setUpload(channelId, localId, u => ({ ...u, status: 'error', error: uploadErrorMessage(e, file.size) }));
       });
   }
 }

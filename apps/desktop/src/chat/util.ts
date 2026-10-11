@@ -1,3 +1,5 @@
+import { ApiRequestError } from '../api/errors';
+import { MAX_UPLOAD_BYTES } from '../api/limits';
 import type { Snowflake } from '../api/types';
 
 const DISCORD_EPOCH = 1420070400000n;
@@ -15,12 +17,25 @@ export function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-/** Locale of the chat area: the document language (the shell may set it from a language setting), else the webview's own. */
+/**
+ * Locale of the chat area: a document language the shell set from a language setting, else the webview's own. A bare "en" is the static
+ * default of index.html (nobody chose it), so it does not shadow the OS language.
+ */
 export function chatLocale(): string {
   const lang = typeof document !== 'undefined' ? document.documentElement.lang : '';
-  if (lang) return lang;
+  if (lang && lang.toLowerCase() !== 'en') return lang;
   if (typeof navigator === 'undefined') return 'en-US';
   return navigator.languages?.[0] || navigator.language || 'en-US';
+}
+
+/** Text for a failed upload. 413 / code 40005 names the server's per-file limit instead of the bare "Request entity too large". */
+export function uploadErrorMessage(e: unknown, fileSize?: number): string {
+  if (e instanceof ApiRequestError && (e.status === 413 || e.code === 40005)) {
+    const limit = `${MAX_UPLOAD_BYTES / (1024 * 1024)} MiB`;
+    if (fileSize === undefined || fileSize > MAX_UPLOAD_BYTES) return `This file is larger than the server's limit of ${limit} per file.`;
+    return `The server refused this upload because your pending uploads are over its size quota (the per-file limit is ${limit}).`;
+  }
+  return e instanceof Error ? e.message : 'Upload failed';
 }
 
 const fmtCache = new Map<string, Intl.DateTimeFormat>();
