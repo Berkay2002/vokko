@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Bell, Hash, MessageSquareText, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
+import { Bell, Hash, Lock, MessageSquareText, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
 import { dmName } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
 import { PinnedMessages } from "../chat/PinnedMessages";
 import { Popout, Tooltip, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
+import { isPrivateChannel } from "./channelPrivacy";
 import { muteItem, notificationItem, UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
 
@@ -62,7 +63,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
       <div className="channel-header-title">
         {guild ? (
           <>
-            {voice ? <Volume2 size={24} className="channel-header-icon" /> : <Hash size={24} className="channel-header-icon" />}
+            {isPrivateChannel(channel, channel.guild_id) ? <Lock size={24} className="channel-header-icon" /> : voice ? <Volume2 size={24} className="channel-header-icon" /> : <Hash size={24} className="channel-header-icon" />}
             <h1 className="channel-header-name">{channel.name}</h1>
             {channel.topic && (
               <>

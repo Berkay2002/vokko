@@ -4,9 +4,9 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get};
 use serde::Deserialize;
-use vokko_protocol::api::permissions::{DEFAULT_EVERYONE, MANAGE_CHANNELS, MANAGE_GUILD};
+use vokko_protocol::api::permissions::{DEFAULT_EVERYONE, MANAGE_CHANNELS, MANAGE_GUILD, MANAGE_ROLES};
 use vokko_protocol::api::{
-    Channel, ChannelType, CreateChannelRequest, CreateGuildRequest, GatewayEvent, Guild, GuildMember, GuildMemberRemove, IdOnly, Snowflake, UpdateGuildRequest,
+    Channel, ChannelType, CreateChannelRequest, CreateGuildRequest, GatewayEvent, Guild, GuildMember, IdOnly, Snowflake, UpdateGuildRequest,
 };
 
 use crate::access::{self, guild_access};
@@ -16,6 +16,8 @@ use crate::events;
 use crate::extract::{ApiJson, ApiQuery, parse_id};
 use crate::media;
 use crate::routes::auth::clean_text;
+use crate::routes::moderation;
+use crate::routes::overwrites;
 use crate::routes::users::owned_attachment_path;
 use crate::state::AppState;
 use crate::store;
@@ -182,7 +184,8 @@ async fn create_channel(
     ApiJson(body): ApiJson<CreateChannelRequest>,
 ) -> ApiResult<Json<Channel>> {
     let id = guild_id(&id)?;
-    guild_access(&state, user_id, id).await?.require(MANAGE_CHANNELS)?;
+    let guild = guild_access(&state, user_id, id).await?;
+    guild.require(MANAGE_CHANNELS)?;
     if !matches!(body.kind, ChannelType::GuildText | ChannelType::GuildVoice | ChannelType::GuildCategory) {
         return Err(ApiErr::invalid("type", "Unsupported channel type."));
     }
@@ -205,6 +208,17 @@ async fn create_channel(
         }
         _ => None,
     };
+    // Explicit overwrites follow the PUT rules (MANAGE_ROLES, nothing beyond the creator's own permissions); the channel does
+    // not exist yet, so the creator's guild-wide permissions stand in for "in that channel".
+    let mut explicit = Vec::new();
+    if let Some(requested) = &body.permission_overwrites
+        && !requested.is_empty()
+    {
+        guild.require(MANAGE_ROLES)?;
+        for overwrite in requested {
+            explicit.push(overwrites::validate(&state, id, guild.permissions, overwrite.id.db(), overwrite.kind, &overwrite.allow, &overwrite.deny).await?);
+        }
+    }
     let (position,): (i32,) =
         sqlx::query_as("SELECT COALESCE(MAX(position) + 1, 0)::int FROM channels WHERE guild_id = $1 AND kind = $2 AND parent_id IS NOT DISTINCT FROM $3")
             .bind(id)
@@ -213,6 +227,7 @@ async fn create_channel(
             .fetch_one(&state.db)
             .await?;
     let channel_id = state.ids.next();
+    let mut tx = state.db.begin().await?;
     sqlx::query("INSERT INTO channels (id, kind, guild_id, name, topic, position, parent_id) VALUES ($1, $2, $3, $4, $5, $6, $7)")
         .bind(channel_id)
         .bind(body.kind.as_u8() as i16)
@@ -221,15 +236,25 @@ async fn create_channel(
         .bind(&topic)
         .bind(position)
         .bind(parent)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
+    match (&body.permission_overwrites, parent) {
+        (Some(_), _) => {
+            for write in &explicit {
+                overwrites::store_overwrite(&mut tx, channel_id, write).await?;
+            }
+        }
+        (None, Some(parent)) => overwrites::copy_overwrites(&mut tx, parent, channel_id).await?,
+        (None, None) => {}
+    }
     if !matches!(body.kind, ChannelType::GuildCategory) {
         sqlx::query("INSERT INTO read_states (user_id, channel_id) SELECT user_id, $2 FROM guild_members WHERE guild_id = $1 ON CONFLICT DO NOTHING")
             .bind(id)
             .bind(channel_id)
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
+    tx.commit().await?;
     let row = store::channel_row(&state, channel_id).await?.ok_or_else(ApiErr::internal)?;
     events::dispatch_channel(&state, &row, GatewayEvent::ChannelCreate).await?;
     let channel = store::channel(&state, channel_id, Some(user_id)).await?.ok_or_else(ApiErr::internal)?;
@@ -260,15 +285,7 @@ async fn leave_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser,
     if guild.owner_id == user_id {
         return Err(ApiErr::invalid("guild_id", "Guild owners cannot leave; delete the guild instead."));
     }
-    let user = store::user(&state, user_id).await?.ok_or_else(ApiErr::unauthorized)?;
-    sqlx::query("DELETE FROM guild_members WHERE guild_id = $1 AND user_id = $2").bind(id).bind(user_id).execute(&state.db).await?;
-    sqlx::query("DELETE FROM read_states WHERE user_id = $1 AND channel_id IN (SELECT id FROM channels WHERE guild_id = $2)")
-        .bind(user_id)
-        .bind(id)
-        .execute(&state.db)
-        .await?;
-    state.hub.send(&[user_id], &GatewayEvent::GuildDelete(IdOnly { id: Snowflake::from(id) }));
-    let remaining = access::guild_member_ids(&state, id).await?;
-    state.hub.send(&remaining, &GatewayEvent::GuildMemberRemove(GuildMemberRemove { guild_id: Snowflake::from(id), user }));
+    // Same removal as a kick, so a running timeout is kept for a rejoin.
+    moderation::remove_member(&state, id, user_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

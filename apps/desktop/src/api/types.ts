@@ -4,7 +4,7 @@
 export type Snowflake = string;
 export type ISO8601 = string;
 
-export type PresenceStatus = "online" | "idle" | "dnd" | "offline";
+export type PresenceStatus = "online" | "idle" | "dnd" | "invisible" | "offline"; // invisible only in op 3 and your own presence
 
 export interface User {
   id: Snowflake;
@@ -14,6 +14,20 @@ export interface User {
   banner_color: string | null; // "#rrggbb"
   bio: string | null;
   bot: boolean;
+  // Profile perks (free for everyone in Vokko; Discord gates them behind Nitro). Absent = not set.
+  banner?: string | null; // banner image URL (static or animated)
+  pronouns?: string | null; // max 40 chars
+  theme_colors?: [number, number] | null; // profile theme primary/accent (RGB ints)
+  avatar_decoration?: string | null; // id of a Vokko-owned decoration asset
+  profile_effect?: string | null; // id of a Vokko-owned profile effect
+  primary_guild?: UserPrimaryGuild | null; // server tag shown next to the name
+}
+export interface UserPrimaryGuild {
+  guild_id: Snowflake;
+  tag: string; // 1-4 chars
+  badge: string; // badge id (Vokko asset set)
+  color_primary: number;
+  color_secondary: number;
 }
 
 export interface Presence {
@@ -73,6 +87,19 @@ export interface Guild {
   owner_id: Snowflake;
   roles: Role[];
   system_channel_id: Snowflake | null;
+  tag?: GuildTag | null; // server tag members can adopt (MANAGE_GUILD edits it)
+  theme?: GuildTheme | null;
+}
+export interface GuildTag {
+  tag: string; // 1-4 chars
+  badge: string;
+  color_primary: number;
+  color_secondary: number;
+}
+export interface GuildTheme {
+  preset: string | null; // Vokko theme preset id, or null for custom
+  primary: number;
+  accent: number;
 }
 
 export interface GuildMember {
@@ -81,6 +108,12 @@ export interface GuildMember {
   roles: Snowflake[];
   joined_at: ISO8601;
   communication_disabled_until?: ISO8601 | null; // timeout end; null/absent = not timed out
+  // Per-server profile (overrides the user profile inside this guild). Absent/null = use the user's.
+  avatar?: string | null;
+  banner?: string | null;
+  bio?: string | null;
+  pronouns?: string | null;
+  theme_colors?: [number, number] | null;
 }
 
 export interface Attachment {
@@ -213,6 +246,27 @@ export interface EditMessageRequest {
   flags?: number; // 1 << 2 SUPPRESS_EMBEDS
 }
 
+export interface EditUserRequest {
+  global_name?: string | null;
+  bio?: string | null;
+  banner_color?: string | null;
+  avatar_attachment_id?: Snowflake | null; // PNG/JPEG/WebP/GIF (animated allowed), ≤8 MiB in, stored as 512x512
+  banner_attachment_id?: Snowflake | null; // ≤10 MiB in, ≤1360x480 out
+  pronouns?: string | null;
+  theme_colors?: [number, number] | null;
+  avatar_decoration?: string | null;
+  profile_effect?: string | null;
+  primary_guild_id?: Snowflake | null; // adopt that guild's tag (must be a member and the guild must have a tag); null clears
+}
+export interface EditOwnMemberRequest {
+  nick?: string | null;
+  avatar_attachment_id?: Snowflake | null;
+  banner_attachment_id?: Snowflake | null;
+  bio?: string | null;
+  pronouns?: string | null;
+  theme_colors?: [number, number] | null;
+}
+
 export interface UserProfile {
   user: User;
   mutual_guilds: { id: Snowflake; nick: string | null }[];
@@ -313,7 +367,7 @@ export interface GatewayEvents {
   CHANNEL_CREATE: Channel;
   CHANNEL_UPDATE: Channel;
   CHANNEL_DELETE: Channel;
-  GUILD_CREATE: ReadyEvent["guilds"][number] & { presences: Presence[] }; // presences of the guild's online members (Discord-style)
+  GUILD_CREATE: ReadyEvent["guilds"][number] & { presences?: Presence[] }; // presences of the guild's online members (Discord-style)
   GUILD_UPDATE: Guild; // roles included, no channels/members
   GUILD_DELETE: { id: Snowflake };
   GUILD_MEMBER_ADD: GuildMember & { guild_id: Snowflake };

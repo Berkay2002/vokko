@@ -23,6 +23,11 @@ export function message(page: Page, text: string | RegExp) {
   return page.locator('.chat-msg', { hasText: text }).last();
 }
 
+/** Origin the app is served from (the invite parser only recognises the app's own host). */
+export function appOrigin(page: Page): string {
+  return new URL(page.url()).origin;
+}
+
 /** Current channel id from the URL (/channels/@me/<id> or /channels/<guild>/<id>). */
 export function channelIdOf(page: Page): string {
   return new URL(page.url()).pathname.split('/').filter(Boolean).pop() ?? '';

@@ -1,19 +1,11 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { channelIdOf, composer, message, openDm, send } from './helpers';
+import { appOrigin, channelIdOf, composer, message, openDm, send } from './helpers';
 
 type Win = {
   __vokkoMock: { say(c: string, u: string, t: string): string; channelIdByName(n: string): string | null };
   __vokko: { request(m: string, p: string, b?: unknown): Promise<unknown>; gateway: { dispatch(t: string, d: unknown): void }; appStore: { getState(): { guilds: Record<string, { id: string; name: string }>; channels: Record<string, { id: string; name?: string; guild_id: string | null; last_message_id: string | null }>; readStates: Record<string, { last_message_id: string | null }> } } };
 };
-
-/** The mock READY has been applied: guild channels and users are in the store (evaluating right after goto races it). */
-async function storeReady(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const s = (window as unknown as Win).__vokko?.appStore.getState() as unknown as { channels: Record<string, { guild_id: string | null }>; users: Record<string, unknown> } | undefined;
-    return !!s && Object.values(s.channels).some(c => c.guild_id) && Object.keys(s.users).length > 1;
-  });
-}
 
 /** In-app navigation: a page reload re-seeds the mock backend and drops the session. */
 async function navigate(page: Page, to: string): Promise<void> {
@@ -35,7 +27,8 @@ test('start-of-DM intro sits directly above the first message and the column is 
 
 test('an empty DM shows the intro at the bottom of the list', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
-  await storeReady(page);
+  // the store fills after the load event: wait for the users list before looking nova up
+  await page.waitForFunction(() => Object.values((window as unknown as Win).__vokko.appStore.getState().users).some(u => u.username === 'nova'));
   // create a DM with nova (no history)
   const id = await page.evaluate(async () => {
     const w = window as unknown as Win;
@@ -107,7 +100,7 @@ test('context menu Add Reaction submenu and View Reactions modal', async ({ page
 
 test('invite embeds: invalid code and a real invite', async ({ page }) => {
   await openDm(page);
-  await send(page, 'http://127.0.0.1:1422/invite/MXuWj96Fr');
+  await send(page, `${appOrigin(page)}/invite/MXuWj96Fr`);
   const bad = message(page, '/invite/MXuWj96Fr');
   await expect(bad.locator('.chat-invite.invalid')).toContainText('Invalid Invite');
   await expect(bad.locator('.chat-invite.invalid')).toContainText('You sent an invite, but');
@@ -118,7 +111,7 @@ test('invite embeds: invalid code and a real invite', async ({ page }) => {
     const invite = await w.__vokko.request('POST', `/channels/${general}/invites`, { max_age: 0 }) as { code: string };
     return invite.code;
   });
-  await send(page, `join us http://127.0.0.1:1422/invite/${code}`);
+  await send(page, `join us ${appOrigin(page)}/invite/${code}`);
   const good = message(page, `/invite/${code}`);
   await expect(good.locator('.chat-invite:not(.invalid)')).toContainText('You sent an invite to join a server');
   await expect(good.locator('.chat-invite-join')).toHaveText('Joined'); // sam is already a member
@@ -163,7 +156,7 @@ test('link embeds from the server render title, description, fields, colour bar 
 
 test('Shift+Escape marks the whole server read', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
-  await storeReady(page);
+  await page.waitForFunction(() => Object.values((window as unknown as Win).__vokko.appStore.getState().channels).some(c => c.guild_id));
   const ids = await page.evaluate(() => {
     const w = window as unknown as Win;
     const s = w.__vokko.appStore.getState();

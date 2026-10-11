@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
+import { Perm } from "../api/permissions";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore, useStore } from "../api/store";
 import { ChannelType, type Channel, type Guild } from "../api/types";
@@ -10,7 +11,12 @@ import { GuildIcon } from "./Avatar";
 import { firstTextChannel } from "./channels";
 import { closeModal, openModal } from "./modalStore";
 import { Category, Field, Page, Select, Unavailable } from "./settings/controls";
-import { MembersPage, RolesPage } from "./settings/server-people";
+import { BansPage } from "./settings/BansPage";
+import { RolesPage } from "./settings/RolesPage";
+import { TagPage } from "./settings/TagPage";
+import { ThemePage } from "./settings/ThemePage";
+import { MembersPage } from "./settings/server-people";
+import { usePermissions } from "./usePermissions";
 
 interface SectionDef {
   id: string;
@@ -19,7 +25,12 @@ interface SectionDef {
   group: "top" | "expression" | "people" | "apps" | "moderation" | "misc" | "bottom";
   /** Category headings shown on pages that are not implemented. */
   outline?: string[];
+  /** Any of these permission bits makes the section visible (Q4.6). Empty: MANAGE_GUILD. */
+  needs?: bigint[];
 }
+
+const MANAGE = [Perm.MANAGE_GUILD];
+const EXPRESSIONS = [Perm.MANAGE_GUILD, Perm.MANAGE_GUILD_EXPRESSIONS];
 
 const GROUP_TITLES: Record<SectionDef["group"], string> = {
   top: "",
@@ -38,20 +49,19 @@ const SECTIONS: SectionDef[] = [
   { id: "tag", label: "Server Tag", group: "top" },
   { id: "theme", label: "Server Theme", group: "top" },
   { id: "engagement", label: "Engagement", group: "top" },
-  { id: "perks", label: "Boost Perks", group: "top" },
-  { id: "emoji", label: "Emoji", group: "expression" },
-  { id: "stickers", label: "Stickers", group: "expression" },
-  { id: "soundboard", label: "Soundboard", group: "expression" },
+  { id: "emoji", label: "Emoji", group: "expression", needs: EXPRESSIONS },
+  { id: "stickers", label: "Stickers", group: "expression", needs: EXPRESSIONS },
+  { id: "soundboard", label: "Soundboard", group: "expression", needs: EXPRESSIONS },
   { id: "official", label: "Official Messages", group: "expression" },
-  { id: "members", label: "Members", group: "people" },
-  { id: "roles", label: "Roles", group: "people" },
-  { id: "invites", label: "Invites", group: "people" },
+  { id: "members", label: "Members", group: "people", needs: [Perm.MANAGE_GUILD, Perm.KICK_MEMBERS, Perm.BAN_MEMBERS, Perm.MODERATE_MEMBERS, Perm.MANAGE_NICKNAMES, Perm.MANAGE_ROLES] },
+  { id: "roles", label: "Roles", group: "people", needs: [Perm.MANAGE_ROLES] },
+  { id: "invites", label: "Invites", group: "people", needs: [Perm.CREATE_INSTANT_INVITE, Perm.MANAGE_GUILD] },
   { id: "access", label: "Access", group: "people" },
   { id: "integrations", label: "Integrations", group: "apps" },
   { id: "directory", label: "App Directory", group: "apps" },
   { id: "safety", label: "Safety Setup", group: "moderation" },
-  { id: "audit", label: "Audit Log", group: "moderation" },
-  { id: "bans", label: "Bans", group: "moderation" },
+  { id: "audit", label: "Audit Log", group: "moderation", needs: [Perm.VIEW_AUDIT_LOG] },
+  { id: "bans", label: "Bans", group: "moderation", needs: [Perm.BAN_MEMBERS] },
   { id: "automod", label: "AutoMod", group: "moderation" },
   { id: "community", label: "Community", group: "misc" },
   { id: "onboarding", label: "Onboarding", group: "misc" },
@@ -146,7 +156,7 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
 
   return (
     <Page title="Server Profile">
-      {!owner && <Unavailable>Only the server owner can change the server profile.</Unavailable>}
+      {!owner && <Unavailable>You need the Manage Server permission to change the server profile.</Unavailable>}
       <Field label="Name">
         <div className="account-inline">
           <input className="input" aria-label="Server name" value={name} maxLength={100} readOnly={!owner} disabled={!owner} onChange={e => setName(e.target.value)} />
@@ -218,7 +228,7 @@ function EngagementPage({ guild, owner, channels }: { guild: Guild; owner: boole
   );
 }
 
-function InvitesPage({ owner, channels }: { owner: boolean; channels: Channel[] }) {
+function InvitesPage({ canCreate, channels }: { canCreate: boolean; channels: Channel[] }) {
   const [code, setCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -245,11 +255,11 @@ function InvitesPage({ owner, channels }: { owner: boolean; channels: Channel[] 
     <Page title="Invites">
       <p className="settings-todo">Invite links let people join your server.</p>
       <div className="account-inline">
-        <button type="button" className="btn btn-primary" disabled={busy || !target || !owner} onClick={() => void create()}>
+        <button type="button" className="btn btn-primary" disabled={busy || !target || !canCreate} onClick={() => void create()}>
           Create Invite Link
         </button>
       </div>
-      {!owner && <p className="settings-todo">Only the server owner can create invite links here.</p>}
+      {!canCreate && <p className="settings-todo">You do not have permission to create invite links.</p>}
       {error && <p className="field-error">{error}</p>}
       {code && (
         <div className="ss-invite" role="status">
@@ -280,6 +290,7 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
   const allChannels = useStore(s => s.channels);
   const members = useStore(s => s.members[guildId]);
   const meId = useStore(s => s.me?.id);
+  const perms = usePermissions(guildId);
   const [current, setCurrent] = useState(section ?? "profile");
   const root = useRef<HTMLDivElement>(null);
   useLayer(true, closeModal);
@@ -288,22 +299,32 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
   if (!guild) return null;
 
   const owner = guild.owner_id === meId;
-  const active = SECTIONS.find(s => s.id === current) ?? SECTIONS[0];
+  const canManage = owner || perms.can(Perm.MANAGE_GUILD);
+  const visibleSections = SECTIONS.filter(s => (s.needs ?? MANAGE).some(bit => perms.can(bit)));
+  const active = visibleSections.find(s => s.id === current) ?? visibleSections[0];
+  if (!active) return null;
+  const canInvite = perms.can(Perm.CREATE_INSTANT_INVITE) || perms.can(Perm.MANAGE_GUILD);
 
   const page = () => {
-    switch (current) {
+    switch (active.id) {
       case "profile":
-        return <ProfilePage guild={guild} owner={owner} channels={channels} />;
+        return <ProfilePage guild={guild} owner={canManage} channels={channels} />;
       case "engagement":
-        return <EngagementPage guild={guild} owner={owner} channels={channels} />;
+        return <EngagementPage guild={guild} owner={canManage} channels={channels} />;
+      case "tag":
+        return <TagPage guildId={guildId} canEdit={canManage} />;
+      case "theme":
+        return <ThemePage guildId={guildId} canEdit={canManage} />;
       case "members":
         return <MembersPage guild={guild} members={members} />;
       case "roles":
         return <RolesPage guild={guild} members={members} />;
       case "invites":
-        return <InvitesPage owner={owner} channels={channels} />;
+        return <InvitesPage canCreate={canInvite} channels={channels} />;
+      case "bans":
+        return <BansPage guild={guild} />;
       default:
-        return active ? <NotYet section={active} /> : null;
+        return <NotYet section={active} />;
     }
   };
 
@@ -315,14 +336,14 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
             {guild.name}
           </div>
           {GROUP_ORDER.map(group => {
-            const items = SECTIONS.filter(s => s.group === group);
-            if (items.length === 0) return null;
+            const items = visibleSections.filter(s => s.group === group);
+            if (items.length === 0 && !(group === "bottom" && owner)) return null;
             const title = GROUP_TITLES[group];
             return (
               <div key={group} className="settings-group">
                 {title && <div className="settings-group-title">{title}</div>}
                 {items.map(s => (
-                  <button key={s.id} type="button" className={`settings-item${current === s.id ? " selected" : ""}`} aria-current={current === s.id ? "page" : undefined} onClick={() => setCurrent(s.id)}>
+                  <button key={s.id} type="button" className={`settings-item${active.id === s.id ? " selected" : ""}`} aria-current={active.id === s.id ? "page" : undefined} onClick={() => setCurrent(s.id)}>
                     {s.label}
                   </button>
                 ))}

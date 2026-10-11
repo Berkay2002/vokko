@@ -4,7 +4,7 @@
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
 import { appStore, isChannelUnread, type AppState } from "../api/store";
-import { ChannelType, GatewayOp, type Channel, type Guild, type PresenceStatus, type Snowflake } from "../api/types";
+import { ChannelType, GatewayOp, type Channel, type Guild, type PermissionOverwrite, type PresenceStatus, type Snowflake } from "../api/types";
 import { dmPath, go, guildPath } from "./nav";
 import { firstTextChannel } from "./channels";
 import type { ServerTemplate } from "./templates";
@@ -57,7 +57,7 @@ export async function joinGuildWithInvite(code: string): Promise<Guild> {
   return guild;
 }
 
-export async function createChannel(guildId: Snowflake, input: { name: string; type: ChannelType; parent_id?: Snowflake | null; topic?: string }): Promise<Channel> {
+export async function createChannel(guildId: Snowflake, input: { name: string; type: ChannelType; parent_id?: Snowflake | null; topic?: string; permission_overwrites?: PermissionOverwrite[] }): Promise<Channel> {
   const channel = await request<Channel>("POST", `/guilds/${guildId}/channels`, input);
   await waitFor(s => s.channels[channel.id]);
   if (channel.type === ChannelType.GuildText) go(guildPath(guildId, channel.id));

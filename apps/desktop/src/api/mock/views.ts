@@ -2,6 +2,7 @@
 
 import { RelationshipType, type Channel, type GatewayEvents, type GuildMember, type Message, type Reaction, type ReadyEvent, type Relationship } from "../types";
 import { compareIds } from "../snowflake";
+import { canView } from "./access";
 import { db, sortedMessages, userOf, type MockChannel, type MockMessage } from "./db";
 
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
@@ -38,6 +39,7 @@ export function channelFor(ch: MockChannel, viewerId: string): Channel {
   void hidden_for;
   const last = sortedMessages(ch.id).at(-1);
   const out: Channel = { ...rest, last_message_id: last?.id ?? null };
+  if (rest.permission_overwrites) out.permission_overwrites = rest.permission_overwrites.map(o => ({ ...o }));
   if (participant_ids) out.recipients = participant_ids.filter(id => id !== viewerId).map(userOf);
   return out;
 }
@@ -52,13 +54,19 @@ export function privateChannelsFor(viewerId: string): Channel[] {
 export function membersOf(guildId: string): (GuildMember & { guild_id?: never })[] {
   const g = db.guilds.get(guildId);
   if (!g) return [];
-  return [...g.members.entries()].map(([id, m]) => ({ user: userOf(id), nick: m.nick, roles: [...m.roles], joined_at: m.joined_at }));
+  return [...g.members.entries()].map(([id, m]) => ({
+    user: userOf(id),
+    nick: m.nick,
+    roles: [...m.roles],
+    joined_at: m.joined_at,
+    ...(m.communication_disabled_until ? { communication_disabled_until: m.communication_disabled_until } : {}),
+  }));
 }
 
 export function guildPayload(guildId: string, viewerId: string): GatewayEvents["GUILD_CREATE"] {
   const g = db.guilds.get(guildId);
   if (!g) throw new Error("unknown guild");
-  const channels = [...db.channels.values()].filter(c => c.guild_id === guildId).map(c => channelFor(c, viewerId));
+  const channels = [...db.channels.values()].filter(c => c.guild_id === guildId && canView(c, viewerId)).map(c => channelFor(c, viewerId));
   const members = membersOf(guildId);
   const presences = members.flatMap(m => {
     const p = db.accounts.get(m.user.id)?.presence;

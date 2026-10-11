@@ -54,6 +54,8 @@ pub fn channel_permissions(base: u64, guild_id: i64, user_id: i64, member_roles:
         permissions &= !member.deny;
         permissions |= member.allow;
     }
+    // ADMINISTRATOR only ever comes from the base (role) permissions, which returned ALL above; an overwrite cannot grant it.
+    permissions &= !ADMINISTRATOR;
     // Without VIEW_CHANNEL nothing else in the channel is usable.
     if permissions & VIEW_CHANNEL == 0 { 0 } else { permissions }
 }
@@ -186,6 +188,75 @@ pub async fn channel_access(state: &AppState, user_id: i64, channel_id: i64) -> 
         return Err(ApiErr::missing_access());
     }
     Ok(ChannelAccess { channel, permissions })
+}
+
+/// Which of `channel_ids` `user_id` can see (same rules as `channel_access`, VIEW_CHANNEL after overwrites), in a
+/// constant number of queries. Unknown channels and channels of guilds the user is not in are left out.
+pub async fn viewable_channels(state: &AppState, user_id: i64, channel_ids: &[i64]) -> ApiResult<std::collections::HashSet<i64>> {
+    use std::collections::HashSet;
+    let mut visible = HashSet::new();
+    let channels: Vec<(i64, Option<i64>)> =
+        sqlx::query_as("SELECT id, guild_id FROM channels WHERE id = ANY($1)").bind(channel_ids).fetch_all(&state.db).await?;
+    let dm_ids: Vec<i64> = channels.iter().filter(|(_, guild_id)| guild_id.is_none()).map(|(id, _)| *id).collect();
+    if !dm_ids.is_empty() {
+        let rows: Vec<(i64,)> = sqlx::query_as("SELECT channel_id FROM channel_recipients WHERE user_id = $1 AND channel_id = ANY($2)")
+            .bind(user_id)
+            .bind(&dm_ids)
+            .fetch_all(&state.db)
+            .await?;
+        visible.extend(rows.into_iter().map(|(id,)| id));
+    }
+    let guild_channels: Vec<(i64, i64)> = channels.iter().filter_map(|(id, guild_id)| guild_id.map(|g| (*id, g))).collect();
+    if guild_channels.is_empty() {
+        return Ok(visible);
+    }
+    let mut guild_ids: Vec<i64> = guild_channels.iter().map(|(_, guild_id)| *guild_id).collect();
+    guild_ids.sort_unstable();
+    guild_ids.dedup();
+    let guild_channel_ids: Vec<i64> = guild_channels.iter().map(|(id, _)| *id).collect();
+    // Only guilds the user is a member of; owner per guild.
+    let guilds: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT g.id, g.owner_id FROM guilds g JOIN guild_members m ON m.guild_id = g.id AND m.user_id = $1 WHERE g.id = ANY($2)")
+            .bind(user_id)
+            .bind(&guild_ids)
+            .fetch_all(&state.db)
+            .await?;
+    let member_role_rows: Vec<(i64, i64)> = sqlx::query_as("SELECT guild_id, role_id FROM member_roles WHERE user_id = $1 AND guild_id = ANY($2)")
+        .bind(user_id)
+        .bind(&guild_ids)
+        .fetch_all(&state.db)
+        .await?;
+    let role_rows: Vec<(i64, i64, i64)> =
+        sqlx::query_as("SELECT guild_id, id, permissions FROM roles WHERE guild_id = ANY($1)").bind(&guild_ids).fetch_all(&state.db).await?;
+    let overwrite_rows: Vec<(i64, i64, i16, i64, i64)> =
+        sqlx::query_as("SELECT channel_id, target_id, target_type, allow, deny FROM permission_overwrites WHERE channel_id = ANY($1)")
+            .bind(&guild_channel_ids)
+            .fetch_all(&state.db)
+            .await?;
+    let mut roles_by_guild: HashMap<i64, HashMap<i64, u64>> = HashMap::new();
+    for (guild_id, id, permissions) in role_rows {
+        roles_by_guild.entry(guild_id).or_default().insert(id, permissions as u64);
+    }
+    let mut member_roles: HashMap<i64, Vec<i64>> = HashMap::new();
+    for (guild_id, role_id) in member_role_rows {
+        member_roles.entry(guild_id).or_default().push(role_id);
+    }
+    let mut overwrites: HashMap<i64, Vec<Overwrite>> = HashMap::new();
+    for (channel_id, target_id, target_type, allow, deny) in overwrite_rows {
+        overwrites.entry(channel_id).or_default().push(Overwrite { target_id, target_type, allow: allow as u64, deny: deny as u64 });
+    }
+    let owners: HashMap<i64, i64> = guilds.into_iter().collect();
+    let no_roles = HashMap::new();
+    for (channel_id, guild_id) in guild_channels {
+        let Some(owner_id) = owners.get(&guild_id) else { continue };
+        let roles = member_roles.get(&guild_id).map(Vec::as_slice).unwrap_or(&[]);
+        let base = base_permissions(guild_id, *owner_id, user_id, roles_by_guild.get(&guild_id).unwrap_or(&no_roles), roles);
+        let channel_overwrites = overwrites.get(&channel_id).map(Vec::as_slice).unwrap_or(&[]);
+        if channel_permissions(base, guild_id, user_id, roles, channel_overwrites) & VIEW_CHANNEL != 0 {
+            visible.insert(channel_id);
+        }
+    }
+    Ok(visible)
 }
 
 /// Everyone who may see the channel: DM recipients, or guild members with VIEW_CHANNEL after overwrites.
@@ -368,6 +439,16 @@ mod tests {
                 channel_permissions(base, GUILD, user, &member_roles, &overwrites)
             };
             assert_eq!(resolved, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn overwrites_cannot_grant_administrator() {
+        let allow_admin = |target_id, target_type| overwrite(target_id, target_type, ADMINISTRATOR | SEND_MESSAGES, 0);
+        for overwrites in [vec![allow_admin(GUILD, 0)], vec![allow_admin(20, 0)], vec![allow_admin(USER, 1)]] {
+            let resolved = channel_permissions(VIEW_CHANNEL, GUILD, USER, &[20], &overwrites);
+            assert_eq!(resolved & ADMINISTRATOR, 0);
+            assert_ne!(resolved & SEND_MESSAGES, 0, "the rest of the allow still applies");
         }
     }
 

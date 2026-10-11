@@ -1,14 +1,13 @@
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import { logout } from "../api/auth";
 import { ApiRequestError } from "../api/errors";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore, avatarUrl, displayName, useStore } from "../api/store";
 import type { User } from "../api/types";
 import { useFocusTrap, useLayer } from "../ui";
 import { Avatar } from "./Avatar";
-import { closeModal } from "./modalStore";
+import { closeModal, openModal } from "./modalStore";
 import { AccessibilityPage } from "./settings/AccessibilityPage";
 import { AppearancePage } from "./settings/AppearancePage";
 import { Category, Page, Select, Unavailable } from "./settings/controls";
@@ -266,7 +265,7 @@ export function UserSettings({ section }: { section?: string }) {
           ))}
           <div className="settings-group">
             <div className="settings-separator" />
-            <button type="button" className="settings-item danger" onClick={() => (closeModal(), void logout())}>
+            <button type="button" className="settings-item danger" onClick={() => openModal({ type: "logout" })}>
               Log Out
             </button>
           </div>

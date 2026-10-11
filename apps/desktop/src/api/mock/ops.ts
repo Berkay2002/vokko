@@ -1,10 +1,14 @@
 // Domain operations on the mock database, shared by the REST router, the seed and the dev hooks.
 
-import { ChannelType, MessageType, type Attachment, type PresenceStatus, type Role, type User } from "../types";
+import { ChannelType, MessageType, type Attachment, type PermissionOverwrite, type PresenceStatus, type Role, type User } from "../types";
 import { ApiRequestError } from "../errors";
+import { hasBit } from "../permissions";
+import { canView, channelPermsOf, guildPermsOf } from "./access";
 import { db, everyoneRole, nextId, sortedMessages, userOf, type MockAccount, type MockChannel, type MockMessage } from "./db";
 import { emit } from "./socket";
 import { channelFor, messageFor } from "./views";
+
+export const MISSING_PERMISSIONS = "Missing Permissions";
 
 export function fail(status: number, code: number, message: string, errors?: Record<string, unknown>): never {
   throw new ApiRequestError(status, { code, message, errors });
@@ -37,14 +41,80 @@ export function guildAudience(guildId: string): string[] {
   return [...(db.guilds.get(guildId)?.members.keys() ?? [])];
 }
 
+/** Everyone who may see the channel (guild channels: members whose resolved permissions include VIEW_CHANNEL). */
 export function channelAudience(channel: MockChannel): string[] {
-  if (channel.guild_id) return guildAudience(channel.guild_id);
+  if (channel.guild_id) return guildAudience(channel.guild_id).filter(id => canView(channel, id));
   return channel.participant_ids ?? [];
 }
 
 export function canAccess(channel: MockChannel, viewerId: string): boolean {
-  if (channel.guild_id) return db.guilds.get(channel.guild_id)?.members.has(viewerId) ?? false;
+  if (channel.guild_id) return canView(channel, viewerId);
   return channel.participant_ids?.includes(viewerId) ?? false;
+}
+
+export function requireGuildMember(guildId: string, viewerId: string) {
+  const guild = db.guilds.get(guildId);
+  if (!guild) fail(404, 10004, "Unknown Guild");
+  if (!guild.members.has(viewerId)) fail(403, 50001, "Missing Access");
+  return guild;
+}
+
+/** Guild member holding every bit of `permission` (guild level, timeout mask applied), else 403 50013. */
+export function requireGuildPerm(guildId: string, viewerId: string, permission: bigint) {
+  const guild = requireGuildMember(guildId, viewerId);
+  if (!hasBit(guildPermsOf(guildId, viewerId), permission)) fail(403, 50013, MISSING_PERMISSIONS);
+  return guild;
+}
+
+/** Channel-level check for a channel the viewer can already see. DMs always pass. */
+export function requireChannelPerm(channel: MockChannel, viewerId: string, permission: bigint, code = 50013, message = MISSING_PERMISSIONS): void {
+  if (!hasBit(channelPermsOf(channel, viewerId), permission)) fail(403, code, message);
+}
+
+/** channel id -> users who can see it, for every channel of the guild. */
+export function visibilityOf(guildId: string): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  for (const channel of db.channels.values()) if (channel.guild_id === guildId) out.set(channel.id, new Set(channelAudience(channel)));
+  return out;
+}
+
+/**
+ * Diff channel visibility against a snapshot taken before a permission change: CHANNEL_CREATE to members who gained a
+ * channel, CHANNEL_DELETE to those who lost it, CHANNEL_UPDATE (only for ids in `updated`) to everyone who kept it.
+ */
+export function emitVisibilityChanges(guildId: string, before: Map<string, Set<string>>, updated: Iterable<string> = []): void {
+  const touched = new Set(updated);
+  const after = visibilityOf(guildId);
+  for (const [channelId, now] of after) {
+    const channel = db.channels.get(channelId);
+    if (!channel) continue;
+    const was = before.get(channelId) ?? new Set<string>();
+    for (const id of now) {
+      if (!was.has(id)) emit([id], "CHANNEL_CREATE", channelFor(channel, id));
+      else if (touched.has(channelId)) emit([id], "CHANNEL_UPDATE", channelFor(channel, id));
+    }
+    for (const id of was) if (!now.has(id) && db.guilds.get(guildId)?.members.has(id)) emit([id], "CHANNEL_DELETE", channelFor(channel, id));
+  }
+}
+
+/** Same set of (id, type, allow, deny), order ignored ("synced" with a category). */
+export function sameOverwrites(a: PermissionOverwrite[] | undefined, b: PermissionOverwrite[] | undefined): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  return left.every(o => right.some(p => p.id === o.id && p.type === o.type && p.allow === o.allow && p.deny === o.deny));
+}
+
+/** After a category's overwrites changed from `previous`: children that were synced follow it. Returns their ids. */
+export function syncCategoryChildren(category: MockChannel, previous: PermissionOverwrite[]): string[] {
+  const synced: string[] = [];
+  for (const child of db.channels.values()) {
+    if (child.guild_id !== category.guild_id || child.parent_id !== category.id) continue;
+    if (!sameOverwrites(child.permission_overwrites, previous)) continue;
+    child.permission_overwrites = (category.permission_overwrites ?? []).map(o => ({ ...o }));
+    synced.push(child.id);
+  }
+  return synced;
 }
 
 export function requireChannel(channelId: string, viewerId: string): MockChannel {
@@ -79,7 +149,7 @@ export function createGuildRecord(ownerId: string, name: string, iconUrl: string
   return id;
 }
 
-export function addChannel(guildId: string, init: { name: string; type: ChannelType; parent_id?: string | null; topic?: string | null; id?: string }): MockChannel {
+export function addChannel(guildId: string, init: { name: string; type: ChannelType; parent_id?: string | null; topic?: string | null; id?: string; permission_overwrites?: PermissionOverwrite[] }): MockChannel {
   const siblings = [...db.channels.values()].filter(c => c.guild_id === guildId && c.parent_id === (init.parent_id ?? null) && c.type === init.type);
   const channel: MockChannel = {
     id: init.id ?? nextId(),
@@ -90,6 +160,7 @@ export function addChannel(guildId: string, init: { name: string; type: ChannelT
     position: siblings.length,
     parent_id: init.parent_id ?? null,
     last_message_id: null,
+    permission_overwrites: (init.permission_overwrites ?? (init.parent_id ? db.channels.get(init.parent_id)?.permission_overwrites : undefined) ?? []).map(o => ({ ...o })),
   };
   db.channels.set(channel.id, channel);
   return channel;
@@ -127,6 +198,8 @@ export interface NewMessage {
   timestamp?: number;
   /** Seed mode: don't emit events. */
   silent?: boolean;
+  /** False: the author lacks MENTION_EVERYONE, so @everyone/@here is kept as text but does not ping. Default true. */
+  allowEveryone?: boolean;
 }
 
 function parseMentions(content: string, referenceAuthor: string | null): { ids: string[]; everyone: boolean } {
@@ -141,6 +214,7 @@ export function addMessage(input: NewMessage): MockMessage {
   const { channel } = input;
   const referenced = input.reference_id ? sortedMessages(channel.id).find(m => m.id === input.reference_id) : undefined;
   const mentions = parseMentions(input.content, referenced?.author_id ?? null);
+  if (input.allowEveryone === false) mentions.everyone = false;
   const ms = input.timestamp ?? Date.now();
   const message: MockMessage = {
     id: nextId(ms),

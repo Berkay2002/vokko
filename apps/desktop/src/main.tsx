@@ -21,6 +21,7 @@ import "./styles/shell.css";
 import "./styles/settings.css";
 import "./styles/menus.css";
 import "./styles/server-settings.css";
+import "./styles/channel-settings.css";
 import "./ui/prefs";
 
 bootstrap();

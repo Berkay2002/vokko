@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import path from 'node:path';
-import { composer, message, openDm, send } from './helpers';
+import { appOrigin, composer, message, openDm, send } from './helpers';
 
 // Acceptance screenshots. Skipped unless VOKKO_SHOTS_DIR is set: VOKKO_SHOTS_DIR=E:\...\artifacts\chat npx playwright test e2e/shots.spec.ts
 const dir = process.env.VOKKO_SHOTS_DIR;
@@ -198,13 +198,13 @@ test('round 2 screenshots: intro, pickers, reactions, embeds', async ({ page }) 
   await page.keyboard.press('Escape');
 
   // 22. invite embeds: an invalid code (as in the reference) and a real invite
-  await send(page, 'http://127.0.0.1:1422/invite/MXuWj96Fr');
+  await send(page, `${appOrigin(page)}/invite/MXuWj96Fr`);
   const code = await page.evaluate(async () => {
     const w = window as unknown as W;
     const general = w.__vokkoMock.channelIdByName('general')!;
     return (await w.__vokko.request('POST', `/channels/${general}/invites`, { max_age: 0 }) as { code: string }).code;
   });
-  await send(page, `http://127.0.0.1:1422/invite/${code}`);
+  await send(page, `${appOrigin(page)}/invite/${code}`);
   await expect(page.locator('.chat-invite:not(.loading)')).toHaveCount(2);
   await page.mouse.move(5, 5);
   await shot(page, '22-invite-embeds');

@@ -1,5 +1,6 @@
 // In-memory backend state shared by the mock REST router and the mock gateway socket.
 
+import { DEFAULT_EVERYONE } from "../permissions";
 import { timestampToSnowflake } from "../snowflake";
 import type { Attachment, Channel, Guild, GuildMember, Message, MessageType, Presence, ReadState, Relationship, RelationshipType, Role, User } from "../types";
 
@@ -47,7 +48,7 @@ export interface MockMessage {
 
 export interface MockGuild {
   guild: Guild;
-  members: Map<string, Pick<GuildMember, "nick" | "roles" | "joined_at">>;
+  members: Map<string, Pick<GuildMember, "nick" | "roles" | "joined_at" | "communication_disabled_until">>;
 }
 
 export interface MockInvite {
@@ -63,6 +64,8 @@ export interface Db {
   messages: Map<string, MockMessage[]>;
   guilds: Map<string, MockGuild>;
   invites: Map<string, MockInvite>;
+  /** guild id → banned user id → reason */
+  bans: Map<string, Map<string, string | null>>;
   pending: Map<string, { attachment: Attachment; owner: string }>;
 }
 
@@ -72,6 +75,7 @@ export const db: Db = {
   messages: new Map(),
   guilds: new Map(),
   invites: new Map(),
+  bans: new Map(),
   pending: new Map(),
 };
 
@@ -91,7 +95,7 @@ export function nextId(ms?: number): string {
 }
 
 export function everyoneRole(guildId: string): Role {
-  return { id: guildId, name: "@everyone", color: 0, hoist: false, position: 0, permissions: "1071698660929", mentionable: false };
+  return { id: guildId, name: "@everyone", color: 0, hoist: false, position: 0, permissions: DEFAULT_EVERYONE.toString(), mentionable: false };
 }
 
 export function userOf(id: string): User {

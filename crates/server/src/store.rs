@@ -5,7 +5,8 @@ use sqlx::FromRow;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::{
-    Attachment, Channel, ChannelType, Guild, GuildMember, Message, MessageMember, MessageReference, MessageType, Reaction, ReactionEmoji, Role, Snowflake, User,
+    Attachment, Channel, ChannelType, Guild, GuildMember, Message, MessageMember, MessageReference, MessageType, OverwriteType, PermissionOverwrite, Reaction,
+    ReactionEmoji, Role, Snowflake, User,
 };
 
 use crate::error::ApiResult;
@@ -142,11 +143,20 @@ struct MemberRow {
     user: UserRow,
     nick: Option<String>,
     joined_at: OffsetDateTime,
+    timeout_until: Option<OffsetDateTime>,
+}
+
+impl MemberRow {
+    fn into_api(self, state: &AppState, roles: Vec<Snowflake>) -> GuildMember {
+        // an expired timeout reads as none
+        let timeout = self.timeout_until.filter(|until| *until > OffsetDateTime::now_utc());
+        GuildMember { user: self.user.into_api(state), nick: self.nick, roles, joined_at: iso(self.joined_at), communication_disabled_until: timeout.map(iso) }
+    }
 }
 
 pub async fn members(state: &AppState, guild_id: i64, limit: i64, after: Option<i64>) -> ApiResult<Vec<GuildMember>> {
     let rows: Vec<MemberRow> = sqlx::query_as(
-        "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, m.nick, m.joined_at \
+        "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, m.nick, m.joined_at, m.timeout_until \
          FROM guild_members m JOIN users u ON u.id = m.user_id WHERE m.guild_id = $1 AND u.id > $2 ORDER BY u.id LIMIT $3",
     )
     .bind(guild_id)
@@ -159,15 +169,15 @@ pub async fn members(state: &AppState, guild_id: i64, limit: i64, after: Option<
     Ok(rows
         .into_iter()
         .map(|row| {
-            let id = row.user.id;
-            GuildMember { user: row.user.into_api(state), nick: row.nick, roles: roles.get(&id).cloned().unwrap_or_default(), joined_at: iso(row.joined_at) }
+            let member_roles = roles.get(&row.user.id).cloned().unwrap_or_default();
+            row.into_api(state, member_roles)
         })
         .collect())
 }
 
 pub async fn member(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<Option<GuildMember>> {
     let rows: Vec<MemberRow> = sqlx::query_as(
-        "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, m.nick, m.joined_at \
+        "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, m.nick, m.joined_at, m.timeout_until \
          FROM guild_members m JOIN users u ON u.id = m.user_id WHERE m.guild_id = $1 AND u.id = $2",
     )
     .bind(guild_id)
@@ -176,8 +186,8 @@ pub async fn member(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<
     .await?;
     let roles = member_roles(state, guild_id, &[user_id]).await?;
     Ok(rows.into_iter().next().map(|row| {
-        let id = row.user.id;
-        GuildMember { user: row.user.into_api(state), nick: row.nick, roles: roles.get(&id).cloned().unwrap_or_default(), joined_at: iso(row.joined_at) }
+        let member_roles = roles.get(&row.user.id).cloned().unwrap_or_default();
+        row.into_api(state, member_roles)
     }))
 }
 
@@ -250,12 +260,15 @@ pub async fn channels_to_api(state: &AppState, rows: Vec<ChannelRow>, viewer: Op
             }
         }
     }
+    let guild_channel_ids: Vec<i64> = rows.iter().filter(|row| !row.is_dm()).map(|row| row.id).collect();
+    let mut overwrites = overwrites_of(state, &guild_channel_ids).await?;
     Ok(rows
         .into_iter()
         .map(|row| {
             let kind = row.channel_type();
             let is_dm = row.is_dm();
             Channel {
+                permission_overwrites: (!is_dm).then(|| overwrites.remove(&row.id).unwrap_or_default()),
                 id: flake(row.id),
                 kind,
                 guild_id: row.guild_id.map(flake),
@@ -270,6 +283,25 @@ pub async fn channels_to_api(state: &AppState, rows: Vec<ChannelRow>, viewer: Op
             }
         })
         .collect())
+}
+
+/// The overwrites of the given channels as wire values, roles before members, each by id.
+pub async fn overwrites_of(state: &AppState, channel_ids: &[i64]) -> ApiResult<HashMap<i64, Vec<PermissionOverwrite>>> {
+    let mut map: HashMap<i64, Vec<PermissionOverwrite>> = HashMap::new();
+    if channel_ids.is_empty() {
+        return Ok(map);
+    }
+    let rows: Vec<(i64, i64, i16, i64, i64)> = sqlx::query_as(
+        "SELECT channel_id, target_id, target_type, allow, deny FROM permission_overwrites WHERE channel_id = ANY($1) ORDER BY channel_id, target_type, target_id",
+    )
+    .bind(channel_ids)
+    .fetch_all(&state.db)
+    .await?;
+    for (channel_id, target_id, target_type, allow, deny) in rows {
+        let kind = OverwriteType::from_u8(target_type as u8).unwrap_or(OverwriteType::Role);
+        map.entry(channel_id).or_default().push(PermissionOverwrite { id: flake(target_id), kind, allow: allow.to_string(), deny: deny.to_string() });
+    }
+    Ok(map)
 }
 
 pub async fn channel(state: &AppState, id: i64, viewer: Option<i64>) -> ApiResult<Option<Channel>> {
@@ -306,6 +338,7 @@ pub const MESSAGE_SELECT: &str = "SELECT m.id, m.channel_id, c.guild_id, m.autho
 struct AttachmentRow {
     id: i64,
     message_id: i64,
+    key: Option<String>,
     filename: String,
     content_type: Option<String>,
     size: i64,
@@ -313,9 +346,11 @@ struct AttachmentRow {
     height: Option<i32>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn attachment_api(
     state: &AppState,
     id: i64,
+    key: &str,
     filename: String,
     content_type: Option<String>,
     size: i64,
@@ -324,7 +359,7 @@ pub fn attachment_api(
 ) -> Attachment {
     Attachment {
         id: flake(id),
-        url: state.asset_url(&format!("{id}/{filename}")),
+        url: state.asset_url(&crate::media::asset_path(id, key, &filename)),
         filename,
         content_type,
         size: size.max(0) as u64,
@@ -363,7 +398,7 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
     let mention_rows: Vec<(i64, i64)> =
         sqlx::query_as("SELECT message_id, user_id FROM message_mentions WHERE message_id = ANY($1) ORDER BY user_id").bind(&ids).fetch_all(&state.db).await?;
     let attachment_rows: Vec<AttachmentRow> =
-        sqlx::query_as("SELECT id, message_id, filename, content_type, size, width, height FROM attachments WHERE message_id = ANY($1) ORDER BY id")
+        sqlx::query_as("SELECT id, message_id, key, filename, content_type, size, width, height FROM attachments WHERE message_id = ANY($1) ORDER BY id")
             .bind(&ids)
             .fetch_all(&state.db)
             .await?;
@@ -386,7 +421,18 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
     }
     let mut attachments: HashMap<i64, Vec<Attachment>> = HashMap::new();
     for row in attachment_rows {
-        attachments.entry(row.message_id).or_default().push(attachment_api(state, row.id, row.filename, row.content_type, row.size, row.width, row.height));
+        // rows from before keys existed cannot be served, so they are not listed
+        let Some(key) = row.key else { continue };
+        attachments.entry(row.message_id).or_default().push(attachment_api(
+            state,
+            row.id,
+            &key,
+            row.filename,
+            row.content_type,
+            row.size,
+            row.width,
+            row.height,
+        ));
     }
     // message → ordered (emoji, users)
     let mut reactions: HashMap<i64, Vec<(ReactionEmoji, Vec<i64>)>> = HashMap::new();

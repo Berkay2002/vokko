@@ -30,6 +30,7 @@ time.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 futures-util.workspace = true
+tokio-util.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 

@@ -189,5 +189,106 @@ for (const [id, label] of [["27-settings-appearance", "Appearance"], ["28-settin
 }
 await page.keyboard.press("Escape");
 
+// ---- milestone D: moderation ----
+await nav(`/channels/${ids.guild}/${ids.text}`);
+await page.waitForSelector(".member-row");
+const menuItem = label => page.click(`.context-menu-item:has(.context-menu-label:text-is("${label}"))`);
+const memberMenu = async name => {
+  await page.click(`.member-row:has-text("${name}")`, { button: "right" });
+  await page.waitForSelector(".context-menu");
+};
+await memberMenu("Nova");
+await shot("31-member-menu-moderation");
+await page.hover('.context-menu-item:has(.context-menu-label:text-is("Roles"))');
+await page.waitForTimeout(400);
+await shot("32-member-menu-roles-submenu");
+await page.keyboard.press("Escape");
+await page.keyboard.press("Escape");
+
+for (const [id, label, ready] of [["33-kick-modal", "Kick Nova", ".modal"], ["34-ban-modal", "Ban Nova", ".modal"], ["35-timeout-modal", "Timeout Nova", ".modal"], ["36-nickname-modal", "Change Nickname", ".modal"]]) {
+  await memberMenu("Nova");
+  await page.click(`.context-menu-item:has(.context-menu-label:has-text("${label.split(" ")[0] === "Change" ? label : label.split(" ")[0]}"))`);
+  await page.waitForSelector(ready);
+  await shot(id);
+  await page.keyboard.press("Escape");
+}
+
+// Server settings: roles editor, bans page, members actions
+await page.click(".guild-header");
+await page.click('.guild-menu-item:has-text("Server Settings")');
+await page.waitForSelector(".settings-overlay");
+await page.click('.settings-item:has-text("Roles")');
+await page.waitForTimeout(300);
+await shot("37-roles-list");
+await page.click(".ss-role-row.ss-role-draggable >> nth=0");
+await page.waitForTimeout(300);
+await shot("38-role-editor-display");
+await page.click('.ss-tab:has-text("Permissions")');
+await shot("39-role-editor-permissions");
+await page.click('.settings-item:has-text("Bans")');
+await page.waitForTimeout(400);
+await shot("40-bans-page");
+await page.click('.settings-item:has-text("Members")');
+await page.waitForTimeout(400);
+await shot("41-members-page");
+// A dialog opened from settings stacks above it; closing it returns to the same page.
+await page.click('.ss-icon-btn[aria-label^="Actions for nova"]');
+await page.click('.context-menu-item:has(.context-menu-label:has-text("Kick"))');
+await page.waitForSelector(".modal");
+await shot("41b-kick-over-settings");
+await page.keyboard.press("Escape");
+await page.waitForTimeout(200);
+const stillMembers = await page.locator('.settings-item.selected:has-text("Members"), .settings-item[aria-current="page"]:has-text("Members")').count();
+console.log("members page kept after dialog:", stillMembers > 0 || (await page.locator(".ss-icon-btn").count()) > 0);
+await page.keyboard.press("Escape");
+
+// Channel settings + private channel
+await page.hover(".channel-row.selected");
+await page.click('.channel-row.selected button[aria-label="Edit Channel"]');
+await page.waitForSelector(".settings-overlay");
+await shot("42-channel-settings-overview");
+await page.click('.settings-item:has-text("Permissions")');
+await page.waitForTimeout(400);
+await shot("43-channel-permissions");
+await page.keyboard.press("Escape");
+await page.waitForTimeout(200);
+await shot("44-sidebar-private-channel");
+
+// ---- milestone E: server tag / theme, sync with category ----
+await page.click(".guild-header");
+await page.click('.guild-menu-item:has-text("Server Settings")');
+await page.waitForSelector(".settings-overlay");
+await page.click('.settings-item:has-text("Server Tag")');
+await page.waitForTimeout(300);
+await shot("48-server-tag");
+await page.click('.settings-item:has-text("Server Theme")');
+await page.waitForTimeout(300);
+await shot("49-server-theme");
+await page.keyboard.press("Escape");
+await page.hover(".channel-row.selected");
+await page.click('.channel-row.selected button[aria-label="Edit Channel"]');
+await page.waitForSelector(".settings-overlay");
+await page.click('.settings-item:has-text("Permissions")');
+await page.waitForTimeout(400);
+await shot("50-channel-permissions-synced");
+await page.keyboard.press("Escape");
+
+// As a moderator (alice): fewer rights
+await page.goto(`${base}/channels/@me?as=alice`);
+await page.waitForSelector(".dm-row");
+const alice = await store();
+await nav(`/channels/${alice.guild}/${alice.text}`);
+await page.waitForSelector(".member-row");
+await memberMenu("Nova");
+await shot("45-member-menu-as-moderator");
+await page.keyboard.press("Escape");
+await page.click(".guild-header");
+await page.waitForSelector(".guild-menu-item");
+await shot("46-guild-menu-as-moderator");
+await page.click('.guild-menu-item:has-text("Server Settings")');
+await page.waitForSelector(".settings-overlay");
+await shot("47-server-settings-as-moderator");
+await page.keyboard.press("Escape");
+
 if (problems.length) console.log("browser problems:\n" + problems.join("\n"));
 await browser.close();

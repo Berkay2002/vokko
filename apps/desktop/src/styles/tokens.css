@@ -1190,9 +1190,9 @@
   --brand-560: #4654c0;
   --brand-600: #3a48a3;
 
-  /* Presence: measured in the captured client (online #3d9e60), the bundle's --status-online (#23a55a) is a different token. */
-  --status-online: var(--icon-status-online);
-  --status-positive: var(--icon-status-online);
+  /* Presence online: #3d9e60 was measured in the captured Onyx client only; every other theme uses the Q6 bundle value. */
+  --status-online: #23a55a;
+  --status-positive: var(--status-online);
   --status-speaking: var(--icon-voice-speaking);
 
   /* Radii (Q6.4) */
@@ -1264,4 +1264,18 @@
   --status-offline: var(--text-status-offline);
   --status-idle: var(--text-status-idle);
   --status-dnd: var(--text-status-dnd);
+}
+
+/* Onyx: presence green measured in the captured client. */
+:root.theme-onyx,
+.theme-onyx {
+  --status-online: #3d9e60;
+  --status-positive: #3d9e60;
+}
+
+/* Light: the Q6 light table gives --icon-status-online #01783e (the badge token measured in the captured client). */
+:root.theme-light,
+.theme-light {
+  --status-online: #01783e;
+  --status-positive: #01783e;
 }

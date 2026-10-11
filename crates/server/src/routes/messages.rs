@@ -636,14 +636,44 @@ async fn ack_message(State(state): State<AppState>, AuthUser(user_id): AuthUser,
 
 /// "Mark server as read": entries the caller cannot see, or whose message is gone, are skipped.
 async fn ack_bulk(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiJson(body): ApiJson<AckBulkRequest>) -> ApiResult<StatusCode> {
-    if body.read_states.len() > 200 {
-        return Err(ApiErr::invalid("read_states", "At most 200 read states per request."));
+    if body.read_states.len() > 100 {
+        return Err(ApiErr::invalid("read_states", "At most 100 read states per request."));
     }
-    for entry in body.read_states {
-        let (id, mid) = (entry.channel_id.db(), entry.message_id.db());
-        if channel_access(&state, user_id, id).await.is_ok() && message_in_channel(&state, id, mid).await.is_ok() {
-            ack(&state, user_id, id, mid).await?;
-        }
+    let entries: Vec<(i64, i64)> = body.read_states.iter().map(|entry| (entry.channel_id.db(), entry.message_id.db())).collect();
+    if entries.is_empty() {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    let channel_ids: Vec<i64> = entries.iter().map(|(channel, _)| *channel).collect();
+    let visible = access::viewable_channels(&state, user_id, &channel_ids).await?;
+    let (channels, messages): (Vec<i64>, Vec<i64>) = entries.iter().copied().filter(|(channel, _)| visible.contains(channel)).unzip();
+    if channels.is_empty() {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    // One statement: keep entries whose message exists in that channel (several entries for a channel collapse to
+    // the newest), move the read state forward and reset the mention counter only when caught up.
+    let acked: Vec<(i64, i64)> = sqlx::query_as(
+        "WITH wanted AS ( \
+             SELECT t.channel_id, MAX(t.message_id) AS message_id \
+             FROM UNNEST($2::bigint[], $3::bigint[]) AS t(channel_id, message_id) \
+             JOIN messages m ON m.id = t.message_id AND m.channel_id = t.channel_id \
+             GROUP BY t.channel_id \
+         ) \
+         INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) \
+         SELECT $1, w.channel_id, w.message_id, 0 FROM wanted w \
+         ON CONFLICT (user_id, channel_id) DO UPDATE SET \
+             last_message_id = GREATEST(read_states.last_message_id, EXCLUDED.last_message_id), \
+             mention_count = CASE WHEN EXCLUDED.last_message_id >= COALESCE((SELECT c.last_message_id FROM channels c WHERE c.id = read_states.channel_id), 0) \
+                 THEN 0 ELSE read_states.mention_count END \
+         RETURNING channel_id, last_message_id",
+    )
+    .bind(user_id)
+    .bind(&channels)
+    .bind(&messages)
+    .fetch_all(&state.db)
+    .await?;
+    for (id, last) in acked {
+        let event = GatewayEvent::MessageAck(MessageAck { channel_id: Snowflake::from(id), message_id: Snowflake::from(last) });
+        state.hub.send(&[user_id], &event);
     }
     Ok(StatusCode::NO_CONTENT)
 }

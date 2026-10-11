@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { NavLink, useLocation } from "react-router";
-import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Plus, Settings, UserPlus, Volume2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Plus, Settings, UserPlus, Volume2 } from "lucide-react";
 import { channelMentionCount, displayName, isChannelUnread, useStore } from "../api/store";
 import { useVoiceOccupants } from "../api/voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
@@ -9,7 +9,10 @@ import { Avatar } from "./Avatar";
 import { groupChannels } from "./channels";
 import { useIsMuted, useLocalState } from "./localState";
 import { channelContextItems, guildDropdownItems } from "./menus";
+import { Perm } from "../api/permissions";
+import { isPrivateChannel } from "./channelPrivacy";
 import { guildPath } from "./nav";
+import { usePermissions } from "./usePermissions";
 import { openModal } from "./modalStore";
 
 const COLLAPSED_KEY = "vokko.collapsedCategories";
@@ -47,7 +50,7 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
   const location = useLocation();
   const unread = useStore(s => isChannelUnread(s, channel.id));
   const mentions = useStore(s => channelMentionCount(s, channel.id));
-  const isOwner = useStore(s => s.me?.id === guild.owner_id);
+  const { can } = usePermissions(guild.id, channel.id);
   const muted = useIsMuted(channel.id) || useIsMuted(channel.parent_id);
   const menu = useContextMenu();
   const voice = channel.type === ChannelType.GuildVoice;
@@ -55,15 +58,17 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
   const className = `channel-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}${voice ? " voice" : ""}`;
   const items = () => channelContextItems(channel, guild);
 
-  const icon = voice ? <Volume2 size={20} className="channel-icon" /> : <Hash size={20} className="channel-icon" />;
+  const icon = isPrivateChannel(channel, guild.id) ? <Lock size={20} className="channel-icon" /> : voice ? <Volume2 size={20} className="channel-icon" /> : <Hash size={20} className="channel-icon" />;
   const actions = (
     <span className="channel-actions">
-      <Tooltip content="Create Invite" side="top">
-        <button type="button" className="channel-action" aria-label="Create Invite" onClick={e => (e.preventDefault(), openModal({ type: "invite", channelId: channel.id }))}>
-          <UserPlus size={16} />
-        </button>
-      </Tooltip>
-      {isOwner && (
+      {can(Perm.CREATE_INSTANT_INVITE) && (
+        <Tooltip content="Create Invite" side="top">
+          <button type="button" className="channel-action" aria-label="Create Invite" onClick={e => (e.preventDefault(), openModal({ type: "invite", channelId: channel.id }))}>
+            <UserPlus size={16} />
+          </button>
+        </Tooltip>
+      )}
+      {can(Perm.MANAGE_CHANNELS) && (
         <Tooltip content="Edit Channel" side="top">
           <button type="button" className="channel-action" aria-label="Edit Channel" onClick={e => (e.preventDefault(), openModal({ type: "editChannel", channelId: channel.id }))}>
             <Settings size={16} />
@@ -97,6 +102,7 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
 function GuildHeader({ guild }: { guild: Guild }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
+  const canInvite = usePermissions(guild.id).can(Perm.CREATE_INSTANT_INVITE);
   const firstText = useStore(s => Object.values(s.channels).find(c => c.guild_id === guild.id && c.type === ChannelType.GuildText));
   // Subscribing re-renders the menu when a mute/hide flag changes while it is open.
   useLocalState(s => s.hideMuted[guild.id]);
@@ -108,11 +114,13 @@ function GuildHeader({ guild }: { guild: Guild }) {
           <span className="guild-header-name">{guild.name}</span>
           {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
-        <Tooltip content="Invite People" side="bottom">
-          <button type="button" className="guild-header-invite" aria-label="Invite People" disabled={!firstText} onClick={() => firstText && openModal({ type: "invite", channelId: firstText.id })}>
-            <UserPlus size={20} />
-          </button>
-        </Tooltip>
+        {canInvite && (
+          <Tooltip content="Invite People" side="bottom">
+            <button type="button" className="guild-header-invite" aria-label="Invite People" disabled={!firstText} onClick={() => firstText && openModal({ type: "invite", channelId: firstText.id })}>
+              <UserPlus size={20} />
+            </button>
+          </Tooltip>
+        )}
       </div>
       <Popout anchor={anchor} open={open} onClose={() => setOpen(false)} side="bottom" align="center" gap={4} className="guild-menu" style={{ width: 220 }}>
         <div role="menu" className="guild-menu-list">
@@ -153,7 +161,8 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
   const [collapsed, setCollapsed] = useState<Set<Snowflake>>(loadCollapsed);
   const mutedUntil = useLocalState(s => s.mutedUntil);
   const hideMuted = useLocalState(s => !!s.hideMuted[guild.id]);
-  const isOwner = useStore(s => s.me?.id === guild.owner_id);
+  const perms = usePermissions(guild.id);
+  const canManageChannels = perms.can(Perm.MANAGE_CHANNELS);
   const selectedId = location.pathname.split("/")[3];
   const isMuted = (id: Snowflake | null) => {
     const until = id ? mutedUntil[id] : undefined;
@@ -213,7 +222,7 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
                       <span className="category-name">{category.name}</span>
                       {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                     </button>
-                    {isOwner && (
+                    {canManageChannels && (
                       <Tooltip content="Create Channel" side="top">
                         <button type="button" className="category-add" aria-label="Create Channel" onClick={() => openModal({ type: "createChannel", guildId: guild.id, parentId: category.id })}>
                           <Plus size={16} />

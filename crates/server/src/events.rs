@@ -13,7 +13,7 @@ pub async fn guild_with_state(state: &AppState, guild_id: i64, viewer: i64) -> A
     let channels = store::channels_to_api(state, rows, Some(viewer)).await?;
     let members = store::members(state, guild_id, 10_000, None).await?;
     let member_count = store::member_count(state, guild_id).await?;
-    Ok(GuildWithState { guild, channels, members, member_count })
+    Ok(GuildWithState { guild, channels, members, member_count, presences: None })
 }
 
 /// Sends a channel-shaped event (CREATE/UPDATE/DELETE) to everyone who can see the channel; DM recipient lists are per receiver.
@@ -31,12 +31,16 @@ pub async fn dispatch_channel(state: &AppState, row: &ChannelRow, make: fn(Chann
     Ok(())
 }
 
-/// Everyone who should hear about `user_id`: themselves, members of shared guilds, DM co-recipients and relationships.
+/// The symmetric "who shares presence with `user_id`" set, used for both directions (who receives this user's
+/// PRESENCE_UPDATE / USER_UPDATE, and whose presences go into this user's READY): the user, members of shared guilds,
+/// accepted friends (kind 1) and peers of DMs that are open on BOTH sides. Pending requests, blocks and DMs the other
+/// side never opened (closed row) do not count, so an unsolicited DM cannot be used to track someone's presence.
 pub async fn user_audience(state: &AppState, user_id: i64) -> ApiResult<Vec<i64>> {
     let rows: Vec<(i64,)> = sqlx::query_as(
         "SELECT m2.user_id FROM guild_members m1 JOIN guild_members m2 ON m1.guild_id = m2.guild_id WHERE m1.user_id = $1 \
-         UNION SELECT other_id FROM relationships WHERE user_id = $1 \
-         UNION SELECT r2.user_id FROM channel_recipients r1 JOIN channel_recipients r2 ON r1.channel_id = r2.channel_id WHERE r1.user_id = $1 \
+         UNION SELECT other_id FROM relationships WHERE user_id = $1 AND kind = 1 \
+         UNION SELECT r2.user_id FROM channel_recipients r1 JOIN channel_recipients r2 ON r1.channel_id = r2.channel_id \
+               WHERE r1.user_id = $1 AND NOT r1.closed AND NOT r2.closed \
          UNION SELECT $1",
     )
     .bind(user_id)
