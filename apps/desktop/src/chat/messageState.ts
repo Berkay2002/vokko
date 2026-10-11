@@ -30,6 +30,8 @@ export interface ChannelState {
   focus: { messageId: Snowflake; token: number } | null;
   /** Read pointer captured when the channel was opened; drives the "new messages" divider. */
   lastReadAtOpen: Snowflake | null;
+  /** Set by "Mark Unread": the unread bar shows even though the list is at the bottom, until marked read. */
+  markedUnread?: boolean;
   /** user id → client-side expiry (ms epoch). */
   typing: Record<Snowflake, number>;
 }

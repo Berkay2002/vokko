@@ -14,7 +14,14 @@ const shot = async (page: Page, name: string) => {
   await page.screenshot({ path: path.join(dir!, `${name}.png`) });
 };
 
+// The user's Discord is Onyx; the app picks it up from the persisted prefs.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => { localStorage.setItem('vokko.prefs', JSON.stringify({ theme: 'onyx' })); });
+});
+
 test('channel: replies, image, mention, server tag', async ({ page }) => {
   await openStockTalk(page);
-  await shot(page, '01-channel');
+  await shot(page, '01-channel-bottom');
+  await page.locator('.chat-scroller').evaluate(el => { el.scrollTop = 0; });
+  await shot(page, '02-channel-top');
 });

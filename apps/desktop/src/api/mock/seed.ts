@@ -161,16 +161,16 @@ function seedMessageShowcase(ctx: { guildId: string; parentId: string; R: string
   post(N, "damn 🤯", base - 25 * MIN);
   post(Bo, "nice chart", base - 26 * MIN, { reply: chart.id });
   post(R, "9% pop since lunch", base - 28 * MIN);
-  post(R, "most of it happened in the last hour, the volume was silly", base - 28 * MIN + 40_000);
+  post(R, "most of it happened in the last hour, the volume was silly", base - 28 * MIN - 40_000);
   const hope = post(N, "i hope it keeps sliding, i want a cheaper entry", base - 30 * MIN);
-  post(R, "its a long way down then", base - 30 * MIN + 30_000, { reply: hope.id });
+  post(R, "its a long way down then", base - 30 * MIN - 30_000, { reply: hope.id });
   const long = post(N, "holding through the next print anyway, but the debt load could turn into a much bigger problem in a higher rate environment than anyone is pricing in right now", base - 31 * MIN);
-  post(R, "they print cash right now, they will be fine", base - 31 * MIN + 45_000, { reply: long.id });
-  const cash = post(R, "and they can sign deals with the big labs too", base - 31 * MIN + 80_000);
+  post(R, "they print cash right now, they will be fine", base - 31 * MIN - 45_000, { reply: long.id });
+  const cash = post(R, "and they can sign deals with the big labs too", base - 31 * MIN - 80_000);
   post(N, "yeah i know", base - 32 * MIN, { reply: cash.id });
   // A reply whose target is deleted afterwards (the wire says referenced_message = null).
   const gone = post(N, "scratch that, wrong ticker", base - 33 * MIN);
-  post(Bo, "lol happens", base - 33 * MIN + 20_000, { reply: gone.id });
+  post(Bo, "lol happens", base - 33 * MIN - 20_000, { reply: gone.id });
   const list = sortedMessages(channel.id);
   const goneIndex = list.findIndex(m => m.id === gone.id);
   if (goneIndex >= 0) list.splice(goneIndex, 1);

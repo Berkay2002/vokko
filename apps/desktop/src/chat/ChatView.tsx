@@ -7,6 +7,7 @@ import { Composer } from './Composer';
 import { MessageList, type MessageListHandle } from './MessageList';
 import { TypingIndicator } from './TypingIndicator';
 import { Lightbox } from './Attachments';
+import { ChatToasts } from './toast';
 import { ReactionsModal } from './ReactionsModal';
 import { Markdown } from './markdown';
 import { Avatar } from './Avatar';
@@ -142,6 +143,9 @@ function ChatBody(p: BodyProps) {
     return () => clearTimeout(t);
   }, [newest, read, state.hasMoreAfter, p.atBottom, focused, p.channelId, mentionCount]);
 
+  // A message marked unread keeps the channel unread while it is open; leaving it lets the normal ack resume.
+  useEffect(() => () => messageStore.releaseHold(p.channelId), [p.channelId]);
+
   // Escape (outside editing/dialogs): mark the channel read and jump to the present. Shift+Escape: mark the whole server read.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -154,7 +158,7 @@ function ChatBody(p: BodyProps) {
       const last = state.messages[state.messages.length - 1];
       if (state.hasMoreAfter) void messageStore.jumpToPresent(p.channelId);
       else p.list.current?.scrollToBottom();
-      if (last) messageStore.ack(p.channelId, last.id);
+      if (last) messageStore.markRead(p.channelId, last.id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -188,6 +192,7 @@ function ChatBody(p: BodyProps) {
       onToggleMention={() => p.setMentionReply(v => !v)}
       onCancelReply={() => p.setReplyTo(null)}
       onSent={() => {
+        messageStore.releaseHold(p.channelId);
         if (state.hasMoreAfter) void messageStore.jumpToPresent(p.channelId);
         requestAnimationFrame(() => p.list.current?.scrollToBottom());
       }}
@@ -195,6 +200,7 @@ function ChatBody(p: BodyProps) {
       focusToken={p.focusToken}
     />
     <TypingIndicator channelId={p.channelId} />
+    <ChatToasts />
     {p.dragging && <div className="chat-drop-overlay" aria-hidden="true">
       <div className="chat-drop-card">
         <Upload size={48} />

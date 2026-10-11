@@ -112,7 +112,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   }
 
   const showJump = state.hasMoreAfter || !atBottom;
-  const showUnread = unreadCount > 0 && !seenBottom && !!firstUnread;
+  const showUnread = unreadCount > 0 && (!seenBottom || !!state.markedUnread) && !!firstUnread;
 
   return <div className="chat-list" onWheel={gesture} onTouchMove={gesture} onKeyDown={gesture} onPointerDown={() => { pointerDown.current = true; gesture(); }}>
     {showUnread && <div className="chat-unread-bar" role="status">
@@ -120,7 +120,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
         const i = rows.findIndex(r => r.message.id === firstUnread!.id);
         if (i >= 0) virtuoso.current?.scrollToIndex({ index: i, align: 'start', behavior: 'smooth' });
       }}>{unreadCount}{state.hasMoreBefore ? '+' : ''} new message{unreadCount === 1 ? '' : 's'} since {formatFullDate(new Date(firstUnread!.timestamp))}</button>
-      <button type="button" className="chat-unread-bar-mark" onClick={() => { const last = state.messages[state.messages.length - 1]; if (last) messageStore.ack(channelId, last.id); setSeenBottom(true); }}>Mark As Read</button>
+      <button type="button" className="chat-unread-bar-mark" onClick={() => { const last = state.messages[state.messages.length - 1]; if (last) messageStore.markRead(channelId, last.id); setSeenBottom(true); }}>Mark As Read</button>
     </div>}
     <Virtuoso<Row, { hasMoreBefore: boolean; hasMoreAfter: boolean; loading: boolean }>
       key={`${channelId}:${state.windowId}`}

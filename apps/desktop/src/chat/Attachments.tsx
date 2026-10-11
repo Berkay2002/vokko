@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronLeft, ChevronRight, Download, ExternalLink, File as FileIcon, FileArchive, FileAudio, FileCode, FileText, FileVideo, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, ExternalLink, File as FileIcon, FileArchive, FileAudio, FileCode, FileText, FileVideo, ImageOff, X } from 'lucide-react';
 import type { Attachment, Message } from '../api/types';
 import { useChat } from './ChatContext';
-import { resolveUrl } from './shell';
+import { Tooltip, resolveUrl } from './shell';
 import { formatBytes } from './util';
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
 const isVideo = (a: Attachment): boolean => !!a.content_type?.startsWith('video/');
 
-const MAX_SINGLE_W = 400;
-const MAX_SINGLE_H = 300;
+// Discord's message media box: 550 x 400 CSS px, aspect-fit, never upscaled (measured: a 2.16:1 screenshot renders 550 x 254).
+const MAX_SINGLE_W = 550;
+const MAX_SINGLE_H = 400;
 
 function fileIcon(a: Attachment) {
   const t = a.content_type ?? '';
@@ -25,12 +26,22 @@ function fileIcon(a: Attachment) {
 function ImageTile({ message, attachment, index, style, className }: { message: Message; attachment: Attachment; index: number; style?: React.CSSProperties; className?: string }) {
   const chat = useChat();
   const [spoiled, setSpoiled] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
   const spoiler = attachment.filename.startsWith('SPOILER_') && !spoiled;
-  return <button type="button" className={`chat-image${className ? ` ${className}` : ''}${spoiler ? ' spoiler' : ''}`} style={style} aria-label={`Open image ${attachment.filename}`}
-    onClick={() => (spoiler ? setSpoiled(true) : chat.actions.openImage(message, index))}>
-    <img src={resolveUrl(attachment.url)} alt={attachment.filename} loading="lazy" draggable={false} />
-    {spoiler && <span className="chat-image-spoiler-label">SPOILER</span>}
-  </button>;
+  const url = resolveUrl(attachment.url);
+  return <div className={`chat-image-wrap${className ? ` ${className}` : ''}`} style={style}>
+    <button type="button" className={`chat-image${spoiler ? ' spoiler' : ''}${loaded ? ' loaded' : ''}${failed ? ' failed' : ''}`} aria-label={`Open image ${attachment.filename}`}
+      onClick={() => (spoiler ? setSpoiled(true) : chat.actions.openImage(message, index))}>
+      <img src={url} alt={attachment.filename} loading="lazy" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+      {spoiler && <span className="chat-image-spoiler-label">SPOILER</span>}
+      {failed && <span className="chat-image-failed"><ImageOff size={24} /></span>}
+    </button>
+    {!spoiler && <div className="chat-image-actions">
+      <Tooltip content="Open in Browser" side="top"><a className="chat-image-action" href={url} target="_blank" rel="noopener noreferrer" aria-label="Open in Browser"><ExternalLink size={16} /></a></Tooltip>
+      <Tooltip content="Download" side="top"><a className="chat-image-action" href={url} download={attachment.filename} aria-label="Download"><Download size={16} /></a></Tooltip>
+    </div>}
+  </div>;
 }
 
 /** Discord-style layouts: 1 single, 2 side by side, 3 one tall + two stacked, 4 grid, 5 two over three, 6+ rows of three. */

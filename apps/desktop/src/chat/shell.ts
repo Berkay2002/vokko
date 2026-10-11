@@ -1,7 +1,7 @@
 // The only module in src/chat that imports shell-owned code (src/api, src/ui). Everything else in the chat area goes through here,
 // so contract drift between the shell and the chat area is fixed in one file.
 import { useMemo } from 'react';
-import { useStore } from '../api/store';
+import { appStore, useStore } from '../api/store';
 import { usePrefs } from '../ui';
 import type { Channel, Guild, GuildMember, ReadState, Relationship, Snowflake, User } from '../api/types';
 
@@ -9,7 +9,7 @@ export { request, uploadAttachment, resolveUrl, ApiRequestError } from '../api/r
 export { gateway } from '../api/gateway';
 export { displayName, roleColor, avatarUrl, dmName, guildIconUrl, guildInitials } from '../api/store';
 export { markGuildRead, joinGuildWithInvite } from '../shell/actions';
-export { Tooltip, Popout, Modal, useContextMenu } from '../ui';
+export { Tooltip, Popout, Modal, useContextMenu, useLayer, useOutsideClose, placeAtPoint } from '../ui';
 export type { MenuItem } from '../ui';
 
 const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
@@ -55,4 +55,10 @@ export function useChatDisplayPrefs(): ChatDisplayPrefs {
 export function useGuildChannels(guildId: Snowflake | null | undefined): Channel[] {
   const all = useStore(s => s.channels);
   return useMemo(() => (guildId ? Object.values(all).filter(c => c.guild_id === guildId).sort((a, b) => a.position - b.position) : []), [all, guildId]);
+}
+
+/** Client-only "mark unread": move this client's read pointer of a channel back (the server keeps its own until the next ack). */
+export function setLocalReadPointer(channelId: Snowflake, lastMessageId: Snowflake): void {
+  const s = appStore.getState();
+  appStore.setState({ readStates: { ...s.readStates, [channelId]: { channel_id: channelId, last_message_id: lastMessageId, mention_count: 0 } } });
 }

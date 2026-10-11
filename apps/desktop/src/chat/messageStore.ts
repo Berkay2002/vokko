@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from 'react';
 import { MessageType } from '../api/types';
 import type { CreateMessageRequest, EditMessageRequest, Message, ReactionEmoji, Snowflake, User } from '../api/types';
-import { gateway, request } from './shell';
+import { gateway, request, setLocalReadPointer } from './shell';
 import {
   PAGE_SIZE, TYPING_TTL_MS, appendPage, applyReaction, deleteMessage, emojiKey, emptyState, indexOfId, prependPage, replaceWindow, setTyping,
   applyUserUpdate, updateIfPresent, upsertMessage, withLateArrivals, type ChannelState, type PendingMessage,
@@ -20,6 +20,8 @@ const listeners = new Map<Snowflake, Set<Listener>>();
 const AROUND_LIMIT = 30;
 const reactionChains =new Map<string, { tail: Promise<void>; pending: number; timer: ReturnType<typeof setTimeout> | null }>();
 const reactionGuard = (messageId: Snowflake, emoji: ReactionEmoji): string => `${messageId}:${emojiKey(emoji)}`;
+/** Channels the user marked unread by hand: the automatic ack stays off until they read it again on purpose, send, or leave. */
+const heldUnread = new Set<Snowflake>();
 let currentUserId: Snowflake | null = null;
 let bound = false;
 
@@ -255,9 +257,30 @@ export const messageStore = {
     });
   },
 
+  /** Automatic ack (viewing the present). Does nothing while the channel is held unread. */
   ack(channelId: Snowflake, messageId: Snowflake): void {
+    if (heldUnread.has(channelId)) return;
     void request<null>('POST', `/channels/${channelId}/messages/${messageId}/ack`).catch(() => undefined);
   },
+
+  /** A deliberate "mark as read" (Escape, the unread bar): releases the hold, then acks. */
+  markRead(channelId: Snowflake, messageId: Snowflake): void {
+    heldUnread.delete(channelId);
+    update(channelId, s => (s.markedUnread ? { ...s, markedUnread: false } : s));
+    this.ack(channelId, messageId);
+  },
+
+  /** Mark Unread (client only, no server contract): everything from this message on becomes unread and the auto-ack is held. */
+  markUnread(channelId: Snowflake, messageId: Snowflake): void {
+    let before: Snowflake;
+    try { before = (BigInt(messageId) - 1n).toString(); } catch { return; }
+    heldUnread.add(channelId);
+    setLocalReadPointer(channelId, before);
+    update(channelId, s => ({ ...s, lastReadAtOpen: before, markedUnread: true }));
+  },
+
+  /** Sending a message or leaving the channel ends a manual "unread" hold. */
+  releaseHold(channelId: Snowflake): void { heldUnread.delete(channelId); },
 
   getState(channelId: Snowflake): ChannelState { return states.get(channelId) ?? EMPTY; },
 };
