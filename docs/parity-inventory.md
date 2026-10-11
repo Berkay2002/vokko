@@ -170,8 +170,8 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | REST-001 | Server-wide message search with filters (from, in, has, mentions, date) and results panel | REF: none |
 | REST-002 | Login, register, password reset, MFA screens | REF: none (session must not be logged out) |
 | REST-003 | Onboarding flow for new members (questions, channels) | REF: none |
-| REST-004 | Loading screen, connection-lost banner, update/maintenance banners | REF: none |
-| REST-005 | Notification sounds and desktop notifications (web: Notification API) | REF: none |
+| REST-004 | Loading screen, connection-lost banner, update/maintenance banners | REF: none (splash, connection and permission banners not observable view-only; see notifications/spec.md status) |
+| REST-005 | Notification sounds and desktop notifications (web: Notification API): Aviseringar page (Översikt, Ljud, Märken, E-post, Avancerat), per-channel notification popout with mute submenu, tab title with leading bullet when unread | notifications/spec.md, notifications/01..07 |
 | REST-006 | Responsive layouts at ~1000 px and minimum width (sidebar collapse, member list hide) | REF: none |
 
 ## Out of scope (decided, no ids)
