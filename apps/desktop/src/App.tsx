@@ -10,6 +10,7 @@ import { InvitePage } from "./shell/InvitePage";
 import { pendingInvite } from "./shell/pendingInvite";
 import { AuthorizePage } from "./apps/AuthorizePage";
 import { WindowFrame } from "./shell/WindowControls";
+import { setNavigator } from "./shell/nav";
 
 function Protected() {
   const token = useStore(s => s.token);
@@ -31,6 +32,11 @@ function Guest({ children }: { children: React.ReactNode }) {
 /** `vokko://invite/<code>` links from the desktop shell open the invite page. Auth links stay queued for the sign-in code. */
 function DeepLinks() {
   const navigate = useNavigate();
+  // Imperative go() for code outside components. Bound here, above every route, so the desktop OAuth callback link also works on /login.
+  useEffect(() => {
+    setNavigator((to, options) => void navigate(to, options));
+    return () => setNavigator(null);
+  }, [navigate]);
   useEffect(
     () =>
       onDeepLink(

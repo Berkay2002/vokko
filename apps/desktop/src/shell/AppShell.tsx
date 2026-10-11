@@ -27,7 +27,6 @@ import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } fr
 import { markChannelRead, markGuildRead } from "./actions";
 import { firstTextChannel } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
-import { setNavigator } from "./nav";
 import { NARROW_QUERY, useNavDrawer } from "./navDrawer";
 import { NavToggle } from "./NavToggle";
 import { useMediaQuery } from "./useMediaQuery";
@@ -54,15 +53,6 @@ function readNumber(key: string, fallback: number): number {
 let clickedBlank = false;
 document.addEventListener("pointerdown", () => (clickedBlank = true), true);
 document.addEventListener("focusin", () => (clickedBlank = false), true);
-
-function NavigatorBridge() {
-  const navigate = useNavigate();
-  useEffect(() => {
-    setNavigator((to, options) => void navigate(to, options));
-    return () => setNavigator(null);
-  }, [navigate]);
-  return null;
-}
 
 function useSidebarWidth() {
   const [width, setWidth] = useState(() => readNumber(SIDEBAR_KEY, SIDEBAR_DEFAULT));
@@ -243,7 +233,6 @@ export function AppShell() {
 
   return (
     <div className={`app-frame${navOpen ? " nav-open" : ""}`} style={{ ["--sidebar-width" as string]: `${width}px` }}>
-      <NavigatorBridge />
       <NativeMenuBridge />
       <TitleBar />
       <div className="app-body">
