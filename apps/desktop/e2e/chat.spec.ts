@@ -22,9 +22,9 @@ test('send, edit, reply, react and delete against the mock backend', async ({ pa
   await expect(edited).toBeVisible();
   await expect(edited.getByText('(edited)')).toBeVisible();
 
-  // reply: hover toolbar → Reply, reply bar shows, send, rendered reply references the original
-  await edited.hover();
-  await edited.getByRole('button', { name: 'Reply' }).click();
+  // reply: own messages have Reply in the context menu (the hover toolbar shows it only on others' messages)
+  await edited.click({ button: 'right', position: { x: 200, y: 10 } });
+  await page.getByRole('menuitem', { name: 'Reply' }).click();
   await expect(page.locator('.chat-reply-bar')).toContainText('Replying to');
   await send(page, 'this is a reply');
   const reply = message(page, 'this is a reply');

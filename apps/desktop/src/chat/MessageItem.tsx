@@ -130,26 +130,26 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
 
   function items(): MenuItem[] {
     const out: MenuItem[] = [];
-    if (!system) {
-      out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={16} />, onSelect: () => chat.actions.reply(message) });
-    }
+    // Order follows the reference: edit, reply | copy text, pin, copy link | delete | copy id.
     if (canEdit) out.push({ id: 'edit', label: 'Edit Message', icon: <Pencil size={16} />, onSelect: () => chat.actions.edit(message) });
-    if (canPin) out.push({ id: 'pin', label: message.pinned ? 'Unpin Message' : 'Pin Message', icon: <Pin size={16} />, onSelect: () => chat.actions.togglePin(message) });
+    if (!system) out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={16} />, onSelect: () => chat.actions.reply(message) });
     out.push({ type: 'separator' });
     if (message.content) out.push({ id: 'copy-text', label: 'Copy Text', onSelect: () => void navigator.clipboard?.writeText(message.content) });
+    if (canPin) out.push({ id: 'pin', label: message.pinned ? 'Unpin Message' : 'Pin Message', icon: <Pin size={16} />, onSelect: () => chat.actions.togglePin(message) });
     out.push({
       id: 'copy-link', label: 'Copy Message Link',
       onSelect: () => void navigator.clipboard?.writeText(`${window.location.origin}/channels/${chat.guildId ?? '@me'}/${message.channel_id}/${message.id}`),
     });
-    out.push({ id: 'copy-id', label: 'Copy Message ID', onSelect: () => void navigator.clipboard?.writeText(message.id) });
     if (canDelete) {
       out.push({ type: 'separator' });
       out.push({ id: 'delete', label: 'Delete Message', danger: true, icon: <Trash />, onSelect: () => chat.actions.requestDelete(message, isShiftDown()) });
     }
+    out.push({ type: 'separator' });
+    out.push({ id: 'copy-id', label: 'Copy Message ID', onSelect: () => void navigator.clipboard?.writeText(message.id) });
     return out;
   }
 
-  const quick = useMemo(() => quickReactions().slice(0, 2), []);
+  const quick = useMemo(() => quickReactions().slice(0, 3), []);
   const [shift, setShift] = useState(false);
 
   const showToolbar = !pending && !editing;
@@ -162,6 +162,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   if (highlighted) cls.push('flash');
   if (message.message_reference && !system) cls.push('has-reply');
   if (system) cls.push('system');
+  if (chat.replyingId === message.id) cls.push('replying');
 
   if (system) {
     return <div className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id} onContextMenu={e => items().length && menu.open(e, items())}>
@@ -202,9 +203,10 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
     </div>
     {showToolbar && <div className={`chat-toolbar${pickerOpen ? ' open' : ''}`} role="toolbar" aria-label="Message actions">
       {quick.map(e => <Tooltip key={e} content="React" side="top"><button type="button" className="chat-toolbar-btn emoji" aria-label={`React with ${e}`} onClick={() => chat.actions.react(message, { id: null, name: e })}>{e}</button></Tooltip>)}
+      <span className="chat-toolbar-sep" role="separator" />
       <Tooltip content="Add Reaction" side="top"><button ref={addBtn} type="button" className="chat-toolbar-btn" aria-label="Add Reaction" onClick={() => setPickerOpen(true)}><SmilePlus size={20} /></button></Tooltip>
       {canEdit && <Tooltip content="Edit" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Edit" onClick={() => chat.actions.edit(message)}><Pencil size={20} /></button></Tooltip>}
-      <Tooltip content="Reply" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Reply" onClick={() => chat.actions.reply(message)}><Reply size={20} /></button></Tooltip>
+      {!isMine && <Tooltip content="Reply" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Reply" onClick={() => chat.actions.reply(message)}><Reply size={20} /></button></Tooltip>}
       {canDelete && shift && <Tooltip content="Delete" side="top"><button type="button" className="chat-toolbar-btn danger" aria-label="Delete" onClick={e => chat.actions.requestDelete(message, e.shiftKey)}><Trash /></button></Tooltip>}
       <Tooltip content="More" side="top"><button type="button" className="chat-toolbar-btn" aria-label="More" onClick={e => {
         const r = e.currentTarget.getBoundingClientRect();

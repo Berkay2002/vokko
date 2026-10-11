@@ -41,6 +41,8 @@ export interface ChatContextValue {
   userById(id: Snowflake): User | undefined;
   /** Hooks supplied by ChatView. */
   actions: ChatActions;
+  /** Message the composer is currently replying to; its row gets the "replying" highlight. */
+  replyingId: Snowflake | null;
 }
 
 export interface ChatActions {
@@ -62,7 +64,7 @@ export function useChat(): ChatContextValue {
   return v;
 }
 
-export function ChatProvider({ channelId, actions, children }: { channelId: Snowflake; actions: ChatActions; children: ReactNode }) {
+export function ChatProvider({ channelId, actions, replyingId = null, children }: { channelId: Snowflake; actions: ChatActions; replyingId?: Snowflake | null; children: ReactNode }) {
   const me = useMe();
   const channel = useChannel(channelId);
   const guildId = channel?.guild_id ?? null;
@@ -91,12 +93,12 @@ export function ChatProvider({ channelId, actions, children }: { channelId: Snow
       onLink: actions.openLink,
     };
     return {
-      channelId, channel, guild, guildId, me, md, roles, members, channels: guildChannels, actions, userById, nameOf,
+      channelId, channel, guild, guildId, me, md, roles, members, channels: guildChannels, actions, userById, nameOf, replyingId,
       isDm: channel?.type === ChannelType.DM || channel?.type === ChannelType.GroupDM,
       canManage: canManageMessages(guild, me, members[me.id]),
       colorOf: m => (guildId ? roleColor(guildId, members[m.author.id] ?? m.member ?? null) : null),
     };
-  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions]);
+  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, replyingId]);
 
   if (!value) return null;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

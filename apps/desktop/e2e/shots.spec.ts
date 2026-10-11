@@ -80,8 +80,8 @@ test('acceptance screenshots', async ({ page }) => {
   await page.getByLabel('Edit message').press('Escape');
 
   // 6. reply in progress + rendered reply
-  await target.hover();
-  await target.getByRole('button', { name: 'Reply' }).click();
+  await target.click({ button: 'right', position: { x: 200, y: 10 } });
+  await page.getByRole('menuitem', { name: 'Reply' }).click();
   await composer(page).fill('replying to that');
   await shot(page, '06a-reply-in-progress');
   await composer(page).press('Enter');

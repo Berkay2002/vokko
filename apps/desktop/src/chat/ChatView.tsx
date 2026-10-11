@@ -77,7 +77,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
 
   if (!me) return null;
 
-  return <ChatProvider channelId={channelId} actions={actions}>
+  return <ChatProvider channelId={channelId} actions={actions} replyingId={replyTo?.id ?? null}>
     <ChatBody
       channelId={channelId}
       replyTo={replyTo} mentionReply={mentionReply} setMentionReply={setMentionReply} setReplyTo={setReplyTo}

@@ -58,7 +58,7 @@ function PinnedList({ channelId, onJump }: { channelId: Snowflake; onJump?: (id:
   }
 
   return <div className="chat-pins" role="dialog" aria-label="Pinned Messages">
-    <header className="chat-pins-header"><h2>Pinned Messages</h2></header>
+    <header className="chat-pins-header"><Pin size={20} aria-hidden="true" /><h2>Pinned Messages</h2></header>
     <div className="chat-pins-body">
       {pins === null && !error && <div className="chat-pins-empty">Loading…</div>}
       {error && <div className="chat-pins-empty">Couldn't load pinned messages.</div>}

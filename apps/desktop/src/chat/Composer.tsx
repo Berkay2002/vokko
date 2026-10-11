@@ -203,7 +203,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   return <div className="chat-composer">
     {replyTo && <div className="chat-reply-bar">
       <span className="chat-reply-bar-text">Replying to <b>{replyName}</b></span>
-      <button type="button" className={`chat-reply-mention${mentionReply ? ' on' : ''}`} aria-pressed={mentionReply} onClick={onToggleMention}><AtSign size={14} /> {mentionReply ? 'ON' : 'OFF'}</button>
+      {!chat.isDm && <button type="button" className={`chat-reply-mention${mentionReply ? ' on' : ''}`} aria-pressed={mentionReply} onClick={onToggleMention}><AtSign size={14} /> {mentionReply ? 'ON' : 'OFF'}</button>}
       <button type="button" className="chat-reply-close" aria-label="Cancel reply" onClick={onCancelReply}><X size={16} /></button>
     </div>}
     <div className={`chat-composer-box${replyTo ? ' has-reply' : ''}`}>
