@@ -1,0 +1,250 @@
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { AtSign, CircleAlert, FileUp, Hash, Plus, Smile, X } from 'lucide-react';
+import { ChannelType } from '../api/types';
+import type { Message, Snowflake } from '../api/types';
+import { request, Popout, Tooltip } from './shell';
+import { useChat } from './ChatContext';
+import { Avatar } from './Avatar';
+import { EmojiPickerPopout } from './EmojiPicker';
+import { useEmojiDb, pushRecentEmoji } from './emojiData';
+import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, useDraft } from './draftStore';
+import { fromDisplay, type MentionToken } from './mentionText';
+import { messageStore } from './messageStore';
+import { formatBytes } from './util';
+
+const MAX_LEN = 2000;
+const TYPING_INTERVAL_MS = 8000;
+const lastTyping = new Map<Snowflake, number>();
+
+interface Suggestion {
+  key: string;
+  label: string;
+  hint?: string;
+  insert: string;
+  token?: MentionToken;
+  lead: 'avatar' | 'hash' | 'at' | 'emoji';
+  user?: { id: string; avatar: string | null };
+  emoji?: string;
+  color?: string | null;
+}
+
+interface Trigger { kind: 'user' | 'channel' | 'emoji'; query: string; start: number }
+
+export function detectTrigger(text: string, caret: number): Trigger | null {
+  const before = text.slice(0, caret);
+  const m = /(^|\s)([@#:])([^\s@#:]*)$/.exec(before);
+  if (!m) return null;
+  const sym = m[2]!, query = m[3]!;
+  if (sym === ':' && query.length < 2) return null;
+  const start = caret - query.length - 1;
+  return { kind: sym === '@' ? 'user' : sym === '#' ? 'channel' : 'emoji', query, start };
+}
+
+export interface ComposerProps {
+  channelId: Snowflake;
+  replyTo: Message | null;
+  mentionReply: boolean;
+  onToggleMention(): void;
+  onCancelReply(): void;
+  onSent(): void;
+  onEditLast(): void;
+  /** Incremented by the parent to pull focus (after reply, closing modals, ...). */
+  focusToken: number;
+}
+
+export function Composer({ channelId, replyTo, mentionReply, onToggleMention, onCancelReply, onSent, onEditLast, focusToken }: ComposerProps) {
+  const chat = useChat();
+  const draft = useDraft(channelId);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const plusBtn = useRef<HTMLButtonElement>(null);
+  const emojiBtn = useRef<HTMLButtonElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [caret, setCaret] = useState(0);
+  const [plusOpen, setPlusOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [selected, setSelected] = useState(0);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const emojiDb = useEmojiDb();
+  const { text, uploads } = draft;
+  const name = chat.channel?.name ? `#${chat.channel.name}` : chat.channel?.recipients?.map(u => chat.nameOf(u)).join(', ') ?? '';
+  const placeholder = chat.isDm ? `Message @${chat.channel?.recipients?.[0] ? chat.nameOf(chat.channel.recipients[0]) : ''}` : `Message ${name}`;
+
+  useLayoutEffect(() => {
+    const el = area.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.5))}px`;
+  }, [text]);
+
+  useEffect(() => { area.current?.focus(); }, [channelId, focusToken]);
+
+  // ---- autocomplete ----
+  const trigger = useMemo(() => detectTrigger(text, caret), [text, caret]);
+  const triggerKey = trigger ? `${trigger.kind}:${trigger.start}:${trigger.query}` : null;
+
+  const suggestions = useMemo<Suggestion[]>(() => {
+    if (!trigger || dismissed === triggerKey) return [];
+    const q = trigger.query.toLowerCase();
+    if (trigger.kind === 'user') {
+      const people = new Map<string, { id: string; avatar: string | null; username: string; name: string; color: string | null }>();
+      const add = (u: { id: string; avatar: string | null; username: string; global_name: string | null }, member?: { nick: string | null; roles: string[] }) => {
+        if (people.has(u.id)) return;
+        people.set(u.id, { id: u.id, avatar: u.avatar, username: u.username, name: member?.nick || u.global_name || u.username, color: null });
+      };
+      if (chat.guildId) for (const m of Object.values(chat.members)) add(m.user, m);
+      else { add(chat.me); for (const u of chat.channel?.recipients ?? []) add(u); }
+      const list = [...people.values()]
+        .filter(p => !q || p.name.toLowerCase().includes(q) || p.username.toLowerCase().includes(q))
+        .sort((a, b) => Number(b.name.toLowerCase().startsWith(q)) - Number(a.name.toLowerCase().startsWith(q)) || a.name.localeCompare(b.name))
+        .slice(0, 10);
+      const out: Suggestion[] = list.map(p => ({
+        key: `u${p.id}`, label: p.name, hint: p.username, insert: `@${p.name}`, token: { display: `@${p.name}`, raw: `<@${p.id}>` }, lead: 'avatar', user: { id: p.id, avatar: p.avatar },
+      }));
+      if (chat.guildId) {
+        for (const r of chat.roles) {
+          if (r.id === chat.guildId || !r.mentionable || !r.name.toLowerCase().includes(q)) continue;
+          out.push({ key: `r${r.id}`, label: r.name, insert: `@${r.name}`, token: { display: `@${r.name}`, raw: `<@&${r.id}>` }, lead: 'at', color: r.color ? `#${r.color.toString(16).padStart(6, '0')}` : null });
+        }
+        for (const special of ['everyone', 'here']) if (special.startsWith(q)) out.push({ key: special, label: `@${special}`, hint: special === 'everyone' ? 'Notify everyone in this channel' : 'Notify online members', insert: `@${special}`, lead: 'at' });
+      }
+      return out.slice(0, 12);
+    }
+    if (trigger.kind === 'channel') {
+      if (!chat.guildId) return [];
+      return chat.channels.filter(c => c.type === ChannelType.GuildText && (c.name ?? '').toLowerCase().includes(q)).slice(0, 10)
+        .map(c => ({ key: `c${c.id}`, label: c.name ?? '', insert: `#${c.name}`, token: { display: `#${c.name}`, raw: `<#${c.id}>` }, lead: 'hash' as const }));
+    }
+    if (!emojiDb) return [];
+    return emojiDb.search(q, 10).map(e => ({ key: `e${e.order}`, label: `:${e.shortcodes[0] ?? e.label}:`, insert: e.emoji, lead: 'emoji' as const, emoji: e.emoji }));
+  }, [trigger, triggerKey, dismissed, chat, emojiDb]);
+
+  useEffect(() => { setSelected(0); }, [triggerKey]);
+
+  const apply = useCallback((s: Suggestion) => {
+    if (!trigger) return;
+    const el = area.current;
+    const end = el ? el.selectionStart : caret;
+    const insert = s.insert + (s.lead === 'emoji' ? ' ' : ' ');
+    const next = text.slice(0, trigger.start) + insert + text.slice(end);
+    if (s.token) addDraftToken(channelId, s.token);
+    if (s.emoji) pushRecentEmoji(s.emoji);
+    setDraftText(channelId, next);
+    const pos = trigger.start + insert.length;
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); setCaret(pos); });
+  }, [trigger, caret, text, channelId]);
+
+  // ---- sending ----
+  const allDone = uploads.every(u => u.status === 'done');
+  const anyUploading = uploads.some(u => u.status === 'uploading');
+  const rawContent = fromDisplay(text, draft.tokens).trim();
+  const tooLong = rawContent.length > MAX_LEN;
+  const readyUploads = uploads.filter(u => u.status === 'done' && u.attachment);
+  const canSend = !tooLong && !anyUploading && (rawContent.length > 0 || readyUploads.length > 0) && (allDone || uploads.every(u => u.status !== 'uploading'));
+
+  function send() {
+    if (!canSend) return;
+    messageStore.send(channelId, chat.me, {
+      content: rawContent,
+      attachments: readyUploads.map(u => u.attachment!),
+      reply: replyTo,
+      mention: mentionReply,
+    });
+    clearDraft(channelId);
+    lastTyping.delete(channelId);
+    setCaret(0);
+    onCancelReply();
+    onSent();
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.nativeEvent.isComposing) return;
+    if (suggestions.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSelected(s => (s + 1) % suggestions.length); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSelected(s => (s - 1 + suggestions.length) % suggestions.length); return; }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); const s = suggestions[selected]; if (s) apply(s); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setDismissed(triggerKey); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); return; }
+    if (e.key === 'Escape' && replyTo) { e.preventDefault(); onCancelReply(); return; }
+    if (e.key === 'ArrowUp' && text === '' && uploads.length === 0 && !e.shiftKey) { e.preventDefault(); onEditLast(); }
+  }
+
+  function onChange(value: string) {
+    setDraftText(channelId, value);
+    const pos = area.current?.selectionStart ?? value.length;
+    setCaret(pos);
+    if (value.trim()) {
+      const now = Date.now();
+      if (now - (lastTyping.get(channelId) ?? 0) >= TYPING_INTERVAL_MS) {
+        lastTyping.set(channelId, now);
+        void request<null>('POST', `/channels/${channelId}/typing`).catch(() => undefined);
+      }
+    }
+  }
+
+  function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = [...e.clipboardData.files];
+    if (files.length) { e.preventDefault(); addFiles(channelId, files); }
+  }
+
+  function insertEmoji(ch: string) {
+    const el = area.current;
+    const start = el?.selectionStart ?? text.length, end = el?.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + ch + text.slice(end);
+    setDraftText(channelId, next);
+    const pos = start + ch.length;
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); setCaret(pos); });
+  }
+
+  const remaining = MAX_LEN - rawContent.length;
+  const replyName = replyTo ? chat.nameOf(replyTo.author, replyTo.member) : '';
+  const hasText = text.length > 0;
+
+  return <div className="chat-composer">
+    {replyTo && <div className="chat-reply-bar">
+      <span className="chat-reply-bar-text">Replying to <b>{replyName}</b></span>
+      <button type="button" className={`chat-reply-mention${mentionReply ? ' on' : ''}`} aria-pressed={mentionReply} onClick={onToggleMention}><AtSign size={14} /> {mentionReply ? 'ON' : 'OFF'}</button>
+      <button type="button" className="chat-reply-close" aria-label="Cancel reply" onClick={onCancelReply}><X size={16} /></button>
+    </div>}
+    <div className={`chat-composer-box${replyTo ? ' has-reply' : ''}`}>
+      {uploads.length > 0 && <div className="chat-tray" aria-label="Attachments to upload">
+        {uploads.map(u => <div key={u.localId} className={`chat-tray-item ${u.status}`}>
+          <button type="button" className="chat-tray-remove" aria-label={`Remove ${u.file.name}`} onClick={() => removeUpload(channelId, u.localId)}><X size={14} /></button>
+          <div className="chat-tray-thumb">{u.previewUrl ? <img src={u.previewUrl} alt="" draggable={false} /> : <FileUp size={40} />}</div>
+          <div className="chat-tray-name" title={u.file.name}>{u.file.name}</div>
+          <div className="chat-tray-size">{u.status === 'error' ? <span className="chat-tray-error"><CircleAlert size={12} /> {u.error}</span> : formatBytes(u.file.size)}</div>
+          {u.status === 'uploading' && <div className="chat-tray-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(u.progress * 100)}><div style={{ width: `${Math.round(u.progress * 100)}%` }} /></div>}
+        </div>)}
+      </div>}
+      <div className="chat-composer-row">
+        <Tooltip content="Attach" side="top"><button ref={plusBtn} type="button" className="chat-composer-btn plus" aria-label="Attach a file" onClick={() => setPlusOpen(v => !v)}><Plus size={20} /></button></Tooltip>
+        <Popout anchor={plusBtn} open={plusOpen} onClose={() => setPlusOpen(false)} side="top">
+          <div className="chat-attach-menu" role="menu">
+            <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><FileUp size={20} /> Upload a File</button>
+          </div>
+        </Popout>
+        <input ref={fileInput} type="file" multiple hidden onChange={e => { addFiles(channelId, [...(e.target.files ?? [])]); e.target.value = ''; }} />
+        <textarea ref={area} className="chat-textarea" rows={1} value={text} placeholder={placeholder} aria-label={placeholder} spellCheck
+          onChange={e => onChange(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste}
+          onSelect={e => setCaret(e.currentTarget.selectionStart)} onClick={e => setCaret(e.currentTarget.selectionStart)} />
+        <div className="chat-composer-actions">
+          {remaining <= 200 && hasText && <span className={`chat-counter${remaining < 0 ? ' over' : ''}`} aria-live="polite">{remaining}</span>}
+          <Tooltip content="Select Emoji" side="top"><button ref={emojiBtn} type="button" className="chat-composer-btn" aria-label="Select emoji" onClick={() => setEmojiOpen(v => !v)}><Smile size={24} /></button></Tooltip>
+        </div>
+        <EmojiPickerPopout anchor={emojiBtn} open={emojiOpen} onClose={() => setEmojiOpen(false)} onPick={e => { setEmojiOpen(false); insertEmoji(e.name); }} />
+      </div>
+      {suggestions.length > 0 && <div className="chat-autocomplete" role="listbox" aria-label="Suggestions">
+        <div className="chat-autocomplete-title">{trigger?.kind === 'user' ? 'Members' : trigger?.kind === 'channel' ? 'Text Channels' : `Emoji matching :${trigger?.query}`}</div>
+        {suggestions.map((s, i) => <div key={s.key} role="option" aria-selected={i === selected} className={`chat-autocomplete-item${i === selected ? ' selected' : ''}`}
+          onMouseEnter={() => setSelected(i)} onMouseDown={e => { e.preventDefault(); apply(s); }}>
+          {s.lead === 'avatar' && s.user && <Avatar user={s.user} size={24} />}
+          {s.lead === 'hash' && <Hash size={20} className="chat-autocomplete-icon" />}
+          {s.lead === 'at' && <AtSign size={20} className="chat-autocomplete-icon" style={s.color ? { color: s.color } : undefined} />}
+          {s.lead === 'emoji' && <span className="chat-autocomplete-emoji">{s.emoji}</span>}
+          <span className="chat-autocomplete-label" style={s.color ? { color: s.color } : undefined}>{s.label}</span>
+          {s.hint && <span className="chat-autocomplete-hint">{s.hint}</span>}
+        </div>)}
+      </div>}
+    </div>
+  </div>;
+}
