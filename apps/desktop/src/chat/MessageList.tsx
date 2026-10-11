@@ -1,5 +1,5 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import { Virtuoso, type ItemProps, type ListProps, type VirtuosoHandle } from 'react-virtuoso';
 import { CheckCheck, Loader2 } from 'lucide-react';
 import type { Snowflake } from '../api/types';
 import { useChat } from './ChatContext';
@@ -29,6 +29,14 @@ const Header = memo(function Header({ context }: { context?: { hasMoreBefore: bo
 const Footer = memo(function Footer({ context }: { context?: { hasMoreAfter: boolean; loading: boolean } }) {
   return <div className="chat-list-footer">{context?.hasMoreAfter && context.loading && <Loader2 className="spin" size={24} />}</div>;
 });
+
+// Virtuoso puts its own wrapper divs between the scroller and the rows: they carry the list roles, so each row has a list parent.
+const List = forwardRef<HTMLDivElement, ListProps<HTMLDivElement> & { context?: unknown }>(function List({ context: _context, ...props }, ref) {
+  return <div ref={ref} {...props} role="list" />;
+});
+function Item({ context: _context, item: _item, ...props }: ItemProps<Row> & { context?: unknown }) {
+  return <div {...props} role="listitem" />;
+}
 
 export const MessageList = forwardRef<MessageListHandle, Props>(function MessageList({ channelId, editingId, onStopEditing, onAtBottomChange }, ref) {
   const chat = useChat();
@@ -161,8 +169,8 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       startReached={() => { void messageStore.loadOlder(channelId); }}
       endReached={() => { void messageStore.loadNewer(channelId); }}
       computeItemKey={(_, row) => row.key}
-      components={{ Header, Footer }}
-      itemContent={(index, row) => <div className="chat-row" role="listitem">
+      components={{ Header, Footer, List, Item }}
+      itemContent={(index, row) => <div className="chat-row">
         {index === state.firstItemIndex && !state.hasMoreBefore && <ChannelStart />}
         {/* The new-messages divider on a day boundary is the day divider itself, in red with the pill at its right end. */}
         {row.dayLabel && <div className={`chat-day-divider${row.unreadDivider ? ' unread' : ''}`} role="separator"><span>{row.dayLabel}</span>{row.unreadDivider && <b className="chat-new-pill">NEW</b>}</div>}

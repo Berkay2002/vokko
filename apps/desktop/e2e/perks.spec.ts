@@ -29,7 +29,8 @@ test('profile perks are all enabled and show in the preview and the profile card
   await expect(preview).toContainText('they/them');
 
   await dialog.getByRole('button', { name: 'Save Changes' }).click();
-  await expect(dialog.getByRole('button', { name: 'Save Changes' })).toHaveCount(0);
+  // the button reads "Saving…" while the request is in flight: the save bar (which also shows a failed save's error) goes away once it is done
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
 
   const me = await page.evaluate(() => (window as unknown as { __vokko: { appStore: { getState(): { me: Record<string, unknown> } } } }).__vokko.appStore.getState().me);
   expect(me.pronouns).toBe('they/them');

@@ -23,7 +23,6 @@ const CONTRAST: Known = { 'color-contrast': 'A11Y-07 muted text tokens (--text-m
 const REGION: Known = { region: 'A11Y-12 sidebar list and resize handle sit outside any landmark' };
 const TARGET: Known = { 'target-size': 'A11Y-09 user-panel input/output chevrons are 16x32 and hover-only channel actions are small' };
 const HEADINGS: Known = { 'heading-order': 'A11Y-20 message author names are <h3> directly under the page <h1>' };
-const CHAT_LIST: Known = { 'aria-required-parent': 'A11Y-01 .chat-row role=listitem has no role=list parent (react-virtuoso wrappers sit in between)' };
 const OVERLAY_MAIN: Known = { 'landmark-no-duplicate-main': 'A11Y-13 settings overlay renders a second <main> while the app shell behind it stays in the a11y tree' };
 
 test.beforeEach(async ({ page }) => {
@@ -78,13 +77,13 @@ test.describe('axe: main screens', () => {
 
   test('DM chat', async ({ page }, info) => {
     await openDm(page);
-    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...TARGET, ...CHAT_LIST, ...HEADINGS });
+    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...TARGET, ...HEADINGS });
   });
 
   test('guild channel with member list', async ({ page }, info) => {
     await openGuild(page);
     await expect(page.getByRole('complementary', { name: 'Members' })).toBeVisible();
-    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...TARGET, ...CHAT_LIST, ...HEADINGS });
+    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...TARGET, ...HEADINGS });
   });
 
   test('message context menu', async ({ page }, info) => {
@@ -108,11 +107,6 @@ test.describe('axe: main screens', () => {
     await page.keyboard.press('Control+k');
     await expect(page.locator('.quick-input')).toBeFocused();
     expectOnlyKnown(info, await scan(page, '.modal'), {
-      'aria-dialog-name': 'A11Y-02 quick switcher dialog has no accessible name',
-      'aria-input-field-name': 'A11Y-02 listbox has no accessible name',
-      'aria-required-children': 'A11Y-02 listbox contains <li> wrappers instead of options',
-      'aria-required-parent': 'A11Y-02 options sit inside <li>, not directly in the listbox',
-      listitem: 'A11Y-02 <li> inside a role=listbox element',
       'color-contrast': 'A11Y-07 .quick-sub on the selected row is 3.96:1',
     });
   });
@@ -255,7 +249,6 @@ test.describe('keyboard: menus', () => {
   });
 
   test('Tab does not walk away from an open context menu', async ({ page }) => {
-    test.fail(true, 'A11Y-06: Tab moves focus to the next control behind the menu and the menu stays open');
     await openGuild(page);
     await page.getByRole('link', { name: 'general' }).focus();
     await page.keyboard.press('Shift+F10');
@@ -263,6 +256,18 @@ test.describe('keyboard: menus', () => {
     const open = (await page.getByRole('menu').count()) > 0;
     const insideMenu = (await focusInfo(page, '.context-menu')).inside;
     expect(!open || insideMenu).toBe(true);
+  });
+
+  test('Tab closes a message menu opened with Shift+F10 from inside a message', async ({ page }) => {
+    await openGuild(page);
+    await page.locator('.chat-scroller').focus();
+    for (let i = 0; i < 12 && !(await focusInfo(page, '.chat-msg')).inside; i += 1) await page.keyboard.press('Tab');
+    expect((await focusInfo(page, '.chat-msg')).inside).toBe(true);
+    await page.keyboard.press('Shift+F10');
+    const menu = page.getByRole('menu', { name: 'Message actions' });
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(menu).toHaveCount(0);
   });
 
   test('message actions are reachable without a mouse', async ({ page }) => {
@@ -364,6 +369,7 @@ test.describe('keyboard: shortcuts', () => {
     await expect(input).toBeFocused();
     await page.keyboard.type('rand');
     await expect(page.locator('.quick-row[aria-selected=true]')).toContainText(/random/i);
+    await expect(input).toHaveAttribute('aria-activedescendant', await page.locator('.quick-row[aria-selected=true]').getAttribute('id') ?? '');
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('ArrowUp');
     await page.keyboard.press('Enter');

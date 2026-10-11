@@ -159,7 +159,8 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
         e.preventDefault();
         if (row.children) setOpen(row.id);
         else if (!row.disabled) { onClose(); row.onSelect?.(); }
-      } else if (e.key === 'ArrowLeft') setOpen(null);
+      } else if (e.key === 'Tab') onClose(); // no focusable rows: let Tab move on and close the menu behind it
+      else if (e.key === 'ArrowLeft') setOpen(null);
       else if (e.key === 'ArrowRight' && active >= 0 && rows[active]?.children) { e.preventDefault(); setOpen(rows[active]!.id); }
     };
     document.addEventListener('keydown', onKey);

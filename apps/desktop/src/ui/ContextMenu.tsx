@@ -49,8 +49,8 @@ export function useContextMenu(): { open: (event: ReactMouseEvent | MouseEvent |
   const hide = useMenuStore(s => s.hide);
   const open = useCallback(
     (event: { clientX: number; clientY: number; preventDefault?: () => void }, items: MenuItem[]) => {
-      event.preventDefault?.();
       if (items.length === 0) return;
+      event.preventDefault?.();
       show(event.clientX, event.clientY, items);
     },
     [show],
@@ -123,6 +123,9 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
         }
       } else if (event.key === "ArrowLeft") {
         setSub(null);
+      } else if (event.key === "Tab") {
+        // The menu has no focusable rows: let Tab move on and close the menu behind it (ARIA menu pattern).
+        onClose();
       }
     };
     document.addEventListener("keydown", onKey);
@@ -176,6 +179,43 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
 export function ContextMenuHost() {
   const { open, x, y, items, hide } = useMenuStore();
   const layer = useLayer(open, hide);
+  useEffect(() => {
+    // Shift+F10 and the Menu key: Chromium on Windows/Linux may turn them into a native `contextmenu` event (Windows: on keyup),
+    // macOS and Tauri's WKWebView do not. Dispatch one ourselves at the focused element so every onContextMenu handler works from
+    // the keyboard, and swallow a trusted native one that follows on the same target so the menu does not open twice.
+    let swallow: { target: Element; until: number } | null = null;
+    const isMenuKey = (event: KeyboardEvent) => event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey);
+    const onKey = (event: KeyboardEvent) => {
+      if (!isMenuKey(event) || event.repeat || event.isComposing) return;
+      const target = document.activeElement;
+      if (!(target instanceof HTMLElement) || target === document.body) return;
+      const rect = target.getBoundingClientRect();
+      const x = Math.min(Math.max(rect.left, 0), window.innerWidth - 1);
+      const y = Math.min(Math.max(rect.bottom, 0), window.innerHeight - 1);
+      // Same outcome as a right click on that element: a handler took it (menu opened) or nobody did and the native menu stays.
+      if (!target.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }))) {
+        event.preventDefault();
+        swallow = { target, until: performance.now() + 500 };
+      }
+    };
+    const onNative = (event: Event) => {
+      if (!swallow || !event.isTrusted || event.target !== swallow.target || performance.now() > swallow.until) return;
+      swallow = null;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (swallow && isMenuKey(event) && performance.now() <= swallow.until) event.preventDefault();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("keyup", onKeyUp);
+    document.addEventListener("contextmenu", onNative, true);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keyup", onKeyUp);
+      document.removeEventListener("contextmenu", onNative, true);
+    };
+  }, []);
   useOutsideClose(open, () => [...document.querySelectorAll(".context-menu")], hide, layer.isTop);
   useEffect(() => {
     if (!open) return;

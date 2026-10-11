@@ -360,6 +360,8 @@ test('the welcome checklist guides the owner of a brand-new server', async ({ pa
 
 // Accessibility: the new dialogs and cards must be clean under axe (no known-issue list needed).
 async function expectClean(page: Page, include: string): Promise<void> {
+  // The dialog behind a click may still be mounting: axe throws when the include selector matches nothing.
+  await expect(page.locator(include).first()).toBeVisible();
   const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-practice']).include(include).analyze();
   expect(results.violations.map(v => `${v.id}: ${v.nodes.slice(0, 3).map(n => n.target.join(' ')).join(' | ')}`)).toEqual([]);
 }
@@ -410,5 +412,7 @@ test('the welcome checklist and the suggestions tab pass axe', async ({ page }) 
   await goTo(page, '/channels/@me');
   await page.getByRole('tab', { name: 'Suggestions' }).click();
   await expect(page.locator('.cm-suggestions')).toBeVisible();
+  // The switch is disabled (faded to 50%, which axe reads as low contrast) until the settings have loaded.
+  await expect(page.locator('.cm-suggestions .switch-row.disabled')).toHaveCount(0);
   await expectClean(page, '.cm-suggestions');
 });

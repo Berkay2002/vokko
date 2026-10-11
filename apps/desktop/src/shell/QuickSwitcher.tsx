@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Hash, Volume2 } from "lucide-react";
 import { appStore, dmName, useStore } from "../api/store";
 import { ChannelType, type Snowflake } from "../api/types";
@@ -124,6 +124,11 @@ export function QuickSwitcher() {
   }, [all, current, query, scope]);
   const shown = previous.length > 0 ? previous : results;
 
+  const activeKey = shown[index]?.key;
+  useEffect(() => {
+    if (activeKey) document.getElementById(`quick-${activeKey}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeKey]);
+
   const choose = (r: Result | undefined) => {
     if (!r) return;
     // Leave parked settings behind too: the result navigates away from them.
@@ -132,9 +137,16 @@ export function QuickSwitcher() {
   };
 
   return (
-    <Modal open onClose={closeModal} hideClose className="quick-switcher">
+    <Modal open onClose={closeModal} hideClose labelledBy="quick-switcher-title" className="quick-switcher">
+      <span id="quick-switcher-title" className="sr-only">Quick switcher</span>
       <input
         className="quick-input"
+        role="combobox"
+        aria-label="Search channels, people and servers"
+        aria-expanded={shown.length > 0}
+        aria-controls="quick-results"
+        aria-activedescendant={shown[index] ? `quick-${shown[index].key}` : undefined}
+        autoComplete="off"
         autoFocus
         value={query}
         placeholder="Where would you like to go?"
@@ -146,19 +158,17 @@ export function QuickSwitcher() {
         }}
       />
       {previous.length > 0 && <div className="quick-heading">Previous channels</div>}
-      <ul className="quick-results" role="listbox">
+      <div id="quick-results" className="quick-results" role="listbox" aria-label="Results">
         {shown.map((r, i) => (
-          <li key={r.key}>
-            <button type="button" role="option" aria-selected={i === index} className={`quick-row${i === index ? " selected" : ""}`} onMouseEnter={() => setIndex(i)} onClick={() => choose(r)}>
-              <span className="quick-icon">{r.icon}</span>
-              <span className="quick-label">{r.label}</span>
-              {KIND_TAG[r.kind] && <span className="quick-tag">{KIND_TAG[r.kind]}</span>}
-              {r.sub && <span className="quick-sub">{r.sub}</span>}
-            </button>
-          </li>
+          <button key={r.key} id={`quick-${r.key}`} type="button" role="option" tabIndex={-1} aria-selected={i === index} className={`quick-row${i === index ? " selected" : ""}`} onMouseEnter={() => setIndex(i)} onClick={() => choose(r)}>
+            <span className="quick-icon">{r.icon}</span>
+            <span className="quick-label">{r.label}</span>
+            {KIND_TAG[r.kind] && <span className="quick-tag">{KIND_TAG[r.kind]}</span>}
+            {r.sub && <span className="quick-sub">{r.sub}</span>}
+          </button>
         ))}
-        {shown.length === 0 && <li className="quick-empty">{scope === "unavailable" ? "Not available yet." : "No results found. Nobody here but us chickens."}</li>}
-      </ul>
+      </div>
+      {shown.length === 0 && <div className="quick-empty" role="status">{scope === "unavailable" ? "Not available yet." : "No results found. Nobody here but us chickens."}</div>}
       <div className="quick-tip">
         <span className="quick-tip-label">PROTIP:</span> Start searches with <kbd>@</kbd> <kbd>#</kbd> <kbd>!</kbd> <kbd>*</kbd> <kbd>$</kbd> to narrow results to users, text channels, voice channels, servers and more.
       </div>
