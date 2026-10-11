@@ -168,3 +168,124 @@ async fn ten_attachments_per_message() {
     assert_eq!(status, 200);
     assert_eq!(message["attachments"].as_array().expect("attachments").len(), 10);
 }
+
+async fn fetch(app: &TestApp, path: &str) -> axum::response::Response {
+    app.router.clone().oneshot(Request::builder().uri(path).body(Body::empty()).expect("request")).await.expect("response")
+}
+
+fn path_of(url: &str) -> String {
+    url.strip_prefix("http://test.local").expect("prefix").to_owned()
+}
+
+#[tokio::test]
+async fn attachment_urls_carry_an_unguessable_key() {
+    let (app, owner, _, channel, _) = setup().await;
+    let (_, attachment) = upload(&app, &owner, &channel, "my pic.png", "image/png", &png(8, 8)).await;
+    let id = attachment["id"].as_str().expect("id");
+    let url = attachment["url"].as_str().expect("url");
+    let rest = url.strip_prefix("http://test.local/api/v1/attachments/").expect("shape");
+    let parts: Vec<&str> = rest.split('/').collect();
+    assert_eq!(parts.len(), 3, "{url}");
+    assert_eq!(parts[0], id);
+    assert_eq!(parts[1].len(), 32);
+    assert!(parts[1].bytes().all(|b| b.is_ascii_hexdigit()));
+    assert_eq!(parts[2], "my%20pic.png");
+    assert_eq!(fetch(&app, &path_of(url)).await.status(), 200);
+
+    let key = parts[1];
+    let wrong_key = format!("/api/v1/attachments/{id}/{}/my%20pic.png", "0".repeat(32));
+    let wrong_name = format!("/api/v1/attachments/{id}/{key}/other.png");
+    let no_key = format!("/api/v1/attachments/{id}/my%20pic.png");
+    for path in [wrong_key, wrong_name, no_key] {
+        let response = fetch(&app, &path).await;
+        assert_eq!(response.status(), 404, "{path}");
+    }
+
+    // a row from before keys existed is never served
+    let numeric: i64 = id.parse().expect("id");
+    sqlx::query("UPDATE attachments SET key = NULL WHERE id = $1").bind(numeric).execute(&app.state.db).await.expect("update");
+    assert_eq!(fetch(&app, &path_of(url)).await.status(), 404);
+}
+
+#[tokio::test]
+async fn avatar_and_icon_urls_download() {
+    let (app, owner, _, channel, guild) = setup().await;
+    let (_, avatar) = upload(&app, &owner, &channel, "me.png", "image/png", &png(4, 4)).await;
+    let (status, user) = app.patch("/users/@me", &owner, json!({"avatar_attachment_id": avatar["id"]})).await;
+    assert_eq!(status, 200, "{user}");
+    let avatar_url = user["avatar"].as_str().expect("avatar").to_owned();
+    assert_eq!(avatar_url, avatar["url"].as_str().expect("url"));
+    assert_eq!(fetch(&app, &path_of(&avatar_url)).await.status(), 200);
+
+    let (_, icon) = upload(&app, &owner, &channel, "icon.png", "image/png", &png(4, 4)).await;
+    let (status, updated) = app.patch(&format!("/guilds/{guild}"), &owner, json!({"icon_attachment_id": icon["id"]})).await;
+    assert_eq!(status, 200, "{updated}");
+    let icon_url = updated["icon"].as_str().expect("icon").to_owned();
+    assert_eq!(fetch(&app, &path_of(&icon_url)).await.status(), 200);
+}
+
+#[tokio::test]
+async fn large_downloads_stream_with_content_length() {
+    let (app, owner, _, channel, _) = setup().await;
+    let data: Vec<u8> = (0..5 * 1024 * 1024_u32).map(|i| (i % 251) as u8).collect();
+    let (status, attachment) = upload(&app, &owner, &channel, "big.bin", "application/octet-stream", &data).await;
+    assert_eq!(status, 200);
+    let response = fetch(&app, &path_of(attachment["url"].as_str().expect("url"))).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers()["content-length"], data.len().to_string().as_str());
+    assert_eq!(response.headers()["cache-control"], "private, max-age=86400");
+    assert!(response.headers()["content-disposition"].to_str().expect("header").starts_with("attachment"));
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.expect("body");
+    assert!(body.as_ref() == data.as_slice(), "streamed body differs");
+}
+
+#[tokio::test]
+async fn cleanup_removes_only_stale_pending_uploads() {
+    let (app, owner, _, channel, _) = setup().await;
+    let (_, stale) = upload(&app, &owner, &channel, "stale.bin", "application/octet-stream", b"stale").await;
+    let (_, attached) = upload(&app, &owner, &channel, "kept.bin", "application/octet-stream", b"kept").await;
+    let (_, avatar) = upload(&app, &owner, &channel, "me.png", "image/png", &png(4, 4)).await;
+    let (_, fresh) = upload(&app, &owner, &channel, "fresh.bin", "application/octet-stream", b"fresh").await;
+    let (status, _) = app.post(&format!("/channels/{channel}/messages"), &owner, json!({"content": "x", "attachment_ids": [attached["id"]]})).await;
+    assert_eq!(status, 200);
+    let (status, _) = app.patch("/users/@me", &owner, json!({"avatar_attachment_id": avatar["id"]})).await;
+    assert_eq!(status, 200);
+    let ids: Vec<i64> = [&stale, &attached, &avatar, &fresh].iter().map(|a| a["id"].as_str().expect("id").parse().expect("id")).collect();
+    sqlx::query("UPDATE attachments SET created_at = now() - interval '2 hours' WHERE id = ANY($1)").bind(&ids[..3]).execute(&app.state.db).await.expect("age");
+
+    let removed = vokko_server::media::cleanup_pending(&app.state, std::time::Duration::from_secs(3600)).await;
+    assert_eq!(removed, 1);
+    let remaining: Vec<(i64,)> =
+        sqlx::query_as("SELECT id FROM attachments WHERE id = ANY($1) ORDER BY id").bind(&ids).fetch_all(&app.state.db).await.expect("rows");
+    let remaining: Vec<i64> = remaining.into_iter().map(|(id,)| id).collect();
+    assert!(!remaining.contains(&ids[0]));
+    assert!(ids[1..].iter().all(|id| remaining.contains(id)));
+    assert!(!vokko_server::media::file_path(&app.state, ids[0]).exists());
+    assert!(vokko_server::media::file_path(&app.state, ids[1]).exists());
+    assert!(vokko_server::media::file_path(&app.state, ids[2]).exists());
+    let (_, user) = app.get("/users/@me", &owner).await;
+    assert_eq!(fetch(&app, &path_of(user["avatar"].as_str().expect("avatar"))).await.status(), 200);
+}
+
+#[tokio::test]
+async fn pending_uploads_have_a_quota() {
+    let (app, owner, member, channel, _) = setup().await;
+    // pre-fill 95 MiB of pending rows for the owner directly in the database
+    sqlx::query(
+        "INSERT INTO attachments (id, channel_id, uploader_id, filename, size, key) \
+         SELECT 9000000000000 + g, $1, u.id, 'filler', 5 * 1024 * 1024, 'k' FROM generate_series(1, 19) g, users u WHERE u.username = 'sam'",
+    )
+    .bind(channel.parse::<i64>().expect("channel"))
+    .execute(&app.state.db)
+    .await
+    .expect("filler");
+    let chunk = vec![b'a'; 4 * 1024 * 1024];
+    let (status, body) = upload(&app, &owner, &channel, "ok.bin", "application/octet-stream", &chunk).await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = upload(&app, &owner, &channel, "too-much.bin", "application/octet-stream", &chunk).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::PAYLOAD_TOO_LARGE, json!(40005)), "{body}");
+    assert!(body["message"].as_str().expect("message").contains("100 MiB"));
+    // quota is per user
+    let (status, _) = upload(&app, &member, &channel, "mine.bin", "application/octet-stream", &chunk).await;
+    assert_eq!(status, 200);
+}

@@ -23,6 +23,11 @@ pub struct Config {
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:8710";
 pub const MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
+/// Total size of one user's pending (not attached, not avatar/icon) uploads.
+pub const MAX_PENDING_BYTES_PER_USER: i64 = 100 * 1024 * 1024;
+/// Pending uploads older than this are deleted by the cleanup task, which runs every `CLEANUP_INTERVAL`.
+pub const PENDING_MAX_AGE: Duration = Duration::from_secs(60 * 60);
+pub const CLEANUP_INTERVAL: Duration = Duration::from_secs(10 * 60);
 pub const MAX_ATTACHMENTS_PER_MESSAGE: usize = 10;
 
 /// Token buckets: one per (caller, route) and one per caller across all routes. Deliberately lenient.
