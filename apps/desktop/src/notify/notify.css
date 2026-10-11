@@ -1,0 +1,124 @@
+/* Banners pinned above everything; while one is visible <html> gets .has-top-banner and #root is pushed down by its height. */
+:root {
+  --notify-banner-height: 32px;
+}
+
+html.has-top-banner #root {
+  box-sizing: border-box;
+  padding-top: var(--notify-banner-height);
+}
+
+.notify-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: var(--notify-banner-height);
+  padding: 0 12px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.notify-banner-critical {
+  background: var(--status-danger);
+}
+
+.notify-banner-brand {
+  background: var(--background-brand);
+}
+
+.notify-banner-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notify-banner-button {
+  flex: none;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notify-banner-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.notify-banner-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.notify-banner-close {
+  position: absolute;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.notify-banner-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.notify-splash {
+  gap: 20px;
+}
+
+.notify-splash-logo {
+  border-radius: 24px;
+  animation: notify-splash-pulse 2s ease-in-out infinite;
+}
+
+.notify-splash-text {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.notify-splash-retry {
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--background-brand);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@keyframes notify-splash-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(0.94);
+    opacity: 0.8;
+  }
+}

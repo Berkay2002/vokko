@@ -1,0 +1,123 @@
+import { describe, expect, it } from "vitest";
+import { MessageType, type User } from "../api/types";
+import { decide, effectiveLevel, isMutedAt, mentionsMyRole, type NotifyInput, type NotifyLocalState } from "./decide";
+
+const ME = "100";
+const user = (id: string): User => ({ id, username: `u${id}`, global_name: null, avatar: null }) as unknown as User;
+const NOW = 1_000_000;
+
+const emptyLocal = (): NotifyLocalState => ({ mutedUntil: {}, notify: {}, suppressEveryone: {}, suppressRoles: {} });
+
+function input(patch: Omit<Partial<NotifyInput>, "message"> & { message?: Partial<NotifyInput["message"]> } = {}): NotifyInput {
+  const { message, ...rest } = patch;
+  return {
+    message: { author: user("200"), mentions: [], mention_everyone: false, content: "hello", type: MessageType.Default, ...message },
+    meId: ME,
+    myRoleIds: [],
+    dm: null,
+    scopes: ["c1", "cat1", "g1"],
+    local: emptyLocal(),
+    prefs: { desktopNotifications: true, notificationSounds: true, soundCurrentChannel: false, streamerMode: false, streamerDisableSounds: true, streamerDisableNotifications: true },
+    status: "online",
+    focused: false,
+    viewing: false,
+    now: NOW,
+    ...rest,
+  };
+}
+
+describe("decide", () => {
+  it("never notifies for my own messages or system messages", () => {
+    expect(decide(input({ message: { author: user(ME) } })).kind).toBeNull();
+    expect(decide(input({ message: { type: MessageType.UserJoin } })).reason).toBe("system");
+  });
+
+  it("notifies on every message at the default level and calls it a plain message", () => {
+    const d = decide(input());
+    expect(d).toMatchObject({ desktop: true, sound: "message", kind: "message", reason: "all" });
+  });
+
+  it("treats a direct mention, a reply ping, @everyone and my role as mentions", () => {
+    expect(decide(input({ message: { mentions: [user(ME)] } }))).toMatchObject({ kind: "mention", sound: "mention", reason: "mention" });
+    expect(decide(input({ message: { mention_everyone: true } }))).toMatchObject({ kind: "mention", reason: "everyone" });
+    expect(decide(input({ message: { content: "hey <@&55>" }, myRoleIds: ["55"] }))).toMatchObject({ kind: "mention", reason: "role" });
+    expect(decide(input({ message: { content: "hey <@&56>" }, myRoleIds: ["55"] })).kind).toBe("message");
+  });
+
+  it("a 1:1 DM always pings, even when the channel level is 'only mentions'", () => {
+    const local = { ...emptyLocal(), notify: { c1: "mentions" as const } };
+    expect(decide(input({ dm: "dm", scopes: ["c1"], local }))).toMatchObject({ kind: "mention", reason: "dm", desktop: true });
+  });
+
+  it("group DMs and guild channels honour 'only mentions'", () => {
+    const local = { ...emptyLocal(), notify: { c1: "mentions" as const } };
+    expect(decide(input({ dm: "group", scopes: ["c1"], local })).reason).toBe("level-mentions");
+    expect(decide(input({ local })).reason).toBe("level-mentions");
+    expect(decide(input({ local, message: { mentions: [user(ME)] } })).kind).toBe("mention");
+  });
+
+  it("resolves the level channel → category → guild, and 'default' defers outward", () => {
+    const local = { ...emptyLocal(), notify: { c1: "default" as const, cat1: "default" as const, g1: "mentions" as const } };
+    expect(effectiveLevel(local, ["c1", "cat1", "g1"])).toBe("mentions");
+    expect(effectiveLevel({ notify: { c1: "all", g1: "none" } }, ["c1", "cat1", "g1"])).toBe("all");
+    expect(effectiveLevel({ notify: {} }, ["c1", "g1"])).toBe("all");
+  });
+
+  it("'Nothing' silences even mentions", () => {
+    const local = { ...emptyLocal(), notify: { g1: "none" as const } };
+    expect(decide(input({ local, message: { mentions: [user(ME)] } })).reason).toBe("level-none");
+  });
+
+  it("muted channel, category or guild silences everything; an expired mute does not", () => {
+    for (const id of ["c1", "cat1", "g1"]) {
+      const local = { ...emptyLocal(), mutedUntil: { [id]: NOW + 60_000 } };
+      expect(decide(input({ local, message: { mentions: [user(ME)] } })).reason).toBe("muted");
+    }
+    expect(decide(input({ local: { ...emptyLocal(), mutedUntil: { g1: -1 } } })).reason).toBe("muted");
+    expect(decide(input({ local: { ...emptyLocal(), mutedUntil: { c1: NOW - 1 } } })).kind).toBe("message");
+    expect(isMutedAt({ mutedUntil: { a: -1 } }, "a", NOW)).toBe(true);
+    expect(isMutedAt({ mutedUntil: {} }, null, NOW)).toBe(false);
+  });
+
+  it("suppress @everyone and role mentions per scope", () => {
+    const everyone = { ...emptyLocal(), suppressEveryone: { g1: true } };
+    expect(decide(input({ local: everyone, message: { mention_everyone: true } })).kind).toBe("message");
+    const roles = { ...emptyLocal(), suppressRoles: { g1: true } };
+    expect(decide(input({ local: roles, myRoleIds: ["55"], message: { content: "<@&55>" } })).kind).toBe("message");
+    // suppressed @everyone under an "only mentions" level means nothing fires at all
+    const both = { ...everyone, notify: { g1: "mentions" as const } };
+    expect(decide(input({ local: both, message: { mention_everyone: true } })).kind).toBeNull();
+  });
+
+  it("do-not-disturb silences everything", () => {
+    expect(decide(input({ status: "dnd", message: { mentions: [user(ME)] } })).reason).toBe("dnd");
+  });
+
+  it("no desktop notification while the window is focused on that channel, but the sound still follows the pref", () => {
+    const viewing = input({ focused: true, viewing: true });
+    expect(decide(viewing)).toMatchObject({ desktop: false, sound: null });
+    const withSound = input({ focused: true, viewing: true, prefs: { ...viewing.prefs, soundCurrentChannel: true } });
+    expect(decide(withSound)).toMatchObject({ desktop: false, sound: "message" });
+  });
+
+  it("focused on another channel, or viewing it in an unfocused window, still notifies", () => {
+    expect(decide(input({ focused: true, viewing: false })).desktop).toBe(true);
+    expect(decide(input({ focused: false, viewing: true })).desktop).toBe(true);
+  });
+
+  it("respects the desktop and sound prefs and streamer mode independently", () => {
+    const base = input().prefs;
+    expect(decide(input({ prefs: { ...base, desktopNotifications: false } }))).toMatchObject({ desktop: false, sound: "message" });
+    expect(decide(input({ prefs: { ...base, notificationSounds: false } }))).toMatchObject({ desktop: true, sound: null });
+    expect(decide(input({ prefs: { ...base, streamerMode: true } }))).toMatchObject({ desktop: false, sound: null });
+    expect(decide(input({ prefs: { ...base, streamerMode: true, streamerDisableSounds: false } }))).toMatchObject({ desktop: false, sound: "message" });
+  });
+});
+
+describe("mentionsMyRole", () => {
+  it("matches only my role ids", () => {
+    expect(mentionsMyRole("<@&1> and <@&2>", ["2"])).toBe(true);
+    expect(mentionsMyRole("<@&1>", [])).toBe(false);
+    expect(mentionsMyRole("@everyone", ["1"])).toBe(false);
+  });
+});
