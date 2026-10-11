@@ -61,10 +61,10 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | MSG-005 | Context menu with quick reactions, reaction submenu, edit, reply, forward, (guild: create thread), copy text, pin, bookmark, remind, apps, mark unread, copy link, TTS, delete, copy ID | dm-chat/11-message-context-menu.jpg, guild/06-message-context-menu.jpg |
 | MSG-006 | Context-menu item hover/focus state; destructive item in danger colour | dm-chat/12-context-menu-item-hover.png |
 | MSG-007 | Reply flow: bar above composer ("Replying to NAME", close), target row highlighted with 2 px brand bar + 16% tint, Escape cancels | dm-chat/13-reply-bar.png |
-| MSG-008 | Reply reference line above a message that replies (avatar 16, name, snippet, curved connector, click jumps to target) | dm-chat/26-reply-reference-line.jpg |
+| MSG-008 | Reply reference line above a message that replies (avatar 16, name, snippet, curved connector 33x12 with 2 px border and 6 px radius, click jumps to target and flashes it brand 16%); deleted target shows an arrow badge and italic "Originalmeddelandet har raderats" | dm-chat/26-reply-reference-line.jpg, messages-states/spec.md §2, messages-states/17-deleted-target-reply.jpg |
 | MSG-009 | Inline edit: textarea in place, "escape cancels • enter saves" hint, emoji button | dm-chat/14-inline-edit.png |
 | MSG-010 | "(edited)" marker after edited content, 10/10 muted | dm-chat/24-edited-marker.jpg |
-| MSG-011 | Delete confirmation modal with message preview | REF: none (not opened) |
+| MSG-011 | Delete confirmation modal with message preview, shift-click tip, red "Ta bort" | messages-states/16-delete-confirm.jpg, messages-states/spec.md §6 |
 | MSG-012 | Reactions: pills under message (emoji + count, own highlighted), + button on hover, tooltip with reactors | dm-chat/20-reaction-pill.jpg (reactor tooltip not measured) |
 | MSG-013 | Reaction picker from the hover bar: emoji picker anchored left of the button, search focused | dm-chat/15-reaction-picker.jpg |
 | MSG-014 | Pin from the menu: confirm modal, then a system row "X pinned a message" with pin icon in the gutter | dm-chat/22-pin-system-message.jpg, modals/05-pin-confirm.jpg |
@@ -72,13 +72,20 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | MSG-016 | Bookmark / reminder submenu | REF: none |
 | MSG-017 | Markdown rendering: bold, italic, underline, strike, spoiler, inline code, code block, headings 1-3, subtext, lists, block quote, masked link, auto link, timestamps, emoji shortcodes | dm-chat/17-rendered-markdown.jpg, dm-chat/19-spoiler-revealed.png, dm-chat/spec.md "Rendered message" |
 | MSG-018 | Link embeds (invite embed incl. expired state, URL previews, image/video embeds) | dm-chat/01-dm-view.png (expired invite only) |
-| MSG-019 | Attachments: images grid with lightbox, files with download, video/audio players, spoiler attachments | REF: none |
+| MSG-019 | Attachments: single image max 550x350 radius 8 (cover), 2-image grid 2x 273x273 (gap 4), 3-image grid 364x350 + 2x 182x173, 4-image grid 2x2 of 273x173, own-image hover pencil + trash (64x32 group), lightbox (scrim .92, top bar with author and 4 actions, prev/next, thumbnail strip); files, video/audio, spoiler attachments not captured | messages-states/spec.md §7, messages-states/03, 12, 13, 14, 20-23 |
 | MSG-020 | Stickers and GIFs in messages | REF: none |
 | MSG-021 | Message selection / long-press mobile gestures | out of scope (desktop web) |
 | MSG-022 | Mentions render as chips (user captured; role and channel chips not) and the row gets a mention highlight with a 2 px bar | dm-chat/21-grouped-and-mention-highlight.jpg, guild/05-mention-autocomplete.jpg |
 | MSG-023 | Slash-command output and application messages (bot badge, ephemeral "only you can see this") | REF: none |
 | MSG-024 | System messages with icon and muted style (pin captured; join, call not) | dm-chat/22-pin-system-message.jpg |
 | MSG-025 | Message length limit 2000 with character counter and block | REF: none |
+| MSG-026 | Server tag chip next to the name (43x15, radius 4, badge 14 + 12 w600 text), also in reply line, member list, DM list and lightbox header; click opens a guild profile popout (hover has no tooltip) | messages-states/spec.md §5, messages-states/06, 07 |
+| MSG-027 | Timestamp formats (sv): today `HH:mm`, older `YYYY-MM-DD HH:mm`, gutter `HH:mm` on hover, tooltip `söndag 11 oktober 2026 kl. 12:38`; yesterday not observed | messages-states/spec.md §1, messages-states/04, 05 |
+| MSG-028 | Mention-of-me row: gold bg alpha .078 (hover .039), 2 px #ce8100 bar; jump-to-message flash uses brand .16 for ~2 s | messages-states/spec.md §2-3, messages-states/01, 11 |
+| MSG-029 | Server-scoped search field in the channel header and its filter popout (from:, in:, has:, mentions:, more filters) | messages-states/spec.md §9, messages-states/15 |
+| MSG-030 | Unread state in a DM: top bar "1 nytt meddelande sedan 11:13" (brand `#5865f2`, ~34 px, "Markera som läst" right) and the day divider turned red `#d22d39` with a "NYTT" pill at the right end; screenshot-derived (user client dpr 1.25) | messages-states/spec.md §10, messages-states/18, 19 |
+| MSG-031 | Jumbo emoji: an emoji-only message renders the emoji 48x48 (row 52 high); hover tooltip with the shortcode + "Klicka för att ta reda på mer", click opens a 288x106 popout (48 px emoji, name, description) | messages-states/spec.md §7 end, messages-states/28-31 |
+| MSG-032 | Attachment upload and edit flow: tray above the composer with preview tiles (eye/spoiler, pencil, trash), "Laddar upp N filer" card with progress and cancel, "Modifiera bifogad fil" modal (filename, alt text, spoiler, Avbryt/Spara), delete-attachment confirm ("Radera den bifogade filen"); screenshot-derived | messages-states/spec.md §7 end, messages-states/24-27 |
 
 ## CMP: composer
 | Id | Acceptance | REF |
