@@ -708,6 +708,14 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn resolver_drops_non_public_answers() {
+        let name = || "localhost".parse::<Name>().expect("valid name");
+        assert!(GuardedResolver { allow_private: false }.resolve(name()).await.is_err(), "loopback answers are filtered out");
+        let addrs: Vec<SocketAddr> = GuardedResolver { allow_private: true }.resolve(name()).await.expect("resolves").collect();
+        assert!(!addrs.is_empty() && addrs.iter().all(|addr| addr.ip().is_loopback()));
+    }
+
     #[test]
     fn literal_hosts_are_checked_before_any_request() {
         let blocked = [

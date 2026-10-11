@@ -286,6 +286,7 @@ async fn blocking_is_announced_to_the_blocker_and_hides_the_friendship_from_the_
 async fn link_embeds_follow_the_message_as_message_update() {
     let app = TestApp::with_config(|config| {
         config.heartbeat_interval_ms = 60_000;
+        config.unfurl.enabled = true;
         config.unfurl.allow_private = true;
     })
     .await;

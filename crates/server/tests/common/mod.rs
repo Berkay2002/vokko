@@ -55,6 +55,7 @@ impl TestApp {
         let mut config = Config::new("unused".to_owned(), "127.0.0.1:0".to_owned(), data_dir.clone(), "http://test.local".to_owned());
         config.heartbeat_interval_ms = 60_000;
         config.rate_limit = None;
+        config.unfurl.enabled = false; // tests that exercise link previews opt in
         adjust(&mut config);
         let state = AppState::new(pool, config);
         let router = vokko_server::router(state.clone());

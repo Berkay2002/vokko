@@ -8,7 +8,11 @@ use serde_json::{Value, json};
 use vokko_server::unfurl::{UnfurlConfig, Unfurler};
 
 async fn app_with_unfurl() -> TestApp {
-    TestApp::with_config(|config| config.unfurl.allow_private = true).await
+    TestApp::with_config(|config| {
+        config.unfurl.enabled = true;
+        config.unfurl.allow_private = true;
+    })
+    .await
 }
 
 async fn message(app: &TestApp, token: &str, channel: &str, id: &str) -> Value {
@@ -157,6 +161,20 @@ async fn private_hosts_are_never_fetched_unless_allowed() {
     let lenient = Unfurler::new(UnfurlConfig { enabled: true, allow_private: true });
     assert!(lenient.embed(url).await.is_some());
     assert_eq!(pages.count("/page"), 1);
+    // a host name goes through the (permissive) resolver and connects
+    let port = pages.address.rsplit(':').next().unwrap_or("0");
+    assert!(lenient.embed(reqwest_url(&format!("http://localhost:{port}/page"))).await.is_some());
+    assert_eq!(pages.count("/page"), 2);
+}
+
+/// Needs the internet: proves HTTPS (rustls with the ring provider, platform verifier) and real DNS through the guard.
+/// Run with `cargo test -p vokko-server --test unfurl -- --ignored`.
+#[tokio::test]
+#[ignore = "needs internet access"]
+async fn https_pages_on_the_public_internet_unfurl() {
+    let unfurler = Unfurler::new(UnfurlConfig::default());
+    let embed = unfurler.embed(reqwest_url("https://example.com/")).await.expect("example.com unfurls over https");
+    assert_eq!(embed.title.as_deref(), Some("Example Domain"));
 }
 
 #[tokio::test]
