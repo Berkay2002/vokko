@@ -1,5 +1,5 @@
 //! Channel permission overwrites: PUT/DELETE per target, category sync, and the shared validation used on channel creation.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use axum::Router;
 use axum::extract::{Path, State};
@@ -33,9 +33,19 @@ fn parse_bits(raw: &str, field: &str) -> ApiResult<u64> {
     raw.trim().parse::<u64>().map_err(|_| ApiErr::invalid(field, "Must be a permission bitfield as a decimal string."))
 }
 
-/// Validates one overwrite: well-formed bits, ADMINISTRATOR and unknown bits stripped, nothing the actor lacks
-/// (`actor_permissions` = their permissions in the channel, or guild-wide when the channel does not exist yet),
-/// and the target is a role of the guild (`@everyone` included) or a member of it.
+/// The permission bits (allow and deny) that differ between two `(allow, deny)` pairs.
+fn flipped(old: (i64, i64), new: (i64, i64)) -> u64 {
+    ((old.0 ^ new.0) | (old.1 ^ new.1)) as u64
+}
+
+/// 403 unless the actor holds every bit `flipped` names (`actor_permissions` = their permissions in the channel).
+fn require_bits(actor_permissions: u64, flipped: u64) -> ApiResult<()> {
+    if flipped & !actor_permissions != 0 { Err(ApiErr::missing_permissions()) } else { Ok(()) }
+}
+
+/// Validates one new overwrite: well-formed bits, ADMINISTRATOR and unknown bits stripped, nothing the actor lacks
+/// (`actor_permissions` = their permissions in the guild, since the channel does not exist yet), and the target
+/// is a role of the guild (`@everyone` included) or a member of it.
 pub async fn validate(
     state: &AppState,
     guild_id: i64,
@@ -45,11 +55,20 @@ pub async fn validate(
     allow: &str,
     deny: &str,
 ) -> ApiResult<OverwriteWrite> {
+    let write = parse_write(target_id, kind, allow, deny)?;
+    require_bits(actor_permissions, flipped((0, 0), (write.allow, write.deny)))?;
+    ensure_target(state, guild_id, target_id, kind).await?;
+    Ok(write)
+}
+
+/// Well-formed bits with ADMINISTRATOR and unknown bits stripped. Whether the actor may set them is checked against what is stored.
+fn parse_write(target_id: i64, kind: OverwriteType, allow: &str, deny: &str) -> ApiResult<OverwriteWrite> {
     let allow = parse_bits(allow, "allow")? & ALL & !ADMINISTRATOR;
     let deny = parse_bits(deny, "deny")? & ALL & !ADMINISTRATOR;
-    if (allow | deny) & !actor_permissions != 0 {
-        return Err(ApiErr::missing_permissions());
-    }
+    Ok(OverwriteWrite { target_id, target_type: kind.as_u8() as i16, allow: allow as i64, deny: deny as i64 })
+}
+
+async fn ensure_target(state: &AppState, guild_id: i64, target_id: i64, kind: OverwriteType) -> ApiResult<()> {
     let exists: Option<(i64,)> = match kind {
         OverwriteType::Role => sqlx::query_as("SELECT id FROM roles WHERE id = $1 AND guild_id = $2"),
         OverwriteType::Member => sqlx::query_as("SELECT user_id FROM guild_members WHERE user_id = $1 AND guild_id = $2"),
@@ -64,7 +83,7 @@ pub async fn validate(
             OverwriteType::Member => ApiErr::unknown_member(),
         });
     }
-    Ok(OverwriteWrite { target_id, target_type: kind.as_u8() as i16, allow: allow as i64, deny: deny as i64 })
+    Ok(())
 }
 
 pub async fn store_overwrite(tx: &mut Transaction<'_, Postgres>, channel_id: i64, write: &OverwriteWrite) -> ApiResult<()> {
@@ -105,6 +124,29 @@ pub async fn copy_overwrites(tx: &mut Transaction<'_, Postgres>, parent_id: i64,
     Ok(())
 }
 
+/// `lock_permissions` on a move: replaces the channel's overwrites with `parent_id`'s. When that changes anything the actor
+/// needs MANAGE_ROLES in the channel and every bit that flips (allow and deny), exactly like editing those overwrites one by one.
+pub async fn lock_to_parent(tx: &mut Transaction<'_, Postgres>, access: &ChannelAccess, parent_id: i64) -> ApiResult<()> {
+    let channel_id = access.channel.id;
+    // The channel first, then the parent: a concurrent edit of the category waits, so the compared rows are the ones copied.
+    sqlx::query("SELECT id FROM channels WHERE id = $1 FOR UPDATE").bind(channel_id).execute(&mut **tx).await?;
+    sqlx::query("SELECT id FROM channels WHERE id = $1 FOR SHARE").bind(parent_id).execute(&mut **tx).await?;
+    let own = overwrite_rows(tx, channel_id).await?;
+    let inherited = overwrite_rows(tx, parent_id).await?;
+    if own != inherited {
+        access.require(MANAGE_ROLES)?;
+        let keyed =
+            |rows: &Rows| -> HashMap<(i64, i16), (i64, i64)> { rows.iter().map(|(target, kind, allow, deny)| ((*target, *kind), (*allow, *deny))).collect() };
+        let (own, inherited) = (keyed(&own), keyed(&inherited));
+        let mut changed = 0;
+        for key in own.keys().chain(inherited.keys()) {
+            changed |= flipped(own.get(key).copied().unwrap_or((0, 0)), inherited.get(key).copied().unwrap_or((0, 0)));
+        }
+        require_bits(access.permissions, changed)?;
+    }
+    copy_overwrites(tx, parent_id, channel_id).await
+}
+
 /// CHANNEL_UPDATE to everyone who still sees the channel, CHANNEL_DELETE to those who lost VIEW_CHANNEL since
 /// `before` (the viewers computed before the change) and CHANNEL_CREATE to those who gained it.
 pub async fn dispatch_visibility(state: &AppState, row: &ChannelRow, before: &[i64]) -> ApiResult<()> {
@@ -141,13 +183,25 @@ async fn apply(tx: &mut Transaction<'_, Postgres>, channel_id: i64, change: &Cha
 }
 
 /// Applies `change` to the channel and, for a category, to every child whose overwrites equalled the category's before it.
-async fn change_overwrites(state: &AppState, channel: &ChannelRow, change: Change) -> ApiResult<()> {
+/// The actor must hold every bit the change flips in the channel (the stored overwrite, read under the channel lock, is the baseline);
+/// children are synced without a second check, the change being the one validated on the category.
+async fn change_overwrites(state: &AppState, channel: &ChannelRow, actor_permissions: u64, change: Change) -> ApiResult<()> {
     let mut changed = vec![channel.clone()];
     let mut before: Vec<Vec<i64>> = vec![access::channel_viewers(state, channel).await?];
     let mut tx = state.db.begin().await?;
+    // Serialise concurrent edits of one channel so the baseline (and, for a category, the "equal before" comparison) stays meaningful.
+    sqlx::query("SELECT id FROM channels WHERE id = $1 FOR UPDATE").bind(channel.id).execute(&mut *tx).await?;
+    let (target_id, new) = match &change {
+        Change::Put(write) => (write.target_id, (write.allow, write.deny)),
+        Change::Delete(target_id) => (*target_id, (0, 0)),
+    };
+    let old: Option<(i64, i64)> = sqlx::query_as("SELECT allow, deny FROM permission_overwrites WHERE channel_id = $1 AND target_id = $2")
+        .bind(channel.id)
+        .bind(target_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    require_bits(actor_permissions, flipped(old.unwrap_or((0, 0)), new))?;
     if channel.channel_type() == ChannelType::GuildCategory {
-        // Serialise concurrent edits of one category so the "equal before" comparison stays meaningful.
-        sqlx::query("SELECT id FROM channels WHERE id = $1 FOR UPDATE").bind(channel.id).execute(&mut *tx).await?;
         let category = overwrite_rows(&mut tx, channel.id).await?;
         let children: Vec<(i64,)> =
             sqlx::query_as("SELECT id FROM channels WHERE parent_id = $1 ORDER BY position, id").bind(channel.id).fetch_all(&mut *tx).await?;
@@ -193,8 +247,9 @@ async fn put_overwrite(
         OverwriteType::Role => ApiErr::unknown_role(),
         OverwriteType::Member => ApiErr::unknown_member(),
     })?;
-    let write = validate(&state, guild_id, access.permissions, target_id, body.kind, &body.allow, &body.deny).await?;
-    change_overwrites(&state, &access.channel, Change::Put(write)).await?;
+    let write = parse_write(target_id, body.kind, &body.allow, &body.deny)?;
+    ensure_target(&state, guild_id, target_id, body.kind).await?;
+    change_overwrites(&state, &access.channel, access.permissions, Change::Put(write)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -202,7 +257,7 @@ async fn delete_overwrite(State(state): State<AppState>, AuthUser(user_id): Auth
     let (access, _) = manageable(&state, user_id, &id).await?;
     // An id that cannot exist has nothing to delete; the call is idempotent.
     if let Some(target_id) = parse_id(&target) {
-        change_overwrites(&state, &access.channel, Change::Delete(target_id)).await?;
+        change_overwrites(&state, &access.channel, access.permissions, Change::Delete(target_id)).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }

@@ -282,6 +282,104 @@ async fn member_edits_nick_roles_timeout() {
 }
 
 #[tokio::test]
+async fn role_edits_change_only_what_the_actor_may() {
+    let w = World::new().await;
+    let manage = w.role("managers", MANAGE_ROLES).await;
+    let first = w.role("first", 0).await;
+    let second = w.role("second", 0).await;
+    let high = w.role("high", 0).await;
+    w.set_position(&high, 5).await;
+    let (manager, manager_id) = w.member("manager").await;
+    let (_, target_id) = w.member("target").await;
+    w.give(&manager_id, &[&manage]).await;
+    w.give(&target_id, &[&first]).await;
+    let target_path = w.path(&format!("/members/{target_id}"));
+    let roles_of = |member: &Value| -> Vec<String> {
+        let mut roles: Vec<String> = member["roles"].as_array().expect("roles").iter().map(|r| r.as_str().expect("id").to_owned()).collect();
+        roles.sort();
+        roles
+    };
+    let sorted = |mut roles: Vec<String>| {
+        roles.sort();
+        roles
+    };
+
+    // roles below the actor can be added and swapped
+    let (status, member) = w.app.patch(&target_path, &manager, json!({"roles": [first, second]})).await;
+    assert_eq!(status, StatusCode::OK, "{member}");
+    assert_eq!(roles_of(&member), sorted(vec![first.clone(), second.clone()]));
+    let (status, member) = w.app.patch(&target_path, &manager, json!({"roles": [second]})).await;
+    assert_eq!((status, roles_of(&member)), (StatusCode::OK, vec![second.clone()]), "{member}");
+    // a role above the actor is refused as a whole: nothing of the request is applied
+    let (status, body) = w.app.patch(&target_path, &manager, json!({"roles": [first, high]})).await;
+    assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, 50013));
+    let (_, members) = w.app.get(&w.path("/members"), &w.owner).await;
+    let stored = members.as_array().expect("members").iter().find(|m| m["user"]["id"] == target_id.as_str()).expect("target").clone();
+    assert_eq!(roles_of(&stored), vec![second]);
+}
+
+#[tokio::test]
+async fn timeouts_survive_leaving_and_being_kicked() {
+    let w = World::new().await;
+    let (token, user_id) = w.member("sleeper").await;
+    let (_, invite) = w.app.post(&format!("/channels/{}/invites", w.channel), &w.owner, json!({})).await;
+    let invite_path = World::invite_path(&invite);
+    let member_path = w.path(&format!("/members/{user_id}"));
+    let messages = format!("/channels/{}/messages", w.channel);
+    let until = (time::OffsetDateTime::now_utc() + time::Duration::days(1)).format(&time::format_description::well_known::Rfc3339).expect("fmt");
+    let (status, member) = w.app.patch(&member_path, &w.owner, json!({"communication_disabled_until": until})).await;
+    assert_eq!(status, StatusCode::OK, "{member}");
+    let set = member["communication_disabled_until"].clone();
+    assert!(set.is_string());
+
+    let address = w.app.serve().await;
+    let mut owner_ws = Client::connect(&address, &w.owner).await;
+    let member_until = |members: &Value| {
+        members.as_array().expect("members").iter().find(|m| m["user"]["id"] == user_id.as_str()).expect("member")["communication_disabled_until"].clone()
+    };
+
+    // leave and come back: still timed out, in the add event and in the member list
+    assert_eq!(w.app.delete(&format!("/users/@me/guilds/{}", w.guild), &token).await.0, StatusCode::NO_CONTENT);
+    let (status, body) = w.app.post(&invite_path, &token, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(owner_ws.wait_for("GUILD_MEMBER_ADD").await["communication_disabled_until"], set);
+    let (_, members) = w.app.get(&w.path("/members"), &w.owner).await;
+    assert_eq!(member_until(&members), set);
+    assert_eq!(w.app.post(&messages, &token, json!({"content": "hi"})).await.0, StatusCode::FORBIDDEN, "still muted");
+
+    // kicked and back: same
+    assert_eq!(w.app.delete(&member_path, &w.owner).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.app.post(&invite_path, &token, json!({})).await.0, StatusCode::OK);
+    let (_, members) = w.app.get(&w.path("/members"), &w.owner).await;
+    assert_eq!(member_until(&members), set);
+
+    // a cleared timeout stays cleared, and a stored one that ran out is not restored
+    assert_eq!(w.app.patch(&member_path, &w.owner, json!({"communication_disabled_until": null})).await.0, StatusCode::OK);
+    assert_eq!(w.app.delete(&format!("/users/@me/guilds/{}", w.guild), &token).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.app.post(&invite_path, &token, json!({})).await.0, StatusCode::OK);
+    let (_, members) = w.app.get(&w.path("/members"), &w.owner).await;
+    assert!(member_until(&members).is_null());
+    assert_eq!(w.app.patch(&member_path, &w.owner, json!({"communication_disabled_until": until})).await.0, StatusCode::OK);
+    assert_eq!(w.app.delete(&member_path, &w.owner).await.0, StatusCode::NO_CONTENT);
+    sqlx::query("UPDATE guild_timeouts SET until = now() - interval '1 minute'").execute(&w.app.state.db).await.expect("expire");
+    assert_eq!(w.app.post(&invite_path, &token, json!({})).await.0, StatusCode::OK);
+    let (_, members) = w.app.get(&w.path("/members"), &w.owner).await;
+    assert!(member_until(&members).is_null());
+
+    // a ban removes the member and drops the stored timeout: unbanned and back, they are free
+    assert_eq!(w.app.patch(&member_path, &w.owner, json!({"communication_disabled_until": until})).await.0, StatusCode::OK);
+    assert_eq!(w.app.put_json(&w.path(&format!("/bans/{user_id}")), &w.owner, json!({})).await.0, StatusCode::NO_CONTENT);
+    let (_, members) = w.app.get(&w.path("/members"), &w.owner).await;
+    assert!(members.as_array().expect("members").iter().all(|m| m["user"]["id"] != user_id.as_str()), "banned member is gone");
+    let (stored,): (i64,) = sqlx::query_as("SELECT count(*) FROM guild_timeouts").fetch_one(&w.app.state.db).await.expect("count");
+    assert_eq!(stored, 0);
+    assert_eq!(w.app.delete(&w.path(&format!("/bans/{user_id}")), &w.owner).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.app.post(&invite_path, &token, json!({})).await.0, StatusCode::OK);
+    let (_, members) = w.app.get(&w.path("/members"), &w.owner).await;
+    assert!(member_until(&members).is_null());
+}
+
+#[tokio::test]
 async fn role_lifecycle_and_limits() {
     let w = World::new().await;
     let manage = w.role("manager", MANAGE_ROLES | KICK).await;

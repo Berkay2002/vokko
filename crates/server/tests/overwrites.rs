@@ -11,7 +11,9 @@ use serde_json::{Value, json};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
-use vokko_protocol::api::permissions::{ADMINISTRATOR, ATTACH_FILES, DEFAULT_EVERYONE, MANAGE_MESSAGES, MANAGE_ROLES, SEND_MESSAGES, VIEW_CHANNEL};
+use vokko_protocol::api::permissions::{
+    ADMINISTRATOR, ATTACH_FILES, DEFAULT_EVERYONE, MANAGE_CHANNELS, MANAGE_MESSAGES, MANAGE_ROLES, SEND_MESSAGES, VIEW_CHANNEL,
+};
 
 struct Client {
     ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
@@ -314,4 +316,64 @@ async fn category_edits_sync_equal_children_only() {
     assert_eq!(updated, expected);
     assert!(w.overwrites(&synced).await.is_empty());
     assert_eq!(w.overwrites(&diverged).await.len(), 1);
+}
+
+#[tokio::test]
+async fn lock_permissions_needs_manage_roles_and_every_flipped_bit() {
+    let w = world().await;
+    let (_, loose) = w.new_channel(json!({"type": 0, "name": "loose"})).await;
+    let loose = loose["id"].as_str().expect("id").to_owned();
+    let parent_of = |channels: &Value, id: &str| channels.as_array().expect("channels").iter().find(|c| c["id"] == id).expect("channel")["parent_id"].clone();
+    // the category hides MANAGE_MESSAGES behind a deny alice does not hold herself
+    assert_eq!(w.put(&w.category, &w.guild, &w.owner, 0, 0, MANAGE_MESSAGES).await.0, StatusCode::NO_CONTENT);
+    let patch = json!({"parent_id": w.category, "lock_permissions": true});
+
+    // MANAGE_CHANNELS alone: moving is fine, adopting the category's overwrites is not
+    w.role_for(&w.alice.1, DEFAULT_EVERYONE | MANAGE_CHANNELS).await;
+    let (status, error) = w.app.patch(&format!("/channels/{loose}"), &w.alice.0, patch.clone()).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)));
+    let (_, channels) = w.app.get(&format!("/guilds/{}/channels", w.guild), &w.owner).await;
+    assert_eq!(parent_of(&channels, &loose), Value::Null, "the rejected request moved nothing");
+    assert!(w.overwrites(&loose).await.is_empty());
+
+    // MANAGE_ROLES too, but the category flips a bit alice lacks
+    w.role_for(&w.alice.1, MANAGE_ROLES).await;
+    let (status, error) = w.app.patch(&format!("/channels/{loose}"), &w.alice.0, patch.clone()).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)));
+    assert!(w.overwrites(&loose).await.is_empty());
+
+    // the same category with a bit she does hold goes through, and the channel adopts it
+    assert_eq!(w.put(&w.category, &w.guild, &w.owner, 0, 0, SEND_MESSAGES).await.0, StatusCode::NO_CONTENT);
+    let (status, moved) = w.app.patch(&format!("/channels/{loose}"), &w.alice.0, patch).await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(moved["parent_id"], w.category.as_str());
+    assert_eq!(w.overwrites(&loose).await, w.overwrites(&w.category).await);
+}
+
+#[tokio::test]
+async fn overwrite_edits_need_the_bits_they_flip() {
+    let w = world().await;
+    w.role_for(&w.alice.1, DEFAULT_EVERYONE | MANAGE_ROLES).await;
+    let delete = format!("/channels/{}/permissions/{}", w.general, w.guild);
+    assert_eq!(w.put(&w.general, &w.guild, &w.owner, 0, 0, MANAGE_MESSAGES).await.0, StatusCode::NO_CONTENT);
+
+    // removing a deny of a bit alice lacks is changing it
+    let (status, error) = w.app.delete(&delete, &w.alice.0).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)));
+    let (status, error) = w.put(&w.general, &w.guild, &w.alice.0, 0, 0, SEND_MESSAGES).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "dropping the foreign deny");
+    let (status, error) = w.put(&w.general, &w.guild, &w.alice.0, 0, MANAGE_MESSAGES, 0).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "flipping it to allow");
+    let stored = w.overwrites(&w.general).await;
+    assert_eq!((stored.len(), stored[0]["deny"].as_str()), (1, Some(MANAGE_MESSAGES.to_string().as_str())));
+
+    // leaving it alone while changing a bit she holds is fine
+    assert_eq!(w.put(&w.general, &w.guild, &w.alice.0, 0, 0, MANAGE_MESSAGES | SEND_MESSAGES).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.overwrites(&w.general).await[0]["deny"], (MANAGE_MESSAGES | SEND_MESSAGES).to_string());
+    // and deleting an overwrite made only of bits she holds is too (she denied herself SEND_MESSAGES above, so not that one)
+    assert_eq!(w.put(&w.general, &w.alice.1, &w.owner, 1, ATTACH_FILES, 0).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.app.delete(&format!("/channels/{}/permissions/{}", w.general, w.alice.1), &w.alice.0).await.0, StatusCode::NO_CONTENT);
+    // the owner removes the rest
+    assert_eq!(w.app.delete(&delete, &w.owner).await.0, StatusCode::NO_CONTENT);
+    assert!(w.overwrites(&w.general).await.is_empty());
 }

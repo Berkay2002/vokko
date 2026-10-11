@@ -44,12 +44,36 @@ async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
     // The member insert and the use are one transaction; the conditional UPDATE re-checks max_uses / expiry under the row lock,
     // so concurrent accepts of the last use cannot both succeed. An existing member does not consume a use.
     let mut tx = state.db.begin().await?;
-    let inserted = sqlx::query("INSERT INTO guild_members (guild_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+    // The shared guild row lock orders this against a ban (which takes it exclusively before writing the ban row and removing
+    // the member): the ban is either visible to the conditional insert below or removes the member inserted here.
+    sqlx::query("SELECT id FROM guilds WHERE id = $1 FOR SHARE").bind(guild_id).execute(&mut *tx).await?;
+    let inserted = sqlx::query(
+        "INSERT INTO guild_members (guild_id, user_id) SELECT $1, $2 \
+         WHERE NOT EXISTS (SELECT 1 FROM guild_bans WHERE guild_id = $1 AND user_id = $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(guild_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    if inserted.rows_affected() == 0 {
+        // Nothing inserted: already a member, or banned since the check above.
+        let banned: Option<(i64,)> =
+            sqlx::query_as("SELECT user_id FROM guild_bans WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).fetch_optional(&mut *tx).await?;
+        if banned.is_some() {
+            return Err(ApiErr::banned());
+        }
+    }
+    if inserted.rows_affected() > 0 {
+        // A timeout still running from before they left or were kicked comes back with them.
+        sqlx::query(
+            "UPDATE guild_members m SET timeout_until = t.until FROM guild_timeouts t \
+             WHERE m.guild_id = $1 AND m.user_id = $2 AND t.guild_id = $1 AND t.user_id = $2 AND t.until > now()",
+        )
         .bind(guild_id)
         .bind(user_id)
         .execute(&mut *tx)
         .await?;
-    if inserted.rows_affected() > 0 {
+        sqlx::query("DELETE FROM guild_timeouts WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).execute(&mut *tx).await?;
         let consumed = sqlx::query(
             "UPDATE invites SET uses = uses + 1 WHERE code = $1 AND (max_uses = 0 OR uses < max_uses) AND (expires_at IS NULL OR expires_at > now())",
         )

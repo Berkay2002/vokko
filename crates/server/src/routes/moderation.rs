@@ -6,6 +6,7 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch, put};
+use sqlx::{Postgres, Transaction};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 use vokko_protocol::api::permissions::{ADMINISTRATOR, ALL, BAN_MEMBERS, CHANGE_NICKNAME, KICK_MEMBERS, MANAGE_NICKNAMES, MANAGE_ROLES, MODERATE_MEMBERS};
@@ -155,9 +156,38 @@ async fn require_member(state: &AppState, guild_id: i64, user_id: i64) -> ApiRes
 }
 
 /// Removes a member the way leaving does (no owner check): row, read states, GUILD_DELETE to them, GUILD_MEMBER_REMOVE to the rest.
-async fn remove_member(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
+/// A running timeout is kept for when they rejoin.
+pub async fn remove_member(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
+    let mut tx = state.db.begin().await?;
+    let removed = delete_member(&mut tx, guild_id, user_id, true).await?;
+    tx.commit().await?;
+    if removed {
+        announce_removal(state, guild_id, user_id).await?;
+    }
+    Ok(())
+}
+
+/// Deletes the member row inside `tx`; whether there was one. With `keep_timeout` a running timeout is stored for a rejoin
+/// (a stored one that no longer applies is dropped), otherwise any stored timeout goes (a ban).
+async fn delete_member(tx: &mut Transaction<'_, Postgres>, guild_id: i64, user_id: i64, keep_timeout: bool) -> ApiResult<bool> {
+    sqlx::query("DELETE FROM guild_timeouts WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).execute(&mut **tx).await?;
+    if keep_timeout {
+        sqlx::query(
+            "INSERT INTO guild_timeouts (guild_id, user_id, until) \
+             SELECT guild_id, user_id, timeout_until FROM guild_members WHERE guild_id = $1 AND user_id = $2 AND timeout_until > now()",
+        )
+        .bind(guild_id)
+        .bind(user_id)
+        .execute(&mut **tx)
+        .await?;
+    }
+    let deleted = sqlx::query("DELETE FROM guild_members WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).execute(&mut **tx).await?;
+    Ok(deleted.rows_affected() > 0)
+}
+
+/// What follows the member row going away: read states, GUILD_DELETE to them, GUILD_MEMBER_REMOVE to the rest.
+async fn announce_removal(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
     let user = store::user(state, user_id).await?.ok_or_else(ApiErr::unknown_user)?;
-    sqlx::query("DELETE FROM guild_members WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).execute(&state.db).await?;
     sqlx::query("DELETE FROM read_states WHERE user_id = $1 AND channel_id IN (SELECT id FROM channels WHERE guild_id = $2)")
         .bind(user_id)
         .bind(guild_id)
@@ -242,6 +272,10 @@ async fn ban_member(
     if was_member && !ctx.can_act_on(target, &member_role_ids(&state, guild, target).await?) {
         return Err(ApiErr::missing_permissions());
     }
+    // Ban row first, then the member row, under the guild row lock invite accepts take shared: an accept either finished
+    // before (and is removed here) or sees the ban, so a banned user never stays a member.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT id FROM guilds WHERE id = $1 FOR NO KEY UPDATE").bind(guild).execute(&mut *tx).await?;
     sqlx::query(
         "INSERT INTO guild_bans (guild_id, user_id, reason, banned_by) VALUES ($1, $2, $3, $4) \
          ON CONFLICT (guild_id, user_id) DO UPDATE SET reason = EXCLUDED.reason, banned_by = EXCLUDED.banned_by, created_at = now()",
@@ -250,10 +284,12 @@ async fn ban_member(
     .bind(target)
     .bind(&reason)
     .bind(user_id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
-    if was_member {
-        remove_member(&state, guild, target).await?;
+    let removed = delete_member(&mut tx, guild, target, false).await?;
+    tx.commit().await?;
+    if removed {
+        announce_removal(&state, guild, target).await?;
     }
     if delete_seconds > 0 {
         delete_recent_messages(&state, guild, target, delete_seconds).await?;
@@ -348,9 +384,25 @@ async fn edit_member(
     let guild = guild_id(&id)?;
     let target = user_id_of(&uid)?;
     let ctx = Ctx::load(&state, user_id, guild).await?;
-    require_member(&state, guild, target).await?;
+    // Lock the member row and read their roles under it: every hierarchy check below and the role delete work on this one snapshot.
+    let mut tx = state.db.begin().await?;
+    let locked: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM guild_members WHERE guild_id = $1 AND user_id = $2 FOR UPDATE")
+        .bind(guild)
+        .bind(target)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if locked.is_none() {
+        return Err(ApiErr::unknown_member());
+    }
     let own = target == user_id;
-    let current_roles = member_role_ids(&state, guild, target).await?;
+    let current_roles: Vec<i64> = sqlx::query_as::<_, (i64,)>("SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2")
+        .bind(guild)
+        .bind(target)
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .map(|(id,)| id)
+        .collect();
     let on_others = |ctx: &Ctx| -> ApiResult<()> { if own || ctx.can_act_on(target, &current_roles) { Ok(()) } else { Err(ApiErr::missing_permissions()) } };
 
     // Validate and authorise everything first so a rejected request changes nothing.
@@ -425,7 +477,6 @@ async fn edit_member(
         None => None,
     };
 
-    let mut tx = state.db.begin().await?;
     if let Some(nick) = nick {
         sqlx::query("UPDATE guild_members SET nick = $3 WHERE guild_id = $1 AND user_id = $2").bind(guild).bind(target).bind(nick).execute(&mut *tx).await?;
     }
@@ -438,10 +489,12 @@ async fn edit_member(
             .await?;
     }
     if let Some(wanted) = roles {
-        sqlx::query("DELETE FROM member_roles WHERE guild_id = $1 AND user_id = $2 AND NOT (role_id = ANY($3))")
+        // Only roles of the checked snapshot go; the hierarchy check covered exactly those.
+        let dropped: Vec<i64> = current_roles.iter().filter(|role| !wanted.contains(role)).copied().collect();
+        sqlx::query("DELETE FROM member_roles WHERE guild_id = $1 AND user_id = $2 AND role_id = ANY($3)")
             .bind(guild)
             .bind(target)
-            .bind(&wanted)
+            .bind(&dropped)
             .execute(&mut *tx)
             .await?;
         for role in wanted {
