@@ -652,7 +652,7 @@
 }
 
 .voice-tiles.single {
-  flex: 0 1 auto;
+  container-type: size;
 }
 
 .voice-tile {
@@ -675,7 +675,7 @@
 
 .voice-tile.solo {
   flex: 0 1 auto;
-  width: min(100%, calc((100vh - 300px) * 16 / 9));
+  width: min(100cqw, 100cqh * 16 / 9);
 }
 
 .voice-tile-avatar {
@@ -726,14 +726,11 @@
 
 .voice-alone {
   display: flex;
-  flex: 1;
+  flex: none;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 16px;
-  min-height: 0;
-  border-radius: var(--radius-md);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--brand, #5865f2) 28%, transparent), transparent 70%), var(--background-base-low);
+  padding: 8px 0;
 }
 
 .voice-alone-art {
