@@ -23,5 +23,5 @@
 `npm run dev` without `VITE_VOKKO_API` serves the seeded mock (login `sam` / `vokko-dev`, same password for `carol`, `alice`, `bob`, `nova`).
 
 - `?as=<username>` signs in without the form; `?mockLatency=0` removes the simulated 25 ms request latency.
-- `window.__vokkoMock`: `say(channelId, username, text, {replyTo})`, `typing`, `presence`, `dropConnections()` (client must resume), `rateLimit(count, retryAfter)` (next N requests answer 429), `addUser`, `messageTimestamp`, `channelIdByName`, `tokenFor`, `reset`. Mock snowflakes are time based: a page reload re-seeds the DB and invalidates the stored token.
+- `window.__vokkoMock`: `say(channelId, username, text, {replyTo})`, `typing`, `presence`, `dropConnections()` (client must resume), `offline(true|false)` (drop everything and refuse new sockets, the reconnecting banner shows; false lets the client back in), `rateLimit(count, retryAfter)` (next N requests answer 429), `addUser`, `messageTimestamp`, `channelIdByName`, `tokenFor`, `reset`. Mock snowflakes are time based: a page reload re-seeds the DB and invalidates the stored token.
 - `window.__vokko`: `gateway`, `request`, `appStore` and the store helpers, for Playwright scripts.

@@ -21,6 +21,11 @@ type Win = {
   __vokko: { appStore: { getState(): { me: { id: string }; channels: Record<string, { id: string; name: string | null; guild_id: string | null; recipients?: { username: string }[] }>; readStates: Record<string, unknown>; connection: string } } };
 };
 
+/** What the browser chrome showed, collected by the tests and drawn into one strip PNG by the last test (a viewport screenshot has no tab). */
+const seen: { states: { label: string; title: string; icon: string }[]; toast?: { title: string; body: string; tag: string } } = { states: [] };
+const chrome = (page: Page) =>
+  page.evaluate(() => ({ title: document.title, icon: decodeURIComponent(document.querySelector<HTMLLinkElement>('link[rel="icon"]')!.href.replace('data:image/svg+xml,', '')) }));
+
 const shot = async (page: Page, name: string) => {
   if (!dir) return;
   await page.waitForTimeout(300);
@@ -106,7 +111,7 @@ test('DM from another user raises a desktop notification and a mention ping when
   expect(note.icon).toBeTruthy();
   // mention / DM ping = 3 notes
   expect(await probe(page, p => p.beeps)).toBe(3);
-  await shot(page, '01-dm-notification-fired');
+  seen.toast = { title: note.title, body: note.body, tag: note.tag };
 });
 
 test('clicking the notification focuses the app on that channel and the message', async ({ page }) => {
@@ -201,16 +206,18 @@ test('document title and favicon show unread and mention state', async ({ page }
   await readEverything(page);
   const general = (await channelNamed(page, 'general'))!;
   const meId = await page.evaluate(() => (window as unknown as Win).__vokko.appStore.getState().me.id);
+  seen.states.push({ label: 'nothing unread', ...(await chrome(page)) });
   await say(page, general, 'alice', 'something unread');
   await expect.poll(() => page.title()).toBe('• Vokko | Friends');
-  const plain = await page.evaluate(() => document.querySelector<HTMLLinkElement>('link[rel="icon"]')!.href);
-  expect(decodeURIComponent(plain)).toContain('#f23f42');
+  const plain = await chrome(page);
+  expect(plain.icon).toContain('#f23f42');
+  seen.states.push({ label: 'unread, no mention', ...plain });
   await say(page, general, 'alice', `<@${meId}> ping`);
   await expect.poll(() => page.title()).toBe('(1) Vokko | Friends');
-  const mention = await page.evaluate(() => document.querySelector<HTMLLinkElement>('link[rel="icon"]')!.href);
-  expect(mention).not.toBe(plain);
-  expect(decodeURIComponent(mention)).toContain('>1<');
-  await shot(page, '02-title-mentions');
+  const mention = await chrome(page);
+  expect(mention.icon).not.toBe(plain.icon);
+  expect(mention.icon).toContain('>1<');
+  seen.states.push({ label: '1 mention', ...mention });
   // the unread badge pref turns the title/favicon indicator off
   await page.evaluate(`import('/src/ui/prefs.ts').then(m => m.setPref('unreadBadge', false))`);
   await expect.poll(() => page.title()).toBe('Vokko | Friends');
@@ -298,4 +305,27 @@ test('first-connect splash', async ({ page }) => {
   await shot(page, '05-splash-connecting');
   await expect(splash.getByRole('button', { name: 'Try again' })).toBeVisible({ timeout: 8000 });
   await shot(page, '06-splash-slow');
+});
+
+test('strip: tab title, favicon states and the toast text (a viewport screenshot cannot show browser chrome)', async ({ browser }) => {
+  test.skip(!dir, 'set VOKKO_SHOTS_DIR to capture screenshots');
+  expect(seen.states.length).toBe(3);
+  const rows = seen.states
+    .map(s => {
+      const uri = `data:image/svg+xml,${encodeURIComponent(s.icon)}`;
+      const icons = [16, 32, 64].map(n => `<img src="${uri}" width="${n}" height="${n}" style="margin-right:12px">`).join('');
+      return `<div class="row"><div class="icons">${icons}</div><div><div class="tab">${s.title.replace(/</g, '&lt;')}</div><div class="label">${s.label}</div></div></div>`;
+    })
+    .join('');
+  const toast = seen.toast
+    ? `<div class="toast"><div class="toast-title">${seen.toast.title}</div><div class="toast-body">${seen.toast.body}</div><div class="label">Notification payload: title / body, tag = channel id ${seen.toast.tag}</div></div>`
+    : '';
+  const page = await browser.newPage({ viewport: { width: 760, height: 420 } });
+  await page.setContent(`<style>body{margin:0;padding:24px;background:#1e1f22;color:#efeff1;font:14px 'Noto Sans',Segoe UI,sans-serif}
+    .row{display:flex;align-items:center;gap:24px;margin-bottom:20px}.icons{width:150px;display:flex;align-items:center}
+    .tab{font-size:15px;font-weight:600}.label{color:#96979e;font-size:12px;margin-top:2px}
+    .toast{margin-top:8px;padding:12px 16px;background:#2b2d31;border-radius:8px;width:420px}.toast-title{font-weight:700}.toast-body{margin-top:2px}</style>
+    <h3 style="margin:0 0 16px">Document title + favicon states, values captured from the e2e run</h3>${rows}${toast}`);
+  await page.screenshot({ path: path.join(dir!, '02-title-favicon-states.png') });
+  await page.close();
 });

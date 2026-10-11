@@ -14,8 +14,13 @@ import { notificationAdapter } from "./desktop";
 import { playSound, wireAudioUnlock } from "./sounds";
 import { notificationTitle, plainBody } from "./text";
 
-/** Messages replayed after a resume that are older than this don't ping (they still count as unread). */
+/**
+ * Right after a (re)connect the server may replay what we missed. Replayed messages older than STALE_MS don't ping (they
+ * still count as unread). Outside this window live messages are never dropped by age, so a skewed client clock can't mute them.
+ */
 const STALE_MS = 2 * 60_000;
+const REPLAY_WINDOW_MS = 3000;
+let replayUntil = 0;
 
 function windowFocused(): boolean {
   if (typeof document === "undefined") return true;
@@ -98,7 +103,7 @@ async function onMessage(message: Message): Promise<void> {
   const input = buildInput(message);
   if (!input) return;
   const sent = Date.parse(message.timestamp);
-  const stale = Number.isFinite(sent) && Date.now() - sent > STALE_MS;
+  const stale = Date.now() < replayUntil && Number.isFinite(sent) && Date.now() - sent > STALE_MS;
   const decision = decide(input);
   if (!decision.kind || stale) return;
   if (decision.sound) playSound(decision.sound === "mention" ? "mention" : "message");
@@ -118,6 +123,11 @@ export function startNotify(): void {
   started = true;
   wireAudioUnlock();
   gateway.on("MESSAGE_CREATE", message => void onMessage(message));
+  let previous = gateway.status;
+  gateway.onStatus(status => {
+    if (status === "ready" && previous !== "ready") replayUntil = Date.now() + REPLAY_WINDOW_MS;
+    previous = status;
+  });
 
   // Recompute the badge only when the inputs it reads actually changed (the store also churns on typing and presence).
   let { channels, readStates, route, guilds, me } = appStore.getState();
