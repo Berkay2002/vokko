@@ -2,7 +2,8 @@
 
 import { DEFAULT_EVERYONE } from "../permissions";
 import { timestampToSnowflake } from "../snowflake";
-import type { Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageInteractionMetadata, MessageSnapshot, MessageType, Presence, ReadState, Relationship, RelationshipType, Reminder, Role, Sticker, StickerItem, User, GuildLayout } from "../types";
+import type { Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageInteractionMetadata, MessageSnapshot, MessageType, Presence, ReactionEmoji, ReadState, Relationship, RelationshipType, Reminder, Role, Sticker, StickerItem, User, GuildLayout } from "../types";
+import type { MockEmoji } from "./emojis";
 
 export interface MockAccount {
   user: User;
@@ -26,7 +27,7 @@ export interface MockChannel extends Channel {
 }
 
 export interface MockReaction {
-  emoji: { id: string | null; name: string };
+  emoji: ReactionEmoji;
   user_ids: string[];
 }
 
@@ -109,6 +110,8 @@ export interface Db {
   bans: Map<string, Map<string, string | null>>;
   pending: Map<string, { attachment: Attachment; owner: string }>;
   followers: Map<string, MockFollower>;
+  /** Custom emoji by id (mock/emojis.ts). */
+  emojis: Map<string, MockEmoji>;
   /** guild id -> stickers, oldest first */
   stickers: Map<string, Sticker[]>;
   /** user id -> favourite GIFs, newest first */
@@ -130,6 +133,7 @@ export const db: Db = {
   bans: new Map(),
   pending: new Map(),
   followers: new Map(),
+  emojis: new Map(),
   stickers: new Map(),
   gifFavorites: new Map(),
   bookmarks: new Map(),

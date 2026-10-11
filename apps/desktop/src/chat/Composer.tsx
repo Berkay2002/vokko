@@ -8,6 +8,8 @@ import { Avatar } from './Avatar';
 import { ExpressionPickerPopout, type ExpressionTab } from './ExpressionPicker';
 import { AppLauncherPopout, AppsGlyph, useCommandComposer } from '../apps/CommandComposer';
 import { useEmojiDb, pushRecentEmoji } from './emojiData';
+import { emojiMarkup, searchCustomEmoji } from '../emoji/store';
+import { usePickerSections } from '../emoji/PickerSections';
 import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, updateUpload, useDraft } from './draftStore';
 import { ModifyAttachmentModal } from './AttachmentModals';
 import { fromDisplay, type MentionToken } from './mentionText';
@@ -53,6 +55,8 @@ interface Suggestion {
   lead: 'avatar' | 'hash' | 'at' | 'emoji';
   user?: { id: string; avatar: string | null };
   emoji?: string;
+  /** custom emoji image */
+  image?: string;
   color?: string | null;
 }
 
@@ -99,6 +103,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const [modifying, setModifying] = useState<string | null>(null); // localId of the tray card whose "Modify Attachment" dialog is open
   const legacyInput = useLegacyChatInput(); // Settings > Accessibility > "Use legacy chat input": plain text box
   const emojiDb = useEmojiDb();
+  const emojiSections = usePickerSections();
   const convert = useConvertEmoticons() && !legacyInput;
   const { text, uploads } = draft;
   const name = chat.channel?.name ? (chat.channel.type === ChannelType.GuildVoice ? chat.channel.name : `#${chat.channel.name}`) :chat.channel?.recipients?.map(u => chat.nameOf(u)).join(', ') ?? '';
@@ -161,9 +166,12 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       return chat.channels.filter(c => c.type === ChannelType.GuildText && (c.name ?? '').toLowerCase().includes(q)).slice(0, 10)
         .map(c => ({ key: `c${c.id}`, label: c.name ?? '', insert: `#${c.name}`, token: { display: `#${c.name}`, raw: `<#${c.id}>` }, lead: 'hash' as const }));
     }
-    if (!emojiDb) return [];
-    return emojiDb.search(q, 10).map(e => ({ key: `e${e.order}`, label: `:${e.shortcodes[0] ?? e.label}:`, insert: e.emoji, lead: 'emoji' as const, emoji: e.emoji }));
-  }, [trigger, triggerKey, dismissed, chat, emojiDb]);
+    const custom: Suggestion[] = searchCustomEmoji(emojiSections, q, 10).map(({ emoji, guild }) => ({
+      key: `x${emoji.id}`, label: `:${emoji.name}:`, hint: guild.name, insert: emojiMarkup(emoji), lead: 'emoji' as const, image: emoji.url,
+    }));
+    const unicode: Suggestion[] = (emojiDb?.search(q, 10) ?? []).map(e => ({ key: `e${e.order}`, label: `:${e.shortcodes[0] ?? e.label}:`, insert: e.emoji, lead: 'emoji' as const, emoji: e.emoji }));
+    return [...custom, ...unicode].slice(0, 10);
+  }, [trigger, triggerKey, dismissed, chat, emojiDb, emojiSections]);
 
   useEffect(() => { setSelected(0); }, [triggerKey]);
 
@@ -341,7 +349,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           <Tooltip content="Apps" side="top"><button ref={appsBtn} type="button" className="chat-composer-btn" aria-label="Apps" aria-expanded={appsOpen} onClick={() => setAppsOpen(v => !v)}><LayoutGrid size={24} /></button></Tooltip>
         </div>
         <ExpressionPickerPopout anchor={expr === 'gif' ? gifBtn : expr === 'sticker' ? stickerBtn : emojiBtn} open={expr !== null} initialTab={expr ?? 'emoji'}
-          onClose={() => setExpr(null)} onPickEmoji={e => { setExpr(null); insertEmoji(e.name); }}
+          onClose={() => setExpr(null)} onPickEmoji={e => { setExpr(null); insertEmoji(e.id ? emojiMarkup({ id: e.id, name: e.name, animated: !!e.animated }) : e.name); }}
           channelId={channelId} onPickGif={(gif: Gif) => sendMedia({ content: gif.url })} onPickSticker={s => sendMedia({ content: '', stickers: [s] })} />
         <AppLauncherPopout anchor={appsBtn} open={appsOpen} onClose={() => setAppsOpen(false)} channelId={channelId} onPick={next => setTextAt(next, next.length)} />
       </div>
@@ -353,7 +361,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           {s.lead === 'avatar' && s.user && <Avatar user={s.user} size={24} />}
           {s.lead === 'hash' && <Hash size={20} className="chat-autocomplete-icon" />}
           {s.lead === 'at' && <AtSign size={20} className="chat-autocomplete-icon" style={s.color ? { color: s.color } : undefined} />}
-          {s.lead === 'emoji' && <span className="chat-autocomplete-emoji">{s.emoji}</span>}
+          {s.lead === 'emoji' && (s.image ? <img className="chat-autocomplete-emoji emoji-autocomplete-img" src={s.image} alt="" /> : <span className="chat-autocomplete-emoji">{s.emoji}</span>)}
           <span className="chat-autocomplete-label" style={s.color ? { color: s.color } : undefined}>{s.label}</span>
           {s.hint && <span className="chat-autocomplete-hint">{s.hint}</span>}
         </div>)}

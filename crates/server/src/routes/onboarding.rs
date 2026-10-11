@@ -110,7 +110,7 @@ pub async fn load(state: &AppState, guild: i64) -> ApiResult<GuildOnboarding> {
     let (channels, roles) = targets(state, guild).await?;
     let mut by_prompt: HashMap<i64, Vec<OnboardingOption>> = HashMap::new();
     for row in options {
-        let emoji = row.emoji_name.map(|name| ReactionEmoji { id: row.emoji_id.map(flake), name });
+        let emoji = row.emoji_name.map(|name| ReactionEmoji { id: row.emoji_id.map(flake), name, animated: None });
         by_prompt.entry(row.prompt_id).or_default().push(OnboardingOption {
             id: flake(row.id),
             title: row.title,

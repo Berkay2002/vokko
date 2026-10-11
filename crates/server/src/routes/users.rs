@@ -186,7 +186,7 @@ pub async fn owned_image_path(state: &AppState, attachment_id: i64, user_id: i64
 pub async fn image_path_on(conn: &mut PgConnection, attachment_id: i64, user_id: i64, kind: ImageKind, field: &str, cover: bool) -> ApiResult<String> {
     let row: Option<(String, String, Option<String>, i64)> = sqlx::query_as(
         "SELECT filename, key, content_type, size FROM attachments WHERE id = $1 AND uploader_id = $2 AND key IS NOT NULL AND message_id IS NULL \
-         AND ($3 OR NOT event_cover)",
+         AND ($3 OR NOT event_cover) AND NOT EXISTS (SELECT 1 FROM emojis e WHERE e.attachment_id = attachments.id)",
     )
     .bind(attachment_id)
     .bind(user_id)
@@ -206,7 +206,8 @@ pub async fn image_path_on(conn: &mut PgConnection, attachment_id: i64, user_id:
     // Claiming is one statement, so two requests racing for the same upload cannot both win.
     let claimed = sqlx::query(
         "UPDATE attachments SET claimed_at = COALESCE(claimed_at, now()), event_cover = $3 WHERE id = $1 AND uploader_id = $2 AND key IS NOT NULL \
-         AND message_id IS NULL AND CASE WHEN $3 THEN claimed_at IS NULL ELSE NOT event_cover END",
+         AND message_id IS NULL AND CASE WHEN $3 THEN claimed_at IS NULL ELSE NOT event_cover END \
+         AND NOT EXISTS (SELECT 1 FROM emojis e WHERE e.attachment_id = attachments.id)",
     )
     .bind(attachment_id)
     .bind(user_id)

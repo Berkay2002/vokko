@@ -62,16 +62,16 @@ async fn reaction_counts_and_me_are_per_viewer() {
     assert_eq!(app.put(&url, &member).await.0, 204);
     assert_eq!(app.put(&url, &member).await.0, 204, "adding twice is idempotent");
     let custom = format!("/channels/{channel}/messages/{}/reactions/party:123456789/@me", message["id"].as_str().expect("id"));
-    assert_eq!(app.put(&custom, &member).await.0, 204);
+    // custom emoji must exist now (tests/emojis.rs covers real ones)
+    let (status, body) = app.put(&custom, &member).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::BAD_REQUEST, json!(10014)));
 
     let (_, messages) = app.get(&format!("/channels/{channel}/messages"), &owner).await;
     let reactions = messages[0]["reactions"].as_array().expect("reactions");
-    assert_eq!(reactions.len(), 2);
+    assert_eq!(reactions.len(), 1);
     let thumbs = reactions.iter().find(|r| r["emoji"]["name"] == "👍").expect("unicode reaction");
     assert_eq!((thumbs["count"].clone(), thumbs["me"].clone()), (json!(2), json!(true)));
     assert_eq!(thumbs["emoji"]["id"], Value::Null);
-    let party = reactions.iter().find(|r| r["emoji"]["name"] == "party").expect("custom reaction");
-    assert_eq!((party["count"].clone(), party["me"].clone(), party["emoji"]["id"].clone()), (json!(1), json!(false), json!("123456789")));
 
     let (_, reactors) = app.get(&format!("/channels/{channel}/messages/{}/reactions/{THUMBS_UP}", message["id"].as_str().expect("id")), &owner).await;
     assert_eq!(reactors.as_array().expect("users").len(), 2);
@@ -89,8 +89,10 @@ async fn reaction_limits_and_access() {
     let (_, message) = app.post(&format!("/channels/{channel}/messages"), &owner, json!({"content": "many"})).await;
     let mid = message["id"].as_str().expect("id");
     assert_eq!(app.put(&format!("/channels/{channel}/messages/{mid}/reactions/{THUMBS_UP}/@me"), &outsider).await.0, 403);
-    for index in 0..20 {
-        let status = app.put(&format!("/channels/{channel}/messages/{mid}/reactions/e{index:02}:{}/@me", 1000 + index), &owner).await.0;
+    for index in 0..20_u32 {
+        let emoji = char::from_u32(0x1F600 + index).expect("emoji").to_string();
+        let encoded: String = emoji.bytes().map(|b| format!("%{b:02X}")).collect();
+        let status = app.put(&format!("/channels/{channel}/messages/{mid}/reactions/{encoded}/@me"), &owner).await.0;
         assert_eq!(status, 204);
     }
     let (status, body) = app.put(&format!("/channels/{channel}/messages/{mid}/reactions/{THUMBS_UP}/@me"), &owner).await;

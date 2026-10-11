@@ -4,17 +4,20 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, put};
 use serde::Deserialize;
-use vokko_protocol::api::permissions::{ADD_REACTIONS, READ_MESSAGE_HISTORY};
+use vokko_protocol::api::permissions::{ADD_REACTIONS, READ_MESSAGE_HISTORY, USE_EXTERNAL_EMOJIS};
 use vokko_protocol::api::{GatewayEvent, MessageReaction, ReactionEmoji, Snowflake, User};
 
 use crate::access::{self, channel_access};
 use crate::auth::AuthUser;
+use crate::emojis;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiQuery, parse_id};
 use crate::state::AppState;
 use crate::store;
 
 const MAX_DISTINCT_REACTIONS: i64 = 20;
+/// Row filter for one reaction emoji (`$2` name, `$3` id): a custom emoji matches by id alone, so a renamed emoji stays one reaction.
+const SAME_EMOJI: &str = "emoji_id = $3 AND ($3 <> 0 OR emoji_name = $2)";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -31,13 +34,13 @@ pub fn parse_emoji(raw: &str) -> ApiResult<ReactionEmoji> {
         if !valid_name {
             return Err(invalid());
         }
-        return Ok(ReactionEmoji { id: Some(Snowflake::from(id)), name: name.to_owned() });
+        return Ok(ReactionEmoji { id: Some(Snowflake::from(id)), name: name.to_owned(), animated: None });
     }
     let name = raw.trim();
     if name.is_empty() || name.len() > 64 || name.chars().any(|c| c.is_ascii_alphanumeric() || c.is_control() || c.is_whitespace()) {
         return Err(invalid());
     }
-    Ok(ReactionEmoji { id: None, name: name.to_owned() })
+    Ok(ReactionEmoji { id: None, name: name.to_owned(), animated: None })
 }
 
 async fn locate(state: &AppState, user_id: i64, channel: &str, message: &str) -> ApiResult<(access::ChannelAccess, i64)> {
@@ -57,15 +60,24 @@ async fn add_reaction(
     AuthUser(user_id): AuthUser,
     Path((id, mid, emoji)): Path<(String, String, String)>,
 ) -> ApiResult<StatusCode> {
-    let emoji = parse_emoji(&emoji)?;
+    let mut emoji = parse_emoji(&emoji)?;
     let (access, message_id) = locate(&state, user_id, &id, &mid).await?;
     access.require(READ_MESSAGE_HISTORY)?;
     access.require(ADD_REACTIONS)?;
     access.require_unarchived()?;
     let emoji_id = emoji.id.map(Snowflake::db).unwrap_or(0);
-    let (distinct, existing): (i64, bool) = sqlx::query_as(
-        "SELECT count(DISTINCT (emoji_name, emoji_id)), COALESCE(bool_or(emoji_name = $2 AND emoji_id = $3), FALSE) FROM reactions WHERE message_id = $1",
-    )
+    if emoji_id != 0 {
+        let (name, animated, emoji_guild) = emojis::usable_by(&state, user_id, emoji_id).await?;
+        // Another guild's emoji in a guild channel needs USE_EXTERNAL_EMOJIS there (on for @everyone by default); DMs never do.
+        if access.channel.guild_id.is_some_and(|guild_id| guild_id != emoji_guild) {
+            access.require(USE_EXTERNAL_EMOJIS)?;
+        }
+        emoji.name = name;
+        emoji.animated = Some(animated);
+    }
+    let (distinct, existing): (i64, bool) = sqlx::query_as(&format!(
+        "SELECT count(DISTINCT CASE WHEN emoji_id = 0 THEN emoji_name ELSE emoji_id::TEXT END), COALESCE(bool_or({SAME_EMOJI}), FALSE) FROM reactions WHERE message_id = $1"
+    ))
     .bind(message_id)
     .bind(&emoji.name)
     .bind(emoji_id)
@@ -74,13 +86,17 @@ async fn add_reaction(
     if !existing && distinct >= MAX_DISTINCT_REACTIONS {
         return Err(ApiErr::conflict(30010, "Maximum number of reactions reached (20)"));
     }
-    let inserted = sqlx::query("INSERT INTO reactions (message_id, user_id, emoji_name, emoji_id) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING")
-        .bind(message_id)
-        .bind(user_id)
-        .bind(&emoji.name)
-        .bind(emoji_id)
-        .execute(&state.db)
-        .await?;
+    let inserted = sqlx::query(
+        "INSERT INTO reactions (message_id, user_id, emoji_name, emoji_id) SELECT $1, $4, $2, $3
+         WHERE NOT EXISTS (SELECT 1 FROM reactions WHERE message_id = $1 AND user_id = $4 AND emoji_id = $3 AND ($3 <> 0 OR emoji_name = $2))
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(message_id)
+    .bind(&emoji.name)
+    .bind(emoji_id)
+    .bind(user_id)
+    .execute(&state.db)
+    .await?;
     if inserted.rows_affected() > 0 {
         let viewers = access::channel_viewers(&state, &access.channel).await?;
         let event = MessageReaction {
@@ -99,16 +115,20 @@ async fn remove_reaction(
     AuthUser(user_id): AuthUser,
     Path((id, mid, emoji)): Path<(String, String, String)>,
 ) -> ApiResult<StatusCode> {
-    let emoji = parse_emoji(&emoji)?;
+    let mut emoji = parse_emoji(&emoji)?;
     let (access, message_id) = locate(&state, user_id, &id, &mid).await?;
-    let removed = sqlx::query("DELETE FROM reactions WHERE message_id = $1 AND user_id = $2 AND emoji_name = $3 AND emoji_id = $4")
-        .bind(message_id)
-        .bind(user_id)
-        .bind(&emoji.name)
-        .bind(emoji.id.map(Snowflake::db).unwrap_or(0))
-        .execute(&state.db)
-        .await?;
-    if removed.rows_affected() > 0 {
+    let emoji_id = emoji.id.map(Snowflake::db).unwrap_or(0);
+    let removed: Vec<(String,)> =
+        sqlx::query_as(&format!("DELETE FROM reactions WHERE message_id = $1 AND user_id = $4 AND {SAME_EMOJI} RETURNING emoji_name"))
+            .bind(message_id)
+            .bind(&emoji.name)
+            .bind(emoji_id)
+            .bind(user_id)
+            .fetch_all(&state.db)
+            .await?;
+    if let Some((name,)) = removed.into_iter().next() {
+        emoji.name = name;
+        emoji.animated = emojis::animated_flags(&state, &[emoji_id]).await?.get(&emoji_id).copied();
         let viewers = access::channel_viewers(&state, &access.channel).await?;
         let event = MessageReaction {
             user_id: Snowflake::from(user_id),
@@ -138,7 +158,7 @@ async fn list_reactors(
     access.require(READ_MESSAGE_HISTORY)?;
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let rows: Vec<(i64,)> =
-        sqlx::query_as("SELECT user_id FROM reactions WHERE message_id = $1 AND emoji_name = $2 AND emoji_id = $3 AND user_id > $4 ORDER BY user_id LIMIT $5")
+        sqlx::query_as(&format!("SELECT user_id FROM reactions WHERE message_id = $1 AND {SAME_EMOJI} AND user_id > $4 ORDER BY user_id LIMIT $5"))
             .bind(message_id)
             .bind(&emoji.name)
             .bind(emoji.id.map(Snowflake::db).unwrap_or(0))

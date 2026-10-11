@@ -575,11 +575,13 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
     .bind(&ids)
     .fetch_all(&state.db)
     .await?;
-    let reaction_rows: Vec<(i64, String, i64, i64)> =
-        sqlx::query_as("SELECT message_id, emoji_name, emoji_id, user_id FROM reactions WHERE message_id = ANY($1) ORDER BY created_at, user_id")
-            .bind(&ids)
-            .fetch_all(&state.db)
-            .await?;
+    let reaction_rows: Vec<(i64, String, i64, i64, Option<bool>)> = sqlx::query_as(
+        "SELECT r.message_id, r.emoji_name, r.emoji_id, r.user_id, e.animated FROM reactions r LEFT JOIN emojis e ON r.emoji_id <> 0 AND e.id = r.emoji_id
+         WHERE r.message_id = ANY($1) ORDER BY r.created_at, r.user_id",
+    )
+    .bind(&ids)
+    .fetch_all(&state.db)
+    .await?;
 
     let mut user_ids: Vec<i64> = rows.iter().map(|row| row.author_id).chain(mention_rows.iter().map(|(_, user_id)| *user_id)).collect();
     user_ids.sort_unstable();
@@ -611,10 +613,11 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
     }
     // message → ordered (emoji, users)
     let mut reactions: HashMap<i64, Vec<(ReactionEmoji, Vec<i64>)>> = HashMap::new();
-    for (message_id, name, emoji_id, user_id) in reaction_rows {
-        let emoji = ReactionEmoji { id: (emoji_id != 0).then(|| flake(emoji_id)), name };
+    for (message_id, name, emoji_id, user_id, animated) in reaction_rows {
+        let emoji = ReactionEmoji { id: (emoji_id != 0).then(|| flake(emoji_id)), name, animated };
         let list = reactions.entry(message_id).or_default();
-        match list.iter_mut().find(|(existing, _)| *existing == emoji) {
+        // A custom emoji is one reaction whatever name it was stored with.
+        match list.iter_mut().find(|(existing, _)| if emoji.id.is_some() { existing.id == emoji.id } else { *existing == emoji }) {
             Some((_, users)) => users.push(user_id),
             None => list.push((emoji, vec![user_id])),
         }

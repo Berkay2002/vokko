@@ -20,9 +20,10 @@ export interface MarkdownContext {
   channelName(id: string): string | null;
   currentUserId: string | null;
   emojiShortcodes?: ReadonlyMap<string, string>;
-  customEmojiUrl?(id: string, animated: boolean): string;
-  /** replaces the plain <img> of a custom emoji (chat uses it so animated emoji follow the accessibility settings) */
-  renderCustomEmoji?(emoji: { src: string; name: string; animated: boolean }): ReactNode;
+  /** null/undefined renders the text `:name:` (unknown emoji) */
+  customEmojiUrl?(id: string, animated: boolean): string | null | undefined;
+  /** replaces the plain <img> of a custom emoji whose URL resolved (chat adds the tooltip, popout and the accessibility settings for animated emoji) */
+  renderCustomEmoji?(emoji: { id: string; src: string; name: string; animated: boolean }): ReactNode;
   /** replaces the plain span for a unicode emoji (chat adds the hover tooltip and the info popout) */
   renderEmoji?(unicode: string, name: string | undefined): ReactNode;
   /** when given, a link click calls it with preventDefault (leaving-Vokko confirm) */
@@ -305,7 +306,7 @@ function renderInline(nodes: Inline[], ctx: MarkdownContext, keyPrefix: string):
       case 'customEmoji': {
         const src = ctx.customEmojiUrl?.(node.id, node.animated);
         if (!src) return `:${node.name}:`;
-        if (ctx.renderCustomEmoji) return <Fragment key={key}>{ctx.renderCustomEmoji({ src, name: node.name, animated: node.animated })}</Fragment>;
+        if (ctx.renderCustomEmoji) return <Fragment key={key}>{ctx.renderCustomEmoji({ id: node.id, src, name: node.name, animated: node.animated })}</Fragment>;
         return (
           <img
             key={key}

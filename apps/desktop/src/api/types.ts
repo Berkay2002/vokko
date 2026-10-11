@@ -225,8 +225,32 @@ export interface Embed {
 }
 
 export interface ReactionEmoji {
-  id: Snowflake | null; // custom emoji id (null for unicode)
+  id: Snowflake | null; // custom emoji id (null for unicode); routes take `name:id` for custom emoji
   name: string; // unicode character(s) or custom name
+  animated?: boolean; // custom emoji only: true for an animated one (absent for unicode)
+}
+
+// Custom emoji uploaded to a guild. Message content references them as <:name:id> (static) or <a:name:id> (animated).
+// Vokko gives every Nitro emoji perk free: members can use any emoji of any guild they are in, anywhere (DMs included).
+export interface GuildEmoji {
+  id: Snowflake;
+  name: string; // 2-32 chars [A-Za-z0-9_]
+  roles: Snowflake[]; // roles allowed to use it; [] = every member
+  user?: User; // uploader; only in REST responses (GET/POST/PATCH /guilds/{id}/emojis), absent in gateway payloads
+  require_colons: boolean; // always true
+  managed: boolean; // always false (no integrations)
+  animated: boolean; // GIF or animated WebP
+  available: boolean; // always true (no boost tiers to lose)
+  url: string; // absolute image URL; the same file is also served by id at GET /emojis/{id}
+}
+export interface CreateGuildEmojiRequest {
+  name: string;
+  image_attachment_id: Snowflake; // PNG/GIF/WebP uploaded with POST /channels/{id}/attachments, max 256 KiB
+  roles?: Snowflake[]; // default []
+}
+export interface EditGuildEmojiRequest {
+  name?: string;
+  roles?: Snowflake[] | null; // null or [] = every member
 }
 
 export interface Reaction {
@@ -1066,8 +1090,8 @@ export interface ReadyEvent {
   v: 1;
   user: User;
   session_id: string;
-  // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels)
-  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; voice_states?: VoiceState[]; threads?: Channel[] })[];
+  // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels); emojis absent = none
+  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[] })[];
   private_channels: Channel[]; // DMs and group DMs
   presences: Presence[];
   read_states: ReadState[];
@@ -1111,6 +1135,7 @@ export interface GatewayEvents {
   GUILD_ROLE_CREATE: { guild_id: Snowflake; role: Role };
   GUILD_ROLE_UPDATE: { guild_id: Snowflake; role: Role };
   GUILD_ROLE_DELETE: { guild_id: Snowflake; role_id: Snowflake };
+  GUILD_EMOJIS_UPDATE: { guild_id: Snowflake; emojis: GuildEmoji[] }; // the guild's full emoji list after any create/edit/delete (no `user`)
   RESUMED: Record<string, never>; // after a successful op 6 replay
   PRESENCE_UPDATE: Presence;
   USER_UPDATE: User; // profile/avatar change; sent to the user and everyone sharing a guild, DM or relationship with them

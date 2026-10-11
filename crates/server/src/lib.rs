@@ -5,6 +5,7 @@ pub mod apps;
 pub mod auth;
 pub mod bot_routes;
 pub mod config;
+pub mod emojis;
 pub mod error;
 pub mod events;
 pub mod extract;

@@ -221,6 +221,7 @@ pub async fn delete_account(
          AND NOT EXISTS (SELECT 1 FROM channels c WHERE split_part(c.icon_path, '/', 1) = a.id::text) \
          AND NOT EXISTS (SELECT 1 FROM stickers s WHERE s.attachment_id = a.id) \
          AND NOT EXISTS (SELECT 1 FROM message_stickers m WHERE m.attachment_id = a.id) \
+         AND NOT EXISTS (SELECT 1 FROM emojis e WHERE e.attachment_id = a.id) \
          AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id <> $1 AND a.id::text IN (split_part(u.avatar_path, '/', 1), split_part(u.banner_path, '/', 1))) \
          AND NOT EXISTS (SELECT 1 FROM guild_members gm WHERE gm.user_id <> $1 \
                          AND a.id::text IN (split_part(gm.avatar_path, '/', 1), split_part(gm.banner_path, '/', 1))) \

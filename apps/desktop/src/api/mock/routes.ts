@@ -18,6 +18,7 @@ import { setVoiceChannelStatus } from "./voice";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
 import "./search";
 import { dismissEphemeral, mergeEphemerals } from "./apps";
+import { resolveReactionEmoji, sameReactionEmoji } from "./emojis";
 import "./invites";
 import "./community";
 import "./status";
@@ -31,7 +32,7 @@ function parseEmoji(raw: string): ReactionEmoji {
   return { id: null, name: decoded };
 }
 
-const sameEmoji = (a: ReactionEmoji, b: ReactionEmoji) => a.id === b.id && a.name === b.name;
+const sameEmoji = sameReactionEmoji;
 
 // ---- auth ----
 
@@ -424,7 +425,7 @@ route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, 
   const message = requireMessage(channel.id, params[1] ?? "");
   requireChannelPerm(channel, viewer.user.id, Perm.ADD_REACTIONS);
   assertThreadOpen(channel);
-  const emoji = parseEmoji(params[2] ?? "");
+  const emoji = resolveReactionEmoji(channel, viewer.user.id, parseEmoji(params[2] ?? ""));
   let reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
   if (!reaction) message.reactions.push((reaction = { emoji, user_ids: [] }));
   if (!reaction.user_ids.includes(viewer.user.id)) {
@@ -442,7 +443,7 @@ route("DELETE", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewe
   if (reaction?.user_ids.includes(viewer.user.id)) {
     reaction.user_ids = reaction.user_ids.filter(id => id !== viewer.user.id);
     if (reaction.user_ids.length === 0) message.reactions = message.reactions.filter(r => r !== reaction);
-    emit(channelAudience(channel), "MESSAGE_REACTION_REMOVE", { user_id: viewer.user.id, channel_id: channel.id, message_id: message.id, emoji });
+    emit(channelAudience(channel), "MESSAGE_REACTION_REMOVE", { user_id: viewer.user.id, channel_id: channel.id, message_id: message.id, emoji: { ...reaction.emoji } });
   }
   return undefined;
 });

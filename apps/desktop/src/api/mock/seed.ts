@@ -6,6 +6,7 @@ import { Perm } from "../permissions";
 import { db, nextId, sortedMessages, type MockChannel, type MockMessage } from "./db";
 import { stickerSvg, svgDataUri } from "./gifs";
 import { addChannel, addMessage, createAccount, createGuildRecord, openDM, openGroupDM } from "./ops";
+import { SEED_EMOJI_IMAGES, addEmoji } from "./emojis";
 import { createForumPost, initChannelFields, startThreadFromMessage } from "./threads";
 import { setRelationship } from "./views";
 import { seedEchoBot } from "./apps";
@@ -315,6 +316,10 @@ export function seed(): void {
   );
   const joined = new Date(Date.now() - 30 * 24 * HOUR).toISOString();
   guild.members.set(R, { nick: null, roles: [admin], joined_at: joined });
+  // Custom emoji (Vokko-drawn SVGs); mods_only is restricted to the Moderator role.
+  for (const [name, url] of Object.entries(SEED_EMOJI_IMAGES)) {
+    addEmoji({ guild_id: guildId, name, url, animated: name === "party_blob", roles: name === "mods_only" ? [moderator] : [], uploader_id: R });
+  }
   guild.members.set(A, { nick: null, roles: [moderator], joined_at: joined });
   guild.members.set(Bo, { nick: "Bobby", roles: [member], joined_at: joined });
   guild.members.set(N, { nick: null, roles: [member], joined_at: joined });

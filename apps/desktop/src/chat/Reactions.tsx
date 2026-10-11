@@ -5,9 +5,11 @@ import { AnimatedImage, request, Tooltip } from './shell';
 import { useChat } from './ChatContext';
 import { emojiKey } from './messageState';
 import { EmojiPickerPopout } from './EmojiPicker';
+import { useCustomEmojiUrl } from '../emoji/store';
 
-function emojiNode(e: ReactionEmoji, customUrl?: string) {
-  if (e.id) return <AnimatedImage kind="emoji" className="chat-reaction-emoji" src={customUrl ?? ''} alt={`:${e.name}:`} draggable={false} />;
+function emojiNode(e: ReactionEmoji, customUrl: string | null) {
+  if (e.id && customUrl) return <AnimatedImage kind="emoji" className="chat-reaction-emoji" src={customUrl} alt={`:${e.name}:`} draggable={false} data-emoji-id={e.id} />;
+  if (e.id) return <span className="chat-reaction-emoji chat-reaction-emoji-text">:{e.name}:</span>;
   return <span className="chat-reaction-emoji" role="img" aria-label={e.name}>{e.name}</span>;
 }
 
@@ -26,6 +28,7 @@ function ReactionPill({ message, reaction }: { message: Message; reaction: React
   const [who, setWho] = useState<string | null>(null);
   const fetched = useRef<number>(-1);
   const key = emojiKey(reaction.emoji);
+  const customUrl = useCustomEmojiUrl();
 
   function load() {
     if (fetched.current === reaction.count) return;
@@ -38,7 +41,7 @@ function ReactionPill({ message, reaction }: { message: Message; reaction: React
   return <Tooltip content={who ?? 'Loading…'} side="top">
     <button type="button" className={`chat-reaction${reaction.me ? ' me' : ''}`} aria-pressed={reaction.me} aria-label={`${reaction.count} ${reaction.emoji.name}`}
       onMouseEnter={load} onFocus={load} onClick={() => chat.actions.react(message, reaction.emoji)}>
-      {emojiNode(reaction.emoji)}
+      {emojiNode(reaction.emoji, reaction.emoji.id ? customUrl(reaction.emoji.id) : null)}
       <span className="chat-reaction-count">{reaction.count}</span>
     </button>
   </Tooltip>;

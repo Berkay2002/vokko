@@ -19,6 +19,7 @@ import { ThemePage } from "./settings/ThemePage";
 import { MembersPage } from "./settings/server-people";
 import { usePermissions } from "./usePermissions";
 import { IntegrationsPage } from "../apps/IntegrationsPage";
+import { EmojiSettingsPage } from "../emoji/EmojiSettingsPage";
 import { InviteList } from "../invites/InviteList";
 
 interface SectionDef {
@@ -51,7 +52,7 @@ const SECTIONS: SectionDef[] = [
   { id: "tag", label: "Server Tag", group: "top" },
   { id: "theme", label: "Server Theme", group: "top" },
   { id: "engagement", label: "Engagement", group: "top" },
-  { id: "emoji", label: "Emoji", group: "expression", needs: EXPRESSIONS, outline: ["Upload Emoji", "Emoji"] },
+  { id: "emoji", label: "Emoji", group: "expression", needs: EXPRESSIONS },
   { id: "stickers", label: "Stickers", group: "expression", needs: EXPRESSIONS, outline: ["Upload Sticker", "Stickers"] },
   { id: "soundboard", label: "Soundboard", group: "expression", needs: EXPRESSIONS, outline: ["Upload Sound", "Sounds"] },
   { id: "members", label: "Members", group: "people", needs: [Perm.MANAGE_GUILD, Perm.KICK_MEMBERS, Perm.BAN_MEMBERS, Perm.MODERATE_MEMBERS, Perm.MANAGE_NICKNAMES, Perm.MANAGE_ROLES] },
@@ -307,6 +308,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         return <BansPage guild={guild} />;
       case "integrations":
         return <IntegrationsPage guild={guild} canManageGuild={canManage} canManageWebhooks={owner || perms.can(Perm.MANAGE_WEBHOOKS)} />;
+      case "emoji":
+        return <EmojiSettingsPage guildId={guildId} canEdit={owner || perms.can(Perm.MANAGE_GUILD_EXPRESSIONS)} channels={channels} />;
       case "onboarding":
         return <OnboardingSettings guildId={guildId} />;
       default:

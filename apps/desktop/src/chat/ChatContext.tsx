@@ -7,6 +7,8 @@ import { mentionTarget } from './mentions';
 import { cachedUser } from './userCache';
 import { useEmojiDb } from './emojiData';
 import { EmojiGlyph } from './EmojiInfo';
+import { CustomEmojiGlyph } from '../emoji/CustomEmoji';
+import { useCustomEmojiUrl } from '../emoji/store';
 
 const ADMINISTRATOR = 1n << 3n;
 const MANAGE_MESSAGES = 1n << 13n;
@@ -94,6 +96,7 @@ export function ChatProvider({ channelId, actions, replyingId = null, onNavigate
   const guildChannels = useGuildChannels(guildId);
   const emoji = useEmojiDb();
   const shortcodes = emoji?.shortcodes;
+  const customEmojiUrl = useCustomEmojiUrl();
   const compact = useCompactMode();
   const { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat } = useChatDisplayPrefs();
   const scaleColor = useCustomColorScale();
@@ -142,9 +145,8 @@ export function ChatProvider({ channelId, actions, replyingId = null, onNavigate
         onNavigate?.();
       },
       renderEmoji: (unicode, name) => <EmojiGlyph unicode={unicode} name={name} />,
-      renderCustomEmoji: ({ src, name, animated }) => animated
-        ? <AnimatedImage kind="emoji" className="md-emoji md-emoji-custom" src={src} alt={`:${name}:`} title={`:${name}:`} draggable={false} loading="lazy" />
-        : <img className="md-emoji md-emoji-custom" src={src} alt={`:${name}:`} title={`:${name}:`} draggable={false} loading="lazy" />,
+      customEmojiUrl: id => customEmojiUrl(id),
+      renderCustomEmoji: e => <CustomEmojiGlyph id={e.id} name={e.name} animated={e.animated} src={e.src} />,
     };
     return {
       channelId, channel, guild, guildId, me, md, roles, members, channels: guildChannels, actions, userById, nameOf, replyingId, compact,
@@ -155,7 +157,7 @@ export function ChatProvider({ channelId, actions, replyingId = null, onNavigate
       roleDotOf: m => (guildId && roleColors === 'dot' ? scaleColor(roleColor(guildId, members[m.author.id] ?? m.member ?? null)) : null),
       display: { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat },
     };
-  }, [me, channel, parent, tick, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, onNavigate, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, scaleColor]);
+  }, [me, channel, parent, tick, channelId, guild, guildId, members, users, guildChannels, shortcodes, customEmojiUrl, actions, onNavigate, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, scaleColor]);
 
   if (!value) return null;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

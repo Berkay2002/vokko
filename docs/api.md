@@ -123,7 +123,7 @@ General rules:
 | POST | /channels/{id}/messages | `CreateMessageRequest` → `Message` |
 | PATCH | /channels/{id}/messages/{mid} | author only, `EditMessageRequest` → `Message`. `attachments` lists the ones to keep (others are removed and their files deleted); a result with no content and no attachments → 400 50006 |
 | DELETE | /channels/{id}/messages/{mid} | author or MANAGE_MESSAGES, 204 |
-| PUT | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | emoji URL-encoded (unicode or `name:id`), 204 |
+| PUT | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | emoji URL-encoded (unicode or `name:id`), 204; custom emoji rules under Custom emoji |
 | DELETE | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | 204 |
 | GET | /channels/{id}/messages/{mid}/reactions/{emoji} | `User[]` who reacted |
 | GET | /channels/{id}/messages/pins?limit&before | `PinnedMessagesPage` (newest pin first, limit 1-50, `before` = pinned_at ISO) |
@@ -132,6 +132,12 @@ General rules:
 | POST | /channels/{id}/typing | 204, emits TYPING_START (expires after 10 s client-side) |
 | POST | /channels/{id}/messages/{mid}/ack | updates read state, 204 |
 | POST | /channels/{id}/attachments | multipart `file` (max 25 MiB, configurable) → `Attachment` (pending until referenced by a message). On send, `CreateMessageRequest.attachments` may rename (`filename`, `SPOILER_` prefix = spoiler) and set `description` (alt text ≤1024) per id |
+| GET | /guilds/{id}/emojis | `GuildEmoji[]` (with `user`), guild members only |
+| POST | /guilds/{id}/emojis | `CreateGuildEmojiRequest` → `GuildEmoji` (MANAGE_GUILD_EXPRESSIONS), emits GUILD_EMOJIS_UPDATE |
+| GET | /guilds/{id}/emojis/{emoji_id} | `GuildEmoji` (with `user`), guild members only |
+| PATCH | /guilds/{id}/emojis/{emoji_id} | `EditGuildEmojiRequest` → `GuildEmoji` (MANAGE_GUILD_EXPRESSIONS), emits GUILD_EMOJIS_UPDATE |
+| DELETE | /guilds/{id}/emojis/{emoji_id} | 204 (MANAGE_GUILD_EXPRESSIONS), emits GUILD_EMOJIS_UPDATE |
+| GET | /emojis/{emoji_id} | the emoji image, **no auth** (like Discord's emoji CDN), `Cache-Control: public`; 404 10014 when unknown |
 | GET | /guilds/{id}/stickers | `Sticker[]` (members) |
 | GET | /guilds/{id}/stickers/{sid} | `Sticker` |
 | POST | /guilds/{id}/stickers | `CreateStickerRequest` → `Sticker` (MANAGE_GUILD_EXPRESSIONS), emits GUILD_STICKERS_UPDATE |
@@ -260,6 +266,17 @@ Applications own a bot user (`User.bot = true`, user id == application id). Shap
 Errors: 10002 unknown application, 10015 unknown webhook, 10062 unknown interaction, 10063 unknown application command, 20001 bots cannot use this endpoint, 30005 max roles, 30007 max webhooks, 30032 max application commands, 30035 max applications, 40060 interaction already acknowledged, 50027 invalid webhook token.
 
 **Gateway.** INTERACTION_CREATE (bot only), INTERACTION_FAILURE and APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE (invoking user's sessions only), WEBHOOKS_UPDATE. Message events for ephemeral messages only reach the invoking user.
+## Custom emoji
+
+Discord behaviour with every Nitro emoji perk free: a member can use the emoji of **any guild they are in, anywhere** (other guilds, DMs, reactions), animated emoji included. Message content references them as `<:name:id>` / `<a:name:id>` (the server does not rewrite or validate content; clients render the image from `GET /emojis/{id}`, which works for viewers outside the emoji's guild too).
+
+- **Upload**: the image is first uploaded with `POST /channels/{id}/attachments` (any channel the caller can attach to), then `POST /guilds/{id}/emojis {name, image_attachment_id, roles?}` claims it (the caller's own pending, unclaimed upload; once claimed it cannot be reused as an avatar, banner, icon, sticker or another emoji). PNG, GIF or WebP only, at most 256 KiB, otherwise 400 50035 on `image_attachment_id`. `animated` = GIF or animated WebP (VP8X animation flag).
+- **Name**: 2-32 characters of `A-Z a-z 0-9 _` (400 50035 on `name`). Names need not be unique (Discord allows duplicates).
+- **Limits**: 250 static + 250 animated emoji per guild (Discord's top boost tier, free in Vokko) → 400 30008 "Maximum number of emojis reached".
+- **Permissions**: create/edit/delete need MANAGE_GUILD_EXPRESSIONS (1<<30, 403 50013); list/get need guild membership (403 50001). `roles` must be roles of the guild other than @everyone (400 50035); an emoji with roles is usable only by members holding one of them.
+- **Reactions** with a custom emoji (`name:id`, the id decides; the stored name is used): unknown emoji → 400 10014 "Unknown Emoji"; the reactor must be a member of the emoji's guild and, for a role-restricted emoji, hold one of its roles, and an emoji of another guild in a guild channel needs USE_EXTERNAL_EMOJIS there (default on for @everyone; DMs never need it) → 403 50013. Removing a reaction and listing reactors never check the emoji (a deleted emoji's reactions stay, with `id` and `name`). Reaction objects and MESSAGE_REACTION_ADD/REMOVE carry `emoji.animated` for custom emoji whose guild still has them.
+- **Delete** removes the emoji and its stored file; `GET /emojis/{id}` then answers 404 and clients fall back to `:name:`.
+- **Gateway**: READY guilds and GUILD_CREATE carry `emojis` (no `user`; omitted when empty). Every create/edit/delete sends GUILD_EMOJIS_UPDATE `{guild_id, emojis}` (the full list) to every member of the guild.
 
 ## Gateway
 

@@ -245,9 +245,15 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
             .bind(id)
             .fetch_all(&state.db)
             .await?;
+    // emoji images are claimed uploads, so nothing else would ever sweep them once the guild's rows cascade away
+    let emoji_attachments: Vec<(i64,)> = sqlx::query_as("SELECT attachment_id FROM emojis WHERE guild_id = $1").bind(id).fetch_all(&state.db).await?;
+    let emoji_attachments: Vec<i64> = emoji_attachments.into_iter().map(|(attachment,)| attachment).collect();
     let _eviction = crate::voice::state::guild_deleted(&state, id).await;
     sqlx::query("DELETE FROM guilds WHERE id = $1").bind(id).execute(&state.db).await?;
-    media::remove_files(&state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
+    let removed: Vec<(i64,)> = sqlx::query_as("DELETE FROM attachments WHERE id = ANY($1) RETURNING id").bind(&emoji_attachments).fetch_all(&state.db).await?;
+    let mut files: Vec<i64> = attachments.into_iter().map(|(id,)| id).collect();
+    files.extend(removed.into_iter().map(|(attachment,)| attachment));
+    media::remove_files(&state, &files).await;
     crate::stickers::sweep_assets(&state).await;
     state.hub.send(&members, &GatewayEvent::GuildDelete(IdOnly { id: Snowflake::from(id) }));
     for (adopter,) in adopters {

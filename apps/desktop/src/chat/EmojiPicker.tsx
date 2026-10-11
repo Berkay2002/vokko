@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Clock, Dog, Flag, Hand, Lightbulb, Pizza, Plane, Search, Smile, Trophy, Hash, X } from 'lucide-react';
 import { Popout, scrollBehavior } from './shell';
 import { getRecentEmoji, getSkinTone, pushRecentEmoji, setSkinTone, useEmojiDb, type EmojiEntry } from './emojiData';
+import { CustomEmojiRail, CustomEmojiSections, CustomSearchResults, hasCustomResults, usePickerSections, type CustomHover, type CustomPick } from '../emoji/PickerSections';
 
-export interface PickedEmoji { id: null; name: string }
+/** Unicode (`id` null) or a server's custom emoji. */
+export interface PickedEmoji { id: string | null; name: string; animated?: boolean }
 
 const CATEGORY_ICONS: Record<string, typeof Smile> = {
   recent: Clock, people: Smile, body: Hand, nature: Dog, food: Pizza, activity: Trophy, travel: Plane, objects: Lightbulb, symbols: Hash, flags: Flag,
@@ -20,7 +22,8 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false }: { on
   const [query, setQuery] = useState('');
   const [tone, setTone] = useState(getSkinTone);
   const [toneOpen, setToneOpen] = useState(false);
-  const [hover, setHover] = useState<{ emoji: string; label: string } | null>(null);
+  const [hover, setHover] = useState<{ emoji: string; label: string; src?: string } | null>(null);
+  const sections = usePickerSections();
   const [active, setActive] = useState('recent');
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -29,6 +32,9 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false }: { on
   useEffect(() => { if (autoFocus) input.current?.focus(); }, [autoFocus]);
 
   const results = useMemo(() => (db && query.trim() ? db.search(query, 120) : null), [db, query]);
+
+  const pickCustom = (e: CustomPick) => onPick(e);
+  const hoverCustom = (h: CustomHover) => setHover({ emoji: '', label: h.label, src: h.src });
 
   function pick(emoji: string) {
     pushRecentEmoji(emoji);
@@ -63,27 +69,30 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false }: { on
     </div>
     <div className="chat-emoji-body">
       <nav className="chat-emoji-cats" aria-label="Categories">
-        {[{ id: 'recent', label: 'Frequently Used' }, ...(db?.categories ?? [])].map(c => {
+        <button type="button" className={active === 'recent' && !results ? 'active' : ''} aria-label="Frequently Used" title="Frequently Used" onClick={() => { setQuery(''); requestAnimationFrame(() => scrollTo('recent')); }}><Clock size={20} /></button>
+        <CustomEmojiRail sections={sections} active={results ? '' : active} onJump={key => { setQuery(''); requestAnimationFrame(() => scrollTo(key)); }} />
+        {(db?.categories ?? []).map(c => {
           const Icon = CATEGORY_ICONS[c.id] ?? Smile;
           return <button key={c.id} type="button" className={active === c.id && !results ? 'active' : ''} aria-label={c.label} title={c.label} onClick={() => { setQuery(''); requestAnimationFrame(() => scrollTo(c.id)); }}><Icon size={20} /></button>;
         })}
       </nav>
       <div className="chat-emoji-scroll" ref={scroller} onScroll={onScroll}>
         {!db && <div className="chat-emoji-empty">Loading…</div>}
-        {db && results && (results.length
-          ? <section><h3 className="chat-emoji-heading">Search Results</h3><div className="chat-emoji-grid">{results.map(cell)}</div></section>
+        {db && results && (results.length || hasCustomResults(sections, query)
+          ? <section><h3 className="chat-emoji-heading">Search Results</h3><CustomSearchResults sections={sections} query={query} onPick={pickCustom} onHover={hoverCustom} /><div className="chat-emoji-grid">{results.map(cell)}</div></section>
           : <div className="chat-emoji-empty">No emoji match your search.</div>)}
         {db && !results && <>
           <section data-cat="recent"><h3 className="chat-emoji-heading">Frequently Used</h3>
             {recent.length === 0 ? <div className="chat-emoji-none">Emoji you use will show up here.</div> :
               <div className="chat-emoji-grid">{recent.map(ch => <button key={ch} type="button" className="chat-emoji-cell" onMouseEnter={() => setHover({ emoji: ch, label: '' })} onClick={() => pick(ch)}>{ch}</button>)}</div>}
           </section>
+          <CustomEmojiSections sections={sections} onPick={pickCustom} onHover={hoverCustom} />
           {db.categories.map(c => <section key={c.id} data-cat={c.id}><h3 className="chat-emoji-heading">{c.label}</h3><div className="chat-emoji-grid">{c.emoji.map(cell)}</div></section>)}
         </>}
       </div>
     </div>
     <div className="chat-emoji-footer">
-      <div className="chat-emoji-preview">{hover ? <><span className="chat-emoji-preview-glyph">{hover.emoji}</span><span>{hover.label}</span></> : <span className="chat-emoji-hint">Pick an emoji</span>}</div>
+      <div className="chat-emoji-preview">{hover ? <>{hover.src ? <img className="chat-emoji-preview-glyph emoji-preview-img" src={hover.src} alt="" /> : <span className="chat-emoji-preview-glyph">{hover.emoji}</span>}<span>{hover.label}</span></> : <span className="chat-emoji-hint">Pick an emoji</span>}</div>
       <div className="chat-emoji-tone">
         <button type="button" aria-label="Skin tone" aria-expanded={toneOpen} onClick={() => setToneOpen(v => !v)}><span className="chat-tone-dot" style={{ background: TONE_SWATCH[tone] }} /></button>
         {toneOpen && <div className="chat-emoji-tone-menu" role="menu">

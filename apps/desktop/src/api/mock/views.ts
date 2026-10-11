@@ -6,6 +6,7 @@ import { canView } from "./access";
 import { db, sortedMessages, userOf, type MockAccount, type MockChannel, type MockMessage } from "./db";
 import { flagsField } from "./memberFlags";
 import { memberProfileFields } from "./perks";
+import { guildEmojis } from "./emojis";
 import { voiceStatesFor } from "./voice";
 
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
@@ -109,7 +110,8 @@ export function guildPayload(guildId: string, viewerId: string): GatewayEvents["
     return p && p.status !== "offline" ? [{ ...p }] : [];
   });
   const stickers = (db.stickers.get(guildId) ?? []).map(s => ({ ...s }));
-  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, presences, stickers, voice_states: voiceStatesFor(guildId, viewerId) };
+  const emojis = guildEmojis(guildId);
+  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, voice_states: voiceStatesFor(guildId, viewerId) };
 }
 
 export function guildIdsFor(viewerId: string): string[] {

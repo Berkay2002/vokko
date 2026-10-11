@@ -763,8 +763,48 @@ pub const SUPPRESS_EMBEDS: u32 = 1 << 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ReactionEmoji {
+    /// Custom emoji id, `null` for unicode; the reaction routes take `name:id` for custom emoji.
     pub id: Option<Snowflake>,
     pub name: String,
+    /// Custom emoji only: whether it is animated; omitted for unicode emoji.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animated: Option<bool>,
+}
+
+/// Custom emoji uploaded to a guild; messages reference it as `<:name:id>` or `<a:name:id>`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildEmoji {
+    pub id: Snowflake,
+    /// 2-32 characters of `A-Z a-z 0-9 _`.
+    pub name: String,
+    /// Roles allowed to use it; empty = every member.
+    pub roles: Vec<Snowflake>,
+    /// Uploader; only in REST responses, omitted in gateway payloads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<User>,
+    pub require_colons: bool,
+    pub managed: bool,
+    pub animated: bool,
+    pub available: bool,
+    /// Absolute image URL; the same file is served by id at `GET /emojis/{id}`.
+    pub url: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateGuildEmojiRequest {
+    pub name: String,
+    pub image_attachment_id: Snowflake,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roles: Option<Vec<Snowflake>>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct EditGuildEmojiRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// `null` or `[]` = every member.
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub roles: Option<Option<Vec<Snowflake>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1968,6 +2008,9 @@ pub struct GuildWithState {
     /// Active threads the user can see (they are not part of `channels`); omitted when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub threads: Vec<Channel>,
+    /// The guild's custom emoji (without `user`); omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub emojis: Vec<GuildEmoji>,
     /// Only on GUILD_CREATE: the presences of the guild's members that are not offline (READY has its own list).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presences: Option<Vec<Presence>>,
@@ -2043,6 +2086,13 @@ pub struct GuildRoleDelete {
 pub struct MessageAck {
     pub channel_id: Snowflake,
     pub message_id: Snowflake,
+}
+
+/// GUILD_EMOJIS_UPDATE: the guild's full emoji list after a change.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildEmojisUpdate {
+    pub guild_id: Snowflake,
+    pub emojis: Vec<GuildEmoji>,
 }
 
 /// THREAD_DELETE.
@@ -2516,6 +2566,7 @@ pub enum GatewayEvent {
     GuildRoleCreate(GuildRoleEvent),
     GuildRoleUpdate(GuildRoleEvent),
     GuildRoleDelete(GuildRoleDelete),
+    GuildEmojisUpdate(GuildEmojisUpdate),
     /// Same payload as GUILD_MEMBER_REMOVE.
     GuildBanAdd(GuildMemberRemove),
     GuildBanRemove(GuildMemberRemove),
@@ -2576,6 +2627,7 @@ impl GatewayEvent {
             Self::GuildRoleCreate(_) => "GUILD_ROLE_CREATE",
             Self::GuildRoleUpdate(_) => "GUILD_ROLE_UPDATE",
             Self::GuildRoleDelete(_) => "GUILD_ROLE_DELETE",
+            Self::GuildEmojisUpdate(_) => "GUILD_EMOJIS_UPDATE",
             Self::GuildBanAdd(_) => "GUILD_BAN_ADD",
             Self::GuildBanRemove(_) => "GUILD_BAN_REMOVE",
             Self::PresenceUpdate(_) => "PRESENCE_UPDATE",
@@ -2631,6 +2683,7 @@ impl GatewayEvent {
             Self::GuildMemberUpdate(value) => serde_json::to_value(value),
             Self::GuildRoleCreate(value) | Self::GuildRoleUpdate(value) => serde_json::to_value(value),
             Self::GuildRoleDelete(value) => serde_json::to_value(value),
+            Self::GuildEmojisUpdate(value) => serde_json::to_value(value),
             Self::PresenceUpdate(value) => serde_json::to_value(value),
             Self::UserUpdate(value) => serde_json::to_value(value),
             Self::MessageAck(value) => serde_json::to_value(value),
@@ -3065,6 +3118,35 @@ mod tests {
             .name(),
             "THREAD_CREATE"
         );
+    }
+
+    #[test]
+    fn custom_emoji_shapes_match_types_ts() {
+        let emoji = json!({
+            "id": "700", "name": "blob_wave", "roles": ["301"], "require_colons": true, "managed": false, "animated": true, "available": true,
+            "url": "http://x/api/v1/attachments/9/k/blob.gif"
+        });
+        round_trip::<GuildEmoji>(emoji.clone());
+        let mut with_user = emoji.clone();
+        with_user["user"] = user();
+        round_trip::<GuildEmoji>(with_user);
+        round_trip::<ReactionEmoji>(json!({"id": "700", "name": "blob_wave", "animated": true}));
+        round_trip::<ReactionEmoji>(json!({"id": null, "name": "👍"}));
+        let guild = json!({
+            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null,
+            "channels": [], "members": [], "member_count": 0, "stickers": [], "emojis": [emoji.clone()], "voice_states": []
+        });
+        round_trip::<GuildWithState>(guild);
+        let update = GatewayEvent::GuildEmojisUpdate(GuildEmojisUpdate {
+            guild_id: Snowflake(300),
+            emojis: vec![serde_json::from_value(emoji.clone()).expect("emoji")],
+        });
+        assert_eq!((update.name(), update.data()), ("GUILD_EMOJIS_UPDATE", json!({"guild_id": "300", "emojis": [emoji]})));
+        let create: CreateGuildEmojiRequest = serde_json::from_value(json!({"name": "wave", "image_attachment_id": "9"})).expect("create");
+        assert_eq!((create.name.as_str(), create.image_attachment_id, create.roles), ("wave", Snowflake(9), None));
+        let edit: EditGuildEmojiRequest = serde_json::from_value(json!({"roles": null})).expect("edit");
+        assert_eq!((edit.name, edit.roles), (None, Some(None)));
+        assert!(serde_json::from_value::<EditGuildEmojiRequest>(json!({})).expect("empty").roles.is_none());
     }
 
     #[test]
