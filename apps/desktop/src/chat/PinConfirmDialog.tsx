@@ -6,7 +6,7 @@ import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { Markdown } from './markdown';
 import { isImage } from './Attachments';
-import { formatMessageTimestamp } from './util';
+import { formatMessageTimestamp, isSpoilerName } from './util';
 
 export type PinConfirmMode = 'pin' | 'unpin';
 
@@ -80,7 +80,7 @@ export function PinConfirmDialog({ message, onConfirm, onCancel }: { message: Me
       <div className="chat-pin-preview-body">
         <div className="chat-msg-header"><span className="chat-author">{chat.nameOf(m.author, m.member)}</span> <span className="chat-timestamp">{formatMessageTimestamp(new Date(m.timestamp))}</span></div>
         {m.content && <Markdown content={m.content} ctx={chat.md} className="chat-content" />}
-        {attachment && (isImage(attachment)
+        {attachment && (isImage(attachment) && !isSpoilerName(attachment.filename)
           ? <img className="chat-pin-preview-thumb" src={resolveUrl(attachment.url)} alt={attachment.description ?? attachment.filename} />
           : <div className="chat-pin-preview-file"><FileIcon size={18} aria-hidden="true" /><span>{attachment.filename}</span></div>)}
       </div>
