@@ -3,6 +3,9 @@ import { Clock, MessageCircle, UserCheck, UserPlus } from "lucide-react";
 import { appStore, displayName, roleColor, useStore } from "../api/store";
 import { request } from "../api/rest";
 import { RelationshipType, type Snowflake } from "../api/types";
+import { ProfileBanner } from "../perks/ProfileBanner";
+import { resolveProfile, themeVars } from "../perks/profile";
+import { TagChip } from "../perks/TagChip";
 import { Popout } from "../ui";
 import { Avatar } from "./Avatar";
 import { openDirectMessage } from "./actions";
@@ -50,14 +53,16 @@ export function ProfileCardHost() {
   const open = !!anchor && !!user;
   const roles = member && guild ? guild.roles.filter(r => member.roles.includes(r.id) && r.id !== guild.id).sort((a, b) => b.position - a.position) : [];
   const color = guildId ? roleColor(guildId, member) : null;
+  const look = user ? resolveProfile(user, member) : null;
+  const tagGuildName = useStore(s => (user?.primary_guild ? s.guilds[user.primary_guild.guild_id]?.name : undefined));
 
   return (
-    <Popout anchor={anchor} open={open} onClose={close} side="right" align="start" gap={8} className="profile-card">
-      {user && (
+    <Popout anchor={anchor} open={open} onClose={close} side="right" align="start" gap={8} className={`profile-card${look?.themeColors ? " pv-themed" : ""}`} style={themeVars(look?.themeColors)}>
+      {user && look && (
         <>
-          <div className="profile-banner" style={{ background: user.banner_color ?? "var(--brand-500)" }} />
+          <ProfileBanner look={look} className="profile-banner" />
           <div className="profile-avatar">
-            <Avatar user={user} size={80} status />
+            <Avatar user={user} member={member} size={80} status />
           </div>
           <div className="profile-body">
             <div className="profile-names">
@@ -65,7 +70,11 @@ export function ProfileCardHost() {
                 {displayName(user, member)}
                 <TimeoutBadge until={member?.communication_disabled_until} />
               </div>
-              <div className="profile-username">{user.username}</div>
+              <div className="pv-name-row">
+                <span className="profile-username">{user.username}</span>
+                <TagChip tag={user.primary_guild} guildName={tagGuildName} />
+              </div>
+              {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
             </div>
             {presence?.custom_status && <div className="profile-status">{presence.custom_status}</div>}
             <div className="profile-actions">
@@ -111,10 +120,10 @@ export function ProfileCardHost() {
               )}
             </div>
             <div className="profile-divider" />
-            {user.bio && (
+            {look.bio && (
               <section className="profile-section">
                 <h3>About Me</h3>
-                <p>{user.bio}</p>
+                <p>{look.bio}</p>
               </section>
             )}
             {roles.length > 0 && (

@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
+import { intToHex } from "../perks/catalog";
 import { NavLink, useLocation } from "react-router";
 import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Plus, Settings, UserPlus, Volume2 } from "lucide-react";
 import { channelMentionCount, displayName, isChannelUnread, useStore } from "../api/store";
@@ -109,7 +110,11 @@ function GuildHeader({ guild }: { guild: Guild }) {
   const items = open ? guildDropdownItems(guild) : [];
   return (
     <>
-      <div ref={setAnchor} className={`guild-header${open ? " open" : ""}`}>
+      <div
+        ref={setAnchor}
+        className={`guild-header${open ? " open" : ""}${guild.theme ? " themed" : ""}`}
+        style={guild.theme ? ({ "--guild-theme-gradient": `linear-gradient(135deg, ${intToHex(guild.theme.primary)}, ${intToHex(guild.theme.accent)})` } as CSSProperties) : undefined}
+      >
         <button type="button" className="guild-header-name-button" onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}>
           <span className="guild-header-name">{guild.name}</span>
           {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}

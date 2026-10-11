@@ -5,7 +5,8 @@ import { ALL_PERMISSIONS, Perm, basePermissions, canEditRole, hasBit, highestPos
 import { ChannelType, OverwriteType, type Ban, type Guild, type GuildMember, type PermissionOverwrite, type Role, type User } from "../types";
 import { guildPermsOf, channelPermsOf } from "./access";
 import { db, nextId, sortedMessages, userOf, type MockGuild } from "./db";
-import { MISSING_PERMISSIONS, channelAudience, emitVisibilityChanges, fail, requireChannel, requireChannelPerm, requireGuildMember, syncCategoryChildren, visibilityOf } from "./ops";
+import { MISSING_PERMISSIONS, pendingAttachment, channelAudience, emitVisibilityChanges, fail, requireChannel, requireChannelPerm, requireGuildMember, syncCategoryChildren, visibilityOf } from "./ops";
+import { applyOwnMemberPerks, dropTagOnLeave, memberProfileFields } from "./perks";
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
 
@@ -32,12 +33,14 @@ function memberJson(guild: MockGuild, userId: string): GuildMember {
     roles: [...record.roles],
     joined_at: record.joined_at,
     ...(record.communication_disabled_until ? { communication_disabled_until: record.communication_disabled_until } : {}),
+    ...memberProfileFields(record),
   };
 }
 
 /** Remove a member and tell everyone: GUILD_MEMBER_REMOVE to the rest of the guild, GUILD_DELETE to the user. */
 function removeMember(guild: MockGuild, userId: string): void {
   if (!guild.members.delete(userId)) return;
+  dropTagOnLeave(guild, userId);
   emit(guild.members.keys(), "GUILD_MEMBER_REMOVE", { guild_id: guild.guild.id, user: userOf(userId) });
   emit([userId], "GUILD_DELETE", { id: guild.guild.id });
 }
@@ -135,7 +138,13 @@ route("PATCH", `/guilds/${ID}/members/${ID}`, ({ viewer, params, body }) => edit
 route("PATCH", `/guilds/${ID}/members/@me`, ({ viewer, params, body }) => {
   const only: Record<string, unknown> = {};
   if ("nick" in body) only.nick = body.nick;
-  return editMember(params[0] ?? "", viewer.user.id, viewer.user.id, only);
+  const guildId = params[0] ?? "";
+  const guild = requireGuildMember(guildId, viewer.user.id);
+  const touched = applyOwnMemberPerks(memberRecord(guild, viewer.user.id), body, id => pendingAttachment(id, viewer.user.id));
+  if (Object.keys(only).length > 0) return editMember(guildId, viewer.user.id, viewer.user.id, only);
+  const json = memberJson(guild, viewer.user.id);
+  if (touched) emit(guild.members.keys(), "GUILD_MEMBER_UPDATE", { guild_id: guildId, ...json });
+  return json;
 });
 
 // ---- bans ----
@@ -320,7 +329,7 @@ route("DELETE", `/guilds/${ID}/roles/${ID}`, ({ viewer, params }) => {
   const g = guild.guild;
   const role = g.roles.find(r => r.id === params[1]);
   if (!role) fail(404, 10011, "Unknown Role");
-  if (role.id === g.id) fail(400, 50028, "Invalid Role");
+  if (role.id === g.id) fail(400, 50028, "Invalid role");
   if (!canEditRole(g, actor, role)) forbidden();
   const before = visibilityOf(guildId);
   g.roles =g.roles.filter(r => r.id !== role.id);

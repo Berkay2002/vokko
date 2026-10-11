@@ -48,7 +48,7 @@ export interface MockMessage {
 
 export interface MockGuild {
   guild: Guild;
-  members: Map<string, Pick<GuildMember, "nick" | "roles" | "joined_at" | "communication_disabled_until">>;
+  members: Map<string, Pick<GuildMember, "nick" | "roles" | "joined_at" | "communication_disabled_until" | "avatar" | "banner" | "bio" | "pronouns" | "theme_colors">>;
 }
 
 export interface MockInvite {

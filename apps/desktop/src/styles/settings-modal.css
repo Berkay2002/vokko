@@ -1,0 +1,395 @@
+/*
+ * Settings modal frame (src/shell/settings/SettingsModal.tsx). Tokens only.
+ * Measurements come from the 1.25x desktop reference (screenshot px / 1.25): modal inset 40/44, sidebar 252, header 48,
+ * nav items 36 on a 40 pitch, content column 696, block headings 24, rows 72 high with a 40 high button.
+ */
+.sm-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+}
+
+.sm-backdrop {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0.7;
+  animation: backdrop-in 0.15s linear;
+}
+
+.sm {
+  position: absolute;
+  inset: 40px 44px;
+  display: flex;
+  overflow: hidden;
+  border: 1px solid var(--border-normal);
+  border-radius: 10px;
+  background: var(--background-base-lower);
+  box-shadow: var(--shadow-high);
+  animation: modal-in 0.2s var(--ease-out);
+}
+
+.sm:focus {
+  outline: none;
+}
+
+/* ---- sidebar ---- */
+.sm-side {
+  display: flex;
+  flex: 0 0 252px;
+  flex-direction: column;
+  width: 252px;
+  padding: 24px 16px 16px;
+  overflow-y: auto;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--background-base-low);
+}
+
+.sm-profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px;
+}
+
+.sm-profile-names {
+  min-width: 0;
+}
+
+.sm-profile-name {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-profile-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.sm-profile-edit:hover {
+  color: var(--text-strong);
+}
+
+.sm-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  margin: 16px 0 12px;
+  padding: 0 12px;
+  border: 1px solid var(--input-border-default);
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.sm-search:focus-within {
+  border-color: var(--input-border-active);
+}
+
+.sm-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-default);
+  font-size: 16px;
+  outline: none;
+}
+
+.sm-search input::placeholder {
+  color: var(--text-muted);
+}
+
+.sm-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.sm-group + .sm-group {
+  margin-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sm-group-title {
+  padding: 11px 8px 7px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.sm-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  margin-bottom: 4px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--interactive-text-default);
+  font-size: 16px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.sm-item:hover {
+  background: var(--interactive-background-hover);
+  color: var(--interactive-text-hover);
+}
+
+.sm-item.selected {
+  background: var(--interactive-background-selected);
+  color: var(--interactive-text-active);
+}
+
+.sm-item.danger {
+  color: var(--text-feedback-critical);
+}
+
+.sm-item-icon {
+  flex: none;
+}
+
+.sm-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* sub-items hang on a rail centred under the parent's icon; the current one carries a bar over it */
+.sm-subs {
+  position: relative;
+  margin-top: -4px;
+  margin-bottom: 8px;
+}
+
+.sm-subs::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 18px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border-normal);
+}
+
+.sm-sub {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px 0 34px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 16px;
+  text-align: left;
+}
+
+.sm-sub:hover {
+  color: var(--text-strong);
+}
+
+.sm-sub.active {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+
+.sm-sub.active::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 17px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--text-strong);
+}
+
+/* ---- header and content ---- */
+.sm-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sm-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 49px;
+  padding: 0 6px 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sm-title {
+  color: var(--text-strong);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.sm-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--interactive-icon-default);
+}
+
+.sm-close:hover {
+  background: var(--interactive-background-hover);
+  color: var(--interactive-icon-hover);
+}
+
+.sm-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
+
+.sm-column {
+  width: 696px;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 64px 16px 120px;
+  box-sizing: content-box;
+}
+
+/* ---- single-page blocks and rows ---- */
+.sm-block {
+  padding-bottom: 36px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.sm-block + .sm-block {
+  padding-top: 40px;
+}
+
+.sm-block:last-child {
+  border-bottom: 0;
+}
+
+.sm-block-title {
+  margin-bottom: 16px;
+  color: var(--text-strong);
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 400;
+}
+
+.sm-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 72px;
+}
+
+.sm-row-label {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.sm-row-value {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-row-input {
+  flex: 0 1 280px;
+  height: 40px;
+}
+
+.sm-btn {
+  flex: none;
+  min-width: 100px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--background-mod-subtle);
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.sm-btn:hover:not(:disabled) {
+  background: var(--background-mod-strong);
+}
+
+.sm-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.sm-btn.primary {
+  background: var(--brand-500);
+  color: #fff;
+}
+
+.sm-btn.primary:hover:not(:disabled) {
+  background: var(--brand-560);
+}
+
+.sm-note {
+  margin: -8px 0 8px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* pages built for the full-screen layout: the header carries the title, headings get the larger scale */
+.sm-column .settings-page > h1 {
+  display: none;
+}
+
+.sm-column .settings-category {
+  margin-bottom: 0;
+  padding-bottom: 36px;
+}
+
+.sm-column .settings-category + .settings-category {
+  padding-top: 40px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sm-column .settings-category-title {
+  padding-bottom: 0;
+  margin-bottom: 16px;
+  border-bottom: 0;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 400;
+}
+
+.sm-muted {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.sm-column .profile-preview .profile-body {
+  padding-top: 64px;
+}
