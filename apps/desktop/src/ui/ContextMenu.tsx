@@ -16,6 +16,8 @@ export type MenuItem =
       checked?: boolean;
       /** Right-aligned hint text (e.g. a shortcut). */
       hint?: string;
+      /** Native tooltip, used for disabled rows ("Not available yet"). */
+      tooltip?: string;
       onSelect?: () => void;
       children?: MenuItem[];
     }
@@ -138,6 +140,7 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
               role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
               aria-checked={item.checked}
               aria-disabled={item.disabled || undefined}
+              title={item.tooltip}
               className={`context-menu-item${item.danger ? " danger" : ""}${item.disabled ? " disabled" : ""}${active === index || sub?.index === index ? " focused" : ""}`}
               onMouseEnter={e => {
                 setActive(index);

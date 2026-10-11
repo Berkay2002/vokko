@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Headphones, HeadphoneOff, Mic, MicOff, Settings } from "lucide-react";
+import { ChevronDown, Headphones, HeadphoneOff, Mic, MicOff, Settings } from "lucide-react";
 import { displayName, useStore } from "../api/store";
-import { Popout, Tooltip } from "../ui";
+import { Popout, Tooltip, setPref, useContextMenu, usePrefs, type MenuItem } from "../ui";
 import { Avatar, StatusBadge } from "./Avatar";
 import { loadStoredStatus, setOwnStatus, type SelectableStatus } from "./actions";
 import { openModal } from "./modalStore";
@@ -15,6 +15,59 @@ const OPTIONS: { value: SelectableStatus; label: string; hint?: string; badge: "
 
 const LABEL: Record<string, string> = { online: "Online", idle: "Idle", dnd: "Do Not Disturb", offline: "Invisible" };
 
+/** Device menus behind the chevrons: visual only, the choice is stored in prefs (no audio engine yet). */
+function useDeviceMenus(muted: boolean, deafened: boolean, toggleMute: () => void, toggleDeafen: () => void) {
+  const prefs = usePrefs();
+  const [devices, setDevices] = useState<{ input: string[]; output: string[] }>({ input: [], output: [] });
+  useEffect(() => {
+    const media = navigator.mediaDevices;
+    if (!media?.enumerateDevices) return;
+    media
+      .enumerateDevices()
+      .then(list => {
+        const labels = (kind: MediaDeviceKind) => list.filter(d => d.kind === kind && d.label).map(d => d.label);
+        setDevices({ input: labels("audioinput"), output: labels("audiooutput") });
+      })
+      .catch(() => undefined);
+  }, []);
+  const voiceSettings = (): MenuItem => ({ id: "voice-settings", label: "Voice Settings", onSelect: () => openModal({ type: "userSettings", section: "voice" }) });
+  const deviceItems = (key: "inputDevice" | "outputDevice", names: string[]): MenuItem[] =>
+    ["Default", ...names].map(name => ({ id: `${key}-${name}`, label: name, checked: (prefs[key] === "default" ? "Default" : prefs[key]) === name, onSelect: () => setPref(key, name === "Default" ? "default" : name) }));
+  const micItems = (): MenuItem[] => [
+    { id: "input-device", label: "Input Device", children: deviceItems("inputDevice", devices.input) },
+    {
+      id: "input-mode",
+      label: "Input Mode",
+      children: [
+        { id: "mode-vad", label: "Voice Activity", checked: prefs.inputMode === "vad", onSelect: () => setPref("inputMode", "vad") },
+        { id: "mode-ptt", label: "Push to Talk", checked: prefs.inputMode === "ptt", onSelect: () => setPref("inputMode", "ptt") },
+      ],
+    },
+    { id: "input-volume", label: "Input Volume", hint: `${prefs.inputVolume}%`, onSelect: () => openModal({ type: "userSettings", section: "voice" }) },
+    { type: "separator" },
+    { id: "mute", label: muted ? "Unmute" : "Mute", onSelect: toggleMute },
+    voiceSettings(),
+  ];
+  const headphoneItems = (): MenuItem[] => [
+    { id: "output-device", label: "Output Device", children: deviceItems("outputDevice", devices.output) },
+    { id: "output-volume", label: "Output Volume", hint: `${prefs.outputVolume}%`, onSelect: () => openModal({ type: "userSettings", section: "voice" }) },
+    { type: "separator" },
+    { id: "deafen", label: deafened ? "Undeafen" : "Deafen", onSelect: toggleDeafen },
+    voiceSettings(),
+  ];
+  return { micItems, headphoneItems };
+}
+
+function DeviceChevron({ label, onOpen }: { label: string; onOpen: (rect: DOMRect) => void }) {
+  return (
+    <Tooltip content={label} side="top">
+      <button type="button" className="user-panel-chevron" aria-label={label} aria-haspopup="menu" onClick={e => onOpen(e.currentTarget.getBoundingClientRect())}>
+        <ChevronDown size={14} />
+      </button>
+    </Tooltip>
+  );
+}
+
 export function UserPanel() {
   const me = useStore(s => s.me);
   const ready = useStore(s => s.ready);
@@ -26,6 +79,13 @@ export function UserPanel() {
   const stored = useRef(loadStoredStatus());
   const [custom, setCustom] = useState(stored.current.custom);
   const [selected, setSelected] = useState<SelectableStatus>(stored.current.status);
+  const menu = useContextMenu();
+  const { micItems, headphoneItems } = useDeviceMenus(
+    muted,
+    deafened,
+    () => setMuted(m => !m),
+    () => setDeafened(d => !d),
+  );
 
   // Re-apply the user's chosen status after every (re)identify: the server starts a session as "online".
   useEffect(() => {
@@ -57,16 +117,22 @@ export function UserPanel() {
         </span>
       </button>
       <div className="user-panel-buttons">
-        <Tooltip content={muted ? "Unmute" : "Mute"} side="top">
-          <button type="button" className={`user-panel-button${muted ? " muted" : ""}`} aria-pressed={muted} aria-label={muted ? "Unmute" : "Mute"} onClick={() => setMuted(m => !m)}>
-            {muted ? <MicOff size={20} /> : <Mic size={20} />}
-          </button>
-        </Tooltip>
-        <Tooltip content={deafened ? "Undeafen" : "Deafen"} side="top">
-          <button type="button" className={`user-panel-button${deafened ? " muted" : ""}`} aria-pressed={deafened} aria-label={deafened ? "Undeafen" : "Deafen"} onClick={() => setDeafened(d => !d)}>
-            {deafened ? <HeadphoneOff size={20} /> : <Headphones size={20} />}
-          </button>
-        </Tooltip>
+        <div className="user-panel-split">
+          <Tooltip content={muted ? "Unmute" : "Mute"} side="top">
+            <button type="button" className={`user-panel-button${muted ? " muted" : ""}`} aria-pressed={muted} aria-label={muted ? "Unmute" : "Mute"} onClick={() => setMuted(m => !m)}>
+              {muted ? <MicOff size={20} /> : <Mic size={20} />}
+            </button>
+          </Tooltip>
+          <DeviceChevron label="Input Options" onOpen={rect => menu.open({ clientX: rect.left, clientY: rect.top }, micItems())} />
+        </div>
+        <div className="user-panel-split">
+          <Tooltip content={deafened ? "Undeafen" : "Deafen"} side="top">
+            <button type="button" className={`user-panel-button${deafened ? " muted" : ""}`} aria-pressed={deafened} aria-label={deafened ? "Undeafen" : "Deafen"} onClick={() => setDeafened(d => !d)}>
+              {deafened ? <HeadphoneOff size={20} /> : <Headphones size={20} />}
+            </button>
+          </Tooltip>
+          <DeviceChevron label="Output Options" onOpen={rect => menu.open({ clientX: rect.left, clientY: rect.top }, headphoneItems())} />
+        </div>
         <Tooltip content="User Settings" side="top">
           <button type="button" className="user-panel-button" aria-label="User Settings" onClick={() => openModal({ type: "userSettings" })}>
             <Settings size={20} />

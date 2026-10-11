@@ -32,11 +32,23 @@ General rules:
 | PATCH | /guilds/{id} | `{name?, icon_attachment_id?, system_channel_id?}` → `Guild` |
 | DELETE | /guilds/{id} | owner only, 204 |
 | GET | /guilds/{id}/channels | `Channel[]` |
-| POST | /guilds/{id}/channels | `{name, type, parent_id?, topic?}` → `Channel` |
+| POST | /guilds/{id}/channels | `{name, type, parent_id?, topic?, permission_overwrites?}` → `Channel` (private channel = @everyone deny VIEW_CHANNEL overwrite) |
 | PATCH | /channels/{id} | `{name?, topic?, position?, parent_id?}` → `Channel` |
 | DELETE | /channels/{id} | 200 + `Channel` (guild) / closes DM |
 | GET | /guilds/{id}/members?limit&after | `GuildMember[]` |
 | DELETE | /users/@me/guilds/{id} | leave guild, 204 |
+| DELETE | /guilds/{id}/members/{uid} | kick (KICK_MEMBERS + hierarchy), 204, emits GUILD_MEMBER_REMOVE to the guild and GUILD_DELETE to the kicked user |
+| PATCH | /guilds/{id}/members/{uid} | `EditMemberRequest` → `GuildMember`: nick needs MANAGE_NICKNAMES, roles MANAGE_ROLES (only roles below your highest), timeout MODERATE_MEMBERS (not on admins/owner, max 28 days); only sent keys change; emits GUILD_MEMBER_UPDATE |
+| PATCH | /guilds/{id}/members/@me | `{nick}` (CHANGE_NICKNAME) → `GuildMember` |
+| GET | /guilds/{id}/bans | `Ban[]` (BAN_MEMBERS) |
+| PUT | /guilds/{id}/bans/{uid} | `BanRequest`, 204; works on non-members; removes the member, emits GUILD_BAN_ADD + GUILD_MEMBER_REMOVE; banned users can't rejoin via invite (403 40007) |
+| DELETE | /guilds/{id}/bans/{uid} | unban, 204, emits GUILD_BAN_REMOVE |
+| POST | /guilds/{id}/roles | `RoleRequest` → `Role` (MANAGE_ROLES; name default "new role", placed just above @everyone; can't grant bits you lack, ADMINISTRATOR only by an admin), emits GUILD_ROLE_CREATE |
+| PATCH | /guilds/{id}/roles | `RolePositionUpdate[]` → `Role[]` (only roles below your highest; @everyone fixed at 0), GUILD_ROLE_UPDATE per changed role |
+| PATCH | /guilds/{id}/roles/{rid} | `RoleRequest` → `Role` (@everyone: permissions only), GUILD_ROLE_UPDATE |
+| DELETE | /guilds/{id}/roles/{rid} | 204 (not @everyone), removes it from members, GUILD_ROLE_DELETE |
+| PUT | /channels/{id}/permissions/{oid} | `OverwriteRequest`, 204 (MANAGE_ROLES on the channel; can't grant/deny bits you lack there), emits CHANNEL_UPDATE |
+| DELETE | /channels/{id}/permissions/{oid} | 204, emits CHANNEL_UPDATE |
 | POST | /channels/{id}/invites | `{max_age?, max_uses?}` → `{code, guild, channel, expires_at}` |
 | GET | /invites/{code} | invite preview |
 | POST | /invites/{code} | accept → `Guild` |
@@ -53,7 +65,7 @@ General rules:
 | POST | /channels/{id}/typing | 204, emits TYPING_START (expires after 10 s client-side) |
 | POST | /channels/{id}/messages/{mid}/ack | updates read state, 204 |
 | POST | /channels/{id}/attachments | multipart `file` (max 10 MiB, Discord's default) → `Attachment` (pending until referenced by a message) |
-| GET | /attachments/{id}/{filename} | serves the file (no auth required in v1; unguessable id) |
+| GET | /attachments/{id}/{key}/{filename} | serves the file; `key` = 32 hex chars (128-bit random per attachment); wrong key or filename → 404. Avatars/icons use the same URLs. Clients treat `Attachment.url`, `User.avatar`, `Guild.icon` as opaque absolute URLs |
 
 ## Gateway
 
@@ -65,7 +77,7 @@ General rules:
 4. Client sends `op 1 Heartbeat {d: last_seq}` every interval; server replies `op 11`. Missing two heartbeats → server closes 4009.
 5. `op 6 Resume {token, session_id, seq}` replays missed dispatches if the session buffer still has them; otherwise `op 9 InvalidSession`, and the client re-identifies.
 
-Events are delivered only to users who can see the channel/guild. Event names and payloads: `GatewayEvents` in types.ts. Presence: connected → online, last connection closed → offline; `op 3 {status, custom_status}` updates it.
+Events are delivered only to users who can see the channel/guild. Event names and payloads: `GatewayEvents` in types.ts. Presence: connected → online, last connection closed → offline; `op 3 {status, custom_status}` updates it (custom_status max 128 chars). The presence preference is not kept across a full disconnect.
 
 Semantics notes: a reply puts the replied-to author in `mentions` (Discord default). Pinning emits MESSAGE_UPDATE for the pinned message plus a type 6 system message (MESSAGE_CREATE). `referenced_message.reactions` is always `[]`. Role mentions only drive `mention_count` (no `mention_roles` field).
 
@@ -77,3 +89,7 @@ Client gateway behaviour (shell): first heartbeat after `random() * interval`, t
 Not adopted for now: op 40 QoS heartbeat, ETF encoding, zstd/zlib compression, capabilities/client_state in Identify, the cloud upload flow (resumable PUT to an upload URL), ack tokens.
 
 Embeds: on message create/edit the server extracts up to 5 http(s) URLs (not inside code, not `<url>`-wrapped), fetches each with a 5 s timeout, 1 MiB cap, no private/loopback addresses (SSRF guard), and parses Open Graph / Twitter card / oEmbed-less HTML meta into `Embed` (type link/article/image/video). Results arrive via MESSAGE_UPDATE after the create. Editing with flags SUPPRESS_EMBEDS (1<<2) clears them. Invite links are rendered client-side from GET /invites/{code}, not unfurled.
+
+Moderation: missing permission → 403 50013; acting on someone at or above your highest role (or the owner) → 403 50013. Role/role-position edits are limited to roles below the actor's highest role (owner exempt). Channel overwrites resolve in Discord's order (@everyone, roles combined, member); ADMINISTRATOR in an overwrite is ignored. On guild join the server posts a UserJoin (type 7) system message in `system_channel_id` when set.
+
+Further semantics: `embed.url` is the normalised parsed URL; `proxy_url` is never set (clients load og:image/video straight from the origin; CSP + IP-exposure trade-off, revisit with a media proxy). Only the author may set message flags. Unfurling has no cache. A block closes 1:1 DMs both ways (403 50007) and DELETE never lifts the other side's block. A closed DM is hidden for that user until a new message arrives. Category overwrites are not inherited by children (no sync). Pending (unreferenced) attachments are deleted after 1 h.

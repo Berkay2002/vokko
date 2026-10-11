@@ -205,7 +205,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  width: 440px;
+  width: var(--modal-width-small);
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
   background: var(--bg-primary);
@@ -215,8 +215,13 @@
   overflow: hidden;
 }
 
-.modal.modal-wide {
-  width: 600px;
+.modal.modal-wide,
+.modal.modal-medium {
+  width: var(--modal-width-medium);
+}
+
+.modal.modal-large {
+  width: var(--modal-width-large);
 }
 
 @keyframes modal-in {

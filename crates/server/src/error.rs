@@ -30,6 +30,10 @@ impl ApiErr {
         Self::new(StatusCode::FORBIDDEN, 50013, "You lack permissions to perform that action")
     }
 
+    pub fn cannot_message_user() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 50007, "Cannot send messages to this user")
+    }
+
     pub fn not_author() -> Self {
         Self::new(StatusCode::FORBIDDEN, 50005, "Cannot edit a message authored by another user")
     }

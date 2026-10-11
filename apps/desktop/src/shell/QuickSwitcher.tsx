@@ -8,8 +8,13 @@ import { openDirectMessage } from "./actions";
 import { closeModal } from "./modalStore";
 import { dmPath, go, guildPath } from "./nav";
 
+type Scope = "all" | "users" | "text" | "voice" | "servers" | "unavailable";
+
+const PREFIXES: Record<string, Scope> = { "@": "users", "#": "text", "!": "voice", "*": "servers", $: "unavailable" };
+
 interface Result {
   key: string;
+  kind: "dm" | "user" | "text" | "voice" | "server";
   label: string;
   sub?: string;
   icon: React.ReactNode;
@@ -35,6 +40,7 @@ export function QuickSwitcher() {
       if (c.type === ChannelType.DM && first) dmUsers.add(first.id);
       out.push({
         key: `dm-${id}`,
+        kind: "dm",
         label: dmName(c),
         sub: c.type === ChannelType.GroupDM ? "Group DM" : first?.username,
         icon: first ? <Avatar user={first} size={24} /> : null,
@@ -43,7 +49,7 @@ export function QuickSwitcher() {
     }
     for (const r of Object.values(relationships)) {
       if (r.type !== 1 || dmUsers.has(r.id)) continue;
-      out.push({ key: `user-${r.id}`, label: r.user.global_name ?? r.user.username, sub: r.user.username, icon: <Avatar user={r.user} size={24} />, run: () => void openDirectMessage(r.id) });
+      out.push({ key: `user-${r.id}`, kind: "user", label: r.user.global_name ?? r.user.username, sub: r.user.username, icon: <Avatar user={r.user} size={24} />, run: () => void openDirectMessage(r.id) });
     }
     for (const c of Object.values(channels)) {
       if (!c.guild_id || (c.type !== ChannelType.GuildText && c.type !== ChannelType.GuildVoice)) continue;
@@ -51,24 +57,32 @@ export function QuickSwitcher() {
       if (!guild) continue;
       out.push({
         key: `ch-${c.id}`,
+        kind: c.type === ChannelType.GuildVoice ? "voice" : "text",
         label: c.name ?? "",
         sub: guild.name,
         icon: c.type === ChannelType.GuildVoice ? <Volume2 size={20} /> : <Hash size={20} />,
         run: () => go(guildPath(guild.id, c.id)),
       });
     }
-    for (const g of Object.values(guilds)) out.push({ key: `g-${g.id}`, label: g.name, sub: "Server", icon: <GuildIcon guild={g} size={24} />, run: () => go(guildPath(g.id)) });
+    for (const g of Object.values(guilds)) out.push({ key: `g-${g.id}`, kind: "server", label: g.name, sub: "Server", icon: <GuildIcon guild={g} size={24} />, run: () => go(guildPath(g.id)) });
     return out;
   }, [channels, guilds, privateChannels, relationships]);
 
+  const scope: Scope = PREFIXES[query.trim().charAt(0)] ?? "all";
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase().replace(/^[#@*!]/, "");
-    if (!q) return all.slice(0, 12);
-    return all
+    if (scope === "unavailable") return [];
+    const q = (scope === "all" ? query : query.trim().slice(1)).trim().toLowerCase();
+    const pool = all.filter(r => {
+      if (scope === "all") return true;
+      if (scope === "users") return r.kind === "dm" || r.kind === "user";
+      return r.kind === scope.replace("servers", "server");
+    });
+    if (!q) return pool.slice(0, 12);
+    return pool
       .filter(r => r.label.toLowerCase().includes(q) || r.sub?.toLowerCase().includes(q))
       .sort((a, b) => Number(b.label.toLowerCase().startsWith(q)) - Number(a.label.toLowerCase().startsWith(q)))
       .slice(0, 12);
-  }, [all, query]);
+  }, [all, query, scope]);
 
   const choose = (r: Result | undefined) => {
     if (!r) return;
@@ -100,9 +114,11 @@ export function QuickSwitcher() {
             </button>
           </li>
         ))}
-        {results.length === 0 && <li className="quick-empty">No results found. Nobody here but us chickens.</li>}
+        {results.length === 0 && <li className="quick-empty">{scope === "unavailable" ? "Not available yet." : "No results found. Nobody here but us chickens."}</li>}
       </ul>
-      <div className="quick-tip">PROTIP: Start searches with @ for users, # for channels.</div>
+      <div className="quick-tip">
+        <span className="quick-tip-label">PROTIP:</span> Start searches with <kbd>@</kbd> <kbd>#</kbd> <kbd>!</kbd> <kbd>*</kbd> <kbd>$</kbd> to narrow results to users, text channels, voice channels, servers and more.
+      </div>
     </Modal>
   );
 }

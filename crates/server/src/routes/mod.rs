@@ -7,7 +7,7 @@ mod auth;
 mod channels;
 mod guilds;
 mod invites;
-mod messages;
+pub mod messages;
 mod reactions;
 pub mod relationships;
 mod users;

@@ -1,10 +1,15 @@
+import { useState } from "react";
 import { CircleHelp, Hash, Inbox, Users, Volume2 } from "lucide-react";
 import { dmName, useStore } from "../api/store";
 import { ChannelType } from "../api/types";
 import { Tooltip } from "../ui";
+import { InboxPopout } from "./Inbox";
+import { closeModal, openModal, useModals } from "./modalStore";
 
 /** The 32 px web title bar: current page title centred, Inbox and Help on the right (desktop builds draw native chrome instead). */
 export function TitleBar() {
+  const [inboxButton, setInboxButton] = useState<HTMLElement | null>(null);
+  const inboxOpen = useModals(s => s.modal?.type === "inbox");
   const title = useStore(s => {
     const channel = s.route.channelId ? s.channels[s.route.channelId] : undefined;
     if (!channel) return { icon: "friends" as const, text: s.route.guildId ? (s.guilds[s.route.guildId]?.name ?? "") : "Friends" };
@@ -21,7 +26,7 @@ export function TitleBar() {
       </div>
       <div className="title-bar-actions">
         <Tooltip content="Inbox" side="bottom">
-          <button type="button" className="title-bar-button" aria-label="Inbox">
+          <button ref={setInboxButton} type="button" className={`title-bar-button${inboxOpen ? " active" : ""}`} aria-label="Inbox" aria-expanded={inboxOpen} onClick={() => (inboxOpen ? closeModal() : openModal({ type: "inbox" }))}>
             <Inbox size={18} />
           </button>
         </Tooltip>
@@ -31,6 +36,7 @@ export function TitleBar() {
           </button>
         </Tooltip>
       </div>
+      <InboxPopout anchor={inboxButton} open={inboxOpen} />
     </header>
   );
 }

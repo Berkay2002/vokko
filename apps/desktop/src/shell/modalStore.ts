@@ -8,9 +8,13 @@ export type ModalSpec =
   | { type: "leaveServer"; guildId: Snowflake }
   | { type: "deleteServer"; guildId: Snowflake }
   | { type: "deleteChannel"; channelId: Snowflake }
-  | { type: "serverSettings"; guildId: Snowflake }
-  | { type: "createDM" }
+  | { type: "serverSettings"; guildId: Snowflake; section?: string }
+  | { type: "editChannel"; channelId: Snowflake }
+  | { type: "notificationSettings"; scopeId: Snowflake; title: string; guild?: boolean }
+  | { type: "createDM"; /** Users already in the conversation (the new group DM keeps them). */ base?: Snowflake[] }
   | { type: "quickSwitcher" }
+  | { type: "profile"; userId: Snowflake; guildId?: Snowflake | null }
+  | { type: "inbox" }
   | { type: "userSettings"; section?: string };
 
 interface ModalStore {

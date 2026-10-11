@@ -9,19 +9,62 @@ import type { User } from "../api/types";
 import { useFocusTrap, useLayer } from "../ui";
 import { Avatar } from "./Avatar";
 import { closeModal } from "./modalStore";
+import { AccessibilityPage } from "./settings/AccessibilityPage";
+import { AppearancePage } from "./settings/AppearancePage";
+import { Category, Page, Select, Unavailable } from "./settings/controls";
+import { KeybindsPage } from "./settings/KeybindsPage";
+import { NotificationsPage } from "./settings/NotificationsPage";
+import { VoiceVideoPage } from "./settings/VoiceVideoPage";
 
-const SECTIONS: { id: string; label: string; group: string; implemented?: boolean }[] = [
-  { id: "account", label: "My Account", group: "User Settings", implemented: true },
-  { id: "profiles", label: "Profiles", group: "User Settings", implemented: true },
-  { id: "privacy", label: "Content & Social", group: "User Settings" },
-  { id: "devices", label: "Devices", group: "User Settings" },
-  { id: "appearance", label: "Appearance", group: "App Settings" },
-  { id: "accessibility", label: "Accessibility", group: "App Settings" },
-  { id: "voice", label: "Voice & Video", group: "App Settings" },
-  { id: "notifications", label: "Notifications", group: "App Settings" },
-  { id: "keybinds", label: "Keybinds", group: "App Settings" },
-  { id: "language", label: "Language", group: "App Settings" },
+interface SectionDef {
+  id: string;
+  label: string;
+  /** Group heading; "" renders no heading (Discord hides the General and Other titles). */
+  group: string;
+  /** Category headings shown on pages that are not implemented, in Discord's order. */
+  outline?: string[];
+}
+
+// Order and grouping follow Discord's User Settings sidebar (research/discord-ui-inventory.md S1). The Billing group
+// (Nitro, Server Boost, Subscriptions, Gift Inventory, Billing) and the desktop-only game pages are left out on purpose.
+const SECTIONS: SectionDef[] = [
+  { id: "profiles", label: "Profiles", group: "" },
+  { id: "account", label: "My Account", group: "General" },
+  { id: "privacy", label: "Data & Privacy", group: "General", outline: ["How Vokko Uses My Data", "Profile Privacy"] },
+  { id: "content", label: "Content & Social", group: "General", outline: ["Content Filters", "Spam Filters", "Direct Message (DM) Permissions", "Friend Request Permissions", "Ignore & Block"] },
+  { id: "notifications", label: "Notifications", group: "General" },
+  { id: "voice", label: "Voice & Video", group: "Experience" },
+  { id: "appearance", label: "Appearance", group: "Experience" },
+  { id: "accessibility", label: "Accessibility", group: "Experience" },
+  { id: "keybinds", label: "Keybinds", group: "Experience" },
+  { id: "language", label: "Language & Time", group: "Experience" },
+  { id: "activity", label: "Activity Privacy", group: "Games & Apps", outline: ["What Activity I Share", "Where I Share Activity"] },
+  { id: "connections", label: "Connected Apps", group: "Games & Apps", outline: ["Connections", "Authorized Apps"] },
 ];
+
+function NotYet({ section }: { section: SectionDef }) {
+  return (
+    <Page title={section.label}>
+      <Unavailable>This section is not available yet.</Unavailable>
+      {section.outline?.map(title => (
+        <Category key={title} title={title}>
+          <p className="settings-todo">Not available yet.</p>
+        </Category>
+      ))}
+    </Page>
+  );
+}
+
+function LanguageTime() {
+  return (
+    <Page title="Language & Time">
+      <Category title="Select a Language">
+        <Select<string> label="Language" value="en" options={[{ value: "en", label: "English" }]} onChange={() => undefined} />
+        <p className="settings-todo">More languages are not available yet.</p>
+      </Category>
+    </Page>
+  );
+}
 
 const BANNER_COLORS = ["#5865f2", "#3d9e60", "#ffcb6e", "#dc4247", "#c45bd0", "#2b8fb5", "#6d7380", "#1e1f22"];
 
@@ -169,27 +212,56 @@ function Profiles({ me }: { me: User }) {
 
 export function UserSettings({ section }: { section?: string }) {
   const me = useStore(s => s.me);
-  const [current, setCurrent] = useState(section ?? "account");
+  const [current, setCurrent] = useState(SECTIONS.some(s => s.id === section) ? (section as string) : "account");
+  const [query, setQuery] = useState("");
   const root = useRef<HTMLDivElement>(null);
   useLayer(true, closeModal);
   useFocusTrap(true, () => root.current);
   if (!me) return null;
 
-  const groups = [...new Set(SECTIONS.map(s => s.group))];
+  const needle = query.trim().toLowerCase();
+  const visible = SECTIONS.filter(s => !needle || s.label.toLowerCase().includes(needle) || (s.outline ?? []).some(o => o.toLowerCase().includes(needle)));
+  const groups = [...new Set(visible.map(s => s.group))];
   const active = SECTIONS.find(s => s.id === current) ?? SECTIONS[0];
+
+  const page = () => {
+    switch (current) {
+      case "account":
+        return <MyAccount me={me} />;
+      case "profiles":
+        return <Profiles me={me} />;
+      case "notifications":
+        return <NotificationsPage />;
+      case "voice":
+        return <VoiceVideoPage />;
+      case "appearance":
+        return <AppearancePage />;
+      case "accessibility":
+        return <AccessibilityPage />;
+      case "keybinds":
+        return <KeybindsPage />;
+      case "language":
+        return <LanguageTime />;
+      default:
+        return active ? <NotYet section={active} /> : null;
+    }
+  };
 
   return createPortal(
     <div ref={root} className="settings-overlay" role="dialog" aria-modal="true" aria-label="User Settings" tabIndex={-1}>
       <nav className="settings-sidebar" aria-label="Settings sections">
         <div className="settings-sidebar-inner">
+          <input className="settings-search" type="search" placeholder="Search" aria-label="Search settings" value={query} onChange={e => setQuery(e.target.value)} />
           {groups.map(group => (
-            <div key={group} className="settings-group">
-              <div className="settings-group-title">{group}</div>
-              {SECTIONS.filter(s => s.group === group).map(s => (
-                <button key={s.id} type="button" className={`settings-item${current === s.id ? " selected" : ""}`} onClick={() => setCurrent(s.id)}>
-                  {s.label}
-                </button>
-              ))}
+            <div key={group || "top"} className="settings-group">
+              {group && <div className="settings-group-title">{group}</div>}
+              {visible
+                .filter(s => s.group === group)
+                .map(s => (
+                  <button key={s.id} type="button" className={`settings-item${current === s.id ? " selected" : ""}`} onClick={() => setCurrent(s.id)}>
+                    {s.label}
+                  </button>
+                ))}
             </div>
           ))}
           <div className="settings-group">
@@ -201,16 +273,7 @@ export function UserSettings({ section }: { section?: string }) {
         </div>
       </nav>
       <main className="settings-content">
-        <div className="settings-content-inner">
-          {current === "account" && <MyAccount me={me} />}
-          {current === "profiles" && <Profiles me={me} />}
-          {!active?.implemented && (
-            <div className="settings-page">
-              <h1>{active?.label}</h1>
-              <p className="settings-todo">This section is not implemented yet.</p>
-            </div>
-          )}
-        </div>
+        <div className="settings-content-inner">{page()}</div>
         <button type="button" className="settings-close" aria-label="Close" onClick={closeModal}>
           <span className="settings-close-icon">
             <X size={18} />
