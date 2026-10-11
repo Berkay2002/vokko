@@ -24,6 +24,7 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     mentions: m.mention_ids.map(userOf),
     mention_everyone: m.mention_everyone,
     attachments: m.attachments.map(a => ({ ...a })),
+    embeds: [],
     reactions,
     pinned: m.pinned,
     message_reference: m.reference_id ? { message_id: m.reference_id, channel_id: m.channel_id, guild_id: m.guild_id } : null,
