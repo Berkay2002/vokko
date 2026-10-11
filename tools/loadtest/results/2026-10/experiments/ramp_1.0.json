@@ -1,0 +1,239 @@
+{
+  "meta": {
+    "label": "send ramp 1.0",
+    "run": "cb81e7",
+    "url": "http://127.0.0.1:8710"
+  },
+  "config": {
+    "connections": 1000,
+    "guild_size": 100,
+    "duration": 15,
+    "send_rate": 1.0,
+    "sender_fraction": 1.0,
+    "typing_fraction": 0.3,
+    "presence_fraction": 0.5,
+    "history_fraction": 0.2,
+    "history_pages": 10,
+    "storm_fraction": 0.5,
+    "storm_offline_ms": 2000,
+    "spoof": true,
+    "scenarios": [
+      "connect",
+      "send"
+    ]
+  },
+  "scenarios": [
+    {
+      "name": "setup:register",
+      "seconds": 6.864321494,
+      "histograms": {
+        "rest:register": {
+          "count": 1000,
+          "mean": 216696,
+          "p50": 218920,
+          "p95": 261401,
+          "p99": 277321,
+          "max": 288212
+        }
+      },
+      "counters": {},
+      "errors": {},
+      "derived": {
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 337.97929766725423,
+          "cpu_max": 345.1376785262032,
+          "rss_max_mib": 200.953125
+        },
+        "postgres": {
+          "cpu_avg": 19.812579518425252,
+          "cpu_max": 21.99368871308058,
+          "rss_max_mib": 308.46484375
+        },
+        "loadgen": {
+          "cpu_avg": 2.76793390330941,
+          "cpu_max": 3.001400108129441,
+          "rss_max_mib": 7.31640625
+        }
+      }
+    },
+    {
+      "name": "setup:guilds",
+      "seconds": 2.816273462,
+      "histograms": {
+        "rest:accept_invite": {
+          "count": 990,
+          "mean": 561260,
+          "p50": 653525,
+          "p95": 757615,
+          "p99": 757615,
+          "max": 763794
+        },
+        "rest:create_channel": {
+          "count": 20,
+          "mean": 9389,
+          "p50": 9826,
+          "p95": 12820,
+          "p99": 13941,
+          "max": 13941
+        },
+        "rest:create_guild": {
+          "count": 10,
+          "mean": 18336,
+          "p50": 19974,
+          "p95": 22190,
+          "p99": 22190,
+          "max": 22190
+        },
+        "rest:create_invite": {
+          "count": 10,
+          "mean": 42744,
+          "p50": 36075,
+          "p95": 99091,
+          "p99": 99091,
+          "max": 99091
+        },
+        "rest:list_channels": {
+          "count": 10,
+          "mean": 4367,
+          "p50": 4294,
+          "p95": 6329,
+          "p99": 6329,
+          "max": 6329
+        }
+      },
+      "counters": {},
+      "errors": {},
+      "derived": {
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 108.26152557836231,
+          "cpu_max": 115.12574090985044,
+          "rss_max_mib": 213.54296875
+        },
+        "postgres": {
+          "cpu_avg": 171.0887059959693,
+          "cpu_max": 205.17209842943836,
+          "rss_max_mib": 393.39453125
+        },
+        "loadgen": {
+          "cpu_avg": 4.969381501957615,
+          "cpu_max": 14.655149887817027,
+          "rss_max_mib": 15.109375
+        }
+      }
+    },
+    {
+      "name": "connect",
+      "seconds": 4.133480111,
+      "histograms": {
+        "identify_ready": {
+          "count": 1000,
+          "mean": 202949,
+          "p50": 206353,
+          "p95": 239219,
+          "p99": 253788,
+          "max": 268243
+        },
+        "size:ready_bytes": {
+          "count": 1000,
+          "mean": 33555,
+          "p50": 33600,
+          "p95": 33600,
+          "p99": 33600,
+          "max": 33600
+        },
+        "ws_connect": {
+          "count": 1000,
+          "mean": 3882,
+          "p50": 2051,
+          "p95": 15767,
+          "p99": 21190,
+          "max": 27726
+        }
+      },
+      "counters": {
+        "recv:presence_other": 80456
+      },
+      "errors": {},
+      "derived": {
+        "connected": 1000.0,
+        "limit_hits": 0.0,
+        "requested": 1000.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 78.60700949007187,
+          "cpu_max": 152.13040846809497,
+          "rss_max_mib": 386.578125
+        },
+        "postgres": {
+          "cpu_avg": 67.96482974372368,
+          "cpu_max": 146.93717830371392,
+          "rss_max_mib": 399.1484375
+        },
+        "loadgen": {
+          "cpu_avg": 12.577121518411499,
+          "cpu_max": 26.022306711647825,
+          "rss_max_mib": 154.109375
+        }
+      }
+    },
+    {
+      "name": "send",
+      "seconds": 49.825588346,
+      "histograms": {
+        "delivery:message": {
+          "count": 1599800,
+          "mean": 21106915,
+          "p50": 24787996,
+          "p95": 30896577,
+          "p99": 30896577,
+          "max": 30896577
+        },
+        "rest:send_message": {
+          "count": 15998,
+          "mean": 21101847,
+          "p50": 24787996,
+          "p95": 30833767,
+          "p99": 30833767,
+          "max": 30833767
+        }
+      },
+      "counters": {
+        "expected:message": 1599800,
+        "recv:message": 1599800,
+        "senders": 1000,
+        "sent:message": 15998
+      },
+      "errors": {},
+      "derived": {
+        "delivered_ratio:message": 1.0,
+        "deliveries_per_second:message": 32108.000188389786,
+        "limit_hits": 0.0,
+        "sent_per_second:message": 321.08000188389786
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 169.51118921356257,
+          "cpu_max": 246.04797172699966,
+          "rss_max_mib": 1295.19921875
+        },
+        "postgres": {
+          "cpu_avg": 77.22934597369036,
+          "cpu_max": 109.40951711975897,
+          "rss_max_mib": 441.90625
+        },
+        "loadgen": {
+          "cpu_avg": 63.58174845235215,
+          "cpu_max": 126.97997309958265,
+          "rss_max_mib": 477.12890625
+        }
+      }
+    }
+  ]
+}

@@ -21,7 +21,7 @@ fn layers() -> Result<(), Box<dyn std::error::Error>> {
     let metadata: Value = serde_json::from_slice(&output.stdout)?;
     let packages = metadata.get("packages").and_then(Value::as_array).ok_or("missing Cargo packages")?;
     let members = metadata.get("workspace_members").and_then(Value::as_array).ok_or("missing Cargo workspace members")?;
-    let levels = [("vokko-protocol", 0_u8), ("vokko-platform", 0), ("vokko-engine", 1), ("vokko-server", 1)];
+    let levels = [("vokko-protocol", 0_u8), ("vokko-platform", 0), ("vokko-engine", 1), ("vokko-server", 1), ("vokko-loadtest", 2)];
     let mut violations = Vec::new();
     for package in packages {
         if !members.contains(package.get("id").ok_or("missing package id")?) {

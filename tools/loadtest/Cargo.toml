@@ -1,0 +1,23 @@
+[package]
+name = "vokko-loadtest"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Load generator for vokko-server: REST + gateway scenarios with latency percentiles"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "vokko-loadtest"
+path = "src/main.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+tokio.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+rand.workspace = true
+futures-util.workspace = true
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }
