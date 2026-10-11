@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BookOpen, Camera, MessagesSquare, Check, ChevronRight, Copy, Gamepad2, GraduationCap, Hash, Heart, MapPin, Palette, Plus, Users, Volume2, type LucideIcon } from "lucide-react";
+import { logout } from "../api/auth";
 import { ApiRequestError } from "../api/errors";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
@@ -533,6 +534,20 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
           onConfirm={async () => {
             await request<void>("DELETE", `/channels/${spec.channelId}`);
             appStore.getState().removeChannel(spec.channelId);
+          }}
+        />
+      );
+    case "logout":
+      return (
+        <Confirm
+          key={id}
+          title="Log Out"
+          body="Are you sure you want to logout?"
+          action="Log Out"
+          danger
+          onConfirm={async () => {
+            await logout();
+            useModals.setState({ modal: null, base: null });
           }}
         />
       );

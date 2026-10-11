@@ -152,6 +152,7 @@ test('link embeds from the server render title, description, fields, colour bar 
 
 test('Shift+Escape marks the whole server read', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.waitForFunction(() => Object.values((window as unknown as Win).__vokko.appStore.getState().channels).some(c => c.guild_id));
   const ids = await page.evaluate(() => {
     const w = window as unknown as Win;
     const s = w.__vokko.appStore.getState();

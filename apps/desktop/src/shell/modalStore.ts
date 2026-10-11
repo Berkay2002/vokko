@@ -20,11 +20,12 @@ export type ModalSpec =
   | { type: "quickSwitcher" }
   | { type: "profile"; userId: Snowflake; guildId?: Snowflake | null }
   | { type: "inbox" }
+  | { type: "logout" }
   | { type: "userSettings"; section?: string };
 
 /** Full-screen settings stay mounted underneath these small dialogs and come back when the dialog closes. */
 const SETTINGS_TYPES = new Set<ModalSpec["type"]>(["serverSettings", "channelSettings", "editChannel", "userSettings"]);
-const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel"]);
+const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout"]);
 
 interface ModalStore {
   modal: ModalSpec | null;
