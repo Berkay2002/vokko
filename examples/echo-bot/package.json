@@ -1,0 +1,8 @@
+{
+  "name": "vokko-echo-bot",
+  "private": true,
+  "type": "module",
+  "description": "A tiny Vokko bot that registers /echo and /roll and answers them, using only the public API.",
+  "engines": { "node": ">=22.18" },
+  "scripts": { "start": "node bot.ts", "test": "node --test bot.test.ts" }
+}

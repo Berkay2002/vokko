@@ -14,6 +14,7 @@ import { isMutedAt, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setN
 import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
 import { openProfile } from "./ProfileCard";
+import { userAppsItems } from "../apps/menus";
 import { voiceUserMenuItems } from "../voice/voiceMenus";
 import { getVoice } from "../voice/store";
 import { useVoiceUi } from "../voice/uiStore";
@@ -346,6 +347,7 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
         ? [{ id: "roles", label: `${roles.length} ${roles.length === 1 ? "Role" : "Roles"}`, children: roles.map(r => ({ id: r.id, label: r.name, disabled: true })) }]
         : [],
     moderation,
+    userAppsItems(user),
     serverVoice,
     [{ id: "copy-id", label: "Copy User ID", onSelect: copy(user.id) }],
   );

@@ -245,11 +245,15 @@ export enum MessageType {
   ThreadCreated = 18, // in the parent when a thread is started without a message; content = thread name, message_reference.channel_id = thread id
   Reply = 19,
   ThreadStarterMessage = 21, // first message of a thread started from a message; message_reference points at the original, referenced_message is filled
+  ChatInputCommand = 20, // response to a slash command (interaction_metadata says who used which command)
+  ContextMenuCommand = 23, // response to a User/Message command
 }
 export enum MessageFlags {
   Crossposted = 1 << 0, // announcement message published to followers
   IsCrosspost = 1 << 1, // copy delivered by a follow; message_reference points at the source message
   SuppressEmbeds = 1 << 2,
+  Ephemeral = 1 << 6, // interaction response visible only to the user who ran the command ("Only you can see this")
+  Loading = 1 << 7, // deferred interaction response: "<bot> is thinking..." until the bot edits @original
 }
 
 export enum MessageReferenceType {
@@ -383,6 +387,9 @@ export interface Message {
   thread?: Channel; // present when a thread was started from this message (thread.id == message id)
   sticker_items?: StickerItem[]; // absent = none
   message_snapshots?: MessageSnapshot[]; // exactly one on a forward (message_reference.type 1)
+  webhook_id?: Snowflake; // posted by a webhook (or an interaction response: then == application_id); author is then the webhook identity
+  application_id?: Snowflake; // interaction responses and followups
+  interaction_metadata?: MessageInteractionMetadata; // interaction responses: who used which command
 }
 
 export interface ReadState {
@@ -1132,7 +1139,239 @@ export interface GatewayEvents {
   THREAD_DELETE: { id: Snowflake; guild_id: Snowflake; parent_id: Snowflake; type: ChannelType };
   THREAD_MEMBER_UPDATE: ThreadMember & { guild_id: Snowflake }; // the current user joined a thread
   THREAD_MEMBERS_UPDATE: { id: Snowflake; guild_id: Snowflake; member_count: number; added_members?: ThreadMember[]; removed_member_ids?: Snowflake[] };
+  INTERACTION_CREATE: Interaction; // to the bot only
+  INTERACTION_FAILURE: { id: Snowflake; nonce: string | null; channel_id: Snowflake; application_id: Snowflake }; // to the invoking user: no callback within 3 s
+  APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE: { id: Snowflake; nonce: string | null; choices: ApplicationCommandOptionChoice[] }; // to the invoking user
+  WEBHOOKS_UPDATE: { guild_id: Snowflake; channel_id: Snowflake }; // a webhook of the channel was created, edited or deleted (to MANAGE_WEBHOOKS holders)
   INVITE_CREATE: InviteMetadata; // to members who can list it: MANAGE_GUILD, or MANAGE_CHANNELS on the invite's channel
   INVITE_DELETE: { code: string; guild_id: Snowflake; channel_id: Snowflake }; // same audience; revoked (not on expiry or last use)
   GUILD_LAYOUT_UPDATE: GuildLayout; // the user's own sessions only
+}
+
+// ---- Applications, bots, slash commands, interactions, webhooks (docs/api.md "Apps") ----
+
+// A bot application. The bot user's id equals the application id; its User has `bot: true`.
+export interface Application {
+  id: Snowflake;
+  name: string; // 2-32 chars
+  description: string; // max 400
+  icon: string | null;
+  owner_id: Snowflake;
+  bot: User;
+  bot_public: boolean; // false = only the owner can add the bot to a server
+  install_params: { permissions: string }; // default permissions of the invite URL (decimal bitfield)
+}
+export type ApplicationWithToken = Application & { token: string }; // POST /applications only: the bot token, shown once
+export interface CreateApplicationRequest {
+  name: string;
+  description?: string;
+}
+export interface EditApplicationRequest {
+  name?: string;
+  description?: string;
+  icon_attachment_id?: Snowflake | null;
+  bot_public?: boolean;
+  install_params?: { permissions: string };
+}
+export interface BotTokenResponse {
+  token: string; // POST /applications/{id}/bot/reset: the new token, the old one stops working (its gateway sessions close 4004)
+}
+// GET /oauth2/authorize?client_id&permissions&scope: what the "Add to server" page shows.
+export interface OAuth2AuthorizeInfo {
+  application: Application;
+  bot: User;
+  permissions: string; // requested bits (defaults to install_params.permissions)
+  guilds: { id: Snowflake; name: string; icon: string | null; permissions: string }[]; // guilds where the caller has MANAGE_GUILD and the bot is not a member
+}
+export interface OAuth2AuthorizeRequest {
+  guild_id: Snowflake;
+  permissions?: string; // bits for the bot's role; only bits the caller has are kept
+}
+export interface OAuth2AuthorizeResponse {
+  guild_id: Snowflake;
+  role_id: Snowflake | null; // role created for the bot ("<bot name>"), null when no permissions were granted
+}
+
+export enum ApplicationCommandType {
+  ChatInput = 1, // slash command
+  User = 2, // user context menu (User > Apps)
+  Message = 3, // message context menu (Message > Apps)
+}
+export enum ApplicationCommandOptionType {
+  String = 3,
+  Integer = 4,
+  Boolean = 5,
+  User = 6,
+  Channel = 7,
+  Role = 8,
+  Number = 10,
+}
+export interface ApplicationCommandOptionChoice {
+  name: string; // 1-100
+  value: string | number; // string for String options, number for Integer/Number
+}
+export interface ApplicationCommandOption {
+  type: ApplicationCommandOptionType;
+  name: string; // 1-32, lowercase [-_a-z0-9] (unicode letters allowed)
+  description: string; // 1-100
+  required?: boolean; // required options come before optional ones
+  choices?: ApplicationCommandOptionChoice[]; // max 25; String/Integer/Number only; not with autocomplete
+  autocomplete?: boolean; // String/Integer/Number: the client asks the bot for choices while typing
+  min_value?: number;
+  max_value?: number;
+  min_length?: number; // String: 0-6000
+  max_length?: number; // String: 1-6000
+  channel_types?: ChannelType[];
+}
+export interface ApplicationCommand {
+  id: Snowflake;
+  type: ApplicationCommandType;
+  application_id: Snowflake;
+  guild_id: Snowflake | null; // null = global command
+  name: string; // ChatInput: 1-32 lowercase; User/Message: 1-32, any case, spaces allowed
+  description: string; // ChatInput 1-100; "" for User/Message
+  options?: ApplicationCommandOption[]; // ChatInput only, max 25
+  default_member_permissions: string | null; // caller needs all these bits; null = everyone with USE_APPLICATION_COMMANDS
+  dm_permission?: boolean; // global commands: usable in DMs with the bot (default true)
+  version: Snowflake; // changes on every edit
+}
+// Body of POST/PUT/PATCH /applications/{id}/commands (and the guild variants). PATCH: every field optional.
+export interface ApplicationCommandRequest {
+  name: string;
+  type?: ApplicationCommandType; // default ChatInput
+  description?: string;
+  options?: ApplicationCommandOption[];
+  default_member_permissions?: string | null;
+  dm_permission?: boolean;
+}
+// GET /channels/{id}/application-commands: what the caller may use in that channel.
+export interface ApplicationCommandIndex {
+  applications: { id: Snowflake; name: string; icon: string | null; bot_id: Snowflake }[];
+  application_commands: ApplicationCommand[];
+}
+
+export enum InteractionType {
+  Ping = 1,
+  ApplicationCommand = 2,
+  ApplicationCommandAutocomplete = 4,
+}
+export interface InteractionDataOption {
+  name: string;
+  type: ApplicationCommandOptionType;
+  value: string | number | boolean; // user/channel/role options carry the id as a string
+  focused?: boolean; // autocomplete: the option being typed
+}
+export interface InteractionResolved {
+  users?: Record<Snowflake, User>;
+  members?: Record<Snowflake, Pick<GuildMember, "nick" | "roles" | "joined_at">>;
+  roles?: Record<Snowflake, Role>;
+  channels?: Record<Snowflake, Pick<Channel, "id" | "type" | "name" | "parent_id">>;
+  messages?: Record<Snowflake, Message>;
+}
+export interface InteractionData {
+  id: Snowflake; // command id
+  name: string;
+  type: ApplicationCommandType;
+  guild_id?: Snowflake; // guild commands
+  options?: InteractionDataOption[];
+  resolved?: InteractionResolved;
+  target_id?: Snowflake; // User/Message commands: the user or message
+}
+// INTERACTION_CREATE (sent to the bot over its gateway).
+export interface Interaction {
+  id: Snowflake;
+  application_id: Snowflake;
+  type: InteractionType;
+  data: InteractionData;
+  guild_id: Snowflake | null;
+  channel_id: Snowflake;
+  member?: GuildMember; // guild: the invoking member
+  user: User; // the invoking user
+  token: string; // valid 15 minutes for callback + followups (the callback itself must come within 3 s)
+  app_permissions: string; // the bot's permissions in the channel
+  version: 1;
+}
+// POST /interactions (user auth): run a command. Answers 200 InteractionCreated; the result arrives as MESSAGE_CREATE,
+// INTERACTION_FAILURE (bot did not answer in 3 s) or APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE.
+export interface InvokeInteractionRequest {
+  type: InteractionType.ApplicationCommand | InteractionType.ApplicationCommandAutocomplete;
+  application_id: Snowflake;
+  channel_id: Snowflake;
+  data: { id: Snowflake; name: string; type: ApplicationCommandType; options?: InteractionDataOption[]; target_id?: Snowflake };
+  nonce?: string; // echoed in INTERACTION_FAILURE / autocomplete responses
+}
+export interface InteractionCreated {
+  id: Snowflake;
+  nonce: string | null;
+}
+export enum InteractionCallbackType {
+  ChannelMessageWithSource = 4,
+  DeferredChannelMessageWithSource = 5, // shows "<bot> is thinking..." (message flags Loading) until @original is edited
+  ApplicationCommandAutocompleteResult = 8,
+}
+export interface InteractionCallbackData {
+  content?: string; // max 2000
+  embeds?: Embed[]; // max 10
+  flags?: number; // MessageFlags.Ephemeral only
+  allowed_mentions?: AllowedMentions;
+  choices?: ApplicationCommandOptionChoice[]; // type 8, max 25
+}
+export interface InteractionResponse {
+  type: InteractionCallbackType;
+  data?: InteractionCallbackData;
+}
+// Followups: POST /webhooks/{app_id}/{token}, PATCH /webhooks/{app_id}/{token}/messages/{@original|id}.
+export interface WebhookMessageRequest {
+  content?: string;
+  embeds?: Embed[];
+  flags?: number; // followups: MessageFlags.Ephemeral
+  allowed_mentions?: AllowedMentions;
+  username?: string; // execute only: override the webhook's name (1-80)
+  avatar_url?: string; // execute only: override the avatar (http/https URL)
+}
+export interface MessageInteractionMetadata {
+  id: Snowflake; // interaction id
+  type: InteractionType;
+  user: User; // who ran the command
+  name: string; // command name, for the "used /name" line
+  command_type: ApplicationCommandType;
+  target_user?: User; // User commands
+  target_message_id?: Snowflake; // Message commands
+}
+
+export enum WebhookType {
+  Incoming = 1,
+  ChannelFollower = 2,
+  Application = 3,
+}
+export interface Webhook {
+  id: Snowflake;
+  type: WebhookType;
+  guild_id: Snowflake | null;
+  channel_id: Snowflake;
+  name: string; // 1-80
+  avatar: string | null;
+  application_id: Snowflake | null;
+  user?: User; // creator; MANAGE_WEBHOOKS views only
+  token?: string; // Incoming, MANAGE_WEBHOOKS views only
+  url?: string; // execute URL (absolute), when token is present
+}
+export interface CreateWebhookRequest {
+  name: string;
+  avatar_attachment_id?: Snowflake | null;
+}
+export interface EditWebhookRequest {
+  name?: string;
+  avatar_attachment_id?: Snowflake | null;
+  channel_id?: Snowflake; // move to another channel of the same guild (MANAGE_WEBHOOKS there too)
+}
+// GET /guilds/{id}/integrations (MANAGE_GUILD): bots added to the server.
+export interface GuildIntegration {
+  id: Snowflake; // application id
+  type: "bot";
+  name: string;
+  enabled: true;
+  application: Pick<Application, "id" | "name" | "description" | "icon" | "bot">;
+  user: User | null; // who added it
+  role_id: Snowflake | null; // the bot's role
 }

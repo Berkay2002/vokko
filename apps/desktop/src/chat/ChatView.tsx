@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
-import type { Attachment, Message, Snowflake } from '../api/types';
+import { MessageFlags, type Attachment, type Message, type Snowflake } from '../api/types';
 import { ApiRequestError, Modal, resolveUrl, useMe, useReadState } from './shell';
 import { useShortcut } from '../keyboard';
 import { DeleteAttachmentModal, ModifyAttachmentModal } from './AttachmentModals';
@@ -149,7 +149,8 @@ function ChatBody(p: BodyProps) {
   const readState = useReadState(p.channelId);
 
   // Ack on view: newest server message, only while the window is at the present, scrolled to the bottom, and focused.
-  const newest = state.messages[state.messages.length - 1]?.id;
+  // Ephemeral interaction responses exist only for this user: the server cannot ack them.
+  const newest = [...state.messages].reverse().find(m => ((m.flags ?? 0) & MessageFlags.Ephemeral) === 0)?.id;
   const read = readState?.last_message_id ?? null;
   const mentionCount = readState?.mention_count ?? 0;
   const [focused, setFocused] = useState(() => document.hasFocus());

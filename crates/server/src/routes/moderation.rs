@@ -28,7 +28,7 @@ use crate::store;
 
 /// Longest communication timeout, like Discord.
 const MAX_TIMEOUT_DAYS: i64 = 28;
-const MAX_ROLES: i64 = 250;
+pub const MAX_ROLES: i64 = 250;
 const MAX_BAN_DELETE_SECONDS: u32 = 604_800;
 
 pub fn routes() -> Router<AppState> {
@@ -162,15 +162,22 @@ pub async fn remove_member(state: &AppState, guild_id: i64, user_id: i64) -> Api
     let mut tx = state.db.begin().await?;
     let removed = delete_member(&mut tx, guild_id, user_id, true).await?;
     tx.commit().await?;
-    if removed {
-        announce_removal(state, guild_id, user_id).await?;
+    if let Some(removed) = removed {
+        announce_removal(state, guild_id, user_id, removed).await?;
     }
     Ok(())
 }
 
-/// Deletes the member row inside `tx`; whether there was one. With `keep_timeout` a running timeout is stored for a rejoin
+/// A member row that went away; for a bot, the role made for it went too.
+#[derive(Clone, Copy)]
+pub struct Removed {
+    pub bot_role: Option<i64>,
+}
+
+/// Deletes the member row inside `tx`; `None` if there was none. With `keep_timeout` a running timeout is stored for a rejoin
 /// (a stored one that no longer applies is dropped), otherwise any stored timeout goes (a ban).
-async fn delete_member(tx: &mut Transaction<'_, Postgres>, guild_id: i64, user_id: i64, keep_timeout: bool) -> ApiResult<bool> {
+/// A bot (kicked, banned, removed from Integrations or leaving) takes its integration, its role and its guild commands along.
+pub async fn delete_member(tx: &mut Transaction<'_, Postgres>, guild_id: i64, user_id: i64, keep_timeout: bool) -> ApiResult<Option<Removed>> {
     sqlx::query("DELETE FROM guild_timeouts WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).execute(&mut **tx).await?;
     if keep_timeout {
         sqlx::query(
@@ -188,11 +195,36 @@ async fn delete_member(tx: &mut Transaction<'_, Postgres>, guild_id: i64, user_i
         .execute(&mut **tx)
         .await?;
     let deleted = sqlx::query("DELETE FROM guild_members WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).execute(&mut **tx).await?;
-    Ok(deleted.rows_affected() > 0)
+    if deleted.rows_affected() == 0 {
+        return Ok(None);
+    }
+    let integration: Option<(Option<i64>,)> = sqlx::query_as("DELETE FROM guild_integrations WHERE guild_id = $1 AND application_id = $2 RETURNING role_id")
+        .bind(guild_id)
+        .bind(user_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+    let Some((role,)) = integration else { return Ok(Some(Removed { bot_role: None })) };
+    sqlx::query("DELETE FROM application_commands WHERE application_id = $1 AND guild_id = $2").bind(user_id).bind(guild_id).execute(&mut **tx).await?;
+    let mut bot_role = None;
+    if let Some(role) = role.filter(|role| *role != guild_id) {
+        let dropped = sqlx::query("DELETE FROM roles WHERE id = $1 AND guild_id = $2").bind(role).bind(guild_id).execute(&mut **tx).await?;
+        bot_role = (dropped.rows_affected() > 0).then_some(role);
+    }
+    Ok(Some(Removed { bot_role }))
 }
 
-/// What follows the member row going away: read states, GUILD_DELETE to them, GUILD_MEMBER_REMOVE to the rest.
-async fn announce_removal(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
+/// A bot's role (made when the bot was added): like Discord's `managed` roles, nobody assigns, removes, edits or deletes it.
+pub async fn is_managed_role<'e>(db: impl sqlx::PgExecutor<'e>, guild_id: i64, role_id: i64) -> ApiResult<bool> {
+    let row: Option<(i64,)> = sqlx::query_as("SELECT application_id FROM guild_integrations WHERE guild_id = $1 AND role_id = $2")
+        .bind(guild_id)
+        .bind(role_id)
+        .fetch_optional(db)
+        .await?;
+    Ok(row.is_some())
+}
+
+/// What follows the member row going away: read states, GUILD_DELETE to them, GUILD_MEMBER_REMOVE (and a bot role's GUILD_ROLE_DELETE) to the rest.
+pub async fn announce_removal(state: &AppState, guild_id: i64, user_id: i64, removed: Removed) -> ApiResult<()> {
     crate::voice::state::member_removed(state, guild_id, user_id).await;
     // The user no longer shows this guild's tag: forget the choice (so it does not reappear on a rejoin) and tell their audience.
     let dropped_tag: Option<(i64,)> = sqlx::query_as("UPDATE users SET primary_guild_id = NULL WHERE id = $1 AND primary_guild_id = $2 RETURNING id")
@@ -212,6 +244,9 @@ async fn announce_removal(state: &AppState, guild_id: i64, user_id: i64) -> ApiR
     state.hub.send(&[user_id], &GatewayEvent::GuildDelete(IdOnly { id: Snowflake::from(guild_id) }));
     let remaining = access::guild_member_ids(state, guild_id).await?;
     state.hub.send(&remaining, &GatewayEvent::GuildMemberRemove(GuildMemberRemove { guild_id: Snowflake::from(guild_id), user }));
+    if let Some(role_id) = removed.bot_role {
+        state.hub.send(&remaining, &GatewayEvent::GuildRoleDelete(GuildRoleDelete { guild_id: Snowflake::from(guild_id), role_id: Snowflake::from(role_id) }));
+    }
     crate::presence::announce_leave(state, guild_id, user_id).await?;
     Ok(())
 }
@@ -304,8 +339,8 @@ async fn ban_member(
     .await?;
     let removed = delete_member(&mut tx, guild, target, false).await?;
     tx.commit().await?;
-    if removed {
-        announce_removal(&state, guild, target).await?;
+    if let Some(removed) = removed {
+        announce_removal(&state, guild, target, removed).await?;
     }
     if delete_seconds > 0 {
         delete_recent_messages(&state, guild, target, delete_seconds).await?;
@@ -509,6 +544,9 @@ async fn edit_member(
                 wanted.iter().filter(|role| !current_roles.contains(role)).chain(current_roles.iter().filter(|role| !wanted.contains(role))).copied().collect();
             for role in changed {
                 let row = ctx.role(role).ok_or_else(ApiErr::unknown_role)?;
+                if is_managed_role(&mut *tx, guild, role).await? {
+                    return Err(ApiErr::invalid("roles", "A bot's role cannot be assigned or removed."));
+                }
                 if !ctx.outranks(row) {
                     return Err(ApiErr::missing_permissions());
                 }
@@ -675,6 +713,9 @@ async fn update_role(
     ctx.access.require(MANAGE_ROLES)?;
     let current = ctx.role(role_id).ok_or_else(ApiErr::unknown_role)?.clone();
     let everyone = role_id == guild;
+    if is_managed_role(&state.db, guild, role_id).await? {
+        return Err(ApiErr::invalid("role", "A bot's role cannot be edited. Change the bot's permissions by adding it again."));
+    }
     if !everyone && !ctx.outranks(&current) {
         return Err(ApiErr::missing_permissions());
     }
@@ -769,6 +810,9 @@ async fn delete_role(State(state): State<AppState>, AuthUser(user_id): AuthUser,
     let current = ctx.role(role_id).ok_or_else(ApiErr::unknown_role)?;
     if role_id == guild {
         return Err(ApiErr::invalid_role());
+    }
+    if is_managed_role(&state.db, guild, role_id).await? {
+        return Err(ApiErr::invalid("role", "A bot's role cannot be deleted. Remove the bot from Integrations instead."));
     }
     if !ctx.outranks(current) {
         return Err(ApiErr::missing_permissions());

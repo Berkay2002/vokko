@@ -53,6 +53,22 @@ async fn list_dms(State(state): State<AppState>, AuthUser(user_id): AuthUser) ->
 }
 
 async fn create_dm(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiJson(body): ApiJson<CreateDmRequest>) -> ApiResult<Json<Channel>> {
+    let (bot,): (bool,) = sqlx::query_as("SELECT bot FROM users WHERE id = $1").bind(user_id).fetch_one(&state.db).await?;
+    if bot {
+        // Bots open one-to-one DMs with people they share a guild with, nothing else.
+        let recipient = body.recipient_id.ok_or_else(ApiErr::bots_forbidden)?.db();
+        let (shared,): (bool,) = sqlx::query_as(
+            "SELECT EXISTS (SELECT 1 FROM guild_members a JOIN guild_members b ON b.guild_id = a.guild_id WHERE a.user_id = $1 AND b.user_id = $2)",
+        )
+        .bind(user_id)
+        .bind(recipient)
+        .fetch_one(&state.db)
+        .await?;
+        if !shared {
+            return Err(ApiErr::cannot_message_user());
+        }
+        return one_to_one(&state, user_id, recipient).await;
+    }
     if let Some(recipient) = body.recipient_id {
         return one_to_one(&state, user_id, recipient.db()).await;
     }

@@ -260,7 +260,7 @@ export function buildRows(s: Pick<ChannelState, 'messages' | 'pending' | 'hasMor
     const grouped = !!prev && !newDay && !unread &&
       !isSystemMessage(m) && !isSystemMessage(prev) &&
       m.type !== MessageType.ThreadStarterMessage && prev.type !== MessageType.ThreadStarterMessage && // a thread's starter stands on its own
-      prev.author.id === m.author.id && m.type !== MessageType.Reply &&
+      prev.author.id === m.author.id && m.type !== MessageType.Reply && !m.interaction_metadata && // a command response shows who used it
       d.getTime() - groupStartMs < GROUP_WINDOW_MS; // measured from the group's FIRST message, not the previous one
     if (!grouped) groupStartMs = d.getTime();
     rows.push({ key: m.nonce ?? m.id, message: m, pending: p, grouped, dayLabel: newDay ? formatDay(d) : null, unreadDivider: unread });

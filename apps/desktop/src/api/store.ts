@@ -12,6 +12,7 @@ import { listActiveThreads, request, resolveUrl } from "./rest";
 import { compareIds, maxId } from "./snowflake";
 import {
   ChannelType,
+  MessageFlags,
   MessageType,
   type Channel,
   type Guild,
@@ -298,6 +299,8 @@ function onThreadMessage(thread: Channel, message: Message): void {
 
 function onMessageCreate(message: Message): void {
   const state = appStore.getState();
+  // Ephemeral interaction responses are not part of the channel: they move neither last_message_id nor read states.
+  if (((message.flags ?? 0) & MessageFlags.Ephemeral) !== 0) return;
   const channel = state.channels[message.channel_id];
   state.cacheUsers([message.author, ...message.mentions]);
   clearTyping(message.channel_id, message.author.id);

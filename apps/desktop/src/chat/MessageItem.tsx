@@ -18,6 +18,7 @@ import { ThreadChip } from '../threads/ThreadChip';
 import { ThreadCreatedNotice } from '../threads/ThreadNotice';
 import { ThreadStarter } from '../threads/ThreadStarter';
 import { useMessageThreadActions } from '../threads/useMessageActions';
+import { AppTag, EphemeralFooter, InteractionHeader, ThinkingBody, isEphemeral } from '../apps/InteractionMessage';
 import { quickReactions } from './emojiData';
 import { messageStore } from './messageStore';
 import { isSystemMessage, mentionsRole, type PendingMessage } from './messageState';
@@ -169,11 +170,12 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const quick = useMemo(() => quickReactions().slice(0, 3), []);
   const [shift, setShift] = useState(false);
 
+  const ephemeral = isEphemeral(message);
   // The hover toolbar (display: none until :hover / :focus-within) is mounted on the first hover or focus, not with every row: rows
   // mount constantly while scrolling a windowed list and the toolbar is most of a row's elements.
   const [armed, setArmed] = useState(false);
   const arm = () => { if (!armed) setArmed(true); };
-  const showToolbar = !pending && !editing && (armed || pickerOpen);
+  const showToolbar = !pending && !editing && !ephemeral && (armed || pickerOpen);
   const cls = ['chat-msg'];
   if (grouped) cls.push('grouped');
   if (compact && !system) cls.push('compact');
@@ -182,7 +184,8 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   if (failed) cls.push('failed');
   if (editing) cls.push('editing');
   if (highlighted) cls.push('flash');
-  if (message.message_reference && message.message_reference.type !== MessageReferenceType.Forward && !system && !crosspost) cls.push('has-reply');
+  if (((message.message_reference && message.message_reference.type !== MessageReferenceType.Forward) || message.interaction_metadata) && !system && !crosspost) cls.push('has-reply');
+  if (ephemeral) cls.push('ephemeral');
   if (system) cls.push('system');
   if (chat.replyingId === message.id) cls.push('replying');
 
@@ -200,8 +203,9 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   return <div ref={rowRef} className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id}
     onMouseEnter={arm} onFocus={arm}
     onMouseMove={e => { arm(); if (e.shiftKey !== shift) setShift(e.shiftKey); }} onMouseLeave={() => shift && setShift(false)}
-    onContextMenu={e => { if (pending || e.target instanceof HTMLAnchorElement) return; e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
+    onContextMenu={e => { if (pending || ephemeral || e.target instanceof HTMLAnchorElement) return; e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
     {!grouped && <ReplyPreview message={message} />}
+    {!grouped && <InteractionHeader message={message} guildId={chat.guildId} />}
     <div className="chat-msg-gutter">
       {grouped || compact
         ? <Tooltip content={formatFullDate(date)}><time className="chat-timestamp compact" dateTime={message.timestamp}>{formatTime(date)}</time></Tooltip>
@@ -213,11 +217,12 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
         {compact && chat.display.showCompactAvatars && <Avatar user={message.author} size={16} className="chat-compact-avatar" guildId={chat.guildId} />}
         <span className="chat-author" style={color ? { color } : undefined}>{name}</span>
         <ServerTag user={chat.userById(message.author.id) ?? message.author} />
-        {message.author.bot && <span className="chat-bot-tag">BOT</span>}
+        <AppTag message={message} />
         {!compact && <Tooltip content={formatFullDate(date)}><time className="chat-timestamp" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>}
       </h3>}
       {crosspost && <div className="chat-crosspost-tag"><Megaphone size={14} aria-hidden="true" /> Published from an announcement channel</div>}
       {editing ? <InlineEdit message={message} onDone={onStopEditing} /> : <>
+        <ThinkingBody message={message} name={name} />
         {message.content && !gif && <Markdown content={message.content} ctx={chat.md} className="chat-content" suffix={message.edited_timestamp
           ? <Tooltip content={formatFullDate(new Date(message.edited_timestamp))}><span className="chat-edited">(edited)</span></Tooltip> : undefined} />}
         {pending && !failed && message.attachments.length > 0
@@ -228,6 +233,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
         {message.message_snapshots?.length ? <ForwardedBlock message={message} /> : null}
         {!gif && <Embeds message={message} />}
         <Reactions message={message} />
+        <EphemeralFooter message={message} />
         {message.thread && <ThreadChip message={message} />}
         {threadActions.published && <div className="chat-crosspost-tag published"><Megaphone size={14} aria-hidden="true" /> Published</div>}
       </>}

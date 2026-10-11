@@ -124,6 +124,13 @@ impl RateLimiter {
         take(&mut buckets, (caller, route.to_owned()), burst, per_second, now).map_err(|retry_after| Limited { retry_after, global: false })
     }
 
+    /// A limit enforced by a handler on a key of its own (a webhook, a channel, a user running commands), independent of the
+    /// configurable REST limits: `burst` requests, refilled at `per_second`. Returns the wait in seconds when it is used up.
+    pub fn check_key(&self, key: &str, id: i64, burst: f64, per_second: f64) -> Result<(), f64> {
+        let mut buckets = self.buckets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        take(&mut buckets, (Caller::User(id), format!("key:{key}")), burst, per_second, Instant::now())
+    }
+
     /// The coarse per-address bucket that precedes a token lookup.
     fn check_address(&self, ip: IpAddr, limit: &RateLimit, now: Instant) -> Result<(), Limited> {
         let mut buckets = self.buckets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());

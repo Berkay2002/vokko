@@ -10,6 +10,7 @@ import { db, nextId } from "./db";
 import { seedOnboardingGuild, type SeededGuild } from "./community";
 import { addMessage, createAccount } from "./ops";
 import { handleRoute } from "./routes";
+import { apps, executeWebhook, installEchoBot, setInternalRouter } from "./apps";
 import "./accounts";
 import { setCurrentToken } from "./sessions";
 import { seed } from "./seed";
@@ -20,6 +21,9 @@ import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromT
 import { setMockVoice } from "./voice";
 
 export { MockSocket };
+
+// The mock Echo bot answers through the same token routes a real bot uses.
+setInternalRouter((method, path, body) => handleRoute(method, path, body, null));
 
 if (MOCK) {
   seed();
@@ -129,6 +133,10 @@ interface MockHooks {
   /** Another user joins (or with null leaves) a voice channel, optionally self-muted / deafened. */
   voice(username: string, channelId: string | null, opts?: { selfMute?: boolean; selfDeaf?: boolean; selfVideo?: boolean; selfStream?: boolean }): void;
   messageTimestamp(id: string): number;
+  /** Add the seeded Echo bot (/echo, /roll, /pick, Wave at, Quote) to a server, by name (default "Sam's server"). */
+  installEchoBot(guildName?: string): string;
+  /** Post through a channel's first webhook (as an external service would). */
+  executeWebhook(channelId: string, content: string, username?: string): string;
   /** A guild owned by `owner` (default alice) with onboarding (a required question, rules, default channels), an invite code and a stranger member. */
   seedOnboardingGuild(owner?: string): SeededGuild;
   /** Show (or with null clear) the maintenance banner served by `GET /status`; the client re-reads it at once. */
@@ -177,6 +185,16 @@ const hooks: MockHooks = {
   channelIdByName: name => [...db.channels.values()].find(c => c.name === name)?.id ?? null,
   voice: (username, channelId, opts) => setMockVoice(userByName(username), channelId, emit, opts),
   messageTimestamp: id => snowflakeToTimestamp(id),
+  installEchoBot: (guildName = "Sam's server") => {
+    const guild = [...db.guilds.values()].find(g => g.guild.name === guildName);
+    if (!guild) throw new Error(`unknown mock guild ${guildName}`);
+    return installEchoBot(guild.guild.id);
+  },
+  executeWebhook: (channelId, content, username) => {
+    const hook = [...apps.webhooks.values()].find(w => w.channel_id === channelId);
+    if (!hook) throw new Error("no webhook in that channel");
+    return executeWebhook(hook, username ? { content, username } : { content }).id;
+  },
   seedOnboardingGuild: owner => seedOnboardingGuild(owner),
   maintenance: (message, startsAt = null) => {
     setMockMaintenance(message ? { message, starts_at: startsAt } : null);

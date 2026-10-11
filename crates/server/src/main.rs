@@ -36,6 +36,7 @@ async fn serve(state: AppState) -> Result<(), String> {
     vokko_server::reminders::spawn(state.clone());
     vokko_server::voice::spawn_tasks(state.clone());
     vokko_server::threads::spawn_sweeper(state.clone());
+    vokko_server::apps::spawn_sweeper(state.clone());
     let bind = state.config.bind.clone();
     let listener = tokio::net::TcpListener::bind(&bind).await.map_err(|error| format!("cannot bind {bind}: {error}"))?;
     tracing::info!("vokko-server listening on http://{bind}");

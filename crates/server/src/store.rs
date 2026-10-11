@@ -484,11 +484,19 @@ pub struct MessageRow {
     pub forward_guild_id: Option<i64>,
     /// JSON `MessageSnapshot` of a forward.
     pub snapshot: Option<String>,
+    /// Webhook and interaction messages (see `apps`): the identity shown instead of the author's profile.
+    pub webhook_id: Option<i64>,
+    pub application_id: Option<i64>,
+    pub webhook_name: Option<String>,
+    pub webhook_avatar: Option<String>,
+    /// JSON `MessageInteractionMetadata`.
+    pub interaction_metadata: Option<String>,
 }
 
 pub const MESSAGE_SELECT: &str = "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.reference_message_id, m.mention_everyone, \
      m.created_at, m.edited_at, m.embeds::text AS embeds, m.flags, m.reference_channel_id, m.reference_guild_id, m.forward_channel_id, m.forward_message_id, \
-     m.forward_guild_id, m.snapshot::text AS snapshot FROM messages m JOIN channels c ON c.id = m.channel_id";
+     m.forward_guild_id, m.snapshot::text AS snapshot, m.webhook_id, m.application_id, m.webhook_name, m.webhook_avatar, \
+     m.interaction_metadata::text AS interaction_metadata FROM messages m JOIN channels c ON c.id = m.channel_id";
 
 #[derive(FromRow)]
 struct AttachmentRow {
@@ -634,7 +642,13 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
 
     let mut views = Vec::with_capacity(rows.len());
     for row in rows {
-        let Some(author) = lookup.get(&row.author_id).cloned() else { continue };
+        let Some(mut author) = lookup.get(&row.author_id).cloned() else { continue };
+        if let Some(name) = &row.webhook_name {
+            // A webhook message shows the name and avatar it was sent with.
+            author.username = name.clone();
+            author.global_name = None;
+            author.avatar = row.webhook_avatar.clone();
+        }
         let raw = reactions.remove(&row.id).unwrap_or_default();
         let reaction_users: Vec<Vec<i64>> = raw.iter().map(|(_, users)| users.clone()).collect();
         let reactions_api: Vec<Reaction> = raw
@@ -646,7 +660,7 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
             channel_id: flake(row.channel_id),
             guild_id: row.guild_id.map(flake),
             author,
-            member: row.guild_id.and_then(|guild_id| member_info.get(&(guild_id, row.author_id)).cloned()),
+            member: row.guild_id.filter(|_| row.webhook_name.is_none()).and_then(|guild_id| member_info.get(&(guild_id, row.author_id)).cloned()),
             content: row.content.clone(),
             timestamp: iso(row.created_at),
             edited_timestamp: row.edited_at.map(iso),
@@ -677,6 +691,9 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
             message_snapshots: row.snapshot.as_deref().and_then(|raw| serde_json::from_str::<MessageSnapshot>(raw).ok()).into_iter().collect(),
             flags: (row.flags != 0).then_some(row.flags as u32),
             thread: started_threads.remove(&row.id).map(Box::new),
+            webhook_id: row.webhook_id.map(flake),
+            application_id: row.application_id.map(flake),
+            interaction_metadata: row.interaction_metadata.as_deref().and_then(|raw| serde_json::from_str(raw).ok()).map(Box::new),
         };
         views.push(MessageView { message, reaction_users });
     }

@@ -1,7 +1,9 @@
 //! Vokko chat server: REST under `/api/v1` and a WebSocket gateway on `/gateway`, backed by PostgreSQL.
 pub mod access;
 pub mod account;
+pub mod apps;
 pub mod auth;
+pub mod bot_routes;
 pub mod config;
 pub mod error;
 pub mod events;
@@ -81,7 +83,12 @@ pub fn router(state: AppState) -> Router {
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
         .expose_headers([header::CONTENT_DISPOSITION, header::RETRY_AFTER]);
     Router::new()
-        .nest("/api/v1", routes::api(state.config.max_upload_bytes).layer(axum::middleware::from_fn_with_state(state.clone(), ratelimit::middleware)))
+        .nest(
+            "/api/v1",
+            routes::api(state.config.max_upload_bytes)
+                .layer(axum::middleware::from_fn_with_state(state.clone(), ratelimit::middleware))
+                .layer(axum::middleware::from_fn(bot_routes::middleware)),
+        )
         .route("/healthz", axum::routing::get(healthz))
         .route("/gateway", axum::routing::get(gateway::upgrade))
         .route("/internal/livekit/webhook", axum::routing::post(voice::webhook::receive))

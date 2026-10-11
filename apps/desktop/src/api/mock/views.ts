@@ -24,8 +24,8 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     id: m.id,
     channel_id: m.channel_id,
     guild_id: m.guild_id,
-    author: userOf(m.author_id),
-    member: member ? { nick: member.nick, roles: [...member.roles] } : undefined,
+    author: m.author_name !== undefined ? { ...userOf(m.author_id), username: m.author_name, global_name: null, avatar: m.author_avatar ?? null } : userOf(m.author_id),
+    member: member && m.author_name === undefined ? { nick: member.nick, roles: [...member.roles] } : undefined,
     content: m.content,
     timestamp: m.timestamp,
     edited_timestamp: m.edited_timestamp,
@@ -45,6 +45,9 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     ...(startedThread ? { thread: startedThread } : {}),
     ...(m.stickers?.length ? { sticker_items: m.stickers.map(s => ({ ...s })) } : {}),
     ...(m.forward ? { message_snapshots: [JSON.parse(JSON.stringify(m.forward.snapshot)) as MessageSnapshot] } : {}),
+    ...(m.webhook_id ? { webhook_id: m.webhook_id } : {}),
+    ...(m.application_id ? { application_id: m.application_id } : {}),
+    ...(m.interaction_metadata ? { interaction_metadata: m.interaction_metadata } : {}),
   };
 }
 

@@ -425,3 +425,44 @@ async fn members_only_read_the_channels_they_can_view() {
     assert_eq!(whole["default_channel_ids"], json!([w.general, secret]));
     assert_eq!(whole["prompts"][0]["options"][0]["channel_ids"], json!([secret, open]));
 }
+
+#[tokio::test]
+async fn onboarding_never_hands_out_a_bots_role() {
+    let w = World::new().await;
+    let editor = w.role("editor", MANAGE_GUILD | MANAGE_ROLES).await;
+    let (moderator, moderator_id) = w.member("moderator").await;
+    let (status, body) = w.app.patch(&w.path(&format!("/members/{moderator_id}")), &w.owner, json!({"roles": [editor]})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, created) = w.app.post("/applications", &w.owner, json!({"name": "Admin Bot"})).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let app_id = created["id"].as_str().expect("app id").to_owned();
+    let (status, added) = w.app.post(&format!("/oauth2/authorize?client_id={app_id}"), &w.owner, json!({"guild_id": w.guild, "permissions": "8"})).await;
+    assert_eq!(status, StatusCode::OK, "{added}");
+    let bot_role = added["role_id"].as_str().expect("bot role").to_owned();
+    // the editor outranks the bot's role, so only its being managed stops them
+    for (role, position) in [(&editor, 5), (&bot_role, 1)] {
+        let (status, body) = w.app.patch(&w.path("/roles"), &w.owner, json!([{"id": role, "position": position}])).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let with_bot_role = json!({"enabled": true, "prompts": [{"type": 0, "title": "Q", "options": [{"title": "Admin", "role_ids": [bot_role]}]}]});
+    for token in [&moderator, &w.owner] {
+        let (status, error) = w.app.send(axum::http::Method::PUT, &w.path("/onboarding"), Some(token), Some(with_bot_role.clone())).await;
+        assert_eq!((status, error["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(50035)), "{error}");
+    }
+
+    // an option that lists the role anyway (stored by older code) grants it to nobody
+    let plain = json!({"enabled": true, "prompts": [{"type": 0, "title": "Q", "options": [{"title": "Admin"}]}]});
+    let (status, config) = w.app.send(axum::http::Method::PUT, &w.path("/onboarding"), Some(&w.owner), Some(plain)).await;
+    assert_eq!(status, StatusCode::OK, "{config}");
+    let option = option_id(&config, 0, 0);
+    let (role_db, option_db): (i64, i64) = (bot_role.parse().expect("role id"), option.parse().expect("option id"));
+    sqlx::query("UPDATE onboarding_options SET role_ids = ARRAY[$1] WHERE id = $2")
+        .bind(role_db)
+        .bind(option_db)
+        .execute(&w.app.state.db)
+        .await
+        .expect("plant the role");
+    let (status, body) = w.app.put_json(&w.path("/onboarding-responses"), &moderator, json!({"option_ids": [option]})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(roles_of(&w.member_json(&moderator_id).await), vec![editor]);
+}

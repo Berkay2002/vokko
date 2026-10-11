@@ -115,6 +115,7 @@ pub async fn check_code(state: &AppState, user_id: i64, code: &str) -> ApiResult
         return Err(ApiErr {
             status: StatusCode::TOO_MANY_REQUESTS,
             body: ApiError { code: 0, message: "Too many wrong codes. Try again in 15 minutes.".to_owned(), errors: None },
+            retry_after: None,
         });
     }
     let accepted = check_code_once(state, user_id, code).await?;

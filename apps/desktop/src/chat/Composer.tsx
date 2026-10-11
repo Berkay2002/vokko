@@ -5,7 +5,8 @@ import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/typ
 import { request, Popout, Tooltip, useConvertEmoticons, useLegacyChatInput } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
-import { AppsPopout, ExpressionPickerPopout, type ExpressionTab } from './ExpressionPicker';
+import { ExpressionPickerPopout, type ExpressionTab } from './ExpressionPicker';
+import { AppLauncherPopout, AppsGlyph, useCommandComposer } from '../apps/CommandComposer';
 import { useEmojiDb, pushRecentEmoji } from './emojiData';
 import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, updateUpload, useDraft } from './draftStore';
 import { ModifyAttachmentModal } from './AttachmentModals';
@@ -117,9 +118,15 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     if (!(e?.target instanceof Node) || !root.current?.contains(e.target) || text !== '' || uploads.length > 0) return false;
     onEditLast();
   });
+  // ---- slash commands (src/apps) ----
+  const setTextAt = useCallback((next: string, pos: number) => {
+    setDraftText(channelId, next);
+    requestAnimationFrame(() => { area.current?.focus(); area.current?.setSelectionRange(pos, pos); setCaret(pos); });
+  }, [channelId]);
+  const commands = useCommandComposer({ channelId, text, caret, setText: setTextAt });
 
   // ---- autocomplete ----
-  const trigger = useMemo(() => detectTrigger(text, caret), [text, caret]);
+  const trigger = useMemo(() => (commands.active ? null : detectTrigger(text, caret)), [text, caret, commands.active]);
   const triggerKey = trigger ? `${trigger.kind}:${trigger.start}:${trigger.query}` : null;
 
   const suggestions = useMemo<Suggestion[]>(() => {
@@ -182,6 +189,9 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
 
   function send() {
     if (tooLong) return;
+    const command = uploads.length === 0 ? commands.submit(rawContent) : 'none';
+    if (command === 'blocked') return;
+    if (command === 'sent') { finishSend(); return; }
     if (anyUploading) {
       // Enter while a file is still uploading: the message waits (as the "Uploading N files" card) and posts when the uploads settle.
       messageStore.sendAfterUploads(channelId, chat.me, {
@@ -226,6 +236,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
 
   function onKeyDown(e: KeyboardEvent<HTMLElement>) {
     if (e.nativeEvent.isComposing) return;
+    if (commands.onKeyDown(e)) return;
     if (suggestions.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSelected(s => (s + 1) % suggestions.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setSelected(s => (s - 1 + suggestions.length) % suggestions.length); return; }
@@ -308,6 +319,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
         <Popout anchor={plusBtn} open={plusOpen} onClose={() => setPlusOpen(false)} side="top">
           <div className="chat-attach-menu" role="menu">
             <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><FileUp size={20} /> Upload a File</button>
+            <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); setAppsOpen(true); }}><AppsGlyph size={20} /> Use Apps</button>
           </div>
         </Popout>
         <input ref={fileInput} type="file" multiple hidden onChange={e => { addFiles(channelId, [...(e.target.files ?? [])]); e.target.value = ''; }} />
@@ -323,8 +335,9 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
         <ExpressionPickerPopout anchor={expr === 'gif' ? gifBtn : expr === 'sticker' ? stickerBtn : emojiBtn} open={expr !== null} initialTab={expr ?? 'emoji'}
           onClose={() => setExpr(null)} onPickEmoji={e => { setExpr(null); insertEmoji(e.name); }}
           channelId={channelId} onPickGif={(gif: Gif) => sendMedia({ content: gif.url })} onPickSticker={s => sendMedia({ content: '', stickers: [s] })} />
-        <AppsPopout anchor={appsBtn} open={appsOpen} onClose={() => setAppsOpen(false)} />
+        <AppLauncherPopout anchor={appsBtn} open={appsOpen} onClose={() => setAppsOpen(false)} channelId={channelId} onPick={next => setTextAt(next, next.length)} />
       </div>
+      {commands.panel}
       {suggestions.length > 0 && <div className="chat-autocomplete" role="listbox" aria-label="Suggestions">
         <div className="chat-autocomplete-title">{trigger?.kind === 'user' ? 'Members' : trigger?.kind === 'channel' ? 'Text Channels' : `Emoji matching :${trigger?.query}`}</div>
         {suggestions.map((s, i) => <div key={s.key} role="option" aria-selected={i === selected} className={`chat-autocomplete-item${i === selected ? ' selected' : ''}`}

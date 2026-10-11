@@ -2,7 +2,7 @@
 
 import { DEFAULT_EVERYONE } from "../permissions";
 import { timestampToSnowflake } from "../snowflake";
-import type { Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageSnapshot, MessageType, Presence, ReadState, Relationship, RelationshipType, Reminder, Role, Sticker, StickerItem, User, GuildLayout } from "../types";
+import type { Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageInteractionMetadata, MessageSnapshot, MessageType, Presence, ReadState, Relationship, RelationshipType, Reminder, Role, Sticker, StickerItem, User, GuildLayout } from "../types";
 
 export interface MockAccount {
   user: User;
@@ -52,6 +52,12 @@ export interface MockMessage {
   /** MessageFlags; absent = 0. */
   flags?: number;
   nonce: string | null;
+  /** Webhook and interaction messages (mock/apps.ts): identity shown instead of the author's profile, embeds, command metadata. */
+  webhook_id?: string;
+  application_id?: string;
+  interaction_metadata?: MessageInteractionMetadata;
+  author_name?: string;
+  author_avatar?: string | null;
   /** Sticker copies (they outlive the sticker). */
   stickers?: StickerItem[];
   /** Link unfurls (only generated for mock GIF links). */

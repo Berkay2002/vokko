@@ -8,6 +8,7 @@ import { stickerSvg, svgDataUri } from "./gifs";
 import { addChannel, addMessage, createAccount, createGuildRecord, openDM, openGroupDM } from "./ops";
 import { createForumPost, initChannelFields, startThreadFromMessage } from "./threads";
 import { setRelationship } from "./views";
+import { seedEchoBot } from "./apps";
 import { seedVoiceState } from "./voice";
 
 const MIN = 60_000;
@@ -402,6 +403,7 @@ export function seed(): void {
   say(random, N, `<@${R}> I'm making popcorn 🍿`, 149);
 
   seedThreads({ general, announcements, guildId, textCategory: textCategory.id, docsQuestion, replayBuffer, morning, R, A, B, Bo, N });
+  seedEchoBot(R);
 
   // Read states for sam: dev-talk partly unread, random has two mentions.
   const state = (channelId: string, last: string | null, mentions = 0) => sam.readStates.set(channelId, { channel_id: channelId, last_message_id: last, mention_count: mentions });

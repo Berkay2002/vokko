@@ -176,13 +176,19 @@ async fn overwrites_for(state: &AppState, channel_id: i64) -> ApiResult<Vec<Over
 pub async fn channel_access(state: &AppState, user_id: i64, channel_id: i64) -> ApiResult<ChannelAccess> {
     let channel = store::channel_row(state, channel_id).await?.ok_or_else(ApiErr::unknown_channel)?;
     if channel.is_dm() {
-        let member: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM channel_recipients WHERE channel_id = $1 AND user_id = $2")
-            .bind(channel_id)
-            .bind(user_id)
-            .fetch_optional(&state.db)
-            .await?;
-        if member.is_none() {
-            return Err(ApiErr::missing_access());
+        // A bot only reaches DMs whose other recipients still share a guild with it.
+        let member: Option<(bool, bool)> = sqlx::query_as(
+            "SELECT u.bot, NOT EXISTS (SELECT 1 FROM channel_recipients o WHERE o.channel_id = $1 AND o.user_id <> $2 \
+             AND NOT EXISTS (SELECT 1 FROM guild_members a JOIN guild_members b ON b.guild_id = a.guild_id WHERE a.user_id = $2 AND b.user_id = o.user_id)) \
+             FROM channel_recipients r JOIN users u ON u.id = r.user_id WHERE r.channel_id = $1 AND r.user_id = $2",
+        )
+        .bind(channel_id)
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await?;
+        match member {
+            Some((false, _)) | Some((true, true)) => {}
+            _ => return Err(ApiErr::missing_access()),
         }
         return Ok(ChannelAccess { channel, permissions: DM_PERMISSIONS, parent: None });
     }

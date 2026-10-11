@@ -17,6 +17,7 @@ import { flagsField } from "./memberFlags";
 import { setVoiceChannelStatus } from "./voice";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
 import "./search";
+import { dismissEphemeral, mergeEphemerals } from "./apps";
 import "./invites";
 import "./community";
 import "./status";
@@ -334,7 +335,7 @@ route("GET", `/channels/${ID}/messages`, ({ viewer, params, query }) => {
   } else {
     slice = all.slice(-limit);
   }
-  return slice.map(m => messageFor(m, viewer.user.id)).reverse();
+  return mergeEphemerals(channel.id, viewer.user.id, slice.map(m => messageFor(m, viewer.user.id)).reverse(), limit, slice.length >= limit);
 });
 
 route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
@@ -405,6 +406,7 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
 
 route("DELETE", `/channels/${ID}/messages/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  if (dismissEphemeral(channel.id, params[1] ?? "", viewer.user.id)) return undefined;
   const message = requireMessage(channel.id, params[1] ?? "");
   if (message.author_id !== viewer.user.id) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_MESSAGES);
   const list = sortedMessages(channel.id);
@@ -544,7 +546,9 @@ export function handleRoute(method: string, rawPath: string, body: unknown, view
   const url = new URL(rawPath, "http://mock.local");
   const key = `${method} ${url.pathname}`;
   const viewer = viewerId ? db.accounts.get(viewerId) : undefined;
-  if (!viewer && !PUBLIC.has(key) && !url.pathname.startsWith("/auth/") && !isInvitePreview(method, url.pathname)) fail(401, 0, "401: Unauthorized");
+  // Webhook and interaction token URLs carry their own credential (mock/apps.ts).
+  const tokenRoute = /^\/(interactions\/\d+\/[^/]+\/callback|webhooks\/\d+\/[^/]+(\/messages\/[^/]+)?)$/.test(url.pathname);
+  if (!viewer && !tokenRoute && !PUBLIC.has(key) && !url.pathname.startsWith("/auth/") && !isInvitePreview(method, url.pathname)) fail(401, 0, "401: Unauthorized");
   for (const r of routes) {
     if (r.method !== method) continue;
     const match = r.pattern.exec(url.pathname);

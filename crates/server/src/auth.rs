@@ -54,13 +54,20 @@ pub fn hash_token(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
 }
 
-/// Looks a token up; `None` if it is unknown or revoked.
+/// Looks a token up; `None` if it is unknown or revoked. Bot tokens only work with the `Bot ` prefix, user tokens only without it.
 pub async fn user_for_token(state: &AppState, token: &str) -> ApiResult<Option<i64>> {
-    let hash = hash_token(token);
-    let row: Option<(i64, bool)> = sqlx::query_as("SELECT user_id, last_used_at < now() - interval '5 minutes' FROM sessions WHERE token_hash = $1")
-        .bind(&hash)
-        .fetch_optional(&state.db)
-        .await?;
+    let (raw, bot) = match token.strip_prefix("Bot ") {
+        Some(raw) => (raw.trim(), true),
+        None => (token, false),
+    };
+    let hash = hash_token(raw);
+    let row: Option<(i64, bool)> = sqlx::query_as(
+        "SELECT s.user_id, s.last_used_at < now() - interval '5 minutes' FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND u.bot = $2",
+    )
+    .bind(&hash)
+    .bind(bot)
+    .fetch_optional(&state.db)
+    .await?;
     // "last used" for the devices list, written at most every 5 minutes per session
     if let Some((_, true)) = row {
         sqlx::query("UPDATE sessions SET last_used_at = now() WHERE token_hash = $1").bind(&hash).execute(&state.db).await?;
@@ -77,8 +84,21 @@ pub fn bearer_header(headers: &HeaderMap) -> Option<&str> {
 #[derive(Clone, Copy)]
 pub struct ResolvedUser(pub i64);
 
-/// The authenticated user, from the raw `Authorization: <token>` header (no scheme prefix).
+/// The authenticated user, from the raw `Authorization: <token>` header (no scheme prefix; `Bot <token>` for bots).
 pub struct AuthUser(pub i64);
+
+/// An authenticated user that is not a bot: routes only people may use (applications, OAuth2, running commands) answer bots 403 20001.
+pub struct HumanUser(pub i64);
+
+impl FromRequestParts<AppState> for HumanUser {
+    type Rejection = ApiErr;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+        let AuthUser(id) = AuthUser::from_request_parts(parts, state).await?;
+        let (bot,): (bool,) = sqlx::query_as("SELECT bot FROM users WHERE id = $1").bind(id).fetch_one(&state.db).await?;
+        if bot { Err(ApiErr::bots_forbidden()) } else { Ok(Self(id)) }
+    }
+}
 
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = ApiErr;

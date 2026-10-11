@@ -215,6 +215,8 @@ export interface NewMessage {
   silent?: boolean;
   /** False: the author lacks MENTION_EVERYONE, so @everyone/@here is kept as text but does not ping. Default true. */
   allowEveryone?: boolean;
+  /** Webhook / interaction fields stored with the message (mock/apps.ts). */
+  extra?: Partial<Pick<MockMessage, "webhook_id" | "application_id" | "interaction_metadata" | "author_name" | "author_avatar" | "embeds">>;
   stickers?: StickerItem[];
   forward?: MockMessage["forward"];
 }
@@ -258,6 +260,7 @@ export function addMessage(input: NewMessage): MockMessage {
     ...(input.stickers?.length ? { stickers: input.stickers } : {}),
     ...(input.forward ? { forward: input.forward } : {}),
     embeds: gifEmbeds(input.content),
+    ...(input.extra ? Object.fromEntries(Object.entries(input.extra).filter(([, value]) => value !== undefined)) : {}),
   };
   const list = sortedMessages(channel.id);
   const previousLast = list.at(-1)?.id ?? null;

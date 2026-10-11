@@ -8,6 +8,7 @@ import { NotifyBanners, Splash } from "./notify";
 import { invitePath, onDeepLink } from "./desktop";
 import { InvitePage } from "./shell/InvitePage";
 import { pendingInvite } from "./shell/pendingInvite";
+import { AuthorizePage } from "./apps/AuthorizePage";
 import { WindowFrame } from "./shell/WindowControls";
 
 function Protected() {
@@ -53,6 +54,7 @@ export function App() {
         <Route path="/reset" element={<ResetPage />} />
         <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
         <Route path="/invite/:code" element={<InvitePage />} />
+        <Route path="/oauth2/authorize" element={<AuthorizePage />} />
         <Route path="/channels/:guildId" element={<Protected />} />
         <Route path="/channels/:guildId/:channelId" element={<Protected />} />
         <Route path="*" element={<Navigate to="/channels/@me" replace />} />

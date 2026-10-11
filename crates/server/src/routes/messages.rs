@@ -221,6 +221,8 @@ pub struct Extras {
     pub reopen_thread: bool,
     /// Embeds to store as they are (a published copy keeps its source's); no unfurl runs for these.
     pub embeds: Option<String>,
+    /// Webhook / interaction messages: the identity and metadata stored with the message (see `apps`).
+    pub identity: Option<crate::apps::MessageIdentity>,
 }
 
 /// Stores a message, updates read states / unread counters, reopens closed DMs and fans MESSAGE_CREATE out.
@@ -293,8 +295,8 @@ async fn insert_message_stored(
     };
     sqlx::query(
         "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds, \
-         forward_channel_id, forward_message_id, forward_guild_id, snapshot) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]')::jsonb, $12, $13, $14, $15::jsonb)",
+         forward_channel_id, forward_message_id, forward_guild_id, snapshot, webhook_id, application_id, webhook_name, webhook_avatar, interaction_metadata) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]')::jsonb, $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20::jsonb)",
     )
     .bind(message_id)
     .bind(channel.id)
@@ -311,6 +313,11 @@ async fn insert_message_stored(
     .bind(draft.forward.as_ref().map(|forward| forward.source_message))
     .bind(draft.forward.as_ref().and_then(|forward| forward.source_guild))
     .bind(snapshot_json)
+    .bind(extras.identity.as_ref().and_then(|identity| identity.webhook_id))
+    .bind(extras.identity.as_ref().and_then(|identity| identity.application_id))
+    .bind(extras.identity.as_ref().and_then(|identity| identity.name.clone()))
+    .bind(extras.identity.as_ref().and_then(|identity| identity.avatar.clone()))
+    .bind(extras.identity.as_ref().and_then(|identity| identity.interaction_metadata.clone()))
     .execute(&mut *tx)
     .await?;
     if let Some(forward) = &draft.forward {
@@ -436,7 +443,9 @@ async fn insert_message_stored(
     let mut view = store::message_view(state, message_id, None).await?.ok_or_else(ApiErr::internal)?;
     view.message.nonce = draft.nonce;
     state.hub.send_with(&viewers, "MESSAGE_CREATE", |user| serde_json::to_value(view.for_viewer(user)).unwrap_or_default());
-    if matches!(draft.kind, MessageType::Default | MessageType::Reply) && extras.embeds.is_none() {
+    if matches!(draft.kind, MessageType::Default | MessageType::Reply | MessageType::ChatInputCommand | MessageType::ContextMenuCommand)
+        && extras.embeds.is_none()
+    {
         unfurl::spawn(state, channel.clone(), message_id, draft.content, Vec::new());
     }
     Ok(view)
@@ -486,7 +495,12 @@ async fn list_messages(
     };
     rows.sort_by_key(|row| std::cmp::Reverse(row.id));
     let views = store::load_messages(&state, rows, Some(user_id)).await?;
-    Ok(Json(views.into_iter().map(|view| view.message).collect()))
+    let mut messages: Vec<Message> = views.into_iter().map(|view| view.message).collect();
+    // The caller's own ephemeral interaction responses that fall inside this page.
+    let page =
+        crate::apps::PageBounds { before: query.before.map(Snowflake::db), after: query.after.map(Snowflake::db), around: query.around.map(Snowflake::db) };
+    crate::apps::merge_ephemerals(&state, id, user_id, page, limit, &mut messages).await?;
+    Ok(Json(messages))
 }
 
 async fn create_message(
@@ -692,6 +706,10 @@ async fn delete_message(State(state): State<AppState>, AuthUser(user_id): AuthUs
     let id = channel_id(&id)?;
     let mid = message_id(&mid)?;
     let access = channel_access(&state, user_id, id).await?;
+    // Dismissing an ephemeral message (only its recipient can see it, so only they can).
+    if crate::apps::dismiss_ephemeral(&state, id, mid, user_id).await? {
+        return Ok(StatusCode::NO_CONTENT);
+    }
     let row = message_in_channel(&state, id, mid).await?;
     if row.author_id != user_id && (access.is_dm() || access.permissions & MANAGE_MESSAGES == 0) {
         return Err(ApiErr::missing_permissions());

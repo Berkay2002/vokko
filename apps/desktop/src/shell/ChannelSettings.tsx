@@ -1,4 +1,4 @@
-// Full-screen channel settings: Overview + Permissions (Invites and Integrations are placeholders).
+// Full-screen channel settings: Overview + Permissions + Integrations (webhooks, src/apps); Invites is a placeholder.
 import { useMemo, useState } from "react";
 import { Eye, Hash, Lock, Smile, Trash2, Volume2 } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
@@ -15,6 +15,7 @@ import { useVoiceUi } from "../voice";
 import { FullScreenSettings, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { SaveBar } from "./settings/SaveBar";
 import { usePermissions } from "./usePermissions";
+import { ChannelIntegrations } from "../apps/IntegrationsPage";
 import { InviteList } from "../invites/InviteList";
 
 type SectionId = "overview" | "forum" | "permissions" | "invites" | "integrations";
@@ -247,16 +248,7 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
           </Page>
         );
       case "integrations":
-        return (
-          <Page title="Integrations">
-            <Category title="Webhooks">
-              <p className="settings-todo">Not available yet.</p>
-            </Category>
-            <Category title="Followed Channels">
-              <p className="settings-todo">Not available yet.</p>
-            </Category>
-          </Page>
-        );
+        return <ChannelIntegrations channel={channel} canManageWebhooks={can(Perm.MANAGE_WEBHOOKS)} />;
     }
   };
 

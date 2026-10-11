@@ -119,7 +119,9 @@ numeric_enum!(MessageType {
     UserJoin = 7,
     ThreadCreated = 18,
     Reply = 19,
+    ChatInputCommand = 20,
     ThreadStarterMessage = 21,
+    ContextMenuCommand = 23,
 });
 
 impl ChannelType {
@@ -145,6 +147,10 @@ pub mod message_flags {
     pub const CROSSPOSTED: u32 = 1 << 0;
     pub const IS_CROSSPOST: u32 = 1 << 1;
     pub const SUPPRESS_EMBEDS: u32 = 1 << 2;
+    /// Interaction response visible only to the user who ran the command.
+    pub const EPHEMERAL: u32 = 1 << 6;
+    /// Deferred interaction response ("is thinking...") until the bot edits `@original`.
+    pub const LOADING: u32 = 1 << 7;
 }
 numeric_enum!(
     /// `MessageReference.type`: 0 = reply / default, 1 = forward (`message_snapshots` carries the copy).
@@ -865,6 +871,14 @@ pub struct Message {
     /// Present when a thread was started from this message (the thread id equals the message id).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread: Option<Box<Channel>>,
+    /// Posted by a webhook or as an interaction response (then equal to `application_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_id: Option<Snowflake>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_id: Option<Snowflake>,
+    /// Interaction responses: who ran which command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interaction_metadata: Option<Box<MessageInteractionMetadata>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2066,6 +2080,418 @@ pub struct IdOnly {
     pub id: Snowflake,
 }
 
+// ---- Applications, bots, slash commands, interactions, webhooks ----
+
+numeric_enum!(ApplicationCommandType { ChatInput = 1, User = 2, Message = 3 });
+numeric_enum!(ApplicationCommandOptionType { String = 3, Integer = 4, Boolean = 5, User = 6, Channel = 7, Role = 8, Number = 10 });
+numeric_enum!(InteractionType { Ping = 1, ApplicationCommand = 2, ApplicationCommandAutocomplete = 4 });
+numeric_enum!(InteractionCallbackType { ChannelMessageWithSource = 4, DeferredChannelMessageWithSource = 5, ApplicationCommandAutocompleteResult = 8 });
+numeric_enum!(WebhookType { Incoming = 1, ChannelFollower = 2, Application = 3 });
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InstallParams {
+    /// Decimal permission bitfield.
+    pub permissions: String,
+}
+
+/// A bot application; the bot user's id equals the application id.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Application {
+    pub id: Snowflake,
+    pub name: String,
+    pub description: String,
+    pub icon: Option<String>,
+    pub owner_id: Snowflake,
+    pub bot: User,
+    pub bot_public: bool,
+    pub install_params: InstallParams,
+}
+
+/// `POST /applications`: the application plus its bot token (shown once).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ApplicationWithToken {
+    #[serde(flatten)]
+    pub application: Application,
+    pub token: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateApplicationRequest {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct EditApplicationRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub icon_attachment_id: Option<Option<Snowflake>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_public: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_params: Option<InstallParams>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BotTokenResponse {
+    pub token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AuthorizeGuild {
+    pub id: Snowflake,
+    pub name: String,
+    pub icon: Option<String>,
+    pub permissions: String,
+}
+
+/// `GET /oauth2/authorize`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OAuth2AuthorizeInfo {
+    pub application: Application,
+    pub bot: User,
+    pub permissions: String,
+    pub guilds: Vec<AuthorizeGuild>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OAuth2AuthorizeRequest {
+    pub guild_id: Snowflake,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OAuth2AuthorizeResponse {
+    pub guild_id: Snowflake,
+    pub role_id: Option<Snowflake>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ApplicationCommandOptionChoice {
+    pub name: String,
+    /// A string for string options, a number for integer/number options.
+    pub value: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ApplicationCommandOption {
+    #[serde(rename = "type")]
+    pub kind: ApplicationCommandOptionType,
+    pub name: String,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choices: Option<Vec<ApplicationCommandOptionChoice>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autocomplete: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_value: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_value: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_types: Option<Vec<ChannelType>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ApplicationCommand {
+    pub id: Snowflake,
+    #[serde(rename = "type")]
+    pub kind: ApplicationCommandType,
+    pub application_id: Snowflake,
+    pub guild_id: Option<Snowflake>,
+    pub name: String,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<ApplicationCommandOption>>,
+    pub default_member_permissions: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dm_permission: Option<bool>,
+    pub version: Snowflake,
+}
+
+/// Body of POST/PUT (all of `name`) and PATCH (every field optional; `name` may then be absent) on the command routes.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ApplicationCommandRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ApplicationCommandType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<ApplicationCommandOption>>,
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub default_member_permissions: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dm_permission: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CommandIndexApplication {
+    pub id: Snowflake,
+    pub name: String,
+    pub icon: Option<String>,
+    pub bot_id: Snowflake,
+}
+
+/// `GET /channels/{id}/application-commands`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ApplicationCommandIndex {
+    pub applications: Vec<CommandIndexApplication>,
+    pub application_commands: Vec<ApplicationCommand>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InteractionDataOption {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: ApplicationCommandOptionType,
+    /// string, number or boolean; user/channel/role options carry the id as a string.
+    pub value: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResolvedMember {
+    pub nick: Option<String>,
+    pub roles: Vec<Snowflake>,
+    pub joined_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResolvedChannel {
+    pub id: Snowflake,
+    #[serde(rename = "type")]
+    pub kind: ChannelType,
+    pub name: Option<String>,
+    pub parent_id: Option<Snowflake>,
+}
+
+/// Objects referenced by user/channel/role options and the target of a context-menu command, keyed by id.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct InteractionResolved {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub users: Option<std::collections::BTreeMap<Snowflake, User>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub members: Option<std::collections::BTreeMap<Snowflake, ResolvedMember>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roles: Option<std::collections::BTreeMap<Snowflake, Role>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channels: Option<std::collections::BTreeMap<Snowflake, ResolvedChannel>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub messages: Option<std::collections::BTreeMap<Snowflake, Message>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InteractionData {
+    pub id: Snowflake,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: ApplicationCommandType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guild_id: Option<Snowflake>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<InteractionDataOption>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<InteractionResolved>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<Snowflake>,
+}
+
+/// INTERACTION_CREATE, sent to the bot.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Interaction {
+    pub id: Snowflake,
+    pub application_id: Snowflake,
+    #[serde(rename = "type")]
+    pub kind: InteractionType,
+    pub data: InteractionData,
+    pub guild_id: Option<Snowflake>,
+    pub channel_id: Snowflake,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<GuildMember>,
+    pub user: User,
+    pub token: String,
+    pub app_permissions: String,
+    pub version: u8,
+}
+
+/// `data` of `POST /interactions`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InvokeInteractionData {
+    pub id: Snowflake,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: ApplicationCommandType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<InteractionDataOption>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<Snowflake>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InvokeInteractionRequest {
+    #[serde(rename = "type")]
+    pub kind: InteractionType,
+    pub application_id: Snowflake,
+    pub channel_id: Snowflake,
+    pub data: InvokeInteractionData,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InteractionCreated {
+    pub id: Snowflake,
+    pub nonce: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct InteractionCallbackData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embeds: Option<Vec<Embed>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_mentions: Option<AllowedMentions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub choices: Option<Vec<ApplicationCommandOptionChoice>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InteractionResponse {
+    #[serde(rename = "type")]
+    pub kind: InteractionCallbackType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<InteractionCallbackData>,
+}
+
+/// Webhook execute, interaction followups and edits of webhook/interaction messages.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct WebhookMessageRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embeds: Option<Vec<Embed>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_mentions: Option<AllowedMentions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MessageInteractionMetadata {
+    pub id: Snowflake,
+    #[serde(rename = "type")]
+    pub kind: InteractionType,
+    pub user: User,
+    pub name: String,
+    pub command_type: ApplicationCommandType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_user: Option<User>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_message_id: Option<Snowflake>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Webhook {
+    pub id: Snowflake,
+    #[serde(rename = "type")]
+    pub kind: WebhookType,
+    pub guild_id: Option<Snowflake>,
+    pub channel_id: Snowflake,
+    pub name: String,
+    pub avatar: Option<String>,
+    pub application_id: Option<Snowflake>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<User>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateWebhookRequest {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_attachment_id: Option<Snowflake>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct EditWebhookRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub avatar_attachment_id: Option<Option<Snowflake>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<Snowflake>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct IntegrationApplication {
+    pub id: Snowflake,
+    pub name: String,
+    pub description: String,
+    pub icon: Option<String>,
+    pub bot: User,
+}
+
+/// `GET /guilds/{id}/integrations`: a bot added to the guild.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildIntegration {
+    pub id: Snowflake,
+    /// Always `"bot"`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub name: String,
+    pub enabled: bool,
+    pub application: IntegrationApplication,
+    pub user: Option<User>,
+    pub role_id: Option<Snowflake>,
+}
+
+/// INTERACTION_FAILURE: the bot did not answer within 3 seconds.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InteractionFailure {
+    pub id: Snowflake,
+    pub nonce: Option<String>,
+    pub channel_id: Snowflake,
+    pub application_id: Snowflake,
+}
+
+/// APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AutocompleteResponse {
+    pub id: Snowflake,
+    pub nonce: Option<String>,
+    pub choices: Vec<ApplicationCommandOptionChoice>,
+}
+
+/// WEBHOOKS_UPDATE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WebhooksUpdate {
+    pub guild_id: Snowflake,
+    pub channel_id: Snowflake,
+}
+
 /// Every dispatch event (`t` → `d`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum GatewayEvent {
@@ -2118,6 +2544,10 @@ pub enum GatewayEvent {
     ThreadDelete(ThreadDelete),
     ThreadMemberUpdate(ThreadMemberUpdate),
     ThreadMembersUpdate(ThreadMembersUpdate),
+    InteractionCreate(Box<Interaction>),
+    InteractionFailure(InteractionFailure),
+    AutocompleteResponse(AutocompleteResponse),
+    WebhooksUpdate(WebhooksUpdate),
     InviteCreate(Box<InviteMetadata>),
     InviteDelete(InviteDelete),
     GuildLayoutUpdate(GuildLayout),
@@ -2173,6 +2603,10 @@ impl GatewayEvent {
             Self::ThreadDelete(_) => "THREAD_DELETE",
             Self::ThreadMemberUpdate(_) => "THREAD_MEMBER_UPDATE",
             Self::ThreadMembersUpdate(_) => "THREAD_MEMBERS_UPDATE",
+            Self::InteractionCreate(_) => "INTERACTION_CREATE",
+            Self::InteractionFailure(_) => "INTERACTION_FAILURE",
+            Self::AutocompleteResponse(_) => "APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE",
+            Self::WebhooksUpdate(_) => "WEBHOOKS_UPDATE",
             Self::InviteCreate(_) => "INVITE_CREATE",
             Self::InviteDelete(_) => "INVITE_DELETE",
             Self::GuildLayoutUpdate(_) => "GUILD_LAYOUT_UPDATE",
@@ -2218,6 +2652,10 @@ impl GatewayEvent {
             Self::ThreadDelete(value) => serde_json::to_value(value),
             Self::ThreadMemberUpdate(value) => serde_json::to_value(value),
             Self::ThreadMembersUpdate(value) => serde_json::to_value(value),
+            Self::InteractionCreate(value) => serde_json::to_value(value),
+            Self::InteractionFailure(value) => serde_json::to_value(value),
+            Self::AutocompleteResponse(value) => serde_json::to_value(value),
+            Self::WebhooksUpdate(value) => serde_json::to_value(value),
             Self::InviteCreate(value) => serde_json::to_value(value),
             Self::InviteDelete(value) => serde_json::to_value(value),
             Self::GuildLayoutUpdate(value) => serde_json::to_value(value),
@@ -2725,5 +3163,102 @@ mod tests {
         assert_eq!(permissions::MANAGE_MESSAGES, 8192);
         assert_eq!(permissions::ADMINISTRATOR, 8);
         assert_eq!(permissions::DEFAULT_EVERYONE & (1 | 64 | 1024 | 2048 | 32768 | 65536 | 131072), 1 | 64 | 1024 | 2048 | 32768 | 65536 | 131072);
+    }
+
+    #[test]
+    fn app_and_command_shapes_match_types_ts() {
+        let application = json!({
+            "id": "700", "name": "Echo", "description": "", "icon": null, "owner_id": "100", "bot": user(), "bot_public": true,
+            "install_params": {"permissions": "2048"}
+        });
+        round_trip::<Application>(application.clone());
+        let mut with_token = application.clone();
+        with_token["token"] = json!("abc");
+        round_trip::<ApplicationWithToken>(with_token);
+        let command = json!({
+            "id": "701", "type": 1, "application_id": "700", "guild_id": null, "name": "roll", "description": "Roll a die",
+            "options": [
+                {"type": 4, "name": "sides", "description": "Sides", "required": true, "min_value": 2.0, "max_value": 100.0},
+                {"type": 3, "name": "mode", "description": "Mode", "choices": [{"name": "Fast", "value": "fast"}, {"name": "Six", "value": 6}]}
+            ],
+            "default_member_permissions": null, "dm_permission": true, "version": "702"
+        });
+        round_trip::<ApplicationCommand>(command.clone());
+        round_trip::<ApplicationCommandIndex>(
+            json!({"applications": [{"id": "700", "name": "Echo", "icon": null, "bot_id": "700"}], "application_commands": [command]}),
+        );
+        let patch: ApplicationCommandRequest = serde_json::from_value(json!({"default_member_permissions": null})).expect("patch");
+        assert_eq!(patch.default_member_permissions, Some(None));
+        assert!(patch.name.is_none() && patch.kind.is_none());
+        let edit: EditApplicationRequest = serde_json::from_value(json!({"icon_attachment_id": null, "bot_public": false})).expect("edit");
+        assert_eq!((edit.icon_attachment_id, edit.bot_public), (Some(None), Some(false)));
+        assert!(serde_json::from_value::<ApplicationCommandOption>(json!({"type": 1, "name": "sub", "description": "x"})).is_err());
+    }
+
+    #[test]
+    fn interaction_shapes_match_types_ts() {
+        let interaction = json!({
+            "id": "800", "application_id": "700", "type": 2, "guild_id": "300", "channel_id": "200", "user": user(), "token": "tok",
+            "app_permissions": "2048", "version": 1,
+            "data": {"id": "701", "name": "echo", "type": 1, "options": [{"name": "text", "type": 3, "value": "hi"}],
+                     "resolved": {"users": {"100": user()}}}
+        });
+        round_trip::<Interaction>(interaction.clone());
+        let event = GatewayEvent::InteractionCreate(Box::new(serde_json::from_value(interaction).expect("interaction")));
+        assert_eq!((event.name(), event.data()["data"]["options"][0]["value"].clone()), ("INTERACTION_CREATE", json!("hi")));
+        let invoke: InvokeInteractionRequest = serde_json::from_value(json!({
+            "type": 2, "application_id": "700", "channel_id": "200", "nonce": "n", "data": {"id": "701", "name": "roll", "type": 1, "options": [{"name": "sides", "type": 4, "value": 6}]}
+        }))
+        .expect("invoke");
+        assert_eq!((invoke.kind, invoke.data.options.map(|options| options[0].value.clone())), (InteractionType::ApplicationCommand, Some(json!(6))));
+        round_trip::<InteractionCreated>(json!({"id": "800", "nonce": null}));
+        let response: InteractionResponse = serde_json::from_value(json!({"type": 4, "data": {"content": "hi", "flags": 64}})).expect("response");
+        assert_eq!(
+            (response.kind, response.data.and_then(|data| data.flags)),
+            (InteractionCallbackType::ChannelMessageWithSource, Some(message_flags::EPHEMERAL))
+        );
+        let message = json!({
+            "id": "801", "channel_id": "200", "guild_id": "300", "author": user(), "content": "hi", "timestamp": "2026-10-11T10:00:00.000Z",
+            "edited_timestamp": null, "type": 20, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false,
+            "message_reference": null, "referenced_message": null, "nonce": null, "flags": 64, "webhook_id": "700", "application_id": "700",
+            "interaction_metadata": {"id": "800", "type": 2, "user": user(), "name": "echo", "command_type": 1}
+        });
+        round_trip::<Message>(message);
+        let failure = GatewayEvent::InteractionFailure(InteractionFailure {
+            id: Snowflake(800),
+            nonce: None,
+            channel_id: Snowflake(200),
+            application_id: Snowflake(700),
+        });
+        assert_eq!(
+            (failure.name(), failure.data()),
+            ("INTERACTION_FAILURE", json!({"id": "800", "nonce": null, "channel_id": "200", "application_id": "700"}))
+        );
+        let choices = GatewayEvent::AutocompleteResponse(AutocompleteResponse {
+            id: Snowflake(800),
+            nonce: Some("n".to_owned()),
+            choices: vec![ApplicationCommandOptionChoice { name: "a".to_owned(), value: json!("a") }],
+        });
+        assert_eq!(choices.name(), "APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE");
+        assert_eq!(MessageType::from_u8(20), Some(MessageType::ChatInputCommand));
+        assert_eq!(MessageType::from_u8(23), Some(MessageType::ContextMenuCommand));
+    }
+
+    #[test]
+    fn webhook_shapes_match_types_ts() {
+        round_trip::<Webhook>(json!({
+            "id": "900", "type": 1, "guild_id": "300", "channel_id": "200", "name": "Hook", "avatar": null, "application_id": null,
+            "user": user(), "token": "t", "url": "http://x/api/v1/webhooks/900/t"
+        }));
+        round_trip::<Webhook>(json!({"id": "900", "type": 1, "guild_id": "300", "channel_id": "200", "name": "Hook", "avatar": null, "application_id": null}));
+        let edit: EditWebhookRequest = serde_json::from_value(json!({"avatar_attachment_id": null})).expect("edit");
+        assert_eq!(edit.avatar_attachment_id, Some(None));
+        round_trip::<WebhookMessageRequest>(json!({"content": "hi", "username": "Alerts", "avatar_url": "https://x.io/a.png"}));
+        let update = GatewayEvent::WebhooksUpdate(WebhooksUpdate { guild_id: Snowflake(300), channel_id: Snowflake(200) });
+        assert_eq!((update.name(), update.data()), ("WEBHOOKS_UPDATE", json!({"guild_id": "300", "channel_id": "200"})));
+        round_trip::<GuildIntegration>(json!({
+            "id": "700", "type": "bot", "name": "Echo", "enabled": true, "user": null, "role_id": "301",
+            "application": {"id": "700", "name": "Echo", "description": "", "icon": null, "bot": user()}
+        }));
     }
 }

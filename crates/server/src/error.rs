@@ -1,21 +1,25 @@
 //! Error model: HTTP status + `ApiError` body with Discord-like numeric codes.
 use axum::Json;
+use axum::http::HeaderValue;
 use axum::http::StatusCode;
+use axum::http::header::RETRY_AFTER;
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
-use vokko_protocol::api::ApiError;
+use vokko_protocol::api::{ApiError, RateLimitError};
 
 #[derive(Debug)]
 pub struct ApiErr {
     pub status: StatusCode,
     pub body: ApiError,
+    /// Set by [`ApiErr::rate_limited`]: the response is a `RateLimitError` with a `Retry-After` header instead.
+    pub retry_after: Option<f64>,
 }
 
 pub type ApiResult<T> = Result<T, ApiErr>;
 
 impl ApiErr {
     fn new(status: StatusCode, code: u32, message: &str) -> Self {
-        Self { status, body: ApiError { code, message: message.to_owned(), errors: None } }
+        Self { status, body: ApiError { code, message: message.to_owned(), errors: None }, retry_after: None }
     }
 
     pub fn unauthorized() -> Self {
@@ -147,6 +151,42 @@ impl ApiErr {
         Self::new(StatusCode::BAD_REQUEST, 40033, "This message has already been crossposted")
     }
 
+    /// 403 / 20001: routes only people may use.
+    pub fn bots_forbidden() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 20001, "Bots cannot use this endpoint")
+    }
+
+    pub fn unknown_application() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10002, "Unknown Application")
+    }
+
+    pub fn unknown_webhook() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10015, "Unknown Webhook")
+    }
+
+    pub fn invalid_webhook_token() -> Self {
+        Self::new(StatusCode::UNAUTHORIZED, 50027, "Invalid Webhook Token")
+    }
+
+    pub fn unknown_interaction() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10062, "Unknown interaction")
+    }
+
+    pub fn unknown_command() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10063, "Unknown application command")
+    }
+
+    pub fn already_acknowledged() -> Self {
+        Self::new(StatusCode::BAD_REQUEST, 40060, "Interaction has already been acknowledged")
+    }
+
+    /// 429 with a `RateLimitError`-shaped body, for limits enforced inside a handler (webhook execute, running commands).
+    pub fn rate_limited(retry_after: f64) -> Self {
+        let mut error = Self::new(StatusCode::TOO_MANY_REQUESTS, 0, "You are being rate limited.");
+        error.retry_after = Some(retry_after);
+        error
+    }
+
     pub fn payload_too_large() -> Self {
         Self::new(StatusCode::PAYLOAD_TOO_LARGE, 40005, "Request entity too large")
     }
@@ -170,6 +210,14 @@ impl ApiErr {
 
 impl IntoResponse for ApiErr {
     fn into_response(self) -> Response {
+        if let Some(retry_after) = self.retry_after {
+            let body = RateLimitError { message: self.body.message, retry_after, global: false };
+            let mut response = (self.status, Json(body)).into_response();
+            if let Ok(value) = HeaderValue::from_str(&(retry_after.ceil().max(1.0) as u64).to_string()) {
+                response.headers_mut().insert(RETRY_AFTER, value);
+            }
+            return response;
+        }
         (self.status, Json(self.body)).into_response()
     }
 }

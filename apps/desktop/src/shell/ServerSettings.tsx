@@ -18,6 +18,7 @@ import { TagPage } from "./settings/TagPage";
 import { ThemePage } from "./settings/ThemePage";
 import { MembersPage } from "./settings/server-people";
 import { usePermissions } from "./usePermissions";
+import { IntegrationsPage } from "../apps/IntegrationsPage";
 import { InviteList } from "../invites/InviteList";
 
 interface SectionDef {
@@ -58,7 +59,7 @@ const SECTIONS: SectionDef[] = [
   { id: "invites", label: "Invites", group: "people", needs: [Perm.CREATE_INSTANT_INVITE, Perm.MANAGE_GUILD] },
   { id: "onboarding", label: "Onboarding", group: "people" },
   { id: "access", label: "Access", group: "people", outline: ["Access Options", "Age-Restricted Server", "Server Rules"] },
-  { id: "integrations", label: "Integrations", group: "apps", outline: ["Webhooks", "Followed Channels", "Bots and Apps"] },
+  { id: "integrations", label: "Integrations", group: "apps", needs: [Perm.MANAGE_GUILD, Perm.MANAGE_WEBHOOKS] },
   { id: "safety", label: "Safety Setup", group: "moderation", outline: ["Verification Level", "Require 2FA", "Sensitive Content Filter", "Activity Alerts"] },
   { id: "audit", label: "Audit Log", group: "moderation", needs: [Perm.VIEW_AUDIT_LOG], outline: ["Audit Log"] },
   { id: "bans", label: "Bans", group: "moderation", needs: [Perm.BAN_MEMBERS] },
@@ -304,6 +305,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         return <InvitesPage guildId={guildId} canCreate={canInvite} canList={canManage} channels={channels} />;
       case "bans":
         return <BansPage guild={guild} />;
+      case "integrations":
+        return <IntegrationsPage guild={guild} canManageGuild={canManage} canManageWebhooks={owner || perms.can(Perm.MANAGE_WEBHOOKS)} />;
       case "onboarding":
         return <OnboardingSettings guildId={guildId} />;
       default:

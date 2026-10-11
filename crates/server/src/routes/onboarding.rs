@@ -75,6 +75,13 @@ struct ConfigRow {
 }
 
 /// Ids of the guild's text and voice channels, and of its roles other than @everyone.
+/// Roles of the guild's bots (managed by their integration).
+async fn managed_roles(state: &AppState, guild: i64) -> ApiResult<HashSet<i64>> {
+    let rows: Vec<(i64,)> =
+        sqlx::query_as("SELECT role_id FROM guild_integrations WHERE guild_id = $1 AND role_id IS NOT NULL").bind(guild).fetch_all(&state.db).await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 async fn targets(state: &AppState, guild: i64) -> ApiResult<(HashSet<i64>, HashSet<i64>)> {
     let channels: Vec<(i64,)> = sqlx::query_as("SELECT id FROM channels WHERE guild_id = $1 AND kind IN (0, 2)").bind(guild).fetch_all(&state.db).await?;
     let roles: Vec<(i64,)> = sqlx::query_as("SELECT id FROM roles WHERE guild_id = $1 AND id <> $1").bind(guild).fetch_all(&state.db).await?;
@@ -200,6 +207,8 @@ struct Context<'a> {
     roles: &'a HashSet<i64>,
     /// Roles the editor may hand out: below their highest role, everything for the owner.
     grantable: HashSet<i64>,
+    /// Bot roles: never handed out by onboarding, not even when an option already listed one.
+    managed: HashSet<i64>,
     /// existing option id -> (prompt id, roles it already grants)
     existing_options: &'a HashMap<i64, (i64, Vec<i64>)>,
 }
@@ -220,6 +229,9 @@ fn option_input(state: &AppState, ctx: &Context<'_>, prompt: Option<i64>, index:
     for role in &role_ids {
         if !ctx.roles.contains(role) {
             return Err(ApiErr::invalid(&field, "Unknown role."));
+        }
+        if ctx.managed.contains(role) {
+            return Err(ApiErr::invalid(&field, "A bot's role cannot be granted by onboarding."));
         }
         let kept = existing.is_some_and(|(_, roles)| roles.contains(role));
         if !kept && !ctx.grantable.contains(role) {
@@ -304,7 +316,8 @@ async fn put_onboarding(
             .await?;
     let existing_options: HashMap<i64, (i64, Vec<i64>)> = stored.into_iter().map(|(id, prompt, roles)| (id, (prompt, roles))).collect();
     let existing_prompts: HashSet<i64> = current.prompts.iter().map(|prompt| prompt.id.db()).collect();
-    let ctx = Context { channels: &channels, roles: &roles, grantable, existing_options: &existing_options };
+    let managed = managed_roles(&state, guild).await?;
+    let ctx = Context { channels: &channels, roles: &roles, grantable, managed, existing_options: &existing_options };
 
     let prompts = match &body.prompts {
         Some(inputs) => {
@@ -454,7 +467,8 @@ async fn put_responses(
     if config.rules.is_some() && body.rules_accepted != Some(true) {
         return Err(ApiErr::invalid("rules_accepted", "Accept the rules to continue."));
     }
-    let wanted: HashSet<i64> = chosen.iter().flat_map(|id| known[id].1.role_ids.iter().map(|role| role.db())).collect();
+    let managed = managed_roles(&state, guild).await?;
+    let wanted: HashSet<i64> = chosen.iter().flat_map(|id| known[id].1.role_ids.iter().map(|role| role.db())).filter(|role| !managed.contains(role)).collect();
 
     let mut tx = state.db.begin().await?;
     let locked: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM guild_members WHERE guild_id = $1 AND user_id = $2 FOR UPDATE")

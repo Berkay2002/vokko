@@ -16,6 +16,7 @@ import { ReminderMenu } from '../media/ReminderMenu';
 import { openForward, toggleBookmark, useIsBookmarked } from '../media/store';
 import { isShiftDown } from './util';
 import { useMessageThreadActions } from '../threads/useMessageActions';
+import { MessageAppsMenu } from '../apps/menus';
 
 export interface MessageMenuTarget {
   message: Message;
@@ -110,7 +111,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
       });
       out.push({
         id: 'apps', label: 'Apps', icon: <AppWindow size={ICON} />,
-        children: close => <div className="chat-menu-list"><button type="button" role="menuitem" disabled onClick={close}>No apps installed</button></div>,
+        children: close => <MessageAppsMenu message={message} close={close} />,
       });
     }
     if (!pending) out.push({ id: 'mark-unread', label: 'Mark Unread', icon: <MailOpen size={ICON} />, onSelect: () => messageStore.markUnread(message.channel_id, message.id) });

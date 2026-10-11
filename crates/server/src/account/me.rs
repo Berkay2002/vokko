@@ -199,6 +199,12 @@ pub async fn delete_account(
     if owned > 0 {
         return Err(ApiErr::conflict(40011, "You need to transfer ownership of the servers you own, or delete them, before deleting your account."));
     }
+    // the user's applications go with them: bot tokens revoked, bots out of every guild (the soft delete fires no ON DELETE CASCADE)
+    let owned_apps: Vec<(i64,)> = sqlx::query_as("SELECT id FROM applications WHERE owner_id = $1").bind(user_id).fetch_all(&mut *tx).await?;
+    let mut deleted_apps = Vec::with_capacity(owned_apps.len());
+    for (app,) in owned_apps {
+        deleted_apps.push(crate::apps::delete_app(&mut tx, app).await?);
+    }
     // profile media (avatar, banner, per-server ones) and unsent uploads go with the account; message attachments stay
     let paths: Vec<(Option<String>,)> = sqlx::query_as(
         "SELECT avatar_path FROM users WHERE id = $1 UNION ALL SELECT banner_path FROM users WHERE id = $1 \
@@ -252,6 +258,12 @@ pub async fn delete_account(
     crate::media::remove_files(&state, &media.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
     for (hash,) in sessions {
         state.hub.close_token_sessions(&hash, CLOSE_AUTH_FAILED);
+    }
+    for app in deleted_apps {
+        // the account is already gone: a failed announcement must not turn the delete into an error
+        if let Err(error) = crate::apps::announce_deleted_app(&state, app).await {
+            tracing::warn!("announcing a deleted application failed: {error:?}");
+        }
     }
     let user = store::user(&state, user_id).await?.ok_or_else(ApiErr::internal)?;
     for (guild_id,) in guilds {

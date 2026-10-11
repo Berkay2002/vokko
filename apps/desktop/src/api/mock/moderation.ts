@@ -9,6 +9,7 @@ import { MISSING_PERMISSIONS, pendingAttachment, channelAudience, emitVisibility
 import { forgetOnboardingRoles } from "./memberFlags";
 import { applyOwnMemberPerks, dropTagOnLeave, memberProfileFields } from "./perks";
 import { ID, route, str } from "./router";
+import { dropIntegration, isManagedRole } from "./apps";
 import { emit } from "./socket";
 
 const DAY_MS = 86_400_000;
@@ -41,6 +42,7 @@ function memberJson(guild: MockGuild, userId: string): GuildMember {
 /** Remove a member and tell everyone: GUILD_MEMBER_REMOVE to the rest of the guild, GUILD_DELETE to the user. */
 function removeMember(guild: MockGuild, userId: string): void {
   if (!guild.members.delete(userId)) return;
+  dropIntegration(guild.guild.id, userId);
   dropTagOnLeave(guild, userId);
   emit(guild.members.keys(), "GUILD_MEMBER_REMOVE", { guild_id: guild.guild.id, user: userOf(userId) });
   emit([userId], "GUILD_DELETE", { id: guild.guild.id });
@@ -100,6 +102,7 @@ function editMember(guildId: string, viewerId: string, targetId: string, body: R
     if (!self && !outranks(g, actor, target)) forbidden();
     const changed = [...wanted.filter(id => !record.roles.includes(id)), ...record.roles.filter(id => !wanted.includes(id))];
     for (const id of changed) {
+      if (isManagedRole(guildId, id)) invalid("roles", "INVALID_ROLE", "A bot's role cannot be assigned or removed.");
       const role = g.roles.find(r => r.id === id);
       if (role && !canEditRole(g, actor, role)) forbidden();
     }
@@ -311,6 +314,7 @@ route("PATCH", `/guilds/${ID}/roles/${ID}`, ({ viewer, params, body }) => {
   const g = guild.guild;
   const role = g.roles.find(r => r.id === params[1]);
   if (!role) fail(404, 10011, "Unknown Role");
+  if (isManagedRole(guildId, role.id)) invalid("role", "INVALID_ROLE", "A bot's role cannot be edited. Change the bot's permissions by adding it again.");
   if (!canEditRole(g, actor, role)) forbidden();
   const isEveryone = role.id === g.id;
   const fields = isEveryone ? {} : readRoleFields(body);
@@ -335,6 +339,7 @@ route("DELETE", `/guilds/${ID}/roles/${ID}`, ({ viewer, params }) => {
   const role = g.roles.find(r => r.id === params[1]);
   if (!role) fail(404, 10011, "Unknown Role");
   if (role.id === g.id) fail(400, 50028, "Invalid role");
+  if (isManagedRole(guildId, role.id)) invalid("role", "INVALID_ROLE", "A bot's role cannot be deleted. Remove the bot from Integrations instead.");
   if (!canEditRole(g, actor, role)) forbidden();
   const before = visibilityOf(guildId);
   g.roles =g.roles.filter(r => r.id !== role.id);

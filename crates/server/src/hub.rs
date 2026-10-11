@@ -302,6 +302,18 @@ impl Hub {
         }
     }
 
+    /// Bot token reset or application deletion: closes every live connection of `user_id` (`code`) and forgets its sessions.
+    pub fn close_user_sessions(&self, user_id: i64, code: u16) {
+        let victims: Vec<Arc<Session>> = {
+            let mut sessions = lock(&self.sessions);
+            let ids: Vec<String> = sessions.iter().filter(|(_, session)| session.user_id == user_id).map(|(id, _)| id.clone()).collect();
+            ids.iter().filter_map(|id| sessions.remove(id)).collect()
+        };
+        for session in victims {
+            session.terminate(code);
+        }
+    }
+
     /// Returns true when this is the user's first live connection.
     pub fn connection_opened(&self, user_id: i64) -> bool {
         let mut connections = lock(&self.connections);

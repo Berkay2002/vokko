@@ -78,7 +78,7 @@ test('composer GIF / sticker / emoji / apps buttons', async ({ page }) => {
   await expect(page.getByRole('tab', { name: 'Stickers' })).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Apps' }).click();
-  await expect(page.getByRole('dialog', { name: 'Apps' })).toContainText('aren’t available yet');
+  await expect(page.getByRole('dialog', { name: 'Apps' })).toContainText('No apps with commands in this channel.'); // no bot in this DM
 });
 
 test('context menu Add Reaction submenu and View Reactions modal', async ({ page }) => {
