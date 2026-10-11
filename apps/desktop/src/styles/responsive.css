@@ -1,0 +1,176 @@
+/*
+ * Narrow-window layouts. Import last (after shell.css and the settings sheets) so these rules win.
+ *   <= 1000px  the member list / DM profile panel start hidden (handled in AppShell.tsx; the header toggle still opens them)
+ *   <=  767px  the server rail and sidebar collapse into a drawer opened by the menu button in the header (.nav-toggle)
+ *   <=  780px  settings: server/channel pages go 30/70 (server-settings.css) and the User Settings modal tightens its insets
+ *   <=  485px  User Settings fills the window and shows either the section list or one page (back button in the header)
+ * The measured Discord breakpoints are 780 and 485 (settings-modal/spec.md); 1000 and 767 are Vokko's, see docs/parity.md SHELL-015.
+ */
+
+.nav-toggle {
+  display: none;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: -8px;
+  border-radius: var(--radius-sm);
+  color: var(--interactive-icon-default);
+}
+
+.nav-toggle:hover {
+  color: var(--interactive-icon-hover);
+  background: var(--background-mod-subtle);
+}
+
+.nav-backdrop {
+  display: none;
+}
+
+.sm-back {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .nav-toggle {
+    display: flex;
+  }
+
+  .nav-toggle-floating {
+    position: absolute;
+    top: 8px;
+    left: 16px;
+    z-index: 2;
+    margin-left: 0;
+  }
+
+  .app-main {
+    position: relative;
+  }
+
+  .app-body > .server-rail,
+  .app-body > .sidebar,
+  .app-body > .sidebar-resize,
+  .user-panel {
+    display: none;
+  }
+
+  .app-frame.nav-open .nav-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 39;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .app-frame.nav-open .app-body > .server-rail {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    background: var(--app-frame-background);
+  }
+
+  .app-frame.nav-open .app-body > .sidebar {
+    display: block;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--rail-width);
+    z-index: 40;
+    width: min(var(--sidebar-width), calc(100vw - var(--rail-width) - 56px));
+    border-top-left-radius: 0;
+  }
+
+  .app-frame.nav-open .user-panel {
+    display: flex;
+    z-index: 45;
+    width: calc(min(var(--sidebar-width), 100vw - var(--rail-width) - 56px) + var(--rail-width) - 16px);
+  }
+}
+
+@media (max-width: 600px) {
+  .channel-header-topic,
+  .channel-header-divider {
+    display: none;
+  }
+}
+
+@media (max-width: 780px) {
+  .sm {
+    inset: 24px 8px;
+  }
+
+  /* the notification / update / connection banner is pinned above the modal layer: keep it off the dialog header */
+  html.has-top-banner .sm {
+    top: max(24px, var(--notify-banner-height));
+  }
+
+  .sm-side {
+    flex-basis: 200px;
+    width: 200px;
+  }
+
+  .sm-column {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 24px 16px 80px;
+  }
+}
+
+@media (max-width: 485px) {
+  .sm {
+    inset: 0;
+    max-width: none;
+    border-radius: 0;
+  }
+
+  html.has-top-banner .sm {
+    top: var(--notify-banner-height);
+  }
+
+  .sm-side {
+    flex: 1 0 100%;
+    width: 100%;
+    border-right: 0;
+  }
+
+  .sm-main {
+    flex: 1 0 100%;
+  }
+
+  .sm[data-pane="nav"] .sm-main,
+  .sm[data-pane="page"] .sm-side {
+    display: none;
+  }
+
+  .sm[data-pane="page"] .sm-back {
+    display: flex;
+  }
+
+  .sm-back {
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    margin-right: 8px;
+    border-radius: 8px;
+    color: var(--text-muted);
+  }
+
+  .sm-back:hover {
+    background: var(--background-mod-subtle);
+    color: var(--text-default);
+  }
+
+  .sm-header {
+    justify-content: flex-start;
+  }
+
+  .sm-header .sm-close {
+    margin-left: auto;
+  }
+}

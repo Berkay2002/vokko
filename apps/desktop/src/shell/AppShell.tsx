@@ -18,9 +18,14 @@ import { markChannelRead, markGuildRead } from "./actions";
 import { firstTextChannel, groupChannels } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
 import { setNavigator } from "./nav";
+import { NARROW_QUERY, useNavDrawer } from "./navDrawer";
+import { NavToggle } from "./NavToggle";
+import { useMediaQuery } from "./useMediaQuery";
 import { channelSlots, useRightPanelOpen } from "./slots";
 
 const SIDEBAR_KEY = "vokko.sidebarWidth";
+/** At this width and below the member list and DM profile panel start hidden. */
+const COMPACT_QUERY = "(max-width: 1000px)";
 const MEMBERS_KEY = "vokko.membersOpen";
 const PROFILE_KEY = "vokko.dmProfileOpen";
 // List column (the 72px rail excluded). Q6: store default 375 total, min 264, max 432.
@@ -95,22 +100,47 @@ export function AppShell() {
     appStore.getState().setRoute({ guildId, channelId });
   }, [guildId, channelId]);
 
+  // At 1000px and below the side panels start hidden and the toggle works on a per-visit state; the stored choice is for wide windows.
+  const compact = useMediaQuery(COMPACT_QUERY);
+  const [compactMembers, setCompactMembers] = useState(false);
+  const [compactProfile, setCompactProfile] = useState(false);
+  const membersVisible = compact ? compactMembers : membersOpen;
+  const profileVisible = compact ? compactProfile : profileOpen;
   const toggleMembers = useCallback(
     () =>
-      setMembersOpen(open => {
-        localStorage.setItem(MEMBERS_KEY, open ? "0" : "1");
-        return !open;
-      }),
-    [],
+      compact
+        ? setCompactMembers(open => !open)
+        : setMembersOpen(open => {
+            localStorage.setItem(MEMBERS_KEY, open ? "0" : "1");
+            return !open;
+          }),
+    [compact],
   );
   const toggleProfile = useCallback(
     () =>
-      setProfileOpen(open => {
-        localStorage.setItem(PROFILE_KEY, open ? "0" : "1");
-        return !open;
-      }),
-    [],
+      compact
+        ? setCompactProfile(open => !open)
+        : setProfileOpen(open => {
+            localStorage.setItem(PROFILE_KEY, open ? "0" : "1");
+            return !open;
+          }),
+    [compact],
   );
+
+  // Narrow windows: the rail and sidebar are a drawer. It closes when you pick a destination and when the window grows again.
+  const narrow = useMediaQuery(NARROW_QUERY);
+  const navOpen = useNavDrawer(s => s.open);
+  useEffect(() => {
+    useNavDrawer.getState().close();
+  }, [guildId, channelId, narrow]);
+  useEffect(() => {
+    if (!narrow || !navOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !useModals.getState().modal) useNavDrawer.getState().close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [narrow, navOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -169,27 +199,33 @@ export function AppShell() {
   const text = channel && channel.type !== ChannelType.GuildVoice;
 
   return (
-    <div className="app-frame" style={{ ["--sidebar-width" as string]: `${width}px` }}>
+    <div className={`app-frame${navOpen ? " nav-open" : ""}`} style={{ ["--sidebar-width" as string]: `${width}px` }}>
       <NavigatorBridge />
       <TitleBar />
       <div className="app-body">
         <ServerRail />
         <div className="sidebar">{guild ? <GuildSidebar guild={guild} /> : <DmSidebar />}</div>
         <div className="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize Sidebar" {...handlers} />
+        <div className="nav-backdrop" onClick={() => useNavDrawer.getState().close()} />
         <main className="app-main" aria-label={channel ? (channel.name ?? "Conversation") : "Friends"}>
           {!channel && isHome && <FriendsPage />}
-          {!channel && !isHome && <div className="main-empty">There are no text channels in this server yet.</div>}
+          {!channel && !isHome && (
+            <>
+              <NavToggle className="nav-toggle-floating" />
+              <div className="main-empty">There are no text channels in this server yet.</div>
+            </>
+          )}
           {channel && (
             <>
-              <ChannelHeader channel={channel} membersOpen={membersOpen && !!guild} onToggleMembers={toggleMembers} profileOpen={profileOpen && !!dmRecipient} onToggleProfile={toggleProfile} />
+              <ChannelHeader channel={channel} membersOpen={membersVisible && !!guild} onToggleMembers={toggleMembers} profileOpen={profileVisible && !!dmRecipient} onToggleProfile={toggleProfile} />
               <div className="channel-body">
                 <div className="channel-chat">{text ? <ChatView key={channel.id} channelId={channel.id} /> : <div className="main-empty">Voice channels are not supported yet.</div>}</div>
                 {panelOpen && channelSlots.RightPanel ? (
                   <channelSlots.RightPanel channel={channel} />
                 ) : (
                   <>
-                    {guild && membersOpen && <MemberList guildId={guild.id} />}
-                    {dmRecipient && profileOpen && <DmProfilePanel user={dmRecipient} />}
+                    {guild && membersVisible && <MemberList guildId={guild.id} />}
+                    {dmRecipient && profileVisible && <DmProfilePanel user={dmRecipient} />}
                   </>
                 )}
               </div>

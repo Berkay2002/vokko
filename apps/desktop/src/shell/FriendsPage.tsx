@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { NavToggle } from "./NavToggle";
 import { Check, MessageCircle, MoreVertical, Search, Users, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
@@ -198,6 +199,7 @@ export function FriendsPage() {
     <div className="friends-page">
       <div className="friends-main">
         <header className="friends-header">
+          <NavToggle />
           <div className="friends-title">
             <Users size={20} />
             <h1>Friends</h1>

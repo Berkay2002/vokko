@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, ReactNode, RefObject, UIEvent } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { ChevronLeft, X } from "lucide-react";
 import { useFocusTrap, useLayer } from "../../ui";
 
 /**
@@ -35,6 +35,8 @@ function motionReduced(): boolean {
 export function SettingsModal({ label, title, side, onClose, children, scrollRef, onScroll, pageKey }: SettingsModalProps) {
   const root = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
+  // Fullscreen phone layout (<= 485px, see styles/responsive.css): the section list and one page take turns.
+  const [pane, setPane] = useState<"nav" | "page">(() => (window.matchMedia("(max-width: 485px)").matches ? "nav" : "page"));
   const timer = useRef<number | undefined>(undefined);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -55,17 +57,20 @@ export function SettingsModal({ label, title, side, onClose, children, scrollRef
   return createPortal(
     <div className={`sm-layer${closing ? " closing" : ""}`}>
       <div className="sm-backdrop" onClick={requestClose} />
-      <div ref={root} className="sm" role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
-        <nav className="sm-side" aria-label={`${label} sections`}>
+      <div ref={root} className="sm" role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} data-pane={pane}>
+        <nav className="sm-side" aria-label={`${label} sections`} onClick={e => (e.target as HTMLElement).closest(".sm-item, .sm-sub") && setPane("page")}>
           {side}
         </nav>
         <div className="sm-main">
-          <header className="sm-header">
+          <div className="sm-header">
+            <button type="button" className="sm-back" aria-label="Back to sections" onClick={() => setPane("nav")}>
+              <ChevronLeft size={20} />
+            </button>
             <h1 className="sm-title">{title}</h1>
             <button type="button" className="sm-close" aria-label="Close" onClick={requestClose}>
               <X size={20} />
             </button>
-          </header>
+          </div>
           <div ref={scrollRef} key={pageKey} className="sm-scroll" onScroll={onScroll}>
             <div className="sm-column">{children}</div>
           </div>

@@ -33,8 +33,8 @@ async function checkAligned(page: Page, name: string): Promise<void> {
   expect(Math.abs(r.boxBottom - r.panelBottom)).toBeLessThanOrEqual(1);
 }
 
-// 780px is not covered: the shell has no narrow breakpoint, so the side panel squeezes the chat column to ~0px there (shell-owned, reported separately).
-for (const width of [1440, 1100]) {
+// At 1000px and below the side panels start hidden, so 780px keeps the chat column wide enough for the composer.
+for (const width of [1440, 1100, 780]) {
   test.describe(`${width}px wide`, () => {
     test.use({ viewport: { width, height: 900 } });
 

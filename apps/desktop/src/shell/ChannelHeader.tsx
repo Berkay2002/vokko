@@ -6,6 +6,7 @@ import { PinnedMessages } from "../chat/PinnedMessages";
 import { Popout, Tooltip, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
 import { isPrivateChannel } from "./channelPrivacy";
+import { NavToggle } from "./NavToggle";
 import { muteItem, notificationItem, UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
 import { channelSlots } from "./slots";
@@ -62,6 +63,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
   return (
     <header className="channel-header">
       <div className="channel-header-title">
+        <NavToggle />
         {guild ? (
           <>
             {isPrivateChannel(channel, channel.guild_id) ? <Lock size={24} className="channel-header-icon" /> : voice ? <Volume2 size={24} className="channel-header-icon" /> : <Hash size={24} className="channel-header-icon" />}
