@@ -18,6 +18,7 @@ import { ServerSettings } from "./ServerSettings";
 import { RadioGroup, SwitchRow, Toggle } from "./settings/controls";
 import { SERVER_TEMPLATES, type ServerTemplate } from "./templates";
 import { UserSettings } from "./UserSettings";
+import { CameraPreviewModal, ChannelStatusModal, ScreenSharePickerModal } from "../voice";
 
 function errorText(error: unknown): string {
   if (error instanceof ApiRequestError) {
@@ -288,7 +289,8 @@ function InviteModal({ channelId }: { channelId: string }) {
   return (
     <Modal open onClose={closeModal} title={guild ? `Invite friends to ${guild.name}` : "Invite friends"}>
       <p className="modal-subtle">
-        Sending invite to <Hash size={14} className="inline-icon" /> {channel?.name}
+        {channel?.type === ChannelType.GuildVoice ? "Recipients will land in " : "Sending invite to "}
+        {channel?.type === ChannelType.GuildVoice ? <Volume2 size={14} className="inline-icon" /> : <Hash size={14} className="inline-icon" />} {channel?.name}
       </p>
       <label className="field-label" htmlFor="invite-link">
         Or send a server invite link to a friend
@@ -577,5 +579,11 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
       return <NotificationSettingsModal key={id} scopeId={spec.scopeId} title={spec.title} guild={spec.guild} />;
     case "userSettings":
       return <UserSettings key={id} section={spec.section} />;
+    case "voiceStatus":
+      return <ChannelStatusModal key={id} channelId={spec.channelId} />;
+    case "cameraPreview":
+      return <CameraPreviewModal key={id} />;
+    case "screenShare":
+      return <ScreenSharePickerModal key={id} />;
   }
 }

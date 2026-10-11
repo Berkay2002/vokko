@@ -14,6 +14,8 @@ import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
 import { openProfile } from "./ProfileCard";
 import { voiceUserMenuItems } from "../voice/voiceMenus";
+import { getVoice } from "../voice/store";
+import { useVoiceUi } from "../voice/uiStore";
 
 export const UNAVAILABLE = "Not available yet";
 
@@ -188,7 +190,7 @@ export function channelContextItems(channel: Channel, guild: Guild, options: Cha
     ? [
         { id: "edit", label: `Edit ${label}`, onSelect: () => openModal({ type: "editChannel", channelId: channel.id }) },
         ...(category ? [] : [{ id: "duplicate", label: "Duplicate Channel", onSelect: () => void duplicateChannel(channel) } satisfies MenuItem]),
-        { id: "create-text", label: category ? "Create Channel" : "Create Text Channel", onSelect: () => openModal({ type: "createChannel", guildId: guild.id, parentId: category ? channel.id : channel.parent_id }) },
+        ...(voice ? [] : [{ id: "create-text", label: category ? "Create Channel" : "Create Text Channel", onSelect: () => openModal({ type: "createChannel", guildId: guild.id, parentId: category ? channel.id : channel.parent_id }) } satisfies MenuItem]),
         ...(category ? [] : [{ id: "create-voice", label: "Create Voice Channel", onSelect: () => openModal({ type: "createChannel", guildId: guild.id, parentId: channel.parent_id, channelType: ChannelType.GuildVoice }) } satisfies MenuItem]),
         { id: "delete", label: `Delete ${label}`, danger: true, onSelect: () => openModal({ type: "deleteChannel", channelId: channel.id }) },
       ]
@@ -204,9 +206,21 @@ export function channelContextItems(channel: Channel, guild: Guild, options: Cha
           { id: "collapse-all", label: "Collapse All Categories", disabled: !options.anyExpanded, onSelect: options.onCollapseAll },
         ]
       : [
-          ...(can(Perm.CREATE_INSTANT_INVITE) ? [{ id: "invite", label: "Invite People", disabled: !invite, onSelect: () => openModal({ type: "invite", channelId: channel.id }) } satisfies MenuItem] : []),
+          ...(can(Perm.CREATE_INSTANT_INVITE) ? [{ id: "invite", label: voice ? "Invite to Voice" : "Invite People", disabled: !invite, onSelect: () => openModal({ type: "invite", channelId: channel.id }) } satisfies MenuItem] : []),
           { id: "copy-link", label: "Copy Link", onSelect: copy(link) },
         ],
+    voice
+      ? [
+          {
+            id: "open-chat",
+            label: "Open Chat",
+            onSelect: () => {
+              useVoiceUi.getState().setChatOpen(true);
+              go(guildPath(guild.id, channel.id));
+            },
+          },
+        ]
+      : [],
     [muteItem(channel.id, category ? "Category" : "Channel"), ...(voice ? [] : [notificationItem(channel.id, { defaultLabel: category ? "Use Server Default" : "Use Category Default" })])],
     manage,
     [{ id: "copy-id", label: `Copy ${label} ID`, onSelect: copy(channel.id) }],
@@ -287,12 +301,21 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
     ...(mayBan ? [{ id: "ban", label: `Ban ${name}`, danger: true, onSelect: () => openModal({ type: "banMember", ...target }) } satisfies MenuItem] : []),
   ];
 
+  // Moderators with Mute/Deafen Members see the server-wide switches for people who are in a voice channel of this server.
+  const voiceState = getVoice().states[user.id];
+  const serverVoice: MenuItem[] =
+    guild && viewer && voiceState?.guild_id === guild.id
+      ? [
+          ...(viewerPerms(guild).can(Perm.MUTE_MEMBERS) ? [{ ...unavailable("server-mute", "Server Mute"), danger: true, checked: !!voiceState.mute } satisfies MenuItem] : []),
+          ...(viewerPerms(guild).can(Perm.DEAFEN_MEMBERS) ? [{ ...unavailable("server-deafen", "Server Deafen"), danger: true, checked: !!voiceState.deaf } satisfies MenuItem] : []),
+        ]
+      : [];
+
   return groups(
     [
       { id: "profile", label: "Profile", disabled: !anchor, onSelect: () => anchor && openProfile(anchor, user.id, options.guildId ?? null) },
       options.onMention ? { id: "mention", label: "Mention", onSelect: () => options.onMention?.(user) } : unavailable("mention", "Mention"),
-      { id: "message", label: "Message", disabled: isMe, onSelect: () => void openDirectMessage(user.id) },
-      unavailable("call", "Start a Call"),
+      ...(isMe ? [] : [{ id: "message", label: "Message", onSelect: () => void openDirectMessage(user.id) } satisfies MenuItem, unavailable("call", "Start a Call")]),
     ],
     voiceUserMenuItems(user.id),
     isMe
@@ -320,6 +343,7 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
         ? [{ id: "roles", label: `${roles.length} ${roles.length === 1 ? "Role" : "Roles"}`, children: roles.map(r => ({ id: r.id, label: r.name, disabled: true })) }]
         : [],
     moderation,
+    serverVoice,
     [{ id: "copy-id", label: "Copy User ID", onSelect: copy(user.id) }],
   );
 }

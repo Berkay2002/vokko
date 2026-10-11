@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Hash, MessageSquareText } from 'lucide-react';
+import { Hash, MessageCircle, MessageSquareText, Pencil } from 'lucide-react';
 import { ChannelType, RelationshipType, isThreadType } from '../api/types';
-import type { Guild, Snowflake, User, UserProfile } from '../api/types';
-import { Modal, guildIconUrl, guildInitials, request, resolveUrl, useGuilds, useMutualGuildsFromStore, useRelationship, Tooltip } from './shell';
+import type { Channel, Guild, Snowflake, User, UserProfile } from '../api/types';
+import { Modal, Perm, guildIconUrl, guildInitials, openModal, request, resolveUrl, useGuilds, useMutualGuildsFromStore, usePermissions, useRelationship, Tooltip } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 
@@ -112,9 +112,21 @@ export function ChannelStart() {
       <p>This is the start of the thread.</p>
     </div>;
   }
+  // Text-in-voice: a speech bubble, the bare channel name (no hash) and a shortcut to the channel settings.
+  const voice = ch?.type === ChannelType.GuildVoice;
+  const label = voice ? ch?.name : `#${ch?.name}`;
   return <div className="chat-start">
-    <div className="chat-start-icon"><Hash size={42} /></div>
-    <h1>Welcome to #{ch?.name}!</h1>
-    <p>This is the start of the #{ch?.name} channel.{ch?.topic ? ` ${ch.topic}` : ''}</p>
+    <div className="chat-start-icon">{voice ? <MessageCircle size={42} /> : <Hash size={42} />}</div>
+    <h1>Welcome to {label}!</h1>
+    <p>This is the start of the {label} channel.{ch?.topic ? ` ${ch.topic}` : ''}</p>
+    {voice && ch && <VoiceStartActions channel={ch} />}
   </div>;
+}
+
+function VoiceStartActions({ channel }: { channel: Channel }) {
+  const { can } = usePermissions(channel.guild_id, channel.id);
+  if (!can(Perm.MANAGE_CHANNELS)) return null;
+  return <button type="button" className="chat-start-btn" style={{ marginTop: 12 }} onClick={() => openModal({ type: 'editChannel', channelId: channel.id })}>
+    <Pencil size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />Edit Channel
+  </button>;
 }

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Bell, Hash, Lock, Megaphone, MessagesSquare, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
+import { Bell, Hash, Lock, Megaphone, MessageCircle, MessagesSquare, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
+import { useVoiceUi } from "../voice";
 import { dmName } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
 import { PinnedMessages } from "../chat/PinnedMessages";
@@ -52,6 +53,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
   const menu = useContextMenu();
   const guild = !!channel.guild_id;
   const voice = channel.type === ChannelType.GuildVoice;
+  const chatOpen = useVoiceUi(s => s.chatOpen);
   const announcement = channel.type === ChannelType.GuildAnnouncement;
   const forum = channel.type === ChannelType.GuildForum;
   const first = channel.recipients?.[0];
@@ -100,7 +102,13 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
       <div className="channel-header-toolbar">
         {guild ? (
           <>
-            <ThreadsToolbar channel={channel} />
+            {voice ? (
+              <ToolbarButton label={chatOpen ? "Hide Chat" : "Show Chat"} active={chatOpen} onClick={() => useVoiceUi.getState().setChatOpen(!chatOpen)}>
+                <MessageCircle size={24} />
+              </ToolbarButton>
+            ) : (
+              <ThreadsToolbar channel={channel} />
+            )}
             <ToolbarButton label="Notification Settings" onClick={bell}>
               <Bell size={24} />
             </ToolbarButton>
@@ -115,7 +123,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             </ToolbarButton>
           </>
         )}
-        {!forum && (
+        {!voice && !forum && (
           <ToolbarButton label="Pinned Messages" active={pinsOpen} onClick={() => setPinsOpen(o => !o)} buttonRef={setPinsAnchor}>
             <Pin size={24} />
           </ToolbarButton>
@@ -125,7 +133,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             <UserPlus size={24} />
           </ToolbarButton>
         )}
-        {guild && (
+        {guild && !voice && (
           <ToolbarButton label={membersOpen ? "Hide Member List" : "Show Member List"} active={membersOpen} onClick={onToggleMembers}>
             <Users size={24} />
           </ToolbarButton>
@@ -135,7 +143,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             <UserRound size={24} />
           </ToolbarButton>
         )}
-        {channelSlots.HeaderSearch ? (
+        {voice ? null : channelSlots.HeaderSearch ? (
           <channelSlots.HeaderSearch channel={channel} />
         ) : (
           <div className="header-search">

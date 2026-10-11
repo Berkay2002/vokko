@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router";
-import { Compass, Plus } from "lucide-react";
+import { Compass, Plus, Volume2 } from "lucide-react";
+import { useVoice } from "../voice";
 import logo from "../../assets/icon.svg";
 import { avatarUrl, channelMentionCount, dmMentionCount, guildUnread, isChannelUnread, useStore } from "../api/store";
 import { ChannelType, type Channel, type Guild } from "../api/types";
@@ -12,7 +13,7 @@ import { guildContextItems } from "./menus";
 import { guildPath } from "./nav";
 import { openModal } from "./modalStore";
 
-function RailItem({ state, mentions, tooltip, muted, children }: { state: "selected" | "unread" | "idle"; mentions?: number; tooltip: ReactNode; muted?: boolean; children: ReactNode }) {
+function RailItem({ state, mentions, tooltip, muted, voice, children }: { state: "selected" | "unread" | "idle"; mentions?: number; tooltip: ReactNode; muted?: boolean; voice?: boolean; children: ReactNode }) {
   return (
     <div className={`rail-item${muted ? " muted" : ""}`} data-state={state}>
       <span className="rail-pill" />
@@ -20,6 +21,11 @@ function RailItem({ state, mentions, tooltip, muted, children }: { state: "selec
         {children}
       </Tooltip>
       {!!mentions && mentions > 0 && <span className="rail-badge">{mentions > 99 ? "99+" : mentions}</span>}
+      {voice && (
+        <span className="rail-voice-badge" aria-hidden="true">
+          <Volume2 size={10} strokeWidth={3} />
+        </span>
+      )}
     </div>
   );
 }
@@ -34,10 +40,12 @@ function GuildRailItem({ guild }: { guild: Guild }) {
   const target = (lastChannel && channels.find(c => c.id === lastChannel)?.id) ?? firstTextChannel(channels)?.id;
   const muted = useIsMuted(guild.id);
   const state = selected ? "selected" : info.unread && !muted ? "unread" : "idle";
+  // Our own voice state, so the badge also shows while the call runs on another device.
+  const inCall = useVoice(s => s.guildId === guild.id || (s.meId !== null && s.states[s.meId]?.guild_id === guild.id));
 
   return (
-    <RailItem state={state} mentions={info.mentions} tooltip={guild.name} muted={muted}>
-      <NavLink to={guildPath(guild.id, target)} className="rail-tile rail-guild" aria-label={guild.name} onContextMenu={e => menu.open(e, guildContextItems(guild))}>
+    <RailItem state={state} mentions={info.mentions} tooltip={guild.name} muted={muted} voice={inCall}>
+      <NavLink to={guildPath(guild.id, target)} className="rail-tile rail-guild" aria-label={inCall ? `${guild.name}, Voice call active` : guild.name} onContextMenu={e => menu.open(e, guildContextItems(guild))}>
         <GuildIcon guild={guild} size={40} />
       </NavLink>
     </RailItem>

@@ -1,9 +1,9 @@
 import { useMemo, useState, type CSSProperties } from "react";
 import { intToHex } from "../perks/catalog";
 import { NavLink, useLocation } from "react-router";
-import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Megaphone, MessagesSquare, Plus, Radio, Settings, UserPlus, Volume2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Megaphone, MessagesSquare, Plus, Radio, Settings, UserPlus } from "lucide-react";
 import { channelMentionCount, isChannelUnread, useStore } from "../api/store";
-import { VoiceChannelBadge, VoiceChannelUsers, joinVoiceChannel } from "../voice";
+import { VoiceChannelRow } from "../voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
 import { Popout, Tooltip, useContextMenu } from "../ui";
 import { groupChannels } from "./channels";
@@ -33,15 +33,12 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
   const { can } = usePermissions(guild.id, channel.id);
   const muted = useIsMuted(channel.id) || useIsMuted(channel.parent_id);
   const menu = useContextMenu();
-  const voice = channel.type === ChannelType.GuildVoice;
   const selected = location.pathname === `/channels/${guild.id}/${channel.id}`;
-  const className = `channel-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}${voice ? " voice" : ""}`;
+  const className = `channel-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}`;
   const items = () => channelContextItems(channel, guild);
 
   const icon = isPrivateChannel(channel, guild.id) ? (
     <Lock size={20} className="channel-icon" />
-  ) : voice ? (
-    <Volume2 size={20} className="channel-icon" />
   ) : channel.type === ChannelType.GuildAnnouncement ? (
     <Megaphone size={20} className="channel-icon" />
   ) : channel.type === ChannelType.GuildForum ? (
@@ -72,31 +69,13 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
 
   return (
     <li className="channel-row-wrap">
-      {voice ? (
-        <div
-          className={className}
-          role="button"
-          tabIndex={0}
-          aria-label={`${channel.name} voice channel`}
-          onClick={e => !(e.target as HTMLElement).closest(".channel-actions") && joinVoiceChannel(channel)}
-          onKeyDown={e => e.key === "Enter" && e.target === e.currentTarget && joinVoiceChannel(channel)}
-          onContextMenu={e => menu.open(e, items())}
-        >
-          {icon}
-          <span className="channel-name">{channel.name}</span>
-          <VoiceChannelBadge channel={channel} />
-          {actions}
-        </div>
-      ) : (
-        <NavLink to={guildPath(guild.id, channel.id)} className={className} onContextMenu={e => menu.open(e, items())}>
-          {icon}
-          <span className="channel-name">{channel.name}</span>
-          {mentions > 0 ? <span className="count-badge">{mentions}</span> : null}
-          {actions}
-        </NavLink>
-      )}
-      {voice && <VoiceChannelUsers channel={channel} guildId={guild.id} />}
-      {!voice && <ChannelThreads channel={channel} />}
+      <NavLink to={guildPath(guild.id, channel.id)} className={className} onContextMenu={e => menu.open(e, items())}>
+        {icon}
+        <span className="channel-name">{channel.name}</span>
+        {mentions > 0 ? <span className="count-badge">{mentions}</span> : null}
+        {actions}
+      </NavLink>
+      <ChannelThreads channel={channel} />
     </li>
   );
 }
@@ -238,9 +217,9 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
                   </div>
                 )}
                 <ul className="category-channels">
-                  {visible.map(c => (
-                    <ChannelRow key={c.id} channel={c} guild={guild} />
-                  ))}
+                  {visible.map(c =>
+                    c.type === ChannelType.GuildVoice ? <VoiceChannelRow key={c.id} channel={c} guild={guild} /> : <ChannelRow key={c.id} channel={c} guild={guild} />,
+                  )}
                 </ul>
               </li>
             );

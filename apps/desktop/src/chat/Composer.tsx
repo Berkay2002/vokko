@@ -97,7 +97,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const emojiDb = useEmojiDb();
   const convert = useConvertEmoticons();
   const { text, uploads } = draft;
-  const name = chat.channel?.name ? `#${chat.channel.name}` : chat.channel?.recipients?.map(u => chat.nameOf(u)).join(', ') ?? '';
+  const name = chat.channel?.name ? (chat.channel.type === ChannelType.GuildVoice ? chat.channel.name : `#${chat.channel.name}`) :chat.channel?.recipients?.map(u => chat.nameOf(u)).join(', ') ?? '';
   const placeholder = chat.isDm ? `Message @${chat.channel?.recipients?.[0] ? chat.nameOf(chat.channel.recipients[0]) : ''}` : `Message ${name}`;
 
   useLayoutEffect(() => {

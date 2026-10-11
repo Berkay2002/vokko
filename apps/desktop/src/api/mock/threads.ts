@@ -204,7 +204,8 @@ export function createForumPost(init: NewForumPost): { thread: MockChannel; mess
 
 /** Posting into `channel`: forum channels only hold posts, a locked thread needs MANAGE_THREADS. */
 export function assertCanPost(channel: MockChannel, userId: string): void {
-  if (channel.type === ChannelType.GuildCategory || channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStage || isForum(channel)) fail(400, 50024, WRONG_TYPE);
+  // Voice channels are not refused: like the server, they carry text-in-voice chat.
+  if (channel.type === ChannelType.GuildCategory || channel.type === ChannelType.GuildStage || isForum(channel)) fail(400, 50024, WRONG_TYPE);
   if (isThread(channel) && channel.thread_metadata?.locked && !canManageThreads(channel, userId)) fail(403, 160005, "Thread is locked");
 }
 

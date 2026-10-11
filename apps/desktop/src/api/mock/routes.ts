@@ -277,9 +277,16 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   if (isThreadType(channel.type)) return editThread(channel, viewer.user.id, body);
   if (channel.guild_id) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
   applyChannelFields(channel, body);
-  if (typeof body.name === "string") channel.name = body.name.trim().toLowerCase().replace(/\s+/g, "-") || channel.name;
+  if (typeof body.name === "string") {
+    const keepCase = channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildCategory;
+    channel.name = (keepCase ? body.name.trim() : body.name.trim().toLowerCase().replace(/\s+/g, "-")) || channel.name;
+  }
   if ("topic" in body) channel.topic = str(body.topic)?.trim() || null;
   if (typeof body.position === "number") channel.position = body.position;
+  if (channel.type === ChannelType.GuildVoice) {
+    if (typeof body.bitrate === "number") channel.bitrate = body.bitrate;
+    if (typeof body.user_limit === "number") channel.user_limit = body.user_limit;
+  }
   const before = channel.guild_id ? visibilityOf(channel.guild_id) : null;
   if ("parent_id" in body) {
     const parent = str(body.parent_id) ?? null;

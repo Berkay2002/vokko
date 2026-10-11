@@ -17,7 +17,7 @@ import { ProfileCardHost } from "./ProfileCard";
 import { ServerRail } from "./ServerRail";
 import { TitleBar } from "./TitleBar";
 import { UserPanel } from "./UserPanel";
-import { VoiceConnectionPanel } from "../voice";
+import { VoiceChannelPage, VoiceConnectionPanel } from "../voice";
 import { markChannelRead, markGuildRead } from "./actions";
 import { firstTextChannel, groupChannels } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
@@ -232,7 +232,7 @@ export function AppShell() {
                   ) : text ? (
                     <ChatView key={channel.id} channelId={channel.id} />
                   ) : (
-                    <div className="main-empty">Voice channels are not supported yet.</div>
+                    <VoiceChannelPage key={channel.id} channel={channel} />
                   )}
                 </div>
                 {threadOpen ? (
@@ -241,7 +241,7 @@ export function AppShell() {
                   <channelSlots.RightPanel channel={channel} />
                 ) : (
                   <>
-                    {guild && membersVisible && <MemberList guildId={guild.id} />}
+                    {guild && membersVisible && text && <MemberList guildId={guild.id} />}
                     {dmRecipient && profileVisible && <DmProfilePanel user={dmRecipient} />}
                   </>
                 )}

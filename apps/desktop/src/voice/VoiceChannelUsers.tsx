@@ -1,10 +1,12 @@
 import { useRef, type ReactNode } from "react";
-import { HeadphoneOff, Lock, MicOff } from "lucide-react";
+import { ChevronRight, HeadphoneOff, Lock, MicOff, UserPlus } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
+import { TagChip } from "../perks/TagChip";
 import { useContextMenu } from "../ui";
 import { Avatar } from "../shell/Avatar";
 import { userContextItems } from "../shell/menus";
+import { openModal } from "../shell/modalStore";
 import { openProfile } from "../shell/ProfileCard";
 import { isChannelFull } from "./engine";
 import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
@@ -20,8 +22,11 @@ function StateIcon({ label, server, children }: { label: string; server?: boolea
 function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflake }) {
   const user = useStore(s => s.users[state.user_id]) ?? state.member?.user;
   const member = useStore(s => s.members[guildId]?.[state.user_id]) ?? state.member;
+  const tagGuildName = useStore(s => (user?.primary_guild ? s.guilds[user.primary_guild.guild_id]?.name : undefined));
   const speaking = useIsSpeaking(state.user_id);
   const localMuted = useVoice(s => !!s.localMutes[state.user_id]);
+  // Other people's rows dim while you are not in their call and they are not talking (reference spec 1).
+  const away = useVoice(s => s.channelId !== state.channel_id);
   const menu = useContextMenu();
   const row = useRef<HTMLLIElement>(null);
   if (!user) return null;
@@ -31,7 +36,7 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
   return (
     <li
       ref={row}
-      className={`voice-occupant voice-user${speaking ? " speaking" : ""}`}
+      className={`voice-occupant voice-user${speaking ? " speaking" : ""}${away && !speaking ? " away" : ""}`}
       data-user-id={state.user_id}
       data-speaking={speaking || undefined}
       tabIndex={0}
@@ -44,6 +49,7 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
         <Avatar user={user} member={member} size={24} decoration={false} />
       </span>
       <span className="voice-occupant-name">{name}</span>
+      <TagChip tag={user.primary_guild} guildName={tagGuildName} />
       <span className="voice-user-icons">
         {localMuted && (
           <StateIcon label="Locally Muted">
@@ -66,14 +72,26 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
 }
 
 /** Connected users under a voice channel in the channel list (speaking rings only inside your own call). */
-export function VoiceChannelUsers({ channel, guildId }: { channel: Pick<Channel, "id" | "name">; guildId: Snowflake }) {
+export function VoiceChannelUsers({ channel, guildId, canInvite }: { channel: Pick<Channel, "id" | "name">; guildId: Snowflake; canInvite?: boolean }) {
   const states = useChannelVoiceStates(channel.id);
+  const inside = useVoice(s => s.channelId === channel.id || (s.meId !== null && s.states[s.meId]?.channel_id === channel.id));
   if (states.length === 0) return null;
   return (
     <ul className="voice-occupants voice-users" aria-label={`Users in ${channel.name ?? "voice channel"}`}>
       {states.map(state => (
         <VoiceUserRow key={state.user_id} state={state} guildId={guildId} />
       ))}
+      {inside && canInvite && (
+        <li className="voice-invite-item">
+          <button type="button" className="voice-invite-row" onClick={() => openModal({ type: "invite", channelId: channel.id })}>
+            <span className="voice-invite-icon">
+              <UserPlus size={14} />
+            </span>
+            <span className="voice-invite-label">Invite to voice</span>
+            <ChevronRight size={16} className="voice-invite-chevron" />
+          </button>
+        </li>
+      )}
     </ul>
   );
 }

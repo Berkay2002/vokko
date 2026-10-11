@@ -80,7 +80,7 @@ test('per-user volume and local mute live in the user context menu while in the 
   await expect(slider).toHaveValue('100');
   await slider.fill('150');
   await expect(page.locator('.voice-volume-value')).toHaveText('150%');
-  await page.getByRole('menuitemcheckbox', { name: 'Mute' }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Mute', exact: true }).click();
   await expect(userRow(page, 'General', 'Alice').getByRole('img', { name: 'Locally Muted' })).toBeVisible();
   const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('vokko.voice') ?? '{}') as { volumes?: Record<string, number>; localMutes?: Record<string, boolean> });
   expect(Object.values(stored.volumes ?? {})).toContain(150);

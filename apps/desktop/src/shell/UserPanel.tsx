@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Headphones, HeadphoneOff, Mic, MicOff, Settings } from "lucide-react";
+import { ChevronDown, Headphones, HeadphoneOff, Mic, MicOff, Settings, Volume2 } from "lucide-react";
 import { displayName, useStore } from "../api/store";
-import { Popout, Tooltip, setPref, useContextMenu, usePrefs, type MenuItem } from "../ui";
+import { Popout, Tooltip, useContextMenu } from "../ui";
 import { Avatar, StatusBadge } from "./Avatar";
 import { loadStoredStatus, setOwnStatus, type SelectableStatus } from "./actions";
 import { openModal } from "./modalStore";
-import { inputDeviceMenu, outputDeviceMenu, refreshVoiceDevices, toggleSelfDeaf, toggleSelfMute, useVoice } from "../voice";
+import { InVoiceCard, toggleSelfDeaf, toggleSelfMute, useDeviceMenus, useVoice } from "../voice";
 
 const OPTIONS: { value: SelectableStatus; label: string; hint?: string; badge: "online" | "idle" | "dnd" | "offline" }[] = [
   { value: "online", label: "Online", badge: "online" },
@@ -15,36 +15,6 @@ const OPTIONS: { value: SelectableStatus; label: string; hint?: string; badge: "
 ];
 
 const LABEL: Record<string, string> = { online: "Online", idle: "Idle", dnd: "Do Not Disturb", offline: "Invisible" };
-
-/** Device menus behind the chevrons. Devices, mute and deafen come from the voice engine (src/voice). */
-function useDeviceMenus(muted: boolean, deafened: boolean, toggleMute: () => void, toggleDeafen: () => void) {
-  const prefs = usePrefs();
-  useEffect(() => void refreshVoiceDevices(), []);
-  const voiceSettings = (): MenuItem => ({ id: "voice-settings", label: "Voice Settings", onSelect: () => openModal({ type: "userSettings", section: "voice" }) });
-  const micItems = (): MenuItem[] => [
-    ...inputDeviceMenu(),
-    {
-      id: "input-mode",
-      label: "Input Mode",
-      children: [
-        { id: "mode-vad", label: "Voice Activity", checked: prefs.inputMode === "vad", onSelect: () => setPref("inputMode", "vad") },
-        { id: "mode-ptt", label: "Push to Talk", checked: prefs.inputMode === "ptt", onSelect: () => setPref("inputMode", "ptt") },
-      ],
-    },
-    { id: "input-volume", label: "Input Volume", hint: `${prefs.inputVolume}%`, onSelect: () => openModal({ type: "userSettings", section: "voice" }) },
-    { type: "separator" },
-    { id: "mute", label: muted ? "Unmute" : "Mute", onSelect: toggleMute },
-    voiceSettings(),
-  ];
-  const headphoneItems = (): MenuItem[] => [
-    ...outputDeviceMenu(),
-    { id: "output-volume", label: "Output Volume", hint: `${prefs.outputVolume}%`, onSelect: () => openModal({ type: "userSettings", section: "voice" }) },
-    { type: "separator" },
-    { id: "deafen", label: deafened ? "Undeafen" : "Deafen", onSelect: toggleDeafen },
-    voiceSettings(),
-  ];
-  return { micItems, headphoneItems };
-}
 
 function DeviceChevron({ label, onOpen }: { label: string; onOpen: (rect: DOMRect) => void }) {
   return (
@@ -68,7 +38,8 @@ export function UserPanel() {
   const [custom, setCustom] = useState(stored.current.custom);
   const [selected, setSelected] = useState<SelectableStatus>(stored.current.status);
   const menu = useContextMenu();
-  const { micItems, headphoneItems } = useDeviceMenus(muted, deafened, toggleSelfMute, toggleSelfDeaf);
+  const inVoice = useVoice(s => s.meId !== null && s.states[s.meId]?.channel_id != null);
+  const { micItems, headphoneItems } = useDeviceMenus();
 
   // Re-apply the user's chosen status after every (re)identify: the server starts a session as "online".
   useEffect(() => {
@@ -89,12 +60,15 @@ export function UserPanel() {
 
   return (
     <section className="user-panel" aria-label="User status and settings">
-      <button ref={setAnchor} type="button" className={`user-panel-account${open ? " active" : ""}`} onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}>
+      <button ref={setAnchor} type="button" className={`user-panel-account${open ? " active" : ""}${inVoice ? " in-voice" : ""}`} onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}>
         <Avatar user={me} size={32} status />
         <span className="user-panel-names">
           <span className="user-panel-name">{displayName(me)}</span>
           <span className="user-panel-sub">
-            <span className="user-panel-sub-status">{subtitle}</span>
+            <span className="user-panel-sub-status">
+              {inVoice && <Volume2 size={12} className="user-panel-voice-icon" aria-hidden="true" />}
+              {inVoice ? "In voice channel" : subtitle}
+            </span>
             <span className="user-panel-sub-username">{me.username}</span>
           </span>
         </span>
@@ -127,6 +101,7 @@ export function UserPanel() {
           <Avatar user={me} size={32} status />
           <div className="status-menu-name">{displayName(me)}</div>
         </div>
+        {inVoice && <InVoiceCard userId={me.id} onOpen={() => setOpen(false)} />}
         <div className="status-menu-list" role="menu">
           {OPTIONS.map(option => (
             <button key={option.value} type="button" role="menuitemradio" aria-checked={selected === option.value} className={`status-menu-item${selected === option.value ? " selected" : ""}`} onClick={() => choose(option.value)}>

@@ -7,6 +7,7 @@ import { ProfileBanner } from "../perks/ProfileBanner";
 import { resolveProfile, themeVars } from "../perks/profile";
 import { TagChip } from "../perks/TagChip";
 import { Popout } from "../ui";
+import { InVoiceCard } from "../voice";
 import { Avatar } from "./Avatar";
 import { openDirectMessage } from "./actions";
 import { openModal } from "./modalStore";
@@ -77,6 +78,7 @@ export function ProfileCardHost() {
               {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
             </div>
             {presence?.custom_status && <div className="profile-status">{presence.custom_status}</div>}
+            <InVoiceCard userId={user.id} onOpen={close} />
             <div className="profile-actions">
               {isMe ? (
                 <button

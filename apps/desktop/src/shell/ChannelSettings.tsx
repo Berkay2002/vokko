@@ -10,7 +10,8 @@ import { ForumSettingsPage } from "../forum/ForumSettings";
 import { isPrivateChannel } from "./channelPrivacy";
 import { closeModal, openModal } from "./modalStore";
 import { ChannelPermissionsPage } from "./settings/ChannelPermissions";
-import { Category, Field, Page, RadioGroup, Select, Unavailable } from "./settings/controls";
+import { Category, Divider, Field, Page, RadioGroup, Select, Slider, Unavailable } from "./settings/controls";
+import { useVoiceUi } from "../voice";
 import { FullScreenSettings, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { SaveBar } from "./settings/SaveBar";
 import { usePermissions } from "./usePermissions";
@@ -36,14 +37,6 @@ function LockedSelect({ label, value }: { label: string; value: string }) {
   return <Select<string> label={label} value="current" options={[{ value: "current", label: value }]} disabled onChange={() => undefined} />;
 }
 
-function NotAvailable({ label, note }: { label: string; note?: string }) {
-  return (
-    <Field label={label} note={note}>
-      <input className="input" disabled aria-label={label} placeholder="Not available yet" />
-    </Field>
-  );
-}
-
 function OverviewPage({ channel, editable }: { channel: Channel; editable: boolean }) {
   const category = channel.type === ChannelType.GuildCategory;
   const voice = channel.type === ChannelType.GuildVoice;
@@ -52,24 +45,38 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const slug = category ? name.trim() : name.trim().toLowerCase().replace(/\s+/g, "-");
+  // Text channel names are slugs; voice channel and category names keep their case and spaces.
+  const slug = category || voice ? name.trim() : name.trim().toLowerCase().replace(/\s+/g, "-");
   const nextTopic = topic.trim() || null;
-  const dirty = slug !== (channel.name ?? "") || (!category && nextTopic !== (channel.topic ?? null));
+  const ceiling = useVoiceUi(s => s.bitrateCeiling);
+  const savedBitrate = Math.round((channel.bitrate ?? 64000) / 1000);
+  const savedLimit = channel.user_limit ?? 0;
+  const [bitrateKbps, setBitrateKbps] = useState(savedBitrate);
+  const [userLimit, setUserLimit] = useState(savedLimit);
+  const voiceDirty = voice && (bitrateKbps !== savedBitrate || userLimit !== savedLimit);
+  const dirty = slug !== (channel.name ?? "") || (!category && nextTopic !== (channel.topic ?? null)) || voiceDirty;
 
   const reset = () => {
     setName(channel.name ?? "");
     setTopic(channel.topic ?? "");
+    setBitrateKbps(savedBitrate);
+    setUserLimit(savedLimit);
     setError(null);
   };
   const save = () => {
     if (!slug) return;
     setBusy(true);
     setError(null);
-    request<Channel>("PATCH", `/channels/${channel.id}`, { name: slug, ...(category ? {} : { topic: nextTopic }) })
+    const voiceBody = voice ? { bitrate: bitrateKbps * 1000, user_limit: userLimit } : {};
+    request<Channel>("PATCH", `/channels/${channel.id}`, { name: slug, ...(category ? {} : { topic: nextTopic }), ...voiceBody })
       .then(updated => {
         appStore.getState().upsertChannel(updated);
         setName(updated.name ?? slug);
         setTopic(updated.topic ?? "");
+        if (voice) {
+          setBitrateKbps(Math.round((updated.bitrate ?? 64000) / 1000));
+          setUserLimit(updated.user_limit ?? 0);
+        }
         setSaved(true);
       })
       .catch(e => setError(errorText(e)))
@@ -130,7 +137,7 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
           </div>
         </Field>
       )}
-      {!category && !voice && (
+      {!category && (
         <>
           <Field label="Slowmode" note="Not available yet.">
             <LockedSelect label="Slowmode" value="Off" />
@@ -148,15 +155,57 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
               onChange={() => undefined}
             />
           </Field>
-          <Field label="Hide After Inactivity" note="Not available yet.">
-            <LockedSelect label="Hide after inactivity" value="3 Days" />
-          </Field>
+          {!voice && (
+            <Field label="Hide After Inactivity" note="Not available yet.">
+              <LockedSelect label="Hide after inactivity" value="3 Days" />
+            </Field>
+          )}
         </>
       )}
       {voice && (
         <>
-          <NotAvailable label="Bitrate" note="Not available yet." />
-          <NotAvailable label="User Limit" note="Not available yet." />
+          <Divider />
+          <Field label="Bitrate" note={bitrateKbps > 64 ? "Over 64 kbps may hurt people with a bad connection. 64 kbps is the recommended default." : "64 kbps is the recommended default."}>
+            <Slider
+              label="Bitrate"
+              min={8}
+              max={Math.round(ceiling / 1000)}
+              value={Math.min(bitrateKbps, Math.round(ceiling / 1000))}
+              disabled={!editable}
+              format={v => `${v} kbps`}
+              onChange={v => {
+                setSaved(false);
+                setBitrateKbps(v);
+              }}
+            />
+          </Field>
+          <Field label="Video Quality" note="Camera in calls arrives in a later update.">
+            <RadioGroup<string>
+              name="Video quality"
+              value="auto"
+              disabled
+              options={[
+                { value: "auto", label: "Auto", note: "Vokko picks the best quality for each viewer." },
+                { value: "720p", label: "720p", note: "Always 720p." },
+              ]}
+              onChange={() => undefined}
+            />
+          </Field>
+          <Divider />
+          <Field label="User Limit" note="Members with the Move Members permission can still join a full channel.">
+            <Slider
+              label="User limit"
+              min={0}
+              max={99}
+              value={userLimit}
+              disabled={!editable}
+              format={v => (v === 0 ? "No limit" : String(v))}
+              onChange={v => {
+                setSaved(false);
+                setUserLimit(v);
+              }}
+            />
+          </Field>
         </>
       )}
       {saved && !dirty && <p className="settings-saved">Saved.</p>}

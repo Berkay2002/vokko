@@ -649,7 +649,8 @@ export function dmName(channel: Channel): string {
 export function isChannelUnread(s: AppState, channelId: Snowflake): boolean {
   const channel = s.channels[channelId];
   if (!channel?.last_message_id) return false;
-  if (channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildCategory) return false;
+  // Voice channels count: their text-in-voice chat can be unread.
+  if (channel.type === ChannelType.GuildCategory) return false;
   const read = s.readStates[channelId]?.last_message_id;
   return !read || compareIds(channel.last_message_id, read) > 0;
 }

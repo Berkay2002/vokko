@@ -115,7 +115,7 @@ export async function markChannelRead(channelId: Snowflake): Promise<void> {
 export async function markGuildRead(guildId: Snowflake): Promise<void> {
   const state = appStore.getState();
   const read_states = Object.values(state.channels)
-    .filter(c => c.guild_id === guildId && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement) && c.last_message_id && isChannelUnread(state, c.id))
+    .filter(c => c.guild_id === guildId && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement || c.type === ChannelType.GuildVoice) && c.last_message_id && isChannelUnread(state, c.id))
     .map(c => ({ channel_id: c.id, message_id: c.last_message_id as Snowflake }));
   for (let i = 0; i < read_states.length; i += 100) await request<void>("POST", "/read-states/ack-bulk", { read_states: read_states.slice(i, i + 100) });
 }

@@ -3,7 +3,7 @@
 
 import type { Snowflake } from "../api/types";
 import { getPrefs, setPref, type MenuItem } from "../ui";
-import { setLocalMute, setUserVolume } from "./engine";
+import { setLocalMute, setUserVolume, toggleSelfDeaf, toggleSelfMute } from "./engine";
 import { VOLUME_MAX } from "./reducer";
 import { getVoice, useVoice } from "./store";
 
@@ -31,10 +31,20 @@ function UserVolumeSlider({ userId }: { userId: Snowflake }) {
   );
 }
 
-/** "User Volume" slider and "Mute" (local) for someone in the same call as us; empty otherwise. */
+/**
+ * In a call: our own Mute / Deafen switches on our menu; "User Volume" slider and "Mute" (local) for someone in the same call
+ * as us. Empty otherwise.
+ */
 export function voiceUserMenuItems(userId: Snowflake): MenuItem[] {
   const model = getVoice();
-  if (!model.channelId || userId === model.meId || model.states[userId]?.channel_id !== model.channelId) return [];
+  if (!model.channelId) return [];
+  if (userId === model.meId) {
+    return [
+      { id: "self-mute", label: "Mute", checked: model.selfMute, onSelect: toggleSelfMute },
+      { id: "self-deafen", label: "Deafen", checked: model.selfDeaf, onSelect: toggleSelfDeaf },
+    ];
+  }
+  if (model.states[userId]?.channel_id !== model.channelId) return [];
   const muted = !!model.localMutes[userId];
   return [
     { id: "user-volume", label: "User Volume", render: () => <UserVolumeSlider userId={userId} /> },

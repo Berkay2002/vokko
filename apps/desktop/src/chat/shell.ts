@@ -9,6 +9,9 @@ export { request, uploadAttachment, resolveUrl, ApiRequestError } from '../api/r
 export { gateway } from '../api/gateway';
 export { displayName, roleColor, avatarUrl, dmName, guildIconUrl, guildInitials } from '../api/store';
 export { markGuildRead, joinGuildWithInvite } from '../shell/actions';
+export { openModal } from '../shell/modalStore';
+export { usePermissions } from '../shell/usePermissions';
+export { Perm } from '../api/permissions';
 export { Tooltip, Popout, Modal, useContextMenu, useLayer, useOutsideClose, placeAtPoint } from '../ui';
 export type { MenuItem } from '../ui';
 
