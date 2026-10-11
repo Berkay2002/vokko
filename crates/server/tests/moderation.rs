@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Kick, bans, member edits and role management, with the gateway events they emit.
 mod common;
 

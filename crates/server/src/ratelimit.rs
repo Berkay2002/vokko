@@ -171,7 +171,7 @@ mod tests {
         let (one, two) = (Caller::User(1), Caller::User(2));
         assert!(limiter.check(one, "GET /x", &limit, false).is_ok());
         assert!(limiter.check(one, "GET /x", &limit, false).is_ok());
-        let limited = limiter.check(one, "GET /x", &limit, false).err().expect("limited");
+        let limited = limiter.check(one, "GET /x", &limit, false).expect_err("limited");
         assert!(!limited.global && limited.retry_after > 0.0 && limited.retry_after <= 1.0);
         // other callers and other routes are independent
         assert!(limiter.check(two, "GET /x", &limit, false).is_ok());
