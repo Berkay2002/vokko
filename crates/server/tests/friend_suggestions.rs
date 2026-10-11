@@ -1,0 +1,155 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+//! Friend suggestions: ranking, privacy (blocks both ways, opt-out, dismissals, big guilds) and the settings endpoint.
+mod common;
+
+use axum::http::StatusCode;
+use common::TestApp;
+use serde_json::json;
+
+struct Person {
+    token: String,
+    id: String,
+}
+
+async fn person(app: &TestApp, name: &str) -> Person {
+    let (token, user) = app.register(name).await;
+    Person { token, id: user["id"].as_str().expect("id").to_owned() }
+}
+
+async fn befriend(app: &TestApp, a: &Person, b: &Person) {
+    let (_, user) = app.get(&format!("/users/{}", b.id), &a.token).await;
+    let name = user["username"].as_str().expect("username");
+    assert_eq!(app.post("/users/@me/relationships", &a.token, json!({"username": name})).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(app.put(&format!("/users/@me/relationships/{}", a.id), &b.token).await.0, StatusCode::NO_CONTENT);
+}
+
+async fn join(app: &TestApp, owner: &Person, guild_channel: &str, who: &Person) {
+    let (_, invite) = app.post(&format!("/channels/{guild_channel}/invites"), &owner.token, json!({})).await;
+    let (status, body) = app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &who.token, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "join: {body}");
+}
+
+async fn suggested(app: &TestApp, who: &Person) -> Vec<String> {
+    let (status, body) = app.get("/users/@me/friend-suggestions", &who.token).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["suggestions"].as_array().expect("suggestions").iter().map(|s| s["user"]["username"].as_str().expect("username").to_owned()).collect()
+}
+
+#[tokio::test]
+async fn mutual_friends_rank_above_shared_guilds() {
+    let app = TestApp::new().await;
+    let ann = person(&app, "ann").await;
+    let ben = person(&app, "ben").await; // shares a guild with ann
+    let cat = person(&app, "cat").await; // friend of ann's friend
+    let dan = person(&app, "dan").await; // ann's friend
+    let eve = person(&app, "eve").await; // nothing in common
+    let (guild, channel) = app.guild_with_channel(&ann.token).await;
+    let _ = guild;
+    join(&app, &ann, &channel, &ben).await;
+    befriend(&app, &ann, &dan).await;
+    befriend(&app, &dan, &cat).await;
+
+    assert_eq!(suggested(&app, &ann).await, vec!["cat", "ben"]);
+    let (_, body) = app.get("/users/@me/friend-suggestions", &ann.token).await;
+    assert_eq!(body["enabled"], true);
+    assert_eq!(body["suggestions"][0]["mutual_friends_count"], 1);
+    assert_eq!(body["suggestions"][0]["mutual_guilds"], json!([]));
+    assert_eq!(body["suggestions"][1]["mutual_guilds"][0]["id"], guild);
+    assert_eq!(body["suggestions"][1]["mutual_friends_count"], 0);
+    // symmetrical: ben sees ann, cat sees ann, eve sees nobody
+    assert_eq!(suggested(&app, &ben).await, vec!["ann"]);
+    assert_eq!(suggested(&app, &cat).await, vec!["ann"]);
+    assert!(suggested(&app, &eve).await.is_empty());
+
+    let (status, error) = app.get("/users/@me/friend-suggestions?limit=0", &ann.token).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)));
+    let (_, one) = app.get("/users/@me/friend-suggestions?limit=1", &ann.token).await;
+    assert_eq!(one["suggestions"].as_array().expect("list").len(), 1);
+
+    // becoming friends or sending a request removes the suggestion
+    assert_eq!(app.post("/users/@me/relationships", &ann.token, json!({"username": "cat"})).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(suggested(&app, &ann).await, vec!["ben"]);
+    assert!(!suggested(&app, &cat).await.contains(&"ann".to_owned()));
+}
+
+#[tokio::test]
+async fn blocks_opt_out_and_dismissals_hide_people() {
+    let app = TestApp::new().await;
+    let ann = person(&app, "ann").await;
+    let blocker = person(&app, "blocker").await; // blocked ann
+    let blocked = person(&app, "blocked").await; // ann blocked them
+    let shy = person(&app, "shy").await; // opted out
+    let dismissed = person(&app, "dismissed").await;
+    let visible = person(&app, "visible").await;
+    let (_, channel) = app.guild_with_channel(&ann.token).await;
+    for who in [&blocker, &blocked, &shy, &dismissed, &visible] {
+        join(&app, &ann, &channel, who).await;
+    }
+    let mut all = suggested(&app, &ann).await;
+    all.sort();
+    assert_eq!(all, vec!["blocked", "blocker", "dismissed", "shy", "visible"]);
+
+    assert_eq!(
+        app.send(axum::http::Method::PUT, &format!("/users/@me/relationships/{}", ann.id), Some(&blocker.token), Some(json!({"type": 2}))).await.0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        app.send(axum::http::Method::PUT, &format!("/users/@me/relationships/{}", blocked.id), Some(&ann.token), Some(json!({"type": 2}))).await.0,
+        StatusCode::NO_CONTENT
+    );
+    let (status, settings) = app.patch("/users/@me/friend-suggestion-settings", &shy.token, json!({"enabled": false})).await;
+    assert_eq!((status, settings), (StatusCode::OK, json!({"enabled": false})));
+    assert_eq!(app.delete(&format!("/users/@me/friend-suggestions/{}", dismissed.id), &ann.token).await.0, StatusCode::NO_CONTENT);
+    // dismissing answers the same for ids that belong to nobody, so it cannot be used to probe which accounts exist
+    assert_eq!(app.delete("/users/@me/friend-suggestions/424242", &ann.token).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(app.delete("/users/@me/friend-suggestions/not-an-id", &ann.token).await.0, StatusCode::NO_CONTENT);
+
+    assert_eq!(suggested(&app, &ann).await, vec!["visible"]);
+    // nobody who is hidden from ann sees ann either, except the person ann merely dismissed
+    assert!(suggested(&app, &blocker).await.iter().all(|name| name != "ann"));
+    assert!(suggested(&app, &blocked).await.iter().all(|name| name != "ann"));
+    let (_, shy_view) = app.get("/users/@me/friend-suggestions", &shy.token).await;
+    assert_eq!((shy_view["enabled"].clone(), shy_view["suggestions"].clone()), (json!(false), json!([])));
+    assert!(suggested(&app, &dismissed).await.contains(&"ann".to_owned()));
+
+    // switching back on restores both directions (the dismissal stays)
+    assert_eq!(app.patch("/users/@me/friend-suggestion-settings", &shy.token, json!({"enabled": true})).await.1, json!({"enabled": true}));
+    let mut again = suggested(&app, &ann).await;
+    again.sort();
+    assert_eq!(again, vec!["shy", "visible"]);
+    assert_eq!(app.patch("/users/@me/friend-suggestion-settings", &shy.token, json!({})).await.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn big_guilds_and_bots_are_not_a_reason() {
+    let app = TestApp::new().await;
+    let ann = person(&app, "ann").await;
+    let ben = person(&app, "ben").await;
+    let (guild, channel) = app.guild_with_channel(&ann.token).await;
+    join(&app, &ann, &channel, &ben).await;
+    assert_eq!(suggested(&app, &ann).await, vec!["ben"]);
+
+    // 250 more members make it a community, not a circle of acquaintances
+    let guild_id: i64 = guild.parse().expect("guild id");
+    sqlx::query("INSERT INTO users (id, username, email, password_hash) SELECT 9000000000000 + n, 'filler' || n, 'filler' || n || '@x.test', 'x' FROM generate_series(1, 250) n")
+        .execute(&app.state.db)
+        .await
+        .expect("filler users");
+    sqlx::query("INSERT INTO guild_members (guild_id, user_id) SELECT $1, 9000000000000 + n FROM generate_series(1, 250) n")
+        .bind(guild_id)
+        .execute(&app.state.db)
+        .await
+        .expect("filler members");
+    assert!(suggested(&app, &ann).await.is_empty());
+    assert!(suggested(&app, &ben).await.is_empty());
+
+    // bots are never suggested
+    let carl = person(&app, "carl").await;
+    let small = app.post("/guilds", &ann.token, json!({"name": "Small one"})).await.1;
+    let (_, channels) = app.get(&format!("/guilds/{}/channels", small["id"].as_str().expect("id")), &ann.token).await;
+    let small_channel = channels.as_array().expect("channels").iter().find(|c| c["name"] == "general").expect("general")["id"].as_str().expect("id").to_owned();
+    join(&app, &ann, &small_channel, &carl).await;
+    assert_eq!(suggested(&app, &ann).await, vec!["carl"]);
+    sqlx::query("UPDATE users SET bot = TRUE WHERE username = 'carl'").execute(&app.state.db).await.expect("mark bot");
+    assert!(suggested(&app, &ann).await.is_empty());
+}

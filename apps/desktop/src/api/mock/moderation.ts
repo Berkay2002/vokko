@@ -6,6 +6,7 @@ import { ChannelType, OverwriteType, type Ban, type Guild, type GuildMember, typ
 import { guildPermsOf, channelPermsOf } from "./access";
 import { db, nextId, sortedMessages, userOf, type MockGuild } from "./db";
 import { MISSING_PERMISSIONS, pendingAttachment, channelAudience, emitVisibilityChanges, fail, requireChannel, requireChannelPerm, requireGuildMember, syncCategoryChildren, visibilityOf } from "./ops";
+import { forgetOnboardingRoles } from "./memberFlags";
 import { applyOwnMemberPerks, dropTagOnLeave, memberProfileFields } from "./perks";
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
@@ -122,7 +123,11 @@ function editMember(guildId: string, viewerId: string, targetId: string, body: R
 
   const before = visibilityOf(guildId);
   if (next.nick !== undefined) record.nick = next.nick;
-  if (next.roles) record.roles = next.roles;
+  if (next.roles) {
+    const wanted = next.roles;
+    forgetOnboardingRoles(guildId, targetId, [...record.roles.filter(id => !wanted.includes(id)), ...wanted.filter(id => !record.roles.includes(id))]);
+    record.roles = wanted;
+  }
   if (next.until !== undefined) {
     if (next.until === null) delete record.communication_disabled_until;
     else record.communication_disabled_until = next.until;

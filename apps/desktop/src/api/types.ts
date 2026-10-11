@@ -173,6 +173,7 @@ export interface GuildMember {
   roles: Snowflake[];
   joined_at: ISO8601;
   communication_disabled_until?: ISO8601 | null; // timeout end; null/absent = not timed out
+  flags?: number; // MemberFlags bitfield; absent = 0
   // Per-server profile (overrides the user profile inside this guild). Absent/null = use the user's.
   avatar?: string | null;
   banner?: string | null;
@@ -627,6 +628,181 @@ export interface OverwriteRequest {
   deny: string;
 }
 
+// ---- Community: scheduled events, onboarding, friend suggestions ----
+
+export const MemberFlags = {
+  DidRejoin: 1 << 0,
+  CompletedOnboarding: 1 << 1,
+  BypassesVerification: 1 << 2,
+  StartedOnboarding: 1 << 3, // set when a member joins a guild whose onboarding is enabled; CompletedOnboarding is added when they finish
+} as const;
+
+export enum ScheduledEventEntityType {
+  StageInstance = 1, // Vokko has no stage channels yet: channel_id must be a voice channel
+  Voice = 2,
+  External = 3,
+}
+export enum ScheduledEventStatus {
+  Scheduled = 1,
+  Active = 2,
+  Completed = 3,
+  Canceled = 4,
+}
+// Allowed status changes (PATCH): Scheduled -> Active, Scheduled -> Canceled, Active -> Completed.
+export enum RecurrenceFrequency {
+  Yearly = 0,
+  Monthly = 1,
+  Weekly = 2,
+  Daily = 3,
+}
+export interface ScheduledEventRecurrenceRule {
+  start: ISO8601; // first occurrence (normally scheduled_start_time)
+  end: ISO8601 | null; // no occurrences after this
+  frequency: RecurrenceFrequency;
+  interval: number; // 1-12 (every N days/weeks/months/years)
+  by_weekday: number[] | null; // 0 = Monday .. 6 = Sunday (weekly rules)
+  count: number | null; // total occurrences, 1-1000
+}
+// Stored and returned as given. Vokko does not spawn follow-up occurrences yet; clients show the rule as text.
+
+export interface GuildScheduledEvent {
+  id: Snowflake;
+  guild_id: Snowflake;
+  channel_id: Snowflake | null; // voice/stage events; null for External
+  creator_id: Snowflake | null; // null when the creator's account is gone
+  creator?: User;
+  name: string; // 1-100 chars
+  description: string | null; // max 1000 chars
+  scheduled_start_time: ISO8601;
+  scheduled_end_time: ISO8601 | null; // required for External
+  privacy_level: 2; // GUILD_ONLY, the only level Discord has
+  status: ScheduledEventStatus;
+  entity_type: ScheduledEventEntityType;
+  entity_id: Snowflake | null; // always null (no stage instances)
+  entity_metadata: { location: string | null } | null; // External: location 1-100 chars
+  user_count: number; // members who marked Interested
+  user_rsvp: boolean; // the viewer is Interested (viewer-specific, also in gateway events)
+  image: string | null; // cover image URL (attachment); null = none
+  recurrence_rule: ScheduledEventRecurrenceRule | null;
+}
+export interface CreateScheduledEventRequest {
+  name: string;
+  description?: string | null;
+  entity_type: ScheduledEventEntityType;
+  channel_id?: Snowflake | null; // required for Voice/StageInstance, must be a voice channel the creator can VIEW_CHANNEL + CONNECT
+  entity_metadata?: { location: string } | null; // required for External
+  scheduled_start_time: ISO8601; // must be in the future
+  scheduled_end_time?: ISO8601 | null; // required for External, after the start
+  privacy_level?: 2;
+  image_attachment_id?: Snowflake | null; // pending attachment from POST /channels/{id}/attachments (any channel the creator can send in)
+  recurrence_rule?: ScheduledEventRecurrenceRule | null;
+}
+export interface EditScheduledEventRequest {
+  name?: string;
+  description?: string | null;
+  entity_type?: ScheduledEventEntityType; // only while Scheduled
+  channel_id?: Snowflake | null;
+  entity_metadata?: { location: string } | null;
+  scheduled_start_time?: ISO8601;
+  scheduled_end_time?: ISO8601 | null;
+  image_attachment_id?: Snowflake | null; // null removes the cover
+  recurrence_rule?: ScheduledEventRecurrenceRule | null;
+  status?: ScheduledEventStatus; // see allowed transitions above
+}
+export interface ScheduledEventUser {
+  guild_scheduled_event_id: Snowflake;
+  user: User;
+  member?: GuildMember; // with ?with_member=true
+}
+
+export enum OnboardingPromptType {
+  MultipleChoice = 0,
+  Dropdown = 1,
+}
+export enum OnboardingMode {
+  Default = 0, // only default channels count
+  Advanced = 1, // default channels plus answers
+}
+export interface OnboardingOption {
+  id: Snowflake;
+  title: string; // 1-50 chars
+  description: string | null; // max 100 chars
+  emoji: ReactionEmoji | null;
+  channel_ids: Snowflake[]; // channels this answer points the member at (visibility still follows permissions)
+  role_ids: Snowflake[]; // roles this answer grants
+}
+export interface OnboardingPrompt {
+  id: Snowflake;
+  type: OnboardingPromptType;
+  title: string; // 1-100 chars
+  options: OnboardingOption[]; // 1-50
+  single_select: boolean;
+  required: boolean;
+  in_onboarding: boolean; // asked during onboarding (false = only on the Channels & Roles page)
+}
+export interface OnboardingRules {
+  description: string | null; // max 300 chars
+  items: string[]; // 1-16 rules, each 1-300 chars
+}
+export interface GuildOnboarding {
+  guild_id: Snowflake;
+  prompts: OnboardingPrompt[]; // max 15
+  default_channel_ids: Snowflake[]; // max 50
+  enabled: boolean;
+  mode: OnboardingMode;
+  rules: OnboardingRules | null; // when set the member must accept before completing
+}
+export interface OnboardingOptionInput {
+  id?: Snowflake; // keep an existing option (and the answers members gave); absent/unknown = new
+  title: string;
+  description?: string | null;
+  emoji?: ReactionEmoji | null;
+  channel_ids?: Snowflake[];
+  role_ids?: Snowflake[];
+}
+export interface OnboardingPromptInput {
+  id?: Snowflake;
+  type: OnboardingPromptType;
+  title: string;
+  options: OnboardingOptionInput[];
+  single_select?: boolean;
+  required?: boolean;
+  in_onboarding?: boolean;
+}
+// PUT /guilds/{id}/onboarding. Only the sent keys change; `prompts` replaces the whole list.
+export interface EditOnboardingRequest {
+  prompts?: OnboardingPromptInput[];
+  default_channel_ids?: Snowflake[];
+  enabled?: boolean;
+  mode?: OnboardingMode;
+  rules?: OnboardingRules | null;
+}
+// PUT /guilds/{id}/onboarding-responses
+export interface OnboardingResponsesRequest {
+  option_ids: Snowflake[]; // the full set of answers; replaces earlier answers
+  rules_accepted?: boolean; // must be true when the guild has rules
+}
+export interface OnboardingResponses {
+  option_ids: Snowflake[];
+}
+export interface OnboardingCompletion {
+  member: GuildMember; // roles granted, flags include CompletedOnboarding
+  channel_ids: Snowflake[]; // default channels then the answers' channels, only ones the member can view, no duplicates
+}
+
+export interface FriendSuggestion {
+  user: User;
+  mutual_guilds: { id: Snowflake; nick: string | null }[]; // guilds (max 200 members) both are in; nick = the suggested user's
+  mutual_friends_count: number;
+}
+export interface FriendSuggestionsResponse {
+  enabled: boolean; // the caller's own setting; false = suggestions is [] and the caller is not suggested to others either
+  suggestions: FriendSuggestion[]; // best first (mutual friends, then mutual guilds), max `limit`
+}
+export interface FriendSuggestionSettings {
+  enabled: boolean;
+}
+
 export interface EditChannelRequest {
   // ---- shared (guild channels) ----
   name?: string;
@@ -749,6 +925,13 @@ export interface GatewayEvents {
   MESSAGE_ACK: { channel_id: Snowflake; message_id: Snowflake };
   RELATIONSHIP_ADD: Relationship;
   RELATIONSHIP_REMOVE: { id: Snowflake };
+  // Scheduled events: sent to every member of the guild; `user_rsvp` is filled per receiver. CREATE/UPDATE/DELETE carry the event
+  // (DELETE: its last state), USER_ADD/USER_REMOVE are Interested toggles (receivers adjust `user_count`).
+  GUILD_SCHEDULED_EVENT_CREATE: GuildScheduledEvent;
+  GUILD_SCHEDULED_EVENT_UPDATE: GuildScheduledEvent;
+  GUILD_SCHEDULED_EVENT_DELETE: GuildScheduledEvent;
+  GUILD_SCHEDULED_EVENT_USER_ADD: { guild_scheduled_event_id: Snowflake; user_id: Snowflake; guild_id: Snowflake };
+  GUILD_SCHEDULED_EVENT_USER_REMOVE: { guild_scheduled_event_id: Snowflake; user_id: Snowflake; guild_id: Snowflake };
   GUILD_STICKERS_UPDATE: { guild_id: Snowflake; stickers: Sticker[] }; // full list after a create/edit/delete
   BOOKMARK_ADD: Bookmark; // to the owner's sessions only
   BOOKMARK_REMOVE: { channel_id: Snowflake; message_id: Snowflake };

@@ -2,7 +2,7 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::routing::get;
-use sqlx::{Postgres, QueryBuilder};
+use sqlx::{PgConnection, Postgres, QueryBuilder};
 use vokko_protocol::api::{GatewayEvent, MutualGuild, Snowflake, UpdateUserRequest, User, UserProfile};
 
 use crate::auth::AuthUser;
@@ -177,12 +177,21 @@ impl ImageKind {
 /// Asset path (`<id>/<key>/<filename>`) of a PNG/JPEG/GIF/WebP attachment uploaded by `user_id` that is within the size limits of `kind`,
 /// used for avatars, banners and guild icons. Marks the row `claimed_at` so the pending-upload cleanup never deletes it while it is in use.
 pub async fn owned_image_path(state: &AppState, attachment_id: i64, user_id: i64, kind: ImageKind, field: &str) -> ApiResult<String> {
+    let mut conn = state.db.acquire().await?;
+    image_path_on(&mut conn, attachment_id, user_id, kind, field, false).await
+}
+
+/// `owned_image_path` on the caller's connection (a transaction, so a failed write leaves nothing claimed). `cover` claims the upload
+/// for a scheduled event: that needs it unclaimed, and from then on avatars and icons refuse it. Anything else refuses event covers.
+pub async fn image_path_on(conn: &mut PgConnection, attachment_id: i64, user_id: i64, kind: ImageKind, field: &str, cover: bool) -> ApiResult<String> {
     let row: Option<(String, String, Option<String>, i64)> = sqlx::query_as(
-        "SELECT filename, key, content_type, size FROM attachments WHERE id = $1 AND uploader_id = $2 AND key IS NOT NULL AND message_id IS NULL",
+        "SELECT filename, key, content_type, size FROM attachments WHERE id = $1 AND uploader_id = $2 AND key IS NOT NULL AND message_id IS NULL \
+         AND ($3 OR NOT event_cover)",
     )
     .bind(attachment_id)
     .bind(user_id)
-    .fetch_optional(&state.db)
+    .bind(cover)
+    .fetch_optional(&mut *conn)
     .await?;
     let Some((filename, key, content_type, size)) = row else { return Err(ApiErr::invalid(field, "Unknown attachment.")) };
     let content_type = content_type.unwrap_or_default();
@@ -194,15 +203,18 @@ pub async fn owned_image_path(state: &AppState, attachment_id: i64, user_id: i64
         let limit = if content_type == "image/gif" { max_animated } else { max };
         return Err(ApiErr::invalid(field, &format!("The image is too large ({} MiB at most).", limit / MIB)));
     }
+    // Claiming is one statement, so two requests racing for the same upload cannot both win.
     let claimed = sqlx::query(
-        "UPDATE attachments SET claimed_at = COALESCE(claimed_at, now()) WHERE id = $1 AND uploader_id = $2 AND key IS NOT NULL AND message_id IS NULL",
+        "UPDATE attachments SET claimed_at = COALESCE(claimed_at, now()), event_cover = $3 WHERE id = $1 AND uploader_id = $2 AND key IS NOT NULL \
+         AND message_id IS NULL AND CASE WHEN $3 THEN claimed_at IS NULL ELSE NOT event_cover END",
     )
     .bind(attachment_id)
     .bind(user_id)
-    .execute(&state.db)
+    .bind(cover)
+    .execute(&mut *conn)
     .await?;
     if claimed.rows_affected() == 0 {
-        return Err(ApiErr::invalid(field, "Unknown attachment."));
+        return Err(if cover { ApiErr::invalid(field, "This upload is already in use.") } else { ApiErr::invalid(field, "Unknown attachment.") });
     }
     Ok(crate::media::asset_path(attachment_id, &key, &filename))
 }

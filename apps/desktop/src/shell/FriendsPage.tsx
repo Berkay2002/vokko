@@ -6,17 +6,19 @@ import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
 import { RelationshipType, type Relationship } from "../api/types";
 import { Tooltip, useContextMenu } from "../ui";
+import { FriendSuggestionsTab } from "../community";
 import { Avatar } from "./Avatar";
 import { copyText, openDirectMessage } from "./actions";
 import { UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
 
-type Tab = "online" | "all" | "pending" | "blocked" | "add";
+type Tab = "online" | "all" | "pending" | "suggestions" | "blocked" | "add";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "online", label: "Online" },
   { id: "all", label: "All" },
   { id: "pending", label: "Pending" },
+  { id: "suggestions", label: "Suggestions" },
   { id: "blocked", label: "Blocked" },
 ];
 
@@ -134,6 +136,7 @@ function AddFriend() {
         </button>
       </form>
       {result && <p className={`add-friend-result ${result.ok ? "success" : "error"}`}>{result.text}</p>}
+      <FriendSuggestionsTab embedded />
     </div>
   );
 }
@@ -247,6 +250,12 @@ export function FriendsPage() {
         </header>
         {tab === "add" ? (
           <AddFriend />
+        ) : tab === "suggestions" ? (
+          <div className="people-column">
+            <div className="people-scroller">
+              <FriendSuggestionsTab />
+            </div>
+          </div>
         ) : (
           <div className="people-column">
             <label className="people-search">

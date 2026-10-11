@@ -155,6 +155,11 @@ numeric_enum!(
     StickerFormat { Png = 1, Apng = 2, Gif = 4, Webp = 5 }
 );
 numeric_enum!(OverwriteType { Role = 0, Member = 1 });
+numeric_enum!(ScheduledEventEntityType { StageInstance = 1, Voice = 2, External = 3 });
+numeric_enum!(ScheduledEventStatus { Scheduled = 1, Active = 2, Completed = 3, Canceled = 4 });
+numeric_enum!(RecurrenceFrequency { Yearly = 0, Monthly = 1, Weekly = 2, Daily = 3 });
+numeric_enum!(OnboardingPromptType { MultipleChoice = 0, Dropdown = 1 });
+numeric_enum!(OnboardingMode { Default = 0, Advanced = 1 });
 numeric_enum!(RelationshipType { Friend = 1, Blocked = 2, IncomingRequest = 3, OutgoingRequest = 4 });
 numeric_enum!(GatewayOp {
     Dispatch = 0,
@@ -567,6 +572,22 @@ pub struct GuildMember {
     pub pronouns: Option<String>,
     #[serde(default)]
     pub theme_colors: Option<[u32; 2]>,
+    /// `member_flags` bitfield; omitted from the JSON while 0.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub flags: u32,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
+/// `GuildMember.flags` bits (Discord's values).
+pub mod member_flags {
+    pub const DID_REJOIN: u32 = 1 << 0;
+    pub const COMPLETED_ONBOARDING: u32 = 1 << 1;
+    pub const BYPASSES_VERIFICATION: u32 = 1 << 2;
+    /// Set when a member joins a guild whose onboarding is enabled.
+    pub const STARTED_ONBOARDING: u32 = 1 << 3;
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1412,6 +1433,233 @@ pub struct InviteChannel {
     pub name: Option<String>,
 }
 
+// ---- Community: scheduled events, onboarding, friend suggestions ----
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EventEntityMetadata {
+    pub location: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EventRecurrenceRule {
+    pub start: String,
+    pub end: Option<String>,
+    pub frequency: RecurrenceFrequency,
+    pub interval: u32,
+    /// 0 = Monday .. 6 = Sunday.
+    pub by_weekday: Option<Vec<u8>>,
+    pub count: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildScheduledEvent {
+    pub id: Snowflake,
+    pub guild_id: Snowflake,
+    pub channel_id: Option<Snowflake>,
+    pub creator_id: Option<Snowflake>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creator: Option<User>,
+    pub name: String,
+    pub description: Option<String>,
+    pub scheduled_start_time: String,
+    pub scheduled_end_time: Option<String>,
+    /// Always 2 (guild only).
+    pub privacy_level: u8,
+    pub status: ScheduledEventStatus,
+    pub entity_type: ScheduledEventEntityType,
+    /// Always `null`.
+    pub entity_id: Option<Snowflake>,
+    pub entity_metadata: Option<EventEntityMetadata>,
+    pub user_count: u32,
+    /// Whether the receiver is Interested (filled per receiver, also in gateway events).
+    pub user_rsvp: bool,
+    pub image: Option<String>,
+    pub recurrence_rule: Option<EventRecurrenceRule>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct CreateScheduledEventRequest {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    pub entity_type: ScheduledEventEntityType,
+    #[serde(default)]
+    pub channel_id: Option<Snowflake>,
+    #[serde(default)]
+    pub entity_metadata: Option<EventEntityMetadata>,
+    pub scheduled_start_time: String,
+    #[serde(default)]
+    pub scheduled_end_time: Option<String>,
+    #[serde(default)]
+    pub privacy_level: Option<u8>,
+    #[serde(default)]
+    pub image_attachment_id: Option<Snowflake>,
+    #[serde(default)]
+    pub recurrence_rule: Option<EventRecurrenceRule>,
+}
+
+/// Every key is optional; a key sent as `null` clears the value where the type is nullable (`Some(None)`).
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct EditScheduledEventRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub description: Option<Option<String>>,
+    #[serde(default)]
+    pub entity_type: Option<ScheduledEventEntityType>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub channel_id: Option<Option<Snowflake>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub entity_metadata: Option<Option<EventEntityMetadata>>,
+    #[serde(default)]
+    pub scheduled_start_time: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub scheduled_end_time: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub image_attachment_id: Option<Option<Snowflake>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub recurrence_rule: Option<Option<EventRecurrenceRule>>,
+    #[serde(default)]
+    pub status: Option<ScheduledEventStatus>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScheduledEventUser {
+    pub guild_scheduled_event_id: Snowflake,
+    pub user: User,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<GuildMember>,
+}
+
+/// GUILD_SCHEDULED_EVENT_USER_ADD / _REMOVE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScheduledEventUserEvent {
+    pub guild_scheduled_event_id: Snowflake,
+    pub user_id: Snowflake,
+    pub guild_id: Snowflake,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OnboardingOption {
+    pub id: Snowflake,
+    pub title: String,
+    pub description: Option<String>,
+    pub emoji: Option<ReactionEmoji>,
+    pub channel_ids: Vec<Snowflake>,
+    pub role_ids: Vec<Snowflake>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OnboardingPrompt {
+    pub id: Snowflake,
+    #[serde(rename = "type")]
+    pub kind: OnboardingPromptType,
+    pub title: String,
+    pub options: Vec<OnboardingOption>,
+    pub single_select: bool,
+    pub required: bool,
+    pub in_onboarding: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OnboardingRules {
+    pub description: Option<String>,
+    pub items: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildOnboarding {
+    pub guild_id: Snowflake,
+    pub prompts: Vec<OnboardingPrompt>,
+    pub default_channel_ids: Vec<Snowflake>,
+    pub enabled: bool,
+    pub mode: OnboardingMode,
+    pub rules: Option<OnboardingRules>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct OnboardingOptionInput {
+    #[serde(default)]
+    pub id: Option<Snowflake>,
+    pub title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub emoji: Option<ReactionEmoji>,
+    #[serde(default)]
+    pub channel_ids: Vec<Snowflake>,
+    #[serde(default)]
+    pub role_ids: Vec<Snowflake>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct OnboardingPromptInput {
+    #[serde(default)]
+    pub id: Option<Snowflake>,
+    #[serde(rename = "type")]
+    pub kind: OnboardingPromptType,
+    pub title: String,
+    pub options: Vec<OnboardingOptionInput>,
+    #[serde(default)]
+    pub single_select: Option<bool>,
+    #[serde(default)]
+    pub required: Option<bool>,
+    #[serde(default)]
+    pub in_onboarding: Option<bool>,
+}
+
+/// `PUT /guilds/{id}/onboarding`: only the sent keys change.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct EditOnboardingRequest {
+    #[serde(default)]
+    pub prompts: Option<Vec<OnboardingPromptInput>>,
+    #[serde(default)]
+    pub default_channel_ids: Option<Vec<Snowflake>>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub mode: Option<OnboardingMode>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub rules: Option<Option<OnboardingRules>>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct OnboardingResponsesRequest {
+    pub option_ids: Vec<Snowflake>,
+    #[serde(default)]
+    pub rules_accepted: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OnboardingResponses {
+    pub option_ids: Vec<Snowflake>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OnboardingCompletion {
+    pub member: GuildMember,
+    pub channel_ids: Vec<Snowflake>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FriendSuggestion {
+    pub user: User,
+    pub mutual_guilds: Vec<MutualGuild>,
+    pub mutual_friends_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FriendSuggestionsResponse {
+    pub enabled: bool,
+    pub suggestions: Vec<FriendSuggestion>,
+}
+
+/// Body and response of `PATCH /users/@me/friend-suggestion-settings`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FriendSuggestionSettings {
+    pub enabled: bool,
+}
+
 // ---- Stickers, GIFs, bookmarks, reminders ----
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1717,6 +1965,11 @@ pub enum GatewayEvent {
     MessageAck(MessageAck),
     RelationshipAdd(Relationship),
     RelationshipRemove(IdOnly),
+    GuildScheduledEventCreate(Box<GuildScheduledEvent>),
+    GuildScheduledEventUpdate(Box<GuildScheduledEvent>),
+    GuildScheduledEventDelete(Box<GuildScheduledEvent>),
+    GuildScheduledEventUserAdd(ScheduledEventUserEvent),
+    GuildScheduledEventUserRemove(ScheduledEventUserEvent),
     GuildStickersUpdate(GuildStickersUpdate),
     BookmarkAdd(Box<Bookmark>),
     BookmarkRemove(BookmarkRemove),
@@ -1764,6 +2017,11 @@ impl GatewayEvent {
             Self::MessageAck(_) => "MESSAGE_ACK",
             Self::RelationshipAdd(_) => "RELATIONSHIP_ADD",
             Self::RelationshipRemove(_) => "RELATIONSHIP_REMOVE",
+            Self::GuildScheduledEventCreate(_) => "GUILD_SCHEDULED_EVENT_CREATE",
+            Self::GuildScheduledEventUpdate(_) => "GUILD_SCHEDULED_EVENT_UPDATE",
+            Self::GuildScheduledEventDelete(_) => "GUILD_SCHEDULED_EVENT_DELETE",
+            Self::GuildScheduledEventUserAdd(_) => "GUILD_SCHEDULED_EVENT_USER_ADD",
+            Self::GuildScheduledEventUserRemove(_) => "GUILD_SCHEDULED_EVENT_USER_REMOVE",
             Self::GuildStickersUpdate(_) => "GUILD_STICKERS_UPDATE",
             Self::BookmarkAdd(_) => "BOOKMARK_ADD",
             Self::BookmarkRemove(_) => "BOOKMARK_REMOVE",
@@ -1804,6 +2062,10 @@ impl GatewayEvent {
             Self::UserUpdate(value) => serde_json::to_value(value),
             Self::MessageAck(value) => serde_json::to_value(value),
             Self::RelationshipAdd(value) => serde_json::to_value(value),
+            Self::GuildScheduledEventCreate(value) | Self::GuildScheduledEventUpdate(value) | Self::GuildScheduledEventDelete(value) => {
+                serde_json::to_value(value)
+            }
+            Self::GuildScheduledEventUserAdd(value) | Self::GuildScheduledEventUserRemove(value) => serde_json::to_value(value),
             Self::GuildStickersUpdate(value) => serde_json::to_value(value),
             Self::BookmarkAdd(value) => serde_json::to_value(value),
             Self::BookmarkRemove(value) => serde_json::to_value(value),
@@ -2091,6 +2353,59 @@ mod tests {
         assert_eq!(GatewayEvent::GuildBanRemove(removed).data()["user"]["username"], "sam");
         round_trip::<Presence>(json!({"user_id": "100", "status": "invisible", "custom_status": "brb"}));
         assert_eq!(PresenceStatus::parse("invisible"), Some(PresenceStatus::Invisible));
+    }
+
+    fn scheduled_event() -> Value {
+        json!({
+            "id": "900", "guild_id": "300", "channel_id": null, "creator_id": "100", "creator": user(), "name": "Movie night", "description": null,
+            "scheduled_start_time": "2026-10-20T18:00:00.000Z", "scheduled_end_time": "2026-10-20T20:00:00.000Z", "privacy_level": 2, "status": 1,
+            "entity_type": 3, "entity_id": null, "entity_metadata": {"location": "The lounge"}, "user_count": 2, "user_rsvp": true, "image": null,
+            "recurrence_rule": {"start": "2026-10-20T18:00:00.000Z", "end": null, "frequency": 2, "interval": 1, "by_weekday": [1], "count": null}
+        })
+    }
+
+    #[test]
+    fn community_shapes_match_types_ts() {
+        round_trip::<GuildScheduledEvent>(scheduled_event());
+        round_trip::<ScheduledEventUser>(json!({"guild_scheduled_event_id": "900", "user": user()}));
+        round_trip::<ScheduledEventUserEvent>(json!({"guild_scheduled_event_id": "900", "user_id": "100", "guild_id": "300"}));
+        let option =
+            json!({"id": "7", "title": "Gamer", "description": null, "emoji": {"id": null, "name": "🎮"}, "channel_ids": ["200"], "role_ids": ["301"]});
+        let prompt =
+            json!({"id": "6", "type": 0, "title": "What do you play?", "options": [option], "single_select": false, "required": true, "in_onboarding": true});
+        round_trip::<OnboardingPrompt>(prompt.clone());
+        round_trip::<GuildOnboarding>(json!({
+            "guild_id": "300", "prompts": [prompt], "default_channel_ids": ["200"], "enabled": true, "mode": 1,
+            "rules": {"description": null, "items": ["Be kind"]}
+        }));
+        round_trip::<OnboardingResponses>(json!({"option_ids": ["7"]}));
+        round_trip::<FriendSuggestionsResponse>(json!({
+            "enabled": true, "suggestions": [{"user": user(), "mutual_guilds": [{"id": "300", "nick": null}], "mutual_friends_count": 1}]
+        }));
+        round_trip::<FriendSuggestionSettings>(json!({"enabled": false}));
+        round_trip::<GuildMember>(
+            json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null, "flags": 8}),
+        );
+        let edit: EditScheduledEventRequest = serde_json::from_value(json!({"description": null, "status": 2})).expect("edit event");
+        assert_eq!((edit.description, edit.status), (Some(None), Some(ScheduledEventStatus::Active)));
+        assert!(edit.scheduled_end_time.is_none() && edit.image_attachment_id.is_none());
+        let edit: EditOnboardingRequest = serde_json::from_value(json!({"rules": null, "enabled": true})).expect("edit onboarding");
+        assert_eq!((edit.rules, edit.enabled), (Some(None), Some(true)));
+        let created = GatewayEvent::GuildScheduledEventCreate(Box::new(serde_json::from_value(scheduled_event()).expect("event")));
+        assert_eq!((created.name(), created.data()["name"].clone()), ("GUILD_SCHEDULED_EVENT_CREATE", json!("Movie night")));
+        let added = GatewayEvent::GuildScheduledEventUserAdd(ScheduledEventUserEvent {
+            guild_scheduled_event_id: Snowflake(900),
+            user_id: Snowflake(100),
+            guild_id: Snowflake(300),
+        });
+        assert_eq!(
+            (added.name(), added.data()),
+            ("GUILD_SCHEDULED_EVENT_USER_ADD", json!({"guild_scheduled_event_id": "900", "user_id": "100", "guild_id": "300"}))
+        );
+        assert!(
+            serde_json::from_value::<CreateScheduledEventRequest>(json!({"name": "x", "entity_type": 9, "scheduled_start_time": "2026-10-20T18:00:00.000Z"}))
+                .is_err()
+        );
     }
 
     #[test]

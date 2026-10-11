@@ -8,6 +8,7 @@ import { request } from "../api/rest";
 import { Perm, basePermissions, canEditRole, canModerate, channelPermissions, hasBit, memberLike } from "../api/permissions";
 import { ChannelType, RelationshipType, type Channel, type Guild, type Snowflake, type User } from "../api/types";
 import type { MenuItem } from "../ui";
+import { openCreateEvent } from "../community/communityModals";
 import { closeDirectMessage, copyText, markChannelRead, markGuildRead, openDirectMessage } from "./actions";
 import { isMutedAt, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setNotifyLevel, toggleFlag, unmute, useLocalState, type NotifyLevel } from "./localState";
 import { openModal } from "./modalStore";
@@ -107,9 +108,9 @@ export function guildContextItems(guild: Guild): MenuItem[] {
       ? [
           { id: "create-channel", label: "Create Channel", onSelect: () => openModal({ type: "createChannel", guildId: guild.id }) },
           { id: "create-category", label: "Create Category", onSelect: () => openModal({ type: "createChannel", guildId: guild.id, channelType: ChannelType.GuildCategory }) },
-          unavailable("create-event", "Create Event"),
         ]
       : [],
+    can(Perm.CREATE_EVENTS) || can(Perm.MANAGE_EVENTS) ? [{ id: "create-event", label: "Create Event", onSelect: () => openCreateEvent(guild.id) }] : [],
     owner ? [] : [{ id: "leave", label: "Leave Server", danger: true, onSelect: () => openModal({ type: "leaveServer", guildId: guild.id }) }],
     [{ id: "copy-id", label: "Copy Server ID", onSelect: copy(guild.id) }],
   );
@@ -152,7 +153,7 @@ function guildDropdownItemsPlain(guild: Guild): MenuItem[] {
             { id: "create-category", label: "Create Category", onSelect: () => openModal({ type: "createChannel", guildId: guild.id, channelType: ChannelType.GuildCategory }) } satisfies MenuItem,
           ]
         : []),
-      unavailable("create-event", "Create Event"),
+      ...(can(Perm.CREATE_EVENTS) || can(Perm.MANAGE_EVENTS) ? [{ id: "create-event", label: "Create Event", onSelect: () => openCreateEvent(guild.id) } satisfies MenuItem] : []),
       unavailable("app-directory", "App Directory"),
       unavailable("linked-roles", "Linked Roles"),
     ],

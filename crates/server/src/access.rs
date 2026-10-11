@@ -321,6 +321,26 @@ pub async fn viewer_permissions(state: &AppState, channel: &ChannelRow) -> ApiRe
         .collect())
 }
 
+/// Guild members whose guild-wide permissions (timeouts applied, as in `guild_access`) include `bit`; a few queries for the whole guild.
+pub async fn members_with_permission(state: &AppState, guild_id: i64, bit: u64) -> ApiResult<Vec<i64>> {
+    let owner: Option<(i64,)> = sqlx::query_as("SELECT owner_id FROM guilds WHERE id = $1").bind(guild_id).fetch_optional(&state.db).await?;
+    let Some((owner_id,)) = owner else { return Ok(Vec::new()) };
+    let role_permissions = role_permissions(state, guild_id).await?;
+    let (members, roles) = guild_members_with_roles(state, guild_id).await?;
+    let timed_out: Vec<(i64,)> =
+        sqlx::query_as("SELECT user_id FROM guild_members WHERE guild_id = $1 AND timeout_until > now()").bind(guild_id).fetch_all(&state.db).await?;
+    let timed_out: std::collections::HashSet<i64> = timed_out.into_iter().map(|(id,)| id).collect();
+    Ok(members
+        .into_iter()
+        .filter(|user_id| {
+            let member_roles = roles.get(user_id).map(Vec::as_slice).unwrap_or(&[]);
+            let base = base_permissions(guild_id, owner_id, *user_id, &role_permissions, member_roles);
+            let permissions = if owner_id == *user_id { base } else { clamp_timeout(base, timed_out.contains(user_id)) };
+            permissions & bit != 0
+        })
+        .collect())
+}
+
 pub async fn guild_members_with_roles(state: &AppState, guild_id: i64) -> ApiResult<(Vec<i64>, HashMap<i64, Vec<i64>>)> {
     let members: Vec<(i64,)> = sqlx::query_as("SELECT user_id FROM guild_members WHERE guild_id = $1").bind(guild_id).fetch_all(&state.db).await?;
     let role_rows: Vec<(i64, i64)> =

@@ -239,8 +239,9 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     let members = access::guild_member_ids(&state, id).await?;
     // The FK clears their primary guild; their audience hears about it as USER_UPDATE once the guild is gone.
     let adopters: Vec<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE primary_guild_id = $1").bind(id).fetch_all(&state.db).await?;
+    crate::routes::scheduled_events::release_guild_covers(&state, id).await;
     let attachments: Vec<(i64,)> =
-        sqlx::query_as("DELETE FROM attachments WHERE channel_id IN (SELECT id FROM channels WHERE guild_id = $1) AND NOT sticker_asset RETURNING id")
+        sqlx::query_as("DELETE FROM attachments WHERE channel_id IN (SELECT id FROM channels WHERE guild_id = $1) AND NOT sticker_asset AND NOT (message_id IS NULL AND claimed_at IS NOT NULL) RETURNING id")
             .bind(id)
             .fetch_all(&state.db)
             .await?;

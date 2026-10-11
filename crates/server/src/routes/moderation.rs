@@ -566,6 +566,14 @@ async fn edit_member(
             .bind(&dropped)
             .execute(&mut *tx)
             .await?;
+        // A role a moderator takes away or hands out is theirs from now on: onboarding must not take it back later.
+        let changed: Vec<i64> = dropped.iter().copied().chain(wanted.iter().filter(|role| !current_roles.contains(role)).copied()).collect();
+        sqlx::query("DELETE FROM member_onboarding_roles WHERE guild_id = $1 AND user_id = $2 AND role_id = ANY($3)")
+            .bind(guild)
+            .bind(target)
+            .bind(&changed)
+            .execute(&mut *tx)
+            .await?;
         for role in wanted {
             sqlx::query("INSERT INTO member_roles (guild_id, user_id, role_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
                 .bind(guild)

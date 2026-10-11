@@ -214,11 +214,12 @@ struct MemberRow {
     member_pronouns: Option<String>,
     member_theme_primary: Option<i32>,
     member_theme_accent: Option<i32>,
+    flags: i32,
 }
 
 /// Member columns after [`USER_COLS`] (alias `m` = `guild_members`).
 const MEMBER_COLS: &str = "m.nick, m.joined_at, m.timeout_until, m.avatar_path AS member_avatar_path, m.banner_path AS member_banner_path, \
-     m.bio AS member_bio, m.pronouns AS member_pronouns, m.theme_primary AS member_theme_primary, m.theme_accent AS member_theme_accent";
+     m.bio AS member_bio, m.pronouns AS member_pronouns, m.theme_primary AS member_theme_primary, m.theme_accent AS member_theme_accent, m.flags";
 
 impl MemberRow {
     fn into_api(self, state: &AppState, roles: Vec<Snowflake>) -> GuildMember {
@@ -235,6 +236,7 @@ impl MemberRow {
             bio: self.member_bio,
             pronouns: self.member_pronouns,
             theme_colors: theme_colors(self.member_theme_primary, self.member_theme_accent),
+            flags: self.flags.max(0) as u32,
         }
     }
 }
@@ -272,6 +274,25 @@ pub async fn member(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<
         let member_roles = roles.get(&row.user.id).cloned().unwrap_or_default();
         row.into_api(state, member_roles)
     }))
+}
+
+/// Several members of a guild in two queries, keyed by user id.
+pub async fn members_by_ids(state: &AppState, guild_id: i64, user_ids: &[i64]) -> ApiResult<HashMap<i64, GuildMember>> {
+    let rows: Vec<MemberRow> = sqlx::query_as(&format!(
+        "SELECT {USER_COLS}, {MEMBER_COLS} FROM guild_members m JOIN {USER_FROM} ON u.id = m.user_id WHERE m.guild_id = $1 AND u.id = ANY($2)"
+    ))
+    .bind(guild_id)
+    .bind(user_ids)
+    .fetch_all(&state.db)
+    .await?;
+    let roles = member_roles(state, guild_id, user_ids).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let id = row.user.id;
+            (id, row.into_api(state, roles.get(&id).cloned().unwrap_or_default()))
+        })
+        .collect())
 }
 
 pub async fn member_roles(state: &AppState, guild_id: i64, user_ids: &[i64]) -> ApiResult<HashMap<i64, Vec<Snowflake>>> {

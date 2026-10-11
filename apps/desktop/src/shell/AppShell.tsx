@@ -4,6 +4,7 @@ import { ChatView } from "../chat/ChatView";
 import { MediaHost } from "../media/MediaHost";
 import { appStore, useStore } from "../api/store";
 import { ChannelType } from "../api/types";
+import { CommunityHost } from "../community";
 import { ForumChannel } from "../forum/ForumChannel";
 import { ThreadHost } from "../threads/ThreadHost";
 import { ThreadPanelHost, useThreadPanelOpen } from "../threads/ThreadPanel";
@@ -255,6 +256,7 @@ export function AppShell() {
       </div>
       <ProfileCardHost />
       <ModalHost />
+      <CommunityHost />
       <MediaHost />
       <ThreadHost />
     </div>

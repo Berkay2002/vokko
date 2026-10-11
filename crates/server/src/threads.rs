@@ -437,7 +437,11 @@ pub async fn delete_threads(state: &AppState, rows: Vec<ChannelRow>, refresh_sta
         audiences.push(access::channel_viewers(state, row).await?);
     }
     let ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
-    let attachments: Vec<(i64,)> = sqlx::query_as("DELETE FROM attachments WHERE channel_id = ANY($1) RETURNING id").bind(&ids).fetch_all(&state.db).await?;
+    let attachments: Vec<(i64,)> =
+        sqlx::query_as("DELETE FROM attachments WHERE channel_id = ANY($1) AND NOT (message_id IS NULL AND claimed_at IS NOT NULL) RETURNING id")
+            .bind(&ids)
+            .fetch_all(&state.db)
+            .await?;
     sqlx::query("DELETE FROM channels WHERE id = ANY($1)").bind(&ids).execute(&state.db).await?;
     crate::media::remove_files(state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
     for (row, viewers) in rows.iter().zip(&audiences) {

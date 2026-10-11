@@ -35,6 +35,7 @@ import "./styles/shortcuts.css";
 import "./styles/responsive.css";
 import "./ui/prefs";
 import "./search";
+import "./community";
 import "./media";
 import "./voice";
 

@@ -1441,6 +1441,7 @@
 }
 
 .friends-header {
+  container-type: inline-size;
   display: flex;
   flex: none;
   align-items: center;
@@ -1475,7 +1476,8 @@
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
+  min-width: 0;
   margin-left: 8px;
 }
 
@@ -1483,7 +1485,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 12px;
+  padding: 4px 10px;
+  white-space: nowrap;
   border-radius: var(--radius-sm);
   color: var(--interactive-text-default);
   font-size: 16px;
@@ -1520,6 +1523,23 @@
   display: flex;
   padding-left: 8px;
   gap: 8px;
+}
+
+/* Six tabs do not fit next to the title in a narrow column: keep the icon, hide the word (still there for screen readers) and the dot. */
+@container (max-width: 760px) {
+  .friends-title h1 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .friends-dot {
+    display: none;
+  }
 }
 
 .people-column {

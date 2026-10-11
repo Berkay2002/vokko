@@ -14,7 +14,8 @@ import { Avatar } from './Avatar';
 import { ServerTag } from './ServerTag';
 import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, addFiles, onUploadNotice } from './draftStore';
 import { messageStore, useChannelState } from './messageStore';
-import { compareIds, formatMessageTimestamp } from './util';
+import { compareIds, formatMessageTimestamp, isShiftDown } from './util';
+import { PinConfirmModal } from '../community';
 import './chat.css';
 
 const ACK_DEBOUNCE_MS = 3000;
@@ -32,6 +33,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
   const [mentionReply, setMentionReply] = useState(true);
   const [editingId, setEditingId] = useState<Snowflake | null>(null);
   const [deleting, setDeleting] = useState<DeleteRequest | null>(null);
+  const [pinning, setPinning] = useState<Message | null>(null);
   const [link, setLink] = useState<string | null>(null);
   const [image, setImage] = useState<ImageView | null>(null);
   const [reactionsOf, setReactionsOf] = useState<Message | null>(null);
@@ -64,16 +66,22 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     setDeleting({ message: m });
   }, []);
 
+  const applyPin = useCallback((m: Message) => {
+    messageStore.setPinned(m.channel_id, m.id, !m.pinned).catch((e: unknown) => {
+      if (e instanceof ApiRequestError && e.code === 30003) {
+        setNotice({ title: 'Pin limit reached', body: 'This channel already has 250 pinned messages. Unpin one to make room for another.' });
+      }
+    });
+  }, []);
+
   const actions = useMemo<ChatActions>(() => ({
     reply: m => { setReplyTo(m); setMentionReply(true); setEditingId(null); setFocusToken(n => n + 1); },
     edit: m => setEditingId(m.id),
     requestDelete,
     togglePin: m => {
-      messageStore.setPinned(m.channel_id, m.id, !m.pinned).catch((e: unknown) => {
-        if (e instanceof ApiRequestError && e.code === 30003) {
-          setNotice({ title: 'Pin limit reached', body: 'This channel already has 250 pinned messages. Unpin one to make room for another.' });
-        }
-      });
+      // Pinning asks first (Shift skips the question, like deleting); unpinning is immediate.
+      if (m.pinned || isShiftDown()) applyPin(m);
+      else setPinning(m);
     },
     react: (m, emoji) => { void messageStore.toggleReaction(m.channel_id, m.id, emoji); },
     jumpTo: id => { void messageStore.jumpToMessage(channelId, id); },
@@ -82,7 +90,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     viewAttachment: (message, attachment) => setAttachmentView({ message, attachment }),
     deleteAttachment: (message, attachment) => setAttachmentDelete({ message, attachment }),
     viewReactions: m => setReactionsOf(m),
-  }), [channelId, requestDelete]);
+  }), [channelId, requestDelete, applyPin]);
 
   const stopEditing = useCallback(() => { setEditingId(null); setFocusToken(n => n + 1); }, []);
 
@@ -97,6 +105,8 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
       dragging={dragging} setDragging={setDragging} dragDepth={dragDepth}
     />
     <DeleteModal request={deleting} onClose={() => { setDeleting(null); setFocusToken(n => n + 1); }} />
+    <PinModal message={pinning} onCancel={() => { setPinning(null); setFocusToken(n => n + 1); }}
+      onConfirm={() => { const m = pinning; setPinning(null); setFocusToken(n => n + 1); if (m) applyPin(m); }} />
     <LinkModal href={link} onClose={() => setLink(null)} />
     <Modal open={!!notice} onClose={() => setNotice(null)} title={notice?.title ?? ''}
       footer={<button type="button" className="chat-btn primary" onClick={() => setNotice(null)}>Okay</button>}>
@@ -252,6 +262,21 @@ function DeleteModal({ request, onClose }: { request: DeleteRequest | null; onCl
       <p className="chat-protip"><span className="chat-protip-label">PROTIP:</span> You can hold down shift when clicking <b>delete message</b> to bypass this confirmation entirely.</p>
     </>}
   </Modal>;
+}
+
+/** "Pin this message?": the community dialog with this message's own markup as the preview. */
+function PinModal({ message, onConfirm, onCancel }: { message: Message | null; onConfirm(): void; onCancel(): void }) {
+  const chat = useChat();
+  const m = message;
+  return <PinConfirmModal open={!!m} channelName={chat.channel?.name ?? null} onConfirm={onConfirm} onCancel={onCancel}>
+    {m && <div className="chat-delete-preview">
+      <Avatar user={m.author} size={40} guildId={chat.guildId} />
+      <div>
+        <div className="chat-msg-header"><span className="chat-author">{chat.nameOf(m.author, m.member)}</span> <span className="chat-timestamp">{formatMessageTimestamp(new Date(m.timestamp))}</span></div>
+        <Markdown content={m.content || (m.attachments.length > 0 ? `(${m.attachments.length} attachment${m.attachments.length === 1 ? '' : 's'})` : '')} ctx={chat.md} className="chat-content" />
+      </div>
+    </div>}
+  </PinConfirmModal>;
 }
 
 function LinkModal({ href, onClose }: { href: string | null; onClose(): void }) {

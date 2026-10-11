@@ -7,6 +7,7 @@ import { ApiRequestError, RateLimitedError } from "../errors";
 import { snowflakeToTimestamp } from "../snowflake";
 import type { Attachment, GifProvider, PresenceStatus } from "../types";
 import { db, nextId } from "./db";
+import { seedOnboardingGuild, type SeededGuild } from "./community";
 import { addMessage, createAccount } from "./ops";
 import { handleRoute } from "./routes";
 import { seed } from "./seed";
@@ -117,6 +118,8 @@ interface MockHooks {
   /** Another user joins (or with null leaves) a voice channel, optionally self-muted / deafened. */
   voice(username: string, channelId: string | null, opts?: { selfMute?: boolean; selfDeaf?: boolean }): void;
   messageTimestamp(id: string): number;
+  /** A guild owned by `owner` (default alice) with onboarding (a required question, rules, default channels), an invite code and a stranger member. */
+  seedOnboardingGuild(owner?: string): SeededGuild;
   reset(): void;
 }
 
@@ -161,6 +164,7 @@ const hooks: MockHooks = {
   channelIdByName: name => [...db.channels.values()].find(c => c.name === name)?.id ?? null,
   voice: (username, channelId, opts) => setMockVoice(userByName(username), channelId, emit, opts),
   messageTimestamp: id => snowflakeToTimestamp(id),
+  seedOnboardingGuild: owner => seedOnboardingGuild(owner),
   reset: () => {
     window.localStorage.removeItem("vokko.token");
     window.location.reload();

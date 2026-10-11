@@ -155,11 +155,17 @@ async fn delete_channel(State(state): State<AppState>, AuthUser(user_id): AuthUs
     let viewers = access::channel_viewers(&state, &access.channel).await?;
     let guild_id = access.channel.guild_id;
     let _eviction = crate::voice::state::channel_deleted(&state, id).await;
-    let attachments: Vec<(i64,)> =
-        sqlx::query_as("DELETE FROM attachments WHERE channel_id = $1 AND NOT sticker_asset RETURNING id").bind(id).fetch_all(&state.db).await?;
+    // Uploads in use as an avatar, icon or event cover (claimed, not on a message) outlive the channel they came through.
+    let attachments: Vec<(i64,)> = sqlx::query_as(
+        "DELETE FROM attachments WHERE channel_id = $1 AND NOT sticker_asset AND NOT (message_id IS NULL AND claimed_at IS NOT NULL) RETURNING id",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
     // Children of a deleted category move to the top level.
     sqlx::query("UPDATE channels SET parent_id = NULL WHERE parent_id = $1").bind(id).execute(&state.db).await?;
     sqlx::query("UPDATE guilds SET system_channel_id = NULL WHERE id = $1 AND system_channel_id = $2").bind(guild_id).bind(id).execute(&state.db).await?;
+    crate::routes::scheduled_events::channel_removed(&state, id).await?;
     sqlx::query("DELETE FROM channels WHERE id = $1").bind(id).execute(&state.db).await?;
     crate::media::remove_files(&state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
     crate::stickers::sweep_assets(&state).await;

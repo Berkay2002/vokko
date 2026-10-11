@@ -4,6 +4,7 @@ import { MessageReferenceType, MessageType, RelationshipType, isThreadType, type
 import { compareIds } from "../snowflake";
 import { canView } from "./access";
 import { db, sortedMessages, userOf, type MockChannel, type MockMessage } from "./db";
+import { flagsField } from "./memberFlags";
 import { memberProfileFields } from "./perks";
 import { voiceStatesFor } from "./voice";
 
@@ -88,6 +89,7 @@ export function membersOf(guildId: string): (GuildMember & { guild_id?: never })
     joined_at: m.joined_at,
     ...(m.communication_disabled_until ? { communication_disabled_until: m.communication_disabled_until } : {}),
     ...memberProfileFields(m),
+    ...flagsField(guildId, id),
   }));
 }
 

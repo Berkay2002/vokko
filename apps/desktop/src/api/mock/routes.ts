@@ -12,9 +12,12 @@ import { applyChannelFields, assertCanPost, assertThreadOpen, deleteThread, drop
 import { applyGuildPerks, applyUserPerks, dropTagOnLeave, memberProfileFields } from "./perks";
 import { ID, route, routes, str } from "./router";
 import { emit } from "./socket";
+import { onboardingStartedFor, eventsChannelRemoved } from "./community";
+import { flagsField } from "./memberFlags";
 import { setVoiceChannelStatus } from "./voice";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
 import "./search";
+import "./community";
 
 export { route, str, requireGuildMember };
 
@@ -104,7 +107,7 @@ route("GET", `/users/${ID}/profile`, ({ viewer, params, query }) => {
   const guildId = query.get("guild_id");
   const record = guildId ? db.guilds.get(guildId)?.members.get(other.user.id) : undefined;
   const guild_member: GuildMember | undefined = record
-    ? { user: other.user, nick: record.nick, roles: record.roles, joined_at: record.joined_at, ...(record.communication_disabled_until ? { communication_disabled_until: record.communication_disabled_until } : {}), ...memberProfileFields(record) }
+    ? { user: other.user, nick: record.nick, roles: record.roles, joined_at: record.joined_at, ...(record.communication_disabled_until ? { communication_disabled_until: record.communication_disabled_until } : {}), ...memberProfileFields(record), ...flagsField(guildId ?? "", other.user.id) }
     : undefined;
   return { user: other.user, mutual_guilds, mutual_friends_count, ...(guild_member ? { guild_member } : {}) };
 });
@@ -323,6 +326,7 @@ route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
   requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
   dropChannelExtras(channel);
   for (const id of channelAudience(channel)) emit([id], "CHANNEL_DELETE", channelFor(channel, id));
+  eventsChannelRemoved(channel.id);
   purgeChannelRefs(channel.id);
   db.channels.delete(channel.id);
   db.messages.delete(channel.id);
@@ -365,8 +369,9 @@ route("POST", "/invites/([a-z0-9]+)", ({ viewer, params }) => {
   if (!guild.members.has(viewer.user.id)) {
     const member = { nick: null, roles: [], joined_at: new Date().toISOString() };
     guild.members.set(viewer.user.id, member);
+    onboardingStartedFor(guild.guild.id, viewer.user.id);
     emit([viewer.user.id], "GUILD_CREATE", guildPayload(guild.guild.id, viewer.user.id));
-    emit([...guild.members.keys()].filter(id => id !== viewer.user.id), "GUILD_MEMBER_ADD", { guild_id: guild.guild.id, user: viewer.user, ...member });
+    emit([...guild.members.keys()].filter(id => id !== viewer.user.id), "GUILD_MEMBER_ADD", { guild_id: guild.guild.id, user: viewer.user, ...member, ...flagsField(guild.guild.id, viewer.user.id) });
   }
   return guild.guild;
 });

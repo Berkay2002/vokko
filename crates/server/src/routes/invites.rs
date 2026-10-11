@@ -64,6 +64,16 @@ async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
         }
     }
     if inserted.rows_affected() > 0 {
+        // Guilds with onboarding switched on show new members the flow until they finish it.
+        sqlx::query(
+            "UPDATE guild_members SET flags = flags | $3 WHERE guild_id = $1 AND user_id = $2 \
+             AND EXISTS (SELECT 1 FROM guild_onboarding WHERE guild_id = $1 AND enabled)",
+        )
+        .bind(guild_id)
+        .bind(user_id)
+        .bind(vokko_protocol::api::member_flags::STARTED_ONBOARDING as i32)
+        .execute(&mut *tx)
+        .await?;
         // A timeout still running from before they left or were kicked comes back with them.
         sqlx::query(
             "UPDATE guild_members m SET timeout_until = t.until FROM guild_timeouts t \

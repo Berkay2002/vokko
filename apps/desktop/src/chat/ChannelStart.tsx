@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { Hash, MessageCircle, MessageSquareText, Pencil } from 'lucide-react';
 import { ChannelType, RelationshipType, isThreadType } from '../api/types';
 import type { Channel, Guild, Snowflake, User, UserProfile } from '../api/types';
-import { Modal, Perm, guildIconUrl, guildInitials, openModal, request, resolveUrl, useGuilds, useMutualGuildsFromStore, usePermissions, useRelationship, Tooltip } from './shell';
+import { Modal, Perm, guildIconUrl, guildInitials, openModal, request, resolveUrl, useGuild, useGuildChannels, useGuilds, useMutualGuildsFromStore, usePermissions, useRelationship, Tooltip } from './shell';
 import { useChat } from './ChatContext';
+import { useChannelState } from './messageStore';
+import { WelcomeChecklist } from '../community';
 import { Avatar } from './Avatar';
 
 /** Guilds shared with `userId`: GET /users/{id}/profile, falling back to the members the store already holds. */
@@ -120,6 +122,7 @@ export function ChannelStart() {
     <h1>Welcome to {label}!</h1>
     <p>This is the start of the {label} channel.{ch?.topic ? ` ${ch.topic}` : ''}</p>
     {voice && ch && <VoiceStartActions channel={ch} />}
+    {ch && chat.guildId && <ServerChecklist guildId={chat.guildId} channelId={ch.id} />}
   </div>;
 }
 
@@ -129,4 +132,22 @@ function VoiceStartActions({ channel }: { channel: Channel }) {
   return <button type="button" className="chat-start-btn" style={{ marginTop: 12 }} onClick={() => openModal({ type: 'editChannel', channelId: channel.id })}>
     <Pencil size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />Edit Channel
   </button>;
+}
+
+function useGuildStartChannel(guildId: Snowflake): Snowflake | undefined {
+  const guild = useGuild(guildId);
+  const channels = useGuildChannels(guildId);
+  const system = guild?.system_channel_id;
+  if (system && channels.some(c => c.id === system)) return system;
+  return channels.find(c => c.type === ChannelType.GuildText)?.id;
+}
+
+/** The new-server checklist belongs to the server's first channel (the system channel, else the first text channel). */
+function ServerChecklist({ guildId, channelId }: { guildId: Snowflake; channelId: Snowflake }) {
+  const chat = useChat();
+  const first = useGuildStartChannel(guildId);
+  const state = useChannelState(channelId);
+  if (first !== channelId) return null;
+  const sentFirstMessage = state.messages.some(m => m.author.id === chat.me.id && m.type === 0);
+  return <WelcomeChecklist guildId={guildId} channelId={channelId} sentFirstMessage={sentFirstMessage} />;
 }

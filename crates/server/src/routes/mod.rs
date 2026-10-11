@@ -12,12 +12,15 @@ mod guilds;
 mod invites;
 pub mod messages;
 mod moderation;
+mod onboarding;
 mod overwrites;
 mod reactions;
 pub mod relationships;
 mod saved;
+pub mod scheduled_events;
 mod search;
 mod stickers;
+mod suggestions;
 mod threads;
 mod users;
 
@@ -34,6 +37,9 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(messages::routes())
         .merge(reactions::routes())
         .merge(search::routes())
+        .merge(scheduled_events::routes())
+        .merge(onboarding::routes())
+        .merge(suggestions::routes())
         .merge(saved::routes())
         .merge(gifs::routes())
         .merge(stickers::routes())

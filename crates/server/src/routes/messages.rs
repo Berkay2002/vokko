@@ -369,7 +369,7 @@ async fn insert_message_stored(
         let filenames: Vec<Option<String>> = draft.attachments.iter().map(|attachment| attachment.filename.clone()).collect();
         let descriptions: Vec<Option<String>> = draft.attachments.iter().map(|attachment| attachment.description.clone()).collect();
         let claimed = sqlx::query(
-            "UPDATE attachments a SET message_id = $1, filename = COALESCE(m.filename, a.filename), description = m.description              FROM UNNEST($2::bigint[], $3::text[], $4::text[]) AS m(id, filename, description)              WHERE a.id = m.id AND a.channel_id = $5 AND a.uploader_id = $6 AND a.message_id IS NULL",
+            "UPDATE attachments a SET message_id = $1, filename = COALESCE(m.filename, a.filename), description = m.description              FROM UNNEST($2::bigint[], $3::text[], $4::text[]) AS m(id, filename, description)              WHERE a.id = m.id AND a.channel_id = $5 AND a.uploader_id = $6 AND a.message_id IS NULL AND a.claimed_at IS NULL",
         )
         .bind(message_id)
         .bind(&ids)

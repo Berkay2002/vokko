@@ -5,6 +5,7 @@ import { Perm } from "../api/permissions";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore, useStore } from "../api/store";
 import { ChannelType, type Channel, type Guild } from "../api/types";
+import { OnboardingSettings } from "../community";
 import { GuildIcon } from "./Avatar";
 import { firstTextChannel } from "./channels";
 import { closeModal, openModal } from "./modalStore";
@@ -54,6 +55,7 @@ const SECTIONS: SectionDef[] = [
   { id: "members", label: "Members", group: "people", needs: [Perm.MANAGE_GUILD, Perm.KICK_MEMBERS, Perm.BAN_MEMBERS, Perm.MODERATE_MEMBERS, Perm.MANAGE_NICKNAMES, Perm.MANAGE_ROLES] },
   { id: "roles", label: "Roles", group: "people", needs: [Perm.MANAGE_ROLES] },
   { id: "invites", label: "Invites", group: "people", needs: [Perm.CREATE_INSTANT_INVITE, Perm.MANAGE_GUILD] },
+  { id: "onboarding", label: "Onboarding", group: "people" },
   { id: "access", label: "Access", group: "people", outline: ["Access Options", "Age-Restricted Server", "Server Rules"] },
   { id: "integrations", label: "Integrations", group: "apps", outline: ["Webhooks", "Followed Channels", "Bots and Apps"] },
   { id: "safety", label: "Safety Setup", group: "moderation", outline: ["Verification Level", "Require 2FA", "Sensitive Content Filter", "Activity Alerts"] },
@@ -342,6 +344,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         return <InvitesPage canCreate={canInvite} channels={channels} />;
       case "bans":
         return <BansPage guild={guild} />;
+      case "onboarding":
+        return <OnboardingSettings guildId={guildId} />;
       default:
         return <NotYet section={active} />;
     }

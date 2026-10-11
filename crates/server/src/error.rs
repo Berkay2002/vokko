@@ -99,6 +99,15 @@ impl ApiErr {
         Self::new(StatusCode::NOT_FOUND, 10015, "Unknown Attachment")
     }
 
+    pub fn unknown_scheduled_event() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10065, "Unknown Guild Scheduled Event")
+    }
+
+    /// 180000: a completed or canceled scheduled event cannot change any more.
+    pub fn finished_event() -> Self {
+        Self::new(StatusCode::BAD_REQUEST, 180000, "Cannot update a finished event")
+    }
+
     pub fn not_found() -> Self {
         Self::new(StatusCode::NOT_FOUND, 0, "404: Not Found")
     }

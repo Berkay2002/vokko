@@ -6,6 +6,7 @@ import { channelMentionCount, isChannelUnread, useStore } from "../api/store";
 import { VoiceChannelRow } from "../voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
 import { Popout, Tooltip, useContextMenu } from "../ui";
+import { EventsQuickLink } from "../community";
 import { groupChannels } from "./channels";
 import { useIsMuted, useLocalState } from "./localState";
 import { channelContextItems, guildDropdownItems } from "./menus";
@@ -180,6 +181,7 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
   return (
     <div className="sidebar-list guild-sidebar">
       <GuildHeader guild={guild} />
+      <EventsQuickLink guildId={guild.id} />
       <div className="sidebar-scroller channel-scroller">
         <ul className="channel-list" aria-label="Channels">
           {groups.map(group => {
