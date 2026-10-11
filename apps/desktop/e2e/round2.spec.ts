@@ -96,8 +96,8 @@ test('context menu Add Reaction submenu and View Reactions modal', async ({ page
 
 test('invite embeds: invalid code and a real invite', async ({ page }) => {
   await openDm(page);
-  await send(page, 'https://discord.gg/MXuWj96Fr');
-  const bad = message(page, 'discord.gg/MXuWj96Fr');
+  await send(page, 'http://127.0.0.1:1422/invite/MXuWj96Fr');
+  const bad = message(page, '/invite/MXuWj96Fr');
   await expect(bad.locator('.chat-invite.invalid')).toContainText('Invalid Invite');
   await expect(bad.locator('.chat-invite.invalid')).toContainText('You sent an invite, but');
 

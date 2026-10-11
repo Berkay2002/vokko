@@ -2,14 +2,23 @@
 
 const MAX_INVITES = 3;
 
-// scheme://<any host>/invite/<code>, scheme://discord.gg/<code>, and the bare discord.gg/<code> / discord(app).com/invite/<code>.
-const INVITE_RE = /(?:https?:\/\/(?:[^\s/<>()]+\/invite|discord\.gg)|(?<![\w/.-])(?:discord\.gg|discord(?:app)?\.com\/invite))\/([A-Za-z0-9-]{2,32})(?![A-Za-z0-9-])/gi;
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Invite codes in message text, in order, de-duplicated. Ignores code spans, code blocks and `<url>` (embed-suppressed) links. */
-export function findInviteCodes(content: string): string[] {
+// Vokko's own invite links: `vokko.gg/<code>` (what the shell's invite modal shows) and `<app host>/invite/<code>`.
+// Other services' invite links (discord.gg, ...) are never ours, so they are left as plain links.
+function inviteRe(hosts: readonly string[]): RegExp {
+  const origins = ['vokko\\.gg', ...hosts.filter(Boolean).map(h => `${escapeRe(h)}\\/invite`)];
+  return new RegExp(`(?<![\\w.@-])(?:https?:\\/\\/)?(?:${origins.join('|')})\\/([A-Za-z0-9-]{2,32})(?![A-Za-z0-9-])`, 'gi');
+}
+
+/**
+ * Invite codes in message text, in order, de-duplicated. `hosts` are the app's own `host[:port]` values
+ * (e.g. `location.host`). Ignores code spans, code blocks and `<url>` (embed-suppressed) links.
+ */
+export function findInviteCodes(content: string, hosts: readonly string[] = []): string[] {
   const visible = content.replace(/```[\s\S]*?```|`[^`\n]*`|<[^>\s]+>/g, ' ');
   const out: string[] = [];
-  for (const m of visible.matchAll(INVITE_RE)) {
+  for (const m of visible.matchAll(inviteRe(hosts))) {
     const code = m[1]!;
     if (!out.includes(code)) out.push(code);
     if (out.length >= MAX_INVITES) break;

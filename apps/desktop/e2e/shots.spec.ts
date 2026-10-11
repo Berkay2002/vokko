@@ -198,7 +198,7 @@ test('round 2 screenshots: intro, pickers, reactions, embeds', async ({ page }) 
   await page.keyboard.press('Escape');
 
   // 22. invite embeds: an invalid code (as in the reference) and a real invite
-  await send(page, 'https://discord.gg/MXuWj96Fr');
+  await send(page, 'http://127.0.0.1:1422/invite/MXuWj96Fr');
   const code = await page.evaluate(async () => {
     const w = window as unknown as W;
     const general = w.__vokkoMock.channelIdByName('general')!;

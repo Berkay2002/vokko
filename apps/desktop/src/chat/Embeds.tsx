@@ -144,7 +144,7 @@ function EmbedCard({ embed }: { embed: Embed }) {
 export function Embeds({ message }: { message: Message }) {
   const chat = useChat();
   const embeds = message.embeds ?? [];
-  const codes = useMemo(() => findInviteCodes(message.content), [message.content]);
+  const codes = useMemo(() => findInviteCodes(message.content, [window.location.host]), [message.content]);
   if (embeds.length === 0 && codes.length === 0) return null;
   const own = message.author.id === chat.me.id;
   return <div className="chat-embeds">
