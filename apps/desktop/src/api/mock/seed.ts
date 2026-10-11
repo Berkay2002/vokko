@@ -4,6 +4,7 @@
 import { ChannelType, RelationshipType, type Attachment } from "../types";
 import { db, nextId, type MockChannel } from "./db";
 import { addChannel, addMessage, createAccount, createGuildRecord, openDM, openGroupDM } from "./ops";
+import { voiceStore } from "../voice";
 import { setRelationship } from "./views";
 
 const MIN = 60_000;
@@ -130,7 +131,10 @@ function addDmConversation(channel: MockChannel, ids: Record<"R" | "B", string>)
     });
     created.push(message.id);
     if (line.edited) message.edited_timestamp = new Date(Date.parse(message.timestamp) + 3 * MIN).toISOString();
-    if (line.pin) message.pinned = true;
+    if (line.pin) {
+      message.pinned = true;
+      message.pinned_at = new Date(Date.parse(message.timestamp) + MIN).toISOString();
+    }
     for (const [name, who] of line.react ?? []) message.reactions.push({ emoji: { id: null, name }, user_ids: who.map(w => ids[w]) });
   });
 }
@@ -191,7 +195,9 @@ export function seed(): void {
   const random = addChannel(guildId, { name: "random", type: ChannelType.GuildText, parent_id: textCategory.id, topic: "Off-topic." });
   const devTalk = addChannel(guildId, { name: "dev-talk", type: ChannelType.GuildText, parent_id: textCategory.id, topic: "Rust, TypeScript and gateway protocol nerdery." });
   addChannel(guildId, { name: "memes", type: ChannelType.GuildText, parent_id: textCategory.id });
-  addChannel(guildId, { name: "Gaming", type: ChannelType.GuildVoice, parent_id: voiceCategory.id });
+  const gaming = addChannel(guildId, { name: "Gaming", type: ChannelType.GuildVoice, parent_id: voiceCategory.id });
+  voiceStore.getState().setOccupants(generalVoice.id, [A, Bo]);
+  voiceStore.getState().setOccupants(gaming.id, [N]);
   addChannel(guildId, { name: "AFK", type: ChannelType.GuildVoice, parent_id: voiceCategory.id });
 
   const say = (channel: MockChannel, who: string, text: string, minutesAgo: number) =>

@@ -14,3 +14,16 @@ export class ApiRequestError extends Error {
     return this.api.code;
   }
 }
+
+/** 429: the server asks the client to wait. GETs are retried once by rest.ts; sends surface this so the UI can show a countdown. */
+export class RateLimitedError extends ApiRequestError {
+  /** Seconds to wait (float). */
+  readonly retryAfter: number;
+  readonly global: boolean;
+  constructor(retryAfter: number, global: boolean, message = "You are being rate limited.") {
+    super(429, { code: 0, message });
+    this.name = "RateLimitedError";
+    this.retryAfter = retryAfter;
+    this.global = global;
+  }
+}

@@ -99,6 +99,10 @@ route("PATCH", "/users/@me", ({ viewer, body }) => {
     const attachment = pendingAttachment(str(body.avatar_attachment_id), user.id);
     user.avatar = attachment ? attachment.url : null;
   }
+  const audience = new Set<string>([user.id, ...viewer.relationships.keys()]);
+  for (const guild of db.guilds.values()) if (guild.members.has(user.id)) for (const id of guild.members.keys()) audience.add(id);
+  for (const channel of db.channels.values()) if (channel.participant_ids?.includes(user.id)) for (const id of channel.participant_ids) audience.add(id);
+  emit(audience, "USER_UPDATE", { ...user });
   return user;
 });
 
@@ -360,6 +364,7 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   if (channel.type === ChannelType.GuildCategory || channel.type === ChannelType.GuildVoice) fail(400, 50024, "Cannot execute action on this channel type");
   const content = (str(body.content) ?? "").trim();
   const ids = Array.isArray(body.attachment_ids) ? body.attachment_ids.filter((v): v is string => typeof v === "string") : [];
+  if (ids.length > 10) fail(400, 50035, "Invalid Form Body", { attachment_ids: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be 10 or fewer in length." } });
   const attachments = ids.map(id => pendingAttachment(id, viewer.user.id)).filter((a): a is Attachment => a !== null);
   if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });
   if (content === "" && attachments.length === 0) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
@@ -441,30 +446,38 @@ route("GET", `/channels/${ID}/messages/${ID}/reactions/([^/]+)`, ({ viewer, para
 
 // ---- pins, typing, ack ----
 
-route("GET", `/channels/${ID}/pins`, ({ viewer, params }) => {
+const MAX_PINS = 250;
+
+route("GET", `/channels/${ID}/messages/pins`, ({ viewer, params, query }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
-  return sortedMessages(channel.id)
-    .filter(m => m.pinned)
-    .map(m => messageFor(m, viewer.user.id))
-    .reverse();
+  const limit = Math.min(50, Math.max(1, Number(query.get("limit") ?? 50) || 50));
+  const before = query.get("before");
+  const pinned = sortedMessages(channel.id)
+    .filter(m => m.pinned && m.pinned_at)
+    .sort((a, b) => Date.parse(b.pinned_at ?? "") - Date.parse(a.pinned_at ?? "") || compareIds(b.id, a.id))
+    .filter(m => !before || Date.parse(m.pinned_at ?? "") < Date.parse(before));
+  const page = pinned.slice(0, limit);
+  return { items: page.map(m => ({ message: messageFor(m, viewer.user.id), pinned_at: m.pinned_at })), has_more: pinned.length > page.length };
 });
 
-route("PUT", `/channels/${ID}/pins/${ID}`, ({ viewer, params }) => {
+route("PUT", `/channels/${ID}/messages/pins/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   if (message.pinned) return undefined;
-  if (sortedMessages(channel.id).filter(m => m.pinned).length >= 50) fail(400, 30003, "Maximum number of pins reached (50)");
+  if (sortedMessages(channel.id).filter(m => m.pinned).length >= MAX_PINS) fail(400, 30003, `Maximum number of pins reached (${MAX_PINS})`);
   message.pinned = true;
+  message.pinned_at = new Date().toISOString();
   for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));
   addMessage({ channel, author_id: viewer.user.id, content: "", type: MessageType.ChannelPinnedMessage, reference_id: message.id });
   return undefined;
 });
 
-route("DELETE", `/channels/${ID}/pins/${ID}`, ({ viewer, params }) => {
+route("DELETE", `/channels/${ID}/messages/pins/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   if (!message.pinned) return undefined;
   message.pinned = false;
+  message.pinned_at = null;
   for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));
   return undefined;
 });
@@ -479,14 +492,29 @@ route("POST", `/channels/${ID}/typing`, ({ viewer, params }) => {
   return undefined;
 });
 
-route("POST", `/channels/${ID}/messages/${ID}/ack`, ({ viewer, params }) => {
-  const channel = requireChannel(params[0] ?? "", viewer.user.id);
-  const message = requireMessage(channel.id, params[1] ?? "");
+function ackChannel(viewer: MockAccount, channelId: string, messageId: string): void {
+  const channel = requireChannel(channelId, viewer.user.id);
+  const message = requireMessage(channel.id, messageId);
   const state = viewer.readStates.get(channel.id) ?? { channel_id: channel.id, last_message_id: null, mention_count: 0 };
   if (!state.last_message_id || compareIds(message.id, state.last_message_id) > 0) state.last_message_id = message.id;
   state.mention_count = 0;
   viewer.readStates.set(channel.id, state);
   emit([viewer.user.id], "MESSAGE_ACK", { channel_id: channel.id, message_id: state.last_message_id ?? message.id });
+}
+
+route("POST", `/channels/${ID}/messages/${ID}/ack`, ({ viewer, params }) => {
+  ackChannel(viewer, params[0] ?? "", params[1] ?? "");
+  return undefined;
+});
+
+route("POST", "/read-states/ack-bulk", ({ viewer, body }) => {
+  const list = Array.isArray(body.read_states) ? (body.read_states as { channel_id?: unknown; message_id?: unknown }[]) : null;
+  if (!list || list.length === 0 || list.length > 100) fail(400, 50035, "Invalid Form Body", { read_states: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 1 and 100 in length." } });
+  for (const entry of list) {
+    const channelId = str(entry.channel_id);
+    const messageId = str(entry.message_id);
+    if (channelId && messageId) ackChannel(viewer, channelId, messageId);
+  }
   return undefined;
 });
 
