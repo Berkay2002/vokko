@@ -10,15 +10,15 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 ## SHELL: app shell, rail, DM sidebar, title bar
 | Id | Acceptance | REF |
 |---|---|---|
-| SHELL-001 | 32 px title bar with app name centred, inbox and help buttons right | app-shell/spec.md#title-bar |
-| SHELL-002 | Server rail 72 px wide, 48 px pitch, 40x40 squircle server icons, selected icon morphs to a rounder shape | app-shell/spec.md#rail |
-| SHELL-003 | Rail pill indicator: selected h40, hover h20, unread h8, hidden when idle; 0.2 s ease-out | app-shell/spec.md#rail |
+| SHELL-001 | 32 px title bar with app name centred, inbox and help buttons right | app-shell/spec.md |
+| SHELL-002 | Server rail 72 px wide, 48 px pitch, 40x40 squircle server icons, selected icon morphs to a rounder shape | app-shell/spec.md |
+| SHELL-003 | Rail pill indicator: selected h40, hover h20, unread h8, hidden when idle; 0.2 s ease-out | app-shell/spec.md |
 | SHELL-004 | Rail tooltip on hover (right of icon, name text) | app-shell/02-rail-hover-tooltip.jpg |
 | SHELL-005 | Rail separator, add-server and discover buttons, download-apps button | app-shell/11-rail-bottom-dmlist.png |
 | SHELL-006 | Rail scrolls independently; folders (collapsible groups, 48 px) | app-shell/10-rail-scrolled-full.jpg |
 | SHELL-007 | Home button + unread DM avatars with red mention badge at the top of the rail | REF: none (no unread DMs at capture) |
 | SHELL-008 | DM sidebar 302.7 px list with top-left radius 12, search button "find or start a conversation" | app-shell/01-home-friends-online.jpg |
-| SHELL-009 | Nav rows (Friends, Nitro, Shop, Quests) h40 with active/hover states | app-shell/spec.md#dm-sidebar |
+| SHELL-009 | Nav rows (Friends, Nitro, Shop, Quests) h40 with active/hover states | app-shell/spec.md |
 | SHELL-010 | "Direct Messages" header with + button; DM rows h44 with avatar, presence dot, name, status/subtitle | app-shell/04-dm-row-hover.png |
 | SHELL-011 | Group DM row shows member count subtitle; clan tag chips next to names | app-shell/11-rail-bottom-dmlist.png |
 | SHELL-012 | Floating user panel (x=8, 358.7 x 57.3, radius 8): avatar+status dot, name, status text, mute / deafen / settings buttons | app-shell/13-userpanel-mute-hover.png |
@@ -34,16 +34,16 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | FRIEND-003 | Pending tab with empty state illustration and text | app-shell/07-friends-pending-empty.png |
 | FRIEND-004 | Suggestions list | app-shell/08-friends-suggestions.png |
 | FRIEND-005 | Add Friend form (username input + send button) | app-shell/09-friends-add.png |
-| FRIEND-006 | Active Now column (420 px, activity cards radius 16) | app-shell/spec.md#active-now |
-| FRIEND-007 | Search bar in the friends list with filter | app-shell/spec.md#friends |
+| FRIEND-006 | Active Now column (420 px, activity cards radius 16) | app-shell/spec.md |
+| FRIEND-007 | Search bar in the friends list with filter | app-shell/spec.md |
 
 ## DM: DM channel frame
 | Id | Acceptance | REF |
 |---|---|---|
-| DM-001 | Header h49: avatar, name, call / video / pins / add-to-DM / profile-toggle buttons (32x32, pitch 40), search box 244x32 | dm-chat/spec.md#layout |
+| DM-001 | Header h49: avatar, name, call / video / pins / add-to-DM / profile-toggle buttons (32x32, pitch 40), search box 244x32 | dm-chat/spec.md |
 | DM-002 | Header icon tooltips below the button | dm-chat/16b-pins-tooltip.png |
 | DM-003 | Start-of-DM block: 80 px avatar, name h3 32/40 w700, username 24/30, description, mutual-servers row, friend/block buttons | dm-chat/01-dm-view.png |
-| DM-004 | Day divider: centred 12 px label on a 0.67 px line, margins 24/8 | dm-chat/spec.md#layout |
+| DM-004 | Day divider: centred 12 px label on a 0.67 px line, margins 24/8 | dm-chat/spec.md |
 | DM-005 | Right profile aside 320 px (banner 105 high, avatar 80, member-since, "view full profile"), toggled from header | dm-chat/01-dm-view.png |
 | DM-006 | Pinned messages popout 420x371 with empty state + tip footer | dm-chat/16-pins-popout.jpg |
 | DM-007 | In-DM search results panel | REF: none |
@@ -54,7 +54,7 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 ## MSG: message list and message actions
 | Id | Acceptance | REF |
 |---|---|---|
-| MSG-001 | Cozy layout: avatar 40 at left, name 16/22 w500, timestamp 12/22, content 16/22, row padding 2/24/2/72 | dm-chat/spec.md#message-row-cozy |
+| MSG-001 | Cozy layout: avatar 40 at left, name 16/22 w500, timestamp 12/22, content 16/22, row padding 2/24/2/72 | dm-chat/spec.md |
 | MSG-002 | Group start has 17 px top margin; follow-up messages within the window collapse the header and show the time on hover in the gutter | REF: none (follow-ups not captured) |
 | MSG-003 | Row hover background rgba(151,151,159,0.12) | dm-chat/10-message-hover-toolbar.png |
 | MSG-004 | Hover toolbar: quick reactions, add reaction, edit (own), reply/forward, more; 28x28 buttons, radius 8 pill, offset -16 / right 14 | dm-chat/10-message-hover-toolbar.png |
@@ -101,14 +101,14 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 ## GLD: guild frame
 | Id | Acceptance | REF |
 |---|---|---|
-| GLD-001 | Server header h49 with name, chevron flip, invite shortcut; banner variant | guild/spec.md#sidebar-column |
+| GLD-001 | Server header h49 with name, chevron flip, invite shortcut; banner variant | guild/spec.md |
 | GLD-002 | Server dropdown: boost, invite, settings, create channel/category/event, app directory, notification + privacy settings, edit server profile, hide muted, copy ID | guild/03-server-dropdown.jpg |
 | GLD-003 | Event and Boost quick links under the header | guild/01-welcome-new-server.jpg |
 | GLD-004 | Category header with collapse chevron and + button | guild/02-channel-rows-hover.png |
 | GLD-005 | Channel row 286x32 radius 8, icon 20, name 16/24; selected 12% bg + w500; hover actions (invite, settings, open chat) | guild/02-channel-rows-hover.png |
 | GLD-006 | Channel states: unread (white text + dot), mention (red badge), muted (dim), locked/private icon | REF: none |
 | GLD-007 | Voice channel with connected users listed below; join on click | REF: none |
-| GLD-008 | Channel header h49 with name, topic, toolbar: threads, notifications, pins, member list; search 244x32 | guild/spec.md#channel-header-lab-text |
+| GLD-008 | Channel header h49 with name, topic, toolbar: threads, notifications, pins, member list; search 244x32 | guild/spec.md |
 | GLD-009 | Start-of-channel header (68 px tile, "Welcome to #name", edit-channel button) | guild/02-channel-start.jpg |
 | GLD-010 | New-server welcome checklist | guild/01-welcome-new-server.jpg |
 | GLD-011 | Member list (role groups, online/offline, presence dots, activity line, role colours), toggled from header | REF: none |
@@ -125,7 +125,7 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 |---|---|---|
 | POP-001 | User profile popout (banner, avatar, roles, note, message box) | REF: none |
 | POP-002 | Full profile modal (tabs: activity, mutual servers, mutual friends) | REF: none |
-| POP-003 | Tooltips: dark pill, 14/18 w500, arrow, 0.2 s delay | dm-chat/16b-pins-tooltip.png |
+| POP-003 | Tooltips: dark pill, 14/18 w500, arrow | dm-chat/16b-pins-tooltip.png |
 | POP-004 | Notification-settings popout and mute submenu | REF: none |
 | POP-005 | Inbox popout (mentions, unreads, tabs) | REF: none |
 | POP-006 | Emoji/GIF/sticker pickers as popouts (see CMP-004..006) | dm-chat/03..05 |
