@@ -2,7 +2,7 @@
 // REST goes through `mockRequest`, the gateway through `MockSocket`; both are wired in rest.ts / gateway.ts.
 
 import { MOCK } from "../config";
-import { ApiRequestError } from "../errors";
+import { ApiRequestError, RateLimitedError } from "../errors";
 import { snowflakeToTimestamp } from "../snowflake";
 import type { Attachment, PresenceStatus } from "../types";
 import { db, nextId } from "./db";
@@ -28,8 +28,15 @@ function latency(): number {
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
+/** Fault injection: the next `count` REST calls answer 429 with this retry_after (seconds). */
+let rateLimit = { count: 0, retryAfter: 1 };
+
 export async function mockRequest(method: string, path: string, body: unknown, token: string | null): Promise<unknown> {
   await sleep(latency());
+  if (rateLimit.count > 0) {
+    rateLimit.count -= 1;
+    throw new RateLimitedError(rateLimit.retryAfter, false);
+  }
   try {
     // Round-trip through JSON so callers can never mutate the database through a returned object.
     const result = handleRoute(method, path, body, userIdFromToken(token));
@@ -53,7 +60,7 @@ export async function mockUpload(channelId: string, file: File, onProgress: ((fr
   const userId = userIdFromToken(token);
   if (!userId) throw new ApiRequestError(401, { code: 0, message: "401: Unauthorized" });
   if (!db.channels.has(channelId)) throw new ApiRequestError(404, { code: 10003, message: "Unknown Channel" });
-  if (file.size > 25 * 1024 * 1024) throw new ApiRequestError(413, { code: 40005, message: "Request entity too large" });
+  if (file.size > 10 * 1024 * 1024) throw new ApiRequestError(413, { code: 40005, message: "Request entity too large" });
   const steps = 8;
   for (let i = 1; i <= steps; i += 1) {
     if (signal?.aborted) throw new DOMException("Upload aborted", "AbortError");
@@ -84,6 +91,8 @@ interface MockHooks {
   presence(username: string, status: PresenceStatus): void;
   /** Close all open gateway connections abruptly; the client should reconnect and resume. */
   dropConnections(): void;
+  /** Make the next `count` REST calls fail with 429 and `retry_after` seconds. */
+  rateLimit(count: number, retryAfterSeconds?: number): void;
   /** Create a DM with `username` for the signed-in `as` user. */
   addUser(username: string, globalName?: string): string;
   channelIdByName(name: string): string | null;
@@ -121,6 +130,9 @@ const hooks: MockHooks = {
     emit([...db.accounts.keys()], "PRESENCE_UPDATE", { ...account.presence });
   },
   dropConnections: () => dropAllConnections(),
+  rateLimit: (count, retryAfterSeconds = 1) => {
+    rateLimit = { count, retryAfter: retryAfterSeconds };
+  },
   addUser: (username, globalName) => createAccount({ username, global_name: globalName ?? null }).user.id,
   channelIdByName: name => [...db.channels.values()].find(c => c.name === name)?.id ?? null,
   messageTimestamp: id => snowflakeToTimestamp(id),

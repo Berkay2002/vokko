@@ -6,7 +6,7 @@ const origin = (import.meta.env.VITE_VOKKO_API ?? "").trim().replace(/\/+$/, "")
 export const MOCK = origin === "";
 export const API_ORIGIN = origin;
 export const REST_BASE = `${origin}/api/v1`;
-export const GATEWAY_URL = import.meta.env.VITE_VOKKO_GATEWAY?.trim() || `${origin.replace(/^http/, "ws")}/api/v1/gateway`;
+export const GATEWAY_URL = import.meta.env.VITE_VOKKO_GATEWAY?.trim() || `${origin.replace(/^http/, "ws")}/gateway`;
 
 const TOKEN_KEY = "vokko.token";
 

@@ -31,6 +31,21 @@ select {
   color: inherit;
 }
 
+input,
+textarea {
+  padding: 0;
+  border: 0;
+  background: none;
+  outline: none;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 button {
   background: none;
   border: 0;
@@ -77,7 +92,7 @@ img {
 /* Scrollbars: "thin" is the quiet one used in lists; "auto" is the chunkier chat scrollbar. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--bg-tertiary) transparent;
+  scrollbar-color: var(--scrollbar-thin-thumb) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -86,7 +101,7 @@ img {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--bg-tertiary);
+  background: var(--scrollbar-thin-thumb);
   border-radius: 4px;
   border: 2px solid transparent;
   background-clip: padding-box;

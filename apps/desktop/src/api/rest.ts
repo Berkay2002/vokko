@@ -1,9 +1,9 @@
 import { API_ORIGIN, MOCK, REST_BASE, getToken } from "./config";
-import { ApiRequestError } from "./errors";
+import { ApiRequestError, RateLimitedError } from "./errors";
 import { mockRequest, mockUpload } from "./mock";
 import type { ApiError, Attachment } from "./types";
 
-export { ApiRequestError };
+export { ApiRequestError, RateLimitedError };
 
 type Unauthorized = () => void;
 let onUnauthorized: Unauthorized | null = null;
@@ -27,7 +27,40 @@ function failIfUnauthorized(status: number, path: string): void {
   if (status === 401 && !path.startsWith("/auth/")) onUnauthorized?.();
 }
 
-export async function request<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
+type Method = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+
+/** Longest 429 wait a GET is willing to sit out before giving the error to the caller. */
+const MAX_RETRY_WAIT_SECONDS = 10;
+
+function rateLimited(response: Response, text: string): RateLimitedError {
+  let retryAfter = Number(response.headers.get("Retry-After"));
+  let global = false;
+  let message: string | undefined;
+  try {
+    const parsed = JSON.parse(text) as { retry_after?: number; global?: boolean; message?: string };
+    if (typeof parsed.retry_after === "number") retryAfter = parsed.retry_after;
+    global = parsed.global === true;
+    message = parsed.message;
+  } catch {
+    /* header only */
+  }
+  return new RateLimitedError(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 1, global, message);
+}
+
+/** GETs wait out one 429 (when the wait is reasonable) and retry once; everything else surfaces the RateLimitedError. */
+export async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+  try {
+    return await send<T>(method, path, body);
+  } catch (error) {
+    if (method === "GET" && error instanceof RateLimitedError && error.retryAfter <= MAX_RETRY_WAIT_SECONDS) {
+      await new Promise(resolve => setTimeout(resolve, error.retryAfter * 1000));
+      return send<T>(method, path, body);
+    }
+    throw error;
+  }
+}
+
+async function send<T>(method: Method, path: string, body?: unknown): Promise<T> {
   const token = getToken();
   if (MOCK) {
     try {
@@ -48,6 +81,7 @@ export async function request<T>(method: "GET" | "POST" | "PATCH" | "PUT" | "DEL
   }
   if (response.status === 204) return undefined as T;
   const text = await response.text();
+  if (response.status === 429) throw rateLimited(response, text);
   if (!response.ok) {
     failIfUnauthorized(response.status, path);
     throw new ApiRequestError(response.status, toApiError(response.status, text));
@@ -80,6 +114,9 @@ export function uploadAttachment(channelId: string, file: File, onProgress?: (fr
         } catch {
           reject(new ApiRequestError(xhr.status, { code: 0, message: "Invalid server response" }));
         }
+      } else if (xhr.status === 429) {
+        const retry = Number(xhr.getResponseHeader("Retry-After"));
+        reject(new RateLimitedError(Number.isFinite(retry) && retry > 0 ? retry : 1, false));
       } else {
         failIfUnauthorized(xhr.status, "/channels");
         reject(new ApiRequestError(xhr.status, toApiError(xhr.status, xhr.responseText)));

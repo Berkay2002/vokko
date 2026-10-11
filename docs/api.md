@@ -23,9 +23,10 @@ General rules:
 | GET | /users/@me/channels | DM + group DM `Channel[]` |
 | POST | /users/@me/channels | `{recipient_id}` → existing or new DM `Channel`; `{recipient_ids: []}` → group DM |
 | GET | /users/@me/relationships | `Relationship[]` |
-| PUT | /users/@me/relationships/{user_id} | send/accept friend request (204) |
+| PUT | /users/@me/relationships/{user_id} | body `{}` or `{type: 1}` = send/accept friend request; `{type: 2}` = block (removes any friendship/request, emits RELATIONSHIP_ADD type 2 to the blocker only; the blocked user gets RELATIONSHIP_REMOVE if they had a relationship). 204 |
+| GET | /users/{id}/profile | `UserProfile`: user, mutual guilds, mutual friend count, guild member info when `?guild_id=` |
 | POST | /users/@me/relationships | `{username}` → send friend request by username (204) |
-| DELETE | /users/@me/relationships/{user_id} | remove friend / cancel / decline (204) |
+| DELETE | /users/@me/relationships/{user_id} | remove friend / cancel / decline / unblock (204) |
 | POST | /guilds | `{name, icon_attachment_id?}` → `Guild` (creates @everyone role, "Text Channels"/"Voice Channels" categories, #general, General voice) |
 | GET | /guilds/{id} | `Guild` |
 | PATCH | /guilds/{id} | `{name?, icon_attachment_id?, system_channel_id?}` → `Guild` |
@@ -74,3 +75,5 @@ Read states: READY includes a read state for every channel the user can see that
 We match Discord's user-visible behaviour, not its wire protocol byte for byte. Adopted: `allowed_mentions` on send (reply ping toggle), paginated pins with `pinned_at` and the 250-pin cap, 10 files per message and 10 MiB per file, bulk ack, 429 responses with `RateLimitError` + `Retry-After` header (code 20016 for slowmode later).
 Client gateway behaviour (shell): first heartbeat after `random() * interval`, then every interval; no ACK before the next beat → close and reconnect; Hello must arrive within 30 s; resume only if the last ACK is under 3 minutes old, else identify; reconnect backoff 1 s doubling to 60 s with jitter; stop reconnecting only on close 4004 (bad token); the client closes its own sockets with 4000.
 Not adopted for now: op 40 QoS heartbeat, ETF encoding, zstd/zlib compression, capabilities/client_state in Identify, the cloud upload flow (resumable PUT to an upload URL), ack tokens.
+
+Embeds: on message create/edit the server extracts up to 5 http(s) URLs (not inside code, not `<url>`-wrapped), fetches each with a 5 s timeout, 1 MiB cap, no private/loopback addresses (SSRF guard), and parses Open Graph / Twitter card / oEmbed-less HTML meta into `Embed` (type link/article/image/video). Results arrive via MESSAGE_UPDATE after the create. Editing with flags SUPPRESS_EMBEDS (1<<2) clears them. Invite links are rendered client-side from GET /invites/{code}, not unfurled.

@@ -354,6 +354,23 @@ export function wireStoreToGateway(): void {
       memberCounts: { ...state.memberCounts, [guild_id]: Math.max(0, (state.memberCounts[guild_id] ?? 1) - 1) },
     });
   });
+  gateway.on("USER_UPDATE", user => {
+    const state = s();
+    state.cacheUsers([user]);
+    if (state.me?.id === user.id) state.setMe(user);
+    // Member / recipient / relationship copies embed the user: refresh them so every view shows the new profile.
+    const members = { ...state.members };
+    for (const [guildId, map] of Object.entries(members)) {
+      const member = map[user.id];
+      if (member) members[guildId] = { ...map, [user.id]: { ...member, user } };
+    }
+    const channels = { ...state.channels };
+    for (const [id, channel] of Object.entries(channels)) {
+      if (channel.recipients?.some(r => r.id === user.id)) channels[id] = { ...channel, recipients: channel.recipients.map(r => (r.id === user.id ? user : r)) };
+    }
+    const relationships = state.relationships[user.id] ? { ...state.relationships, [user.id]: { ...state.relationships[user.id]!, user } } : state.relationships;
+    appStore.setState({ members, channels, relationships });
+  });
   gateway.on("PRESENCE_UPDATE", presence => appStore.setState({ presences: { ...s().presences, [presence.user_id]: presence } }));
   gateway.on("RELATIONSHIP_ADD", relationship => {
     appStore.setState({ relationships: { ...s().relationships, [relationship.id]: relationship } });

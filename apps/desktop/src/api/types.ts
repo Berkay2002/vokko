@@ -80,6 +80,28 @@ export interface Attachment {
   height: number | null;
 }
 
+export interface EmbedMedia {
+  url: string;
+  proxy_url?: string;
+  width?: number;
+  height?: number;
+}
+export interface Embed {
+  type: "rich" | "link" | "image" | "video" | "article" | "gifv";
+  title?: string;
+  description?: string;
+  url?: string;
+  timestamp?: ISO8601;
+  color?: number;
+  footer?: { text: string; icon_url?: string };
+  image?: EmbedMedia;
+  thumbnail?: EmbedMedia;
+  video?: EmbedMedia;
+  provider?: { name?: string; url?: string };
+  author?: { name: string; url?: string; icon_url?: string };
+  fields?: { name: string; value: string; inline?: boolean }[];
+}
+
 export interface ReactionEmoji {
   id: Snowflake | null; // custom emoji id (null for unicode)
   name: string; // unicode character(s) or custom name
@@ -120,6 +142,7 @@ export interface Message {
   mentions: User[];
   mention_everyone: boolean;
   attachments: Attachment[];
+  embeds: Embed[]; // link unfurls (server-generated); [] when none
   reactions: Reaction[];
   pinned: boolean;
   message_reference: MessageReference | null;
@@ -174,6 +197,14 @@ export interface RateLimitError {
 }
 export interface EditMessageRequest {
   content: string;
+  flags?: number; // 1 << 2 SUPPRESS_EMBEDS
+}
+
+export interface UserProfile {
+  user: User;
+  mutual_guilds: { id: Snowflake; nick: string | null }[];
+  mutual_friends_count: number;
+  guild_member?: GuildMember; // when ?guild_id= is given and the user is a member
 }
 
 export interface ApiError {

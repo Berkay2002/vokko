@@ -6,7 +6,14 @@ export type GatewayStatus = "disconnected" | "connecting" | "ready" | "reconnect
 
 /** Close code the server uses for a bad token: stop reconnecting and drop the session. */
 export const CLOSE_AUTH_FAILED = 4004;
-const CLOSE_ZOMBIE = 4000;
+/** Close code for sockets the client itself drops (zombie connection, Hello timeout, teardown); the session stays resumable. */
+const CLOSE_CLIENT = 4000;
+/** Hello must arrive this soon after the socket opens. */
+const HELLO_TIMEOUT_MS = 30_000;
+/** A session is resumed only if the last heartbeat ACK is younger than this; otherwise the client identifies again. */
+const RESUME_WINDOW_MS = 3 * 60_000;
+const BACKOFF_BASE_MS = 1000;
+const BACKOFF_MAX_MS = 60_000;
 
 interface Socket {
   onopen: ((event: unknown) => void) | null;
@@ -29,6 +36,8 @@ class GatewayClient {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private heartbeatKickoff: ReturnType<typeof setTimeout> | null = null;
   private ackPending = false;
+  private lastAckAt = 0;
+  private helloTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private attempts = 0;
   private current: GatewayStatus = "disconnected";
@@ -114,6 +123,10 @@ class GatewayClient {
     this.setStatus(this.sessionId || this.attempts > 0 ? "reconnecting" : "connecting");
     const socket: Socket = MOCK ? new MockSocket() : (new WebSocket(GATEWAY_URL) as unknown as Socket);
     this.socket = socket;
+    this.helloTimer = setTimeout(() => {
+      this.helloTimer = null;
+      if (this.socket === socket) socket.close(CLOSE_CLIENT);
+    }, HELLO_TIMEOUT_MS);
     socket.onmessage = event => {
       if (this.socket === socket) this.handle(event.data);
     };
@@ -136,10 +149,16 @@ class GatewayClient {
     if (payload.s != null) this.seq = payload.s;
     switch (payload.op) {
       case GatewayOp.Hello: {
+        this.clearHelloTimer();
         const interval = (payload.d as { heartbeat_interval: number }).heartbeat_interval;
         this.startHeartbeat(interval);
-        if (this.sessionId && this.seq != null) this.send(GatewayOp.Resume, { token: this.token, session_id: this.sessionId, seq: this.seq });
-        else this.send(GatewayOp.Identify, { token: this.token });
+        const fresh = Date.now() - this.lastAckAt < RESUME_WINDOW_MS;
+        if (this.sessionId && this.seq != null && fresh) this.send(GatewayOp.Resume, { token: this.token, session_id: this.sessionId, seq: this.seq });
+        else {
+          this.sessionId = null;
+          this.seq = null;
+          this.send(GatewayOp.Identify, { token: this.token });
+        }
         break;
       }
       case GatewayOp.Heartbeat:
@@ -147,9 +166,10 @@ class GatewayClient {
         break;
       case GatewayOp.HeartbeatAck:
         this.ackPending = false;
+        this.lastAckAt = Date.now();
         break;
       case GatewayOp.Reconnect:
-        this.socket?.close(CLOSE_ZOMBIE);
+        this.socket?.close(CLOSE_CLIENT);
         break;
       case GatewayOp.InvalidSession:
         this.sessionId = null;
@@ -182,9 +202,16 @@ class GatewayClient {
     }
   }
 
+  private clearHelloTimer(): void {
+    if (this.helloTimer) clearTimeout(this.helloTimer);
+    this.helloTimer = null;
+  }
+
   private startHeartbeat(interval: number): void {
     this.stopHeartbeat();
     this.ackPending = false;
+    // The connection was just proven alive by Hello; count it as the last ACK until the first real one arrives.
+    this.lastAckAt = Date.now();
     this.heartbeatKickoff = setTimeout(() => {
       this.beat();
       this.heartbeat = setInterval(() => this.beat(), interval);
@@ -194,7 +221,7 @@ class GatewayClient {
   private beat(): void {
     if (this.ackPending) {
       // The previous heartbeat was never acknowledged: the connection is a zombie.
-      this.socket?.close(CLOSE_ZOMBIE);
+      this.socket?.close(CLOSE_CLIENT);
       return;
     }
     this.ackPending = true;
@@ -210,6 +237,7 @@ class GatewayClient {
 
   private teardown(): void {
     this.stopHeartbeat();
+    this.clearHelloTimer();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     const socket = this.socket;
@@ -217,7 +245,7 @@ class GatewayClient {
     if (socket) {
       socket.onmessage = socket.onclose = socket.onerror = socket.onopen = null;
       try {
-        socket.close(1000);
+        socket.close(CLOSE_CLIENT);
       } catch {
         /* already closed */
       }
@@ -226,6 +254,7 @@ class GatewayClient {
 
   private closed(code: number): void {
     this.stopHeartbeat();
+    this.clearHelloTimer();
     this.socket = null;
     if (code === CLOSE_AUTH_FAILED) {
       this.wanted = false;
@@ -240,7 +269,7 @@ class GatewayClient {
       return;
     }
     this.setStatus("reconnecting");
-    const delay = Math.min(30_000, 1000 * 2 ** this.attempts) * (0.75 + Math.random() * 0.5);
+    const delay = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** this.attempts) * (0.75 + Math.random() * 0.5);
     this.attempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
