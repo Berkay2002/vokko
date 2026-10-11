@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
-import { AtSign, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Lock, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
+import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Lock, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
+import { Perm, channelPermissions, hasBit, memberLike } from '../api/permissions';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
-import { request, Popout, Tooltip, useConvertEmoticons, useLegacyChatInput } from './shell';
+import { request, Popout, Tooltip, useConvertEmoticons, useGuild, useGuildMembers, useLegacyChatInput } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { ExpressionPickerPopout, type ExpressionTab } from './ExpressionPicker';
@@ -18,6 +19,7 @@ import { messageStore } from './messageStore';
 import { TypingIndicator } from './TypingIndicator';
 import { activeTypers } from './messageState';
 import { isSpoilerName, stripSpoiler } from './util';
+import { CreatePollModal } from '../polls/CreatePollModal';
 import { ComposerInput, type ComposerField } from './composer/ComposerInput';
 import { useShortcut } from '../keyboard';
 
@@ -96,6 +98,15 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const fileInput = useRef<HTMLInputElement>(null);
   const [caret, setCaret] = useState(0);
   const [plusOpen, setPlusOpen] = useState(false);
+  const [pollOpen, setPollOpen] = useState(false);
+  const pollGuild = useGuild(chat.guildId);
+  const pollMembers = useGuildMembers(chat.guildId);
+  // A DM needs nothing extra; in a server the Create Poll item is offered only with SEND_POLLS.
+  const canPoll = useMemo(() => {
+    const member = pollMembers[chat.me.id];
+    if (!pollGuild || !chat.channel || !member) return true;
+    return hasBit(channelPermissions(pollGuild, memberLike(member), chat.channel), Perm.SEND_POLLS);
+  }, [pollGuild, pollMembers, chat.channel, chat.me.id]);
   const [expr, setExpr] = useState<ExpressionTab | null>(null);
   const [appsOpen, setAppsOpen] = useState(false);
   const [selected, setSelected] = useState(0);
@@ -336,8 +347,10 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           <div className="chat-attach-menu" role="menu">
             <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><FileUp size={20} /> Upload a File</button>
             <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); setAppsOpen(true); }}><AppsGlyph size={20} /> Use Apps</button>
+            {canPoll && <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); setPollOpen(true); }}><ChartBarBig size={20} /> Create Poll</button>}
           </div>
         </Popout>
+        {pollOpen && <CreatePollModal channelId={channelId} onClose={() => { setPollOpen(false); area.current?.focus(); }} />}
         <input ref={fileInput} type="file" multiple hidden onChange={e => { addFiles(channelId, [...(e.target.files ?? [])]); e.target.value = ''; }} />
         <ComposerInput fieldRef={area} value={text} placeholder={placeholder} mentions={draft.tokens.map(t => t.display)} resetKey={channelId}
           onChange={onChange} onKeyDown={onKeyDown} onPaste={onPaste} onCaret={setCaret} />

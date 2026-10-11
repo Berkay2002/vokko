@@ -10,6 +10,7 @@ import { canAccess, fail, guildAudience, pendingAttachment, requireChannel, requ
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
 import { messageFor } from "./views";
+import { isPoll } from "./pollData";
 
 export const MAX_STICKERS_PER_GUILD = 60;
 export const MAX_STICKERS_PER_MESSAGE = 3;
@@ -222,6 +223,7 @@ export function buildForward(viewerId: string, ref: { message_id?: unknown; chan
   if (!hasBit(channelPermsOf(source, viewerId), Perm.READ_MESSAGE_HISTORY)) return fail(404, 10008, "Unknown Message");
   const original = requireMessage(channelId, messageId);
   if (!CAN_FORWARD.has(original.type)) return invalid("message_reference", "System messages cannot be forwarded.", "CANNOT_FORWARD");
+  if (isPoll(original.id)) return invalid("message_reference", "Polls cannot be forwarded.", "CANNOT_FORWARD");
   // A forward of a forward copies the snapshot content, not the original message.
   const frozen = original.forward?.snapshot.message;
   const snapshot: MessageSnapshot = frozen

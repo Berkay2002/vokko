@@ -538,6 +538,7 @@ pub fn attachment_api(
 pub struct MessageView {
     pub message: Message,
     reaction_users: Vec<Vec<i64>>,
+    poll: Option<crate::polls::LoadedPoll>,
 }
 
 impl MessageView {
@@ -545,6 +546,9 @@ impl MessageView {
         let mut message = self.message.clone();
         for (reaction, users) in message.reactions.iter_mut().zip(&self.reaction_users) {
             reaction.me = users.contains(&viewer);
+        }
+        if let Some(poll) = &self.poll {
+            message.poll = Some(Box::new(poll.for_viewer(Some(viewer))));
         }
         message
     }
@@ -643,6 +647,7 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
 
     let mut started_threads = threads::started_threads(state, rows, viewer).await?;
     let mut calls = call_records(state, rows).await?;
+    let mut polls = crate::polls::load(state, &ids).await?;
 
     let mut views = Vec::with_capacity(rows.len());
     for row in rows {
@@ -702,8 +707,12 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
                 // No row yet: the MESSAGE_CREATE of a call that just started (only its author is in it).
                 calls.remove(&row.id).unwrap_or_else(|| MessageCall { participants: vec![flake(row.author_id)], ended_timestamp: None })
             }),
+            poll: None,
         };
-        views.push(MessageView { message, reaction_users });
+        let poll = polls.remove(&row.id);
+        let mut message = message;
+        message.poll = poll.as_ref().map(|poll| Box::new(poll.for_viewer(viewer)));
+        views.push(MessageView { message, reaction_users, poll });
     }
     Ok(views)
 }

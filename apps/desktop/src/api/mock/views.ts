@@ -7,6 +7,7 @@ import { db, sortedMessages, userOf, type MockAccount, type MockChannel, type Mo
 import { flagsField } from "./memberFlags";
 import { memberProfileFields } from "./perks";
 import { guildEmojis } from "./emojis";
+import { pollEmbedsFor, pollFor } from "./pollData";
 import { voiceStatesFor } from "./voice";
 
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
@@ -18,6 +19,7 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
   // A thread started from this message (thread.id == message id) rides along for the viewers who can see it.
   const thread = depth === 0 ? db.channels.get(m.id) : undefined;
   const startedThread = thread && isThreadType(thread.type) && thread.parent_id === m.channel_id && canView(thread, viewerId) ? channelFor(thread, viewerId) : undefined;
+  const poll = pollFor(m.id, viewerId);
   const reactions: Reaction[] = m.reactions
     .filter(r => r.user_ids.length > 0)
     .map(r => ({ emoji: { ...r.emoji }, count: r.user_ids.length, me: r.user_ids.includes(viewerId) }));
@@ -34,7 +36,7 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     mentions: m.mention_ids.map(userOf),
     mention_everyone: m.mention_everyone,
     attachments: m.attachments.map(a => ({ ...a })),
-    embeds: (m.embeds ?? []).map(e => ({ ...e })),
+    embeds: [...(m.embeds ?? []).map(e => ({ ...e })), ...pollEmbedsFor(m.id)],
     reactions,
     pinned: m.pinned,
     message_reference: m.forward
@@ -44,6 +46,7 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     nonce: m.nonce,
     ...(m.flags ? { flags: m.flags } : {}),
     ...(startedThread ? { thread: startedThread } : {}),
+    ...(poll ? { poll } : {}),
     ...(m.stickers?.length ? { sticker_items: m.stickers.map(s => ({ ...s })) } : {}),
     ...(m.call ? { call: { participants: [...m.call.participants], ended_timestamp: m.call.ended_timestamp } } : {}),
     ...(m.forward ? { message_snapshots: [JSON.parse(JSON.stringify(m.forward.snapshot)) as MessageSnapshot] } : {}),

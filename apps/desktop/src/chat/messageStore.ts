@@ -10,6 +10,7 @@ import {
 } from './messageState';
 import { rememberMessage, rememberMessages } from './userCache';
 import { newNonce } from './util';
+import { applyPollVote } from '../polls/pollState';
 
 const MAX_LOADED_CHANNELS = 12;
 
@@ -66,6 +67,13 @@ function bindGateway(): void {
   };
   gateway.on('MESSAGE_REACTION_ADD', onReaction(true));
   gateway.on('MESSAGE_REACTION_REMOVE', onReaction(false));
+  const onPollVote = (add: boolean) => (d: { channel_id: Snowflake; message_id: Snowflake; user_id: Snowflake; answer_id: number }): void =>
+    update(d.channel_id, s => {
+      const m = s.messages[indexOfId(s.messages, d.message_id)];
+      return m ? updateIfPresent(s, applyPollVote(m, d.answer_id, add, d.user_id === currentUserId)) : s;
+    });
+  gateway.on('MESSAGE_POLL_VOTE_ADD', onPollVote(true));
+  gateway.on('MESSAGE_POLL_VOTE_REMOVE', onPollVote(false));
   gateway.on('TYPING_START', d => {
     if (d.user_id === currentUserId) return;
     update(d.channel_id, s => setTyping(s, d.user_id, Date.now()));

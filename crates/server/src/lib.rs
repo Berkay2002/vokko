@@ -16,6 +16,7 @@ pub mod hub;
 pub mod ids;
 pub mod media;
 pub mod net;
+pub mod polls;
 pub mod presence;
 pub mod ratelimit;
 pub mod reminders;

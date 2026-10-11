@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  AppWindow, Bell, Bookmark, ChevronRight, Copy, CornerUpLeft, Fingerprint, Flag, Forward, Link2, MailOpen, Megaphone, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
+  AppWindow, Bell, ChartBarBig, Bookmark, ChevronRight, Copy, CornerUpLeft, Fingerprint, Flag, Forward, Link2, MailOpen, Megaphone, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
 } from 'lucide-react';
 import { MessageType } from '../api/types';
 import type { Message } from '../api/types';
@@ -17,6 +17,7 @@ import { openForward, toggleBookmark, useIsBookmarked } from '../media/store';
 import { isShiftDown } from './util';
 import { useMessageThreadActions } from '../threads/useMessageActions';
 import { MessageAppsMenu } from '../apps/menus';
+import { canEndPoll, endPollNow } from '../polls/usePollActions';
 
 export interface MessageMenuTarget {
   message: Message;
@@ -70,7 +71,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
 
   const isMine = message.author.id === chat.me.id;
   const system = isSystemMessage(message);
-  const canEdit = isMine && !system && !pending && message.message_reference?.type !== 1; // a forward has no text to edit
+  const canEdit = isMine && !system && !pending && !message.poll && message.message_reference?.type !== 1; // a forward has no text to edit
   const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
   const canPin = !pending && !system && (chat.isDm || chat.canManage);
   const bookmarked = useIsBookmarked(message.channel_id, message.id);
@@ -89,9 +90,10 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
       sep();
     }
     if (canEdit) out.push({ id: 'edit', label: 'Edit Message', icon: <Pencil size={ICON} />, onSelect: () => chat.actions.edit(message) });
+    if (!pending && canEndPoll(message, chat.me.id)) out.push({ id: 'end-poll', label: 'End Poll Now', icon: <ChartBarBig size={ICON} />, onSelect: () => endPollNow(message) });
     if (!system) {
       if (chat.canSend) out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={ICON} />, onSelect: () => chat.actions.reply(message) });
-      if (!pending) out.push({ id: 'forward', label: 'Forward', icon: <Forward size={ICON} />, onSelect: () => openForward(message) });
+      if (!pending && !message.poll) out.push({ id: 'forward', label: 'Forward', icon: <Forward size={ICON} />, onSelect: () => openForward(message) });
       if (!pending && chat.guildId) {
         if (threadActions.thread) out.push({ id: 'thread', label: 'Open Thread', icon: <MessageSquareText size={ICON} />, onSelect: threadActions.openThread });
         else if (threadActions.canCreateThread) out.push({ id: 'thread', label: 'Create Thread', icon: <MessageSquareText size={ICON} />, onSelect: threadActions.createThread });

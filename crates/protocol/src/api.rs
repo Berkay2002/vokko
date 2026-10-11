@@ -123,6 +123,7 @@ numeric_enum!(MessageType {
     ChatInputCommand = 20,
     ThreadStarterMessage = 21,
     ContextMenuCommand = 23,
+    PollResult = 46,
 });
 
 impl ChannelType {
@@ -683,6 +684,9 @@ pub enum EmbedType {
     Video,
     Article,
     Gifv,
+    /// Only on a `PollResult` message; the data is in `fields` (see `poll_result_fields`).
+    #[serde(rename = "poll_result")]
+    PollResult,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -923,6 +927,9 @@ pub struct Message {
     /// Type 3 (call) messages only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call: Option<MessageCall>,
+    /// Present on poll messages; `results.answer_counts[].me_voted` is per viewer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll: Option<Box<Poll>>,
 }
 
 /// `Message::call` of a type 3 message: who joined the DM call, and when it ended (`null` while it goes on).
@@ -930,6 +937,102 @@ pub struct Message {
 pub struct MessageCall {
     pub participants: Vec<Snowflake>,
     pub ended_timestamp: Option<String>,
+}
+
+// ---- polls ----
+
+pub const POLL_MAX_ANSWERS: usize = 10;
+pub const POLL_QUESTION_MAX_CHARS: usize = 300;
+pub const POLL_ANSWER_MAX_CHARS: usize = 55;
+/// Hours a poll may run (Discord's API range); the client offers 1, 4, 8, 24, 72, 168 and 336.
+pub const POLL_MAX_DURATION_HOURS: u32 = 768;
+pub const POLL_DEFAULT_DURATION_HOURS: u32 = 24;
+pub const POLL_LAYOUT_DEFAULT: u8 = 1;
+
+/// Question (text only) or answer (text plus optional emoji).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PollMedia {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<ReactionEmoji>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PollAnswer {
+    /// 1-based, in creation order.
+    pub answer_id: u32,
+    pub poll_media: PollMedia,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PollAnswerCount {
+    pub id: u32,
+    pub count: u32,
+    pub me_voted: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PollResults {
+    pub is_finalized: bool,
+    /// One entry per answer, in answer order, zero counts included.
+    pub answer_counts: Vec<PollAnswerCount>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Poll {
+    pub question: PollMedia,
+    pub answers: Vec<PollAnswer>,
+    pub expiry: String,
+    pub allow_multiselect: bool,
+    pub layout_type: u8,
+    pub results: PollResults,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PollAnswerRequest {
+    pub poll_media: PollMedia,
+}
+
+/// `CreateMessageRequest.poll`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PollCreateRequest {
+    pub question: PollMedia,
+    pub answers: Vec<PollAnswerRequest>,
+    /// Hours, 1-768, default 24.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_multiselect: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_type: Option<u8>,
+}
+
+/// `GET /channels/{id}/polls/{message_id}/answers/{answer_id}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PollAnswerVotersResponse {
+    pub users: Vec<User>,
+}
+
+/// MESSAGE_POLL_VOTE_ADD / MESSAGE_POLL_VOTE_REMOVE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PollVote {
+    pub user_id: Snowflake,
+    pub channel_id: Snowflake,
+    pub message_id: Snowflake,
+    pub guild_id: Option<Snowflake>,
+    pub answer_id: u32,
+}
+
+/// `EmbedField::name`s of a `poll_result` embed (Discord's); `victor_*` only when one answer has strictly the most votes.
+pub mod poll_result_fields {
+    pub const QUESTION_TEXT: &str = "poll_question_text";
+    pub const TOTAL_VOTES: &str = "total_votes";
+    pub const VICTOR_ANSWER_ID: &str = "victor_answer_id";
+    pub const VICTOR_ANSWER_TEXT: &str = "victor_answer_text";
+    pub const VICTOR_ANSWER_VOTES: &str = "victor_answer_votes";
+    pub const VICTOR_ANSWER_EMOJI_ID: &str = "victor_answer_emoji_id";
+    pub const VICTOR_ANSWER_EMOJI_NAME: &str = "victor_answer_emoji_name";
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1159,6 +1262,9 @@ pub struct CreateMessageRequest {
     pub attachments: Option<Vec<PendingAttachmentMeta>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_mentions: Option<AllowedMentions>,
+    /// Makes this a poll message: content optional, no attachments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poll: Option<PollCreateRequest>,
     /// Up to 3 guild stickers; content may then be empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sticker_ids: Option<Vec<Snowflake>>,
@@ -2663,6 +2769,8 @@ pub enum GatewayEvent {
     CallCreate(Box<Call>),
     CallUpdate(CallUpdate),
     CallDelete(CallDelete),
+    MessagePollVoteAdd(PollVote),
+    MessagePollVoteRemove(PollVote),
     InviteCreate(Box<InviteMetadata>),
     InviteDelete(InviteDelete),
     GuildLayoutUpdate(GuildLayout),
@@ -2726,6 +2834,8 @@ impl GatewayEvent {
             Self::CallCreate(_) => "CALL_CREATE",
             Self::CallUpdate(_) => "CALL_UPDATE",
             Self::CallDelete(_) => "CALL_DELETE",
+            Self::MessagePollVoteAdd(_) => "MESSAGE_POLL_VOTE_ADD",
+            Self::MessagePollVoteRemove(_) => "MESSAGE_POLL_VOTE_REMOVE",
             Self::InviteCreate(_) => "INVITE_CREATE",
             Self::InviteDelete(_) => "INVITE_DELETE",
             Self::GuildLayoutUpdate(_) => "GUILD_LAYOUT_UPDATE",
@@ -2779,6 +2889,7 @@ impl GatewayEvent {
             Self::CallCreate(value) => serde_json::to_value(value),
             Self::CallUpdate(value) => serde_json::to_value(value),
             Self::CallDelete(value) => serde_json::to_value(value),
+            Self::MessagePollVoteAdd(value) | Self::MessagePollVoteRemove(value) => serde_json::to_value(value),
             Self::InviteCreate(value) => serde_json::to_value(value),
             Self::InviteDelete(value) => serde_json::to_value(value),
             Self::GuildLayoutUpdate(value) => serde_json::to_value(value),
@@ -3217,6 +3328,48 @@ mod tests {
         let edit: EditGuildEmojiRequest = serde_json::from_value(json!({"roles": null})).expect("edit");
         assert_eq!((edit.name, edit.roles), (None, Some(None)));
         assert!(serde_json::from_value::<EditGuildEmojiRequest>(json!({})).expect("empty").roles.is_none());
+    }
+
+    #[test]
+    fn poll_shapes_match_types_ts() {
+        let poll = json!({
+            "question": {"text": "Lunch?"},
+            "answers": [
+                {"answer_id": 1, "poll_media": {"text": "Pizza", "emoji": {"id": null, "name": "🍕"}}},
+                {"answer_id": 2, "poll_media": {"text": "Sushi"}}
+            ],
+            "expiry": "2026-10-12T10:00:00.000Z", "allow_multiselect": false, "layout_type": 1,
+            "results": {"is_finalized": false, "answer_counts": [{"id": 1, "count": 2, "me_voted": true}, {"id": 2, "count": 0, "me_voted": false}]}
+        });
+        round_trip::<Poll>(poll.clone());
+        let message = json!({
+            "id": "11", "channel_id": "200", "guild_id": "300", "author": user(), "content": "", "timestamp": "2026-10-11T10:00:00.000Z",
+            "edited_timestamp": null, "type": 0, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false,
+            "message_reference": null, "referenced_message": null, "nonce": null, "poll": poll
+        });
+        round_trip::<Message>(message);
+        let create: CreateMessageRequest = serde_json::from_value(json!({
+            "poll": {"question": {"text": "Q"}, "answers": [{"poll_media": {"text": "A"}}], "duration": 4, "allow_multiselect": true}
+        }))
+        .expect("create");
+        let poll = create.poll.expect("poll");
+        assert_eq!((poll.question.text.as_deref(), poll.answers.len(), poll.duration, poll.allow_multiselect), (Some("Q"), 1, Some(4), Some(true)));
+        let vote = GatewayEvent::MessagePollVoteAdd(PollVote {
+            user_id: Snowflake(100),
+            channel_id: Snowflake(200),
+            message_id: Snowflake(11),
+            guild_id: None,
+            answer_id: 2,
+        });
+        assert_eq!(
+            (vote.name(), vote.data()),
+            ("MESSAGE_POLL_VOTE_ADD", json!({"user_id": "100", "channel_id": "200", "message_id": "11", "guild_id": null, "answer_id": 2}))
+        );
+        assert_eq!(MessageType::from_u8(46), Some(MessageType::PollResult));
+        round_trip::<Embed>(
+            json!({"type": "poll_result", "fields": [{"name": "poll_question_text", "value": "Lunch?"}, {"name": "total_votes", "value": "2"}]}),
+        );
+        round_trip::<PollAnswerVotersResponse>(json!({"users": [user()]}));
     }
 
     #[test]

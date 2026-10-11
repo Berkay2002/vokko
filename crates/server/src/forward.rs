@@ -74,6 +74,10 @@ pub async fn prepare(
     if !matches!(MessageType::from_u8(row.kind as u8), Some(MessageType::Default | MessageType::Reply)) {
         return Err(ApiErr::invalid("message_reference", "Only regular messages can be forwarded."));
     }
+    let (is_poll,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM polls WHERE message_id = $1)").bind(source_message).fetch_one(&state.db).await?;
+    if is_poll {
+        return Err(ApiErr::invalid("message_reference", "Polls cannot be forwarded."));
+    }
     let view = store::message_view(state, source_message, None).await?.ok_or_else(unreadable)?;
     let message = view.message;
     // Forwarding a forward copies what it showed.

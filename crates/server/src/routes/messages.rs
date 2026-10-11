@@ -8,7 +8,7 @@ use axum::routing::{get, post, put};
 use serde::Deserialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use vokko_protocol::api::permissions::{ATTACH_FILES, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES};
+use vokko_protocol::api::permissions::{ATTACH_FILES, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_POLLS};
 use vokko_protocol::api::{
     AckBulkRequest, AllowedMentions, CreateMessageRequest, EditMessageRequest, Embed, GatewayEvent, Message, MessageAck, MessageDelete, MessageReferenceType,
     MessageType, PendingAttachmentMeta, PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart, message_flags::IS_CROSSPOST,
@@ -22,6 +22,7 @@ use crate::extract::{ApiJson, ApiQuery, parse_id};
 use crate::forward::{self, ForwardDraft};
 use crate::ids::now_ms;
 use crate::media;
+use crate::polls;
 use crate::state::AppState;
 use crate::stickers::{self, StickerRef};
 use crate::store::{self, ChannelRow, MESSAGE_SELECT, MessageRow, MessageView};
@@ -223,6 +224,8 @@ pub struct Extras {
     pub embeds: Option<String>,
     /// Webhook / interaction messages: the identity and metadata stored with the message (see `apps`).
     pub identity: Option<crate::apps::MessageIdentity>,
+    /// Makes the message a poll (stored in the same transaction).
+    pub poll: Option<polls::PollDraft>,
 }
 
 /// Stores a message, updates read states / unread counters, reopens closed DMs and fans MESSAGE_CREATE out.
@@ -320,6 +323,9 @@ async fn insert_message_stored(
     .bind(extras.identity.as_ref().and_then(|identity| identity.interaction_metadata.clone()))
     .execute(&mut *tx)
     .await?;
+    if let Some(poll) = &extras.poll {
+        polls::insert(&mut tx, message_id, poll).await?;
+    }
     if let Some(forward) = &draft.forward {
         for copy in &forward.copies {
             sqlx::query(
@@ -547,7 +553,22 @@ async fn create_message(
     if forwarding && (!body.content.as_deref().unwrap_or("").trim().is_empty() || !attachments.is_empty() || !sticker_ids.is_empty()) {
         return Err(ApiErr::invalid("message_reference", "A forward cannot carry content, attachments or stickers."));
     }
-    let content = validate_content(body.content.as_deref().unwrap_or(""), !attachments.is_empty() || !sticker_ids.is_empty() || forwarding)?;
+    let poll = match &body.poll {
+        Some(request) => {
+            if !access.is_dm() {
+                access.require(SEND_POLLS)?;
+            }
+            if !attachments.is_empty() {
+                return Err(ApiErr::invalid("attachments", "A poll message cannot have attachments."));
+            }
+            if forwarding || !sticker_ids.is_empty() {
+                return Err(ApiErr::invalid("poll", "A poll message cannot carry stickers or be a forward."));
+            }
+            Some(polls::validate(request)?)
+        }
+        None => None,
+    };
+    let content = validate_content(body.content.as_deref().unwrap_or(""), !attachments.is_empty() || !sticker_ids.is_empty() || forwarding || poll.is_some())?;
     let stickers = stickers::resolve_for_message(&state, user_id, &access.channel, access.permissions, &sticker_ids).await?;
     let mut forward_source: Option<(i64, i64)> = None;
     let reference = match body.message_reference {
@@ -583,7 +604,7 @@ async fn create_message(
     let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied, stickers, forward };
     // Everything is validated: a message into a thread reopens it if it is archived (the UPDATE's `AND archived` guards it, and
     // deciding inside the transaction closes the race with the auto-archive sweep) together with the insert.
-    let extras = Extras { reopen_thread: access.channel.is_thread(), ..Extras::default() };
+    let extras = Extras { reopen_thread: access.channel.is_thread(), poll, ..Extras::default() };
     let view = insert_message_with(&state, &access.channel, user_id, draft, extras).await?;
     if access.channel.is_thread() {
         // Talking in a thread joins it.
@@ -625,6 +646,10 @@ async fn edit_message(
     }
     if row.flags & IS_CROSSPOST as i32 != 0 {
         return Err(ApiErr::invalid("message_id", "Cannot edit a published copy."));
+    }
+    let (is_poll,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM polls WHERE message_id = $1)").bind(mid).fetch_one(&state.db).await?;
+    if is_poll {
+        return Err(polls::cannot_edit());
     }
     if row.forward_message_id.is_some() {
         return Err(ApiErr::invalid("message_id", "Cannot edit a forwarded message."));

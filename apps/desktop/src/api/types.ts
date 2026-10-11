@@ -209,7 +209,7 @@ export interface EmbedMedia {
   height?: number;
 }
 export interface Embed {
-  type: "rich" | "link" | "image" | "video" | "article" | "gifv";
+  type: "rich" | "link" | "image" | "video" | "article" | "gifv" | "poll_result"; // poll_result: only on a MessageType.PollResult message, data in `fields`
   title?: string;
   description?: string;
   url?: string;
@@ -272,6 +272,7 @@ export enum MessageType {
   ThreadStarterMessage = 21, // first message of a thread started from a message; message_reference points at the original, referenced_message is filled
   ChatInputCommand = 20, // response to a slash command (interaction_metadata says who used which command)
   ContextMenuCommand = 23, // response to a User/Message command
+  PollResult = 46, // posted once when a poll ends, by the poll's author; message_reference = the poll message, embeds[0] is a "poll_result" embed (PollResultField)
 }
 export enum MessageFlags {
   Crossposted = 1 << 0, // announcement message published to followers
@@ -410,6 +411,7 @@ export interface Message {
   nonce: string | null; // echoed from the send request for optimistic UI
   flags?: number; // MessageFlags; absent = 0
   thread?: Channel; // present when a thread was started from this message (thread.id == message id)
+  poll?: Poll; // present on poll messages; results are per viewer (me_voted)
   sticker_items?: StickerItem[]; // absent = none
   message_snapshots?: MessageSnapshot[]; // exactly one on a forward (message_reference.type 1)
   webhook_id?: Snowflake; // posted by a webhook (or an interaction response: then == application_id); author is then the webhook identity
@@ -422,6 +424,70 @@ export interface MessageCall {
   participants: Snowflake[]; // everyone who joined the call (the starter first)
   ended_timestamp: ISO8601 | null; // null while the call goes on; nobody but the starter joined = a missed call for the others
 }
+
+// ---- polls ----
+
+export const POLL_MAX_ANSWERS = 10;
+export const POLL_QUESTION_MAX = 300; // characters
+export const POLL_ANSWER_MAX = 55; // characters
+export const POLL_DURATIONS_HOURS = [1, 4, 8, 24, 72, 168, 336] as const; // what the client offers; the server accepts 1-768 hours
+export enum PollLayoutType {
+  Default = 1,
+}
+export interface PollMedia {
+  text?: string; // question: 1-300 chars (required); answer: 1-55 chars (required)
+  emoji?: ReactionEmoji; // answers only: unicode `{id: null, name}` or custom `{id, name}`
+}
+export interface PollAnswer {
+  answer_id: number; // 1-based, in creation order
+  poll_media: PollMedia;
+}
+export interface PollAnswerCount {
+  id: number; // answer_id
+  count: number;
+  me_voted: boolean;
+}
+export interface PollResults {
+  is_finalized: boolean; // true once the poll ended and its counts are final (the result message was posted)
+  answer_counts: PollAnswerCount[]; // one per answer, in answer order (zero counts included)
+}
+export interface Poll {
+  question: PollMedia; // text only
+  answers: PollAnswer[]; // 1-10
+  expiry: ISO8601; // votes are refused from this moment on; "End Poll Now" moves it to now
+  allow_multiselect: boolean;
+  layout_type: PollLayoutType;
+  results: PollResults;
+}
+// `CreateMessageRequest.poll`
+export interface PollCreateRequest {
+  question: { text: string };
+  answers: { poll_media: PollMedia }[]; // answer ids are assigned by the server
+  duration?: number; // hours, 1-768 (32 days), default 24
+  allow_multiselect?: boolean; // default false
+  layout_type?: PollLayoutType; // default 1
+}
+// GET /channels/{id}/polls/{message_id}/answers/{answer_id}
+export interface PollAnswerVotersResponse {
+  users: User[]; // ordered by user id, paged with ?after=<user id>&limit=1-100 (default 25)
+}
+// MESSAGE_POLL_VOTE_ADD / MESSAGE_POLL_VOTE_REMOVE
+export interface PollVoteEvent {
+  user_id: Snowflake;
+  channel_id: Snowflake;
+  message_id: Snowflake;
+  guild_id: Snowflake | null;
+  answer_id: number;
+}
+// `fields` of the "poll_result" embed (Discord's names; `value` is always a string). victor_* are absent when nobody voted or the top answers tie.
+export type PollResultField =
+  | "poll_question_text"
+  | "total_votes"
+  | "victor_answer_id"
+  | "victor_answer_text"
+  | "victor_answer_votes"
+  | "victor_answer_emoji_id"
+  | "victor_answer_emoji_name";
 
 export interface ReadState {
   channel_id: Snowflake;
@@ -650,6 +716,7 @@ export interface CreateMessageRequest {
   attachment_ids?: Snowflake[]; // ids returned by POST /channels/{id}/attachments; max 10 per message
   attachments?: PendingAttachmentMeta[]; // same ids with optional rename / alt text; use instead of attachment_ids
   allowed_mentions?: AllowedMentions; // omitted = parse everything, replied_user true
+  poll?: PollCreateRequest; // makes a poll message: content optional, no attachments (SEND_POLLS in guild channels)
 }
 export interface AllowedMentions {
   parse?: ("users" | "roles" | "everyone")[];
@@ -1198,6 +1265,8 @@ export interface GatewayEvents {
   CALL_CREATE: Call; // to the DM's recipients when a call starts, and after READY for every ongoing call in the user's DMs
   CALL_UPDATE: Omit<Call, "voice_states">; // ringing or region changed
   CALL_DELETE: { channel_id: Snowflake }; // the last participant left
+  MESSAGE_POLL_VOTE_ADD: PollVoteEvent; // to everyone who can see the channel
+  MESSAGE_POLL_VOTE_REMOVE: PollVoteEvent;
   INVITE_CREATE: InviteMetadata; // to members who can list it: MANAGE_GUILD, or MANAGE_CHANNELS on the invite's channel
   INVITE_DELETE: { code: string; guild_id: Snowflake; channel_id: Snowflake }; // same audience; revoked (not on expiry or last use)
   GUILD_LAYOUT_UPDATE: GuildLayout; // the user's own sessions only

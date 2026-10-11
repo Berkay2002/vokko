@@ -411,6 +411,7 @@ async fn post_message(state: &AppState, row: &InteractionRow, request: &WebhookM
             application_id: Some(Snowflake::from(row.application_id)),
             interaction_metadata: interaction_metadata.map(Box::new),
             call: None,
+            poll: None,
         };
         apps::insert_ephemeral(state, &message, row.user_id, Some(row.id)).await?;
         return Ok(message);

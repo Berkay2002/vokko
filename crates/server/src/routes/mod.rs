@@ -18,6 +18,7 @@ pub mod messages;
 pub mod moderation;
 mod onboarding;
 mod overwrites;
+mod polls;
 mod reactions;
 pub mod relationships;
 mod saved;
@@ -44,6 +45,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(messages::routes())
         .merge(reactions::routes())
         .merge(emojis::routes())
+        .merge(polls::routes())
         .merge(search::routes())
         .merge(scheduled_events::routes())
         .merge(onboarding::routes())

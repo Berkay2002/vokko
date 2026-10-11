@@ -21,6 +21,8 @@ import "./search";
 import { dismissEphemeral, mergeEphemerals } from "./apps";
 import { resolveReactionEmoji, sameReactionEmoji } from "./emojis";
 import "./calls";
+import { parsePoll, requirePollPerm } from "./polls";
+import { addPoll, isPoll } from "./pollData";
 import "./invites";
 import "./community";
 import "./status";
@@ -367,15 +369,25 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
     return { ...found, ...(filename !== undefined ? { filename } : {}), ...(description !== undefined ? { description: description === "" ? null : description } : {}) };
   }).filter((a): a is Attachment => a !== null);
   if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });
+  if (body.poll !== undefined) {
+    requirePollPerm(channel, viewer.user.id);
+    if (ids.length > 0) fail(400, 50035, "Invalid Form Body", { attachments: { code: "BASE_TYPE_BAD_LENGTH", message: "A poll message cannot have attachments." } });
+  }
   const reference = body.message_reference as { message_id?: string; channel_id?: string; type?: number } | undefined;
   const forwarding = reference?.type === 1;
   const stickers = resolveStickers(channel, viewer.user.id, body.sticker_ids);
+  if (body.poll !== undefined && (forwarding || stickers.length > 0)) fail(400, 50035, "Invalid Form Body", { poll: { code: "BASE_TYPE_BAD_LENGTH", message: "A poll message cannot carry stickers or be a forward." } });
+  const poll = body.poll !== undefined ? parsePoll(body.poll) : null;
   if (forwarding && (content !== "" || attachments.length > 0 || stickers.length > 0)) fail(400, 50035, "Invalid Form Body", { message_reference: { code: "FORWARD_HAS_CONTENT", message: "A forward cannot carry content, attachments or stickers." } });
-  if (content === "" && attachments.length === 0 && stickers.length === 0 && !forwarding) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
+  if (content === "" && attachments.length === 0 && stickers.length === 0 && !forwarding && !poll) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
   const forward = forwarding ? buildForward(viewer.user.id, reference, channel) : undefined;
   if (reference?.message_id && !forwarding) requireMessage(channel.id, reference.message_id);
   for (const id of ids) db.pending.delete(id);
+  // A poll is registered under the message's id first, so MESSAGE_CREATE already carries it.
+  const messageId = poll ? nextId() : undefined;
+  if (poll && messageId) addPoll(messageId, poll);
   const message = addMessage({
+    ...(messageId ? { id: messageId } : {}),
     channel,
     author_id: viewer.user.id,
     content,
@@ -394,6 +406,7 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   const message = requireMessage(channel.id, params[1] ?? "");
   if (message.author_id !== viewer.user.id) fail(403, 50005, "Cannot edit a message authored by another user");
   assertThreadOpen(channel);
+  if (isPoll(message.id)) fail(400, 520003, "Cannot edit a poll message");
   // `content` is optional now; `attachments` lists the ones to keep (omitted = unchanged, can only remove).
   const content = (str(body.content) ?? message.content).trim();
   if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });

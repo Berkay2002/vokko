@@ -129,6 +129,10 @@ General rules:
 | PUT | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | emoji URL-encoded (unicode or `name:id`), 204; custom emoji rules under Custom emoji |
 | DELETE | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | 204 |
 | GET | /channels/{id}/messages/{mid}/reactions/{emoji} | `User[]` who reacted |
+| PUT | /channels/{id}/polls/{mid}/answers/{answer_id}/@me | vote, 204 (see Polls) |
+| DELETE | /channels/{id}/polls/{mid}/answers/{answer_id}/@me | remove your vote, 204 |
+| GET | /channels/{id}/polls/{mid}/answers/{answer_id}?after&limit | `PollAnswerVotersResponse` (READ_MESSAGE_HISTORY) |
+| POST | /channels/{id}/polls/{mid}/expire | end the poll now (author only) → `Message` with final results |
 | GET | /channels/{id}/messages/pins?limit&before | `PinnedMessagesPage` (newest pin first, limit 1-50, `before` = pinned_at ISO) |
 | PUT/DELETE | /channels/{id}/messages/pins/{mid} | 204; max 250 pins per channel → 400 code 30003 |
 | POST | /read-states/ack-bulk | `{read_states: [{channel_id, message_id}]}` → 204 ("mark server as read") |
@@ -269,6 +273,7 @@ Applications own a bot user (`User.bot = true`, user id == application id). Shap
 Errors: 10002 unknown application, 10015 unknown webhook, 10062 unknown interaction, 10063 unknown application command, 20001 bots cannot use this endpoint, 30005 max roles, 30007 max webhooks, 30032 max application commands, 30035 max applications, 40060 interaction already acknowledged, 50027 invalid webhook token.
 
 **Gateway.** INTERACTION_CREATE (bot only), INTERACTION_FAILURE and APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE (invoking user's sessions only), WEBHOOKS_UPDATE. Message events for ephemeral messages only reach the invoking user.
+
 ## Custom emoji
 
 Discord behaviour with every Nitro emoji perk free: a member can use the emoji of **any guild they are in, anywhere** (other guilds, DMs, reactions), animated emoji included. Message content references them as `<:name:id>` / `<a:name:id>` (the server does not rewrite or validate content; clients render the image from `GET /emojis/{id}`, which works for viewers outside the emoji's guild too).
@@ -280,6 +285,33 @@ Discord behaviour with every Nitro emoji perk free: a member can use the emoji o
 - **Reactions** with a custom emoji (`name:id`, the id decides; the stored name is used): unknown emoji → 400 10014 "Unknown Emoji"; the reactor must be a member of the emoji's guild and, for a role-restricted emoji, hold one of its roles, and an emoji of another guild in a guild channel needs USE_EXTERNAL_EMOJIS there (default on for @everyone; DMs never need it) → 403 50013. Removing a reaction and listing reactors never check the emoji (a deleted emoji's reactions stay, with `id` and `name`). Reaction objects and MESSAGE_REACTION_ADD/REMOVE carry `emoji.animated` for custom emoji whose guild still has them.
 - **Delete** removes the emoji and its stored file; `GET /emojis/{id}` then answers 404 and clients fall back to `:name:`.
 - **Gateway**: READY guilds and GUILD_CREATE carry `emojis` (no `user`; omitted when empty). Every create/edit/delete sends GUILD_EMOJIS_UPDATE `{guild_id, emojis}` (the full list) to every member of the guild.
+
+## Polls
+
+A poll is a message with `poll` (Discord's shape: `Poll`, `PollCreateRequest`, `PollVoteEvent` in types.ts). Created with `CreateMessageRequest.poll`:
+question 1-300 characters, 1-10 answers of 1-55 characters each with an optional emoji, `duration` 1-768 hours (default 24; the client offers
+1 h, 4 h, 8 h, 24 h, 3 d, 1 w, 2 w), `allow_multiselect` default false, `layout_type` 1. `content` is optional next to a poll; attachments are not allowed
+(400 50035). Guild channels need SEND_MESSAGES and SEND_POLLS (1<<49, part of the default @everyone set); DMs and group DMs need nothing extra.
+Forum channels take no messages, so no polls (50024).
+
+- **Results** are computed live: `results.answer_counts` has one entry per answer (zero counts included) and `me_voted` is per viewer (REST and
+  each receiver of MESSAGE_CREATE/UPDATE). `is_finalized` turns true once the poll has ended and its result message exists.
+- **Voting** (`PUT .../answers/{answer_id}/@me`) needs VIEW_CHANNEL + READ_MESSAGE_HISTORY. Single choice: voting for another answer moves the vote
+  (MESSAGE_POLL_VOTE_REMOVE for the old answer, then MESSAGE_POLL_VOTE_ADD). Multiselect: each answer is a separate vote. Repeating a vote, or removing
+  one that does not exist, is a 204 with no event. Unknown answer → 400 50035. At or after `expiry` → 400 520001 `Poll expired`. Archived thread → 403
+  50083. Removing a vote follows the same rules. Events go to everyone who can see the channel.
+- **Voters** (`GET .../answers/{answer_id}`): users ordered by id, `after` = user id, `limit` 1-100 (default 25).
+- Votes and voters on a message without a poll → 404 10008. A forum post's first message cannot carry a poll (`poll` is ignored there), and
+  publishing (crosspost) a poll message copies its content only, not the poll. A poll message cannot carry stickers or be a forward
+  (`poll` with `sticker_ids` or a forward `message_reference` → 400 50035), and a poll message cannot be forwarded (400 50035 on `message_reference`).
+- **Ending.** `POST .../expire` (the poll's author only, 403 50005 otherwise; a non-poll message → 400 520006; an ended poll → 400 520001) sets
+  `expiry` to now and finalises at once. A background sweep (every 5 s, `polls::sweep_expired`) finalises polls whose expiry has passed. Finalising
+  happens exactly once per poll (a conditional UPDATE decides the winner of a race between the sweep and End Poll Now): it emits MESSAGE_UPDATE for the
+  poll message and posts a type 46 `PollResult` message (author = the poll's author, `message_reference` = the poll message, content empty, no pings)
+  whose single embed has `type: "poll_result"` and Discord's `fields`: `poll_question_text`, `total_votes`, and when one answer has strictly the most
+  votes `victor_answer_id`, `victor_answer_text`, `victor_answer_votes`, `victor_answer_emoji_id`, `victor_answer_emoji_name` (values are strings).
+  A vote either commits before the poll is finalised (and is counted) or is refused with 520001; counts never change after finalising.
+- **Editing** a poll message → 400 520003 `Cannot edit a poll message`. Deleting it deletes the poll and its votes (no result message).
 
 ## Gateway
 
@@ -293,6 +325,9 @@ Discord behaviour with every Nitro emoji perk free: a member can use the emoji o
 6. `op 6 Resume {token, session_id, seq}` replays missed dispatches if the session buffer still has them; otherwise `op 9 InvalidSession`, and the client re-identifies.
 
 Events are delivered only to users who can see the channel/guild. Event names and payloads: `GatewayEvents` in types.ts. Presence: connected → online, last connection closed → offline; `op 3 {status, custom_status, activities?}` updates it (custom_status max 128 chars; `activities` below). The presence preference is not kept across a full disconnect.
+
+Poll events: `MESSAGE_POLL_VOTE_ADD` / `MESSAGE_POLL_VOTE_REMOVE` `{user_id, channel_id, message_id, guild_id, answer_id}` to the channel's viewers;
+clients apply them to `results` (and `me_voted` when `user_id` is theirs).
 
 Semantics notes: a reply puts the replied-to author in `mentions` (Discord default). Pinning emits MESSAGE_UPDATE for the pinned message plus a type 6 system message (MESSAGE_CREATE). `referenced_message.reactions` is always `[]`. Role mentions only drive `mention_count` (no `mention_roles` field).
 

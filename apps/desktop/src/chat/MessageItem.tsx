@@ -18,6 +18,8 @@ import { ThreadChip } from '../threads/ThreadChip';
 import { ThreadCreatedNotice } from '../threads/ThreadNotice';
 import { CallNotice } from '../calls/CallNotice';
 import { ThreadStarter } from '../threads/ThreadStarter';
+import { PollView } from '../polls/PollView';
+import { PollResultNotice } from '../polls/PollResultNotice';
 import { useMessageThreadActions } from '../threads/useMessageActions';
 import { AppTag, EphemeralFooter, InteractionHeader, ThinkingBody, isEphemeral } from '../apps/InteractionMessage';
 import { quickReactions } from './emojiData';
@@ -54,6 +56,8 @@ function SystemBody({ message, name }: { message: Message; name: string }) {
       return <ThreadCreatedNotice message={message} name={name} />;
     case MessageType.Call:
       return <CallNotice message={message} name={name} />;
+    case MessageType.PollResult:
+      return <PollResultNotice message={message} name={name} />;
     default:
       return <span className="chat-system-text">{message.content}</span>;
   }
@@ -167,7 +171,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const failed = pending?.state === 'failed';
   const gif = system ? null : gifMessageMedia(message);
 
-  const canEdit = isMine && !system && !pending && message.message_reference?.type !== 1; // a forward has no text to edit
+  const canEdit = isMine && !system && !pending && !message.poll && message.message_reference?.type !== 1; // a forward has no text to edit
   const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
 
   const quick = useMemo(() => quickReactions().slice(0, 3), []);
@@ -231,6 +235,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
         {pending && !failed && message.attachments.length > 0
           ? <PendingUpload files={message.attachments} onCancel={() => messageStore.discardPending(message.channel_id, pending.nonce)} />
           : <Attachments message={message} />}
+        {message.poll && <PollView message={message} />}
         {gif && <GifMessage message={message} media={gif} />}
         <StickerItems items={message.sticker_items} />
         {message.message_snapshots?.length ? <ForwardedBlock message={message} /> : null}

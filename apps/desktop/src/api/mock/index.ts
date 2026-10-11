@@ -17,6 +17,7 @@ import { seed } from "./seed";
 import { seedBig } from "./seedBig";
 import { setMockMaintenance } from "./status";
 import { sweepArchivedThreads } from "./threads";
+import { sweepExpiredPolls } from "./polls";
 import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromToken } from "./socket";
 import { setMockVoice } from "./voice";
 import { ringTimeout } from "./calls";
@@ -37,6 +38,8 @@ if (MOCK) {
   }
   // Threads without a message for their auto-archive duration are archived (THREAD_UPDATE), like the server's minute sweep.
   setInterval(() => sweepArchivedThreads(), 30_000);
+  // Polls past their expiry are ended (MESSAGE_UPDATE + the result message), like the server's sweep.
+  setInterval(() => sweepExpiredPolls(), 5_000);
   // `?mockGifProvider=none` boots a mock whose GIF provider is not configured (the picker then shows favourites only).
   try {
     const provider = new URLSearchParams(window.location.search).get("mockGifProvider");
