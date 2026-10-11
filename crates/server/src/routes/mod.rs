@@ -12,6 +12,7 @@ mod moderation;
 mod overwrites;
 mod reactions;
 pub mod relationships;
+mod search;
 mod users;
 
 pub fn api(max_upload_bytes: usize) -> Router<AppState> {
@@ -26,5 +27,6 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(relationships::routes())
         .merge(messages::routes())
         .merge(reactions::routes())
+        .merge(search::routes())
         .merge(attachments::routes(max_upload_bytes))
 }

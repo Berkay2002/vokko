@@ -29,6 +29,7 @@ import "./styles/perks.css";
 import "./styles/profiles.css";
 import "./styles/server-perks.css";
 import "./ui/prefs";
+import "./search";
 
 bootstrap();
 startNotify();

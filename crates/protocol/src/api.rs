@@ -610,6 +610,13 @@ pub struct PinnedMessagesPage {
     pub has_more: bool,
 }
 
+/// `GET /guilds/{id}/messages/search` and `GET /channels/{id}/messages/search`: each hit is a one-element array.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MessageSearchResponse {
+    pub total_results: u64,
+    pub messages: Vec<Vec<Message>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RateLimitError {
     pub message: String,
@@ -1156,6 +1163,7 @@ mod tests {
         round_trip::<AckBulkRequest>(json!({"read_states": [{"channel_id": "1", "message_id": "2"}]}));
         round_trip::<RateLimitError>(json!({"message": "You are being rate limited.", "retry_after": 1.5, "global": false}));
         round_trip::<PinnedMessagesPage>(json!({"items": [], "has_more": false}));
+        round_trip::<MessageSearchResponse>(json!({"total_results": 0, "messages": []}));
         round_trip::<ApiError>(json!({"code": 50035, "message": "Invalid Form Body", "errors": {"content": ["too long"]}}));
         round_trip::<ApiError>(json!({"code": 0, "message": "401: Unauthorized"}));
     }
