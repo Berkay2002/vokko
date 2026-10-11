@@ -851,18 +851,18 @@
 }
 
 .user-popout .in-voice-card {
-  margin: 0 16px 12px;
+  margin: 0 8px;
 }
 
+/* Section cards (in-voice card, menu groups) stack 8px apart, 8px in from the popout edges. */
 .user-popout-menu {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 8px;
-  border-top: 1px solid var(--border-subtle);
 }
 
-/* Rows sit in rounded grouped cards on the popout background, split by 1px lines. */
+/* Rows sit in rounded grouped cards on the popout background, split by inset 1px lines. */
 .user-popout-card {
   overflow: hidden;
   border-radius: var(--radius-md);
@@ -870,26 +870,42 @@
 }
 
 .user-popout-row {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   width: 100%;
-  height: 34px;
-  padding: 0 12px;
+  height: 48px;
+  padding: 0 16px;
   color: var(--interactive-text-default);
-  font-size: 14px;
-  line-height: 18px;
-  font-weight: 500;
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 400;
   text-align: left;
 }
 
-.user-popout-row + .user-popout-row {
-  border-top: 1px solid var(--border-subtle);
+.user-popout-row > svg {
+  flex: none;
+  color: var(--icon-muted);
+}
+
+.user-popout-row + .user-popout-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 16px;
+  right: 16px;
+  height: 1px;
+  background: var(--border-subtle);
 }
 
 .user-popout-row:hover {
   background: var(--interactive-background-hover);
   color: var(--interactive-text-hover);
+}
+
+.user-popout-row:hover > svg {
+  color: var(--interactive-icon-hover);
 }
 
 .user-popout-row > .status-badge {
