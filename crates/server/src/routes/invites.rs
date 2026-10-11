@@ -34,13 +34,28 @@ async fn preview(State(state): State<AppState>, AuthUser(_): AuthUser, Path(code
 
 async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(code): Path<String>) -> ApiResult<Json<Guild>> {
     let (guild_id, _) = live_invite(&state, &code).await?;
+    // The member insert and the use are one transaction; the conditional UPDATE re-checks max_uses / expiry under the row lock,
+    // so concurrent accepts of the last use cannot both succeed. An existing member does not consume a use.
+    let mut tx = state.db.begin().await?;
     let inserted = sqlx::query("INSERT INTO guild_members (guild_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
         .bind(guild_id)
         .bind(user_id)
-        .execute(&state.db)
+        .execute(&mut *tx)
         .await?;
     if inserted.rows_affected() > 0 {
-        sqlx::query("UPDATE invites SET uses = uses + 1 WHERE code = $1").bind(&code).execute(&state.db).await?;
+        let consumed = sqlx::query(
+            "UPDATE invites SET uses = uses + 1 WHERE code = $1 AND (max_uses = 0 OR uses < max_uses) AND (expires_at IS NULL OR expires_at > now())",
+        )
+        .bind(&code)
+        .execute(&mut *tx)
+        .await?;
+        if consumed.rows_affected() == 0 {
+            tx.rollback().await?;
+            return Err(ApiErr::unknown_invite());
+        }
+    }
+    tx.commit().await?;
+    if inserted.rows_affected() > 0 {
         sqlx::query("INSERT INTO read_states (user_id, channel_id, last_message_id) SELECT $1, id, last_message_id FROM channels WHERE guild_id = $2 AND kind IN (0, 2) ON CONFLICT DO NOTHING")
             .bind(user_id)
             .bind(guild_id)

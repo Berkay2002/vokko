@@ -311,6 +311,22 @@ async fn bulk_ack_marks_channels_read() {
         .expect("read state");
     assert_eq!((last, count), (Some(nid.parse::<i64>().expect("id")), 0));
     assert_eq!(s.app.get(&format!("{base}?limit=1"), &s.member).await.0, StatusCode::OK);
+
+    // A duplicate entry for the same channel is fine and an older message never moves the read state back.
+    let (status, _) = s
+        .app
+        .post(
+            "/read-states/ack-bulk",
+            &s.member,
+            json!({"read_states": [{"channel_id": s.channel, "message_id": "1"}, {"channel_id": s.channel, "message_id": nid}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // More than 100 entries is a 400.
+    let too_many: Vec<_> = (0..101).map(|_| json!({"channel_id": s.channel, "message_id": nid})).collect();
+    let (status, _) = s.app.post("/read-states/ack-bulk", &s.member, json!({ "read_states": too_many })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

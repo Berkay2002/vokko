@@ -70,6 +70,15 @@ async fn create_dm(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     if known.len() != ids.len() {
         return Err(ApiErr::unknown_user());
     }
+    // Only accepted friends of the creator can be added to a new group DM.
+    let (friends,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM relationships WHERE user_id = $1 AND other_id = ANY($2) AND kind = 1")
+        .bind(user_id)
+        .bind(&ids)
+        .fetch_one(&state.db)
+        .await?;
+    if friends != ids.len() as i64 {
+        return Err(ApiErr::cannot_message_user());
+    }
     let channel_id = state.ids.next();
     let mut tx = state.db.begin().await?;
     sqlx::query("INSERT INTO channels (id, kind, owner_id) VALUES ($1, 3, $2)").bind(channel_id).bind(user_id).execute(&mut *tx).await?;
@@ -91,6 +100,15 @@ async fn one_to_one(state: &AppState, user_id: i64, other: i64) -> ApiResult<Jso
     }
     if store::user(state, other).await?.is_none() {
         return Err(ApiErr::unknown_user());
+    }
+    let (blocked,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM relationships WHERE kind = 2 AND ((user_id = $1 AND other_id = $2) OR (user_id = $2 AND other_id = $1)))")
+            .bind(user_id)
+            .bind(other)
+            .fetch_one(&state.db)
+            .await?;
+    if blocked {
+        return Err(ApiErr::cannot_message_user());
     }
     let existing: Option<(i64,)> = sqlx::query_as(
         "SELECT c.id FROM channels c WHERE c.kind = 1 \
@@ -116,6 +134,18 @@ async fn one_to_one(state: &AppState, user_id: i64, other: i64) -> ApiResult<Jso
             id
         }
         None => {
+            // A new DM needs a shared guild or an accepted friendship.
+            let (reachable,): (bool,) = sqlx::query_as(
+                "SELECT EXISTS (SELECT 1 FROM guild_members a JOIN guild_members b ON a.guild_id = b.guild_id WHERE a.user_id = $1 AND b.user_id = $2) \
+                 OR EXISTS (SELECT 1 FROM relationships WHERE user_id = $1 AND other_id = $2 AND kind = 1)",
+            )
+            .bind(user_id)
+            .bind(other)
+            .fetch_one(&state.db)
+            .await?;
+            if !reachable {
+                return Err(ApiErr::cannot_message_user());
+            }
             let id = state.ids.next();
             let mut tx = state.db.begin().await?;
             sqlx::query("INSERT INTO channels (id, kind) VALUES ($1, 1)").bind(id).execute(&mut *tx).await?;
