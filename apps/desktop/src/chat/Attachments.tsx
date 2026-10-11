@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, Download, ExternalLink, File as FileIcon, FileArchive, FileAudio, FileCode, FileText, FileVideo, X } from 'lucide-react';
 import type { Attachment, Message } from '../api/types';
 import { useChat } from './ChatContext';
+import { resolveUrl } from './shell';
 import { formatBytes } from './util';
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
@@ -27,7 +28,7 @@ function ImageTile({ message, attachment, index, style, className }: { message: 
   const spoiler = attachment.filename.startsWith('SPOILER_') && !spoiled;
   return <button type="button" className={`chat-image${className ? ` ${className}` : ''}${spoiler ? ' spoiler' : ''}`} style={style} aria-label={`Open image ${attachment.filename}`}
     onClick={() => (spoiler ? setSpoiled(true) : chat.actions.openImage(message, index))}>
-    <img src={attachment.url} alt={attachment.filename} loading="lazy" draggable={false} />
+    <img src={resolveUrl(attachment.url)} alt={attachment.filename} loading="lazy" draggable={false} />
     {spoiler && <span className="chat-image-spoiler-label">SPOILER</span>}
   </button>;
 }
@@ -64,7 +65,7 @@ export function Attachments({ message }: { message: Message }) {
   return <div className="chat-attachments">
     {images.length > 0 && <ImageGrid message={message} images={images} />}
     {others.map(a => isVideo(a)
-      ? <video key={a.id} className="chat-video" src={a.url} controls preload="metadata" />
+      ? <video key={a.id} className="chat-video" src={resolveUrl(a.url)} controls preload="metadata" />
       : <FileCard key={a.id} attachment={a} />)}
   </div>;
 }
@@ -74,10 +75,10 @@ export function FileCard({ attachment }: { attachment: Attachment }) {
   return <div className="chat-file">
     <Icon className="chat-file-icon" size={40} aria-hidden="true" />
     <div className="chat-file-meta">
-      <a className="chat-file-name" href={attachment.url} target="_blank" rel="noopener noreferrer" title={attachment.filename}>{attachment.filename}</a>
+      <a className="chat-file-name" href={resolveUrl(attachment.url)} target="_blank" rel="noopener noreferrer" title={attachment.filename}>{attachment.filename}</a>
       <span className="chat-file-size">{formatBytes(attachment.size)}</span>
     </div>
-    <a className="chat-file-download" href={attachment.url} download={attachment.filename} aria-label={`Download ${attachment.filename}`} title="Download"><Download size={24} /></a>
+    <a className="chat-file-download" href={resolveUrl(attachment.url)} download={attachment.filename} aria-label={`Download ${attachment.filename}`} title="Download"><Download size={24} /></a>
   </div>;
 }
 
@@ -101,8 +102,8 @@ export function Lightbox({ message, index, onClose }: { message: Message; index:
     {i > 0 && <button type="button" className="chat-lightbox-nav prev" aria-label="Previous image" onClick={() => setI(i - 1)}><ChevronLeft size={36} /></button>}
     {i < images.length - 1 && <button type="button" className="chat-lightbox-nav next" aria-label="Next image" onClick={() => setI(i + 1)}><ChevronRight size={36} /></button>}
     <figure className="chat-lightbox-figure">
-      <img src={cur.url} alt={cur.filename} draggable={false} />
-      <figcaption><a href={cur.url} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> Open in Browser</a></figcaption>
+      <img src={resolveUrl(cur.url)} alt={cur.filename} draggable={false} />
+      <figcaption><a href={resolveUrl(cur.url)} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> Open in Browser</a></figcaption>
     </figure>
   </div>, document.body);
 }

@@ -21,7 +21,6 @@ export interface MarkdownContext {
   customEmojiUrl?(id: string, animated: boolean): string;
   /** when given, a link click calls it with preventDefault (leaving-Vokko confirm) */
   onLink?(href: string): void;
-  /** Keyboard activation (Enter/Space) passes the KeyboardEvent; use only ev.currentTarget. */
   onMention?(kind: 'user' | 'role' | 'channel', id: string, ev: MouseEvent): void;
   formatTimestamp?(unix: number, style: string): { text: string; title: string };
 }
@@ -115,7 +114,6 @@ function Spoiler({ children }: { children: ReactNode }) {
   return (
     <span
       className="md-spoiler"
-      data-revealed="false"
       role="button"
       tabIndex={0}
       aria-label="Spoiler, activate to reveal"
@@ -187,8 +185,9 @@ function Mention({
       onClick={(e) => onMention(kind, id, e)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
+          // dispatch a real click so onMention always receives a MouseEvent
           e.preventDefault();
-          onMention(kind, id, e as unknown as MouseEvent);
+          e.currentTarget.click();
         }
       }}
     >

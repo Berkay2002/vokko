@@ -1,6 +1,6 @@
 // Pure state transitions for one channel's message window. No React, no I/O: unit-tested in messageState.test.ts.
 import { MessageType } from '../api/types';
-import type { CreateMessageRequest, Message, ReactionEmoji, Snowflake } from '../api/types';
+import type { CreateMessageRequest, Message, ReactionEmoji, Snowflake, User } from '../api/types';
 import { compareIds } from './util';
 
 export interface PendingMessage {
@@ -165,6 +165,24 @@ export function applyReaction(s: ChannelState, messageId: Snowflake, emoji: Reac
   const messages = s.messages.slice();
   messages[i] = { ...m, reactions };
   return { ...s, messages };
+}
+
+/** Refresh a user's profile everywhere it is embedded in loaded messages (author, mentions, reply targets). */
+export function applyUserUpdate(s: ChannelState, user: User): ChannelState {
+  const touches = (m: Message): boolean =>
+    m.author.id === user.id || m.mentions.some(u => u.id === user.id) || m.referenced_message?.author.id === user.id;
+  if (!s.messages.some(touches) && !s.pending.some(p => p.message.author.id === user.id)) return s;
+  const fix = (m: Message): Message => (!touches(m) ? m : {
+    ...m,
+    author: m.author.id === user.id ? user : m.author,
+    mentions: m.mentions.map(u => (u.id === user.id ? user : u)),
+    referenced_message: m.referenced_message && m.referenced_message.author.id === user.id ? { ...m.referenced_message, author: user } : m.referenced_message,
+  });
+  return {
+    ...s,
+    messages: s.messages.map(fix),
+    pending: s.pending.map(p => (p.message.author.id === user.id ? { ...p, message: fix(p.message) } : p)),
+  };
 }
 
 export function setTyping(s: ChannelState, userId: Snowflake, now: number): ChannelState {

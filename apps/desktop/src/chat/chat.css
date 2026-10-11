@@ -3,35 +3,37 @@
  * values measured from memory; tokens from the shell (--background-primary, ...) win when they exist. Correct values here, not in rules.
  */
 .chat-view, .chat-pins, .chat-lightbox, .chat-emoji-picker, .chat-autocomplete, .chat-attach-menu {
-  --chat-font: "Noto Sans", Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif;
-  --chat-mono: Consolas, "Andale Mono WT", "Andale Mono", "Lucida Console", "DejaVu Sans Mono", Menlo, monospace;
-  --chat-bg: var(--background-primary, #313338);
-  --chat-bg-secondary: var(--background-secondary, #2b2d31);
-  --chat-bg-tertiary: var(--background-tertiary, #1e1f22);
-  --chat-bg-floating: var(--background-floating, #111214);
-  --chat-input-bg: var(--channeltextarea-background, #383a40);
-  --chat-message-hover: var(--background-message-hover, rgba(2, 2, 2, 0.06));
-  --chat-mentioned-bg: rgba(250, 166, 26, 0.1);
-  --chat-mentioned-hover: rgba(250, 166, 26, 0.08);
-  --chat-mentioned-bar: #f0b232;
-  --chat-flash-bg: rgba(88, 101, 242, 0.25);
+  --chat-font: var(--font-sans, "Noto Sans", Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif);
+  --chat-mono: var(--font-mono, Consolas, "Andale Mono WT", "Andale Mono", "Lucida Console", "DejaVu Sans Mono", Menlo, monospace);
+  --chat-bg: var(--bg-primary, #313338);
+  --chat-bg-secondary: var(--bg-secondary, #2b2d31);
+  --chat-bg-tertiary: var(--bg-tertiary, #1e1f22);
+  --chat-bg-floating: var(--bg-floating, #111214);
+  --chat-input-bg: var(--bg-input, #383a40);
+  --chat-message-hover: var(--bg-message-hover, rgba(2, 2, 2, 0.06));
+  --chat-mentioned-bg: var(--bg-message-mentioned, rgba(250, 166, 26, 0.1));
+  --chat-mentioned-hover: var(--bg-message-mentioned-hover, rgba(250, 166, 26, 0.08));
+  --chat-mentioned-bar: var(--yellow, #f0b232);
+  --chat-flash-bg: var(--bg-message-highlight, rgba(88, 101, 242, 0.12));
   --chat-text: var(--text-normal, #dbdee1);
-  --chat-text-strong: var(--header-primary, #f2f3f5);
+  --chat-text-strong: var(--text-header, #f2f3f5);
   --chat-text-muted: var(--text-muted, #949ba4);
-  --chat-text-placeholder: var(--channel-text-area-placeholder, #80848e);
+  --chat-text-placeholder: var(--text-faint, #80848e);
   --chat-icon: var(--interactive-normal, #b5bac1);
   --chat-icon-hover: var(--interactive-hover, #dbdee1);
   --chat-link: var(--text-link, #00a8fc);
-  --chat-brand: var(--brand-500, #5865f2);
-  --chat-brand-hover: var(--brand-560, #4752c4);
-  --chat-danger: var(--status-danger, #f23f42);
-  --chat-danger-bg: var(--button-danger-background, #da373c);
-  --chat-divider: var(--background-modifier-accent, #3f4147);
-  --chat-hover: var(--background-modifier-hover, rgba(78, 80, 88, 0.3));
-  --chat-selected: var(--background-modifier-selected, rgba(78, 80, 88, 0.6));
+  --chat-brand: var(--brand, #5865f2);
+  --chat-brand-hover: var(--brand-hover, #4752c4);
+  --chat-danger: var(--red, #f23f43);
+  --chat-danger-bg: var(--red-hover, #da373c);
+  --chat-danger-bg-hover: var(--red-active, #a12828);
+  --chat-green: var(--green, #23a55a);
+  --chat-divider: var(--divider, rgba(78, 80, 88, 0.48));
+  --chat-hover: var(--bg-modifier-hover, rgba(78, 80, 88, 0.3));
+  --chat-selected: var(--bg-modifier-selected, rgba(78, 80, 88, 0.6));
   --chat-spoiler-hidden: #1e1f22;
-  --chat-quote-bar: #4e5058;
-  --chat-mention-bg: rgba(88, 101, 242, 0.3);
+  --chat-quote-bar: var(--bg-accent, #4e5058);
+  --chat-mention-bg: var(--bg-mention, rgba(88, 101, 242, 0.3));
   --chat-mention-fg: #c9cdfb;
   --chat-gutter: 72px;
   --chat-pad-right: 48px;
@@ -116,7 +118,7 @@
 .chat-msg.system .chat-msg-gutter + .chat-msg-body { position: relative; }
 .chat-system-icon { position: absolute; left: -36px; top: 2px; }
 .chat-system-icon.pin, .chat-system-icon.leave { color: var(--chat-text-muted); }
-.chat-system-icon.join { color: #23a55a; }
+.chat-system-icon.join { color: var(--chat-green); }
 .chat-system-text { color: var(--chat-text-muted); font-size: 16px; line-height: var(--chat-line-height); }
 .chat-system-text b { color: var(--chat-text-strong); font-weight: 500; }
 .chat-system-link { color: var(--chat-text-strong); font-weight: 600; }
@@ -270,7 +272,7 @@
 .chat-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 96px; height: 38px; padding: 2px 16px; border-radius: 3px; border: 0; font: inherit; font-size: 14px; font-weight: 500; color: #fff; background: var(--chat-brand); cursor: pointer; text-decoration: none; }
 .chat-btn:hover { background: var(--chat-brand-hover); }
 .chat-btn.danger { background: var(--chat-danger-bg); }
-.chat-btn.danger:hover { background: #a12828; }
+.chat-btn.danger:hover { background: var(--chat-danger-bg-hover); }
 .chat-btn.link { background: none; }
 .chat-btn.link:hover { text-decoration: underline; background: none; }
 .chat-btn:disabled { opacity: 0.5; cursor: not-allowed; }

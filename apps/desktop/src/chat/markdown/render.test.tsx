@@ -43,7 +43,7 @@ describe('Markdown render', () => {
   it('spoiler is a hidden button until clicked', () => {
     const out = html('||secret||');
     expect(out).toContain('class="md-spoiler"');
-    expect(out).toContain('data-revealed="false"');
+    expect(out).not.toContain('data-revealed');
     expect(out).toContain('role="button"');
     expect(out).toContain('tabindex="0"');
     expect(out).toContain('aria-hidden="true"');
@@ -109,8 +109,10 @@ describe('Markdown render', () => {
       expect(out).toContain('<time class="md-timestamp"');
     }
     expect(html('<t:999999999999999>', noFmt)).toContain('md-timestamp');
-    expect(defaultFormatTimestamp(Math.floor(Date.now() / 1000) + 3 * 3600 + 30, 'R').text).toMatch(/3 hours/);
-    expect(defaultFormatTimestamp(Math.floor(Date.now() / 1000) - 2 * 86400 - 30, 'R').text).toMatch(/2 days ago/);
+    const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'always' });
+    const now = Math.floor(Date.now() / 1000);
+    expect(defaultFormatTimestamp(now + 3 * 3600 + 30, 'R').text).toBe(rtf.format(3, 'hour'));
+    expect(defaultFormatTimestamp(now - 2 * 86400 - 30, 'R').text).toBe(rtf.format(-2, 'day'));
   });
 
   it('emoji: unicode, custom, jumbo', () => {

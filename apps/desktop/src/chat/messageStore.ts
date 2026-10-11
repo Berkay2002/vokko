@@ -6,7 +6,7 @@ import type { CreateMessageRequest, EditMessageRequest, Message, ReactionEmoji, 
 import { gateway, request } from './shell';
 import {
   PAGE_SIZE, TYPING_TTL_MS, appendPage, applyReaction, deleteMessage, emojiKey, emptyState, indexOfId, prependPage, replaceWindow, setTyping,
-  updateIfPresent, upsertMessage, type ChannelState, type PendingMessage,
+  applyUserUpdate, updateIfPresent, upsertMessage, type ChannelState, type PendingMessage,
 } from './messageState';
 import { rememberMessage, rememberMessages } from './userCache';
 import { newNonce } from './util';
@@ -57,6 +57,7 @@ function bindGateway(): void {
     update(d.channel_id, s => setTyping(s, d.user_id, Date.now()));
     setTimeout(() => notify(d.channel_id), TYPING_TTL_MS + 50);
   });
+  gateway.on('USER_UPDATE', user => { for (const id of states.keys()) update(id, s => applyUserUpdate(s, user)); });
   // A fresh READY means events may have been missed: refetch the latest page of every loaded channel.
   gateway.on('READY', () => {
     for (const [id, s] of states) if (s.status === 'ready') void refreshLatest(id);

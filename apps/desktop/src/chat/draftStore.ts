@@ -15,6 +15,7 @@ export interface Upload {
   status: 'uploading' | 'done' | 'error';
   attachment?: Attachment;
   error?: string;
+  abort: AbortController;
 }
 
 export interface Draft {
@@ -67,20 +68,25 @@ export function addFiles(channelId: Snowflake, files: File[]): void {
   for (const file of files.slice(0, Math.max(0, room))) {
     const localId = `u${++seq}`;
     const tooBig = file.size > MAX_UPLOAD_BYTES;
+    const abort = new AbortController();
     const upload: Upload = {
-      localId, file, previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null, progress: 0,
+      localId, file, abort, previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null, progress: 0,
       status: tooBig ? 'error' : 'uploading', error: tooBig ? 'File is larger than 25 MB.' : undefined,
     };
     patch(channelId, d => ({ ...d, uploads: [...d.uploads, upload] }));
     if (tooBig) continue;
-    uploadAttachment(channelId, file, p => setUpload(channelId, localId, u => ({ ...u, progress: p })))
+    uploadAttachment(channelId, file, p => setUpload(channelId, localId, u => ({ ...u, progress: p })), abort.signal)
       .then(attachment => setUpload(channelId, localId, u => ({ ...u, status: 'done', progress: 1, attachment })))
-      .catch(e => setUpload(channelId, localId, u => ({ ...u, status: 'error', error: e instanceof Error ? e.message : 'Upload failed' })));
+      .catch(e => {
+        if (abort.signal.aborted) return;
+        setUpload(channelId, localId, u => ({ ...u, status: 'error', error: e instanceof Error ? e.message : 'Upload failed' }));
+      });
   }
 }
 
 export function removeUpload(channelId: Snowflake, localId: string): void {
   const u = getDraft(channelId).uploads.find(x => x.localId === localId);
+  u?.abort.abort();
   if (u?.previewUrl) URL.revokeObjectURL(u.previewUrl);
   patch(channelId, d => ({ ...d, uploads: d.uploads.filter(x => x.localId !== localId) }));
 }
