@@ -142,6 +142,8 @@ function MyAccount({ me }: { me: User }) {
   const [name, setName] = useState(me.global_name ?? "");
   const { busy, error, saved, save } = useSave();
   const Security = settingsSlots.accountSecurity;
+  const Identity = settingsSlots.accountIdentity;
+  const SignIn = settingsSlots.signInMethods;
   const unchanged = name.trim() === (me.global_name ?? "");
   const submit = async () => {
     if (await save({ global_name: name.trim() })) setEditing(false);
@@ -149,41 +151,47 @@ function MyAccount({ me }: { me: User }) {
   return (
     <>
       <SettingsBlock anchor="info" title="Account Info">
-        {editing ? (
-          <SettingsRow label="Display Name">
-            <input
-              className="input sm-row-input"
-              aria-label="Display Name"
-              value={name}
-              maxLength={32}
-              placeholder={me.username}
-              autoFocus
-              onChange={e => setName(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === "Enter" && !unchanged && !busy) void submit();
-              }}
-            />
-            <button type="button" className="sm-btn" onClick={() => { setEditing(false); setName(me.global_name ?? ""); }}>
-              Cancel
-            </button>
-            <button type="button" className="sm-btn primary" disabled={busy || unchanged} onClick={() => void submit()}>
-              Save
-            </button>
-          </SettingsRow>
+        {Identity ? (
+          <Identity me={me} />
         ) : (
-          <SettingsRow label="Display Name" value={displayName(me)}>
-            <button type="button" className="sm-btn" onClick={() => setEditing(true)}>
+          <>
+          {editing ? (
+            <SettingsRow label="Display Name">
+              <input
+                className="input sm-row-input"
+                aria-label="Display Name"
+                value={name}
+                maxLength={32}
+                placeholder={me.username}
+                autoFocus
+                onChange={e => setName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && !unchanged && !busy) void submit();
+                }}
+              />
+              <button type="button" className="sm-btn" onClick={() => { setEditing(false); setName(me.global_name ?? ""); }}>
+                Cancel
+              </button>
+              <button type="button" className="sm-btn primary" disabled={busy || unchanged} onClick={() => void submit()}>
+                Save
+              </button>
+            </SettingsRow>
+          ) : (
+            <SettingsRow label="Display Name" value={displayName(me)}>
+              <button type="button" className="sm-btn" onClick={() => setEditing(true)}>
+                Edit
+              </button>
+            </SettingsRow>
+          )}
+          {error && <p className="field-error">{error}</p>}
+          {saved && !editing && <p className="settings-saved">Saved.</p>}
+          <SettingsRow label="Username" value={me.username}>
+            <button type="button" className="sm-btn" disabled title="Not available yet">
               Edit
             </button>
           </SettingsRow>
+          </>
         )}
-        {error && <p className="field-error">{error}</p>}
-        {saved && !editing && <p className="settings-saved">Saved.</p>}
-        <SettingsRow label="Username" value={me.username}>
-          <button type="button" className="sm-btn" disabled title="Not available yet">
-            Edit
-          </button>
-        </SettingsRow>
       </SettingsBlock>
       <SettingsBlock anchor="security" title="Password & Security">
         {Security ? (
@@ -199,6 +207,11 @@ function MyAccount({ me }: { me: User }) {
           </>
         )}
       </SettingsBlock>
+      {SignIn && (
+        <SettingsBlock anchor="signin" title="Sign-in Methods">
+          <SignIn />
+        </SettingsBlock>
+      )}
       <SettingsBlock anchor="status" title="Account Status">
         <SettingsRow label="Disable Account" value={<span className="sm-muted">Not available yet</span>}>
           <button type="button" className="sm-btn" disabled title="Not available yet">
