@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { COMMUNITY_THEME_CARDS, FONT_SIZES, THEMES, previewThemeChoice, resetPrefs, setPref, usePrefs } from "../../ui";
+import { COMMUNITY_THEME_CARDS, FONT_SIZES, GRADIENT_THEME_CARDS, THEMES, previewThemeChoice, resetPrefs, setPref, usePrefs } from "../../ui";
 import { GROUP_GAPS, SPACING_PRESETS, setMessageSpacing } from "../../ui/prefs";
 import type { MessageDisplay, MessageSpacing, ThemeCard } from "../../ui/prefs";
 import { Category, Divider, Field, Page, RadioGroup, Select, Slider, SwitchRow, Unavailable } from "./controls";
@@ -65,6 +65,31 @@ export function AppearancePage() {
           })}
         </div>
         <SwitchRow label="Sync with computer" note="Follow your system's light or dark setting." checked={theme === "system"} onChange={on => setPref("theme", on ? "system" : "dark")} />
+      </Category>
+
+      <Category title="Colour themes">
+        <p className="theme-note">Gradient themes, free for everyone. Hover or focus one to preview it; Esc goes back to your saved theme.</p>
+        <div className="theme-swatches gradients" role="radiogroup" aria-label="Colour themes">
+          {GRADIENT_THEME_CARDS.map(t => {
+            const selected = theme === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                aria-label={t.label}
+                title={t.label}
+                data-theme-id={t.id}
+                className={`theme-swatch${selected ? " selected" : ""}`}
+                onClick={() => setPref("theme", t.id)}
+                {...previewProps(t.id)}
+              >
+                <span className="theme-swatch-fill" aria-hidden="true" style={{ background: t.gradient }} />
+              </button>
+            );
+          })}
+        </div>
       </Category>
 
       <Category title="Community themes">

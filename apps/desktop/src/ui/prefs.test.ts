@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PREFS, GROUP_GAPS, SPACING_PRESETS, migratePrefs, windowSyncPlan } from "./prefs";
+import { GRADIENT_THEMES } from "../styles/themes/gradients";
+import { DEFAULT_PREFS, GRADIENT_THEME_CARDS, GROUP_GAPS, SPACING_PRESETS, isThemeChoice, migratePrefs, themeBase, windowSyncPlan } from "./prefs";
 
 describe("message spacing prefs", () => {
   it("balanced is the default and every preset gap is one of the slider stops", () => {
@@ -59,6 +60,27 @@ describe("theme migration", () => {
     expect(migratePrefs({ theme: "no-such-theme" }).theme).toBe(DEFAULT_PREFS.theme);
     expect(migratePrefs({ theme: "dracula" }).theme).toBe("dracula");
     expect(migratePrefs({ theme: "system" }).theme).toBe("system");
+  });
+});
+
+describe("gradient colour themes", () => {
+  it("are valid saved choices and survive migration", () => {
+    for (const t of GRADIENT_THEMES) {
+      expect(isThemeChoice(t.id), t.id).toBe(true);
+      expect(migratePrefs({ theme: t.id }).theme, t.id).toBe(t.id);
+    }
+  });
+
+  it("sit on their own base set and the picker lists them all", () => {
+    expect(themeBase("hanami")).toBe("light");
+    expect(themeBase("sunset")).toBe("dark");
+    expect(GRADIENT_THEME_CARDS.map(c => c.id)).toEqual(GRADIENT_THEMES.map(t => t.id));
+    for (const card of GRADIENT_THEME_CARDS) expect(card.gradient, card.id).toMatch(/^linear-gradient\(/);
+  });
+
+  it("force their base scheme on the native window", () => {
+    expect(windowSyncPlan("hanami", "hanami").scheme).toBe("light");
+    expect(windowSyncPlan("midnight-blurple", "midnight-blurple").scheme).toBe("dark");
   });
 });
 

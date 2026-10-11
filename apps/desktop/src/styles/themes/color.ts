@@ -76,3 +76,55 @@ export function ensureContrast(color: string, backgrounds: readonly string[], mi
   }
   return towards;
 }
+
+const toLinear = (v: number): number => {
+  const c = v / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+};
+const fromLinear = (c: number): number => 255 * (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055);
+
+function toOklab(color: string): [number, number, number] {
+  const [r, g, b] = parseColor(color).rgb.map(toLinear) as [number, number, number];
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s];
+}
+
+function fromOklab([L, a, b]: readonly [number, number, number]): string {
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return toHex([
+    fromLinear(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+    fromLinear(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    fromLinear(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s),
+  ]);
+}
+
+/** CSS `color-mix(in oklab, a, b t)`: `t` = 0 returns `a`, `t` = 1 returns `b`. Opaque colours only. */
+export function mixOklab(a: string, b: string, t: number): string {
+  const x = toOklab(a);
+  const y = toOklab(b);
+  return fromOklab([x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t, x[2] + (y[2] - x[2]) * t]);
+}
+
+/** Hue in degrees (0..360) of an opaque colour; 0 for greys. */
+export function hue(color: string): number {
+  const [r, g, b] = parseColor(color).rgb.map(v => v / 255) as [number, number, number];
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  if (d === 0) return 0;
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+}
+
+/** `hsl(h, s, l)` as hex; `h` in degrees, `s` and `l` 0..1. */
+export function hslToHex(h: number, s: number, l: number): string {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const sector = Math.floor((((h % 360) + 360) % 360) / 60);
+  const [r, g, b] = ([[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]] as const)[sector]!;
+  return toHex([(r + m) * 255, (g + m) * 255, (b + m) * 255]);
+}

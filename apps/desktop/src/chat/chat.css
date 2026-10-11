@@ -68,7 +68,7 @@
 }
 .chat-view, .chat-pins, .chat-lightbox, .chat-emoji-picker, .chat-expression-picker, .chat-autocomplete, .chat-attach-menu, .chat-apps-panel, .chat-reactions-modal { font-family: var(--chat-font); }
 
-.chat-view { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; background: var(--chat-bg); color: var(--chat-text); font-size: var(--chat-font-size); }
+.chat-view { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; background: var(--background-gradient-chat, var(--chat-bg)); color: var(--chat-text); font-size: var(--chat-font-size); }
 .chat-view *, .chat-pins *, .chat-lightbox * { box-sizing: border-box; }
 .chat-view button, .chat-pins button, .chat-lightbox button { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; }
 .chat-view button:focus-visible, .chat-pins button:focus-visible { outline: 2px solid var(--chat-link); outline-offset: 1px; }
@@ -99,7 +99,7 @@
 /* flow-root keeps the row's margin-top (the group gap) inside the list item, so the list measures it (it used to collapse out of the item). */
 .chat-row { position: relative; display: flow-root; }
 .chat-day-divider { position: relative; display: flex; align-items: center; justify-content: center; margin: 24px 14px 8px 16px; height: 0; border-top: 1px solid var(--chat-divider); color: var(--chat-text-muted); font-size: 12px; font-weight: 600; line-height: 13px; }
-.chat-day-divider span { position: relative; background: var(--chat-bg); padding: 2px 4px; }
+.chat-day-divider span { position: relative; background: var(--background-gradient-chat, var(--chat-bg)); padding: 2px 4px; }
 .chat-new-divider { position: relative; margin: 8px 14px 0 8px; height: 0; border-top: 1px solid var(--chat-danger); display: flex; justify-content: flex-end; }
 .chat-day-divider.unread { border-top-color: var(--chat-danger); color: var(--chat-danger); }
 .chat-day-divider .chat-new-pill { position: absolute; right: 0; }

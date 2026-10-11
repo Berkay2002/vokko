@@ -3,6 +3,7 @@
  * from the palettes and the Discord base sets in tokens.css. Run `npm run themes` after editing palettes or derive.ts.
  */
 import { deriveTheme, type DerivedTheme } from "./derive";
+import { GRADIENT_THEMES, VEIL, VEIL_LEVELS, deriveGradientTheme, type DerivedGradient } from "./gradients";
 import { COMMUNITY_THEMES, type ThemeDef } from "./palettes";
 
 export type TokenSet = Record<string, string>;
@@ -31,14 +32,41 @@ export function deriveAll(tokensCss: string): DerivedTheme[] {
   return COMMUNITY_THEMES.map(def => deriveTheme(def, def.base === "dark" ? sets.dark : sets.light));
 }
 
+export function deriveGradients(tokensCss: string): DerivedGradient[] {
+  const sets = parseBaseSets(tokensCss);
+  return GRADIENT_THEMES.map(def => deriveGradientTheme(def, def.base === "dark" ? sets.dark : sets.light));
+}
+
 /** Specificity (0,3,0): beats `:root.theme-light`, chat.css's `:root` and `.theme-light` blocks whatever the import order. */
-export const themeSelector = (def: Pick<ThemeDef, "id" | "base">): string => `:root.theme-${def.base}.theme-${def.id}`;
+export const themeSelector = (def: { id: string; base: "dark" | "light" }): string => `:root.theme-${def.base}.theme-${def.id}`;
+
+/** The veil variables (`--background-gradient-<level>`) a gradient theme's surfaces paint with; one block per base set. */
+function veilCss(): string[] {
+  const out: string[] = [
+    "/* Discord colour themes (gradient themes, parity). The gradient is one fixed, viewport-sized image; every surface level paints a",
+    "   black (dark base) or white (light base) veil over it, so surfaces read as translucent panes of one picture. Surfaces use",
+    "   the `--background-gradient-<level>` variable with the solid token as its fallback, which keeps every other theme untouched. */",
+    "",
+  ];
+  for (const base of ["dark", "light"] as const) {
+    const { color, opacity } = VEIL[base];
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(color.slice(i, i + 2), 16));
+    out.push(`:root.custom-theme-background.theme-${base} {`);
+    for (const level of VEIL_LEVELS) {
+      const veil = `rgba(${r}, ${g}, ${b}, ${opacity[level]})`;
+      out.push(`  --background-gradient-${level}: linear-gradient(${veil}, ${veil}) fixed 0 0 / cover, var(--custom-theme-background) fixed 0 0 / cover;`);
+    }
+    out.push("}", "");
+  }
+  return out;
+}
 
 export function generateThemesCss(tokensCss: string): string {
   const derived = deriveAll(tokensCss);
   const sets = parseBaseSets(tokensCss);
   const out: string[] = [
-    "/* Community colour themes (Dracula, Gruvbox, Nord, ...). GENERATED from src/styles/themes/palettes.ts by `npm run themes`: do not edit.",
+    "/* Community colour themes (Dracula, Gruvbox, Nord, ...) and Discord's gradient themes. GENERATED from src/styles/themes/palettes.ts and",
+    "   gradients.ts by `npm run themes`: do not edit.",
     "   Each block starts from the Discord base set named in its selector (theme-dark or theme-light stays on <html>) and overrides only",
     "   the tokens its palette changes. Credits and licences: THEMES.md. */",
     "",
@@ -49,6 +77,14 @@ export function generateThemesCss(tokensCss: string): string {
     const names = [...baseNames.filter(n => n in theme.tokens), ...Object.keys(theme.tokens).filter(n => !baseNames.includes(n))];
     out.push(`/* ${def.label} (${def.base}) */`, `${themeSelector(def)} {`);
     for (const name of names) out.push(`  --${name}: ${theme.tokens[name]};`);
+    out.push("}", "");
+  }
+  out.push(...veilCss());
+  for (const theme of deriveGradients(tokensCss)) {
+    const def = GRADIENT_THEMES.find(d => d.id === theme.id)!;
+    out.push(`/* ${def.label} (${def.base}, gradient) */`, `${themeSelector(def)} {`);
+    for (const [name, value] of Object.entries(theme.props)) out.push(`  --${name}: ${value};`);
+    for (const [name, value] of Object.entries(theme.tokens)) out.push(`  --${name}: ${value};`);
     out.push("}", "");
   }
   return out.join("\n");
@@ -98,5 +134,45 @@ export function generateThemesDoc(tokensCss: string): string {
     for (const a of theme.adjustments) lines.push(`| ${def.label} | ${a.role} | \`${a.upstream}\` | \`${a.shipped}\` |`);
   }
   lines.push("");
+  lines.push(...gradientDoc(tokensCss));
   return lines.join("\n");
+}
+
+function gradientDoc(tokensCss: string): string[] {
+  const lines: string[] = [
+    "## Discord colour themes (parity)",
+    "",
+    "The gradient themes Discord sells with Nitro (Mint Apple ... Sepia, plus Blurple Twilight), free in Vokko. The base set, angle and colour",
+    "stops are Discord's. They are generated into `themes.generated.css` after the community themes, from `src/styles/themes/gradients.ts`.",
+    "",
+    "How a gradient theme paints:",
+    "",
+    "- `<html>` gets `custom-theme-background`, `theme-<base>` and `theme-<id>`. The theme block defines `--custom-theme-background` (the gradient),",
+    "  `--custom-theme-primary-color` / `-secondary-color` (first and last stop), `--custom-theme-base-color` and `--custom-theme-text-color`.",
+    "- The base colour is the hue of the darker (dark base) or lighter (light base) end stop at hsl(h, 100%, 5% or 90%); the text colour is the same",
+    "  hue at 95% (80% for blue hues, 200 to 300 degrees) lightness on dark bases, 15% (25% for blue hues) on light ones.",
+    "- Background tokens are mixed in oklab with the base colour (amount 50%), text and icon tokens with the text colour (38%). The mixes are",
+    "  computed at generation time, so the contrast tests run on the result.",
+    "- Layout panes (window frame, channel list, chat, member list, user panel) paint `--background-gradient-<level>`: a veil of black (dark base)",
+    "  or white (light base) over the gradient, which is `fixed` to the viewport so every pane shows the same picture. Opacity per level:",
+    "",
+    `| Base | ${VEIL_LEVELS.join(" | ")} |`,
+    `| --- | ${VEIL_LEVELS.map(() => "---").join(" | ")} |`,
+    ...(["dark", "light"] as const).map(b => `| ${b} | ${VEIL_LEVELS.map(l => VEIL[b].opacity[l]).join(" | ")} |`),
+    "",
+    "- Popouts, modals and menus stay solid, in the tinted tokens. The accent stays Discord's blurple, as in Discord.",
+    "- Text is moved towards white (dark) or black (light) only as far as needed for 4.5:1 (3:1 for icons) over every veil level and every colour",
+    "  the gradient passes through; moves are listed under \"Shade adjustments (gradient themes)\".",
+    "",
+    "| Theme | Base | Angle | Stops |",
+    "| --- | --- | --- | --- |",
+  ];
+  for (const def of GRADIENT_THEMES) lines.push(`| ${def.label} | ${def.base} | ${def.angle}deg | ${def.stops.map(s => `\`${s.color}\` ${s.at}%`).join(", ")} |`);
+  lines.push("", "### Shade adjustments (gradient themes)", "", "| Theme | Token | Mixed | Shipped |", "| --- | --- | --- | --- |");
+  for (const theme of deriveGradients(tokensCss)) {
+    const def = GRADIENT_THEMES.find(d => d.id === theme.id)!;
+    for (const a of theme.adjustments) lines.push(`| ${def.label} | ${a.role} | \`${a.upstream}\` | \`${a.shipped}\` |`);
+  }
+  lines.push("");
+  return lines;
 }

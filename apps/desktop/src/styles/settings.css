@@ -301,6 +301,12 @@
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
+/* gradient colour themes: rounded squares showing the gradient itself */
+.theme-swatches.gradients .theme-swatch,
+.theme-swatches.gradients .theme-swatch-fill {
+  border-radius: 12px;
+}
+
 .theme-swatch-fill > i {
   display: block;
   flex: 1;

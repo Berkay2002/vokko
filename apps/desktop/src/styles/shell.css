@@ -8,7 +8,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--app-frame-background);
+  background: var(--background-gradient-app-frame, var(--app-frame-background));
   color: var(--text-default);
 }
 
@@ -26,7 +26,7 @@
   border-top-left-radius: var(--radius-md);
   border-top: 1px solid var(--border-subtle);
   border-left: 1px solid var(--border-subtle);
-  background: var(--background-base-low);
+  background: var(--background-gradient-low, var(--background-base-low));
   overflow: hidden;
 }
 
@@ -50,7 +50,7 @@
   flex: 1;
   flex-direction: column;
   min-width: 0;
-  background: var(--chat-background);
+  background: var(--background-gradient-chat, var(--chat-background));
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -83,7 +83,7 @@
   justify-content: flex-end;
   height: var(--title-bar-height);
   padding: 0 12px 0 0;
-  background: var(--app-frame-background);
+  background: var(--background-gradient-app-frame, var(--app-frame-background));
   -webkit-app-region: drag;
 }
 
@@ -590,7 +590,7 @@
   padding: 0 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  background: var(--background-base-lowest);
+  background: var(--background-gradient-lowest, var(--background-base-lowest));
 }
 
 .user-panel-account {
@@ -1070,7 +1070,7 @@
   height: var(--header-height);
   padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--chat-background);
+  background: var(--background-gradient-chat, var(--chat-background));
 }
 
 .channel-header-title {
@@ -1223,7 +1223,7 @@
 .member-list {
   flex: none;
   width: var(--member-list-width);
-  background: var(--background-base-low);
+  background: var(--background-gradient-low, var(--background-base-low));
   border-left: 1px solid var(--border-subtle);
 }
 
@@ -1430,7 +1430,7 @@
   display: flex;
   flex: 1;
   min-height: 0;
-  background: var(--chat-background);
+  background: var(--background-gradient-chat, var(--chat-background));
 }
 
 .friends-main {
@@ -2295,7 +2295,7 @@
   inset: 0;
   z-index: var(--z-modal);
   display: flex;
-  background: var(--background-base-lower);
+  background: var(--background-gradient-lower, var(--background-base-lower));
   animation: backdrop-in 0.15s ease-out;
 }
 
@@ -2303,7 +2303,7 @@
   display: flex;
   flex: 1 0 218px;
   justify-content: flex-end;
-  background: var(--background-base-low);
+  background: var(--background-gradient-low, var(--background-base-low));
 }
 
 .settings-sidebar-inner {
@@ -2424,7 +2424,7 @@
 .account-card {
   overflow: hidden;
   border-radius: var(--radius-md);
-  background: var(--background-base-low);
+  background: var(--background-gradient-low, var(--background-base-low));
 }
 
 .account-banner {
@@ -2442,7 +2442,7 @@
 .account-head .avatar {
   padding: 6px;
   border-radius: 50%;
-  background: var(--background-base-low);
+  background: var(--background-gradient-low, var(--background-base-low));
   box-sizing: content-box;
   --status-ring: var(--background-base-low);
 }
@@ -2469,7 +2469,7 @@
   margin: 16px;
   padding: 16px;
   border-radius: var(--radius-sm);
-  background: var(--background-base-lower);
+  background: var(--background-gradient-lower, var(--background-base-lower));
 }
 
 .account-inline {

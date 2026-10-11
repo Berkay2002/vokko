@@ -69,7 +69,7 @@ test('a light community theme sits on the light base set', async ({ page }) => {
 
 test('every community swatch applies its own theme class and Nord paints the Nord chat background', async ({ page }) => {
   const dialog = await openAppearance(page);
-  const swatches = dialog.locator('.theme-swatch');
+  const swatches = dialog.getByRole('radiogroup', { name: 'Community themes' }).locator('.theme-swatch');
   await expect(swatches).toHaveCount(13);
   await dialog.getByRole('radio', { name: 'Nord' }).click();
   await dialog.getByRole('button', { name: 'Close' }).click();

@@ -292,3 +292,141 @@ Only listed where a palette colour did not reach AA on the theme's own surfaces,
 | Rosé Pine Dawn | status-danger (white text) | `#b4637a` | `#a95d73` |
 | Rosé Pine Dawn | control-connected-background (white text) | `#56949f` | `#487c86` |
 | Rosé Pine Dawn | status-warning (white text) | `#ea9d34` | `#9f6b23` |
+
+## Discord colour themes (parity)
+
+The gradient themes Discord sells with Nitro (Mint Apple ... Sepia, plus Blurple Twilight), free in Vokko. The base set, angle and colour
+stops are Discord's. They are generated into `themes.generated.css` after the community themes, from `src/styles/themes/gradients.ts`.
+
+How a gradient theme paints:
+
+- `<html>` gets `custom-theme-background`, `theme-<base>` and `theme-<id>`. The theme block defines `--custom-theme-background` (the gradient),
+  `--custom-theme-primary-color` / `-secondary-color` (first and last stop), `--custom-theme-base-color` and `--custom-theme-text-color`.
+- The base colour is the hue of the darker (dark base) or lighter (light base) end stop at hsl(h, 100%, 5% or 90%); the text colour is the same
+  hue at 95% (80% for blue hues, 200 to 300 degrees) lightness on dark bases, 15% (25% for blue hues) on light ones.
+- Background tokens are mixed in oklab with the base colour (amount 50%), text and icon tokens with the text colour (38%). The mixes are
+  computed at generation time, so the contrast tests run on the result.
+- Layout panes (window frame, channel list, chat, member list, user panel) paint `--background-gradient-<level>`: a veil of black (dark base)
+  or white (light base) over the gradient, which is `fixed` to the viewport so every pane shows the same picture. Opacity per level:
+
+| Base | lowest | lower | low | high | higher | chat | app-frame | highest |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| dark | 0.9 | 0.85 | 0.8 | 0.75 | 0.7 | 0.8 | 0.7 | 0.65 |
+| light | 0.85 | 0.8 | 0.75 | 0.7 | 0.65 | 0.85 | 0.65 | 0.95 |
+
+- Popouts, modals and menus stay solid, in the tinted tokens. The accent stays Discord's blurple, as in Discord.
+- Text is moved towards white (dark) or black (light) only as far as needed for 4.5:1 (3:1 for icons) over every veil level and every colour
+  the gradient passes through; moves are listed under "Shade adjustments (gradient themes)".
+
+| Theme | Base | Angle | Stops |
+| --- | --- | --- | --- |
+| Mint Apple | light | 180deg | `#56b69f` 6.15%, `#63bc61` 48.7%, `#9eca67` 93.07% |
+| Citrus Sherbert | light | 180deg | `#f3b336` 31.1%, `#ee8558` 67.09% |
+| Retro Raincloud | light | 148.71deg | `#3a7ca1` 5.64%, `#7f7eb9` 26.38%, `#7f7eb9` 49.92%, `#3a7ca1` 73.12% |
+| Hanami | light | 38.08deg | `#efaab3` 3.56%, `#efd696` 35.49%, `#a6daa2` 68.78% |
+| Sunrise | light | 154.19deg | `#9f4175` 8.62%, `#c49064` 48.07%, `#a6953d` 76.04% |
+| Cotton Candy | light | 180.14deg | `#f4abb8` 8.5%, `#b1c2fc` 94.28% |
+| Lofi Vibes | light | 179.52deg | `#a4c0f7` 7.08%, `#a9e4e8` 34.94%, `#b0e2b8` 65.12%, `#cfdfa2` 96.23% |
+| Desert Khaki | light | 38.99deg | `#e7dbd0` 12.92%, `#dfd0b2` 32.92%, `#e0d6a3` 52.11% |
+| Sunset | dark | 141.68deg | `#48288c` 27.57%, `#db7f4b` 71.25% |
+| Chroma Glow | dark | 128.92deg | `#0eb5bf` 3.94%, `#4c0ce0` 26.1%, `#a308a7` 39.82%, `#9a53ff` 56.89%, `#218be0` 76.45% |
+| Forest | dark | 162.27deg | `#142215` 11.2%, `#2d4d39` 29.93%, `#454c32` 48.64%, `#5a7c58` 67.85%, `#a98e4b` 83.54% |
+| Crimson | dark | 64.92deg | `#950909` 16.17%, `#000000` 72% |
+| Midnight Blurple | dark | 48.17deg | `#5348ca` 11.21%, `#140730` 61.92% |
+| Mars | dark | 170.82deg | `#895240` 14.61%, `#8f4343` 74.62% |
+| Dusk | dark | 180deg | `#665069` 12.84%, `#91a3d1` 85.99% |
+| Under The Sea | dark | 179.14deg | `#647962` 1.91%, `#588575` 48.99%, `#6a8482` 96.35% |
+| Retro Storm | dark | 148.71deg | `#3a7ca1` 5.64%, `#58579a` 26.38%, `#58579a` 49.92%, `#3a7ca1` 73.12% |
+| Neon Nights | dark | 180deg | `#01a89e` 0%, `#7d60ba` 50%, `#b43898` 100% |
+| Strawberry Lemonade | dark | 161.03deg | `#af1a6c` 18.79%, `#c26b20` 49.76%, `#e7a525` 80.72% |
+| Aurora | dark | 239.16deg | `#062053` 10.39%, `#191fbb` 26.87%, `#13929a` 48.31%, `#218573` 64.98%, `#051a81` 92.5% |
+| Sepia | dark | 69.98deg | `#857664` 14.14%, `#5b4421` 60.35% |
+| Blurple Twilight | dark | 47.61deg | `#2c3fe7` 11.18%, `#261d83` 64.54% |
+
+### Shade adjustments (gradient themes)
+
+| Theme | Token | Mixed | Shipped |
+| --- | --- | --- | --- |
+| Mint Apple | chat-text-muted | `#5d685d` | `#596459` |
+| Mint Apple | channel-text-area-placeholder | `#68756b` | `#59655c` |
+| Mint Apple | text-link | `#006dd4` | `#0060bb` |
+| Mint Apple | text-brand | `#525fe0` | `#4854c5` |
+| Mint Apple | text-feedback-warning | `#945300` | `#915100` |
+| Citrus Sherbert | chat-text-muted | `#67605b` | `#655e59` |
+| Citrus Sherbert | channel-text-area-placeholder | `#726d69` | `#64605c` |
+| Citrus Sherbert | text-link | `#006dd4` | `#005eb6` |
+| Citrus Sherbert | text-brand | `#525fe0` | `#4854c5` |
+| Citrus Sherbert | text-feedback-critical | `#b92733` | `#b52632` |
+| Citrus Sherbert | text-feedback-info | `#0361bc` | `#035fb8` |
+| Citrus Sherbert | text-feedback-positive | `#01713a` | `#016f39` |
+| Citrus Sherbert | text-feedback-warning | `#945300` | `#915100` |
+| Retro Raincloud | text-muted | `#56667a` | `#4a5869` |
+| Retro Raincloud | chat-text-muted | `#59697c` | `#4b5868` |
+| Retro Raincloud | channel-text-area-placeholder | `#64778b` | `#4a5867` |
+| Retro Raincloud | input-placeholder-text-default | `#546477` | `#4a5869` |
+| Retro Raincloud | text-link | `#006dd4` | `#0057aa` |
+| Retro Raincloud | text-brand | `#525fe0` | `#424cb3` |
+| Retro Raincloud | text-feedback-critical | `#b92733` | `#a7232e` |
+| Retro Raincloud | text-feedback-info | `#0361bc` | `#0357a9` |
+| Retro Raincloud | text-feedback-positive | `#01713a` | `#016333` |
+| Retro Raincloud | text-feedback-warning | `#945300` | `#824900` |
+| Hanami | channel-text-area-placeholder | `#62766b` | `#586a60` |
+| Hanami | text-link | `#006dd4` | `#0066c7` |
+| Hanami | text-brand | `#525fe0` | `#4d59d3` |
+| Sunrise | text-subtle | `#56534d` | `#54514b` |
+| Sunrise | text-muted | `#63615a` | `#53514c` |
+| Sunrise | chat-text-muted | `#66645d` | `#54524c` |
+| Sunrise | channel-text-area-placeholder | `#71716b` | `#51514d` |
+| Sunrise | input-placeholder-text-default | `#615f58` | `#53524c` |
+| Sunrise | interactive-text-default | `#56534d` | `#54514b` |
+| Sunrise | reaction-text-default | `#56534d` | `#54514b` |
+| Sunrise | text-link | `#006dd4` | `#00519d` |
+| Sunrise | text-brand | `#525fe0` | `#3e48aa` |
+| Sunrise | text-feedback-critical | `#b92733` | `#9b212b` |
+| Sunrise | text-feedback-info | `#0361bc` | `#03519e` |
+| Sunrise | text-feedback-positive | `#01713a` | `#015f31` |
+| Sunrise | text-feedback-warning | `#945300` | `#794400` |
+| Cotton Candy | channel-text-area-placeholder | `#5b6b8d` | `#576787` |
+| Cotton Candy | text-link | `#006dd4` | `#0066c7` |
+| Cotton Candy | text-brand | `#525fe0` | `#4d59d3` |
+| Lofi Vibes | channel-text-area-placeholder | `#6b756b` | `#606960` |
+| Lofi Vibes | text-link | `#006dd4` | `#0066c7` |
+| Lofi Vibes | text-brand | `#525fe0` | `#4f5bd7` |
+| Desert Khaki | channel-text-area-placeholder | `#736968` | `#716766` |
+| Desert Khaki | text-link | `#006dd4` | `#0069cc` |
+| Desert Khaki | text-brand | `#525fe0` | `#4f5bd7` |
+| Sunset | chat-text-muted | `#9089aa` | `#a09ab6` |
+| Sunset | channel-text-area-placeholder | `#817b9f` | `#9f9bb6` |
+| Sunset | input-placeholder-text-default | `#9a93b4` | `#a099b9` |
+| Sunset | text-link | `#4d96ee` | `#5fa1f0` |
+| Sunset | text-brand | `#798df9` | `#8496f9` |
+| Chroma Glow | chat-text-muted | `#8998a9` | `#97a4b3` |
+| Chroma Glow | channel-text-area-placeholder | `#79899e` | `#96a3b3` |
+| Chroma Glow | input-placeholder-text-default | `#93a2b3` | `#95a4b5` |
+| Chroma Glow | text-link | `#4d96ee` | `#66a5f0` |
+| Chroma Glow | text-brand | `#798df9` | `#899bfa` |
+| Forest | channel-text-area-placeholder | `#8c9599` | `#959da1` |
+| Forest | text-link | `#4d96ee` | `#5b9eef` |
+| Forest | text-brand | `#798df9` | `#8194f9` |
+| Midnight Blurple | channel-text-area-placeholder | `#807b9f` | `#8f8bab` |
+| Dusk | text-muted | `#b099b9` | `#b29bba` |
+| Dusk | chat-text-muted | `#a08aa9` | `#af9db7` |
+| Dusk | textbox-markdown-syntax | `#b099bc` | `#b29bbd` |
+| Dusk | channel-text-area-placeholder | `#917c9f` | `#ae9eb8` |
+| Dusk | input-placeholder-text-default | `#ab94b3` | `#b29db9` |
+| Dusk | text-link | `#4d96ee` | `#66a5f0` |
+| Dusk | text-brand | `#798df9` | `#8c9dfa` |
+| Retro Storm | channel-text-area-placeholder | `#798b9e` | `#8494a6` |
+| Neon Nights | channel-text-area-placeholder | `#928e9d` | `#9f9ca9` |
+| Neon Nights | text-link | `#4d96ee` | `#5b9eef` |
+| Neon Nights | text-brand | `#798df9` | `#8496f9` |
+| Strawberry Lemonade | chat-text-muted | `#a29ca6` | `#ada8b1` |
+| Strawberry Lemonade | channel-text-area-placeholder | `#928e9c` | `#aaa7b2` |
+| Strawberry Lemonade | text-link | `#4d96ee` | `#74adf2` |
+| Strawberry Lemonade | text-brand | `#798df9` | `#94a4fa` |
+| Strawberry Lemonade | text-feedback-critical | `#f87e7a` | `#f98885` |
+| Strawberry Lemonade | text-feedback-info | `#66a5f3` | `#72acf4` |
+| Strawberry Lemonade | text-feedback-positive | `#5eb479` | `#68b981` |
+| Aurora | chat-text-muted | `#8892a9` | `#8d96ac` |
+| Aurora | channel-text-area-placeholder | `#78839f` | `#8b94ac` |
+| Blurple Twilight | channel-text-area-placeholder | `#7a7b9f` | `#8a8bab` |

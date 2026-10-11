@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { GRADIENT_THEMES, gradientCss, type GradientThemeId } from "../styles/themes/gradients";
 import { COMMUNITY_THEMES, type CommunityThemeId } from "../styles/themes/palettes";
 import { syncWindowTheme } from "../desktop/window";
 
@@ -6,7 +7,7 @@ import { syncWindowTheme } from "../desktop/window";
 
 /** Discord's four themes plus the community ones (src/styles/themes); `system` follows the OS light/dark setting. */
 export type DiscordThemeName = "dark" | "ash" | "onyx" | "light";
-export type ThemeName = DiscordThemeName | CommunityThemeId;
+export type ThemeName = DiscordThemeName | GradientThemeId | CommunityThemeId;
 export type ThemeChoice = ThemeName | "system";
 export type MessageDisplay = "cozy" | "compact";
 export type Density = "compact" | "default" | "cozy";
@@ -125,6 +126,8 @@ export interface ThemeCard {
   /** Sidebar colour and chat colour: the two halves of the picker swatch. */
   swatch: string;
   chat: string;
+  /** Gradient themes: the CSS gradient the picker swatch shows (Discord's `linear-gradient`). */
+  gradient?: string;
 }
 
 /** Discord's themes, in the order of its picker. */
@@ -135,12 +138,23 @@ export const THEMES: ThemeCard[] = [
   { id: "onyx", label: "Onyx", swatch: "#000000", chat: "#000000" },
 ];
 
+/** Discord's gradient colour themes (Mint Apple, Hanami, ...), in the order of its picker. */
+export const GRADIENT_THEME_CARDS: ThemeCard[] = GRADIENT_THEMES.map(t => ({
+  id: t.id,
+  label: t.label,
+  swatch: t.stops[0]!.color,
+  chat: t.stops[t.stops.length - 1]!.color,
+  gradient: gradientCss(t),
+}));
+
 /** Community themes (Dracula, Gruvbox, ...), dark ones first. */
 export const COMMUNITY_THEME_CARDS: ThemeCard[] = COMMUNITY_THEMES.map(t => ({ id: t.id, label: t.label, swatch: t.palette.bg1, chat: t.palette.bg2 }));
 
 // Declared before `load()` runs (module evaluation order): load validates the stored theme against these.
-const ALL_THEME_IDS: readonly ThemeName[] = [...THEMES.map(t => t.id), ...COMMUNITY_THEMES.map(t => t.id)];
-const COMMUNITY_BASE = new Map<ThemeName, "dark" | "light">(COMMUNITY_THEMES.map(t => [t.id, t.base]));
+const ALL_THEME_IDS: readonly ThemeName[] = [...THEMES.map(t => t.id), ...GRADIENT_THEMES.map(t => t.id), ...COMMUNITY_THEMES.map(t => t.id)];
+/** Themes layered on a Discord base set (their own id class plus `theme-dark` or `theme-light` go on <html>). */
+const NAMED_BASE = new Map<ThemeName, "dark" | "light">([...GRADIENT_THEMES, ...COMMUNITY_THEMES].map(t => [t.id, t.base]));
+const GRADIENT_IDS: ReadonlySet<ThemeName> = new Set(GRADIENT_THEMES.map(t => t.id));
 
 export function isThemeChoice(value: unknown): value is ThemeChoice {
   return value === "system" || (typeof value === "string" && (ALL_THEME_IDS as readonly string[]).includes(value));
@@ -148,7 +162,7 @@ export function isThemeChoice(value: unknown): value is ThemeChoice {
 
 /** Whether a theme is built on Discord's dark or light value set (community themes name theirs). */
 export function themeBase(theme: ThemeName): "dark" | "light" {
-  return COMMUNITY_BASE.get(theme) ?? (theme === "light" ? "light" : "dark");
+  return NAMED_BASE.get(theme) ?? (theme === "light" ? "light" : "dark");
 }
 
 /** Every `theme-*` class a theme can put on <html>: its own id, plus `theme-dark` or `theme-light` for community themes. */
@@ -281,9 +295,11 @@ function apply(prefs: Prefs): void {
   const root = document.documentElement;
   const saved = resolveTheme(prefs.theme);
   const theme = previewTheme ?? saved;
-  // A community theme sits on top of Discord's dark or light set, so <html> carries both classes (theme-dark theme-dracula).
-  const wanted = new Set([`theme-${theme}`, ...(COMMUNITY_BASE.has(theme) ? [`theme-${themeBase(theme)}`] : [])]);
+  // A community or gradient theme sits on top of Discord's dark or light set, so <html> carries both classes (theme-dark theme-dracula).
+  const wanted = new Set([`theme-${theme}`, ...(NAMED_BASE.has(theme) ? [`theme-${themeBase(theme)}`] : [])]);
   for (const cls of THEME_CLASSES) root.classList.toggle(cls, wanted.has(cls));
+  // Gradient themes paint the gradient on the app background and veil it per surface (see themes.generated.css).
+  root.classList.toggle("custom-theme-background", GRADIENT_IDS.has(theme));
   if (previewTheme === null) syncWindow(prefs.theme, saved);
   for (const name of ["compact", "default", "cozy"]) root.classList.toggle(`density-${name}`, name === prefs.density);
   root.classList.toggle("reduce-motion", reducedMotionActive(prefs));
