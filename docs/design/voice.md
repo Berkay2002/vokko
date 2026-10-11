@@ -596,3 +596,11 @@ VOICE_CHANNEL_EFFECT_SEND only to the channel's connected users.
    webview support varies): needed for V3, later, or never?
 7. Activities / "watch together": out of scope, or a later milestone of our own design?
 8. Ring timeout 60 s and gateway-loss grace 60 s: acceptable?
+
+### 8.1 Decisions (user, 2026-10-11)
+
+The user accepted the recommendations: LiveKit runs natively on macOS (not Docker); 64 kbps default per new channel, 128 kbps guild
+max, 384 kbps ceiling only by instance config; 10 cameras per channel, no viewer cap per stream; Linux desktop voice is low
+priority (browser on Linux is fine at first); E2EE for DM calls later (not V3); Activities out of scope; ring timeout 60 s and
+gateway-loss grace 60 s. Question 1 (public IPv4, port forwarding, upload bandwidth) stays open: it only affects calls from
+outside the LAN and instance-wide stream limits, and is settled before deploying voice beyond the home network.
