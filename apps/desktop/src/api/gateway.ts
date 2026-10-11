@@ -1,5 +1,5 @@
 import { GATEWAY_URL, MOCK } from "./config";
-import { MockSocket } from "./mock";
+import { mockBackend } from "./mockBackend";
 import { GatewayOp, type GatewayEvents, type GatewayPayload, type VoiceStateUpdateCommand } from "./types";
 
 export type GatewayStatus = "disconnected" | "connecting" | "ready" | "reconnecting";
@@ -163,7 +163,7 @@ class GatewayClient {
     if (!this.wanted) return;
     this.setRetry(this.attempts, null);
     this.setStatus(this.sessionId || this.attempts > 0 ? "reconnecting" : "connecting");
-    const socket: Socket = MOCK ? new MockSocket() : (new WebSocket(GATEWAY_URL) as unknown as Socket);
+    const socket: Socket = MOCK ? new (mockBackend().MockSocket)() : (new WebSocket(GATEWAY_URL) as unknown as Socket);
     this.socket = socket;
     this.helloTimer = setTimeout(() => {
       this.helloTimer = null;

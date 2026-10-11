@@ -169,7 +169,11 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const quick = useMemo(() => quickReactions().slice(0, 3), []);
   const [shift, setShift] = useState(false);
 
-  const showToolbar = !pending && !editing;
+  // The hover toolbar (display: none until :hover / :focus-within) is mounted on the first hover or focus, not with every row: rows
+  // mount constantly while scrolling a windowed list and the toolbar is most of a row's elements.
+  const [armed, setArmed] = useState(false);
+  const arm = () => { if (!armed) setArmed(true); };
+  const showToolbar = !pending && !editing && (armed || pickerOpen);
   const cls = ['chat-msg'];
   if (grouped) cls.push('grouped');
   if (compact && !system) cls.push('compact');
@@ -194,7 +198,8 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   }
 
   return <div ref={rowRef} className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id}
-    onMouseMove={e => { if (e.shiftKey !== shift) setShift(e.shiftKey); }} onMouseLeave={() => shift && setShift(false)}
+    onMouseEnter={arm} onFocus={arm}
+    onMouseMove={e => { arm(); if (e.shiftKey !== shift) setShift(e.shiftKey); }} onMouseLeave={() => shift && setShift(false)}
     onContextMenu={e => { if (pending || e.target instanceof HTMLAnchorElement) return; e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
     {!grouped && <ReplyPreview message={message} />}
     <div className="chat-msg-gutter">

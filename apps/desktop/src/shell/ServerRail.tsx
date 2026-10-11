@@ -39,10 +39,13 @@ function GuildRailItem({ guild }: { guild: Guild }) {
   const location = useLocation();
   const selected = location.pathname.startsWith(`/channels/${guild.id}`);
   const info = useStore(s => guildUnread(s, guild.id));
-  const lastChannel = useStore(s => s.lastChannelByGuild[guild.id]);
-  const channels = useStore(s => Object.values(s.channels).filter(c => c.guild_id === guild.id));
+  // Select the link target, not the channel list: the list changes on every message in the guild.
+  const target = useStore(s => {
+    const last = s.lastChannelByGuild[guild.id];
+    const channels = Object.values(s.channels).filter(c => c.guild_id === guild.id);
+    return (last && channels.find(c => c.id === last)?.id) ?? firstTextChannel(channels)?.id;
+  });
   const menu = useContextMenu();
-  const target = (lastChannel && channels.find(c => c.id === lastChannel)?.id) ?? firstTextChannel(channels)?.id;
   const muted = useIsMuted(guild.id);
   const state = selected ? "selected" : info.unread && !muted ? "unread" : "idle";
   // Our own voice state, so the badge also shows while the call runs on another device.

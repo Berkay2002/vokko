@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent, type Ref } from 'react';
 import { useChat } from '../ChatContext';
-import { defaultFormatTimestamp, type MarkdownContext } from '../markdown';
+import { defaultFormatTimestamp, useHighlighterLoaded, type MarkdownContext } from '../markdown';
 import { highlightRanges } from './codeHighlight';
 import { domToOffset, offsetToDom, readSource, walkOffset, type DomNode } from './domMap';
 import { applyInput, type EditResult, type Selection } from './edit';
@@ -253,6 +253,12 @@ export function LiveEditor({ fieldRef, value, onChange, placeholder, mentions, r
     const sel = focused ? readSelection(root) : null;
     if (render() && sel) setSelection(root, sel.start, sel.end);
   }, [render]);
+
+  // Code fences typed before the lazy highlighter arrived get their colours when it does.
+  const highlighterLoaded = useHighlighterLoaded();
+  useEffect(() => {
+    if (highlighterLoaded && state.current.rendered) renderKeepingSelection();
+  }, [highlighterLoaded, renderKeepingSelection]);
 
   /** Make `next` the editor's content and selection, then tell the composer. */
   const commit = useCallback(

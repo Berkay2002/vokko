@@ -1,6 +1,6 @@
 import { API_ORIGIN, MOCK, REST_BASE, getToken } from "./config";
 import { ApiRequestError, RateLimitedError } from "./errors";
-import { mockRequest, mockUpload } from "./mock";
+import { loadedMockBackend, loadMockBackend } from "./mockBackend";
 import type {
   ApiError,
   Attachment,
@@ -82,7 +82,9 @@ async function send<T>(method: Method, path: string, body?: unknown): Promise<T>
   const token = getToken();
   if (MOCK) {
     try {
-      return (await mockRequest(method, path, body, token)) as T;
+      // Loaded before bootstrap, so this is as direct as before the backend became a lazy chunk (no extra await).
+      const mock = loadedMockBackend() ?? (await loadMockBackend());
+      return (await mock.mockRequest(method, path, body, token)) as T;
     } catch (error) {
       if (error instanceof ApiRequestError) failIfUnauthorized(error.status, path);
       throw error;
@@ -113,7 +115,7 @@ export function resolveUrl(url: string): string {
 }
 
 export function uploadAttachment(channelId: string, file: File, onProgress?: (fraction: number) => void, signal?: AbortSignal): Promise<Attachment> {
-  if (MOCK) return mockUpload(channelId, file, onProgress, signal, getToken());
+  if (MOCK) return loadMockBackend().then(m => m.mockUpload(channelId, file, onProgress, signal, getToken()));
   return new Promise<Attachment>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${REST_BASE}/channels/${channelId}/attachments`);

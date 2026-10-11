@@ -85,6 +85,7 @@ test('has: and date filters narrow the results', async ({ page }) => {
   await page.getByRole('option', { name: 'image' }).click();
   await box(page).press('Enter');
   await expect(panel(page)).toBeVisible();
+  await expect(hits(page).nth(1)).toBeVisible();
   const withImages = await hits(page).count();
   expect(withImages).toBeGreaterThanOrEqual(2);
 

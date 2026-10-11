@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { ChatView } from "../chat/ChatView";
 import { MediaHost } from "../media/MediaHost";
 import { appStore, useStore } from "../api/store";
-import { ChannelType } from "../api/types";
+import { ChannelType, type Guild, type Snowflake } from "../api/types";
 import { CommunityHost } from "../community";
 import { ForumChannel } from "../forum/ForumChannel";
 import { ThreadHost } from "../threads/ThreadHost";
 import { ThreadPanelHost, useThreadPanelOpen } from "../threads/ThreadPanel";
+import { Measure } from "../perf/Measure";
 import { ChannelHeader } from "./ChannelHeader";
 import { DmProfilePanel } from "./DmProfilePanel";
 import { DmSidebar } from "./DmSidebar";
@@ -88,6 +89,33 @@ function useSidebarWidth() {
   return { width, handlers: { onPointerDown, onPointerMove, onPointerUp } };
 }
 
+// The shell re-renders when the open channel changes (every new message bumps its last_message_id). These panes only re-render
+// when their own props or subscriptions change.
+const Rail = memo(function Rail() {
+  return (
+    <Measure id="rail">
+      <ServerRail />
+    </Measure>
+  );
+});
+const Sidebar = memo(function Sidebar({ guild }: { guild: Guild | undefined }) {
+  return <Measure id="channels">{guild ? <GuildSidebar guild={guild} /> : <DmSidebar />}</Measure>;
+});
+const Messages = memo(function Messages({ channelId }: { channelId: Snowflake }) {
+  return (
+    <Measure id="messages">
+      <ChatView channelId={channelId} />
+    </Measure>
+  );
+});
+const Members = memo(function Members({ guildId }: { guildId: Snowflake }) {
+  return (
+    <Measure id="members">
+      <MemberList guildId={guildId} />
+    </Measure>
+  );
+});
+
 export function AppShell() {
   const params = useParams();
   const isHome = (params.guildId ?? "@me") === "@me";
@@ -95,9 +123,15 @@ export function AppShell() {
   const channelId = params.channelId ?? null;
 
   const guild = useStore(s => (guildId ? s.guilds[guildId] : undefined));
-  const guildChannels = useStore(s => (guildId ? Object.values(s.channels).filter(c => c.guild_id === guildId) : []));
   const channel = useStore(s => (channelId ? s.channels[channelId] : undefined));
-  const lastChannel = useStore(s => (guildId ? s.lastChannelByGuild[guildId] : undefined));
+  // Only /channels/<guild> (no channel) needs the guild's channels, to pick where to go. Selecting the id, not the channel list, keeps
+  // the whole shell from re-rendering whenever any channel in the guild changes (every new message bumps last_message_id).
+  const redirectTarget = useStore(s => {
+    if (!guildId || channelId) return undefined;
+    const channels = Object.values(s.channels).filter(c => c.guild_id === guildId);
+    const last = s.lastChannelByGuild[guildId];
+    return (last && channels.find(c => c.id === last)?.id) ?? firstTextChannel(channels)?.id;
+  });
   const { width, handlers } = useSidebarWidth();
   const [membersOpen, setMembersOpen] = useState(() => localStorage.getItem(MEMBERS_KEY) !== "0");
   const [profileOpen, setProfileOpen] = useState(() => localStorage.getItem(PROFILE_KEY) !== "0");
@@ -201,10 +235,7 @@ export function AppShell() {
   });
 
   if (!isHome && !guild) return <Navigate to="/channels/@me" replace />;
-  if (guildId && !channelId) {
-    const target = (lastChannel && guildChannels.find(c => c.id === lastChannel)?.id) ?? firstTextChannel(guildChannels)?.id;
-    if (target) return <Navigate to={`/channels/${guildId}/${target}`} replace />;
-  }
+  if (guildId && !channelId && redirectTarget) return <Navigate to={`/channels/${guildId}/${redirectTarget}`} replace />;
   if (channelId && !channel) return <Navigate to={guildId ? `/channels/${guildId}` : "/channels/@me"} replace />;
 
   const text = channel && channel.type !== ChannelType.GuildVoice;
@@ -215,8 +246,10 @@ export function AppShell() {
       <NativeMenuBridge />
       <TitleBar />
       <div className="app-body">
-        <ServerRail />
-        <div className="sidebar">{guild ? <GuildSidebar guild={guild} /> : <DmSidebar />}</div>
+        <Rail />
+        <div className="sidebar">
+          <Sidebar guild={guild} />
+        </div>
         <div className="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize Sidebar" {...handlers} />
         <div className="nav-backdrop" onClick={() => useNavDrawer.getState().close()} />
         <main className="app-main" aria-label={channel ? (channel.name ?? "Conversation") : "Friends"}>
@@ -237,7 +270,7 @@ export function AppShell() {
                   ) : channel.type === ChannelType.GuildStage ? (
                     <div className="main-empty">Stage channels are not supported yet.</div>
                   ) : text ? (
-                    <ChatView key={channel.id} channelId={channel.id} />
+                    <Messages key={channel.id} channelId={channel.id} />
                   ) : (
                     <VoiceChannelPage key={channel.id} channel={channel} />
                   )}
@@ -248,7 +281,7 @@ export function AppShell() {
                   <channelSlots.RightPanel channel={channel} />
                 ) : (
                   <>
-                    {guild && membersVisible && text && <MemberList guildId={guild.id} />}
+                    {guild && membersVisible && text && <Members guildId={guild.id} />}
                     {dmRecipient && profileVisible && <DmProfilePanel user={dmRecipient} />}
                   </>
                 )}

@@ -1,6 +1,6 @@
 // The only module in src/chat that imports shell-owned code (src/api, src/ui). Everything else in the chat area goes through here,
 // so contract drift between the shell and the chat area is fixed in one file.
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { appStore, useStore } from '../api/store';
 import { usePrefs } from '../ui';
 import type { Channel, Guild, GuildMember, ReadState, Relationship, Snowflake, User } from '../api/types';
@@ -21,6 +21,25 @@ const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
 
 export function useMe(): User | null { return useStore(s => s.me); }
 export function useChannel(channelId: Snowflake): Channel | undefined { return useStore(s => s.channels[channelId] ?? s.threads[channelId]); }
+
+/** Fields that move with every message; a change in only these does not make a channel "different" for rendering. */
+const COUNTERS = new Set<string>(['last_message_id', 'message_count']);
+function sameApartFromCounters(a: Channel, b: Channel): boolean {
+  const ka = Object.keys(a) as (keyof Channel)[];
+  if (ka.length !== Object.keys(b).length) return false;
+  return ka.every(k => COUNTERS.has(k) || a[k] === b[k]);
+}
+
+/**
+ * `useChannel` for the chat context: keeps the previous object while only the counters changed, so every visible message row does not
+ * re-render when a message arrives. Callers must not read `last_message_id` / `message_count` from it.
+ */
+export function useStableChannel(channelId: Snowflake): Channel | undefined {
+  const channel = useChannel(channelId);
+  const kept = useRef(channel);
+  if (channel !== kept.current && !(channel && kept.current && sameApartFromCounters(channel, kept.current))) kept.current = channel;
+  return kept.current;
+}
 export function useGuild(guildId: Snowflake | null | undefined): Guild | undefined { return useStore(s => (guildId ? s.guilds[guildId] : undefined)); }
 export function useGuildMembers(guildId: Snowflake | null | undefined): Record<Snowflake, GuildMember> { return useStore(s => (guildId ? s.members[guildId] : undefined)) ?? NO_MEMBERS; }
 export function useUsers(): Record<Snowflake, User> { return useStore(s => s.users); }
@@ -94,9 +113,14 @@ export function timeFormatPref(): 'auto' | '12' | '24' { return usePrefs.getStat
 export function useConvertEmoticons(): boolean { return usePrefs(s => s.convertEmoticons); }
 
 /** Channels of a guild, in position order (for #channel autocomplete and mention rendering). */
+/** The list keeps its identity while only message counters change (every new message in the guild), so consumers do not re-render. */
 export function useGuildChannels(guildId: Snowflake | null | undefined): Channel[] {
   const all = useStore(s => s.channels);
-  return useMemo(() => (guildId ? Object.values(all).filter(c => c.guild_id === guildId).sort((a, b) => a.position - b.position) : []), [all, guildId]);
+  const list = useMemo(() => (guildId ? Object.values(all).filter(c => c.guild_id === guildId).sort((a, b) => a.position - b.position) : []), [all, guildId]);
+  const kept = useRef(list);
+  const prev = kept.current;
+  if (list !== prev && !(list.length === prev.length && list.every((c, i) => c === prev[i] || sameApartFromCounters(c, prev[i]!)))) kept.current = list;
+  return kept.current;
 }
 
 /** Client-only "mark unread": move this client's read pointer of a channel back (the server keeps its own until the next ack). */

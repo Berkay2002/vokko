@@ -1,7 +1,7 @@
 // Syntax highlighting of a fenced code block's body as offset ranges, built from the message renderer's highlighter
-// (so the composer and the sent message use the same languages and classes).
+// (so the composer and the sent message use the same languages and classes). Plain until the lazy highlighter has loaded.
 import { isValidElement, type ReactNode } from 'react';
-import { highlightToReact } from '../markdown';
+import { highlightIfLoaded } from '../markdown';
 import type { HighlightRange } from './tokenize';
 
 export function highlightRanges(code: string, lang: string | null): HighlightRange[] {
@@ -18,6 +18,6 @@ export function highlightRanges(code: string, lang: string | null): HighlightRan
       walk(props.children, props.className ?? cls);
     }
   };
-  walk(highlightToReact(code, lang), null);
+  walk(highlightIfLoaded(code, lang), null);
   return pos === code.length ? out : [];
 }

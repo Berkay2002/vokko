@@ -13,6 +13,7 @@ import { handleRoute } from "./routes";
 import "./accounts";
 import { setCurrentToken } from "./sessions";
 import { seed } from "./seed";
+import { seedBig } from "./seedBig";
 import { setMockMaintenance } from "./status";
 import { sweepArchivedThreads } from "./threads";
 import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromToken } from "./socket";
@@ -22,6 +23,12 @@ export { MockSocket };
 
 if (MOCK) {
   seed();
+  // `?seed=big` adds the perf harness server (200 channels, 5,000 members, 20,000 messages in #firehose).
+  try {
+    if (new URLSearchParams(window.location.search).get("seed") === "big") seedBig();
+  } catch {
+    /* no window (tests) */
+  }
   // Threads without a message for their auto-archive duration are archived (THREAD_UPDATE), like the server's minute sweep.
   setInterval(() => sweepArchivedThreads(), 30_000);
   // `?mockGifProvider=none` boots a mock whose GIF provider is not configured (the picker then shows favourites only).

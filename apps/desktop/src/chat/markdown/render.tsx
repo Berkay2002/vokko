@@ -7,7 +7,8 @@ import {
   type ReactNode,
 } from 'react';
 import type { Block, Inline } from './ast';
-import { highlightToReact, languageLabel } from './highlight';
+import { highlightIfLoaded, useHighlighterLoaded } from './highlighter';
+import { languageLabel } from './languages';
 import { isJumbo, parseMarkdown } from './parse';
 
 export interface MarkdownContext {
@@ -137,7 +138,10 @@ function Spoiler({ children }: { children: ReactNode }) {
 
 function CodeBlock({ lang, code }: { lang: string | null; code: string }) {
   const label = languageLabel(lang);
-  const body = useMemo(() => highlightToReact(code, lang), [code, lang]);
+  const ready = useHighlighterLoaded();
+  // Only fences with a known language need the grammars; until they load the code shows as plain text in the same font.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const body = useMemo(() => (label ? highlightIfLoaded(code, lang) : code), [code, lang, label, ready]);
   return (
     <pre className="md-codeblock">
       {label ? <div className="md-codeblock-lang">{label}</div> : null}

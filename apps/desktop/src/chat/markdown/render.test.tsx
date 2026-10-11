@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { highlightToReact, languageLabel } from './highlight';
+import { preloadHighlighter } from './highlighter';
 import { Markdown, defaultFormatTimestamp, type MarkdownContext } from './render';
+
+// Code blocks highlight once the lazy highlighter has loaded.
+beforeAll(() => preloadHighlighter());
 
 const ctx: MarkdownContext = {
   userName: (id) => (id === '1' ? 'alice' : id === '2' ? 'bob' : null),

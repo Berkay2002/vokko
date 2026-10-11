@@ -1376,10 +1376,23 @@ button.channel-header-topic:hover {
 
 .member-list-scroller {
   height: 100%;
-  padding: 8px 0 16px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thin-thumb) transparent;
+}
+
+/* The list is windowed (react-virtuoso): the scroller padding lives in spacer rows, and each row is its own formatting context so
+   the 1px row margin is part of the measured height. */
+.member-list-pad-top {
+  height: 8px;
+}
+
+.member-list-pad-bottom {
+  height: 16px;
+}
+
+.member-list-scroller [data-index] {
+  display: flow-root;
 }
 
 .member-section-title {
@@ -1391,7 +1404,7 @@ button.channel-header-topic:hover {
   text-transform: none;
 }
 
-.member-section:first-child .member-section-title {
+.member-section-title.first {
   padding-top: 16px;
 }
 

@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import type { Attachment, Channel, Guild, GuildMember, Message, Role, Snowflake, User } from '../api/types';
 import { ChannelType } from '../api/types';
 import type { MarkdownContext } from './markdown';
-import { AnimatedImage, displayName, roleColor, useChannel, useChatDisplayPrefs, useCompactMode, useCustomColorScale, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
+import { AnimatedImage, displayName, roleColor, useStableChannel, useChatDisplayPrefs, useCompactMode, useCustomColorScale, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
 import { cachedUser } from './userCache';
 import { useEmojiDb } from './emojiData';
 import { EmojiGlyph } from './EmojiInfo';
@@ -78,7 +78,7 @@ export function useChat(): ChatContextValue {
 
 export function ChatProvider({ channelId, actions, replyingId = null, children }: { channelId: Snowflake; actions: ChatActions; replyingId?: Snowflake | null; children: ReactNode }) {
   const me = useMe();
-  const channel = useChannel(channelId);
+  const channel = useStableChannel(channelId);
   const guildId = channel?.guild_id ?? null;
   const guild = useGuild(guildId);
   const members = useGuildMembers(guildId);

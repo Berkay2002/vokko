@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Component, Suspense, lazy, useEffect, useRef, useState, type ReactNode } from "react";
 import { BookOpen, Camera, MessagesSquare, Check, ChevronRight, Copy, Gamepad2, GraduationCap, Hash, Heart, MapPin, Megaphone, Palette, Plus, Radio, Users, Volume2, type LucideIcon } from "lucide-react";
 import { logout } from "../api/auth";
 import { ApiRequestError } from "../api/errors";
@@ -9,7 +9,6 @@ import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
 import { createChannel, createGroupDM, createGuild, deleteGuild, joinGuildWithInvite, leaveGuild } from "./actions";
 import { InviteModal } from "../invites/InviteModal";
-import { ChannelSettings } from "./ChannelSettings";
 import { FullProfileModal } from "./DmProfilePanel";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
@@ -17,11 +16,63 @@ import { closeModal, useModals, type ModalSpec } from "./modalStore";
 import { QuickSwitcher } from "./QuickSwitcher";
 import { ShortcutsModal } from "./ShortcutsModal";
 import { TopicModal } from "./TopicModal";
-import { ServerSettings } from "./ServerSettings";
 import { RadioGroup, SwitchRow, Toggle } from "./settings/controls";
 import { SERVER_TEMPLATES, type ServerTemplate } from "./templates";
-import { UserSettings } from "./UserSettings";
 import { CameraPreviewModal, ChannelStatusModal, ScreenSharePickerModal } from "../voice";
+
+// The settings screens are split out of the startup bundle; `preloadSettings()` fetches them at idle so opening one does not wait.
+// A failed fetch (dev server restart, stale chunk after a redeploy) is retried once; if that fails too, ChunkBoundary offers a retry.
+const loadUserSettings = () => import("./UserSettings");
+const loadServerSettings = () => import("./ServerSettings");
+const loadChannelSettings = () => import("./ChannelSettings");
+const retryOnce = <T,>(load: () => Promise<T>) => load().catch(() => load());
+const lazySettings = () => ({
+  UserSettings: lazy(() => retryOnce(loadUserSettings).then(m => ({ default: m.UserSettings }))),
+  ServerSettings: lazy(() => retryOnce(loadServerSettings).then(m => ({ default: m.ServerSettings }))),
+  ChannelSettings: lazy(() => retryOnce(loadChannelSettings).then(m => ({ default: m.ChannelSettings }))),
+});
+// React keeps a failed lazy() rejected for good, so a retry needs fresh components.
+let { UserSettings, ServerSettings, ChannelSettings } = lazySettings();
+
+export function preloadSettings(): void {
+  // Only a warm-up: a failure here is retried when the screen is opened.
+  for (const load of [loadUserSettings, loadServerSettings, loadChannelSettings]) load().catch(() => {});
+}
+
+/** A settings screen whose chunk could not be loaded: a small dialog to try again or close, instead of an empty app. */
+class ChunkBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  retry = () => {
+    ({ UserSettings, ServerSettings, ChannelSettings } = lazySettings());
+    this.setState({ failed: false });
+  };
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <Modal
+        open
+        onClose={closeModal}
+        title="Couldn't load this screen"
+        className="modal-compact"
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={closeModal}>
+              Close
+            </button>
+            <button type="button" className="btn btn-primary" onClick={this.retry}>
+              Try Again
+            </button>
+          </>
+        }
+      >
+        <p>Check your connection and try again.</p>
+      </Modal>
+    );
+  }
+}
 
 function errorText(error: unknown): string {
   if (error instanceof ApiRequestError) {
@@ -456,8 +507,18 @@ export function ModalHost() {
   if (!modal || goneModal) return null;
   return (
     <>
-      {base && !gone(base.spec) && <ModalView key={`${base.spec.type}-${base.serial}`} spec={base.spec} id={`${base.spec.type}-${base.serial}`} />}
-      <ModalView key={`${modal.type}-${serial}`} spec={modal} id={`${modal.type}-${serial}`} />
+      {base && !gone(base.spec) && (
+        <ChunkBoundary key={`${base.spec.type}-${base.serial}`}>
+          <Suspense fallback={null}>
+            <ModalView spec={base.spec} id={`${base.spec.type}-${base.serial}`} />
+          </Suspense>
+        </ChunkBoundary>
+      )}
+      <ChunkBoundary key={`${modal.type}-${serial}`}>
+        <Suspense fallback={null}>
+          <ModalView spec={modal} id={`${modal.type}-${serial}`} />
+        </Suspense>
+      </ChunkBoundary>
     </>
   );
 }

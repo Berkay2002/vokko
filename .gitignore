@@ -14,3 +14,4 @@
 /data/
 /.claude/reference/
 *.tsbuildinfo
+/apps/desktop/perf-results/

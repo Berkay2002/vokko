@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties } from "react";
+import { memo, useMemo, useState, type CSSProperties } from "react";
 import { intToHex } from "../perks/catalog";
 import { NavLink, useLocation } from "react-router";
 import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Megaphone, MessagesSquare, Plus, Radio, Settings, UserPlus } from "lucide-react";
@@ -27,14 +27,13 @@ function loadCollapsed(): Set<Snowflake> {
   }
 }
 
-function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
-  const location = useLocation();
+// Memoised, and `selected` comes from the list: a gateway event or a route change re-renders only the rows it touches.
+const ChannelRow = memo(function ChannelRow({ channel, guild, selected }: { channel: Channel; guild: Guild; selected: boolean }) {
   const unread = useStore(s => isChannelUnread(s, channel.id));
   const mentions = useStore(s => channelMentionCount(s, channel.id));
   const { can } = usePermissions(guild.id, channel.id);
   const muted = useIsMuted(channel.id) || useIsMuted(channel.parent_id);
   const menu = useContextMenu();
-  const selected = location.pathname === `/channels/${guild.id}/${channel.id}`;
   const className = `channel-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}`;
   const items = () => channelContextItems(channel, guild);
 
@@ -79,7 +78,9 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
       <ChannelThreads channel={channel} />
     </li>
   );
-}
+});
+
+const MemoVoiceChannelRow = memo(VoiceChannelRow);
 
 function GuildHeader({ guild }: { guild: Guild }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -220,7 +221,11 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
                 )}
                 <ul className="category-channels">
                   {visible.map(c =>
-                    c.type === ChannelType.GuildVoice ? <VoiceChannelRow key={c.id} channel={c} guild={guild} /> : <ChannelRow key={c.id} channel={c} guild={guild} />,
+                    c.type === ChannelType.GuildVoice ? (
+                      <MemoVoiceChannelRow key={c.id} channel={c} guild={guild} />
+                    ) : (
+                      <ChannelRow key={c.id} channel={c} guild={guild} selected={c.id === selectedId} />
+                    ),
                   )}
                 </ul>
               </li>

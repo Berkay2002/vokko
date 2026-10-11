@@ -1,5 +1,6 @@
 export type { Block, Inline, ParseOptions } from './ast';
 export { parseMarkdown, isJumbo } from './parse';
-export { highlightToReact, languageLabel } from './highlight';
+export { languageLabel } from './languages';
+export { highlightIfLoaded, preloadHighlighter, useHighlighterLoaded } from './highlighter';
 export { Markdown, defaultFormatTimestamp } from './render';
 export type { MarkdownContext } from './render';
