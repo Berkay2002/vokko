@@ -14,6 +14,7 @@ import { MOCK } from "./api/config";
 import { gateway } from "./api/gateway";
 import * as rest from "./api/rest";
 import * as store from "./api/store";
+import { startNotify } from "./notify";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/ui.css";
@@ -25,6 +26,7 @@ import "./styles/channel-settings.css";
 import "./ui/prefs";
 
 bootstrap();
+startNotify();
 
 // Mock mode only: expose internals to Playwright scripts and the console (no effect in real builds).
 if (MOCK) (window as unknown as { __vokko: unknown }).__vokko = { gateway, ...rest, ...store };
