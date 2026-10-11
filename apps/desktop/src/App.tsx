@@ -8,6 +8,7 @@ import { NotifyBanners, Splash } from "./notify";
 import { invitePath, onDeepLink } from "./desktop";
 import { InvitePage } from "./shell/InvitePage";
 import { pendingInvite } from "./shell/pendingInvite";
+import { WindowFrame } from "./shell/WindowControls";
 
 function Protected() {
   const token = useStore(s => s.token);
@@ -57,6 +58,7 @@ export function App() {
         <Route path="*" element={<Navigate to="/channels/@me" replace />} />
       </Routes>
       <ContextMenuHost />
+      <WindowFrame />
       <NotifyBanners />
       <DeepLinks />
     </BrowserRouter>

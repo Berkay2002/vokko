@@ -409,6 +409,25 @@ fn presence(status: &str, custom_status: &str) -> Value {
 }
 
 #[tokio::test]
+async fn invalid_activities_are_a_decode_error() {
+    let w = world().await;
+    let too_many = json!([{"name": "A", "type": 0}, {"name": "B", "type": 0}]);
+    let streaming = json!([{"name": "A", "type": 1}]);
+    let blank = json!([{"name": "  ", "type": 0}]);
+    let long = json!([{"name": "x".repeat(129), "type": 0}]);
+    let newline = json!([{"name": "A\nB", "type": 0}]);
+    let zero_width = json!([{"name": "\u{200B}", "type": 0}]);
+    let bidi = json!([{"name": "\u{202E}gnihtemos", "type": 0}]);
+    let negative_start = json!([{"name": "A", "type": 0, "timestamps": {"start": -1}}]);
+    for activities in [too_many, streaming, blank, long, newline, zero_width, bidi, negative_start] {
+        let mut client = Client::connect(&w.address).await;
+        client.identify(&w.member).await;
+        client.send(json!({"op": 3, "d": {"status": "online", "activities": activities}})).await;
+        assert_eq!(closed_with(&mut client).await, Some(4002), "{activities}");
+    }
+}
+
+#[tokio::test]
 async fn presence_updates_are_bounded_in_size_and_rate() {
     let w = world().await;
     let mut client = Client::connect(&w.address).await;

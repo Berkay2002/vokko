@@ -14,6 +14,8 @@ No signing keys, endpoints or secrets are committed; releases supply them at bui
 | `vokko://invite/<code>` and `vokko://auth/callback?...` deep links | `links.rs`, `tauri-plugin-deep-link` | `onDeepLink(cb)`; invites default to routing `/invite/<code>` |
 | Updater, inactive unless configured | `updates.rs`, `tauri-plugin-updater` | `useDesktopUpdate()`, `checkForUpdate()`, `restartToUpdate()` |
 | Global shortcuts registry (nothing registered by default) | `shortcuts.rs`, `tauri-plugin-global-shortcut` | `registerShortcut`, `unregisterShortcut`, `listShortcuts`, `onShortcut` |
+| Window controls: undecorated window off macOS, minimize/maximize/close drawn in the title bar | `window.rs` (`use_custom_controls`, `desktop_window_chrome`) | `useWindowChrome()`, `minimizeWindow()`, `toggleMaximizeWindow()`, `closeWindow()` (`windowControls.ts`) |
+| Running programs for game detection (names and start times only) | `games.rs` (`desktop_list_processes`, `sysinfo`) | `listProcesses()`, `matchGame()` (`games.ts`, list in `detectableGames.json`) |
 | Notifications | `tauri-plugin-notification`, capability `notification:default` | `src/notify/desktop.ts` invokes the plugin commands |
 
 `initDesktop()` (called from `src/main.tsx`) starts deep-link delivery and the updater loop. `isDesktop()` tells a settings page
@@ -109,6 +111,24 @@ strictly newer version.
 3. The shell shows the "update ready, restart" banner from `useDesktopUpdate()` (`status.state === "ready"`) and calls `restartToUpdate()`.
    On Windows the installer takes over and exits the app; on macOS/Linux the app restarts itself. The download is never installed
    without that user action.
+
+## Window controls
+
+Off macOS the window is created without decorations (`window.rs`) and the title bar draws the minimize, maximize and close buttons with
+Tauri drag regions; macOS keeps its native traffic lights, and the web build is unchanged. The window API needs
+`core:window:allow-minimize`, `-toggle-maximize`, `-close` and `-start-dragging` in `capabilities/default.json`. Close goes through
+`window.close()`, so close-to-tray still applies. Windows 11 snap layouts (hover on maximize) are not available: tao has no
+`HTMAXBUTTON` handling. Win+Z and drag-to-edge still work.
+
+## Game detection
+
+`desktop_list_processes` returns running program names and start times (no paths, window titles or command lines leave the Rust side).
+The frontend matches them against `src/desktop/detectableGames.json` (an editable list of about 50 games and apps; add entries as
+`{ "name", "exe": [...] }`; add `"kind": "app"` for programs that stay open all day, such as editors and OBS: a running game
+always wins over them) and the games the user added under Settings > Registered Games, and sends the match as a `Playing`
+activity (`activities` on gateway op 3, see docs/api.md). Among games the one that started first wins. Only the desktop app
+sends `activities`, again after every reconnect; a browser session of the same account leaves the field out. Sharing can be
+switched off in Registered Games and Activity Privacy.
 
 ## Debug helpers
 

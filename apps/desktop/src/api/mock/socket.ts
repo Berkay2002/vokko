@@ -1,7 +1,7 @@
 // Mock gateway: speaks the same Hello / Identify / READY / heartbeat / Resume protocol as the real server so the
 // client gateway code (and everything above it) cannot tell the difference.
 
-import { GatewayOp, type GatewayEvents, type GatewayPayload, type PresenceStatus, type VoiceStateUpdateCommand } from "../types";
+import { GatewayOp, type Activity, type GatewayEvents, type GatewayPayload, type PresenceStatus, type VoiceStateUpdateCommand } from "../types";
 import { db } from "./db";
 import { tokenUserId } from "./sessions";
 import { readyFor } from "./views";
@@ -121,7 +121,7 @@ export class MockSocket {
         this.resume(payload.d as { token?: string; session_id?: string; seq?: number });
         break;
       case GatewayOp.PresenceUpdate:
-        this.presence(payload.d as { status: PresenceStatus; custom_status?: string | null });
+        this.presence(payload.d as { status: PresenceStatus; custom_status?: string | null; activities?: Activity[] });
         break;
       case GatewayOp.VoiceStateUpdate:
         if (this.session) handleVoiceStateUpdate(this.session.id, this.session.userId, payload.d as VoiceStateUpdateCommand, emit, emitToSession);
@@ -188,11 +188,17 @@ export class MockSocket {
     this.sync(userId);
   }
 
-  private presence(d: { status: PresenceStatus; custom_status?: string | null }): void {
+  private presence(d: { status: PresenceStatus; custom_status?: string | null; activities?: Activity[] }): void {
     if (!this.session) return;
     const account = db.accounts.get(this.session.userId);
     if (!account) return;
-    account.presence = { user_id: account.user.id, status: d.status, custom_status: d.custom_status ?? null };
+    // Like the server: absent activities keep the current ones, [] clears, and an invalid list ends the connection (4002).
+    if (d.activities && (d.activities.length > 1 || d.activities.some(a => a.type !== 0 || !a.name?.trim() || a.name.length > 128))) {
+      this.close(4002);
+      return;
+    }
+    const activities = d.activities ?? account.presence.activities ?? [];
+    account.presence = { user_id: account.user.id, status: d.status, custom_status: d.custom_status ?? null, ...(activities.length > 0 ? { activities } : {}) };
     emitToAll("PRESENCE_UPDATE", { ...account.presence });
   }
 

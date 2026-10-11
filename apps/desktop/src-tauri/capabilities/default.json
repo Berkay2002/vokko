@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "Local application window; no filesystem or shell plugins exposed to the frontend. Desktop features (tray, autostart, updater, deep links, global shortcuts) are app commands, so they need no plugin permission; only notifications are used straight from JS.",
+  "description": "Local application window; no filesystem or shell plugins exposed to the frontend. Desktop features (tray, autostart, updater, deep links, global shortcuts) are app commands, so they need no plugin permission; notifications and the window buttons (minimize, maximize, close, drag) are used straight from JS.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-background-color", "core:window:allow-set-theme", "notification:default"]
+  "permissions": ["core:default", "core:window:allow-set-background-color", "core:window:allow-set-theme", "core:window:allow-minimize", "core:window:allow-toggle-maximize", "core:window:allow-close", "core:window:allow-start-dragging", "notification:default"]
 }

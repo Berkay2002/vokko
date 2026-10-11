@@ -8,7 +8,7 @@ vi.mock("../desktop", () => ({
   onShortcut: async () => () => undefined,
 }));
 
-import { acceleratorFromEvent, bindPtt, hasModifier, matchesDown, matchesUp, type ShortcutAdapter } from "./ptt";
+import { acceleratorFromEvent, bindPtt, hasModifier, matchesDown, matchesUp, probeShortcut, usePttGlobal, type ShortcutAdapter } from "./ptt";
 
 const key = (code: string, key: string, mods: Partial<{ ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }> = {}) => ({
   code,
@@ -156,5 +156,40 @@ describe("push-to-talk global binding", () => {
     win.dispatchEvent(keyEvent("keydown"));
     win.dispatchEvent(keyEvent("keyup"));
     expect(states).toEqual([true, false]);
+  });
+});
+
+describe("when the OS refuses the global shortcut", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    usePttGlobal.setState({ refused: null });
+  });
+
+  it("says so, keeps listening in the window, and clears the note on unbind", async () => {
+    vi.stubGlobal("window", new EventTarget());
+    const fake = fakeAdapter();
+    fake.registered.set("other-app", "F13");
+    const unbind = bindPtt("F13", () => undefined, fake.adapter);
+    await settle();
+    fake.pending[0]!.done.resolve();
+    await settle();
+    expect(usePttGlobal.getState().refused).toMatch(/did not allow this shortcut \(taken\).*only work while Vokko is focused/);
+    unbind();
+    await settle();
+    expect(usePttGlobal.getState().refused).toBeNull();
+  });
+
+  it("probeShortcut reports a refusal and releases a free accelerator again", async () => {
+    const fake = fakeAdapter();
+    const refused = probeShortcut("F14", fake.adapter);
+    await settle();
+    fake.pending[0]!.done.resolve();
+    expect(await refused).toBeNull();
+    expect(fake.registered.size).toBe(0);
+    fake.registered.set("other-app", "F14");
+    const taken = probeShortcut("F14", fake.adapter);
+    await settle();
+    fake.pending[1]!.done.resolve();
+    expect(await taken).toMatch(/taken/);
   });
 });

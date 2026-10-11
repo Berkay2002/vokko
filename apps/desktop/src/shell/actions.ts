@@ -1,10 +1,12 @@
 // User-initiated API actions of the shell. State comes back through gateway events; these helpers also wait for
 // the event (or fall back to the REST response) so navigation after "create" lands on a known entity.
 
+import { getOwnActivities } from "../activity/own";
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
 import { appStore, isChannelUnread, type AppState } from "../api/store";
-import { ChannelType, GatewayOp, type Channel, type Guild, type PermissionOverwrite, type PresenceStatus, type Snowflake } from "../api/types";
+import { isDesktop } from "../desktop";
+import { ChannelType, GatewayOp, type Activity, type Channel, type Guild, type PermissionOverwrite, type PresenceStatus, type Snowflake } from "../api/types";
 import { dmPath, go, guildPath } from "./nav";
 import { firstTextChannel } from "./channels";
 import type { ServerTemplate } from "./templates";
@@ -141,7 +143,18 @@ export function setOwnStatus(status: SelectableStatus, custom: string): void {
     /* ignore */
   }
   const wire: PresenceStatus = status === "invisible" ? "offline" : status;
-  gateway.send(GatewayOp.PresenceUpdate, { status: wire, custom_status: custom.trim() || null });
+  // Op 3 keeps every field it leaves out. Only the desktop app detects games, so only it sends `activities` (with every
+  // status change, so a reconnect cannot lose them). A browser session sending `[]` would otherwise hide the game that the
+  // desktop app of the same account reported.
+  const presence: { status: PresenceStatus; custom_status: string | null; activities?: Activity[] } = { status: wire, custom_status: custom.trim() || null };
+  if (isDesktop()) presence.activities = getOwnActivities();
+  gateway.send(GatewayOp.PresenceUpdate, presence);
+}
+
+/** Sends the stored status again, e.g. after the detected game changed. */
+export function resendOwnStatus(): void {
+  const { status, custom } = loadStoredStatus();
+  setOwnStatus(status, custom);
 }
 
 /** Copy text to the clipboard; a missing or denied clipboard is not worth surfacing. */

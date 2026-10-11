@@ -69,7 +69,7 @@ test('create an event with the wizard, see it in the list and mark yourself inte
   await expect(interested).toHaveAttribute('aria-pressed', 'false');
   await interested.click();
   await expect(interested).toHaveAttribute('aria-pressed', 'true');
-  await expect(detail.getByText('1 interested').or(detail.getByText('Sam'))).toBeVisible();
+  await expect(detail.getByText('1 interested').or(detail.getByText('Sam', { exact: true }))).toBeVisible();
 
   // the list and the quick link know about it
   await page.keyboard.press('Escape');

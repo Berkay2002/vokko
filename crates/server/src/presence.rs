@@ -5,7 +5,7 @@
 //! (offline while nobody is connected or the user is invisible).
 use std::collections::HashSet;
 
-use vokko_protocol::api::{GatewayEvent, Presence, PresenceStatus, Snowflake};
+use vokko_protocol::api::{Activity, GatewayEvent, Presence, PresenceStatus, Snowflake};
 
 use crate::error::ApiResult;
 use crate::events;
@@ -16,13 +16,17 @@ struct Row {
     status: String,
     preferred: String,
     custom_status: Option<String>,
+    activities: Vec<Activity>,
 }
 
-type RawRow = (i64, String, String, Option<String>);
+/// `activities` is a JSON array kept as text.
+type RawRow = (i64, String, String, Option<String>, String);
+
+const ROW_COLUMNS: &str = "user_id, status, preferred, custom_status, activities";
 
 impl Row {
-    fn from_raw((user_id, status, preferred, custom_status): RawRow) -> Self {
-        Self { user_id, status, preferred, custom_status }
+    fn from_raw((user_id, status, preferred, custom_status, activities): RawRow) -> Self {
+        Self { user_id, status, preferred, custom_status, activities: serde_json::from_str(&activities).unwrap_or_default() }
     }
 
     /// What `viewer` sees. The user's own sessions see the chosen status (including `invisible`), connected or not.
@@ -31,18 +35,19 @@ impl Row {
         let invisible = self.preferred == "invisible";
         if viewer == self.user_id {
             let status = PresenceStatus::parse(&self.preferred).unwrap_or(PresenceStatus::Online);
-            return Presence { user_id, status, custom_status: self.custom_status.clone() };
+            return Presence { user_id, status, custom_status: self.custom_status.clone(), activities: self.activities.clone() };
         }
         let status = if invisible { PresenceStatus::Offline } else { PresenceStatus::parse(&self.status).unwrap_or(PresenceStatus::Offline) };
-        // an offline user (disconnected or invisible) shows no custom status to others
-        let custom_status = if status == PresenceStatus::Offline { None } else { self.custom_status.clone() };
-        Presence { user_id, status, custom_status }
+        // an offline user (disconnected or invisible) shows no custom status or activity to others
+        let offline = status == PresenceStatus::Offline;
+        let custom_status = if offline { None } else { self.custom_status.clone() };
+        let activities = if offline { Vec::new() } else { self.activities.clone() };
+        Presence { user_id, status, custom_status, activities }
     }
 }
 
 async fn rows(state: &AppState, ids: &[i64]) -> ApiResult<Vec<Row>> {
-    let found: Vec<RawRow> =
-        sqlx::query_as("SELECT user_id, status, preferred, custom_status FROM presences WHERE user_id = ANY($1)").bind(ids).fetch_all(&state.db).await?;
+    let found: Vec<RawRow> = sqlx::query_as(&format!("SELECT {ROW_COLUMNS} FROM presences WHERE user_id = ANY($1)")).bind(ids).fetch_all(&state.db).await?;
     Ok(found.into_iter().map(Row::from_raw).collect())
 }
 
@@ -53,19 +58,23 @@ fn effective(preferred: &str, connected: bool) -> &str {
 
 /// Stores a change and tells everyone who shares something with the user. `preferred` of `None` keeps the choice;
 /// `connected` says whether the user has a live gateway connection after this change. `offline` is read as `invisible`.
+/// `activities` of `None` keeps the current ones, `Some(vec![])` clears them.
 pub async fn update(
     state: &AppState,
     user_id: i64,
     preferred: Option<PresenceStatus>,
     custom_status: Option<Option<String>>,
+    activities: Option<Vec<Activity>>,
     connected: bool,
 ) -> ApiResult<()> {
     let preferred = preferred.map(|status| if status == PresenceStatus::Offline { PresenceStatus::Invisible } else { status }.as_str());
     let first = preferred.unwrap_or("online");
+    let encoded = activities.as_ref().map(|list| serde_json::to_string(list).unwrap_or_else(|_| "[]".to_owned()));
     sqlx::query(
-        "INSERT INTO presences (user_id, status, preferred, custom_status) VALUES ($1, $2, $3, $4) \
+        "INSERT INTO presences (user_id, status, preferred, custom_status, activities) VALUES ($1, $2, $3, $4, COALESCE($8, '[]')) \
          ON CONFLICT (user_id) DO UPDATE SET preferred = COALESCE($5, presences.preferred), \
            custom_status = CASE WHEN $6 THEN $4 ELSE presences.custom_status END, \
+           activities = COALESCE($8, presences.activities), \
            status = CASE WHEN NOT $7 OR COALESCE($5, presences.preferred) = 'invisible' THEN 'offline' \
                          ELSE COALESCE($5, presences.preferred) END",
     )
@@ -76,19 +85,21 @@ pub async fn update(
     .bind(preferred)
     .bind(custom_status.is_some())
     .bind(connected)
+    .bind(encoded)
     .execute(&state.db)
     .await?;
     publish(state, user_id).await
 }
 
-/// The first connection of a user opened: the chosen status comes back.
+/// The first connection of a user opened: the chosen status comes back. Activities start empty (the client sends its own
+/// after READY), so nothing stale survives a crash.
 pub async fn connected(state: &AppState, user_id: i64) -> ApiResult<()> {
-    update(state, user_id, None, None, true).await
+    update(state, user_id, None, None, Some(Vec::new()), true).await
 }
 
-/// The last connection of a user closed: everyone sees offline, the choice stays.
+/// The last connection of a user closed: everyone sees offline and the activity is gone, the choice stays.
 pub async fn disconnected(state: &AppState, user_id: i64) -> ApiResult<()> {
-    update(state, user_id, None, None, false).await
+    update(state, user_id, None, None, Some(Vec::new()), false).await
 }
 
 /// Sends the user's current presence to everyone who shares something with them, each in their own view.
@@ -107,7 +118,7 @@ pub async fn presences_for(state: &AppState, viewer: i64, ids: &[i64]) -> ApiRes
 /// The presences of a guild's members that are not offline, for the GUILD_CREATE of `viewer`.
 pub async fn guild_presences(state: &AppState, guild_id: i64, viewer: i64) -> ApiResult<Vec<Presence>> {
     let found: Vec<RawRow> = sqlx::query_as(
-        "SELECT p.user_id, p.status, p.preferred, p.custom_status FROM presences p JOIN guild_members m ON m.user_id = p.user_id \
+        "SELECT p.user_id, p.status, p.preferred, p.custom_status, p.activities FROM presences p JOIN guild_members m ON m.user_id = p.user_id \
          WHERE m.guild_id = $1 AND (p.status <> 'offline' OR p.user_id = $2)",
     )
     .bind(guild_id)
@@ -160,7 +171,9 @@ pub async fn announce_leave(state: &AppState, guild_id: i64, user_id: i64) -> Ap
     if strangers.is_empty() {
         return Ok(());
     }
-    let offline = |id: i64| GatewayEvent::PresenceUpdate(Presence { user_id: Snowflake::from(id), status: PresenceStatus::Offline, custom_status: None });
+    let offline = |id: i64| {
+        GatewayEvent::PresenceUpdate(Presence { user_id: Snowflake::from(id), status: PresenceStatus::Offline, custom_status: None, activities: Vec::new() })
+    };
     state.hub.send(&strangers, &offline(user_id));
     for id in strangers {
         state.hub.send(&[user_id], &offline(id));

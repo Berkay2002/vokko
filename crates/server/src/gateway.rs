@@ -15,7 +15,8 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use vokko_protocol::api::{
-    GatewayEvent, GatewayOp, GatewayPayload, Hello, Identify, PresenceUpdateRequest, ReadState, ReadyEvent, Resume, Snowflake, VoiceStateUpdateCommand,
+    Activity, GatewayEvent, GatewayOp, GatewayPayload, Hello, Identify, PresenceUpdateRequest, ReadState, ReadyEvent, Resume, Snowflake,
+    VoiceStateUpdateCommand,
 };
 
 use crate::auth::{hash_token, random_hex, user_for_token};
@@ -117,11 +118,16 @@ async fn handle(state: AppState, socket: WebSocket, slot: PreauthSlot) {
         let _ = presence::connected(&state, user_id).await;
     }
     run(&state, &session, &mut writer, &mut stream, &mut receiver).await;
-    if session.detach(generation) {
+    let detached = session.detach(generation);
+    if detached {
         voice::state::gateway_detached(&state, session.id.clone());
     }
+    // The activity belongs to the connection that reported it: when that one goes (even while other sessions stay), it goes too.
+    let remaining = if detached { state.hub.clear_session_activities(user_id, &session.id) } else { None };
     if state.hub.connection_closed(user_id) {
         let _ = presence::disconnected(&state, user_id).await;
+    } else if let Some(shown) = remaining {
+        let _ = presence::update(&state, user_id, None, None, Some(shown), true).await;
     }
 }
 
@@ -251,11 +257,17 @@ async fn run(state: &AppState, session: &Arc<Session>, writer: &mut Writer, stre
                                 writer.close(CLOSE_DECODE_ERROR).await;
                                 break;
                             }
+                            if update.activities.as_deref().is_some_and(|list| !Activity::list_is_valid(list)) {
+                                writer.close(CLOSE_DECODE_ERROR).await;
+                                break;
+                            }
                             if !presence_updates.allow(Instant::now()) {
                                 writer.close(CLOSE_RATE_LIMITED).await;
                                 break;
                             }
-                            let _ = presence::update(state, session.user_id, Some(update.status), Some(update.custom_status), true).await;
+                            // Activities are kept per session: this session's list replaces its own, never another session's.
+                            let activities = update.activities.map(|list| state.hub.set_session_activities(session.user_id, &session.id, list));
+                            let _ = presence::update(state, session.user_id, Some(update.status), Some(update.custom_status), activities, true).await;
                         }
                         GatewayOp::VoiceStateUpdate => {
                             let Ok(command) = serde_json::from_value::<VoiceStateUpdateCommand>(payload.d) else { continue };

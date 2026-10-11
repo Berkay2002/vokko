@@ -30,10 +30,18 @@ export interface UserPrimaryGuild {
   color_secondary: number;
 }
 
+/** What a user is doing. Only type 0 ("Playing") exists; `timestamps.start` is unix ms. At most one per presence. */
+export interface Activity {
+  name: string; // 1-128 chars
+  type: 0;
+  timestamps?: { start?: number };
+}
+
 export interface Presence {
   user_id: Snowflake;
   status: PresenceStatus;
   custom_status: string | null;
+  activities?: Activity[]; // absent = none; hidden from others while offline/invisible
 }
 
 export enum ChannelType {

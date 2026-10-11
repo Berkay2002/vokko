@@ -4,6 +4,7 @@ import { displayName, roleColor, useStore } from "../api/store";
 import { appStore } from "../api/store";
 import type { GuildMember, Role, Snowflake } from "../api/types";
 import { useContextMenu } from "../ui";
+import { ActivityLine, usePlaying } from "./ActivityLine";
 import { Avatar } from "./Avatar";
 import { userContextItems } from "./menus";
 import { openProfile, TimeoutBadge } from "./ProfileCard";
@@ -19,6 +20,7 @@ function MemberRow({ member, guildId, offline }: { member: GuildMember; guildId:
   const menu = useContextMenu();
   const color = useStore(() => roleColor(guildId, member));
   const custom = useStore(s => s.presences[member.user.id]?.custom_status);
+  const playing = usePlaying(member.user.id);
   return (
     <li>
       <button
@@ -34,7 +36,7 @@ function MemberRow({ member, guildId, offline }: { member: GuildMember; guildId:
             <TagChip tag={member.user.primary_guild} />
             <TimeoutBadge until={member.communication_disabled_until} />
           </span>
-          {custom && <span className="member-status">{custom}</span>}
+          {playing ? <ActivityLine activity={playing} className="member-status" /> : custom && <span className="member-status">{custom}</span>}
         </span>
       </button>
     </li>

@@ -28,8 +28,8 @@ Status as of main at 11ae952
 | MOD | 11 | 6 | 4 | 1 | 0 | 1 |
 | SET | 7 | 2 | 5 | 0 | 0 | 0 |
 | REST | 6 | 2 | 3 | 1 | 0 | 0 |
-| DESK | 8 | 2 | 3 | 3 | 0 | 0 |
-| **Total** | **135** | **61** | **55** | **18** | **1** | **28** |
+| DESK | 9 | 6 | 1 | 0 | 2 | 0 |
+| **Total** | **136** | **65** | **53** | **15** | **3** | **28** |
 
 ## SHELL: app shell, rail, DM sidebar, title bar
 
@@ -212,12 +212,12 @@ Status as of main at 11ae952
 
 | id | feature | looks the same | works the same | notes |
 | --- | --- | --- | --- | --- |
-| DESK-01 | Voice and video call overlay | n/a | - | No voice or video (see DM-008); no overlay window |
-| DESK-02 | Game overlay | n/a | - | Not started |
+| DESK-01 | Voice and video call overlay | n/a | n/a | Overlay out of scope this round (needs a transparent always-on-top window and game hooks); calls stay in the app window |
+| DESK-02 | Game overlay | n/a | n/a | Overlay out of scope this round |
 | DESK-03 | Tray icon and close-to-tray | n/a | done | tray.rs (install, set_unread); close-to-tray in main.rs:150-154, prefs.rs:15,22,30. Desktop only. |
-| DESK-04 | Push-to-talk global keybinds | n/a | partial | shortcuts.rs:1,39-83 is a global shortcut registry, but nothing is bound and push-to-talk needs voice, so it is not wired. |
-| DESK-05 | Rich presence and game detection | n/a | - | Presence has status and custom status only |
+| DESK-04 | Push-to-talk global keybinds | n/a | done | voice/ptt.ts `bindPtt` registers the keybind from the existing PTT pref with shortcuts.rs (an OS-wide shortcut, so it fires without window focus; covered by unit tests, not exercised live this round because that needs a LiveKit call); when the OS refuses the shortcut the Voice page shows a note (`usePttGlobal`, PttSettings.tsx `ptt-refused`); activate/deactivate sounds come from the shared sound catalog (notify/soundCatalog.ts, per-sound toggles in Voice & Video). Registration goes through app commands, so no extra `global-shortcut:*` capability. Mouse buttons cannot be bound (OS hotkey API). |
+| DESK-05 | Rich presence and game detection | n/a | done | `desktop_list_processes` (src-tauri games.rs, sysinfo, names and start times only) matched in desktop/games.ts against desktop/detectableGames.json (57 games, editable) plus the games the user added; games rank above always-open apps (`kind: "app"`: VS Code, OBS, ...); activity/index.ts sends `activities` (type 0 Playing, timestamps.start, name cleaned to the server's rules) on op 3 from the desktop app only and re-sends on every READY and RESUMED; the server keeps activities per gateway session, so a browser tab cannot clear them and they go when the reporting connection closes; Registered Games and Activity Privacy settings pages; "Playing X" and elapsed time in the member list, profile card and DM list (shell/ActivityLine.tsx). Server: Presence.activities, 4002 on invalid lists (docs/api.md). |
 | DESK-06 | Run on startup | n/a | done | tauri-plugin-autostart (src-tauri/Cargo.toml:26-28), desktop/autostart.ts, run-on-startup toggle in shell/settings/WindowsPage.tsx. |
-| DESK-07 | Native window controls | n/a | partial | Tauri window uses native decorations (tauri.conf.json); the web title bar also renders in the desktop build |
-| DESK-08 | Auto-update UX | n/a | partial | updates.rs:3,12,15,44-115 and desktop/updater.ts, update-ready banner in NotifyBanners. Inactive unless the build has updater config (tauri.conf.json:18 bundle inactive). |
+| DESK-07 | Native window controls | n/a | done | Off macOS the window is created undecorated (window.rs `use_custom_controls`) and the title bar draws Discord-style minimize/maximize/close with drag regions (shell/WindowControls.tsx, TitleBar.tsx, desktop/windowControls.ts); macOS keeps native traffic lights; the web build is unchanged. Snap layouts: not supported (tao/tauri 2.12 have no HTMAXBUTTON handling); Win+Z and drag-to-edge still work. |
+| DESK-08 | Auto-update UX | n/a | done | updates.rs and desktop/updater.ts feed the update banner (NotifyBanners) and Windows Settings > Updates (check, download progress, Restart to Update, retry). Off unless the build has `plugins.updater` config, so it is inactive until the release pipeline provides a pubkey and endpoint; the disabled state was seen in the real app, download and restart are covered by unit tests only (no update endpoint exists yet) (docs/desktop-release.md, docs/self-hosting.md). |
 | DESK-09 | Custom app icons (Appearance > App Icon, Discord "Appikon") | partial | partial | 8 variants (default, gradient, flame, pastel, galaxy, mono, inverted, outline) from `assets/app-icons/*.svg`, rasters by `npm run app-icons`; picker in src/appicon, pref `appIcon`; `desktop_set_app_icon` (src-tauri/src/appicon.rs) sets the window/taskbar icon, the tray icon (unread dot kept) and, on macOS, the Dock tile (a content view, because `setApplicationIconImage` is unsafe and the workspace forbids unsafe). Not done: Cmd+Tab, Mission Control and the Dock entry of a closed app keep the bundle icon (needs the icon chosen at bundle time); Windows/Linux window and tray paths not run here; the picker was not compared against a reference capture (none exists), tile layout is the theme-card one |

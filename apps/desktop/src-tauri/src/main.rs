@@ -1,6 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod appicon;
+mod games;
 mod links;
 mod prefs;
 mod shortcuts;
@@ -72,6 +73,8 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             links::handle_url(&link_handle, url.as_str());
         }
     });
+
+    window::use_custom_controls(&handle);
 
     let autostarted = std::env::args().any(|arg| arg == AUTOSTART_ARG);
     let stay_hidden = autostarted && handle.state::<PrefsStore>().get().start_minimized && handle.state::<tray::TrayState>().present();
@@ -168,6 +171,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             desktop_autostart_status,
             desktop_autostart_set,
             desktop_set_unread,
+            window::desktop_window_chrome,
+            games::desktop_list_processes,
             appicon::desktop_set_app_icon,
             links::desktop_take_pending_links,
             updates::desktop_update_status,

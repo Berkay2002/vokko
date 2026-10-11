@@ -125,6 +125,92 @@ async fn chosen_status_and_custom_status_survive_disconnects() {
 }
 
 #[tokio::test]
+async fn activity_is_shared_kept_cleared_and_hidden_like_a_custom_status() {
+    let w = world().await;
+    let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;
+    let (mut alice, _) = Client::connect(&w.address, &w.alice.0).await;
+    owner.wait_presence(&w.alice.1, "online").await;
+
+    let game = json!([{"name": "Factorio", "type": 0, "timestamps": {"start": 1_760_000_000_000_i64}}]);
+    alice.send(json!({"op": 3, "d": {"status": "online", "activities": game}})).await;
+    let seen = loop {
+        let seen = owner.wait_presence(&w.alice.1, "online").await;
+        if !seen["activities"].is_null() {
+            break seen;
+        }
+    };
+    assert_eq!(seen["activities"], game, "others see the activity");
+
+    // a later update without `activities` keeps it
+    alice.send(json!({"op": 3, "d": {"status": "idle", "custom_status": "brb"}})).await;
+    let seen = owner.wait_presence(&w.alice.1, "idle").await;
+    assert_eq!((seen["custom_status"].as_str(), &seen["activities"]), (Some("brb"), &game), "absent activities are kept");
+
+    // invisible hides it from others but not from her own sessions
+    alice.send(json!({"op": 3, "d": {"status": "invisible"}})).await;
+    let seen = owner.wait_presence(&w.alice.1, "offline").await;
+    assert!(seen["activities"].is_null(), "no activity while invisible: {seen}");
+    let own = alice.wait_presence(&w.alice.1, "invisible").await;
+    assert_eq!(own["activities"], game);
+
+    // an empty list clears it
+    alice.send(json!({"op": 3, "d": {"status": "online", "activities": []}})).await;
+    let cleared = owner.wait_presence(&w.alice.1, "online").await;
+    assert!(cleared["activities"].is_null(), "cleared: {cleared}");
+
+    // the last disconnect clears it, so a reconnect starts without one
+    alice.send(json!({"op": 3, "d": {"status": "online", "activities": game}})).await;
+    owner.wait_for("PRESENCE_UPDATE").await;
+    drop(alice);
+    owner.wait_presence(&w.alice.1, "offline").await;
+    let (_alice, ready) = Client::connect(&w.address, &w.alice.0).await;
+    let own = find(&ready["presences"], &w.alice.1).expect("own presence in READY");
+    assert!(own["activities"].is_null(), "no activity after a reconnect: {own}");
+}
+
+/// The next PRESENCE_UPDATE of `user_id` with `status` whose activities satisfy `want`.
+async fn wait_activities(client: &mut Client, user_id: &str, status: &str, want: impl Fn(&Value) -> bool) -> Value {
+    loop {
+        let seen = client.wait_presence(user_id, status).await;
+        if want(&seen["activities"]) {
+            return seen;
+        }
+    }
+}
+
+#[tokio::test]
+async fn activity_belongs_to_the_session_that_reported_it() {
+    let w = world().await;
+    let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;
+    let (mut desktop, _) = Client::connect(&w.address, &w.alice.0).await;
+    let (mut browser, _) = Client::connect(&w.address, &w.alice.0).await;
+    owner.wait_presence(&w.alice.1, "online").await;
+
+    let game = json!([{"name": "Factorio", "type": 0, "timestamps": {"start": 1_760_000_000_000_i64}}]);
+    let other = json!([{"name": "Terraria", "type": 0}]);
+    desktop.send(json!({"op": 3, "d": {"status": "online", "activities": game}})).await;
+    wait_activities(&mut owner, &w.alice.1, "online", |a| a == &game).await;
+
+    // the browser neither wipes the game with an empty list nor with an update that has no activities
+    browser.send(json!({"op": 3, "d": {"status": "online", "activities": []}})).await;
+    browser.send(json!({"op": 3, "d": {"status": "dnd"}})).await;
+    let seen = owner.wait_presence(&w.alice.1, "dnd").await;
+    assert_eq!(seen["activities"], game, "another session cannot wipe the game: {seen}");
+
+    // the newest report wins while both are connected; when that session goes, the older one shows again
+    browser.send(json!({"op": 3, "d": {"status": "dnd", "activities": other}})).await;
+    wait_activities(&mut owner, &w.alice.1, "dnd", |a| a == &other).await;
+    drop(browser);
+    wait_activities(&mut owner, &w.alice.1, "dnd", |a| a == &game).await;
+
+    // the desktop goes while another session stays: its game goes with it, not at the last disconnect
+    let (_still_here, _) = Client::connect(&w.address, &w.alice.0).await;
+    drop(desktop);
+    let cleared = wait_activities(&mut owner, &w.alice.1, "dnd", |a| a.is_null()).await;
+    assert_eq!(cleared["status"], "dnd", "she is still online: {cleared}");
+}
+
+#[tokio::test]
 async fn invisible_reads_offline_to_others_and_survives_reconnects() {
     let w = world().await;
     let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;

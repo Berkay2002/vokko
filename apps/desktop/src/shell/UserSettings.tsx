@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { UIEvent } from "react";
-import { Accessibility, Bell, Code, Gamepad2, Keyboard, Languages, LogOut, Mic, MessagesSquare, Monitor, Palette, Pencil, Plug, Search, ShieldCheck, User as UserIcon, X } from "lucide-react";
+import { Accessibility, Bell, Code, Gamepad2, Joystick, Keyboard, Languages, LogOut, Mic, MessagesSquare, Monitor, Palette, Pencil, Plug, Search, ShieldCheck, User as UserIcon, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
@@ -21,6 +21,7 @@ import { settingsSlots } from "./settings/slots";
 import { blockedByUnsaved } from "./settings/unsaved";
 import { VoiceVideoPage } from "./settings/VoiceVideoPage";
 import { WindowsPage } from "./settings/WindowsPage";
+import { RegisteredGamesPage } from "./settings/RegisteredGamesPage";
 
 type NavIcon = typeof UserIcon;
 
@@ -54,6 +55,7 @@ const ALL_SECTIONS: SectionDef[] = [
   { id: "language", label: "Language & Time", icon: Languages, group: "Experience", keywords: ["language", "locale", "time format", "12-hour", "24-hour", "clock"] },
   { id: "windows", label: "Windows Settings", icon: Monitor, group: "Experience", desktopOnly: true, keywords: ["startup", "tray", "minimize", "close", "autostart", "login", "open on startup"] },
   { id: "activity", label: "Activity Privacy", icon: Gamepad2, group: "Games & Apps", outline: ["What Activity I Share", "Where I Share Activity"], keywords: ["status", "games", "share", "join"] },
+  { id: "games", label: "Registered Games", icon: Joystick, group: "Games & Apps", desktopOnly: true, keywords: ["game", "detection", "detected", "add", "playing", "activity", "running"] },
   { id: "connections", label: "Connected Apps", icon: Plug, group: "Games & Apps", outline: ["Connections", "Authorized Apps"], keywords: ["connections", "accounts", "authorized", "integrations"] },
   { id: "developer", label: "Advanced", icon: Code, group: "Other", keywords: ["developer", "developer mode", "application test mode", "ids", "api"] },
   { id: "profiles", label: "Profiles", icon: UserIcon, group: "", hidden: true },
@@ -261,6 +263,8 @@ export function UserSettings({ section }: { section?: string }) {
         return <ContentSocialPage onOpen={open} />;
       case "activity":
         return <ActivityPrivacyPage />;
+      case "games":
+        return <RegisteredGamesPage />;
       case "connections":
         return <ConnectedAppsPage />;
       default:

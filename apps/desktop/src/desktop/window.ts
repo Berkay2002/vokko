@@ -17,3 +17,14 @@ export async function syncWindowTheme(background: string, scheme: "dark" | "ligh
     console.warn("[desktop] cannot sync the window theme", error);
   }
 }
+
+/** The installed app version (from the Tauri config), or null in the browser. */
+export async function getAppVersion(): Promise<string | null> {
+  if (!isDesktop()) return null;
+  try {
+    const { getVersion } = await import("@tauri-apps/api/app");
+    return await getVersion();
+  } catch {
+    return null;
+  }
+}

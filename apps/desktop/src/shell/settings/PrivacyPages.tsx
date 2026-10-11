@@ -5,6 +5,8 @@ import { useStore } from "../../api/store";
 import { RelationshipType } from "../../api/types";
 import { Avatar, GuildIcon } from "../Avatar";
 import { Category, Field, Page, RadioGroup, SwitchRow, Unavailable } from "./controls";
+import { isDesktop } from "../../desktop";
+import { ShareActivitySwitch } from "./RegisteredGamesPage";
 import { InfoBanner, RelatedSetting, SubHeading } from "./smControls";
 
 /**
@@ -134,9 +136,17 @@ export function ActivityPrivacyPage() {
   const list = order.map(id => guilds[id]).filter((g): g is NonNullable<typeof g> => !!g && g.name.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <Page title="Activity Privacy">
-      <InfoBanner>Vokko has no game or activity status yet. These settings are laid out for when it does, and cannot be changed now.</InfoBanner>
+      {isDesktop() ? (
+        <InfoBanner>Games are detected by the desktop app. Only “Share my activity” can be changed so far; the rest is laid out for later.</InfoBanner>
+      ) : (
+        <InfoBanner>Game and activity status comes from the desktop app. These settings are laid out for it, and cannot be changed in the browser.</InfoBanner>
+      )}
       <Category title="What Activity I Share">
-        <SwitchRow label="Share my activity" note="Share information about the games you play and the apps you use." checked={false} disabled onChange={noop} />
+        {isDesktop() ? (
+          <ShareActivitySwitch />
+        ) : (
+          <SwitchRow label="Share my activity" note="Share information about the games you play and the apps you use." checked={false} disabled onChange={noop} />
+        )}
         <SwitchRow label="Share when I go online" note="Let friends get a push notification when you go online." checked={false} disabled onChange={noop} />
       </Category>
       <Category title="Where I Share Activity">

@@ -8,6 +8,7 @@ import { resolveProfile, themeVars } from "../perks/profile";
 import { TagChip } from "../perks/TagChip";
 import { Popout } from "../ui";
 import { InVoiceCard } from "../voice";
+import { ActivityCard, usePlaying } from "./ActivityLine";
 import { Avatar } from "./Avatar";
 import { openDirectMessage } from "./actions";
 import { openModal } from "./modalStore";
@@ -49,6 +50,7 @@ export function ProfileCardHost() {
   const member = useStore(s => (userId && guildId ? s.members[guildId]?.[userId] : undefined));
   const guild = useStore(s => (guildId ? s.guilds[guildId] : undefined));
   const presence = useStore(s => (userId ? s.presences[userId] : undefined));
+  const playing = usePlaying(userId);
   const isMe = useStore(s => s.me?.id === userId);
   const relationship = useStore(s => (userId ? s.relationships[userId] : undefined));
   const open = !!anchor && !!user;
@@ -78,6 +80,7 @@ export function ProfileCardHost() {
               {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
             </div>
             {presence?.custom_status && <div className="profile-status">{presence.custom_status}</div>}
+            {playing && <ActivityCard activity={playing} />}
             <InVoiceCard userId={user.id} onOpen={close} />
             <div className="profile-actions">
               {isMe ? (

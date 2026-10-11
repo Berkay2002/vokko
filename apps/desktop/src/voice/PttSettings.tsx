@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Field, Slider } from "../shell/settings/controls";
 import { setPttKey, setPttReleaseMs } from "./engine";
-import { acceleratorFromEvent } from "./ptt";
+import { acceleratorFromEvent, probeShortcut, usePttGlobal } from "./ptt";
 import { useVoice } from "./store";
 
 /** Push-to-talk keybind recorder and release delay, shown in Voice & Video settings while the input mode is Push to Talk. */
@@ -9,6 +9,9 @@ export function PttSettings() {
   const key = useVoice(s => s.settings.pttKey);
   const release = useVoice(s => s.settings.pttReleaseMs);
   const [recording, setRecording] = useState(false);
+  const [probeNote, setProbeNote] = useState<string | null>(null);
+  const refused = usePttGlobal(s => s.refused);
+  const inCall = useVoice(s => s.channelId !== null);
 
   useEffect(() => {
     if (!recording) return;
@@ -23,10 +26,13 @@ export function PttSettings() {
       if (!accelerator) return; // wait for a non-modifier key
       setPttKey(accelerator);
       setRecording(false);
+      setProbeNote(null);
+      // While in a call with the same key the shortcut is already ours: probing would only report "already registered".
+      if (!(inCall && key === accelerator)) void probeShortcut(accelerator).then(setProbeNote);
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [recording]);
+  }, [recording, inCall, key]);
 
   return (
     <>
@@ -45,6 +51,11 @@ export function PttSettings() {
           )}
         </div>
       </Field>
+      {(refused ?? probeNote) && (
+        <p className="field-error" role="alert" data-testid="ptt-refused">
+          {refused ?? probeNote}
+        </p>
+      )}
       <Field label="Push to Talk release delay">
         <Slider label="Push to Talk release delay" value={release} min={0} max={2000} step={10} onChange={setPttReleaseMs} format={v => `${v} ms`} />
       </Field>

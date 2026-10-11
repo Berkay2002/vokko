@@ -121,6 +121,56 @@
   color: var(--interactive-icon-hover);
 }
 
+/* ---- window controls (desktop app off macOS: the OS frame is removed and the page draws these) ---- */
+.window-controls {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-self: stretch;
+  margin-left: 12px;
+  -webkit-app-region: no-drag;
+}
+
+.window-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  color: var(--interactive-icon-default);
+}
+
+.window-control:hover {
+  background: var(--background-mod-subtle);
+  color: var(--interactive-icon-hover);
+}
+
+.window-control:active {
+  background: var(--background-mod-normal);
+}
+
+.window-control-close:hover,
+.window-control-close:active {
+  background: var(--status-danger);
+  color: var(--white);
+}
+
+.title-bar:has(.window-controls) {
+  padding-right: 0;
+}
+
+/* The same strip for screens without the title bar (sign-in, splash, invite page). */
+.window-frame {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+  height: var(--title-bar-height);
+}
+
 /* ---- server rail ---- */
 .server-rail {
   flex: none;
@@ -1351,6 +1401,80 @@
   margin-top: 8px;
   color: var(--text-default);
   font-size: 14px;
+}
+
+/* ---- activity ("Playing X") ---- */
+.activity-line strong,
+.member-status strong,
+.dm-sub strong {
+  font-weight: 600;
+}
+
+.dm-sub:has(strong) {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.activity-elapsed {
+  opacity: 0.8;
+}
+
+.activity-card {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--background-mod-subtle);
+}
+
+.activity-card-heading {
+  margin-bottom: 8px;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.activity-card-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.activity-card-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--background-mod-strong);
+  color: var(--interactive-icon-default);
+}
+
+.activity-card-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.activity-card-name {
+  overflow: hidden;
+  color: var(--text-default);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.activity-card-time {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
 }
 
 .profile-actions {

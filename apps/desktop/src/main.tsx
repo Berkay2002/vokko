@@ -13,6 +13,7 @@ import { bootstrap } from "./api/auth";
 import { MOCK } from "./api/config";
 import * as desktop from "./desktop";
 import { initDesktop } from "./desktop";
+import { startGameDetection } from "./activity";
 import { gateway } from "./api/gateway";
 import * as rest from "./api/rest";
 import * as store from "./api/store";
@@ -44,6 +45,7 @@ import "./voice";
 bootstrap();
 startNotify();
 void initDesktop(); // deep links + updater + tray unread dot; no-op outside the Tauri webview
+startGameDetection(); // desktop only: detected game goes out as presence
 
 // Mock mode only: expose internals to Playwright scripts and the console (no effect in real builds).
 if (MOCK) (window as unknown as { __vokko: unknown }).__vokko = { gateway, desktop, ...rest, ...store };

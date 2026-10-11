@@ -7,6 +7,7 @@ import { TagChip } from "../perks/TagChip";
 import { Avatar } from "./Avatar";
 import { closeDirectMessage } from "./actions";
 import { useIsMuted } from "./localState";
+import { ActivityLine, usePlaying } from "./ActivityLine";
 import { dmContextItems } from "./menus";
 import { openModal } from "./modalStore";
 
@@ -20,6 +21,7 @@ function DmRow({ channel }: { channel: Channel }) {
   const recipients = channel.recipients ?? [];
   const group = channel.type === ChannelType.GroupDM;
   const first = recipients[0];
+  const playing = usePlaying(group ? null : first?.id);
 
   return (
     <li className="dm-row-wrap">
@@ -43,6 +45,7 @@ function DmRow({ channel }: { channel: Channel }) {
             {!group && <span className="dm-tag" aria-hidden="true"><TagChip tag={first?.primary_guild} /></span>}
           </span>
           {group && <span className="dm-sub">{recipients.length + 1} members</span>}
+          {playing && <ActivityLine activity={playing} className="dm-sub" />}
         </span>
         {mentions > 0 && <span className="count-badge">{mentions}</span>}
       </NavLink>

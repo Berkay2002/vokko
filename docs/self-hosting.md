@@ -215,6 +215,10 @@ cd deploy && docker compose up -d --build        # add --profile web if you run 
 
 Migrations are embedded in the binary and applied on start; the old container keeps serving until the new one is built. Back up first: migrations only move forward, so rolling back means restoring the dump taken before the upgrade. PostgreSQL major upgrades (16 to 17) need a dump and restore, not just a tag change.
 
+## Desktop app updates
+
+The desktop app updates itself only if it was built for it. Updates are off by default: a build without updater settings never contacts a server for updates, and Windows Settings > Updates says so. To turn them on for your own builds, put a `plugins.updater` entry (your signing public key and an HTTPS endpoint that serves the update manifest) into the Tauri config at build time through `TAURI_CONFIG`, and sign the bundles with your private key. The steps, the manifest format and the in-app flow (check, download progress, "Restart to update") are in [desktop-release.md](desktop-release.md#updater). The endpoint is fixed when the app is built; it is not a server setting, and Vokko does not host update files for you.
+
 ## Reverse proxy and TLS
 
 The bundled `web` profile already runs Caddy with automatic certificates (`deploy/Caddyfile`). If you run your own Caddy on the host and want only the server container, publish the server on loopback (the default), set `VOKKO_TRUST_PROXY=on` and `VOKKO_PUBLIC_URL=https://chat.example.com`, and use:

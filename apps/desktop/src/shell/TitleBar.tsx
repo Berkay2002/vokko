@@ -5,10 +5,12 @@ import { ChannelType } from "../api/types";
 import { Tooltip } from "../ui";
 import { InboxPopout } from "./Inbox";
 import { closeModal, openModal, useModals } from "./modalStore";
+import { useRegisterTitleBar, WindowControls } from "./WindowControls";
 
-/** The 32 px web title bar: current page title centred, Inbox and Help on the right (desktop builds draw native chrome instead). Help opens the keybinds page, the only shortcut list we have. */
+/** The 32 px title bar: current page title centred, Inbox and Help on the right, and in the desktop app (off macOS) the window buttons after them and a drag region over the whole bar. Help opens the keybinds page, the only shortcut list we have. */
 export function TitleBar() {
   const [inboxButton, setInboxButton] = useState<HTMLElement | null>(null);
+  useRegisterTitleBar();
   const inboxOpen = useModals(s => s.modal?.type === "inbox");
   const title = useStore(s => {
     const channel = s.route.channelId ? s.channels[s.route.channelId] : undefined;
@@ -17,7 +19,7 @@ export function TitleBar() {
     return { icon: "dm" as const, text: dmName(channel) };
   });
   return (
-    <header className="title-bar">
+    <header className="title-bar" data-tauri-drag-region="deep">
       <div className="title-bar-title">
         {title.icon === "friends" && <Users size={18} />}
         {title.icon === "hash" && <Hash size={18} />}
@@ -36,6 +38,7 @@ export function TitleBar() {
           </button>
         </Tooltip>
       </div>
+      <WindowControls />
       <InboxPopout anchor={inboxButton} open={inboxOpen} />
     </header>
   );

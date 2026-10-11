@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::{Notify, mpsc};
-use vokko_protocol::api::{GatewayEvent, GatewayOp, GatewayPayload};
+use vokko_protocol::api::{Activity, GatewayEvent, GatewayOp, GatewayPayload};
 
 /// Close code for a connection that was replaced by a newer one of the same session.
 pub const CLOSE_REPLACED: u16 = 4000;
@@ -213,9 +213,14 @@ impl Session {
     }
 }
 
+/// The activities one gateway session reported: `(session id, list)`.
+type SessionActivities = (String, Vec<Activity>);
+
 pub struct Hub {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
     connections: Mutex<HashMap<i64, usize>>,
+    /// Activities per user, one entry per gateway session that set a non-empty list (the newest set is last).
+    activities: Mutex<HashMap<i64, Vec<SessionActivities>>>,
     identifies: Mutex<HashMap<i64, (Instant, u32)>>,
     preauth: Mutex<HashMap<IpAddr, usize>>,
     capacity: usize,
@@ -228,6 +233,7 @@ impl Hub {
         Self {
             sessions: Mutex::new(HashMap::new()),
             connections: Mutex::new(HashMap::new()),
+            activities: Mutex::new(HashMap::new()),
             identifies: Mutex::new(HashMap::new()),
             preauth: Mutex::new(HashMap::new()),
             capacity,
@@ -314,6 +320,39 @@ impl Hub {
             return true;
         }
         false
+    }
+
+    /// Records the activities `session_id` reports (an empty list withdraws them) and returns what the user shows now: the list
+    /// the newest reporting session set. Another session's empty list therefore never wipes a game running elsewhere.
+    pub fn set_session_activities(&self, user_id: i64, session_id: &str, list: Vec<Activity>) -> Vec<Activity> {
+        let mut activities = lock(&self.activities);
+        let entries = activities.entry(user_id).or_default();
+        entries.retain(|(id, _)| id != session_id);
+        if !list.is_empty() {
+            entries.push((session_id.to_owned(), list));
+        }
+        let shown = entries.last().map(|(_, list)| list.clone()).unwrap_or_default();
+        if entries.is_empty() {
+            activities.remove(&user_id);
+        }
+        shown
+    }
+
+    /// The connection of `session_id` is gone: its activities go with it. `Some(shown)` is what the user shows now when that
+    /// changed anything (the session had reported a list), `None` when the session had no activity.
+    pub fn clear_session_activities(&self, user_id: i64, session_id: &str) -> Option<Vec<Activity>> {
+        let mut activities = lock(&self.activities);
+        let entries = activities.get_mut(&user_id)?;
+        let before = entries.len();
+        entries.retain(|(id, _)| id != session_id);
+        if entries.len() == before {
+            return None;
+        }
+        let shown = entries.last().map(|(_, list)| list.clone()).unwrap_or_default();
+        if entries.is_empty() {
+            activities.remove(&user_id);
+        }
+        Some(shown)
     }
 
     pub fn is_online(&self, user_id: i64) -> bool {

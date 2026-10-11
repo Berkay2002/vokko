@@ -397,6 +397,69 @@ pub struct Presence {
     pub user_id: Snowflake,
     pub status: PresenceStatus,
     pub custom_status: Option<String>,
+    /// What the user is doing (a detected game on the desktop app); at most one for now. Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub activities: Vec<Activity>,
+}
+
+/// An activity shown next to a user's presence. Only type 0 ("Playing") exists so far.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Activity {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamps: Option<ActivityTimestamps>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityTimestamps {
+    /// Unix time in milliseconds when the activity began.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<i64>,
+}
+
+impl Activity {
+    /// "Playing".
+    pub const PLAYING: u8 = 0;
+    pub const MAX_NAME_CHARS: usize = 128;
+    /// Most activities a user can have at once.
+    pub const MAX_PER_PRESENCE: usize = 1;
+
+    /// Whether a client-supplied activity list is acceptable: at most one entry, type 0, a name of 1 to 128 characters (code
+    /// points) that shows something and holds no control, zero-width or bidirectional-override characters, and a start time
+    /// that is not negative.
+    pub fn list_is_valid(list: &[Activity]) -> bool {
+        list.len() <= Self::MAX_PER_PRESENCE
+            && list.iter().all(|activity| {
+                activity.kind == Self::PLAYING
+                    && Self::name_is_valid(&activity.name)
+                    && activity.timestamps.as_ref().and_then(|timestamps| timestamps.start).is_none_or(|start| start >= 0)
+            })
+    }
+
+    fn name_is_valid(name: &str) -> bool {
+        name.chars().count() <= Self::MAX_NAME_CHARS && !name.chars().any(|c| c.is_control() || is_invisible(c)) && name.chars().any(|c| !c.is_whitespace())
+    }
+}
+
+/// Characters that take no space or reorder the text around them (zero-width, directional marks and overrides, soft hyphen, fillers).
+fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{034F}'
+            | '\u{061C}'
+            | '\u{115F}'
+            | '\u{1160}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2069}'
+            | '\u{3164}'
+            | '\u{FEFF}'
+            | '\u{FFA0}'
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1815,6 +1878,9 @@ pub struct PresenceUpdateRequest {
     pub status: PresenceStatus,
     #[serde(default)]
     pub custom_status: Option<String>,
+    /// Absent keeps the current activities, an empty list clears them.
+    #[serde(default)]
+    pub activities: Option<Vec<Activity>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2535,6 +2601,18 @@ mod tests {
         let parsed: VoiceState = serde_json::from_value(state).expect("state");
         assert_eq!(GatewayEvent::VoiceStateUpdate(Box::new(parsed)).name(), "VOICE_STATE_UPDATE");
         assert_eq!(serde_json::to_value(GatewayOp::VoiceStateUpdate).expect("op"), json!(4));
+    }
+
+    #[test]
+    fn activity_names_must_show_something_and_hold_no_invisible_characters() {
+        let playing = |name: &str| Activity { name: name.to_owned(), kind: Activity::PLAYING, timestamps: None };
+        assert!(Activity::list_is_valid(&[playing("Elden Ring")]));
+        assert!(Activity::list_is_valid(&[playing("Pokémon 🎮")]));
+        assert!(Activity::list_is_valid(&[playing(&"é".repeat(128))]));
+        assert!(!Activity::list_is_valid(&[playing(&"é".repeat(129))]));
+        for bad in ["", "   ", "\n", "A\nB", "\u{200B}", "A\u{200B}B", "A\u{202E}B", "\u{2066}x", "\u{FEFF}", "\u{3164}", "tab\there"] {
+            assert!(!Activity::list_is_valid(&[playing(bad)]), "{bad:?} must be rejected");
+        }
     }
 
     #[test]
