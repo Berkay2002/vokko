@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 import type { Message, Snowflake } from '../api/types';
-import { ApiRequestError, Modal, useMe, useReadState } from './shell';
+import { ApiRequestError, Modal, markGuildRead, useMe, useReadState } from './shell';
 import { ChatProvider, useChat, type ChatActions } from './ChatContext';
 import { Composer } from './Composer';
 import { MessageList, type MessageListHandle } from './MessageList';
 import { TypingIndicator } from './TypingIndicator';
 import { Lightbox } from './Attachments';
+import { ReactionsModal } from './ReactionsModal';
 import { Markdown } from './markdown';
 import { Avatar } from './Avatar';
 import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, addFiles, onUploadNotice } from './draftStore';
@@ -31,6 +32,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
   const [deleting, setDeleting] = useState<DeleteRequest | null>(null);
   const [link, setLink] = useState<string | null>(null);
   const [image, setImage] = useState<ImageView | null>(null);
+  const [reactionsOf, setReactionsOf] = useState<Message | null>(null);
   const [focusToken, setFocusToken] = useState(0);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
@@ -48,7 +50,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
   const lastReadRef = useRef(lastRead);
   lastReadRef.current = lastRead;
   useEffect(() => {
-    setReplyTo(null); setEditingId(null); setDeleting(null); setImage(null);
+    setReplyTo(null); setEditingId(null); setDeleting(null); setImage(null); setReactionsOf(null);
     messageStore.open(channelId, lastReadRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId]);
@@ -73,6 +75,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     jumpTo: id => { void messageStore.jumpToMessage(channelId, id); },
     openLink: href => setLink(href),
     openImage: (message, index) => setImage({ message, index }),
+    viewReactions: m => setReactionsOf(m),
   }), [channelId, requestDelete]);
 
   const stopEditing = useCallback(() => { setEditingId(null); setFocusToken(n => n + 1); }, []);
@@ -93,6 +96,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
       footer={<button type="button" className="chat-btn primary" onClick={() => setNotice(null)}>Okay</button>}>
       <p className="chat-modal-text">{notice?.body}</p>
     </Modal>
+    <ReactionsModal message={reactionsOf} onClose={() => setReactionsOf(null)} />
     {image && <Lightbox message={image.message} index={image.index} onClose={() => setImage(null)} />}
   </ChatProvider>;
 }
@@ -138,11 +142,15 @@ function ChatBody(p: BodyProps) {
     return () => clearTimeout(t);
   }, [newest, read, state.hasMoreAfter, p.atBottom, focused, p.channelId, mentionCount]);
 
-  // Escape (outside editing/dialogs): mark the channel read and jump to the present.
+  // Escape (outside editing/dialogs): mark the channel read and jump to the present. Shift+Escape: mark the whole server read.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || e.shiftKey) return;
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
       if (document.querySelector('[role="dialog"], [role="menu"], .chat-edit, .chat-autocomplete')) return;
+      if (e.shiftKey) {
+        if (chat.guildId) void markGuildRead(chat.guildId).catch(() => undefined);
+        return;
+      }
       const last = state.messages[state.messages.length - 1];
       if (state.hasMoreAfter) void messageStore.jumpToPresent(p.channelId);
       else p.list.current?.scrollToBottom();
@@ -150,7 +158,7 @@ function ChatBody(p: BodyProps) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [p.channelId, p.list, state.messages, state.hasMoreAfter]);
+  }, [p.channelId, p.list, state.messages, state.hasMoreAfter, chat.guildId]);
 
   const editLast = useCallback(() => {
     for (let i = state.messages.length - 1; i >= 0; i--) {

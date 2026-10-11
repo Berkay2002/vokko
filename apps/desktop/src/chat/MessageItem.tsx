@@ -7,9 +7,10 @@ import { Tooltip, useContextMenu, type MenuItem } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { Attachments } from './Attachments';
+import { Embeds } from './Embeds';
 import { Reactions } from './Reactions';
 import { EmojiPickerPopout } from './EmojiPicker';
-import { quickReactions } from './emojiData';
+import { emojiShortcodeLabel, frequentEmoji, quickReactions } from './emojiData';
 import { messageStore } from './messageStore';
 import { isSystemMessage, type PendingMessage } from './messageState';
 import { fromDisplay, toDisplay, type MentionToken } from './mentionText';
@@ -115,7 +116,9 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const chat = useChat();
   const menu = useContextMenu();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [menuPickerOpen, setMenuPickerOpen] = useState(false);
   const addBtn = useRef<HTMLButtonElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
   const date = useMemo(() => new Date(message.timestamp), [message.timestamp]);
   const isMine = message.author.id === chat.me.id;
   const system = isSystemMessage(message);
@@ -130,8 +133,20 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
 
   function items(): MenuItem[] {
     const out: MenuItem[] = [];
-    // Order follows discord-ui-inventory A2: G4 edit, reply, forward, thread | G5 copy text, pin, mark unread, copy link | G6 delete | G7 id.
-    // Features that don't exist yet are listed disabled.
+    // Order follows discord-ui-inventory A2: G3 add/view reactions | G4 edit, reply, forward, thread | G5 copy text, pin, mark unread,
+    // copy link | G6 delete | G7 id. Features that don't exist yet are listed disabled.
+    if (!pending && !system) {
+      out.push({
+        id: 'add-reaction', label: 'Add Reaction', icon: <SmilePlus size={16} />,
+        children: [
+          ...frequentEmoji(12).map((ch): MenuItem => ({ id: `react-${ch}`, label: emojiShortcodeLabel(ch), icon: <span className="chat-menu-emoji">{ch}</span>, onSelect: () => chat.actions.react(message, { id: null, name: ch }) })),
+          { type: 'separator' },
+          { id: 'react-more', label: 'View More', onSelect: () => setMenuPickerOpen(true) },
+        ],
+      });
+      if (message.reactions.length > 0) out.push({ id: 'view-reactions', label: 'View Reactions', onSelect: () => chat.actions.viewReactions(message) });
+      out.push({ type: 'separator' });
+    }
     if (canEdit) out.push({ id: 'edit', label: 'Edit Message', icon: <Pencil size={16} />, onSelect: () => chat.actions.edit(message) });
     if (!system) {
       out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={16} />, onSelect: () => chat.actions.reply(message) });
@@ -180,7 +195,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
     </div>;
   }
 
-  return <div className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id}
+  return <div ref={rowRef} className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id}
     onMouseMove={e => { if (e.shiftKey !== shift) setShift(e.shiftKey); }} onMouseLeave={() => shift && setShift(false)}
     onContextMenu={e => { if (!pending && !(e.target instanceof HTMLAnchorElement)) menu.open(e, items()); }}>
     {!grouped && <ReplyPreview message={message} />}
@@ -199,6 +214,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
         {message.content && <Markdown content={message.content} ctx={chat.md} className="chat-content" suffix={message.edited_timestamp
           ? <Tooltip content={formatFullDate(new Date(message.edited_timestamp))}><span className="chat-edited">(edited)</span></Tooltip> : undefined} />}
         <Attachments message={message} />
+        <Embeds message={message} />
         <Reactions message={message} />
       </>}
       {failed && <div className="chat-failed" role="alert">
@@ -207,6 +223,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
         <button type="button" onClick={() => messageStore.discardPending(message.channel_id, pending.nonce)}>Delete</button>
       </div>}
     </div>
+    <EmojiPickerPopout anchor={rowRef} open={menuPickerOpen} onClose={() => setMenuPickerOpen(false)} onPick={e => { setMenuPickerOpen(false); chat.actions.react(message, e); }} />
     {showToolbar && <div className={`chat-toolbar${pickerOpen ? ' open' : ''}`} role="toolbar" aria-label="Message actions">
       {quick.map(e => <Tooltip key={e} content="React" side="top"><button type="button" className="chat-toolbar-btn emoji" aria-label={`React with ${e}`} onClick={() => chat.actions.react(message, { id: null, name: e })}>{e}</button></Tooltip>)}
       <span className="chat-toolbar-sep" role="separator" />
