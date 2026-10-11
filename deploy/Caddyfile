@@ -1,0 +1,23 @@
+# Used by deploy/web.Dockerfile. One origin for the SPA, REST and the gateway websocket, so the browser never makes a
+# cross-origin request (the server's CORS allowlist is localhost/Tauri only).
+{
+	# Do not serve the admin API on a published container.
+	admin off
+}
+
+{$VOKKO_SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	@server path /api/* /gateway
+	handle @server {
+		# Caddy appends the client address to X-Forwarded-For and upgrades websockets automatically.
+		reverse_proxy server:8710
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+	}
+}

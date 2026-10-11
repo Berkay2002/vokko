@@ -1,0 +1,78 @@
+# Vokko self-hosting stack. Run from this directory:
+#   cp .env.example .env && $EDITOR .env            # set POSTGRES_PASSWORD and VOKKO_PUBLIC_URL
+#   docker compose up -d --build                    # postgres + vokko-server
+#   docker compose --profile web up -d --build      # ... plus the web client and Caddy (TLS) on ports 80/443
+# See docs/self-hosting.md.
+name: vokko
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vokko
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: vokko
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vokko -d vokko"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: vokko-server:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://vokko:${POSTGRES_PASSWORD}@postgres:5432/vokko
+      VOKKO_BIND: 0.0.0.0:8710
+      VOKKO_DATA_DIR: /data
+      VOKKO_PUBLIC_URL: ${VOKKO_PUBLIC_URL:-http://localhost:8710}
+      VOKKO_MAX_UPLOAD_MB: ${VOKKO_MAX_UPLOAD_MB:-25}
+      VOKKO_UNFURL: ${VOKKO_UNFURL:-on}
+      # `on` only when every request arrives through a reverse proxy that appends the client address (the bundled Caddy does).
+      VOKKO_TRUST_PROXY: ${VOKKO_TRUST_PROXY:-off}
+      RUST_LOG: ${RUST_LOG:-vokko_server=info,warn}
+    volumes:
+      - vokko-data:/data
+    ports:
+      # Loopback by default: put Caddy (or another TLS proxy) in front. Use 0.0.0.0:8710 only on a trusted LAN.
+      - "${VOKKO_SERVER_LISTEN:-127.0.0.1:8710}:8710"
+
+  # Optional: the browser client plus a Caddy that terminates TLS and proxies /api and /gateway to the server on one origin
+  # (the server's CORS only allows localhost and Tauri origins, so a same-origin proxy is the supported web setup).
+  web:
+    profiles: ["web"]
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+      args:
+        # Baked into the bundle at build time; must equal VOKKO_PUBLIC_URL. Rebuild the web image when it changes.
+        VITE_VOKKO_API: ${VOKKO_PUBLIC_URL:-http://localhost:8710}
+    image: vokko-web:local
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      # `localhost` or `:80` = plain HTTP; a real domain (matching VOKKO_PUBLIC_URL) = automatic Let's Encrypt certificates.
+      VOKKO_SITE_ADDRESS: ${VOKKO_SITE_ADDRESS:-:80}
+    ports:
+      - "${VOKKO_WEB_HTTP_PORT:-80}:80"
+      - "${VOKKO_WEB_HTTPS_PORT:-443}:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  pgdata:
+  vokko-data:
+  caddy-data:
+  caddy-config:

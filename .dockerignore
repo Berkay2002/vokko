@@ -1,0 +1,13 @@
+.git
+.github
+.claude
+.references
+**/.env*
+**/target
+/target
+**/node_modules
+**/dist
+/data
+/artifacts
+*.log
+deploy/.env
