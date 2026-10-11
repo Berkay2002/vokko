@@ -318,7 +318,9 @@ function onMessageCreate(message: Message): void {
   if (mine) {
     state.setReadState({ ...read, last_message_id: message.id, mention_count: 0 });
   } else {
-    const mentioned = message.mention_everyone || message.mentions.some(u => u.id === state.me?.id);
+    // In DMs and group DMs every ordinary message counts as a mention (the server's counter does the same).
+    const dm = !channel.guild_id && (message.type === MessageType.Default || message.type === MessageType.Reply);
+    const mentioned = dm || message.mention_everyone || message.mentions.some(u => u.id === state.me?.id);
     state.setReadState({ ...read, mention_count: read.mention_count + (mentioned ? 1 : 0) });
   }
 }
@@ -680,13 +682,6 @@ export function guildUnread(s: AppState, guildId: Snowflake): { unread: boolean;
     mentions += channelMentionCount(s, channel.id);
   }
   return { unread, mentions };
-}
-
-/** Total unread DM mentions (for the home button badge). */
-export function dmMentionCount(s: AppState): number {
-  let total = 0;
-  for (const id of s.privateChannels) total += channelMentionCount(s, id);
-  return total;
 }
 
 /** Users currently typing in a channel (excluding me). */

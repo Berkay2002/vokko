@@ -1,7 +1,8 @@
 import { NavLink, useLocation } from "react-router";
-import { Plus, Users, X } from "lucide-react";
+import { Plus, Users, Volume2, X } from "lucide-react";
+import { useVoice } from "../voice";
 import { channelMentionCount, dmName, isChannelUnread, useStore } from "../api/store";
-import { ChannelType, RelationshipType, type Channel } from "../api/types";
+import { ChannelType, RelationshipType, type Channel, type PresenceStatus } from "../api/types";
 import { Tooltip, useContextMenu } from "../ui";
 import { TagChip } from "../perks/TagChip";
 import { Avatar } from "./Avatar";
@@ -10,6 +11,14 @@ import { useIsMuted } from "./localState";
 import { ActivityLine, usePlaying } from "./ActivityLine";
 import { dmContextItems } from "./menus";
 import { openModal } from "./modalStore";
+
+const STATUS_LABEL: Record<PresenceStatus, string> = { online: "online", idle: "idle", dnd: "do not disturb", invisible: "offline", offline: "offline" };
+
+/** The unread part of a DM's accessible name, shared with its rail item: "1 mention", "3 mentions", "unread" or nothing. */
+export function unreadLabel(mentions: number, unread: boolean): string | null {
+  if (mentions > 0) return `${mentions} mention${mentions === 1 ? "" : "s"}`;
+  return unread ? "unread" : null;
+}
 
 function DmRow({ channel }: { channel: Channel }) {
   const location = useLocation();
@@ -22,12 +31,28 @@ function DmRow({ channel }: { channel: Channel }) {
   const group = channel.type === ChannelType.GroupDM;
   const first = recipients[0];
   const playing = usePlaying(group ? null : first?.id);
+  // Subtitle under a 1:1 DM's name: "Playing X" (the main activity), else "In voice" while they sit in a voice channel we can see, else their custom status.
+  const inVoice = useVoice(s => !group && !!first && !!s.states[first.id]?.channel_id);
+  const status = useStore(s => (!group && first ? (s.presences[first.id]?.status ?? "offline") : null));
+  const custom = useStore(s => (!group && first ? s.presences[first.id]?.custom_status : null));
+  const name = dmName(channel);
+  // The link's name starts with the DM's name (Discord: "Alice (direct message)"), then unread state, presence and activity.
+  const label = [
+    name,
+    unreadLabel(muted ? 0 : mentions, unread && !muted),
+    status && STATUS_LABEL[status],
+    playing ? `playing ${playing.name}` : inVoice ? "in voice" : custom,
+    group ? `${recipients.length + 1} members` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <li className="dm-row-wrap">
       <NavLink
         to={`/channels/@me/${channel.id}`}
         className={`dm-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}`}
+        aria-label={label}
         onContextMenu={e => menu.open(e, dmContextItems(channel, { anchor: e.currentTarget }))}
       >
         {group || !first ? (
@@ -41,13 +66,21 @@ function DmRow({ channel }: { channel: Channel }) {
         )}
         <span className="dm-text">
           <span className="dm-name-row">
-            <span className="dm-name">{dmName(channel)}</span>
+            <span className="dm-name">{name}</span>
             {!group && <span className="dm-tag" aria-hidden="true"><TagChip tag={first?.primary_guild} /></span>}
           </span>
           {group && <span className="dm-sub">{recipients.length + 1} members</span>}
-          {playing && <ActivityLine activity={playing} className="dm-sub" />}
+          {playing ? (
+            <ActivityLine activity={playing} className="dm-sub dm-activity" />
+          ) : inVoice ? (
+            <span className="dm-sub dm-activity voice">
+              <Volume2 size={12} strokeWidth={2.5} aria-hidden="true" />
+              In voice
+            </span>
+          ) : (
+            custom && <span className="dm-sub dm-activity">{custom}</span>
+          )}
         </span>
-        {mentions > 0 && <span className="count-badge">{mentions}</span>}
       </NavLink>
       <Tooltip content="Close DM" side="top">
         <button type="button" className="dm-close" aria-label="Close DM" onClick={() => void closeDirectMessage(channel.id)}>

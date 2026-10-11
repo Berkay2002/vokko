@@ -24,8 +24,8 @@ async function openChannel(page: Page, name: string): Promise<void> {
   await page.locator('.chat-msg').first().waitFor();
 }
 
-/** The sidebar link of a DM by display name (its accessible name carries a presence prefix like "idle Bob"). */
-const dmLink = (page: Page, name: string): Locator => page.getByRole('link', { name: new RegExp(`(^|\\s)${name}$`, 'i') }).first();
+/** The sidebar link of a DM by display name (its accessible name starts with it, then unread state and presence: "Bob, idle, in voice"). */
+const dmLink = (page: Page, name: string): Locator => page.getByRole('link', { name: new RegExp(`^${name}(,|$)`, 'i') }).first();
 
 async function openDm(page: Page, name = 'Alice'): Promise<void> {
   await page.goto('/channels/@me?as=sam&mockLatency=0');

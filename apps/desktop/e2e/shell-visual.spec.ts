@@ -33,7 +33,7 @@ test('nav row is 40 px and DM row 44 px with no gap; DM rows show the server tag
   expect((await box(page, '.dm-row-wrap')).h).toBe(44);
   const [a, b] = [await rows.nth(0).boundingBox(), await rows.nth(1).boundingBox()];
   expect(b!.y - a!.y).toBe(44);
-  const bob = page.locator('.dm-row', { hasText: /^Bob\s*GG$/ });
+  const bob = page.locator('.dm-row', { hasText: /^Bob\s*GG/ }); // the activity subtitle ("In voice") follows
   await expect(bob.locator('.chat-server-tag')).toHaveText('GG');
   await bob.click();
   await expect(page).toHaveURL(/\/channels\/@me\/\d+$/);

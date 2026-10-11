@@ -419,7 +419,8 @@ export function seed(): void {
   say(dmAlice, R, "can you review the docs PR when you have a minute?", 180);
   const a2 = say(dmAlice, A, "sure, looking now", 175);
   say(dmAlice, A, "left two comments, mostly nits", 25);
-  sam.readStates.set(dmAlice.id, { channel_id: dmAlice.id, last_message_id: a2.id, mention_count: 0 });
+  // One unread DM message: Alice shows in the rail under Home with a "1" badge (every DM message counts as a mention).
+  sam.readStates.set(dmAlice.id, { channel_id: dmAlice.id, last_message_id: a2.id, mention_count: 1 });
 
   const dmBob = openDM(R, Bo);
   say(dmBob, Bo, "gg last night", 60 * 20);
@@ -430,5 +431,8 @@ export function seed(): void {
   say(group, N, "movie night on friday?", 600);
   say(group, Bo, "I'm in", 590);
   const gl = say(group, R, "same, I'll bring snacks", 585);
-  sam.readStates.set(group.id, { channel_id: group.id, last_message_id: gl.id, mention_count: 0 });
+  say(group, N, "I'll pick the movie", 300);
+  say(group, Bo, "nothing longer than two hours pls", 298);
+  // Two unread group messages: the group DM shows in the rail too, with a "2".
+  sam.readStates.set(group.id, { channel_id: group.id, last_message_id: gl.id, mention_count: 2 });
 }

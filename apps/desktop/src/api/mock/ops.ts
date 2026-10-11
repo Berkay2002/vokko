@@ -272,7 +272,8 @@ export function addMessage(input: NewMessage): MockMessage {
     if (userId === input.author_id) {
       state.last_message_id = message.id;
       state.mention_count = 0;
-    } else if (mentions.ids.includes(userId) || mentions.everyone) {
+    } else if (mentions.ids.includes(userId) || mentions.everyone || (!channel.guild_id && (message.type === MessageType.Default || message.type === MessageType.Reply))) {
+      // Like the server: every ordinary DM / group DM message counts as a mention of the other recipients.
       state.mention_count += 1;
     }
     account.readStates.set(channel.id, state);
