@@ -1,170 +1,114 @@
 import { useState } from "react";
-import {
-  Bird, Bone, Brain, Bug, Cat, Clover, Cloud, Compass, Crosshair, Crown, Diamond, DollarSign, Dog, Droplet, Droplets, Flame, Flower, Flower2, Gem, Heart, Leaf, LeafyGreen, Moon, Mountain, Orbit, Rabbit, Skull, Snail, Snowflake, Sparkles, Sprout, Sun, Sword, Trophy, Turtle, Umbrella, Volume2, Wallet, Wind, Worm, Zap, type LucideIcon,
-} from "lucide-react";
-import { Category, Field, Page, SwitchRow } from "./controls";
-import { DEVICE_NOTE, HEX_RE, useDeviceSetting } from "./deviceSettings";
+import { request } from "../../api/rest";
+import { appStore, useStore } from "../../api/store";
+import type { Guild } from "../../api/types";
+import { BADGES, HEX_COLOR_RE, TAG_RE, hexToInt, intToHex } from "../../perks/catalog";
+import { TagChip } from "../../perks/TagChip";
+import { Category, Field, Page } from "./controls";
+import { SaveBar } from "./SaveBar";
+import { errorText } from "./shared";
 
-export const BADGES: { id: string; label: string; Icon: LucideIcon }[] = [
-  { id: "sword", label: "Sword", Icon: Sword },
-  { id: "water-drop", label: "Water drop", Icon: Droplet },
-  { id: "skull", label: "Skull", Icon: Skull },
-  { id: "toadstool", label: "Toadstool", Icon: Umbrella },
-  { id: "moon", label: "Moon", Icon: Moon },
-  { id: "lightning", label: "Lightning", Icon: Zap },
-  { id: "leaf", label: "Leaf", Icon: Leaf },
-  { id: "heart", label: "Heart", Icon: Heart },
-  { id: "fire", label: "Fire", Icon: Flame },
-  { id: "compass", label: "Compass", Icon: Compass },
-  { id: "crosshairs", label: "Crosshairs", Icon: Crosshair },
-  { id: "flower", label: "Flower", Icon: Flower },
-  { id: "force", label: "Force", Icon: Orbit },
-  { id: "gem", label: "Gem", Icon: Gem },
-  { id: "lava", label: "Lava", Icon: Mountain },
-  { id: "psychic", label: "Psychic", Icon: Brain },
-  { id: "smoke", label: "Smoke", Icon: Cloud },
-  { id: "snow", label: "Snow", Icon: Snowflake },
-  { id: "sound", label: "Sound", Icon: Volume2 },
-  { id: "sun", label: "Sun", Icon: Sun },
-  { id: "wind", label: "Wind", Icon: Wind },
-  { id: "bunny", label: "Bunny", Icon: Rabbit },
-  { id: "dog", label: "Dog", Icon: Dog },
-  { id: "frog", label: "Frog", Icon: Turtle },
-  { id: "goat", label: "Goat", Icon: Bone },
-  { id: "cat", label: "Cat", Icon: Cat },
-  { id: "diamond", label: "Diamond", Icon: Diamond },
-  { id: "crown", label: "Crown", Icon: Crown },
-  { id: "trophy", label: "Trophy", Icon: Trophy },
-  { id: "money-bag", label: "Money bag", Icon: Wallet },
-  { id: "dollar-sign", label: "Dollar sign", Icon: DollarSign },
-  { id: "clover", label: "Clover", Icon: Clover },
-  { id: "blossom", label: "Blossom", Icon: Sparkles },
-  { id: "potted-plant", label: "Potted plant", Icon: Sprout },
-  { id: "maple-leaf", label: "Maple leaf", Icon: LeafyGreen },
-  { id: "wilted-flower", label: "Wilted flower", Icon: Flower2 },
-  { id: "butterfly", label: "Butterfly", Icon: Bird },
-  { id: "snail", label: "Snail", Icon: Snail },
-  { id: "caterpillar", label: "Caterpillar", Icon: Worm },
-  { id: "spider", label: "Spider", Icon: Bug },
-  { id: "bee", label: "Bee", Icon: Droplets },
-];
+const DEFAULT_PRIMARY = "#5865f2";
+const DEFAULT_SECONDARY = "#8d96f7";
 
-const COLOR_PRESETS: { primary: string; accent: string }[] = [
-  { primary: "#5865f2", accent: "#8d96f7" },
-  { primary: "#1f8b4c", accent: "#57d28f" },
-  { primary: "#d22d39", accent: "#f47b84" },
-  { primary: "#f8a300", accent: "#ffd166" },
-  { primary: "#0074e3", accent: "#74b7f5" },
-  { primary: "#b3269c", accent: "#e47fd2" },
-  { primary: "#7b4fd6", accent: "#b79bf0" },
-  { primary: "#36b5b0", accent: "#8fe3df" },
-];
+/** A colour as a native picker plus a hex text box; the parent keeps the raw text so partial input is not lost. */
+export function ColorField({ label, value, disabled, onChange }: { label: string; value: string; disabled: boolean; onChange(next: string): void }) {
+  const valid = HEX_COLOR_RE.test(value);
+  return (
+    <Field label={label}>
+      <div className="ss-color-field">
+        <input type="color" className="ss-color-picker" aria-label={`${label} picker`} value={valid ? value.toLowerCase() : "#000000"} disabled={disabled} onChange={e => onChange(e.target.value)} />
+        <input className="input" aria-label={label} value={value} maxLength={7} disabled={disabled} onChange={e => onChange(e.target.value)} />
+      </div>
+      {!valid && <p className="field-error">Use a hex color like #5865f2.</p>}
+    </Field>
+  );
+}
 
-const DEFAULT_TAG = { enabled: false, name: "", badge: "sword", primary: COLOR_PRESETS[0]!.primary, accent: COLOR_PRESETS[0]!.accent };
+interface TagDraft {
+  tag: string;
+  badge: string;
+  primary: string;
+  secondary: string;
+}
 
-const NAME_RE = /^[A-Za-z0-9]{0,4}$/;
+const EMPTY: TagDraft = { tag: "", badge: BADGES[0]!.id, primary: DEFAULT_PRIMARY, secondary: DEFAULT_SECONDARY };
+
+function draftOf(guild: Guild | undefined): TagDraft {
+  const t = guild?.tag;
+  return t ? { tag: t.tag, badge: t.badge, primary: intToHex(t.color_primary), secondary: intToHex(t.color_secondary) } : EMPTY;
+}
 
 export function TagPage({ guildId, canEdit }: { guildId: string; canEdit: boolean }) {
-  const [tag, setTag] = useDeviceSetting(guildId, "tag", DEFAULT_TAG);
-  const [draftName, setDraftName] = useState(tag.name);
-  const [primaryText, setPrimaryText] = useState(tag.primary);
-  const [accentText, setAccentText] = useState(tag.accent);
+  const guild = useStore(s => s.guilds[guildId]);
+  const saved = draftOf(guild);
+  const hasTag = !!guild?.tag;
+  const [draft, setDraft] = useState<TagDraft>(saved);
+  const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+  const disabled = !canEdit || state.busy;
 
-  const nameValid = NAME_RE.test(draftName);
-  const nameError = nameValid ? null : /^[A-Za-z0-9]+$/.test(draftName) ? "Tags can be at most 4 characters." : "Tags can only contain letters and numbers (up to 4).";
-  const badge = BADGES.find(b => b.id === tag.badge) ?? BADGES[0]!;
-  const BadgeIcon = badge.Icon;
-  const disabled = !canEdit;
-  const update = (patch: Partial<typeof tag>) => setTag({ ...tag, ...patch });
-  const setColors = (primary: string, accent: string) => {
-    setPrimaryText(primary);
-    setAccentText(accent);
-    update({ primary, accent });
+  const dirty = draft.tag !== saved.tag || draft.badge !== saved.badge || draft.primary.toLowerCase() !== saved.primary.toLowerCase() || draft.secondary.toLowerCase() !== saved.secondary.toLowerCase();
+  const tagValid = TAG_RE.test(draft.tag);
+  const colorsValid = HEX_COLOR_RE.test(draft.primary) && HEX_COLOR_RE.test(draft.secondary);
+  const tagError = draft.tag === "" ? null : tagValid ? null : "Tags are 1 to 4 letters or numbers.";
+  const update = (patch: Partial<TagDraft>) => setDraft(d => ({ ...d, ...patch }));
+
+  const send = async (tag: Record<string, unknown> | null): Promise<void> => {
+    setState({ busy: true, error: null });
+    try {
+      const next = await request<Guild>("PATCH", `/guilds/${guildId}`, { tag });
+      const s = appStore.getState();
+      appStore.setState({ guilds: { ...s.guilds, [next.id]: { ...s.guilds[next.id], ...next } } });
+      setDraft(draftOf(next));
+      setState({ busy: false, error: null });
+    } catch (e) {
+      setState({ busy: false, error: errorText(e) });
+    }
   };
-  const isDefaultColors = tag.primary.toLowerCase() === DEFAULT_TAG.primary && tag.accent.toLowerCase() === DEFAULT_TAG.accent;
-  const previewName = (nameValid ? draftName : tag.name) || "TAG";
+
+  const save = () => {
+    if (!tagValid) return setState({ busy: false, error: "Tags are 1 to 4 letters or numbers." });
+    if (!colorsValid) return setState({ busy: false, error: "Colors must be hex values like #5865f2." });
+    void send({ tag: draft.tag, badge: draft.badge, color_primary: hexToInt(draft.primary), color_secondary: hexToInt(draft.secondary) });
+  };
+
+  const previewColor = HEX_COLOR_RE.test(draft.primary) ? hexToInt(draft.primary) : 0;
 
   return (
     <Page title="Server Tag">
-      {!canEdit && <p className="settings-todo">You need the Manage Server permission to change the server tag.</p>}
-      <p className="settings-todo">Create a tag that your server members can display next to their name!</p>
+      {!canEdit && <p className="settings-todo">You need Manage Server to change the server tag.</p>}
+      <p className="settings-todo">Create a tag that your server members can display next to their name.</p>
       <div className="ss-tag-preview" aria-label="Server tag preview">
-        <span className="ss-tag-chip" style={{ color: tag.accent, background: `${tag.primary}33`, borderColor: tag.primary }}>
-          <BadgeIcon size={14} aria-hidden="true" />
-          <span className="ss-tag-chip-text">{previewName.toUpperCase()}</span>
-        </span>
-        <span className="ss-tag-preview-note">{tag.enabled ? "Members can display this tag." : "Server Tag is off."}</span>
+        <TagChip tag={{ tag: draft.tag || "TAG", badge: draft.badge, color_primary: previewColor }} guildName={guild?.name} />
+        <span className="ss-tag-preview-note">Members choose to wear this tag in User Settings &gt; Profiles.</span>
       </div>
-      <SwitchRow label="Enable Server Tag" checked={tag.enabled} disabled={disabled} onChange={enabled => update({ enabled })} />
       <Category title="Choose Name">
-        <Field label="Tag" note="Changing the tag requires members to reapply it to their profile.">
-          <input
-            className="input ss-tag-name"
-            aria-label="Server tag name"
-            value={draftName}
-            maxLength={12}
-            disabled={disabled}
-            placeholder="TAG"
-            onChange={e => {
-              setDraftName(e.target.value);
-              if (NAME_RE.test(e.target.value)) update({ name: e.target.value });
-            }}
-          />
-          {nameError && <p className="field-error">{nameError}</p>}
+        <Field label="Tag" note="1 to 4 letters or numbers. Changing the tag updates it for members who wear it.">
+          <input className="input ss-tag-name" aria-label="Server tag name" value={draft.tag} maxLength={8} disabled={disabled} placeholder="TAG" onChange={e => update({ tag: e.target.value })} />
+          {tagError && <p className="field-error">{tagError}</p>}
         </Field>
       </Category>
       <Category title="Choose Badge">
         <div className="ss-badge-grid" role="radiogroup" aria-label="Server tag badge">
           {BADGES.map(({ id, label, Icon }) => (
-            <button key={id} type="button" role="radio" aria-checked={tag.badge === id} aria-label={label} title={label} disabled={disabled} className={`ss-badge${tag.badge === id ? " selected" : ""}`} onClick={() => update({ badge: id })}>
+            <button key={id} type="button" role="radio" aria-checked={draft.badge === id} aria-label={label} title={label} disabled={disabled} className={`ss-badge${draft.badge === id ? " selected" : ""}`} onClick={() => update({ badge: id })}>
               <Icon size={20} aria-hidden="true" />
             </button>
           ))}
         </div>
       </Category>
       <Category title="Choose Color">
-        <div className="ss-swatch-row" role="radiogroup" aria-label="Color presets">
-          {COLOR_PRESETS.map(p => {
-            const on = tag.primary === p.primary && tag.accent === p.accent;
-            return <button key={p.primary} type="button" role="radio" aria-checked={on} aria-label={`Preset ${p.primary} and ${p.accent}`} disabled={disabled} className={`ss-swatch${on ? " selected" : ""}`} style={{ background: `linear-gradient(135deg, ${p.primary} 50%, ${p.accent} 50%)` }} onClick={() => setColors(p.primary, p.accent)} />;
-          })}
-        </div>
         <div className="ss-color-inputs">
-          <Field label="Custom Colors: Primary">
-            <input
-              className="input"
-              aria-label="Primary color"
-              value={primaryText}
-              maxLength={7}
-              disabled={disabled}
-              onChange={e => {
-                setPrimaryText(e.target.value);
-                if (HEX_RE.test(e.target.value)) update({ primary: e.target.value });
-              }}
-            />
-            {!HEX_RE.test(primaryText) && <p className="field-error">Use a hex color like #5865f2.</p>}
-          </Field>
-          <Field label="Accent">
-            <input
-              className="input"
-              aria-label="Accent color"
-              value={accentText}
-              maxLength={7}
-              disabled={disabled}
-              onChange={e => {
-                setAccentText(e.target.value);
-                if (HEX_RE.test(e.target.value)) update({ accent: e.target.value });
-              }}
-            />
-            {!HEX_RE.test(accentText) && <p className="field-error">Use a hex color like #8d96f7.</p>}
-          </Field>
+          <ColorField label="Primary" value={draft.primary} disabled={disabled} onChange={primary => update({ primary })} />
+          <ColorField label="Secondary" value={draft.secondary} disabled={disabled} onChange={secondary => update({ secondary })} />
         </div>
-        <button type="button" className="btn btn-link btn-sm" disabled={disabled || isDefaultColors} onClick={() => setColors(DEFAULT_TAG.primary, DEFAULT_TAG.accent)}>
-          Reset to default colors
-        </button>
       </Category>
-      <p className="settings-todo">Your Server Profile is private. Users will not be able to see it from a Server Tag.</p>
-      <p className="settings-todo">{DEVICE_NOTE}</p>
+      {canEdit && hasTag && (
+        <button type="button" className="btn btn-danger btn-sm" disabled={state.busy} onClick={() => void send(null)}>
+          Remove tag
+        </button>
+      )}
+      <SaveBar visible={canEdit && (dirty || state.error !== null)} busy={state.busy} error={state.error} onReset={() => (setDraft(saved), setState({ busy: false, error: null }))} onSave={save} />
     </Page>
   );
 }

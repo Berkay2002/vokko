@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { avatarUrl, guildIconUrl, guildInitials, useStore } from "../api/store";
-import type { Guild, PresenceStatus, Snowflake, User } from "../api/types";
+import type { Guild, GuildMember, PresenceStatus, Snowflake, User } from "../api/types";
+import { AvatarDecoration } from "../perks/AvatarDecoration";
 
 /** 10 px status badge (online dot, idle crescent, dnd bar, offline ring). Sits on a ring of the row background. */
 export function StatusBadge({ status, size = 10 }: { status: PresenceStatus; size?: number }) {
@@ -21,7 +22,12 @@ export function StatusBadge({ status, size = 10 }: { status: PresenceStatus; siz
 }
 
 export interface AvatarProps {
-  user: Pick<User, "id" | "avatar">;
+  user: Pick<User, "id" | "avatar"> & { avatar_decoration?: string | null };
+  /** The viewer's guild context: the member's per-server avatar wins over the user's own. Pass `guildId` to look the member up in the store. */
+  member?: Pick<GuildMember, "avatar"> | null;
+  guildId?: Snowflake | null;
+  /** Decoration id drawn around the avatar. Default: the user's own; `false` hides it. Only drawn from 32 px up. */
+  decoration?: string | null | false;
   size?: number;
   /** Show a presence badge using the store presence of this user. */
   status?: boolean;
@@ -30,12 +36,15 @@ export interface AvatarProps {
   className?: string;
 }
 
-export function Avatar({ user, size = 32, status, dim, className }: AvatarProps) {
+export function Avatar({ user, member, guildId, decoration, size = 32, status, dim, className }: AvatarProps) {
   const presence = useStore(s => (status ? s.presences[user.id]?.status ?? "offline" : undefined));
+  const guildMember = useStore(s => (member === undefined && guildId ? s.members[guildId]?.[user.id] : undefined));
   const style: CSSProperties = { width: size, height: size };
+  const decorationId = decoration === false || size < 32 ? null : decoration ?? user.avatar_decoration ?? null;
   return (
     <span className={`avatar ${className ?? ""}`} style={style}>
-      <img className={`avatar-img${dim ? " dim" : ""}`} src={avatarUrl(user)} alt="" width={size} height={size} draggable={false} />
+      <img className={`avatar-img${dim ? " dim" : ""}`} src={avatarUrl({ id: user.id, avatar: (member ?? guildMember)?.avatar || user.avatar })} alt="" width={size} height={size} draggable={false} />
+      {decorationId && <AvatarDecoration id={decorationId} />}
       {presence && (
         <span className="avatar-status">
           <StatusBadge status={presence} size={size >= 40 ? 12 : 10} />

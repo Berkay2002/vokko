@@ -82,11 +82,12 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | MSG-026 | Server tag chip next to the name (43x15, radius 4, badge 14 + 12 w600 text), also in reply line, member list, DM list and lightbox header; click opens a guild profile popout (hover has no tooltip) | messages-states/spec.md §5, messages-states/06, 07 |
 | MSG-027 | Timestamp formats (sv): today `HH:mm`, older `YYYY-MM-DD HH:mm`, gutter `HH:mm` on hover, tooltip `söndag 11 oktober 2026 kl. 12:38`; yesterday not observed | messages-states/spec.md §1, messages-states/04, 05 |
 | MSG-028 | Mention-of-me row: gold bg alpha .078 (hover .039), 2 px #ce8100 bar; jump-to-message flash uses brand .16 for ~2 s | messages-states/spec.md §2-3, messages-states/01, 11 |
-| MSG-029 | Server-scoped search field in the channel header and its filter popout (from:, in:, has:, mentions:, more filters) | messages-states/spec.md §9, messages-states/15 |
+| MSG-029 | Server-scoped search field in the channel header and its filter popout (from:, in:, has:, mentions:, more filters) | messages-states/spec.md §9, messages-states/15; full capture in search/spec.md §1 |
 | MSG-030 | Unread state in a DM: top bar "1 nytt meddelande sedan 11:13" (brand `#5865f2`, ~34 px, "Markera som läst" right) and the day divider turned red `#d22d39` with a "NYTT" pill at the right end; screenshot-derived (user client dpr 1.25); jump-to-present bar ("Du visar äldre meddelanden" + "Hoppa till senaste", 341x49, radius 16, bottom 28, centred, `#17181b`) live-measured | messages-states/spec.md §10, messages-states/18, 19, 36, 37 |
 | MSG-031 | Jumbo emoji: an emoji-only message renders the emoji 48x48 (row 52 high); hover tooltip with the shortcode + "Klicka för att ta reda på mer", click opens a 288x106 popout (48 px emoji, name, description) | messages-states/spec.md §7 end, messages-states/28-31 |
 | MSG-032 | Attachment upload and edit flow: tray above the composer with preview tiles (eye/spoiler, pencil, trash), "Laddar upp N filer" card with progress and cancel, "Modifiera bifogad fil" modal (filename, alt text, spoiler, Avbryt/Spara), delete-attachment confirm ("Radera den bifogade filen"); screenshot-derived | messages-states/spec.md §7 end, messages-states/24-27 |
 | MSG-033 | Reply to an attachment-only message: reference line shows italic "Klicka för att visa bifogad fil" + 20 px image icon (same 20 px line, spine, avatar, tag chip); replying state = brand .16 tint `#0e1027` + 2 px `#5865f2` bar on the target row and a "Svarar <name>" bar (37 px, `#121214`, circular ✕) above the composer | messages-states/spec.md §2 end, messages-states/32-35 |
+| MSG-034 | Message search: 244x32 header field (no widening on focus), focus popout with 5 filter rows, typed-prefix autocompletes (från:/omnämningar: users, har: 9 types, i: channels, före:/under:/efter: calendar), token chip in the field, results panel (418.7 wide, replaces member list, "N träffar" + Filter/Sortera buttons, per-channel groups, hit cards with `rgba(253,184,51,.3)` highlight, "Hoppa till" on hover), sort menu (Senaste/Äldst/Mest relevant), Filter modal, first-search indexing state ("Indexerar" + "Innan sökningen påbörjas behöver vi indexera denna server. Var god vänta."), no-results state ("Inga träffar", 160 px illustration, "Vi sökte vitt och brett, men tyvärr utan resultat."), search history list with clear button. NOT captured: DM scope, pagination | search/spec.md §5, search/01..16 |
 
 ## CMP: composer
 | Id | Acceptance | REF |
@@ -167,11 +168,11 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 ## REST: remaining
 | Id | Acceptance | REF |
 |---|---|---|
-| REST-001 | Server-wide message search with filters (from, in, has, mentions, date) and results panel | REF: none |
+| REST-001 | Server-wide message search with filters (from, in, has, mentions, date) and results panel | search/spec.md, search/01..16 (see MSG-034) |
 | REST-002 | Login, register, password reset, MFA screens | REF: none (session must not be logged out) |
 | REST-003 | Onboarding flow for new members (questions, channels) | REF: none |
-| REST-004 | Loading screen, connection-lost banner, update/maintenance banners | REF: none |
-| REST-005 | Notification sounds and desktop notifications (web: Notification API) | REF: none |
+| REST-004 | Loading screen, connection-lost banner, update/maintenance banners | REF: none (splash, connection and permission banners not observable view-only; see notifications/spec.md status) |
+| REST-005 | Notification sounds and desktop notifications (web: Notification API): Aviseringar page (Översikt, Ljud, Märken, E-post, Avancerat), per-channel notification popout with mute submenu, tab title with leading bullet when unread | notifications/spec.md, notifications/01..07 |
 | REST-006 | Responsive layouts at ~1000 px and minimum width (sidebar collapse, member list hide) | REF: none |
 
 ## Out of scope (decided, no ids)

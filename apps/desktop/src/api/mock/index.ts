@@ -10,7 +10,7 @@ import { db, nextId } from "./db";
 import { addMessage, createAccount } from "./ops";
 import { handleRoute } from "./routes";
 import { seed } from "./seed";
-import { MockSocket, dropAllConnections, emit, tokenFor, userIdFromToken } from "./socket";
+import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromToken } from "./socket";
 
 export { MockSocket };
 
@@ -92,6 +92,8 @@ interface MockHooks {
   presence(username: string, status: PresenceStatus): void;
   /** Close all open gateway connections abruptly; the client should reconnect and resume. */
   dropConnections(): void;
+  /** true: drop every connection and refuse new ones (the client shows its reconnecting banner); false: let it back in. */
+  offline(on: boolean): void;
   /** Make the next `count` REST calls fail with 429 and `retry_after` seconds. */
   rateLimit(count: number, retryAfterSeconds?: number): void;
   /** Create a DM with `username` for the signed-in `as` user. */
@@ -131,6 +133,7 @@ const hooks: MockHooks = {
     emit([...db.accounts.keys()], "PRESENCE_UPDATE", { ...account.presence });
   },
   dropConnections: () => dropAllConnections(),
+  offline: on => setOffline(on),
   rateLimit: (count, retryAfterSeconds = 1) => {
     rateLimit = { count, retryAfter: retryAfterSeconds };
   },

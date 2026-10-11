@@ -59,6 +59,14 @@ export function dropAllConnections(code = 1006): void {
   for (const session of sessions.values()) session.socket?.drop(code);
 }
 
+let refusing = false;
+
+/** Test hook: while true every new connection is refused (closed with 1006) and open ones are dropped, like a dead network. */
+export function setOffline(offline: boolean): void {
+  refusing = offline;
+  if (offline) dropAllConnections();
+}
+
 export class MockSocket {
   onopen: ((event: unknown) => void) | null = null;
   onmessage: ((event: { data: unknown }) => void) | null = null;
@@ -70,6 +78,11 @@ export class MockSocket {
   constructor() {
     setTimeout(() => {
       if (this.readyState !== 0) return;
+      if (refusing) {
+        this.readyState = 3;
+        this.onclose?.({ code: 1006 });
+        return;
+      }
       this.readyState = 1;
       this.onopen?.({});
       this.out({ op: GatewayOp.Hello, d: { heartbeat_interval: HEARTBEAT_MS }, s: null, t: null });

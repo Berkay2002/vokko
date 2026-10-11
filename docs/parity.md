@@ -12,22 +12,24 @@ How to read the statuses: `-` not started, `partial` some of it exists, `done` i
 
 ## Summary
 
-Counts are rows by their **works the same** column. They are counts, not a parity percentage.
+Counts are rows by their **works the same** column, plus a last column with the rows whose **looks the same** column is `done`. They are counts, not a parity percentage.
 
-| area | rows | done | partial | not started | n/a |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| SHELL | 15 | 5 | 10 | 0 | 0 |
-| FRIEND | 7 | 4 | 2 | 1 | 0 |
-| DM | 10 | 7 | 1 | 2 | 0 |
-| MSG | 25 | 14 | 6 | 4 | 1 |
-| CMP | 14 | 5 | 5 | 4 | 0 |
-| GLD | 18 | 4 | 8 | 6 | 0 |
-| POP | 6 | 2 | 4 | 0 | 0 |
-| MOD | 11 | 4 | 6 | 1 | 0 |
-| SET | 7 | 2 | 5 | 0 | 0 |
-| REST | 6 | 0 | 2 | 4 | 0 |
-| DESK | 8 | 0 | 1 | 7 | 0 |
-| **Total** | **127** | **47** | **50** | **29** | **1** |
+Status as of main at 1ff4677 (messages round, composer alignment). The settings and shell work on branch `worktree-shell` is not included yet; it lands later and the SHELL, SET, MOD and POP rows will be re-judged then.
+
+| area | rows | done | partial | not started | n/a | looks done |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SHELL | 15 | 5 | 10 | 0 | 0 | 3 |
+| FRIEND | 7 | 4 | 2 | 1 | 0 | 0 |
+| DM | 10 | 7 | 1 | 2 | 0 | 2 |
+| MSG | 33 | 18 | 9 | 5 | 1 | 10 |
+| CMP | 14 | 5 | 5 | 4 | 0 | 2 |
+| GLD | 18 | 4 | 8 | 6 | 0 | 1 |
+| POP | 6 | 2 | 4 | 0 | 0 | 0 |
+| MOD | 11 | 5 | 5 | 1 | 0 | 0 |
+| SET | 7 | 2 | 5 | 0 | 0 | 0 |
+| REST | 6 | 0 | 2 | 4 | 0 | 0 |
+| DESK | 8 | 0 | 1 | 7 | 0 | 0 |
+| **Total** | **135** | **52** | **52** | **30** | **1** | **18** |
 
 ## SHELL: app shell, rail, DM sidebar, title bar
 
@@ -44,7 +46,7 @@ Counts are rows by their **works the same** column. They are counts, not a parit
 | SHELL-009 | Friends nav row h40 with active and hover states | partial | done | DmSidebar.tsx nav-row is 38 px high, not 40; pending badge from relationships |
 | SHELL-010 | Direct Messages header with + button; DM rows with avatar, presence, name, subtitle | partial | partial | dm-row is 42 px high, not 44; create DM (POST /users/@me/channels), close DM (DELETE /channels/{id}), presence dot; 1:1 rows have no status subtitle |
 | SHELL-011 | Group DM row member count subtitle; clan tag chips | partial | partial | DmSidebar.tsx shows member count; server tag chips (in API) are not rendered in DM rows |
-| SHELL-012 | Floating user panel with avatar, status dot, name, status text, mute, deafen, settings | done | partial | UserPanel.tsx, shell.css (x=8, 359 wide, 57 high, radius 8); status via gateway op 3; mute and deafen are local toggles with no audio behind them |
+| SHELL-012 | Floating user panel with avatar, status dot, name, status text, mute, deafen, settings | done | partial | UserPanel.tsx, shell.css (x=8, 359 wide, 57 high, radius 8); the composer box ends on the same line (e2e layout-align.spec.ts); status via gateway op 3; mute and deafen are local toggles with no audio behind them |
 | SHELL-013 | Mute and deafen split caret opens input and output device menus | partial | partial | UserPanel.tsx device menus list devices from enumerateDevices; choice only stored in local prefs, no audio engine |
 | SHELL-014 | User-panel popout: profile card, edit profile, status submenu, switch account, copy ID | partial | partial | UserPanel.tsx popout has status list and custom status (persisted via gateway); no profile card, edit profile, switch account or copy ID rows |
 | SHELL-015 | 4 px resize handle; layout at about 1000 px and minimum width | partial | partial | AppShell.tsx sidebar-resize (4 px, clamped, stored locally); no responsive layout rules (no media queries) |
@@ -73,8 +75,8 @@ Counts are rows by their **works the same** column. They are counts, not a parit
 | DM-006 | Pinned messages popout with empty state and tip footer | partial | done | PinnedMessages.tsx: 420 px wide but max height 560 (not 371) and no tip footer; paginated GET pins, jump to message |
 | DM-007 | In-DM search results panel | - | - | Header search input is inert; no search route in crates/server |
 | DM-008 | Call UI: start voice or video call, incoming call screen | - | - | Call buttons are disabled; no voice state in the server contract |
-| DM-009 | Typing indicator under the composer | partial | done | TypingIndicator.tsx plus POST /channels/{id}/typing and TYPING_START with Discord timings |
-| DM-010 | New-messages divider, mark-as-read bar, jump-to-present bar | partial | done | MessageList.tsx unread bar, NEW divider, jump bar; ack and read states from server |
+| DM-009 | Typing indicator under the composer | partial | done | TypingIndicator.tsx overlays the top edge of the composer (chat.css .chat-typing, absolute, 24 px high) plus POST /channels/{id}/typing and TYPING_START with Discord timings |
+| DM-010 | New-messages divider, mark-as-read bar, jump-to-present bar | done | done | MessageList.tsx and chat.css: unread bar, red day divider with NEW pill, jump pill match the measured numbers (see MSG-030); ack and read states from server |
 
 ## MSG: message list and message actions
 
@@ -83,46 +85,54 @@ Counts are rows by their **works the same** column. They are counts, not a parit
 | MSG-001 | Cozy layout: avatar, name, timestamp, content, row padding | done | done | chat.css: 40 px avatar, 16/22 type, 12/22 timestamp, padding 2/24/2/72; GET/POST messages in crates/server/src/routes/messages.rs |
 | MSG-002 | Message grouping: 17 px group margin, collapsed follow-ups, time on hover in gutter | partial | done | chat.css 17 px margin matches; hover-time gutter width not verified against 56 px; grouping in messageState.ts |
 | MSG-003 | Row hover background | done | done | tokens.css --message-background-hover is rgba(151,151,159,0.12) |
-| MSG-004 | Hover toolbar: quick reactions, add reaction, edit, reply, forward, more | partial | partial | MessageItem.tsx and chat.css (28 px buttons, radius 8, offset -16/14 match); no forward button |
-| MSG-005 | Context menu: reactions, edit, reply, forward, thread, copy, pin, bookmark, remind, apps, mark unread, link, TTS, delete, ID | partial | partial | MessageItem.tsx items(): working reaction, edit, reply, copy, pin, link, delete, ID; forward, thread, mark unread disabled; no quick reaction row, bookmark, remind, apps, TTS |
-| MSG-006 | Context-menu item hover and focus state; destructive item in danger colour | partial | done | ContextMenu.tsx, menus.css with danger items; exact colours not compared |
-| MSG-007 | Reply flow: bar above composer, highlighted target row, Escape cancels | done | done | Composer.tsx reply bar, chat.css .replying (2 px brand bar, 16% tint); message_reference and allowed_mentions handled in routes/messages.rs |
-| MSG-008 | Reply reference line above a reply: avatar, name, snippet, connector, jump | done | done | MessageItem.tsx ReplyPreview (16 px avatar, curved spine, click jumps); referenced_message from server, deleted-original state |
+| MSG-004 | Hover toolbar: quick reactions, add reaction, edit, reply, forward, more | done | partial | MessageItem.tsx and chat.css: 28 px buttons, radius 8 container, offset -16/14 match; three quick reactions, add reaction, edit (own), reply (others), forward, more; the Forward button only shows a coming-soon toast |
+| MSG-005 | Context menu: reactions, edit, reply, forward, thread, copy, pin, bookmark, remind, apps, mark unread, link, TTS, delete, ID | done | partial | MessageMenu.tsx (221 px, quick-reaction tile row, Add Reaction submenu, then the reference order down to Copy Message ID; item metrics are not in the acceptance text): edit, reply, copy text, pin, copy link, delete, ID, Read Aloud (speechSynthesis) and reactions work; Forward, Create Thread, Bookmark and Create Reminder only show a coming-soon toast, Apps is empty; Mark Unread is client-only (no server route) |
+| MSG-006 | Context-menu item hover and focus state; destructive item in danger colour | partial | done | ContextMenu.tsx, menus.css and MessageMenu.tsx (focus fill, danger rows with their own focus fill); exact colours not compared |
+| MSG-007 | Reply flow: bar above composer, highlighted target row, Escape cancels | done | done | Composer.tsx reply bar (37 px, 20 px circular close, ping toggle in guilds), chat.css .replying (2 px brand bar, 16% tint); message_reference and allowed_mentions handled in routes/messages.rs |
+| MSG-008 | Reply reference line above a reply: avatar, name, snippet, connector, jump | partial | done | MessageItem.tsx ReplyPreview and chat.css: 16 px avatar, 33x12 spine with 2 px border and 6 px radius, tag chip, click jumps and flashes (2.2 s); a deleted original shows an alert icon and italic text, not the arrow badge; referenced_message from server |
 | MSG-009 | Inline edit: textarea in place, hint, emoji button | partial | done | MessageItem.tsx InlineEdit: PATCH message works; hint wording differs and there is no emoji button |
 | MSG-010 | (edited) marker after edited content | done | done | chat.css .chat-edited is 10 px with line-height 1, muted; edited_timestamp from server |
-| MSG-011 | Delete confirmation modal with message preview | partial | done | ChatView.tsx DeleteModal with preview; DELETE message; no reference to compare against |
+| MSG-011 | Delete confirmation modal with message preview | partial | done | ChatView.tsx DeleteModal with preview; DELETE message; shift-click deletes without the modal but there is no shift-click tip; no reference to compare against |
 | MSG-012 | Reactions: pills, own highlighted, + button on hover, reactor tooltip | partial | done | Reactions.tsx; PUT/DELETE/GET reactions in routes/reactions.rs; unicode emoji only (custom emoji do not render) |
 | MSG-013 | Reaction picker from the hover bar with search | partial | done | EmojiPicker.tsx popout from the toolbar, search; unicode emoji set only |
 | MSG-014 | Pin from the menu: confirm modal, then system row with pin icon | partial | partial | Pin applies immediately, no confirm modal; PUT pin emits a type 6 system row (MessageItem.tsx SystemBody); 250 cap handled |
-| MSG-015 | Forward modal | - | - | Forward menu item is disabled |
-| MSG-016 | Bookmark and reminder submenu | - | - | Not in the message menu; inbox bookmark and reminder tabs are empty placeholders |
-| MSG-017 | Markdown rendering: emphasis, code, headings, lists, quotes, links, spoilers, timestamps, shortcodes | partial | done | chat/markdown/ (parse.ts, render.tsx, highlight.ts, unit tests) covers the listed syntax; styling not compared |
+| MSG-015 | Forward modal | - | - | Forward is a button in the hover bar, the context menu and the lightbox; all only show a coming-soon toast, there is no modal |
+| MSG-016 | Bookmark and reminder submenu | partial | - | MessageMenu.tsx has Bookmark Message and a Create Reminder submenu with preset times, both only show a coming-soon toast; inbox bookmark and reminder tabs are empty placeholders |
+| MSG-017 | Markdown rendering: emphasis, code, headings, lists, quotes, links, spoilers, timestamps, shortcodes | partial | done | chat/markdown/ (parse.ts, render.tsx, highlight.ts, unit tests) covers the listed syntax; shortcodes use JoyPixels names first (emojiData.ts); styling not compared |
 | MSG-018 | Link embeds: invite embed incl. expired state, URL previews, image and video embeds | partial | done | Embeds.tsx; invites via GET /invites/{code}; server unfurl.rs builds embeds, delivered by MESSAGE_UPDATE |
-| MSG-019 | Attachments: image grid with lightbox, files, video and audio players, spoiler | partial | partial | Attachments.tsx: grid, lightbox, file cards, video, SPOILER_ files; routes/attachments.rs; audio files show as file cards (no player) |
+| MSG-019 | Attachments: image grid with lightbox, files, video and audio players, spoiler | partial | partial | Attachments.tsx, chat.css: single 550x350 box, 2-image 273x273, 3-image 364x350 + 2x 182x173, 4-image 2x2 273x173, own-image pencil and trash group, lightbox with .92 scrim, author header, thumbnail strip; lightbox top bar has five buttons where the reference lists four; audio files show as file cards (no player); routes/attachments.rs serves files; alt text, rename and removal on sent messages are mock-only (see MSG-032) |
 | MSG-020 | Stickers and GIFs in messages | - | - | No sticker or GIF support in client or server |
 | MSG-021 | Message selection and long-press mobile gestures | n/a | n/a | Out of scope (desktop web) |
 | MSG-022 | Mention chips and mention-highlighted row with 2 px bar | partial | partial | markdown render.tsx chips (user, role, channel, everyone), chat.css .mentioned 2 px bar; row highlight only for user and everyone mentions (server has no mention_roles) |
 | MSG-023 | Slash-command output and application messages: bot badge, ephemeral | partial | - | BOT tag renders in MessageItem.tsx; no commands, apps or ephemeral messages |
 | MSG-024 | System messages with icon and muted style | partial | partial | MessageItem.tsx SystemBody handles pin, join, leave, rename; server posts pin and join rows; no call messages |
 | MSG-025 | Message length limit 2000 with counter and block | partial | done | Composer.tsx counter and send block; server rejects over 2000 (routes/messages.rs) |
+| MSG-026 | Server tag chip next to the name and in reply line, member list, DM list, lightbox; click opens a tag popout | partial | partial | ServerTag.tsx: 15 px chip, radius 4, 14 px badge, 12/16 w600, no tooltip, in message header, reply line and lightbox; click opens a tag card (Go to Server only closes it); not in the member list or DM rows (see SHELL-011); primary_guild exists in the mock API only (crates/protocol User has no such field); the Server Tag settings page is a device setting |
+| MSG-027 | Timestamp formats: today, older, gutter on hover, full-date tooltip | done | done | util.ts formatMessageTimestamp, formatTime, formatFullDate via Intl and chatLocale(): Swedish gives bare time today and YYYY-MM-DD HH:mm older, other languages get Today/Yesterday words; util.test.ts; client only |
+| MSG-028 | Mention-of-me row tint and 2 px bar; jump-to-message flash | partial | partial | chat.css .mentioned: rgba(248,163,0,.08) and .04 on hover, 2 px bar from --border-feedback-warning (#ea9800, reference #ce8100); .flash is a 2.2 s brand .16 animation; highlight only for user and everyone mentions (server has no mention_roles) |
+| MSG-029 | Server-scoped search field in the channel header and its filter popout | partial | - | ChannelHeader.tsx: search box is present but inert, no filter popout; no search route in crates/server (see DM-007, REST-001) |
+| MSG-030 | Unread bar, red day divider with NEW pill, jump-to-present pill | done | done | MessageList.tsx, messageState.ts buildRows, chat.css: unread bar 34 px brand with Mark As Read, red day divider with NEW pill, jump pill 341x49 radius 16 bottom 28; read pointer and ack from server read states (POST ack, ack-bulk); Mark Unread is client-only |
+| MSG-031 | Jumbo emoji, emoji hover tooltip and info popout | partial | done | chat.css .md-jumbo (48 px emoji on a 52 px line); EmojiInfo.tsx hover tooltip (shortcode and Click to learn more) and click popout 288 px wide whose height follows its content (not checked against 106); unicode emoji only; client only |
+| MSG-032 | Attachment upload tray, uploading card, Modify Attachment modal, delete-attachment confirm | done | partial | Composer.tsx tray (216 px cards, 152 px tile, preview, edit, remove), AttachmentModals.tsx, Attachments.tsx PendingUpload (432x74, indeterminate bar, cancel); the client sends attachments[] (rename, alt text, SPOILER_ prefix) and PATCH attachments to keep, but crates/protocol CreateMessageRequest only has attachment_ids and EditMessageRequest requires content, so only the mock honours them; sent attachments open the modal read-only |
+| MSG-033 | Reply to an attachment-only message; replying state on the target row and bar | done | done | MessageItem.tsx ReplyPreview shows italic Click to see attachment with a 20 px image icon; chat.css .replying (brand .16 tint, 2 px brand bar), Composer.tsx reply bar 37 px with 20 px circular close; referenced_message from server |
 
 ## CMP: composer
 
 | id | feature | looks the same | works the same | notes |
 | --- | --- | --- | --- | --- |
-| CMP-001 | Composer wrapper height, radius, border, grows to about half the viewport | partial | done | Composer.tsx, chat.css: 56 px min height with 1 px border (reference 0.67), auto-grow up to 50vh |
+| CMP-001 | Composer wrapper height, radius, border, grows to about half the viewport | partial | done | Composer.tsx, chat.css: 57 px high (55 + 2 border, same line as the user panel), radius 8, border is 1 px (reference 0.67), auto-grow up to 50vh |
 | CMP-002 | Attach + button menu: upload file, create poll, use apps | partial | partial | Composer.tsx: only Upload a File (POST attachments); no poll, no apps |
 | CMP-003 | Right buttons: GIF, sticker, emoji, apps | partial | partial | Composer.tsx: four buttons present; emoji works, GIF/sticker/apps open empty-state panels |
 | CMP-004 | Emoji picker with tabs, search, category rail, 48 px cells, preview footer | done | partial | chat.css expression picker 498x486, 48 px cells, footer preview; unicode only, GIF and sticker tabs are empty |
 | CMP-005 | GIF picker with search, categories, trending | partial | - | ExpressionPicker.tsx: search box with an honest empty state; no provider |
 | CMP-006 | Sticker picker | partial | - | ExpressionPicker.tsx: empty state; no sticker packs |
 | CMP-007 | @ autocomplete for members and roles with keyboard selection, Tab inserts chip | partial | done | Composer.tsx suggestions (members, mentionable roles, everyone/here); sends raw mention tokens; server parses them |
-| CMP-008 | Emoji shortcode autocomplete with preview | partial | done | Composer.tsx ':' trigger lists matches from the emoji database; no preview pane |
+| CMP-008 | Emoji shortcode autocomplete with preview | partial | done | Composer.tsx ':' trigger lists matches from the emoji database (JoyPixels names first); no preview pane |
 | CMP-009 | Slash-command panel with app rail | - | - | No slash-command handling |
 | CMP-010 | # channel autocomplete (guild only) | partial | done | Composer.tsx '#' trigger, text channels only in guilds |
 | CMP-011 | Live markdown styling in the editor | - | - | Plain textarea; the previewMarkdown preference is not wired |
 | CMP-012 | Shift+Enter newline, Enter send, Escape clears reply, Up edits last message | n/a | done | Composer.tsx onKeyDown and ChatView.tsx editLast; behaviour row, no visuals |
-| CMP-013 | Paste and drag-drop upload preview with remove, spoiler, alt text | partial | partial | draftStore.ts, Composer.tsx tray, drop overlay in ChatView.tsx; remove works; no spoiler or alt-text controls |
+| CMP-013 | Paste and drag-drop upload preview with remove, spoiler, alt text | done | partial | draftStore.ts, Composer.tsx tray (preview, edit via Modify Attachment with file name, alt text and spoiler, remove), drop overlay in ChatView.tsx; the Rust server ignores rename, alt text and spoiler (see MSG-032) |
 | CMP-014 | Slowmode, locked channel, no-permission composer states | - | partial | Server rejects sends without SEND_MESSAGES; composer shows no locked state; no slowmode in crates/server |
 
 ## GLD: guild frame
@@ -170,7 +180,7 @@ Counts are rows by their **works the same** column. They are counts, not a parit
 | MOD-005 | Quick switcher: input, recent channels, tips footer | partial | partial | QuickSwitcher.tsx: prefixes and PROTIP footer; searches loaded data only, no recents list |
 | MOD-006 | Keyboard shortcuts dialog with key-cap cards | partial | partial | Ctrl+/ opens the Keybinds settings page (KeybindsPage.tsx), a table rather than a dialog; some listed shortcuts are not wired |
 | MOD-007 | Confirmation modals: delete message, leave server, unsaved-changes bar | partial | partial | Delete message and leave server confirms work; the unsaved bar exists in channel settings only (see SET-007) |
-| MOD-008 | Image lightbox with zoom, open original, download | partial | partial | Attachments.tsx Lightbox: previous/next, Open in Browser; no zoom, no download button |
+| MOD-008 | Image lightbox with zoom, open original, download | partial | done | Attachments.tsx Lightbox: zoom toggle, Download, Open in Browser, Copy Link, previous/next and thumbnail strip; the top bar has five buttons where the reference lists four (see MSG-019) |
 | MOD-009 | Report, block and remove-friend confirmations | partial | partial | Block confirm in ChannelStart.tsx; context-menu block and remove-friend act without confirmation; no report |
 | MOD-010 | Join-server-with-invite modal and invite landing screen | partial | partial | Join modal works; no invite landing route |
 | MOD-011 | Pin confirmation modal with preview and buttons | - | - | Pin is applied immediately (see MSG-014) |
@@ -181,7 +191,7 @@ Counts are rows by their **works the same** column. They are counts, not a parit
 | --- | --- | --- | --- | --- |
 | SET-001 | User settings as large modal with left nav, search, title strip, close and Esc | partial | done | UserSettings.tsx: full-screen overlay with 218 px nav, section search, ESC close button (reference 253 px nav in a centred modal) |
 | SET-002 | My Account page: info rows with Change buttons, password and security rows | partial | partial | UserSettings.tsx MyAccount: display name saves via PATCH /users/@me; no email, password or security rows |
-| SET-003 | Appearance page: theme toggle and default theme swatches | partial | done | AppearancePage.tsx theme cards, sync with system, message display; stored as local preferences |
+| SET-003 | Appearance page: theme toggle and default theme swatches | partial | done | AppearancePage.tsx theme cards, sync with system, message display; Convert emoticons is wired (chat/emoticons.ts, applied on send), Preview Markdown is not; stored as local preferences |
 | SET-004 | Accessibility, Voice and Video, Chat, Notifications, Keybinds, Language, Streamer mode, Advanced | partial | partial | Pages exist for Accessibility, Voice and Video, Notifications, Keybinds (read-only), Language (English only), streamer toggles; all local prefs, no audio engine, nothing fires; Chat and Advanced missing |
 | SET-005 | Server settings: overview, roles, emoji, stickers, soundboard, integrations, moderation, audit log, bans, invites, onboarding, community | partial | partial | ServerSettings.tsx: Profile (PATCH /guilds/{id}), Roles, Members, Bans, Tag, Theme work; Invites only creates; emoji, stickers, soundboard, integrations, audit log, safety, onboarding, community are placeholders |
 | SET-006 | Channel settings: overview, permissions, invites, integrations | partial | partial | ChannelSettings.tsx: Overview (PATCH /channels/{id}) and Permissions (overwrite routes) work; Invites and Integrations are placeholders; no slowmode |
