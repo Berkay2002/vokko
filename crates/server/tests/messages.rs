@@ -312,3 +312,26 @@ async fn bulk_ack_marks_channels_read() {
     assert_eq!((last, count), (Some(nid.parse::<i64>().expect("id")), 0));
     assert_eq!(s.app.get(&format!("{base}?limit=1"), &s.member).await.0, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn timed_out_members_can_read_but_not_write() {
+    let s = setup().await;
+    let base = format!("/channels/{}/messages", s.channel);
+    send(&s, &s.owner, "before the timeout").await;
+    sqlx::query("UPDATE guild_members SET timeout_until = now() + interval '1 hour' WHERE guild_id = $1 AND user_id = $2")
+        .bind(s.guild.parse::<i64>().expect("id"))
+        .bind(s.member_id.parse::<i64>().expect("id"))
+        .execute(&s.app.state.db)
+        .await
+        .expect("timeout");
+    assert_eq!(s.app.get(&format!("{base}?limit=1"), &s.member).await.0, StatusCode::OK);
+    let (status, error) = s.app.post(&base, &s.member, json!({"content": "muted"})).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(50013)));
+    // the owner is unaffected, and the timeout ending restores access
+    sqlx::query("UPDATE guild_members SET timeout_until = now() - interval '1 minute' WHERE user_id = $1")
+        .bind(s.member_id.parse::<i64>().expect("id"))
+        .execute(&s.app.state.db)
+        .await
+        .expect("expire");
+    assert_eq!(s.app.post(&base, &s.member, json!({"content": "back"})).await.0, StatusCode::OK);
+}

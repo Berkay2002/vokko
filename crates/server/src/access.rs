@@ -1,7 +1,9 @@
 //! Permission resolution (Discord's algorithm) and channel access checks. The server is authoritative for every check.
 use std::collections::HashMap;
 
-use vokko_protocol::api::permissions::{ADD_REACTIONS, ADMINISTRATOR, ALL, ATTACH_FILES, READ_MESSAGE_HISTORY, SEND_MESSAGES, VIEW_CHANNEL};
+use std::cmp::Ordering;
+
+use vokko_protocol::api::permissions::{ADD_REACTIONS, ADMINISTRATOR, ALL, ATTACH_FILES, READ_MESSAGE_HISTORY, SEND_MESSAGES, TIMEOUT_ALLOWED, VIEW_CHANNEL};
 
 use crate::error::{ApiErr, ApiResult};
 use crate::state::AppState;
@@ -56,8 +58,53 @@ pub fn channel_permissions(base: u64, guild_id: i64, user_id: i64, member_roles:
     if permissions & VIEW_CHANNEL == 0 { 0 } else { permissions }
 }
 
+/// A timed-out member keeps only view + history; owner and administrators are exempt.
+pub fn clamp_timeout(permissions: u64, timed_out: bool) -> u64 {
+    if timed_out && permissions & ADMINISTRATOR == 0 { permissions & TIMEOUT_ALLOWED } else { permissions }
+}
+
+/// A role as far as ranking is concerned.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RoleRank {
+    pub id: i64,
+    pub position: i32,
+    /// `@everyone` (role id == guild id) always ranks lowest.
+    pub everyone: bool,
+}
+
+/// `Greater` when `a` outranks `b`: higher position wins, ties go to the older (smaller) snowflake.
+pub fn compare_roles(a: &RoleRank, b: &RoleRank) -> Ordering {
+    match (a.everyone, b.everyone) {
+        (true, true) => Ordering::Equal,
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        (false, false) => a.position.cmp(&b.position).then_with(|| b.id.cmp(&a.id)),
+    }
+}
+
+pub fn highest_role(roles: &[RoleRank]) -> Option<RoleRank> {
+    roles.iter().copied().max_by(compare_roles)
+}
+
+/// Moderation hierarchy: the owner can act on everyone but nobody acts on the owner; otherwise the actor's highest role must
+/// outrank the target's highest role (a target without roles can always be acted on). The caller checks the permission itself.
+pub fn can_act_on(actor_is_owner: bool, target_is_owner: bool, actor_roles: &[RoleRank], target_roles: &[RoleRank]) -> bool {
+    if target_is_owner {
+        return false;
+    }
+    if actor_is_owner {
+        return true;
+    }
+    match (highest_role(actor_roles), highest_role(target_roles)) {
+        (_, None) => true,
+        (None, Some(_)) => false,
+        (Some(actor), Some(target)) => compare_roles(&actor, &target) == Ordering::Greater,
+    }
+}
+
 pub struct GuildAccess {
     pub owner_id: i64,
+    pub timed_out: bool,
     pub permissions: u64,
     pub roles: Vec<i64>,
 }
@@ -71,16 +118,19 @@ async fn role_permissions(state: &AppState, guild_id: i64) -> ApiResult<HashMap<
 pub async fn guild_access(state: &AppState, user_id: i64, guild_id: i64) -> ApiResult<GuildAccess> {
     let owner: Option<(i64,)> = sqlx::query_as("SELECT owner_id FROM guilds WHERE id = $1").bind(guild_id).fetch_optional(&state.db).await?;
     let Some((owner_id,)) = owner else { return Err(ApiErr::unknown_guild()) };
-    let member: Option<(i64,)> =
-        sqlx::query_as("SELECT user_id FROM guild_members WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).fetch_optional(&state.db).await?;
-    if member.is_none() {
-        return Err(ApiErr::missing_access());
-    }
+    let member: Option<(bool,)> = sqlx::query_as("SELECT COALESCE(timeout_until > now(), FALSE) FROM guild_members WHERE guild_id = $1 AND user_id = $2")
+        .bind(guild_id)
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await?;
+    let Some((timed_out,)) = member else { return Err(ApiErr::missing_access()) };
     let roles: Vec<(i64,)> =
         sqlx::query_as("SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).fetch_all(&state.db).await?;
     let roles: Vec<i64> = roles.into_iter().map(|(id,)| id).collect();
-    let permissions = base_permissions(guild_id, owner_id, user_id, &role_permissions(state, guild_id).await?, &roles);
-    Ok(GuildAccess { owner_id, permissions, roles })
+    let base = base_permissions(guild_id, owner_id, user_id, &role_permissions(state, guild_id).await?, &roles);
+    // The owner is never clamped (Discord returns before the timeout step).
+    let permissions = if owner_id == user_id { base } else { clamp_timeout(base, timed_out) };
+    Ok(GuildAccess { owner_id, timed_out, permissions, roles })
 }
 
 impl GuildAccess {
@@ -129,7 +179,9 @@ pub async fn channel_access(state: &AppState, user_id: i64, channel_id: i64) -> 
     let guild_id = channel.guild_id.ok_or_else(ApiErr::unknown_channel)?;
     let guild = guild_access(state, user_id, guild_id).await?;
     let overwrites = overwrites_for(state, channel_id).await?;
-    let permissions = channel_permissions(guild.permissions, guild_id, user_id, &guild.roles, &overwrites);
+    // Overwrites may allow more than the clamp lets through, so clamp again.
+    let resolved = channel_permissions(guild.permissions, guild_id, user_id, &guild.roles, &overwrites);
+    let permissions = if guild.owner_id == user_id { resolved } else { clamp_timeout(resolved, guild.timed_out) };
     if permissions & VIEW_CHANNEL == 0 {
         return Err(ApiErr::missing_access());
     }
@@ -242,6 +294,110 @@ mod tests {
         let member_denied = channel_permissions(base, GUILD, USER, &[], &[deny_member]);
         assert_eq!(member_denied & ADD_REACTIONS, 0);
         assert_ne!(member_denied & SEND_MESSAGES, 0);
+    }
+
+    fn overwrite(target_id: i64, target_type: i16, allow: u64, deny: u64) -> Overwrite {
+        Overwrite { target_id, target_type, allow, deny }
+    }
+
+    /// (case, base, member roles, overwrites, expected)
+    #[test]
+    fn resolution_order_table() {
+        let role_a = 20;
+        let role_b = 21;
+        let ow = overwrite;
+        type Case = (&'static str, i64, u64, Vec<i64>, Vec<Overwrite>, u64);
+        let cases: Vec<Case> = vec![
+            // administrators and the owner skip overwrites entirely
+            ("admin ignores a hiding overwrite", USER, ADMINISTRATOR | VIEW_CHANNEL, vec![], vec![ow(GUILD, 0, 0, VIEW_CHANNEL | SEND_MESSAGES)], ALL),
+            ("owner ignores a hiding overwrite", OWNER, 0, vec![], vec![ow(GUILD, 0, 0, VIEW_CHANNEL), ow(OWNER, 1, 0, VIEW_CHANNEL)], ALL),
+            // @everyone overwrite: deny then allow
+            ("everyone deny", USER, DEFAULT_EVERYONE, vec![], vec![ow(GUILD, 0, 0, SEND_MESSAGES)], DEFAULT_EVERYONE & !SEND_MESSAGES),
+            ("everyone allow beats its own deny", USER, DEFAULT_EVERYONE, vec![], vec![ow(GUILD, 0, SEND_MESSAGES, SEND_MESSAGES)], DEFAULT_EVERYONE),
+            // roles: all denies are removed, then all allows are added
+            (
+                "role allow beats another role's deny",
+                USER,
+                DEFAULT_EVERYONE,
+                vec![role_a, role_b],
+                vec![ow(role_a, 0, 0, ATTACH_FILES), ow(role_b, 0, ATTACH_FILES, 0)],
+                DEFAULT_EVERYONE,
+            ),
+            (
+                "role overwrite beats @everyone overwrite",
+                USER,
+                DEFAULT_EVERYONE,
+                vec![role_a],
+                vec![ow(GUILD, 0, 0, SEND_MESSAGES), ow(role_a, 0, SEND_MESSAGES, 0)],
+                DEFAULT_EVERYONE,
+            ),
+            ("roles the member lacks are ignored", USER, DEFAULT_EVERYONE, vec![], vec![ow(role_a, 0, 0, SEND_MESSAGES)], DEFAULT_EVERYONE),
+            // member overwrite wins over every role layer
+            (
+                "member allow beats role deny",
+                USER,
+                DEFAULT_EVERYONE,
+                vec![role_a],
+                vec![ow(role_a, 0, 0, SEND_MESSAGES), ow(USER, 1, SEND_MESSAGES, 0)],
+                DEFAULT_EVERYONE,
+            ),
+            (
+                "member deny beats role allow",
+                USER,
+                DEFAULT_EVERYONE,
+                vec![role_a],
+                vec![ow(role_a, 0, ADD_REACTIONS, 0), ow(USER, 1, 0, ADD_REACTIONS)],
+                DEFAULT_EVERYONE & !ADD_REACTIONS,
+            ),
+            ("overwrite of another member is ignored", USER, DEFAULT_EVERYONE, vec![], vec![ow(99, 1, 0, SEND_MESSAGES)], DEFAULT_EVERYONE),
+            // overwrites can grant what the base lacks
+            ("allow adds a bit the base lacks", USER, VIEW_CHANNEL, vec![role_a], vec![ow(role_a, 0, MANAGE_MESSAGES, 0)], VIEW_CHANNEL | MANAGE_MESSAGES),
+            // no VIEW_CHANNEL: nothing is usable
+            ("hidden channel resolves to nothing", USER, DEFAULT_EVERYONE, vec![], vec![ow(GUILD, 0, 0, VIEW_CHANNEL)], 0),
+        ];
+        for (name, user, base, member_roles, overwrites, expected) in cases {
+            let resolved = if user == OWNER {
+                channel_permissions(
+                    base_permissions(GUILD, OWNER, user, &HashMap::from([(GUILD, base)]), &member_roles),
+                    GUILD,
+                    user,
+                    &member_roles,
+                    &overwrites,
+                )
+            } else {
+                channel_permissions(base, GUILD, user, &member_roles, &overwrites)
+            };
+            assert_eq!(resolved, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn timeout_clamps_everyone_but_admins() {
+        assert_eq!(clamp_timeout(DEFAULT_EVERYONE, true), VIEW_CHANNEL | READ_MESSAGE_HISTORY);
+        assert_eq!(clamp_timeout(DEFAULT_EVERYONE, false), DEFAULT_EVERYONE);
+        assert_eq!(clamp_timeout(ALL, true), ALL);
+    }
+
+    #[test]
+    fn role_ranking_and_moderation_hierarchy() {
+        let everyone = RoleRank { id: GUILD, position: 0, everyone: true };
+        let low = RoleRank { id: 30, position: 1, everyone: false };
+        let high = RoleRank { id: 31, position: 5, everyone: false };
+        let older_tie = RoleRank { id: 20, position: 5, everyone: false };
+        assert_eq!(compare_roles(&high, &low), Ordering::Greater);
+        assert_eq!(compare_roles(&low, &everyone), Ordering::Greater, "@everyone is always lowest");
+        assert_eq!(compare_roles(&older_tie, &high), Ordering::Greater, "same position: the older snowflake ranks higher");
+        assert_eq!(highest_role(&[low, high, everyone]), Some(high));
+        assert_eq!(highest_role(&[]), None);
+
+        assert!(can_act_on(true, false, &[], &[high]), "owner acts on anyone");
+        assert!(!can_act_on(true, true, &[], &[]), "nobody acts on the owner");
+        assert!(!can_act_on(false, true, &[high], &[]), "not on the owner");
+        assert!(can_act_on(false, false, &[high], &[low]));
+        assert!(!can_act_on(false, false, &[low], &[high]));
+        assert!(!can_act_on(false, false, &[high], &[high]), "equal rank cannot act");
+        assert!(can_act_on(false, false, &[low], &[]), "a member without roles can be acted on");
+        assert!(!can_act_on(false, false, &[], &[low]));
     }
 
     #[test]

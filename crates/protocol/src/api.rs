@@ -142,33 +142,149 @@ impl PresenceStatus {
     }
 }
 
-/// Permission bit values (Discord's).
+/// Permission bit values (Discord's): 53 permissions on bits 0..46 and 48..53, bit 47 is unassigned.
 pub mod permissions {
     pub const CREATE_INSTANT_INVITE: u64 = 1 << 0;
+    pub const KICK_MEMBERS: u64 = 1 << 1;
+    pub const BAN_MEMBERS: u64 = 1 << 2;
     pub const ADMINISTRATOR: u64 = 1 << 3;
     pub const MANAGE_CHANNELS: u64 = 1 << 4;
     pub const MANAGE_GUILD: u64 = 1 << 5;
     pub const ADD_REACTIONS: u64 = 1 << 6;
+    pub const VIEW_AUDIT_LOG: u64 = 1 << 7;
+    pub const PRIORITY_SPEAKER: u64 = 1 << 8;
+    pub const STREAM: u64 = 1 << 9;
     pub const VIEW_CHANNEL: u64 = 1 << 10;
     pub const SEND_MESSAGES: u64 = 1 << 11;
+    pub const SEND_TTS_MESSAGES: u64 = 1 << 12;
     pub const MANAGE_MESSAGES: u64 = 1 << 13;
+    pub const EMBED_LINKS: u64 = 1 << 14;
     pub const ATTACH_FILES: u64 = 1 << 15;
     pub const READ_MESSAGE_HISTORY: u64 = 1 << 16;
     pub const MENTION_EVERYONE: u64 = 1 << 17;
-    pub const ALL: u64 = CREATE_INSTANT_INVITE
-        | ADMINISTRATOR
-        | MANAGE_CHANNELS
-        | MANAGE_GUILD
-        | ADD_REACTIONS
+    pub const USE_EXTERNAL_EMOJIS: u64 = 1 << 18;
+    pub const VIEW_GUILD_ANALYTICS: u64 = 1 << 19;
+    pub const CONNECT: u64 = 1 << 20;
+    pub const SPEAK: u64 = 1 << 21;
+    pub const MUTE_MEMBERS: u64 = 1 << 22;
+    pub const DEAFEN_MEMBERS: u64 = 1 << 23;
+    pub const MOVE_MEMBERS: u64 = 1 << 24;
+    pub const USE_VAD: u64 = 1 << 25;
+    pub const CHANGE_NICKNAME: u64 = 1 << 26;
+    pub const MANAGE_NICKNAMES: u64 = 1 << 27;
+    pub const MANAGE_ROLES: u64 = 1 << 28;
+    pub const MANAGE_WEBHOOKS: u64 = 1 << 29;
+    pub const MANAGE_GUILD_EXPRESSIONS: u64 = 1 << 30;
+    pub const USE_APPLICATION_COMMANDS: u64 = 1 << 31;
+    pub const REQUEST_TO_SPEAK: u64 = 1 << 32;
+    pub const MANAGE_EVENTS: u64 = 1 << 33;
+    pub const MANAGE_THREADS: u64 = 1 << 34;
+    pub const CREATE_PUBLIC_THREADS: u64 = 1 << 35;
+    pub const CREATE_PRIVATE_THREADS: u64 = 1 << 36;
+    pub const USE_EXTERNAL_STICKERS: u64 = 1 << 37;
+    pub const SEND_MESSAGES_IN_THREADS: u64 = 1 << 38;
+    pub const USE_EMBEDDED_ACTIVITIES: u64 = 1 << 39;
+    pub const MODERATE_MEMBERS: u64 = 1 << 40;
+    pub const VIEW_CREATOR_MONETIZATION_ANALYTICS: u64 = 1 << 41;
+    pub const USE_SOUNDBOARD: u64 = 1 << 42;
+    pub const CREATE_GUILD_EXPRESSIONS: u64 = 1 << 43;
+    pub const CREATE_EVENTS: u64 = 1 << 44;
+    pub const USE_EXTERNAL_SOUNDS: u64 = 1 << 45;
+    pub const SEND_VOICE_MESSAGES: u64 = 1 << 46;
+    pub const SET_VOICE_CHANNEL_STATUS: u64 = 1 << 48;
+    pub const SEND_POLLS: u64 = 1 << 49;
+    pub const USE_EXTERNAL_APPS: u64 = 1 << 50;
+    pub const PIN_MESSAGES: u64 = 1 << 51;
+    pub const BYPASS_SLOWMODE: u64 = 1 << 52;
+    pub const MANAGE_OFFICIAL_MESSAGES: u64 = 1 << 53;
+
+    /// Every defined permission bit (what the owner and administrators resolve to).
+    pub const ALL: u64 = (1 << 54) - 1 - (1 << 47);
+    /// Every permission name with its bit, in bit order.
+    pub const NAMED: [(&str, u64); 53] = [
+        ("CREATE_INSTANT_INVITE", CREATE_INSTANT_INVITE),
+        ("KICK_MEMBERS", KICK_MEMBERS),
+        ("BAN_MEMBERS", BAN_MEMBERS),
+        ("ADMINISTRATOR", ADMINISTRATOR),
+        ("MANAGE_CHANNELS", MANAGE_CHANNELS),
+        ("MANAGE_GUILD", MANAGE_GUILD),
+        ("ADD_REACTIONS", ADD_REACTIONS),
+        ("VIEW_AUDIT_LOG", VIEW_AUDIT_LOG),
+        ("PRIORITY_SPEAKER", PRIORITY_SPEAKER),
+        ("STREAM", STREAM),
+        ("VIEW_CHANNEL", VIEW_CHANNEL),
+        ("SEND_MESSAGES", SEND_MESSAGES),
+        ("SEND_TTS_MESSAGES", SEND_TTS_MESSAGES),
+        ("MANAGE_MESSAGES", MANAGE_MESSAGES),
+        ("EMBED_LINKS", EMBED_LINKS),
+        ("ATTACH_FILES", ATTACH_FILES),
+        ("READ_MESSAGE_HISTORY", READ_MESSAGE_HISTORY),
+        ("MENTION_EVERYONE", MENTION_EVERYONE),
+        ("USE_EXTERNAL_EMOJIS", USE_EXTERNAL_EMOJIS),
+        ("VIEW_GUILD_ANALYTICS", VIEW_GUILD_ANALYTICS),
+        ("CONNECT", CONNECT),
+        ("SPEAK", SPEAK),
+        ("MUTE_MEMBERS", MUTE_MEMBERS),
+        ("DEAFEN_MEMBERS", DEAFEN_MEMBERS),
+        ("MOVE_MEMBERS", MOVE_MEMBERS),
+        ("USE_VAD", USE_VAD),
+        ("CHANGE_NICKNAME", CHANGE_NICKNAME),
+        ("MANAGE_NICKNAMES", MANAGE_NICKNAMES),
+        ("MANAGE_ROLES", MANAGE_ROLES),
+        ("MANAGE_WEBHOOKS", MANAGE_WEBHOOKS),
+        ("MANAGE_GUILD_EXPRESSIONS", MANAGE_GUILD_EXPRESSIONS),
+        ("USE_APPLICATION_COMMANDS", USE_APPLICATION_COMMANDS),
+        ("REQUEST_TO_SPEAK", REQUEST_TO_SPEAK),
+        ("MANAGE_EVENTS", MANAGE_EVENTS),
+        ("MANAGE_THREADS", MANAGE_THREADS),
+        ("CREATE_PUBLIC_THREADS", CREATE_PUBLIC_THREADS),
+        ("CREATE_PRIVATE_THREADS", CREATE_PRIVATE_THREADS),
+        ("USE_EXTERNAL_STICKERS", USE_EXTERNAL_STICKERS),
+        ("SEND_MESSAGES_IN_THREADS", SEND_MESSAGES_IN_THREADS),
+        ("USE_EMBEDDED_ACTIVITIES", USE_EMBEDDED_ACTIVITIES),
+        ("MODERATE_MEMBERS", MODERATE_MEMBERS),
+        ("VIEW_CREATOR_MONETIZATION_ANALYTICS", VIEW_CREATOR_MONETIZATION_ANALYTICS),
+        ("USE_SOUNDBOARD", USE_SOUNDBOARD),
+        ("CREATE_GUILD_EXPRESSIONS", CREATE_GUILD_EXPRESSIONS),
+        ("CREATE_EVENTS", CREATE_EVENTS),
+        ("USE_EXTERNAL_SOUNDS", USE_EXTERNAL_SOUNDS),
+        ("SEND_VOICE_MESSAGES", SEND_VOICE_MESSAGES),
+        ("SET_VOICE_CHANNEL_STATUS", SET_VOICE_CHANNEL_STATUS),
+        ("SEND_POLLS", SEND_POLLS),
+        ("USE_EXTERNAL_APPS", USE_EXTERNAL_APPS),
+        ("PIN_MESSAGES", PIN_MESSAGES),
+        ("BYPASS_SLOWMODE", BYPASS_SLOWMODE),
+        ("MANAGE_OFFICIAL_MESSAGES", MANAGE_OFFICIAL_MESSAGES),
+    ];
+    /// What the @everyone role of a new guild grants: the 26-bit default set of the Discord client.
+    pub const DEFAULT_EVERYONE: u64 = CREATE_INSTANT_INVITE
+        | CHANGE_NICKNAME
         | VIEW_CHANNEL
         | SEND_MESSAGES
-        | MANAGE_MESSAGES
+        | EMBED_LINKS
         | ATTACH_FILES
         | READ_MESSAGE_HISTORY
-        | MENTION_EVERYONE;
-    /// What the `@everyone` role of a new guild grants.
-    pub const DEFAULT_EVERYONE: u64 =
-        CREATE_INSTANT_INVITE | ADD_REACTIONS | VIEW_CHANNEL | SEND_MESSAGES | ATTACH_FILES | READ_MESSAGE_HISTORY | MENTION_EVERYONE;
+        | MENTION_EVERYONE
+        | USE_EXTERNAL_EMOJIS
+        | USE_EXTERNAL_STICKERS
+        | ADD_REACTIONS
+        | CREATE_PUBLIC_THREADS
+        | CREATE_PRIVATE_THREADS
+        | SEND_MESSAGES_IN_THREADS
+        | SEND_POLLS
+        | CONNECT
+        | SPEAK
+        | USE_VAD
+        | STREAM
+        | USE_EMBEDDED_ACTIVITIES
+        | USE_SOUNDBOARD
+        | REQUEST_TO_SPEAK
+        | USE_APPLICATION_COMMANDS
+        | CREATE_GUILD_EXPRESSIONS
+        | CREATE_EVENTS
+        | USE_EXTERNAL_APPS;
+    /// A timed-out member keeps only these.
+    pub const TIMEOUT_ALLOWED: u64 = VIEW_CHANNEL | READ_MESSAGE_HISTORY;
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -747,6 +863,25 @@ mod tests {
     }
 
     #[test]
+    fn permission_table_is_complete() {
+        use super::permissions::*;
+        let mut seen = 0_u64;
+        for (name, bit) in NAMED {
+            assert_eq!(bit.count_ones(), 1, "{name} is a single bit");
+            assert_eq!(seen & bit, 0, "{name} is unique");
+            seen |= bit;
+        }
+        assert_eq!(NAMED.len(), 53);
+        assert_eq!(seen, ALL);
+        assert_eq!(ALL & (1 << 47), 0, "bit 47 is unassigned");
+        assert_eq!(NAMED.last().map(|(_, bit)| bit.trailing_zeros()), Some(53));
+        assert_eq!(DEFAULT_EVERYONE.count_ones(), 26);
+        assert_eq!(DEFAULT_EVERYONE & !ALL, 0);
+        assert_eq!(DEFAULT_EVERYONE & ADMINISTRATOR, 0);
+        assert_ne!(DEFAULT_EVERYONE & VIEW_CHANNEL, 0);
+    }
+
+    #[test]
     fn requests_and_errors() {
         round_trip::<AuthRequest>(json!({"login": "sam", "password": "pw"}));
         round_trip::<RegisterRequest>(json!({"email": "r@x.io", "username": "sam", "password": "pw"}));
@@ -803,6 +938,6 @@ mod tests {
         assert_eq!(permissions::SEND_MESSAGES, 2048);
         assert_eq!(permissions::MANAGE_MESSAGES, 8192);
         assert_eq!(permissions::ADMINISTRATOR, 8);
-        assert_eq!(permissions::DEFAULT_EVERYONE, 1 | 64 | 1024 | 2048 | 32768 | 65536 | 131072);
+        assert_eq!(permissions::DEFAULT_EVERYONE & (1 | 64 | 1024 | 2048 | 32768 | 65536 | 131072), 1 | 64 | 1024 | 2048 | 32768 | 65536 | 131072);
     }
 }
