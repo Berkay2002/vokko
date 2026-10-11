@@ -1,0 +1,265 @@
+mod common;
+
+use std::time::Duration;
+
+use common::TestApp;
+use futures_util::{SinkExt, StreamExt};
+use serde_json::{Value, json};
+use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
+
+struct Client {
+    ws: WebSocketStream<MaybeTlsStream<TcpStream>>,
+}
+
+impl Client {
+    async fn connect(address: &str) -> Self {
+        let (ws, _) = connect_async(format!("ws://{address}/gateway")).await.expect("websocket connects");
+        Self { ws }
+    }
+
+    async fn send(&mut self, value: Value) {
+        self.ws.send(Message::Text(value.to_string().into())).await.expect("send frame");
+    }
+
+    /// Next text frame, or `Err(close code)` when the server closes.
+    async fn recv(&mut self) -> Result<Value, Option<u16>> {
+        loop {
+            match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await {
+                Ok(Some(Ok(Message::Text(text)))) => return Ok(serde_json::from_str(&text).expect("json frame")),
+                Ok(Some(Ok(Message::Close(frame)))) => return Err(frame.map(|frame| u16::from(frame.code))),
+                Ok(Some(Ok(_))) => continue,
+                Ok(Some(Err(_))) | Ok(None) => return Err(None),
+                Err(_) => panic!("timed out waiting for a gateway frame"),
+            }
+        }
+    }
+
+    async fn hello(&mut self) -> Value {
+        let frame = self.recv().await.expect("hello");
+        assert_eq!(frame["op"], 10);
+        frame["d"].clone()
+    }
+
+    async fn identify(&mut self, token: &str) -> Value {
+        self.hello().await;
+        self.send(json!({"op": 2, "d": {"token": token}})).await;
+        self.wait_for("READY").await
+    }
+
+    /// Skips unrelated dispatches until `name` arrives; returns the whole payload.
+    async fn wait_for_payload(&mut self, name: &str) -> Value {
+        loop {
+            let frame = self.recv().await.unwrap_or_else(|code| panic!("closed ({code:?}) while waiting for {name}"));
+            if frame["op"] == 0 && frame["t"] == name {
+                return frame;
+            }
+        }
+    }
+
+    async fn wait_for(&mut self, name: &str) -> Value {
+        self.wait_for_payload(name).await["d"].clone()
+    }
+
+    /// True if no dispatch named `name` arrives within `window`.
+    async fn silent_for(&mut self, name: &str, window: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + window;
+        while let Ok(next) = tokio::time::timeout_at(deadline, self.ws.next()).await {
+            if let Some(Ok(Message::Text(text))) = next {
+                let frame: Value = serde_json::from_str(&text).expect("json");
+                if frame["t"] == name {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+struct World {
+    app: TestApp,
+    address: String,
+    owner: String,
+    member: String,
+    outsider: String,
+    channel: String,
+}
+
+async fn world() -> World {
+    world_with_heartbeat(60_000).await
+}
+
+async fn world_with_heartbeat(interval_ms: u64) -> World {
+    let app = TestApp::with_heartbeat(interval_ms).await;
+    let address = app.serve().await;
+    let (owner, _) = app.register("sam").await;
+    let (member, _) = app.register("alice").await;
+    let (outsider, _) = app.register("bob").await;
+    let (_, guild) = app.post("/guilds", &owner, json!({"name": "Gateway guild"})).await;
+    let guild_id = guild["id"].as_str().expect("id").to_owned();
+    let (_, channels) = app.get(&format!("/guilds/{guild_id}/channels"), &owner).await;
+    let channel = channels.as_array().expect("channels").iter().find(|c| c["name"] == "general").expect("general")["id"].as_str().expect("id").to_owned();
+    let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &owner, json!({})).await;
+    app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &member, json!({})).await;
+    World { app, address, owner, member, outsider, channel }
+}
+
+#[tokio::test]
+async fn login_send_and_gateway_receive() {
+    let w = world().await;
+    // login over REST like a real client
+    let (status, login) = w.app.send(axum::http::Method::POST, "/auth/login", None, Some(json!({"login": "alice", "password": "correct horse battery"}))).await;
+    assert_eq!(status, 200);
+    let member_token = login["token"].as_str().expect("token").to_owned();
+
+    let mut alice = Client::connect(&w.address).await;
+    let hello = alice.hello().await;
+    assert_eq!(hello["heartbeat_interval"], 60_000);
+    alice.send(json!({"op": 2, "d": {"token": member_token}})).await;
+    let ready_frame = alice.wait_for_payload("READY").await;
+    assert_eq!(ready_frame["s"], 1);
+    let ready = &ready_frame["d"];
+    assert_eq!(ready["v"], 1);
+    assert_eq!(ready["user"]["username"], "alice");
+    assert!(ready["session_id"].is_string());
+    assert_eq!(ready["guilds"][0]["name"], "Gateway guild");
+    assert_eq!(ready["guilds"][0]["member_count"], 2);
+    assert!(ready["guilds"][0]["channels"].as_array().expect("channels").len() >= 4);
+
+    let mut bob = Client::connect(&w.address).await;
+    bob.identify(&w.outsider).await;
+
+    let (status, sent) = w.app.post(&format!("/channels/{}/messages", w.channel), &w.owner, json!({"content": "hello gateway", "nonce": "abc"})).await;
+    assert_eq!(status, 200);
+
+    let frame = alice.wait_for_payload("MESSAGE_CREATE").await;
+    assert!(frame["s"].as_u64().expect("seq") > 1, "sequence numbers increase after READY");
+    assert_eq!(frame["d"]["id"], sent["id"]);
+    assert_eq!(frame["d"]["content"], "hello gateway");
+    assert_eq!(frame["d"]["author"]["username"], "sam");
+    assert_eq!(frame["d"]["nonce"], "abc");
+    // not a member: nothing is delivered
+    assert!(bob.silent_for("MESSAGE_CREATE", Duration::from_millis(300)).await);
+}
+
+#[tokio::test]
+async fn resume_replays_missed_events() {
+    let w = world().await;
+    let mut alice = Client::connect(&w.address).await;
+    let ready = alice.identify(&w.member).await;
+    let session_id = ready["session_id"].as_str().expect("session").to_owned();
+    let mut last_seq = 1;
+
+    // one live event, then the socket drops
+    w.app.post(&format!("/channels/{}/messages", w.channel), &w.owner, json!({"content": "live"})).await;
+    let live = alice.wait_for_payload("MESSAGE_CREATE").await;
+    last_seq = last_seq.max(live["s"].as_u64().expect("seq"));
+    drop(alice);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    for content in ["missed one", "missed two"] {
+        w.app.post(&format!("/channels/{}/messages", w.channel), &w.owner, json!({"content": content})).await;
+    }
+
+    let mut again = Client::connect(&w.address).await;
+    again.hello().await;
+    again.send(json!({"op": 6, "d": {"token": w.member, "session_id": session_id, "seq": last_seq}})).await;
+    let first = again.wait_for_payload("MESSAGE_CREATE").await;
+    let second = again.wait_for_payload("MESSAGE_CREATE").await;
+    assert_eq!(first["d"]["content"], "missed one");
+    assert_eq!(second["d"]["content"], "missed two");
+    let (first_seq, second_seq) = (first["s"].as_u64().expect("seq"), second["s"].as_u64().expect("seq"));
+    assert!(first_seq > last_seq && second_seq > first_seq, "replayed in order after the last seen sequence");
+    again.wait_for("RESUMED").await;
+
+    // and the session keeps working
+    w.app.post(&format!("/channels/{}/messages", w.channel), &w.owner, json!({"content": "after resume"})).await;
+    assert_eq!(again.wait_for("MESSAGE_CREATE").await["content"], "after resume");
+
+    // unknown session → InvalidSession
+    let mut stranger = Client::connect(&w.address).await;
+    stranger.hello().await;
+    stranger.send(json!({"op": 6, "d": {"token": w.member, "session_id": "nope", "seq": 1}})).await;
+    assert_eq!(stranger.recv().await.expect("frame")["op"], 9);
+    // someone else's token cannot resume it
+    stranger.send(json!({"op": 6, "d": {"token": w.outsider, "session_id": session_id, "seq": 1}})).await;
+    assert_eq!(stranger.recv().await.expect("frame")["op"], 9);
+}
+
+#[tokio::test]
+async fn bad_token_and_heartbeats() {
+    let w = world_with_heartbeat(400).await;
+    let mut bad = Client::connect(&w.address).await;
+    bad.hello().await;
+    bad.send(json!({"op": 2, "d": {"token": "wrong"}})).await;
+    assert_eq!(bad.recv().await.expect_err("closed"), Some(4004));
+
+    // heartbeats are acknowledged
+    let mut client = Client::connect(&w.address).await;
+    client.identify(&w.member).await;
+    client.send(json!({"op": 1, "d": 1})).await;
+    let mut acked = false;
+    for _ in 0..5 {
+        if client.recv().await.expect("frame")["op"] == 11 {
+            acked = true;
+            break;
+        }
+    }
+    assert!(acked, "op 11 after op 1");
+
+    // ... and silence ends in close code 4009 (interval is 400 ms in tests)
+    let mut silent = Client::connect(&w.address).await;
+    silent.identify(&w.owner).await;
+    loop {
+        match silent.recv().await {
+            Err(code) => {
+                assert_eq!(code, Some(4009));
+                break;
+            }
+            Ok(_) => continue,
+        }
+    }
+}
+
+#[tokio::test]
+async fn presence_follows_connections_and_typing_is_relayed() {
+    let w = world().await;
+    let mut owner = Client::connect(&w.address).await;
+    owner.identify(&w.owner).await;
+    let mut alice = Client::connect(&w.address).await;
+    let ready = alice.identify(&w.member).await;
+    let owner_presence = ready["presences"].as_array().expect("presences").iter().find(|p| p["status"] == "online").cloned();
+    assert!(owner_presence.is_some(), "owner is already online in alice's READY");
+
+    w.app.post(&format!("/channels/{}/typing", w.channel), &w.owner, json!({})).await;
+    let typing = alice.wait_for("TYPING_START").await;
+    assert_eq!(typing["channel_id"], w.channel);
+    assert!(typing["timestamp"].is_u64());
+
+    // alice goes away → owner sees offline
+    alice.send(json!({"op": 1, "d": null})).await;
+    drop(alice);
+    let update = loop {
+        let frame = owner.recv().await.expect("frame");
+        if frame["t"] == "PRESENCE_UPDATE" && frame["d"]["status"] == "offline" {
+            break frame;
+        }
+    };
+    assert_eq!(update["d"]["custom_status"], Value::Null);
+}
+
+#[tokio::test]
+async fn client_close_is_answered_with_a_close_frame() {
+    let w = world().await;
+    let mut client = Client::connect(&w.address).await;
+    client.identify(&w.member).await;
+    client.ws.send(Message::Close(None)).await.expect("send close");
+    loop {
+        match tokio::time::timeout(Duration::from_secs(5), client.ws.next()).await.expect("server answers") {
+            Some(Ok(Message::Close(_))) => break,
+            Some(Ok(_)) => continue,
+            other => panic!("expected a close frame, got {other:?}"),
+        }
+    }
+}
