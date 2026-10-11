@@ -12,6 +12,7 @@ use crate::events;
 use crate::extract::{ApiJson, parse_id};
 use crate::routes::auth::clean_text;
 use crate::routes::guilds::channel_name;
+use crate::routes::overwrites;
 use crate::state::AppState;
 use crate::store::{self, iso};
 
@@ -58,6 +59,7 @@ async fn update_channel(
     if let Some(position) = body.position {
         sqlx::query("UPDATE channels SET position = $2 WHERE id = $1").bind(id).bind(position).execute(&state.db).await?;
     }
+    let mut viewers_before = None;
     if let Some(parent) = body.parent_id {
         let parent = if parent.0 == 0 {
             None
@@ -75,10 +77,23 @@ async fn update_channel(
             }
             Some(parent.db())
         };
-        sqlx::query("UPDATE channels SET parent_id = $2 WHERE id = $1").bind(id).bind(parent).execute(&state.db).await?;
+        // Moving under a category with lock_permissions adopts its overwrites; without a parent there is nothing to adopt.
+        let lock_to = parent.filter(|_| body.lock_permissions == Some(true));
+        if let Some(parent) = lock_to {
+            viewers_before = Some(access::channel_viewers(&state, &access.channel).await?);
+            let mut tx = state.db.begin().await?;
+            sqlx::query("UPDATE channels SET parent_id = $2 WHERE id = $1").bind(id).bind(parent).execute(&mut *tx).await?;
+            overwrites::copy_overwrites(&mut tx, parent, id).await?;
+            tx.commit().await?;
+        } else {
+            sqlx::query("UPDATE channels SET parent_id = $2 WHERE id = $1").bind(id).bind(parent).execute(&state.db).await?;
+        }
     }
     let row = store::channel_row(&state, id).await?.ok_or_else(ApiErr::unknown_channel)?;
-    events::dispatch_channel(&state, &row, GatewayEvent::ChannelUpdate).await?;
+    match viewers_before {
+        Some(before) => overwrites::dispatch_visibility(&state, &row, &before).await?,
+        None => events::dispatch_channel(&state, &row, GatewayEvent::ChannelUpdate).await?,
+    }
     store::channel(&state, id, Some(user_id)).await?.map(Json).ok_or_else(ApiErr::unknown_channel)
 }
 
