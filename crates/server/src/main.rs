@@ -1,0 +1,35 @@
+use vokko_server::{AppState, Config};
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "vokko_server=info,warn".into())).init();
+    if let Err(message) = run().await {
+        eprintln!("vokko-server: {message}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), String> {
+    let command = std::env::args().nth(1).unwrap_or_else(|| "serve".to_owned());
+    let config = Config::from_env()?;
+    let pool = vokko_server::connect(&config.database_url).await.map_err(|error| format!("database connection failed: {error}"))?;
+    vokko_server::migrate(&pool).await.map_err(|error| format!("migration failed: {error}"))?;
+    let state = AppState::new(pool, config);
+    match command.as_str() {
+        "serve" => serve(state).await,
+        other => Err(format!("unknown command {other}; use `serve` or `seed`")),
+    }
+}
+
+async fn serve(state: AppState) -> Result<(), String> {
+    tokio::fs::create_dir_all(state.attachments_dir()).await.map_err(|error| format!("cannot create the data directory: {error}"))?;
+    let bind = state.config.bind.clone();
+    let listener = tokio::net::TcpListener::bind(&bind).await.map_err(|error| format!("cannot bind {bind}: {error}"))?;
+    tracing::info!("vokko-server listening on http://{bind}");
+    axum::serve(listener, vokko_server::router(state))
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
+        .map_err(|error| error.to_string())
+}
