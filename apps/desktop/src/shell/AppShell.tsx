@@ -3,7 +3,6 @@ import { Navigate, useNavigate, useParams } from "react-router";
 import { ChatView } from "../chat/ChatView";
 import { appStore, useStore } from "../api/store";
 import { ChannelType } from "../api/types";
-import { SearchResultsPanel, useSearchPanelOpen } from "../search";
 import { ChannelHeader } from "./ChannelHeader";
 import { DmProfilePanel } from "./DmProfilePanel";
 import { DmSidebar } from "./DmSidebar";
@@ -89,7 +88,6 @@ export function AppShell() {
   const navigate = useNavigate();
   const isGroupDm = channel?.type === ChannelType.GroupDM;
   const dmRecipient = channel && !guild && !isGroupDm ? channel.recipients?.[0] : undefined;
-  const searching = useSearchPanelOpen(channelId ?? "");
 
   useEffect(() => {
     appStore.getState().setRoute({ guildId, channelId });
@@ -184,9 +182,8 @@ export function AppShell() {
               <ChannelHeader channel={channel} membersOpen={membersOpen && !!guild} onToggleMembers={toggleMembers} profileOpen={profileOpen && !!dmRecipient} onToggleProfile={toggleProfile} />
               <div className="channel-body">
                 <div className="channel-chat">{text ? <ChatView key={channel.id} channelId={channel.id} /> : <div className="main-empty">Voice channels are not supported yet.</div>}</div>
-                {searching && <SearchResultsPanel channel={channel} />}
-                {guild && membersOpen && !searching && <MemberList guildId={guild.id} />}
-                {dmRecipient && profileOpen && !searching && <DmProfilePanel user={dmRecipient} />}
+                {guild && membersOpen && <MemberList guildId={guild.id} />}
+                {dmRecipient && profileOpen && <DmProfilePanel user={dmRecipient} />}
               </div>
             </>
           )}

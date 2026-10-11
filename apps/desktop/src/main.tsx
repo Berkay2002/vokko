@@ -23,6 +23,7 @@ import "./styles/menus.css";
 import "./styles/server-settings.css";
 import "./styles/channel-settings.css";
 import "./ui/prefs";
+import "./search";
 
 bootstrap();
 
