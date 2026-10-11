@@ -16,6 +16,17 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 log = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "fs", "signal"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio", "ws", "multipart", "matched-path"] }
+tower-http = { version = "0.6", default-features = false, features = ["cors"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "migrate", "macros", "time"] }
+argon2 = "0.5"
+rand = "0.9"
+sha2 = "0.10"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

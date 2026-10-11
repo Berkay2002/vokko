@@ -2,6 +2,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod api;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Community {
     pub id: String,
