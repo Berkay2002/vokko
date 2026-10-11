@@ -563,12 +563,14 @@ route("POST", "/read-states/ack-bulk", ({ viewer, body }) => {
 // ---- entry point ----
 
 const PUBLIC = new Set(["POST /auth/register", "POST /auth/login"]);
+/** An invite preview is readable without an account (the invite page shows it before login). */
+const isInvitePreview = (method: string, pathname: string): boolean => method === "GET" && /^\/invites\/[a-z0-9]+$/.test(pathname);
 
 export function handleRoute(method: string, rawPath: string, body: unknown, viewerId: string | null): unknown {
   const url = new URL(rawPath, "http://mock.local");
   const key = `${method} ${url.pathname}`;
   const viewer = viewerId ? db.accounts.get(viewerId) : undefined;
-  if (!viewer && !PUBLIC.has(key) && !url.pathname.startsWith("/auth/")) fail(401, 0, "401: Unauthorized");
+  if (!viewer && !PUBLIC.has(key) && !url.pathname.startsWith("/auth/") && !isInvitePreview(method, url.pathname)) fail(401, 0, "401: Unauthorized");
   for (const r of routes) {
     if (r.method !== method) continue;
     const match = r.pattern.exec(url.pathname);

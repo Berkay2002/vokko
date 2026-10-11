@@ -256,6 +256,8 @@ export function seed(): void {
   voiceCategory.position = 2;
   const welcome = addChannel(guildId, { name: "welcome", type: ChannelType.GuildText, parent_id: info.id, topic: "Say hi and read the rules." });
   addChannel(guildId, { name: "announcements", type: ChannelType.GuildText, parent_id: info.id, topic: "Release notes and news." });
+  // a standing invite, so the /invite/vokkodev page has something to show in mock mode
+  db.invites.set("vokkodev", { code: "vokkodev", guild_id: guildId, channel_id: welcome.id, expires_at: null });
   // Private channel: hidden from @everyone, visible to Moderators (and the owner / admins).
   const staff = addChannel(guildId, {
     name: "staff",

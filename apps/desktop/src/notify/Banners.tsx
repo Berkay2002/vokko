@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { BellRing, WifiOff, X } from "lucide-react";
+import { BellRing, Download, WifiOff, X } from "lucide-react";
 import { gateway } from "../api/gateway";
 import { useStore } from "../api/store";
+import { restartToUpdate, useDesktopUpdate } from "../desktop";
 import { setPref, usePrefs } from "../ui/prefs";
 import { notificationAdapter, type PermissionState } from "./desktop";
 import "./notify.css";
@@ -50,6 +51,31 @@ function ConnectionBar({ offline }: { offline: boolean }) {
   );
 }
 
+/** A downloaded desktop update waiting for a restart. Not dismissible: it stays until Vokko restarts. */
+function UpdateBar({ version }: { version: string }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const restart = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      await restartToUpdate();
+    } catch {
+      setFailed(true);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="notify-banner notify-banner-brand" role="region" aria-label="Update ready" data-testid="update-banner">
+      <Download size={16} aria-hidden />
+      <span className="notify-banner-text">{failed ? "Couldn't install the update. Try again." : `Update ready: Vokko ${version} is ready to install.`}</span>
+      <button type="button" className="notify-banner-button" disabled={busy} onClick={() => void restart()}>
+        Restart to Update
+      </button>
+    </div>
+  );
+}
+
 function PermissionBar({ onDone }: { onDone(): void }) {
   const [busy, setBusy] = useState(false);
   const enable = async () => {
@@ -81,7 +107,7 @@ function PermissionBar({ onDone }: { onDone(): void }) {
   );
 }
 
-/** Top-of-window banners: connection state first, otherwise the one-time notification permission prompt. */
+/** Top-of-window banners, one at a time: connection state, then a ready update, then the one-time notification permission prompt. */
 export function NotifyBanners() {
   const loggedIn = useStore(s => !!s.token && s.ready);
   const connection = useStore(s => s.connection);
@@ -109,14 +135,18 @@ export function NotifyBanners() {
     };
   }, [loggedIn, desktopPref]);
 
-  const showPermission = loggedIn && !showConnection && !dismissed && !desktopPref && permission === "default";
-  const visible = showConnection || showPermission;
+  const readyVersion = useDesktopUpdate(s => (s.status.state === "ready" ? s.status.version : null));
+  const showUpdate = !showConnection && readyVersion !== null;
+
+  const showPermission = loggedIn && !showConnection && !showUpdate && !dismissed && !desktopPref && permission === "default";
+  const visible = showConnection || showUpdate || showPermission;
   useEffect(() => {
     document.documentElement.classList.toggle("has-top-banner", visible);
     return () => document.documentElement.classList.remove("has-top-banner");
   }, [visible]);
 
   if (showConnection) return <ConnectionBar offline={!online} />;
+  if (showUpdate && readyVersion !== null) return <UpdateBar version={readyVersion} />;
   if (showPermission) return <PermissionBar onDone={() => setDismissed(true)} />;
   return null;
 }

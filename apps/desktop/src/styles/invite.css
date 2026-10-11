@@ -1,0 +1,110 @@
+/* /invite/:code: the join-invite confirmation card (reuses the auth page backdrop and card) */
+.invite-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 440px;
+  text-align: center;
+}
+
+.invite-eyebrow {
+  margin: 0 0 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.invite-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  border-radius: 20px;
+  background: var(--brand-500);
+  color: #fff;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.invite-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.invite-icon-bad {
+  background: transparent;
+  color: var(--status-danger);
+}
+
+.invite-name {
+  margin: 0;
+  color: var(--text-header);
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.invite-counts {
+  display: flex;
+  gap: 16px;
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.invite-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.invite-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.invite-dot-online {
+  background: var(--status-online);
+}
+
+.invite-sub {
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.invite-error {
+  margin: 16px 0 0;
+}
+
+.invite-button {
+  width: 100%;
+  margin-top: 24px;
+  text-decoration: none;
+}
+
+.invite-skip {
+  margin-top: 16px;
+  color: var(--text-link);
+  font-size: 14px;
+}
+
+.invite-skeleton {
+  width: 100%;
+  height: 220px;
+  border-radius: var(--radius-md);
+  background: var(--background-surface-high);
+  opacity: 0.5;
+}

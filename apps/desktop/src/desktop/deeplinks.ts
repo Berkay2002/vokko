@@ -24,12 +24,21 @@ export function routeDeepLink(link: DeepLink): void {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-const listeners = new Set<DeepLinkHandler>();
+interface Listener {
+  handler: DeepLinkHandler;
+  /** Link kinds this listener wants; undefined means all of them. */
+  kinds?: readonly DeepLink["kind"][];
+}
+
+const listeners = new Set<Listener>();
 let backlog: DeepLink[] = [];
 
+const wants = (listener: Listener, link: DeepLink): boolean => !listener.kinds || listener.kinds.includes(link.kind);
+
 function deliver(link: DeepLink): void {
-  if (listeners.size > 0) {
-    for (const listener of [...listeners]) listener(link);
+  const targets = [...listeners].filter(listener => wants(listener, link));
+  if (targets.length > 0) {
+    for (const listener of targets) listener.handler(link);
     return;
   }
   if (link.kind === "invite") routeDeepLink(link);
@@ -38,16 +47,22 @@ function deliver(link: DeepLink): void {
 
 /**
  * Subscribes to every deep link (`vokko://invite/<code>`, `vokko://auth/callback?…`). Auth links that arrived before the first
- * subscriber are replayed to it. While at least one listener exists, invite links go to listeners instead of `routeDeepLink`.
+ * subscriber are replayed to it. While at least one listener wants a link's kind, it goes to those listeners instead of
+ * `routeDeepLink`. Pass `kinds` to receive only those kinds: links of other kinds stay queued for a later subscriber, so a
+ * handler that only cares about invites does not swallow an OAuth redirect meant for the sign-in code.
  * Returns an unsubscribe function. Never fires outside Tauri.
  */
-export function onDeepLink(handler: DeepLinkHandler): () => void {
-  listeners.add(handler);
+export function onDeepLink(handler: DeepLinkHandler, options: { kinds?: readonly DeepLink["kind"][] } = {}): () => void {
+  const listener: Listener = { handler, kinds: options.kinds };
+  listeners.add(listener);
   const queued = backlog;
   backlog = [];
-  for (const link of queued) handler(link);
+  for (const link of queued) {
+    if (wants(listener, link)) handler(link);
+    else backlog = [...backlog, link];
+  }
   return () => {
-    listeners.delete(handler);
+    listeners.delete(listener);
   };
 }
 
