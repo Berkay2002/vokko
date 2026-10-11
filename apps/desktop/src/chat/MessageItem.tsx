@@ -70,7 +70,7 @@ function ReplyPreview({ message }: { message: Message }) {
     <span className="chat-reply-name" style={color ? { color } : undefined}>@{chat.nameOf(ref.author, ref.member)}</span>
     <ServerTag user={author} className="small" />
     <span className="chat-reply-text">
-      {text || (ref.attachments.length ? <><ImageIcon size={14} /><i>Click to see attachment</i></> : <i>Click to see attachment</i>)}
+      {text || (ref.attachments.length ? <><i>Click to see attachment</i><ImageIcon size={20} aria-hidden="true" /></> : <i>Click to see attachment</i>)}
     </span>
   </div>;
 }

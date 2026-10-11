@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowRight, Download, ExternalLink, File as FileIcon, Forward, Link2, MoreHorizontal, ZoomIn, FileArchive, FileAudio, FileCode, FileText, FileVideo, ImageOff, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Download, ExternalLink, File as FileIcon, Forward, Link2, MoreHorizontal, Pencil, Trash2, ZoomIn, FileArchive, FileAudio, FileCode, FileText, FileVideo, ImageOff, X } from 'lucide-react';
 import type { Attachment, Message } from '../api/types';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { ServerTag } from './ServerTag';
 import { Tooltip, resolveUrl } from './shell';
 import { comingSoon } from './toast';
-import { formatBytes, formatFullDate, formatMessageTimestamp } from './util';
+import { formatBytes, formatFullDate, formatMessageTimestamp, isSpoilerName } from './util';
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
 const isVideo = (a: Attachment): boolean => !!a.content_type?.startsWith('video/');
@@ -31,16 +31,21 @@ function ImageTile({ message, attachment, index, style, className }: { message: 
   const [spoiled, setSpoiled] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const spoiler = attachment.filename.startsWith('SPOILER_') && !spoiled;
+  const spoiler = isSpoilerName(attachment.filename) && !spoiled;
+  const own = message.author.id === chat.me.id && !message.id.startsWith('pending:');
   const url = resolveUrl(attachment.url);
   return <div className={`chat-image-wrap${className ? ` ${className}` : ''}`} style={style}>
     <button type="button" className={`chat-image${spoiler ? ' spoiler' : ''}${loaded ? ' loaded' : ''}${failed ? ' failed' : ''}`} aria-label={`Open image ${attachment.filename}`}
       onClick={() => (spoiler ? setSpoiled(true) : chat.actions.openImage(message, index))}>
-      <img src={url} alt={attachment.filename} loading="lazy" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+      <img src={url} alt={attachment.description || attachment.filename} loading="lazy" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
       {spoiler && <span className="chat-image-spoiler-label">SPOILER</span>}
       {failed && <span className="chat-image-failed"><ImageOff size={24} /></span>}
     </button>
-    {!spoiler && <div className="chat-image-actions">
+    {!spoiler && own && <div className="chat-image-actions own">
+      <Tooltip content="Modify Attachment" side="top"><button type="button" className="chat-image-action" aria-label="Modify Attachment" onClick={() => chat.actions.viewAttachment(message, attachment)}><Pencil size={16} /></button></Tooltip>
+      <Tooltip content="Remove Attachment From Message" side="top"><button type="button" className="chat-image-action danger" aria-label="Remove Attachment From Message" onClick={() => chat.actions.deleteAttachment(message, attachment)}><Trash2 size={16} /></button></Tooltip>
+    </div>}
+    {!spoiler && !own && <div className="chat-image-actions">
       <Tooltip content="Open in Browser" side="top"><a className="chat-image-action" href={url} target="_blank" rel="noopener noreferrer" aria-label="Open in Browser"><ExternalLink size={16} /></a></Tooltip>
       <Tooltip content="Download" side="top"><a className="chat-image-action" href={url} download={attachment.filename} aria-label="Download"><Download size={16} /></a></Tooltip>
     </div>}
@@ -75,8 +80,8 @@ function ImageGrid({ message, images }: { message: Message; images: { a: Attachm
     {rows.map((count, ri) => {
       const slice = shown.slice(cursor, cursor + count);
       cursor += count;
-      // Two images: measured equal 273x273 cells (550 wide, 4px gap) cropped to fill. Other layouts: rows of 160px.
-      return <div className="chat-image-row" key={ri} style={{ height: n === 2 ? 273 : 160 }}>
+      // Measured: two images are two 273x273 cells (550 wide, 4px gap), four are a 2x2 of 273x173 cells (550x350). Other layouts: rows of 160px.
+      return <div className="chat-image-row" key={ri} style={{ height: n === 2 ? 273 : n === 4 ? 173 : 160 }}>
         {slice.map(({ a, index }) => <ImageTile key={a.id} message={message} attachment={a} index={index} className="fill" />)}
       </div>;
     })}

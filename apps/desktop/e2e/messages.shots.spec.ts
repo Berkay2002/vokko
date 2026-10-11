@@ -10,7 +10,7 @@ test.skip(!dir, 'set VOKKO_SHOTS_DIR to capture screenshots');
 test.use({ viewport: { width: 1489, height: 1097 }, deviceScaleFactor: 1.25, locale: 'sv-SE' });
 
 const shot = async (page: Page, name: string) => {
-  await page.waitForTimeout(350);
+  await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(dir!, `${name}.png`) });
 };
 
@@ -79,3 +79,64 @@ test('overlays: toolbar, context menu, tag popout, lightbox', async ({ page }) =
   await shot(page, '08-lightbox-multi');
 });
 
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+const png = (name: string) => ({ name, mimeType: 'image/png', buffer: PNG });
+const box = (page: Page) => page.getByRole('textbox', { name: /#stock-talk/ });
+
+test('attachments: tray, modify dialog, pending card, grids, own hover, delete confirm', async ({ page }) => {
+  await openStockTalk(page);
+  const input = page.locator('input[type=file]');
+  await input.setInputFiles([png('chart-one.png'), png('chart-two.png')]);
+  await page.locator('.chat-tray-item.done').nth(1).waitFor();
+  await page.locator('.chat-tray-item').first().hover();
+  await shot(page, '12-tray-two-images');
+  await page.getByRole('button', { name: 'Edit chart-one.png' }).click();
+  await shot(page, '13-modify-attachment');
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  // a slow server so the "uploading" card is visible
+  await page.evaluate(() => localStorage.setItem('vokko.mock.latency', '4000'));
+  await box(page).fill('two charts');
+  await page.keyboard.press('Enter');
+  await page.locator('.chat-pending-upload').waitFor();
+  await shot(page, '14-pending-upload');
+  await page.evaluate(() => localStorage.setItem('vokko.mock.latency', '0'));
+  await row(page, 'two charts').locator('.chat-image-wrap').first().waitFor();
+  await page.locator('.chat-pending-upload').waitFor({ state: 'detached' });
+  await shot(page, '15-two-image-grid');
+  await input.setInputFiles([png('a.png'), png('b.png'), png('c.png'), png('d.png')]);
+  await page.locator('.chat-tray-item.done').nth(3).waitFor();
+  await shot(page, '16-tray-four-images');
+  await box(page).fill('four charts');
+  await page.keyboard.press('Enter');
+  const four = row(page, 'four charts');
+  await four.locator('.chat-image-wrap').nth(3).waitFor();
+  await four.locator('.chat-image-wrap').first().hover();
+  await shot(page, '17-four-image-grid-own-hover');
+  await four.getByRole('button', { name: 'Remove Attachment From Message' }).first().click();
+  await shot(page, '18-delete-attachment-confirm');
+});
+
+test('emoji: hover tooltip, info popout, jumbo, emoticon on send, reply to image', async ({ page }) => {
+  await openStockTalk(page);
+  await box(page).fill('hello :)');
+  await shot(page, '19-emoticon-typing');
+  await page.keyboard.press('Enter');
+  const hello = row(page, 'hello');
+  await hello.locator('.md-emoji').first().hover();
+  await shot(page, '20-emoji-tooltip');
+  await hello.locator('.md-emoji').first().click();
+  await shot(page, '21-emoji-popout');
+  await page.keyboard.press('Escape');
+  await box(page).fill('🔥');
+  await page.keyboard.press('Enter');
+  await page.locator('.md-jumbo').last().waitFor();
+  await shot(page, '22-jumbo-emoji');
+  await toTop(page);
+  const chart = page.locator('.chat-msg').filter({ has: page.locator('.chat-image') }).filter({ hasNot: page.locator('.chat-image-actions.own') }).first();
+  await chart.hover();
+  await chart.getByRole('button', { name: 'Reply' }).click();
+  await shot(page, '23-replying-to-image');
+  await box(page).fill('thanks');
+  await page.keyboard.press('Enter');
+  await shot(page, '24-reply-to-image-sent');
+});

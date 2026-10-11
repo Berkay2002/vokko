@@ -17,6 +17,9 @@ export interface Upload {
   attachment?: Attachment;
   error?: string;
   abort: AbortController;
+  /** Set from the tray's "Modify Attachment" dialog; sent as CreateMessageRequest.attachments[] (name may carry the SPOILER_ prefix). */
+  filename?: string;
+  description?: string;
 }
 
 export interface Draft {
@@ -93,6 +96,10 @@ export function addFiles(channelId: Snowflake, files: File[]): void {
         setUpload(channelId, localId, u => ({ ...u, status: 'error', error: uploadErrorMessage(e, file.size) }));
       });
   }
+}
+
+export function updateUpload(channelId: Snowflake, localId: string, details: { filename: string; description: string }): void {
+  setUpload(channelId, localId, u => ({ ...u, filename: details.filename, description: details.description }));
 }
 
 export function removeUpload(channelId: Snowflake, localId: string): void {

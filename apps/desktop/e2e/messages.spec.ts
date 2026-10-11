@@ -254,3 +254,122 @@ test.describe('timestamps', () => {
     });
   });
 });
+
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+const png = (name: string) => ({ name, mimeType: 'image/png', buffer: PNG });
+const settled = (page: Page) => expect(page.locator('.chat-tray-item.uploading')).toHaveCount(0);
+const stockBox = (page: Page) => page.getByRole('textbox', { name: /Message #stock-talk/ });
+
+test.describe('attachments', () => {
+  test('tray Edit renames, adds alt text and a spoiler mark; the sent message carries all three', async ({ page }) => {
+    await openStockTalk(page);
+    await page.locator('input[type=file]').setInputFiles(png('chart.png'));
+    const card = page.locator('.chat-tray-item');
+    await expect(card).toHaveCount(1);
+    await card.hover();
+    await page.getByRole('button', { name: 'Edit chart.png' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Modify Attachment' });
+    await dialog.getByLabel('Filename').fill('renamed.png');
+    await dialog.getByLabel('Description (alt text)').fill('a one pixel chart');
+    await dialog.getByLabel('Mark as spoiler').check();
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(page.locator('.chat-tray-spoiler')).toBeVisible();
+    await expect(page.locator('.chat-tray-name')).toHaveText('renamed.png');
+    await settled(page);
+    await stockBox(page).fill('look at this');
+    await page.keyboard.press('Enter');
+    const sent = row(page, 'look at this');
+    await expect(sent.locator('.chat-image.spoiler')).toBeVisible();
+    await expect(sent.locator('.chat-image img')).toHaveAttribute('alt', 'a one pixel chart');
+    await expect(sent.locator('.chat-image')).toHaveAttribute('aria-label', 'Open image SPOILER_renamed.png');
+  });
+
+  test('Cancel in the modify dialog changes nothing', async ({ page }) => {
+    await openStockTalk(page);
+    await page.locator('input[type=file]').setInputFiles(png('keep.png'));
+    await page.locator('.chat-tray-item').hover();
+    await page.getByRole('button', { name: 'Edit keep.png' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Modify Attachment' });
+    await dialog.getByLabel('Filename').fill('other.png');
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('.chat-tray-name')).toHaveText('keep.png');
+  });
+
+  test('removing a sent image asks first; backdrop click cancels, confirming removes only the image', async ({ page }) => {
+    await openStockTalk(page);
+    await page.locator('input[type=file]').setInputFiles(png('gone.png'));
+    await settled(page);
+    await stockBox(page).fill('delete my image');
+    await page.keyboard.press('Enter');
+    const sent = row(page, 'delete my image');
+    await sent.locator('.chat-image-wrap').hover();
+    await sent.getByRole('button', { name: 'Remove Attachment From Message' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Are you sure?' });
+    await expect(dialog).toContainText('permanently delete the attachment');
+    await page.mouse.click(5, 5); // backdrop
+    await expect(dialog).toHaveCount(0);
+    await expect(sent.locator('.chat-image')).toHaveCount(1);
+    await sent.locator('.chat-image-wrap').hover();
+    await sent.getByRole('button', { name: 'Remove Attachment From Message' }).click();
+    await page.getByRole('button', { name: 'Delete Attachment' }).click();
+    // the message had text, so it stays, without the image
+    await expect(sent.locator('.chat-image')).toHaveCount(0);
+    await expect(row(page, 'delete my image')).toBeVisible();
+  });
+
+  test('two images are equal squares, four are a 2x2 of equal cells with the same overall width', async ({ page }) => {
+    await openStockTalk(page);
+    await page.locator('input[type=file]').setInputFiles([png('a.png'), png('b.png')]);
+    await expect(page.locator('.chat-tray-item')).toHaveCount(2);
+    await settled(page);
+    await stockBox(page).fill('pair');
+    await page.keyboard.press('Enter');
+    const two = row(page, 'pair').locator('.chat-image-wrap');
+    await expect(two).toHaveCount(2);
+    const [a, b] = [(await two.nth(0).boundingBox())!, (await two.nth(1).boundingBox())!];
+    expect(Math.abs(a.width - b.width)).toBeLessThan(1.5);
+    expect(Math.abs(a.height - 273)).toBeLessThan(1.5);
+    const total = b.x + b.width - a.x;
+    await page.locator('input[type=file]').setInputFiles([png('1.png'), png('2.png'), png('3.png'), png('4.png')]);
+    await expect(page.locator('.chat-tray-item')).toHaveCount(4);
+    await settled(page);
+    await stockBox(page).fill('quad');
+    await page.keyboard.press('Enter');
+    const four = row(page, 'quad').locator('.chat-image-wrap');
+    await expect(four).toHaveCount(4);
+    const boxes = await Promise.all([0, 1, 2, 3].map(async i => (await four.nth(i).boundingBox())!));
+    for (const bx of boxes) { expect(Math.abs(bx.width - boxes[0]!.width)).toBeLessThan(1.5); expect(Math.abs(bx.height - 173)).toBeLessThan(1.5); }
+    expect(Math.abs(boxes[1]!.x + boxes[1]!.width - boxes[0]!.x - total)).toBeLessThan(1.5);
+    expect(boxes[2]!.y).toBeGreaterThan(boxes[0]!.y + 100);
+  });
+});
+
+test.describe('emoji', () => {
+  test('emoticons convert on send, not while typing, and not inside code', async ({ page }) => {
+    await openStockTalk(page);
+    await stockBox(page).fill('see you :)');
+    await expect(stockBox(page)).toHaveValue('see you :)');
+    await page.keyboard.press('Enter');
+    await expect(row(page, 'see you')).toContainText('see you 🙂');
+    await stockBox(page).fill('use `:)` here');
+    await page.keyboard.press('Enter');
+    await expect(row(page, 'use').locator('.chat-content')).toContainText(':)');
+  });
+
+  test('hover shows the name tooltip, click opens the info popout', async ({ page }) => {
+    await openStockTalk(page);
+    await stockBox(page).fill('smile 🙂 please');
+    await page.keyboard.press('Enter');
+    const glyph = row(page, 'smile').locator('.md-emoji').first();
+    await glyph.hover();
+    const tip = page.locator('.chat-emoji-tip');
+    await expect(tip).toContainText('Click to learn more');
+    await expect(tip.locator('b')).toHaveText(':slight_smile:');
+    await glyph.click();
+    const pop = page.locator('.chat-emoji-pop');
+    await expect(pop).toContainText('A standard emoji');
+    await expect(tip).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(pop).toHaveCount(0);
+  });
+});

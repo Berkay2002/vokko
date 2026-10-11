@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
-import type { Message, Snowflake } from '../api/types';
-import { ApiRequestError, Modal, markGuildRead, useMe, useReadState } from './shell';
+import type { Attachment, Message, Snowflake } from '../api/types';
+import { ApiRequestError, Modal, markGuildRead, resolveUrl, useMe, useReadState } from './shell';
+import { DeleteAttachmentModal, ModifyAttachmentModal } from './AttachmentModals';
 import { ChatProvider, useChat, type ChatActions } from './ChatContext';
 import { Composer } from './Composer';
 import { MessageList, type MessageListHandle } from './MessageList';
@@ -34,6 +35,8 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
   const [link, setLink] = useState<string | null>(null);
   const [image, setImage] = useState<ImageView | null>(null);
   const [reactionsOf, setReactionsOf] = useState<Message | null>(null);
+  const [attachmentView, setAttachmentView] = useState<{ message: Message; attachment: Attachment } | null>(null);
+  const [attachmentDelete, setAttachmentDelete] = useState<{ message: Message; attachment: Attachment } | null>(null);
   const [focusToken, setFocusToken] = useState(0);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
@@ -76,6 +79,8 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     jumpTo: id => { void messageStore.jumpToMessage(channelId, id); },
     openLink: href => setLink(href),
     openImage: (message, index) => setImage({ message, index }),
+    viewAttachment: (message, attachment) => setAttachmentView({ message, attachment }),
+    deleteAttachment: (message, attachment) => setAttachmentDelete({ message, attachment }),
     viewReactions: m => setReactionsOf(m),
   }), [channelId, requestDelete]);
 
@@ -98,6 +103,13 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
       <p className="chat-modal-text">{notice?.body}</p>
     </Modal>
     <ReactionsModal message={reactionsOf} onClose={() => setReactionsOf(null)} />
+    <ModifyAttachmentModal readOnly onSave={() => undefined} onClose={() => setAttachmentView(null)}
+      target={attachmentView ? { details: { filename: attachmentView.attachment.filename, description: attachmentView.attachment.description ?? '' }, thumbUrl: resolveUrl(attachmentView.attachment.url) } : null} />
+    <DeleteAttachmentModal open={!!attachmentDelete} onClose={() => setAttachmentDelete(null)} onConfirm={() => {
+      const t = attachmentDelete;
+      setAttachmentDelete(null);
+      if (t) void messageStore.removeAttachment(t.message.channel_id, t.message, t.attachment.id).catch(() => undefined);
+    }} />
     {image && <Lightbox message={image.message} index={image.index} onClose={() => setImage(null)} />}
   </ChatProvider>;
 }

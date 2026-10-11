@@ -160,7 +160,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
   return createPortal(<div className="chat-menu-layer context-menu-layer" onContextMenu={e => { e.preventDefault(); e.stopPropagation(); }}>
     <div ref={box} className="chat-menu context-menu" role="menu" aria-label="Message actions" style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}>
       {!pending && !system && <div className="chat-menu-tiles" role="group" aria-label="Quick reactions">
-        {quick.map(e => <button key={e} type="button" className="chat-menu-tile" aria-label={`React with ${e}`} onClick={() => { onClose(); react(e); }}>{e}</button>)}
+        {quick.map(e => <button key={e} type="button" role="menuitem" className="chat-menu-tile" aria-label={`React with ${e}`} onClick={() => { onClose(); react(e); }}>{e}</button>)}
       </div>}
       {entries.map((entry, i) => {
         if (entry === 'separator') return <div key={`sep-${i}`} className="chat-menu-sep" role="separator" />;

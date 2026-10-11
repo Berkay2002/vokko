@@ -2,7 +2,7 @@
 // components subscribe with useChannelState().
 import { useSyncExternalStore } from 'react';
 import { MessageType } from '../api/types';
-import type { CreateMessageRequest, EditMessageRequest, Message, ReactionEmoji, Snowflake, User } from '../api/types';
+import type { CreateMessageRequest, EditMessageRequest, Message, PendingAttachmentMeta, ReactionEmoji, Snowflake, User } from '../api/types';
 import { gateway, request, setLocalReadPointer } from './shell';
 import {
   PAGE_SIZE, TYPING_TTL_MS, appendPage, applyReaction, deleteMessage, emojiKey, emptyState, indexOfId, prependPage, replaceWindow, setTyping,
@@ -174,11 +174,12 @@ export const messageStore = {
 
   // ---- sending ----
 
-  send(channelId: Snowflake, me: User, input: { content: string; attachments?: Message['attachments']; reply?: Message | null; mention?: boolean }): void {
+  send(channelId: Snowflake, me: User, input: { content: string; attachments?: Message['attachments']; meta?: PendingAttachmentMeta[]; reply?: Message | null; mention?: boolean }): void {
     const nonce = newNonce();
     const content = input.content.trim();
     const req: CreateMessageRequest = { content, nonce };
-    if (input.attachments?.length) req.attachment_ids = input.attachments.map(a => a.id);
+    if (input.meta?.length) req.attachments = input.meta;
+    else if (input.attachments?.length) req.attachment_ids = input.attachments.map(a => a.id);
     if (input.reply) req.message_reference = { message_id: input.reply.id };
     if (input.reply && input.mention === false) req.allowed_mentions = { replied_user: false };
     const message: Message = {
@@ -271,6 +272,15 @@ export const messageStore = {
   ack(channelId: Snowflake, messageId: Snowflake): void {
     if (heldUnread.has(channelId)) return;
     void request<null>('POST', `/channels/${channelId}/messages/${messageId}/ack`).catch(() => undefined);
+  },
+
+  /** Remove one attachment from a sent message (PATCH with the ones to keep); the last one of a text-less message deletes the message. */
+  async removeAttachment(channelId: Snowflake, message: Message, attachmentId: Snowflake): Promise<void> {
+    const keep = message.attachments.filter(a => a.id !== attachmentId);
+    if (keep.length === 0 && message.content.trim() === '') { await this.remove(channelId, message.id); return; }
+    const body: EditMessageRequest = { attachments: keep.map(a => ({ id: a.id })) };
+    const m = await request<Message>('PATCH', `/channels/${channelId}/messages/${message.id}`, body);
+    update(channelId, s => updateIfPresent(s, m));
   },
 
   /** A deliberate "mark as read" (Escape, the unread bar): releases the hold, then acks. */

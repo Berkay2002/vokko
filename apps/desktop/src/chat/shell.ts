@@ -51,6 +51,9 @@ export function useChatDisplayPrefs(): ChatDisplayPrefs {
   };
 }
 
+/** Settings > Appearance > "Convert emoticons to emoji": applied to the text of a message when it is sent. */
+export function useConvertEmoticons(): boolean { return usePrefs(s => s.convertEmoticons); }
+
 /** Channels of a guild, in position order (for #channel autocomplete and mention rendering). */
 export function useGuildChannels(guildId: Snowflake | null | undefined): Channel[] {
   const all = useStore(s => s.channels);

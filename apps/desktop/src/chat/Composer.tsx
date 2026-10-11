@@ -2,16 +2,18 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { AtSign, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
 import { ChannelType } from '../api/types';
 import type { Message, Snowflake } from '../api/types';
-import { request, Popout, Tooltip } from './shell';
+import { request, Popout, Tooltip, useConvertEmoticons } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { AppsPopout, ExpressionPickerPopout, type ExpressionTab } from './ExpressionPicker';
 import { useEmojiDb, pushRecentEmoji } from './emojiData';
-import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, useDraft } from './draftStore';
+import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, updateUpload, useDraft } from './draftStore';
+import { ModifyAttachmentModal } from './AttachmentModals';
 import { fromDisplay, type MentionToken } from './mentionText';
+import { convertEmoticons } from './emoticons';
 import { messageStore } from './messageStore';
 import { activeTypers } from './messageState';
-import { comingSoon } from './toast';
+import { isSpoilerName, stripSpoiler } from './util';
 
 const MAX_LEN = 2000;
 // Discord client timings: POST at most every 8 s; the first one waits 1.5 s unless the previous was 16+ s ago;
@@ -90,7 +92,9 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const [appsOpen, setAppsOpen] = useState(false);
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
+  const [modifying, setModifying] = useState<string | null>(null); // localId of the tray card whose "Modify Attachment" dialog is open
   const emojiDb = useEmojiDb();
+  const convert = useConvertEmoticons();
   const { text, uploads } = draft;
   const name = chat.channel?.name ? `#${chat.channel.name}` : chat.channel?.recipients?.map(u => chat.nameOf(u)).join(', ') ?? '';
   const placeholder = chat.isDm ? `Message @${chat.channel?.recipients?.[0] ? chat.nameOf(chat.channel.recipients[0]) : ''}` : `Message ${name}`;
@@ -169,9 +173,20 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
 
   function send() {
     if (!canSend) return;
+    // Renamed / alt-texted / spoiler files go as CreateMessageRequest.attachments[]; untouched ones keep the plain id list.
+    const modified = readyUploads.some(u => u.filename !== undefined || u.description !== undefined);
     messageStore.send(channelId, chat.me, {
-      content: rawContent,
-      attachments: readyUploads.map(u => u.attachment!),
+      content: convert ? convertEmoticons(rawContent) : rawContent,
+      attachments: readyUploads.map(u => ({
+        ...u.attachment!,
+        ...(u.filename !== undefined ? { filename: u.filename } : {}),
+        ...(u.description !== undefined ? { description: u.description || null } : {}),
+      })),
+      meta: modified ? readyUploads.map(u => ({
+        id: u.attachment!.id,
+        ...(u.filename !== undefined ? { filename: u.filename } : {}),
+        ...(u.description !== undefined ? { description: u.description } : {}),
+      })) : undefined,
       reply: replyTo,
       mention: mentionReply,
     });
@@ -229,16 +244,23 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       <button type="button" className="chat-reply-close" aria-label="Cancel reply" onClick={onCancelReply}><X size={16} /></button>
     </div>}
     <div className={`chat-composer-box${replyTo ? ' has-reply' : ''}`}>
+      <ModifyAttachmentModal
+        target={(() => { const u = uploads.find(x => x.localId === modifying); return u ? { details: { filename: u.filename ?? u.file.name, description: u.description ?? '' }, thumbUrl: u.previewUrl } : null; })()}
+        onSave={d => { if (modifying) updateUpload(channelId, modifying, d); }}
+        onClose={() => { setModifying(null); area.current?.focus(); }} />
       {uploads.length > 0 && <div className="chat-tray" aria-label="Attachments to upload">
         {uploads.map(u => <div key={u.localId} className={`chat-tray-item ${u.status}`}>
           <div className="chat-tray-actions">
             <Tooltip content="Preview" side="top"><button type="button" className="chat-tray-btn" aria-label={`Preview ${u.file.name}`} disabled={!u.previewUrl}
               onClick={() => { if (u.previewUrl) window.open(u.previewUrl, '_blank', 'noopener'); }}><Eye size={20} /></button></Tooltip>
-            <Tooltip content="Edit" side="top"><button type="button" className="chat-tray-btn" aria-label={`Edit ${u.file.name}`} onClick={() => comingSoon('Editing attachments')}><Pencil size={20} /></button></Tooltip>
+            <Tooltip content="Edit" side="top"><button type="button" className="chat-tray-btn" aria-label={`Edit ${u.file.name}`} onClick={() => setModifying(u.localId)}><Pencil size={20} /></button></Tooltip>
             <Tooltip content="Remove Attachment" side="top"><button type="button" className="chat-tray-btn chat-tray-remove" aria-label={`Remove ${u.file.name}`} onClick={() => removeUpload(channelId, u.localId)}><Trash2 size={20} /></button></Tooltip>
           </div>
-          <div className="chat-tray-thumb">{u.previewUrl ? <img src={u.previewUrl} alt="" draggable={false} /> : <FileUp size={40} />}</div>
-          <div className="chat-tray-name" title={u.file.name}>{u.file.name}</div>
+          <div className="chat-tray-thumb">
+            {u.previewUrl ? <img src={u.previewUrl} alt={u.description ?? ''} draggable={false} /> : <FileUp size={40} />}
+            {u.filename && isSpoilerName(u.filename) && <span className="chat-tray-spoiler">SPOILER</span>}
+          </div>
+          <div className="chat-tray-name" title={u.filename ?? u.file.name}>{stripSpoiler(u.filename ?? u.file.name)}</div>
           {u.status === 'error' && <div className="chat-tray-size"><span className="chat-tray-error"><CircleAlert size={12} /> {u.error}</span></div>}
           {u.status === 'uploading' && <div className="chat-tray-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(u.progress * 100)}><div style={{ width: `${Math.round(u.progress * 100)}%` }} /></div>}
         </div>)}

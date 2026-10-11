@@ -121,3 +121,9 @@ export function isShiftDown(): boolean {
 }
 
 if (typeof window !== 'undefined') isShiftDown();
+
+// Spoiler attachments are a naming convention (the server never interprets it): the file name starts with "SPOILER_".
+export const SPOILER_PREFIX = 'SPOILER_';
+export const isSpoilerName = (filename: string): boolean => filename.startsWith(SPOILER_PREFIX);
+export const stripSpoiler = (filename: string): string => (isSpoilerName(filename) ? filename.slice(SPOILER_PREFIX.length) : filename);
+export const withSpoiler = (filename: string, spoiler: boolean): string => (spoiler ? SPOILER_PREFIX + stripSpoiler(filename) : stripSpoiler(filename));

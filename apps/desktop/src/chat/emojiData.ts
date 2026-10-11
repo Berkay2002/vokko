@@ -47,16 +47,19 @@ let db: EmojiDb | null = null;
 
 export function loadEmojiDb(): Promise<EmojiDb> {
   dbPromise ??= (async () => {
-    const [data, codes] = await Promise.all([
+    const [data, joy, github] = await Promise.all([
       import('emojibase-data/en/data.json'),
+      import('emojibase-data/en/shortcodes/joypixels.json'),
       import('emojibase-data/en/shortcodes/github.json'),
     ]);
     const raw = (data.default as unknown as RawEmoji[]).filter(e => e.group !== undefined && e.group !== 2);
-    const codeMap = codes.default as unknown as Record<string, string | string[]>;
+    // JoyPixels names first (they are the ones Discord shows, e.g. :slight_smile:), GitHub's as extra aliases so older names keep working.
+    const joyMap = joy.default as unknown as Record<string, string | string[]>;
+    const githubMap = github.default as unknown as Record<string, string | string[]>;
+    const namesOf = (m: Record<string, string | string[]>, hex: string): string[] => { const c = m[hex]; return c === undefined ? [] : Array.isArray(c) ? c : [c]; };
     const shortcodes = new Map<string, string>();
     const list: EmojiEntry[] = raw.map(e => {
-      const c = codeMap[e.hexcode];
-      const names = c === undefined ? [] : Array.isArray(c) ? c : [c];
+      const names = [...new Set([...namesOf(joyMap, e.hexcode), ...namesOf(githubMap, e.hexcode)])];
       for (const n of names) if (!shortcodes.has(n)) shortcodes.set(n, e.emoji);
       return {
         emoji: e.emoji, label: e.label, tags: e.tags ?? [], group: e.group ?? 0, order: e.order ?? 0, shortcodes: names,
