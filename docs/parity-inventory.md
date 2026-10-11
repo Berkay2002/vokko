@@ -86,6 +86,7 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | MSG-030 | Unread state in a DM: top bar "1 nytt meddelande sedan 11:13" (brand `#5865f2`, ~34 px, "Markera som läst" right) and the day divider turned red `#d22d39` with a "NYTT" pill at the right end; screenshot-derived (user client dpr 1.25) | messages-states/spec.md §10, messages-states/18, 19 |
 | MSG-031 | Jumbo emoji: an emoji-only message renders the emoji 48x48 (row 52 high); hover tooltip with the shortcode + "Klicka för att ta reda på mer", click opens a 288x106 popout (48 px emoji, name, description) | messages-states/spec.md §7 end, messages-states/28-31 |
 | MSG-032 | Attachment upload and edit flow: tray above the composer with preview tiles (eye/spoiler, pencil, trash), "Laddar upp N filer" card with progress and cancel, "Modifiera bifogad fil" modal (filename, alt text, spoiler, Avbryt/Spara), delete-attachment confirm ("Radera den bifogade filen"); screenshot-derived | messages-states/spec.md §7 end, messages-states/24-27 |
+| MSG-033 | Reply to an attachment-only message: reference line shows italic "Klicka för att visa bifogad fil" + 20 px image icon (same 20 px line, spine, avatar, tag chip); replying state = brand .16 tint `#0e1027` + 2 px `#5865f2` bar on the target row and a "Svarar <name>" bar (37 px, `#121214`, circular ✕) above the composer | messages-states/spec.md §2 end, messages-states/32-35 |
 
 ## CMP: composer
 | Id | Acceptance | REF |
