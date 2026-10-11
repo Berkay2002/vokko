@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, CornerUpRight, Hash, Loader2, SearchX, Search as SearchIcon, SlidersHorizontal } from 'lucide-react';
+import { ArrowDownUp, ChevronLeft, ChevronRight, CornerUpRight, Folder, Hash, Loader2, SearchX, Search as SearchIcon, SlidersHorizontal } from 'lucide-react';
 import type { Channel, Message } from '../api/types';
 import { Attachments } from '../chat/Attachments';
 import { Avatar } from '../chat/Avatar';
@@ -41,7 +41,6 @@ function Panel({ channel }: { channel: Channel }) {
   const pages = Math.max(1, Math.ceil(reachable / PAGE_SIZE));
   const hasContent = !!submitted?.text;
   const sorts = hasContent ? SORTS : SORTS.filter(s => s.sort !== 'relevant');
-  const sortLabel = SORTS.find(s => s.sort === sort)?.label ?? 'Newest';
 
   // Highlight after the markdown (and late emoji data) has rendered: repaint on every DOM change inside the body.
   useLayoutEffect(() => {
@@ -55,11 +54,11 @@ function Panel({ channel }: { channel: Channel }) {
   useEffect(() => clearHighlights, []);
   useEffect(() => { body.current?.scrollTo({ top: 0 }); }, [page, sort, submitted]);
 
-  const labelOf = (channelId: string): { icon: boolean; name: string } => {
+  const labelOf = (channelId: string): { icon: boolean; name: string; category: string | null } => {
     const c = channels[channelId];
-    if (!c) return { icon: false, name: 'Unknown channel' };
-    if (c.guild_id) return { icon: true, name: c.name ?? 'channel' };
-    return { icon: false, name: dmName(c) };
+    if (!c) return { icon: false, name: 'Unknown channel', category: null };
+    if (c.guild_id) return { icon: true, name: c.name ?? 'channel', category: (c.parent_id && channels[c.parent_id]?.name) || null };
+    return { icon: false, name: dmName(c), category: null };
   };
 
   const loading = status === 'loading';
@@ -70,29 +69,32 @@ function Panel({ channel }: { channel: Channel }) {
       <h2 className="search-panel-count" aria-live="polite">{heading}{loading && hits.length > 0 && <Loader2 size={16} className="search-spin" aria-hidden="true" />}{loading && hits.length === 0 && <Loader2 size={16} className="search-spin" aria-hidden="true" />}</h2>
       <button type="button" className="search-panel-btn" onClick={() => searchActions.focusBox()}><SlidersHorizontal size={16} aria-hidden="true" />Filter</button>
       <button ref={setSortAnchor} type="button" className="search-panel-btn" aria-haspopup="listbox" aria-expanded={sortOpen} onClick={() => setSortOpen(o => !o)}>
-        {sortLabel}<ChevronDown size={16} aria-hidden="true" />
+        <ArrowDownUp size={16} aria-hidden="true" />Sort
       </button>
       <Popout anchor={sortAnchor} open={sortOpen} onClose={() => setSortOpen(false)} side="bottom" align="end" gap={4} className="search-sort-popout">
         <div role="listbox" aria-label="Sort results" className="search-sort-menu">
           {sorts.map(s => <button key={s.sort} type="button" role="option" aria-selected={s.sort === sort} className="search-sort-option"
             onClick={() => { setSortOpen(false); if (s.sort !== sort) searchActions.setSort(s.sort); }}>
-            {s.label}{s.sort === sort && <Check size={16} aria-hidden="true" />}
+            {s.label}<span className="search-radio" aria-hidden="true" />
           </button>)}
         </div>
       </Popout>
     </header>
 
     <div className="search-panel-body" ref={body}>
-      {status === 'error' && <Empty icon={<SearchX size={64} />} title="Something went wrong" text="We couldn't run that search. Check your connection and try again.">
+      {status === 'error' && <Empty icon={<SearchX size={64} />} text="We couldn't run that search. Check your connection and try again.">
         <button type="button" className="search-retry" onClick={() => searchActions.setPage(page)}>Try again</button>
       </Empty>}
-      {status === 'loading' && hits.length === 0 && <Empty icon={<SearchIcon size={64} />} title="Searching…" text="Hang on while we look through the messages." />}
-      {status === 'ready' && hits.length === 0 && <Empty icon={<SearchX size={64} />} title="No results" text="We searched far and wide and couldn't find what you're looking for." />}
+      {status === 'loading' && hits.length === 0 && <Empty icon={<SearchIcon size={64} />} text="Hang on while we look through the messages." />}
+      {status === 'ready' && hits.length === 0 && <Empty icon={<SearchX size={64} />} text="We searched far and wide and couldn't find what you're looking for." />}
       {hits.length > 0 && <div className={`search-groups${loading ? ' stale' : ''}`}>
         {groups.map((group, index) => {
           const label = labelOf(group.channelId);
           return <section className="search-group" key={`${group.channelId}:${index}`} aria-label={label.name}>
-            <h3 className="search-group-title">{label.icon && <Hash size={16} aria-hidden="true" />}<span>{label.name}</span></h3>
+            <h3 className="search-group-title">
+              {label.icon && <Hash size={20} aria-hidden="true" />}<span className="search-group-name">{label.name}</span>
+              {label.category && <span className="search-group-category"><Folder size={14} aria-hidden="true" />{label.category}</span>}
+            </h3>
             {group.hits.map(hit => <Hit key={hit.id} hit={hit} currentChannelId={channel.id} />)}
           </section>;
         })}
@@ -110,10 +112,9 @@ function Panel({ channel }: { channel: Channel }) {
   </aside>;
 }
 
-function Empty({ icon, title, text, children }: { icon: React.ReactNode; title: string; text: string; children?: React.ReactNode }) {
+function Empty({ icon, text, children }: { icon: React.ReactNode; text: string; children?: React.ReactNode }) {
   return <div className="search-empty" role="status">
     <div className="search-empty-art" aria-hidden="true">{icon}</div>
-    <p className="search-empty-title">{title}</p>
     <p className="search-empty-text">{text}</p>
     {children}
   </div>;

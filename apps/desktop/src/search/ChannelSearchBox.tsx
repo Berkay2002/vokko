@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import {
-  AtSign, ChevronLeft, ChevronRight, File, Hash, Image as ImageIcon, Link as LinkIcon, Music, Paperclip, Pin, Search, SlidersHorizontal, StickyNote, User as UserIcon, Video, X,
+  AtSign, ChevronLeft, ChevronRight, File, Hash, Image as ImageIcon, Link as LinkIcon, Music, Paperclip, Pin, Search, SlidersHorizontal, StickyNote, Trash2, User as UserIcon, Video, X,
   Globe,
 } from 'lucide-react';
 import { ChannelType, type Channel, type User } from '../api/types';
@@ -13,6 +13,7 @@ const DATE_KINDS: readonly FilterKind[] = ['before', 'during', 'after'];
 
 interface Option {
   key: string;
+  section?: 'search' | 'filter' | 'history';
   icon?: ReactNode;
   title: ReactNode;
   hint?: ReactNode;
@@ -73,6 +74,7 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
   const [more, setMore] = useState(false);
   const [cursor, setCursor] = useState(0);
   const input = useRef<HTMLInputElement>(null);
+  const history = searchStore(s => s.history[scope] ?? NO_HISTORY);
 
   useEffect(() => { searchActions.enter(channel); }, [channel.id, channel.guild_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -157,9 +159,13 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
   const dateMode = keyword && DATE_KINDS.includes(keyword.kind);
   const listMode = keyword && !dateMode;
   const freeText = text.trim();
+  const showHistory = !keyword && !more && freeText === '' && history.length > 0;
   const rows: Option[] = listMode ? options : dateMode ? [] : [
-    ...(freeText ? [{ key: 'search', icon: <Search size={20} />, title: <>Search for <b>{freeText}</b></>, onPick: () => submit() }] : []),
+    ...(freeText ? [{ key: 'search', section: 'search' as const, icon: <Search size={20} />, title: <>Search for <b>{freeText}</b></>, onPick: () => submit() }] : []),
     ...(more ? moreRows : rootRows),
+    ...(showHistory ? history.map((q): Option => ({
+      key: `history:${q}`, section: 'history', icon: <Search size={20} />, title: <b>{q}</b>, onPick: () => { searchActions.setText(q); submit(); },
+    })) : []),
   ];
 
   useEffect(() => { setCursor(0); }, [keyword?.kind, query, more, freeText === '']);
@@ -167,7 +173,6 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
   function submit() {
     searchActions.submit();
     setOpen(false);
-    input.current?.blur();
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -178,15 +183,16 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
       setCursor(c => (c + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length);
     } else if (e.key === 'Enter') {
       e.preventDefault();
+      if (!open && !listMode) { submit(); return; }
       if (listMode) { rows[cursor]?.onPick(); return; }
       if (dateMode) return;
       submit();
     } else if (e.key === 'Backspace' && text === '' && filters.length > 0) {
       searchActions.removeFilter(filters.length - 1);
     } else if (e.key === 'Escape') {
-      // First Escape closes the suggestions, a second one with the results showing drops the search.
-      if (open) setOpen(false);
-      else if (active) searchActions.clear();
+      // With the results showing and the suggestions closed, Escape drops the search and brings the suggestions back (Discord does the same).
+      if (active && !open) { searchActions.clear(); setOpen(true); }
+      else if (open) setOpen(false);
       else input.current?.blur();
     }
   }
@@ -203,24 +209,35 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
       onChange={e => { searchActions.setText(e.target.value); setOpen(true); }}
       onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onKeyDown={onKeyDown} />
     {hasContent
-      ? <button type="button" className="search-box-clear" aria-label="Clear search" onMouseDown={e => e.preventDefault()} onClick={() => { searchActions.clear(); searchActions.enter(channel); input.current?.focus(); }}><X size={16} /></button>
+      ? <button type="button" className="search-box-clear" aria-label="Clear search" onMouseDown={e => e.preventDefault()} onClick={() => { searchActions.clear(); input.current?.focus(); }}><X size={16} /></button>
       : <Search size={16} />}
     <Popout anchor={anchor} open={open} onClose={() => { setOpen(false); setMore(false); }} side="bottom" align="end" gap={8} className="search-popout">
       <div className="search-suggest" role="listbox" aria-label="Search suggestions" onMouseDown={e => e.preventDefault()}>
-        <div className="search-suggest-head">{header}</div>
-        {dateMode && <Calendar onPick={iso => commit(keyword!.kind, iso, dateLabel(iso))} />}
-        {!dateMode && rows.length === 0 && <div className="search-suggest-empty">No matches</div>}
-        {rows.map((row, i) => <button key={row.key} type="button" role="option" aria-selected={i === cursor} data-suggest={row.key}
-          className={`search-suggest-row${i === cursor ? ' active' : ''}${listMode ? ' compact' : ''}`} onMouseEnter={() => setCursor(i)} onClick={row.onPick}>
-          {row.icon && <span className="search-suggest-icon">{row.icon}</span>}
-          <span className="search-suggest-text"><span className="search-suggest-title">{row.title}</span>{row.hint && <span className="search-suggest-hint">{row.hint}</span>}</span>
-        </button>)}
+        {rows.map((row, i) => {
+          const section = row.section ?? 'filter';
+          const first = rows.findIndex(r => (r.section ?? 'filter') === section) === i;
+          return <Fragment key={row.key}>
+            {first && section === 'filter' && <div className="search-suggest-head">{header}</div>}
+            {first && section === 'history' && <div className="search-suggest-head history">
+              <span>History</span>
+              <button type="button" className="search-suggest-trash" aria-label="Clear search history" onClick={() => searchActions.clearHistory()}><Trash2 size={16} /></button>
+            </div>}
+            <button type="button" role="option" aria-selected={i === cursor} data-suggest={row.key}
+              className={`search-suggest-row${i === cursor ? ' active' : ''}${listMode || section === 'history' ? ' compact' : ''}`} onMouseEnter={() => setCursor(i)} onClick={row.onPick}>
+              {row.icon && <span className="search-suggest-icon">{row.icon}</span>}
+              <span className="search-suggest-text"><span className="search-suggest-title">{row.title}</span>{row.hint && <span className="search-suggest-hint">{row.hint}</span>}</span>
+            </button>
+          </Fragment>;
+        })}
+        {dateMode && <><div className="search-suggest-head">{header}</div><Calendar onPick={iso => commit(keyword!.kind, iso, dateLabel(iso))} /></>}
+        {!dateMode && rows.length === 0 && <><div className="search-suggest-head">{header}</div><div className="search-suggest-empty">No matches</div></>}
       </div>
     </Popout>
   </div>;
 }
 
 const EMPTY_FILTERS: SearchFilter[] = [];
+const NO_HISTORY: string[] = [];
 
 function FilterChip({ filter, onRemove }: { filter: SearchFilter; onRemove(): void }) {
   return <span className="search-chip" data-kind={filter.kind}>

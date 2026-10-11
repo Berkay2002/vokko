@@ -32,13 +32,38 @@ export interface SearchState {
   submitted: Submitted | null;
   /** Bumped by the panel's Filter button: the search box focuses itself and opens its suggestions. */
   focusToken: number;
+  /** Free-text queries that were run, newest first, per guild / DM. */
+  history: Record<string, string[]>;
 }
 
-const blank = (): Omit<SearchState, 'scope' | 'scopeKind' | 'scopePath' | 'focusToken'> => ({
+const HISTORY_KEY = 'vokko.searchHistory';
+const HISTORY_MAX = 8;
+
+function loadHistory(): Record<string, string[]> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '{}');
+    return typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, string[]>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveHistory(history: Record<string, string[]>): void {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); } catch { /* private mode / quota: history is a convenience */ }
+}
+
+function rememberQuery(scope: string, text: string): void {
+  const history = searchStore.getState().history;
+  const next = { ...history, [scope]: [text, ...(history[scope] ?? []).filter(q => q !== text)].slice(0, HISTORY_MAX) };
+  searchStore.setState({ history: next });
+  saveHistory(next);
+}
+
+const blank = (): Omit<SearchState, 'scope' | 'scopeKind' | 'scopePath' | 'focusToken' | 'history'> => ({
   text: '', filters: [], active: false, sort: 'newest', page: 1, status: 'idle', total: 0, hits: [], terms: [], submitted: null,
 });
 
-export const searchStore = create<SearchState>()(() => ({ scope: null, scopeKind: 'channel', scopePath: '', focusToken: 0, ...blank() }));
+export const searchStore = create<SearchState>()(() => ({ scope: null, scopeKind: 'channel', scopePath: '', focusToken: 0, history: loadHistory(), ...blank() }));
 
 export const scopeOf = (channel: Pick<Channel, 'id' | 'guild_id'>): string => channel.guild_id ?? channel.id;
 
@@ -77,7 +102,15 @@ export const searchActions = {
     const filters = draft?.filters ?? s.filters;
     if (!text && filters.length === 0) return;
     searchStore.setState({ text, filters, active: true, page: 1, submitted: { text, filters } });
+    if (text && s.scope) rememberQuery(s.scope, text);
     void run();
+  },
+
+  clearHistory(): void {
+    const scope = searchStore.getState().scope;
+    if (!scope) return;
+    searchStore.setState(s => ({ history: { ...s.history, [scope]: [] } }));
+    saveHistory(searchStore.getState().history);
   },
 
   setPage(page: number): void {
