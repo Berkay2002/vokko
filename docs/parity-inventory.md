@@ -148,10 +148,10 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 ## SET: settings
 | Id | Acceptance | REF |
 |---|---|---|
-| SET-001 | User settings opens as a large centred modal (~1400x665 in the web build): left nav 253 px with search and section labels, content column with title strip, close button + Esc | settings/01-appearance.jpg, settings/spec.md |
-| SET-002 | My Account page: info rows with Change buttons, password and security rows (other pages not opened) | settings/02-account.jpg (contains masked account data) |
-| SET-003 | Appearance page: theme toggle, default theme swatches (light/dark/darker/onyx/sync); other sub-pages not opened | settings/01-appearance.jpg |
-| SET-004 | Accessibility, Voice & Video, Chat, Notifications, Keybinds, Language, Streamer mode, Advanced | REF: none |
+| SET-001 | User settings is a centred MODAL over the app (not a page, URL unchanged): 1400x699 max, radius 12, 72 px top/bottom inset at 843 px viewport, scrim rgba(0,0,0,.72), scale 0.9->1 + fade in ~180 ms; sidebar 253 px (profile header, 220x40 search, 220x36 nav items radius 8 with hover/selected tints, group headings, scroll-spy sub-items, build footer); content: 48.7 px header strip with breadcrumb + 31.5 px close button, 696 px column. Esc, close button and scrim click all close it | settings-modal/spec.md, settings-modal/shell/01-03.jpg |
+| SET-002 | My Account page: Kontoinfo rows with Change buttons, password + MFA + devices chevron rows, account status banner, family center, danger zone (disable/delete) | settings-modal/account/01-03.jpg (contains masked account data) |
+| SET-003 | Appearance page: theme swatches, app icon, message display, chat input, search, streamer mode sections (some options Nitro-gated: see Perks) | settings-modal/appearance/01-06.jpg |
+| SET-004 | Pages with full scroll series: Data and privacy, Message permissions, Notifications, Voice & video, Accessibility, System (shortcuts), Language and time, Activity privacy. NOT captured: Connected apps (renderer hung), Developer, Edit profiles + per-server tab | settings-modal/{data-privacy,message-permissions,notifications,voice-video,accessibility,system,language-time,activity-privacy}/NN.jpg |
 | SET-005 | Server settings: Overview, Roles, Emoji, Stickers, Soundboard, Integrations, Moderation, Audit log, Safety setup, Bans, Invites, Onboarding, Community | REF: none |
 | SET-006 | Channel settings: Overview, Permissions, Invites, Integrations | REF: none |
 | SET-007 | Unsaved-changes bar (shake animation, reset/save) | REF: none |
