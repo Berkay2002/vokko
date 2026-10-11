@@ -5,6 +5,7 @@ pub mod config;
 pub mod error;
 pub mod events;
 pub mod extract;
+pub mod gateway;
 pub mod hub;
 pub mod ids;
 pub mod media;
@@ -46,5 +47,10 @@ pub fn router(state: AppState) -> Router {
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
         .expose_headers([header::CONTENT_DISPOSITION]);
-    Router::new().nest("/api/v1", routes::api()).fallback(|| async { error::ApiErr::not_found() }).layer(cors).with_state(state)
+    Router::new()
+        .nest("/api/v1", routes::api())
+        .route("/gateway", axum::routing::get(gateway::upgrade))
+        .fallback(|| async { error::ApiErr::not_found() })
+        .layer(cors)
+        .with_state(state)
 }

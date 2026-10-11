@@ -2,12 +2,14 @@ use axum::Router;
 
 use crate::state::AppState;
 
+mod attachments;
 mod auth;
 mod channels;
 mod guilds;
 mod invites;
 mod messages;
-mod relationships;
+mod reactions;
+pub mod relationships;
 mod users;
 
 pub fn api() -> Router<AppState> {
@@ -19,4 +21,6 @@ pub fn api() -> Router<AppState> {
         .merge(invites::routes())
         .merge(relationships::routes())
         .merge(messages::routes())
+        .merge(reactions::routes())
+        .merge(attachments::routes())
 }

@@ -20,11 +20,13 @@ CREATE TABLE sessions (
 );
 CREATE INDEX sessions_user ON sessions (user_id);
 
--- Last known effective presence; seeded rows show up in READY before anybody connects.
+-- Last known effective presence. Rows with pinned = TRUE (seed data) keep their status across server restarts
+-- so demo users show up in READY before anybody connects; every other row is reset to offline at startup.
 CREATE TABLE presences (
     user_id BIGINT PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
     status TEXT NOT NULL DEFAULT 'offline',
-    custom_status TEXT
+    custom_status TEXT,
+    pinned BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE guilds (

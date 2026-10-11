@@ -22,6 +22,10 @@ async fn run() -> Result<(), String> {
 }
 
 async fn serve(state: AppState) -> Result<(), String> {
+    sqlx::query("UPDATE presences SET status = 'offline' WHERE NOT pinned AND status <> 'offline'")
+        .execute(&state.db)
+        .await
+        .map_err(|error| error.to_string())?;
     tokio::fs::create_dir_all(state.attachments_dir()).await.map_err(|error| format!("cannot create the data directory: {error}"))?;
     let bind = state.config.bind.clone();
     let listener = tokio::net::TcpListener::bind(&bind).await.map_err(|error| format!("cannot bind {bind}: {error}"))?;
