@@ -16,7 +16,7 @@ const PAGE = 50;
 /** Body of the header "Pinned Messages" popout. The shell supplies the popout chrome and anchors it to the header button. */
 export function PinnedMessages({ channelId, onJump }: { channelId: Snowflake; onJump?: (messageId: Snowflake) => void }) {
   const actions = useMemo<ChatActions>(() => ({
-    reply() {}, edit() {}, requestDelete() {}, togglePin() {}, react() {}, openImage() {}, viewReactions() {},
+    reply() {}, edit() {}, requestDelete() {}, togglePin() {}, react() {}, openImage() {}, viewAttachment() {}, deleteAttachment() {}, viewReactions() {},
     jumpTo: id => { void messageStore.jumpToMessage(channelId, id); onJump?.(id); },
     openLink: href => { window.open(href, '_blank', 'noopener,noreferrer'); },
   }), [channelId, onJump]);

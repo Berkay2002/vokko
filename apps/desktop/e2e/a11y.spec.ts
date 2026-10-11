@@ -195,8 +195,9 @@ test.describe('keyboard: tab order and focus rings', () => {
     await page.locator('body').press('Tab'); // switch Chromium to keyboard modality so :focus-visible applies
     for (const target of targets) {
       await target.focus();
-      await page.keyboard.press('Shift+Tab');
+      // Forward then back: Shift+Tab then Tab breaks when the previous stop is inside a message (its toolbar opens on focus-within).
       await page.keyboard.press('Tab');
+      await page.keyboard.press('Shift+Tab');
       const ring = await target.evaluate(el => ({ style: getComputedStyle(el).outlineStyle, width: parseFloat(getComputedStyle(el).outlineWidth) }));
       expect(ring.style, await target.evaluate(el => el.outerHTML.slice(0, 80))).not.toBe('none');
       expect(ring.width).toBeGreaterThanOrEqual(2);
@@ -265,7 +266,6 @@ test.describe('keyboard: menus', () => {
   });
 
   test('message actions are reachable without a mouse', async ({ page }) => {
-    test.fail(true, 'A11Y-05: messages are not focusable and the hover toolbar is display:none until hovered; only right-click (and Up-arrow edit) reach them');
     await openGuild(page);
     await page.locator('.chat-scroller').focus();
     let reached = false;

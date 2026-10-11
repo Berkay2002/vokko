@@ -1,10 +1,11 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import type { Channel, Guild, GuildMember, Message, Role, Snowflake, User } from '../api/types';
+import type { Attachment, Channel, Guild, GuildMember, Message, Role, Snowflake, User } from '../api/types';
 import { ChannelType } from '../api/types';
 import type { MarkdownContext } from './markdown';
 import { displayName, roleColor, useChannel, useChatDisplayPrefs, useCompactMode, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
 import { cachedUser } from './userCache';
 import { useEmojiDb } from './emojiData';
+import { EmojiGlyph } from './EmojiInfo';
 
 const ADMINISTRATOR = 1n << 3n;
 const MANAGE_MESSAGES = 1n << 13n;
@@ -60,6 +61,10 @@ export interface ChatActions {
   jumpTo(messageId: Snowflake): void;
   openLink(href: string): void;
   openImage(message: Message, index: number): void;
+  /** Pencil on a sent image: the "Modify Attachment" dialog (read-only, the contract can't change sent attachments). */
+  viewAttachment(message: Message, attachment: Attachment): void;
+  /** Trash on a sent image: asks, then removes the attachment from the message. */
+  deleteAttachment(message: Message, attachment: Attachment): void;
   viewReactions(m: Message): void;
 }
 
@@ -100,6 +105,7 @@ export function ChatProvider({ channelId, actions, replyingId = null, children }
       currentUserId: me.id,
       emojiShortcodes: shortcodes,
       onLink: actions.openLink,
+      renderEmoji: (unicode, name) => <EmojiGlyph unicode={unicode} name={name} />,
     };
     return {
       channelId, channel, guild, guildId, me, md, roles, members, channels: guildChannels, actions, userById, nameOf, replyingId, compact,

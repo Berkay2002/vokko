@@ -1,3 +1,5 @@
+import { ApiRequestError } from '../api/errors';
+import { MAX_UPLOAD_BYTES } from '../api/limits';
 import type { Snowflake } from '../api/types';
 
 const DISCORD_EPOCH = 1420070400000n;
@@ -15,21 +17,81 @@ export function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-const timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-const shortDateFmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit', day: '2-digit' });
-const longFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-const dividerFmt = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+/**
+ * Locale of the chat area: a document language the shell set from a language setting, else the webview's own. A bare "en" is the static
+ * default of index.html (nobody chose it), so it does not shadow the OS language.
+ */
+export function chatLocale(): string {
+  const lang = typeof document !== 'undefined' ? document.documentElement.lang : '';
+  if (lang && lang.toLowerCase() !== 'en') return lang;
+  if (typeof navigator === 'undefined') return 'en-US';
+  return navigator.languages?.[0] || navigator.language || 'en-US';
+}
 
-export const formatTime = (d: Date): string => timeFmt.format(d);
-export const formatFullDate = (d: Date): string => longFmt.format(d);
-export const formatDivider = (d: Date): string => dividerFmt.format(d);
+/** Text for a failed upload. 413 / code 40005 names the server's per-file limit instead of the bare "Request entity too large". */
+export function uploadErrorMessage(e: unknown, fileSize?: number): string {
+  if (e instanceof ApiRequestError && (e.status === 413 || e.code === 40005)) {
+    const limit = `${MAX_UPLOAD_BYTES / (1024 * 1024)} MiB`;
+    if (fileSize === undefined || fileSize > MAX_UPLOAD_BYTES) return `This file is larger than the server's limit of ${limit} per file.`;
+    return `The server refused this upload because your pending uploads are over its size quota (the per-file limit is ${limit}).`;
+  }
+  return e instanceof Error ? e.message : 'Upload failed';
+}
 
-/** Header time: "3:42 PM" today (the reference shows no "Today at"), "Yesterday at 3:42 PM", "10/09/2026 3:42 PM". */
-export function formatMessageTimestamp(d: Date, now = new Date()): string {
-  if (sameDay(d, now)) return formatTime(d);
+const fmtCache = new Map<string, Intl.DateTimeFormat>();
+function fmt(locale: string, key: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const k = `${locale}|${key}`;
+  let f = fmtCache.get(k);
+  if (!f) {
+    try { f = new Intl.DateTimeFormat(locale, opts); } catch { f = new Intl.DateTimeFormat('en-US', opts); }
+    fmtCache.set(k, f);
+  }
+  return f;
+}
+
+/** "9:24 PM" in 12-hour locales, "21:24" / "09:05" (two-digit hour, like Discord) in 24-hour ones. */
+export function formatTime(d: Date, locale = chatLocale()): string {
+  const h12 = fmt(locale, 'time', { hour: 'numeric', minute: '2-digit' });
+  const cycle = h12.resolvedOptions().hourCycle;
+  return (cycle === 'h23' || cycle === 'h24' ? fmt(locale, 'time24', { hour: '2-digit', minute: '2-digit' }) : h12).format(d);
+}
+export const formatShortDate = (d: Date, locale = chatLocale()): string => fmt(locale, 'short', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+export const formatFullDate = (d: Date, locale = chatLocale()): string =>
+  fmt(locale, 'long', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d);
+export const formatDivider = (d: Date, locale = chatLocale()): string => fmt(locale, 'divider', { year: 'numeric', month: 'long', day: 'numeric' }).format(d);
+
+// "Today at 9:24 PM": the day word plus the locale's connector. Unlisted languages fall back to Intl's relative word. An empty word means the
+// locale's Discord shows no day word: Swedish today is the bare "12:37" and yesterday was never observed, so it uses the dated form.
+const DAY_WORDS: Record<string, { today: string; yesterday: string; at: string }> = {
+  en: { today: 'Today', yesterday: 'Yesterday', at: 'at' },
+  sv: { today: '', yesterday: '', at: '' },
+  de: { today: 'Heute', yesterday: 'Gestern', at: 'um' },
+  fr: { today: "Aujourd'hui", yesterday: 'Hier', at: 'à' },
+  es: { today: 'Hoy', yesterday: 'Ayer', at: 'a las' },
+  nb: { today: 'I dag', yesterday: 'I går', at: 'kl.' },
+  da: { today: 'I dag', yesterday: 'I går', at: 'kl.' },
+};
+
+function dayWords(locale: string): { today: string; yesterday: string; at: string } {
+  const base = locale.toLowerCase().split('-')[0] ?? 'en';
+  const known = DAY_WORDS[base];
+  if (known) return known;
+  try {
+    const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
+    const cap = (s: string) => s.charAt(0).toLocaleUpperCase(locale) + s.slice(1);
+    return { today: cap(rtf.format(0, 'day')), yesterday: cap(rtf.format(-1, 'day')), at: '' };
+  } catch { return DAY_WORDS.en!; }
+}
+
+/** Message header time: "Today at 9:24 PM" / bare "21:24" (sv), "Yesterday at …", older "10/09/2026 9:24 PM" / "2026-10-09 21:24" (sv). */
+export function formatMessageTimestamp(d: Date, now = new Date(), locale = chatLocale()): string {
+  const time = formatTime(d, locale);
+  const words = dayWords(locale);
+  const withDay = (day: string) => `${day} ${words.at ? `${words.at} ` : ''}${time}`;
+  if (sameDay(d, now)) return words.today ? withDay(words.today) : time;
   const y = new Date(now); y.setDate(y.getDate() - 1);
-  if (sameDay(d, y)) return `Yesterday at ${formatTime(d)}`;
-  return `${shortDateFmt.format(d)} ${formatTime(d)}`;
+  if (words.yesterday && sameDay(d, y)) return withDay(words.yesterday);
+  return `${formatShortDate(d, locale)} ${time}`;
 }
 
 export function formatBytes(n: number): string {
@@ -59,3 +121,9 @@ export function isShiftDown(): boolean {
 }
 
 if (typeof window !== 'undefined') isShiftDown();
+
+// Spoiler attachments are a naming convention (the server never interprets it): the file name starts with "SPOILER_".
+export const SPOILER_PREFIX = 'SPOILER_';
+export const isSpoilerName = (filename: string): boolean => filename.startsWith(SPOILER_PREFIX);
+export const stripSpoiler = (filename: string): string => (isSpoilerName(filename) ? filename.slice(SPOILER_PREFIX.length) : filename);
+export const withSpoiler = (filename: string, spoiler: boolean): string => (spoiler ? SPOILER_PREFIX + stripSpoiler(filename) : stripSpoiler(filename));

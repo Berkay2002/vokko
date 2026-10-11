@@ -52,7 +52,7 @@ test('send, edit, reply, react and delete against the mock backend', async ({ pa
 test('upload limits show the Discord-style modals', async ({ page }) => {
   await openDm(page);
   const input = page.locator('input[type=file]');
-  await input.setInputFiles({ name: 'huge.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(11 * 1024 * 1024) });
+  await input.setInputFiles({ name: 'huge.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(26 * 1024 * 1024) });
   await expect(page.getByRole('dialog')).toContainText('Your files are too powerful');
   await page.getByRole('button', { name: 'Okay' }).click();
   await expect(page.locator('.chat-tray-item')).toHaveCount(0);

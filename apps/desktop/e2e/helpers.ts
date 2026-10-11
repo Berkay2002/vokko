@@ -32,3 +32,21 @@ export function appOrigin(page: Page): string {
 export function channelIdOf(page: Page): string {
   return new URL(page.url()).pathname.split('/').filter(Boolean).pop() ?? '';
 }
+
+type StoreWin = { __vokko: { appStore: { getState(): { channels: Record<string, { id: string; name?: string; guild_id: string | null }> } } } };
+
+/** Signs in as sam and opens #stock-talk (the message-area showcase channel of the mock seed). `query` is appended to the first URL. */
+export async function openStockTalk(page: Page, query = ''): Promise<string> {
+  await page.goto(`/channels/@me?as=sam&mockLatency=0${query}`);
+  await page.waitForFunction(() => Object.values((window as unknown as StoreWin).__vokko.appStore.getState().channels).some(c => c.name === 'stock-talk'));
+  const target = await page.evaluate(() => {
+    const c = Object.values((window as unknown as StoreWin).__vokko.appStore.getState().channels).find(x => x.name === 'stock-talk')!;
+    return `/channels/${c.guild_id}/${c.id}`;
+  });
+  // A reload would re-seed the mock and drop the session: navigate in-app.
+  await page.evaluate(path => { history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, target);
+  await page.locator('.chat-textarea').waitFor();
+  await page.locator('.chat-msg').first().waitFor();
+  await page.waitForTimeout(400);
+  return target.split('/').pop()!;
+}

@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useMemo,
   useState,
   type CSSProperties,
@@ -19,6 +20,8 @@ export interface MarkdownContext {
   currentUserId: string | null;
   emojiShortcodes?: ReadonlyMap<string, string>;
   customEmojiUrl?(id: string, animated: boolean): string;
+  /** replaces the plain span for a unicode emoji (chat adds the hover tooltip and the info popout) */
+  renderEmoji?(unicode: string, name: string | undefined): ReactNode;
   /** when given, a link click calls it with preventDefault (leaving-Vokko confirm) */
   onLink?(href: string): void;
   onMention?(kind: 'user' | 'role' | 'channel', id: string, ev: MouseEvent): void;
@@ -279,6 +282,7 @@ function renderInline(nodes: Inline[], ctx: MarkdownContext, keyPrefix: string):
         );
       }
       case 'emoji':
+        if (ctx.renderEmoji) return <Fragment key={key}>{ctx.renderEmoji(node.unicode, node.name)}</Fragment>;
         return (
           <span key={key} className="md-emoji" role="img" aria-label={node.name ?? node.unicode}>
             {node.unicode}

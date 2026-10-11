@@ -1,9 +1,9 @@
 // Seed data mirroring `vokko-server seed`: users sam, carol, alice, bob, nova (password "vokko-dev"),
 // "Sam's server", a 60-message DM sam <-> carol and a few smaller conversations.
 
-import { ChannelType, OverwriteType, RelationshipType, type Attachment } from "../types";
+import { ChannelType, OverwriteType, RelationshipType, type Attachment, type User } from "../types";
 import { Perm } from "../permissions";
-import { db, nextId, type MockChannel } from "./db";
+import { db, nextId, sortedMessages, type MockChannel } from "./db";
 import { addChannel, addMessage, createAccount, createGuildRecord, openDM, openGroupDM } from "./ops";
 import { voiceStore } from "../voice";
 import { setRelationship } from "./views";
@@ -140,6 +140,57 @@ function addDmConversation(channel: MockChannel, ids: Record<"R" | "B", string>)
   });
 }
 
+/**
+ * #stock-talk in the guild: the message-area showcase (invented text). Server tags on two authors, replies (to text, to an image, to a deleted
+ * message), a ping-reply and an @everyone that mention sam, a single image, an image grid, emoji-only and inline-emoji lines, and dates old
+ * enough (3 days) to show the locale date format plus one yesterday and one today.
+ */
+function seedMessageShowcase(ctx: { guildId: string; parentId: string; R: string; A: string; Bo: string; N: string; sam: User; bob: User }): MockChannel {
+  const { guildId, parentId, R, A, Bo, N, sam, bob } = ctx;
+  sam.primary_guild = { guild_id: guildId, tag: "VKO", badge: "bolt", color_primary: 0x5865f2, color_secondary: 0x3b2f8f };
+  bob.primary_guild = { guild_id: guildId, tag: "GG", badge: "leaf", color_primary: 0x3ba55d, color_secondary: 0x1d6b3a };
+  const channel = addChannel(guildId, { name: "stock-talk", type: ChannelType.GuildText, parent_id: parentId, topic: "Charts, takes and bad ideas." });
+  const day = 24 * HOUR;
+  const at = (offsetMs: number): number => Date.now() - offsetMs;
+  const post = (who: string, content: string, offsetMs: number, extra: { reply?: string; attachments?: Attachment[] } = {}) =>
+    addMessage({ channel, author_id: who, content, timestamp: at(offsetMs), reference_id: extra.reply ?? null, attachments: extra.attachments ?? [], silent: true });
+
+  const base = 3 * day;
+  post(R, "squeeze watch: the float on this one is tiny", base);
+  const chart = post(R, "", base - 20 * MIN, { attachments: [seedImage()] });
+  post(N, "damn 🤯", base - 25 * MIN);
+  post(Bo, "nice chart", base - 26 * MIN, { reply: chart.id });
+  post(R, "9% pop since lunch", base - 28 * MIN);
+  post(R, "most of it happened in the last hour, the volume was silly", base - 28 * MIN - 40_000);
+  const hope = post(N, "i hope it keeps sliding, i want a cheaper entry", base - 30 * MIN);
+  post(R, "its a long way down then", base - 30 * MIN - 30_000, { reply: hope.id });
+  const long = post(N, "holding through the next print anyway, but the debt load could turn into a much bigger problem in a higher rate environment than anyone is pricing in right now", base - 31 * MIN);
+  post(R, "they print cash right now, they will be fine", base - 31 * MIN - 45_000, { reply: long.id });
+  const cash = post(R, "and they can sign deals with the big labs too", base - 31 * MIN - 80_000);
+  post(N, "yeah i know", base - 32 * MIN, { reply: cash.id });
+  // A reply whose target is deleted afterwards (the wire says referenced_message = null).
+  const gone = post(N, "scratch that, wrong ticker", base - 33 * MIN);
+  post(Bo, "lol happens", base - 33 * MIN - 20_000, { reply: gone.id });
+  const list = sortedMessages(channel.id);
+  const goneIndex = list.findIndex(m => m.id === gone.id);
+  if (goneIndex >= 0) list.splice(goneIndex, 1);
+
+  post(A, "morning all, three charts from the weekend scan", day + 2 * HOUR, { attachments: [seedImage(), seedImage(), seedImage()] });
+  post(N, "🔥", day + HOUR);
+  post(N, "this one is a **solid** setup :eyes: not financial advice 😅", day + HOUR - MIN);
+  post(Bo, `@everyone market opens in ten, coffee up`, 2 * HOUR);
+  post(A, `<@${R}> did you see the filing? worth a look before the bell`, 90 * MIN);
+  const status = post(R, "reading it now, will post a summary", 80 * MIN);
+  post(Bo, "thanks!", 40 * MIN, { reply: status.id });
+  post(N, "the summary will be long, brace yourselves", 20 * MIN, { reply: status.id });
+  // Several mentions in one group: each mentioned line is its own tinted block with its own bar, the plain line between them is not.
+  post(Bo, `<@${R}>`, 10 * MIN);
+  post(Bo, `<@${R}>`, 10 * MIN - 5_000);
+  post(Bo, "hello", 10 * MIN - 10_000);
+  post(Bo, `<@${R}>`, 10 * MIN - 15_000);
+  return channel;
+}
+
 /** Populate an empty database. Safe to call once at module load. */
 export function seed(): void {
   if (db.accounts.size > 0) return;
@@ -250,7 +301,8 @@ export function seed(): void {
 
   // Read states for sam: dev-talk partly unread, random has two mentions.
   const state = (channelId: string, last: string | null, mentions = 0) => sam.readStates.set(channelId, { channel_id: channelId, last_message_id: last, mention_count: mentions });
-  for (const c of [welcome, general]) state(c.id, c.last_message_id);
+  const stockTalk = seedMessageShowcase({ guildId, parentId: textCategory.id, R, A, Bo, N, sam: sam.user, bob: bob.user });
+  for (const c of [welcome, general, stockTalk]) state(c.id, c.last_message_id);
   state(devTalk.id, g2.id);
   state(random.id, r1.id, 2);
 

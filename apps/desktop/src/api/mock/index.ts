@@ -2,6 +2,7 @@
 // REST goes through `mockRequest`, the gateway through `MockSocket`; both are wired in rest.ts / gateway.ts.
 
 import { MOCK } from "../config";
+import { MAX_UPLOAD_BYTES } from "../limits";
 import { ApiRequestError, RateLimitedError } from "../errors";
 import { snowflakeToTimestamp } from "../snowflake";
 import type { Attachment, PresenceStatus } from "../types";
@@ -60,7 +61,7 @@ export async function mockUpload(channelId: string, file: File, onProgress: ((fr
   const userId = userIdFromToken(token);
   if (!userId) throw new ApiRequestError(401, { code: 0, message: "401: Unauthorized" });
   if (!db.channels.has(channelId)) throw new ApiRequestError(404, { code: 10003, message: "Unknown Channel" });
-  if (file.size > 10 * 1024 * 1024) throw new ApiRequestError(413, { code: 40005, message: "Request entity too large" });
+  if (file.size > MAX_UPLOAD_BYTES) throw new ApiRequestError(413, { code: 40005, message: "Request entity too large" });
   const steps = 8;
   for (let i = 1; i <= steps; i += 1) {
     if (signal?.aborted) throw new DOMException("Upload aborted", "AbortError");

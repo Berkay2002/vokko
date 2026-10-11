@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
-import type { Message, Snowflake } from '../api/types';
-import { ApiRequestError, Modal, markGuildRead, useMe, useReadState } from './shell';
+import type { Attachment, Message, Snowflake } from '../api/types';
+import { ApiRequestError, Modal, markGuildRead, resolveUrl, useMe, useReadState } from './shell';
+import { DeleteAttachmentModal, ModifyAttachmentModal } from './AttachmentModals';
 import { ChatProvider, useChat, type ChatActions } from './ChatContext';
 import { Composer } from './Composer';
 import { MessageList, type MessageListHandle } from './MessageList';
 import { TypingIndicator } from './TypingIndicator';
 import { Lightbox } from './Attachments';
+import { ChatToasts } from './toast';
 import { ReactionsModal } from './ReactionsModal';
 import { Markdown } from './markdown';
 import { Avatar } from './Avatar';
@@ -33,6 +35,8 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
   const [link, setLink] = useState<string | null>(null);
   const [image, setImage] = useState<ImageView | null>(null);
   const [reactionsOf, setReactionsOf] = useState<Message | null>(null);
+  const [attachmentView, setAttachmentView] = useState<{ message: Message; attachment: Attachment } | null>(null);
+  const [attachmentDelete, setAttachmentDelete] = useState<{ message: Message; attachment: Attachment } | null>(null);
   const [focusToken, setFocusToken] = useState(0);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
@@ -75,6 +79,8 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     jumpTo: id => { void messageStore.jumpToMessage(channelId, id); },
     openLink: href => setLink(href),
     openImage: (message, index) => setImage({ message, index }),
+    viewAttachment: (message, attachment) => setAttachmentView({ message, attachment }),
+    deleteAttachment: (message, attachment) => setAttachmentDelete({ message, attachment }),
     viewReactions: m => setReactionsOf(m),
   }), [channelId, requestDelete]);
 
@@ -97,6 +103,13 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
       <p className="chat-modal-text">{notice?.body}</p>
     </Modal>
     <ReactionsModal message={reactionsOf} onClose={() => setReactionsOf(null)} />
+    <ModifyAttachmentModal readOnly onSave={() => undefined} onClose={() => setAttachmentView(null)}
+      target={attachmentView ? { details: { filename: attachmentView.attachment.filename, description: attachmentView.attachment.description ?? '' }, thumbUrl: resolveUrl(attachmentView.attachment.url) } : null} />
+    <DeleteAttachmentModal open={!!attachmentDelete} onClose={() => setAttachmentDelete(null)} onConfirm={() => {
+      const t = attachmentDelete;
+      setAttachmentDelete(null);
+      if (t) void messageStore.removeAttachment(t.message.channel_id, t.message, t.attachment.id).catch(() => undefined);
+    }} />
     {image && <Lightbox message={image.message} index={image.index} onClose={() => setImage(null)} />}
   </ChatProvider>;
 }
@@ -142,6 +155,9 @@ function ChatBody(p: BodyProps) {
     return () => clearTimeout(t);
   }, [newest, read, state.hasMoreAfter, p.atBottom, focused, p.channelId, mentionCount]);
 
+  // A message marked unread keeps the channel unread while it is open; leaving it lets the normal ack resume.
+  useEffect(() => () => messageStore.releaseHold(p.channelId), [p.channelId]);
+
   // Escape (outside editing/dialogs): mark the channel read and jump to the present. Shift+Escape: mark the whole server read.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -154,7 +170,7 @@ function ChatBody(p: BodyProps) {
       const last = state.messages[state.messages.length - 1];
       if (state.hasMoreAfter) void messageStore.jumpToPresent(p.channelId);
       else p.list.current?.scrollToBottom();
-      if (last) messageStore.ack(p.channelId, last.id);
+      if (last) messageStore.markRead(p.channelId, last.id);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -188,6 +204,7 @@ function ChatBody(p: BodyProps) {
       onToggleMention={() => p.setMentionReply(v => !v)}
       onCancelReply={() => p.setReplyTo(null)}
       onSent={() => {
+        messageStore.releaseHold(p.channelId);
         if (state.hasMoreAfter) void messageStore.jumpToPresent(p.channelId);
         requestAnimationFrame(() => p.list.current?.scrollToBottom());
       }}
@@ -195,6 +212,7 @@ function ChatBody(p: BodyProps) {
       focusToken={p.focusToken}
     />
     <TypingIndicator channelId={p.channelId} />
+    <ChatToasts />
     {p.dragging && <div className="chat-drop-overlay" aria-hidden="true">
       <div className="chat-drop-card">
         <Upload size={48} />
