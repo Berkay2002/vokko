@@ -1,10 +1,13 @@
 //! Friend requests and DM / group DM channels of the current user.
 use axum::Json;
 use axum::Router;
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, put};
-use vokko_protocol::api::{Channel, CreateDmRequest, CreateRelationshipRequest, GatewayEvent, IdOnly, Relationship, RelationshipType, Snowflake};
+use vokko_protocol::api::{
+    Channel, CreateDmRequest, CreateRelationshipRequest, GatewayEvent, IdOnly, PutRelationshipRequest, Relationship, RelationshipType, Snowflake,
+};
 
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
@@ -187,9 +190,55 @@ async fn befriend(state: &AppState, user_id: i64, other: i64) -> ApiResult<()> {
     Ok(())
 }
 
-async fn add_relationship(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<StatusCode> {
+async fn block(state: &AppState, user_id: i64, other: i64) -> ApiResult<()> {
+    if other == user_id {
+        return Err(ApiErr::invalid("user_id", "You cannot block yourself."));
+    }
+    if store::user(state, other).await?.is_none() {
+        return Err(ApiErr::unknown_user());
+    }
+    let mut tx = state.db.begin().await?;
+    let mine: Option<(i16,)> = sqlx::query_as("SELECT kind FROM relationships WHERE user_id = $1 AND other_id = $2 FOR UPDATE")
+        .bind(user_id)
+        .bind(other)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if mine.is_some_and(|(kind,)| kind == RelationshipType::Blocked.as_u8() as i16) {
+        return Ok(());
+    }
+    // Their half of a friendship / request goes away; their own block of me (if any) stays.
+    let theirs =
+        sqlx::query("DELETE FROM relationships WHERE user_id = $2 AND other_id = $1 AND kind <> 2").bind(user_id).bind(other).execute(&mut *tx).await?;
+    sqlx::query(
+        "INSERT INTO relationships (user_id, other_id, kind) VALUES ($1, $2, 2) \
+         ON CONFLICT (user_id, other_id) DO UPDATE SET kind = 2, created_at = now()",
+    )
+    .bind(user_id)
+    .bind(other)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    send_view(state, user_id, other, RelationshipType::Blocked).await?;
+    if theirs.rows_affected() > 0 {
+        state.hub.send(&[other], &GatewayEvent::RelationshipRemove(IdOnly { id: Snowflake::from(user_id) }));
+    }
+    Ok(())
+}
+
+async fn add_relationship(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>, body: Bytes) -> ApiResult<StatusCode> {
     let other = parse_id(&id).ok_or_else(ApiErr::unknown_user)?;
-    befriend(&state, user_id, other).await?;
+    // The body is optional: none, `{}` and `{"type": 1}` mean friend request / accept, `{"type": 2}` blocks.
+    let request: PutRelationshipRequest = if body.iter().all(u8::is_ascii_whitespace) {
+        PutRelationshipRequest::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|_| ApiErr::invalid("body", "Expected a JSON object like {\"type\": 2}."))?
+    };
+    match request.kind {
+        None => befriend(&state, user_id, other).await?,
+        Some(kind) if kind == RelationshipType::Friend.as_u8() => befriend(&state, user_id, other).await?,
+        Some(kind) if kind == RelationshipType::Blocked.as_u8() => block(&state, user_id, other).await?,
+        Some(_) => return Err(ApiErr::invalid("type", "Must be 1 (friend) or 2 (blocked).")),
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -205,15 +254,30 @@ async fn request_by_username(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Remove friend / cancel / decline / unblock. Only the caller's own row goes, plus the counterpart row of a
+/// friendship or request; the other person's block of the caller is never touched.
 async fn remove_relationship(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<StatusCode> {
     let other = parse_id(&id).ok_or_else(ApiErr::unknown_user)?;
-    let removed = sqlx::query("DELETE FROM relationships WHERE (user_id = $1 AND other_id = $2) OR (user_id = $2 AND other_id = $1)")
+    let mine: Option<(i16,)> = sqlx::query_as("DELETE FROM relationships WHERE user_id = $1 AND other_id = $2 RETURNING kind")
         .bind(user_id)
         .bind(other)
-        .execute(&state.db)
+        .fetch_optional(&state.db)
         .await?;
-    if removed.rows_affected() > 0 {
+    let was_block = mine.is_some_and(|(kind,)| kind == RelationshipType::Blocked.as_u8() as i16);
+    let theirs = if was_block {
+        0
+    } else {
+        sqlx::query("DELETE FROM relationships WHERE user_id = $2 AND other_id = $1 AND kind <> 2")
+            .bind(user_id)
+            .bind(other)
+            .execute(&state.db)
+            .await?
+            .rows_affected()
+    };
+    if mine.is_some() {
         state.hub.send(&[user_id], &GatewayEvent::RelationshipRemove(IdOnly { id: Snowflake::from(other) }));
+    }
+    if theirs > 0 {
         state.hub.send(&[other], &GatewayEvent::RelationshipRemove(IdOnly { id: Snowflake::from(user_id) }));
     }
     Ok(StatusCode::NO_CONTENT)

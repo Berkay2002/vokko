@@ -250,6 +250,69 @@ async fn presence_follows_connections_and_typing_is_relayed() {
 }
 
 #[tokio::test]
+async fn blocking_is_announced_to_the_blocker_and_hides_the_friendship_from_the_blocked() {
+    let w = world().await;
+    let (_, owner_user) = w.app.get("/users/@me", &w.owner).await;
+    let (_, member_user) = w.app.get("/users/@me", &w.member).await;
+    let (owner_id, member_id) = (owner_user["id"].as_str().expect("id"), member_user["id"].as_str().expect("id"));
+    let mut owner = Client::connect(&w.address).await;
+    owner.identify(&w.owner).await;
+    let mut alice = Client::connect(&w.address).await;
+    alice.identify(&w.member).await;
+
+    w.app.post("/users/@me/relationships", &w.owner, json!({"username": "alice"})).await;
+    w.app.put(&format!("/users/@me/relationships/{owner_id}"), &w.member).await;
+    assert_eq!(owner.wait_for("RELATIONSHIP_ADD").await["type"], 4);
+    assert_eq!(owner.wait_for("RELATIONSHIP_ADD").await["type"], 1);
+    assert_eq!(alice.wait_for("RELATIONSHIP_ADD").await["type"], 3);
+    assert_eq!(alice.wait_for("RELATIONSHIP_ADD").await["type"], 1);
+
+    let (status, _) = w.app.put_json(&format!("/users/@me/relationships/{member_id}"), &w.owner, json!({"type": 2})).await;
+    assert_eq!(status, 204);
+    let added = owner.wait_for("RELATIONSHIP_ADD").await;
+    assert_eq!((added["id"].as_str(), added["type"].as_u64()), (Some(member_id), Some(2)));
+    assert_eq!(added["user"]["username"], "alice");
+    let removed = alice.wait_for("RELATIONSHIP_REMOVE").await;
+    assert_eq!(removed, json!({"id": owner_id}));
+    assert!(alice.silent_for("RELATIONSHIP_ADD", Duration::from_millis(300)).await, "the blocked user is never told about the block");
+
+    // unblocking only concerns the blocker
+    w.app.delete(&format!("/users/@me/relationships/{member_id}"), &w.owner).await;
+    assert_eq!(owner.wait_for("RELATIONSHIP_REMOVE").await, json!({"id": member_id}));
+    assert!(alice.silent_for("RELATIONSHIP_REMOVE", Duration::from_millis(300)).await);
+}
+
+#[tokio::test]
+async fn link_embeds_follow_the_message_as_message_update() {
+    let app = TestApp::with_config(|config| {
+        config.heartbeat_interval_ms = 60_000;
+        config.unfurl.enabled = true;
+        config.unfurl.allow_private = true;
+    })
+    .await;
+    let address = app.serve().await;
+    let pages = common::PageServer::start().await;
+    let (token, _) = app.register("sam").await;
+    let (_, channel) = app.guild_with_channel(&token).await;
+    let mut client = Client::connect(&address).await;
+    client.identify(&token).await;
+
+    let (_, sent) = app.post(&format!("/channels/{channel}/messages"), &token, json!({"content": format!("see {}", pages.url("/page"))})).await;
+    let created = client.wait_for("MESSAGE_CREATE").await;
+    assert_eq!(created["id"], sent["id"]);
+    assert_eq!(created["author"]["username"], "sam", "MESSAGE_CREATE always carries the author");
+    assert_eq!(created["embeds"], json!([]));
+
+    let updated = client.wait_for("MESSAGE_UPDATE").await;
+    assert_eq!(updated["id"], sent["id"]);
+    assert_eq!(updated["content"], created["content"], "MESSAGE_UPDATE carries the whole message");
+    assert_eq!(updated["author"]["username"], "sam");
+    assert_eq!(updated["embeds"][0]["title"], "Vokko & friends");
+    assert_eq!(updated["embeds"][0]["url"], pages.url("/page"));
+    assert_eq!(updated["edited_timestamp"], Value::Null, "an unfurl is not an edit");
+}
+
+#[tokio::test]
 async fn client_close_is_answered_with_a_close_frame() {
     let w = world().await;
     let mut client = Client::connect(&w.address).await;

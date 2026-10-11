@@ -294,10 +294,13 @@ pub struct MessageRow {
     pub mention_everyone: bool,
     pub created_at: OffsetDateTime,
     pub edited_at: Option<OffsetDateTime>,
+    /// JSON array of `Embed`.
+    pub embeds: String,
+    pub flags: i32,
 }
 
 pub const MESSAGE_SELECT: &str = "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.reference_message_id, m.mention_everyone, \
-     m.created_at, m.edited_at FROM messages m JOIN channels c ON c.id = m.channel_id";
+     m.created_at, m.edited_at, m.embeds::text AS embeds, m.flags FROM messages m JOIN channels c ON c.id = m.channel_id";
 
 #[derive(FromRow)]
 struct AttachmentRow {
@@ -436,6 +439,7 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
             mentions: mentions.remove(&row.id).unwrap_or_default(),
             mention_everyone: row.mention_everyone,
             attachments: attachments.remove(&row.id).unwrap_or_default(),
+            embeds: serde_json::from_str(&row.embeds).unwrap_or_default(),
             reactions: reactions_api,
             pinned: row.pinned,
             message_reference: row.reference_message_id.map(|message_id| MessageReference {

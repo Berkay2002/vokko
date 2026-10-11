@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::hub::Hub;
 use crate::ids::SnowflakeGenerator;
 use crate::ratelimit::RateLimiter;
+use crate::unfurl::Unfurler;
 
 pub struct Inner {
     pub db: PgPool,
@@ -15,6 +16,7 @@ pub struct Inner {
     pub ids: SnowflakeGenerator,
     pub hub: Hub,
     pub limiter: RateLimiter,
+    pub unfurler: Unfurler,
 }
 
 #[derive(Clone)]
@@ -30,7 +32,8 @@ impl Deref for AppState {
 impl AppState {
     pub fn new(db: PgPool, config: Config) -> Self {
         let hub = Hub::new(config.replay_capacity, config.session_ttl);
-        Self(Arc::new(Inner { db, config, ids: SnowflakeGenerator::new(1), hub, limiter: RateLimiter::default() }))
+        let unfurler = Unfurler::new(config.unfurl);
+        Self(Arc::new(Inner { db, config, ids: SnowflakeGenerator::new(1), hub, limiter: RateLimiter::default(), unfurler }))
     }
 
     /// Absolute URL of a stored asset path (`<attachment id>/<filename>`).

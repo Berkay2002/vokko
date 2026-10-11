@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::unfurl::UnfurlConfig;
+
 #[derive(Clone, Debug)]
 pub struct Config {
     pub database_url: String,
@@ -16,6 +18,7 @@ pub struct Config {
     pub replay_capacity: usize,
     /// `None` disables REST rate limiting.
     pub rate_limit: Option<RateLimit>,
+    pub unfurl: UnfurlConfig,
 }
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:8710";
@@ -87,7 +90,10 @@ impl Config {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("data").join("server-dev"));
         let public_url = env.get("VOKKO_PUBLIC_URL").unwrap_or_else(|| format!("http://{bind}"));
-        Ok(Self::new(database_url, bind, data_dir, public_url))
+        let mut config = Self::new(database_url, bind, data_dir, public_url);
+        // `VOKKO_UNFURL=off` disables link previews (no outbound requests at all).
+        config.unfurl.enabled = !env.get("VOKKO_UNFURL").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "off" | "0" | "false" | "no"));
+        Ok(config)
     }
 
     pub fn new(database_url: String, bind: String, data_dir: PathBuf, public_url: String) -> Self {
@@ -101,6 +107,7 @@ impl Config {
             session_ttl: Duration::from_secs(300),
             replay_capacity: 1000,
             rate_limit: Some(RateLimit::default()),
+            unfurl: UnfurlConfig::default(),
         }
     }
 }
