@@ -3,6 +3,7 @@ import { Plus, Users, X } from "lucide-react";
 import { channelMentionCount, dmName, isChannelUnread, useStore } from "../api/store";
 import { ChannelType, RelationshipType, type Channel } from "../api/types";
 import { Tooltip, useContextMenu } from "../ui";
+import { TagChip } from "../perks/TagChip";
 import { Avatar } from "./Avatar";
 import { closeDirectMessage } from "./actions";
 import { useIsMuted } from "./localState";
@@ -37,7 +38,10 @@ function DmRow({ channel }: { channel: Channel }) {
           <Avatar user={first} size={32} status />
         )}
         <span className="dm-text">
-          <span className="dm-name">{dmName(channel)}</span>
+          <span className="dm-name-row">
+            <span className="dm-name">{dmName(channel)}</span>
+            {!group && <span className="dm-tag" aria-hidden="true"><TagChip tag={first?.primary_guild} /></span>}
+          </span>
           {group && <span className="dm-sub">{recipients.length + 1} members</span>}
         </span>
         {mentions > 0 && <span className="count-badge">{mentions}</span>}
@@ -66,11 +70,13 @@ export function DmSidebar() {
       </div>
       <div className="sidebar-scroller">
         <nav className="sidebar-nav" aria-label="Home">
-          <NavLink to="/channels/@me" end className={`nav-row${friendsSelected ? " selected" : ""}`}>
-            <Users size={20} />
-            <span className="nav-row-label">Friends</span>
-            {pending > 0 && <span className="count-badge">{pending}</span>}
-          </NavLink>
+          <div className="nav-row-wrap">
+            <NavLink to="/channels/@me" end className={`nav-row${friendsSelected ? " selected" : ""}`}>
+              <Users size={20} />
+              <span className="nav-row-label">Friends</span>
+              {pending > 0 && <span className="count-badge">{pending}</span>}
+            </NavLink>
+          </div>
         </nav>
         <div className="dm-section-header">
           <span>Direct Messages</span>

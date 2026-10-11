@@ -6,7 +6,7 @@ import { Tooltip } from "../ui";
 import { InboxPopout } from "./Inbox";
 import { closeModal, openModal, useModals } from "./modalStore";
 
-/** The 32 px web title bar: current page title centred, Inbox and Help on the right (desktop builds draw native chrome instead). */
+/** The 32 px web title bar: current page title centred, Inbox and Help on the right (desktop builds draw native chrome instead). Help opens the keybinds page, the only shortcut list we have. */
 export function TitleBar() {
   const [inboxButton, setInboxButton] = useState<HTMLElement | null>(null);
   const inboxOpen = useModals(s => s.modal?.type === "inbox");
@@ -19,9 +19,9 @@ export function TitleBar() {
   return (
     <header className="title-bar">
       <div className="title-bar-title">
-        {title.icon === "friends" && <Users size={16} />}
-        {title.icon === "hash" && <Hash size={16} />}
-        {title.icon === "voice" && <Volume2 size={16} />}
+        {title.icon === "friends" && <Users size={18} />}
+        {title.icon === "hash" && <Hash size={18} />}
+        {title.icon === "voice" && <Volume2 size={18} />}
         <span>{title.text}</span>
       </div>
       <div className="title-bar-actions">
@@ -31,7 +31,7 @@ export function TitleBar() {
           </button>
         </Tooltip>
         <Tooltip content="Help" side="bottom">
-          <button type="button" className="title-bar-button" aria-label="Help">
+          <button type="button" className="title-bar-button" aria-label="Help" onClick={() => openModal({ type: "userSettings", section: "keybinds" })}>
             <CircleHelp size={18} />
           </button>
         </Tooltip>

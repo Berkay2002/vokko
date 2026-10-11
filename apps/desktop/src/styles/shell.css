@@ -158,7 +158,7 @@
   background: var(--interactive-text-active);
   opacity: 0;
   transform: translateY(-50%);
-  transition: height 0.2s ease-out, opacity 0.2s ease-out;
+  transition: height 0.2s ease-out, opacity 0.2s ease-out, transform 0.2s ease-out;
   pointer-events: none;
 }
 
@@ -221,7 +221,8 @@
   background: var(--brand-500);
 }
 
-.rail-discover:hover {
+.rail-discover:hover,
+.rail-download:hover {
   background: var(--status-online);
 }
 
@@ -265,6 +266,33 @@
   font-weight: 700;
   text-align: center;
   pointer-events: none;
+}
+
+.download-apps-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 16px;
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.download-apps-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: var(--background-mod-subtle);
+  color: var(--interactive-icon-default);
+}
+
+.download-apps-note {
+  color: var(--text-muted);
 }
 
 .rail-dm-fallback {
@@ -321,12 +349,17 @@
   padding-bottom: 8px;
 }
 
+/* The reference row is 40 px: 1 px padding around the 38 px interactive box. */
+.nav-row-wrap {
+  margin: 0 8px;
+  padding: 1px 0;
+}
+
 .nav-row {
   display: flex;
   align-items: center;
   gap: 12px;
   height: 38px;
-  margin: 0 8px 2px;
   padding: 0 8px;
   border-radius: var(--radius-sm);
   color: var(--interactive-text-default);
@@ -393,9 +426,11 @@
   padding-bottom: 8px;
 }
 
+/* The reference row is 44 px: 1 px padding around the 42 px interactive box, no gap between rows. */
 .dm-row-wrap {
   position: relative;
-  margin: 0 8px 2px;
+  margin: 0 8px;
+  padding: 1px 0;
 }
 
 .dm-row {
@@ -429,6 +464,22 @@
   flex: 1;
   flex-direction: column;
   min-width: 0;
+}
+
+.dm-name-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dm-tag {
+  display: contents;
+}
+
+.dm-name-row .chat-server-tag {
+  flex: none;
+  height: 20px;
 }
 
 .dm-name {
@@ -633,87 +684,90 @@
   background: rgba(0, 0, 0, 0.22);
 }
 
-.status-menu {
-  width: 280px;
-  padding: 8px;
+/* User-panel popout: the own profile card (shares .profile-card) over the account rows. */
+.user-popout .profile-banner {
+  height: 105px;
+}
+
+.user-popout .profile-avatar {
+  top: 59px;
+}
+
+.user-popout .profile-body {
+  padding: 54px 16px 12px;
+}
+
+.user-popout-note {
+  position: absolute;
+  top: 113px;
+  left: 112px;
+  right: 16px;
+}
+
+.user-popout-note input {
+  width: 100%;
+  height: 35px;
+  padding: 0 14px;
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--background-surface-high);
-  box-shadow: var(--elevation-high);
+  border-radius: 16px;
+  background: var(--background-surface-higher);
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 18px;
 }
 
-.status-menu-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px;
+.user-popout-note input::placeholder {
+  color: var(--input-placeholder-text-default);
 }
 
-.status-menu-name {
-  color: var(--text-strong);
-  font-size: 16px;
-  font-weight: 600;
+.user-popout .in-voice-card {
+  margin: 0 16px 12px;
 }
 
-.status-menu-list {
+.user-popout-menu {
   display: flex;
   flex-direction: column;
-  padding: 4px 0;
+  gap: 8px;
+  padding: 8px;
   border-top: 1px solid var(--border-subtle);
 }
 
-.status-menu-item {
+/* Rows sit in rounded grouped cards on the popout background, split by 1px lines. */
+.user-popout-card {
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--background-surface-higher);
+}
+
+.user-popout-row {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px;
-  border-radius: var(--radius-xs);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 34px;
+  padding: 0 12px;
   color: var(--interactive-text-default);
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 500;
   text-align: left;
 }
 
-.status-menu-item .status-badge {
-  margin-top: 5px;
+.user-popout-row + .user-popout-row {
+  border-top: 1px solid var(--border-subtle);
 }
 
-.status-menu-item:hover,
-.status-menu-item.selected {
+.user-popout-row:hover {
   background: var(--interactive-background-hover);
   color: var(--interactive-text-hover);
 }
 
-.status-menu-text {
-  display: flex;
-  flex-direction: column;
+.user-popout-row > .status-badge {
+  margin: 0 5px;
 }
 
-.status-menu-label {
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 500;
-}
-
-.status-menu-hint {
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 16px;
-}
-
-.status-menu-custom {
-  padding: 4px 0 0;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.status-menu-input {
-  width: 100%;
-  height: 36px;
-  margin-top: 8px;
-  padding: 0 10px;
-  border: 1px solid var(--input-border-default);
-  border-radius: var(--radius-sm);
-  background: var(--input-background-default);
-  color: var(--text-default);
-  font-size: 14px;
+.user-popout-chevron {
+  margin-left: auto;
 }
 
 /* ---- guild sidebar ---- */
@@ -1095,17 +1149,12 @@
   position: relative;
   display: flex;
   align-items: center;
-  width: 144px;
-  height: 28px;
+  width: 244px;
+  height: 32px;
   padding: 0 8px;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   background: var(--background-mod-subtle);
   color: var(--interactive-icon-default);
-  transition: width 0.25s ease;
-}
-
-.header-search:focus-within {
-  width: 240px;
 }
 
 .header-search-input {
@@ -1119,14 +1168,12 @@
   color: var(--input-placeholder-text-default);
 }
 
+/* PinnedMessages (.chat-pins) draws its own frame; the host only positions it. */
 .pins-popout-host {
   width: 420px;
-  max-height: 60vh;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--background-surface-high);
-  box-shadow: var(--elevation-high);
-  overflow: hidden;
+  border-radius: 8px;
+  background: none;
+  box-shadow: none;
 }
 
 .pins-header {
@@ -1441,6 +1488,7 @@
   color: var(--interactive-text-default);
   font-size: 16px;
   line-height: 20px;
+  white-space: nowrap;
   transition: background-color 0.3s ease;
 }
 
@@ -1617,6 +1665,10 @@
 }
 
 .people-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
   margin: 80px auto 0;
   max-width: 320px;
   color: var(--text-muted);

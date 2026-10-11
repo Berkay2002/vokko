@@ -13,6 +13,9 @@ export interface PopoutProps {
   gap?: number;
   className?: string;
   style?: CSSProperties;
+  /** Landmark role and name for popouts that are dialogs rather than plain panels. */
+  role?: "dialog";
+  label?: string;
   children: ReactNode;
 }
 
@@ -22,7 +25,7 @@ function resolve(anchor: PopoutProps["anchor"]): HTMLElement | null {
 }
 
 /** Floating panel anchored to an element: closes on Escape and on outside clicks (the anchor itself is "inside"). */
-export function Popout({ anchor, open, onClose, side = "bottom", align = "center", gap = 8, className, style, children }: PopoutProps) {
+export function Popout({ anchor, open, onClose, side = "bottom", align = "center", gap = 8, className, style, role, label, children }: PopoutProps) {
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const layer = useLayer(open, onClose);
@@ -47,7 +50,7 @@ export function Popout({ anchor, open, onClose, side = "bottom", align = "center
 
   if (!open) return null;
   return createPortal(
-    <div ref={box} className={`popout ${className ?? ""}`} style={{ ...style, left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}>
+    <div ref={box} role={role} aria-label={label} className={`popout ${className ?? ""}`} style={{ ...style, left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}>
       {children}
     </div>,
     document.body,

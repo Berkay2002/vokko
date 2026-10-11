@@ -8,7 +8,7 @@ import { request } from "../api/rest";
 import { Perm, basePermissions, canEditRole, canModerate, channelPermissions, hasBit, memberLike } from "../api/permissions";
 import { ChannelType, RelationshipType, type Channel, type Guild, type Snowflake, type User } from "../api/types";
 import type { MenuItem } from "../ui";
-import { closeDirectMessage, markChannelRead, markGuildRead, openDirectMessage } from "./actions";
+import { closeDirectMessage, copyText, markChannelRead, markGuildRead, openDirectMessage } from "./actions";
 import { isMutedAt, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setNotifyLevel, toggleFlag, unmute, useLocalState, type NotifyLevel } from "./localState";
 import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
@@ -19,7 +19,7 @@ import { useVoiceUi } from "../voice/uiStore";
 
 export const UNAVAILABLE = "Not available yet";
 
-const copy = (text: string) => () => void navigator.clipboard?.writeText(text);
+const copy = (text: string) => () => copyText(text);
 const sep: MenuItem = { type: "separator" };
 const local = () => useLocalState.getState();
 const unavailable = (id: string, label: string, icon?: ReactNode): MenuItem => ({ id, label, icon, disabled: true, tooltip: UNAVAILABLE });
@@ -245,7 +245,7 @@ function relationshipItems(user: User): MenuItem[] {
   const type = state.relationships[user.id]?.type;
   const items: MenuItem[] = [];
   if (type === RelationshipType.Friend) {
-    items.push({ id: "remove-friend", label: "Remove Friend", onSelect: () => void request("DELETE", `/users/@me/relationships/${user.id}`) });
+    items.push({ id: "remove-friend", label: "Remove Friend", onSelect: () => openModal({ type: "removeFriend", userId: user.id }) });
   } else if (type === RelationshipType.OutgoingRequest) {
     items.push({ id: "request-sent", label: "Friend Request Sent", disabled: true });
   } else if (type !== RelationshipType.Blocked) {

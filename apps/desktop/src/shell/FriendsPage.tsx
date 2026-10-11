@@ -7,7 +7,8 @@ import { displayName, useStore } from "../api/store";
 import { RelationshipType, type Relationship } from "../api/types";
 import { Tooltip, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
-import { openDirectMessage } from "./actions";
+import { copyText, openDirectMessage } from "./actions";
+import { UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
 
 type Tab = "online" | "all" | "pending" | "blocked" | "add";
@@ -28,7 +29,7 @@ function PersonRow({ relationship, mode }: { relationship: Relationship; mode: "
   const status = presence?.status ?? "offline";
   const sub =
     mode === "incoming" ? "Incoming Friend Request" : mode === "outgoing" ? "Outgoing Friend Request" : mode === "blocked" ? "Blocked" : (presence?.custom_status ?? (status === "offline" ? "Offline" : status === "dnd" ? "Do Not Disturb" : status === "idle" ? "Idle" : "Online"));
-  const circle = (label: string, icon: React.ReactNode, onClick: () => void, danger?: boolean) => (
+  const circle = (label: string, icon: React.ReactNode, onClick: (event: React.MouseEvent<HTMLButtonElement>) => void, danger?: boolean) => (
     <Tooltip content={label} side="top">
       <button
         type="button"
@@ -36,7 +37,7 @@ function PersonRow({ relationship, mode }: { relationship: Relationship; mode: "
         aria-label={`${label}`}
         onClick={e => {
           e.stopPropagation();
-          onClick();
+          onClick(e);
         }}
       >
         {icon}
@@ -51,8 +52,8 @@ function PersonRow({ relationship, mode }: { relationship: Relationship; mode: "
         menu.open(e, [
           { id: "message", label: "Message", onSelect: () => void openDirectMessage(user.id) },
           { type: "separator" },
-          ...(mode === "friend" ? [{ id: "remove", label: "Remove Friend", danger: true, onSelect: () => void act("DELETE", user.id) }] : []),
-          { id: "copy", label: "Copy User ID", onSelect: () => void navigator.clipboard?.writeText(user.id) },
+          ...(mode === "friend" ? [{ id: "remove", label: "Remove Friend", danger: true, onSelect: () => openModal({ type: "removeFriend", userId: user.id }) }] : []),
+          { id: "copy", label: "Copy User ID", onSelect: () => copyText(user.id) },
         ])
       }
     >
@@ -71,7 +72,14 @@ function PersonRow({ relationship, mode }: { relationship: Relationship; mode: "
             {circle(
               "More",
               <MoreVertical size={18} />,
-              () => undefined,
+              event => {
+                const rect = event.currentTarget.getBoundingClientRect();
+                menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [
+                  { id: "video-call", label: "Start Video Call", disabled: true, tooltip: UNAVAILABLE },
+                  { id: "voice-call", label: "Start Voice Call", disabled: true, tooltip: UNAVAILABLE },
+                  { id: "remove", label: "Remove Friend", danger: true, onSelect: () => openModal({ type: "removeFriend", userId: user.id }) },
+                ]);
+              },
             )}
           </>
         )}
@@ -193,7 +201,20 @@ export function FriendsPage() {
       </section>
     );
 
-  const empty = (text: string) => <div className="people-empty">{text}</div>;
+  const empty = (text: string) => (
+    <div className="people-empty">
+      <svg width="96" height="72" viewBox="0 0 96 72" fill="none" aria-hidden="true">
+        <rect x="6" y="10" width="54" height="36" rx="12" fill="var(--background-mod-subtle)" />
+        <path d="M18 46l-6 12 16-12z" fill="var(--background-mod-subtle)" />
+        <rect x="36" y="26" width="54" height="36" rx="12" fill="var(--background-mod-normal)" />
+        <path d="M78 62l6 8-16-8z" fill="var(--background-mod-normal)" />
+        <circle cx="52" cy="44" r="3" fill="var(--interactive-icon-default)" />
+        <circle cx="63" cy="44" r="3" fill="var(--interactive-icon-default)" />
+        <circle cx="74" cy="44" r="3" fill="var(--interactive-icon-default)" />
+      </svg>
+      <span>{text}</span>
+    </div>
+  );
 
   return (
     <div className="friends-page">
@@ -233,8 +254,8 @@ export function FriendsPage() {
               <Search size={20} />
             </label>
             <div className="people-scroller">
-              {tab === "online" && (rows.online.length > 0 ? list("Online", rows.online, "friend") : empty("No one's around to play with Wumpus."))}
-              {tab === "all" && (rows.friends.length > 0 ? list("All friends", rows.friends, "friend") : empty("Wumpus is waiting on friends. You don't have to though!"))}
+              {tab === "online" && (rows.online.length > 0 ? list("Online", rows.online, "friend") : empty("No one's around to hang out with right now."))}
+              {tab === "all" && (rows.friends.length > 0 ? list("All friends", rows.friends, "friend") : empty("You don't have any friends yet. Use Add Friend to send a request."))}
               {tab === "pending" &&
                 (rows.incoming.length + rows.outgoing.length > 0 ? (
                   <>
@@ -242,9 +263,9 @@ export function FriendsPage() {
                     {list("Outgoing", rows.outgoing, "outgoing")}
                   </>
                 ) : (
-                  empty("There are no pending friend requests. Here's Wumpus for now.")
+                  empty("There are no pending friend requests. Click Add Friend to send requests.")
                 ))}
-              {tab === "blocked" && (rows.blocked.length > 0 ? list("Blocked", rows.blocked, "blocked") : empty("You can't unblock the Wumpus."))}
+              {tab === "blocked" && (rows.blocked.length > 0 ? list("Blocked", rows.blocked, "blocked") : empty("You haven't blocked anyone."))}
             </div>
           </div>
         )}

@@ -1,18 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Headphones, HeadphoneOff, Mic, MicOff, Settings, Volume2 } from "lucide-react";
 import { displayName, useStore } from "../api/store";
-import { Popout, Tooltip, useContextMenu } from "../ui";
-import { Avatar, StatusBadge } from "./Avatar";
+import { Tooltip, useContextMenu } from "../ui";
+import { Avatar } from "./Avatar";
 import { loadStoredStatus, setOwnStatus, type SelectableStatus } from "./actions";
 import { openModal } from "./modalStore";
-import { InVoiceCard, toggleSelfDeaf, toggleSelfMute, useDeviceMenus, useVoice } from "../voice";
-
-const OPTIONS: { value: SelectableStatus; label: string; hint?: string; badge: "online" | "idle" | "dnd" | "offline" }[] = [
-  { value: "online", label: "Online", badge: "online" },
-  { value: "idle", label: "Idle", badge: "idle" },
-  { value: "dnd", label: "Do Not Disturb", hint: "You will not receive any desktop notifications.", badge: "dnd" },
-  { value: "invisible", label: "Invisible", hint: "You will appear offline.", badge: "offline" },
-];
+import { UserPanelPopout } from "./UserPanelPopout";
+import { toggleSelfDeaf, toggleSelfMute, useDeviceMenus, useVoice } from "../voice";
 
 const LABEL: Record<string, string> = { online: "Online", idle: "Idle", dnd: "Do Not Disturb", offline: "Invisible" };
 
@@ -60,7 +54,7 @@ export function UserPanel() {
 
   return (
     <section className="user-panel" aria-label="User status and settings">
-      <button ref={setAnchor} type="button" className={`user-panel-account${open ? " active" : ""}${inVoice ? " in-voice" : ""}`} onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}>
+      <button ref={setAnchor} type="button" className={`user-panel-account${open ? " active" : ""}${inVoice ? " in-voice" : ""}`} onClick={() => setOpen(o => !o)} aria-haspopup="dialog" aria-expanded={open}>
         <Avatar user={me} size={32} status />
         <span className="user-panel-names">
           <span className="user-panel-name">{displayName(me)}</span>
@@ -96,34 +90,20 @@ export function UserPanel() {
           </button>
         </Tooltip>
       </div>
-      <Popout anchor={anchor} open={open} onClose={() => setOpen(false)} side="top" align="start" gap={8} className="status-menu">
-        <div className="status-menu-header">
-          <Avatar user={me} size={32} status />
-          <div className="status-menu-name">{displayName(me)}</div>
-        </div>
-        {inVoice && <InVoiceCard userId={me.id} onOpen={() => setOpen(false)} />}
-        <div className="status-menu-list" role="menu">
-          {OPTIONS.map(option => (
-            <button key={option.value} type="button" role="menuitemradio" aria-checked={selected === option.value} className={`status-menu-item${selected === option.value ? " selected" : ""}`} onClick={() => choose(option.value)}>
-              <StatusBadge status={option.badge} size={10} />
-              <span className="status-menu-text">
-                <span className="status-menu-label">{option.label}</span>
-                {option.hint && <span className="status-menu-hint">{option.hint}</span>}
-              </span>
-            </button>
-          ))}
-        </div>
-        <form
-          className="status-menu-custom"
-          onSubmit={e => {
-            e.preventDefault();
-            setOwnStatus(selected, custom);
-            setOpen(false);
-          }}
-        >
-          <input className="status-menu-input" value={custom} maxLength={128} placeholder="Set a custom status" onChange={e => setCustom(e.target.value)} />
-        </form>
-      </Popout>
+      <UserPanelPopout
+        anchor={anchor}
+        open={open}
+        onClose={() => setOpen(false)}
+        status={selected}
+        onStatus={choose}
+        custom={custom}
+        onCustom={setCustom}
+        onSubmitCustom={() => {
+          setOwnStatus(selected, custom);
+          setOpen(false);
+        }}
+        inVoice={inVoice}
+      />
     </section>
   );
 }

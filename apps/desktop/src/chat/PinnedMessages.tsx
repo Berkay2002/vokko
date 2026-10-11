@@ -57,7 +57,8 @@ function PinnedList({ channelId, onJump }: { channelId: Snowflake; onJump?: (id:
     } catch { setError(true); } finally { setLoadingMore(false); }
   }
 
-  return <div className="chat-pins" role="dialog" aria-label="Pinned Messages">
+  const empty = pins?.length === 0;
+  return <div className={`chat-pins${empty ? ' empty' : ''}`} role="dialog" aria-label="Pinned Messages">
     <header className="chat-pins-header"><Pin size={20} aria-hidden="true" /><h2>Pinned Messages</h2></header>
     <div className="chat-pins-body">
       {pins === null && !error && <div className="chat-pins-empty">Loading…</div>}
@@ -79,5 +80,6 @@ function PinnedList({ channelId, onJump }: { channelId: Snowflake; onJump?: (id:
       </article>)}
       {hasMore && <button type="button" className="chat-btn chat-pins-more" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? 'Loading…' : 'Load more'}</button>}
     </div>
+    {empty && <footer className="chat-pins-tip"><b>PRO TIP:</b> {chat.isDm ? 'Open a message\'s menu and choose Pin Message to keep it here.' : 'Members with the Manage Messages permission can pin from a message\'s menu.'}</footer>}
   </div>;
 }

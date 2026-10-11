@@ -427,6 +427,11 @@ html.message-compact { --chat-gutter: 80px; }
 .chat-pins-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 32px 24px; text-align: center; color: var(--chat-text-muted); font-size: 14px; }
 .chat-pins-empty h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--chat-text-strong); }
 .chat-pins-empty p { margin: 0; }
+.chat-pins { box-sizing: border-box; }
+.chat-pins.empty { height: 371px; }
+.chat-pins.empty .chat-pins-body { display: flex; flex-direction: column; justify-content: center; }
+.chat-pins-tip { flex: none; box-sizing: border-box; height: 86px; padding: 16px; background: var(--background-mod-subtle); color: var(--chat-text-muted); font-size: 12px; line-height: 16px; }
+.chat-pins-tip b { color: var(--chat-green); font-weight: 700; }
 .chat-pin { padding: 8px 12px; margin-bottom: 8px; border-radius: 4px; border: 1px solid var(--chat-bg-tertiary); background: var(--chat-bg); }
 .chat-pin header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .chat-pin header .chat-timestamp { margin: 0; }

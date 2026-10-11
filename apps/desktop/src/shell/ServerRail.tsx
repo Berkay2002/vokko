@@ -1,12 +1,13 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router";
-import { Compass, Plus, Volume2 } from "lucide-react";
+import { Compass, Download, Plus, Volume2 } from "lucide-react";
 import { useVoice } from "../voice";
 import logo from "../../assets/icon.svg";
 import { avatarUrl, channelMentionCount, dmMentionCount, guildUnread, isChannelUnread, useStore } from "../api/store";
 import { ChannelType, type Channel, type Guild } from "../api/types";
 import { Tooltip, useContextMenu } from "../ui";
 import { GuildIcon } from "./Avatar";
+import { DownloadAppsModal } from "./DownloadApps";
 import { firstTextChannel } from "./channels";
 import { useIsMuted } from "./localState";
 import { guildContextItems } from "./menus";
@@ -17,7 +18,7 @@ function RailItem({ state, mentions, tooltip, muted, voice, children }: { state:
   return (
     <div className={`rail-item${muted ? " muted" : ""}`} data-state={state}>
       <span className="rail-pill" />
-      <Tooltip content={tooltip} side="right">
+      <Tooltip content={tooltip} side="right" className="tooltip-lg" gap={12}>
         {children}
       </Tooltip>
       {!!mentions && mentions > 0 && <span className="rail-badge">{mentions > 99 ? "99+" : mentions}</span>}
@@ -73,6 +74,7 @@ export function ServerRail() {
   const unreadDms = useStore(s => s.privateChannels.map(id => s.channels[id]).filter((c): c is Channel => !!c && isChannelUnread(s, c.id)));
   const dmMentions = useStore(dmMentionCount);
   const home = location.pathname.startsWith("/channels/@me");
+  const [downloadOpen, setDownloadOpen] = useState(false);
   const visibleDms = useMemo(() => unreadDms.filter(c => c.type === ChannelType.DM || c.type === ChannelType.GroupDM), [unreadDms]);
 
   return (
@@ -99,6 +101,12 @@ export function ServerRail() {
           <Compass size={20} />
         </button>
       </RailItem>
+      <RailItem state="idle" tooltip="Download Desktop App">
+        <button type="button" className="rail-tile rail-action rail-download" aria-label="Download Desktop App" onClick={() => setDownloadOpen(true)}>
+          <Download size={20} />
+        </button>
+      </RailItem>
+      <DownloadAppsModal open={downloadOpen} onClose={() => setDownloadOpen(false)} />
     </nav>
   );
 }

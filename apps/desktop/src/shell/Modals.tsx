@@ -516,6 +516,7 @@ export function ModalHost() {
 function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
   const guilds = useStore(s => s.guilds);
   const channels = useStore(s => s.channels);
+  const relationships = useStore(s => s.relationships);
   switch (spec.type) {
     case "createServer":
       return <CreateServer key={id} />;
@@ -541,6 +542,10 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
           }}
         />
       );
+    case "removeFriend": {
+      const name = relationships[spec.userId] ? displayName(relationships[spec.userId].user) : "this friend";
+      return <Confirm key={id} title={`Remove '${name}'`} body={`Are you sure you want to permanently remove ${name} from your friends?`} action="Remove Friend" danger onConfirm={() => request<void>("DELETE", `/users/@me/relationships/${spec.userId}`)} />;
+    }
     case "logout":
       return (
         <Confirm

@@ -9,10 +9,14 @@ export interface TooltipProps {
   /** Delay before showing, ms. */
   delay?: number;
   disabled?: boolean;
+  /** Extra class on the bubble, e.g. `tooltip-lg` for the 16/20 rail variant. */
+  className?: string;
+  /** Distance from the trigger, px. */
+  gap?: number;
 }
 
 /** Hover/focus tooltip. Wraps its children in a layout-neutral element (`display: contents`). */
-export function Tooltip({ content, children, side = "top", delay = 120, disabled }: TooltipProps) {
+export function Tooltip({ content, children, side = "top", delay = 120, disabled, className, gap = 8 }: TooltipProps) {
   const wrapper = useRef<HTMLSpanElement>(null);
   const bubble = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -37,8 +41,8 @@ export function Tooltip({ content, children, side = "top", delay = 120, disabled
     const el = bubble.current;
     if (!target || !el) return;
     const rect = target.getBoundingClientRect();
-    setPos(placeNear(rect, el.offsetWidth, el.offsetHeight, side, 10));
-  }, [open, side, content]);
+    setPos(placeNear(rect, el.offsetWidth, el.offsetHeight, side, gap));
+  }, [open, side, content, gap]);
 
   const visible = open && !disabled && content !== null && content !== undefined && content !== "";
   return (
@@ -50,7 +54,7 @@ export function Tooltip({ content, children, side = "top", delay = 120, disabled
             ref={bubble}
             id={id}
             role="tooltip"
-            className={`tooltip tooltip-${pos?.side ?? side}`}
+            className={`tooltip tooltip-${pos?.side ?? side}${className ? ` ${className}` : ""}`}
             style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}
           >
             {content}

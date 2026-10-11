@@ -143,3 +143,6 @@ export function setOwnStatus(status: SelectableStatus, custom: string): void {
   const wire: PresenceStatus = status === "invisible" ? "offline" : status;
   gateway.send(GatewayOp.PresenceUpdate, { status: wire, custom_status: custom.trim() || null });
 }
+
+/** Copy text to the clipboard; a missing or denied clipboard is not worth surfacing. */
+export const copyText = (text: string): void => void navigator.clipboard?.writeText(text).catch(() => {});

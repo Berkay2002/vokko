@@ -6,6 +6,7 @@ import { defineConfig } from '@playwright/test';
 // Both serve the client from Vite on port 1422.
 const REAL = !!process.env.VOKKO_REAL;
 const API = process.env.VOKKO_REAL_API ?? 'http://127.0.0.1:8711';
+const PORT = process.env.VOKKO_E2E_PORT ?? '1422';
 
 export default defineConfig({
   testDir: 'e2e',
@@ -16,14 +17,14 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   use: {
-    baseURL: 'http://127.0.0.1:1422',
+    baseURL: `http://127.0.0.1:${PORT}`,
     viewport: { width: 1440, height: 900 },
     colorScheme: 'dark',
     launchOptions: process.env.VOKKO_CHROMIUM ? { executablePath: process.env.VOKKO_CHROMIUM } : {},
   },
   webServer: {
-    command: 'npm run dev -- --port 1422',
-    url: 'http://127.0.0.1:1422',
+    command: `npm run dev -- --port ${PORT}`,
+    url: `http://127.0.0.1:${PORT}`,
     // Real mode needs VITE_VOKKO_API baked into a fresh Vite: never reuse a mock one.
     reuseExistingServer: !REAL,
     env: REAL ? { VITE_VOKKO_API: API } : {},
