@@ -1,5 +1,6 @@
 import { ChannelFlags, ChannelType, THREAD_AUTO_ARCHIVE_DURATIONS, type Channel, type ThreadAutoArchiveDuration } from "../api/types";
-import { snowflakeToTimestamp } from "../api/snowflake";
+import { compareIds, snowflakeToTimestamp } from "../api/snowflake";
+import type { ReactionEmoji, ReadState, Reaction } from "../api/types";
 
 export const ARCHIVE_LABELS: Record<ThreadAutoArchiveDuration, string> = { 60: "1 Hour", 1440: "24 Hours", 4320: "3 Days", 10080: "1 Week" };
 export const ARCHIVE_OPTIONS = THREAD_AUTO_ARCHIVE_DURATIONS.map(value => ({ value: String(value), label: ARCHIVE_LABELS[value] }));
@@ -37,4 +38,64 @@ export const messageCountLabel = (count: number | undefined): string => `${count
 export function previewText(content: string, max = 140): string {
   const flat = content.replace(/\s+/g, " ").trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+export type ThreadSort = "activity" | "created";
+
+const createdMs = (thread: Channel): number => Date.parse(thread.thread_metadata?.create_timestamp ?? "") || snowflakeToTimestamp(thread.id);
+
+/** Newest first, by last activity or by creation. Returns a new array. */
+export function sortThreads(threads: readonly Channel[], sort: ThreadSort): Channel[] {
+  const key = sort === "created" ? createdMs : lastActivityMs;
+  return [...threads].sort((a, b) => key(b) - key(a) || compareIds(b.id, a.id));
+}
+
+/** Threads popout "Active" view: name search, then the threads the viewer joined and the other active ones, each sorted. */
+export function groupActiveThreads(threads: readonly Channel[], needle: string, sort: ThreadSort): { joined: Channel[]; other: Channel[] } {
+  const q = needle.trim().toLowerCase();
+  const shown = sortThreads(
+    threads.filter(t => !q || (t.name ?? "").toLowerCase().includes(q)),
+    sort,
+  );
+  return { joined: shown.filter(t => !!t.member), other: shown.filter(t => !t.member) };
+}
+
+/**
+ * A thread is unread when the viewer has a read state for it that is behind its last message. Threads without a read state (archived
+ * ones from search, which READY does not cover) count as read, so an old archive does not light up.
+ */
+export function isThreadUnread(thread: Pick<Channel, "last_message_id">, read: ReadState | undefined): boolean {
+  if (!thread.last_message_id || !read) return false;
+  return !read.last_message_id || compareIds(thread.last_message_id, read.last_message_id) > 0;
+}
+
+/** Reaction shown on a forum card: the most used one of the starter message (first wins a tie), else none. */
+export function topReaction(reactions: readonly Reaction[] | undefined): Reaction | undefined {
+  return (reactions ?? []).reduce<Reaction | undefined>((best, r) => (!best || r.count > best.count ? r : best), undefined);
+}
+
+export const PANEL_MIN = 360;
+export const PANEL_DEFAULT = 420;
+/** The chat column next to the thread panel never gets narrower than this (unless the panel is already at PANEL_MIN). */
+export const CHAT_MIN = 440;
+
+/** Widest the panel may be inside a channel body `available` px wide. */
+export const panelMax = (available: number): number => Math.max(PANEL_MIN, Math.floor(available - CHAT_MIN));
+
+/** Thread panel width inside a channel body `available` px wide: at least PANEL_MIN, and the chat column keeps CHAT_MIN. */
+export function clampPanelWidth(width: number, available: number): number {
+  return Math.round(Math.max(PANEL_MIN, Math.min(width, panelMax(available))));
+}
+
+const sameEmoji = (a: ReactionEmoji, b: ReactionEmoji): boolean => (a.id ?? a.name) === (b.id ?? b.name);
+
+/** Reactions after a MESSAGE_REACTION_ADD (+1) or _REMOVE (-1) event; `mine` sets the viewer's flag. Returns a new array. */
+export function applyReactionEvent(reactions: readonly Reaction[], emoji: ReactionEmoji, delta: 1 | -1, mine: boolean): Reaction[] {
+  const found = reactions.find(r => sameEmoji(r.emoji, emoji));
+  if (!found) return delta > 0 ? [...reactions, { emoji, count: 1, me: mine }] : [...reactions];
+  return reactions.flatMap(r => {
+    if (r !== found) return [r];
+    const count = r.count + delta;
+    return count > 0 ? [{ ...r, count, me: mine ? delta > 0 : r.me }] : [];
+  });
 }

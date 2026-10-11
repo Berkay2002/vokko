@@ -110,6 +110,27 @@ describe("threads in the store", () => {
     expect(appStore.getState().threads["3"]).toBeUndefined();
   });
 
+  it("a thread arriving after READY gets an empty read state unless it is ours or one exists", () => {
+    const empty = (id: string) => ({ channel_id: id, last_message_id: null, mention_count: 0 });
+    fire("THREAD_CREATE", thread("6", { owner_id: "11", last_message_id: "60" }));
+    expect(appStore.getState().readStates["6"]).toEqual(empty("6"));
+    fire("THREAD_CREATE", thread("7"));
+    expect(appStore.getState().readStates["7"]).toBeUndefined(); // started by me
+    // unarchived: archived -> active creates one; a later update keeps a read state we already have
+    const archived = { ...thread("1").thread_metadata!, archived: true };
+    fire("THREAD_UPDATE", { ...thread("8", { owner_id: "11" }), thread_metadata: archived });
+    expect(appStore.getState().readStates["8"]).toBeUndefined();
+    fire("THREAD_UPDATE", thread("8", { owner_id: "11" }));
+    expect(appStore.getState().readStates["8"]).toEqual(empty("8"));
+    appStore.getState().setReadState({ channel_id: "8", last_message_id: "80", mention_count: 0 });
+    fire("THREAD_UPDATE", { ...thread("8", { owner_id: "11" }), thread_metadata: archived });
+    fire("THREAD_UPDATE", thread("8", { owner_id: "11" }));
+    expect(appStore.getState().readStates["8"]?.last_message_id).toBe("80");
+    // a plain rename of an active thread does not touch read states
+    fire("THREAD_UPDATE", { ...thread("1"), name: "renamed" });
+    expect(appStore.getState().readStates["1"]).toBeUndefined();
+  });
+
   it("THREAD_MEMBER_UPDATE joins, THREAD_MEMBERS_UPDATE changes the count and removes our membership", () => {
     fire("THREAD_CREATE", thread("4"));
     fire("THREAD_MEMBER_UPDATE", { ...member("4"), guild_id: GUILD });

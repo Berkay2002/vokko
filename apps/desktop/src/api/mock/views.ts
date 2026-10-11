@@ -1,9 +1,9 @@
 // Per-viewer JSON builders: the mock stores neutral rows and renders them like the server would.
 
-import { MessageReferenceType, MessageType, RelationshipType, isThreadType, type Channel, type GatewayEvents, type GuildMember, type Message, type MessageSnapshot, type Reaction, type ReadyEvent, type Relationship } from "../types";
+import { ChannelType, MessageReferenceType, MessageType, RelationshipType, isThreadType, type Channel, type GatewayEvents, type GuildMember, type Message, type MessageSnapshot, type Reaction, type ReadState, type ReadyEvent, type Relationship } from "../types";
 import { compareIds } from "../snowflake";
 import { canView } from "./access";
-import { db, sortedMessages, userOf, type MockChannel, type MockMessage } from "./db";
+import { db, sortedMessages, userOf, type MockAccount, type MockChannel, type MockMessage } from "./db";
 import { flagsField } from "./memberFlags";
 import { memberProfileFields } from "./perks";
 import { voiceStatesFor } from "./voice";
@@ -135,19 +135,33 @@ export function setRelationship(a: string, b: string, aSees: RelationshipType | 
   set(b, a, bSees);
 }
 
+/**
+ * Like gateway.rs: read states only for what the viewer can see (guild channels except categories, active threads, private channels);
+ * the stored one where there is one, else an empty one for a channel that has messages.
+ */
+function readStatesFor(account: MockAccount, guilds: ReturnType<typeof guildPayload>[], privateChannels: Channel[]): ReadState[] {
+  const visible = [...guilds.flatMap(g => [...g.channels, ...(g.threads ?? [])]).filter(c => c.type !== ChannelType.GuildCategory), ...privateChannels];
+  return visible.flatMap(channel => {
+    const stored = account.readStates.get(channel.id);
+    if (stored) return [stored];
+    return channel.last_message_id ? [{ channel_id: channel.id, last_message_id: null, mention_count: 0 }] : [];
+  });
+}
+
 export function readyFor(viewerId: string, sessionId: string): ReadyEvent {
   const account = db.accounts.get(viewerId);
   if (!account) throw new Error("unknown viewer");
   const guilds = guildIdsFor(viewerId).map(id => guildPayload(id, viewerId));
+  const privateChannels = privateChannelsFor(viewerId);
   const presences = [...db.accounts.values()].map(a => ({ ...a.presence }));
   return {
     v: 1,
     user: account.user,
     session_id: sessionId,
     guilds,
-    private_channels: privateChannelsFor(viewerId),
+    private_channels: privateChannels,
     presences,
-    read_states: [...account.readStates.values()],
+    read_states: readStatesFor(account, guilds, privateChannels),
     relationships: relationshipsFor(viewerId).filter(r => r.type !== RelationshipType.Blocked || true),
     media: { voice_enabled: true, voice_bitrate_ceiling: 128000, screenshare_qualities: ["720p30"], video_enabled: false },
   };

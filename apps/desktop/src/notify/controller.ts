@@ -33,11 +33,16 @@ export function buildInput(message: Message, now = Date.now()): NotifyInput | nu
   const meId = state.me?.id;
   if (!meId) return null;
   const channel = state.channels[message.channel_id];
+  // A thread message follows the thread, then its parent channel and that channel's category.
+  const thread = channel ? undefined : state.threads[message.channel_id];
+  const parent = thread?.parent_id ? state.channels[thread.parent_id] : undefined;
   // A DM we have not seen yet: the store is fetching it. Treat it as a 1:1 DM (it can only be addressed to me).
-  const guildId = channel?.guild_id ?? message.guild_id;
+  const guildId = channel?.guild_id ?? thread?.guild_id ?? message.guild_id;
   const dm = guildId ? null : channel?.type === ChannelType.GroupDM ? "group" : "dm";
   const scopes: Snowflake[] = [message.channel_id];
-  if (channel?.parent_id) scopes.push(channel.parent_id);
+  if (parent) scopes.push(parent.id);
+  const category = (parent ?? channel)?.parent_id;
+  if (category) scopes.push(category);
   if (guildId) scopes.push(guildId);
   const local = useLocalState.getState();
   const prefs = getPrefs();

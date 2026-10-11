@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Hash, MessageCircle, MessageSquareText, Pencil } from 'lucide-react';
 import { ChannelType, RelationshipType, isThreadType } from '../api/types';
 import type { Channel, Guild, Snowflake, User, UserProfile } from '../api/types';
-import { Modal, Perm, guildIconUrl, guildInitials, openModal, request, resolveUrl, useGuild, useGuildChannels, useGuilds, useMutualGuildsFromStore, usePermissions, useRelationship, Tooltip } from './shell';
+import { Modal, Perm, guildIconUrl, guildInitials, openModal, request, resolveUrl, useGuild, useGuildChannels, useGuilds, useMutualGuildsFromStore, usePermissions, useRelationship, useUsers, Tooltip } from './shell';
 import { useChat } from './ChatContext';
 import { useChannelState } from './messageStore';
 import { WelcomeChecklist } from '../community';
@@ -107,13 +107,7 @@ export function ChannelStart() {
     const names = (ch.recipients ?? []).map(u => chat.nameOf(u)).join(', ');
     return <div className="chat-start"><h1>{names}</h1><p>Welcome to the beginning of the group.</p></div>;
   }
-  if (ch && isThreadType(ch.type)) {
-    return <div className="chat-start">
-      <div className="chat-start-icon"><MessageSquareText size={42} /></div>
-      <h1>{ch.name}</h1>
-      <p>This is the start of the thread.</p>
-    </div>;
-  }
+  if (ch && isThreadType(ch.type)) return <ThreadStart thread={ch} />;
   // Text-in-voice: a speech bubble, the bare channel name (no hash) and a shortcut to the channel settings.
   const voice = ch?.type === ChannelType.GuildVoice;
   const label = voice ? ch?.name : `#${ch?.name}`;
@@ -123,6 +117,18 @@ export function ChannelStart() {
     <p>This is the start of the {label} channel.{ch?.topic ? ` ${ch.topic}` : ''}</p>
     {voice && ch && <VoiceStartActions channel={ch} />}
     {ch && chat.guildId && <ServerChecklist guildId={chat.guildId} channelId={ch.id} />}
+  </div>;
+}
+
+/** Top of a thread: its icon, name and who started it (Discord's "Started by"). */
+function ThreadStart({ thread }: { thread: Channel }) {
+  const chat = useChat();
+  const users = useUsers();
+  const owner = thread.owner_id ? users[thread.owner_id] : undefined;
+  return <div className="chat-start">
+    <div className="chat-start-icon"><MessageSquareText size={42} /></div>
+    <h1>{thread.name}</h1>
+    <p>{owner ? <>Started by <b>{chat.nameOf(owner)}</b></> : 'This is the start of the thread.'}</p>
   </div>;
 }
 

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { gateway } from "../api/gateway";
 import { searchThreads } from "../api/rest";
 import { appStore } from "../api/store";
-import type { Channel, Message, Snowflake } from "../api/types";
+import type { Channel, Message, ReactionEmoji, Snowflake } from "../api/types";
+import { applyReactionEvent } from "../threads/util";
 
 export interface ForumQuery {
   text: string;
@@ -59,6 +60,16 @@ export function useForumPosts(forumId: Snowflake, query: ForumQuery): ForumPosts
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Cards only show the starter's reactions (the starter message id is the post id): patch it in place, no refetch, loaded pages stay.
+    const patchReaction = (r: { user_id: Snowflake; channel_id: Snowflake; message_id: Snowflake; emoji: ReactionEmoji }, delta: 1 | -1) => {
+      if (r.message_id !== r.channel_id) return;
+      const mine = r.user_id === appStore.getState().me?.id;
+      setState(cur => {
+        const first = cur.first[r.channel_id];
+        if (!first) return cur;
+        return { ...cur, first: { ...cur.first, [r.channel_id]: { ...first, reactions: applyReactionEvent(first.reactions, r.emoji, delta, mine) } } };
+      });
+    };
     const bump = () => {
       clearTimeout(timer);
       timer = setTimeout(() => setRefresh(n => n + 1), 200);
@@ -69,6 +80,8 @@ export function useForumPosts(forumId: Snowflake, query: ForumQuery): ForumPosts
       gateway.on("THREAD_DELETE", t => t.parent_id === forumId && bump()),
       gateway.on("MESSAGE_CREATE", m => appStore.getState().threads[m.channel_id]?.parent_id === forumId && bump()),
       gateway.on("MESSAGE_DELETE", m => appStore.getState().threads[m.channel_id]?.parent_id === forumId && bump()),
+      gateway.on("MESSAGE_REACTION_ADD", r => patchReaction(r, 1)),
+      gateway.on("MESSAGE_REACTION_REMOVE", r => patchReaction(r, -1)),
     ];
     return () => {
       clearTimeout(timer);

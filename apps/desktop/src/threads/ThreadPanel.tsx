@@ -1,19 +1,94 @@
-import { useEffect, useState } from "react";
-import { Archive, ArchiveRestore, Copy, Lock, LockOpen, LogIn, LogOut, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Trash2, Users, X } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Archive, ArchiveRestore, Bell, Copy, Lock, LockOpen, LogIn, LogOut, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Settings, Trash2, Users, X } from "lucide-react";
 import { editChannel, joinThread, leaveThread } from "../api/rest";
 import { appStore, useStore } from "../api/store";
 import { ChannelFlags, ChannelType, type Channel } from "../api/types";
 import { ChatView } from "../chat/ChatView";
+import { PinnedMessages } from "../chat/PinnedMessages";
 import { chatToast } from "../chat/toast";
+import { muteItem, notificationItem } from "../shell/menus";
 import { Popout, Tooltip, useContextMenu, type MenuItem } from "../ui";
 import { ThreadMembers } from "./ThreadMembers";
 import { DeleteThreadModal, EditThreadModal } from "./ThreadModals";
 import { useThreadRights } from "./rights";
 import { closeThread, useOpenThread, useThreadUi } from "./threadUi";
-import { isPinned } from "./util";
+import { clampPanelWidth, isPinned, PANEL_DEFAULT, PANEL_MIN, panelMax } from "./util";
 import "./threads.css";
 
 type Dialog = "edit" | "delete" | null;
+
+const WIDTH_KEY = "vokko.threadPanelWidth";
+
+function storedWidth(): number {
+  let saved = 0;
+  try {
+    saved = Number(localStorage.getItem(WIDTH_KEY));
+  } catch {
+    /* the width is only a convenience */
+  }
+  return saved > 0 ? saved : PANEL_DEFAULT;
+}
+
+function saveWidth(width: number): void {
+  try {
+    localStorage.setItem(WIDTH_KEY, String(width));
+  } catch {
+    /* the width is only a convenience */
+  }
+}
+
+/**
+ * Panel width, dragged by the left edge (or arrow keys, Home and End on it). The preferred width is kept and remembered; the shown width
+ * is clamped at render against the channel body, so the panel grows back when the window grows.
+ */
+function usePanelWidth(panel: React.RefObject<HTMLElement | null>) {
+  const [preferred, setPreferred] = useState(storedWidth);
+  const [available, setAvailable] = useState(Number.POSITIVE_INFINITY);
+  const drag = useRef<{ x: number; start: number; last: number } | null>(null);
+  useLayoutEffect(() => {
+    const body = panel.current?.parentElement;
+    if (!body) return;
+    const measure = () => setAvailable(body.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [panel]);
+  const width = clampPanelWidth(preferred, available);
+  const max = panelMax(available);
+  const commit = (next: number) => {
+    const clamped = clampPanelWidth(next, available);
+    setPreferred(clamped);
+    saveWidth(clamped);
+  };
+  const endDrag = () => {
+    if (!drag.current) return;
+    commit(drag.current.last);
+    drag.current = null;
+  };
+  const handle = {
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      drag.current = { x: e.clientX, start: width, last: width };
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+      if (!drag.current) return;
+      drag.current.last = clampPanelWidth(drag.current.start + drag.current.x - e.clientX, available);
+      setPreferred(drag.current.last);
+    },
+    onPointerUp: endDrag,
+    onPointerCancel: endDrag,
+    onLostPointerCapture: endDrag,
+    onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const next = e.key === "ArrowLeft" ? width + 16 : e.key === "ArrowRight" ? width - 16 : e.key === "Home" ? PANEL_MIN : e.key === "End" ? max : null;
+      if (next === null) return;
+      e.preventDefault();
+      commit(next);
+    },
+  };
+  return { width, max, handle };
+}
 
 /** Thread patch that updates the store right away (the THREAD_UPDATE event repeats it). */
 function patchThread(thread: Channel, body: Parameters<typeof editChannel>[1]): void {
@@ -44,6 +119,11 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
   const [dialog, setDialog] = useState<Dialog>(null);
   const [membersAnchor, setMembersAnchor] = useState<HTMLElement | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [pinsAnchor, setPinsAnchor] = useState<HTMLElement | null>(null);
+  const [pinsOpen, setPinsOpen] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
+  const panelId = useId();
+  const { width, max, handle } = usePanelWidth(panelRef);
   const archived = thread.thread_metadata?.archived === true;
   const locked = thread.thread_metadata?.locked === true;
   const forumPost = parent.type === ChannelType.GuildForum;
@@ -72,7 +152,19 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
   const noSend = !locked && !rights.canSend ? "You do not have permission to send messages in this thread." : null;
 
   return (
-    <aside className="thread-panel" aria-label={`Thread: ${thread.name ?? ""}`}>
+    <aside ref={panelRef} id={panelId} className="thread-panel" aria-label={`Thread: ${thread.name ?? ""}`} style={{ width }}>
+      <div
+        className="thread-panel-resize"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize thread panel"
+        aria-controls={panelId}
+        aria-valuenow={width}
+        aria-valuemin={PANEL_MIN}
+        aria-valuemax={max}
+        tabIndex={0}
+        {...handle}
+      />
       <header className="thread-panel-header">
         <MessageSquareText size={22} className="thread-panel-icon" aria-hidden="true" />
         <div className="thread-panel-title">
@@ -88,11 +180,36 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
               Join
             </button>
           )}
+          <Tooltip content="Notification Settings" side="bottom">
+            <button
+              type="button"
+              className="toolbar-button"
+              aria-label="Notification Settings"
+              onClick={e => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [muteItem(thread.id, "Thread"), notificationItem(thread.id, { defaultLabel: "Use Channel Default" })]);
+              }}
+            >
+              <Bell size={20} />
+            </button>
+          </Tooltip>
+          <Tooltip content="Pinned Messages" side="bottom">
+            <button ref={setPinsAnchor} type="button" className={`toolbar-button${pinsOpen ? " active" : ""}`} aria-label="Pinned Messages" aria-pressed={pinsOpen} onClick={() => setPinsOpen(o => !o)}>
+              <Pin size={20} />
+            </button>
+          </Tooltip>
           <Tooltip content="Members" side="bottom">
             <button ref={setMembersAnchor} type="button" className={`toolbar-button${membersOpen ? " active" : ""}`} aria-label="Thread members" aria-pressed={membersOpen} onClick={() => setMembersOpen(o => !o)}>
               <Users size={20} />
             </button>
           </Tooltip>
+          {rights.canEdit && (
+            <Tooltip content={forumPost ? "Post Settings" : "Thread Settings"} side="bottom">
+              <button type="button" className="toolbar-button" aria-label={forumPost ? "Post Settings" : "Thread Settings"} onClick={() => setDialog("edit")}>
+                <Settings size={20} />
+              </button>
+            </Tooltip>
+          )}
           <Tooltip content="More" side="bottom">
             <button
               type="button"
@@ -114,6 +231,9 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
         </div>
         <Popout anchor={membersAnchor} open={membersOpen} onClose={() => setMembersOpen(false)} side="bottom" align="end" gap={6} className="thread-members-host">
           <ThreadMembers thread={thread} rights={rights} />
+        </Popout>
+        <Popout anchor={pinsAnchor} open={pinsOpen} onClose={() => setPinsOpen(false)} side="bottom" align="end" gap={6} className="pins-popout-host">
+          <PinnedMessages channelId={thread.id} />
         </Popout>
       </header>
       <ThreadTags thread={thread} parent={parent} />

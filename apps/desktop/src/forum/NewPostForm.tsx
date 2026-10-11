@@ -10,7 +10,10 @@ import "./forum.css";
 const MAX_TAGS = 5;
 const MESSAGE_MAX = 2000;
 
-/** Create-post composer: title, up to five tags (moderated ones only with Manage Threads), first message. Opens the new post in the thread panel. */
+/**
+ * Create-post composer: the forum's post guidelines, title, up to five tags (moderated ones only with Manage Threads; at least one when the
+ * forum requires tags), first message. Opens the new post in the thread panel.
+ */
 export function NewPostForm({ forum, canModerateTags, onClose }: { forum: Channel; canModerateTags: boolean; onClose(): void }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -46,6 +49,12 @@ export function NewPostForm({ forum, canModerateTags, onClose }: { forum: Channe
         void submit();
       }}
     >
+      {forum.topic && (
+        <section className="forum-new-guidelines" aria-label="Post guidelines for this forum">
+          <h3>Post Guidelines</h3>
+          <p>{forum.topic}</p>
+        </section>
+      )}
       <input className="input forum-new-title" aria-label="Post title" value={title} maxLength={NAME_MAX} autoFocus placeholder="Post title" onChange={e => setTitle(e.target.value)} />
       {available.length > 0 && (
         <div className="forum-new-tags" role="group" aria-label={requireTag ? "Tags (at least one required)" : "Tags"}>
@@ -55,6 +64,7 @@ export function NewPostForm({ forum, canModerateTags, onClose }: { forum: Channe
               <TagChip tag={tag} selected={tags.includes(tag.id)} onClick={tag.moderated && !canModerateTags ? () => undefined : () => toggle(tag.id)} />
             </span>
           ))}
+          {requireTag && tags.length === 0 && <span className="forum-new-hint">Pick at least one tag to post.</span>}
         </div>
       )}
       <textarea className="forum-new-message" aria-label="Post message" rows={4} value={content} maxLength={MESSAGE_MAX} placeholder="Write the first message" onChange={e => setContent(e.target.value)} />

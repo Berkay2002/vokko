@@ -2,14 +2,48 @@
 
 /* ---- side panel ---- */
 .thread-panel {
+  position: relative;
   display: flex;
   flex: none;
   flex-direction: column;
-  width: 420px;
+  width: 420px; /* replaced inline by the dragged width */
   min-width: 0;
   min-height: 0;
   border-left: 1px solid var(--border-subtle);
   background: var(--chat-background);
+}
+
+/* Drag handle on the left edge: 8 px hit area centred on the border, a brand line while hovered, dragged or focused. */
+.thread-panel-resize {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.thread-panel-resize::after {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  content: "";
+  transition: background-color 0.15s;
+}
+
+.thread-panel-resize:hover::after,
+.thread-panel-resize:active::after,
+.thread-panel-resize:focus-visible::after {
+  background: var(--background-brand);
+}
+
+.thread-panel-resize:focus-visible {
+  outline: none;
 }
 
 .thread-panel-header {
@@ -61,11 +95,12 @@
   font-weight: 600;
 }
 
+/* 32x32 buttons at a 40 px pitch, like the channel header toolbar (guild/spec.md). */
 .thread-panel-actions {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
 .thread-panel-actions .btn {
@@ -285,9 +320,51 @@
 
 .threads-tabs {
   display: flex;
+  align-items: center;
   gap: 16px;
   padding: 0 16px;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.threads-tablist {
+  display: flex;
+  flex: 1;
+  gap: 16px;
+}
+
+.threads-sort {
+  flex: none;
+  width: 160px;
+}
+
+.threads-sort .select-wrap {
+  margin: 0;
+}
+
+/* Compact select: 28 px tall, 14 px text, so it fits the 38 px tab row. */
+.threads-sort .select {
+  height: 28px;
+  padding: 0 32px 0 10px;
+  font-size: 14px;
+}
+
+.threads-sort .select-chevron {
+  top: 5px;
+  right: 8px;
+}
+
+/* "2 Joined Threads" / "3 Other Active Threads": Discord's 12/16 w600 uppercase list headers. */
+.threads-section + .threads-section {
+  margin-top: 8px;
+}
+
+.threads-section-title {
+  padding: 8px 8px 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .threads-tab {

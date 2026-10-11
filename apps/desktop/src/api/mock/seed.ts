@@ -199,8 +199,8 @@ function seedMessageShowcase(ctx: { guildId: string; parentId: string; R: string
  * Threads, an announcement channel with news, and a forum channel with tags and posts. Times are relative to now; the forum posts use
  * the 7 day auto-archive so a long-open mock session does not archive them under the user's feet.
  */
-function seedThreads(ctx: { general: MockChannel; announcements: MockChannel; guildId: string; textCategory: string; docsQuestion: MockMessage; replayBuffer: MockMessage; R: string; A: string; B: string; Bo: string; N: string }): void {
-  const { general, announcements, guildId, textCategory, docsQuestion, replayBuffer, R, A, B, Bo, N } = ctx;
+function seedThreads(ctx: { general: MockChannel; announcements: MockChannel; guildId: string; textCategory: string; docsQuestion: MockMessage; replayBuffer: MockMessage; morning: MockMessage; R: string; A: string; B: string; Bo: string; N: string }): void {
+  const { general, announcements, guildId, textCategory, docsQuestion, replayBuffer, morning, R, A, B, Bo, N } = ctx;
   const ago = (minutes: number): number => Date.now() - minutes * MIN;
   const reply = (channel: MockChannel, who: string, text: string, minutesAgo: number) => addMessage({ channel, author_id: who, content: text, timestamp: ago(minutesAgo), silent: true });
 
@@ -216,6 +216,12 @@ function seedThreads(ctx: { general: MockChannel; announcements: MockChannel; gu
     buffer.thread_metadata.archived = true;
     buffer.thread_metadata.archive_timestamp = new Date(ago(60 * 30)).toISOString();
   }
+
+  // A locked thread sam has not joined (bob owns it, so as bob it reads as locked without Manage Threads).
+  const coffee = startThreadFromMessage(general, morning, "coffee setups", Bo, 1440, Date.parse(morning.timestamp));
+  reply(coffee, A, "pour-over, every day", 290);
+  reply(coffee, Bo, "locking this before it turns into a flame war", 280);
+  if (coffee.thread_metadata) coffee.thread_metadata.locked = true;
 
   // Announcements: a couple of news posts (publish them to followers from the message menu).
   const news = (who: string, text: string, minutesAgo: number) => addMessage({ channel: announcements, author_id: who, content: text, timestamp: ago(minutesAgo), silent: true });
@@ -252,7 +258,14 @@ function seedThreads(ctx: { general: MockChannel; announcements: MockChannel; gu
   reply(tagQ.thread, A, "User Settings, then Profiles, then Server Tag", 60 * 8);
   const contrast = post("Member list contrast in light theme", A, "The offline group header is hard to read on the light theme.", ["Bug", "Docs"], 60 * 4);
   reply(contrast.thread, R, "confirmed, will fix with the next token pass", 60 * 3);
-  post("Idea: show joined threads under their channel", Bo, "Would be nice to see the threads I joined right in the channel list.", ["Feature"], 45);
+  const idea = post("Idea: show joined threads under their channel", Bo, "Would be nice to see the threads I joined right in the channel list.", ["Feature"], 45);
+
+  // Reactions on starter messages (forum cards show the top one). Sam has read the guide, the server tag question and the docs thread
+  // (posts sam replied in are read by sending), so the newest post is the unread one.
+  loop.message.reactions.push({ emoji: { id: null, name: "👍" }, user_ids: [A, B] });
+  idea.message.reactions.push({ emoji: { id: null, name: "💡" }, user_ids: [N] }, { emoji: { id: null, name: "👍" }, user_ids: [A, B, N] });
+  const sam = db.accounts.get(R);
+  for (const t of [guide.thread, tagQ.thread, docs]) sam?.readStates.set(t.id, { channel_id: t.id, last_message_id: t.last_message_id, mention_count: 0 });
 }
 
 /** Populate an empty database. Safe to call once at module load. */
@@ -373,7 +386,7 @@ export function seed(): void {
   say(welcome, R, "Welcome to **Sam's server**! Be kind, have fun.", 60 * 24 * 7);
   say(welcome, A, "Glad to be here 👋", 60 * 24 * 7 - 3);
   say(general, A, "morning everyone", 300);
-  say(general, Bo, "morning ☕", 296);
+  const morning = say(general, Bo, "morning ☕", 296);
   const docsQuestion = say(general, N, "has anyone looked at the new gateway docs?", 240);
   say(general, R, "yes, resume replays missed dispatches and ends with RESUMED", 235);
   say(general, A, `<@${R}> nice, I'll add that to the docs page`, 230);
@@ -388,7 +401,7 @@ export function seed(): void {
   say(random, N, `<@${R}> you in?`, 150);
   say(random, N, `<@${R}> I'm making popcorn 🍿`, 149);
 
-  seedThreads({ general, announcements, guildId, textCategory: textCategory.id, docsQuestion, replayBuffer, R, A, B, Bo, N });
+  seedThreads({ general, announcements, guildId, textCategory: textCategory.id, docsQuestion, replayBuffer, morning, R, A, B, Bo, N });
 
   // Read states for sam: dev-talk partly unread, random has two mentions.
   const state = (channelId: string, last: string | null, mentions = 0) => sam.readStates.set(channelId, { channel_id: channelId, last_message_id: last, mention_count: mentions });

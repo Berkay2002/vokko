@@ -142,6 +142,35 @@ button.forum-tag.selected {
   background: var(--background-surface-high);
 }
 
+.forum-new-guidelines {
+  padding: 8px 12px;
+  border-left: 4px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--background-mod-subtle);
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.forum-new-guidelines h3 {
+  margin-bottom: 2px;
+  color: var(--text-strong);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.forum-new-guidelines p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.forum-new-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .forum-new-tags {
   display: flex;
   flex-wrap: wrap;
@@ -202,6 +231,7 @@ button.forum-tag.selected {
 }
 
 .forum-post {
+  position: relative;
   display: flex;
   flex: 1;
   min-width: 0;
@@ -220,6 +250,58 @@ button.forum-tag.selected {
 
 .forum-post.selected {
   border-color: var(--background-brand);
+}
+
+/* The card-wide open button; anything interactive inside the card (the reaction) sits above it. */
+.forum-post-open {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.forum-post-open:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* Read posts drop to the secondary text colour; unread ones keep the strong title (Discord's unread cue on forum cards). */
+.forum-post .forum-post-title {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.forum-post.unread .forum-post-title {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.forum-post-reaction {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  margin-left: auto;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--background-mod-normal);
+  color: var(--text-default);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.forum-post-reaction:hover {
+  border-color: var(--border-strong);
+}
+
+.forum-post-reaction.me {
+  border-color: var(--background-brand);
+  background: var(--background-mod-strong);
 }
 
 .forum-post.archived .forum-post-name {

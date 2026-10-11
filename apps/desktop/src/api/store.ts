@@ -521,8 +521,20 @@ export function canManageThreadsIn(thread: Channel): boolean {
 
 function wireThreadEvents(): void {
   const s = () => appStore.getState();
-  gateway.on("THREAD_CREATE", thread => s().upsertThread(thread));
-  gateway.on("THREAD_UPDATE", thread => s().upsertThread(thread));
+  // A thread that shows up after READY gets the empty read state READY would have carried for it, so it can read as unread: a new
+  // thread someone else started, or one that was unarchived. A read state we already have is kept.
+  const emptyReadState = (thread: Channel) => {
+    if (!s().readStates[thread.id]) s().setReadState({ channel_id: thread.id, last_message_id: null, mention_count: 0 });
+  };
+  gateway.on("THREAD_CREATE", thread => {
+    s().upsertThread(thread);
+    if (thread.owner_id !== s().me?.id) emptyReadState(thread);
+  });
+  gateway.on("THREAD_UPDATE", thread => {
+    const before = s().threads[thread.id];
+    s().upsertThread(thread);
+    if ((!before || before.thread_metadata?.archived) && !thread.thread_metadata?.archived) emptyReadState(thread);
+  });
   gateway.on("THREAD_DELETE", ({ id }) => s().removeThread(id));
   gateway.on("THREAD_MEMBER_UPDATE", ({ guild_id: _guild, ...member }) => {
     void _guild;

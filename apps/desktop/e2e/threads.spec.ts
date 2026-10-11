@@ -1,27 +1,12 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { composer, send } from './helpers';
+import { openChannel, panel } from './threadHelpers';
 
 // Threads, forum channels and announcement channels against the in-memory mock (?as=sam&mockLatency=0: sam is an administrator).
 // The seed has: #general with a thread "gateway docs" (and an archived "replay buffer sizing"), #announcements (type 5) and the forum #support
 // with tags Question / Bug / Feature / Docs / Solved and five posts, one of them pinned.
 
-type StoreWin = { __vokko: { appStore: { getState(): { channels: Record<string, { id: string; name?: string; guild_id: string | null }> } } } };
-
-/** Signs in as sam and opens the channel called `name` of the demo server (in-app navigation: a reload would re-seed the mock). */
-async function openChannel(page: Page, name: string): Promise<string> {
-  await page.goto('/channels/@me?as=sam&mockLatency=0');
-  await page.waitForFunction(n => Object.values((window as unknown as StoreWin).__vokko.appStore.getState().channels).some(c => c.name === n && c.guild_id), name);
-  const target = await page.evaluate(n => {
-    const c = Object.values((window as unknown as StoreWin).__vokko.appStore.getState().channels).find(x => x.name === n && x.guild_id)!;
-    return `/channels/${c.guild_id}/${c.id}`;
-  }, name);
-  await page.evaluate(path => { history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, target);
-  await page.locator('.channel-header').getByRole('heading', { name, exact: true }).waitFor();
-  return target.split('/').pop()!;
-}
-
-const panel = (page: Page) => page.locator('.thread-panel');
 const row = (page: Page, text: string | RegExp) => page.locator('.channel-chat .chat-msg', { hasText: text }).last();
 
 test('start a thread from a message, reply in it, archive and unarchive it', async ({ page }) => {

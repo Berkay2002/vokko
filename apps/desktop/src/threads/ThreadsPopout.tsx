@@ -4,10 +4,11 @@ import { Perm } from "../api/permissions";
 import { listArchivedThreads, searchThreads } from "../api/rest";
 import { useStore } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
+import { Select } from "../shell/settings/controls";
 import { usePermissions } from "../shell/usePermissions";
 import { ThreadRow } from "./ThreadRow";
 import { openThread, startThreadFlow } from "./threadUi";
-import { lastActivityMs } from "./util";
+import { groupActiveThreads, sortThreads, type ThreadSort } from "./util";
 import "./threads.css";
 
 type Tab = "active" | "archived";
@@ -20,6 +21,11 @@ interface Archived {
 }
 
 const EMPTY: Archived = { threads: [], hasMore: false, loading: true, error: false };
+const SORTS: { value: ThreadSort; label: string }[] = [
+  { value: "activity", label: "Recent Activity" },
+  { value: "created", label: "Date Created" },
+];
+
 const archiveTime = (t: Channel): number => Date.parse(t.thread_metadata?.archive_timestamp ?? "") || 0;
 
 function merge(...lists: Channel[][]): Channel[] {
@@ -40,19 +46,39 @@ async function loadArchived(channelId: string, manage: boolean, name: string, be
   return { list: merge(pub.threads, ...extra.map(r => r?.threads ?? [])), hasMore: pub.has_more };
 }
 
-/** Threads button popout: active and archived threads of the channel, a search box and a Create button. */
+function Section({ title, threads, onOpen }: { title: string; threads: Channel[]; onOpen(thread: Channel): void }) {
+  if (threads.length === 0) return null;
+  return (
+    <section className="threads-section" aria-label={title}>
+      <h3 className="threads-section-title">
+        {threads.length} {title}
+      </h3>
+      <div role="list">
+        {threads.map(thread => (
+          <div key={thread.id} role="listitem">
+            <ThreadRow thread={thread} onOpen={onOpen} />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** Threads button popout: joined and other active threads (or the archived ones), a search box, a sort and a Create button. */
 export function ThreadsPopout({ channel, onClose }: { channel: Channel; onClose(): void }) {
   const [tab, setTab] = useState<Tab>("active");
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<ThreadSort>("activity");
   const [archived, setArchived] = useState<Archived>(EMPTY);
   const { can } = usePermissions(channel.guild_id, channel.id);
   const manage = can(Perm.MANAGE_THREADS);
-  const active = useStore(s => Object.values(s.threads).filter(t => t.parent_id === channel.id && !t.thread_metadata?.archived));
+  const threads = useStore(s => s.threads);
   const needle = query.trim().toLowerCase();
-  const shown = useMemo(
-    () => active.filter(t => !needle || (t.name ?? "").toLowerCase().includes(needle)).sort((a, b) => lastActivityMs(b) - lastActivityMs(a)),
-    [active, needle],
+  const groups = useMemo(
+    () => groupActiveThreads(Object.values(threads).filter(t => t.parent_id === channel.id && !t.thread_metadata?.archived), needle, sort),
+    [threads, channel.id, needle, sort],
   );
+  const archivedRows = useMemo(() => sortThreads(archived.threads, sort), [archived.threads, sort]);
 
   useEffect(() => {
     if (tab !== "archived") return;
@@ -82,7 +108,7 @@ export function ThreadsPopout({ channel, onClose }: { channel: Channel; onClose(
     openThread(thread);
     onClose();
   };
-  const rows = tab === "active" ? shown : archived.threads;
+  const rows = tab === "active" ? [...groups.joined, ...groups.other] : archivedRows;
 
   return (
     <div className="threads-popout" role="dialog" aria-label="Threads">
@@ -106,24 +132,32 @@ export function ThreadsPopout({ channel, onClose }: { channel: Channel; onClose(
           </button>
         )}
       </div>
-      <div className="threads-tabs" role="tablist" aria-label="Thread filter">
-        {(["active", "archived"] as const).map(id => (
-          <button key={id} type="button" role="tab" aria-selected={tab === id} className={`threads-tab${tab === id ? " selected" : ""}`} onClick={() => setTab(id)}>
-            {id === "active" ? "Active Threads" : "Archived Threads"}
-          </button>
-        ))}
+      <div className="threads-tabs">
+        <div className="threads-tablist" role="tablist" aria-label="Thread filter">
+          {(["active", "archived"] as const).map(id => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id} className={`threads-tab${tab === id ? " selected" : ""}`} onClick={() => setTab(id)}>
+              {id === "active" ? "Active Threads" : "Archived Threads"}
+            </button>
+          ))}
+        </div>
+        <div className="threads-sort">
+          <Select<ThreadSort> label="Sort threads" value={sort} options={SORTS} onChange={setSort} />
+        </div>
       </div>
-      <div className="threads-list" role="list">
+      <div className="threads-list">
         {tab === "archived" && archived.loading && archived.threads.length === 0 && (
           <div className="threads-empty" role="status">
             <Loader2 className="spin" size={22} /> Loading…
           </div>
         )}
-        {rows.map(thread => (
-          <div key={thread.id} role="listitem">
-            <ThreadRow thread={thread} onOpen={open} />
-          </div>
-        ))}
+        {tab === "active" ? (
+          <>
+            <Section title="Joined Threads" threads={groups.joined} onOpen={open} />
+            <Section title="Other Active Threads" threads={groups.other} onOpen={open} />
+          </>
+        ) : (
+          <Section title="Archived Threads" threads={archivedRows} onOpen={open} />
+        )}
         {tab === "archived" && archived.error && <div className="threads-empty">Archived threads could not be loaded.</div>}
         {rows.length === 0 && !(tab === "archived" && (archived.loading || archived.error)) && (
           <div className="threads-empty">
