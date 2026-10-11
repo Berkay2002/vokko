@@ -6,6 +6,7 @@ import {
   KEYBIND_ACTIONS,
   actionForKeys,
   applyKeybinds,
+  canBindKeys,
   effectiveKeybinds,
   eventKeys,
   findConflicts,
@@ -24,6 +25,30 @@ const env = { mac: false, modalOpen: () => false };
 afterEach(() => setKeyOverrides(null));
 
 describe("keybinds", () => {
+  it("refuses bare and Shift-only keys, except function keys and the action's own default", () => {
+    expect(canBindKeys("K", "mute")).toBe(false);
+    expect(canBindKeys("Shift+K", "mute")).toBe(false);
+    expect(canBindKeys("Space", "mute")).toBe(false);
+    expect(canBindKeys("Ctrl+K", "mute")).toBe(true);
+    expect(canBindKeys("Alt+K", "mute")).toBe(true);
+    expect(canBindKeys("F8", "mute")).toBe(true);
+    expect(canBindKeys("Shift+F12", "mute")).toBe(true);
+    expect(canBindKeys("Escape", "markChannelRead")).toBe(true);
+    expect(canBindKeys("Escape", "mute")).toBe(false);
+    expect(canBindKeys("ArrowUp", "editLast")).toBe(true);
+  });
+
+  it("ignores a stored bare key so typing it in a text field still types", () => {
+    const run = vi.fn(() => true);
+    const off = registerShortcut("mute", run);
+    applyKeybinds([{ action: "mute", keys: "K" }]);
+    const e = event("k");
+    handleKeyDown(e, env);
+    expect(run).not.toHaveBeenCalled();
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    off();
+  });
+
   it("normalizes key combinations and key events the same way", () => {
     expect(normalizeKeys("shift+ctrl+k")).toBe("Ctrl+Shift+K");
     expect(normalizeKeys("Cmd+K")).toBe("Ctrl+K");

@@ -2,7 +2,7 @@ import { Fragment, useState, type KeyboardEvent } from "react";
 import { Plus, RotateCcw, X } from "lucide-react";
 import { isDesktop } from "../../desktop";
 import { IS_MAC, keyCaps } from "../../keyboard";
-import { DEFAULT_KEYBINDS, KEYBIND_ACTIONS, actionById, effectiveKeybinds, eventKeys, findConflicts, normalizeKeys, toAccelerator } from "../../ui/keybinds";
+import { DEFAULT_KEYBINDS, KEYBIND_ACTIONS, actionById, canBindKeys, effectiveKeybinds, eventKeys, findConflicts, normalizeKeys, toAccelerator } from "../../ui/keybinds";
 import { setPref, usePrefs, type KeybindPref } from "../../ui/prefs";
 import { Category, Page, Select, Toggle } from "./controls";
 
@@ -66,6 +66,11 @@ export function KeybindsPage() {
   const takenBy = (keys: string, index: number): KeybindPref | undefined => rows.find((b, i) => i !== index && normalizeKeys(b.keys).toLowerCase() === keys.toLowerCase());
   const record = (index: number, raw: string) => {
     const keys = normalizeKeys(raw);
+    const action = index < 0 ? draft : rows[index]?.action;
+    if (action && !canBindKeys(keys, action)) {
+      setError(`${keys} would block typing: add Ctrl, Alt or ${IS_MAC ? "Cmd" : "the Windows key"}, or use a function key.`);
+      return;
+    }
     const other = takenBy(keys, index);
     if (other) {
       setError(`${keys} is already used by "${actionById(other.action)?.label ?? other.action}".`);

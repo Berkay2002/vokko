@@ -81,6 +81,18 @@ export function effectiveKeybinds(stored: readonly KeybindPref[]): KeybindPref[]
   });
 }
 
+/**
+ * Keys the user may bind to `actionId`: a bare or Shift-only key would be swallowed in every text field (and sync to every device),
+ * so it needs Ctrl/Cmd or Alt. Function keys and the action's own default (Escape, Tab, ArrowUp) are fine.
+ */
+export function canBindKeys(keys: string, actionId: string): boolean {
+  const parts = normalizeKeys(keys).split("+");
+  const key = parts[parts.length - 1] ?? "";
+  if (parts.includes("Ctrl") || parts.includes("Alt") || /^F([1-9]|1\d|2[0-4])$/.test(key)) return true;
+  const def = actionById(actionId)?.defaultKeys;
+  return !!def && normalizeKeys(def) === normalizeKeys(keys);
+}
+
 /** Lays the user's list over the shortcut table (an empty list = the table's own keys). */
 export function applyKeybinds(stored: readonly KeybindPref[]): void {
   if (stored.length === 0) {
@@ -91,7 +103,8 @@ export function applyKeybinds(stored: readonly KeybindPref[]): void {
   for (const bind of effectiveKeybinds(stored)) {
     const action = actionById(bind.action);
     const spec = keysToSpec(bind.keys);
-    if (!action || !spec) continue;
+    // A bare key stored by an older build or another device is ignored rather than eating typed text.
+    if (!action || !spec || !canBindKeys(bind.keys, action.id)) continue;
     map.set(action.shortcut, [...(map.get(action.shortcut) ?? []), { spec, index: action.index }]);
   }
   setKeyOverrides(map);
