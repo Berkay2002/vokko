@@ -17,7 +17,8 @@ test('send, edit, reply, react and delete against the mock backend', async ({ pa
   const editor = page.getByLabel('Edit message');
   await editor.fill('hello edited');
   await editor.press('Enter');
-  const edited = message(page, 'hello edited');
+  // The reply later embeds "hello edited" in its preview, so pin the locator to the message without a reply preview.
+  const edited = page.locator('.chat-msg', { hasText: 'hello edited' }).filter({ hasNot: page.locator('.chat-reply') });
   await expect(edited).toBeVisible();
   await expect(edited.getByText('(edited)')).toBeVisible();
 

@@ -91,13 +91,27 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.windowId]);
 
+  // `stick`: the user has not scrolled away from the bottom, so content growing under us (image load, pending to confirmed swap) keeps the
+  // list pinned. At-bottom flipping to false without a scroll gesture is growth, not intent.
+  const stick = useRef(true);
+  const scroller = useRef<HTMLElement | null>(null);
+  const lastGesture = useRef(0);
+  const pointerDown = useRef(false);
+  const gesture = useCallback(() => { lastGesture.current = performance.now(); }, []);
+  useEffect(() => {
+    const up = () => { pointerDown.current = false; };
+    window.addEventListener('pointerup', up);
+    return () => window.removeEventListener('pointerup', up);
+  }, []);
   const onBottom = useCallback((value: boolean) => {
+    if (value) stick.current = true;
+    else if (pointerDown.current || performance.now() - lastGesture.current < 500) stick.current = false;
     setAtBottom(value);
     if (value) setSeenBottom(true);
     onAtBottomChange(value);
   }, [onAtBottomChange]);
 
-  useEffect(() => { setSeenBottom(false); setAtBottom(true); }, [channelId]);
+  useEffect(() => { stick.current = true; setSeenBottom(false); setAtBottom(true); }, [channelId]);
 
   const unreadCount = useMemo(() => {
     if (!state.lastReadAtOpen) return 0;
@@ -118,7 +132,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   const showJump = state.hasMoreAfter || !atBottom;
   const showUnread = unreadCount > 0 && !seenBottom && !!firstUnread;
 
-  return <div className="chat-list">
+  return <div className="chat-list" onWheel={gesture} onTouchMove={gesture} onKeyDown={gesture} onPointerDown={() => { pointerDown.current = true; gesture(); }}>
     {showUnread && <div className="chat-unread-bar" role="status">
       <button type="button" className="chat-unread-bar-main" onClick={() => {
         const i = rows.findIndex(r => r.message.id === firstUnread!.id);
@@ -139,6 +153,17 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       increaseViewportBy={{ top: 600, bottom: 400 }}
       atBottomThreshold={160}
       atBottomStateChange={onBottom}
+      scrollerRef={el => { scroller.current = el instanceof HTMLElement ? el : null; }}
+      totalListHeightChanged={() => {
+        if (!stick.current || state.hasMoreAfter) return;
+        // Item sizes are measured after layout, so scroll again once the new height has settled.
+        const toEnd = () => {
+          const el = scroller.current;
+          if (stick.current && el) el.scrollTop = el.scrollHeight;
+        };
+        toEnd();
+        requestAnimationFrame(() => requestAnimationFrame(toEnd));
+      }}
       followOutput={isAtBottom => (isAtBottom && !state.hasMoreAfter ? 'auto' : false)}
       startReached={() => { void messageStore.loadOlder(channelId); }}
       endReached={() => { void messageStore.loadNewer(channelId); }}

@@ -17,7 +17,8 @@ type Listener = () => void;
 const states = new Map<Snowflake, ChannelState>();
 const touched = new Map<Snowflake, number>();
 const listeners = new Map<Snowflake, Set<Listener>>();
-const inflight = new Set<string>();
+const reactionChains = new Map<string, { tail: Promise<void>; pending: number; timer: ReturnType<typeof setTimeout> | null }>();
+const reactionGuard = (messageId: Snowflake, emoji: ReactionEmoji): string => `${messageId}:${emojiKey(emoji)}`;
 let currentUserId: Snowflake | null = null;
 let bound = false;
 
@@ -50,8 +51,14 @@ function bindGateway(): void {
   gateway.on('MESSAGE_CREATE', m => { rememberMessage(m); update(m.channel_id, s => upsertMessage(s, m)); });
   gateway.on('MESSAGE_UPDATE', m => { rememberMessage(m); update(m.channel_id, s => updateIfPresent(s, m)); });
   gateway.on('MESSAGE_DELETE', d => update(d.channel_id, s => deleteMessage(s, d.id)));
-  gateway.on('MESSAGE_REACTION_ADD', d => update(d.channel_id, s => applyReaction(s, d.message_id, d.emoji, d.user_id === currentUserId, true)));
-  gateway.on('MESSAGE_REACTION_REMOVE', d => update(d.channel_id, s => applyReaction(s, d.message_id, d.emoji, d.user_id === currentUserId, false)));
+  // Our own reaction echoes are ignored while a local toggle for the same message+emoji is queued or just settled: the optimistic state wins.
+  const onReaction = (add: boolean) => (d: { channel_id: Snowflake; message_id: Snowflake; user_id: Snowflake; emoji: ReactionEmoji }): void => {
+    const byMe = d.user_id === currentUserId;
+    if (byMe && reactionChains.has(reactionGuard(d.message_id, d.emoji))) return;
+    update(d.channel_id, s => applyReaction(s, d.message_id, d.emoji, byMe, add));
+  };
+  gateway.on('MESSAGE_REACTION_ADD', onReaction(true));
+  gateway.on('MESSAGE_REACTION_REMOVE', onReaction(false));
   gateway.on('TYPING_START', d => {
     if (d.user_id === currentUserId) return;
     update(d.channel_id, s => setTyping(s, d.user_id, Date.now()));
@@ -218,18 +225,25 @@ export const messageStore = {
     const m = s?.messages[s ? indexOfId(s.messages, messageId) : -1];
     if (!m) return;
     const key = emojiKey(emoji);
-    const guard = `${messageId}:${key}`;
-    if (inflight.has(guard)) return;
-    inflight.add(guard);
+    const guard = reactionGuard(messageId, emoji);
+    // Rapid toggles are applied optimistically right away and sent in order, one request at a time per message+emoji.
+    const chain = reactionChains.get(guard) ?? { tail: Promise.resolve(), pending: 0, timer: null };
+    if (chain.timer) { clearTimeout(chain.timer); chain.timer = null; }
+    chain.pending++;
+    reactionChains.set(guard, chain);
     const had = m.reactions.find(r => emojiKey(r.emoji) === key)?.me ?? false;
     update(channelId, x => applyReaction(x, messageId, emoji, true, !had));
-    try {
-      await request<null>(had ? 'DELETE' : 'PUT', `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(key)}/@me`);
-    } catch {
-      update(channelId, x => applyReaction(x, messageId, emoji, true, had));
-    } finally {
-      inflight.delete(guard);
-    }
+    const run = chain.tail.then(async () => {
+      try {
+        await request<null>(had ? 'DELETE' : 'PUT', `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(key)}/@me`);
+      } catch {
+        update(channelId, x => applyReaction(x, messageId, emoji, true, had));
+      }
+    });
+    chain.tail = run;
+    await run;
+    // Keep suppressing our own gateway echoes briefly after the last request settles.
+    if (--chain.pending === 0) chain.timer = setTimeout(() => reactionChains.delete(guard), 1500);
   },
 
   async setPinned(channelId: Snowflake, messageId: Snowflake, pinned: boolean): Promise<void> {

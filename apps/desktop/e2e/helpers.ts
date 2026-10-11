@@ -1,9 +1,9 @@
 import type { Page } from '@playwright/test';
 
-/** Opens the DM with Alice. Before milestone A this goes through the chat playground; afterwards through the shell's DM list. */
-export async function openDm(page: Page, name = 'Alice'): Promise<void> {
-  await page.goto('/?playground');
-  await page.getByRole('button', { name }).first().click();
+/** Signs in to the mock backend as sam and opens the DM with `name`. */
+export async function openDm(page: Page, name = 'alice'): Promise<void> {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.getByRole('link', { name: new RegExp(`^${name}`, 'i') }).first().click();
   await page.locator('.chat-textarea').waitFor();
   await page.locator('.chat-msg').first().waitFor();
 }
@@ -21,4 +21,9 @@ export async function send(page: Page, text: string): Promise<void> {
 
 export function message(page: Page, text: string | RegExp) {
   return page.locator('.chat-msg', { hasText: text }).last();
+}
+
+/** Current channel id from the URL (/channels/@me/<id> or /channels/<guild>/<id>). */
+export function channelIdOf(page: Page): string {
+  return new URL(page.url()).pathname.split('/').filter(Boolean).pop() ?? '';
 }
