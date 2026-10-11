@@ -73,7 +73,7 @@ test('composer GIF / sticker / emoji / apps buttons', async ({ page }) => {
   await expect(picker.getByRole('button', { name: 'wave' })).toBeVisible();
   await picker.getByRole('tab', { name: 'Emoji' }).click();
   await picker.getByRole('button', { name: /grinning face/i }).first().click();
-  await expect(composer(page)).not.toHaveValue('');
+  await expect(composer(page)).not.toHaveText('');
   await page.getByRole('button', { name: 'Open sticker picker' }).click();
   await expect(page.getByRole('tab', { name: 'Stickers' })).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Escape');

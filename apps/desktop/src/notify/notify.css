@@ -123,3 +123,130 @@ html.has-top-banner #root {
     opacity: 0.8;
   }
 }
+
+.notify-banner-positive {
+  background: var(--status-positive-background);
+  color: var(--status-positive-text);
+}
+
+.notify-banner-warning {
+  background: var(--status-warning-background);
+  color: var(--status-warning-text);
+}
+
+.notify-banner-warning .notify-banner-close:hover {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.notify-banner-link {
+  flex: none;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Startup screen: the logo's light sweep, the tip line and the "Taking too long?" link. */
+.notify-splash-sheen {
+  animation: notify-splash-sheen 2.4s ease-in-out infinite;
+}
+
+.notify-splash-tip {
+  max-width: min(420px, 80vw);
+  min-height: 20px;
+  margin: 0;
+  text-align: center;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-muted);
+  animation: notify-splash-tip-in 400ms ease both;
+}
+
+.notify-splash-tip-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-brand, var(--brand));
+}
+
+.notify-splash-slow {
+  border: 0;
+  background: transparent;
+  color: var(--text-link);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.notify-splash-slow:hover {
+  text-decoration: underline;
+}
+
+.notify-status-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+}
+
+.notify-status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle, rgba(151, 151, 159, 0.12));
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.notify-status-row dt {
+  color: var(--text-muted);
+}
+
+.notify-status-row dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.notify-status-help {
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--text-muted);
+}
+
+@keyframes notify-splash-sheen {
+  0% {
+    transform: translateX(0) skewX(-18deg);
+  }
+  60%,
+  100% {
+    transform: translateX(900px) skewX(-18deg);
+  }
+}
+
+@keyframes notify-splash-tip-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notify-splash-logo,
+  .notify-splash-sheen,
+  .notify-splash-tip {
+    animation: none;
+  }
+}

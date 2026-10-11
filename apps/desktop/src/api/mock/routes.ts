@@ -18,6 +18,7 @@ import { setVoiceChannelStatus } from "./voice";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
 import "./search";
 import "./community";
+import "./status";
 
 export { route, str, requireGuildMember };
 
@@ -577,7 +578,7 @@ route("POST", "/read-states/ack-bulk", ({ viewer, body }) => {
 
 // ---- entry point ----
 
-const PUBLIC = new Set(["POST /auth/register", "POST /auth/login"]);
+const PUBLIC = new Set(["POST /auth/register", "POST /auth/login", "GET /status"]);
 /** An invite preview is readable without an account (the invite page shows it before login). */
 const isInvitePreview = (method: string, pathname: string): boolean => method === "GET" && /^\/invites\/[a-z0-9]+$/.test(pathname);
 

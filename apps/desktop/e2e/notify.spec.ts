@@ -256,6 +256,10 @@ test('connection banner appears when the gateway is down and goes away on reconn
   await banner.getByRole('button', { name: 'Reconnect now' }).click();
   await expect(banner).toHaveCount(0, { timeout: 8000 });
   expect(await page.evaluate(() => (window as unknown as Win).__vokko.appStore.getState().connection)).toBe('ready');
+  // the banner turns into a green "Connected" strip for a moment (the page stays pushed down), then the space is given back
+  await expect(page.getByTestId('connection-restored')).toContainText('Connected');
+  expect(await page.evaluate(() => document.documentElement.classList.contains('has-top-banner'))).toBe(true);
+  await expect(page.getByTestId('connection-restored')).toHaveCount(0, { timeout: 6000 });
   expect(await page.evaluate(() => document.documentElement.classList.contains('has-top-banner'))).toBe(false);
 });
 
@@ -297,14 +301,19 @@ test('permission banner: "No thanks" hides it for good', async ({ page }) => {
 });
 
 test('first-connect splash', async ({ page }) => {
-  await setup(page, { slowGateway: 9000 });
+  await setup(page, { slowGateway: 16_000 });
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   const splash = page.getByTestId('splash');
   await expect(splash).toBeVisible();
   await expect(splash).toContainText('Connecting');
+  await expect(page.getByTestId('splash-tip')).toBeVisible();
+  await expect(splash.getByRole('button', { name: 'Taking too long?' })).toHaveCount(0);
   await shot(page, '05-splash-connecting');
-  await expect(splash.getByRole('button', { name: 'Try again' })).toBeVisible({ timeout: 8000 });
+  // after 10 s without READY the "Taking too long?" link appears and opens the connection status
+  await expect(splash.getByRole('button', { name: 'Taking too long?' })).toBeVisible({ timeout: 13_000 });
   await shot(page, '06-splash-slow');
+  await splash.getByRole('button', { name: 'Taking too long?' }).click();
+  await expect(page.getByTestId('connection-status')).toBeVisible();
 });
 
 test('strip: tab title, favicon states and the toast text (a viewport screenshot cannot show browser chrome)', async ({ browser }) => {

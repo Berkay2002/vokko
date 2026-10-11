@@ -1,0 +1,67 @@
+/* The composer's live-styled input (CMP-011). It stands in for the <textarea>, so the box model matches `.chat-textarea`. */
+.chat-live {
+  display: block;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  cursor: text;
+  position: relative;
+}
+.chat-live[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  left: 4px;
+  top: 16px;
+  right: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--chat-text-placeholder);
+  pointer-events: none;
+}
+.chat-live .le-line { min-height: 1lh; }
+.chat-live .le-b { font-weight: 700; }
+.chat-live .le-i { font-style: italic; }
+.chat-live .le-u { text-decoration: underline; }
+.chat-live .le-s { text-decoration: line-through; }
+.chat-live .le-u.le-s { text-decoration: underline line-through; }
+.chat-live .le-sp { border-radius: 3px; background: var(--chat-spoiler-revealed); }
+.chat-live .le-c {
+  border-radius: 4px;
+  background: var(--chat-bg-secondary);
+  font-family: var(--chat-mono);
+  font-size: 0.875rem;
+  font-weight: 400;
+  font-style: normal;
+}
+/* Discord draws code-block lines as monospace text with highlighting, no box, in the composer */
+.chat-live .le-code-line { font-family: var(--chat-mono); font-size: 0.875rem; }
+.chat-live .le-code-line .le-c { background: none; }
+/* delimiters and prefixes stay visible but quiet; their weight/style follows the line so the text does not jump */
+.chat-live .le-syn { color: var(--textbox-markdown-syntax); font-weight: 400; font-style: normal; text-decoration: none; }
+.chat-live .le-link { color: var(--chat-link); }
+.chat-live .le-men { border-radius: 3px; background: var(--chat-mention-bg); color: var(--chat-mention-fg); font-weight: 500; }
+/* the "> " prefix stays in the text (it is the source) but is drawn as the bar plus a 12px indent, like Discord */
+.chat-live .le-quote { position: relative; color: var(--chat-text-muted); }
+.chat-live .le-quote.le-quote-body { padding-left: 12px; }
+.chat-live .le-quote::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--chat-quote-bar);
+}
+.chat-live .le-quote .le-qm { color: transparent; }
+.chat-live .le-sub { font-size: 0.75rem; color: var(--chat-text-muted); }
+/* headings and lists keep body size and weight; only their prefix is dimmed (.le-syn) */
+
+/* chips: the editor treats each as one unit (see edit.ts) */
+.chat-live .le-atom { display: inline; border-radius: 3px; padding: 0 2px; user-select: all; }
+.chat-live .le-atom-mention { background: var(--chat-mention-bg); color: var(--chat-mention-fg); font-weight: 500; }
+.chat-live .le-atom-timestamp { background: var(--chat-code-chip); }
+.chat-live .le-atom-emoji, .chat-live .le-atom-shortcode { padding: 0; }
+.chat-live .le-emoji-img { display: inline-block; vertical-align: bottom; width: 1.375em; height: 1.375em; object-fit: contain; }

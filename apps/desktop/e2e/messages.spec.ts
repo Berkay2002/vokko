@@ -329,7 +329,7 @@ test.describe('attachments', () => {
     await expect(sent.locator('.chat-pending-upload')).toContainText('Uploading 2 files');
     await expect(sent).toHaveClass(/pending/);
     await expect(page.locator('.chat-tray-item')).toHaveCount(0);
-    await expect(stockBox(page)).toHaveValue('');
+    await expect(stockBox(page)).toHaveText('');
     // ...and turns into the real message with both images once the uploads are done
     await expect(sent.locator('.chat-pending-upload')).toHaveCount(0);
     await expect(sent).not.toHaveClass(/pending/);
@@ -415,7 +415,7 @@ test.describe('emoji', () => {
   test('emoticons convert on send, not while typing, and not inside code', async ({ page }) => {
     await openStockTalk(page);
     await stockBox(page).fill('see you :)');
-    await expect(stockBox(page)).toHaveValue('see you :)');
+    await expect(stockBox(page)).toHaveText('see you :)');
     await page.keyboard.press('Enter');
     await expect(row(page, 'see you')).toContainText('see you 🙂');
     await stockBox(page).fill('use `:)` here');

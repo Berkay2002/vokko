@@ -13,6 +13,7 @@ import { handleRoute } from "./routes";
 import "./accounts";
 import { setCurrentToken } from "./sessions";
 import { seed } from "./seed";
+import { setMockMaintenance } from "./status";
 import { sweepArchivedThreads } from "./threads";
 import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromToken } from "./socket";
 import { setMockVoice } from "./voice";
@@ -123,6 +124,8 @@ interface MockHooks {
   messageTimestamp(id: string): number;
   /** A guild owned by `owner` (default alice) with onboarding (a required question, rules, default channels), an invite code and a stranger member. */
   seedOnboardingGuild(owner?: string): SeededGuild;
+  /** Show (or with null clear) the maintenance banner served by `GET /status`; the client re-reads it at once. */
+  maintenance(message: string | null, startsAt?: string | null): void;
   reset(): void;
 }
 
@@ -168,6 +171,10 @@ const hooks: MockHooks = {
   voice: (username, channelId, opts) => setMockVoice(userByName(username), channelId, emit, opts),
   messageTimestamp: id => snowflakeToTimestamp(id),
   seedOnboardingGuild: owner => seedOnboardingGuild(owner),
+  maintenance: (message, startsAt = null) => {
+    setMockMaintenance(message ? { message, starts_at: startsAt } : null);
+    window.dispatchEvent(new Event("vokko:status-changed"));
+  },
   reset: () => {
     window.localStorage.removeItem("vokko.token");
     window.location.reload();

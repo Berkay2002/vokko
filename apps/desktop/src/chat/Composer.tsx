@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { AtSign, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
@@ -15,6 +15,7 @@ import { messageStore } from './messageStore';
 import { TypingIndicator } from './TypingIndicator';
 import { activeTypers } from './messageState';
 import { isSpoilerName, stripSpoiler } from './util';
+import { ComposerInput, type ComposerField } from './composer/ComposerInput';
 
 const MAX_LEN = 2000;
 // Discord client timings: POST at most every 8 s; the first one waits 1.5 s unless the previous was 16+ s ago;
@@ -80,7 +81,7 @@ export interface ComposerProps {
 export function Composer({ channelId, replyTo, mentionReply, onToggleMention, onCancelReply, onSent, onEditLast, focusToken }: ComposerProps) {
   const chat = useChat();
   const draft = useDraft(channelId);
-  const area = useRef<HTMLTextAreaElement>(null);
+  const area = useRef<ComposerField>(null);
   const plusBtn = useRef<HTMLButtonElement>(null);
   const gifBtn = useRef<HTMLButtonElement>(null);
   const stickerBtn = useRef<HTMLButtonElement>(null);
@@ -99,13 +100,6 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const { text, uploads } = draft;
   const name = chat.channel?.name ? (chat.channel.type === ChannelType.GuildVoice ? chat.channel.name : `#${chat.channel.name}`) :chat.channel?.recipients?.map(u => chat.nameOf(u)).join(', ') ?? '';
   const placeholder = chat.isDm ? `Message @${chat.channel?.recipients?.[0] ? chat.nameOf(chat.channel.recipients[0]) : ''}` : `Message ${name}`;
-
-  useLayoutEffect(() => {
-    const el = area.current;
-    if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.5))}px`;
-  }, [text]);
 
   useEffect(() => { area.current?.focus(); }, [channelId, focusToken]);
 
@@ -154,7 +148,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const apply = useCallback((s: Suggestion) => {
     if (!trigger) return;
     const el = area.current;
-    const end = el ? el.selectionStart : caret;
+    const end = el?.selectionStart ?? caret;
     const insert = s.insert + (s.lead === 'emoji' ? ' ' : ' ');
     const next = text.slice(0, trigger.start) + insert + text.slice(end);
     if (s.token) addDraftToken(channelId, s.token);
@@ -215,7 +209,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     onSent();
   }
 
-  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+  function onKeyDown(e: KeyboardEvent<HTMLElement>) {
     if (e.nativeEvent.isComposing) return;
     if (suggestions.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSelected(s => (s + 1) % suggestions.length); return; }
@@ -235,7 +229,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     if (value.trim()) notifyTyping(channelId, chat.me.id);
   }
 
-  function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
+  function onPaste(e: ClipboardEvent<HTMLElement>) {
     const files = [...e.clipboardData.files];
     if (files.length) { e.preventDefault(); addFiles(channelId, files); }
   }
@@ -303,9 +297,8 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           </div>
         </Popout>
         <input ref={fileInput} type="file" multiple hidden onChange={e => { addFiles(channelId, [...(e.target.files ?? [])]); e.target.value = ''; }} />
-        <textarea ref={area} className="chat-textarea" rows={1} value={text} placeholder={placeholder} aria-label={placeholder} spellCheck
-          onChange={e => onChange(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste}
-          onSelect={e => setCaret(e.currentTarget.selectionStart)} onClick={e => setCaret(e.currentTarget.selectionStart)} />
+        <ComposerInput fieldRef={area} value={text} placeholder={placeholder} mentions={draft.tokens.map(t => t.display)} resetKey={channelId}
+          onChange={onChange} onKeyDown={onKeyDown} onPaste={onPaste} onCaret={setCaret} />
         <div className="chat-composer-actions">
           {remaining <= 200 && hasText && <span className={`chat-counter${remaining < 0 ? ' over' : ''}`} aria-live="polite">{remaining}</span>}
           <Tooltip content="Open GIF picker" side="top"><button ref={gifBtn} type="button" className="chat-composer-btn" aria-label="Open GIF picker" aria-expanded={expr === 'gif'} onClick={() => setExpr(v => (v === 'gif' ? null : 'gif'))}><span className="chat-gif-glyph" aria-hidden="true">GIF</span></button></Tooltip>

@@ -1,14 +1,19 @@
-import { useEffect, useState } from "react";
-import { BellRing, Download, WifiOff, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { BellRing, Check, Download, Wrench, WifiOff, X } from "lucide-react";
+import { useConnectionState, useCountdown, type ConnectionState } from "../api/connection";
 import { gateway } from "../api/gateway";
 import { useStore } from "../api/store";
 import { restartToUpdate, useDesktopUpdate } from "../desktop";
 import { setPref, usePrefs } from "../ui/prefs";
+import { ConnectionStatusModal } from "./ConnectionStatus";
 import { notificationAdapter, type PermissionState } from "./desktop";
+import { startMaintenanceWatch, useMaintenance, type MaintenanceNotice } from "./maintenance";
 import "./notify.css";
 
 /** The connection banner waits this long before appearing, so a quick resume never flashes it. */
 export const BANNER_GRACE_MS = 1500;
+/** How long the green "Connected" strip stays after a banner that was shown ends. */
+export const CONNECTED_FLASH_MS = 2500;
 const DISMISSED_KEY = "vokko.notify.promptDismissed";
 
 function useOnline(): boolean {
@@ -39,14 +44,73 @@ function useDelayed(active: boolean, delay: number): boolean {
   return shown;
 }
 
-function ConnectionBar({ offline }: { offline: boolean }) {
+function ConnectionBar({ offline, connection }: { offline: boolean; connection: ConnectionState }) {
+  const [details, setDetails] = useState(false);
+  const secondsLeft = useCountdown(connection.nextRetryAt);
+  // the alert announces only the static part; the changing countdown stays out of the accessibility tree
+  let text: string;
+  let live: string | null = null;
+  if (offline) text = "You're offline. Vokko will reconnect when your network is back.";
+  else if (secondsLeft !== null && secondsLeft > 0) {
+    text = "Connection lost. Retrying";
+    live = ` in ${secondsLeft}s (attempt ${connection.attempt})`;
+  } else text = connection.attempt > 0 ? `Connection lost. Reconnecting… (attempt ${connection.attempt})` : "Connection lost. Reconnecting…";
   return (
-    <div className="notify-banner notify-banner-critical" role="alert" data-testid="connection-banner">
+    <div className="notify-banner notify-banner-critical" role="alert" data-testid="connection-banner" data-attempt={connection.attempt} data-offline={offline}>
       <WifiOff size={16} aria-hidden />
-      <span className="notify-banner-text">{offline ? "You're offline. Vokko will reconnect when your network is back." : "Connection lost. Trying to reconnect…"}</span>
+      <span className="notify-banner-text">
+        {text}
+        {live && <span aria-hidden>{live}</span>}
+      </span>
       <button type="button" className="notify-banner-button" onClick={() => gateway.retryNow()}>
         Reconnect now
       </button>
+      <button type="button" className="notify-banner-link" onClick={() => setDetails(true)}>
+        Details
+      </button>
+      <ConnectionStatusModal open={details} onClose={() => setDetails(false)} />
+    </div>
+  );
+}
+
+/** The red banner turns green for a moment once the connection is back. */
+function ConnectedFlash() {
+  return (
+    <div className="notify-banner notify-banner-positive" role="status" data-testid="connection-restored">
+      <Check size={16} aria-hidden />
+      <span className="notify-banner-text">Connected</span>
+    </div>
+  );
+}
+
+function MaintenanceBar({ notice, onDismiss }: { notice: MaintenanceNotice; onDismiss(): void }) {
+  const starts = notice.startsAt ? new Date(notice.startsAt) : null;
+  const scheduled = starts !== null && !Number.isNaN(starts.getTime()) && starts.getTime() > Date.now();
+  const when = scheduled && starts ? ` Starts ${starts.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.` : "";
+  return (
+    <div className="notify-banner notify-banner-warning" role="region" aria-label="Maintenance" data-testid="maintenance-banner">
+      <Wrench size={16} aria-hidden />
+      <span className="notify-banner-text">
+        {scheduled ? "Scheduled maintenance: " : "Maintenance: "}
+        {notice.message}
+        {when}
+      </span>
+      <button type="button" className="notify-banner-close" aria-label="Dismiss" onClick={onDismiss}>
+        <X size={16} aria-hidden />
+      </button>
+    </div>
+  );
+}
+
+/** The update is downloading in the background; nothing to click yet. */
+function DownloadingBar({ version, fraction }: { version: string; fraction: number | null }) {
+  return (
+    <div className="notify-banner notify-banner-brand" role="status" aria-label="Downloading update" data-testid="update-downloading-banner">
+      <Download size={16} aria-hidden />
+      <span className="notify-banner-text">
+        Downloading Vokko {version}
+        {fraction !== null ? ` (${Math.round(fraction * 100)}%)` : "…"}
+      </span>
     </div>
   );
 }
@@ -107,14 +171,41 @@ function PermissionBar({ onDone }: { onDone(): void }) {
   );
 }
 
-/** Top-of-window banners, one at a time: connection state, then a ready update, then the one-time notification permission prompt. */
+/** Top-of-window banners, one at a time: connection state, the "Connected" flash, a maintenance notice, a desktop update, then the one-time notification permission prompt. */
 export function NotifyBanners() {
   const loggedIn = useStore(s => !!s.token && s.ready);
-  const connection = useStore(s => s.connection);
+  const connection = useConnectionState();
   const desktopPref = usePrefs(s => s.desktopNotifications);
   const online = useOnline();
-  const disrupted = loggedIn && (connection !== "ready" || !online);
+  const disrupted = loggedIn && (connection.status !== "ready" || !online);
   const showConnection = useDelayed(disrupted, BANNER_GRACE_MS);
+
+  // "Connected": only after a connection banner was actually on screen, so a quick resume stays silent.
+  const [flash, setFlash] = useState(false);
+  const wasShown = useRef(false);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (wasShown.current && !showConnection && loggedIn && connection.status === "ready" && online) {
+      setFlash(true);
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => setFlash(false), CONNECTED_FLASH_MS);
+    }
+    wasShown.current = showConnection;
+  }, [showConnection, loggedIn, connection.status, online]);
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    return startMaintenanceWatch();
+  }, [loggedIn]);
+  const notice = useMaintenance(s => s.notice);
+  const [dismissedNotice, setDismissedNotice] = useState<string | null>(null);
+  const showMaintenance = !showConnection && !flash && notice !== null && dismissedNotice !== notice.message;
 
   const [permission, setPermission] = useState<PermissionState>("granted");
   const [dismissed, setDismissed] = useState(() => {
@@ -135,18 +226,25 @@ export function NotifyBanners() {
     };
   }, [loggedIn, desktopPref]);
 
-  const readyVersion = useDesktopUpdate(s => (s.status.state === "ready" ? s.status.version : null));
-  const showUpdate = !showConnection && readyVersion !== null;
+  const update = useDesktopUpdate(s => s.status);
+  const readyVersion = update.state === "ready" ? update.version : null;
+  const downloading = update.state === "downloading" ? update : null;
+  const quiet = !showConnection && !flash && !showMaintenance;
+  const showUpdate = quiet && readyVersion !== null;
+  const showDownloading = quiet && downloading !== null;
 
-  const showPermission = loggedIn && !showConnection && !showUpdate && !dismissed && !desktopPref && permission === "default";
-  const visible = showConnection || showUpdate || showPermission;
+  const showPermission = loggedIn && quiet && !showUpdate && !showDownloading && !dismissed && !desktopPref && permission === "default";
+  const visible = showConnection || flash || showMaintenance || showUpdate || showDownloading || showPermission;
   useEffect(() => {
     document.documentElement.classList.toggle("has-top-banner", visible);
     return () => document.documentElement.classList.remove("has-top-banner");
   }, [visible]);
 
-  if (showConnection) return <ConnectionBar offline={!online} />;
+  if (showConnection) return <ConnectionBar offline={!online} connection={connection} />;
+  if (flash) return <ConnectedFlash />;
+  if (showMaintenance && notice) return <MaintenanceBar notice={notice} onDismiss={() => setDismissedNotice(notice.message)} />;
   if (showUpdate && readyVersion !== null) return <UpdateBar version={readyVersion} />;
+  if (showDownloading && downloading) return <DownloadingBar version={downloading.version} fraction={downloading.total ? downloading.downloaded / downloading.total : null} />;
   if (showPermission) return <PermissionBar onDone={() => setDismissed(true)} />;
   return null;
 }

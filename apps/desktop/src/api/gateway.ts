@@ -4,6 +4,12 @@ import { GatewayOp, type GatewayEvents, type GatewayPayload, type VoiceStateUpda
 
 export type GatewayStatus = "disconnected" | "connecting" | "ready" | "reconnecting";
 
+/** Bookkeeping for the connection banner: failed attempts so far and, while backing off, when the next socket opens (epoch ms). */
+export interface ReconnectInfo {
+  attempt: number;
+  nextRetryAt: number | null;
+}
+
 /** Close code the server uses for a bad token: stop reconnecting and drop the session. */
 export const CLOSE_AUTH_FAILED = 4004;
 /** Close code for sockets the client itself drops (zombie connection, Hello timeout, teardown); the session stays resumable. */
@@ -44,6 +50,8 @@ class GatewayClient {
   private listeners = new Map<string, Set<Listener>>();
   private statusListeners = new Set<(status: GatewayStatus) => void>();
   private authFailedListeners = new Set<() => void>();
+  private retryInfo: ReconnectInfo = { attempt: 0, nextRetryAt: null };
+  private retryListeners = new Set<() => void>();
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -57,6 +65,19 @@ class GatewayClient {
     return this.current;
   }
 
+  /** Stable object between changes (safe as a `useSyncExternalStore` snapshot). */
+  get retry(): ReconnectInfo {
+    return this.retryInfo;
+  }
+
+  /** Fires whenever the attempt count or the scheduled retry time changes. */
+  onRetry(fn: () => void): () => void {
+    this.retryListeners.add(fn);
+    return () => {
+      this.retryListeners.delete(fn);
+    };
+  }
+
   /** Idempotent: calling again with the same token while connected/connecting is a no-op. */
   connect(token: string): void {
     if (this.wanted && this.token === token && (this.socket || this.reconnectTimer)) return;
@@ -66,6 +87,7 @@ class GatewayClient {
     this.seq = null;
     this.sessionId = null;
     this.attempts = 0;
+    this.setRetry(0, null);
     this.open();
   }
 
@@ -82,6 +104,7 @@ class GatewayClient {
     this.token = null;
     this.seq = null;
     this.sessionId = null;
+    this.setRetry(0, null);
     this.setStatus("disconnected");
   }
 
@@ -124,6 +147,12 @@ class GatewayClient {
     };
   }
 
+  private setRetry(attempt: number, nextRetryAt: number | null): void {
+    if (this.retryInfo.attempt === attempt && this.retryInfo.nextRetryAt === nextRetryAt) return;
+    this.retryInfo = { attempt, nextRetryAt };
+    for (const fn of [...this.retryListeners]) fn();
+  }
+
   private setStatus(status: GatewayStatus): void {
     if (this.current === status) return;
     this.current = status;
@@ -132,6 +161,7 @@ class GatewayClient {
 
   private open(): void {
     if (!this.wanted) return;
+    this.setRetry(this.attempts, null);
     this.setStatus(this.sessionId || this.attempts > 0 ? "reconnecting" : "connecting");
     const socket: Socket = MOCK ? new MockSocket() : (new WebSocket(GATEWAY_URL) as unknown as Socket);
     this.socket = socket;
@@ -201,6 +231,7 @@ class GatewayClient {
     if (t === "READY") this.sessionId = (d as { session_id: string }).session_id;
     if (t === "READY" || t === "RESUMED") {
       this.attempts = 0;
+      this.setRetry(0, null);
       this.setStatus("ready");
     }
     const set = this.listeners.get(t);
@@ -283,6 +314,7 @@ class GatewayClient {
     this.setStatus("reconnecting");
     const delay = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** this.attempts) * (0.75 + Math.random() * 0.5);
     this.attempts += 1;
+    this.setRetry(this.attempts, Date.now() + delay);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.open();
