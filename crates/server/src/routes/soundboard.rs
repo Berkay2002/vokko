@@ -136,7 +136,7 @@ async fn create(
     if size as u64 > SOUNDBOARD_MAX_BYTES {
         return Err(ApiErr::invalid("attachment_id", "A sound can be at most 512 KiB."));
     }
-    let bytes = tokio::fs::read(media::file_path(&state, attachment)).await.map_err(|_| unknown())?;
+    let bytes = state.storage.read(attachment).await.map_err(|_| unknown())?;
     let probe = audio::probe(&bytes).ok_or_else(|| ApiErr::invalid("attachment_id", "A sound must be an MP3, OGG or WAV file."))?;
     if probe.duration_ms > u64::from(SOUNDBOARD_MAX_DURATION_MS) {
         return Err(ApiErr::invalid("attachment_id", "A sound can be at most 5.2 seconds long."));

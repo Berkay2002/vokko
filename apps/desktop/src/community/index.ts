@@ -9,6 +9,5 @@ export { CommunityHost } from "./CommunityHost";
 export { EventsQuickLink } from "./EventsQuickLink";
 export { FriendSuggestionsTab } from "./FriendSuggestions";
 export { OnboardingSettings } from "./OnboardingSettings";
-export { PinConfirmModal } from "./PinConfirmModal";
 export { WelcomeChecklist } from "./WelcomeChecklist";
 export { openCreateEvent, openEvents } from "./communityModals";

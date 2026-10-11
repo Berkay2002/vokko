@@ -11,6 +11,7 @@ import { formatBytes, formatFullDate, formatMessageTimestamp, isSpoilerName } fr
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
 const isVideo = (a: Attachment): boolean => !!a.content_type?.startsWith('video/');
+const isAudio = (a: Attachment): boolean => !!a.content_type?.startsWith('audio/') || /\.(mp3|ogg|oga|wav|flac|m4a|opus)$/i.test(a.filename);
 /** Formats that can animate: they follow Settings > Accessibility > "Play GIFs when Vokko is focused". */
 const isAnimatable = (a: Attachment): boolean => /^image\/(gif|apng|webp)$/.test(a.content_type ?? '') || /\.(gif|apng|webp)$/i.test(a.filename);
 
@@ -33,7 +34,7 @@ function ImageTile({ message, attachment, index, style, className }: { message: 
   const [spoiled, setSpoiled] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const spoiler = isSpoilerName(attachment.filename) && !spoiled;
+  const spoiler = isSpoilerName(attachment.filename) && !spoiled && !chat.revealSpoilers;
   const own = message.author.id === chat.me.id && !message.id.startsWith('pending:');
   const url = resolveUrl(attachment.url);
   return <div className={`chat-image-wrap${className ? ` ${className}` : ''}`} style={style}>
@@ -109,14 +110,17 @@ export function PendingUpload({ files, onCancel }: { files: Attachment[]; onCanc
 }
 
 export function Attachments({ message }: { message: Message }) {
+  const chat = useChat();
   const showDescriptions = useShowImageDescriptions();
   if (message.attachments.length === 0) return null;
+  // Settings > Chat > "Display images, videos and lolcats": off shows every upload as a file card.
+  const inline = chat.display.inlineAttachmentMedia;
   const images: { a: Attachment; index: number }[] = [];
   const others: Attachment[] = [];
-  message.attachments.forEach((a, index) => { if (isImage(a)) images.push({ a, index }); else others.push(a); });
+  message.attachments.forEach((a, index) => { if (inline && isImage(a)) images.push({ a, index }); else others.push(a); });
   return <div className="chat-attachments">
     {images.length > 0 && <ImageGrid message={message} images={images} />}
-    {others.map(a => isVideo(a)
+    {others.map(a => inline && isVideo(a)
       ? <video key={a.id} className="chat-video" src={resolveUrl(a.url)} controls preload="metadata" />
       : <FileCard key={a.id} attachment={a} />)}
     {showDescriptions && message.attachments.filter(a => a.description).map(a => <p key={a.id} className="chat-attachment-alt"><span className="chat-attachment-alt-tag">ALT</span>{a.description}</p>)}
@@ -125,13 +129,15 @@ export function Attachments({ message }: { message: Message }) {
 
 export function FileCard({ attachment }: { attachment: Attachment }) {
   const Icon = fileIcon(attachment);
-  return <div className="chat-file">
+  const audio = isAudio(attachment);
+  return <div className={`chat-file${audio ? ' audio' : ''}`}>
     <Icon className="chat-file-icon" size={40} aria-hidden="true" />
     <div className="chat-file-meta">
       <a className="chat-file-name" href={resolveUrl(attachment.url)} target="_blank" rel="noopener noreferrer" title={attachment.filename}>{attachment.filename}</a>
       <span className="chat-file-size">{formatBytes(attachment.size)}</span>
     </div>
     <a className="chat-file-download" href={resolveUrl(attachment.url)} download={attachment.filename} aria-label={`Download ${attachment.filename}`} title="Download"><Download size={24} /></a>
+    {audio && <audio className="chat-audio" src={resolveUrl(attachment.url)} controls preload="metadata" aria-label={attachment.filename} />}
   </div>;
 }
 

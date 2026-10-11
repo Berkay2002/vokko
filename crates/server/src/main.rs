@@ -12,7 +12,7 @@ async fn main() {
 async fn run() -> Result<(), String> {
     let command = std::env::args().nth(1).unwrap_or_else(|| "serve".to_owned());
     let config = Config::from_env()?;
-    let pool = vokko_server::connect(&config.database_url).await.map_err(|error| format!("database connection failed: {error}"))?;
+    let pool = vokko_server::connect(&config.database_url, config.db_max_connections).await.map_err(|error| format!("database connection failed: {error}"))?;
     vokko_server::migrate(&pool).await.map_err(|error| format!("migration failed: {error}"))?;
     let state = AppState::new(pool, config);
     match command.as_str() {
@@ -31,7 +31,9 @@ async fn serve(state: AppState) -> Result<(), String> {
         .execute(&state.db)
         .await
         .map_err(|error| error.to_string())?;
-    tokio::fs::create_dir_all(state.attachments_dir()).await.map_err(|error| format!("cannot create the data directory: {error}"))?;
+    if matches!(state.config.storage, vokko_server::storage::StorageConfig::Local) {
+        tokio::fs::create_dir_all(state.attachments_dir()).await.map_err(|error| format!("cannot create the data directory: {error}"))?;
+    }
     vokko_server::media::spawn_cleanup(state.clone());
     vokko_server::reminders::spawn(state.clone());
     vokko_server::voice::spawn_tasks(state.clone());

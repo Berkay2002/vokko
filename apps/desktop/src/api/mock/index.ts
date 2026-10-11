@@ -5,7 +5,7 @@ import { MOCK } from "../config";
 import { MAX_UPLOAD_BYTES } from "../limits";
 import { ApiRequestError, RateLimitedError } from "../errors";
 import { snowflakeToTimestamp } from "../snowflake";
-import type { Attachment, GifProvider, PresenceStatus } from "../types";
+import type { Attachment, GifProvider, PresenceStatus, UserSettings, UserSettingsData } from "../types";
 import { db, nextId } from "./db";
 import { seedOnboardingGuild, type SeededGuild } from "./community";
 import { addMessage, createAccount } from "./ops";
@@ -23,6 +23,7 @@ import { setMockVoice, voiceStates } from "./voice";
 import { noteAudioUpload, seedGuildSounds } from "./soundboard";
 import { ringTimeout } from "./calls";
 import { ChannelType } from "../types";
+import { patchSettings, settingsOf } from "./settings";
 
 export { MockSocket };
 
@@ -147,6 +148,10 @@ interface MockHooks {
   /** How long mock calls ring before they count as missed (default 3 minutes). */
   ringTimeout(ms: number): void;
   messageTimestamp(id: string): number;
+  /** The account settings blob of a user (GET /users/@me/settings as them). */
+  settingsOf(username: string): UserSettings;
+  /** Another device of `username` saves settings: USER_SETTINGS_UPDATE reaches this client unless `silent` (then only the next PATCH learns of it, as a 409). */
+  settingsFromOtherDevice(username: string, settings: UserSettingsData, opts?: { silent?: boolean }): UserSettings;
   /** Add the seeded Echo bot (/echo, /roll, /pick, Wave at, Quote) to a server, by name (default "Sam's server"). */
   installEchoBot(guildName?: string): string;
   /** Post through a channel's first webhook (as an external service would). */
@@ -218,6 +223,11 @@ const hooks: MockHooks = {
     ringTimeout.ms = ms;
   },
   messageTimestamp: id => snowflakeToTimestamp(id),
+  settingsOf: username => settingsOf(userByName(username)),
+  settingsFromOtherDevice: (username, settings, opts) => {
+    const id = userByName(username);
+    return patchSettings(id, settingsOf(id).version, settings, opts);
+  },
   installEchoBot: (guildName = "Sam's server") => {
     const guild = [...db.guilds.values()].find(g => g.guild.name === guildName);
     if (!guild) throw new Error(`unknown mock guild ${guildName}`);

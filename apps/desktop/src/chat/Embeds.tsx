@@ -92,6 +92,12 @@ function EmbedCard({ embed }: { embed: Embed }) {
   const open = (e: React.MouseEvent, href: string) => { e.preventDefault(); chat.actions.openLink(href); };
   const mediaUrl = (m?: { url: string; proxy_url?: string }) => safeHttpUrl(m?.proxy_url ?? m?.url);
 
+  // Settings > Chat > "Display images and videos from links": off keeps the text of the card only.
+  const inlineMedia = chat.display.inlineEmbedMedia;
+  if (!inlineMedia && (embed.type === 'image' || embed.type === 'gifv')) {
+    const href = link ?? mediaUrl(embed.image) ?? mediaUrl(embed.thumbnail);
+    return href ? <a className="chat-embed-media-link" href={href} onClick={e => open(e, href)}>{embed.title ?? href}</a> : null;
+  }
   // A bare image link renders as just the image.
   if (embed.type === 'image') {
     const src = mediaUrl(embed.thumbnail) ?? mediaUrl(embed.image) ?? safeHttpUrl(embed.url);
@@ -100,12 +106,12 @@ function EmbedCard({ embed }: { embed: Embed }) {
   }
 
   const videoUrl = safeHttpUrl(embed.video?.url);
-  const inlineVideo = !!videoUrl && (embed.type === 'gifv' || isVideoUrl(videoUrl));
-  const image = mediaUrl(embed.image);
-  const thumb = mediaUrl(embed.thumbnail);
+  const inlineVideo = inlineMedia && !!videoUrl && (embed.type === 'gifv' || isVideoUrl(videoUrl));
+  const image = inlineMedia ? mediaUrl(embed.image) : null;
+  const thumb = inlineMedia ? mediaUrl(embed.thumbnail) : null;
   const authorUrl = safeHttpUrl(embed.author?.url);
   const hasText = !!(embed.title || embed.description || embed.fields?.length || embed.author || embed.provider?.name);
-  const showVideoPoster = !!videoUrl && !inlineVideo;
+  const showVideoPoster = inlineMedia && !!videoUrl && !inlineVideo;
 
   return <article className="chat-embed chat-embed-rich" style={color ? { borderLeftColor: color } : undefined}>
     <div className="chat-embed-grid">

@@ -146,3 +146,13 @@ describe("mentionsMyRole", () => {
     expect(mentionsMyRole("@everyone", ["1"])).toBe(false);
   });
 });
+
+describe("message requests", () => {
+  it("keeps DMs from non-friends silent while message requests are on", () => {
+    const base = { dm: "dm" as const, scopes: ["dm1"] };
+    const prefs = { desktopNotifications: true, notificationSounds: true, soundCurrentChannel: false, streamerMode: false, streamerDisableSounds: true, streamerDisableNotifications: true };
+    expect(decide(input({ ...base, friend: false, prefs: { ...prefs, messageRequests: true } })).reason).toBe("message-request");
+    expect(decide(input({ ...base, friend: true, prefs: { ...prefs, messageRequests: true } })).kind).toBe("mention");
+    expect(decide(input({ ...base, friend: false, prefs: { ...prefs, messageRequests: false } })).kind).toBe("mention");
+  });
+});

@@ -1,6 +1,6 @@
 # Self-hosting Vokko
 
-Vokko's server is one Rust binary (`vokko-server`) plus PostgreSQL. Uploaded files live on local disk. Everything here assumes Docker with Compose v2; the files are in `deploy/`, `Dockerfile` and `deploy/web.Dockerfile`.
+Vokko's server is one Rust binary (`vokko-server`) plus PostgreSQL. Uploaded files live on local disk by default, or in an S3-compatible bucket. No always-on machine? See [self-hosting-free.md](self-hosting-free.md) for free-tier recipes (Oracle Always Free VM, Neon/Supabase + R2). Everything here assumes Docker with Compose v2; the files are in `deploy/`, `Dockerfile` and `deploy/web.Dockerfile`.
 
 ## Requirements
 
@@ -45,9 +45,17 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `DATABASE_URL` | required | PostgreSQL URL. Compose builds it from `POSTGRES_PASSWORD`. |
+| `DATABASE_URL` | required | PostgreSQL URL. Compose builds it from `POSTGRES_PASSWORD`. `sslmode` (`disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`) and `sslrootcert` are honoured (TLS via rustls). Over the internet use `verify-full`: `prefer` and `require` encrypt without checking the certificate. A provider with its own CA (Supabase) needs `sslrootcert=<file>`; see [self-hosting-free.md](self-hosting-free.md). |
+| `VOKKO_DB_MAX_CONNECTIONS` | `10` | Database pool size (1-1000). Lower it on free tiers with small connection limits. |
 | `VOKKO_BIND` | `127.0.0.1:8710` (image: `0.0.0.0:8710`) | Listen address. |
-| `VOKKO_DATA_DIR` | image: `/data` | Where attachments are stored (`<dir>/attachments`). Mounted as the `vokko-data` volume. |
+| `VOKKO_DATA_DIR` | image: `/data` | Where attachments are stored (`<dir>/attachments`) with local storage. Mounted as the `vokko-data` volume. |
+| `VOKKO_STORAGE` | `local` | `local` (files under `VOKKO_DATA_DIR`) or `s3` (any S3-compatible bucket: Cloudflare R2, Backblaze B2, Supabase Storage, MinIO, AWS S3). Switching does not move existing files (copy `<data dir>/attachments/*` to `<prefix>*` in the bucket, e.g. with rclone, or old attachments answer 404). With `s3`, deleted guilds, channels and accounts remove their files in the background. |
+| `VOKKO_S3_ENDPOINT` | required with `s3` | Endpoint without the bucket, e.g. `https://<account>.r2.cloudflarestorage.com`, `https://s3.<region>.backblazeb2.com`, `https://<project>.supabase.co/storage/v1/s3`, `http://minio:9000`. Path-style addressing (`<endpoint>/<bucket>/<key>`). |
+| `VOKKO_S3_BUCKET` / `VOKKO_S3_REGION` | required / `auto` | Bucket name and its region (`auto` for R2; e.g. `us-west-004` for B2, the project region for Supabase). |
+| `VOKKO_S3_ACCESS_KEY_ID` / `VOKKO_S3_SECRET_ACCESS_KEY` | required with `s3` | Keys with read, write and delete on the bucket. |
+| `VOKKO_S3_PREFIX` | `attachments/` | Object key prefix (objects are `<prefix><attachment id>`). |
+| `VOKKO_S3_SERVE` | `proxy` | `proxy`: downloads stream through vokko-server (the bucket stays private). `presigned`: after the same key/filename check the server answers `302` to a short-lived presigned bucket URL, so file bytes skip the server. |
+| `VOKKO_S3_PRESIGN_TTL_SECS` | `300` | Lifetime of presigned URLs (1-604800). |
 | `VOKKO_PUBLIC_URL` | `http://<bind>` | Origin used in absolute attachment URLs. Set it to what clients type. |
 | `VOKKO_MAX_UPLOAD_MB` | `25` | Per-file upload limit in MiB (whole number, at least 1). |
 | `VOKKO_UNFURL` | on | `off`/`0`/`false`/`no` disables link previews (no outbound requests at all). |
@@ -188,7 +196,7 @@ Sizing: the SFU forwards and never transcodes, so CPU stays low (a 10-person voi
 
 ## Backups
 
-State is the `pgdata` volume (messages, users, everything structured) and the `vokko-data` volume (uploaded files). Back up both; the database rows reference files by id.
+State is the `pgdata` volume (messages, users, everything structured) and the `vokko-data` volume (uploaded files; with `VOKKO_STORAGE=s3` the bucket instead). Back up both; the database rows reference files by id.
 
 ```sh
 cd deploy
@@ -250,7 +258,7 @@ Serve the web client from the same origin as the API where you can: same-origin 
 - The bundled container healthcheck still only proves the port accepts connections; `GET /healthz` (see above) is the real check, but `deploy/` does not use it yet.
 - Voice V1 has no server mute/deafen, moves or DM calls yet; camera and screen share are not available (later milestones in `docs/design/voice.md`).
 - Single instance only: the gateway hub, replay buffers, presence and rate limiters live in process memory. No horizontal scaling; a restart drops every websocket (clients resume or reconnect).
-- Uploads are on local disk (no S3 or object storage), and there is no built-in backup, retention or admin tooling.
+- There is no built-in backup, retention or admin tooling (uploads can live in an S3-compatible bucket, `VOKKO_STORAGE=s3`).
 - Registration is open by default; set `VOKKO_REGISTRATION=closed` once your accounts exist. There is no invite-only mode or captcha.
 - `seed` creates accounts with a published password; development only.
 - The server speaks plain HTTP; TLS comes from the proxy. No audit logs, metrics endpoint or log rotation beyond Docker's own.

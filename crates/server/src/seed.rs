@@ -50,7 +50,6 @@ pub async fn run(state: &AppState) -> Result<String, String> {
         return Err(format!("username `{name}` already exists without the seed marker; use a fresh database"));
     }
     let hash = crate::auth::hash_password(PASSWORD.to_owned()).await.map_err(|error| format!("cannot hash the demo password: {:?}", error.body))?;
-    tokio::fs::create_dir_all(state.attachments_dir()).await.map_err(|error| format!("cannot create the data directory: {error}"))?;
 
     let base = ids::now_ms();
     let mut gen_ = Gen { base, seq: 0, per_channel: HashMap::new(), messages: 0 };
@@ -433,7 +432,8 @@ async fn populate(state: &AppState, gen_: &mut Gen, tx: &mut sqlx::Transaction<'
         if l.image {
             let attachment = ids::at(gen_.base - age_ms, 26, 0);
             let png = demo_png(256, 144);
-            tokio::fs::write(media::file_path(state, attachment), &png).await.map_err(sqlx::Error::Io)?;
+            let size = png.len() as i64;
+            state.storage.put(attachment, png.into()).await.map_err(sqlx::Error::Io)?;
             sqlx::query(
                 "INSERT INTO attachments (id, channel_id, uploader_id, message_id, filename, content_type, size, width, height, key) \
                  VALUES ($1, $2, $3, $4, 'vokko-shell.png', 'image/png', $5, 256, 144, $6)",
@@ -442,7 +442,7 @@ async fn populate(state: &AppState, gen_: &mut Gen, tx: &mut sqlx::Transaction<'
             .bind(dm)
             .bind(author)
             .bind(id)
-            .bind(png.len() as i64)
+            .bind(size)
             .bind(media::new_key())
             .execute(&mut *c)
             .await?;

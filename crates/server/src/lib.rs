@@ -27,6 +27,7 @@ pub mod seed;
 pub mod soundboard;
 pub mod state;
 pub mod stickers;
+pub mod storage;
 pub mod store;
 pub mod threads;
 pub mod unfurl;
@@ -38,14 +39,22 @@ use axum::extract::State;
 use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::{Json, Router};
 use sqlx::PgPool;
-use sqlx::postgres::PgPoolOptions;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 pub use config::Config;
 pub use state::AppState;
 
-pub async fn connect(database_url: &str) -> Result<PgPool, sqlx::Error> {
-    PgPoolOptions::new().max_connections(10).connect(database_url).await
+/// Opens the pool. `DATABASE_URL`'s `sslmode` (`disable`, `prefer` (default), `require`, `verify-ca`, `verify-full`) and
+/// `sslrootcert` are honoured; only `verify-full` authenticates the server (`require` encrypts without checking the certificate).
+pub async fn connect(database_url: &str, max_connections: u32) -> Result<PgPool, sqlx::Error> {
+    // TLS to the database uses rustls with ring, like every other outbound connection.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    PgPoolOptions::new().max_connections(max_connections).connect_with(connect_options(database_url)?).await
+}
+
+pub fn connect_options(database_url: &str) -> Result<PgConnectOptions, sqlx::Error> {
+    database_url.parse::<PgConnectOptions>()
 }
 
 /// Applies the embedded migrations.

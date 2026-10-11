@@ -1405,6 +1405,107 @@ pub struct MessageSearchResponse {
     pub messages: Vec<Vec<Message>>,
 }
 
+/// `MemberSearchRequest.sort` (Discord's member-safety sort).
+pub mod member_search_sort {
+    pub const MEMBER_SINCE_NEWEST_FIRST: u8 = 1;
+    pub const MEMBER_SINCE_OLDEST_FIRST: u8 = 2;
+    pub const JOINED_VOKKO_NEWEST_FIRST: u8 = 3;
+    pub const JOINED_VOKKO_OLDEST_FIRST: u8 = 4;
+}
+
+/// `SupplementalGuildMember.join_source_type` (Discord's values; Vokko records `INVITE` and leaves the rest `UNSPECIFIED`).
+pub mod join_source_type {
+    pub const UNSPECIFIED: u8 = 0;
+    pub const BOT: u8 = 1;
+    pub const INTEGRATION: u8 = 2;
+    pub const DISCOVERY: u8 = 3;
+    pub const HUB: u8 = 4;
+    pub const INVITE: u8 = 5;
+    pub const VANITY_URL: u8 = 6;
+    pub const MANUAL_MEMBER_VERIFICATION: u8 = 7;
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct OrQuery<T> {
+    pub or_query: Vec<T>,
+}
+
+/// `{and_query}`: every listed value must match; `{or_query}`: any of them.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AndOrQuery<T> {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub and_query: Option<Vec<T>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub or_query: Option<Vec<T>>,
+}
+
+/// Inclusive bounds in unix milliseconds.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TimeRange {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gte: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lte: Option<i64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RangeQuery {
+    pub range: TimeRange,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MemberSearchQuery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<OrQuery<Snowflake>>,
+    /// Prefix of the username, display name or nickname (case-insensitive), or an exact user id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usernames: Option<OrQuery<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_ids: Option<AndOrQuery<Snowflake>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guild_joined_at: Option<RangeQuery>,
+    /// Account creation, read from the user id (snowflake).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_created_at: Option<RangeQuery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_invite_code: Option<OrQuery<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub join_source_type: Option<OrQuery<u8>>,
+}
+
+/// `POST /guilds/{id}/members-search`. Vokko pages with `offset` instead of Discord's `before`/`after` cursors.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MemberSearchRequest {
+    /// 1-1000, default 25.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    /// 0-100000, default 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+    /// `member_search_sort`, default MEMBER_SINCE_NEWEST_FIRST.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort: Option<u8>,
+    #[serde(default)]
+    pub and_query: MemberSearchQuery,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SupplementalGuildMember {
+    pub member: GuildMember,
+    /// The invite the member joined through; `null` for members from before tracking, the owner and other join paths.
+    pub source_invite_code: Option<String>,
+    pub join_source_type: u8,
+    pub inviter_id: Option<Snowflake>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MemberSearchResponse {
+    pub guild_id: Snowflake,
+    pub members: Vec<SupplementalGuildMember>,
+    pub page_result_count: u32,
+    pub total_result_count: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RateLimitError {
     pub message: String,
@@ -2573,6 +2674,211 @@ pub struct BookmarkRemove {
     pub message_id: Snowflake,
 }
 
+// ---- User settings (synced preferences) and data export ----
+
+/// `GET /users/@me/settings`, the PATCH result, the 409 body (flattened into [`UserSettingsConflict`]) and USER_SETTINGS_UPDATE.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UserSettings {
+    /// Starts at 0 (nothing saved yet) and grows by one with every accepted PATCH.
+    pub version: u64,
+    /// Only keys of [`user_settings::KEYS`]; a key that is absent means the client default.
+    pub settings: serde_json::Map<String, Value>,
+}
+
+/// `PATCH /users/@me/settings`: `version` is the one the change is based on; each key in `settings` is set, `null` removes it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PatchUserSettingsRequest {
+    pub version: u64,
+    pub settings: serde_json::Map<String, Value>,
+}
+
+/// 409 body of a PATCH based on an old version: the error plus the current blob.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UserSettingsConflict {
+    pub code: u32,
+    pub message: String,
+    pub version: u64,
+    pub settings: serde_json::Map<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExportedGuild {
+    pub id: Snowflake,
+    pub name: String,
+    pub nick: Option<String>,
+    pub joined_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExportedChannel {
+    pub id: Snowflake,
+    #[serde(rename = "type")]
+    pub kind: ChannelType,
+    pub guild_id: Option<Snowflake>,
+    pub name: Option<String>,
+    /// DMs and group DMs: the other recipients.
+    pub recipient_ids: Vec<Snowflake>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExportedMessage {
+    pub id: Snowflake,
+    pub channel_id: Snowflake,
+    pub content: String,
+    pub timestamp: String,
+    pub edited_timestamp: Option<String>,
+    /// File names of the message's attachments.
+    pub attachments: Vec<String>,
+}
+
+/// `GET /users/@me/export` ("Request my data"): the caller's own data as JSON, at most once per 24 h.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UserDataExport {
+    pub exported_at: String,
+    pub user: User,
+    pub settings: UserSettings,
+    pub relationships: Vec<Relationship>,
+    pub guilds: Vec<ExportedGuild>,
+    /// Every channel the user wrote in plus their open DMs.
+    pub channels: Vec<ExportedChannel>,
+    /// The user's own messages, newest first, at most [`user_settings::EXPORT_MAX_MESSAGES`].
+    pub messages: Vec<ExportedMessage>,
+    pub messages_truncated: bool,
+}
+
+/// The allow-list of synced settings. A key the server does not know is rejected, so a new synced pref needs one line here
+/// (and one in `apps/desktop/src/ui/settingsSync.ts`).
+pub mod user_settings {
+    use serde_json::Value;
+
+    /// Serialized size cap of the stored blob.
+    pub const MAX_BYTES: usize = 64 * 1024;
+    pub const EXPORT_MAX_MESSAGES: i64 = 20_000;
+    /// 409 code of a PATCH whose `version` is not the current one.
+    pub const VERSION_CONFLICT: u32 = 40090;
+    pub const MAX_KEYBINDS: usize = 512;
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum Kind {
+        Bool,
+        Enum(&'static [&'static str]),
+        Int {
+            min: i64,
+            max: i64,
+        },
+        Text {
+            max_chars: usize,
+        },
+        /// Array of distinct short strings.
+        StringList {
+            max_items: usize,
+            max_chars: usize,
+        },
+        /// Array of `{action, keys, global?}` objects.
+        Keybinds,
+    }
+
+    const MESSAGE_DISPLAY: &[&str] = &["cozy", "compact"];
+    const DENSITY: &[&str] = &["compact", "default", "cozy"];
+    const SPACING: &[&str] = &["compact", "balanced", "roomy"];
+    const TIME_FORMAT: &[&str] = &["auto", "12", "24"];
+    const SPOILERS: &[&str] = &["click", "always", "moderated"];
+    const REACTION_NOTIFICATIONS: &[&str] = &["all", "dm", "never"];
+
+    pub const KEYS: &[(&str, Kind)] = &[
+        // Appearance
+        // Theme ids grow with every client release (community and gradient themes), so the client validates them.
+        ("theme", Kind::Text { max_chars: 32 }),
+        ("message_display", Kind::Enum(MESSAGE_DISPLAY)),
+        ("density", Kind::Enum(DENSITY)),
+        ("message_spacing", Kind::Enum(SPACING)),
+        ("message_group_gap", Kind::Int { min: 0, max: 24 }),
+        ("show_compact_avatars", Kind::Bool),
+        // Chat
+        ("inline_attachment_media", Kind::Bool),
+        ("inline_embed_media", Kind::Bool),
+        ("show_embeds", Kind::Bool),
+        ("show_reactions", Kind::Bool),
+        ("convert_emoticons", Kind::Bool),
+        ("emoji_autocomplete", Kind::Bool),
+        ("sticker_suggestions", Kind::Bool),
+        ("sticker_autocomplete", Kind::Bool),
+        ("preview_markdown", Kind::Bool),
+        ("spoiler_content", Kind::Enum(SPOILERS)),
+        ("thread_split_view", Kind::Bool),
+        // Language & time
+        ("locale", Kind::Text { max_chars: 16 }),
+        ("time_format", Kind::Enum(TIME_FORMAT)),
+        // Notifications
+        ("desktop_notifications", Kind::Bool),
+        ("notification_sounds", Kind::Bool),
+        ("sound_current_channel", Kind::Bool),
+        ("unread_badge", Kind::Bool),
+        ("taskbar_flash", Kind::Bool),
+        ("friends_online_alerts", Kind::Bool),
+        ("reaction_notifications", Kind::Enum(REACTION_NOTIFICATIONS)),
+        ("disabled_sounds", Kind::StringList { max_items: 32, max_chars: 32 }),
+        // Keybinds
+        ("keybinds", Kind::Keybinds),
+        // Streamer mode
+        ("streamer_mode", Kind::Bool),
+        ("streamer_auto_enable", Kind::Bool),
+        ("streamer_hide_personal", Kind::Bool),
+        ("streamer_hide_invites", Kind::Bool),
+        ("streamer_disable_sounds", Kind::Bool),
+        ("streamer_disable_notifications", Kind::Bool),
+        ("streamer_hide_window", Kind::Bool),
+        // Advanced
+        ("developer_mode", Kind::Bool),
+        // Data & privacy (the server enforces these three groups)
+        ("dms_from_server_members", Kind::Bool),
+        ("message_requests", Kind::Bool),
+        ("friend_requests_everyone", Kind::Bool),
+        ("friend_requests_mutual_friends", Kind::Bool),
+        ("friend_requests_mutual_guilds", Kind::Bool),
+    ];
+
+    pub fn kind(key: &str) -> Option<Kind> {
+        KEYS.iter().find(|(name, _)| *name == key).map(|(_, kind)| *kind)
+    }
+
+    fn short_text(value: &Value, max_chars: usize) -> bool {
+        value.as_str().is_some_and(|text| !text.is_empty() && text.chars().count() <= max_chars)
+    }
+
+    /// Checks one value against its key; the error is the 50035 message for that key.
+    pub fn validate(key: &str, value: &Value) -> Result<(), &'static str> {
+        let Some(kind) = kind(key) else { return Err("Unknown setting.") };
+        let ok = match kind {
+            Kind::Bool => value.is_boolean(),
+            Kind::Enum(values) => value.as_str().is_some_and(|text| values.contains(&text)),
+            Kind::Int { min, max } => value.as_i64().is_some_and(|number| (min..=max).contains(&number)),
+            Kind::Text { max_chars } => short_text(value, max_chars),
+            Kind::StringList { max_items, max_chars } => value.as_array().is_some_and(|items| {
+                let mut seen = std::collections::HashSet::new();
+                items.len() <= max_items && items.iter().all(|item| short_text(item, max_chars) && seen.insert(item.as_str()))
+            }),
+            Kind::Keybinds => value.as_array().is_some_and(|items| {
+                items.len() <= MAX_KEYBINDS
+                    && items.iter().all(|item| {
+                        item.as_object().is_some_and(|bind| {
+                            bind.keys().all(|field| matches!(field.as_str(), "action" | "keys" | "global"))
+                                && bind.get("action").is_some_and(|action| short_text(action, 64))
+                                && bind.get("keys").is_some_and(|keys| short_text(keys, 64))
+                                && bind.get("global").is_none_or(Value::is_boolean)
+                        })
+                    })
+            }),
+        };
+        if ok { Ok(()) } else { Err("Invalid value for this setting.") }
+    }
+
+    /// Server-enforced privacy setting with its default when the key is absent.
+    pub fn flag(settings: &serde_json::Map<String, Value>, key: &str, default: bool) -> bool {
+        settings.get(key).and_then(Value::as_bool).unwrap_or(default)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ApiError {
     pub code: u32,
@@ -3221,6 +3527,7 @@ pub enum GatewayEvent {
     ReminderCreate(Box<Reminder>),
     ReminderDue(Box<Reminder>),
     ReminderDelete(IdOnly),
+    UserSettingsUpdate(Box<UserSettings>),
     VoiceStateUpdate(Box<VoiceState>),
     VoiceServerUpdate(VoiceServerUpdate),
     VoiceConnectFailed(VoiceConnectFailed),
@@ -3301,6 +3608,7 @@ impl GatewayEvent {
             Self::ReminderCreate(_) => "REMINDER_CREATE",
             Self::ReminderDue(_) => "REMINDER_DUE",
             Self::ReminderDelete(_) => "REMINDER_DELETE",
+            Self::UserSettingsUpdate(_) => "USER_SETTINGS_UPDATE",
             Self::VoiceStateUpdate(_) => "VOICE_STATE_UPDATE",
             Self::VoiceServerUpdate(_) => "VOICE_SERVER_UPDATE",
             Self::VoiceConnectFailed(_) => "VOICE_CONNECT_FAILED",
@@ -3370,6 +3678,7 @@ impl GatewayEvent {
             Self::BookmarkRemove(value) => serde_json::to_value(value),
             Self::ReminderCreate(value) | Self::ReminderDue(value) => serde_json::to_value(value),
             Self::ReminderDelete(value) => serde_json::to_value(value),
+            Self::UserSettingsUpdate(value) => serde_json::to_value(value),
             Self::VoiceStateUpdate(value) => serde_json::to_value(value),
             Self::VoiceServerUpdate(value) => serde_json::to_value(value),
             Self::VoiceConnectFailed(value) => serde_json::to_value(value),
@@ -3417,6 +3726,25 @@ mod tests {
 
     fn user() -> Value {
         json!({"id": "100", "username": "sam", "global_name": null, "avatar": null, "banner_color": "#5865f2", "bio": null, "bot": false, "banner": null, "pronouns": null, "theme_colors": null, "avatar_decoration": null, "profile_effect": null, "primary_guild": null})
+    }
+
+    #[test]
+    fn member_search() {
+        round_trip::<MemberSearchRequest>(json!({
+            "limit": 12, "offset": 24, "sort": 2,
+            "and_query": {
+                "usernames": {"or_query": ["ryz"]}, "user_id": {"or_query": ["100"]}, "role_ids": {"or_query": ["301"]},
+                "guild_joined_at": {"range": {"gte": 1_700_000_000_000_i64}}, "user_created_at": {"range": {"gte": 1, "lte": 2}},
+                "source_invite_code": {"or_query": ["abc"]}, "join_source_type": {"or_query": [5]}
+            }
+        }));
+        round_trip::<MemberSearchRequest>(json!({"and_query": {}}));
+        let member = json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T00:00:00Z", "communication_disabled_until": null,
+            "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null});
+        round_trip::<MemberSearchResponse>(json!({
+            "guild_id": "300", "page_result_count": 1, "total_result_count": 7,
+            "members": [{"member": member, "source_invite_code": "abc", "join_source_type": 5, "inviter_id": "101"}]
+        }));
     }
 
     #[test]
@@ -3886,6 +4214,31 @@ mod tests {
             json!({"type": "poll_result", "fields": [{"name": "poll_question_text", "value": "Lunch?"}, {"name": "total_votes", "value": "2"}]}),
         );
         round_trip::<PollAnswerVotersResponse>(json!({"users": [user()]}));
+    }
+
+    #[test]
+    fn user_settings_shapes_and_allow_list() {
+        round_trip::<UserSettings>(json!({"version": 3, "settings": {"theme": "light", "keybinds": [{"action": "mark-read", "keys": "Shift+Escape"}]}}));
+        round_trip::<PatchUserSettingsRequest>(json!({"version": 3, "settings": {"theme": null, "time_format": "24"}}));
+        round_trip::<UserSettingsConflict>(json!({"code": 40090, "message": "Settings version conflict", "version": 4, "settings": {}}));
+        round_trip::<UserDataExport>(json!({
+            "exported_at": "2026-10-12T10:00:00.000Z", "user": user(), "settings": {"version": 0, "settings": {}}, "relationships": [],
+            "guilds": [{"id": "300", "name": "g", "nick": null, "joined_at": "2026-10-11T10:00:00.000Z"}],
+            "channels": [{"id": "201", "type": 1, "guild_id": null, "name": null, "recipient_ids": ["101"]}],
+            "messages": [{"id": "11", "channel_id": "201", "content": "hi", "timestamp": "2026-10-11T10:00:00.000Z", "edited_timestamp": null, "attachments": ["a.png"]}],
+            "messages_truncated": false
+        }));
+        let event = GatewayEvent::UserSettingsUpdate(Box::new(UserSettings { version: 2, settings: serde_json::Map::new() }));
+        assert_eq!((event.name(), event.data()), ("USER_SETTINGS_UPDATE", json!({"version": 2, "settings": {}})));
+        use user_settings::validate;
+        assert!(validate("theme", &json!("onyx")).is_ok());
+        assert!(validate("theme", &json!("x".repeat(33))).is_err());
+        assert!(validate("time_format", &json!("25")).is_err());
+        assert!(validate("nope", &json!(true)).is_err());
+        assert!(validate("font_size", &json!(30)).is_err());
+        assert!(validate("disabled_sounds", &json!(["message", "message"])).is_err());
+        assert!(validate("keybinds", &json!([{"action": "a", "keys": "Ctrl+K", "global": true}])).is_ok());
+        assert!(validate("keybinds", &json!([{"action": "a", "keys": "Ctrl+K", "extra": 1}])).is_err());
     }
 
     #[test]

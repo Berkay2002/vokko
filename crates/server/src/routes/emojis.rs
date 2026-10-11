@@ -1,12 +1,10 @@
 use axum::Json;
 use axum::Router;
-use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_LENGTH, CONTENT_TYPE, HeaderName};
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::Response;
 use axum::routing::get;
-use tokio_util::io::ReaderStream;
 use vokko_protocol::api::permissions::MANAGE_GUILD_EXPRESSIONS;
 use vokko_protocol::api::{CreateGuildEmojiRequest, EditGuildEmojiRequest, GuildEmoji, Snowflake};
 
@@ -97,7 +95,7 @@ async fn create(
     if size > MAX_BYTES {
         return Err(ApiErr::invalid(field, "The image is too large (256 KiB at most)."));
     }
-    let bytes = tokio::fs::read(media::file_path(&state, attachment_id)).await.map_err(|_| ApiErr::invalid(field, "Unknown attachment."))?;
+    let bytes = state.storage.read(attachment_id).await.map_err(|_| ApiErr::invalid(field, "Unknown attachment."))?;
     let animated = emojis::is_animated(&content_type, &bytes);
 
     let emoji_id = state.ids.next();
@@ -182,14 +180,13 @@ async fn image(State(state): State<AppState>, Path(emoji): Path<String>) -> ApiR
             .fetch_optional(&state.db)
             .await?;
     let Some((attachment_id, content_type)) = row else { return Err(ApiErr::unknown_emoji()) };
-    let file = tokio::fs::File::open(media::file_path(&state, attachment_id)).await.map_err(|_| ApiErr::unknown_emoji())?;
-    let length = file.metadata().await.map_err(|_| ApiErr::unknown_emoji())?.len();
+    let object = state.storage.open(attachment_id).await.map_err(|_| ApiErr::unknown_emoji())?;
     let content_type = content_type.unwrap_or_else(|| "application/octet-stream".to_owned());
-    let mut response = Response::new(Body::from_stream(ReaderStream::new(file)));
+    let mut response = Response::new(object.body);
     *response.status_mut() = StatusCode::OK;
     let headers = response.headers_mut();
     headers.insert(CONTENT_TYPE, HeaderValue::from_str(&content_type).map_err(|_| ApiErr::internal())?);
-    headers.insert(CONTENT_LENGTH, HeaderValue::from(length));
+    headers.insert(CONTENT_LENGTH, HeaderValue::from(object.length));
     // The image of an id never changes (PATCH edits only name and roles); a deleted emoji 404s once the cache expires.
     headers.insert(CACHE_CONTROL, HeaderValue::from_static("public, max-age=86400"));
     headers.insert(HeaderName::from_static("x-content-type-options"), HeaderValue::from_static("nosniff"));

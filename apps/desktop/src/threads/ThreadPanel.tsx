@@ -8,6 +8,7 @@ import { PinnedMessages } from "../chat/PinnedMessages";
 import { chatToast } from "../chat/toast";
 import { muteItem, notificationItem } from "../shell/menus";
 import { Popout, Tooltip, useContextMenu, type MenuItem } from "../ui";
+import { getPrefs } from "../ui/prefs";
 import { ThreadMembers } from "./ThreadMembers";
 import { DeleteThreadModal, EditThreadModal } from "./ThreadModals";
 import { useThreadRights } from "./rights";
@@ -140,8 +141,10 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
       const pinned = isPinned(thread);
       out.push({ id: "pin", label: pinned ? "Unpin Post" : "Pin Post", icon: pinned ? <PinOff size={16} /> : <Pin size={16} />, onSelect: () => patchThread(thread, { flags: pinned ? 0 : ChannelFlags.Pinned }) });
     }
-    out.push({ type: "separator" });
-    out.push({ id: "copy-id", label: "Copy Thread ID", icon: <Copy size={16} />, onSelect: () => void navigator.clipboard?.writeText(thread.id) });
+    if (getPrefs().developerMode) {
+      out.push({ type: "separator" });
+      out.push({ id: "copy-id", label: "Copy Thread ID", icon: <Copy size={16} />, onSelect: () => void navigator.clipboard?.writeText(thread.id) });
+    }
     if (rights.canDelete) {
       out.push({ type: "separator" });
       out.push({ id: "delete", label: forumPost ? "Delete Post" : "Delete Thread", icon: <Trash2 size={16} />, danger: true, onSelect: () => setDialog("delete") });

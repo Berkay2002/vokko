@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 import type { Attachment, Channel, Guild, GuildMember, Message, Role, Snowflake, User } from '../api/types';
 import { ChannelType } from '../api/types';
 import type { MarkdownContext } from './markdown';
-import { AnimatedImage, cacheUser, canSendIn, closeModal, displayName, go, guildPath, openProfile, roleColor, useStableChannel, useChatDisplayPrefs, useCompactMode, useCustomColorScale, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
+import { cacheUser, canSendIn, closeModal, displayName, go, guildPath, openProfile, roleColor, useStableChannel, useChatDisplayPrefs, useChatLocale, useCompactMode, useCustomColorScale, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
 import { mentionTarget } from './mentions';
 import { cachedUser } from './userCache';
 import { useEmojiDb } from './emojiData';
@@ -48,6 +48,10 @@ export interface ChatContextValue {
   roleDotOf(message: Message): string | null;
   /** The shell's message display toggles (embeds, reactions, role colours, compact avatars). */
   display: ChatDisplayPrefs;
+  /** Spoilers start revealed here (Settings > Chat > spoilers). */
+  revealSpoilers: boolean;
+  /** Locale tag of timestamps (also on <html lang>); part of the value so messages re-render when it changes. */
+  locale: string;
   userById(id: Snowflake): User | undefined;
   /** Hooks supplied by ChatView. */
   actions: ChatActions;
@@ -98,7 +102,8 @@ export function ChatProvider({ channelId, actions, replyingId = null, onNavigate
   const shortcodes = emoji?.shortcodes;
   const customEmojiUrl = useCustomEmojiUrl();
   const compact = useCompactMode();
-  const { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat } = useChatDisplayPrefs();
+  const locale = useChatLocale();
+  const { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, inlineAttachmentMedia, inlineEmbedMedia, spoilerContent } = useChatDisplayPrefs();
   const scaleColor = useCustomColorScale();
 
   // A timeout lifts by itself: recompute canSend when it ends (the delay is clamped to the 32-bit timer limit, the tick re-arms).
@@ -117,6 +122,8 @@ export function ChatProvider({ channelId, actions, replyingId = null, onNavigate
     const userById = (id: Snowflake): User | undefined => (id === me.id ? me : users[id] ?? members[id]?.user ?? recipients.find(u => u.id === id) ?? cachedUser(id));
     const nameOf = (user: User, member?: Pick<GuildMember, 'nick'> | null): string => displayName(user, guildId ? member ?? members[user.id] : null);
     const roles = guild?.roles ?? [];
+    const canManage = canManageMessages(guild, me, members[me.id]);
+    const revealSpoilers = spoilerContent === 'always' || (spoilerContent === 'moderated' && !!guildId && canManage);
     const mentionEnv = { guildId, channels: guildChannels, hasUser: (uid: Snowflake) => !!userById(uid) };
     const md: MarkdownContext = {
       userName: id => { const u = userById(id); return u ? nameOf(u, members[id]) : null; },
@@ -146,18 +153,21 @@ export function ChatProvider({ channelId, actions, replyingId = null, onNavigate
       },
       renderEmoji: (unicode, name) => <EmojiGlyph unicode={unicode} name={name} />,
       customEmojiUrl: id => customEmojiUrl(id),
+      revealSpoilers,
       renderCustomEmoji: e => <CustomEmojiGlyph id={e.id} name={e.name} animated={e.animated} src={e.src} />,
     };
     return {
       channelId, channel, guild, guildId, me, md, roles, members, channels: guildChannels, actions, userById, nameOf, replyingId, compact,
       isDm: channel?.type === ChannelType.DM || channel?.type === ChannelType.GroupDM,
-      canManage: canManageMessages(guild, me, members[me.id]),
+      canManage,
       canSend: canSendIn(guild, members[me.id] && { id: me.id, roles: members[me.id]!.roles, communication_disabled_until: members[me.id]!.communication_disabled_until }, channel, parent),
       colorOf: m => (guildId && roleColors === 'name' ? scaleColor(roleColor(guildId, members[m.author.id] ?? m.member ?? null)) : null),
       roleDotOf: m => (guildId && roleColors === 'dot' ? scaleColor(roleColor(guildId, members[m.author.id] ?? m.member ?? null)) : null),
-      display: { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat },
+      display: { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, inlineAttachmentMedia, inlineEmbedMedia, spoilerContent },
+      revealSpoilers,
+      locale,
     };
-  }, [me, channel, parent, tick, channelId, guild, guildId, members, users, guildChannels, shortcodes, customEmojiUrl, actions, onNavigate, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, scaleColor]);
+  }, [locale, me, channel, parent, tick, channelId, guild, guildId, members, users, guildChannels, shortcodes, customEmojiUrl, actions, onNavigate, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, inlineAttachmentMedia, inlineEmbedMedia, spoilerContent, scaleColor]);
 
   if (!value) return null;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

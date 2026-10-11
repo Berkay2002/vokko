@@ -50,6 +50,9 @@ General rules:
 | GET | /users/@me/channels | DM + group DM `Channel[]` |
 | POST | /users/@me/channels | `{recipient_id}` → existing or new DM `Channel`; `{recipient_ids: []}` → group DM |
 | GET | /users/@me/relationships | `Relationship[]` |
+| GET | /users/@me/settings | `UserSettings` (`{version: 0, settings: {}}` before the first save), see User settings |
+| PATCH | /users/@me/settings | `PatchUserSettingsRequest` → `UserSettings`; stale `version` → 409 `UserSettingsConflict`; emits USER_SETTINGS_UPDATE |
+| GET | /users/@me/export | `UserDataExport` ("Request my data"), at most once per 24 h per user (429 `RateLimitError` with `retry_after` in seconds) |
 | PUT | /users/@me/relationships/{user_id} | body `{}` or `{type: 1}` = send/accept friend request; `{type: 2}` = block (removes any friendship/request, emits RELATIONSHIP_ADD type 2 to the blocker only; the blocked user gets RELATIONSHIP_REMOVE if they had a relationship). 204 |
 | GET | /users/{id}/profile | `UserProfile`: user, mutual guilds, mutual friend count, guild member info when `?guild_id=` |
 | POST | /users/@me/relationships | `{username}` → send friend request by username (204) |
@@ -73,6 +76,7 @@ General rules:
 | PATCH | /guilds/{id}/voice-states/{uid} | `EditVoiceStateRequest` `{channel_id, suppress}` → 204 (stage moderator): invite to speak / move to the audience |
 | DELETE | /channels/{id} | 200 + `Channel` (guild) / closes DM; a thread needs MANAGE_THREADS or being its owner (emits THREAD_DELETE) |
 | GET | /guilds/{id}/members?limit&after | `GuildMember[]` |
+| POST | /guilds/{id}/members-search | `MemberSearchRequest` → `MemberSearchResponse` (members page); needs any of ADMINISTRATOR, MANAGE_GUILD, KICK_MEMBERS, BAN_MEMBERS, MODERATE_MEMBERS, MANAGE_ROLES, MANAGE_NICKNAMES (403 50013). See Members page |
 | DELETE | /users/@me/guilds/{id} | leave guild, 204 |
 | DELETE | /guilds/{id}/members/{uid} | kick (KICK_MEMBERS + hierarchy), 204, emits GUILD_MEMBER_REMOVE to the guild and GUILD_DELETE to the kicked user |
 | PATCH | /guilds/{id}/members/{uid} | `EditMemberRequest` → `GuildMember`: nick needs MANAGE_NICKNAMES, roles MANAGE_ROLES (only roles below your highest), timeout MODERATE_MEMBERS (not on admins/owner, max 28 days), `mute` MUTE_MEMBERS, `deaf` DEAFEN_MEMBERS, `channel_id` MOVE_MEMBERS (see Voice); only sent keys change; emits GUILD_MEMBER_UPDATE |
@@ -114,7 +118,7 @@ General rules:
 | GET | /channels/{id}/invites | `InviteMetadata[]` of the channel's live invites (MANAGE_CHANNELS on the channel) |
 | GET | /guilds/{id}/invites | `InviteMetadata[]` of the guild's live invites (MANAGE_GUILD) |
 | GET | /invites/{code} | `Invite` preview |
-| POST | /invites/{code} | accept → `Guild` |
+| POST | /invites/{code} | accept → `Guild`; a new member records the invite code, its inviter and join source INVITE (see Members page) |
 | DELETE | /invites/{code} | revoke → `InviteMetadata` (MANAGE_CHANNELS on the invite's channel or MANAGE_GUILD), emits INVITE_DELETE |
 | GET | /users/@me/guild-layout | `GuildLayout` `{guild_folders, guild_positions}` |
 | PATCH | /users/@me/guild-layout | `UpdateGuildLayoutRequest` → `GuildLayout` (only sent keys change), emits GUILD_LAYOUT_UPDATE to the user's own sessions |
@@ -212,6 +216,14 @@ Onboarding (Discord shape): `GuildOnboarding` holds up to 15 prompts (multiple c
 
 Friend suggestions: candidates are users who share a guild of at most 200 members with the caller, or who are friends of the caller's friends. Never listed: the caller, bots, anyone with any relationship to the caller (friend, pending either way, blocked either way), anyone who blocked the caller, anyone with suggestions switched off, anyone the caller dismissed. Switching suggestions off (default on) empties the caller's own list and removes them from everybody else's, in one setting. Order: mutual friends first, then mutual guilds, then user id; `limit` 1-100 (default 25). `mutual_guilds` lists only guilds the caller is also in.
 
+## Members page (member-safety search)
+
+`POST /guilds/{id}/members-search` is Discord's member-safety search. Access: any of ADMINISTRATOR, MANAGE_GUILD, KICK_MEMBERS, BAN_MEMBERS, MODERATE_MEMBERS, MANAGE_ROLES, MANAGE_NICKNAMES (Discord's member-safety access check), else 403 50013; non-members 403 50001.
+- Body `{limit?, offset?, sort?, and_query}`. `limit` 1-1000 (default 25), `offset` 0-100000 (default 0; Vokko pages by offset so the UI can jump to a page, Discord uses `before`/`after` cursors, which Vokko does not take). `sort`: 1 member since newest first (default), 2 member since oldest first, 3 joined Vokko newest first, 4 joined Vokko oldest first; ties break on user id in the same direction.
+- `and_query` (every present key must match; absent or empty = no filter): `usernames.or_query` (1-10 terms, each 1-100 chars, trimmed): case-insensitive prefix of the username, global name or nickname, or, for an all-digit term, the exact user id; `user_id.or_query` (ids); `role_ids.or_query` (has any) and/or `role_ids.and_query` (has all); `guild_joined_at.range` and `user_created_at.range` `{gte?, lte?}` inclusive unix ms (account creation is read from the snowflake); `source_invite_code.or_query`; `join_source_type.or_query`. Lists hold at most 100 entries. Invalid values → 400 50035.
+- Response `{guild_id, members: [{member, source_invite_code, join_source_type, inviter_id}], page_result_count, total_result_count}`: `total_result_count` counts every match before offset/limit.
+- Join source: accepting an invite as a new member stores `source_invite_code`, `inviter_id` (the invite's creator) and `join_source_type` 5 (INVITE) on the membership. Everyone else (the owner, members from before tracking, seeded members) has `null`, `null`, 0 (UNSPECIFIED), shown as "Unknown". Leaving and rejoining through another invite records the new one.
+
 ## Stickers, GIFs, forward, bookmarks, reminders
 
 Vokko is free: nothing here is gated behind a plan. Server-side limits (sticker count per server, favourites) are plain config.
@@ -238,6 +250,17 @@ Vokko is free here too: every guild has the top tier (48 sounds), any member can
 - **Entrance sounds.** `PUT /users/@me/entrance-sounds` sets the sound of one scope (`guild_id`, or `null` = global); the same rules decide which sounds may be picked (a default sound, or a sound of a guild the user is in). When the user joins a guild voice channel (a new binding or a move, not a mute toggle or a reconnect), the server resolves the guild's entrance sound, else the global one, and sends VOICE_CHANNEL_EFFECT_SEND with `entrance: true` to everyone in the channel, the joiner included, provided the joiner has USE_SOUNDBOARD and SPEAK there (and USE_EXTERNAL_SOUNDS for another guild's sound) and the sound still exists; otherwise nothing plays. At most one entrance sound per user and channel every 3 s; extra joins are silent. Leaving a guild drops its scope; a sound that is deleted simply stops playing.
 
 Non-Discord error codes: none (10097 and 30045 are Discord's own).
+
+## User settings
+
+Synced preferences live on the account so they follow the user across devices; device-only ones never leave the client. The device-only list is `DEVICE_LOCAL` in `apps/desktop/src/ui/settingsSync.ts`: audio/video devices and volumes, voice processing (noise suppression and its kind, echo cancellation, gain, input profile, sensitivity), camera, camera background (uploads live in the device's IndexedDB), Go Live and viewer quality, stream attenuation and previews, debug logging, and the Accessibility display prefs (font size, zoom, saturation, contrast, motion and the rest), app icon, window and hardware acceleration.
+- `disabled_sounds` is one list for the message sounds (`message`, `mention`) and the voice sounds of Voice & Video (`apps/desktop/src/notify/soundCatalog.ts`); the server checks the shape only (distinct strings), and a client drops ids it does not know.
+- The blob is a flat JSON object of allow-listed keys (`vokko_protocol::api::user_settings::KEYS`, mirrored by the client registry in `apps/desktop/src/ui/settingsSync.ts`); keys are the snake_case form of the client pref name. Each key has a value kind (bool, enum, bounded int, short text, string list, keybind list); an unknown key or a wrong value → 400 50035 with `errors.<key>`, and nothing is saved. The stored blob is at most 64 KiB serialized (400 50035 on `settings`).
+- `PATCH` merges: keys in `settings` are set, `null` removes a key (client default again), absent keys stay. It must carry the `version` it is based on; if that is not the current version → 409 with `UserSettingsConflict` (`code` 40090 plus the current `version` and `settings`). An accepted PATCH increments `version` even if nothing changed and sends `USER_SETTINGS_UPDATE` (the full `UserSettings`) to every gateway session of the user, the saving one included.
+- Client conflict rule: server wins for keys another device changed since our base; our own pending keys the server did not touch are re-applied on top of the new blob and pushed again.
+- Client accounts and devices: the local cache remembers the account it was last synced with (`localStorage["vokko.prefs.syncedFor"]`). A device that never synced uploads its non-default values for the keys the account has not set (the account keeps the keys it has); a device last synced with another account takes the new account's blob (or the defaults) and uploads nothing. Unsent changes are kept per account (`vokko.prefs.pending.<user id>`, values plus the version they were made on) and pushed on the next start unless another device changed the same key since; network errors, 429 and 5xx are retried after 5 s, 30 s, then every 120 s.
+- Server-enforced privacy keys (defaults when absent): `dms_from_server_members` (true): when false, a user who is neither a friend nor already in an open DM with you cannot open a new DM to you (403 50007); `friend_requests_everyone` (true), `friend_requests_mutual_friends` (true), `friend_requests_mutual_guilds` (true): a friend request is accepted only from a source that one of the enabled keys allows (everyone, someone with a mutual friend, someone in a shared guild), else 403 80000 "Incoming friend requests disabled". `message_requests` is client-side: DMs from people who are not friends are filed under message requests and do not notify.
+- `GET /users/@me/export` returns the caller's profile, settings, relationships, guild memberships, channels they wrote in or have open DMs with, and up to 20000 of their own messages (newest first, `messages_truncated` when cut). One export per user per 24 h, counted from the last successful export.
 
 ## Threads, forums and announcements
 

@@ -5,6 +5,7 @@ import { appStore, displayName, useStore } from "../../api/store";
 import { request } from "../../api/rest";
 import type { Guild, GuildMember, Role, RolePositionUpdate, RoleRequest } from "../../api/types";
 import { Modal, useContextMenu } from "../../ui";
+import { getPrefs } from "../../ui/prefs";
 import { Avatar } from "../Avatar";
 import { Category, Divider, Field, Page, RadioGroup, SwitchRow } from "./controls";
 import { useFrameLayout } from "./FullScreenSettings";
@@ -188,8 +189,8 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
           aria-haspopup="menu"
           onClick={e =>
             menu.open(e, [
-              { id: "copy-id", label: "Copy Role ID", onSelect: () => void navigator.clipboard.writeText(role.id).catch(() => undefined) },
-              ...(editable && !isEveryone ? [{ type: "separator" as const }, { id: "delete", label: "Delete Role", danger: true, onSelect: () => setConfirmDelete(true) }] : []),
+              ...(getPrefs().developerMode ? [{ id: "copy-id", label: "Copy Role ID", onSelect: () => void navigator.clipboard.writeText(role.id).catch(() => undefined) }, { type: "separator" as const }] : []),
+              ...(editable && !isEveryone ? [{ id: "delete", label: "Delete Role", danger: true, onSelect: () => setConfirmDelete(true) }] : []),
             ])
           }
         >

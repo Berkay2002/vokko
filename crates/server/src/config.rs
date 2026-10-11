@@ -6,6 +6,7 @@ use std::time::Duration;
 use crate::account::config::AccountsConfig;
 use vokko_protocol::api::{VOICE_BITRATE_CEILING_MAX, VOICE_BITRATE_GUILD_MAX, VOICE_BITRATE_MIN};
 
+use crate::storage::StorageConfig;
 use crate::unfurl::UnfurlConfig;
 
 #[derive(Clone, Debug)]
@@ -13,6 +14,10 @@ pub struct Config {
     pub database_url: String,
     pub bind: String,
     pub data_dir: PathBuf,
+    /// Attachment backend (`VOKKO_STORAGE`, `storage::StorageConfig`); local disk under `data_dir` by default.
+    pub storage: StorageConfig,
+    /// Database pool size (`VOKKO_DB_MAX_CONNECTIONS`, default 10); lower it for free-tier connection limits.
+    pub db_max_connections: u32,
     /// Origin used in absolute attachment URLs.
     pub public_url: String,
     pub heartbeat_interval_ms: u64,
@@ -83,6 +88,14 @@ pub struct LiveKitConfig {
     pub api_secret: String,
 }
 
+/// `VOKKO_DB_MAX_CONNECTIONS`: 1..=1000.
+pub fn parse_db_max_connections(value: &str) -> Result<u32, String> {
+    match value.trim().parse::<u32>() {
+        Ok(count @ 1..=1000) => Ok(count),
+        _ => Err(format!("VOKKO_DB_MAX_CONNECTIONS must be a whole number from 1 to 1000, got {value}")),
+    }
+}
+
 impl LiveKitConfig {
     /// `wss://host` → `https://host`, `ws://host` → `http://host`.
     pub fn derive_api_url(url: &str) -> String {
@@ -107,6 +120,8 @@ pub fn parse_connect_timeout(value: &str) -> Result<Duration, String> {
         _ => Err(format!("VOKKO_VOICE_CONNECT_TIMEOUT_SECS must be whole seconds between 5 and 600, got {value}")),
     }
 }
+/// Default of `VOKKO_DB_MAX_CONNECTIONS`.
+pub const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
 /// Default of `VOKKO_MAX_UPLOAD_MB`.
 pub const DEFAULT_MAX_UPLOAD_MB: usize = 25;
 /// Total size of one user's pending (not attached, not avatar/icon) uploads.
@@ -150,6 +165,11 @@ impl DotEnv {
         Self(HashMap::new())
     }
 
+    /// Fixed values (tests); the real environment still wins on lookups.
+    pub fn from_pairs(pairs: &[(&str, &str)]) -> Self {
+        Self(pairs.iter().map(|(key, value)| ((*key).to_owned(), (*value).to_owned())).collect())
+    }
+
     pub fn from_file(path: &Path) -> Self {
         Self(std::fs::read_to_string(path).map(|text| Self::parse(&text).0).unwrap_or_default())
     }
@@ -190,6 +210,10 @@ impl Config {
             .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("data").join("server-dev"));
         let public_url = env.get("VOKKO_PUBLIC_URL").unwrap_or_else(|| format!("http://{bind}"));
         let mut config = Self::new(database_url, bind, data_dir, public_url);
+        config.storage = StorageConfig::from_env(&env)?;
+        if let Some(value) = env.get("VOKKO_DB_MAX_CONNECTIONS") {
+            config.db_max_connections = parse_db_max_connections(&value)?;
+        }
         // `VOKKO_UNFURL=off` disables link previews (no outbound requests at all).
         config.unfurl.enabled = !env.get("VOKKO_UNFURL").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "off" | "0" | "false" | "no"));
         if let Some(value) = env.get("VOKKO_MAX_UPLOAD_MB") {
@@ -261,6 +285,8 @@ impl Config {
             database_url,
             bind,
             data_dir,
+            storage: StorageConfig::Local,
+            db_max_connections: DEFAULT_DB_MAX_CONNECTIONS,
             public_url,
             heartbeat_interval_ms: 41_250,
             heartbeat_misses: 2,

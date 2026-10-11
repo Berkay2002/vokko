@@ -52,6 +52,8 @@ test('tooltips are 14/18 w500, the rail variant 16/20 w600', async ({ page }) =>
 });
 
 test('user-panel popout: profile card, status submenu, switch accounts, copy ID, edit profile', async ({ page, context }) => {
+  // Copy User ID is a developer-mode item (Settings > Advanced).
+  await page.addInitScript(() => localStorage.setItem('vokko.prefs', JSON.stringify({ developerMode: true })));
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await home(page);
   await page.locator('.user-panel-account').click();

@@ -469,6 +469,58 @@ export interface Reminder {
   message: Message | null; // null when the owner can no longer read it
 }
 
+// ---- User settings (synced preferences, docs/api.md "User settings") ----
+/** Allow-listed keys (crates/protocol `user_settings::KEYS`); values are JSON. Absent key = the client default. */
+export type UserSettingsData = Record<string, unknown>;
+export interface UserSettings {
+  version: number; // 0 = nothing saved yet; +1 per accepted PATCH
+  settings: UserSettingsData;
+}
+export interface PatchUserSettingsRequest {
+  version: number; // the version this change is based on; another one → 409 UserSettingsConflict
+  settings: UserSettingsData; // keys to set; null removes a key (back to the default)
+}
+/** 409 body of PATCH /users/@me/settings: code 40090 plus the current blob. */
+export interface UserSettingsConflict extends ApiError, UserSettings {}
+export interface Keybind {
+  action: string; // client action id (≤64 chars)
+  keys: string; // "Ctrl+Shift+K" (≤64 chars)
+  global?: boolean; // desktop only: registered with the OS while the app is in the background
+}
+
+// ---- "Request my data" (GET /users/@me/export, once per 24 h) ----
+export interface ExportedGuild {
+  id: Snowflake;
+  name: string;
+  nick: string | null;
+  joined_at: ISO8601;
+}
+export interface ExportedChannel {
+  id: Snowflake;
+  type: ChannelType;
+  guild_id: Snowflake | null;
+  name: string | null;
+  recipient_ids: Snowflake[]; // DMs: the other recipients
+}
+export interface ExportedMessage {
+  id: Snowflake;
+  channel_id: Snowflake;
+  content: string;
+  timestamp: ISO8601;
+  edited_timestamp: ISO8601 | null;
+  attachments: string[]; // file names
+}
+export interface UserDataExport {
+  exported_at: ISO8601;
+  user: User;
+  settings: UserSettings;
+  relationships: Relationship[];
+  guilds: ExportedGuild[];
+  channels: ExportedChannel[]; // channels the user wrote in plus open DMs
+  messages: ExportedMessage[]; // own messages, newest first, at most 20000
+  messages_truncated: boolean;
+}
+
 export interface Message {
   id: Snowflake;
   channel_id: Snowflake;
@@ -855,6 +907,62 @@ export interface MessageSearchQuery {
 export interface MessageSearchResponse {
   total_results: number; // all matches the caller may read, before offset/limit
   messages: Message[][]; // each hit is a one-element array (Discord's shape)
+}
+
+// ---- Members page: POST /guilds/{id}/members-search (Discord's member-safety search) ----
+
+export enum MemberSearchSort {
+  MemberSinceNewestFirst = 1,
+  MemberSinceOldestFirst = 2,
+  JoinedVokkoNewestFirst = 3,
+  JoinedVokkoOldestFirst = 4,
+}
+export enum JoinSourceType {
+  Unspecified = 0, // members from before tracking, the owner, and every path other than an invite
+  Bot = 1,
+  Integration = 2,
+  Discovery = 3,
+  Hub = 4,
+  Invite = 5,
+  VanityUrl = 6,
+  ManualMemberVerification = 7,
+}
+export interface OrQuery<T> {
+  or_query: T[];
+}
+export interface AndOrQuery<T> {
+  and_query?: T[]; // every listed value
+  or_query?: T[]; // any of them
+}
+export interface RangeQuery {
+  range: { gte?: number; lte?: number }; // inclusive, unix ms
+}
+export interface MemberSearchQuery {
+  user_id?: OrQuery<Snowflake>;
+  usernames?: OrQuery<string>; // case-insensitive prefix of username, display name or nickname, or an exact user id
+  role_ids?: AndOrQuery<Snowflake>;
+  guild_joined_at?: RangeQuery;
+  user_created_at?: RangeQuery; // read from the user id (snowflake)
+  source_invite_code?: OrQuery<string>;
+  join_source_type?: OrQuery<JoinSourceType>;
+}
+export interface MemberSearchRequest {
+  limit?: number; // 1-1000, default 25
+  offset?: number; // 0-100000, default 0 (Vokko pages by offset, not Discord's before/after cursors)
+  sort?: MemberSearchSort; // default MemberSinceNewestFirst
+  and_query: MemberSearchQuery;
+}
+export interface SupplementalGuildMember {
+  member: GuildMember;
+  source_invite_code: string | null; // null: joined before tracking, the owner, or not through an invite
+  join_source_type: JoinSourceType;
+  inviter_id: Snowflake | null;
+}
+export interface MemberSearchResponse {
+  guild_id: Snowflake;
+  members: SupplementalGuildMember[];
+  page_result_count: number;
+  total_result_count: number; // all matches, before offset/limit
 }
 export interface RateLimitError {
   message: string;
@@ -1513,6 +1621,7 @@ export interface GatewayEvents {
   REMINDER_CREATE: Reminder;
   REMINDER_DUE: Reminder; // delivered_at set; the "notice from the instance"
   REMINDER_DELETE: { id: Snowflake };
+  USER_SETTINGS_UPDATE: UserSettings; // the full blob after a change, to every session of that user (the one that saved it included)
   VOICE_STATE_UPDATE: VoiceState; // to everyone who can see the channel
   VOICE_SERVER_UPDATE: { guild_id: Snowflake | null; channel_id: Snowflake; endpoint: string; token: string; session_id: string }; // requesting session only; session_id = the VoiceState.session_id this token is for
   VOICE_CONNECT_FAILED: { guild_id: Snowflake | null; channel_id: Snowflake; reason: VoiceConnectFailure }; // Vokko-only, requesting session only

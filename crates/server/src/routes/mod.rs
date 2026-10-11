@@ -14,6 +14,7 @@ pub mod guild_layout;
 mod guilds;
 mod interactions;
 pub mod invites;
+mod member_search;
 pub mod messages;
 pub mod moderation;
 mod onboarding;
@@ -25,6 +26,7 @@ mod saved;
 pub mod scheduled_events;
 mod search;
 mod soundboard;
+pub mod settings;
 mod stickers;
 mod suggestions;
 mod threads;
@@ -39,6 +41,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(guild_layout::routes())
         .merge(guilds::routes())
         .merge(moderation::routes())
+        .merge(member_search::routes())
         .merge(channels::routes())
         .merge(overwrites::routes())
         .merge(invites::routes())
@@ -52,6 +55,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(onboarding::routes())
         .merge(suggestions::routes())
         .merge(saved::routes())
+        .merge(settings::routes())
         .merge(gifs::routes())
         .merge(stickers::routes())
         .merge(soundboard::routes())

@@ -32,6 +32,8 @@ export interface MarkdownContext {
   /** whether a click on this mention does anything; when given it decides if the chip is a button (otherwise: it resolved to a name) */
   mentionActionable?(kind: 'user' | 'role' | 'channel', id: string): boolean;
   formatTimestamp?(unix: number, style: string): { text: string; title: string };
+  /** Settings > Chat > spoilers: true shows spoiler content without a click. */
+  revealSpoilers?: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -40,10 +42,16 @@ export interface MarkdownContext {
 
 const dateFormatters = new Map<string, Intl.DateTimeFormat>();
 function dateFormatter(key: string, opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
-  let f = dateFormatters.get(key);
+  // The document language carries the user's locale and 24-hour choice (src/ui/prefs.ts).
+  const lang = typeof document !== 'undefined' ? document.documentElement.lang : '';
+  let f = dateFormatters.get(`${lang}|${key}`);
   if (!f) {
-    f = new Intl.DateTimeFormat(undefined, opts);
-    dateFormatters.set(key, f);
+    try {
+      f = new Intl.DateTimeFormat(lang || undefined, opts);
+    } catch {
+      f = new Intl.DateTimeFormat(undefined, opts);
+    }
+    dateFormatters.set(`${lang}|${key}`, f);
   }
   return f;
 }
@@ -106,9 +114,9 @@ export function defaultFormatTimestamp(unix: number, style: string): { text: str
 // pieces
 // ---------------------------------------------------------------------------------------------
 
-function Spoiler({ children }: { children: ReactNode }) {
+function Spoiler({ children, initial = false }: { children: ReactNode; initial?: boolean }) {
   const [revealed, setRevealed] = useState(false);
-  if (revealed) {
+  if (revealed || initial) {
     return (
       <span className="md-spoiler" data-revealed="true">
         {children}
@@ -231,7 +239,7 @@ function renderInline(nodes: Inline[], ctx: MarkdownContext, keyPrefix: string):
       case 'strike':
         return <s key={key}>{renderInline(node.c, ctx, `${key}.`)}</s>;
       case 'spoiler':
-        return <Spoiler key={key}>{renderInline(node.c, ctx, `${key}.`)}</Spoiler>;
+        return <Spoiler key={key} initial={ctx.revealSpoilers}>{renderInline(node.c, ctx, `${key}.`)}</Spoiler>;
       case 'code':
         return (
           <code key={key} className="md-code">

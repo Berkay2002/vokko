@@ -7,6 +7,7 @@ import { StageLivePill, VoiceChannelRow, VoiceChannelUsers } from "../voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
 import { Popout, Tooltip, useContextMenu } from "../ui";
 import { EventsQuickLink } from "../community";
+import { MembersQuickLink } from "../members";
 import { groupChannels } from "./channels";
 import { useIsMuted, useLocalState } from "./localState";
 import { channelContextItems, guildDropdownItems } from "./menus";
@@ -185,6 +186,7 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
     <div className="sidebar-list guild-sidebar">
       <GuildHeader guild={guild} />
       <EventsQuickLink guildId={guild.id} />
+      <MembersQuickLink guild={guild} />
       <div className="sidebar-scroller channel-scroller">
         <ul className="channel-list" aria-label="Channels">
           {groups.map(group => {

@@ -81,6 +81,18 @@ const tauriAdapter: NotificationAdapter = {
   },
 };
 
+/** Settings > Notifications > taskbar flashing: asks the OS to flash the taskbar button / bounce the dock icon (desktop only). */
+export async function flashTaskbar(): Promise<boolean> {
+  if (!isTauri()) return false;
+  try {
+    const { getCurrentWindow, UserAttentionType } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().requestUserAttention(UserAttentionType.Informational);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 let override: NotificationAdapter | null = null;
 
 /** The adapter for this runtime (tests may inject one). */

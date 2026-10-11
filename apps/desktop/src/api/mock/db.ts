@@ -2,7 +2,7 @@
 
 import { DEFAULT_EVERYONE } from "../permissions";
 import { timestampToSnowflake } from "../snowflake";
-import type { Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageInteractionMetadata, MessageSnapshot, MessageType, Presence, ReactionEmoji, ReadState, Relationship, RelationshipType, Reminder, Role, SoundboardSound, Sticker, StickerItem, User, GuildLayout } from "../types";
+import type { JoinSourceType, Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageInteractionMetadata, MessageSnapshot, MessageType, Presence, ReactionEmoji, ReadState, Relationship, RelationshipType, Reminder, Role, SoundboardSound, Sticker, StickerItem, User, GuildLayout } from "../types";
 import type { MockEmoji } from "./emojis";
 
 export interface MockAccount {
@@ -73,11 +73,20 @@ export interface MockReminder extends Omit<Reminder, "message"> {
   owner_id: string;
 }
 
+/** How a member joined (docs/api.md "Members page"); absent = unknown (owner, seeded or pre-tracking members). */
+export interface MockJoinSource {
+  source_invite_code?: string | null;
+  inviter_id?: string | null;
+  join_source_type?: JoinSourceType;
+}
+
+export type MockMember = Pick<GuildMember, "nick" | "roles" | "joined_at" | "communication_disabled_until" | "avatar" | "banner" | "bio" | "pronouns" | "theme_colors" | "mute" | "deaf"> & MockJoinSource;
+
 export interface MockGuild {
   guild: Guild;
   /** Members who joined through a temporary invite (docs/api.md "Invites"); the mock keeps the flag but never removes them. */
   temporary?: Set<string>;
-  members: Map<string, Pick<GuildMember, "nick" | "roles" | "joined_at" | "communication_disabled_until" | "avatar" | "banner" | "bio" | "pronouns" | "theme_colors" | "mute" | "deaf">>;
+  members: Map<string, MockMember>;
 }
 
 export interface MockInvite {

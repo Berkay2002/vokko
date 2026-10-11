@@ -6,9 +6,11 @@ export interface DesktopPrefs {
   closeToTray: boolean;
   /** When started by the "run on startup" entry, stay in the tray instead of opening the window. Default false. */
   startMinimized: boolean;
+  /** GPU acceleration of the webview (Settings > Advanced); applied when the window is created, so it needs a restart. Default true. */
+  hardwareAcceleration: boolean;
 }
 
-export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = { closeToTray: true, startMinimized: false };
+export const DEFAULT_DESKTOP_PREFS: DesktopPrefs = { closeToTray: true, startMinimized: false, hardwareAcceleration: true };
 
 export function getDesktopPrefs(): Promise<DesktopPrefs> {
   return call<DesktopPrefs>("desktop_get_prefs", undefined, DEFAULT_DESKTOP_PREFS);

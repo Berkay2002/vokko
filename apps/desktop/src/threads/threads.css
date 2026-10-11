@@ -46,6 +46,21 @@
   outline: none;
 }
 
+/* Settings > Chat > thread split view off: the thread takes the channel's place */
+.channel-body.thread-full > .channel-chat {
+  display: none;
+}
+
+.channel-body.thread-full > .thread-panel {
+  flex: 1 1 auto;
+  width: auto !important; /* beats the dragged inline width */
+  border-left: 0;
+}
+
+.channel-body.thread-full .thread-panel-resize {
+  display: none;
+}
+
 .thread-panel-header {
   display: flex;
   flex: none;

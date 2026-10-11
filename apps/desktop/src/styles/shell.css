@@ -2083,6 +2083,12 @@ button.channel-header-topic:hover {
   white-space: nowrap;
 }
 
+.active-card-voice {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--status-positive);
+}
+
 /* ---- modal content ---- */
 .modal.modal-compact {
   width: 480px;

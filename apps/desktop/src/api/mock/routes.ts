@@ -1,6 +1,6 @@
 // Mock REST router: every route of docs/api.md that the UI uses, with the same status codes and error codes.
 
-import { AuditLogEvent, ChannelType, ExplicitContentFilter, MessageType, RelationshipType, VerificationLevel, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
+import { AuditLogEvent, ChannelType, ExplicitContentFilter, JoinSourceType, MessageType, RelationshipType, VerificationLevel, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
 import { compareIds } from "../snowflake";
 import { Perm, hasBit } from "../permissions";
 import { channelPermsOf } from "./access";
@@ -19,6 +19,7 @@ import { setMockVoice, setVoiceChannelStatus, voiceStates } from "./voice";
 import { callRecipientRemoved } from "./calls";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
 import "./search";
+import "./membersSearch";
 import { dismissEphemeral, mergeEphemerals } from "./apps";
 import { resolveReactionEmoji, sameReactionEmoji } from "./emojis";
 import "./calls";
@@ -26,6 +27,7 @@ import { parsePoll, requirePollPerm } from "./polls";
 import { addPoll, isPoll } from "./pollData";
 import "./invites";
 import "./stage";
+import { assertAcceptsFriendRequest, assertCanOpenDm } from "./settings";
 import "./community";
 import "./status";
 import "./soundboard";
@@ -121,6 +123,8 @@ route("POST", "/users/@me/channels", ({ viewer, body }) => {
   if (recipient) {
     if (!db.accounts.has(recipient)) fail(404, 10013, "Unknown User");
     if (recipient === viewer.user.id) fail(400, 50035, "Invalid Form Body", { recipient_id: { code: "CANNOT_DM_SELF", message: "Cannot send messages to yourself" } });
+    const existing = [...db.channels.values()].some(c => c.type === ChannelType.DM && c.participant_ids?.includes(viewer.user.id) && c.participant_ids.includes(recipient));
+    if (!existing) assertCanOpenDm(viewer.user.id, recipient);
     return channelFor(openDM(viewer.user.id, recipient), viewer.user.id);
   }
   const recipients = Array.isArray(body.recipient_ids) ? body.recipient_ids.filter((v): v is string => typeof v === "string") : [];
@@ -139,6 +143,7 @@ function addRelationship(viewerId: string, otherId: string): void {
   if (current === RelationshipType.Friend || current === RelationshipType.OutgoingRequest) return;
   if (relationship(otherId, viewerId)?.type === RelationshipType.Blocked) fail(403, 80000, "Cannot send friend request to this user");
   const accept = current === RelationshipType.IncomingRequest;
+  if (!accept) assertAcceptsFriendRequest(viewerId, otherId);
   const mine = accept ? RelationshipType.Friend : RelationshipType.OutgoingRequest;
   const theirs = accept ? RelationshipType.Friend : RelationshipType.IncomingRequest;
   setRelationship(viewerId, otherId, mine, theirs);

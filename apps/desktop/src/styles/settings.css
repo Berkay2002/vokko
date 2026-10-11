@@ -314,7 +314,9 @@
 }
 
 /* streamer mode: hide sensitive text */
-.streamer-mode .sensitive {
+.streamer-mode .sensitive,
+.streamer-hide-personal .personal-info,
+.streamer-hide-invites .invite-secret {
   filter: blur(6px);
 }
 
@@ -429,4 +431,67 @@
 .keybind-tag {
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* Keybinds editor (Settings > Keybinds) */
+.keybinds-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.keybind-editor th {
+  padding-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.keybind-editor .keybind-status {
+  width: 40px;
+}
+
+.keybind-editor .keybind-global {
+  width: 64px;
+  text-align: center;
+}
+
+.keybind-editor tr.conflict .keybind-recorder {
+  border-color: var(--border-feedback-critical);
+}
+
+.keybind-recorder {
+  min-width: 180px;
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-normal);
+  border-radius: var(--radius-sm);
+  background: var(--background-base-lower);
+  color: var(--text-default);
+  cursor: pointer;
+}
+
+.keybind-recorder.recording {
+  border-color: var(--border-focus);
+}
+
+.keybind-empty,
+.keybind-recording {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.keybind-remove {
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.keybind-remove:hover {
+  color: var(--text-default);
 }

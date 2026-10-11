@@ -323,13 +323,17 @@ async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
     // The shared guild row lock orders this against a ban (which takes it exclusively before writing the ban row and removing
     // the member): the ban is either visible to the conditional insert below or removes the member inserted here.
     sqlx::query("SELECT id FROM guilds WHERE id = $1 FOR SHARE").bind(guild_id).execute(&mut *tx).await?;
+    // A new member records the invite, its creator and the join source for the members page.
     let inserted = sqlx::query(
-        "INSERT INTO guild_members (guild_id, user_id, temporary) SELECT $1, $2, $3 \
+        "INSERT INTO guild_members (guild_id, user_id, temporary, source_invite_code, inviter_id, join_source_type) SELECT $1, $2, $3, $4, $5, $6 \
          WHERE NOT EXISTS (SELECT 1 FROM guild_bans WHERE guild_id = $1 AND user_id = $2) ON CONFLICT DO NOTHING",
     )
     .bind(guild_id)
     .bind(user_id)
     .bind(temporary)
+    .bind(&invite.code)
+    .bind(invite.inviter_id)
+    .bind(i16::from(vokko_protocol::api::join_source_type::INVITE))
     .execute(&mut *tx)
     .await?;
     if inserted.rows_affected() == 0 {

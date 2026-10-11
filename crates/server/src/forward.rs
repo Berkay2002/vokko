@@ -42,14 +42,6 @@ fn unreadable() -> ApiErr {
     ApiErr::unknown_message()
 }
 
-/// Hard link where the filesystem allows (files are write-once, so sharing the data is safe), a full copy otherwise.
-async fn link_or_copy(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
-    if tokio::fs::hard_link(from, to).await.is_ok() {
-        return Ok(());
-    }
-    tokio::fs::copy(from, to).await.map(|_| ())
-}
-
 /// Checks that `user_id` may read the source message and may post this content in the target channel (`target_permissions`),
 /// then builds the snapshot, copying the attachment files. Nothing is copied when a check fails, and a failure while copying
 /// removes what was copied so far.
@@ -128,43 +120,44 @@ pub async fn prepare(
     let originals = std::mem::take(&mut content.attachments);
     let mut copies: Vec<AttachmentCopy> = Vec::new();
     let mut attachments: Vec<Attachment> = Vec::new();
-    let copied = async {
-        tokio::fs::create_dir_all(state.attachments_dir()).await?;
-        for original in originals {
-            let new_id = state.ids.next();
-            if link_or_copy(&media::file_path(state, original.id.db()), &media::file_path(state, new_id)).await.is_err() {
-                continue; // the file is gone: drop it from the copy rather than point at a dead link
+    // Files are write-once, so the local backend may share them with a hard link.
+    for original in originals {
+        let new_id = state.ids.next();
+        match state.storage.copy(original.id.db(), new_id).await {
+            Ok(()) => {}
+            // The file is gone: drop it from the copy rather than point at a dead link.
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                // A failed copy can leave a partial target behind (a local copy that ran out of space).
+                let mut written: Vec<i64> = copies.iter().map(|copy| copy.id).collect();
+                written.push(new_id);
+                media::remove_files(state, &written).await;
+                return Err(error.into());
             }
-            let key = media::new_key();
-            let mut copy = store::attachment_api(
-                state,
-                new_id,
-                &key,
-                original.filename.clone(),
-                original.content_type.clone(),
-                original.size as i64,
-                original.width.map(|value| value as i32),
-                original.height.map(|value| value as i32),
-            );
-            copy.description = original.description.clone();
-            attachments.push(copy);
-            copies.push(AttachmentCopy {
-                id: new_id,
-                key,
-                filename: original.filename,
-                content_type: original.content_type,
-                size: original.size,
-                width: original.width,
-                height: original.height,
-                description: original.description,
-            });
         }
-        Ok::<(), std::io::Error>(())
-    }
-    .await;
-    if let Err(error) = copied {
-        media::remove_files(state, &copies.iter().map(|copy| copy.id).collect::<Vec<_>>()).await;
-        return Err(error.into());
+        let key = media::new_key();
+        let mut copy = store::attachment_api(
+            state,
+            new_id,
+            &key,
+            original.filename.clone(),
+            original.content_type.clone(),
+            original.size as i64,
+            original.width.map(|value| value as i32),
+            original.height.map(|value| value as i32),
+        );
+        copy.description = original.description.clone();
+        attachments.push(copy);
+        copies.push(AttachmentCopy {
+            id: new_id,
+            key,
+            filename: original.filename,
+            content_type: original.content_type,
+            size: original.size,
+            width: original.width,
+            height: original.height,
+            description: original.description,
+        });
     }
     let snapshot = MessageSnapshot { message: MessageSnapshotContent { attachments, ..content } };
     Ok(ForwardDraft { source_channel, source_guild: access.channel.guild_id, source_message, snapshot, copies, stickers })

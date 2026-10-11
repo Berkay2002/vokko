@@ -2,6 +2,8 @@
 // and each call site registers what a binding does with useShortcut(id, handler).
 // "Mod" is Cmd on macOS and Ctrl elsewhere, like Discord; "Alt" is Option on macOS.
 
+import { keysFor } from "./overrides";
+
 export const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
 export type ShortcutGroup = "Navigation" | "Unreads" | "Chat" | "Voice" | "Panels";
@@ -49,6 +51,9 @@ export const BINDINGS = [
   { id: "pins", group: "Panels", label: "Toggle pinned messages", keys: ["Mod+P"] },
   { id: "members", group: "Panels", label: "Toggle member list", keys: ["Mod+U"] },
   { id: "shortcuts", group: "Panels", label: "Toggle keyboard shortcuts", keys: ["Mod+/"], modal: true },
+  { id: "settings", group: "Panels", label: "Open user settings", keys: ["Mod+,"] },
+  // Unbound out of the box: runs only once the user gives it keys in Settings > Keybinds.
+  { id: "streamerMode", group: "Panels", label: "Toggle streamer mode", keys: [] },
 ] as const satisfies readonly Binding[];
 
 export type ShortcutId = (typeof BINDINGS)[number]["id"];
@@ -114,6 +119,11 @@ export interface ShortcutRow {
 export function bindingGroups(mac: boolean = IS_MAC): { title: ShortcutGroup; binds: ShortcutRow[] }[] {
   return SHORTCUT_GROUPS.map(title => ({
     title,
-    binds: (BINDINGS as readonly Binding[]).filter(b => b.group === title).map(b => ({ id: b.id, action: b.label, keys: bindingCaps(b, mac) })),
+    // The keys in force: the user's keybinds (Settings > Keybinds) when set; a binding without keys is left out.
+    binds: (BINDINGS as readonly Binding[])
+      .filter(b => b.group === title)
+      .map(b => ({ b, keys: keysFor(b).map(k => k.spec) }))
+      .filter(({ keys }) => keys.length > 0)
+      .map(({ b, keys }) => ({ id: b.id, action: b.label, keys: bindingCaps({ keys }, mac) })),
   }));
 }

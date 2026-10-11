@@ -6,13 +6,14 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, put};
 use vokko_protocol::api::{
-    Channel, CreateDmRequest, CreateRelationshipRequest, GatewayEvent, IdOnly, PutRelationshipRequest, Relationship, RelationshipType, Snowflake,
+    Channel, CreateDmRequest, CreateRelationshipRequest, GatewayEvent, IdOnly, PutRelationshipRequest, Relationship, RelationshipType, Snowflake, user_settings,
 };
 
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
 use crate::extract::{ApiJson, parse_id};
+use crate::routes::settings::privacy_flag;
 use crate::state::AppState;
 use crate::store::{self, CHANNEL_COLS, ChannelRow};
 
@@ -159,7 +160,7 @@ async fn one_to_one(state: &AppState, user_id: i64, other: i64) -> ApiResult<Jso
             .bind(other)
             .fetch_one(&state.db)
             .await?;
-            if !reachable {
+            if !reachable || !(is_friend(state, user_id, other).await? || privacy_flag(state, other, "dms_from_server_members", true).await?) {
                 return Err(ApiErr::cannot_message_user());
             }
             let id = state.ids.next();
@@ -181,6 +182,50 @@ async fn one_to_one(state: &AppState, user_id: i64, other: i64) -> ApiResult<Jso
         }
     };
     store::channel(state, channel_id, Some(user_id)).await?.map(Json).ok_or_else(ApiErr::internal)
+}
+
+async fn is_friend(state: &AppState, user_id: i64, other: i64) -> ApiResult<bool> {
+    let (friend,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM relationships WHERE user_id = $1 AND other_id = $2 AND kind = 1)")
+        .bind(user_id)
+        .bind(other)
+        .fetch_one(&state.db)
+        .await?;
+    Ok(friend)
+}
+
+/// Whether `target`'s friend request sources (Data & Privacy) let `sender` send them a request.
+async fn accepts_friend_request(state: &AppState, target: i64, sender: i64) -> ApiResult<bool> {
+    let settings = crate::routes::settings::load(state, target).await?.settings;
+    let allowed = |key: &str| user_settings::flag(&settings, key, true);
+    if allowed("friend_requests_everyone") {
+        return Ok(true);
+    }
+    if allowed("friend_requests_mutual_friends") {
+        let (mutual,): (bool,) = sqlx::query_as(
+            "SELECT EXISTS (SELECT 1 FROM relationships a JOIN relationships b ON a.other_id = b.other_id \
+             WHERE a.user_id = $1 AND a.kind = 1 AND b.user_id = $2 AND b.kind = 1)",
+        )
+        .bind(target)
+        .bind(sender)
+        .fetch_one(&state.db)
+        .await?;
+        if mutual {
+            return Ok(true);
+        }
+    }
+    if allowed("friend_requests_mutual_guilds") {
+        let (shared,): (bool,) = sqlx::query_as(
+            "SELECT EXISTS (SELECT 1 FROM guild_members a JOIN guild_members b ON a.guild_id = b.guild_id WHERE a.user_id = $1 AND b.user_id = $2)",
+        )
+        .bind(target)
+        .bind(sender)
+        .fetch_one(&state.db)
+        .await?;
+        if shared {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 async fn list_relationships(State(state): State<AppState>, AuthUser(user_id): AuthUser) -> ApiResult<Json<Vec<Relationship>>> {
@@ -212,6 +257,9 @@ async fn befriend(state: &AppState, user_id: i64, other: i64) -> ApiResult<()> {
                 .await?;
             if reverse.is_some_and(|(kind,)| kind == RelationshipType::Blocked.as_u8() as i16) {
                 return Err(ApiErr::missing_access());
+            }
+            if !accepts_friend_request(state, other, user_id).await? {
+                return Err(ApiErr::friend_requests_disabled());
             }
             sqlx::query("INSERT INTO relationships (user_id, other_id, kind) VALUES ($1, $2, 4), ($2, $1, 3) ON CONFLICT DO NOTHING")
                 .bind(user_id)

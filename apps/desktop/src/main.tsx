@@ -40,6 +40,8 @@ import "./styles/shortcuts.css";
 import "./styles/responsive.css";
 import "./styles/a11y.css";
 import "./ui/prefs";
+import "./ui/settingsSyncLive";
+import "./ui/keybindsLive";
 import "./appicon/apply";
 import "./search";
 import "./community";

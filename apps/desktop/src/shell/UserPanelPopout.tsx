@@ -4,6 +4,7 @@ import { ProfileBanner } from "../perks/ProfileBanner";
 import { resolveProfile, themeVars } from "../perks/profile";
 import { TagChip } from "../perks/TagChip";
 import { Popout, useContextMenu, type MenuItem } from "../ui";
+import { usePrefs } from "../ui/prefs";
 import { Avatar, StatusBadge } from "./Avatar";
 import { copyText, type SelectableStatus } from "./actions";
 import { openModal } from "./modalStore";
@@ -33,6 +34,7 @@ export interface UserPanelPopoutProps {
 /** Popout above the user panel: own profile card (banner, avatar, status note, names) over the account rows. */
 export function UserPanelPopout({ anchor, open, onClose, status, onStatus, custom, onCustom, onSubmitCustom, inVoice }: UserPanelPopoutProps) {
   const me = useStore(s => s.me);
+  const developerMode = usePrefs(s => s.developerMode);
   const tagGuildName = useStore(s => (s.me?.primary_guild ? s.guilds[s.me.primary_guild.guild_id]?.name : undefined));
   const menu = useContextMenu();
   if (!me) return null;
@@ -76,7 +78,7 @@ export function UserPanelPopout({ anchor, open, onClose, status, onStatus, custo
       <div className="profile-body">
         <div className="profile-name">{displayName(me)}</div>
         <div className="pv-name-row">
-          <span className="profile-username">{me.username}</span>
+          <span className="profile-username personal-info">{me.username}</span>
           <TagChip tag={me.primary_guild} guildName={tagGuildName} />
         </div>
         {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
@@ -100,10 +102,12 @@ export function UserPanelPopout({ anchor, open, onClose, status, onStatus, custo
             <span>Switch Accounts</span>
             <ChevronRight size={16} className="user-popout-chevron" />
           </button>
-          <button type="button" role="menuitem" className="user-popout-row" onClick={() => (copyText(me.id), onClose())}>
-            <Copy size={20} />
-            <span>Copy User ID</span>
-          </button>
+          {developerMode && (
+            <button type="button" role="menuitem" className="user-popout-row" onClick={() => (copyText(me.id), onClose())}>
+              <Copy size={20} />
+              <span>Copy User ID</span>
+            </button>
+          )}
         </div>
       </div>
     </Popout>

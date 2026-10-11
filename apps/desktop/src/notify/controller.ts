@@ -3,15 +3,16 @@
 
 import { gateway } from "../api/gateway";
 import { avatarUrl, appStore, displayName, dmName } from "../api/store";
-import { ChannelType, type Message, type Snowflake } from "../api/types";
+import { ChannelType, RelationshipType, type Message, type Snowflake } from "../api/types";
 import { messageStore } from "../chat/messageStore";
 import { dmPath, go, guildPath } from "../shell/nav";
 import { useLocalState } from "../shell/localState";
 import { getPrefs, usePrefs } from "../ui/prefs";
 import { applyUnread, pageLabel, summarizeUnread } from "./badge";
 import { requestAttention } from "../desktop/attention";
+import { IS_MAC } from "../desktop/tauri";
 import { decide, shouldBounce, type NotifyInput } from "./decide";
-import { notificationAdapter } from "./desktop";
+import { flashTaskbar, notificationAdapter } from "./desktop";
 import { playSound, wireAudioUnlock } from "./sounds";
 import { notificationTitle, plainBody } from "./text";
 
@@ -51,6 +52,7 @@ export function buildInput(message: Message, now = Date.now()): NotifyInput | nu
     meId,
     myRoleIds: guildId ? (state.members[guildId]?.[meId]?.roles ?? []) : [],
     dm,
+    friend: state.relationships[message.author.id]?.type === RelationshipType.Friend,
     scopes,
     local,
     prefs,
@@ -114,6 +116,8 @@ async function onMessage(message: Message): Promise<void> {
   if (!decision.kind || stale) return;
   if (decision.sound) playSound(decision.sound === "mention" ? "mention" : "message");
   if (shouldBounce(decision, input.focused)) void requestAttention();
+  // Windows and Linux: a mention or DM in the background flashes the taskbar (desktop app, Settings > Notifications); macOS bounces the Dock above.
+  if (!IS_MAC && decision.kind === "mention" && !input.focused && getPrefs().taskbarFlash) void flashTaskbar();
   if (decision.desktop && (await notificationAdapter().permission()) === "granted") show(message);
 }
 
