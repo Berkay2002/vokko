@@ -130,12 +130,18 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
 
   function items(): MenuItem[] {
     const out: MenuItem[] = [];
-    // Order follows the reference: edit, reply | copy text, pin, copy link | delete | copy id.
+    // Order follows discord-ui-inventory A2: G4 edit, reply, forward, thread | G5 copy text, pin, mark unread, copy link | G6 delete | G7 id.
+    // Features that don't exist yet are listed disabled.
     if (canEdit) out.push({ id: 'edit', label: 'Edit Message', icon: <Pencil size={16} />, onSelect: () => chat.actions.edit(message) });
-    if (!system) out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={16} />, onSelect: () => chat.actions.reply(message) });
+    if (!system) {
+      out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={16} />, onSelect: () => chat.actions.reply(message) });
+      if (!pending) out.push({ id: 'forward', label: 'Forward', disabled: true });
+      if (!pending && chat.guildId) out.push({ id: 'thread', label: 'Create Thread', disabled: true });
+    }
     out.push({ type: 'separator' });
     if (message.content) out.push({ id: 'copy-text', label: 'Copy Text', onSelect: () => void navigator.clipboard?.writeText(message.content) });
     if (canPin) out.push({ id: 'pin', label: message.pinned ? 'Unpin Message' : 'Pin Message', icon: <Pin size={16} />, onSelect: () => chat.actions.togglePin(message) });
+    if (!pending) out.push({ id: 'mark-unread', label: 'Mark Unread', disabled: true });
     out.push({
       id: 'copy-link', label: 'Copy Message Link',
       onSelect: () => void navigator.clipboard?.writeText(`${window.location.origin}/channels/${chat.guildId ?? '@me'}/${message.channel_id}/${message.id}`),
