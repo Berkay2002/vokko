@@ -18,7 +18,7 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | SHELL-006 | Rail scrolls independently; folders (collapsible groups, 48 px) | app-shell/10-rail-scrolled-full.jpg |
 | SHELL-007 | Home button + unread DM avatars with red mention badge at the top of the rail | REF: none (no unread DMs at capture) |
 | SHELL-008 | DM sidebar 302.7 px list with top-left radius 12, search button "find or start a conversation" | app-shell/01-home-friends-online.jpg |
-| SHELL-009 | Friends nav row h40 with active/hover states (the other nav rows in that list are paid features, see Out of scope) | app-shell/spec.md |
+| SHELL-009 | Friends nav row h40 with active/hover states (the Nitro / Shop / Quests rows are paid screens, see Out of scope) | app-shell/spec.md |
 | SHELL-010 | "Direct Messages" header with + button; DM rows h44 with avatar, presence dot, name, status/subtitle | app-shell/04-dm-row-hover.png |
 | SHELL-011 | Group DM row shows member count subtitle; clan tag chips next to names | app-shell/11-rail-bottom-dmlist.png |
 | SHELL-012 | Floating user panel (x=8, 358.7 x 57.3, radius 8): avatar+status dot, name, status text, mute / deafen / settings buttons | app-shell/13-userpanel-mute-hover.png |
@@ -85,7 +85,7 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 |---|---|---|
 | CMP-001 | Composer wrapper h57.3 radius 8, border 0.67 px, grows with lines up to ~50% of viewport then scrolls | dm-chat/01-dm-view.png, dm-chat/09-composer-markdown-live.png |
 | CMP-002 | Attach "+" button opens menu: upload a file, create poll, use apps (182x125) | dm-chat/02-attach-menu.png |
-| CMP-003 | Right buttons: gift, GIF, sticker, emoji, apps (32x32) | dm-chat/01-dm-view.png |
+| CMP-003 | Right buttons: GIF, sticker, emoji, apps (32x32); the gift button opens a purchase flow, see Out of scope | dm-chat/01-dm-view.png |
 | CMP-004 | Emoji picker 498x486 with Emoji/GIF/Stickers tabs, search, categories rail, 48 px cells, preview footer | dm-chat/03-emoji-picker.png |
 | CMP-005 | GIF picker with search + categories + trending | dm-chat/04-gif-picker.png |
 | CMP-006 | Sticker picker | dm-chat/05-sticker-picker.png |
@@ -167,9 +167,16 @@ Conventions: measurements are CSS px; token names refer to `tokens.md`. UI langu
 | REST-006 | Responsive layouts at ~1000 px and minimum width (sidebar collapse, member list hide) | REF: none |
 
 ## Out of scope (decided, no ids)
-Vokko is free: Nitro and subscriptions, billing and payment settings, the Shop, Quests, Orbs, server boosts (boost button, boost perks, boost-locked features), gift inventory
-and every paid upsell (locked profile effects/decorations, locked colour themes, locked emoji/sticker/soundboard slots). Not captured and not to be built. Rows above that touched them were reduced to the free part.
+The paid machinery only: Nitro, subscription, billing and payment screens, the Shop, Quests, Orbs, boost screens and purchase/gift flows (including the composer gift button).
+Rows above that touched them were reduced to the free part.
 
+## Perks seen behind upsells (in scope, free in Vokko; no ids, covered by another worker)
+Where Discord gates a feature, what it gates and where the upsell appears (captured, nothing unlocked):
+- Colour themes beyond the default four: locked gradient theme grid with "preview" / unlock buttons on the Appearance settings page (settings/01-appearance.jpg).
+- Custom theme builder: banner card with "try it" on the same page.
+- Server emoji from other servers: lock marker on locked emoji cells in the emoji / reaction pickers (dm-chat/15-reaction-picker.jpg).
+- Profile effects / decorations: animated gradient behind the own member-list row and profile card (guild/04-member-list.jpg, popouts/01-member-profile.jpg).
+- Server-boost-gated server features (banner, higher upload limits, animated icon): quick link and dropdown entry in the guild frame (guild/spec.md); screens themselves out of scope.
 ## DESK: desktop-only (not available from web capture)
 Voice/video call overlay, game overlay, tray icon + close-to-tray, push-to-talk global keybinds, rich presence/game detection, run on startup,
 native window controls, auto-update UX. Reference needs desktop capture (see INDEX.md "Desktop-only").
