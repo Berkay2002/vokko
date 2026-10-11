@@ -1,6 +1,6 @@
 // Mock REST router: every route of docs/api.md that the UI uses, with the same status codes and error codes.
 
-import { ChannelType, MessageType, RelationshipType, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
+import { AuditLogEvent, ChannelType, ExplicitContentFilter, MessageType, RelationshipType, VerificationLevel, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
 import { compareIds } from "../snowflake";
 import { Perm, hasBit } from "../permissions";
 import { channelPermsOf } from "./access";
@@ -10,7 +10,8 @@ import { buildForward, purgeChannelRefs, purgeGuildStickers, purgeMessageRefs, r
 import { parseOverwrites } from "./moderation";
 import { applyChannelFields, assertCanPost, assertThreadOpen, deleteThread, dropChannelExtras, editThread, initChannelFields } from "./threads";
 import { applyGuildPerks, applyUserPerks, dropTagOnLeave, memberProfileFields } from "./perks";
-import { ID, route, routes, str } from "./router";
+import { ID, route, routes, str, withAuditReason } from "./router";
+import { change, checkAutomod, checkSend, recordAudit } from "./admin";
 import { emit } from "./socket";
 import { onboardingStartedFor, eventsChannelRemoved } from "./community";
 import { flagsField } from "./memberFlags";
@@ -199,6 +200,17 @@ route("GET", `/guilds/${ID}`, ({ viewer, params }) => requireGuildMember(params[
 
 route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
   const guild = requireGuildPerm(params[0] ?? "", viewer.user.id, Perm.MANAGE_GUILD);
+  const before = { ...guild.guild };
+  const level = body.verification_level;
+  if (level !== undefined && (typeof level !== "number" || !Number.isInteger(level) || level < VerificationLevel.None || level > VerificationLevel.VeryHigh)) {
+    fail(400, 50035, "Invalid Form Body", { verification_level: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 1, 2, 3, 4)." } });
+  }
+  const filter = body.explicit_content_filter;
+  if (filter !== undefined && (typeof filter !== "number" || !Number.isInteger(filter) || filter < ExplicitContentFilter.Disabled || filter > ExplicitContentFilter.AllMembers)) {
+    fail(400, 50035, "Invalid Form Body", { explicit_content_filter: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 1, 2)." } });
+  }
+  if (typeof level === "number") guild.guild.verification_level = level;
+  if (typeof filter === "number") guild.guild.explicit_content_filter = filter;
   if (typeof body.name === "string") {
     const name = body.name.trim();
     if (name.length < 2 || name.length > 100) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 2 and 100 in length." } });
@@ -208,6 +220,17 @@ route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
   if ("system_channel_id" in body) guild.guild.system_channel_id = str(body.system_channel_id) ?? null;
   applyGuildPerks(guild, body);
   emit(guild.members.keys(), "GUILD_UPDATE", { ...guild.guild });
+  const after = guild.guild;
+  recordAudit(after.id, viewer.user.id, AuditLogEvent.GuildUpdate, after.id, {
+    changes: [
+      change("name", before.name, after.name),
+      change("icon", before.icon, after.icon),
+      change("system_channel_id", before.system_channel_id, after.system_channel_id),
+      change("verification_level", before.verification_level ?? 0, after.verification_level ?? 0),
+      change("explicit_content_filter", before.explicit_content_filter ?? 0, after.explicit_content_filter ?? 0),
+    ],
+    skipIfUnchanged: true,
+  });
   return guild.guild;
 });
 
@@ -248,6 +271,7 @@ route("POST", `/guilds/${ID}/channels`, ({ viewer, params, body }) => {
   const channel = addChannel(guildId, { name, type, parent_id: type === ChannelType.GuildCategory ? null : parent, topic: str(body.topic) ?? null, permission_overwrites: explicit ? permission_overwrites : undefined });
   initChannelFields(channel, body);
   for (const id of channelAudience(channel)) emit([id], "CHANNEL_CREATE", channelFor(channel, id));
+  recordAudit(guildId, viewer.user.id, AuditLogEvent.ChannelCreate, channel.id, { changes: channelChanges(null, channel) });
   return channelFor(channel, viewer.user.id);
 });
 
@@ -264,10 +288,15 @@ route("GET", `/guilds/${ID}/members`, ({ viewer, params, query }) => {
 
 // ---- channels ----
 
+function channelChanges(before: Channel | null, after: Channel | null) {
+  return (["name", "type", "topic", "position", "parent_id"] as const).map(key => change(key, before?.[key] ?? null, after?.[key] ?? null));
+}
+
 route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   if (isThreadType(channel.type)) return editThread(channel, viewer.user.id, body);
   if (channel.guild_id) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
+  const snapshot = { ...channel };
   applyChannelFields(channel, body);
   if (typeof body.name === "string") {
     const keepCase = channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildCategory;
@@ -291,6 +320,7 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   const payload = channelFor(channel, viewer.user.id);
   if (channel.guild_id && before) emitVisibilityChanges(channel.guild_id, before, [channel.id]);
   else emit(channelAudience(channel), "CHANNEL_UPDATE", payload);
+  if (channel.guild_id) recordAudit(channel.guild_id, viewer.user.id, AuditLogEvent.ChannelUpdate, channel.id, { changes: channelChanges(snapshot, channel), skipIfUnchanged: true });
   return payload;
 });
 
@@ -315,6 +345,7 @@ route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
     return payload;
   }
   requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
+  recordAudit(channel.guild_id, viewer.user.id, AuditLogEvent.ChannelDelete, channel.id, { changes: channelChanges(channel, null) });
   dropChannelExtras(channel);
   for (const id of channelAudience(channel)) emit([id], "CHANNEL_DELETE", channelFor(channel, id));
   eventsChannelRemoved(channel.id);
@@ -384,6 +415,7 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   if (content === "" && attachments.length === 0 && stickers.length === 0 && !forwarding && !poll) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
   const forward = forwarding ? buildForward(viewer.user.id, reference, channel) : undefined;
   if (reference?.message_id && !forwarding) requireMessage(channel.id, reference.message_id);
+  checkSend(channel, viewer.user.id, content);
   for (const id of ids) db.pending.delete(id);
   // A poll is registered under the message's id first, so MESSAGE_CREATE already carries it.
   const messageId = poll ? nextId() : undefined;
@@ -418,6 +450,7 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
     attachments = message.attachments.filter(a => keep.has(a.id));
   }
   if (content === "" && attachments.length === 0) fail(400, 50006, "Cannot send an empty message");
+  if (content !== message.content) checkAutomod(channel, viewer.user.id, content);
   message.content = content;
   message.attachments = attachments;
   message.edited_timestamp = new Date().toISOString();
@@ -437,6 +470,9 @@ route("DELETE", `/channels/${ID}/messages/${ID}`, ({ viewer, params }) => {
   purgeMessageRefs(channel.id, message.id);
   channel.last_message_id = list.at(-1)?.id ?? null;
   emit(channelAudience(channel), "MESSAGE_DELETE", { id: message.id, channel_id: channel.id, guild_id: channel.guild_id });
+  if (channel.guild_id && message.author_id !== viewer.user.id) {
+    recordAudit(channel.guild_id, viewer.user.id, AuditLogEvent.MessageDelete, message.author_id, { options: { channel_id: channel.id, count: "1" } });
+  }
   return undefined;
 });
 
@@ -508,6 +544,7 @@ route("PUT", `/channels/${ID}/messages/pins/${ID}`, ({ viewer, params }) => {
   message.pinned_at = new Date().toISOString();
   for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));
   addMessage({ channel, author_id: viewer.user.id, content: "", type: MessageType.ChannelPinnedMessage, reference_id: message.id });
+  if (channel.guild_id) recordAudit(channel.guild_id, viewer.user.id, AuditLogEvent.MessagePin, message.author_id, { options: { channel_id: channel.id, message_id: message.id } });
   return undefined;
 });
 
@@ -519,6 +556,7 @@ route("DELETE", `/channels/${ID}/messages/pins/${ID}`, ({ viewer, params }) => {
   message.pinned = false;
   message.pinned_at = null;
   for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));
+  if (channel.guild_id) recordAudit(channel.guild_id, viewer.user.id, AuditLogEvent.MessageUnpin, message.author_id, { options: { channel_id: channel.id, message_id: message.id } });
   return undefined;
 });
 
@@ -565,7 +603,7 @@ const PUBLIC = new Set(["POST /auth/register", "POST /auth/login", "GET /status"
 /** An invite preview is readable without an account (the invite page shows it before login). */
 const isInvitePreview = (method: string, pathname: string): boolean => method === "GET" && /^\/invites\/[a-z0-9]+$/.test(pathname);
 
-export function handleRoute(method: string, rawPath: string, body: unknown, viewerId: string | null): unknown {
+export function handleRoute(method: string, rawPath: string, body: unknown, viewerId: string | null, auditReason: string | null = null): unknown {
   const url = new URL(rawPath, "http://mock.local");
   const key = `${method} ${url.pathname}`;
   const viewer = viewerId ? db.accounts.get(viewerId) : undefined;
@@ -577,7 +615,7 @@ export function handleRoute(method: string, rawPath: string, body: unknown, view
     const match = r.pattern.exec(url.pathname);
     if (!match) continue;
     const ctx = { viewer: viewer as MockAccount, params: match.slice(1), query: url.searchParams, body: (body && typeof body === "object" ? body : {}) as Record<string, unknown> };
-    return r.handler(ctx);
+    return withAuditReason(auditReason, () => r.handler(ctx));
   }
   return fail(404, 0, "404: Not Found");
 }

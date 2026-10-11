@@ -191,6 +191,24 @@ impl ApiErr {
         error
     }
 
+    /// 403 / 50009: the guild's verification level is above what the member meets.
+    pub fn verification_level() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 50009, "Channel verification level is too high for you to gain access")
+    }
+
+    /// 400 / 200000: an AutoMod rule blocked the message; `errors.content` carries the rule's custom message when it has one.
+    pub fn automod_blocked(custom_message: Option<&str>) -> Self {
+        let error = Self::new(StatusCode::BAD_REQUEST, 200000, "Message was blocked by automatic moderation");
+        match custom_message {
+            Some(message) => error.with_errors(json!({ "content": { "_errors": [{ "code": "AUTOMOD_BLOCKED", "message": message }] } })),
+            None => error,
+        }
+    }
+
+    pub fn unknown_automod_rule() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10066, "Unknown auto moderation rule")
+    }
+
     pub fn payload_too_large() -> Self {
         Self::new(StatusCode::PAYLOAD_TOO_LARGE, 40005, "Request entity too large")
     }

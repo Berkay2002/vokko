@@ -7,6 +7,7 @@ import type { EditMemberRequest, BanRequest, Snowflake } from "../api/types";
 import { Modal } from "../ui";
 import { closeModal } from "./modalStore";
 import { RadioGroup, Select } from "./settings/controls";
+import { BAN_HISTORY_OPTIONS } from "./settings/admin";
 
 function errorText(error: unknown): string {
   if (error instanceof ApiRequestError) {
@@ -61,18 +62,19 @@ function useTargetName(guildId: Snowflake, userId: Snowflake): string {
 
 export function KickModal({ guildId, userId }: { guildId: Snowflake; userId: Snowflake }) {
   const name = useTargetName(guildId, userId);
+  const [reason, setReason] = useState("");
   return (
-    <ModShell title={`Kick ${name} from server`} action="Kick" danger onSubmit={() => request("DELETE", `/guilds/${guildId}/members/${userId}`)}>
+    <ModShell title={`Kick ${name} from server`} action="Kick" danger onSubmit={() => request("DELETE", `/guilds/${guildId}/members/${userId}`, undefined, { reason })}>
       <p className="modal-text">Are you sure you want to kick {name} from the server? They will be able to rejoin again with a new invite.</p>
+      <label className="field-label mod-reason-label" htmlFor="mod-kick-reason">
+        Reason for kick
+      </label>
+      <textarea id="mod-kick-reason" className="input mod-reason" value={reason} maxLength={512} placeholder="Optional" onChange={e => setReason(e.target.value)} />
     </ModShell>
   );
 }
 
-const DELETE_OPTIONS = [
-  { value: "0", label: "Don't delete any" },
-  { value: "86400", label: "Previous 24 hours" },
-  { value: "604800", label: "Previous 7 days" },
-];
+const DELETE_OPTIONS = BAN_HISTORY_OPTIONS;
 
 export function BanModal({ guildId, userId }: { guildId: Snowflake; userId: Snowflake }) {
   const name = useTargetName(guildId, userId);
@@ -85,7 +87,7 @@ export function BanModal({ guildId, userId }: { guildId: Snowflake; userId: Snow
       danger
       onSubmit={() => {
         const body: BanRequest = { delete_message_seconds: Number(history), ...(reason.trim() ? { reason: reason.trim() } : {}) };
-        return request("PUT", `/guilds/${guildId}/bans/${userId}`, body);
+        return request("PUT", `/guilds/${guildId}/bans/${userId}`, body, { reason });
       }}
     >
       <p className="modal-text">Are you sure you want to ban {name}? They will not be able to rejoin until unbanned.</p>
@@ -120,7 +122,7 @@ export function TimeoutModal({ guildId, userId }: { guildId: Snowflake; userId: 
       action="Timeout"
       onSubmit={() => {
         const body: EditMemberRequest = { communication_disabled_until: new Date(Date.now() + Number(duration) * 1000).toISOString() };
-        return request("PATCH", `/guilds/${guildId}/members/${userId}`, body);
+        return request("PATCH", `/guilds/${guildId}/members/${userId}`, body, { reason });
       }}
     >
       <p className="modal-text">When you put a member in timeout they will not be able to send messages, react, or speak in voice channels.</p>

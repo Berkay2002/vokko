@@ -69,7 +69,7 @@ const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, m
 /** Fault injection: the next `count` REST calls answer 429 with this retry_after (seconds). */
 let rateLimit = { count: 0, retryAfter: 1 };
 
-export async function mockRequest(method: string, path: string, body: unknown, token: string | null): Promise<unknown> {
+export async function mockRequest(method: string, path: string, body: unknown, token: string | null, auditReason: string | null = null): Promise<unknown> {
   await sleep(latency());
   if (rateLimit.count > 0) {
     rateLimit.count -= 1;
@@ -78,7 +78,7 @@ export async function mockRequest(method: string, path: string, body: unknown, t
   try {
     // Round-trip through JSON so callers can never mutate the database through a returned object.
     setCurrentToken(token);
-    const result = handleRoute(method, path, body, userIdFromToken(token));
+    const result = handleRoute(method, path, body, userIdFromToken(token), auditReason);
     return result === undefined ? undefined : JSON.parse(JSON.stringify(result));
   } catch (error) {
     if (error instanceof ApiRequestError) throw error;

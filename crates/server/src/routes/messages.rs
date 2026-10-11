@@ -10,11 +10,13 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::permissions::{ATTACH_FILES, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_POLLS};
 use vokko_protocol::api::{
-    AckBulkRequest, AllowedMentions, CreateMessageRequest, EditMessageRequest, Embed, GatewayEvent, Message, MessageAck, MessageDelete, MessageReferenceType,
-    MessageType, PendingAttachmentMeta, PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart, message_flags::IS_CROSSPOST,
+    AckBulkRequest, AllowedMentions, AuditEntryInfo, AuditLogEvent, CreateMessageRequest, EditMessageRequest, Embed, GatewayEvent, Message, MessageAck,
+    MessageDelete, MessageReferenceType, MessageType, PendingAttachmentMeta, PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart,
+    message_flags::IS_CROSSPOST,
 };
 
 use crate::access::{self, ChannelAccess, channel_access};
+use crate::audit::{self, AuditReason, Entry};
 use crate::auth::AuthUser;
 use crate::config::MAX_ATTACHMENTS_PER_MESSAGE;
 use crate::error::{ApiErr, ApiResult};
@@ -569,6 +571,7 @@ async fn create_message(
         None => None,
     };
     let content = validate_content(body.content.as_deref().unwrap_or(""), !attachments.is_empty() || !sticker_ids.is_empty() || forwarding || poll.is_some())?;
+    crate::safety::check_send(&state, &access, user_id, &content).await?;
     let stickers = stickers::resolve_for_message(&state, user_id, &access.channel, access.permissions, &sticker_ids).await?;
     let mut forward_source: Option<(i64, i64)> = None;
     let reference = match body.message_reference {
@@ -671,6 +674,9 @@ async fn edit_message(
         return Err(ApiErr::empty_message());
     }
     let content_changed = content != row.content;
+    if content_changed {
+        crate::safety::check_automod(&state, &access, user_id, &content).await?;
+    }
     // `flags` only carries SUPPRESS_EMBEDS; omitting it keeps the current state.
     let suppress_bit = SUPPRESS_EMBEDS as i32;
     let old_flags = row.flags;
@@ -727,7 +733,12 @@ async fn edit_message(
     store::message_view(&state, mid, Some(user_id)).await?.map(|view| Json(view.message)).ok_or_else(ApiErr::unknown_message)
 }
 
-async fn delete_message(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, mid)): Path<(String, String)>) -> ApiResult<StatusCode> {
+async fn delete_message(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path((id, mid)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
+) -> ApiResult<StatusCode> {
     let id = channel_id(&id)?;
     let mid = message_id(&mid)?;
     let access = channel_access(&state, user_id, id).await?;
@@ -754,7 +765,22 @@ async fn delete_message(State(state): State<AppState>, AuthUser(user_id): AuthUs
         guild_id: access.channel.guild_id.map(Snowflake::from),
     });
     state.hub.send(&viewers, &event);
+    // Discord logs deletions of someone else's message only.
+    if let Some(guild_id) = access.channel.guild_id
+        && row.author_id != user_id
+    {
+        let options = AuditEntryInfo { channel_id: Some(Snowflake::from(id)), count: Some("1".to_owned()), ..Default::default() };
+        audit::record(&state, Entry::new(guild_id, user_id, AuditLogEvent::MessageDelete, row.author_id).reason(reason).options(options)).await?;
+    }
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Audit entry for a pin or unpin in a guild channel.
+async fn audit_pin(state: &AppState, access: &ChannelAccess, user_id: i64, row: &MessageRow, action: AuditLogEvent, reason: Option<String>) -> ApiResult<()> {
+    let Some(guild_id) = access.channel.guild_id else { return Ok(()) };
+    let options = AuditEntryInfo { channel_id: Some(Snowflake::from(access.channel.id)), message_id: Some(Snowflake::from(row.id)), ..Default::default() };
+    audit::record(state, Entry::new(guild_id, user_id, action, row.author_id).reason(reason).options(options)).await?;
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -806,7 +832,12 @@ fn can_pin(access: &ChannelAccess) -> bool {
     access.is_dm() || access.permissions & MANAGE_MESSAGES != 0
 }
 
-async fn pin_message(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, mid)): Path<(String, String)>) -> ApiResult<StatusCode> {
+async fn pin_message(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path((id, mid)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
+) -> ApiResult<StatusCode> {
     let id = channel_id(&id)?;
     let mid = message_id(&mid)?;
     let access = channel_access(&state, user_id, id).await?;
@@ -835,10 +866,16 @@ async fn pin_message(State(state): State<AppState>, AuthUser(user_id): AuthUser,
         forward: None,
     };
     insert_message(&state, &access.channel, user_id, notice).await?;
+    audit_pin(&state, &access, user_id, &row, AuditLogEvent::MessagePin, reason).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn unpin_message(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, mid)): Path<(String, String)>) -> ApiResult<StatusCode> {
+async fn unpin_message(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path((id, mid)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
+) -> ApiResult<StatusCode> {
     let id = channel_id(&id)?;
     let mid = message_id(&mid)?;
     let access = channel_access(&state, user_id, id).await?;
@@ -849,6 +886,7 @@ async fn unpin_message(State(state): State<AppState>, AuthUser(user_id): AuthUse
     if row.pinned {
         sqlx::query("UPDATE messages SET pinned = FALSE, pinned_at = NULL WHERE id = $1").bind(mid).execute(&state.db).await?;
         broadcast_update(&state, &access.channel, mid).await?;
+        audit_pin(&state, &access, user_id, &row, AuditLogEvent::MessageUnpin, reason).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }

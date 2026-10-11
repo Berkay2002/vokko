@@ -59,6 +59,7 @@ function bindGateway(): void {
   gateway.on('MESSAGE_CREATE', m => { rememberMessage(m); update(m.channel_id, s => upsertMessage(s, m)); });
   gateway.on('MESSAGE_UPDATE', m => { rememberMessage(m); update(m.channel_id, s => updateIfPresent(s, m)); });
   gateway.on('MESSAGE_DELETE', d => update(d.channel_id, s => deleteMessage(s, d.id)));
+  gateway.on('MESSAGE_DELETE_BULK', d => update(d.channel_id, s => d.ids.reduce((acc, id) => deleteMessage(acc, id), s)));
   // Our own reaction echoes are ignored while a local toggle for the same message+emoji is queued or just settled: the optimistic state wins.
   const onReaction = (add: boolean) => (d: { channel_id: Snowflake; message_id: Snowflake; user_id: Snowflake; emoji: ReactionEmoji }): void => {
     const byMe = d.user_id === currentUserId;

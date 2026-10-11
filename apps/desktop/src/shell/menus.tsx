@@ -15,6 +15,7 @@ import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
 import { openProfile } from "./ProfileCard";
 import { userAppsItems } from "../apps/menus";
+import { serverSettingsSections } from "./ServerSettings";
 import { voiceModerationItems, voiceUserMenuItems } from "../voice/voiceMenus";
 import { getVoice } from "../voice/store";
 import { useVoiceUi } from "../voice/uiStore";
@@ -101,7 +102,15 @@ export function guildContextItems(guild: Guild): MenuItem[] {
     can(Perm.CREATE_INSTANT_INVITE) ? [{ id: "invite", label: "Invite to Server", disabled: !invite, onSelect: () => invite && openModal({ type: "invite", channelId: invite }) }] : [],
     [muteItem(guild.id, "Server"), notificationItem(guild.id, { guild: true }), hideMutedItem(guild)],
     [
-      ...(canOpenSettings(can) ? [{ id: "settings", label: "Server Settings", onSelect: () => openModal({ type: "serverSettings", guildId: guild.id }) } satisfies MenuItem] : []),
+      ...(canOpenSettings(can)
+        ? [
+            {
+              id: "settings",
+              label: "Server Settings",
+              children: serverSettingsSections(can).map(section => ({ id: `settings-${section.id}`, label: section.label, onSelect: () => openModal({ type: "serverSettings", guildId: guild.id, section: section.id }) })),
+            } satisfies MenuItem,
+          ]
+        : []),
       unavailable("privacy", "Privacy Settings"),
       unavailable("per-server-profile", "Edit Per-server Profile"),
     ],
@@ -196,7 +205,9 @@ export function channelContextItems(channel: Channel, guild: Guild, options: Cha
         ...(category ? [] : [{ id: "create-voice", label: "Create Voice Channel", onSelect: () => openModal({ type: "createChannel", guildId: guild.id, parentId: channel.parent_id, channelType: ChannelType.GuildVoice }) } satisfies MenuItem]),
         { id: "delete", label: `Delete ${label}`, danger: true, onSelect: () => openModal({ type: "deleteChannel", channelId: channel.id }) },
       ]
-    : [];
+    : can(Perm.MANAGE_ROLES)
+      ? [{ id: "edit-permissions", label: `Edit ${label} Permissions`, onSelect: () => openModal({ type: "channelSettings", channelId: channel.id, section: "permissions" }) }]
+      : [];
 
   const invite = firstTextChannelId(guild.id);
   const link = `${window.location.origin}${guildPath(guild.id, channel.id)}`;

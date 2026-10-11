@@ -975,3 +975,237 @@
   border: 4px solid var(--background-surface-high);
   box-sizing: content-box;
 }
+
+/* ---- server admin: members table, audit log, AutoMod, role icons ---- */
+
+.ss-check-cell {
+  width: 32px;
+}
+
+.ss-table tr.selected td {
+  background: var(--background-mod-subtle);
+}
+
+.ss-th-sort {
+  padding: 0;
+  font: inherit;
+  text-transform: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.ss-table th[aria-sort] .ss-th-sort {
+  color: var(--text-default);
+}
+
+.ss-signal {
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--background-mod-normal);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.ss-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: var(--background-base-low);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.ss-chip-toggle {
+  cursor: pointer;
+}
+
+.ss-chip-toggle.selected {
+  border-color: var(--brand-500);
+  background: var(--background-mod-normal);
+}
+
+.ss-audit-filters {
+  flex-wrap: wrap;
+}
+
+.ss-audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.ss-audit-entry {
+  background: var(--background-base-low);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.ss-audit-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--text-default);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.ss-audit-head:disabled {
+  cursor: default;
+}
+
+.ss-audit-dot {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--background-mod-strong);
+}
+
+.ss-audit-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ss-audit-summary {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ss-audit-time {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ss-audit-body {
+  padding: 0 12px 12px 56px;
+  font-size: 13px;
+}
+
+.ss-audit-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ss-audit-diff li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.ss-audit-key {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.ss-audit-old {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.ss-audit-new {
+  color: var(--text-default);
+}
+
+.ss-audit-reason {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+}
+
+.ss-automod-rule {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--background-base-low);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.ss-automod-rule .ss-member-text {
+  flex: 1;
+}
+
+.ss-automod-rule .switch-row {
+  flex: none;
+  padding: 0;
+  border: 0;
+}
+
+.ss-automod-rule .switch-row-text {
+  display: none;
+}
+
+.ss-role-icon-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ss-role-icon-preview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
+  background: var(--background-base-low);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.ss-icon-preset {
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  background: var(--background-base-low);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.ss-icon-preset.selected {
+  outline: 2px solid var(--brand-500);
+  outline-offset: 2px;
+}
+
+.ss-role-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.cs-access .cs-targets-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+@media (max-width: 720px) {
+  .ss-members-table th:nth-child(4),
+  .ss-members-table td:nth-child(4),
+  .ss-members-table th:nth-child(6),
+  .ss-members-table td:nth-child(6) {
+    display: none;
+  }
+}

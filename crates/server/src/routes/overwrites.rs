@@ -7,9 +7,10 @@ use axum::http::StatusCode;
 use axum::routing::put;
 use sqlx::{Postgres, Transaction};
 use vokko_protocol::api::permissions::{ADMINISTRATOR, ALL, MANAGE_ROLES};
-use vokko_protocol::api::{ChannelType, GatewayEvent, OverwriteRequest, OverwriteType};
+use vokko_protocol::api::{AuditEntryInfo, AuditLogEvent, ChannelType, GatewayEvent, OverwriteRequest, OverwriteType, Snowflake};
 
 use crate::access::{self, ChannelAccess, channel_access};
+use crate::audit::{self, AuditReason, Entry};
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, parse_id};
@@ -189,7 +190,8 @@ async fn apply(tx: &mut Transaction<'_, Postgres>, channel_id: i64, change: &Cha
 /// Applies `change` to the channel and, for a category, to every child whose overwrites equalled the category's before it.
 /// The actor must hold every bit the change flips in the channel (the stored overwrite, read under the channel lock, is the baseline);
 /// children are synced without a second check, the change being the one validated on the category.
-async fn change_overwrites(state: &AppState, channel: &ChannelRow, actor_permissions: u64, change: Change) -> ApiResult<()> {
+/// Returns the overwrite stored before the change as (allow, deny, target type), if there was one.
+async fn change_overwrites(state: &AppState, channel: &ChannelRow, actor_permissions: u64, change: Change) -> ApiResult<Option<(i64, i64, i16)>> {
     let mut changed = vec![channel.clone()];
     let mut before: Vec<Vec<i64>> = vec![access::channel_viewers(state, channel).await?];
     let mut tx = state.db.begin().await?;
@@ -199,12 +201,12 @@ async fn change_overwrites(state: &AppState, channel: &ChannelRow, actor_permiss
         Change::Put(write) => (write.target_id, (write.allow, write.deny)),
         Change::Delete(target_id) => (*target_id, (0, 0)),
     };
-    let old: Option<(i64, i64)> = sqlx::query_as("SELECT allow, deny FROM permission_overwrites WHERE channel_id = $1 AND target_id = $2")
+    let old: Option<(i64, i64, i16)> = sqlx::query_as("SELECT allow, deny, target_type FROM permission_overwrites WHERE channel_id = $1 AND target_id = $2")
         .bind(channel.id)
         .bind(target_id)
         .fetch_optional(&mut *tx)
         .await?;
-    require_bits(actor_permissions, flipped(old.unwrap_or((0, 0)), new))?;
+    require_bits(actor_permissions, flipped(old.map(|(allow, deny, _)| (allow, deny)).unwrap_or((0, 0)), new))?;
     if channel.channel_type() == ChannelType::GuildCategory {
         let category = overwrite_rows(&mut tx, channel.id).await?;
         let children: Vec<(i64,)> =
@@ -225,6 +227,44 @@ async fn change_overwrites(state: &AppState, channel: &ChannelRow, actor_permiss
     for (row, viewers) in changed.iter().zip(&before) {
         dispatch_visibility(state, row, viewers).await?;
     }
+    Ok(old)
+}
+
+/// Records an overwrite create / update / delete (options name the target like Discord).
+async fn audit_overwrite(
+    state: &AppState,
+    (guild_id, user_id, channel_id): (i64, i64, i64),
+    target: (i64, i16),
+    old: Option<(i64, i64)>,
+    new: Option<(i64, i64)>,
+    reason: Option<String>,
+) -> ApiResult<()> {
+    let action = match (old, new) {
+        (None, Some(_)) => AuditLogEvent::ChannelOverwriteCreate,
+        (Some(_), Some(_)) => AuditLogEvent::ChannelOverwriteUpdate,
+        (Some(_), None) => AuditLogEvent::ChannelOverwriteDelete,
+        (None, None) => return Ok(()),
+    };
+    if old == new {
+        return Ok(());
+    }
+    let role_name: Option<(String,)> =
+        if target.1 == 0 { sqlx::query_as("SELECT name FROM roles WHERE id = $1").bind(target.0).fetch_optional(&state.db).await? } else { None };
+    let options = AuditEntryInfo {
+        id: Some(Snowflake::from(target.0)),
+        kind: Some(target.1.to_string()),
+        role_name: role_name.map(|(name,)| name),
+        ..Default::default()
+    };
+    let bits = |value: Option<(i64, i64)>, pick: fn((i64, i64)) -> i64| value.map(|pair| (pick(pair) as u64).to_string());
+    let entry = Entry::new(guild_id, user_id, action, channel_id)
+        .reason(reason)
+        .options(options)
+        .change("id", old.map(|_| target.0.to_string()), new.map(|_| target.0.to_string()))
+        .change("type", old.map(|_| target.1), new.map(|_| target.1))
+        .change("allow", bits(old, |pair| pair.0), bits(new, |pair| pair.0))
+        .change("deny", bits(old, |pair| pair.1), bits(new, |pair| pair.1));
+    audit::record(state, entry).await?;
     Ok(())
 }
 
@@ -248,6 +288,7 @@ async fn put_overwrite(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path((id, target)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
     ApiJson(body): ApiJson<OverwriteRequest>,
 ) -> ApiResult<StatusCode> {
     let (access, guild_id) = manageable(&state, user_id, &id).await?;
@@ -257,15 +298,25 @@ async fn put_overwrite(
     })?;
     let write = parse_write(target_id, body.kind, &body.allow, &body.deny)?;
     ensure_target(&state, guild_id, target_id, body.kind).await?;
-    change_overwrites(&state, &access.channel, access.permissions, Change::Put(write)).await?;
+    let old = change_overwrites(&state, &access.channel, access.permissions, Change::Put(write)).await?;
+    let target = (target_id, write.target_type);
+    audit_overwrite(&state, (guild_id, user_id, access.channel.id), target, old.map(|(allow, deny, _)| (allow, deny)), Some((write.allow, write.deny)), reason)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn delete_overwrite(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, target)): Path<(String, String)>) -> ApiResult<StatusCode> {
-    let (access, _) = manageable(&state, user_id, &id).await?;
+async fn delete_overwrite(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path((id, target)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
+) -> ApiResult<StatusCode> {
+    let (access, guild_id) = manageable(&state, user_id, &id).await?;
     // An id that cannot exist has nothing to delete; the call is idempotent.
-    if let Some(target_id) = parse_id(&target) {
-        change_overwrites(&state, &access.channel, access.permissions, Change::Delete(target_id)).await?;
+    if let Some(target_id) = parse_id(&target)
+        && let Some((allow, deny, kind)) = change_overwrites(&state, &access.channel, access.permissions, Change::Delete(target_id)).await?
+    {
+        audit_overwrite(&state, (guild_id, user_id, access.channel.id), (target_id, kind), Some((allow, deny)), None, reason).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }

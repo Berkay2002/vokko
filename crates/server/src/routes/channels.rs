@@ -3,9 +3,10 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::routing::patch;
 use vokko_protocol::api::permissions::MANAGE_CHANNELS;
-use vokko_protocol::api::{Channel, ChannelType, GatewayEvent, UpdateChannelRequest};
+use vokko_protocol::api::{AuditLogEvent, Channel, ChannelType, GatewayEvent, UpdateChannelRequest};
 
 use crate::access::{self, channel_access};
+use crate::audit::{self, AuditReason, Entry};
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
@@ -31,6 +32,7 @@ async fn update_channel(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(id): Path<String>,
+    AuditReason(reason): AuditReason,
     ApiJson(body): ApiJson<UpdateChannelRequest>,
 ) -> ApiResult<Json<Channel>> {
     let id = channel_id(&id)?;
@@ -52,6 +54,10 @@ async fn update_channel(
     } else {
         access.require(MANAGE_CHANNELS)?;
     }
+    let before = match access.channel.guild_id {
+        Some(_) => store::channel(&state, id, Some(user_id)).await?,
+        None => None,
+    };
     // Validate everything first, then write in one transaction: a rejected request (including a lock_permissions the actor
     // may not apply) changes nothing.
     let name = match &body.name {
@@ -123,10 +129,22 @@ async fn update_channel(
         None => events::dispatch_channel(&state, &row, GatewayEvent::ChannelUpdate).await?,
     }
     forums::announce_changed_posts(&state, &changed_posts).await?;
-    store::channel(&state, id, Some(user_id)).await?.map(Json).ok_or_else(ApiErr::unknown_channel)
+    let channel = store::channel(&state, id, Some(user_id)).await?.ok_or_else(ApiErr::unknown_channel)?;
+    if let (Some(guild_id), Some(before)) = (row.guild_id, before) {
+        let entry = audit::channel_changes(Entry::new(guild_id, user_id, AuditLogEvent::ChannelUpdate, id).reason(reason), Some(&before), Some(&channel));
+        if !entry.changes.is_empty() {
+            audit::record(&state, entry).await?;
+        }
+    }
+    Ok(Json(channel))
 }
 
-async fn delete_channel(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<Channel>> {
+async fn delete_channel(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(id): Path<String>,
+    AuditReason(reason): AuditReason,
+) -> ApiResult<Json<Channel>> {
     let id = channel_id(&id)?;
     let access = channel_access(&state, user_id, id).await?;
     if access.channel.is_thread() {
@@ -177,5 +195,9 @@ async fn delete_channel(State(state): State<AppState>, AuthUser(user_id): AuthUs
     crate::media::remove_files(&state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
     crate::stickers::sweep_assets(&state).await;
     state.hub.send(&viewers, &GatewayEvent::ChannelDelete(channel.clone()));
+    if let Some(guild_id) = guild_id {
+        audit::record(&state, audit::channel_changes(Entry::new(guild_id, user_id, AuditLogEvent::ChannelDelete, id).reason(reason), Some(&channel), None))
+            .await?;
+    }
     Ok(Json(channel))
 }

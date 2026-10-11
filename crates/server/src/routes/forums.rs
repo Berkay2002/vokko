@@ -306,6 +306,7 @@ pub async fn create_post(state: &AppState, user_id: i64, access: &ChannelAccess,
         }
     }
     let content = validate_content(first.content.as_deref().unwrap_or(""), !attachments.is_empty())?;
+    crate::safety::check_send(state, access, user_id, &content).await?;
     let mentions = apply_allowed(resolve_mentions(state, access, parse_mentions(&content)).await?, first.allowed_mentions.as_ref());
 
     let id = state.ids.next();

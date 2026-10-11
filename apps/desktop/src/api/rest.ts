@@ -65,26 +65,32 @@ function rateLimited(response: Response, text: string): RateLimitedError {
   return new RateLimitedError(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 1, global, message);
 }
 
+export interface RequestOptions {
+  /** Sent as `X-Audit-Log-Reason` (URL-encoded); the server records it on the audit log entry. */
+  reason?: string;
+}
+
 /** GETs wait out one 429 (when the wait is reasonable) and retry once; everything else surfaces the RateLimitedError. */
-export async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+export async function request<T>(method: Method, path: string, body?: unknown, options: RequestOptions = {}): Promise<T> {
   try {
-    return await send<T>(method, path, body);
+    return await send<T>(method, path, body, options);
   } catch (error) {
     if (method === "GET" && error instanceof RateLimitedError && error.retryAfter <= MAX_RETRY_WAIT_SECONDS) {
       await new Promise(resolve => setTimeout(resolve, error.retryAfter * 1000));
-      return send<T>(method, path, body);
+      return send<T>(method, path, body, options);
     }
     throw error;
   }
 }
 
-async function send<T>(method: Method, path: string, body?: unknown): Promise<T> {
+async function send<T>(method: Method, path: string, body: unknown, options: RequestOptions): Promise<T> {
   const token = getToken();
+  const reason = options.reason?.trim() || null;
   if (MOCK) {
     try {
       // Loaded before bootstrap, so this is as direct as before the backend became a lazy chunk (no extra await).
       const mock = loadedMockBackend() ?? (await loadMockBackend());
-      return (await mock.mockRequest(method, path, body, token)) as T;
+      return (await mock.mockRequest(method, path, body, token, reason)) as T;
     } catch (error) {
       if (error instanceof ApiRequestError) failIfUnauthorized(error.status, path);
       throw error;
@@ -93,6 +99,7 @@ async function send<T>(method: Method, path: string, body?: unknown): Promise<T>
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = token;
+  if (reason) headers["X-Audit-Log-Reason"] = encodeURIComponent(Array.from(reason).slice(0, 512).join(""));
   let response: Response;
   try {
     response = await fetch(`${REST_BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });

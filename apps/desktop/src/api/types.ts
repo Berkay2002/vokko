@@ -151,6 +151,7 @@ export interface Role {
   position: number;
   permissions: string; // bitfield as decimal string (Discord bit values)
   mentionable: boolean;
+  unicode_emoji?: string | null; // role icon as an emoji (free in Vokko, no boost level); always sent by the server
 }
 
 export interface Guild {
@@ -162,6 +163,22 @@ export interface Guild {
   system_channel_id: Snowflake | null;
   tag?: GuildTag | null; // server tag members can adopt (MANAGE_GUILD edits it)
   theme?: GuildTheme | null;
+  verification_level?: VerificationLevel; // safety setup (MANAGE_GUILD); always sent by the server
+  explicit_content_filter?: ExplicitContentFilter;
+}
+/** Who may send messages; members with any role bypass it (Discord rule). */
+export enum VerificationLevel {
+  None = 0,
+  Low = 1, // Discord: verified email. Vokko has no email verification: every account passes
+  Medium = 2, // account older than 5 minutes
+  High = 3, // also a member for longer than 10 minutes
+  VeryHigh = 4, // Discord: verified phone. Vokko: same as High
+}
+/** Stored and shown; Vokko does not scan media yet. */
+export enum ExplicitContentFilter {
+  Disabled = 0,
+  MembersWithoutRoles = 1,
+  AllMembers = 2,
 }
 export interface GuildTag {
   tag: string; // 1-4 chars
@@ -971,6 +988,7 @@ export interface RoleRequest {
   hoist?: boolean;
   permissions?: string;
   mentionable?: boolean;
+  unicode_emoji?: string | null; // null removes the role icon
 }
 export interface RolePositionUpdate {
   id: Snowflake;
@@ -1155,6 +1173,158 @@ export interface FriendSuggestionsResponse {
 }
 export interface FriendSuggestionSettings {
   enabled: boolean;
+}
+
+// ---- Server admin: prune, audit log, AutoMod ----
+/** GET /guilds/{id}/prune?days&include_roles (comma-separated) and POST /guilds/{id}/prune. */
+export interface PruneRequest {
+  days?: number; // 1..30, default 7
+  include_roles?: Snowflake[]; // members holding only these roles are pruned too
+  compute_prune_count?: boolean; // POST only, default true; false → { pruned: null }
+}
+export interface PruneResponse {
+  pruned: number | null;
+}
+
+/** Discord's audit log event numbers (Vokko records the ones whose routes exist, see docs/api.md). */
+export enum AuditLogEvent {
+  GuildUpdate = 1,
+  ChannelCreate = 10,
+  ChannelUpdate = 11,
+  ChannelDelete = 12,
+  ChannelOverwriteCreate = 13,
+  ChannelOverwriteUpdate = 14,
+  ChannelOverwriteDelete = 15,
+  MemberKick = 20,
+  MemberPrune = 21,
+  MemberBanAdd = 22,
+  MemberBanRemove = 23,
+  MemberUpdate = 24,
+  MemberRoleUpdate = 25,
+  MemberMove = 26,
+  MemberDisconnect = 27,
+  BotAdd = 28,
+  RoleCreate = 30,
+  RoleUpdate = 31,
+  RoleDelete = 32,
+  InviteCreate = 40,
+  InviteUpdate = 41,
+  InviteDelete = 42,
+  WebhookCreate = 50,
+  WebhookUpdate = 51,
+  WebhookDelete = 52,
+  EmojiCreate = 60,
+  EmojiUpdate = 61,
+  EmojiDelete = 62,
+  MessageDelete = 72,
+  MessageBulkDelete = 73,
+  MessagePin = 74,
+  MessageUnpin = 75,
+  IntegrationCreate = 80,
+  IntegrationUpdate = 81,
+  IntegrationDelete = 82,
+  StickerCreate = 90,
+  StickerUpdate = 91,
+  StickerDelete = 92,
+  GuildScheduledEventCreate = 100,
+  GuildScheduledEventUpdate = 101,
+  GuildScheduledEventDelete = 102,
+  ThreadCreate = 110,
+  ThreadUpdate = 111,
+  ThreadDelete = 112,
+  ApplicationCommandPermissionUpdate = 121,
+  AutoModerationRuleCreate = 140,
+  AutoModerationRuleUpdate = 141,
+  AutoModerationRuleDelete = 142,
+  AutoModerationBlockMessage = 143,
+  OnboardingPromptCreate = 163,
+  OnboardingPromptUpdate = 164,
+  OnboardingPromptDelete = 165,
+  OnboardingCreate = 166,
+  OnboardingUpdate = 167,
+}
+/** One changed key; a missing side means it was not set before (create) or after (delete). */
+export interface AuditLogChange {
+  key: string; // "$add" / "$remove" carry [{id, name}] role lists on MemberRoleUpdate
+  old_value?: unknown;
+  new_value?: unknown;
+}
+/** Extra context per action type (numbers are strings, like Discord). */
+export interface AuditEntryInfo {
+  channel_id?: Snowflake;
+  message_id?: Snowflake;
+  count?: string;
+  delete_member_days?: string;
+  members_removed?: string;
+  id?: Snowflake; // overwrite target
+  type?: string; // overwrite target type: "0" role, "1" member
+  role_name?: string;
+  auto_moderation_rule_name?: string;
+  auto_moderation_rule_trigger_type?: string;
+}
+export interface AuditLogEntry {
+  id: Snowflake;
+  guild_id: Snowflake;
+  user_id: Snowflake | null; // who acted
+  target_id: string | null; // affected user / role / channel / invite code / rule
+  action_type: AuditLogEvent;
+  changes?: AuditLogChange[];
+  options?: AuditEntryInfo;
+  reason: string | null; // X-Audit-Log-Reason header (URL-encoded, max 512 chars)
+}
+/** GET /guilds/{id}/audit-logs query. */
+export interface AuditLogQuery {
+  user_id?: Snowflake;
+  action_type?: AuditLogEvent;
+  before?: Snowflake;
+  after?: Snowflake;
+  limit?: number; // 1..100, default 50
+}
+export interface AuditLog {
+  audit_log_entries: AuditLogEntry[]; // newest first
+  users: User[]; // every actor and user target referenced
+}
+
+export enum AutoModerationTriggerType {
+  Keyword = 1,
+}
+export enum AutoModerationEventType {
+  MessageSend = 1,
+}
+export enum AutoModerationActionType {
+  BlockMessage = 1,
+}
+export interface AutoModerationTriggerMetadata {
+  keyword_filter: string[]; // max 1000, each ≤60 chars; "*" at the start/end = prefix / suffix / substring match
+  allow_list: string[]; // max 100, same syntax
+}
+export interface AutoModerationAction {
+  type: AutoModerationActionType;
+  metadata?: { custom_message?: string }; // ≤150 chars, shown to the blocked author
+}
+export interface AutoModerationRule {
+  id: Snowflake;
+  guild_id: Snowflake;
+  name: string;
+  creator_id: Snowflake;
+  event_type: AutoModerationEventType;
+  trigger_type: AutoModerationTriggerType;
+  trigger_metadata: AutoModerationTriggerMetadata;
+  actions: AutoModerationAction[];
+  enabled: boolean;
+  exempt_roles: Snowflake[];
+  exempt_channels: Snowflake[];
+}
+/** POST (name, event_type, trigger_type, actions required) and PATCH (all optional; trigger_type cannot change). */
+export interface AutoModerationRuleRequest {
+  name?: string;
+  event_type?: AutoModerationEventType;
+  trigger_type?: AutoModerationTriggerType;
+  trigger_metadata?: Partial<AutoModerationTriggerMetadata>;
+  actions?: AutoModerationAction[];
+  enabled?: boolean;
+  exempt_roles?: Snowflake[];
+  exempt_channels?: Snowflake[];
 }
 
 export interface EditChannelRequest {
@@ -1369,6 +1539,11 @@ export interface GatewayEvents {
   GUILD_SOUNDBOARD_SOUND_DELETE: { sound_id: Snowflake; guild_id: Snowflake };
   VOICE_CHANNEL_EFFECT_SEND: VoiceChannelEffectSend; // only to the users connected to that voice channel
   ENTRANCE_SOUNDS_UPDATE: EntranceSounds; // to the user's own sessions
+  MESSAGE_DELETE_BULK: { ids: Snowflake[]; channel_id: Snowflake; guild_id: Snowflake | null }; // ban with message history deletion
+  GUILD_AUDIT_LOG_ENTRY_CREATE: AuditLogEntry; // only to members with VIEW_AUDIT_LOG
+  AUTO_MODERATION_RULE_CREATE: AutoModerationRule; // AUTO_MODERATION_RULE_*: only to members with MANAGE_GUILD
+  AUTO_MODERATION_RULE_UPDATE: AutoModerationRule;
+  AUTO_MODERATION_RULE_DELETE: AutoModerationRule;
   INVITE_CREATE: InviteMetadata; // to members who can list it: MANAGE_GUILD, or MANAGE_CHANNELS on the invite's channel
   INVITE_DELETE: { code: string; guild_id: Snowflake; channel_id: Snowflake }; // same audience; revoked (not on expiry or last use)
   GUILD_LAYOUT_UPDATE: GuildLayout; // the user's own sessions only

@@ -6,11 +6,12 @@ use axum::routing::{delete, get};
 use serde::Deserialize;
 use vokko_protocol::api::permissions::{DEFAULT_EVERYONE, MANAGE_CHANNELS, MANAGE_GUILD, MANAGE_ROLES};
 use vokko_protocol::api::{
-    Channel, ChannelType, CreateChannelRequest, CreateGuildRequest, GatewayEvent, Guild, GuildMember, GuildTag, GuildTheme, IdOnly, Snowflake,
+    AuditLogEvent, Channel, ChannelType, CreateChannelRequest, CreateGuildRequest, GatewayEvent, Guild, GuildMember, GuildTag, GuildTheme, IdOnly, Snowflake,
     UpdateGuildRequest,
 };
 
 use crate::access::{self, guild_access};
+use crate::audit::{self, AuditReason, Entry};
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
@@ -130,10 +131,12 @@ async fn update_guild(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(id): Path<String>,
+    AuditReason(reason): AuditReason,
     ApiJson(body): ApiJson<UpdateGuildRequest>,
 ) -> ApiResult<Json<Guild>> {
     let id = guild_id(&id)?;
     guild_access(&state, user_id, id).await?.require(MANAGE_GUILD)?;
+    let before = store::guild(&state, id).await?.ok_or_else(ApiErr::unknown_guild)?;
     // Validate every key first so a rejected request changes nothing.
     let name = body.name.as_deref().map(guild_name).transpose()?;
     let icon_path = match body.icon_attachment_id {
@@ -170,6 +173,12 @@ async fn update_guild(
     if let Some(channel) = body.system_channel_id {
         sqlx::query("UPDATE guilds SET system_channel_id = $2 WHERE id = $1").bind(id).bind(channel.db()).execute(&state.db).await?;
     }
+    if let Some(level) = body.verification_level {
+        sqlx::query("UPDATE guilds SET verification_level = $2 WHERE id = $1").bind(id).bind(level.as_u8() as i16).execute(&state.db).await?;
+    }
+    if let Some(filter) = body.explicit_content_filter {
+        sqlx::query("UPDATE guilds SET explicit_content_filter = $2 WHERE id = $1").bind(id).bind(filter.as_u8() as i16).execute(&state.db).await?;
+    }
     if let Some(theme) = theme {
         sqlx::query("UPDATE guilds SET theme_preset = $2, theme_primary = $3, theme_accent = $4 WHERE id = $1")
             .bind(id)
@@ -203,6 +212,17 @@ async fn update_guild(
     state.hub.send(&members, &GatewayEvent::GuildUpdate(guild.clone()));
     for adopter in adopters {
         users::publish_user(&state, adopter).await?;
+    }
+    let entry = Entry::new(id, user_id, AuditLogEvent::GuildUpdate, id)
+        .reason(reason)
+        .change("name", &before.name, &guild.name)
+        .change("icon", &before.icon, &guild.icon)
+        .change("system_channel_id", before.system_channel_id, guild.system_channel_id)
+        .change("verification_level", before.verification_level.as_u8(), guild.verification_level.as_u8())
+        .change("explicit_content_filter", before.explicit_content_filter.as_u8(), guild.explicit_content_filter.as_u8())
+        .change("tag", before.tag.as_ref().map(|tag| &tag.tag), guild.tag.as_ref().map(|tag| &tag.tag));
+    if !entry.changes.is_empty() {
+        audit::record(&state, entry).await?;
     }
     Ok(Json(guild))
 }
@@ -273,6 +293,7 @@ async fn create_channel(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(id): Path<String>,
+    AuditReason(reason): AuditReason,
     ApiJson(body): ApiJson<CreateChannelRequest>,
 ) -> ApiResult<Json<Channel>> {
     let id = guild_id(&id)?;
@@ -367,6 +388,8 @@ async fn create_channel(
     let row = store::channel_row(&state, channel_id).await?.ok_or_else(ApiErr::internal)?;
     events::dispatch_channel(&state, &row, GatewayEvent::ChannelCreate).await?;
     let channel = store::channel(&state, channel_id, Some(user_id)).await?.ok_or_else(ApiErr::internal)?;
+    audit::record(&state, audit::channel_changes(Entry::new(id, user_id, AuditLogEvent::ChannelCreate, channel_id).reason(reason), None, Some(&channel)))
+        .await?;
     Ok(Json(channel))
 }
 

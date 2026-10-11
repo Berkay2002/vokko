@@ -56,7 +56,7 @@ General rules:
 | DELETE | /users/@me/relationships/{user_id} | remove friend / cancel / decline / unblock (204) |
 | POST | /guilds | `{name, icon_attachment_id?}` → `Guild` (creates @everyone role, "Text Channels"/"Voice Channels" categories, #general, General voice) |
 | GET | /guilds/{id} | `Guild` |
-| PATCH | /guilds/{id} | `{name?, icon_attachment_id?, system_channel_id?, tag?: GuildTag \| null, theme?: GuildTheme \| null}` → `Guild` (MANAGE_GUILD) |
+| PATCH | /guilds/{id} | `{name?, icon_attachment_id?, system_channel_id?, tag?: GuildTag \| null, theme?: GuildTheme \| null, verification_level?, explicit_content_filter?}` → `Guild` (MANAGE_GUILD) |
 | DELETE | /guilds/{id} | owner only, 204 |
 | GET | /guilds/{id}/channels | `Channel[]` |
 | POST | /guilds/{id}/channels | `CreateChannelRequest` → `Channel`; `type` 0 text, 2 voice, 4 category, 5 announcement, 13 stage (see Stage channels), 15 forum (private channel = @everyone deny VIEW_CHANNEL overwrite; `bitrate`/`user_limit` voice only, see Voice) |
@@ -78,7 +78,7 @@ General rules:
 | PATCH | /guilds/{id}/members/{uid} | `EditMemberRequest` → `GuildMember`: nick needs MANAGE_NICKNAMES, roles MANAGE_ROLES (only roles below your highest), timeout MODERATE_MEMBERS (not on admins/owner, max 28 days), `mute` MUTE_MEMBERS, `deaf` DEAFEN_MEMBERS, `channel_id` MOVE_MEMBERS (see Voice); only sent keys change; emits GUILD_MEMBER_UPDATE |
 | PATCH | /guilds/{id}/members/@me | `EditOwnMemberRequest` → `GuildMember` (nick needs CHANGE_NICKNAME; per-server avatar/banner/bio/pronouns/theme colours need nothing) |
 | GET | /guilds/{id}/bans | `Ban[]` (BAN_MEMBERS) |
-| PUT | /guilds/{id}/bans/{uid} | `BanRequest`, 204; works on non-members; removes the member, emits GUILD_BAN_ADD + GUILD_MEMBER_REMOVE; banned users can't rejoin via invite (403 40007) |
+| PUT | /guilds/{id}/bans/{uid} | `BanRequest`, 204; works on non-members; removes the member, emits GUILD_BAN_ADD + GUILD_MEMBER_REMOVE; banned users can't rejoin via invite (403 40007). `delete_message_seconds` deletes the user's messages of that window in every channel and thread of the guild, one MESSAGE_DELETE_BULK per channel |
 | DELETE | /guilds/{id}/bans/{uid} | unban, 204, emits GUILD_BAN_REMOVE |
 | GET | /users/@me/friend-suggestions?limit | `FriendSuggestionsResponse`: people the caller shares a small guild or friends with, see "Community features" |
 | PATCH | /users/@me/friend-suggestion-settings | `{enabled}` → `FriendSuggestionSettings` (opt out of seeing and of being suggested) |
@@ -97,8 +97,17 @@ General rules:
 | PUT | /guilds/{id}/onboarding-responses | `OnboardingResponsesRequest` → `OnboardingCompletion`; any member while onboarding is enabled |
 | POST | /guilds/{id}/roles | `RoleRequest` → `Role` (MANAGE_ROLES; name default "new role", placed just above @everyone; can't grant bits you lack, ADMINISTRATOR only by an admin), emits GUILD_ROLE_CREATE |
 | PATCH | /guilds/{id}/roles | `RolePositionUpdate[]` → `Role[]` (only roles below your highest; @everyone fixed at 0), GUILD_ROLE_UPDATE per changed role |
-| PATCH | /guilds/{id}/roles/{rid} | `RoleRequest` → `Role` (@everyone: permissions only), GUILD_ROLE_UPDATE |
+| PATCH | /guilds/{id}/roles/{rid} | `RoleRequest` → `Role` (@everyone: permissions only; `unicode_emoji` 1-32 chars or `null` sets the role icon, free), GUILD_ROLE_UPDATE |
 | DELETE | /guilds/{id}/roles/{rid} | 204 (not @everyone), removes it from members, GUILD_ROLE_DELETE |
+| GET | /guilds/{id}/roles/member-counts | `Record<role id, number>` for every role but @everyone (guild members) |
+| GET | /guilds/{id}/prune?days&include_roles | `PruneResponse` count of members a prune would remove (KICK_MEMBERS + MANAGE_GUILD); `include_roles` comma-separated |
+| POST | /guilds/{id}/prune | `PruneRequest` → `PruneResponse`; removes them like a kick (GUILD_MEMBER_REMOVE each), one MEMBER_PRUNE audit entry |
+| GET | /guilds/{id}/audit-logs?user_id&action_type&before&after&limit | `AuditLog` (VIEW_AUDIT_LOG), newest first, limit 1-100 (default 50) |
+| GET | /guilds/{id}/auto-moderation/rules | `AutoModerationRule[]` (MANAGE_GUILD) |
+| GET | /guilds/{id}/auto-moderation/rules/{rule_id} | `AutoModerationRule` (MANAGE_GUILD), 404 10066 unknown rule |
+| POST | /guilds/{id}/auto-moderation/rules | `AutoModerationRuleRequest` → `AutoModerationRule` (MANAGE_GUILD), AUTO_MODERATION_RULE_CREATE |
+| PATCH | /guilds/{id}/auto-moderation/rules/{rule_id} | `AutoModerationRuleRequest` → `AutoModerationRule`, AUTO_MODERATION_RULE_UPDATE |
+| DELETE | /guilds/{id}/auto-moderation/rules/{rule_id} | 204, AUTO_MODERATION_RULE_DELETE |
 | PUT | /channels/{id}/permissions/{oid} | `OverwriteRequest`, 204 (MANAGE_ROLES on the channel; can't grant/deny bits you lack there), emits CHANNEL_UPDATE |
 | DELETE | /channels/{id}/permissions/{oid} | 204, emits CHANNEL_UPDATE |
 | POST | /channels/{id}/invites | `CreateInviteRequest` `{max_age?, max_uses?, temporary?, unique?}` → `InviteMetadata` (CREATE_INSTANT_INVITE; see Invites) |
@@ -338,6 +347,16 @@ Forum channels take no messages, so no polls (50024).
   votes `victor_answer_id`, `victor_answer_text`, `victor_answer_votes`, `victor_answer_emoji_id`, `victor_answer_emoji_name` (values are strings).
   A vote either commits before the poll is finalised (and is counted) or is refused with 520001; counts never change after finalising.
 - **Editing** a poll message → 400 520003 `Cannot edit a poll message`. Deleting it deletes the poll and its votes (no result message).
+
+## Server admin: hierarchy, prune, audit log, safety
+
+- **Hierarchy.** Roles rank by `position` (ties: older snowflake higher), @everyone always last. Everyone but the owner can only edit, delete, assign, remove or move roles strictly below their own highest role, and only move them to positions below it; role edits can only flip permission bits the actor holds. The owner bypasses all of it. Violations → 403 50013.
+- **Role icon.** `Role.unicode_emoji` (any emoji, 1-32 chars), free for every server; image role icons are not supported yet.
+- **Prune.** A member is inactive when they joined more than `days` days ago and posted no message of their own (join notices do not count) in the guild during the last `days` days. Never the owner or the caller; members with roles only when every role they hold is in `include_roles` (each of which must be below the caller's highest role, 403 50013 otherwise). `days` 1-30 (400 50035).
+- **Audit log.** Entries are recorded for guild updates (1), channel create/update/delete (10-12), overwrite create/update/delete (13-15, options `id`, `type`, `role_name`), kick (20), prune (21, options `delete_member_days`, `members_removed`), ban add/remove (22/23), member nick/timeout (24), member role add/remove (25, `$add` / `$remove` changes with `[{id, name}]`), role create/update/delete (30-32), invite create / delete (40/42, in routes/invites.rs), a message deleted by someone other than its author (72, options `channel_id`, `count`), pin/unpin (74/75, options `channel_id`, `message_id`), AutoMod rule create/update/delete (140-142) and AutoMod blocks (143, the author is `user_id` and `target_id`, options `channel_id`, `auto_moderation_rule_name`, `auto_moderation_rule_trigger_type`). Webhooks, emoji, stickers, scheduled events and onboarding have no routes in this version; their numbers are reserved in `AuditLogEvent` and `audit::record` is the hook. `reason` comes from the `X-Audit-Log-Reason` request header (percent-decoded, trimmed, cut to 512 characters; CORS allows it); a ban stores the body `reason` and falls back to the header. `changes` lists only keys that changed. `before` / `after` page by entry id. Entries are kept indefinitely (no 90-day expiry yet). `GUILD_AUDIT_LOG_ENTRY_CREATE` (the entry) goes only to members with VIEW_AUDIT_LOG (owner and administrators included).
+- **Safety.** `verification_level` is enforced when sending a message in a guild channel (members with any role, administrators and the owner bypass it): Medium = account older than 5 minutes, High / VeryHigh = also a member for more than 10 minutes; otherwise 403 50009 "Channel verification level is too high for you to gain access". Low counts every account as verified (no email verification exists). `explicit_content_filter` is stored and shown; media is not scanned yet.
+- **AutoMod** (keyword rules only: `trigger_type` 1, `event_type` 1, action 1 BLOCK_MESSAGE; anything else → 400 50035). At most 6 keyword rules per guild (400 30035). `keyword_filter` ≤1000 entries of 1-60 chars, `allow_list` ≤100, `exempt_roles` ≤20 (roles of the guild), `exempt_channels` ≤50 (channels of the guild), `name` 1-100. Matching is case-insensitive on whole words: `cat` matches the word cat, `cat*` words starting with cat, `*cat` words ending with it, `*cat*` anywhere; a keyword may contain spaces. A word matched by `allow_list` never triggers. Checked on message create and on content edits (messages, thread and forum post starters) for enabled rules; exempt: the owner, members with MANAGE_GUILD or ADMINISTRATOR, members holding an exempt role, and exempt channels (a thread uses its parent). A blocked message is not stored: 400 code 200000 "Message was blocked by automatic moderation" (`errors.content._errors[0].message` = the custom message when set) plus an audit entry 143. AUTO_MODERATION_RULE_* go to members with MANAGE_GUILD.
+- Errors: 50009 verification level, 200000 AutoMod block, 10066 unknown AutoMod rule, 30035 too many AutoMod rules.
 
 ## Gateway
 

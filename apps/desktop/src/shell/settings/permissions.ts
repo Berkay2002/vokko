@@ -3,6 +3,8 @@
 export interface PermissionDef {
   label: string;
   bit: number;
+  /** One-line explanation shown under the toggle (Vokko's own wording). */
+  description?: string;
 }
 
 export interface PermissionGroup {
@@ -12,8 +14,62 @@ export interface PermissionGroup {
 
 export const ADMINISTRATOR_BIT = 3;
 
+const DESCRIPTIONS: Record<number, string> = {
+  10: "See channels (unless a channel is private) and read along.",
+  4: "Create, edit and delete channels.",
+  28: "Create roles below their highest role and edit or assign them.",
+  43: "Upload new emoji, stickers and sounds.",
+  30: "Edit or remove the server's emoji, stickers and sounds.",
+  7: "Read the audit log of moderation and settings changes.",
+  19: "See server statistics.",
+  29: "Create, edit and delete webhooks and channel follows.",
+  5: "Change the server name, icon, safety setup and AutoMod; prune members.",
+  0: "Invite new people to the server.",
+  26: "Change their own nickname.",
+  27: "Change other members' nicknames.",
+  1: "Remove members from the server (they can rejoin with an invite).",
+  2: "Ban members permanently and optionally delete their recent messages.",
+  40: "Stop members from chatting, reacting or speaking for a while.",
+  11: "Send messages in text channels and create forum posts.",
+  38: "Send messages in threads and forum posts.",
+  35: "Start threads everyone in the channel can see.",
+  36: "Start invite-only threads.",
+  14: "Show previews for links they post.",
+  15: "Upload files and images.",
+  6: "Add new reactions to messages.",
+  18: "Use emoji from other servers.",
+  37: "Use stickers from other servers.",
+  17: "Ping @everyone, @here and every role.",
+  13: "Delete other members' messages.",
+  51: "Pin and unpin messages.",
+  52: "Not affected by slowmode.",
+  34: "Rename, archive, lock and delete threads and forum posts.",
+  16: "Read messages sent before they arrived.",
+  12: "Send messages read aloud by text-to-speech.",
+  46: "Send voice messages.",
+  49: "Create polls.",
+  20: "Join voice channels.",
+  21: "Talk in voice channels.",
+  9: "Share their camera or screen.",
+  42: "Play sounds from the soundboard.",
+  45: "Use sounds from other servers.",
+  25: "Talk without push-to-talk.",
+  8: "Be heard more clearly when they talk.",
+  22: "Mute others in voice channels.",
+  23: "Deafen others in voice channels.",
+  24: "Move or disconnect others between voice channels.",
+  48: "Set a status on voice channels.",
+  31: "Use slash commands and app menus.",
+  39: "Start activities in voice channels.",
+  50: "Use apps that are not added to the server.",
+  32: "Ask to speak on a stage.",
+  44: "Create events.",
+  33: "Edit and cancel every event.",
+  3: "Every permission, and channel overrides do not apply. Grant with care.",
+};
+
 function group(title: string, entries: [string, number][]): PermissionGroup {
-  return { title, permissions: entries.map(([label, bit]) => ({ label, bit })) };
+  return { title, permissions: entries.map(([label, bit]) => ({ label, bit, description: DESCRIPTIONS[bit] })) };
 }
 
 export const PERMISSION_GROUPS: PermissionGroup[] = [

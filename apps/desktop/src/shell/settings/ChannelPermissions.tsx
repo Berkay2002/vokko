@@ -230,6 +230,20 @@ export function ChannelPermissionsPage({ channel, guild, members }: { channel: C
     setQuery("");
   };
 
+  // Simple private-channel view: who holds an explicit VIEW_CHANNEL allow.
+  const [accessPicker, setAccessPicker] = useState(false);
+  const withAccess = Object.entries(drafts)
+    .filter(([id, d]) => id !== guild.id && hasBit(d.allow, Perm.VIEW_CHANNEL))
+    .map(([id, d]) => targetFor(id, d.type));
+  const needle = query.trim().toLowerCase();
+  const grantAccess = (id: string, type: OverwriteType) => {
+    const mask = Perm.VIEW_CHANNEL;
+    setDraft(id, type, d => ({ ...d, allow: d.allow | mask, deny: d.deny & ~mask }));
+    setAccessPicker(false);
+    setQuery("");
+  };
+  const revokeAccess = (id: string, type: OverwriteType) => setDraft(id, type, d => ({ ...d, allow: d.allow & ~Perm.VIEW_CHANNEL }));
+
   const allowed = new Set(bitsFor(channel.type));
   const groups = PERMISSION_GROUPS.map(g => ({ title: g.title, permissions: g.permissions.filter(p => allowed.has(p.bit)) })).filter(g => g.permissions.length > 0);
   const selectedTarget = targetFor(selected, current.type);
@@ -258,6 +272,60 @@ export function ChannelPermissionsPage({ channel, guild, members }: { channel: C
       <div className="cs-card">
         <SwitchRow label={`Private ${noun === "category" ? "Category" : "Channel"}`} note={`By making a ${noun} private, only select members and roles will be able to view it.`} checked={privateOn} disabled={!editable || !grantable(10)} onChange={setPrivate} />
       </div>
+      {privateOn && (
+        <section className="settings-category cs-access" aria-label={`Who can access this ${noun}?`}>
+          <div className="cs-targets-head">
+            <h2 className="settings-category-title">Who can access this {noun}?</h2>
+            {editable && grantable(10) && (
+              <button type="button" className="btn btn-secondary btn-sm" aria-expanded={accessPicker} onClick={() => setAccessPicker(p => !p)}>
+                Add members or roles
+              </button>
+            )}
+          </div>
+          {accessPicker && (
+            <div className="cs-picker" role="dialog" aria-label="Add members or roles">
+              <div className="ss-search">
+                <Search size={14} aria-hidden="true" />
+                <input className="ss-search-input" autoFocus placeholder="Role / Member" aria-label="Search roles and members to add" value={query} onChange={e => setQuery(e.target.value)} />
+              </div>
+              <div className="cs-picker-list">
+                {guild.roles
+                  .filter(r => r.id !== guild.id && !hasBit(drafts[r.id]?.allow ?? 0n, Perm.VIEW_CHANNEL) && r.name.toLowerCase().includes(needle))
+                  .sort((a, b) => b.position - a.position)
+                  .map(r => (
+                    <button key={r.id} type="button" className="cs-target" onClick={() => grantAccess(r.id, OverwriteType.Role)}>
+                      <span className="cs-dot" style={{ background: roleColor(r) }} />
+                      <span className="cs-target-name">{r.name}</span>
+                    </button>
+                  ))}
+                {Object.values(members ?? {})
+                  .filter(m => !hasBit(drafts[m.user.id]?.allow ?? 0n, Perm.VIEW_CHANNEL) && displayName(m.user, m).toLowerCase().includes(needle))
+                  .slice(0, 50)
+                  .map(m => (
+                    <button key={m.user.id} type="button" className="cs-target" onClick={() => grantAccess(m.user.id, OverwriteType.Member)}>
+                      <Avatar user={m.user} size={20} />
+                      <span className="cs-target-name">{displayName(m.user, m)}</span>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+          <ul className="ss-holder-list" aria-label="Members and roles with access">
+            {withAccess.map(t => (
+              <li key={t.id} className="ss-member-name ss-holder">
+                {t.member ? <Avatar user={t.member.user} size={24} /> : <span className="cs-dot" style={{ background: t.color ?? "var(--text-muted)" }} />}
+                <span className="ss-member-display">{t.label}</span>
+                {editable && grantable(10) && (
+                  <button type="button" className="ss-icon-btn" aria-label={`Remove access for ${t.label}`} onClick={() => revokeAccess(t.id, t.type)}>
+                    <X size={16} aria-hidden="true" />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+          {withAccess.length === 0 && <p className="settings-todo">Only administrators can see this {noun} right now.</p>}
+        </section>
+      )}
       <section className="settings-category">
         <button type="button" className="cs-advanced-toggle" aria-expanded={advanced} onClick={() => setAdvanced(a => !a)}>
           <span>Advanced Permissions</span>

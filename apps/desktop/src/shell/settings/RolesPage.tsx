@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, GripVertical, Lock, MoreHorizontal, Plus, X } from "lucide-react";
 import { Perm, basePermissions, canEditRole, canModerate, hasBit, memberLike, parseBits } from "../../api/permissions";
 import { appStore, displayName, useStore } from "../../api/store";
@@ -10,6 +10,8 @@ import { Category, Divider, Field, Page, RadioGroup, SwitchRow } from "./control
 import { useFrameLayout } from "./FullScreenSettings";
 import { PERMISSION_GROUPS } from "./permissions";
 import { SearchBox, errorText, mergeMemberLocal, removeRoleLocal, roleColor, upsertRoles } from "./shared";
+import { fetchRoleMemberCounts, nudgeRole } from "./admin";
+import { gateway } from "../../api/gateway";
 
 type RoleTab = "display" | "permissions" | "links" | "members";
 
@@ -17,6 +19,9 @@ type RoleTab = "display" | "permissions" | "links" | "members";
 const COLOR_PRESETS = [0x1abc9c, 0x2ecc71, 0x3498db, 0x9b59b6, 0xe91e63, 0xf1c40f, 0xe67e22, 0xe74c3c, 0x95a5a6, 0x607d8b];
 
 const HEX = /^#?([0-9a-fA-F]{6})$/;
+
+/** Quick picks for the role icon (any emoji can be typed; role icons are free in Vokko). */
+const ICON_PRESETS = ["⭐", "🛡️", "👑", "🎨", "🎮", "🔧", "💎", "🔥", "🌱", "🎵"];
 
 interface Actor {
   id: string;
@@ -29,9 +34,10 @@ interface Draft {
   hoist: boolean;
   mentionable: boolean;
   permissions: bigint;
+  icon: string;
 }
 
-const draftOf = (role: Role): Draft => ({ name: role.name, color: role.color, hoist: role.hoist, mentionable: role.mentionable, permissions: parseBits(role.permissions) });
+const draftOf = (role: Role): Draft => ({ name: role.name, color: role.color, hoist: role.hoist, mentionable: role.mentionable, permissions: parseBits(role.permissions), icon: role.unicode_emoji ?? "" });
 
 function MemberPicker({ guild, role, candidates, onPick, onClose }: { guild: Guild; role: Role; candidates: GuildMember[]; onPick(member: GuildMember): void; onClose(): void }) {
   const [query, setQuery] = useState("");
@@ -97,7 +103,8 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
   const viewerBits = basePermissions(guild, actor);
   const holders = isEveryone ? members : members.filter(m => m.roles.includes(role.id));
   const base = draftOf(role);
-  const dirty = draft.name !== base.name || draft.color !== base.color || draft.hoist !== base.hoist || draft.mentionable !== base.mentionable || draft.permissions !== base.permissions;
+  const dirty =
+    draft.name !== base.name || draft.color !== base.color || draft.hoist !== base.hoist || draft.mentionable !== base.mentionable || draft.permissions !== base.permissions || draft.icon.trim() !== base.icon;
   const isAdmin = hasBit(draft.permissions, Perm.ADMINISTRATOR);
   const needle = permQuery.trim().toLowerCase();
   const title = isEveryone ? "Edit Role - @everyone" : `Edit Role - ${role.name}`;
@@ -123,7 +130,14 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
     setError(null);
     const body: RoleRequest = isEveryone
       ? { permissions: draft.permissions.toString() }
-      : { name: draft.name.trim() || role.name, color: draft.color, hoist: draft.hoist, permissions: draft.permissions.toString(), mentionable: draft.mentionable };
+      : {
+          name: draft.name.trim() || role.name,
+          color: draft.color,
+          hoist: draft.hoist,
+          permissions: draft.permissions.toString(),
+          mentionable: draft.mentionable,
+          unicode_emoji: draft.icon.trim() || null,
+        };
     try {
       const updated = await request<Role>("PATCH", `/guilds/${guild.id}/roles/${role.id}`, body);
       upsertRoles(guild.id, [updated]);
@@ -248,6 +262,25 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
               ))}
             </div>
           </div>
+          <div className="settings-field">
+            <div className="field-label">Role Icon</div>
+            <div className="ss-role-icon-row">
+              <span className="ss-role-icon-preview" aria-hidden="true">
+                {draft.icon || "—"}
+              </span>
+              <input className="input ss-hex" aria-label="Role icon emoji" placeholder="Emoji" maxLength={16} value={draft.icon} disabled={!editable} onChange={e => patch({ icon: e.target.value })} />
+              <button type="button" className="btn btn-link btn-sm" disabled={!editable || !draft.icon} onClick={() => patch({ icon: "" })}>
+                Remove Icon
+              </button>
+            </div>
+            <div className="ss-swatch-row" role="group" aria-label="Preset role icons">
+              {ICON_PRESETS.map(icon => (
+                <button key={icon} type="button" className={`ss-icon-preset${draft.icon === icon ? " selected" : ""}`} aria-label={`Icon ${icon}`} aria-pressed={draft.icon === icon} disabled={!editable} onClick={() => patch({ icon })}>
+                  {icon}
+                </button>
+              ))}
+            </div>
+          </div>
           <Divider />
           <SwitchRow label="Display role members separately from online members" checked={draft.hoist} onChange={v => patch({ hoist: v })} disabled={!editable} />
           <SwitchRow label="Allow anyone to @mention this role" checked={draft.mentionable} onChange={v => patch({ mentionable: v })} disabled={!editable} />
@@ -287,6 +320,7 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
                     <SwitchRow
                       key={p.bit}
                       label={p.label}
+                      note={p.description}
                       checked={isAdmin || on}
                       onChange={() => patch({ permissions: draft.permissions ^ bitValue })}
                       disabled={!editable || !hasBit(viewerBits, bitValue)}
@@ -378,6 +412,18 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
 
   const memberList = useMemo(() => Object.values(members ?? {}), [members]);
   const actor: Actor = { id: meId, roles: members?.[meId]?.roles ?? [] };
+  const [serverCounts, setServerCounts] = useState<Record<string, number> | null>(null);
+  // The member list in the store can be partial on big servers: the server's counts win when they arrive.
+  useEffect(() => {
+    let live = true;
+    const refresh = () => void fetchRoleMemberCounts(guild.id).then(counts => live && setServerCounts(counts)).catch(() => undefined);
+    refresh();
+    const offs = [gateway.on("GUILD_MEMBER_UPDATE", m => m.guild_id === guild.id && refresh()), gateway.on("GUILD_MEMBER_REMOVE", m => m.guild_id === guild.id && refresh())];
+    return () => {
+      live = false;
+      offs.forEach(off => off());
+    };
+  }, [guild.id]);
   const everyone = guild.roles.find(r => r.id === guild.id);
   const roles = useMemo(() => guild.roles.filter(r => r.id !== guild.id).sort((a, b) => b.position - a.position), [guild.roles, guild.id]);
   const active = selected ? guild.roles.find(r => r.id === selected) : undefined;
@@ -433,8 +479,26 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
   const needle = query.trim().toLowerCase();
   const visible = needle ? shown.filter(r => r.name.toLowerCase().includes(needle)) : shown;
   const canReorder = !needle;
-  const countOf = (role: Role) => memberList.filter(m => m.roles.includes(role.id)).length;
+  const countOf = (role: Role) => serverCounts?.[role.id] ?? memberList.filter(m => m.roles.includes(role.id)).length;
   const editableRole = (role: Role) => canEditRole(guild, actor, role);
+
+  const sendPositions = async (updates: RolePositionUpdate[]) => {
+    if (updates.length === 0) return;
+    setError(null);
+    try {
+      upsertRoles(guild.id, await request<Role[]>("PATCH", `/guilds/${guild.id}/roles`, updates));
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
+
+  /** Alt+Up / Alt+Down moves a role one slot (keyboard alternative to dragging). */
+  const nudge = (role: Role, direction: "up" | "down") => {
+    const updates = nudgeRole(roles, role.id, direction);
+    const other = updates[1] ? roles.find(r => r.id === updates[1]?.id) : undefined;
+    if (!other || !editableRole(other)) return;
+    void sendPositions(updates);
+  };
 
   const drop = async (targetId: string) => {
     const from = dragId;
@@ -475,7 +539,7 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
 
   return (
     <Page title="Roles">
-      <p className="settings-todo">Use roles to group your server members and assign permissions. Drag the handle to reorder; higher roles rank above lower ones.</p>
+      <p className="settings-todo">Use roles to group your server members and assign permissions. Drag the handle (or press Alt+Up / Alt+Down) to reorder; higher roles rank above lower ones.</p>
       <div className="ss-toolbar">
         <SearchBox value={query} onChange={setQuery} placeholder="Search Roles" />
         <button type="button" className="btn btn-primary btn-sm" disabled={creating} onClick={() => void create()}>
@@ -518,6 +582,11 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
               }}
               onClick={() => editable && setSelected(role.id)}
               onKeyDown={e => {
+                if (editable && canReorder && e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+                  e.preventDefault();
+                  nudge(role, e.key === "ArrowUp" ? "up" : "down");
+                  return;
+                }
                 if (editable && (e.key === "Enter" || e.key === " ")) {
                   e.preventDefault();
                   setSelected(role.id);
@@ -529,6 +598,11 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
                 {editable ? <GripVertical size={16} /> : <Lock size={14} />}
               </span>
               <span className="ss-role-dot" style={{ background: roleColor(role) }} aria-hidden="true" />
+              {role.unicode_emoji && (
+                <span className="ss-role-icon" aria-hidden="true">
+                  {role.unicode_emoji}
+                </span>
+              )}
               <span className="ss-role-row-name">{role.name}</span>
               <span className="ss-role-row-count">
                 {countOf(role)} {countOf(role) === 1 ? "member" : "members"}

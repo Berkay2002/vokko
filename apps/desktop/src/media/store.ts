@@ -178,6 +178,7 @@ export function wireMedia(): void {
     purge({ guildId: id });
   });
   gateway.on('MESSAGE_DELETE', ({ id }) => purge({ messageId: id }));
+  gateway.on('MESSAGE_DELETE_BULK', ({ ids }) => ids.forEach(id => purge({ messageId: id })));
   gateway.on('CHANNEL_DELETE', channel => purge({ channelId: channel.id }));
   gateway.on('GUILD_STICKERS_UPDATE', ({ guild_id, stickers }) => set(s => ({ stickers: { ...s.stickers, [guild_id]: stickers } })));
   gateway.on('BOOKMARK_ADD', bookmark => set(s => ({ bookmarks: upsertBookmark(s.bookmarks ?? [], bookmark) })));

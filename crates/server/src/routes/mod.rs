@@ -64,5 +64,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(applications::routes())
         .merge(interactions::routes())
         .merge(webhooks::routes())
+        .merge(crate::audit::routes())
+        .merge(crate::safety::routes())
         .merge(attachments::routes(max_upload_bytes))
 }

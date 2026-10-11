@@ -9,17 +9,21 @@ use axum::routing::{get, patch, put};
 use sqlx::{Postgres, QueryBuilder, Transaction};
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
-use vokko_protocol::api::permissions::{ADMINISTRATOR, ALL, BAN_MEMBERS, CHANGE_NICKNAME, KICK_MEMBERS, MANAGE_NICKNAMES, MANAGE_ROLES, MODERATE_MEMBERS};
+use vokko_protocol::api::permissions::{
+    ADMINISTRATOR, ALL, BAN_MEMBERS, CHANGE_NICKNAME, KICK_MEMBERS, MANAGE_GUILD, MANAGE_NICKNAMES, MANAGE_ROLES, MODERATE_MEMBERS,
+};
 use vokko_protocol::api::{
-    Ban, BanRequest, EditMemberRequest, EditOwnMemberRequest, GatewayEvent, GuildMember, GuildMemberAdd, GuildMemberRemove, GuildRoleDelete, GuildRoleEvent,
-    IdOnly, MessageDelete, Role, RolePositionUpdate, RoleRequest, Snowflake,
+    AuditEntryInfo, AuditLogChange, AuditLogEvent, Ban, BanRequest, EditMemberRequest, EditOwnMemberRequest, GatewayEvent, GuildMember, GuildMemberAdd,
+    GuildMemberRemove, GuildRoleDelete, GuildRoleEvent, IdOnly, MessageDeleteBulk, PruneRequest, PruneResponse, Role, RolePositionUpdate, RoleRequest,
+    Snowflake,
 };
 
 use crate::access::{self, GuildAccess, RoleRank, compare_roles, guild_access, highest_role};
+use crate::audit::{self, AuditReason, Entry};
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
-use crate::extract::{ApiJson, parse_id};
+use crate::extract::{ApiJson, ApiQuery, parse_id};
 use crate::media;
 use crate::routes::auth::clean_text;
 use crate::routes::users::{self, ImageKind};
@@ -38,7 +42,9 @@ pub fn routes() -> Router<AppState> {
         .route("/guilds/{id}/bans", get(list_bans))
         .route("/guilds/{id}/bans/{uid}", put(ban_member).delete(unban_member))
         .route("/guilds/{id}/roles", axum::routing::post(create_role).patch(update_role_positions))
+        .route("/guilds/{id}/roles/member-counts", get(role_member_counts))
         .route("/guilds/{id}/roles/{rid}", patch(update_role).delete(delete_role))
+        .route("/guilds/{id}/prune", get(prune_count).post(prune))
 }
 
 fn guild_id(raw: &str) -> ApiResult<i64> {
@@ -62,9 +68,10 @@ struct RoleRow {
     position: i32,
     permissions: i64,
     mentionable: bool,
+    unicode_emoji: Option<String>,
 }
 
-const ROLE_COLS: &str = "id, name, color, hoist, position, permissions, mentionable";
+const ROLE_COLS: &str = "id, name, color, hoist, position, permissions, mentionable, unicode_emoji";
 
 impl RoleRow {
     fn api(&self) -> Role {
@@ -76,6 +83,7 @@ impl RoleRow {
             position: self.position,
             permissions: (self.permissions as u64).to_string(),
             mentionable: self.mentionable,
+            unicode_emoji: self.unicode_emoji.clone(),
         }
     }
 }
@@ -273,7 +281,12 @@ async fn ban_audience(state: &AppState, ctx: &Ctx) -> ApiResult<Vec<i64>> {
 
 // ---- kick ----
 
-async fn kick_member(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, uid)): Path<(String, String)>) -> ApiResult<StatusCode> {
+async fn kick_member(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path((id, uid)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
+) -> ApiResult<StatusCode> {
     let guild = guild_id(&id)?;
     let target = user_id_of(&uid)?;
     let ctx = Ctx::load(&state, user_id, guild).await?;
@@ -283,6 +296,7 @@ async fn kick_member(State(state): State<AppState>, AuthUser(user_id): AuthUser,
         return Err(ApiErr::missing_permissions());
     }
     remove_member(&state, guild, target).await?;
+    audit::record(&state, Entry::new(guild, user_id, AuditLogEvent::MemberKick, target).reason(reason)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -304,6 +318,7 @@ async fn ban_member(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path((id, uid)): Path<(String, String)>,
+    AuditReason(header_reason): AuditReason,
     ApiJson(body): ApiJson<BanRequest>,
 ) -> ApiResult<StatusCode> {
     let guild = guild_id(&id)?;
@@ -314,7 +329,7 @@ async fn ban_member(
     if delete_seconds > MAX_BAN_DELETE_SECONDS {
         return Err(ApiErr::invalid("delete_message_seconds", "Must be between 0 and 604800."));
     }
-    let reason = clean_text(body.reason, 512, "reason")?;
+    let reason = clean_text(body.reason, 512, "reason")?.or(header_reason);
     if target == user_id || target == ctx.access.owner_id {
         return Err(ApiErr::missing_permissions());
     }
@@ -347,6 +362,7 @@ async fn ban_member(
     }
     let audience = ban_audience(&state, &ctx).await?;
     state.hub.send(&audience, &GatewayEvent::GuildBanAdd(GuildMemberRemove { guild_id: Snowflake::from(guild), user }));
+    audit::record(&state, Entry::new(guild, user_id, AuditLogEvent::MemberBanAdd, target).reason(reason)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -376,19 +392,20 @@ async fn delete_recent_messages(state: &AppState, guild_id: i64, user_id: i64, s
             .await?;
         let Some(channel) = store::channel_row(state, channel_id).await? else { continue };
         let viewers = access::channel_viewers(state, &channel).await?;
-        for (message_id, _) in rows.iter().filter(|(_, channel)| *channel == channel_id) {
-            let event = GatewayEvent::MessageDelete(MessageDelete {
-                id: Snowflake::from(*message_id),
-                channel_id: Snowflake::from(channel_id),
-                guild_id: Some(Snowflake::from(guild_id)),
-            });
-            state.hub.send(&viewers, &event);
-        }
+        let ids = rows.iter().filter(|(_, channel)| *channel == channel_id).map(|(message_id, _)| Snowflake::from(*message_id)).collect();
+        let event =
+            GatewayEvent::MessageDeleteBulk(MessageDeleteBulk { ids, channel_id: Snowflake::from(channel_id), guild_id: Some(Snowflake::from(guild_id)) });
+        state.hub.send(&viewers, &event);
     }
     Ok(())
 }
 
-async fn unban_member(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, uid)): Path<(String, String)>) -> ApiResult<StatusCode> {
+async fn unban_member(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path((id, uid)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
+) -> ApiResult<StatusCode> {
     let guild = guild_id(&id)?;
     let target = parse_id(&uid).ok_or_else(ApiErr::unknown_ban)?;
     let ctx = Ctx::load(&state, user_id, guild).await?;
@@ -400,6 +417,7 @@ async fn unban_member(State(state): State<AppState>, AuthUser(user_id): AuthUser
     let user = store::user(&state, target).await?.ok_or_else(ApiErr::unknown_user)?;
     let audience = ban_audience(&state, &ctx).await?;
     state.hub.send(&audience, &GatewayEvent::GuildBanRemove(GuildMemberRemove { guild_id: Snowflake::from(guild), user }));
+    audit::record(&state, Entry::new(guild, user_id, AuditLogEvent::MemberBanRemove, target).reason(reason)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -483,6 +501,7 @@ async fn edit_member(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path((id, uid)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
     ApiJson(body): ApiJson<EditMemberRequest>,
 ) -> ApiResult<Json<GuildMember>> {
     let guild = guild_id(&id)?;
@@ -499,6 +518,12 @@ async fn edit_member(
         return Err(ApiErr::unknown_member());
     }
     let own = target == user_id;
+    let previous: (Option<String>, Option<OffsetDateTime>) =
+        sqlx::query_as("SELECT nick, CASE WHEN timeout_until > now() THEN timeout_until END FROM guild_members WHERE guild_id = $1 AND user_id = $2")
+            .bind(guild)
+            .bind(target)
+            .fetch_one(&mut *tx)
+            .await?;
     let current_roles: Vec<i64> = sqlx::query_as::<_, (i64,)>("SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2")
         .bind(guild)
         .bind(target)
@@ -586,6 +611,27 @@ async fn edit_member(
     };
     let permissions_changed = roles.is_some() || timeout.is_some();
 
+    let iso = |value: Option<OffsetDateTime>| value.and_then(|at| at.format(&Rfc3339).ok());
+    let mut member_entry = Entry::new(guild, user_id, AuditLogEvent::MemberUpdate, target).reason(reason.clone());
+    if let Some(nick) = &nick {
+        member_entry = member_entry.change("nick", &previous.0, nick);
+    }
+    if let Some(timeout) = &timeout {
+        member_entry = member_entry.change("communication_disabled_until", iso(previous.1), iso(*timeout));
+    }
+    let mut role_entry = Entry::new(guild, user_id, AuditLogEvent::MemberRoleUpdate, target).reason(reason);
+    if let Some(wanted) = &roles {
+        let named = |ids: Vec<&i64>| -> Vec<serde_json::Value> {
+            ids.into_iter().filter_map(|id| ctx.role(*id)).map(|row| serde_json::json!({"id": row.id.to_string(), "name": row.name})).collect()
+        };
+        let added = named(wanted.iter().filter(|role| !current_roles.contains(role)).collect());
+        let removed = named(current_roles.iter().filter(|role| !wanted.contains(role)).collect());
+        for (key, list) in [("$add", added), ("$remove", removed)] {
+            if !list.is_empty() {
+                role_entry = role_entry.push(AuditLogChange { key: key.to_owned(), old_value: None, new_value: Some(serde_json::Value::Array(list)) });
+            }
+        }
+    }
     if let Some(nick) = nick {
         sqlx::query("UPDATE guild_members SET nick = $3 WHERE guild_id = $1 AND user_id = $2").bind(guild).bind(target).bind(nick).execute(&mut *tx).await?;
     }
@@ -626,7 +672,13 @@ async fn edit_member(
     voice.store(&mut tx, guild, target).await?;
     tx.commit().await?;
     voice.apply(&state, guild, target, permissions_changed).await?;
-    Ok(Json(publish_member(&state, guild, target).await?))
+    let member = publish_member(&state, guild, target).await?;
+    for entry in [member_entry, role_entry] {
+        if !entry.changes.is_empty() {
+            audit::record(&state, entry).await?;
+        }
+    }
+    Ok(Json(member))
 }
 
 // ---- roles ----
@@ -644,6 +696,35 @@ fn role_color(value: u32) -> ApiResult<i32> {
         return Err(ApiErr::invalid("color", "Must be a 24-bit colour."));
     }
     Ok(value as i32)
+}
+
+/// A role icon: any emoji-ish text of 1-32 characters (trimmed); blank clears it.
+fn role_emoji(value: Option<String>) -> ApiResult<Option<String>> {
+    let Some(value) = value else { return Ok(None) };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed.chars().count() > 32 || trimmed.chars().any(char::is_whitespace) {
+        return Err(ApiErr::invalid("unicode_emoji", "Must be an emoji of at most 32 characters."));
+    }
+    Ok(Some(trimmed.to_owned()))
+}
+
+type RoleField = fn(&RoleRow) -> serde_json::Value;
+
+/// Audit changes between two role states (only keys that differ).
+fn role_changes(entry: Entry, old: Option<&RoleRow>, new: Option<&RoleRow>) -> Entry {
+    let field = |row: Option<&RoleRow>, pick: fn(&RoleRow) -> serde_json::Value| row.map(pick).unwrap_or(serde_json::Value::Null);
+    let keys: [(&str, RoleField); 6] = [
+        ("name", |row| row.name.clone().into()),
+        ("color", |row| row.color.into()),
+        ("hoist", |row| row.hoist.into()),
+        ("mentionable", |row| row.mentionable.into()),
+        ("permissions", |row| (row.permissions as u64).to_string().into()),
+        ("unicode_emoji", |row| row.unicode_emoji.clone().into()),
+    ];
+    keys.into_iter().fold(entry, |entry, (key, pick)| entry.change(key, field(old, pick), field(new, pick)))
 }
 
 fn role_permissions(value: &str) -> ApiResult<u64> {
@@ -670,11 +751,13 @@ async fn create_role(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(id): Path<String>,
+    AuditReason(reason): AuditReason,
     ApiJson(body): ApiJson<RoleRequest>,
 ) -> ApiResult<Json<Role>> {
     let guild = guild_id(&id)?;
     let ctx = Ctx::load(&state, user_id, guild).await?;
     ctx.access.require(MANAGE_ROLES)?;
+    let emoji = role_emoji(body.unicode_emoji.clone().flatten())?;
     let name = role_name(body.name.as_deref().unwrap_or("new role"))?;
     let color = role_color(body.color.unwrap_or(0))?;
     let permissions = match &body.permissions {
@@ -689,7 +772,8 @@ async fn create_role(
     // Position 1 sits just above @everyone; equal positions rank by age, so a new role never outranks an older one at 1.
     let role_id = state.ids.next();
     let row: RoleRow = sqlx::query_as(&format!(
-        "INSERT INTO roles (id, guild_id, name, color, hoist, position, permissions, mentionable) VALUES ($1, $2, $3, $4, $5, 1, $6, $7) RETURNING {ROLE_COLS}"
+        "INSERT INTO roles (id, guild_id, name, color, hoist, position, permissions, mentionable, unicode_emoji) VALUES ($1, $2, $3, $4, $5, 1, $6, $7, $8) \
+         RETURNING {ROLE_COLS}"
     ))
     .bind(role_id)
     .bind(guild)
@@ -698,10 +782,12 @@ async fn create_role(
     .bind(body.hoist.unwrap_or(false))
     .bind(permissions as i64)
     .bind(body.mentionable.unwrap_or(false))
+    .bind(&emoji)
     .fetch_one(&state.db)
     .await?;
     let role = row.api();
     publish_role(&state, guild, role.clone(), true).await?;
+    audit::record(&state, role_changes(Entry::new(guild, user_id, AuditLogEvent::RoleCreate, role_id).reason(reason), None, Some(&row))).await?;
     Ok(Json(role))
 }
 
@@ -709,6 +795,7 @@ async fn update_role(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path((id, rid)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
     ApiJson(body): ApiJson<RoleRequest>,
 ) -> ApiResult<Json<Role>> {
     let guild = guild_id(&id)?;
@@ -729,8 +816,8 @@ async fn update_role(
     };
     check_grant(&ctx, current.permissions as u64, permissions)?;
     // @everyone keeps its name, colour, hoist and mentionable flag; only its permissions change.
-    let (name, color, hoist, mentionable) = if everyone {
-        (current.name.clone(), current.color, current.hoist, current.mentionable)
+    let (name, color, hoist, mentionable, emoji) = if everyone {
+        (current.name.clone(), current.color, current.hoist, current.mentionable, current.unicode_emoji.clone())
     } else {
         (
             match &body.name {
@@ -743,23 +830,33 @@ async fn update_role(
             },
             body.hoist.unwrap_or(current.hoist),
             body.mentionable.unwrap_or(current.mentionable),
+            match body.unicode_emoji {
+                Some(value) => role_emoji(value)?,
+                None => current.unicode_emoji.clone(),
+            },
         )
     };
-    let row: RoleRow =
-        sqlx::query_as(&format!("UPDATE roles SET name = $2, color = $3, hoist = $4, permissions = $5, mentionable = $6 WHERE id = $1 RETURNING {ROLE_COLS}"))
-            .bind(role_id)
-            .bind(&name)
-            .bind(color)
-            .bind(hoist)
-            .bind(permissions as i64)
-            .bind(mentionable)
-            .fetch_one(&state.db)
-            .await?;
+    let row: RoleRow = sqlx::query_as(&format!(
+        "UPDATE roles SET name = $2, color = $3, hoist = $4, permissions = $5, mentionable = $6, unicode_emoji = $7 WHERE id = $1 RETURNING {ROLE_COLS}"
+    ))
+    .bind(role_id)
+    .bind(&name)
+    .bind(color)
+    .bind(hoist)
+    .bind(permissions as i64)
+    .bind(mentionable)
+    .bind(&emoji)
+    .fetch_one(&state.db)
+    .await?;
     let role = row.api();
     publish_role(&state, guild, role.clone(), false).await?;
     // Cosmetic edits leave voice rights alone; recomputing holds the instance-wide admission lock.
     if permissions != current.permissions as u64 {
         crate::voice::state::recompute_guild(&state, guild).await;
+    }
+    let entry = role_changes(Entry::new(guild, user_id, AuditLogEvent::RoleUpdate, role_id).reason(reason), Some(&current), Some(&row));
+    if !entry.changes.is_empty() {
+        audit::record(&state, entry).await?;
     }
     Ok(Json(role))
 }
@@ -810,19 +907,24 @@ async fn update_role_positions(
     Ok(Json(roles.iter().map(RoleRow::api).collect()))
 }
 
-async fn delete_role(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, rid)): Path<(String, String)>) -> ApiResult<StatusCode> {
+async fn delete_role(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path((id, rid)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
+) -> ApiResult<StatusCode> {
     let guild = guild_id(&id)?;
     let role_id = role_id_of(&rid)?;
     let ctx = Ctx::load(&state, user_id, guild).await?;
     ctx.access.require(MANAGE_ROLES)?;
-    let current = ctx.role(role_id).ok_or_else(ApiErr::unknown_role)?;
+    let current = ctx.role(role_id).ok_or_else(ApiErr::unknown_role)?.clone();
     if role_id == guild {
         return Err(ApiErr::invalid_role());
     }
     if is_managed_role(&state.db, guild, role_id).await? {
         return Err(ApiErr::invalid("role", "A bot's role cannot be deleted. Remove the bot from Integrations instead."));
     }
-    if !ctx.outranks(current) {
+    if !ctx.outranks(&current) {
         return Err(ApiErr::missing_permissions());
     }
     // Overwrites naming the role go with it (member_roles rows cascade); the affected channels are re-sent.
@@ -839,5 +941,101 @@ async fn delete_role(State(state): State<AppState>, AuthUser(user_id): AuthUser,
         }
     }
     crate::voice::state::recompute_guild(&state, guild).await;
+    audit::record(&state, role_changes(Entry::new(guild, user_id, AuditLogEvent::RoleDelete, role_id).reason(reason), Some(&current), None)).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `GET /guilds/{id}/roles/member-counts`: how many members hold each role (@everyone left out).
+async fn role_member_counts(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<HashMap<String, i64>>> {
+    let guild = guild_id(&id)?;
+    guild_access(&state, user_id, guild).await?;
+    let rows: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT r.id, count(m.user_id) FROM roles r LEFT JOIN member_roles m ON m.role_id = r.id WHERE r.guild_id = $1 AND r.id <> $1 GROUP BY r.id",
+    )
+    .bind(guild)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(rows.into_iter().map(|(id, count)| (id.to_string(), count)).collect()))
+}
+
+// ---- prune ----
+
+const DEFAULT_PRUNE_DAYS: u32 = 7;
+
+/// Query form of `PruneRequest`: `include_roles` is comma-separated.
+#[derive(serde::Deserialize)]
+struct PruneQuery {
+    days: Option<u32>,
+    include_roles: Option<String>,
+}
+
+/// Validated prune parameters: (days, included roles).
+fn prune_params(ctx: &Ctx, days: Option<u32>, include_roles: Vec<i64>) -> ApiResult<(u32, Vec<i64>)> {
+    ctx.access.require(KICK_MEMBERS | MANAGE_GUILD)?;
+    let days = days.unwrap_or(DEFAULT_PRUNE_DAYS);
+    if !(1..=30).contains(&days) {
+        return Err(ApiErr::invalid("days", "Must be between 1 and 30."));
+    }
+    for role in &include_roles {
+        let row = ctx.role(*role).filter(|row| row.id != ctx.guild_id).ok_or_else(|| ApiErr::invalid("include_roles", "Unknown role."))?;
+        if !ctx.outranks(row) {
+            return Err(ApiErr::missing_permissions());
+        }
+    }
+    Ok((days, include_roles))
+}
+
+/// Members a prune removes: joined more than `days` ago, no message of their own (join notices do not count) in the guild for `days`, not the owner or the caller,
+/// and holding no role outside `include_roles`.
+async fn prunable(state: &AppState, ctx: &Ctx, days: u32, include_roles: &[i64]) -> ApiResult<Vec<i64>> {
+    let rows: Vec<(i64,)> = sqlx::query_as(
+        "SELECT m.user_id FROM guild_members m WHERE m.guild_id = $1 AND m.user_id <> $2 AND m.user_id <> $3          AND m.joined_at < now() - make_interval(days => $4)          AND NOT EXISTS (SELECT 1 FROM member_roles r WHERE r.guild_id = m.guild_id AND r.user_id = m.user_id AND NOT (r.role_id = ANY($5)))          AND NOT EXISTS (SELECT 1 FROM messages x JOIN channels c ON c.id = x.channel_id                          WHERE c.guild_id = m.guild_id AND x.author_id = m.user_id AND x.kind IN (0, 19) AND x.created_at > now() - make_interval(days => $4))          ORDER BY m.user_id",
+    )
+    .bind(ctx.guild_id)
+    .bind(ctx.access.owner_id)
+    .bind(ctx.user_id)
+    .bind(days as i32)
+    .bind(include_roles)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+async fn prune_count(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(id): Path<String>,
+    ApiQuery(query): ApiQuery<PruneQuery>,
+) -> ApiResult<Json<PruneResponse>> {
+    let guild = guild_id(&id)?;
+    let ctx = Ctx::load(&state, user_id, guild).await?;
+    let mut include = Vec::new();
+    for raw in query.include_roles.as_deref().unwrap_or("").split(',').map(str::trim).filter(|raw| !raw.is_empty()) {
+        include.push(parse_id(raw).ok_or_else(|| ApiErr::invalid("include_roles", "Must be role ids."))?);
+    }
+    let (days, include) = prune_params(&ctx, query.days, include)?;
+    let members = prunable(&state, &ctx, days, &include).await?;
+    Ok(Json(PruneResponse { pruned: Some(members.len() as u32) }))
+}
+
+async fn prune(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(id): Path<String>,
+    AuditReason(reason): AuditReason,
+    ApiJson(body): ApiJson<PruneRequest>,
+) -> ApiResult<Json<PruneResponse>> {
+    let guild = guild_id(&id)?;
+    let ctx = Ctx::load(&state, user_id, guild).await?;
+    let include = body.include_roles.unwrap_or_default().into_iter().map(Snowflake::db).collect();
+    let (days, include) = prune_params(&ctx, body.days, include)?;
+    let members = prunable(&state, &ctx, days, &include).await?;
+    for member in &members {
+        remove_member(&state, guild, *member).await?;
+    }
+    let options = AuditEntryInfo { delete_member_days: Some(days.to_string()), members_removed: Some(members.len().to_string()), ..Default::default() };
+    let mut entry = Entry::new(guild, user_id, AuditLogEvent::MemberPrune, guild).reason(reason).options(options);
+    entry.target_id = None;
+    audit::record(&state, entry).await?;
+    Ok(Json(PruneResponse { pruned: body.compute_prune_count.unwrap_or(true).then_some(members.len() as u32) }))
 }

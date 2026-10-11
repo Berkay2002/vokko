@@ -80,6 +80,7 @@ export function useForumPosts(forumId: Snowflake, query: ForumQuery): ForumPosts
       gateway.on("THREAD_DELETE", t => t.parent_id === forumId && bump()),
       gateway.on("MESSAGE_CREATE", m => appStore.getState().threads[m.channel_id]?.parent_id === forumId && bump()),
       gateway.on("MESSAGE_DELETE", m => appStore.getState().threads[m.channel_id]?.parent_id === forumId && bump()),
+      gateway.on("MESSAGE_DELETE_BULK", m => appStore.getState().threads[m.channel_id]?.parent_id === forumId && bump()),
       gateway.on("MESSAGE_REACTION_ADD", r => patchReaction(r, 1)),
       gateway.on("MESSAGE_REACTION_REMOVE", r => patchReaction(r, -1)),
     ];

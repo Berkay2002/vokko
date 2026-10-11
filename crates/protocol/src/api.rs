@@ -62,11 +62,11 @@ fn double_option<'de, T: Deserialize<'de>, D: Deserializer<'de>>(deserializer: D
 }
 
 macro_rules! numeric_enum {
-    ($(#[$meta:meta])* $name:ident { $($variant:ident = $value:expr),+ $(,)? }) => {
+    ($(#[$meta:meta])* $name:ident { $($(#[$vmeta:meta])* $variant:ident = $value:expr),+ $(,)? }) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub enum $name {
-            $($variant = $value),+
+            $($(#[$vmeta])* $variant = $value),+
         }
 
         impl $name {
@@ -590,6 +590,9 @@ pub struct Role {
     pub position: i32,
     pub permissions: String,
     pub mentionable: bool,
+    /// Role icon as a unicode emoji (free in Vokko, no boost level); always sent, `null` when none.
+    #[serde(default)]
+    pub unicode_emoji: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -605,7 +608,39 @@ pub struct Guild {
     pub tag: Option<GuildTag>,
     #[serde(default)]
     pub theme: Option<GuildTheme>,
+    /// Safety setup (MANAGE_GUILD edits both).
+    #[serde(default)]
+    pub verification_level: VerificationLevel,
+    #[serde(default)]
+    pub explicit_content_filter: ExplicitContentFilter,
 }
+
+numeric_enum!(
+    /// Who may send messages in the guild's channels (members with any role bypass it, like Discord).
+    #[derive(Default)]
+    VerificationLevel {
+        #[default]
+        None = 0,
+        /// Discord: verified email. Vokko has no email verification, so every account passes.
+        Low = 1,
+        /// Account older than 5 minutes.
+        Medium = 2,
+        /// Also a member of the guild for longer than 10 minutes.
+        High = 3,
+        /// Discord: verified phone. Vokko has none, so it behaves like `High`.
+        VeryHigh = 4,
+    }
+);
+numeric_enum!(
+    /// Stored and shown; Vokko does not scan media yet.
+    #[derive(Default)]
+    ExplicitContentFilter {
+        #[default]
+        Disabled = 0,
+        MembersWithoutRoles = 1,
+        AllMembers = 2,
+    }
+);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GuildTag {
@@ -1478,6 +1513,10 @@ pub struct UpdateGuildRequest {
     pub tag: Option<Option<GuildTag>>,
     #[serde(default, deserialize_with = "double_option")]
     pub theme: Option<Option<GuildTheme>>,
+    #[serde(default)]
+    pub verification_level: Option<VerificationLevel>,
+    #[serde(default)]
+    pub explicit_content_filter: Option<ExplicitContentFilter>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1739,6 +1778,9 @@ pub struct RoleRequest {
     pub permissions: Option<String>,
     #[serde(default)]
     pub mentionable: Option<bool>,
+    /// `null` removes the role icon.
+    #[serde(default, deserialize_with = "double_option")]
+    pub unicode_emoji: Option<Option<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1754,6 +1796,229 @@ pub struct OverwriteRequest {
     pub kind: OverwriteType,
     pub allow: String,
     pub deny: String,
+}
+
+// ---- Server admin: prune, audit log, AutoMod ----
+
+/// `GET /guilds/{id}/prune?days&include_roles` (query) and `POST /guilds/{id}/prune` (body).
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct PruneRequest {
+    /// 1..=30, default 7.
+    #[serde(default)]
+    pub days: Option<u32>,
+    /// Members holding only these roles are pruned too (members with any other role never are).
+    #[serde(default)]
+    pub include_roles: Option<Vec<Snowflake>>,
+    /// POST only: `false` skips counting and answers `{pruned: null}`. Default true.
+    #[serde(default)]
+    pub compute_prune_count: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PruneResponse {
+    pub pruned: Option<u32>,
+}
+
+numeric_enum!(
+    /// Discord's audit log event numbers; Vokko records the ones whose routes exist (docs/api.md).
+    AuditLogEvent {
+        GuildUpdate = 1,
+        ChannelCreate = 10,
+        ChannelUpdate = 11,
+        ChannelDelete = 12,
+        ChannelOverwriteCreate = 13,
+        ChannelOverwriteUpdate = 14,
+        ChannelOverwriteDelete = 15,
+        MemberKick = 20,
+        MemberPrune = 21,
+        MemberBanAdd = 22,
+        MemberBanRemove = 23,
+        MemberUpdate = 24,
+        MemberRoleUpdate = 25,
+        MemberMove = 26,
+        MemberDisconnect = 27,
+        BotAdd = 28,
+        RoleCreate = 30,
+        RoleUpdate = 31,
+        RoleDelete = 32,
+        InviteCreate = 40,
+        InviteUpdate = 41,
+        InviteDelete = 42,
+        WebhookCreate = 50,
+        WebhookUpdate = 51,
+        WebhookDelete = 52,
+        EmojiCreate = 60,
+        EmojiUpdate = 61,
+        EmojiDelete = 62,
+        MessageDelete = 72,
+        MessageBulkDelete = 73,
+        MessagePin = 74,
+        MessageUnpin = 75,
+        IntegrationCreate = 80,
+        IntegrationUpdate = 81,
+        IntegrationDelete = 82,
+        StickerCreate = 90,
+        StickerUpdate = 91,
+        StickerDelete = 92,
+        GuildScheduledEventCreate = 100,
+        GuildScheduledEventUpdate = 101,
+        GuildScheduledEventDelete = 102,
+        ThreadCreate = 110,
+        ThreadUpdate = 111,
+        ThreadDelete = 112,
+        ApplicationCommandPermissionUpdate = 121,
+        AutoModerationRuleCreate = 140,
+        AutoModerationRuleUpdate = 141,
+        AutoModerationRuleDelete = 142,
+        AutoModerationBlockMessage = 143,
+        OnboardingPromptCreate = 163,
+        OnboardingPromptUpdate = 164,
+        OnboardingPromptDelete = 165,
+        OnboardingCreate = 166,
+        OnboardingUpdate = 167,
+    }
+);
+
+/// One changed key; a missing side means the key was not set before (create) or after (delete).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AuditLogChange {
+    pub key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_value: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_value: Option<Value>,
+}
+
+/// Extra context per action type (Discord's "optional audit entry info"; numbers are strings like Discord's).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AuditEntryInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<Snowflake>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<Snowflake>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delete_member_days: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub members_removed: Option<String>,
+    /// Overwrite entries: the role or member id and `"0"` role / `"1"` member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Snowflake>,
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_moderation_rule_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_moderation_rule_trigger_type: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AuditLogEntry {
+    pub id: Snowflake,
+    pub guild_id: Snowflake,
+    /// Who acted; `null` for system actions.
+    pub user_id: Option<Snowflake>,
+    /// The affected object (user, role, channel, invite code, rule...).
+    pub target_id: Option<String>,
+    pub action_type: AuditLogEvent,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changes: Option<Vec<AuditLogChange>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<AuditEntryInfo>,
+    /// From the `X-Audit-Log-Reason` header (URL-encoded, at most 512 characters).
+    pub reason: Option<String>,
+}
+
+/// `GET /guilds/{id}/audit-logs`
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct AuditLogQuery {
+    #[serde(default)]
+    pub user_id: Option<Snowflake>,
+    #[serde(default)]
+    pub action_type: Option<u8>,
+    #[serde(default)]
+    pub before: Option<Snowflake>,
+    #[serde(default)]
+    pub after: Option<Snowflake>,
+    /// 1..=100, default 50.
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AuditLog {
+    /// Newest first.
+    pub audit_log_entries: Vec<AuditLogEntry>,
+    /// Every user referenced as actor or target.
+    pub users: Vec<User>,
+}
+
+numeric_enum!(AutoModerationTriggerType { Keyword = 1 });
+numeric_enum!(AutoModerationEventType { MessageSend = 1 });
+numeric_enum!(AutoModerationActionType { BlockMessage = 1 });
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AutoModerationTriggerMetadata {
+    /// Up to 1000 keywords of at most 60 characters; `*` at the start or end matches a prefix / suffix / substring.
+    #[serde(default)]
+    pub keyword_filter: Vec<String>,
+    /// Words that never trigger the rule (same syntax), up to 100.
+    #[serde(default)]
+    pub allow_list: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct AutoModerationActionMetadata {
+    /// Shown to the blocked author (at most 150 characters).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_message: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AutoModerationAction {
+    #[serde(rename = "type")]
+    pub kind: AutoModerationActionType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<AutoModerationActionMetadata>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AutoModerationRule {
+    pub id: Snowflake,
+    pub guild_id: Snowflake,
+    pub name: String,
+    pub creator_id: Snowflake,
+    pub event_type: AutoModerationEventType,
+    pub trigger_type: AutoModerationTriggerType,
+    pub trigger_metadata: AutoModerationTriggerMetadata,
+    pub actions: Vec<AutoModerationAction>,
+    pub enabled: bool,
+    pub exempt_roles: Vec<Snowflake>,
+    pub exempt_channels: Vec<Snowflake>,
+}
+
+/// POST (name, event_type, trigger_type and actions required) and PATCH (every key optional; the trigger type never changes).
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct AutoModerationRuleRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub event_type: Option<AutoModerationEventType>,
+    #[serde(default)]
+    pub trigger_type: Option<AutoModerationTriggerType>,
+    #[serde(default)]
+    pub trigger_metadata: Option<AutoModerationTriggerMetadata>,
+    #[serde(default)]
+    pub actions: Option<Vec<AutoModerationAction>>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub exempt_roles: Option<Vec<Snowflake>>,
+    #[serde(default)]
+    pub exempt_channels: Option<Vec<Snowflake>>,
 }
 
 /// Body of `POST /channels/{id}/invites`; every key is optional.
@@ -2403,6 +2668,14 @@ pub struct MessageDelete {
     pub guild_id: Option<Snowflake>,
 }
 
+/// MESSAGE_DELETE_BULK: several messages of one channel at once (a ban with message history deletion).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MessageDeleteBulk {
+    pub ids: Vec<Snowflake>,
+    pub channel_id: Snowflake,
+    pub guild_id: Option<Snowflake>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MessageReaction {
     pub user_id: Snowflake,
@@ -2974,6 +3247,13 @@ pub enum GatewayEvent {
     GuildSoundboardSoundDelete(SoundboardSoundDelete),
     VoiceChannelEffectSend(VoiceChannelEffectSend),
     EntranceSoundsUpdate(EntranceSounds),
+    MessageDeleteBulk(MessageDeleteBulk),
+    /// Only to members with VIEW_AUDIT_LOG.
+    GuildAuditLogEntryCreate(AuditLogEntry),
+    /// AUTO_MODERATION_RULE_*: only to members with MANAGE_GUILD.
+    AutoModerationRuleCreate(AutoModerationRule),
+    AutoModerationRuleUpdate(AutoModerationRule),
+    AutoModerationRuleDelete(AutoModerationRule),
     InviteCreate(Box<InviteMetadata>),
     InviteDelete(InviteDelete),
     GuildLayoutUpdate(GuildLayout),
@@ -3047,6 +3327,11 @@ impl GatewayEvent {
             Self::GuildSoundboardSoundDelete(_) => "GUILD_SOUNDBOARD_SOUND_DELETE",
             Self::VoiceChannelEffectSend(_) => "VOICE_CHANNEL_EFFECT_SEND",
             Self::EntranceSoundsUpdate(_) => "ENTRANCE_SOUNDS_UPDATE",
+            Self::MessageDeleteBulk(_) => "MESSAGE_DELETE_BULK",
+            Self::GuildAuditLogEntryCreate(_) => "GUILD_AUDIT_LOG_ENTRY_CREATE",
+            Self::AutoModerationRuleCreate(_) => "AUTO_MODERATION_RULE_CREATE",
+            Self::AutoModerationRuleUpdate(_) => "AUTO_MODERATION_RULE_UPDATE",
+            Self::AutoModerationRuleDelete(_) => "AUTO_MODERATION_RULE_DELETE",
             Self::InviteCreate(_) => "INVITE_CREATE",
             Self::InviteDelete(_) => "INVITE_DELETE",
             Self::GuildLayoutUpdate(_) => "GUILD_LAYOUT_UPDATE",
@@ -3106,6 +3391,11 @@ impl GatewayEvent {
             Self::GuildSoundboardSoundDelete(value) => serde_json::to_value(value),
             Self::VoiceChannelEffectSend(value) => serde_json::to_value(value),
             Self::EntranceSoundsUpdate(value) => serde_json::to_value(value),
+            Self::MessageDeleteBulk(value) => serde_json::to_value(value),
+            Self::GuildAuditLogEntryCreate(value) => serde_json::to_value(value),
+            Self::AutoModerationRuleCreate(value) | Self::AutoModerationRuleUpdate(value) | Self::AutoModerationRuleDelete(value) => {
+                serde_json::to_value(value)
+            }
             Self::InviteCreate(value) => serde_json::to_value(value),
             Self::InviteDelete(value) => serde_json::to_value(value),
             Self::GuildLayoutUpdate(value) => serde_json::to_value(value),
@@ -3154,14 +3444,15 @@ mod tests {
 
     #[test]
     fn guild_role_and_member() {
-        let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false});
+        let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false, "unicode_emoji": null});
         round_trip::<Role>(role.clone());
         round_trip::<Guild>(
-            json!({"id": "300", "name": "Sam's server", "icon": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null}),
+            json!({"id": "300", "name": "Sam's server", "icon": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0}),
         );
         round_trip::<Guild>(json!({
             "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null,
-            "tag": {"tag": "VKO", "badge": "bolt", "color_primary": 5793266, "color_secondary": 3878800}, "theme": {"preset": null, "primary": 1, "accent": 2}
+            "tag": {"tag": "VKO", "badge": "bolt", "color_primary": 5793266, "color_secondary": 3878800}, "theme": {"preset": null, "primary": 1, "accent": 2},
+            "verification_level": 3, "explicit_content_filter": 2
         }));
         round_trip::<GuildMember>(
             json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}),
@@ -3317,7 +3608,7 @@ mod tests {
 
     #[test]
     fn ready_and_flattened_guild_events() {
-        let guild = json!({"id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null});
+        let guild = json!({"id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0});
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
@@ -3372,7 +3663,16 @@ mod tests {
 
     #[test]
     fn moderation_events_and_invisible_presence() {
-        let role = Role { id: Snowflake(301), name: "mod".to_owned(), color: 0, hoist: false, position: 1, permissions: "8192".to_owned(), mentionable: false };
+        let role = Role {
+            id: Snowflake(301),
+            name: "mod".to_owned(),
+            color: 0,
+            hoist: false,
+            position: 1,
+            permissions: "8192".to_owned(),
+            mentionable: false,
+            unicode_emoji: Some("🛡️".to_owned()),
+        };
         let created = GatewayEvent::GuildRoleCreate(GuildRoleEvent { guild_id: Snowflake(300), role: role.clone() });
         assert_eq!(created.name(), "GUILD_ROLE_CREATE");
         assert_eq!(created.data()["role"]["name"], "mod");
@@ -3624,6 +3924,52 @@ mod tests {
         let event = GatewayEvent::MessageAck(MessageAck { channel_id: Snowflake(2), message_id: Snowflake(3) });
         assert_eq!(event.name(), "MESSAGE_ACK");
         assert_eq!(event.data(), json!({"channel_id": "2", "message_id": "3"}));
+    }
+
+    #[test]
+    fn server_admin_shapes_match_types_ts() {
+        let guild: UpdateGuildRequest = serde_json::from_value(json!({"verification_level": 2, "explicit_content_filter": 1})).expect("safety");
+        assert_eq!(
+            (guild.verification_level, guild.explicit_content_filter),
+            (Some(VerificationLevel::Medium), Some(ExplicitContentFilter::MembersWithoutRoles))
+        );
+        assert!(serde_json::from_value::<UpdateGuildRequest>(json!({"verification_level": 5})).is_err());
+        let role: RoleRequest = serde_json::from_value(json!({"unicode_emoji": null})).expect("role icon");
+        assert_eq!(role.unicode_emoji, Some(None));
+        let prune: PruneRequest = serde_json::from_value(json!({"days": 7, "include_roles": ["301"], "compute_prune_count": false})).expect("prune");
+        assert_eq!((prune.days, prune.include_roles, prune.compute_prune_count), (Some(7), Some(vec![Snowflake(301)]), Some(false)));
+        round_trip::<PruneResponse>(json!({"pruned": 3}));
+        round_trip::<PruneResponse>(json!({"pruned": null}));
+        let entry = json!({
+            "id": "900", "guild_id": "300", "user_id": "100", "target_id": "301", "action_type": 31,
+            "changes": [{"key": "name", "old_value": "a", "new_value": "b"}, {"key": "$add", "new_value": [{"id": "301", "name": "mod"}]}],
+            "reason": "tidy up"
+        });
+        round_trip::<AuditLogEntry>(entry.clone());
+        round_trip::<AuditLogEntry>(json!({
+            "id": "901", "guild_id": "300", "user_id": "100", "target_id": "200", "action_type": 14,
+            "options": {"id": "301", "type": "0", "role_name": "mod"}, "reason": null
+        }));
+        round_trip::<AuditLog>(json!({"audit_log_entries": [entry.clone()], "users": [user()]}));
+        let created = GatewayEvent::GuildAuditLogEntryCreate(serde_json::from_value(entry).expect("entry"));
+        assert_eq!((created.name(), created.data()["action_type"].as_u64()), ("GUILD_AUDIT_LOG_ENTRY_CREATE", Some(31)));
+        assert_eq!(AuditLogEvent::from_u8(143), Some(AuditLogEvent::AutoModerationBlockMessage));
+        let rule = json!({
+            "id": "950", "guild_id": "300", "name": "No slurs", "creator_id": "100", "event_type": 1, "trigger_type": 1,
+            "trigger_metadata": {"keyword_filter": ["bad*"], "allow_list": ["badge"]}, "actions": [{"type": 1, "metadata": {"custom_message": "Nope"}}],
+            "enabled": true, "exempt_roles": ["301"], "exempt_channels": []
+        });
+        round_trip::<AutoModerationRule>(rule.clone());
+        let parsed: AutoModerationRule = serde_json::from_value(rule).expect("rule");
+        assert_eq!(GatewayEvent::AutoModerationRuleDelete(parsed).name(), "AUTO_MODERATION_RULE_DELETE");
+        let patch: AutoModerationRuleRequest = serde_json::from_value(json!({"enabled": false})).expect("patch");
+        assert!(patch.name.is_none() && patch.enabled == Some(false));
+        let bulk = GatewayEvent::MessageDeleteBulk(MessageDeleteBulk {
+            ids: vec![Snowflake(1), Snowflake(2)],
+            channel_id: Snowflake(3),
+            guild_id: Some(Snowflake(4)),
+        });
+        assert_eq!((bulk.name(), bulk.data()), ("MESSAGE_DELETE_BULK", json!({"ids": ["1", "2"], "channel_id": "3", "guild_id": "4"})));
     }
 
     #[test]

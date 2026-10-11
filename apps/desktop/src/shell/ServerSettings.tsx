@@ -11,7 +11,9 @@ import { firstTextChannel } from "./channels";
 import { closeModal, openModal } from "./modalStore";
 import { Category, Field, Page, Select, Unavailable } from "./settings/controls";
 import { FullScreenSettings, useFrameLayout, type SettingsNavGroup } from "./settings/FullScreenSettings";
+import { AuditLogPage } from "./settings/AuditLogPage";
 import { BansPage } from "./settings/BansPage";
+import { AutoModPage, SafetyPage } from "./settings/SafetyPage";
 import { SaveBar } from "./settings/SaveBar";
 import { RolesPage } from "./settings/RolesPage";
 import { TagPage } from "./settings/TagPage";
@@ -62,10 +64,10 @@ const SECTIONS: SectionDef[] = [
   { id: "onboarding", label: "Onboarding", group: "people" },
   { id: "access", label: "Access", group: "people", outline: ["Access Options", "Age-Restricted Server", "Server Rules"] },
   { id: "integrations", label: "Integrations", group: "apps", needs: [Perm.MANAGE_GUILD, Perm.MANAGE_WEBHOOKS] },
-  { id: "safety", label: "Safety Setup", group: "moderation", outline: ["Verification Level", "Require 2FA", "Sensitive Content Filter", "Activity Alerts"] },
-  { id: "audit", label: "Audit Log", group: "moderation", needs: [Perm.VIEW_AUDIT_LOG], outline: ["Audit Log"] },
+  { id: "safety", label: "Safety Setup", group: "moderation" },
+  { id: "audit", label: "Audit Log", group: "moderation", needs: [Perm.VIEW_AUDIT_LOG] },
   { id: "bans", label: "Bans", group: "moderation", needs: [Perm.BAN_MEMBERS] },
-  { id: "automod", label: "AutoMod", group: "moderation", outline: ["Block Mention Spam", "Block Suspected Spam", "Block Commonly Flagged Words", "Block Custom Words"] },
+  { id: "automod", label: "AutoMod", group: "moderation" },
   { id: "community", label: "Enable Community", group: "bottom", outline: ["Enable Community"] },
   { id: "template", label: "Server Template", group: "bottom", outline: ["Template Title", "Description"] },
 ];
@@ -268,6 +270,11 @@ function InvitesPage({ guildId, canCreate, canList, channels }: { guildId: strin
   );
 }
 
+/** Sections the viewer may open (rail context menu "Server Settings" submenu). */
+export function serverSettingsSections(can: (bit: bigint) => boolean): { id: string; label: string }[] {
+  return SECTIONS.filter(s => (s.needs ?? MANAGE).some(bit => can(bit))).map(s => ({ id: s.id, label: s.label }));
+}
+
 export function ServerSettings({ guildId, section }: { guildId: string; section?: string }) {
   const guild = useStore(s => s.guilds[guildId]);
   const allChannels = useStore(s => s.channels);
@@ -311,6 +318,16 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         return <IntegrationsPage guild={guild} canManageGuild={canManage} canManageWebhooks={owner || perms.can(Perm.MANAGE_WEBHOOKS)} />;
       case "emoji":
         return <EmojiSettingsPage guildId={guildId} canEdit={owner || perms.can(Perm.MANAGE_GUILD_EXPRESSIONS)} channels={channels} />;
+      case "audit":
+        return (
+          <Wide>
+            <AuditLogPage guild={guild} />
+          </Wide>
+        );
+      case "safety":
+        return <SafetyPage guild={guild} canEdit={canManage} />;
+      case "automod":
+        return <AutoModPage guild={guild} canEdit={canManage} />;
       case "onboarding":
         return <OnboardingSettings guildId={guildId} />;
       case "soundboard":

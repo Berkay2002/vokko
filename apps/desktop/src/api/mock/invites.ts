@@ -2,8 +2,9 @@
 // (GET/PATCH /users/@me/guild-layout, GUILD_LAYOUT_UPDATE), following docs/api.md "Invites and server folders".
 
 import { Perm, hasBit } from "../permissions";
-import { ChannelType, isThreadType, type GuildFolder, type Invite, type InviteMetadata, type GuildLayout } from "../types";
+import { AuditLogEvent, ChannelType, isThreadType, type GuildFolder, type Invite, type InviteMetadata, type GuildLayout } from "../types";
 import { channelPermsOf, guildPermsOf } from "./access";
+import { change, recordAudit } from "./admin";
 import { db, userOf, type MockAccount, type MockInvite } from "./db";
 import { fail, guildAudience, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm } from "./ops";
 import { onboardingStartedFor } from "./community";
@@ -99,6 +100,16 @@ route("POST", `/channels/${ID}/invites`, ({ viewer, params, body }) => {
     created_at: new Date().toISOString(),
   };
   db.invites.set(code, invite);
+  recordAudit(channel.guild_id, viewer.user.id, AuditLogEvent.InviteCreate, code, {
+    changes: [
+      change("code", null, code),
+      change("channel_id", null, channel.id),
+      change("inviter_id", null, viewer.user.id),
+      change("max_age", null, maxAge),
+      change("max_uses", null, maxUses),
+      change("temporary", null, temporary),
+    ],
+  });
   const created = metadataOf(invite);
   emit(inviteAudience(invite), "INVITE_CREATE", created);
   return created;
@@ -148,6 +159,16 @@ route("DELETE", `/invites/${CODE}`, ({ viewer, params }) => {
   const revoked = metadataOf(invite);
   const audience = inviteAudience(invite);
   db.invites.delete(invite.code);
+  recordAudit(invite.guild_id, viewer.user.id, AuditLogEvent.InviteDelete, invite.code, {
+    changes: [
+      change("code", invite.code, null),
+      change("channel_id", invite.channel_id, null),
+      change("inviter_id", invite.inviter_id ?? null, null),
+      change("uses", invite.uses ?? 0, null),
+      change("max_age", invite.max_age ?? 0, null),
+      change("max_uses", invite.max_uses ?? 0, null),
+    ],
+  });
   emit(audience, "INVITE_DELETE", { code: invite.code, guild_id: invite.guild_id, channel_id: invite.channel_id });
   return revoked;
 });

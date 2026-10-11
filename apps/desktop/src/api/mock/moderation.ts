@@ -2,16 +2,17 @@
 // Registered by import side effect (routes.ts imports `parseOverwrites` from here).
 
 import { ALL_PERMISSIONS, Perm, basePermissions, canEditRole, hasBit, highestPosition, outranks, parseBits } from "../permissions";
-import { ChannelType, OverwriteType, type Ban, type Guild, type GuildMember, type PermissionOverwrite, type Role, type User } from "../types";
+import { AuditLogEvent, ChannelType, OverwriteType, type AuditLogChange, type Ban, type Guild, type GuildMember, type PermissionOverwrite, type Role, type User } from "../types";
 import { guildPermsOf, channelPermsOf } from "./access";
 import { db, nextId, sortedMessages, userOf, type MockGuild } from "./db";
 import { MISSING_PERMISSIONS, pendingAttachment, channelAudience, emitVisibilityChanges, fail, requireChannel, requireChannelPerm, requireGuildMember, syncCategoryChildren, visibilityOf } from "./ops";
 import { forgetOnboardingRoles } from "./memberFlags";
 import { applyOwnMemberPerks, dropTagOnLeave, memberProfileFields } from "./perks";
-import { ID, route, str } from "./router";
+import { ID, currentAuditReason, route, str } from "./router";
 import { dropIntegration, isManagedRole } from "./apps";
 import { emit } from "./socket";
 import { memberVoiceEdit } from "./voice";
+import { change, recordAudit } from "./admin";
 
 const DAY_MS = 86_400_000;
 const MAX_TIMEOUT_MS = 28 * DAY_MS;
@@ -71,6 +72,7 @@ route("DELETE", `/guilds/${ID}/members/${ID}`, ({ viewer, params }) => {
   if (targetId === viewer.user.id || targetId === guild.guild.owner_id) forbidden();
   if (!outranks(guild.guild, like(viewer.user.id, memberRecord(guild, viewer.user.id)), like(targetId, target))) forbidden();
   removeMember(guild, targetId);
+  recordAudit(guildId, viewer.user.id, AuditLogEvent.MemberKick, targetId);
   return undefined;
 });
 
@@ -131,6 +133,18 @@ function editMember(guildId: string, viewerId: string, targetId: string, body: R
   const voice = memberVoiceEdit(guildId, viewerId, targetId, body);
 
   const before = visibilityOf(guildId);
+  const memberChanges = [
+    next.nick !== undefined ? change("nick", record.nick, next.nick) : null,
+    next.until !== undefined ? change("communication_disabled_until", record.communication_disabled_until ?? null, next.until) : null,
+  ];
+  const roleChanges: AuditLogChange[] = [];
+  if (next.roles) {
+    const named = (ids: string[]) => ids.map(id => ({ id, name: g.roles.find(r => r.id === id)?.name ?? "" }));
+    const added = named(next.roles.filter(id => !record.roles.includes(id)));
+    const removed = named(record.roles.filter(id => !next.roles?.includes(id)));
+    if (added.length > 0) roleChanges.push({ key: "$add", new_value: added });
+    if (removed.length > 0) roleChanges.push({ key: "$remove", new_value: removed });
+  }
   if (next.nick !== undefined) record.nick = next.nick;
   if (next.roles) {
     const wanted = next.roles;
@@ -146,6 +160,8 @@ function editMember(guildId: string, viewerId: string, targetId: string, body: R
   emit(guild.members.keys(), "GUILD_MEMBER_UPDATE", { guild_id: guildId, ...json });
   emitVisibilityChanges(guildId, before);
   voice.apply(next.roles !== undefined || next.until !== undefined);
+  recordAudit(guildId, viewerId, AuditLogEvent.MemberUpdate, targetId, { changes: memberChanges, skipIfUnchanged: true });
+  recordAudit(guildId, viewerId, AuditLogEvent.MemberRoleUpdate, targetId, { changes: roleChanges, skipIfUnchanged: true });
   return json;
 }
 
@@ -194,7 +210,7 @@ route("PUT", `/guilds/${ID}/bans/${ID}`, ({ viewer, params, body }) => {
   if (!Number.isInteger(seconds) || seconds < 0 || seconds > MAX_DELETE_SECONDS) {
     invalid("delete_message_seconds", "BASE_TYPE_BAD_RANGE", "Must be between 0 and 604800.");
   }
-  const reasonRaw = str(body.reason)?.trim();
+  const reasonRaw = str(body.reason)?.trim() || currentAuditReason();
   const targetRecord = guild.members.get(targetId);
   if (targetRecord && !outranks(guild.guild, like(viewer.user.id, memberRecord(guild, viewer.user.id)), like(targetId, targetRecord))) forbidden();
 
@@ -207,6 +223,7 @@ route("PUT", `/guilds/${ID}/bans/${ID}`, ({ viewer, params, body }) => {
     emit(moderators, "GUILD_BAN_ADD", { guild_id: guildId, user });
   }
   removeMember(guild, targetId);
+  recordAudit(guildId, viewer.user.id, AuditLogEvent.MemberBanAdd, targetId, { reason: reasonRaw ? reasonRaw : null });
 
   if (seconds > 0) {
     const cutoff = Date.now() - seconds * 1000;
@@ -218,7 +235,7 @@ route("PUT", `/guilds/${ID}/bans/${ID}`, ({ viewer, params, body }) => {
       db.messages.set(channel.id, list.filter(m => !doomed.includes(m)));
       channel.last_message_id = sortedMessages(channel.id).at(-1)?.id ?? null;
       const audience = channelAudience(channel);
-      for (const message of doomed) emit(audience, "MESSAGE_DELETE", { id: message.id, channel_id: channel.id, guild_id: guildId });
+      emit(audience, "MESSAGE_DELETE_BULK", { ids: doomed.map(m => m.id), channel_id: channel.id, guild_id: guildId });
     }
   }
   return undefined;
@@ -231,6 +248,7 @@ route("DELETE", `/guilds/${ID}/bans/${ID}`, ({ viewer, params }) => {
   if (!bansOf(guildId).delete(targetId)) fail(404, 10026, "Unknown Ban");
   const moderators = [...guild.members.keys()].filter(id => hasBit(guildPermsOf(guildId, id), Perm.BAN_MEMBERS));
   emit(moderators, "GUILD_BAN_REMOVE", { guild_id: guildId, user: userOf(targetId) });
+  recordAudit(guildId, viewer.user.id, AuditLogEvent.MemberBanRemove, targetId);
   return undefined;
 });
 
@@ -243,8 +261,20 @@ function requireRoleManager(guildId: string, viewerId: string): { guild: MockGui
   return { guild, bits, actor: like(viewerId, memberRecord(guild, viewerId)) };
 }
 
-function readRoleFields(body: Record<string, unknown>): Partial<Pick<Role, "name" | "color" | "hoist" | "mentionable">> {
-  const out: Partial<Pick<Role, "name" | "color" | "hoist" | "mentionable">> = {};
+type RoleFields = Partial<Pick<Role, "name" | "color" | "hoist" | "mentionable" | "unicode_emoji">>;
+
+const ROLE_AUDIT_KEYS = ["name", "color", "hoist", "mentionable", "permissions", "unicode_emoji"] as const;
+const roleChanges = (before: Role | null, after: Role | null) => ROLE_AUDIT_KEYS.map(key => change(key, before?.[key] ?? null, after?.[key] ?? null));
+
+function readRoleFields(body: Record<string, unknown>): RoleFields {
+  const out: RoleFields = {};
+  if ("unicode_emoji" in body) {
+    const raw = body.unicode_emoji;
+    if (raw !== null && typeof raw !== "string") invalid("unicode_emoji", "BASE_TYPE_STRING", "Not a string.");
+    const emoji = typeof raw === "string" ? raw.trim() : "";
+    if ([...emoji].length > 32 || /\s/.test(emoji)) invalid("unicode_emoji", "BASE_TYPE_BAD_LENGTH", "Must be an emoji of at most 32 characters.");
+    out.unicode_emoji = emoji === "" ? null : emoji;
+  }
   if ("name" in body) {
     const name = (str(body.name) ?? "").trim();
     if (name.length < 1 || name.length > 100) invalid("name", "BASE_TYPE_BAD_LENGTH", "Must be between 1 and 100 in length.");
@@ -277,10 +307,20 @@ route("POST", `/guilds/${ID}/roles`, ({ viewer, params, body }) => {
     if (role.id === guildId) continue;
     role.position += 1;
   }
-  const role: Role = { id: nextId(), name: fields.name ?? "new role", color: fields.color ?? 0, hoist: fields.hoist ?? false, position: 1, permissions: permissions.toString(), mentionable: fields.mentionable ?? false };
+  const role: Role = {
+    id: nextId(),
+    name: fields.name ?? "new role",
+    color: fields.color ?? 0,
+    hoist: fields.hoist ?? false,
+    position: 1,
+    permissions: permissions.toString(),
+    mentionable: fields.mentionable ?? false,
+    unicode_emoji: fields.unicode_emoji ?? null,
+  };
   guild.guild.roles.push(role);
   emitRole(guild, "GUILD_ROLE_CREATE", role);
   for (const other of guild.guild.roles) if (other.id !== guildId && other.id !== role.id) emitRole(guild, "GUILD_ROLE_UPDATE", other);
+  recordAudit(guildId, viewer.user.id, AuditLogEvent.RoleCreate, role.id, { changes: roleChanges(null, role) });
   return { ...role };
 });
 
@@ -333,10 +373,12 @@ route("PATCH", `/guilds/${ID}/roles/${ID}`, ({ viewer, params, body }) => {
     if ((added & ~bits) !== 0n) forbidden();
   }
   const before = visibilityOf(guildId);
+  const snapshot = { ...role };
   Object.assign(role, fields);
   if (permissions !== undefined) role.permissions = permissions.toString();
   emitRole(guild, "GUILD_ROLE_UPDATE", role);
   emitVisibilityChanges(guildId, before);
+  recordAudit(guildId, viewer.user.id, AuditLogEvent.RoleUpdate, role.id, { changes: roleChanges(snapshot, role), skipIfUnchanged: true });
   return { ...role };
 });
 
@@ -363,6 +405,7 @@ route("DELETE", `/guilds/${ID}/roles/${ID}`, ({ viewer, params }) => {
   }
   emit(guild.members.keys(), "GUILD_ROLE_DELETE", { guild_id: guildId, role_id: role.id });
   emitVisibilityChanges(guildId, before, touched);
+  recordAudit(guildId, viewer.user.id, AuditLogEvent.RoleDelete, role.id, { changes: roleChanges(role, null) });
   return undefined;
 });
 
@@ -382,6 +425,25 @@ function overwriteFrom(guild: MockGuild, entry: unknown, actorBits: bigint): Per
   const deny = bitsOf(e.deny ?? "0", "deny") & ~Perm.ADMINISTRATOR;
   if (((allow | deny) & ~actorBits) !== 0n) forbidden();
   return { id, type: e.type, allow: allow.toString(), deny: deny.toString() };
+}
+
+/** Overwrite create (13) / update (14) / delete (15) entries, options naming the target like Discord. */
+function auditOverwrite(guildId: string, actorId: string, channelId: string, before: PermissionOverwrite | null, after: PermissionOverwrite | null): void {
+  const target = after ?? before;
+  if (!target) return;
+  const same = before && after && before.allow === after.allow && before.deny === after.deny;
+  if (same) return;
+  const action = !before ? AuditLogEvent.ChannelOverwriteCreate : after ? AuditLogEvent.ChannelOverwriteUpdate : AuditLogEvent.ChannelOverwriteDelete;
+  const roleName = target.type === OverwriteType.Role ? db.guilds.get(guildId)?.guild.roles.find(r => r.id === target.id)?.name : undefined;
+  recordAudit(guildId, actorId, action, channelId, {
+    options: { id: target.id, type: String(target.type), ...(roleName ? { role_name: roleName } : {}) },
+    changes: [
+      change("id", before?.id ?? null, after?.id ?? null),
+      change("type", before?.type ?? null, after?.type ?? null),
+      change("allow", before?.allow ?? null, after?.allow ?? null),
+      change("deny", before?.deny ?? null, after?.deny ?? null),
+    ],
+  });
 }
 
 /** Validate `permission_overwrites` of a channel create body (creator needs every bit they set). */
@@ -412,6 +474,7 @@ route("PUT", `/channels/${ID}/permissions/${ID}`, ({ viewer, params, body }) => 
   else list.push(overwrite);
   const synced = channel.type === ChannelType.GuildCategory ? syncCategoryChildren(channel, previous) : [];
   emitVisibilityChanges(channel.guild_id, before, [channel.id, ...synced]);
+  auditOverwrite(channel.guild_id, viewer.user.id, channel.id, previous.find(o => o.id === overwrite.id) ?? null, overwrite);
   return undefined;
 });
 
@@ -424,5 +487,6 @@ route("DELETE", `/channels/${ID}/permissions/${ID}`, ({ viewer, params }) => {
   channel.permission_overwrites = previous.filter(o => o.id !== params[1]);
   const synced = channel.type === ChannelType.GuildCategory ? syncCategoryChildren(channel, previous) : [];
   emitVisibilityChanges(channel.guild_id, before, [channel.id, ...synced]);
+  auditOverwrite(channel.guild_id, viewer.user.id, channel.id, previous.find(o => o.id === params[1]) ?? null, null);
   return undefined;
 });

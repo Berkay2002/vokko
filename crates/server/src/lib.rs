@@ -2,6 +2,7 @@
 pub mod access;
 pub mod account;
 pub mod apps;
+pub mod audit;
 pub mod auth;
 pub mod bot_routes;
 pub mod config;
@@ -21,6 +22,7 @@ pub mod presence;
 pub mod ratelimit;
 pub mod reminders;
 pub mod routes;
+pub mod safety;
 pub mod seed;
 pub mod soundboard;
 pub mod state;
@@ -83,7 +85,7 @@ pub fn router(state: AppState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::predicate(move |origin, _| origin_allowed(origin, allow_list.as_deref())))
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS])
-        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE, header::HeaderName::from_static(audit::REASON_HEADER)])
         .expose_headers([header::CONTENT_DISPOSITION, header::RETRY_AFTER]);
     Router::new()
         .nest(

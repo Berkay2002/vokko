@@ -7,10 +7,12 @@ use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use vokko_protocol::api::permissions::{CREATE_INSTANT_INVITE, MANAGE_CHANNELS, MANAGE_GUILD};
 use vokko_protocol::api::{
-    CreateInviteRequest, GatewayEvent, Guild, GuildMemberAdd, Invite, InviteChannel, InviteDelete, InviteGuild, InviteMetadata, MessageType, Snowflake,
+    AuditLogEvent, CreateInviteRequest, GatewayEvent, Guild, GuildMemberAdd, Invite, InviteChannel, InviteDelete, InviteGuild, InviteMetadata, MessageType,
+    Snowflake,
 };
 
 use crate::access::{self, channel_access, guild_access};
+use crate::audit::{self, AuditReason, Entry};
 use crate::auth::{AuthUser, random_hex};
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
@@ -161,6 +163,7 @@ async fn create_invite(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(id): Path<String>,
+    AuditReason(reason): AuditReason,
     body: axum::body::Bytes,
 ) -> ApiResult<Json<InviteMetadata>> {
     let id = parse_id(&id).ok_or_else(ApiErr::unknown_channel)?;
@@ -206,6 +209,15 @@ async fn create_invite(
     .bind(temporary)
     .execute(&state.db)
     .await?;
+    let entry = Entry::new(guild_id, user_id, AuditLogEvent::InviteCreate, &code)
+        .reason(reason)
+        .change("code", (), &code)
+        .change("channel_id", (), id.to_string())
+        .change("inviter_id", (), user_id.to_string())
+        .change("max_age", (), max_age)
+        .change("max_uses", (), max_uses)
+        .change("temporary", (), temporary);
+    audit::record(&state, entry).await?;
     let created = metadata(&state, vec![live_row(&state, &code).await?]).await?.into_iter().next().ok_or_else(ApiErr::internal)?;
     let audience = invite_audience(&state, guild_id, id).await?;
     state.hub.send(&audience, &GatewayEvent::InviteCreate(Box::new(created.clone())));
@@ -231,7 +243,12 @@ async fn list_guild_invites(State(state): State<AppState>, AuthUser(user_id): Au
 }
 
 /// `DELETE /invites/{code}`: MANAGE_GUILD, or MANAGE_CHANNELS on the invite's channel.
-async fn revoke(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(code): Path<String>) -> ApiResult<Json<InviteMetadata>> {
+async fn revoke(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(code): Path<String>,
+    AuditReason(reason): AuditReason,
+) -> ApiResult<Json<InviteMetadata>> {
     let row = live_row(&state, &code).await?;
     let (guild_id, channel_id) = (row.guild_id, row.channel_id);
     let guild = guild_access(&state, user_id, guild_id).await?;
@@ -243,6 +260,15 @@ async fn revoke(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
     if deleted.rows_affected() == 0 {
         return Err(ApiErr::unknown_invite());
     }
+    let entry = Entry::new(guild_id, user_id, AuditLogEvent::InviteDelete, &code)
+        .reason(reason)
+        .change("code", &code, ())
+        .change("channel_id", channel_id.to_string(), ())
+        .change("inviter_id", revoked.inviter.as_ref().map(|user| user.id.to_string()), ())
+        .change("uses", revoked.uses, ())
+        .change("max_age", revoked.max_age, ())
+        .change("max_uses", revoked.max_uses, ());
+    audit::record(&state, entry).await?;
     let audience = invite_audience(&state, guild_id, channel_id).await?;
     state.hub.send(
         &audience,
