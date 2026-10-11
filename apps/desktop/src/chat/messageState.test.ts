@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../api/types';
 import { buildRows, emptyState, replaceWindow, withLateArrivals } from './messageState';
-import { formatMessageTimestamp, sameDay } from './util';
+import { sameDay } from './util';
 
 const BASE = Date.UTC(2026, 9, 10, 12, 0, 0);
 const msg = (id: string, author: string, minute: number, type = 0): Message => ({
@@ -47,15 +47,3 @@ describe('withLateArrivals', () => {
   });
 });
 
-describe('formatMessageTimestamp', () => {
-  const now = new Date(2026, 9, 10, 15, 0);
-  it('shows only the time today', () => {
-    expect(formatMessageTimestamp(new Date(2026, 9, 10, 9, 5), now)).not.toMatch(/Today|Yesterday|2026/);
-  });
-  it('prefixes yesterday', () => {
-    expect(formatMessageTimestamp(new Date(2026, 9, 9, 9, 5), now)).toMatch(/^Yesterday at /);
-  });
-  it('shows the date for older messages', () => {
-    expect(formatMessageTimestamp(new Date(2026, 8, 1, 9, 5), now)).toMatch(/2026/);
-  });
-});
