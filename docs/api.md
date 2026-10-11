@@ -55,7 +55,7 @@ General rules:
 
 ## Gateway
 
-`GET /gateway` upgrades to WebSocket. Text frames carrying `GatewayPayload`.
+`GET /gateway` (at the server root, not under `/api/v1`; e.g. `ws://127.0.0.1:8710/gateway`) upgrades to WebSocket. Text frames carrying `GatewayPayload`.
 
 1. Server sends `op 10 Hello {heartbeat_interval: 41250}`.
 2. Client sends `op 2 Identify {token}`. Bad token → close code 4004.
@@ -66,3 +66,5 @@ General rules:
 Events are delivered only to users who can see the channel/guild. Event names and payloads: `GatewayEvents` in types.ts. Presence: connected → online, last connection closed → offline; `op 3 {status, custom_status}` updates it.
 
 Semantics notes: a reply puts the replied-to author in `mentions` (Discord default). Pinning emits MESSAGE_UPDATE for the pinned message plus a type 6 system message (MESSAGE_CREATE). `referenced_message.reactions` is always `[]`. Role mentions only drive `mention_count` (no `mention_roles` field).
+
+Read states: READY includes a read state for every channel the user can see that has messages. When a user joins a guild or a DM is created, their read state starts at the channel's latest message (nothing is unread). A channel without a read state counts as unread on the client.
