@@ -69,11 +69,10 @@ class GatewayClient {
     this.open();
   }
 
-  /** "Reconnect now" on the connection banner: skip the backoff wait and open a socket immediately. */
+  /** "Reconnect now" on the connection banner / splash: drop the current attempt (or its backoff wait) and open a socket immediately. */
   retryNow(): void {
-    if (!this.wanted || !this.reconnectTimer) return;
-    clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
+    if (!this.wanted || this.current === "ready") return;
+    this.teardown();
     this.open();
   }
 
