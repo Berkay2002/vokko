@@ -14,9 +14,10 @@
   --chat-input-bg: var(--background-surface-high);
   --chat-reply-bar-bg: var(--background-surface-higher);
   --chat-message-hover: var(--message-background-hover);
-  --chat-mentioned-bg: var(--message-mentioned-background-default);
-  --chat-mentioned-hover: var(--message-mentioned-background-hover);
-  --chat-mentioned-bar: var(--border-feedback-warning);
+  /* Mention-of-me row: bar and tint share one colour (#ce8100); the tint keeps the shell tokens' alphas (.08 rest, .04 hover). */
+  --chat-mentioned-bg: rgba(206, 129, 0, 0.08);
+  --chat-mentioned-hover: rgba(206, 129, 0, 0.04);
+  --chat-mentioned-bar: #ce8100;
   --chat-flash-bg: var(--message-highlight-background-default);
   --chat-replying-bg: var(--message-highlight-background-default);
   --chat-text: var(--text-default);
@@ -655,7 +656,7 @@ span.md-emoji { width: auto; height: auto; line-height: inherit; }
 .chat-emoji-tip-text { display: flex; flex-direction: column; min-width: 0; font-size: 14px; line-height: 18px; }
 .chat-emoji-tip-text b { font-weight: 700; color: var(--chat-text-strong); }
 .chat-emoji-tip-text span { font-weight: 500; color: var(--chat-text-muted); }
-.chat-emoji-pop { position: fixed; z-index: 1000; display: flex; align-items: flex-start; gap: 16px; box-sizing: border-box; width: 288px; padding: 16px; border-radius: 8px; background: var(--chat-bg-floating); box-shadow: var(--chat-shadow-popout); color: var(--chat-text); font-family: var(--chat-font); }
+.chat-emoji-pop { position: fixed; z-index: 1000; display: flex; align-items: center; gap: 16px; box-sizing: border-box; width: 288px; height: 106px; padding: 12px 16px; border-radius: 8px; background: var(--chat-bg-floating); box-shadow: var(--chat-shadow-popout); color: var(--chat-text); font-family: var(--chat-font); }
 .chat-emoji-pop-glyph { flex: none; font-size: 48px; line-height: 48px; }
 .chat-emoji-pop-body { min-width: 0; }
 .chat-emoji-pop-body b { display: block; font-size: 16px; line-height: 20px; font-weight: 600; color: var(--chat-text-strong); }

@@ -20,6 +20,8 @@ const listeners = new Map<Snowflake, Set<Listener>>();
 const AROUND_LIMIT = 30;
 /** Nonces of sends cancelled while the POST was in flight: the created message is deleted again when the response arrives. */
 const cancelled = new Set<string>();
+/** Sends queued behind in-flight uploads, by nonce: calling the entry aborts those uploads (the card's cancel X). */
+const waiting = new Map<string, () => void>();
 const reactionChains =new Map<string, { tail: Promise<void>; pending: number; timer: ReturnType<typeof setTimeout> | null }>();
 const reactionGuard = (messageId: Snowflake, emoji: ReactionEmoji): string => `${messageId}:${emojiKey(emoji)}`;
 /** Channels the user marked unread by hand: the automatic ack stays off until they read it again on purpose, send, or leave. */
@@ -89,6 +91,26 @@ async function refreshLatest(channelId: Snowflake): Promise<void> {
     const page = await fetchPage(channelId, {});
     update(channelId, s => ({ ...replaceWindow(s, withLateArrivals(s, page), { hasMoreBefore: page.length >= PAGE_SIZE, hasMoreAfter: false }) }));
   } catch { /* the next open retries */ }
+}
+
+export interface SendInput { content: string; attachments?: Message['attachments']; meta?: PendingAttachmentMeta[]; reply?: Message | null; mention?: boolean }
+/** The part of a composer upload a queued send needs (see `Upload` in draftStore). */
+export interface QueuedUpload {
+  localId: string;
+  file: File;
+  abort: AbortController;
+  done: Promise<Message['attachments'][number]>;
+  filename?: string;
+  description?: string;
+}
+
+function buildRequest(nonce: string, content: string, input: SendInput): CreateMessageRequest {
+  const req: CreateMessageRequest = { content, nonce };
+  if (input.meta?.length) req.attachments = input.meta;
+  else if (input.attachments?.length) req.attachment_ids = input.attachments.map(a => a.id);
+  if (input.reply) req.message_reference = { message_id: input.reply.id };
+  if (input.reply && input.mention === false) req.allowed_mentions = { replied_user: false };
+  return req;
 }
 
 export const messageStore = {
@@ -174,14 +196,55 @@ export const messageStore = {
 
   // ---- sending ----
 
-  send(channelId: Snowflake, me: User, input: { content: string; attachments?: Message['attachments']; meta?: PendingAttachmentMeta[]; reply?: Message | null; mention?: boolean }): void {
+  send(channelId: Snowflake, me: User, input: SendInput): void {
+    const nonce = this.enqueue(channelId, me, input);
+    void this.dispatchPending(channelId, nonce);
+  },
+
+  /**
+   * Enter pressed while uploads are still in flight: the message is shown at once as pending ("Uploading N files") and posted when every
+   * upload has settled. Uploads that failed are left out; nothing is posted when that leaves the message empty. Cancelling the pending
+   * message (the card's X) aborts the uploads too.
+   */
+  sendAfterUploads(channelId: Snowflake, me: User, input: Omit<SendInput, 'attachments' | 'meta'> & { uploads: QueuedUpload[] }): void {
+    const { uploads, ...rest } = input;
+    const placeholders: Message['attachments'] = uploads.map(u => ({ id: u.localId, filename: u.filename ?? u.file.name, content_type: u.file.type || null, size: u.file.size, url: '', width: null, height: null }));
+    const nonce = this.enqueue(channelId, me, { ...rest, attachments: placeholders });
+    waiting.set(nonce, () => uploads.forEach(u => u.abort.abort()));
+    void Promise.allSettled(uploads.map(u => u.done)).then(results => {
+      waiting.delete(nonce);
+      if (!states.get(channelId)?.pending.some(p => p.nonce === nonce)) return; // cancelled meanwhile
+      const ready = uploads.flatMap((u, i) => {
+        const r = results[i];
+        return r?.status === 'fulfilled' ? [{ u, attachment: r.value }] : [];
+      });
+      if (rest.content.trim() === '' && ready.length === 0) { update(channelId, s => ({ ...s, pending: s.pending.filter(p => p.nonce !== nonce) })); return; }
+      const attachments = ready.map(({ u, attachment }) => ({
+        ...attachment,
+        ...(u.filename !== undefined ? { filename: u.filename } : {}),
+        ...(u.description !== undefined ? { description: u.description || null } : {}),
+      }));
+      const meta = ready.some(({ u }) => u.filename !== undefined || u.description !== undefined)
+        ? ready.map(({ u, attachment }) => ({
+          id: attachment.id,
+          ...(u.filename !== undefined ? { filename: u.filename } : {}),
+          ...(u.description !== undefined ? { description: u.description } : {}),
+        }))
+        : undefined;
+      const req = buildRequest(nonce, rest.content.trim(), { ...rest, attachments, meta });
+      update(channelId, s => ({
+        ...s,
+        pending: s.pending.map(p => (p.nonce === nonce ? { ...p, request: req, message: { ...p.message, attachments } } : p)),
+      }));
+      void this.dispatchPending(channelId, nonce);
+    });
+  },
+
+  /** Adds the optimistic message to the channel (state 'sending', not yet dispatched) and returns its nonce. */
+  enqueue(channelId: Snowflake, me: User, input: SendInput): string {
     const nonce = newNonce();
     const content = input.content.trim();
-    const req: CreateMessageRequest = { content, nonce };
-    if (input.meta?.length) req.attachments = input.meta;
-    else if (input.attachments?.length) req.attachment_ids = input.attachments.map(a => a.id);
-    if (input.reply) req.message_reference = { message_id: input.reply.id };
-    if (input.reply && input.mention === false) req.allowed_mentions = { replied_user: false };
+    const req = buildRequest(nonce, content, input);
     const message: Message = {
       id: `pending:${nonce}`, channel_id: channelId, guild_id: input.reply?.guild_id ?? null, author: me, content, timestamp: new Date().toISOString(), edited_timestamp: null,
       type: input.reply ? MessageType.Reply : MessageType.Default, mentions: input.reply && input.mention !== false ? [input.reply.author] : [], mention_everyone: false,
@@ -191,7 +254,7 @@ export const messageStore = {
     };
     // Sending is an ack of everything above: the new-messages divider and the unread banner go away at once.
     update(channelId, s => ({ ...s, lastReadAtOpen: null, markedUnread: false, pending: [...s.pending, { nonce, message, state: 'sending', request: req }] }));
-    void this.dispatchPending(channelId, nonce);
+    return nonce;
   },
 
   async dispatchPending(channelId: Snowflake, nonce: string): Promise<void> {
@@ -216,7 +279,9 @@ export const messageStore = {
 
   discardPending(channelId: Snowflake, nonce: string): void {
     const inFlight = states.get(channelId)?.pending.find(p => p.nonce === nonce)?.state === 'sending';
-    if (inFlight) cancelled.add(nonce);
+    if (inFlight && !waiting.has(nonce)) cancelled.add(nonce);
+    waiting.get(nonce)?.();
+    waiting.delete(nonce);
     update(channelId, s => ({ ...s, pending: s.pending.filter(p => p.nonce !== nonce) }));
   },
 

@@ -58,7 +58,7 @@ function ReplyPreview({ message }: { message: Message }) {
   if (!message.message_reference) return null;
   if (!ref) {
     const text = ref === null ? 'Original message was deleted' : 'Message could not be loaded';
-    return <div className="chat-reply missing"><span className="chat-reply-spine" /><span className="chat-reply-text"><CircleAlert size={14} />{text}</span></div>;
+    return <div className="chat-reply missing"><span className="chat-reply-spine" /><span className="chat-reply-text"><Reply size={14} className="chat-reply-missing-icon" aria-hidden="true" />{text}</span></div>;
   }
   const text = toDisplay(ref.content, { user: id => chat.md.userName(id), role: id => chat.md.roleInfo(id)?.name ?? null, channel: id => chat.md.channelName(id) }).text.replace(/\s+/g, ' ').trim();
   const color = chat.colorOf(ref);
@@ -66,7 +66,7 @@ function ReplyPreview({ message }: { message: Message }) {
   return <div className="chat-reply" role="button" tabIndex={0} aria-label={`Jump to the message by ${chat.nameOf(ref.author, ref.member)}`} onClick={() => chat.actions.jumpTo(ref.id)}
     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chat.actions.jumpTo(ref.id); } }}>
     <span className="chat-reply-spine" />
-    <Avatar user={ref.author} size={16} className="chat-reply-avatar" />
+    <Avatar user={ref.author} size={16} className="chat-reply-avatar" guildId={chat.guildId} />
     <span className="chat-reply-name" style={color ? { color } : undefined}>@{chat.nameOf(ref.author, ref.member)}</span>
     <ServerTag user={author} className="small" />
     <span className="chat-reply-text">
@@ -174,12 +174,12 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
     <div className="chat-msg-gutter">
       {grouped || compact
         ? <Tooltip content={formatFullDate(date)}><time className="chat-timestamp compact" dateTime={message.timestamp}>{formatTime(date)}</time></Tooltip>
-        : <Avatar user={message.author} size={40} />}
+        : <Avatar user={message.author} size={40} guildId={chat.guildId} />}
     </div>
     <div className="chat-msg-body">
       {(!grouped || compact) && <h3 className="chat-msg-header">
         {dot && <span className="chat-role-dot" style={{ background: dot }} aria-hidden="true" />}
-        {compact && chat.display.showCompactAvatars && <Avatar user={message.author} size={16} className="chat-compact-avatar" />}
+        {compact && chat.display.showCompactAvatars && <Avatar user={message.author} size={16} className="chat-compact-avatar" guildId={chat.guildId} />}
         <span className="chat-author" style={color ? { color } : undefined}>{name}</span>
         <ServerTag user={chat.userById(message.author.id) ?? message.author} />
         {message.author.bot && <span className="chat-bot-tag">BOT</span>}

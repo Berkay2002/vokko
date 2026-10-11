@@ -69,7 +69,7 @@ function PinnedList({ channelId, onJump }: { channelId: Snowflake; onJump?: (id:
       </div>}
       {pins?.map(m => <article className="chat-pin" key={m.id}>
         <header>
-          <Avatar user={m.author} size={24} />
+          <Avatar user={m.author} size={24} guildId={chat.guildId} />
           <span className="chat-author" style={chat.colorOf(m) ? { color: chat.colorOf(m)! } : undefined}>{chat.nameOf(m.author, m.member)}</span>
           <time className="chat-timestamp" dateTime={m.timestamp}>{formatMessageTimestamp(new Date(m.timestamp))}</time>
           <button type="button" className="chat-pin-jump" onClick={() => chat.actions.jumpTo(m.id)}>Jump</button>

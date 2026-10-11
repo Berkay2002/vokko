@@ -69,6 +69,10 @@ const HELP: &str = "vokko-loadtest [options]
   --label TEXT              free text stored in the report";
 
 fn parse_args() -> Result<Args, String> {
+    parse_args_from(std::env::args().skip(1))
+}
+
+fn parse_args_from(arguments: impl IntoIterator<Item = String>) -> Result<Args, String> {
     let mut args = Args {
         url: "http://127.0.0.1:8710".to_owned(),
         connections: 50,
@@ -90,7 +94,7 @@ fn parse_args() -> Result<Args, String> {
         out: None,
         label: String::new(),
     };
-    let mut iter = std::env::args().skip(1);
+    let mut iter = arguments.into_iter();
     while let Some(flag) = iter.next() {
         let mut value = |name: &str| iter.next().ok_or_else(|| format!("{name} needs a value"));
         fn number<T: std::str::FromStr>(name: &str, text: String) -> Result<T, String> {
@@ -122,6 +126,9 @@ fn parse_args() -> Result<Args, String> {
             }
             other => return Err(format!("unknown option {other}\n{HELP}")),
         }
+    }
+    if !args.url.starts_with("http://") {
+        return Err(format!("--url must start with http:// (TLS is not supported), got {}", args.url));
     }
     if args.connections == 0 {
         return Err("--connections must be at least 1".to_owned());
@@ -203,4 +210,27 @@ async fn run() -> Result<(), String> {
         println!("wrote {path}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(arguments: &[&str]) -> Result<Args, String> {
+        parse_args_from(arguments.iter().map(|argument| (*argument).to_owned()))
+    }
+
+    #[test]
+    fn accepts_http_urls() {
+        assert_eq!(parse(&[]).expect("defaults").url, "http://127.0.0.1:8710");
+        assert_eq!(parse(&["--url", "http://example.test:9000"]).expect("http").url, "http://example.test:9000");
+    }
+
+    #[test]
+    fn rejects_urls_that_are_not_http() {
+        for url in ["https://example.test", "ws://example.test", "example.test:8710"] {
+            let error = parse(&["--url", url]).err().unwrap_or_default();
+            assert!(error.contains("--url must start with http://") && error.contains(url), "{url}: {error}");
+        }
+    }
 }

@@ -155,7 +155,7 @@ export function Lightbox({ message, index, onClose }: { message: Message; index:
   return createPortal(<div className="chat-lightbox" role="dialog" aria-modal="true" aria-label={cur.filename} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="chat-lightbox-modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <header className="chat-lightbox-top">
-        <Avatar user={message.author} size={40} />
+        <Avatar user={message.author} size={40} guildId={chat.guildId} />
         <div className="chat-lightbox-who">
           <div className="chat-lightbox-name"><span style={color ? { color } : undefined}>{chat.nameOf(message.author, message.member)}</span><ServerTag user={author} /></div>
           <Tooltip content={formatFullDate(date)} side="bottom"><time className="chat-lightbox-time" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>

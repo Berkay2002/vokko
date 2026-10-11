@@ -6,7 +6,8 @@ use axum::routing::{delete, get};
 use serde::Deserialize;
 use vokko_protocol::api::permissions::{DEFAULT_EVERYONE, MANAGE_CHANNELS, MANAGE_GUILD, MANAGE_ROLES};
 use vokko_protocol::api::{
-    Channel, ChannelType, CreateChannelRequest, CreateGuildRequest, GatewayEvent, Guild, GuildMember, IdOnly, Snowflake, UpdateGuildRequest,
+    Channel, ChannelType, CreateChannelRequest, CreateGuildRequest, GatewayEvent, Guild, GuildMember, GuildTag, GuildTheme, IdOnly, Snowflake,
+    UpdateGuildRequest,
 };
 
 use crate::access::{self, guild_access};
@@ -18,7 +19,7 @@ use crate::media;
 use crate::routes::auth::clean_text;
 use crate::routes::moderation;
 use crate::routes::overwrites;
-use crate::routes::users::owned_attachment_path;
+use crate::routes::users::{self, ImageKind, owned_image_path};
 use crate::state::AppState;
 use crate::store;
 
@@ -58,7 +59,7 @@ pub fn channel_name(kind: ChannelType, value: &str) -> ApiResult<String> {
 async fn create_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiJson(body): ApiJson<CreateGuildRequest>) -> ApiResult<Json<Guild>> {
     let name = guild_name(&body.name)?;
     let icon_path = match body.icon_attachment_id {
-        Some(id) => Some(owned_attachment_path(&state, id.db(), user_id).await?),
+        Some(id) => Some(owned_image_path(&state, id.db(), user_id, ImageKind::Avatar, "icon_attachment_id").await?),
         None => None,
     };
     let guild_id = state.ids.next();
@@ -129,14 +130,12 @@ async fn update_guild(
 ) -> ApiResult<Json<Guild>> {
     let id = guild_id(&id)?;
     guild_access(&state, user_id, id).await?.require(MANAGE_GUILD)?;
-    if let Some(name) = body.name {
-        let name = guild_name(&name)?;
-        sqlx::query("UPDATE guilds SET name = $2 WHERE id = $1").bind(id).bind(name).execute(&state.db).await?;
-    }
-    if let Some(icon) = body.icon_attachment_id {
-        let path = owned_attachment_path(&state, icon.db(), user_id).await?;
-        sqlx::query("UPDATE guilds SET icon_path = $2 WHERE id = $1").bind(id).bind(path).execute(&state.db).await?;
-    }
+    // Validate every key first so a rejected request changes nothing.
+    let name = body.name.as_deref().map(guild_name).transpose()?;
+    let icon_path = match body.icon_attachment_id {
+        Some(icon) => Some(owned_image_path(&state, icon.db(), user_id, ImageKind::Avatar, "icon_attachment_id").await?),
+        None => None,
+    };
     if let Some(channel) = body.system_channel_id {
         let found: Option<(i64,)> = sqlx::query_as("SELECT id FROM channels WHERE id = $1 AND guild_id = $2 AND kind = 0")
             .bind(channel.db())
@@ -146,12 +145,85 @@ async fn update_guild(
         if found.is_none() {
             return Err(ApiErr::invalid("system_channel_id", "Must be a text channel of this guild."));
         }
+    }
+    let tag = match body.tag {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(tag)) => Some(Some(guild_tag(tag)?)),
+    };
+    let theme = match body.theme {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(theme)) => Some(Some(guild_theme(theme)?)),
+    };
+
+    if let Some(name) = name {
+        sqlx::query("UPDATE guilds SET name = $2 WHERE id = $1").bind(id).bind(name).execute(&state.db).await?;
+    }
+    if let Some(path) = icon_path {
+        sqlx::query("UPDATE guilds SET icon_path = $2 WHERE id = $1").bind(id).bind(path).execute(&state.db).await?;
+    }
+    if let Some(channel) = body.system_channel_id {
         sqlx::query("UPDATE guilds SET system_channel_id = $2 WHERE id = $1").bind(id).bind(channel.db()).execute(&state.db).await?;
+    }
+    if let Some(theme) = theme {
+        sqlx::query("UPDATE guilds SET theme_preset = $2, theme_primary = $3, theme_accent = $4 WHERE id = $1")
+            .bind(id)
+            .bind(theme.as_ref().and_then(|theme| theme.0.clone()))
+            .bind(theme.as_ref().map(|theme| theme.1))
+            .bind(theme.as_ref().map(|theme| theme.2))
+            .execute(&state.db)
+            .await?;
+    }
+    // Members who show this guild's tag carry it inside their user object, so a tag edit is a USER_UPDATE for each of them.
+    let mut adopters: Vec<i64> = Vec::new();
+    if let Some(tag) = tag {
+        sqlx::query("UPDATE guilds SET tag = $2, tag_badge = $3, tag_color_primary = $4, tag_color_secondary = $5 WHERE id = $1")
+            .bind(id)
+            .bind(tag.as_ref().map(|tag| tag.0.clone()))
+            .bind(tag.as_ref().map(|tag| tag.1.clone()))
+            .bind(tag.as_ref().map(|tag| tag.2))
+            .bind(tag.as_ref().map(|tag| tag.3))
+            .execute(&state.db)
+            .await?;
+        let rows: Vec<(i64,)> = if tag.is_some() {
+            sqlx::query_as("SELECT id FROM users WHERE primary_guild_id = $1").bind(id).fetch_all(&state.db).await?
+        } else {
+            // Without a tag nobody can keep it as their primary guild.
+            sqlx::query_as("UPDATE users SET primary_guild_id = NULL WHERE primary_guild_id = $1 RETURNING id").bind(id).fetch_all(&state.db).await?
+        };
+        adopters = rows.into_iter().map(|(user,)| user).collect();
     }
     let guild = store::guild(&state, id).await?.ok_or_else(ApiErr::unknown_guild)?;
     let members = access::guild_member_ids(&state, id).await?;
     state.hub.send(&members, &GatewayEvent::GuildUpdate(guild.clone()));
+    for adopter in adopters {
+        users::publish_user(&state, adopter).await?;
+    }
     Ok(Json(guild))
+}
+
+/// (tag, badge, primary colour, secondary colour) as stored.
+type TagColumns = (String, String, i32, i32);
+
+fn guild_tag(tag: GuildTag) -> ApiResult<TagColumns> {
+    let text = tag.tag.trim().to_owned();
+    if !(1..=4).contains(&text.chars().count()) || text.chars().any(char::is_whitespace) {
+        return Err(ApiErr::invalid("tag", "Must be 1-4 characters without spaces."));
+    }
+    let Some(badge) = users::asset_id(Some(tag.badge), "tag.badge")? else {
+        return Err(ApiErr::invalid("tag.badge", "Required."));
+    };
+    Ok((text, badge, users::rgb(tag.color_primary, "tag.color_primary")?, users::rgb(tag.color_secondary, "tag.color_secondary")?))
+}
+
+/// (preset id, primary, accent) as stored.
+type ThemeColumns = (Option<String>, i32, i32);
+
+fn guild_theme(theme: GuildTheme) -> ApiResult<ThemeColumns> {
+    let preset = users::asset_id(theme.preset, "theme.preset")?;
+    let (primary, accent) = users::theme_pair([theme.primary, theme.accent], "theme")?;
+    Ok((preset, primary, accent))
 }
 
 async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<StatusCode> {
@@ -161,6 +233,8 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
         return Err(ApiErr::missing_permissions());
     }
     let members = access::guild_member_ids(&state, id).await?;
+    // The FK clears their primary guild; their audience hears about it as USER_UPDATE once the guild is gone.
+    let adopters: Vec<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE primary_guild_id = $1").bind(id).fetch_all(&state.db).await?;
     let attachments: Vec<(i64,)> = sqlx::query_as("DELETE FROM attachments WHERE channel_id IN (SELECT id FROM channels WHERE guild_id = $1) RETURNING id")
         .bind(id)
         .fetch_all(&state.db)
@@ -168,6 +242,9 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     sqlx::query("DELETE FROM guilds WHERE id = $1").bind(id).execute(&state.db).await?;
     media::remove_files(&state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
     state.hub.send(&members, &GatewayEvent::GuildDelete(IdOnly { id: Snowflake::from(id) }));
+    for (adopter,) in adopters {
+        users::publish_user(&state, adopter).await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

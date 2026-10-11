@@ -33,6 +33,11 @@ pub struct Config {
     pub max_preauth_per_ip: usize,
     /// Take the client address from the last `X-Forwarded-For` entry (only behind a reverse proxy that sets it).
     pub trust_proxy: bool,
+    /// `VOKKO_CORS_ORIGINS`: exact origins allowed to call the API from a browser. `None` keeps the dev defaults (localhost on any port).
+    /// The Tauri origins are always allowed.
+    pub cors_origins: Option<Vec<String>>,
+    /// `VOKKO_REGISTRATION=open|closed`: with `closed`, `POST /auth/register` answers 403 (existing users and the seed are unaffected).
+    pub registration_open: bool,
 }
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:8710";
@@ -125,6 +130,16 @@ impl Config {
         }
         // `VOKKO_TRUST_PROXY=on` behind a reverse proxy that appends the client address to X-Forwarded-For.
         config.trust_proxy = env.get("VOKKO_TRUST_PROXY").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "on" | "1" | "true" | "yes"));
+        if let Some(value) = env.get("VOKKO_CORS_ORIGINS") {
+            config.cors_origins = parse_cors_origins(&value)?;
+        }
+        if let Some(value) = env.get("VOKKO_REGISTRATION") {
+            config.registration_open = match value.trim().to_ascii_lowercase().as_str() {
+                "open" => true,
+                "closed" => false,
+                _ => return Err(format!("VOKKO_REGISTRATION must be `open` or `closed`, got {value}")),
+            };
+        }
         Ok(config)
     }
 
@@ -147,6 +162,39 @@ impl Config {
             identify_per_minute: 10,
             max_preauth_per_ip: 16,
             trust_proxy: false,
+            cors_origins: None,
+            registration_open: true,
+        }
+    }
+}
+
+/// Comma-separated origins (`https://chat.example.com`), trimmed, trailing `/` dropped. An empty list keeps the dev defaults.
+fn parse_cors_origins(value: &str) -> Result<Option<Vec<String>>, String> {
+    let mut origins = Vec::new();
+    for entry in value.split(',').map(str::trim).filter(|entry| !entry.is_empty()) {
+        let origin = entry.trim_end_matches('/');
+        let has_scheme = origin.split_once("://").is_some_and(|(scheme, host)| !scheme.is_empty() && !host.is_empty() && !host.contains('/'));
+        if origin == "*" || !has_scheme || origin.chars().any(char::is_whitespace) {
+            return Err(format!("VOKKO_CORS_ORIGINS entries must be exact origins like https://chat.example.com, got {entry}"));
+        }
+        origins.push(origin.to_owned());
+    }
+    Ok(if origins.is_empty() { None } else { Some(origins) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_cors_origins;
+
+    #[test]
+    fn cors_origins_are_trimmed_and_exact() {
+        assert_eq!(
+            parse_cors_origins(" https://chat.example.com/ , http://localhost:5173,, "),
+            Ok(Some(vec!["https://chat.example.com".to_owned(), "http://localhost:5173".to_owned()]))
+        );
+        assert_eq!(parse_cors_origins("  , "), Ok(None));
+        for bad in ["*", "chat.example.com", "https://chat.example.com/app", "https://", "https://a b"] {
+            assert!(parse_cors_origins(bad).is_err(), "{bad}");
         }
     }
 }

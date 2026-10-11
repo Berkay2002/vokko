@@ -192,6 +192,83 @@ async fn resume_replays_missed_events() {
     assert_eq!(stranger.recv().await.expect("frame")["op"], 9);
 }
 
+/// Messages keep arriving while the resume is processed: every dispatch comes exactly once, in sequence order, RESUMED included.
+#[tokio::test]
+async fn resume_during_live_traffic_has_no_duplicates_or_reordering() {
+    let w = world().await;
+    let mut alice = Client::connect(&w.address).await;
+    let ready = alice.identify(&w.member).await;
+    let session_id = ready["session_id"].as_str().expect("session").to_owned();
+    drop(alice);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let path = format!("/channels/{}/messages", w.channel);
+    for index in 0..20 {
+        w.app.post(&path, &w.owner, json!({"content": format!("m-{index}")})).await;
+    }
+    let poster = async {
+        for index in 20..50 {
+            w.app.post(&path, &w.owner, json!({"content": format!("m-{index}")})).await;
+        }
+    };
+    let reader = async {
+        let mut again = Client::connect(&w.address).await;
+        again.hello().await;
+        again.send(json!({"op": 6, "d": {"token": w.member, "session_id": session_id, "seq": 1}})).await;
+        let mut seqs = Vec::new();
+        let mut contents = Vec::new();
+        let mut resumed_at = None;
+        while contents.len() < 50 {
+            let frame = again.recv().await.expect("frame");
+            assert_eq!(frame["op"], 0, "{frame}");
+            let seq = frame["s"].as_u64().expect("seq");
+            match frame["t"].as_str().expect("event") {
+                "MESSAGE_CREATE" => contents.push(frame["d"]["content"].as_str().expect("content").to_owned()),
+                "RESUMED" => resumed_at = Some(seqs.len()),
+                _ => {}
+            }
+            seqs.push(seq);
+        }
+        (seqs, contents, resumed_at)
+    };
+    let (_, (seqs, contents, resumed_at)) = tokio::join!(poster, reader);
+
+    let expected: Vec<u64> = (seqs[0]..seqs[0] + seqs.len() as u64).collect();
+    assert_eq!(seqs, expected, "consecutive sequence numbers, no repeats");
+    assert_eq!(seqs[0], 2, "starts right after the last sequence the client had");
+    let wanted: Vec<String> = (0..50).map(|index| format!("m-{index}")).collect();
+    assert_eq!(contents, wanted, "every message once, in order");
+    assert!(resumed_at.is_some_and(|at| at >= 20), "RESUMED follows the replayed backlog: {resumed_at:?}");
+}
+
+#[tokio::test]
+async fn a_resume_gap_is_invalid_session_and_ends_the_old_connection() {
+    let w = world_with_config(|config| config.replay_capacity = 5).await;
+    let mut old = Client::connect(&w.address).await;
+    let ready = old.identify(&w.member).await;
+    let session_id = ready["session_id"].as_str().expect("session").to_owned();
+    for index in 0..10 {
+        w.app.post(&format!("/channels/{}/messages", w.channel), &w.owner, json!({"content": format!("m-{index}")})).await;
+    }
+    // the replay buffer (5) no longer reaches back to seq 1, while the old socket is still attached
+    let mut late = Client::connect(&w.address).await;
+    late.hello().await;
+    late.send(json!({"op": 6, "d": {"token": w.member, "session_id": session_id, "seq": 1}})).await;
+    assert_eq!(late.recv().await.expect("frame")["op"], 9);
+    loop {
+        match old.recv().await {
+            Ok(_) => continue,
+            Err(code) => {
+                assert_eq!(code, Some(4000), "the old connection is closed like a replaced one");
+                break;
+            }
+        }
+    }
+    // the session is gone for good
+    late.send(json!({"op": 6, "d": {"token": w.member, "session_id": session_id, "seq": 100}})).await;
+    assert_eq!(late.recv().await.expect("frame")["op"], 9);
+}
+
 #[tokio::test]
 async fn bad_token_and_heartbeats() {
     let w = world_with_heartbeat(400).await;
