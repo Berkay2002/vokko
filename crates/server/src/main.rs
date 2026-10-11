@@ -17,6 +17,11 @@ async fn run() -> Result<(), String> {
     let state = AppState::new(pool, config);
     match command.as_str() {
         "serve" => serve(state).await,
+        "seed" => {
+            let summary = vokko_server::seed::run(&state).await?;
+            println!("vokko-server: {summary}");
+            Ok(())
+        }
         other => Err(format!("unknown command {other}; use `serve` or `seed`")),
     }
 }

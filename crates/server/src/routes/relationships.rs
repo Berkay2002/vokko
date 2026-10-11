@@ -105,10 +105,10 @@ async fn one_to_one(state: &AppState, user_id: i64, other: i64) -> ApiResult<Jso
                 .bind(user_id)
                 .execute(&state.db)
                 .await?;
-            if reopened.rows_affected() > 0 {
-                if let Some(channel) = store::channel(state, id, Some(user_id)).await? {
-                    state.hub.send(&[user_id], &GatewayEvent::ChannelCreate(channel));
-                }
+            if reopened.rows_affected() > 0
+                && let Some(channel) = store::channel(state, id, Some(user_id)).await?
+            {
+                state.hub.send(&[user_id], &GatewayEvent::ChannelCreate(channel));
             }
             id
         }

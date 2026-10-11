@@ -60,11 +60,11 @@ async fn register(State(state): State<AppState>, ApiJson(body): ApiJson<Register
         .execute(&state.db)
         .await;
     if let Err(error) = inserted {
-        if let sqlx::Error::Database(database) = &error {
-            if database.is_unique_violation() {
-                let field = if database.constraint().is_some_and(|name| name.contains("email")) { "email" } else { "username" };
-                return Err(ApiErr::invalid(field, "Already taken."));
-            }
+        if let sqlx::Error::Database(database) = &error
+            && database.is_unique_violation()
+        {
+            let field = if database.constraint().is_some_and(|name| name.contains("email")) { "email" } else { "username" };
+            return Err(ApiErr::invalid(field, "Already taken."));
         }
         return Err(error.into());
     }

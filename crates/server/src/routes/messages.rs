@@ -175,23 +175,26 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
     let mut mentioned: Vec<i64> = draft.mentions.users.clone();
     if let Some(reference) = draft.reference {
         let author: Option<(i64,)> = sqlx::query_as("SELECT author_id FROM messages WHERE id = $1").bind(reference).fetch_optional(&state.db).await?;
-        if let Some((replied,)) = author {
-            if draft.ping_replied && replied != author_id && !mentioned.contains(&replied) && viewers.contains(&replied) {
-                mentioned.push(replied);
-            }
+        if let Some((replied,)) = author
+            && draft.ping_replied
+            && replied != author_id
+            && !mentioned.contains(&replied)
+            && viewers.contains(&replied)
+        {
+            mentioned.push(replied);
         }
     }
     // Everyone whose unread-mention counter goes up.
     let mut notify: HashSet<i64> = mentioned.iter().copied().collect();
-    if !draft.mentions.roles.is_empty() {
-        if let Some(guild_id) = channel.guild_id {
-            let rows: Vec<(i64,)> = sqlx::query_as("SELECT DISTINCT user_id FROM member_roles WHERE guild_id = $1 AND role_id = ANY($2)")
-                .bind(guild_id)
-                .bind(&draft.mentions.roles)
-                .fetch_all(&state.db)
-                .await?;
-            notify.extend(rows.into_iter().map(|(id,)| id));
-        }
+    if !draft.mentions.roles.is_empty()
+        && let Some(guild_id) = channel.guild_id
+    {
+        let rows: Vec<(i64,)> = sqlx::query_as("SELECT DISTINCT user_id FROM member_roles WHERE guild_id = $1 AND role_id = ANY($2)")
+            .bind(guild_id)
+            .bind(&draft.mentions.roles)
+            .fetch_all(&state.db)
+            .await?;
+        notify.extend(rows.into_iter().map(|(id,)| id));
     }
     if draft.mentions.everyone || (channel.is_dm() && draft.kind != MessageType::ChannelPinnedMessage) {
         notify.extend(viewers.iter().copied());
@@ -322,7 +325,7 @@ async fn list_messages(
             .fetch_all(&state.db)
             .await?
     };
-    rows.sort_by(|a, b| b.id.cmp(&a.id));
+    rows.sort_by_key(|row| std::cmp::Reverse(row.id));
     let views = store::load_messages(&state, rows, Some(user_id)).await?;
     Ok(Json(views.into_iter().map(|view| view.message).collect()))
 }

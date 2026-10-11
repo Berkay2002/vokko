@@ -51,10 +51,10 @@ impl Session {
         while inner.buffer.len() > self.capacity {
             inner.buffer.pop_front();
         }
-        if let Some(tx) = &inner.tx {
-            if tx.send(Outgoing::Text(text)).is_err() {
-                inner.tx = None;
-            }
+        if let Some(tx) = &inner.tx
+            && tx.send(Outgoing::Text(text)).is_err()
+        {
+            inner.tx = None;
         }
     }
 
