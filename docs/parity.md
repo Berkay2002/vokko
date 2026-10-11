@@ -2,6 +2,8 @@
 
 Target: Discord's feature behavior and familiar layout. A specific dated Discord reference has not yet been captured; no parity percentage is claimed.
 
+Vokko is free: every Discord Nitro / paid perk is a normal feature for everyone (parity target = Discord with Nitro). Out of scope: the paid machinery itself: Nitro, billing, shop, boost and quest screens, badges, purchase flows and upsell prompts.
+
 Measure visible feature coverage separately from correct behavior and practical readiness. A wired button or a matching screen is not a completed feature.
 
 | Area | Current status | Acceptance needed |
