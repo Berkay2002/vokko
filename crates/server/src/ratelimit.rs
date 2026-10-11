@@ -25,6 +25,10 @@ const SWEEP_EVERY: Duration = Duration::from_secs(30);
 /// Requests that carry a token are first counted against the client address with this multiple of the global bucket,
 /// so token lookups cannot be used as a free oracle.
 const ADDRESS_FLOOR_FACTOR: f64 = 10.0;
+/// `/gifs/*` is proxied to a provider with a quota: search, trending and categories share one bucket per user.
+const GIF_ROUTE: &str = "GET /gifs";
+const GIF_BURST: f64 = 10.0;
+const GIF_PER_SECOND: f64 = 2.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Caller {
@@ -86,10 +90,28 @@ impl RateLimiter {
     /// Counts one request of `caller` against the caller-wide bucket and the bucket of `route`.
     /// `auth` routes use the stricter `auth_*` route bucket.
     pub fn check(&self, caller: Caller, route: &str, limit: &RateLimit, auth: bool) -> Result<(), Limited> {
-        self.check_at(caller, route, limit, auth, Instant::now())
+        self.check_with(caller, route, limit, auth, None)
     }
 
+    /// Like `check`, with the route bucket's `(burst, per_second)` replaced (routes that cost the server more than they look).
+    pub fn check_with(&self, caller: Caller, route: &str, limit: &RateLimit, auth: bool, route_bucket: Option<(f64, f64)>) -> Result<(), Limited> {
+        self.check_bucket_at(caller, route, limit, auth, route_bucket, Instant::now())
+    }
+
+    #[cfg(test)]
     fn check_at(&self, caller: Caller, route: &str, limit: &RateLimit, auth: bool, now: Instant) -> Result<(), Limited> {
+        self.check_bucket_at(caller, route, limit, auth, None, now)
+    }
+
+    fn check_bucket_at(
+        &self,
+        caller: Caller,
+        route: &str,
+        limit: &RateLimit,
+        auth: bool,
+        route_bucket: Option<(f64, f64)>,
+        now: Instant,
+    ) -> Result<(), Limited> {
         let mut buckets = self.buckets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if now.saturating_duration_since(buckets.swept) >= SWEEP_EVERY {
             buckets.map.retain(|_, bucket| !bucket.is_full_at(now));
@@ -97,7 +119,8 @@ impl RateLimiter {
         }
         take(&mut buckets, (caller, String::new()), limit.global_burst, limit.global_per_second, now)
             .map_err(|retry_after| Limited { retry_after, global: true })?;
-        let (burst, per_second) = if auth { (limit.auth_burst, limit.auth_per_second) } else { (limit.route_burst, limit.route_per_second) };
+        let (burst, per_second) =
+            route_bucket.unwrap_or(if auth { (limit.auth_burst, limit.auth_per_second) } else { (limit.route_burst, limit.route_per_second) });
         take(&mut buckets, (caller, route.to_owned()), burst, per_second, now).map_err(|retry_after| Limited { retry_after, global: false })
     }
 
@@ -149,8 +172,11 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
             request.extensions_mut().insert(ResolvedUser(user_id));
         }
     }
-    let route = format!("{} {route}", request.method());
-    match state.limiter.check(caller, &route, &limit, auth) {
+    let is_gif = request.method() == axum::http::Method::GET && route.contains("/gifs/");
+    let route = if is_gif { GIF_ROUTE.to_owned() } else { format!("{} {route}", request.method()) };
+    // The limits are never raised above the configured route bucket (tests and operators may set it lower).
+    let bucket = is_gif.then(|| (GIF_BURST.min(limit.route_burst), GIF_PER_SECOND.min(limit.route_per_second)));
+    match state.limiter.check_with(caller, &route, &limit, auth, bucket) {
         Ok(()) => next.run(request).await,
         Err(limited) => limited_response(limited),
     }
@@ -176,6 +202,19 @@ mod tests {
         // other callers and other routes are independent
         assert!(limiter.check(two, "GET /x", &limit, false).is_ok());
         assert!(limiter.check(one, "GET /y", &limit, false).is_ok());
+    }
+
+    #[test]
+    fn a_replaced_route_bucket_is_shared_by_the_routes_that_use_it() {
+        let limiter = RateLimiter::default();
+        let limit = limit(30.0);
+        let caller = Caller::User(1);
+        for _ in 0..3 {
+            assert!(limiter.check_with(caller, "GET /gifs", &limit, false, Some((3.0, 0.01))).is_ok());
+        }
+        assert!(limiter.check_with(caller, "GET /gifs", &limit, false, Some((3.0, 0.01))).is_err());
+        assert!(limiter.check_with(Caller::User(2), "GET /gifs", &limit, false, Some((3.0, 0.01))).is_ok(), "per user");
+        assert!(limiter.check(caller, "GET /other", &limit, false).is_ok(), "other routes are untouched");
     }
 
     #[test]

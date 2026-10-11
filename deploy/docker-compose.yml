@@ -38,6 +38,8 @@ services:
       VOKKO_PUBLIC_URL: ${VOKKO_PUBLIC_URL:-http://localhost:8710}
       VOKKO_MAX_UPLOAD_MB: ${VOKKO_MAX_UPLOAD_MB:-25}
       VOKKO_UNFURL: ${VOKKO_UNFURL:-on}
+      VOKKO_GIF_PROVIDER: ${VOKKO_GIF_PROVIDER:-none}
+      VOKKO_GIF_API_KEY: ${VOKKO_GIF_API_KEY:-}
       # `on` only when every request arrives through a reverse proxy that appends the client address (the bundled Caddy does).
       VOKKO_TRUST_PROXY: ${VOKKO_TRUST_PROXY:-off}
       RUST_LOG: ${RUST_LOG:-vokko_server=info,warn}

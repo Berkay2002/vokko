@@ -7,6 +7,7 @@ mod auth;
 mod channels;
 mod follows;
 mod forums;
+mod gifs;
 mod guilds;
 mod invites;
 pub mod messages;
@@ -14,7 +15,9 @@ mod moderation;
 mod overwrites;
 mod reactions;
 pub mod relationships;
+mod saved;
 mod search;
+mod stickers;
 mod threads;
 mod users;
 
@@ -31,6 +34,9 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(messages::routes())
         .merge(reactions::routes())
         .merge(search::routes())
+        .merge(saved::routes())
+        .merge(gifs::routes())
+        .merge(stickers::routes())
         .merge(crate::voice::status::routes())
         .merge(threads::routes())
         .merge(forums::routes())

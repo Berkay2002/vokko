@@ -16,9 +16,10 @@ pub async fn guild_with_state(state: &AppState, guild_id: i64, viewer: i64) -> A
     let channels = store::channels_to_api(state, rows, Some(viewer)).await?;
     let members = store::members(state, guild_id, 10_000, None).await?;
     let member_count = store::member_count(state, guild_id).await?;
+    let stickers = crate::stickers::of_guild(state, guild_id).await?;
     let thread_rows = threads::active_threads(state, viewer, guild_id).await?;
     let threads = store::channels_to_api(state, thread_rows, Some(viewer)).await?;
-    Ok(GuildWithState { guild, channels, members, member_count, threads, presences: None, voice_states })
+    Ok(GuildWithState { guild, channels, members, member_count, stickers, threads, presences: None, voice_states })
 }
 
 /// Sends a channel-shaped event (CREATE/UPDATE/DELETE) to everyone who can see the channel; DM recipient lists are per receiver.

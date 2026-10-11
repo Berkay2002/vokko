@@ -10,8 +10,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::permissions::{ATTACH_FILES, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES};
 use vokko_protocol::api::{
-    AckBulkRequest, AllowedMentions, CreateMessageRequest, EditMessageRequest, Embed, GatewayEvent, Message, MessageAck, MessageDelete, MessageType,
-    PendingAttachmentMeta, PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart, message_flags::IS_CROSSPOST,
+    AckBulkRequest, AllowedMentions, CreateMessageRequest, EditMessageRequest, Embed, GatewayEvent, Message, MessageAck, MessageDelete, MessageReferenceType,
+    MessageType, PendingAttachmentMeta, PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart, message_flags::IS_CROSSPOST,
 };
 
 use crate::access::{self, ChannelAccess, channel_access};
@@ -19,9 +19,11 @@ use crate::auth::AuthUser;
 use crate::config::MAX_ATTACHMENTS_PER_MESSAGE;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, ApiQuery, parse_id};
+use crate::forward::{self, ForwardDraft};
 use crate::ids::now_ms;
 use crate::media;
 use crate::state::AppState;
+use crate::stickers::{self, StickerRef};
 use crate::store::{self, ChannelRow, MESSAGE_SELECT, MessageRow, MessageView};
 use crate::threads;
 use crate::unfurl;
@@ -180,6 +182,8 @@ pub struct Draft {
     pub mentions: Resolved,
     /// Whether the replied-to author counts as mentioned (`allowed_mentions.replied_user`, default true).
     pub ping_replied: bool,
+    pub stickers: Vec<StickerRef>,
+    pub forward: Option<ForwardDraft>,
 }
 
 /// Applies `allowed_mentions` to what the content parsed to. Omitted = everything pings.
@@ -225,6 +229,25 @@ pub async fn insert_message(state: &AppState, channel: &ChannelRow, author_id: i
 }
 
 pub async fn insert_message_with(state: &AppState, channel: &ChannelRow, author_id: i64, draft: Draft, extras: Extras) -> ApiResult<MessageView> {
+    // Files copied for a forward belong to the message only once it is committed: an error before that deletes them, an error
+    // after it (DM reopen, loading the view) must not, or the saved forward would point at deleted files.
+    let copies = draft.forward.as_ref().map(ForwardDraft::copy_ids).unwrap_or_default();
+    let mut committed = false;
+    let result = insert_message_stored(state, channel, author_id, draft, extras, &mut committed).await;
+    if result.is_err() && !committed {
+        media::remove_files(state, &copies).await;
+    }
+    result
+}
+
+async fn insert_message_stored(
+    state: &AppState,
+    channel: &ChannelRow,
+    author_id: i64,
+    draft: Draft,
+    extras: Extras,
+    committed: &mut bool,
+) -> ApiResult<MessageView> {
     let message_id = extras.id.unwrap_or_else(|| state.ids.next());
     let crosspost = extras.flags & IS_CROSSPOST as i32 != 0;
     let viewers = access::channel_viewers(state, channel).await?;
@@ -264,9 +287,14 @@ pub async fn insert_message_with(state: &AppState, channel: &ChannelRow, author_
     notify.retain(|user| viewers.contains(user));
 
     let mut tx = state.db.begin().await?;
+    let snapshot_json = match &draft.forward {
+        Some(forward) => Some(serde_json::to_string(&forward.snapshot).map_err(|_| ApiErr::internal())?),
+        None => None,
+    };
     sqlx::query(
-        "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]')::jsonb)",
+        "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds, \
+         forward_channel_id, forward_message_id, forward_guild_id, snapshot) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]')::jsonb, $12, $13, $14, $15::jsonb)",
     )
     .bind(message_id)
     .bind(channel.id)
@@ -279,8 +307,49 @@ pub async fn insert_message_with(state: &AppState, channel: &ChannelRow, author_
     .bind(extras.reference_channel)
     .bind(extras.reference_guild)
     .bind(&extras.embeds)
+    .bind(draft.forward.as_ref().map(|forward| forward.source_channel))
+    .bind(draft.forward.as_ref().map(|forward| forward.source_message))
+    .bind(draft.forward.as_ref().and_then(|forward| forward.source_guild))
+    .bind(snapshot_json)
     .execute(&mut *tx)
     .await?;
+    if let Some(forward) = &draft.forward {
+        for copy in &forward.copies {
+            sqlx::query(
+                "INSERT INTO attachments (id, channel_id, uploader_id, message_id, filename, content_type, size, width, height, key, snapshot, description) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, $11)",
+            )
+            .bind(copy.id)
+            .bind(channel.id)
+            .bind(author_id)
+            .bind(message_id)
+            .bind(&copy.filename)
+            .bind(&copy.content_type)
+            .bind(copy.size as i64)
+            .bind(copy.width.map(|value| value as i32))
+            .bind(copy.height.map(|value| value as i32))
+            .bind(&copy.key)
+            .bind(&copy.description)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    let snapshot_stickers = draft.forward.iter().flat_map(|forward| forward.stickers.iter()).map(|sticker| (sticker, true));
+    for (position, (sticker, snapshot)) in draft.stickers.iter().map(|sticker| (sticker, false)).chain(snapshot_stickers).enumerate() {
+        sqlx::query(
+            "INSERT INTO message_stickers (message_id, position, sticker_id, name, format, attachment_id, asset_path, snapshot) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        )
+        .bind(message_id)
+        .bind(position as i16)
+        .bind(sticker.sticker_id)
+        .bind(&sticker.name)
+        .bind(sticker.format.as_u8() as i16)
+        .bind(sticker.attachment_id)
+        .bind(&sticker.asset_path)
+        .bind(snapshot)
+        .execute(&mut *tx)
+        .await?;
+    }
     for user in &mentioned {
         sqlx::query("INSERT INTO message_mentions (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
             .bind(message_id)
@@ -354,6 +423,7 @@ pub async fn insert_message_with(state: &AppState, channel: &ChannelRow, author_
         Vec::new()
     };
     tx.commit().await?;
+    *committed = true;
 
     if reopened_thread && let Some(row) = store::channel_row(state, channel.id).await? {
         threads::dispatch(state, &row, "THREAD_UPDATE", false).await?;
@@ -458,8 +528,20 @@ async fn create_message(
             return Err(ApiErr::invalid(attachments_field, "A message can have at most 10 attachments."));
         }
     }
-    let content = validate_content(body.content.as_deref().unwrap_or(""), !attachments.is_empty())?;
+    let sticker_ids = body.sticker_ids.unwrap_or_default();
+    let forwarding = body.message_reference.as_ref().is_some_and(|reference| reference.kind == Some(MessageReferenceType::Forward));
+    if forwarding && (!body.content.as_deref().unwrap_or("").trim().is_empty() || !attachments.is_empty() || !sticker_ids.is_empty()) {
+        return Err(ApiErr::invalid("message_reference", "A forward cannot carry content, attachments or stickers."));
+    }
+    let content = validate_content(body.content.as_deref().unwrap_or(""), !attachments.is_empty() || !sticker_ids.is_empty() || forwarding)?;
+    let stickers = stickers::resolve_for_message(&state, user_id, &access.channel, access.permissions, &sticker_ids).await?;
+    let mut forward_source: Option<(i64, i64)> = None;
     let reference = match body.message_reference {
+        Some(reference) if forwarding => {
+            let source = reference.channel_id.ok_or_else(|| ApiErr::invalid("message_reference", "A forward needs channel_id."))?;
+            forward_source = Some((source.db(), reference.message_id.db()));
+            None
+        }
         Some(reference) => {
             let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM messages WHERE id = $1 AND channel_id = $2")
                 .bind(reference.message_id.db())
@@ -476,7 +558,15 @@ async fn create_message(
     let mentions = apply_allowed(resolve_mentions(&state, &access, parse_mentions(&content)).await?, body.allowed_mentions.as_ref());
     let ping_replied = body.allowed_mentions.as_ref().and_then(|allowed| allowed.replied_user).unwrap_or(true);
     let kind = if reference.is_some() { MessageType::Reply } else { MessageType::Default };
-    let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied };
+    let mentions = if forwarding { Resolved { users: Vec::new(), roles: Vec::new(), everyone: false } } else { mentions };
+    // Last step before the insert: it copies files, and nothing after it may fail without cleaning them up.
+    let forward = match forward_source {
+        Some((source_channel, source_message)) => {
+            Some(forward::prepare(&state, user_id, source_channel, source_message, &access.channel, access.permissions).await?)
+        }
+        None => None,
+    };
+    let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied, stickers, forward };
     // Everything is validated: a message into a thread reopens it if it is archived (the UPDATE's `AND archived` guards it, and
     // deciding inside the transaction closes the race with the auto-archive sweep) together with the insert.
     let extras = Extras { reopen_thread: access.channel.is_thread(), ..Extras::default() };
@@ -522,7 +612,11 @@ async fn edit_message(
     if row.flags & IS_CROSSPOST as i32 != 0 {
         return Err(ApiErr::invalid("message_id", "Cannot edit a published copy."));
     }
-    let existing: Vec<(i64,)> = sqlx::query_as("SELECT id FROM attachments WHERE message_id = $1 ORDER BY id").bind(mid).fetch_all(&state.db).await?;
+    if row.forward_message_id.is_some() {
+        return Err(ApiErr::invalid("message_id", "Cannot edit a forwarded message."));
+    }
+    let existing: Vec<(i64,)> =
+        sqlx::query_as("SELECT id FROM attachments WHERE message_id = $1 AND NOT snapshot ORDER BY id").bind(mid).fetch_all(&state.db).await?;
     let existing: Vec<i64> = existing.into_iter().map(|(id,)| id).collect();
     // `attachments` is the keep-list: omitted = unchanged, ids that are not on the message are ignored, the rest are removed.
     let removed: Vec<i64> = match &body.attachments {
@@ -694,6 +788,8 @@ async fn pin_message(State(state): State<AppState>, AuthUser(user_id): AuthUser,
         nonce: None,
         mentions: Resolved { users: Vec::new(), roles: Vec::new(), everyone: false },
         ping_replied: false,
+        stickers: Vec::new(),
+        forward: None,
     };
     insert_message(&state, &access.channel, user_id, notice).await?;
     Ok(StatusCode::NO_CONTENT)

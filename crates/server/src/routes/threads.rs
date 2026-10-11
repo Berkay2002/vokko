@@ -43,7 +43,17 @@ fn no_mentions() -> Resolved {
 }
 
 fn system_draft(kind: MessageType, content: String, reference: i64) -> Draft {
-    Draft { content, kind, reference: Some(reference), attachments: Vec::new(), nonce: None, mentions: no_mentions(), ping_replied: false }
+    Draft {
+        content,
+        kind,
+        reference: Some(reference),
+        attachments: Vec::new(),
+        nonce: None,
+        mentions: no_mentions(),
+        ping_replied: false,
+        stickers: Vec::new(),
+        forward: None,
+    }
 }
 
 /// Inserts the thread row and its creator as the first member in one transaction.

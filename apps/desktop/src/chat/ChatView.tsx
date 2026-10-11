@@ -178,7 +178,7 @@ function ChatBody(p: BodyProps) {
   const editLast = useCallback(() => {
     for (let i = state.messages.length - 1; i >= 0; i--) {
       const m = state.messages[i]!;
-      if (m.author.id === chat.me.id && m.type === 0) { p.setEditingId(m.id); return; }
+      if (m.author.id === chat.me.id && m.type === 0 && m.message_reference?.type !== 1) { p.setEditingId(m.id); return; }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.messages, chat.me.id]);

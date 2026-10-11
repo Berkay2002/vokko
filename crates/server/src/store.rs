@@ -5,8 +5,9 @@ use sqlx::FromRow;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::{
-    Attachment, Channel, ChannelType, Guild, GuildMember, GuildTag, GuildTheme, Message, MessageMember, MessageReference, MessageType, OverwriteType,
-    PermissionOverwrite, Reaction, ReactionEmoji, Role, Snowflake, User, UserPrimaryGuild,
+    Attachment, Channel, ChannelType, Guild, GuildMember, GuildTag, GuildTheme, Message, MessageMember, MessageReference, MessageReferenceType,
+    MessageSnapshot, MessageType, OverwriteType, PermissionOverwrite, Reaction, ReactionEmoji, Role, Snowflake, StickerFormat, StickerItem, User,
+    UserPrimaryGuild,
 };
 
 use crate::error::ApiResult;
@@ -457,10 +458,16 @@ pub struct MessageRow {
     /// Set when the reference points into another channel (thread starters, thread announcements, published copies).
     pub reference_channel_id: Option<i64>,
     pub reference_guild_id: Option<i64>,
+    pub forward_channel_id: Option<i64>,
+    pub forward_message_id: Option<i64>,
+    pub forward_guild_id: Option<i64>,
+    /// JSON `MessageSnapshot` of a forward.
+    pub snapshot: Option<String>,
 }
 
 pub const MESSAGE_SELECT: &str = "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.reference_message_id, m.mention_everyone, \
-     m.created_at, m.edited_at, m.embeds::text AS embeds, m.flags, m.reference_channel_id, m.reference_guild_id FROM messages m JOIN channels c ON c.id = m.channel_id";
+     m.created_at, m.edited_at, m.embeds::text AS embeds, m.flags, m.reference_channel_id, m.reference_guild_id, m.forward_channel_id, m.forward_message_id, \
+     m.forward_guild_id, m.snapshot::text AS snapshot FROM messages m JOIN channels c ON c.id = m.channel_id";
 
 #[derive(FromRow)]
 struct AttachmentRow {
@@ -528,7 +535,13 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
     let mention_rows: Vec<(i64, i64)> =
         sqlx::query_as("SELECT message_id, user_id FROM message_mentions WHERE message_id = ANY($1) ORDER BY user_id").bind(&ids).fetch_all(&state.db).await?;
     let attachment_rows: Vec<AttachmentRow> = sqlx::query_as(
-        "SELECT id, message_id, key, filename, content_type, size, width, height, description FROM attachments WHERE message_id = ANY($1) ORDER BY id",
+        "SELECT id, message_id, key, filename, content_type, size, width, height, description FROM attachments WHERE message_id = ANY($1) AND NOT snapshot ORDER BY id",
+    )
+    .bind(&ids)
+    .fetch_all(&state.db)
+    .await?;
+    let sticker_rows: Vec<(i64, i64, String, i16, String)> = sqlx::query_as(
+        "SELECT message_id, sticker_id, name, format, asset_path FROM message_stickers WHERE message_id = ANY($1) AND NOT snapshot ORDER BY message_id, position",
     )
     .bind(&ids)
     .fetch_all(&state.db)
@@ -557,6 +570,15 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
         let mut attachment = attachment_api(state, row.id, &key, row.filename, row.content_type, row.size, row.width, row.height);
         attachment.description = row.description;
         attachments.entry(row.message_id).or_default().push(attachment);
+    }
+    let mut stickers: HashMap<i64, Vec<StickerItem>> = HashMap::new();
+    for (message_id, sticker_id, name, format, path) in sticker_rows {
+        stickers.entry(message_id).or_default().push(StickerItem {
+            id: flake(sticker_id),
+            name,
+            format_type: StickerFormat::from_u8(format as u8).unwrap_or(StickerFormat::Png),
+            url: state.asset_url(&path),
+        });
     }
     // message → ordered (emoji, users)
     let mut reactions: HashMap<i64, Vec<(ReactionEmoji, Vec<i64>)>> = HashMap::new();
@@ -614,13 +636,24 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
             embeds: serde_json::from_str(&row.embeds).unwrap_or_default(),
             reactions: reactions_api,
             pinned: row.pinned,
-            message_reference: row.reference_message_id.map(|message_id| MessageReference {
-                message_id: flake(message_id),
-                channel_id: flake(row.reference_channel_id.unwrap_or(row.channel_id)),
-                guild_id: if row.reference_channel_id.is_some() { row.reference_guild_id } else { row.guild_id }.map(flake),
-            }),
+            message_reference: match (row.forward_message_id, row.forward_channel_id) {
+                (Some(message_id), Some(channel_id)) => Some(MessageReference {
+                    kind: Some(MessageReferenceType::Forward),
+                    message_id: flake(message_id),
+                    channel_id: flake(channel_id),
+                    guild_id: row.forward_guild_id.map(flake),
+                }),
+                _ => row.reference_message_id.map(|message_id| MessageReference {
+                    kind: None,
+                    message_id: flake(message_id),
+                    channel_id: flake(row.reference_channel_id.unwrap_or(row.channel_id)),
+                    guild_id: if row.reference_channel_id.is_some() { row.reference_guild_id } else { row.guild_id }.map(flake),
+                }),
+            },
             referenced_message: None,
             nonce: None,
+            sticker_items: stickers.remove(&row.id).unwrap_or_default(),
+            message_snapshots: row.snapshot.as_deref().and_then(|raw| serde_json::from_str::<MessageSnapshot>(raw).ok()).into_iter().collect(),
             flags: (row.flags != 0).then_some(row.flags as u32),
             thread: started_threads.remove(&row.id).map(Box::new),
         };
@@ -650,7 +683,10 @@ pub async fn load_messages(state: &AppState, rows: Vec<MessageRow>, viewer: Opti
     }
     for view in &mut views {
         let same_channel = view.message.message_reference.as_ref().is_some_and(|reference| reference.channel_id == view.message.channel_id);
-        if let Some(reference) = view.message.message_reference.as_ref().filter(|_| same_channel || view.message.kind == MessageType::ThreadStarterMessage) {
+        // A forward never shows its source as a reply target, even when the source is in the same channel.
+        if let Some(reference) = view.message.message_reference.as_ref().filter(|reference| {
+            reference.kind != Some(MessageReferenceType::Forward) && (same_channel || view.message.kind == MessageType::ThreadStarterMessage)
+        }) {
             view.message.referenced_message = referenced.get(&reference.message_id.db()).cloned().map(Box::new);
         }
     }

@@ -5,7 +5,7 @@ import { MOCK } from "../config";
 import { MAX_UPLOAD_BYTES } from "../limits";
 import { ApiRequestError, RateLimitedError } from "../errors";
 import { snowflakeToTimestamp } from "../snowflake";
-import type { Attachment, PresenceStatus } from "../types";
+import type { Attachment, GifProvider, PresenceStatus } from "../types";
 import { db, nextId } from "./db";
 import { addMessage, createAccount } from "./ops";
 import { handleRoute } from "./routes";
@@ -20,6 +20,13 @@ if (MOCK) {
   seed();
   // Threads without a message for their auto-archive duration are archived (THREAD_UPDATE), like the server's minute sweep.
   setInterval(() => sweepArchivedThreads(), 30_000);
+  // `?mockGifProvider=none` boots a mock whose GIF provider is not configured (the picker then shows favourites only).
+  try {
+    const provider = new URLSearchParams(window.location.search).get("mockGifProvider");
+    if (provider === "none" || provider === "klipy" || provider === "giphy" || provider === "tenor") db.gifProvider = provider;
+  } catch {
+    /* no window (tests) */
+  }
 }
 
 /** Simulated network latency in ms; `?mockLatency=0` in the URL (or localStorage `vokko.mock.latency`) overrides it. */
@@ -102,6 +109,8 @@ interface MockHooks {
   offline(on: boolean): void;
   /** Make the next `count` REST calls fail with 429 and `retry_after` seconds. */
   rateLimit(count: number, retryAfterSeconds?: number): void;
+  /** Make GET /gifs/* answer like a server with this VOKKO_GIF_PROVIDER ("none" = favourites only). */
+  gifProvider(provider: GifProvider): void;
   /** Create a DM with `username` for the signed-in `as` user. */
   addUser(username: string, globalName?: string): string;
   channelIdByName(name: string): string | null;
@@ -144,6 +153,9 @@ const hooks: MockHooks = {
   offline: on => setOffline(on),
   rateLimit: (count, retryAfterSeconds = 1) => {
     rateLimit = { count, retryAfter: retryAfterSeconds };
+  },
+  gifProvider: provider => {
+    db.gifProvider = provider;
   },
   addUser: (username, globalName) => createAccount({ username, global_name: globalName ?? null }).user.id,
   channelIdByName: name => [...db.channels.values()].find(c => c.name === name)?.id ?? null,

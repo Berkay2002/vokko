@@ -172,11 +172,11 @@ test.describe('context menu', () => {
     await expect(page.locator('.chat-menu')).toHaveCount(0);
   });
 
-  test('items without a server contract show a toast', async ({ page }) => {
+  test('Forward opens the destination dialog', async ({ page }) => {
     await openStockTalk(page);
     await row(page, 'did you see the filing').click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Forward' }).click();
-    await expect(page.locator('.chat-toast')).toContainText('Forwarding messages is coming soon');
+    await expect(page.getByRole('dialog', { name: 'Forward To' })).toBeVisible();
   });
 
   test('Mark Unread brings the unread bar back and the channel stays unread', async ({ page }) => {

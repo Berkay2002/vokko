@@ -90,6 +90,11 @@ impl ApiErr {
         Self::new(StatusCode::FORBIDDEN, 40007, "The user is banned from this guild")
     }
 
+    /// 404 with a specific Discord code (e.g. 10060 unknown sticker).
+    pub fn new_unknown(message: &str, code: u32) -> Self {
+        Self::new(StatusCode::NOT_FOUND, code, message)
+    }
+
     pub fn unknown_attachment() -> Self {
         Self::new(StatusCode::NOT_FOUND, 10015, "Unknown Attachment")
     }

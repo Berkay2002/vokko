@@ -146,6 +146,14 @@ pub mod message_flags {
     pub const IS_CROSSPOST: u32 = 1 << 1;
     pub const SUPPRESS_EMBEDS: u32 = 1 << 2;
 }
+numeric_enum!(
+    /// `MessageReference.type`: 0 = reply / default, 1 = forward (`message_snapshots` carries the copy).
+    MessageReferenceType { Default = 0, Forward = 1 }
+);
+numeric_enum!(
+    /// `Sticker.format_type`. Discord's LOTTIE (3) is not supported; WebP (5) is Vokko's addition.
+    StickerFormat { Png = 1, Apng = 2, Gif = 4, Webp = 5 }
+);
 numeric_enum!(OverwriteType { Role = 0, Member = 1 });
 numeric_enum!(RelationshipType { Friend = 1, Blocked = 2, IncomingRequest = 3, OutgoingRequest = 4 });
 numeric_enum!(GatewayOp {
@@ -678,9 +686,58 @@ pub struct Reaction {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MessageReference {
+    /// Absent = 0 (reply); 1 = forward, where `channel_id`/`guild_id` point at the source message.
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<MessageReferenceType>,
     pub message_id: Snowflake,
     pub channel_id: Snowflake,
     pub guild_id: Option<Snowflake>,
+}
+
+/// A guild sticker (`GET /guilds/{id}/stickers`, `GUILD_CREATE.stickers`). Always Discord type 2 (GUILD), so no `type` field.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Sticker {
+    pub id: Snowflake,
+    pub guild_id: Snowflake,
+    pub name: String,
+    pub description: Option<String>,
+    /// Comma separated search words, 2-200 chars.
+    pub tags: String,
+    pub format_type: StickerFormat,
+    /// Absolute asset URL of the image.
+    pub url: String,
+    pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<User>,
+}
+
+/// The part of a sticker a message carries (`Message.sticker_items`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StickerItem {
+    pub id: Snowflake,
+    pub name: String,
+    pub format_type: StickerFormat,
+    pub url: String,
+}
+
+/// The copy of a forwarded message (`Message.message_snapshots[].message`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MessageSnapshotContent {
+    #[serde(rename = "type")]
+    pub kind: MessageType,
+    pub content: String,
+    pub timestamp: String,
+    pub edited_timestamp: Option<String>,
+    pub mentions: Vec<User>,
+    pub attachments: Vec<Attachment>,
+    pub embeds: Vec<Embed>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sticker_items: Vec<StickerItem>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MessageSnapshot {
+    pub message: MessageSnapshotContent,
 }
 
 /// `Pick<GuildMember, "nick" | "roles">`.
@@ -713,6 +770,11 @@ pub struct Message {
     pub message_reference: Option<MessageReference>,
     pub referenced_message: Option<Box<Message>>,
     pub nonce: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sticker_items: Vec<StickerItem>,
+    /// Exactly one entry on a forward (`message_reference.type` 1), absent otherwise.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub message_snapshots: Vec<MessageSnapshot>,
     /// `message_flags` bits; absent = 0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flags: Option<u32>,
@@ -870,7 +932,12 @@ pub struct AuthResponse {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct MessageReferenceRequest {
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<MessageReferenceType>,
     pub message_id: Snowflake,
+    /// Required for a forward (the source channel); ignored for replies, which always stay in the channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<Snowflake>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -888,6 +955,9 @@ pub struct CreateMessageRequest {
     pub attachments: Option<Vec<PendingAttachmentMeta>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allowed_mentions: Option<AllowedMentions>,
+    /// Up to 3 guild stickers; content may then be empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sticker_ids: Option<Vec<Snowflake>>,
 }
 
 /// One pending upload referenced by `CreateMessageRequest.attachments`.
@@ -1342,6 +1412,116 @@ pub struct InviteChannel {
     pub name: Option<String>,
 }
 
+// ---- Stickers, GIFs, bookmarks, reminders ----
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateStickerRequest {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub tags: String,
+    /// Pending upload from `POST /channels/{id}/attachments` (PNG, APNG, GIF or WebP, at most 512 KiB and 512x512).
+    pub attachment_id: Snowflake,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct EditStickerRequest {
+    pub name: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub description: Option<Option<String>>,
+    pub tags: Option<String>,
+}
+
+/// Which provider answers `/gifs/*`; `none` = picker shows favourites only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GifProvider {
+    Klipy,
+    Giphy,
+    Tenor,
+    None,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Gif {
+    /// `<provider>:<provider id>`.
+    pub id: String,
+    pub title: String,
+    /// Direct media URL (GIF or WebP). Sending a GIF = a message whose content is this URL.
+    pub url: String,
+    /// Small still or low-res image for the picker grid.
+    pub preview_url: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GifPage {
+    pub provider: GifProvider,
+    pub results: Vec<Gif>,
+    /// Opaque cursor for the next page (`pos` query), `null` at the end.
+    pub next: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GifCategory {
+    pub name: String,
+    pub image: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GifCategories {
+    pub provider: GifProvider,
+    pub categories: Vec<GifCategory>,
+}
+
+/// A saved message, as the owner sees it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Bookmark {
+    pub message: Message,
+    pub saved_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BookmarksPage {
+    pub items: Vec<Bookmark>,
+    pub has_more: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CreateReminderRequest {
+    pub channel_id: Snowflake,
+    pub message_id: Snowflake,
+    /// ISO 8601; must be in the future and at most one year ahead.
+    pub remind_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Reminder {
+    pub id: Snowflake,
+    pub channel_id: Snowflake,
+    pub message_id: Snowflake,
+    pub guild_id: Option<Snowflake>,
+    pub remind_at: String,
+    pub created_at: String,
+    /// Set once the due notice was sent (REMINDER_DUE); the reminder stays listed until dismissed.
+    pub delivered_at: Option<String>,
+    /// `null` when the owner can no longer read the message.
+    pub message: Option<Message>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildStickersUpdate {
+    pub guild_id: Snowflake,
+    pub stickers: Vec<Sticker>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BookmarkRemove {
+    pub channel_id: Snowflake,
+    pub message_id: Snowflake,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ApiError {
     pub code: u32,
@@ -1391,6 +1571,7 @@ pub struct GuildWithState {
     pub channels: Vec<Channel>,
     pub members: Vec<GuildMember>,
     pub member_count: u32,
+    pub stickers: Vec<Sticker>,
     /// Active threads the user can see (they are not part of `channels`); omitted when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub threads: Vec<Channel>,
@@ -1536,6 +1717,12 @@ pub enum GatewayEvent {
     MessageAck(MessageAck),
     RelationshipAdd(Relationship),
     RelationshipRemove(IdOnly),
+    GuildStickersUpdate(GuildStickersUpdate),
+    BookmarkAdd(Box<Bookmark>),
+    BookmarkRemove(BookmarkRemove),
+    ReminderCreate(Box<Reminder>),
+    ReminderDue(Box<Reminder>),
+    ReminderDelete(IdOnly),
     VoiceStateUpdate(Box<VoiceState>),
     VoiceServerUpdate(VoiceServerUpdate),
     VoiceConnectFailed(VoiceConnectFailed),
@@ -1577,6 +1764,12 @@ impl GatewayEvent {
             Self::MessageAck(_) => "MESSAGE_ACK",
             Self::RelationshipAdd(_) => "RELATIONSHIP_ADD",
             Self::RelationshipRemove(_) => "RELATIONSHIP_REMOVE",
+            Self::GuildStickersUpdate(_) => "GUILD_STICKERS_UPDATE",
+            Self::BookmarkAdd(_) => "BOOKMARK_ADD",
+            Self::BookmarkRemove(_) => "BOOKMARK_REMOVE",
+            Self::ReminderCreate(_) => "REMINDER_CREATE",
+            Self::ReminderDue(_) => "REMINDER_DUE",
+            Self::ReminderDelete(_) => "REMINDER_DELETE",
             Self::VoiceStateUpdate(_) => "VOICE_STATE_UPDATE",
             Self::VoiceServerUpdate(_) => "VOICE_SERVER_UPDATE",
             Self::VoiceConnectFailed(_) => "VOICE_CONNECT_FAILED",
@@ -1611,6 +1804,11 @@ impl GatewayEvent {
             Self::UserUpdate(value) => serde_json::to_value(value),
             Self::MessageAck(value) => serde_json::to_value(value),
             Self::RelationshipAdd(value) => serde_json::to_value(value),
+            Self::GuildStickersUpdate(value) => serde_json::to_value(value),
+            Self::BookmarkAdd(value) => serde_json::to_value(value),
+            Self::BookmarkRemove(value) => serde_json::to_value(value),
+            Self::ReminderCreate(value) | Self::ReminderDue(value) => serde_json::to_value(value),
+            Self::ReminderDelete(value) => serde_json::to_value(value),
             Self::VoiceStateUpdate(value) => serde_json::to_value(value),
             Self::VoiceServerUpdate(value) => serde_json::to_value(value),
             Self::VoiceConnectFailed(value) => serde_json::to_value(value),
@@ -1779,6 +1977,45 @@ mod tests {
     }
 
     #[test]
+    fn stickers_forwards_gifs_bookmarks_reminders() {
+        let sticker = json!({
+            "id": "70", "guild_id": "300", "name": "wave", "description": null, "tags": "hi,wave", "format_type": 5,
+            "url": "http://x/a.webp", "available": true
+        });
+        round_trip::<Sticker>(sticker.clone());
+        round_trip::<Sticker>(json!({
+            "id": "70", "guild_id": "300", "name": "wave", "description": "d", "tags": "hi", "format_type": 2, "url": "http://x/a.png",
+            "available": true, "user": user()
+        }));
+        let item = json!({"id": "70", "name": "wave", "format_type": 1, "url": "http://x/a.png"});
+        round_trip::<StickerItem>(item.clone());
+        let snapshot = json!({"message": {
+            "type": 0, "content": "hi", "timestamp": "2026-10-11T10:00:00.000Z", "edited_timestamp": null, "mentions": [],
+            "attachments": [], "embeds": [], "sticker_items": [item]
+        }});
+        round_trip::<MessageSnapshot>(snapshot.clone());
+        round_trip::<Message>(json!({
+            "id": "13", "channel_id": "201", "guild_id": null, "author": user(), "content": "", "timestamp": "2026-10-11T10:03:00.000Z",
+            "edited_timestamp": null, "type": 0, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [],
+            "pinned": false, "message_reference": {"type": 1, "message_id": "11", "channel_id": "200", "guild_id": "300"},
+            "referenced_message": null, "nonce": null, "message_snapshots": [snapshot], "sticker_items": [item]
+        }));
+        round_trip::<CreateMessageRequest>(json!({"sticker_ids": ["70"]}));
+        round_trip::<CreateMessageRequest>(json!({"message_reference": {"type": 1, "message_id": "11", "channel_id": "200"}}));
+        round_trip::<CreateStickerRequest>(json!({"name": "wave", "tags": "hi", "attachment_id": "9"}));
+        let gif = json!({"id": "giphy:abc", "title": "t", "url": "http://x/a.gif", "preview_url": "http://x/p.gif", "width": 200, "height": 100});
+        round_trip::<GifPage>(json!({"provider": "giphy", "results": [gif], "next": "25"}));
+        round_trip::<GifPage>(json!({"provider": "none", "results": [], "next": null}));
+        round_trip::<GifCategories>(json!({"provider": "tenor", "categories": [{"name": "happy", "image": "http://x/c.gif"}]}));
+        round_trip::<CreateReminderRequest>(json!({"channel_id": "200", "message_id": "11", "remind_at": "2026-10-11T11:00:00.000Z"}));
+        round_trip::<Reminder>(json!({
+            "id": "80", "channel_id": "200", "message_id": "11", "guild_id": null, "remind_at": "2026-10-11T11:00:00.000Z",
+            "created_at": "2026-10-11T10:00:00.000Z", "delivered_at": null, "message": null
+        }));
+        round_trip::<BookmarksPage>(json!({"items": [], "has_more": false}));
+    }
+
+    #[test]
     fn gateway_payloads() {
         round_trip::<GatewayPayload>(json!({"op": 10, "d": {"heartbeat_interval": 41250}, "s": null, "t": null}));
         round_trip::<GatewayPayload>(json!({"op": 0, "d": {"id": "1"}, "s": 3, "t": "GUILD_DELETE"}));
@@ -1794,6 +2031,7 @@ mod tests {
             value["channels"] = json!([]);
             value["members"] = json!([{"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}]);
             value["member_count"] = json!(1);
+            value["stickers"] = json!([]);
             value["voice_states"] = json!([]);
             value
         };

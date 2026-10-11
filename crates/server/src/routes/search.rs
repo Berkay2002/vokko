@@ -180,7 +180,7 @@ fn push_filters(builder: &mut QueryBuilder<'_, Postgres>, params: &Params, chann
                  OR m.embeds @> '[{\"type\": \"video\"}]'::jsonb OR m.embeds @> '[{\"type\": \"gifv\"}]'::jsonb)"
             }
             Has::Sound => " AND EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = m.id AND a.content_type LIKE 'audio/%')",
-            Has::Sticker => " AND FALSE",
+            Has::Sticker => " AND EXISTS (SELECT 1 FROM message_stickers ms WHERE ms.message_id = m.id)",
         });
     }
     if let Some(pinned) = params.pinned {

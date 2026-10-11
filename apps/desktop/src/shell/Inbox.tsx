@@ -4,6 +4,7 @@ import { channelMentionCount, dmName, isChannelUnread, useStore } from "../api/s
 import { ChannelType, type Channel } from "../api/types";
 import { Popout } from "../ui";
 import { markChannelRead } from "./actions";
+import { ReminderList, SavedMessages } from "../media/InboxLists";
 import { closeModal } from "./modalStore";
 import { dmPath, go, guildPath } from "./nav";
 
@@ -90,7 +91,9 @@ export function InboxPopout({ anchor, open }: { anchor: HTMLElement | null; open
               </div>
             );
           })}
-        {tab !== "unreads" && tab !== "mentions" && (
+        {tab === "bookmarks" && <SavedMessages onNavigate={closeModal} />}
+        {tab === "reminders" && <ReminderList onNavigate={closeModal} />}
+        {tab === "scheduled" && (
           <div className="inbox-empty">
             {EMPTY[tab].icon}
             <div className="inbox-empty-title">{EMPTY[tab].title}</div>

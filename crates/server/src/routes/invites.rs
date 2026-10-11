@@ -123,6 +123,8 @@ async fn post_join_message(state: &AppState, guild_id: i64, user_id: i64) -> Api
         nonce: None,
         mentions: Resolved { users: Vec::new(), roles: Vec::new(), everyone: false },
         ping_replied: false,
+        stickers: Vec::new(),
+        forward: None,
     };
     insert_message(state, &channel, user_id, draft).await?;
     Ok(())

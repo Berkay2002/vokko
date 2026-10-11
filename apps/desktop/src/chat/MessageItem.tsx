@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Forward, Pencil, Pin, SmilePlus, MoreHorizontal, Reply, UserPlus, UserMinus, PenLine, Image as ImageIcon, CircleAlert, ArrowRightFromLine, MessageSquareText, Megaphone } from 'lucide-react';
-import { MessageFlags, MessageType } from '../api/types';
+import { MessageFlags, MessageReferenceType, MessageType } from '../api/types';
 import type { Message } from '../api/types';
 import { Markdown } from './markdown';
 import { Tooltip } from './shell';
@@ -12,11 +12,12 @@ import { Embeds } from './Embeds';
 import { Reactions } from './Reactions';
 import { EmojiPickerPopout } from './EmojiPicker';
 import { MessageMenu } from './MessageMenu';
+import { ForwardedBlock, GifMessage, StickerItems, gifMessageMedia } from '../media/MessageParts';
+import { openForward } from '../media/store';
 import { ThreadChip } from '../threads/ThreadChip';
 import { ThreadCreatedNotice } from '../threads/ThreadNotice';
 import { ThreadStarter } from '../threads/ThreadStarter';
 import { useMessageThreadActions } from '../threads/useMessageActions';
-import { comingSoon } from './toast';
 import { quickReactions } from './emojiData';
 import { messageStore } from './messageStore';
 import { isSystemMessage, type PendingMessage } from './messageState';
@@ -61,7 +62,7 @@ function SystemBody({ message, name }: { message: Message; name: string }) {
 function ReplyPreview({ message }: { message: Message }) {
   const chat = useChat();
   const ref = message.referenced_message;
-  if (!message.message_reference || ((message.flags ?? 0) & MessageFlags.IsCrosspost) !== 0) return null; // a published copy points at its source, it is not a reply
+  if (!message.message_reference || message.message_reference.type === MessageReferenceType.Forward || ((message.flags ?? 0) & MessageFlags.IsCrosspost) !== 0) return null; // a forward has its own block; a published copy points at its source, it is not a reply
   if (!ref) {
     const text = ref === null ? 'Original message was deleted' : 'Message could not be loaded';
     return <div className="chat-reply missing"><span className="chat-reply-spine" /><span className="chat-reply-text"><Reply size={14} className="chat-reply-missing-icon" aria-hidden="true" />{text}</span></div>;
@@ -144,8 +145,9 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const compact = chat.compact;
   const mentionsMe = !isMine && (message.mentions.some(u => u.id === chat.me.id) || message.mention_everyone);
   const failed = pending?.state === 'failed';
+  const gif = system ? null : gifMessageMedia(message);
 
-  const canEdit = isMine && !system && !pending;
+  const canEdit = isMine && !system && !pending && message.message_reference?.type !== 1; // a forward has no text to edit
   const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
 
   const quick = useMemo(() => quickReactions().slice(0, 3), []);
@@ -160,7 +162,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   if (failed) cls.push('failed');
   if (editing) cls.push('editing');
   if (highlighted) cls.push('flash');
-  if (message.message_reference && !system && !crosspost) cls.push('has-reply');
+  if (message.message_reference && message.message_reference.type !== MessageReferenceType.Forward && !system && !crosspost) cls.push('has-reply');
   if (system) cls.push('system');
   if (chat.replyingId === message.id) cls.push('replying');
 
@@ -195,12 +197,15 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
       </h3>}
       {crosspost && <div className="chat-crosspost-tag"><Megaphone size={14} aria-hidden="true" /> Published from an announcement channel</div>}
       {editing ? <InlineEdit message={message} onDone={onStopEditing} /> : <>
-        {message.content && <Markdown content={message.content} ctx={chat.md} className="chat-content" suffix={message.edited_timestamp
+        {message.content && !gif && <Markdown content={message.content} ctx={chat.md} className="chat-content" suffix={message.edited_timestamp
           ? <Tooltip content={formatFullDate(new Date(message.edited_timestamp))}><span className="chat-edited">(edited)</span></Tooltip> : undefined} />}
         {pending && !failed && message.attachments.length > 0
           ? <PendingUpload files={message.attachments} onCancel={() => messageStore.discardPending(message.channel_id, pending.nonce)} />
           : <Attachments message={message} />}
-        <Embeds message={message} />
+        {gif && <GifMessage message={message} media={gif} />}
+        <StickerItems items={message.sticker_items} />
+        {message.message_snapshots?.length ? <ForwardedBlock message={message} /> : null}
+        {!gif && <Embeds message={message} />}
         <Reactions message={message} />
         {message.thread && <ThreadChip message={message} />}
         {threadActions.published && <div className="chat-crosspost-tag published"><Megaphone size={14} aria-hidden="true" /> Published</div>}
@@ -222,7 +227,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
       {canDelete && shift && <Tooltip content="Delete" side="top"><button type="button" className="chat-toolbar-btn danger" aria-label="Delete" onClick={e => chat.actions.requestDelete(message, e.shiftKey)}><Trash /></button></Tooltip>}
       {threadActions.canCreateThread && <Tooltip content="Create Thread" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Create Thread" onClick={threadActions.createThread}><MessageSquareText size={20} /></button></Tooltip>}
       {threadActions.canPublish && !threadActions.published && <Tooltip content="Publish" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Publish" onClick={threadActions.publish}><Megaphone size={20} /></button></Tooltip>}
-      <Tooltip content="Forward" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Forward" onClick={() => comingSoon('Forwarding messages')}><Forward size={20} /></button></Tooltip>
+      <Tooltip content="Forward" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Forward" onClick={() => openForward(message)}><Forward size={20} /></button></Tooltip>
       <Tooltip content="More" side="top"><button type="button" className="chat-toolbar-btn" aria-label="More" onClick={e => {
         const r = e.currentTarget.getBoundingClientRect();
         setMenuAt({ x: r.left, y: r.bottom + 4 });

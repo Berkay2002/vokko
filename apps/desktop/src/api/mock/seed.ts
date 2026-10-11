@@ -1,9 +1,10 @@
 // Seed data mirroring `vokko-server seed`: users sam, carol, alice, bob, nova (password "vokko-dev"),
 // "Sam's server", a 60-message DM sam <-> carol and a few smaller conversations.
 
-import { ChannelFlags, ChannelType, ForumLayout, OverwriteType, RelationshipType, type Attachment, type User } from "../types";
+import { ChannelFlags, ChannelType, ForumLayout, OverwriteType, RelationshipType, StickerFormat, type Attachment, type Sticker, type User } from "../types";
 import { Perm } from "../permissions";
 import { db, nextId, sortedMessages, type MockChannel, type MockMessage } from "./db";
+import { stickerSvg, svgDataUri } from "./gifs";
 import { addChannel, addMessage, createAccount, createGuildRecord, openDM, openGroupDM } from "./ops";
 import { createForumPost, initChannelFields, startThreadFromMessage } from "./threads";
 import { setRelationship } from "./views";
@@ -304,6 +305,24 @@ export function seed(): void {
   guild.members.set(B, { nick: null, roles: [member], joined_at: joined });
 
   db.bans.set(guildId, new Map([[spammer.user.id, "Posting scam links"]]));
+
+  // Demo stickers (generated artwork, no assets). The sticker picker groups them under the server.
+  const sticker = (name: string, tags: string, description: string, hue: number): Sticker => ({
+    id: nextId(),
+    guild_id: guildId,
+    name,
+    description,
+    tags,
+    format_type: StickerFormat.PNG,
+    url: svgDataUri(stickerSvg(name, hue)),
+    available: true,
+    user: sam.user,
+  });
+  db.stickers.set(guildId, [
+    sticker("wave", "hello,hi,greeting", "A friendly wave", 210),
+    sticker("party", "celebrate,confetti,yay", "Time to celebrate", 320),
+    sticker("thumbs-up", "yes,approve,ok", "Looks good to me", 140),
+  ]);
 
   const channels = [...db.channels.values()].filter(c => c.guild_id === guildId);
   const textCategory = channels.find(c => c.name === "Text Channels");

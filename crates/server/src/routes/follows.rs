@@ -110,6 +110,8 @@ async fn deliver_copy(state: &AppState, target: &ChannelRow, source: &MessageRow
         nonce: None,
         mentions: Resolved { users: Vec::new(), roles: Vec::new(), everyone: false },
         ping_replied: false,
+        stickers: Vec::new(),
+        forward: None,
     };
     let extras = Extras {
         flags: message_flags::IS_CROSSPOST as i32,

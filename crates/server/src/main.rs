@@ -33,6 +33,7 @@ async fn serve(state: AppState) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     tokio::fs::create_dir_all(state.attachments_dir()).await.map_err(|error| format!("cannot create the data directory: {error}"))?;
     vokko_server::media::spawn_cleanup(state.clone());
+    vokko_server::reminders::spawn(state.clone());
     vokko_server::voice::spawn_tasks(state.clone());
     vokko_server::threads::spawn_sweeper(state.clone());
     let bind = state.config.bind.clone();

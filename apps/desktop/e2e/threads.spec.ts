@@ -103,7 +103,8 @@ test('a thread started without a message posts a notice in the channel and joine
   const dialog = page.getByRole('dialog', { name: 'Create Thread' });
   await dialog.getByLabel('Thread name').fill('standalone talk');
   await dialog.getByRole('button', { name: 'Create Thread' }).click();
-  await expect(panel(page).getByRole('heading', { name: 'standalone talk' })).toBeVisible();
+  // level 2 is the panel header; the empty thread's channel-start intro is an h1 with the same text and can appear at the same time
+  await expect(panel(page).getByRole('heading', { name: 'standalone talk', level: 2 })).toBeVisible();
   // type 18 notice in the channel
   await expect(page.locator('.chat-msg.system', { hasText: 'started a thread' })).toContainText('standalone talk');
   // the creator is a member: the thread is listed under #general

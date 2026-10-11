@@ -5,6 +5,7 @@ use std::sync::Arc;
 use sqlx::PgPool;
 
 use crate::config::Config;
+use crate::gifs::GifProxy;
 use crate::hub::Hub;
 use crate::ids::SnowflakeGenerator;
 use crate::ratelimit::RateLimiter;
@@ -18,6 +19,7 @@ pub struct Inner {
     pub hub: Hub,
     pub limiter: RateLimiter,
     pub unfurler: Unfurler,
+    pub gifs: GifProxy,
     pub voice: Voice,
 }
 
@@ -41,8 +43,9 @@ impl AppState {
     pub fn with_room_service(db: PgPool, config: Config, rooms: Arc<dyn RoomService>) -> Self {
         let hub = Hub::new(config.replay_capacity, config.session_ttl, config.outgoing_queue);
         let unfurler = Unfurler::new(config.unfurl);
+        let gifs = GifProxy::new(config.gif.clone());
         let voice = Voice::new(rooms);
-        Self(Arc::new(Inner { db, config, ids: SnowflakeGenerator::new(1), hub, limiter: RateLimiter::default(), unfurler, voice }))
+        Self(Arc::new(Inner { db, config, ids: SnowflakeGenerator::new(1), hub, limiter: RateLimiter::default(), unfurler, gifs, voice }))
     }
 
     /// Absolute URL of a stored asset path (`<attachment id>/<filename>`).

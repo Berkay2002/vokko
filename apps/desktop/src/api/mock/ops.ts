@@ -1,10 +1,11 @@
 // Domain operations on the mock database, shared by the REST router, the seed and the dev hooks.
 
-import { ChannelType, MessageType, isThreadType, VOICE_BITRATE_DEFAULT, type Attachment, type PermissionOverwrite, type PresenceStatus, type Role, type User } from "../types";
+import { ChannelType, MessageType, isThreadType, VOICE_BITRATE_DEFAULT, type Attachment, type PermissionOverwrite, type PresenceStatus, type Role, type StickerItem, type User } from "../types";
 import { ApiRequestError } from "../errors";
 import { hasBit } from "../permissions";
 import { canView, channelPermsOf, guildPermsOf } from "./access";
 import { db, everyoneRole, nextId, sortedMessages, userOf, type MockAccount, type MockChannel, type MockMessage } from "./db";
+import { gifEmbeds } from "./gifs";
 import { emit } from "./socket";
 import { channelFor, messageFor } from "./views";
 
@@ -214,6 +215,8 @@ export interface NewMessage {
   silent?: boolean;
   /** False: the author lacks MENTION_EVERYONE, so @everyone/@here is kept as text but does not ping. Default true. */
   allowEveryone?: boolean;
+  stickers?: StickerItem[];
+  forward?: MockMessage["forward"];
 }
 
 function parseMentions(content: string, referenceAuthor: string | null): { ids: string[]; everyone: boolean } {
@@ -252,6 +255,9 @@ export function addMessage(input: NewMessage): MockMessage {
     ...(input.reference_channel_id ? { reference_channel_id: input.reference_channel_id } : {}),
     ...(input.flags ? { flags: input.flags } : {}),
     nonce: input.nonce ?? null,
+    ...(input.stickers?.length ? { stickers: input.stickers } : {}),
+    ...(input.forward ? { forward: input.forward } : {}),
+    embeds: gifEmbeds(input.content),
   };
   const list = sortedMessages(channel.id);
   const previousLast = list.at(-1)?.id ?? null;

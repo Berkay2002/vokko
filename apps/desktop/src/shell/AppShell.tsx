@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { ChatView } from "../chat/ChatView";
+import { MediaHost } from "../media/MediaHost";
 import { appStore, useStore } from "../api/store";
 import { ChannelType } from "../api/types";
 import { ForumChannel } from "../forum/ForumChannel";
@@ -254,6 +255,7 @@ export function AppShell() {
       </div>
       <ProfileCardHost />
       <ModalHost />
+      <MediaHost />
       <ThreadHost />
     </div>
   );

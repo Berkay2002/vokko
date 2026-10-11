@@ -84,3 +84,27 @@ async fn auth_routes_are_limited_per_client_address() {
     let register = json!({"email": "a@example.test", "username": "newbie", "password": "correct horse battery"});
     assert_eq!(app.send(Method::POST, "/auth/register", None, Some(register)).await.0, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn gif_routes_share_one_bucket_per_user_to_protect_the_provider_quota() {
+    // default limits: 30 per route and 10 per second per route; the GIF bucket is 10 with 2 per second, shared by search/trending/categories
+    let app = TestApp::with_config(|config| config.rate_limit = Some(RateLimit::default())).await;
+    let (token, _) = app.register("sam").await;
+    let (other, _) = app.register("alice").await;
+    let mut limited_at = None;
+    for request in 0..14 {
+        let path = match request % 3 {
+            0 => "/gifs/trending",
+            1 => "/gifs/categories",
+            _ => "/gifs/search?q=cat",
+        };
+        if app.get(path, &token).await.0 == 429 {
+            limited_at = Some(request);
+            break;
+        }
+    }
+    let limited_at = limited_at.expect("the shared GIF bucket ran dry");
+    assert!((10..=12).contains(&limited_at), "burst of 10 plus a little refill, got {limited_at}");
+    assert_eq!(app.get("/gifs/trending", &other).await.0, 200, "another user has their own bucket");
+    assert_eq!(app.get("/users/@me", &token).await.0, 200, "other routes are unaffected");
+}

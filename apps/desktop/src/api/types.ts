@@ -243,10 +243,112 @@ export enum MessageFlags {
   SuppressEmbeds = 1 << 2,
 }
 
+export enum MessageReferenceType {
+  Default = 0, // reply
+  Forward = 1, // `message_snapshots` carries the copy; channel_id/guild_id/message_id point at the source
+}
 export interface MessageReference {
+  type?: MessageReferenceType; // absent = 0
   message_id: Snowflake;
   channel_id: Snowflake;
   guild_id: Snowflake | null;
+}
+
+// ---- Stickers (guild stickers; every member can use them everywhere, no upsell) ----
+export enum StickerFormat {
+  PNG = 1,
+  APNG = 2,
+  GIF = 4, // Discord's LOTTIE (3) is not supported
+  WebP = 5, // Vokko addition
+}
+export interface Sticker {
+  id: Snowflake;
+  guild_id: Snowflake;
+  name: string; // 2-30 chars
+  description: string | null; // max 100
+  tags: string; // comma separated search words, 2-200 chars
+  format_type: StickerFormat;
+  url: string; // absolute asset URL
+  available: boolean; // always true
+  user?: User; // uploader
+}
+export interface StickerItem {
+  id: Snowflake;
+  name: string;
+  format_type: StickerFormat;
+  url: string;
+}
+export interface MessageSnapshot {
+  message: {
+    type: MessageType;
+    content: string;
+    timestamp: ISO8601;
+    edited_timestamp: ISO8601 | null;
+    mentions: User[];
+    attachments: Attachment[];
+    embeds: Embed[];
+    sticker_items?: StickerItem[];
+  };
+}
+export interface CreateStickerRequest {
+  name: string;
+  description?: string;
+  tags: string;
+  attachment_id: Snowflake; // pending upload from POST /channels/{id}/attachments: PNG/APNG/GIF/WebP, ≤512 KiB, ≤512x512
+}
+export interface EditStickerRequest {
+  name?: string;
+  description?: string | null;
+  tags?: string;
+}
+
+// ---- GIFs (proxied by the server; the provider key never reaches clients) ----
+export type GifProvider = "klipy" | "giphy" | "tenor" | "none"; // none = picker shows favourites only
+export interface Gif {
+  id: string; // "<provider>:<provider id>"
+  title: string;
+  url: string; // direct media URL; sending a GIF = a message whose content is this URL
+  preview_url: string; // small image for the picker grid
+  width: number;
+  height: number;
+}
+export interface GifPage {
+  provider: GifProvider;
+  results: Gif[];
+  next: string | null; // opaque cursor for ?pos=
+}
+export interface GifCategory {
+  name: string; // searching for it lists the category
+  image: string;
+}
+export interface GifCategories {
+  provider: GifProvider;
+  categories: GifCategory[];
+}
+
+// ---- Bookmarks (saved messages) and reminders ----
+export interface Bookmark {
+  message: Message;
+  saved_at: ISO8601;
+}
+export interface BookmarksPage {
+  items: Bookmark[]; // newest saved first; items the owner can no longer read are left out
+  has_more: boolean;
+}
+export interface CreateReminderRequest {
+  channel_id: Snowflake;
+  message_id: Snowflake;
+  remind_at: ISO8601; // in the future, at most one year ahead; presets (1h, 3h, tomorrow) are computed by the client
+}
+export interface Reminder {
+  id: Snowflake;
+  channel_id: Snowflake;
+  message_id: Snowflake;
+  guild_id: Snowflake | null;
+  remind_at: ISO8601;
+  created_at: ISO8601;
+  delivered_at: ISO8601 | null; // set when REMINDER_DUE fired; stays listed until dismissed
+  message: Message | null; // null when the owner can no longer read it
 }
 
 export interface Message {
@@ -270,6 +372,8 @@ export interface Message {
   nonce: string | null; // echoed from the send request for optimistic UI
   flags?: number; // MessageFlags; absent = 0
   thread?: Channel; // present when a thread was started from this message (thread.id == message id)
+  sticker_items?: StickerItem[]; // absent = none
+  message_snapshots?: MessageSnapshot[]; // exactly one on a forward (message_reference.type 1)
 }
 
 export interface ReadState {
@@ -347,7 +451,8 @@ export interface AuthResponse {
 export interface CreateMessageRequest {
   content?: string;
   nonce?: string;
-  message_reference?: { message_id: Snowflake };
+  message_reference?: { message_id: Snowflake; channel_id?: Snowflake; type?: MessageReferenceType }; // type 1 (forward) needs channel_id, no content/attachments/stickers
+  sticker_ids?: Snowflake[]; // max 3; content may then be empty
   attachment_ids?: Snowflake[]; // ids returned by POST /channels/{id}/attachments; max 10 per message
   attachments?: PendingAttachmentMeta[]; // same ids with optional rename / alt text; use instead of attachment_ids
   allowed_mentions?: AllowedMentions; // omitted = parse everything, replied_user true
@@ -595,7 +700,7 @@ export interface ReadyEvent {
   user: User;
   session_id: string;
   // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels)
-  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; voice_states?: VoiceState[]; threads?: Channel[] })[];
+  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; voice_states?: VoiceState[]; threads?: Channel[] })[];
   private_channels: Channel[]; // DMs and group DMs
   presences: Presence[];
   read_states: ReadState[];
@@ -644,6 +749,12 @@ export interface GatewayEvents {
   MESSAGE_ACK: { channel_id: Snowflake; message_id: Snowflake };
   RELATIONSHIP_ADD: Relationship;
   RELATIONSHIP_REMOVE: { id: Snowflake };
+  GUILD_STICKERS_UPDATE: { guild_id: Snowflake; stickers: Sticker[] }; // full list after a create/edit/delete
+  BOOKMARK_ADD: Bookmark; // to the owner's sessions only
+  BOOKMARK_REMOVE: { channel_id: Snowflake; message_id: Snowflake };
+  REMINDER_CREATE: Reminder;
+  REMINDER_DUE: Reminder; // delivered_at set; the "notice from the instance"
+  REMINDER_DELETE: { id: Snowflake };
   VOICE_STATE_UPDATE: VoiceState; // to everyone who can see the channel
   VOICE_SERVER_UPDATE: { guild_id: Snowflake | null; channel_id: Snowflake; endpoint: string; token: string; session_id: string }; // requesting session only; session_id = the VoiceState.session_id this token is for
   VOICE_CONNECT_FAILED: { guild_id: Snowflake | null; channel_id: Snowflake; reason: VoiceConnectFailure }; // Vokko-only, requesting session only

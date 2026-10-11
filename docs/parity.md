@@ -96,12 +96,12 @@ Status as of main at 11ae952
 | MSG-012 | Reactions: pills, own highlighted, + button on hover, reactor tooltip | partial | done | Reactions.tsx; PUT/DELETE/GET reactions in routes/reactions.rs; unicode emoji only (custom emoji do not render) |
 | MSG-013 | Reaction picker from the hover bar with search | partial | done | EmojiPicker.tsx popout from the toolbar, search; unicode emoji set only |
 | MSG-014 | Pin from the menu: confirm modal, then system row with pin icon | partial | partial | Pin applies immediately, no confirm modal; PUT pin emits a type 6 system row (MessageItem.tsx SystemBody); 250 cap handled |
-| MSG-015 | Forward modal | - | - | Forward is a button in the hover bar, the context menu and the lightbox; all only show a coming-soon toast, there is no modal |
-| MSG-016 | Bookmark and reminder submenu | partial | - | MessageMenu.tsx has Bookmark Message and a Create Reminder submenu with preset times, both only show a coming-soon toast; inbox bookmark and reminder tabs are empty placeholders |
+| MSG-015 | Forward modal | partial | partial | Forward modal (up to 5 destinations, comment, preview) from the hover bar, context menu and lightbox; server copies a snapshot with its files. Mock e2e only, not compared with a reference |
+| MSG-016 | Bookmark and reminder submenu | partial | partial | Bookmark toggle, reminder presets (1 h, 3 h, tomorrow, custom), inbox Bookmarks/Reminders tabs and REMINDER_DUE notice; server delivers due reminders once. Mock e2e only |
 | MSG-017 | Markdown rendering: emphasis, code, headings, lists, quotes, links, spoilers, timestamps, shortcodes | partial | done | chat/markdown/ (parse.ts, render.tsx, highlight.ts, unit tests) covers the listed syntax; shortcodes use JoyPixels names first (emojiData.ts); styling not compared |
 | MSG-018 | Link embeds: invite embed incl. expired state, URL previews, image and video embeds | partial | done | Embeds.tsx; invites via GET /invites/{code}; server unfurl.rs builds embeds, delivered by MESSAGE_UPDATE |
 | MSG-019 | Attachments: image grid with lightbox, files, video and audio players, spoiler | partial | partial | Attachments.tsx, chat.css: single 550x350 box, 2-image 273x273, 3-image 364x350 + 2x 182x173, 4-image 2x2 273x173, own-image pencil and trash group, lightbox with .92 scrim, author header, thumbnail strip; lightbox top bar has five buttons where the reference lists four; audio files show as file cards (no player); routes/attachments.rs serves files; alt text, rename and removal on sent messages persist on the server (see MSG-032) |
-| MSG-020 | Stickers and GIFs in messages | - | - | No sticker or GIF support in client or server |
+| MSG-020 | Stickers and GIFs in messages | partial | partial | Stickers (`sticker_ids`/`sticker_items`), GIF-only messages shown inline, forwarded blocks; server and mock. No sticker upload UI yet |
 | MSG-021 | Message selection and long-press mobile gestures | n/a | n/a | Out of scope (desktop web) |
 | MSG-022 | Mention chips and mention-highlighted row with 2 px bar | partial | partial | markdown render.tsx chips (user, role, channel, everyone), chat.css .mentioned 2 px bar; row highlight only for user and everyone mentions (server has no mention_roles) |
 | MSG-023 | Slash-command output and application messages: bot badge, ephemeral | partial | - | BOT tag renders in MessageItem.tsx; no commands, apps or ephemeral messages |
@@ -124,8 +124,8 @@ Status as of main at 11ae952
 | CMP-002 | Attach + button menu: upload file, create poll, use apps | partial | partial | Composer.tsx: only Upload a File (POST attachments); no poll, no apps |
 | CMP-003 | Right buttons: GIF, sticker, emoji, apps | partial | partial | Composer.tsx: four buttons present; emoji works, GIF/sticker/apps open empty-state panels |
 | CMP-004 | Emoji picker with tabs, search, category rail, 48 px cells, preview footer | done | partial | chat.css expression picker 498x486, 48 px cells, footer preview; unicode only, GIF and sticker tabs are empty |
-| CMP-005 | GIF picker with search, categories, trending | partial | - | ExpressionPicker.tsx: search box with an honest empty state; no provider |
-| CMP-006 | Sticker picker | partial | - | ExpressionPicker.tsx: empty state; no sticker packs |
+| CMP-005 | GIF picker with search, categories, trending | partial | partial | Picker with categories, trending, search, favourites; server proxies klipy/giphy/tenor (`VOKKO_GIF_PROVIDER`), `none` = favourites only. Klipy parser is tested on fixtures only, not the live API |
+| CMP-006 | Sticker picker | partial | partial | Picker grouped by server with search and hover preview; guild stickers via REST + GUILD_STICKERS_UPDATE. No upload/management UI in server settings yet |
 | CMP-007 | @ autocomplete for members and roles with keyboard selection, Tab inserts chip | partial | done | Composer.tsx suggestions (members, mentionable roles, everyone/here); sends raw mention tokens; server parses them |
 | CMP-008 | Emoji shortcode autocomplete with preview | partial | done | Composer.tsx ':' trigger lists matches from the emoji database (JoyPixels names first); no preview pane |
 | CMP-009 | Slash-command panel with app rail | - | - | No slash-command handling |

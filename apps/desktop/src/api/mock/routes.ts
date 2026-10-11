@@ -6,6 +6,7 @@ import { Perm, hasBit } from "../permissions";
 import { channelPermsOf } from "./access";
 import { db, nextId, sortedMessages, userOf, type MockAccount, type MockChannel } from "./db";
 import { pendingAttachment, addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, openDM, openGroupDM, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm, requireMessage, emitVisibilityChanges, visibilityOf } from "./ops";
+import { buildForward, purgeChannelRefs, purgeGuildStickers, purgeMessageRefs, resolveStickers } from "./media";
 import { parseOverwrites } from "./moderation";
 import { applyChannelFields, assertCanPost, assertThreadOpen, deleteThread, dropChannelExtras, editThread, initChannelFields } from "./threads";
 import { applyGuildPerks, applyUserPerks, dropTagOnLeave, memberProfileFields } from "./perks";
@@ -229,9 +230,11 @@ route("DELETE", `/guilds/${ID}`, ({ viewer, params }) => {
   db.guilds.delete(guildId);
   for (const channel of [...db.channels.values()]) {
     if (channel.guild_id !== guildId) continue;
+    purgeChannelRefs(channel.id);
     db.channels.delete(channel.id);
     db.messages.delete(channel.id);
   }
+  purgeGuildStickers(guildId);
   return undefined;
 });
 
@@ -320,6 +323,7 @@ route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
   requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
   dropChannelExtras(channel);
   for (const id of channelAudience(channel)) emit([id], "CHANNEL_DELETE", channelFor(channel, id));
+  purgeChannelRefs(channel.id);
   db.channels.delete(channel.id);
   db.messages.delete(channel.id);
   return payload;
@@ -414,16 +418,22 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
     return { ...found, ...(filename !== undefined ? { filename } : {}), ...(description !== undefined ? { description: description === "" ? null : description } : {}) };
   }).filter((a): a is Attachment => a !== null);
   if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });
-  if (content === "" && attachments.length === 0) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
-  const reference = body.message_reference as { message_id?: string } | undefined;
-  if (reference?.message_id) requireMessage(channel.id, reference.message_id);
+  const reference = body.message_reference as { message_id?: string; channel_id?: string; type?: number } | undefined;
+  const forwarding = reference?.type === 1;
+  const stickers = resolveStickers(channel, viewer.user.id, body.sticker_ids);
+  if (forwarding && (content !== "" || attachments.length > 0 || stickers.length > 0)) fail(400, 50035, "Invalid Form Body", { message_reference: { code: "FORWARD_HAS_CONTENT", message: "A forward cannot carry content, attachments or stickers." } });
+  if (content === "" && attachments.length === 0 && stickers.length === 0 && !forwarding) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
+  const forward = forwarding ? buildForward(viewer.user.id, reference, channel) : undefined;
+  if (reference?.message_id && !forwarding) requireMessage(channel.id, reference.message_id);
   for (const id of ids) db.pending.delete(id);
   const message = addMessage({
     channel,
     author_id: viewer.user.id,
     content,
     attachments,
-    reference_id: reference?.message_id ?? null,
+    stickers,
+    forward,
+    reference_id: forwarding ? null : reference?.message_id ?? null,
     nonce: str(body.nonce) ?? null,
     allowEveryone: hasBit(channelPermsOf(channel, viewer.user.id), Perm.MENTION_EVERYONE),
   });
@@ -459,6 +469,7 @@ route("DELETE", `/channels/${ID}/messages/${ID}`, ({ viewer, params }) => {
   if (message.author_id !== viewer.user.id) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_MESSAGES);
   const list = sortedMessages(channel.id);
   list.splice(list.indexOf(message), 1);
+  purgeMessageRefs(channel.id, message.id);
   channel.last_message_id = list.at(-1)?.id ?? null;
   emit(channelAudience(channel), "MESSAGE_DELETE", { id: message.id, channel_id: channel.id, guild_id: channel.guild_id });
   return undefined;

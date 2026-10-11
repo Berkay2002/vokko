@@ -23,6 +23,7 @@ export const PermBit = {
   READ_MESSAGE_HISTORY: 16,
   MENTION_EVERYONE: 17,
   USE_EXTERNAL_EMOJIS: 18,
+  USE_EXTERNAL_STICKERS: 37,
   CONNECT: 20,
   SPEAK: 21,
   MUTE_MEMBERS: 22,
@@ -56,7 +57,7 @@ export const ALL_PERMISSIONS: bigint = (() => {
 })();
 
 /** Q4.4 fallback @everyone set, used when a guild has no @everyone role. */
-export const DEFAULT_EVERYONE: bigint = [0, 26, 10, 11, 14, 15, 16, 17, 18, 6, 20, 21, 25, 9, 43, 35, 36, 38].reduce((acc, n) => acc | bit(n), 0n);
+export const DEFAULT_EVERYONE: bigint = [0, 26, 10, 11, 14, 15, 16, 17, 18, 37, 6, 20, 21, 25, 9, 43, 35, 36, 38].reduce((acc, n) => acc | bit(n), 0n);
 
 export function parseBits(value: string | bigint | undefined | null): bigint {
   if (typeof value === "bigint") return value;

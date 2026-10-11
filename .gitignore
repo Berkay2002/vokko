@@ -13,3 +13,4 @@
 /artifacts/
 /data/
 /.claude/reference/
+*.tsbuildinfo

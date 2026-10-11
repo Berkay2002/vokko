@@ -2,6 +2,9 @@ import { useState, type RefObject } from 'react';
 import { Search, Sticker as StickerIcon, X } from 'lucide-react';
 import { Popout } from './shell';
 import { EmojiPicker, type PickedEmoji } from './EmojiPicker';
+import type { Gif, Snowflake, Sticker } from '../api/types';
+import { GifPicker } from '../media/GifPicker';
+import { StickerPicker } from '../media/StickerPicker';
 
 export type ExpressionTab = 'gif' | 'sticker' | 'emoji';
 
@@ -29,20 +32,26 @@ function UnavailablePanel({ tab }: { tab: 'gif' | 'sticker' }) {
   </div>;
 }
 
-export function ExpressionPicker({ initialTab, onPickEmoji }: { initialTab: ExpressionTab; onPickEmoji: (e: PickedEmoji) => void }) {
+export function ExpressionPicker({ initialTab, onPickEmoji, channelId, onPickGif, onPickSticker }: {
+  initialTab: ExpressionTab; onPickEmoji: (e: PickedEmoji) => void; channelId?: Snowflake; onPickGif?: (gif: Gif) => void; onPickSticker?: (sticker: Sticker) => void;
+}) {
   const [tab, setTab] = useState<ExpressionTab>(initialTab);
   return <div className="chat-expression-picker" role="dialog" aria-label="Expression picker">
     <div className="chat-expr-tabs" role="tablist">
       {TABS.map(t => <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>{t.label}</button>)}
     </div>
-    {tab === 'emoji' ? <EmojiPicker embedded onPick={onPickEmoji} /> : <UnavailablePanel key={tab} tab={tab} />}
+    {tab === 'emoji' ? <EmojiPicker embedded onPick={onPickEmoji} />
+      : tab === 'gif' && onPickGif ? <GifPicker onPick={onPickGif} />
+      : tab === 'sticker' && onPickSticker && channelId ? <StickerPicker channelId={channelId} onPick={onPickSticker} />
+      : <UnavailablePanel key={tab} tab={tab} />}
   </div>;
 }
 
-export function ExpressionPickerPopout({ anchor, open, initialTab, onClose, onPickEmoji }: {
+export function ExpressionPickerPopout({ anchor, open, initialTab, onClose, onPickEmoji, channelId, onPickGif, onPickSticker }: {
   anchor: RefObject<HTMLElement | null>; open: boolean; initialTab: ExpressionTab; onClose: () => void; onPickEmoji: (e: PickedEmoji) => void;
+  channelId?: Snowflake; onPickGif?: (gif: Gif) => void; onPickSticker?: (sticker: Sticker) => void;
 }) {
-  return <Popout anchor={anchor} open={open} onClose={onClose} side="top"><ExpressionPicker key={initialTab} initialTab={initialTab} onPickEmoji={onPickEmoji} /></Popout>;
+  return <Popout anchor={anchor} open={open} onClose={onClose} side="top"><ExpressionPicker key={initialTab} initialTab={initialTab} onPickEmoji={onPickEmoji} channelId={channelId} onPickGif={onPickGif} onPickSticker={onPickSticker} /></Popout>;
 }
 
 /** Small popout for the "Apps" button: there are no apps yet. */

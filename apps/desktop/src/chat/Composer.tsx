@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
 import { AtSign, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
 import { ChannelType } from '../api/types';
-import type { Message, Snowflake } from '../api/types';
+import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
 import { request, Popout, Tooltip, useConvertEmoticons } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
@@ -249,6 +249,19 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); setCaret(pos); });
   }
 
+  /** A GIF (its URL is the message) or a sticker is sent at once, like Discord; the draft text stays. */
+  function sendMedia(input: { content: string; stickers?: StickerData[] }) {
+    setExpr(null);
+    messageStore.send(channelId, chat.me, {
+      content: input.content,
+      stickers: input.stickers?.map(s => ({ id: s.id, name: s.name, format_type: s.format_type, url: s.url })),
+      reply: replyTo,
+      mention: mentionReply,
+    });
+    onCancelReply();
+    onSent();
+  }
+
   const remaining = MAX_LEN - rawContent.length;
   const replyName = replyTo ? chat.nameOf(replyTo.author, replyTo.member) : '';
   const hasText = text.length > 0;
@@ -301,7 +314,8 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           <Tooltip content="Apps" side="top"><button ref={appsBtn} type="button" className="chat-composer-btn" aria-label="Apps" aria-expanded={appsOpen} onClick={() => setAppsOpen(v => !v)}><LayoutGrid size={24} /></button></Tooltip>
         </div>
         <ExpressionPickerPopout anchor={expr === 'gif' ? gifBtn : expr === 'sticker' ? stickerBtn : emojiBtn} open={expr !== null} initialTab={expr ?? 'emoji'}
-          onClose={() => setExpr(null)} onPickEmoji={e => { setExpr(null); insertEmoji(e.name); }} />
+          onClose={() => setExpr(null)} onPickEmoji={e => { setExpr(null); insertEmoji(e.name); }}
+          channelId={channelId} onPickGif={(gif: Gif) => sendMedia({ content: gif.url })} onPickSticker={s => sendMedia({ content: '', stickers: [s] })} />
         <AppsPopout anchor={appsBtn} open={appsOpen} onClose={() => setAppsOpen(false)} />
       </div>
       {suggestions.length > 0 && <div className="chat-autocomplete" role="listbox" aria-label="Suggestions">

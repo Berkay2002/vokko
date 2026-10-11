@@ -315,7 +315,17 @@ pub async fn create_post(state: &AppState, user_id: i64, access: &ChannelAccess,
     }
     let row = store::channel_row(state, id).await?.ok_or_else(ApiErr::internal)?;
     threads::dispatch(state, &row, "THREAD_CREATE", true).await?;
-    let draft = Draft { content, kind: MessageType::Default, reference: None, attachments: drafts, nonce: first.nonce, mentions, ping_replied: false };
+    let draft = Draft {
+        content,
+        kind: MessageType::Default,
+        reference: None,
+        attachments: drafts,
+        nonce: first.nonce,
+        mentions,
+        ping_replied: false,
+        stickers: Vec::new(),
+        forward: None,
+    };
     let view = match insert_message_with(state, &row, user_id, draft, Extras { id: Some(id), ..Extras::default() }).await {
         Ok(view) => view,
         Err(error) => {

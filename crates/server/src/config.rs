@@ -49,6 +49,20 @@ pub struct Config {
     /// A voice state outlives its gateway session (or, after a restart, waits for its client) this long.
     pub voice_gateway_grace: Duration,
     pub voice_reconcile_interval: Duration,
+    /// Stickers per guild (one owner-editable block instead of boost levels).
+    pub max_stickers_per_guild: usize,
+    /// GIF proxy: provider, API key and an optional override of the provider's API origin.
+    pub gif: GifConfig,
+    /// How often due reminders are looked for.
+    pub reminder_poll: Duration,
+}
+
+/// `VOKKO_GIF_PROVIDER` / `VOKKO_GIF_API_KEY` / `VOKKO_GIF_BASE_URL`.
+#[derive(Clone, Debug)]
+pub struct GifConfig {
+    pub provider: vokko_protocol::api::GifProvider,
+    pub api_key: String,
+    pub base_url: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -164,6 +178,25 @@ impl Config {
         }
         // `VOKKO_TRUST_PROXY=on` behind a reverse proxy that appends the client address to X-Forwarded-For.
         config.trust_proxy = env.get("VOKKO_TRUST_PROXY").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "on" | "1" | "true" | "yes"));
+        if let Some(value) = env.get("VOKKO_GIF_PROVIDER") {
+            use vokko_protocol::api::GifProvider;
+            config.gif.provider = match value.trim().to_ascii_lowercase().as_str() {
+                "klipy" => GifProvider::Klipy,
+                "giphy" => GifProvider::Giphy,
+                "tenor" => GifProvider::Tenor,
+                "none" | "" => GifProvider::None,
+                other => return Err(format!("VOKKO_GIF_PROVIDER must be klipy, giphy, tenor or none, got {other}")),
+            };
+        }
+        config.gif.api_key = env.get("VOKKO_GIF_API_KEY").unwrap_or_default();
+        config.gif.base_url = env.get("VOKKO_GIF_BASE_URL").map(|value| value.trim_end_matches('/').to_owned());
+        if config.gif.provider != vokko_protocol::api::GifProvider::None && config.gif.api_key.is_empty() {
+            return Err("VOKKO_GIF_API_KEY is required when VOKKO_GIF_PROVIDER is set".to_owned());
+        }
+        if let Some(value) = env.get("VOKKO_REMINDER_POLL_SECS") {
+            let seconds: u64 = value.trim().parse().map_err(|_| format!("VOKKO_REMINDER_POLL_SECS must be a whole number of seconds, got {value}"))?;
+            config.reminder_poll = Duration::from_secs(seconds.max(1));
+        }
         if let Some(value) = env.get("VOKKO_CORS_ORIGINS") {
             config.cors_origins = parse_cors_origins(&value)?;
         }
@@ -213,6 +246,9 @@ impl Config {
             identify_per_minute: 10,
             max_preauth_per_ip: 16,
             trust_proxy: false,
+            max_stickers_per_guild: 60,
+            gif: GifConfig { provider: vokko_protocol::api::GifProvider::None, api_key: String::new(), base_url: None },
+            reminder_poll: Duration::from_secs(15),
             cors_origins: None,
             registration_open: true,
             livekit: None,

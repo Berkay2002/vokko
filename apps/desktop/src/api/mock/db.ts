@@ -2,7 +2,7 @@
 
 import { DEFAULT_EVERYONE } from "../permissions";
 import { timestampToSnowflake } from "../snowflake";
-import type { Attachment, Channel, Guild, GuildMember, Message, MessageType, Presence, ReadState, Relationship, RelationshipType, Role, User } from "../types";
+import type { Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageSnapshot, MessageType, Presence, ReadState, Relationship, RelationshipType, Reminder, Role, Sticker, StickerItem, User } from "../types";
 
 export interface MockAccount {
   user: User;
@@ -50,6 +50,16 @@ export interface MockMessage {
   /** MessageFlags; absent = 0. */
   flags?: number;
   nonce: string | null;
+  /** Sticker copies (they outlive the sticker). */
+  stickers?: StickerItem[];
+  /** Link unfurls (only generated for mock GIF links). */
+  embeds?: Embed[];
+  /** Forward (message_reference.type 1): the source ids and the frozen copy. */
+  forward?: { message_id: string; channel_id: string; guild_id: string | null; snapshot: MessageSnapshot };
+}
+
+export interface MockReminder extends Omit<Reminder, "message"> {
+  owner_id: string;
 }
 
 export interface MockGuild {
@@ -82,6 +92,16 @@ export interface Db {
   bans: Map<string, Map<string, string | null>>;
   pending: Map<string, { attachment: Attachment; owner: string }>;
   followers: Map<string, MockFollower>;
+  /** guild id -> stickers, oldest first */
+  stickers: Map<string, Sticker[]>;
+  /** user id -> favourite GIFs, newest first */
+  gifFavorites: Map<string, Gif[]>;
+  /** user id -> "channel:message" -> saved_at ISO */
+  bookmarks: Map<string, Map<string, string>>;
+  /** reminder id -> reminder */
+  reminders: Map<string, MockReminder>;
+  /** What GET /gifs/* answers with; "none" = no provider configured. */
+  gifProvider: GifProvider;
 }
 
 export const db: Db = {
@@ -93,6 +113,11 @@ export const db: Db = {
   bans: new Map(),
   pending: new Map(),
   followers: new Map(),
+  stickers: new Map(),
+  gifFavorites: new Map(),
+  bookmarks: new Map(),
+  reminders: new Map(),
+  gifProvider: "klipy",
 };
 
 let lastNow = 0;

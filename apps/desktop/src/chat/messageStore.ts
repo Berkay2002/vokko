@@ -2,7 +2,7 @@
 // components subscribe with useChannelState().
 import { useSyncExternalStore } from 'react';
 import { MessageType } from '../api/types';
-import type { CreateMessageRequest, EditMessageRequest, Message, PendingAttachmentMeta, ReactionEmoji, Snowflake, User } from '../api/types';
+import type { CreateMessageRequest, EditMessageRequest, Message, PendingAttachmentMeta, ReactionEmoji, Snowflake, StickerItem, User } from '../api/types';
 import { gateway, request, setLocalReadPointer } from './shell';
 import {
   PAGE_SIZE, TYPING_TTL_MS, appendPage, applyReaction, deleteMessage, emojiKey, emptyState, indexOfId, prependPage, replaceWindow, setTyping,
@@ -93,7 +93,7 @@ async function refreshLatest(channelId: Snowflake): Promise<void> {
   } catch { /* the next open retries */ }
 }
 
-export interface SendInput { content: string; attachments?: Message['attachments']; meta?: PendingAttachmentMeta[]; reply?: Message | null; mention?: boolean }
+export interface SendInput { content: string; attachments?: Message['attachments']; meta?: PendingAttachmentMeta[]; reply?: Message | null; mention?: boolean; stickers?: StickerItem[] }
 /** The part of a composer upload a queued send needs (see `Upload` in draftStore). */
 export interface QueuedUpload {
   localId: string;
@@ -108,6 +108,7 @@ function buildRequest(nonce: string, content: string, input: SendInput): CreateM
   const req: CreateMessageRequest = { content, nonce };
   if (input.meta?.length) req.attachments = input.meta;
   else if (input.attachments?.length) req.attachment_ids = input.attachments.map(a => a.id);
+  if (input.stickers?.length) req.sticker_ids = input.stickers.map(s => s.id);
   if (input.reply) req.message_reference = { message_id: input.reply.id };
   if (input.reply && input.mention === false) req.allowed_mentions = { replied_user: false };
   return req;
@@ -251,6 +252,7 @@ export const messageStore = {
       attachments: input.attachments ?? [], embeds: [], reactions: [], pinned: false,
       message_reference: input.reply ? { message_id: input.reply.id, channel_id: channelId, guild_id: input.reply.guild_id } : null,
       referenced_message: input.reply ?? null, nonce,
+      ...(input.stickers?.length ? { sticker_items: input.stickers } : {}),
     };
     // Sending is an ack of everything above: the new-messages divider and the unread banner go away at once.
     update(channelId, s => ({ ...s, lastReadAtOpen: null, markedUnread: false, pending: [...s.pending, { nonce, message, state: 'sending', request: req }] }));

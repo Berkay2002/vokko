@@ -1,6 +1,6 @@
 // Per-viewer JSON builders: the mock stores neutral rows and renders them like the server would.
 
-import { MessageType, RelationshipType, isThreadType, type Channel, type GatewayEvents, type GuildMember, type Message, type Reaction, type ReadyEvent, type Relationship } from "../types";
+import { MessageReferenceType, MessageType, RelationshipType, isThreadType, type Channel, type GatewayEvents, type GuildMember, type Message, type MessageSnapshot, type Reaction, type ReadyEvent, type Relationship } from "../types";
 import { compareIds } from "../snowflake";
 import { canView } from "./access";
 import { db, sortedMessages, userOf, type MockChannel, type MockMessage } from "./db";
@@ -32,14 +32,18 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     mentions: m.mention_ids.map(userOf),
     mention_everyone: m.mention_everyone,
     attachments: m.attachments.map(a => ({ ...a })),
-    embeds: [],
+    embeds: (m.embeds ?? []).map(e => ({ ...e })),
     reactions,
     pinned: m.pinned,
-    message_reference: m.reference_id ? { message_id: m.reference_id, channel_id: refChannelId, guild_id: db.channels.get(refChannelId)?.guild_id ?? m.guild_id } : null,
+    message_reference: m.forward
+      ? { type: MessageReferenceType.Forward, message_id: m.forward.message_id, channel_id: m.forward.channel_id, guild_id: m.forward.guild_id }
+      : m.reference_id ? { message_id: m.reference_id, channel_id: refChannelId, guild_id: db.channels.get(refChannelId)?.guild_id ?? m.guild_id } : null,
     referenced_message: reference && depth === 0 && m.type !== MessageType.ThreadCreated ? messageFor(reference, viewerId, 1) : null,
     nonce: m.nonce,
     ...(m.flags ? { flags: m.flags } : {}),
     ...(startedThread ? { thread: startedThread } : {}),
+    ...(m.stickers?.length ? { sticker_items: m.stickers.map(s => ({ ...s })) } : {}),
+    ...(m.forward ? { message_snapshots: [JSON.parse(JSON.stringify(m.forward.snapshot)) as MessageSnapshot] } : {}),
   };
 }
 
@@ -99,7 +103,8 @@ export function guildPayload(guildId: string, viewerId: string): GatewayEvents["
     const p = db.accounts.get(m.user.id)?.presence;
     return p && p.status !== "offline" ? [{ ...p }] : [];
   });
-  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, presences, voice_states: voiceStatesFor(guildId, viewerId) };
+  const stickers = (db.stickers.get(guildId) ?? []).map(s => ({ ...s }));
+  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, presences, stickers, voice_states: voiceStatesFor(guildId, viewerId) };
 }
 
 export function guildIdsFor(viewerId: string): string[] {

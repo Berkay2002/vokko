@@ -12,6 +12,8 @@ import { isSystemMessage, type PendingMessage } from './messageState';
 import { toDisplay } from './mentionText';
 import { useLayer, useOutsideClose } from './shell';
 import { comingSoon } from './toast';
+import { ReminderMenu } from '../media/ReminderMenu';
+import { openForward, toggleBookmark, useIsBookmarked } from '../media/store';
 import { isShiftDown } from './util';
 import { useMessageThreadActions } from '../threads/useMessageActions';
 
@@ -65,9 +67,10 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
 
   const isMine = message.author.id === chat.me.id;
   const system = isSystemMessage(message);
-  const canEdit = isMine && !system && !pending;
+  const canEdit = isMine && !system && !pending && message.message_reference?.type !== 1; // a forward has no text to edit
   const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
   const canPin = !pending && !system && (chat.isDm || chat.canManage);
+  const bookmarked = useIsBookmarked(message.channel_id, message.id);
   const quick = useMemo(() => quickReactions().slice(0, 4), []);
   const react = (name: string) => chat.actions.react(message, { id: null, name });
 
@@ -89,7 +92,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     if (canEdit) out.push({ id: 'edit', label: 'Edit Message', icon: <Pencil size={ICON} />, onSelect: () => chat.actions.edit(message) });
     if (!system) {
       out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={ICON} />, onSelect: () => chat.actions.reply(message) });
-      if (!pending) out.push({ id: 'forward', label: 'Forward', icon: <Forward size={ICON} />, onSelect: () => comingSoon('Forwarding messages') });
+      if (!pending) out.push({ id: 'forward', label: 'Forward', icon: <Forward size={ICON} />, onSelect: () => openForward(message) });
       if (!pending && chat.guildId) {
         if (threadActions.thread) out.push({ id: 'thread', label: 'Open Thread', icon: <MessageSquareText size={ICON} />, onSelect: threadActions.openThread });
         else if (threadActions.canCreateThread) out.push({ id: 'thread', label: 'Create Thread', icon: <MessageSquareText size={ICON} />, onSelect: threadActions.createThread });
@@ -102,12 +105,10 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     if (message.content) out.push({ id: 'copy-text', label: 'Copy Text', icon: <Copy size={ICON} />, onSelect: () => void navigator.clipboard?.writeText(message.content) });
     if (canPin) out.push({ id: 'pin', label: message.pinned ? 'Unpin Message' : 'Pin Message', icon: message.pinned ? <PinOff size={ICON} /> : <Pin size={ICON} />, onSelect: () => chat.actions.togglePin(message) });
     if (!pending && !system) {
-      out.push({ id: 'bookmark', label: 'Bookmark Message', icon: <Bookmark size={ICON} />, onSelect: () => comingSoon('Bookmarking messages') });
+      out.push({ id: 'bookmark', label: bookmarked ? 'Remove Bookmark' : 'Bookmark Message', icon: <Bookmark size={ICON} fill={bookmarked ? 'currentColor' : 'none'} />, onSelect: () => void toggleBookmark(message) });
       out.push({
         id: 'reminder', label: 'Create Reminder', icon: <Bell size={ICON} />,
-        children: close => <div className="chat-menu-list">
-          {['In 20 minutes', 'In 1 hour', 'In 3 hours', 'Tomorrow', 'Next week'].map(t => <button key={t} type="button" role="menuitem" onClick={() => { close(); comingSoon('Setting reminders'); }}>{t}</button>)}
-        </div>,
+        children: close => <ReminderMenu message={message} close={close} />,
       });
       out.push({
         id: 'apps', label: 'Apps', icon: <AppWindow size={ICON} />,
@@ -138,7 +139,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     out.push({ id: 'copy-id', label: 'Copy Message ID', icon: <Fingerprint size={ICON} />, onSelect: () => void navigator.clipboard?.writeText(message.id) });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message, pending, chat.guildId, chat.canManage, chat.isDm, chat.me.id, threadActions.thread?.id, threadActions.canCreateThread, threadActions.canPublish, threadActions.published, threadActions.announcement]);
+  }, [message, pending, bookmarked, chat.guildId, chat.canManage, chat.isDm, chat.me.id, threadActions.thread?.id, threadActions.canCreateThread, threadActions.canPublish, threadActions.published, threadActions.announcement]);
 
   useLayoutEffect(() => {
     const el = box.current;
