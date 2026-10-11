@@ -104,8 +104,10 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-pub enum ReplayOutcome {
-    Replayed(usize),
+pub enum ResumeOutcome {
+    /// Attached as `generation`; `replayed` buffered frames were queued ahead of the `resumed` frame.
+    Resumed { generation: u64, replayed: usize },
+    /// `seq` is ahead of the session or older than the replay buffer.
     Gap,
 }
 
@@ -113,6 +115,10 @@ impl Session {
     /// Assigns the next sequence number, buffers the payload and forwards it to the live connection if there is one.
     fn push(&self, name: &str, data: Value) {
         let mut inner = lock(&self.inner);
+        self.push_locked(&mut inner, name, data);
+    }
+
+    fn push_locked(&self, inner: &mut SessionInner, name: &str, data: Value) {
         inner.seq += 1;
         let seq = inner.seq;
         let payload = GatewayPayload { op: GatewayOp::Dispatch, d: data, s: Some(seq), t: Some(name.to_owned()) };
@@ -158,14 +164,27 @@ impl Session {
         inner.detached_at.get_or_insert_with(Instant::now);
     }
 
-    /// Re-sends buffered dispatches newer than `seq` to the attached connection.
-    pub fn replay_after(&self, seq: u64) -> ReplayOutcome {
+    /// Resume: checks that the buffer still reaches back to `seq`, attaches `link`, re-sends the buffered dispatches newer than
+    /// `seq` and queues the `resumed` frame, all under one lock. A dispatch can therefore never slip between the attach and the
+    /// replay (it would be delivered twice, or ahead of older buffered ones). On a gap nothing is attached: the connection the
+    /// session still had is closed like a replaced one and the caller forgets the session.
+    pub fn resume(&self, link: Link, seq: u64, resumed: (&str, Value)) -> ResumeOutcome {
         let mut inner = lock(&self.inner);
         let oldest = inner.buffer.front().map(|(first, _)| *first).unwrap_or(inner.seq + 1);
         if seq > inner.seq || seq + 1 < oldest {
-            return ReplayOutcome::Gap;
+            if let Some(old) = inner.link.take() {
+                old.close(CLOSE_REPLACED);
+            }
+            inner.detached_at.get_or_insert_with(Instant::now);
+            return ResumeOutcome::Gap;
         }
-        let mut count = 0;
+        if let Some(old) = inner.link.replace(link) {
+            old.close(CLOSE_REPLACED);
+        }
+        inner.detached_at = None;
+        inner.generation += 1;
+        let generation = inner.generation;
+        let mut replayed = 0;
         let mut overflowed = false;
         if let Some(link) = &inner.link {
             for (_, text) in inner.buffer.iter().filter(|(entry, _)| *entry > seq) {
@@ -173,14 +192,15 @@ impl Session {
                     overflowed = true;
                     break;
                 }
-                count += 1;
+                replayed += 1;
             }
         }
         if overflowed {
             inner.link = None;
             inner.detached_at.get_or_insert_with(Instant::now);
         }
-        ReplayOutcome::Replayed(count)
+        self.push_locked(&mut inner, resumed.0, resumed.1);
+        ResumeOutcome::Resumed { generation, replayed }
     }
 
     pub fn dispatch(&self, name: &str, data: Value) {
@@ -216,19 +236,39 @@ impl Hub {
         link(self.queue_capacity.max(self.capacity + 64))
     }
 
-    pub fn create_session(&self, user_id: i64, id: String, token_hash: Vec<u8>) -> Arc<Session> {
-        let session = Arc::new(Session {
-            id: id.clone(),
+    fn new_session(&self, user_id: i64, id: String, token_hash: Vec<u8>, link: Option<Link>) -> Arc<Session> {
+        let generation = u64::from(link.is_some());
+        Arc::new(Session {
+            id,
             user_id,
             token_hash,
             capacity: self.capacity,
-            inner: Mutex::new(SessionInner { seq: 0, buffer: VecDeque::new(), link: None, detached_at: None, generation: 0 }),
-        });
+            inner: Mutex::new(SessionInner { seq: 0, buffer: VecDeque::new(), link, detached_at: None, generation }),
+        })
+    }
+
+    fn register(&self, session: &Arc<Session>) {
         let mut sessions = lock(&self.sessions);
         let ttl = self.ttl;
         sessions.retain(|_, existing| lock(&existing.inner).detached_at.is_none_or(|since| since.elapsed() < ttl));
-        sessions.insert(id, session.clone());
+        sessions.insert(session.id.clone(), session.clone());
+    }
+
+    /// A registered session without a connection (the caller attaches one).
+    pub fn create_session(&self, user_id: i64, id: String, token_hash: Vec<u8>) -> Arc<Session> {
+        let session = self.new_session(user_id, id, token_hash, None);
+        self.register(&session);
         session
+    }
+
+    /// Identify: a session that is attached to `link` and already holds `READY` as sequence 1 when it becomes visible to dispatchers,
+    /// so no event can be numbered ahead of READY or buffered without a connection. Returns it with the connection's generation.
+    pub fn open_session(&self, user_id: i64, id: String, token_hash: Vec<u8>, link: Link, ready: Value) -> (Arc<Session>, u64) {
+        let session = self.new_session(user_id, id, token_hash, Some(link));
+        session.push("READY", ready);
+        self.register(&session);
+        let generation = lock(&session.inner).generation;
+        (session, generation)
     }
 
     pub fn session(&self, id: &str) -> Option<Arc<Session>> {
@@ -356,8 +396,8 @@ mod tests {
         // later events only reach the replay buffer, which a resume can read
         session.dispatch("X", Value::from(4));
         let (roomy, mut again) = super::link(16);
-        session.attach(roomy);
-        assert!(matches!(session.replay_after(0), ReplayOutcome::Replayed(5)), "the overflowed events are in the replay buffer");
+        let outcome = session.resume(roomy, 0, ("RESUMED", Value::Null));
+        assert!(matches!(outcome, ResumeOutcome::Resumed { replayed: 5, .. }), "the overflowed events are in the replay buffer");
         assert_eq!(again.queue.recv().await.map(|text| text.contains("\"s\":1")), Some(true));
         assert!(receiver.queue.recv().await.is_some(), "frames queued before the overflow stay readable");
     }
@@ -385,8 +425,74 @@ mod tests {
             session.dispatch("X", Value::from(n));
         }
         let (link, _receiver) = hub.new_link();
-        session.attach(link);
-        assert!(matches!(session.replay_after(0), ReplayOutcome::Replayed(100)));
+        assert!(matches!(session.resume(link, 0, ("RESUMED", Value::Null)), ResumeOutcome::Resumed { replayed: 100, .. }));
+    }
+
+    #[test]
+    fn a_gap_attaches_nothing_and_closes_the_old_connection() {
+        let hub = Hub::new(5, Duration::from_secs(60), 8);
+        let session = hub.create_session(1, "s".to_owned(), vec![1]);
+        let (old, mut old_receiver) = hub.new_link();
+        session.attach(old);
+        for n in 0..10 {
+            session.dispatch("X", Value::from(n));
+        }
+        let (fresh, mut fresh_receiver) = hub.new_link();
+        // the buffer holds seq 6..=10 only; 2 is too old, 11 has not happened yet
+        for seq in [2, 11] {
+            assert!(matches!(session.resume(fresh.clone(), seq, ("RESUMED", Value::Null)), ResumeOutcome::Gap), "seq {seq}");
+        }
+        assert_eq!(old_receiver.signal.fired(), Some(CLOSE_REPLACED));
+        assert!(fresh_receiver.queue.try_recv().is_err(), "nothing was sent to the resuming connection");
+        assert!(old_receiver.queue.try_recv().is_ok(), "frames queued earlier stay readable");
+    }
+
+    /// Sequence numbers of every frame the connection received so far.
+    fn received(receiver: &mut LinkReceiver) -> Vec<u64> {
+        let mut seqs = Vec::new();
+        while let Ok(text) = receiver.queue.try_recv() {
+            let payload: GatewayPayload = serde_json::from_str(&text).expect("frame");
+            seqs.push(payload.s.expect("dispatch carries a sequence"));
+        }
+        seqs
+    }
+
+    /// Events dispatched while a resume is in flight must neither be sent twice nor jump ahead of the replayed ones.
+    #[test]
+    fn resume_is_atomic_with_concurrent_dispatch() {
+        for round in 0..1500 {
+            let hub = Hub::new(1000, Duration::from_secs(60), 2048);
+            let session = hub.create_session(1, "s".to_owned(), vec![1]);
+            for n in 0..600 {
+                session.dispatch("OLD", Value::from(n));
+            }
+            let (link, mut receiver) = hub.new_link();
+            let started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let producer = {
+                let (session, started) = (session.clone(), started.clone());
+                std::thread::spawn(move || {
+                    started.store(true, Ordering::Release);
+                    for n in 0..300 {
+                        session.dispatch("LIVE", Value::from(n));
+                    }
+                })
+            };
+            while !started.load(Ordering::Acquire) {
+                std::hint::spin_loop();
+            }
+            let outcome = session.resume(link, 0, ("RESUMED", Value::Null));
+            assert!(matches!(outcome, ResumeOutcome::Resumed { replayed: 600.., .. }));
+            producer.join().expect("producer");
+            let seqs = received(&mut receiver);
+            let expected: Vec<u64> = (1..=901).collect();
+            let first_bad = seqs.iter().zip(&expected).position(|(got, want)| got != want);
+            assert!(
+                seqs == expected,
+                "round {round}: {} frames, first out of place at {first_bad:?}: {:?}",
+                seqs.len(),
+                first_bad.map(|at| &seqs[at.saturating_sub(1)..=at])
+            );
+        }
     }
 
     #[test]
