@@ -3,18 +3,7 @@ import { useStore } from "./api/store";
 import { ContextMenuHost } from "./ui";
 import { AppShell } from "./shell/AppShell";
 import { LoginPage, RegisterPage } from "./shell/AuthPages";
-
-function Splash() {
-  return (
-    <div className="splash" role="status" aria-label="Loading">
-      <div className="splash-dots">
-        <span />
-        <span />
-        <span />
-      </div>
-    </div>
-  );
-}
+import { NotifyBanners, Splash } from "./notify";
 
 function Protected() {
   const token = useStore(s => s.token);
@@ -41,6 +30,7 @@ export function App() {
         <Route path="*" element={<Navigate to="/channels/@me" replace />} />
       </Routes>
       <ContextMenuHost />
+      <NotifyBanners />
     </BrowserRouter>
   );
 }
