@@ -4,6 +4,8 @@ use std::time::Instant;
 
 use serde::Serialize;
 
+/// Assumes the usual Linux USER_HZ of 100 (what `sysconf(_SC_CLK_TCK)` returns on x86-64 and arm64); `/proc/<pid>/stat` times are in these
+/// ticks. A kernel built with another USER_HZ would scale every CPU figure by the ratio.
 const CLOCK_TICKS_PER_SECOND: f64 = 100.0;
 
 #[derive(Clone, Copy, Default)]

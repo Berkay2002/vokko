@@ -17,6 +17,8 @@ export interface Upload {
   attachment?: Attachment;
   error?: string;
   abort: AbortController;
+  /** Settles with the server attachment (rejects on error or abort); a send queued behind this upload waits on it after the draft is cleared. */
+  done: Promise<Attachment>;
   /** Set from the tray's "Modify Attachment" dialog; sent as CreateMessageRequest.attachments[] (name may carry the SPOILER_ prefix). */
   filename?: string;
   description?: string;
@@ -85,11 +87,12 @@ export function addFiles(channelId: Snowflake, files: File[]): void {
   for (const file of fits.slice(0, room)) {
     const localId = `u${++seq}`;
     const abort = new AbortController();
+    const done = uploadAttachment(channelId, file, p => setUpload(channelId, localId, u => ({ ...u, progress: p })), abort.signal);
     const upload: Upload = {
-      localId, file, abort, previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null, progress: 0, status: 'uploading',
+      localId, file, abort, done, previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : null, progress: 0, status: 'uploading',
     };
     patch(channelId, d => ({ ...d, uploads: [...d.uploads, upload] }));
-    uploadAttachment(channelId, file, p => setUpload(channelId, localId, u => ({ ...u, progress: p })), abort.signal)
+    done
       .then(attachment => setUpload(channelId, localId, u => ({ ...u, status: 'done', progress: 1, attachment })))
       .catch(e => {
         if (abort.signal.aborted) return;

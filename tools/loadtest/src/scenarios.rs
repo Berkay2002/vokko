@@ -159,6 +159,12 @@ pub async fn history(world: &World, fraction: f64, pages: usize) {
     world.shared.m().add("readers", readers.len() as u64);
 }
 
+/// Every victim is accounted for once it is back (Resume or re-Identify) or gave up (`storm:failed`); a victim that never returns must not
+/// keep the loop waiting for its full 60 s limit.
+fn storm_settled(back: u64, failed: u64, victims: usize) -> bool {
+    back + failed >= victims as u64
+}
+
 /// Reconnect storm: a fraction of the connections is cut at the same instant and comes back with Resume after `offline`,
 /// while a low background message load keeps filling the replay buffers.
 pub async fn reconnect(world: &World, args: &Args) {
@@ -178,11 +184,25 @@ pub async fn reconnect(world: &World, args: &Args) {
         let wait_until = Instant::now() + Duration::from_secs(60);
         while Instant::now() < wait_until {
             let back = metrics.counter("resumed") + metrics.hist("reidentify").summary().count;
-            if back >= victims.len() as u64 {
+            if storm_settled(back, metrics.counter("storm:failed"), victims.len()) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
     };
     tokio::join!(load, storm);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::storm_settled;
+
+    #[test]
+    fn storm_waits_until_every_victim_is_back_or_failed() {
+        assert!(!storm_settled(3, 0, 5), "two victims still away");
+        assert!(storm_settled(5, 0, 5));
+        assert!(!storm_settled(3, 1, 5), "one victim unaccounted for");
+        assert!(storm_settled(3, 2, 5), "failed reconnects count as settled");
+        assert!(storm_settled(0, 0, 0));
+    }
 }

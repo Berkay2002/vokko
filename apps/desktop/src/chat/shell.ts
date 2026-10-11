@@ -23,6 +23,11 @@ export function useReadState(channelId: Snowflake): ReadState | undefined { retu
 export function useRelationship(userId: Snowflake | null | undefined): Relationship | undefined { return useStore(s => (userId ? s.relationships[userId] : undefined)); }
 export function useGuilds(): Record<Snowflake, Guild> { return useStore(s => s.guilds); }
 
+/** The per-server avatar hash of a loaded guild member (null when the user has none or the member is not loaded). */
+export function useMemberAvatar(guildId: Snowflake | null | undefined, userId: Snowflake): string | null {
+  return useStore(s => (guildId ? s.members[guildId]?.[userId]?.avatar ?? null : null));
+}
+
 /** Guilds where `userId` is a loaded member (client-side fallback when GET /users/{id}/profile is unavailable). */
 export function useMutualGuildsFromStore(userId: Snowflake | null | undefined): Guild[] {
   return useStore(s => (userId ? s.guildOrder.filter(id => s.members[id]?.[userId]).map(id => s.guilds[id]!).filter(Boolean) : []));

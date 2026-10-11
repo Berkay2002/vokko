@@ -165,14 +165,25 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   }, [trigger, caret, text, channelId]);
 
   // ---- sending ----
-  const allDone = uploads.every(u => u.status === 'done');
   const anyUploading = uploads.some(u => u.status === 'uploading');
   const rawContent = fromDisplay(text, draft.tokens).trim();
   const tooLong = rawContent.length > MAX_LEN;
   const readyUploads = uploads.filter(u => u.status === 'done' && u.attachment);
-  const canSend = !tooLong && !anyUploading && (rawContent.length > 0 || readyUploads.length > 0) && (allDone || uploads.every(u => u.status !== 'uploading'));
+  const canSend = !tooLong && !anyUploading && (rawContent.length > 0 || readyUploads.length > 0);
 
   function send() {
+    if (tooLong) return;
+    if (anyUploading) {
+      // Enter while a file is still uploading: the message waits (as the "Uploading N files" card) and posts when the uploads settle.
+      messageStore.sendAfterUploads(channelId, chat.me, {
+        content: convert ? convertEmoticons(rawContent) : rawContent,
+        uploads: uploads.filter(u => u.status !== 'error'),
+        reply: replyTo,
+        mention: mentionReply,
+      });
+      finishSend();
+      return;
+    }
     if (!canSend) return;
     // Renamed / alt-texted / spoiler files go as CreateMessageRequest.attachments[]; untouched ones keep the plain id list.
     const modified = readyUploads.some(u => u.filename !== undefined || u.description !== undefined);
@@ -191,6 +202,10 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       reply: replyTo,
       mention: mentionReply,
     });
+    finishSend();
+  }
+
+  function finishSend() {
     clearDraft(channelId);
     clearTimeout(typingTimers.get(channelId));
     typingTimers.delete(channelId);

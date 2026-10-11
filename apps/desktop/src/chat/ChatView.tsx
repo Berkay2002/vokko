@@ -242,7 +242,7 @@ function DeleteModal({ request, onClose }: { request: DeleteRequest | null; onCl
     {m && <>
       <p className="chat-modal-text">Are you sure you want to delete this message?</p>
       <div className="chat-delete-preview">
-        <Avatar user={m.author} size={40} />
+        <Avatar user={m.author} size={40} guildId={chat.guildId} />
         <div>
           <div className="chat-msg-header"><span className="chat-author">{chat.nameOf(m.author, m.member)}</span> <span className="chat-timestamp">{formatMessageTimestamp(new Date(m.timestamp))}</span></div>
           <Markdown content={m.content || '(attachment)'} ctx={chat.md} className="chat-content" />

@@ -129,7 +129,7 @@ impl State {
         }
         let started = Instant::now();
         let connected = tokio::time::timeout(STEP_TIMEOUT, connect_async(request)).await;
-        let (mut ws, response) = match connected {
+        let (mut ws, _) = match connected {
             Ok(Ok(pair)) => pair,
             Ok(Err(error)) => {
                 let reason = error.to_string();
@@ -144,7 +144,6 @@ impl State {
                 return Err("connect timeout".to_owned());
             }
         };
-        let _ = response;
         self.shared.m().time("ws_connect", started.elapsed());
         let hello = tokio::time::timeout(STEP_TIMEOUT, async {
             while let Some(Ok(message)) = ws.next().await {
@@ -341,6 +340,7 @@ impl State {
                 command = commands.recv() => match command {
                     Some(Cmd::Storm { offline }) => {
                         if !self.storm(offline).await {
+                            self.shared.m().add("storm:failed", 1);
                             break;
                         }
                         beats = self.heartbeat_timer();

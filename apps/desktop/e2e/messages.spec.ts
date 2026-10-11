@@ -47,6 +47,9 @@ test.describe('replies', () => {
     const preview = row(page, 'lol happens').locator('.chat-reply');
     await expect(preview).toContainText('Original message was deleted');
     await expect(preview).toHaveClass(/missing/);
+    // the badge is the curved reply arrow (like the other previews), not an alert icon
+    await expect(preview.locator('svg.lucide-reply')).toHaveCount(1);
+    await expect(preview.locator('svg.lucide-circle-alert')).toHaveCount(0);
   });
 
   test('attachment-only original reads "Click to see attachment"', async ({ page }) => {
@@ -63,7 +66,33 @@ test('messages that mention me are highlighted, others are not', async ({ page }
   await expect(row(page, 'reading it now')).not.toHaveClass(/mentioned/);
   const bar = await row(page, 'did you see the filing').evaluate(el => { const c = getComputedStyle(el, '::before'); return { w: c.width, bg: c.backgroundColor }; });
   expect(bar.w).toBe('2px'); // the 2px left bar
-  expect(bar.bg).not.toBe('rgba(0, 0, 0, 0)');
+  expect(bar.bg).toBe('rgb(206, 129, 0)'); // #ce8100
+});
+
+test('mention-of-me row tint is #ce8100 at 8% alpha, 4% on hover', async ({ page }) => {
+  await openStockTalk(page);
+  const mentioned = row(page, 'did you see the filing');
+  await page.mouse.move(0, 0);
+  await expect(mentioned).toHaveCSS('background-color', 'rgba(206, 129, 0, 0.08)');
+  await mentioned.hover();
+  await expect(mentioned).toHaveCSS('background-color', 'rgba(206, 129, 0, 0.04)');
+});
+
+test('guild channels show the per-server avatar on messages and reply previews', async ({ page }) => {
+  await openStockTalk(page);
+  const own = page.locator('.chat-msg:not(.grouped) .chat-msg-gutter .chat-avatar').first();
+  await expect(own).not.toHaveAttribute('src', /server-avatar/);
+  await page.evaluate(() => {
+    type Store = { getState(): { members: Record<string, Record<string, { avatar?: string | null }>> }; setState(p: unknown): void };
+    const store = (window as unknown as { __vokko: { appStore: Store } }).__vokko.appStore;
+    const members = store.getState().members;
+    const next = Object.fromEntries(Object.entries(members).map(([guild, byUser]) => [guild, Object.fromEntries(Object.entries(byUser).map(([id, m]) => [id, { ...m, avatar: 'https://example.test/server-avatar.png' }]))]));
+    store.setState({ members: next });
+  });
+  await expect(own).toHaveAttribute('src', 'https://example.test/server-avatar.png');
+  await scrollTop(page);
+  const preview = page.locator('.chat-reply:not(.missing) .chat-reply-avatar').first();
+  await expect(preview).toHaveAttribute('src', 'https://example.test/server-avatar.png');
 });
 
 test('several mentions in one group: only the mentioned lines are tinted, each with its own bar', async ({ page }) => {
@@ -284,6 +313,39 @@ test.describe('attachments', () => {
     await expect(sent.locator('.chat-image')).toHaveAttribute('aria-label', 'Open image SPOILER_renamed.png');
   });
 
+  test('Enter while a file is still uploading queues the send; it posts once the upload finishes', async ({ page }) => {
+    await openStockTalk(page);
+    await page.locator('input[type=file]').setInputFiles([png('a.png'), png('b.png')]);
+    await expect(page.locator('.chat-tray-item.uploading')).toHaveCount(2);
+    await stockBox(page).fill('queued behind uploads');
+    await page.keyboard.press('Enter');
+    const sent = row(page, 'queued behind uploads');
+    // the queued message shows the "Uploading 2 files" card and the draft is cleared
+    await expect(sent.locator('.chat-pending-upload')).toContainText('Uploading 2 files');
+    await expect(sent).toHaveClass(/pending/);
+    await expect(page.locator('.chat-tray-item')).toHaveCount(0);
+    await expect(stockBox(page)).toHaveValue('');
+    // ...and turns into the real message with both images once the uploads are done
+    await expect(sent.locator('.chat-pending-upload')).toHaveCount(0);
+    await expect(sent).not.toHaveClass(/pending/);
+    await expect(sent.locator('.chat-image')).toHaveCount(2);
+    await expect(page.locator('.chat-content', { hasText: 'queued behind uploads' })).toHaveCount(1);
+  });
+
+  test('cancelling a send queued behind an upload posts nothing and aborts the upload', async ({ page }) => {
+    await openStockTalk(page);
+    await page.locator('input[type=file]').setInputFiles(png('abort.png'));
+    await expect(page.locator('.chat-tray-item.uploading')).toHaveCount(1);
+    await stockBox(page).fill('never posted');
+    await page.keyboard.press('Enter');
+    const sent = row(page, 'never posted');
+    await expect(sent.locator('.chat-pending-upload')).toContainText('Uploading abort.png');
+    await sent.getByRole('button', { name: 'Cancel Upload' }).click();
+    await expect(page.locator('.chat-content', { hasText: 'never posted' })).toHaveCount(0);
+    await page.waitForTimeout(1500); // longer than the mock upload: it must not post late
+    await expect(page.locator('.chat-content', { hasText: 'never posted' })).toHaveCount(0);
+  });
+
   test('Cancel in the modify dialog changes nothing', async ({ page }) => {
     await openStockTalk(page);
     await page.locator('input[type=file]').setInputFiles(png('keep.png'));
@@ -368,6 +430,9 @@ test.describe('emoji', () => {
     await glyph.click();
     const pop = page.locator('.chat-emoji-pop');
     await expect(pop).toContainText('A standard emoji');
+    const box = (await pop.boundingBox())!;
+    expect(Math.round(box.width)).toBe(288);
+    expect(Math.round(box.height)).toBe(106);
     await expect(tip).toHaveCount(0);
     await page.keyboard.press('Escape');
     await expect(pop).toHaveCount(0);
