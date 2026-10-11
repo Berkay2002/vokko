@@ -1,7 +1,8 @@
 // Seed data mirroring `vokko-server seed`: users sam, carol, alice, bob, nova (password "vokko-dev"),
 // "Sam's server", a 60-message DM sam <-> carol and a few smaller conversations.
 
-import { ChannelType, RelationshipType, type Attachment } from "../types";
+import { ChannelType, OverwriteType, RelationshipType, type Attachment } from "../types";
+import { Perm } from "../permissions";
 import { db, nextId, type MockChannel } from "./db";
 import { addChannel, addMessage, createAccount, createGuildRecord, openDM, openGroupDM } from "./ops";
 import { voiceStore } from "../voice";
@@ -153,6 +154,9 @@ export function seed(): void {
   const Bo = bob.user.id;
   const N = nova.user.id;
 
+  // A banned account (not a member) so the Bans page has a row.
+  const spammer = createAccount({ username: "spambot", global_name: "Spam Bot", status: "offline" });
+
   // Relationships (from sam's side): three friends, one incoming request from nova.
   setRelationship(R, B, RelationshipType.Friend, RelationshipType.Friend);
   setRelationship(R, A, RelationshipType.Friend, RelationshipType.Friend);
@@ -168,9 +172,17 @@ export function seed(): void {
   const moderator = nextId();
   const member = nextId();
   guild.guild.roles.push(
-    { id: admin, name: "Admin", color: 0xf0b232, hoist: true, position: 3, permissions: "8", mentionable: false },
-    { id: moderator, name: "Moderator", color: 0x3ba55d, hoist: true, position: 2, permissions: "1099511627775", mentionable: true },
-    { id: member, name: "Member", color: 0x5865f2, hoist: false, position: 1, permissions: "1071698660929", mentionable: false },
+    { id: admin, name: "Admin", color: 0xf0b232, hoist: true, position: 3, permissions: Perm.ADMINISTRATOR.toString(), mentionable: false },
+    {
+      id: moderator,
+      name: "Moderator",
+      color: 0x3ba55d,
+      hoist: true,
+      position: 2,
+      permissions: (Perm.KICK_MEMBERS | Perm.BAN_MEMBERS | Perm.MODERATE_MEMBERS | Perm.MANAGE_MESSAGES | Perm.MANAGE_NICKNAMES).toString(),
+      mentionable: true,
+    },
+    { id: member, name: "Member", color: 0x5865f2, hoist: false, position: 1, permissions: "0", mentionable: false },
   );
   const joined = new Date(Date.now() - 30 * 24 * HOUR).toISOString();
   guild.members.set(R, { nick: null, roles: [admin], joined_at: joined });
@@ -178,6 +190,8 @@ export function seed(): void {
   guild.members.set(Bo, { nick: "Bobby", roles: [member], joined_at: joined });
   guild.members.set(N, { nick: null, roles: [member], joined_at: joined });
   guild.members.set(B, { nick: null, roles: [member], joined_at: joined });
+
+  db.bans.set(guildId, new Map([[spammer.user.id, "Posting scam links"]]));
 
   const channels = [...db.channels.values()].filter(c => c.guild_id === guildId);
   const textCategory = channels.find(c => c.name === "Text Channels");
@@ -191,6 +205,17 @@ export function seed(): void {
   voiceCategory.position = 2;
   const welcome = addChannel(guildId, { name: "welcome", type: ChannelType.GuildText, parent_id: info.id, topic: "Say hi and read the rules." });
   addChannel(guildId, { name: "announcements", type: ChannelType.GuildText, parent_id: info.id, topic: "Release notes and news." });
+  // Private channel: hidden from @everyone, visible to Moderators (and the owner / admins).
+  const staff = addChannel(guildId, {
+    name: "staff",
+    type: ChannelType.GuildText,
+    parent_id: info.id,
+    topic: "Moderators only.",
+    permission_overwrites: [
+      { id: guildId, type: OverwriteType.Role, allow: "0", deny: Perm.VIEW_CHANNEL.toString() },
+      { id: moderator, type: OverwriteType.Role, allow: Perm.VIEW_CHANNEL.toString(), deny: "0" },
+    ],
+  });
   general.topic = "Chat about anything.";
   const random = addChannel(guildId, { name: "random", type: ChannelType.GuildText, parent_id: textCategory.id, topic: "Off-topic." });
   const devTalk = addChannel(guildId, { name: "dev-talk", type: ChannelType.GuildText, parent_id: textCategory.id, topic: "Rust, TypeScript and gateway protocol nerdery." });
@@ -203,6 +228,8 @@ export function seed(): void {
   const say = (channel: MockChannel, who: string, text: string, minutesAgo: number) =>
     addMessage({ channel, author_id: who, content: text, timestamp: Date.now() - minutesAgo * MIN, silent: true });
 
+  say(staff, A, "reminder: spammers get banned on sight, no warnings", 60 * 24 * 2);
+  say(staff, R, "agreed, invites are off for now", 60 * 24 * 2 - 5);
   say(welcome, R, "Welcome to **Sam's server**! Be kind, have fun.", 60 * 24 * 7);
   say(welcome, A, "Glad to be here 👋", 60 * 24 * 7 - 3);
   say(general, A, "morning everyone", 300);

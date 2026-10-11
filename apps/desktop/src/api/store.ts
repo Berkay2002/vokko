@@ -6,6 +6,7 @@ import { useRef, useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { shallow } from "zustand/shallow";
 import { gateway, type GatewayStatus } from "./gateway";
+import { go, guildPath } from "../shell/nav";
 import { request, resolveUrl } from "./rest";
 import { compareIds, maxId } from "./snowflake";
 import {
@@ -17,6 +18,7 @@ import {
   type Presence,
   type ReadState,
   type ReadyEvent,
+  type Role,
   type Relationship,
   type Snowflake,
   type User,
@@ -312,7 +314,11 @@ export function wireStoreToGateway(): void {
   });
   gateway.on("CHANNEL_CREATE", c => s().upsertChannel(c));
   gateway.on("CHANNEL_UPDATE", c => s().upsertChannel(c));
-  gateway.on("CHANNEL_DELETE", c => s().removeChannel(c.id));
+  gateway.on("CHANNEL_DELETE", c => {
+    const open = s().route.channelId === c.id;
+    s().removeChannel(c.id);
+    if (open && c.guild_id) go(guildPath(c.guild_id), { replace: true });
+  });
   gateway.on("GUILD_CREATE", entry => {
     const { channels, members, member_count, ...guild } = entry;
     const state = s();
@@ -333,7 +339,40 @@ export function wireStoreToGateway(): void {
     const state = s();
     appStore.setState({ guilds: { ...state.guilds, [guild.id]: { ...state.guilds[guild.id], ...guild } } });
   });
-  gateway.on("GUILD_DELETE", ({ id }) => s().removeGuild(id));
+  gateway.on("GUILD_DELETE", ({ id }) => {
+    // Kicked, banned or deleted while the guild is open: leave its (now dead) route.
+    const open = s().route.guildId === id;
+    s().removeGuild(id);
+    if (open) go("/channels/@me", { replace: true });
+  });
+  gateway.on("GUILD_MEMBER_UPDATE", ({ guild_id, ...member }) => {
+    const state = s();
+    const known = state.members[guild_id] ?? {};
+    appStore.setState({ members: { ...state.members, [guild_id]: { ...known, [member.user.id]: { ...known[member.user.id], ...member } } } });
+    state.cacheUsers([member.user]);
+  });
+  // The Bans page refetches on open; nothing to keep in the store.
+  gateway.on("GUILD_BAN_ADD", () => undefined);
+  gateway.on("GUILD_BAN_REMOVE", () => undefined);
+  const patchRoles = (guildId: Snowflake, change: (roles: Role[]) => Role[]) => {
+    const state = s();
+    const guild = state.guilds[guildId];
+    if (!guild) return;
+    const roles = change(guild.roles).sort((a, b) => b.position - a.position);
+    appStore.setState({ guilds: { ...state.guilds, [guildId]: { ...guild, roles } } });
+  };
+  const upsertRole = (guildId: Snowflake, role: Role) => patchRoles(guildId, roles => [...roles.filter(r => r.id !== role.id), role]);
+  gateway.on("GUILD_ROLE_CREATE", ({ guild_id, role }) => upsertRole(guild_id, role));
+  gateway.on("GUILD_ROLE_UPDATE", ({ guild_id, role }) => upsertRole(guild_id, role));
+  gateway.on("GUILD_ROLE_DELETE", ({ guild_id, role_id }) => {
+    patchRoles(guild_id, roles => roles.filter(r => r.id !== role_id));
+    const state = s();
+    const known = state.members[guild_id];
+    if (!known) return;
+    const members: Record<Snowflake, GuildMember> = {};
+    for (const [id, member] of Object.entries(known)) members[id] = member.roles.includes(role_id) ? { ...member, roles: member.roles.filter(r => r !== role_id) } : member;
+    appStore.setState({ members: { ...state.members, [guild_id]: members } });
+  });
   gateway.on("GUILD_MEMBER_ADD", ({ guild_id, ...member }) => {
     const state = s();
     const known = state.members[guild_id] ?? {};

@@ -2,9 +2,10 @@
 // Entries the backend has no data for are present but disabled with a "Not available yet" tooltip.
 
 import type { ReactNode } from "react";
-import { Bell, CalendarPlus, CirclePlus, Copy, FolderPlus, Link2, LayoutGrid, LogOut, Pencil, Settings, ShieldCheck, Sparkles, UserPlus } from "lucide-react";
+import { Bell, CalendarPlus, CirclePlus, Copy, FolderPlus, Link2, LayoutGrid, LogOut, Pencil, Settings, ShieldCheck, UserPlus } from "lucide-react";
 import { appStore, displayName, guildUnread, isChannelUnread } from "../api/store";
 import { request } from "../api/rest";
+import { Perm, basePermissions, canEditRole, canModerate, channelPermissions, hasBit, memberLike } from "../api/permissions";
 import { ChannelType, RelationshipType, type Channel, type Guild, type Snowflake, type User } from "../api/types";
 import type { MenuItem } from "../ui";
 import { closeDirectMessage, markChannelRead, markGuildRead, openDirectMessage } from "./actions";
@@ -32,6 +33,20 @@ function groups(...lists: MenuItem[][]): MenuItem[] {
 }
 
 const isOwnerOf = (guild: Guild) => appStore.getState().me?.id === guild.owner_id;
+
+/** The viewer's permissions, computed when a menu opens (menu builders are plain functions). Channel-level when a channel is given. */
+function viewerPerms(guild: Guild, channel?: Channel) {
+  const state = appStore.getState();
+  const meId = state.me?.id ?? "";
+  const member = state.members[guild.id]?.[meId];
+  const actor = { id: meId, roles: member?.roles ?? [], communication_disabled_until: member?.communication_disabled_until };
+  const bits = channel ? channelPermissions(guild, actor, channel) : basePermissions(guild, actor);
+  return { actor, bits, can: (permission: bigint) => hasBit(bits, permission) };
+}
+
+/** Q4.6: the server settings entry shows for any of these. */
+const SETTINGS_ACCESS = [Perm.MANAGE_GUILD, Perm.MANAGE_ROLES, Perm.ADMINISTRATOR, Perm.BAN_MEMBERS, Perm.MANAGE_NICKNAMES];
+const canOpenSettings = (can: (permission: bigint) => boolean) => SETTINGS_ACCESS.some(p => can(p));
 
 // ---- mute + notification submenus (A1, A9) ----
 
@@ -73,18 +88,19 @@ function firstTextChannelId(guildId: Snowflake): Snowflake | undefined {
 
 export function guildContextItems(guild: Guild): MenuItem[] {
   const owner = isOwnerOf(guild);
+  const { can } = viewerPerms(guild);
   const unread = guildUnread(appStore.getState(), guild.id).unread;
   const invite = firstTextChannelId(guild.id);
   return groups(
     [{ id: "mark-read", label: "Mark As Read", disabled: !unread, onSelect: () => void markGuildRead(guild.id) }],
-    [{ id: "invite", label: "Invite to Server", disabled: !invite, onSelect: () => invite && openModal({ type: "invite", channelId: invite }) }],
+    can(Perm.CREATE_INSTANT_INVITE) ? [{ id: "invite", label: "Invite to Server", disabled: !invite, onSelect: () => invite && openModal({ type: "invite", channelId: invite }) }] : [],
     [muteItem(guild.id, "Server"), notificationItem(guild.id, { guild: true }), hideMutedItem(guild)],
     [
-      ...(owner ? [{ id: "settings", label: "Server Settings", onSelect: () => openModal({ type: "serverSettings", guildId: guild.id }) } satisfies MenuItem] : []),
+      ...(canOpenSettings(can) ? [{ id: "settings", label: "Server Settings", onSelect: () => openModal({ type: "serverSettings", guildId: guild.id }) } satisfies MenuItem] : []),
       unavailable("privacy", "Privacy Settings"),
       unavailable("per-server-profile", "Edit Per-server Profile"),
     ],
-    owner
+    can(Perm.MANAGE_CHANNELS)
       ? [
           { id: "create-channel", label: "Create Channel", onSelect: () => openModal({ type: "createChannel", guildId: guild.id }) },
           { id: "create-category", label: "Create Category", onSelect: () => openModal({ type: "createChannel", guildId: guild.id, channelType: ChannelType.GuildCategory }) },
@@ -97,7 +113,6 @@ export function guildContextItems(guild: Guild): MenuItem[] {
 }
 
 const DROPDOWN_ICONS: Record<string, ReactNode> = {
-  boost: <Sparkles size={20} />,
   invite: <UserPlus size={20} />,
   settings: <Settings size={20} />,
   "create-channel": <CirclePlus size={20} />,
@@ -122,13 +137,13 @@ function withIcons(items: MenuItem[], icons: Record<string, ReactNode>): MenuIte
 
 function guildDropdownItemsPlain(guild: Guild): MenuItem[] {
   const owner = isOwnerOf(guild);
+  const { can } = viewerPerms(guild);
   const invite = firstTextChannelId(guild.id);
   return groups(
-    [{ id: "boost", label: "Server Boost", disabled: true, tooltip: UNAVAILABLE }],
     [
-      { id: "invite", label: "Invite to Server", disabled: !invite, onSelect: () => invite && openModal({ type: "invite", channelId: invite }) },
-      ...(owner ? [{ id: "settings", label: "Server Settings", onSelect: () => openModal({ type: "serverSettings", guildId: guild.id }) } satisfies MenuItem] : []),
-      ...(owner
+      ...(can(Perm.CREATE_INSTANT_INVITE) ? [{ id: "invite", label: "Invite to Server", disabled: !invite, onSelect: () => invite && openModal({ type: "invite", channelId: invite }) } satisfies MenuItem] : []),
+      ...(canOpenSettings(can) ? [{ id: "settings", label: "Server Settings", onSelect: () => openModal({ type: "serverSettings", guildId: guild.id }) } satisfies MenuItem] : []),
+      ...(can(Perm.MANAGE_CHANNELS)
         ? [
             { id: "create-channel", label: "Create Channel", onSelect: () => openModal({ type: "createChannel", guildId: guild.id }) } satisfies MenuItem,
             { id: "create-category", label: "Create Category", onSelect: () => openModal({ type: "createChannel", guildId: guild.id, channelType: ChannelType.GuildCategory }) } satisfies MenuItem,
@@ -159,7 +174,7 @@ export interface ChannelMenuOptions {
 }
 
 export function channelContextItems(channel: Channel, guild: Guild, options: ChannelMenuOptions = {}): MenuItem[] {
-  const owner = isOwnerOf(guild);
+  const { can } = viewerPerms(guild, channel);
   const state = appStore.getState();
   const category = channel.type === ChannelType.GuildCategory;
   const voice = channel.type === ChannelType.GuildVoice;
@@ -168,7 +183,7 @@ export function channelContextItems(channel: Channel, guild: Guild, options: Cha
   const markRead = () => (category ? Promise.all(children.map(c => markChannelRead(c.id))) : markChannelRead(channel.id));
   const label = category ? "Category" : "Channel";
 
-  const manage: MenuItem[] = owner
+  const manage: MenuItem[] = can(Perm.MANAGE_CHANNELS)
     ? [
         { id: "edit", label: `Edit ${label}`, onSelect: () => openModal({ type: "editChannel", channelId: channel.id }) },
         ...(category ? [] : [{ id: "duplicate", label: "Duplicate Channel", onSelect: () => void duplicateChannel(channel) } satisfies MenuItem]),
@@ -188,7 +203,7 @@ export function channelContextItems(channel: Channel, guild: Guild, options: Cha
           { id: "collapse-all", label: "Collapse All Categories", disabled: !options.anyExpanded, onSelect: options.onCollapseAll },
         ]
       : [
-          { id: "invite", label: "Invite People", disabled: !invite, onSelect: () => openModal({ type: "invite", channelId: channel.id }) },
+          ...(can(Perm.CREATE_INSTANT_INVITE) ? [{ id: "invite", label: "Invite People", disabled: !invite, onSelect: () => openModal({ type: "invite", channelId: channel.id }) } satisfies MenuItem] : []),
           { id: "copy-link", label: "Copy Link", onSelect: copy(link) },
         ],
     [muteItem(channel.id, category ? "Category" : "Channel"), ...(voice ? [] : [notificationItem(channel.id, { defaultLabel: category ? "Use Server Default" : "Use Category Default" })])],
@@ -238,10 +253,38 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
   const isMe = state.me?.id === user.id;
   const guild = options.guildId ? state.guilds[options.guildId] : undefined;
   const member = options.guildId ? state.members[options.guildId]?.[user.id] : undefined;
-  const owner = guild ? isOwnerOf(guild) : false;
   const roles = guild && member ? guild.roles.filter(r => member.roles.includes(r.id) && r.id !== guild.id).sort((a, b) => b.position - a.position) : [];
   const name = displayName(user, member);
   const anchor = options.anchor;
+
+  // Moderation rights, hidden (not disabled) when the viewer lacks them.
+  const viewer = guild ? viewerPerms(guild).actor : undefined;
+  const allowed = (action: "kick" | "ban" | "timeout" | "nickname" | "roles") => !!guild && !!member && !!viewer && canModerate(guild, viewer, memberLike(member), action);
+  const mayNick = allowed("nickname");
+  const mayRoles = !isMe && allowed("roles");
+  const mayTimeout = !isMe && allowed("timeout") && !hasBit(basePermissions(guild!, memberLike(member!)), Perm.ADMINISTRATOR);
+  const mayKick = !isMe && allowed("kick");
+  const mayBan = !isMe && allowed("ban");
+  const target = { guildId: options.guildId ?? "", userId: user.id };
+  const timedOut = !!member?.communication_disabled_until && Date.parse(member.communication_disabled_until) > Date.now();
+  const assignable = mayRoles && guild && viewer ? guild.roles.filter(r => r.id !== guild.id && canEditRole(guild, viewer, r)).sort((a, b) => b.position - a.position) : [];
+  const toggleRole = (roleId: Snowflake) => {
+    if (!member || !guild) return;
+    const current = member.roles.filter(id => id !== guild.id);
+    const next = current.includes(roleId) ? current.filter(id => id !== roleId) : [...current, roleId];
+    void request("PATCH", `/guilds/${guild.id}/members/${user.id}`, { roles: next });
+  };
+  const moderation: MenuItem[] = [
+    ...(mayTimeout
+      ? [
+          timedOut
+            ? ({ id: "timeout", label: "Remove Timeout", onSelect: () => void request("PATCH", `/guilds/${target.guildId}/members/${user.id}`, { communication_disabled_until: null }) } satisfies MenuItem)
+            : ({ id: "timeout", label: `Timeout ${name}`, onSelect: () => openModal({ type: "timeoutMember", ...target }) } satisfies MenuItem),
+        ]
+      : []),
+    ...(mayKick ? [{ id: "kick", label: `Kick ${name}`, danger: true, onSelect: () => openModal({ type: "kickMember", ...target }) } satisfies MenuItem] : []),
+    ...(mayBan ? [{ id: "ban", label: `Ban ${name}`, danger: true, onSelect: () => openModal({ type: "banMember", ...target }) } satisfies MenuItem] : []),
+  ];
 
   return groups(
     [
@@ -251,16 +294,30 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
       unavailable("call", "Start a Call"),
     ],
     isMe
-      ? [unavailable("per-server-profile", "Edit Per-server Profile")]
+      ? [unavailable("per-server-profile", "Edit Per-server Profile"), ...(mayNick ? [{ id: "change-nickname", label: "Change Nickname", onSelect: () => openModal({ type: "nickname", ...target }) } satisfies MenuItem] : [])]
       : [
           unavailable("invite-to-server", "Invite to Server"),
           ...relationshipItems(user),
-          ...(guild ? [unavailable("change-nickname", "Change Nickname")] : []),
+          ...(mayNick ? [{ id: "change-nickname", label: "Change Nickname", onSelect: () => openModal({ type: "nickname", ...target }) } satisfies MenuItem] : []),
         ],
-    guild && roles.length > 0
-      ? [{ id: "roles", label: `${roles.length} ${roles.length === 1 ? "Role" : "Roles"}`, children: roles.map(r => ({ id: r.id, label: r.name, disabled: true, tooltip: UNAVAILABLE })) }]
-      : [],
-    owner && !isMe ? [unavailable("timeout", `Timeout ${name}`), unavailable("kick", `Kick ${name}`), unavailable("ban", `Ban ${name}`)] : [],
+    guild && mayRoles && assignable.length > 0
+      ? [
+          {
+            id: "roles",
+            label: "Roles",
+            children: assignable.map(r => ({
+              id: r.id,
+              label: r.name,
+              checked: !!member?.roles.includes(r.id),
+              icon: <span className="role-dot" style={{ background: r.color ? `#${r.color.toString(16).padStart(6, "0")}` : "var(--text-muted)" }} />,
+              onSelect: () => toggleRole(r.id),
+            })),
+          },
+        ]
+      : guild && roles.length > 0
+        ? [{ id: "roles", label: `${roles.length} ${roles.length === 1 ? "Role" : "Roles"}`, children: roles.map(r => ({ id: r.id, label: r.name, disabled: true })) }]
+        : [],
+    moderation,
     [{ id: "copy-id", label: "Copy User ID", onSelect: copy(user.id) }],
   );
 }

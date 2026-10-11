@@ -1,0 +1,252 @@
+/* Channel settings: header group, permissions overwrite editor, unsaved-changes bar. */
+
+.cs-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.cs-header-name {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-default);
+  font-size: 14px;
+  text-transform: none;
+}
+
+.cs-header-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-header-kind {
+  color: var(--channels-default);
+  font-size: 12px;
+}
+
+.cs-content {
+  position: relative;
+  width: 860px;
+}
+
+.cs-perm-editor {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.cs-targets {
+  flex: none;
+  width: 200px;
+}
+
+.cs-targets-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cs-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--interactive-icon-default);
+  border-radius: var(--radius-sm);
+}
+
+.cs-icon-btn:hover {
+  color: var(--interactive-icon-hover);
+  background: var(--interactive-background-hover);
+}
+
+.cs-picker {
+  margin-bottom: 8px;
+  padding: 8px;
+  background: var(--background-surface-high);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.cs-picker-list {
+  max-height: 220px;
+  margin-top: 8px;
+  overflow-y: auto;
+}
+
+.cs-picker-title {
+  padding: 6px 8px 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cs-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  color: var(--interactive-text-default);
+  font-size: 14px;
+  text-align: left;
+  border-radius: var(--radius-sm);
+}
+
+.cs-target:hover {
+  background: var(--interactive-background-hover);
+  color: var(--interactive-text-hover);
+}
+
+.cs-target.selected {
+  background: var(--interactive-background-selected);
+  color: var(--interactive-text-active);
+}
+
+.cs-target-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-dot {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.cs-perms {
+  flex: 1;
+  min-width: 0;
+}
+
+.cs-perms-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cs-perms-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cs-perms-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.cs-danger {
+  color: var(--text-feedback-critical);
+}
+
+.cs-perm-group-title {
+  margin: 16px 0 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cs-perm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.cs-perm-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-default);
+  font-size: 14px;
+}
+
+.cs-tri {
+  display: flex;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--background-base-low);
+}
+
+.cs-tri-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 28px;
+  color: var(--interactive-icon-default);
+}
+
+.cs-tri-btn + .cs-tri-btn {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.cs-tri-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cs-tri-btn.neutral.on {
+  color: var(--interactive-icon-hover);
+  background: var(--interactive-background-selected);
+}
+
+.cs-tri-btn.deny.on {
+  color: var(--status-positive-text);
+  background: var(--status-danger);
+}
+
+.cs-tri-btn.allow.on {
+  color: var(--status-positive-text);
+  background: var(--status-positive-background);
+}
+
+.cs-savebar {
+  position: sticky;
+  bottom: -40px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  padding: 10px 10px 10px 16px;
+  color: var(--text-default);
+  background: var(--background-surface-highest);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.cs-savebar-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+}

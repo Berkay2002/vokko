@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { MessageCircle, UserCheck, UserPlus } from "lucide-react";
+import { Clock, MessageCircle, UserCheck, UserPlus } from "lucide-react";
 import { appStore, displayName, roleColor, useStore } from "../api/store";
 import { request } from "../api/rest";
 import { RelationshipType, type Snowflake } from "../api/types";
@@ -26,6 +26,18 @@ const useProfile = create<ProfileState>()(set => ({
 
 export const openProfile = (anchor: HTMLElement, userId: Snowflake, guildId: Snowflake | null) => useProfile.getState().open(anchor, userId, guildId);
 
+/** Small clock next to a name while the member is timed out. */
+export function TimeoutBadge({ until }: { until: string | null | undefined }) {
+  const time = until ? Date.parse(until) : 0;
+  if (!(time > Date.now())) return null;
+  const label = `Timed out until ${new Date(time).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`;
+  return (
+    <span className="timeout-icon" title={label} aria-label={label} role="img">
+      <Clock size={14} />
+    </span>
+  );
+}
+
 /** User profile card popout (member list, message authors, DM rows). Mounted once in the shell. */
 export function ProfileCardHost() {
   const { anchor, userId, guildId, close } = useProfile();
@@ -51,6 +63,7 @@ export function ProfileCardHost() {
             <div className="profile-names">
               <div className="profile-name" style={color ? { color } : undefined}>
                 {displayName(user, member)}
+                <TimeoutBadge until={member?.communication_disabled_until} />
               </div>
               <div className="profile-username">{user.username}</div>
             </div>

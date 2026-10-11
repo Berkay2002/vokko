@@ -2,34 +2,15 @@
 
 import { ChannelType, MessageType, RelationshipType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
 import { compareIds } from "../snowflake";
+import { Perm } from "../permissions";
 import { db, nextId, sortedMessages, userOf, type MockAccount } from "./db";
-import { addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, guildAudience, openDM, openGroupDM, requireChannel, requireMessage } from "./ops";
+import { addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, openDM, openGroupDM, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm, requireMessage } from "./ops";
+import { parseOverwrites } from "./moderation";
+import { ID, route, routes, str } from "./router";
 import { emit } from "./socket";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
 
-type Handler = (ctx: Ctx) => unknown;
-
-interface Ctx {
-  viewer: MockAccount;
-  params: string[];
-  query: URLSearchParams;
-  body: Record<string, unknown>;
-}
-
-const routes: { method: string; pattern: RegExp; handler: Handler }[] = [];
-function route(method: string, pattern: string, handler: Handler): void {
-  routes.push({ method, pattern: new RegExp(`^${pattern}$`), handler });
-}
-
-const ID = "(\\d+)";
-const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
-
-function requireGuildMember(guildId: string, viewerId: string) {
-  const guild = db.guilds.get(guildId);
-  if (!guild) fail(404, 10004, "Unknown Guild");
-  if (!guild.members.has(viewerId)) fail(403, 50001, "Missing Access");
-  return guild;
-}
+export { route, str, requireGuildMember };
 
 function pendingAttachment(id: string | undefined, owner: string): Attachment | null {
   if (!id) return null;
@@ -122,7 +103,9 @@ route("GET", `/users/${ID}/profile`, ({ viewer, params, query }) => {
   const mutual_friends_count = [...other.relationships].filter(([id, t]) => t === RelationshipType.Friend && mine.has(id)).length;
   const guildId = query.get("guild_id");
   const record = guildId ? db.guilds.get(guildId)?.members.get(other.user.id) : undefined;
-  const guild_member: GuildMember | undefined = record ? { user: other.user, nick: record.nick, roles: record.roles, joined_at: record.joined_at } : undefined;
+  const guild_member: GuildMember | undefined = record
+    ? { user: other.user, nick: record.nick, roles: record.roles, joined_at: record.joined_at, ...(record.communication_disabled_until ? { communication_disabled_until: record.communication_disabled_until } : {}) }
+    : undefined;
   return { user: other.user, mutual_guilds, mutual_friends_count, ...(guild_member ? { guild_member } : {}) };
 });
 
@@ -225,8 +208,7 @@ route("POST", "/guilds", ({ viewer, body }) => {
 route("GET", `/guilds/${ID}`, ({ viewer, params }) => requireGuildMember(params[0] ?? "", viewer.user.id).guild);
 
 route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
-  const guild = requireGuildMember(params[0] ?? "", viewer.user.id);
-  if (guild.guild.owner_id !== viewer.user.id) fail(403, 50013, "Missing Permissions");
+  const guild = requireGuildPerm(params[0] ?? "", viewer.user.id, Perm.MANAGE_GUILD);
   if (typeof body.name === "string") {
     const name = body.name.trim();
     if (name.length < 2 || name.length > 100) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 2 and 100 in length." } });
@@ -255,23 +237,22 @@ route("DELETE", `/guilds/${ID}`, ({ viewer, params }) => {
 route("GET", `/guilds/${ID}/channels`, ({ viewer, params }) => {
   const guildId = params[0] ?? "";
   requireGuildMember(guildId, viewer.user.id);
-  return [...db.channels.values()].filter(c => c.guild_id === guildId).map(c => channelFor(c, viewer.user.id));
+  return [...db.channels.values()].filter(c => c.guild_id === guildId && canAccess(c, viewer.user.id)).map(c => channelFor(c, viewer.user.id));
 });
 
 route("POST", `/guilds/${ID}/channels`, ({ viewer, params, body }) => {
   const guildId = params[0] ?? "";
-  const guild = requireGuildMember(guildId, viewer.user.id);
-  if (guild.guild.owner_id !== viewer.user.id) fail(403, 50013, "Missing Permissions");
+  requireGuildPerm(guildId, viewer.user.id, Perm.MANAGE_CHANNELS);
   const type = body.type;
   if (type !== ChannelType.GuildText && type !== ChannelType.GuildVoice && type !== ChannelType.GuildCategory) fail(400, 50035, "Invalid Form Body", { type: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 2, 4)." } });
   const name = (str(body.name) ?? "").trim().toLowerCase().replace(/\s+/g, "-");
   if (name.length < 1 || name.length > 100) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 1 and 100 in length." } });
   const parent = str(body.parent_id) ?? null;
   if (parent && db.channels.get(parent)?.guild_id !== guildId) fail(400, 50035, "Invalid Form Body", { parent_id: { code: "INVALID", message: "Unknown category" } });
-  const channel = addChannel(guildId, { name, type, parent_id: type === ChannelType.GuildCategory ? null : parent, topic: str(body.topic) ?? null });
-  const payload = channelFor(channel, viewer.user.id);
-  emit(guild.members.keys(), "CHANNEL_CREATE", payload);
-  return payload;
+  const permission_overwrites = parseOverwrites(guildId, viewer.user.id, body.permission_overwrites);
+  const channel = addChannel(guildId, { name, type, parent_id: type === ChannelType.GuildCategory ? null : parent, topic: str(body.topic) ?? null, permission_overwrites });
+  for (const id of channelAudience(channel)) emit([id], "CHANNEL_CREATE", channelFor(channel, id));
+  return channelFor(channel, viewer.user.id);
 });
 
 route("GET", `/guilds/${ID}/members`, ({ viewer, params, query }) => {
@@ -289,10 +270,7 @@ route("GET", `/guilds/${ID}/members`, ({ viewer, params, query }) => {
 
 route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
-  if (channel.guild_id) {
-    const guild = db.guilds.get(channel.guild_id);
-    if (guild?.guild.owner_id !== viewer.user.id) fail(403, 50013, "Missing Permissions");
-  }
+  if (channel.guild_id) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
   if (typeof body.name === "string") channel.name = body.name.trim().toLowerCase().replace(/\s+/g, "-") || channel.name;
   if ("topic" in body) channel.topic = str(body.topic)?.trim() || null;
   if (typeof body.position === "number") channel.position = body.position;
@@ -310,9 +288,8 @@ route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
     emit([viewer.user.id], "CHANNEL_DELETE", payload);
     return payload;
   }
-  const guild = db.guilds.get(channel.guild_id);
-  if (guild?.guild.owner_id !== viewer.user.id) fail(403, 50013, "Missing Permissions");
-  emit(guildAudience(channel.guild_id), "CHANNEL_DELETE", payload);
+  requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
+  for (const id of channelAudience(channel)) emit([id], "CHANNEL_DELETE", channelFor(channel, id));
   db.channels.delete(channel.id);
   db.messages.delete(channel.id);
   return payload;
@@ -337,6 +314,7 @@ function invitePreview(code: string) {
 route("POST", `/channels/${ID}/invites`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   if (!channel.guild_id) fail(400, 50003, "Cannot execute action on a DM channel");
+  requireChannelPerm(channel, viewer.user.id, Perm.CREATE_INSTANT_INVITE);
   const maxAge = typeof body.max_age === "number" ? body.max_age : 86_400;
   const code = Math.random().toString(36).slice(2, 10);
   db.invites.set(code, { code, guild_id: channel.guild_id, channel_id: channel.id, expires_at: maxAge > 0 ? new Date(Date.now() + maxAge * 1000).toISOString() : null });
@@ -349,6 +327,7 @@ route("POST", "/invites/([a-z0-9]+)", ({ viewer, params }) => {
   const preview = invitePreview(params[0] ?? "");
   const guild = db.guilds.get(preview.guild.id);
   if (!guild) fail(404, 10006, "Unknown Invite");
+  if (db.bans.get(guild.guild.id)?.has(viewer.user.id)) fail(403, 40007, "The user is banned from this guild");
   if (!guild.members.has(viewer.user.id)) {
     const member = { nick: null, roles: [], joined_at: new Date().toISOString() };
     guild.members.set(viewer.user.id, member);
@@ -362,6 +341,7 @@ route("POST", "/invites/([a-z0-9]+)", ({ viewer, params }) => {
 
 route("GET", `/channels/${ID}/messages`, ({ viewer, params, query }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  requireChannelPerm(channel, viewer.user.id, Perm.READ_MESSAGE_HISTORY, 50001, "Missing Access");
   const all = sortedMessages(channel.id);
   const limit = Math.min(100, Math.max(1, Number(query.get("limit") ?? 50) || 50));
   const before = query.get("before");
@@ -386,6 +366,7 @@ route("GET", `/channels/${ID}/messages`, ({ viewer, params, query }) => {
 route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   if (channel.type === ChannelType.GuildCategory || channel.type === ChannelType.GuildVoice) fail(400, 50024, "Cannot execute action on this channel type");
+  requireChannelPerm(channel, viewer.user.id, Perm.SEND_MESSAGES);
   const content = (str(body.content) ?? "").trim();
   const ids = Array.isArray(body.attachment_ids) ? body.attachment_ids.filter((v): v is string => typeof v === "string") : [];
   if (ids.length > 10) fail(400, 50035, "Invalid Form Body", { attachment_ids: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be 10 or fewer in length." } });
@@ -424,8 +405,7 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
 route("DELETE", `/channels/${ID}/messages/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
-  const owner = channel.guild_id ? db.guilds.get(channel.guild_id)?.guild.owner_id === viewer.user.id : false;
-  if (message.author_id !== viewer.user.id && !owner) fail(403, 50013, "Missing Permissions");
+  if (message.author_id !== viewer.user.id) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_MESSAGES);
   const list = sortedMessages(channel.id);
   list.splice(list.indexOf(message), 1);
   channel.last_message_id = list.at(-1)?.id ?? null;
@@ -438,6 +418,7 @@ route("DELETE", `/channels/${ID}/messages/${ID}`, ({ viewer, params }) => {
 route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
+  requireChannelPerm(channel, viewer.user.id, Perm.ADD_REACTIONS);
   const emoji = parseEmoji(params[2] ?? "");
   let reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
   if (!reaction) message.reactions.push((reaction = { emoji, user_ids: [] }));

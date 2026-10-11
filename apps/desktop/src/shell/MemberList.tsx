@@ -6,7 +6,7 @@ import type { GuildMember, Role, Snowflake } from "../api/types";
 import { useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
 import { userContextItems } from "./menus";
-import { openProfile } from "./ProfileCard";
+import { openProfile, TimeoutBadge } from "./ProfileCard";
 
 interface Section {
   key: string;
@@ -30,6 +30,7 @@ function MemberRow({ member, guildId, offline }: { member: GuildMember; guildId:
         <span className="member-text">
           <span className="member-name" style={color ? { color } : undefined}>
             {displayName(member.user, member)}
+            <TimeoutBadge until={member.communication_disabled_until} />
           </span>
           {custom && <span className="member-status">{custom}</span>}
         </span>

@@ -11,7 +11,7 @@ import { ChannelSettings } from "./ChannelSettings";
 import { FullProfileModal } from "./DmProfilePanel";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
-import { closeModal, useModals } from "./modalStore";
+import { closeModal, useModals, type ModalSpec } from "./modalStore";
 import { QuickSwitcher } from "./QuickSwitcher";
 import { ServerSettings } from "./ServerSettings";
 import { RadioGroup, SwitchRow, Toggle } from "./settings/controls";
@@ -326,13 +326,21 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
   const category = type === ChannelType.GuildCategory;
   const parent = useStore(s => (parentId ? s.channels[parentId] : undefined));
   const slug = category ? name : name.toLowerCase().replace(/\s+/g, "-");
   const submit = () => {
     if (!slug.trim()) return;
     setBusy(true);
-    createChannel(guildId, { name: slug.trim(), type, parent_id: category ? null : (parentId ?? null) })
+    const body = {
+      name: slug.trim(),
+      type,
+      parent_id: category ? null : (parentId ?? null),
+      // Private channel: @everyone is denied VIEW_CHANNEL (bit 10).
+      ...(isPrivate ? { permission_overwrites: [{ id: guildId, type: 0, allow: "0", deny: String(1n << 10n) }] } : {}),
+    };
+    createChannel(guildId, body as Parameters<typeof createChannel>[1])
       .then(closeModal)
       .catch(e => {
         setError(errorText(e));
@@ -395,69 +403,13 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
         {!category && (type === ChannelType.GuildVoice ? <Volume2 size={16} /> : <Hash size={16} />)}
         <input id="channel-name" className="input" value={name} maxLength={100} autoFocus placeholder={category ? "New Category" : "new-channel"} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
       </div>
-      <div className="switch-row private-row" title="Not available yet">
+      <div className="switch-row">
         <div className="switch-row-text">
           <div className="switch-row-label">{category ? "Private Category" : "Private Channel"}</div>
           <div className="switch-row-note">Only selected members and roles will be able to view this {category ? "category" : "channel"}.</div>
         </div>
-        <Toggle checked={false} onChange={() => undefined} disabled label="Private" />
+        <Toggle checked={isPrivate} onChange={setIsPrivate} label="Private" />
       </div>
-      {error && <p className="field-error">{error}</p>}
-    </Modal>
-  );
-}
-
-function EditChannelModal({ channelId }: { channelId: string }) {
-  const channel = useStore(s => s.channels[channelId]);
-  const category = channel?.type === ChannelType.GuildCategory;
-  const [name, setName] = useState(channel?.name ?? "");
-  const [topic, setTopic] = useState(channel?.topic ?? "");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  if (!channel) return null;
-  const slug = category ? name : name.toLowerCase().replace(/\s+/g, "-");
-  const save = () => {
-    if (!slug.trim()) return;
-    setBusy(true);
-    request<typeof channel>("PATCH", `/channels/${channelId}`, { name: slug.trim(), ...(category ? {} : { topic: topic.trim() || null }) })
-      .then(updated => {
-        appStore.getState().upsertChannel(updated);
-        closeModal();
-      })
-      .catch(e => {
-        setError(errorText(e));
-        setBusy(false);
-      });
-  };
-  return (
-    <Modal
-      open
-      onClose={closeModal}
-      title={category ? "Edit Category" : "Edit Channel"}
-      className="modal-compact"
-      footer={
-        <>
-          <button type="button" className="btn btn-secondary" onClick={closeModal}>
-            Cancel
-          </button>
-          <button type="button" className="btn btn-primary" disabled={busy || !slug.trim()} onClick={save}>
-            Save Changes
-          </button>
-        </>
-      }
-    >
-      <label className="field-label" htmlFor="edit-channel-name">
-        {category ? "Category name" : "Channel name"}
-      </label>
-      <input id="edit-channel-name" className="input" value={name} maxLength={100} autoFocus onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && save()} />
-      {!category && (
-        <>
-          <label className="field-label" htmlFor="edit-channel-topic" style={{ marginTop: 16 }}>
-            Channel topic
-          </label>
-          <textarea id="edit-channel-topic" className="input textarea" rows={3} maxLength={1024} value={topic} placeholder="Let everyone know how to use this channel!" onChange={e => setTopic(e.target.value)} />
-        </>
-      )}
       {error && <p className="field-error">{error}</p>}
     </Modal>
   );
@@ -533,15 +485,32 @@ function CreateDM({ base = [] }: { base?: string[] }) {
   );
 }
 
-/** Renders whichever modal is open (one at a time). */
+/** Renders the open modal, with a settings screen kept mounted underneath when a small dialog was opened from it. */
 export function ModalHost() {
   const modal = useModals(s => s.modal);
+  const serial = useModals(s => s.serial);
+  const base = useModals(s => s.base);
   const guilds = useStore(s => s.guilds);
   const channels = useStore(s => s.channels);
-  const serial = useModals(s => s.serial);
-  const spec = modal;
-  if (!spec) return null;
-  const id = `${spec.type}-${serial}`;
+  // A parked settings screen whose guild/channel was deleted from the dialog on top has nothing left to show.
+  const gone = (spec: ModalSpec) =>
+    (spec.type === "serverSettings" && !guilds[spec.guildId]) || ((spec.type === "channelSettings" || spec.type === "editChannel") && !channels[spec.channelId]);
+  const goneModal = !!modal && gone(modal);
+  useEffect(() => {
+    if (goneModal) closeModal();
+  }, [goneModal]);
+  if (!modal || goneModal) return null;
+  return (
+    <>
+      {base && !gone(base.spec) && <ModalView spec={base.spec} id={`${base.spec.type}-${base.serial}`} />}
+      <ModalView spec={modal} id={`${modal.type}-${serial}`} />
+    </>
+  );
+}
+
+function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
+  const guilds = useStore(s => s.guilds);
+  const channels = useStore(s => s.channels);
   switch (spec.type) {
     case "createServer":
       return <CreateServer key={id} />;
@@ -576,7 +545,7 @@ export function ModalHost() {
     case "serverSettings":
       return <ServerSettings key={id} guildId={spec.guildId} section={spec.section} />;
     case "editChannel":
-      return <EditChannelModal key={id} channelId={spec.channelId} />;
+      return <ChannelSettings key={id} channelId={spec.channelId} />;
     case "channelSettings":
       return <ChannelSettings key={id} channelId={spec.channelId} section={spec.section} />;
     case "kickMember":
