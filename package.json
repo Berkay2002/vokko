@@ -1,0 +1,13 @@
+{
+  "name": "vokko",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/desktop"],
+  "scripts": {
+    "dev": "npm run dev --workspace @vokko/desktop",
+    "build": "npm run build --workspace @vokko/desktop",
+    "desktop": "npm run desktop --workspace @vokko/desktop",
+    "desktop:build": "npm run desktop:build --workspace @vokko/desktop"
+  }
+}

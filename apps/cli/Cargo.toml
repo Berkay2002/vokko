@@ -1,0 +1,13 @@
+[package]
+name = "vokko-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+vokko-engine.workspace = true
+vokko-protocol.workspace = true
+serde_json.workspace = true

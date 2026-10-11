@@ -1,0 +1,14 @@
+# Local upstream checkouts used for research.
+/.references/
+/target/
+/node_modules/
+**/node_modules/
+**/dist/
+*.log
+.DS_Store
+/apps/desktop/src-tauri/gen/
+/.claude/worktrees/
+/.claude/briefs/
+/.env.dev
+/artifacts/
+/data/

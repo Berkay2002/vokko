@@ -1,0 +1,19 @@
+[package]
+name = "vokko-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+vokko-engine.workspace = true
+vokko-protocol.workspace = true
+vokko-platform.workspace = true
+serde_json.workspace = true
+log.workspace = true

@@ -1,0 +1,26 @@
+{
+  "communities": [
+    { "id": "vokko", "name": "Vokko Community", "initials": "V" },
+    { "id": "studio", "name": "The Studio", "initials": "S" }
+  ],
+  "channels": [
+    { "id": "welcome", "community_id": "vokko", "name": "welcome", "kind": "text", "description": "A place to start. Make yourself at home." },
+    { "id": "general", "community_id": "vokko", "name": "general", "kind": "text", "description": "Good conversations start here." },
+    { "id": "development", "community_id": "vokko", "name": "development", "kind": "text", "description": "Building an open source place to belong." },
+    { "id": "lounge", "community_id": "vokko", "name": "Lounge", "kind": "voice", "description": "Voice calls are coming in a later milestone." },
+    { "id": "studio-general", "community_id": "studio", "name": "general", "kind": "text", "description": "Share what you are working on." }
+  ],
+  "members": [
+    { "id": "you", "name": "You", "initials": "Y", "color": "#5865f2", "status": "online" },
+    { "id": "alex", "name": "Alex", "initials": "A", "color": "#438e79", "status": "online" },
+    { "id": "sam", "name": "Sam", "initials": "S", "color": "#b37551", "status": "online" }
+  ],
+  "messages": [
+    { "id": "seed-1", "channel_id": "general", "author_id": "alex", "content": "Welcome to Vokko. A familiar place, built in the open.", "created_at_ms": 1791709200000 },
+    { "id": "seed-2", "channel_id": "general", "author_id": "sam", "content": "This is our first local workspace. Switch channels, look around, and try writing a message in the desktop app.", "created_at_ms": 1791709260000 },
+    { "id": "seed-3", "channel_id": "welcome", "author_id": "alex", "content": "You are looking at sample conversations. Accounts, networking, and voice are not connected yet.", "created_at_ms": 1791709200000 },
+    { "id": "seed-4", "channel_id": "development", "author_id": "sam", "content": "An independent Rust engine, shared commands, and a familiar interface. This is where we start building Vokko.", "created_at_ms": 1791709200000 }
+  ],
+  "selected_channel_id": "general",
+  "current_user_id": "you"
+}
