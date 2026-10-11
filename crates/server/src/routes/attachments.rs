@@ -1,6 +1,7 @@
 use axum::Json;
 use axum::Router;
 use axum::body::Body;
+use axum::extract::multipart::MultipartError;
 use axum::extract::{DefaultBodyLimit, Multipart, Path, State};
 use axum::http::header::{CACHE_CONTROL, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_TYPE, HeaderName};
 use axum::http::{HeaderValue, StatusCode};
@@ -18,6 +19,11 @@ use crate::media::{self, encode_filename, plain_content_type, sanitize_filename,
 use crate::state::AppState;
 use crate::store::attachment_api;
 
+/// Hitting the body limit surfaces as a multipart error carrying 413; everything else is a malformed form.
+fn multipart_error(error: MultipartError, message: &str) -> ApiErr {
+    if error.status() == StatusCode::PAYLOAD_TOO_LARGE { ApiErr::payload_too_large() } else { ApiErr::invalid("file", message) }
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/channels/{id}/attachments", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES + 1024 * 1024)))
@@ -28,14 +34,14 @@ async fn upload(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
     let channel_id = parse_id(&id).ok_or_else(ApiErr::unknown_channel)?;
     let access = channel_access(&state, user_id, channel_id).await?;
     access.require(ATTACH_FILES)?;
-    while let Some(mut field) = multipart.next_field().await.map_err(|_| ApiErr::invalid("file", "Malformed multipart body."))? {
+    while let Some(mut field) = multipart.next_field().await.map_err(|error| multipart_error(error, "Malformed multipart body."))? {
         if field.name() != Some("file") {
             continue;
         }
         let filename = sanitize_filename(field.file_name().unwrap_or("file"));
         let declared = field.content_type().map(str::to_owned);
         let mut bytes: Vec<u8> = Vec::new();
-        while let Some(chunk) = field.chunk().await.map_err(|_| ApiErr::invalid("file", "Upload interrupted."))? {
+        while let Some(chunk) = field.chunk().await.map_err(|error| multipart_error(error, "Upload interrupted."))? {
             if bytes.len() + chunk.len() > MAX_UPLOAD_BYTES {
                 return Err(ApiErr::payload_too_large());
             }

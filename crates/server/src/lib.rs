@@ -48,7 +48,7 @@ pub fn router(state: AppState) -> Router {
         .allow_origin(AllowOrigin::predicate(|origin, _| origin_allowed(origin)))
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::OPTIONS])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
-        .expose_headers([header::CONTENT_DISPOSITION]);
+        .expose_headers([header::CONTENT_DISPOSITION, header::RETRY_AFTER]);
     Router::new()
         .nest("/api/v1", routes::api().layer(axum::middleware::from_fn_with_state(state.clone(), ratelimit::middleware)))
         .route("/gateway", axum::routing::get(gateway::upgrade))

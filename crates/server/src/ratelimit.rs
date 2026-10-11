@@ -68,6 +68,10 @@ fn caller_key(request: &Request) -> u64 {
 pub async fn middleware(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let Some(limit) = state.config.rate_limit else { return next.run(request).await };
     let route = request.extensions().get::<MatchedPath>().map(|path| path.as_str().to_owned()).unwrap_or_else(|| request.uri().path().to_owned());
+    // Downloads are unauthenticated <img> loads: every anonymous client would share one bucket, so they are not limited.
+    if request.method() == axum::http::Method::GET && route.ends_with("/attachments/{id}/{filename}") {
+        return next.run(request).await;
+    }
     let route = format!("{} {route}", request.method());
     match state.limiter.check(caller_key(&request), &route, &limit) {
         Ok(()) => next.run(request).await,

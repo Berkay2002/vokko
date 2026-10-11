@@ -143,6 +143,10 @@ async fn oversized_upload_is_rejected() {
     let (status, body) = upload(&app, &owner, &channel, "big.bin", "application/octet-stream", &big).await;
     assert_eq!(status, 413, "{body}");
     assert_eq!(body["code"], 40005);
+    // far beyond the body limit: still 413 / 40005, not a generic 400
+    let huge = vec![b'a'; 16 * 1024 * 1024];
+    let (status, body) = upload(&app, &owner, &channel, "huge.bin", "application/octet-stream", &huge).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::PAYLOAD_TOO_LARGE, json!(40005)), "{body}");
     let ok = vec![b'a'; 1024 * 1024];
     let (status, _) = upload(&app, &owner, &channel, "ok.bin", "application/octet-stream", &ok).await;
     assert_eq!(status, 200);
