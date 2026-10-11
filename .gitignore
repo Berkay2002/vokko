@@ -12,3 +12,4 @@
 /.env.dev
 /artifacts/
 /data/
+/.claude/reference/

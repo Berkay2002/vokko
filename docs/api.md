@@ -1,0 +1,66 @@
+# Vokko server API (v1 contract)
+
+Types: `apps/desktop/src/api/types.ts` is the source of truth for JSON shapes until generated bindings replace it. The Rust side (`crates/protocol` `api` module) must serialize identically. Shapes follow Discord's public API where it fits, so behaviour can be compared one to one.
+
+General rules:
+- Base URL `http://<host>:<port>/api/v1`. Auth header `Authorization: <token>` (opaque session token, no "Bearer" prefix, Discord-style). Everything except `/auth/*` requires it.
+- IDs are 64-bit snowflakes (Discord epoch 2015-01-01, worker/process bits, increment) serialized as strings.
+- Errors: HTTP status + `ApiError` body. 400 → 50035, 401 → 0 "401: Unauthorized", 403 → 50001/50013, 404 → 10003 (channel), 10008 (message), 10004 (guild), 10013 (user).
+- Server is authoritative for every permission check. Message content max 2000 chars, trimmed, not empty unless attachments exist.
+- CORS allows `http://localhost:*`, `http://127.0.0.1:*` and `tauri://localhost` / `http://tauri.localhost` in dev.
+
+## REST
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | /auth/register | `RegisterRequest` → `AuthResponse` |
+| POST | /auth/login | `AuthRequest` → `AuthResponse` |
+| POST | /auth/logout | revokes token, 204 |
+| GET | /users/@me | `User` |
+| PATCH | /users/@me | `{global_name?, bio?, banner_color?, avatar_attachment_id?}` → `User` |
+| GET | /users/{id} | `User` |
+| GET | /users/@me/guilds | `Guild[]` |
+| GET | /users/@me/channels | DM + group DM `Channel[]` |
+| POST | /users/@me/channels | `{recipient_id}` → existing or new DM `Channel`; `{recipient_ids: []}` → group DM |
+| GET | /users/@me/relationships | `Relationship[]` |
+| PUT | /users/@me/relationships/{user_id} | send/accept friend request (204) |
+| POST | /users/@me/relationships | `{username}` → send friend request by username (204) |
+| DELETE | /users/@me/relationships/{user_id} | remove friend / cancel / decline (204) |
+| POST | /guilds | `{name, icon_attachment_id?}` → `Guild` (creates @everyone role, "Text Channels"/"Voice Channels" categories, #general, General voice) |
+| GET | /guilds/{id} | `Guild` |
+| PATCH | /guilds/{id} | `{name?, icon_attachment_id?, system_channel_id?}` → `Guild` |
+| DELETE | /guilds/{id} | owner only, 204 |
+| GET | /guilds/{id}/channels | `Channel[]` |
+| POST | /guilds/{id}/channels | `{name, type, parent_id?, topic?}` → `Channel` |
+| PATCH | /channels/{id} | `{name?, topic?, position?, parent_id?}` → `Channel` |
+| DELETE | /channels/{id} | 200 + `Channel` (guild) / closes DM |
+| GET | /guilds/{id}/members?limit&after | `GuildMember[]` |
+| DELETE | /users/@me/guilds/{id} | leave guild, 204 |
+| POST | /channels/{id}/invites | `{max_age?, max_uses?}` → `{code, guild, channel, expires_at}` |
+| GET | /invites/{code} | invite preview |
+| POST | /invites/{code} | accept → `Guild` |
+| GET | /channels/{id}/messages?before&after&around&limit | `Message[]` newest first, limit 1-100 (default 50) |
+| POST | /channels/{id}/messages | `CreateMessageRequest` → `Message` |
+| PATCH | /channels/{id}/messages/{mid} | author only, `EditMessageRequest` → `Message` |
+| DELETE | /channels/{id}/messages/{mid} | author or MANAGE_MESSAGES, 204 |
+| PUT | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | emoji URL-encoded (unicode or `name:id`), 204 |
+| DELETE | /channels/{id}/messages/{mid}/reactions/{emoji}/@me | 204 |
+| GET | /channels/{id}/messages/{mid}/reactions/{emoji} | `User[]` who reacted |
+| GET | /channels/{id}/pins | `Message[]` |
+| PUT/DELETE | /channels/{id}/pins/{mid} | 204 |
+| POST | /channels/{id}/typing | 204, emits TYPING_START (expires after 10 s client-side) |
+| POST | /channels/{id}/messages/{mid}/ack | updates read state, 204 |
+| POST | /channels/{id}/attachments | multipart `file` (max 25 MiB) → `Attachment` (pending until referenced by a message) |
+| GET | /attachments/{id}/{filename} | serves the file (no auth required in v1; unguessable id) |
+
+## Gateway
+
+`GET /gateway` upgrades to WebSocket. Text frames carrying `GatewayPayload`.
+
+1. Server sends `op 10 Hello {heartbeat_interval: 41250}`.
+2. Client sends `op 2 Identify {token}`. Bad token → close code 4004.
+3. Server dispatches `READY` (op 0, `s` increments per dispatch).
+4. Client sends `op 1 Heartbeat {d: last_seq}` every interval; server replies `op 11`. Missing two heartbeats → server closes 4009.
+5. `op 6 Resume {token, session_id, seq}` replays missed dispatches if the session buffer still has them; otherwise `op 9 InvalidSession`, and the client re-identifies.
+
+Events are delivered only to users who can see the channel/guild. Event names and payloads: `GatewayEvents` in types.ts. Presence: connected → online, last connection closed → offline; `op 3 {status, custom_status}` updates it.
