@@ -112,6 +112,20 @@ route("GET", `/users/${ID}`, ({ params }) => {
   return account.user;
 });
 
+route("GET", `/users/${ID}/profile`, ({ viewer, params, query }) => {
+  const other = db.accounts.get(params[0] ?? "");
+  if (!other) fail(404, 10013, "Unknown User");
+  const mutual_guilds = [...db.guilds.values()]
+    .filter(g => g.members.has(viewer.user.id) && g.members.has(other.user.id))
+    .map(g => ({ id: g.guild.id, nick: g.members.get(other.user.id)?.nick ?? null }));
+  const mine = new Set([...viewer.relationships].filter(([, t]) => t === RelationshipType.Friend).map(([id]) => id));
+  const mutual_friends_count = [...other.relationships].filter(([id, t]) => t === RelationshipType.Friend && mine.has(id)).length;
+  const guildId = query.get("guild_id");
+  const record = guildId ? db.guilds.get(guildId)?.members.get(other.user.id) : undefined;
+  const guild_member: GuildMember | undefined = record ? { user: other.user, nick: record.nick, roles: record.roles, joined_at: record.joined_at } : undefined;
+  return { user: other.user, mutual_guilds, mutual_friends_count, ...(guild_member ? { guild_member } : {}) };
+});
+
 route("GET", "/users/@me/guilds", ({ viewer }) =>
   [...db.guilds.values()].filter(g => g.members.has(viewer.user.id)).map((g): Guild => ({ ...g.guild })),
 );
@@ -160,9 +174,19 @@ function addRelationship(viewerId: string, otherId: string): void {
   emit([otherId], "RELATIONSHIP_ADD", toThem);
 }
 
-route("PUT", `/users/@me/relationships/${ID}`, ({ viewer, params }) => {
+route("PUT", `/users/@me/relationships/${ID}`, ({ viewer, params, body }) => {
   const id = params[0] ?? "";
   if (!db.accounts.has(id)) fail(404, 10013, "Unknown User");
+  if (body.type === RelationshipType.Blocked) {
+    if (id === viewer.user.id) fail(400, 80007, "You cannot block yourself.");
+    const theirs = relationship(id, viewer.user.id);
+    // Blocking drops any friendship or request on the other side too (unless they blocked us: that stays).
+    const dropsTheirs = theirs && theirs.type !== RelationshipType.Blocked;
+    setRelationship(viewer.user.id, id, RelationshipType.Blocked, dropsTheirs ? null : (theirs?.type ?? null));
+    emit([viewer.user.id], "RELATIONSHIP_ADD", { id, type: RelationshipType.Blocked, user: userOf(id) } satisfies Relationship);
+    if (dropsTheirs) emit([id], "RELATIONSHIP_REMOVE", { id: viewer.user.id });
+    return undefined;
+  }
   addRelationship(viewer.user.id, id);
   return undefined;
 });
