@@ -380,6 +380,12 @@ html.message-compact { --chat-gutter: 80px; }
 .chat-autocomplete-item.selected { background: var(--chat-selected); }
 .chat-autocomplete-icon { color: var(--chat-icon); }
 .chat-autocomplete-emoji { font-size: 22px; width: 24px; text-align: center; }
+.chat-autocomplete-sticker { width: 24px; height: 24px; object-fit: contain; }
+/* Settings > Chat: stickers matching the typed word */
+.chat-sticker-suggest { position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 5; display: flex; gap: 8px; padding: 8px; border-radius: 8px; background: var(--chat-bg-secondary); box-shadow: var(--chat-shadow-popout); border: 1px solid var(--chat-bg-tertiary); }
+.chat-sticker-suggest-item { padding: 4px; border: 0; border-radius: 4px; background: none; cursor: pointer; }
+.chat-sticker-suggest-item:hover { background: var(--background-mod-subtle); }
+.chat-sticker-suggest-item img { display: block; width: 64px; height: 64px; object-fit: contain; }
 .chat-autocomplete-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* footer preview of the highlighted emoji, like the picker's preview row (48px high) */
 .chat-autocomplete-preview { position: sticky; bottom: -8px; display: flex; align-items: center; gap: 12px; height: 48px; margin: 8px -8px -8px; padding: 0 16px; border-top: 1px solid var(--chat-edge); background: var(--chat-bg-secondary); font-size: 14px; font-weight: 600; color: var(--chat-text); }
@@ -616,6 +622,7 @@ span.md-emoji { width: auto; height: auto; line-height: inherit; }
 .chat-embed-play { position: absolute; inset: 0; display: grid; place-items: center; color: var(--chat-on-brand); }
 .chat-embed-footer { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--chat-text-muted); }
 .chat-embed-image-only { display: block; max-width: 400px; border-radius: 8px; overflow: hidden; }
+.chat-embed-media-link { display: inline-block; max-width: 400px; color: var(--text-link); overflow-wrap: anywhere; }
 .chat-embed-image-only img { display: block; width: 100%; max-height: 300px; object-fit: contain; }
 .chat-invite { padding: 16px; background: var(--background-base-lower); }
 .chat-invite-head { margin-bottom: 12px; font-size: 12px; line-height: 16px; font-weight: 600; text-transform: none; color: var(--chat-text-muted); }

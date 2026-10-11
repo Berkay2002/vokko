@@ -65,7 +65,7 @@ export function UserPanel() {
               {inVoice && !sharing && <Volume2 size={12} className="user-panel-voice-icon" aria-hidden="true" />}
               {inVoice ? (sharing ? "Sharing Your Screen" : "In voice channel") : subtitle}
             </span>
-            <span className="user-panel-sub-username">{me.username}</span>
+            <span className="user-panel-sub-username personal-info">{me.username}</span>
           </span>
         </span>
       </button>

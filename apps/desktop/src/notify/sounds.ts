@@ -1,9 +1,9 @@
 // Notification sounds, synthesised with Web Audio (no audio files, so no licences to carry). Open assets only.
 
 import { getPrefs } from "../ui/prefs";
-import { isSoundEnabled, type VoiceSoundId } from "./soundCatalog";
+import { isSoundEnabled, type SoundId } from "./soundCatalog";
 
-export type SoundName = "message" | "mention" | VoiceSoundId;
+export type SoundName = SoundId;
 
 interface Note {
   /** Seconds after the sound starts. */
@@ -90,8 +90,6 @@ const SOUNDS: Record<SoundName, Note[]> = {
   ],
 };
 
-const isVoiceSound = (name: SoundName): name is VoiceSoundId => name !== "message" && name !== "mention";
-
 /** Master level: quiet by design, the output-volume pref scales it. */
 const MASTER = 0.22;
 /** Don't stack the same sound inside this window (a burst of messages is one ping). */
@@ -128,9 +126,26 @@ export function wireAudioUnlock(): void {
   window.addEventListener("keydown", unlock, true);
 }
 
+/** Settings > Notifications > Sounds: the message and voice presence sounds, in Discord's list order (all in `disabledSounds`). */
+export const SOUND_LABELS = {
+  message: "Message",
+  mention: "Mention and direct message",
+  "user-join": "User join",
+  "user-leave": "User leave",
+} as const satisfies Partial<Record<SoundName, string>>;
+
+export type NotificationSoundName = keyof typeof SOUND_LABELS;
+
+/** Whether the user's settings let this sound play (per-sound switch, streamer mode "disable sounds"). */
+export function soundEnabled(name: SoundName): boolean {
+  const prefs = getPrefs();
+  if (prefs.streamerMode && prefs.streamerDisableSounds) return false;
+  return isSoundEnabled(prefs.disabledSounds, name);
+}
+
 /** Plays a notification sound at the user's output volume. Returns false when nothing was played. */
 export function playSound(name: SoundName, now = Date.now()): boolean {
-  if (isVoiceSound(name) && !isSoundEnabled(getPrefs().disabledSounds, name)) return false;
+  if (!soundEnabled(name)) return false;
   return play(name, now, false);
 }
 

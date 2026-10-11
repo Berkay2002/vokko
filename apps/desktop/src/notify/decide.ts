@@ -22,6 +22,8 @@ export interface NotifyPrefs {
   streamerMode: boolean;
   streamerDisableSounds: boolean;
   streamerDisableNotifications: boolean;
+  /** Settings > Data & Privacy: DMs from non-friends are message requests and stay silent. */
+  messageRequests?: boolean;
 }
 
 export interface NotifyInput {
@@ -31,6 +33,8 @@ export interface NotifyInput {
   myRoleIds: readonly Snowflake[];
   /** "dm" = 1:1 DM (every message is addressed to me), "group" = group DM, null = guild channel. */
   dm: "dm" | "group" | null;
+  /** The author is an accepted friend (only read for 1:1 DMs; absent = unknown, treated as a friend). */
+  friend?: boolean;
   /** Settings scopes nearest first: [channel, category?, guild?]. */
   scopes: readonly Snowflake[];
   local: NotifyLocalState;
@@ -85,6 +89,7 @@ export function decide(input: NotifyInput): NotifyDecision {
   if (message.type !== MessageType.Default && message.type !== MessageType.Reply) return NONE("system");
   if (input.status === "dnd") return NONE("dnd");
   if (input.scopes.some(id => isMutedAt(local, id, input.now))) return NONE("muted");
+  if (input.dm === "dm" && prefs.messageRequests && input.friend === false) return NONE("message-request");
 
   const level = effectiveLevel(local, input.scopes);
   if (level === "none") return NONE("level-none");

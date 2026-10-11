@@ -3,6 +3,7 @@
 import { useMemo, useRef } from 'react';
 import { appStore, useStore } from '../api/store';
 import { usePrefs } from '../ui';
+import { getPrefs, localeTag } from '../ui/prefs';
 import type { Channel, Guild, GuildMember, ReadState, Relationship, Snowflake, User } from '../api/types';
 
 export { request, uploadAttachment, resolveUrl, ApiRequestError } from '../api/rest';
@@ -84,6 +85,12 @@ export interface ChatDisplayPrefs {
   roleColors: 'name' | 'dot' | 'none';
   /** Streamer mode with "hide invite links" on: invite cards and invite links are not rendered. */
   hideInvites: boolean;
+  /** Settings > Chat: uploaded images/videos inline (off: file cards). */
+  inlineAttachmentMedia: boolean;
+  /** Settings > Chat: images/videos of link previews (off: text-only cards). */
+  inlineEmbedMedia: boolean;
+  /** Settings > Chat > spoilers: "click" (default), "moderated" (shown where I can manage messages), "always". */
+  spoilerContent: 'click' | 'moderated' | 'always';
   /** Settings > Language & Time clock; part of the display prefs so timestamps re-render when it changes. */
   timeFormat: 'auto' | '12' | '24';
 }
@@ -95,6 +102,9 @@ export function useChatDisplayPrefs(): ChatDisplayPrefs {
     roleColors: usePrefs(s => s.roleColors),
     hideInvites: usePrefs(s => s.streamerMode && s.streamerHideInvites),
     timeFormat: usePrefs(s => s.timeFormat),
+    inlineAttachmentMedia: usePrefs(s => s.inlineAttachmentMedia),
+    inlineEmbedMedia: usePrefs(s => s.inlineEmbedMedia),
+    spoilerContent: usePrefs(s => s.spoilerContent),
   };
 }
 
@@ -112,6 +122,29 @@ export function scrollBehavior(): 'auto' | 'smooth' { return document.documentEl
 
 /** Current clock choice outside React (formatTime in util.ts). */
 export function timeFormatPref(): 'auto' | '12' | '24' { return usePrefs.getState().timeFormat; }
+
+/** The document language (locale + clock choice, Settings > Language & Time); timestamps re-render when it changes. */
+export function useChatLocale(): string { return usePrefs(s => localeTag(s)); }
+
+/** Settings > Advanced > Developer Mode (menus add "Copy … ID"); read when a menu opens. */
+export function isDeveloperMode(): boolean { return getPrefs().developerMode; }
+
+/** Settings > Chat options the composer reads. */
+export interface ComposerOptions {
+  emojiAutocomplete: boolean;
+  stickerSuggestions: boolean;
+  stickerAutocomplete: boolean;
+  previewMarkdown: boolean;
+}
+export function useComposerOptions(): ComposerOptions {
+  return {
+    emojiAutocomplete: usePrefs(s => s.emojiAutocomplete),
+    stickerSuggestions: usePrefs(s => s.stickerSuggestions),
+    stickerAutocomplete: usePrefs(s => s.stickerAutocomplete),
+    previewMarkdown: usePrefs(s => s.previewMarkdown),
+  };
+}
+
 
 /** Settings > Appearance > "Convert emoticons to emoji": applied to the text of a message when it is sent. */
 export function useConvertEmoticons(): boolean { return usePrefs(s => s.convertEmoticons); }

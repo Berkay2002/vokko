@@ -156,7 +156,7 @@ export function InviteModal({ channelId, onClose }: { channelId: Snowflake; onCl
             Or, send a server invite link to a friend
           </label>
           <div className="copy-field">
-            <input id="invite-link" className="input" readOnly value={invite ? link : error ? "" : "Generating…"} onFocus={e => e.currentTarget.select()} />
+            <input id="invite-link" className="input invite-secret" readOnly value={invite ? link : error ? "" : "Generating…"} onFocus={e => e.currentTarget.select()} />
             <button
               type="button"
               className={`btn ${copied ? "btn-success" : "btn-primary"}`}

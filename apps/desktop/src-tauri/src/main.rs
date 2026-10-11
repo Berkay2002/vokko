@@ -7,6 +7,7 @@ mod links;
 mod macos;
 mod prefs;
 mod shortcuts;
+mod streamer;
 mod tray;
 mod updates;
 mod window;
@@ -55,8 +56,26 @@ fn desktop_set_unread(app: AppHandle, unread: bool) -> Result<(), String> {
     tray::set_unread(&app, unread)
 }
 
+/// Creates the main window from its tauri.conf.json entry (`create: false` there), so start-up preferences can shape it.
+fn create_main_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(config) = app.config().app.windows.iter().find(|window| window.label == window::MAIN_WINDOW).cloned() else {
+        return Err("tauri.conf.json has no main window".into());
+    };
+    let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?;
+    // Settings > Advanced > hardware acceleration off: WebView2 renders without the GPU (Tauri's default flags kept).
+    #[cfg(windows)]
+    let builder = if app.state::<PrefsStore>().get().hardware_acceleration {
+        builder
+    } else {
+        builder.additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu --disable-gpu-compositing")
+    };
+    builder.build()?;
+    Ok(())
+}
+
 fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
+    create_main_window(&handle)?;
     if let Err(error) = tray::install(&handle) {
         // Without a tray the window must stay closable: close-to-tray checks TrayState.
         log::warn!("tray icon unavailable: {error}");
@@ -198,6 +217,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             shortcuts::desktop_shortcut_register,
             shortcuts::desktop_shortcut_unregister,
             shortcuts::desktop_shortcut_list,
+            streamer::desktop_streaming_software_running,
+            streamer::desktop_set_capture_hidden,
+            streamer::desktop_restart,
         ])
         .build(context)?
         .run(run_event);

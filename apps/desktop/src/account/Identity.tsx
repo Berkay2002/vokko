@@ -142,7 +142,7 @@ export function AccountIdentity({ me }: { me: User }) {
   return (
     <>
       <DisplayNameRow me={me} />
-      <SettingsRow label="Username" value={me.username}>
+      <SettingsRow label="Username" value={<span className="personal-info">{me.username}</span>}>
         <button type="button" className="sm-btn" onClick={() => setDialog("username")}>
           Edit
         </button>
@@ -152,7 +152,8 @@ export function AccountIdentity({ me }: { me: User }) {
         value={
           info ? (
             <>
-              {reveal ? info.email : maskEmail(info.email)}
+              {/* Streamer Mode "hide personal information" blurs it (styles/settings.css) */}
+              <span className="personal-info">{reveal ? info.email : maskEmail(info.email)}</span>
               <button type="button" className="acct-reveal" onClick={() => setReveal(r => !r)}>
                 {reveal ? "Hide" : "Reveal"}
               </button>

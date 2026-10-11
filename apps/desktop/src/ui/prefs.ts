@@ -22,6 +22,13 @@ export type SpoilerContent = "click" | "always" | "moderated";
 export type InputMode = "vad" | "ptt";
 export type InputProfileChoice = "isolation" | "studio" | "custom";
 export type TimeFormat = "auto" | "12" | "24";
+/** A user keybind (Settings > Keybinds): `action` is an id from src/ui/keybinds.ts, `keys` like "Ctrl+Shift+K". */
+export interface KeybindPref {
+  action: string;
+  keys: string;
+  /** Desktop only: also registered as an OS-wide shortcut. */
+  global?: boolean;
+}
 
 export interface Prefs {
   // Appearance
@@ -43,6 +50,18 @@ export interface Prefs {
   spoilerContent: SpoilerContent;
   previewMarkdown: boolean;
   convertEmoticons: boolean;
+  // Chat page (read by src/chat)
+  /** Show uploaded images/videos inline; off = a file card instead. */
+  inlineAttachmentMedia: boolean;
+  /** Show images/videos of link previews; off = text-only embeds. */
+  inlineEmbedMedia: boolean;
+  emojiAutocomplete: boolean;
+  /** Suggest stickers whose name or tags match the word you typed. */
+  stickerSuggestions: boolean;
+  /** Include stickers in the :emoji: autocomplete. */
+  stickerAutocomplete: boolean;
+  /** Open threads beside the channel (split view) instead of in place of it. */
+  threadSplitView: boolean;
   // Accessibility (Settings > Accessibility; styles/a11y.css and src/ui/a11yApply.ts act on these)
   /** "Enable reduced motion". Effective when on, or when `syncReducedMotion` is on and the OS asks for it. */
   reducedMotionEnabled: boolean;
@@ -78,6 +97,12 @@ export interface Prefs {
   streamerHideInvites: boolean;
   streamerDisableSounds: boolean;
   streamerDisableNotifications: boolean;
+  /** Desktop: turn streamer mode on while OBS or other streaming software runs. */
+  streamerAutoEnable: boolean;
+  /** Blur username and account details. */
+  streamerHidePersonal: boolean;
+  /** Desktop: keep the window out of screen captures and recordings. */
+  streamerHideWindow: boolean;
   // Notifications
   desktopNotifications: boolean;
   notificationSounds: boolean;
@@ -85,6 +110,20 @@ export interface Prefs {
   unreadBadge: boolean;
   friendsOnlineAlerts: boolean;
   reactionNotifications: "all" | "dm" | "never";
+  /** Desktop: flash the taskbar button on a mention or DM while unfocused. */
+  taskbarFlash: boolean;
+  // Keybinds: user binds; empty = the built-in defaults (src/ui/keybinds.ts)
+  keybinds: KeybindPref[];
+  // Advanced
+  /** Adds "Copy ID" to context menus. */
+  developerMode: boolean;
+  // Content & Social / Data & Privacy (the server enforces the DM and friend request ones)
+  dmsFromServerMembers: boolean;
+  /** DMs from people who are not friends are filed as message requests and do not notify. */
+  messageRequests: boolean;
+  friendRequestsEveryone: boolean;
+  friendRequestsMutualFriends: boolean;
+  friendRequestsMutualGuilds: boolean;
   // Voice & video (visual: the app has no voice transport yet)
   inputDevice: string;
   outputDevice: string;
@@ -126,6 +165,8 @@ export interface Prefs {
   // Language & time (settings modal)
   /** Clock of message timestamps: the locale's own ("auto"), 12-hour or 24-hour. Read by src/chat/util.ts. */
   timeFormat: TimeFormat;
+  /** BCP 47 tag of the app language and date formats; "" = follow the device. */
+  locale: string;
   // App icon (src/appicon): window, tray and Dock icon of the desktop app
   appIcon: AppIconId;
 }
@@ -143,6 +184,12 @@ export const DEFAULT_PREFS: Prefs = {
   spoilerContent: "click",
   previewMarkdown: true,
   convertEmoticons: true,
+  inlineAttachmentMedia: true,
+  inlineEmbedMedia: true,
+  emojiAutocomplete: true,
+  stickerSuggestions: true,
+  stickerAutocomplete: true,
+  threadSplitView: true,
   reducedMotionEnabled: false,
   syncReducedMotion: true,
   underlineLinks: false,
@@ -165,12 +212,23 @@ export const DEFAULT_PREFS: Prefs = {
   streamerHideInvites: true,
   streamerDisableSounds: true,
   streamerDisableNotifications: true,
+  streamerAutoEnable: false,
+  streamerHidePersonal: true,
+  streamerHideWindow: true,
   desktopNotifications: false,
   notificationSounds: true,
   soundCurrentChannel: false,
   unreadBadge: true,
   friendsOnlineAlerts: false,
   reactionNotifications: "all",
+  taskbarFlash: true,
+  keybinds: [],
+  developerMode: false,
+  dmsFromServerMembers: true,
+  messageRequests: false,
+  friendRequestsEveryone: true,
+  friendRequestsMutualFriends: true,
+  friendRequestsMutualGuilds: true,
   inputDevice: "default",
   outputDevice: "default",
   cameraDevice: "default",
@@ -200,6 +258,7 @@ export const DEFAULT_PREFS: Prefs = {
   soundboardVolume: 100,
   debugLogging: false,
   timeFormat: "auto",
+  locale: "",
   appIcon: DEFAULT_APP_ICON,
 };
 
@@ -271,7 +330,7 @@ export function migratePrefs(stored: Partial<Record<keyof Prefs, unknown>>): Pre
   const merged = { ...DEFAULT_PREFS } as Record<string, unknown>;
   for (const key of Object.keys(DEFAULT_PREFS) as (keyof Prefs)[]) {
     // Only accept values of the same type as the default, so an old or hand-edited file can't break the UI.
-    if (typeof parsed[key] === typeof DEFAULT_PREFS[key]) merged[key] = parsed[key];
+    if (typeof parsed[key] === typeof DEFAULT_PREFS[key] && Array.isArray(parsed[key]) === Array.isArray(DEFAULT_PREFS[key])) merged[key] = parsed[key];
   }
   // Saved before the camera preview default moved to on: the old default (off) was stored as if chosen, so it moves once;
   // after this the flag is saved with the rest and a later "off" is the user's own choice.
@@ -394,6 +453,9 @@ function apply(prefs: Prefs): void {
   root.classList.toggle("underline-links", prefs.underlineLinks);
   root.classList.toggle("message-compact", prefs.messageDisplay === "compact");
   root.classList.toggle("streamer-mode", prefs.streamerMode);
+  root.classList.toggle("streamer-hide-personal", prefs.streamerMode && prefs.streamerHidePersonal);
+  root.classList.toggle("streamer-hide-invites", prefs.streamerMode && prefs.streamerHideInvites);
+  root.lang = localeTag(prefs);
   root.style.fontSize = `${(prefs.fontSize / 16) * 100}%`;
   root.style.setProperty("--chat-font-size", `${prefs.fontSize}px`);
   // chat.css redeclares --chat-font-size on its own roots, so menus.css maps this one onto them.
@@ -423,6 +485,14 @@ if (typeof document !== "undefined") {
   window.addEventListener("storage", event => {
     if (event.key === KEY) usePrefs.setState(load());
   });
+}
+
+/** The document language: the chosen locale (or the device's), with the clock forced by Settings > Language & Time as a
+ * `-u-hc-` extension. src/chat and the markdown timestamps read it. */
+export function localeTag(prefs: Pick<Prefs, "locale" | "timeFormat">): string {
+  const device = typeof navigator !== "undefined" ? (navigator.languages?.[0] ?? navigator.language) : "";
+  const base = prefs.locale || device || "en-US";
+  return prefs.timeFormat === "24" ? `${base}-u-hc-h23` : prefs.timeFormat === "12" ? `${base}-u-hc-h12` : base;
 }
 
 /** Message layout for src/chat: "cozy" (avatars, grouped) or "compact" (one line, no avatars). Also on <html> as `.message-compact`. */

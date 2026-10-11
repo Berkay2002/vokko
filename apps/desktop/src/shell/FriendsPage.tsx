@@ -6,6 +6,7 @@ import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
 import { RelationshipType, type Relationship } from "../api/types";
 import { Tooltip, useContextMenu } from "../ui";
+import { getPrefs } from "../ui/prefs";
 import { FriendSuggestionsTab } from "../community";
 import { Avatar } from "./Avatar";
 import { copyText, openDirectMessage } from "./actions";
@@ -60,7 +61,7 @@ function PersonRow({ relationship, mode }: { relationship: Relationship; mode: "
                 { id: "block", label: "Block", danger: true, onSelect: () => void blockUser(user.id) },
               ]
             : []),
-          { id: "copy", label: "Copy User ID", onSelect: () => copyText(user.id) },
+          ...(getPrefs().developerMode ? [{ id: "copy", label: "Copy User ID", onSelect: () => copyText(user.id) }] : []),
         ])
       }
     >

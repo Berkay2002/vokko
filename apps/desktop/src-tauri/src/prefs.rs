@@ -15,11 +15,13 @@ pub struct DesktopPrefs {
     pub close_to_tray: bool,
     /// When launched by the autostart entry, stay in the tray instead of showing the window.
     pub start_minimized: bool,
+    /// GPU acceleration of the webview (Settings > Advanced). Read when the window is created, so a change needs a restart.
+    pub hardware_acceleration: bool,
 }
 
 impl Default for DesktopPrefs {
     fn default() -> Self {
-        Self { close_to_tray: true, start_minimized: false }
+        Self { close_to_tray: true, start_minimized: false, hardware_acceleration: true }
     }
 }
 
@@ -29,11 +31,16 @@ impl Default for DesktopPrefs {
 pub struct PrefsPatch {
     pub close_to_tray: Option<bool>,
     pub start_minimized: Option<bool>,
+    pub hardware_acceleration: Option<bool>,
 }
 
 impl DesktopPrefs {
     fn patched(self, patch: PrefsPatch) -> Self {
-        Self { close_to_tray: patch.close_to_tray.unwrap_or(self.close_to_tray), start_minimized: patch.start_minimized.unwrap_or(self.start_minimized) }
+        Self {
+            close_to_tray: patch.close_to_tray.unwrap_or(self.close_to_tray),
+            start_minimized: patch.start_minimized.unwrap_or(self.start_minimized),
+            hardware_acceleration: patch.hardware_acceleration.unwrap_or(self.hardware_acceleration),
+        }
     }
 }
 
@@ -81,6 +88,7 @@ mod tests {
         let prefs = DesktopPrefs::default();
         assert!(prefs.close_to_tray);
         assert!(!prefs.start_minimized);
+        assert!(prefs.hardware_acceleration);
     }
 
     #[test]
@@ -97,9 +105,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("vokko-prefs-{}", std::process::id()));
         let path = dir.join("desktop.json");
         let store = PrefsStore::load(Some(path.clone()));
-        store.update(PrefsPatch { close_to_tray: Some(false), start_minimized: Some(true) }).unwrap();
+        store.update(PrefsPatch { close_to_tray: Some(false), start_minimized: Some(true), hardware_acceleration: Some(false) }).unwrap();
         let reloaded = PrefsStore::load(Some(path));
-        assert_eq!(reloaded.get(), DesktopPrefs { close_to_tray: false, start_minimized: true });
+        assert_eq!(reloaded.get(), DesktopPrefs { close_to_tray: false, start_minimized: true, hardware_acceleration: false });
         let _ = std::fs::remove_dir_all(dir);
     }
 

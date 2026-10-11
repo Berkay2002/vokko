@@ -155,7 +155,7 @@ test.describe('context menu', () => {
     expect(await menuLabels(page)).toEqual([
       'Add Reaction', 'Reply', 'Forward', 'Create Thread',
       'Copy Text', 'Pin Message', 'Bookmark Message', 'Create Reminder', 'Apps', 'Mark Unread', 'Copy Message Link', 'Read Aloud',
-      'Delete Message', 'Report Message', 'Copy Message ID',
+      'Delete Message', 'Report Message',
     ]);
     await expect(page.locator('.chat-menu-item.danger')).toHaveText(['Delete Message', 'Report Message']);
   });

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useModals } from "../shell/modalStore";
-import { BINDINGS, IS_MAC, matchIndex, type Binding, type ShortcutId } from "./bindings";
+import { BINDINGS, IS_MAC, matches, type Binding, type ShortcutId } from "./bindings";
+import { keysFor } from "./overrides";
 
 /** Return false when the shortcut does not apply right now: the next handler (or the browser default) gets the key. */
 export type ShortcutHandler = (index: number, event?: KeyboardEvent) => boolean | void;
@@ -37,7 +38,7 @@ export function handleKeyDown(e: KeyboardEvent, env: DispatchEnv = { mac: IS_MAC
   // Handled already (a popout's Escape, the composer's autocomplete) or mid IME composition.
   if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
   for (const b of BINDINGS as readonly Binding[]) {
-    const index = matchIndex(b, e, env.mac);
+    const index = keysFor(b).find(k => matches(k.spec, e, env.mac))?.index ?? -1;
     if (index < 0) continue;
     const id = b.id as ShortcutId;
     if (isEditable(e.target) && (b.text === "none" || (b.text === "composer" && !e.target.closest(".chat-composer")))) return;

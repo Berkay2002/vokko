@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent,
 import { AtSign, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Lock, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
-import { request, Popout, Tooltip, useConvertEmoticons, useLegacyChatInput } from './shell';
+import { request, Popout, Tooltip, resolveUrl, useComposerOptions, useConvertEmoticons, useLegacyChatInput } from './shell';
+import { useMedia } from '../media/store';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { ExpressionPickerPopout, type ExpressionTab } from './ExpressionPicker';
@@ -50,9 +51,10 @@ interface Suggestion {
   hint?: string;
   insert: string;
   token?: MentionToken;
-  lead: 'avatar' | 'hash' | 'at' | 'emoji';
+  lead: 'avatar' | 'hash' | 'at' | 'emoji' | 'sticker';
   user?: { id: string; avatar: string | null };
   emoji?: string;
+  sticker?: StickerData;
   color?: string | null;
 }
 
@@ -100,6 +102,10 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const legacyInput = useLegacyChatInput(); // Settings > Accessibility > "Use legacy chat input": plain text box
   const emojiDb = useEmojiDb();
   const convert = useConvertEmoticons() && !legacyInput;
+  const options = useComposerOptions();
+  const allStickers = useMedia(s => s.stickers);
+  // Stickers this channel can take without extra permission checks: the server's own, or everything in DMs.
+  const stickers = useMemo(() => (chat.guildId ? allStickers[chat.guildId] ?? [] : Object.values(allStickers).flat()), [allStickers, chat.guildId]);
   const { text, uploads } = draft;
   const name = chat.channel?.name ? (chat.channel.type === ChannelType.GuildVoice ? chat.channel.name : `#${chat.channel.name}`) :chat.channel?.recipients?.map(u => chat.nameOf(u)).join(', ') ?? '';
   const placeholder = chat.isDm ? `Message @${chat.channel?.recipients?.[0] ? chat.nameOf(chat.channel.recipients[0]) : ''}` : `Message ${name}`;
@@ -161,9 +167,22 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       return chat.channels.filter(c => c.type === ChannelType.GuildText && (c.name ?? '').toLowerCase().includes(q)).slice(0, 10)
         .map(c => ({ key: `c${c.id}`, label: c.name ?? '', insert: `#${c.name}`, token: { display: `#${c.name}`, raw: `<#${c.id}>` }, lead: 'hash' as const }));
     }
-    if (!emojiDb) return [];
-    return emojiDb.search(q, 10).map(e => ({ key: `e${e.order}`, label: `:${e.shortcodes[0] ?? e.label}:`, insert: e.emoji, lead: 'emoji' as const, emoji: e.emoji }));
-  }, [trigger, triggerKey, dismissed, chat, emojiDb]);
+    // Settings > Chat: ":emoji: autocomplete" and "sticker autocomplete" decide what a `:` query lists.
+    const out: Suggestion[] = options.emojiAutocomplete && emojiDb
+      ? emojiDb.search(q, 10).map(e => ({ key: `e${e.order}`, label: `:${e.shortcodes[0] ?? e.label}:`, insert: e.emoji, lead: 'emoji' as const, emoji: e.emoji }))
+      : [];
+    if (options.stickerAutocomplete) {
+      for (const s of stickers.filter(s => s.name.toLowerCase().includes(q)).slice(0, 4)) out.push({ key: `s${s.id}`, label: s.name, hint: 'Sticker', insert: '', lead: 'sticker', sticker: s });
+    }
+    return out;
+  }, [trigger, triggerKey, dismissed, chat, emojiDb, options.emojiAutocomplete, options.stickerAutocomplete, stickers]);
+
+  // Settings > Chat > "sticker suggestions": a single typed word that names a sticker (or one of its tags) offers it.
+  const stickerHits = useMemo(() => {
+    const word = text.trim().toLowerCase();
+    if (!options.stickerSuggestions || trigger || word.length < 2 || /\s/.test(word)) return [];
+    return stickers.filter(s => s.name.toLowerCase() === word || s.tags.split(',').some(t => t.trim().toLowerCase() === word)).slice(0, 5);
+  }, [options.stickerSuggestions, trigger, text, stickers]);
 
   useEffect(() => { setSelected(0); }, [triggerKey]);
 
@@ -171,6 +190,12 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     if (!trigger) return;
     const el = area.current;
     const end = el?.selectionStart ?? caret;
+    if (s.sticker) {
+      // A sticker is sent at once; the `:query` that found it is removed from the draft.
+      setDraftText(channelId, text.slice(0, trigger.start) + text.slice(end));
+      sendMedia({ content: '', stickers: [s.sticker] });
+      return;
+    }
     const insert = s.insert + (s.lead === 'emoji' ? ' ' : ' ');
     const next = text.slice(0, trigger.start) + insert + text.slice(end);
     if (s.token) addDraftToken(channelId, s.token);
@@ -178,6 +203,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     setDraftText(channelId, next);
     const pos = trigger.start + insert.length;
     requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); setCaret(pos); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trigger, caret, text, channelId]);
 
   // ---- sending ----
@@ -345,6 +371,12 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           channelId={channelId} onPickGif={(gif: Gif) => sendMedia({ content: gif.url })} onPickSticker={s => sendMedia({ content: '', stickers: [s] })} />
         <AppLauncherPopout anchor={appsBtn} open={appsOpen} onClose={() => setAppsOpen(false)} channelId={channelId} onPick={next => setTextAt(next, next.length)} />
       </div>
+      {stickerHits.length > 0 && <div className="chat-sticker-suggest" role="listbox" aria-label="Sticker suggestions">
+        {stickerHits.map(s => <button key={s.id} type="button" role="option" aria-selected={false} className="chat-sticker-suggest-item" title={s.name}
+          onMouseDown={e => { e.preventDefault(); clearDraft(channelId); sendMedia({ content: '', stickers: [s] }); }}>
+          <img src={resolveUrl(s.url)} alt={`Sticker: ${s.name}`} width={64} height={64} draggable={false} />
+        </button>)}
+      </div>}
       {commands.panel}
       {suggestions.length > 0 && <div className="chat-autocomplete" role="listbox" aria-label="Suggestions">
         <div className="chat-autocomplete-title">{trigger?.kind === 'user' ? 'Members' : trigger?.kind === 'channel' ? 'Text Channels' : `Emoji matching :${trigger?.query}`}</div>
@@ -354,6 +386,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           {s.lead === 'hash' && <Hash size={20} className="chat-autocomplete-icon" />}
           {s.lead === 'at' && <AtSign size={20} className="chat-autocomplete-icon" style={s.color ? { color: s.color } : undefined} />}
           {s.lead === 'emoji' && <span className="chat-autocomplete-emoji">{s.emoji}</span>}
+          {s.lead === 'sticker' && s.sticker && <img className="chat-autocomplete-sticker" src={resolveUrl(s.sticker.url)} alt="" width={24} height={24} draggable={false} />}
           <span className="chat-autocomplete-label" style={s.color ? { color: s.color } : undefined}>{s.label}</span>
           {s.hint && <span className="chat-autocomplete-hint">{s.hint}</span>}
         </div>)}

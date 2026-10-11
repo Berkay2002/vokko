@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { UIEvent } from "react";
-import { Accessibility, Bell, Code, Gamepad2, Joystick, Keyboard, Languages, LogOut, Mic, MessagesSquare, Monitor, Palette, Pencil, Plug, Search, ShieldCheck, User as UserIcon, X } from "lucide-react";
+import { Accessibility, Bell, Code, Gamepad2, Joystick, Keyboard, Languages, LogOut, MessageCircle, Mic, MessagesSquare, Monitor, Palette, Pencil, Plug, Radio, Search, ShieldCheck, User as UserIcon, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
@@ -10,6 +10,8 @@ import { Avatar } from "./Avatar";
 import { closeModal, openModal } from "./modalStore";
 import { AccessibilityPage } from "./settings/AccessibilityPage";
 import { AppearancePage } from "./settings/AppearancePage";
+import { ChatPage } from "./settings/ChatPage";
+import { StreamerPage } from "./settings/StreamerPage";
 import { DeveloperPage } from "./settings/DeveloperPage";
 import { KeybindsPage } from "./settings/KeybindsPage";
 import { LanguageTimePage } from "./settings/LanguageTimePage";
@@ -45,19 +47,21 @@ interface SectionDef {
 // The Billing group (Nitro, Server Boost, Subscriptions, Gift Inventory, Billing) and the desktop-only game pages are left out on purpose.
 const ALL_SECTIONS: SectionDef[] = [
   { id: "account", label: "My Account", icon: UserIcon, group: "", outline: ["Account Info", "Password & Security", "Account Status"], keywords: ["username", "display name", "email", "phone", "password", "security", "devices", "disable", "delete"] },
-  { id: "privacy", label: "Data & Privacy", icon: ShieldCheck, group: "", outline: ["How Vokko Uses My Data", "Profile Privacy"], keywords: ["data", "personalization", "analytics", "profile"] },
-  { id: "content", label: "Content & Social", icon: MessagesSquare, group: "", outline: ["Content Filters", "Spam Filters", "Direct Message (DM) Permissions", "Friend Request Permissions", "Ignore & Block"], keywords: ["messages", "dm", "friends", "block", "filter", "explicit", "spam", "permissions"] },
+  { id: "privacy", label: "Data & Privacy", icon: ShieldCheck, group: "", outline: ["How Vokko Uses My Data", "Profile Privacy"], keywords: ["data", "personalization", "analytics", "profile", "request my data", "export"] },
+  { id: "content", label: "Content & Social", icon: MessagesSquare, group: "", outline: ["Content Filters", "Spam Filters", "Direct Message (DM) Permissions", "Friend Request Permissions", "Ignore & Block"], keywords: ["messages", "dm", "friends", "block", "filter", "explicit", "spam", "permissions", "message requests", "friend requests"] },
   { id: "notifications", label: "Notifications", icon: Bell, group: "", keywords: ["sounds", "badges", "email", "desktop", "push", "mentions"] },
   { id: "voice", label: "Voice & Video", icon: Mic, group: "Experience", keywords: ["microphone", "speaker", "camera", "input", "output", "streaming", "audio", "noise"] },
   { id: "appearance", label: "Appearance", icon: Palette, group: "Experience", keywords: ["theme", "dark", "light", "messages", "chat", "zoom", "font", "spellcheck"] },
   { id: "accessibility", label: "Accessibility", icon: Accessibility, group: "Experience", keywords: ["text", "readability", "density", "contrast", "motion", "screen reader", "saturation", "theme"] },
+  { id: "chat", label: "Chat", icon: MessageCircle, group: "Experience", keywords: ["images", "videos", "embeds", "link previews", "emoji", "stickers", "spoilers", "markdown", "threads", "emoticons", "reactions"] },
   { id: "keybinds", label: "Keybinds", icon: Keyboard, group: "Experience", keywords: ["shortcuts", "hotkeys", "keyboard", "system"] },
   { id: "language", label: "Language & Time", icon: Languages, group: "Experience", keywords: ["language", "locale", "time format", "12-hour", "24-hour", "clock"] },
+  { id: "streamer", label: "Streamer Mode", icon: Radio, group: "Experience", keywords: ["streaming", "obs", "hide", "personal information", "invite links", "screen capture"] },
   { id: "windows", label: "Windows Settings", icon: Monitor, group: "Experience", desktopOnly: true, keywords: ["startup", "tray", "minimize", "close", "autostart", "login", "open on startup"] },
   { id: "activity", label: "Activity Privacy", icon: Gamepad2, group: "Games & Apps", outline: ["What Activity I Share", "Where I Share Activity"], keywords: ["status", "games", "share", "join"] },
   { id: "games", label: "Registered Games", icon: Joystick, group: "Games & Apps", desktopOnly: true, keywords: ["game", "detection", "detected", "add", "playing", "activity", "running"] },
   { id: "connections", label: "Connected Apps", icon: Plug, group: "Games & Apps", outline: ["Connections", "Authorized Apps"], keywords: ["connections", "accounts", "authorized", "integrations"] },
-  { id: "developer", label: "Advanced", icon: Code, group: "Other", keywords: ["developer", "developer mode", "application test mode", "ids", "api"] },
+  { id: "developer", label: "Advanced", icon: Code, group: "Other", keywords: ["developer", "developer mode", "application test mode", "ids", "api", "copy id", "hardware acceleration", "gpu"] },
   { id: "profiles", label: "Profiles", icon: UserIcon, group: "", hidden: true },
 ];
 
@@ -139,7 +143,7 @@ function MyAccount({ me }: { me: User }) {
           )}
           {error && <p className="field-error">{error}</p>}
           {saved && !editing && <p className="settings-saved">Saved.</p>}
-          <SettingsRow label="Username" value={me.username}>
+          <SettingsRow label="Username" value={<span className="personal-info">{me.username}</span>}>
             <button type="button" className="sm-btn" disabled title="Not available yet">
               Edit
             </button>
@@ -257,6 +261,10 @@ export function UserSettings({ section }: { section?: string }) {
         return <LanguageTimePage />;
       case "developer":
         return <DeveloperPage />;
+      case "chat":
+        return <ChatPage />;
+      case "streamer":
+        return <StreamerPage />;
       case "privacy":
         return <DataPrivacyPage onOpen={open} />;
       case "content":

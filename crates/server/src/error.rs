@@ -48,6 +48,11 @@ impl ApiErr {
         Self::new(StatusCode::FORBIDDEN, 50007, "Cannot send messages to this user")
     }
 
+    /// 403 / 80000: the target's friend request sources (Data & Privacy) do not include the sender.
+    pub fn friend_requests_disabled() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 80000, "Incoming friend requests disabled")
+    }
+
     pub fn not_author() -> Self {
         Self::new(StatusCode::FORBIDDEN, 50005, "Cannot edit a message authored by another user")
     }

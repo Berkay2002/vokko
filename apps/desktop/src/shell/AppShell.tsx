@@ -24,6 +24,7 @@ import { UserPanel } from "./UserPanel";
 import { toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
 import { inChatPanel, useShortcut } from "../keyboard";
 import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } from "../keyboard/navigation";
+import { getPrefs, setPref, usePrefs } from "../ui/prefs";
 import { markChannelRead, markGuildRead } from "./actions";
 import { firstTextChannel } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
@@ -131,6 +132,7 @@ export function AppShell() {
   const dmRecipient = channel && !guild && !isGroupDm ? channel.recipients?.[0] : undefined;
   const panelOpen = useRightPanelOpen(channelId ?? "");
   const threadOpen = useThreadPanelOpen(channelId ?? "");
+  const threadSplitView = usePrefs(s => s.threadSplitView);
 
   useEffect(() => {
     appStore.getState().setRoute({ guildId, channelId });
@@ -224,6 +226,8 @@ export function AppShell() {
     if (!box) return false;
     box.focus();
   });
+  useShortcut("settings", () => openModal({ type: "userSettings" }));
+  useShortcut("streamerMode", () => setPref("streamerMode", !getPrefs().streamerMode));
 
   if (!isHome && !guild) return <Navigate to="/channels/@me" replace />;
   if (guildId && !channelId && redirectTarget) return <Navigate to={`/channels/${guildId}/${redirectTarget}`} replace />;
@@ -253,7 +257,7 @@ export function AppShell() {
           {channel && (
             <>
               <ChannelHeader channel={channel} membersOpen={membersVisible && !!guild} onToggleMembers={toggleMembers} profileOpen={profileVisible && !!dmRecipient} onToggleProfile={toggleProfile} />
-              <div className="channel-body">
+              <div className={`channel-body${threadOpen && !threadSplitView ? " thread-full" : ""}`}>
                 <div className="channel-chat">
                   {channel.type === ChannelType.GuildForum ? (
                     <ForumChannel key={channel.id} channel={channel} />

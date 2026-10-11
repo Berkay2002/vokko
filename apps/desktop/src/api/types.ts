@@ -364,6 +364,58 @@ export interface Reminder {
   message: Message | null; // null when the owner can no longer read it
 }
 
+// ---- User settings (synced preferences, docs/api.md "User settings") ----
+/** Allow-listed keys (crates/protocol `user_settings::KEYS`); values are JSON. Absent key = the client default. */
+export type UserSettingsData = Record<string, unknown>;
+export interface UserSettings {
+  version: number; // 0 = nothing saved yet; +1 per accepted PATCH
+  settings: UserSettingsData;
+}
+export interface PatchUserSettingsRequest {
+  version: number; // the version this change is based on; another one → 409 UserSettingsConflict
+  settings: UserSettingsData; // keys to set; null removes a key (back to the default)
+}
+/** 409 body of PATCH /users/@me/settings: code 40090 plus the current blob. */
+export interface UserSettingsConflict extends ApiError, UserSettings {}
+export interface Keybind {
+  action: string; // client action id (≤64 chars)
+  keys: string; // "Ctrl+Shift+K" (≤64 chars)
+  global?: boolean; // desktop only: registered with the OS while the app is in the background
+}
+
+// ---- "Request my data" (GET /users/@me/export, once per 24 h) ----
+export interface ExportedGuild {
+  id: Snowflake;
+  name: string;
+  nick: string | null;
+  joined_at: ISO8601;
+}
+export interface ExportedChannel {
+  id: Snowflake;
+  type: ChannelType;
+  guild_id: Snowflake | null;
+  name: string | null;
+  recipient_ids: Snowflake[]; // DMs: the other recipients
+}
+export interface ExportedMessage {
+  id: Snowflake;
+  channel_id: Snowflake;
+  content: string;
+  timestamp: ISO8601;
+  edited_timestamp: ISO8601 | null;
+  attachments: string[]; // file names
+}
+export interface UserDataExport {
+  exported_at: ISO8601;
+  user: User;
+  settings: UserSettings;
+  relationships: Relationship[];
+  guilds: ExportedGuild[];
+  channels: ExportedChannel[]; // channels the user wrote in plus open DMs
+  messages: ExportedMessage[]; // own messages, newest first, at most 20000
+  messages_truncated: boolean;
+}
+
 export interface Message {
   id: Snowflake;
   channel_id: Snowflake;
@@ -1130,6 +1182,7 @@ export interface GatewayEvents {
   REMINDER_CREATE: Reminder;
   REMINDER_DUE: Reminder; // delivered_at set; the "notice from the instance"
   REMINDER_DELETE: { id: Snowflake };
+  USER_SETTINGS_UPDATE: UserSettings; // the full blob after a change, to every session of that user (the one that saved it included)
   VOICE_STATE_UPDATE: VoiceState; // to everyone who can see the channel
   VOICE_SERVER_UPDATE: { guild_id: Snowflake | null; channel_id: Snowflake; endpoint: string; token: string; session_id: string }; // requesting session only; session_id = the VoiceState.session_id this token is for
   VOICE_CONNECT_FAILED: { guild_id: Snowflake | null; channel_id: Snowflake; reason: VoiceConnectFailure }; // Vokko-only, requesting session only

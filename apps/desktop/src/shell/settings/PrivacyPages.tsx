@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { Cloud, Code, Gamepad2, Globe, MessageCircle, Music, Palette, Tv, Video } from "lucide-react";
-import { request } from "../../api/rest";
+import { Cloud, Code, Download, Gamepad2, Globe, MessageCircle, Music, Palette, Tv, Video } from "lucide-react";
+import { ApiRequestError, RateLimitedError, request } from "../../api/rest";
 import { useStore } from "../../api/store";
-import { RelationshipType } from "../../api/types";
+import { RelationshipType, type UserDataExport } from "../../api/types";
+import { setPref, usePrefs } from "../../ui";
 import { Avatar, GuildIcon } from "../Avatar";
 import { Category, Field, Page, RadioGroup, SwitchRow, Unavailable } from "./controls";
 import { isDesktop } from "../../desktop";
@@ -10,14 +11,70 @@ import { ShareActivitySwitch } from "./RegisteredGamesPage";
 import { InfoBanner, RelatedSetting, SubHeading } from "./smControls";
 
 /**
- * Data & Privacy, Content & Social, Activity Privacy and Connected Apps. Vokko keeps none of these settings on the server yet, so the
- * controls Discord shows are laid out in its order but disabled, with one note per section (the brief: no switches that do nothing).
- * The one live part is the blocked-users list in Content & Social.
+ * Data & Privacy, Content & Social, Activity Privacy and Connected Apps, in Discord's order. Live: "Request my data" (GET
+ * /users/@me/export), the DM and friend request permissions (synced prefs the server enforces, docs/api.md "User settings"),
+ * message requests (DMs from non-friends stay silent) and the blocked-users list. The rest has no server support yet, so those
+ * controls are disabled with one note per section (the brief: no switches that do nothing).
  */
 
 type Open = (section: string) => void;
 
 const noop = () => undefined;
+
+function hoursText(seconds: number): string {
+  const hours = Math.ceil(seconds / 3600);
+  return hours <= 1 ? "within the hour" : `in about ${hours} hours`;
+}
+
+/** Saves the export as vokko-data-<username>-<date>.json through a download link. */
+function download(data: UserDataExport): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `vokko-data-${data.user.username}-${data.exported_at.slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+function RequestData() {
+  const [state, setState] = useState<{ busy: boolean; message: string | null; error: string | null }>({ busy: false, message: null, error: null });
+  const run = async () => {
+    setState({ busy: true, message: null, error: null });
+    try {
+      const data = await request<UserDataExport>("GET", "/users/@me/export");
+      download(data);
+      setState({ busy: false, message: `Downloaded your data: ${data.messages.length} messages, ${data.guilds.length} servers.`, error: null });
+    } catch (error) {
+      const text =
+        error instanceof RateLimitedError
+          ? `You can request your data once every 24 hours. Try again ${hoursText(error.retryAfter)}.`
+          : error instanceof ApiRequestError
+            ? error.message
+            : "Something went wrong. Try again.";
+      setState({ busy: false, message: null, error: text });
+    }
+  };
+  return (
+    <Field label="Request my data" note="A JSON file with your profile, settings, friends, servers and messages. You can request it once every 24 hours.">
+      <button type="button" className="sm-btn" disabled={state.busy} onClick={() => void run()}>
+        <Download size={16} /> {state.busy ? "Preparing…" : "Request Data"}
+      </button>
+      {state.message && (
+        <p className="settings-saved" role="status">
+          {state.message}
+        </p>
+      )}
+      {state.error && (
+        <p className="field-error" role="alert">
+          {state.error}
+        </p>
+      )}
+    </Field>
+  );
+}
 
 export function DataPrivacyPage({ onOpen }: { onOpen: Open }) {
   return (
@@ -27,11 +84,7 @@ export function DataPrivacyPage({ onOpen }: { onOpen: Open }) {
           Use data to make Vokko work
         </SubHeading>
         <Unavailable>There is no analytics, personalisation or sponsored content in Vokko, so the switches Discord shows here do not exist.</Unavailable>
-        <Field label="Request my data" note="A copy of everything your account has posted. Not available yet.">
-          <button type="button" className="sm-btn" disabled>
-            Request Data
-          </button>
-        </Field>
+        <RequestData />
       </Category>
       <Category title="Profile Privacy">
         <Field label="Share my full profile with">
@@ -90,6 +143,7 @@ function BlockedUsers() {
 }
 
 export function ContentSocialPage({ onOpen }: { onOpen: Open }) {
+  const p = usePrefs();
   return (
     <Page title="Content & Social">
       <Category title="Content Filters">
@@ -111,16 +165,14 @@ export function ContentSocialPage({ onOpen }: { onOpen: Open }) {
         />
       </Category>
       <Category title="Direct Message (DM) Permissions">
-        <SwitchRow label="Direct messages" note="Allow direct messages from server members." checked disabled onChange={noop} />
-        <SwitchRow label="Message requests" note="Filter messages from server members you might not know." checked={false} disabled onChange={noop} />
-        <Unavailable>Per-server DM permissions are not available yet; everyone who shares a server with you can message you.</Unavailable>
+        <SwitchRow label="Direct messages" note="Allow direct messages from server members. Off: people who share a server with you but are not your friends cannot start a new DM." checked={p.dmsFromServerMembers} onChange={v => setPref("dmsFromServerMembers", v)} />
+        <SwitchRow label="Message requests" note="Filter messages from server members you might not know: DMs from people who are not your friends do not notify you." checked={p.messageRequests} onChange={v => setPref("messageRequests", v)} />
       </Category>
       <Category title="Friend Request Permissions">
         <SubHeading>Allow friend requests from ...</SubHeading>
-        <SwitchRow label="Everyone" checked disabled onChange={noop} />
-        <SwitchRow label="Friends of friends" checked disabled onChange={noop} />
-        <SwitchRow label="Server members" checked disabled onChange={noop} />
-        <Unavailable>Friend request permissions are not available yet; anyone can send you a request.</Unavailable>
+        <SwitchRow label="Everyone" checked={p.friendRequestsEveryone} onChange={v => setPref("friendRequestsEveryone", v)} />
+        <SwitchRow label="Friends of friends" checked={p.friendRequestsEveryone || p.friendRequestsMutualFriends} disabled={p.friendRequestsEveryone} onChange={v => setPref("friendRequestsMutualFriends", v)} />
+        <SwitchRow label="Server members" checked={p.friendRequestsEveryone || p.friendRequestsMutualGuilds} disabled={p.friendRequestsEveryone} onChange={v => setPref("friendRequestsMutualGuilds", v)} />
       </Category>
       <Category title="Ignore & Block">
         <BlockedUsers />

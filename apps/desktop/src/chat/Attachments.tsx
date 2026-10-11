@@ -33,7 +33,7 @@ function ImageTile({ message, attachment, index, style, className }: { message: 
   const [spoiled, setSpoiled] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
-  const spoiler = isSpoilerName(attachment.filename) && !spoiled;
+  const spoiler = isSpoilerName(attachment.filename) && !spoiled && !chat.revealSpoilers;
   const own = message.author.id === chat.me.id && !message.id.startsWith('pending:');
   const url = resolveUrl(attachment.url);
   return <div className={`chat-image-wrap${className ? ` ${className}` : ''}`} style={style}>
@@ -109,14 +109,17 @@ export function PendingUpload({ files, onCancel }: { files: Attachment[]; onCanc
 }
 
 export function Attachments({ message }: { message: Message }) {
+  const chat = useChat();
   const showDescriptions = useShowImageDescriptions();
   if (message.attachments.length === 0) return null;
+  // Settings > Chat > "Display images, videos and lolcats": off shows every upload as a file card.
+  const inline = chat.display.inlineAttachmentMedia;
   const images: { a: Attachment; index: number }[] = [];
   const others: Attachment[] = [];
-  message.attachments.forEach((a, index) => { if (isImage(a)) images.push({ a, index }); else others.push(a); });
+  message.attachments.forEach((a, index) => { if (inline && isImage(a)) images.push({ a, index }); else others.push(a); });
   return <div className="chat-attachments">
     {images.length > 0 && <ImageGrid message={message} images={images} />}
-    {others.map(a => isVideo(a)
+    {others.map(a => inline && isVideo(a)
       ? <video key={a.id} className="chat-video" src={resolveUrl(a.url)} controls preload="metadata" />
       : <FileCard key={a.id} attachment={a} />)}
     {showDescriptions && message.attachments.filter(a => a.description).map(a => <p key={a.id} className="chat-attachment-alt"><span className="chat-attachment-alt-tag">ALT</span>{a.description}</p>)}

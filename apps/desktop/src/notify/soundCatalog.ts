@@ -55,21 +55,37 @@ const IDS = new Set<string>(VOICE_SOUNDS.map(s => s.id));
 
 export const isVoiceSoundId = (value: string): value is VoiceSoundId => IDS.has(value);
 
+/** Message sounds (User Settings > Notifications > Sounds). They share the `disabledSounds` pref with the voice sounds. */
+export type NotifySoundId = "message" | "mention";
+export type SoundId = NotifySoundId | VoiceSoundId;
+
+/** Every switchable sound in `disabledSounds` order. */
+const ORDER: readonly SoundId[] = ["message", "mention", ...VOICE_SOUNDS.map(s => s.id)];
+const ALL_IDS = new Set<string>(ORDER);
+
+export const isSoundId = (value: string): value is SoundId => ALL_IDS.has(value);
+
 /** `disabledSounds` pref (comma separated ids) as a set; unknown ids from older or newer builds are dropped. */
-export function parseDisabledSounds(value: string): Set<VoiceSoundId> {
-  return new Set(value.split(",").map(s => s.trim()).filter(isVoiceSoundId));
+export function parseDisabledSounds(value: string): Set<SoundId> {
+  return new Set(value.split(",").map(s => s.trim()).filter(isSoundId));
 }
 
-export function serializeDisabledSounds(disabled: Iterable<VoiceSoundId>): string {
+export function serializeDisabledSounds(disabled: Iterable<SoundId>): string {
   const set = new Set(disabled);
-  return VOICE_SOUNDS.filter(s => set.has(s.id)).map(s => s.id).join(",");
+  return ORDER.filter(id => set.has(id)).join(",");
 }
 
-export const isSoundEnabled = (value: string, id: VoiceSoundId): boolean => !parseDisabledSounds(value).has(id);
+export const isSoundEnabled = (value: string, id: SoundId): boolean => !parseDisabledSounds(value).has(id);
 
-export function withSoundEnabled(value: string, id: VoiceSoundId, enabled: boolean): string {
+export function withSoundEnabled(value: string, id: SoundId, enabled: boolean): string {
+  return withSoundsEnabled(value, [id], enabled);
+}
+
+export function withSoundsEnabled(value: string, ids: Iterable<SoundId>, enabled: boolean): string {
   const set = parseDisabledSounds(value);
-  if (enabled) set.delete(id);
-  else set.add(id);
+  for (const id of ids) {
+    if (enabled) set.delete(id);
+    else set.add(id);
+  }
   return serializeDisabledSounds(set);
 }

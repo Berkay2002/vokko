@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AppState } from "../api/store";
 import { ChannelType, type Channel, type ReadState } from "../api/types";
 import { BINDINGS, SHORTCUT_GROUPS, bindingGroups, keyCaps, matches, matchIndex } from "./bindings";
+import { setKeyOverrides } from "./overrides";
 import { handleKeyDown, inChatPanel, registerShortcut, runShortcut } from "./dispatch";
 import { allChannelOrder, channelOrder, mentioned, step, unread } from "./navigation";
 import { fuzzyScore, parseQuery, rank } from "./switcher";
@@ -51,10 +52,22 @@ describe("binding table", () => {
 describe("binding groups", () => {
   const find = (mac: boolean, id: string) => bindingGroups(mac).flatMap(g => g.binds).find(b => b.id === id)!;
 
-  it("lists every binding once, grouped in dialog order", () => {
+  it("lists every binding with keys once, grouped in dialog order", () => {
     const groups = bindingGroups(true);
     expect(groups.map(g => g.title)).toEqual([...SHORTCUT_GROUPS]);
-    expect(groups.flatMap(g => g.binds)).toHaveLength(BINDINGS.length);
+    // Bindings without default keys (Streamer Mode, set in Settings > Keybinds) are left out until the user binds them.
+    const ids = groups.flatMap(g => g.binds).map(b => b.id);
+    expect([...ids].sort()).toEqual(BINDINGS.filter(b => b.keys.length > 0).map(b => b.id).sort());
+    expect(ids).not.toContain("streamerMode");
+  });
+
+  it("shows the user's custom keys and lists a keyless binding once it is bound", () => {
+    setKeyOverrides(new Map([["streamerMode", [{ spec: "Mod+Shift+S", index: 0 }]]]));
+    try {
+      expect(find(false, "streamerMode").keys).toEqual(["Ctrl", "Shift", "S"]);
+    } finally {
+      setKeyOverrides(null);
+    }
   });
 
   it("shows the keys of the OS, and shares modifiers across an Up/Down pair", () => {

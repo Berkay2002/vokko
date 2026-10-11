@@ -18,6 +18,10 @@ import { userAppsItems } from "../apps/menus";
 import { voiceUserMenuItems } from "../voice/voiceMenus";
 import { getVoice } from "../voice/store";
 import { useVoiceUi } from "../voice/uiStore";
+import { getPrefs } from "../ui/prefs";
+
+/** Settings > Advanced > Developer Mode adds the "Copy … ID" items. */
+const devOnly = (items: MenuItem[]): MenuItem[] => (getPrefs().developerMode ? items : []);
 
 export const UNAVAILABLE = "Not available yet";
 
@@ -113,7 +117,7 @@ export function guildContextItems(guild: Guild): MenuItem[] {
       : [],
     can(Perm.CREATE_EVENTS) || can(Perm.MANAGE_EVENTS) ? [{ id: "create-event", label: "Create Event", onSelect: () => openCreateEvent(guild.id) }] : [],
     owner ? [] : [{ id: "leave", label: "Leave Server", danger: true, onSelect: () => openModal({ type: "leaveServer", guildId: guild.id }) }],
-    [{ id: "copy-id", label: "Copy Server ID", onSelect: copy(guild.id) }],
+    devOnly([{ id: "copy-id", label: "Copy Server ID", onSelect: copy(guild.id) }]),
   );
 }
 
@@ -164,7 +168,7 @@ function guildDropdownItemsPlain(guild: Guild): MenuItem[] {
     ],
     [unavailable("per-server-profile", "Edit Per-server Profile"), hideMutedItem(guild)],
     owner ? [] : [{ id: "leave", label: "Leave Server", danger: true, onSelect: () => openModal({ type: "leaveServer", guildId: guild.id }) }],
-    [{ id: "copy-id", label: "Copy Server ID", onSelect: copy(guild.id) }],
+    devOnly([{ id: "copy-id", label: "Copy Server ID", onSelect: copy(guild.id) }]),
   );
 }
 
@@ -225,7 +229,7 @@ export function channelContextItems(channel: Channel, guild: Guild, options: Cha
       : [],
     [muteItem(channel.id, category ? "Category" : "Channel"), ...(voice ? [] : [notificationItem(channel.id, { defaultLabel: category ? "Use Server Default" : "Use Category Default" })])],
     manage,
-    [{ id: "copy-id", label: `Copy ${label} ID`, onSelect: copy(channel.id) }],
+    devOnly([{ id: "copy-id", label: `Copy ${label} ID`, onSelect: copy(channel.id) }]),
   );
 }
 
@@ -349,7 +353,7 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
     moderation,
     userAppsItems(user),
     serverVoice,
-    [{ id: "copy-id", label: "Copy User ID", onSelect: copy(user.id) }],
+    devOnly([{ id: "copy-id", label: "Copy User ID", onSelect: copy(user.id) }]),
   );
 }
 
@@ -370,6 +374,6 @@ export function dmContextItems(channel: Channel, options: { anchor?: HTMLElement
       : [],
     other ? relationshipItems(other) : [],
     [muteItem(channel.id, group ? "Conversation" : name)],
-    [...(other ? [{ id: "copy-user-id", label: "Copy User ID", onSelect: copy(other.id) } satisfies MenuItem] : []), { id: "copy-id", label: "Copy Channel ID", onSelect: copy(channel.id) }],
+    devOnly([...(other ? [{ id: "copy-user-id", label: "Copy User ID", onSelect: copy(other.id) } satisfies MenuItem] : []), { id: "copy-id", label: "Copy Channel ID", onSelect: copy(channel.id) }]),
   );
 }
