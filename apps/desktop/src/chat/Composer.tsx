@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
-import { AtSign, CircleAlert, FileUp, Hash, LayoutGrid, Plus, Smile, Sticker, X } from 'lucide-react';
+import { AtSign, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
 import { ChannelType } from '../api/types';
 import type { Message, Snowflake } from '../api/types';
 import { request, Popout, Tooltip } from './shell';
@@ -11,7 +11,7 @@ import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, useDra
 import { fromDisplay, type MentionToken } from './mentionText';
 import { messageStore } from './messageStore';
 import { activeTypers } from './messageState';
-import { formatBytes } from './util';
+import { comingSoon } from './toast';
 
 const MAX_LEN = 2000;
 // Discord client timings: POST at most every 8 s; the first one waits 1.5 s unless the previous was 16+ s ago;
@@ -231,10 +231,15 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     <div className={`chat-composer-box${replyTo ? ' has-reply' : ''}`}>
       {uploads.length > 0 && <div className="chat-tray" aria-label="Attachments to upload">
         {uploads.map(u => <div key={u.localId} className={`chat-tray-item ${u.status}`}>
-          <button type="button" className="chat-tray-remove" aria-label={`Remove ${u.file.name}`} onClick={() => removeUpload(channelId, u.localId)}><X size={14} /></button>
+          <div className="chat-tray-actions">
+            <Tooltip content="Preview" side="top"><button type="button" className="chat-tray-btn" aria-label={`Preview ${u.file.name}`} disabled={!u.previewUrl}
+              onClick={() => { if (u.previewUrl) window.open(u.previewUrl, '_blank', 'noopener'); }}><Eye size={20} /></button></Tooltip>
+            <Tooltip content="Edit" side="top"><button type="button" className="chat-tray-btn" aria-label={`Edit ${u.file.name}`} onClick={() => comingSoon('Editing attachments')}><Pencil size={20} /></button></Tooltip>
+            <Tooltip content="Remove Attachment" side="top"><button type="button" className="chat-tray-btn chat-tray-remove" aria-label={`Remove ${u.file.name}`} onClick={() => removeUpload(channelId, u.localId)}><Trash2 size={20} /></button></Tooltip>
+          </div>
           <div className="chat-tray-thumb">{u.previewUrl ? <img src={u.previewUrl} alt="" draggable={false} /> : <FileUp size={40} />}</div>
           <div className="chat-tray-name" title={u.file.name}>{u.file.name}</div>
-          <div className="chat-tray-size">{u.status === 'error' ? <span className="chat-tray-error"><CircleAlert size={12} /> {u.error}</span> : formatBytes(u.file.size)}</div>
+          {u.status === 'error' && <div className="chat-tray-size"><span className="chat-tray-error"><CircleAlert size={12} /> {u.error}</span></div>}
           {u.status === 'uploading' && <div className="chat-tray-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(u.progress * 100)}><div style={{ width: `${Math.round(u.progress * 100)}%` }} /></div>}
         </div>)}
       </div>}

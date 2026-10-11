@@ -183,6 +183,11 @@ function seedMessageShowcase(ctx: { guildId: string; parentId: string; R: string
   const status = post(R, "reading it now, will post a summary", 80 * MIN);
   post(Bo, "thanks!", 40 * MIN, { reply: status.id });
   post(N, "the summary will be long, brace yourselves", 20 * MIN, { reply: status.id });
+  // Several mentions in one group: each mentioned line is its own tinted block with its own bar, the plain line between them is not.
+  post(Bo, `<@${R}>`, 10 * MIN);
+  post(Bo, `<@${R}>`, 10 * MIN - 5_000);
+  post(Bo, "hello", 10 * MIN - 10_000);
+  post(Bo, `<@${R}>`, 10 * MIN - 15_000);
   return channel;
 }
 

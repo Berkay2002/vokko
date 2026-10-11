@@ -24,9 +24,9 @@ describe('formatMessageTimestamp', () => {
   const yesterday = new Date(2026, 9, 10, 21, 24);
   const older = new Date(2026, 9, 9, 21, 24);
 
-  it('Swedish: Idag/Igår kl., then 2026-10-09 21:24', () => {
-    expect(formatMessageTimestamp(today, now, 'sv-SE')).toBe('Idag kl. 09:05');
-    expect(formatMessageTimestamp(yesterday, now, 'sv-SE')).toBe('Igår kl. 21:24');
+  it('Swedish (as measured in Discord): bare 09:05 today, dated form from yesterday on', () => {
+    expect(formatMessageTimestamp(today, now, 'sv-SE')).toBe('09:05');
+    expect(formatMessageTimestamp(yesterday, now, 'sv-SE')).toBe('2026-10-10 21:24');
     expect(formatMessageTimestamp(older, now, 'sv-SE')).toBe('2026-10-09 21:24');
   });
 

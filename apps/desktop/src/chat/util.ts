@@ -60,10 +60,11 @@ export const formatFullDate = (d: Date, locale = chatLocale()): string =>
   fmt(locale, 'long', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d);
 export const formatDivider = (d: Date, locale = chatLocale()): string => fmt(locale, 'divider', { year: 'numeric', month: 'long', day: 'numeric' }).format(d);
 
-// "Today at 9:24 PM" / "Idag kl. 21:24": the day word plus the locale's connector. Unlisted languages fall back to Intl's relative word.
+// "Today at 9:24 PM": the day word plus the locale's connector. Unlisted languages fall back to Intl's relative word. An empty word means the
+// locale's Discord shows no day word: Swedish today is the bare "12:37" and yesterday was never observed, so it uses the dated form.
 const DAY_WORDS: Record<string, { today: string; yesterday: string; at: string }> = {
   en: { today: 'Today', yesterday: 'Yesterday', at: 'at' },
-  sv: { today: 'Idag', yesterday: 'Igår', at: 'kl.' },
+  sv: { today: '', yesterday: '', at: '' },
   de: { today: 'Heute', yesterday: 'Gestern', at: 'um' },
   fr: { today: "Aujourd'hui", yesterday: 'Hier', at: 'à' },
   es: { today: 'Hoy', yesterday: 'Ayer', at: 'a las' },
@@ -82,14 +83,14 @@ function dayWords(locale: string): { today: string; yesterday: string; at: strin
   } catch { return DAY_WORDS.en!; }
 }
 
-/** Message header time: "Today at 9:24 PM" / "Idag kl. 21:24", "Yesterday at …" / "Igår kl. …", older "10/09/2026 9:24 PM" / "2026-10-09 21:24". */
+/** Message header time: "Today at 9:24 PM" / bare "21:24" (sv), "Yesterday at …", older "10/09/2026 9:24 PM" / "2026-10-09 21:24" (sv). */
 export function formatMessageTimestamp(d: Date, now = new Date(), locale = chatLocale()): string {
   const time = formatTime(d, locale);
   const words = dayWords(locale);
   const withDay = (day: string) => `${day} ${words.at ? `${words.at} ` : ''}${time}`;
-  if (sameDay(d, now)) return withDay(words.today);
+  if (sameDay(d, now)) return words.today ? withDay(words.today) : time;
   const y = new Date(now); y.setDate(y.getDate() - 1);
-  if (sameDay(d, y)) return withDay(words.yesterday);
+  if (words.yesterday && sameDay(d, y)) return withDay(words.yesterday);
   return `${formatShortDate(d, locale)} ${time}`;
 }
 

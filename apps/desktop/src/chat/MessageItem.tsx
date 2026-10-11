@@ -7,7 +7,7 @@ import { Tooltip } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { ServerTag } from './ServerTag';
-import { Attachments } from './Attachments';
+import { Attachments, PendingUpload } from './Attachments';
 import { Embeds } from './Embeds';
 import { Reactions } from './Reactions';
 import { EmojiPickerPopout } from './EmojiPicker';
@@ -62,13 +62,12 @@ function ReplyPreview({ message }: { message: Message }) {
   }
   const text = toDisplay(ref.content, { user: id => chat.md.userName(id), role: id => chat.md.roleInfo(id)?.name ?? null, channel: id => chat.md.channelName(id) }).text.replace(/\s+/g, ' ').trim();
   const color = chat.colorOf(ref);
-  const mentioned = message.mentions.some(u => u.id === ref.author.id);
   const author = chat.userById(ref.author.id) ?? ref.author;
   return <div className="chat-reply" role="button" tabIndex={0} aria-label={`Jump to the message by ${chat.nameOf(ref.author, ref.member)}`} onClick={() => chat.actions.jumpTo(ref.id)}
     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chat.actions.jumpTo(ref.id); } }}>
     <span className="chat-reply-spine" />
     <Avatar user={ref.author} size={16} className="chat-reply-avatar" />
-    <span className="chat-reply-name" style={color ? { color } : undefined}>{mentioned ? '@' : ''}{chat.nameOf(ref.author, ref.member)}</span>
+    <span className="chat-reply-name" style={color ? { color } : undefined}>@{chat.nameOf(ref.author, ref.member)}</span>
     <ServerTag user={author} className="small" />
     <span className="chat-reply-text">
       {text || (ref.attachments.length ? <><ImageIcon size={14} /><i>Click to see attachment</i></> : <i>Click to see attachment</i>)}
@@ -189,7 +188,9 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
       {editing ? <InlineEdit message={message} onDone={onStopEditing} /> : <>
         {message.content && <Markdown content={message.content} ctx={chat.md} className="chat-content" suffix={message.edited_timestamp
           ? <Tooltip content={formatFullDate(new Date(message.edited_timestamp))}><span className="chat-edited">(edited)</span></Tooltip> : undefined} />}
-        <Attachments message={message} />
+        {pending && !failed && message.attachments.length > 0
+          ? <PendingUpload files={message.attachments} onCancel={() => messageStore.discardPending(message.channel_id, pending.nonce)} />
+          : <Attachments message={message} />}
         <Embeds message={message} />
         <Reactions message={message} />
       </>}

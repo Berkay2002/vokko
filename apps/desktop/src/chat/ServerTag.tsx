@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { Anchor, Cat, Crown, Flame, Flower2, Gem, Ghost, Heart, Hexagon, Leaf, Moon, Rocket, Shield, Skull, Snowflake, Star, Sun, Swords, Zap, type LucideIcon } from 'lucide-react';
 import type { User, UserPrimaryGuild } from '../api/types';
-import { Popout, Tooltip, guildIconUrl, guildInitials, useGuild } from './shell';
+import { Popout, guildIconUrl, guildInitials, useGuild } from './shell';
 
 /** Vokko's own open badge set (lucide glyphs). `UserPrimaryGuild.badge` is one of these ids; an unknown id renders the fallback hexagon. */
 export const SERVER_TAG_BADGES: Record<string, LucideIcon> = {
@@ -19,38 +19,37 @@ export function ServerTagBadge({ badge, size = 12, color }: { badge: string; siz
 function TagCard({ tag, onClose }: { tag: UserPrimaryGuild; onClose(): void }) {
   const guild = useGuild(tag.guild_id);
   const icon = guild ? guildIconUrl(guild) : null;
-  return <div className="chat-tag-card" role="dialog" aria-label="Server tag">
-    <div className="chat-tag-card-head">
-      <span className="chat-tag-card-icon">{icon ? <img src={icon} alt="" /> : guildInitials(guild?.name ?? tag.tag)}</span>
-      <div className="chat-tag-card-text">
-        <div className="chat-tag-card-name">{guild?.name ?? 'Unknown server'}</div>
-        <div className="chat-tag-card-sub">Members of this server can wear its tag next to their name.</div>
-      </div>
+  const banner = hex(tag.color_primary) ?? 'var(--chat-brand)';
+  return <div className="chat-tag-card" role="dialog" aria-label={`${guild?.name ?? 'Server'} tag`}>
+    <div className="chat-tag-card-banner" style={{ background: banner }} />
+    <span className="chat-tag-card-icon">{icon ? <img src={icon} alt="" /> : guildInitials(guild?.name ?? tag.tag)}</span>
+    <div className="chat-tag-card-body">
+      <div className="chat-tag-card-name">{guild?.name ?? 'Unknown server'}</div>
+      <div className="chat-tag-card-sub">Members of this server can wear its tag next to their name.</div>
+      <div className="chat-tag-card-chip"><span className="chat-server-tag static"><ServerTagBadge badge={tag.badge} color={hex(tag.color_primary)} /><span>{tag.tag}</span></span></div>
     </div>
-    <div className="chat-tag-card-chip"><span className="chat-server-tag static"><ServerTagBadge badge={tag.badge} color={hex(tag.color_primary)} /><span>{tag.tag}</span></span></div>
-    <button type="button" className="chat-tag-card-close" onClick={onClose}>Close</button>
+    <div className="chat-tag-card-actions">
+      <button type="button" className="chat-tag-card-go" onClick={onClose}>Go to Server</button>
+    </div>
   </div>;
 }
 
 /**
- * The pill next to a name ("OAI"): badge glyph + up to 4 letters of the author's server tag. Hover shows the server, click opens the tag card.
+ * The chip next to a name ("OAI"): badge glyph + up to 4 letters of the author's server tag. No tooltip (the reference has none); click opens the tag card.
  * Used for author names and reply previews here; the member list in src/shell can render the same component.
  */
 export function ServerTag({ user, className }: { user: Pick<User, 'primary_guild'>; className?: string }) {
   const tag = user.primary_guild;
   const ref = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const guild = useGuild(tag?.guild_id);
   if (!tag || !tag.tag) return null;
   return <>
-    <Tooltip content={guild ? `${tag.tag} · ${guild.name}` : `Server tag: ${tag.tag}`} side="top">
-      <button ref={ref} type="button" className={`chat-server-tag${className ? ` ${className}` : ''}`} aria-label={`Server tag ${tag.tag}`}
-        onClick={e => { e.stopPropagation(); setOpen(o => !o); }}>
-        <ServerTagBadge badge={tag.badge} color={hex(tag.color_primary)} />
-        <span>{tag.tag}</span>
-      </button>
-    </Tooltip>
-    <Popout anchor={ref} open={open} onClose={() => setOpen(false)} side="bottom" align="start" className="chat-tag-popout">
+    <button ref={ref} type="button" className={`chat-server-tag${className ? ` ${className}` : ''}`} aria-label={`Server tag ${tag.tag}`}
+      onClick={e => { e.stopPropagation(); setOpen(o => !o); }}>
+      <ServerTagBadge badge={tag.badge} color={hex(tag.color_primary)} />
+      <span>{tag.tag}</span>
+    </button>
+    <Popout anchor={ref} open={open} onClose={() => setOpen(false)} side="right" align="start" className="chat-tag-popout">
       <TagCard tag={tag} onClose={() => setOpen(false)} />
     </Popout>
   </>;

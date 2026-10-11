@@ -19,9 +19,16 @@ async function reveal(page: Page, text: string | RegExp): Promise<void> {
   await expect(content.last()).toBeVisible();
 }
 
+/** Scroll to the very start of the channel with the wheel (a programmatic scrollTop is treated as list growth and re-pins to the bottom). */
 async function scrollTop(page: Page): Promise<void> {
-  await page.locator('.chat-scroller').evaluate(el => { el.scrollTop = 0; });
-  await page.waitForTimeout(300);
+  const scroller = page.locator('.chat-scroller');
+  await scroller.hover();
+  for (let i = 0; i < 15; i++) {
+    await page.mouse.wheel(0, -4000);
+    await page.waitForTimeout(250);
+    const top = await scroller.evaluate(el => el.scrollTop);
+    if (top === 0 && (await page.locator('.chat-list-spinner').count()) === 0) return;
+  }
 }
 
 test.describe('replies', () => {
@@ -54,8 +61,18 @@ test('messages that mention me are highlighted, others are not', async ({ page }
   await expect(row(page, 'did you see the filing')).toHaveClass(/mentioned/);
   await expect(row(page, '@everyone').first()).toHaveClass(/mentioned/);
   await expect(row(page, 'reading it now')).not.toHaveClass(/mentioned/);
-  const shadow = await row(page, 'did you see the filing').evaluate(el => getComputedStyle(el).boxShadow);
-  expect(shadow).toMatch(/ 2px 0px 0px 0px inset$/); // the 2px left bar
+  const bar = await row(page, 'did you see the filing').evaluate(el => { const c = getComputedStyle(el, '::before'); return { w: c.width, bg: c.backgroundColor }; });
+  expect(bar.w).toBe('2px'); // the 2px left bar
+  expect(bar.bg).not.toBe('rgba(0, 0, 0, 0)');
+});
+
+test('several mentions in one group: only the mentioned lines are tinted, each with its own bar', async ({ page }) => {
+  await openStockTalk(page);
+  const last = page.locator('.chat-msg').last();
+  await expect(last).toHaveClass(/mentioned/);
+  const hello = row(page, /^hello$/);
+  await expect(hello).not.toHaveClass(/mentioned/);
+  await expect(page.locator('.chat-msg.mentioned.grouped').first()).toBeVisible();
 });
 
 test('server tag shows next to the author and opens a popout', async ({ page }) => {
@@ -69,6 +86,32 @@ test('server tag shows next to the author and opens a popout', async ({ page }) 
   await expect(page.locator('.chat-tag-popout')).toHaveCount(0);
 });
 
+test.describe('lightbox', () => {
+  test('single image: author, actions, Escape closes', async ({ page }) => {
+    await openStockTalk(page);
+    await scrollTop(page);
+    await page.locator('.chat-image').first().click();
+    const box = page.getByRole('dialog');
+    await expect(box).toBeVisible();
+    await expect(box.locator('.chat-lightbox-name')).toContainText('Sam');
+    for (const name of ['Zoom in', 'Forward', 'Download', 'Open in Browser', 'More', 'Close']) await expect(box.getByRole(name === 'Download' || name === 'Open in Browser' ? 'link' : 'button', { name })).toBeVisible();
+    await expect(box.locator('.chat-lightbox-thumbs')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
+  test('three images: strip of thumbnails and arrow keys move between them', async ({ page }) => {
+    await openStockTalk(page);
+    await reveal(page, 'morning all');
+    await row(page, 'morning all').locator('.chat-image').first().click();
+    const strip = page.locator('.chat-lightbox-thumbs button');
+    await expect(strip).toHaveCount(3);
+    await expect(strip.first()).toHaveClass(/current/);
+    await page.keyboard.press('ArrowRight');
+    await expect(strip.nth(1)).toHaveClass(/current/);
+  });
+});
+
 test.describe('context menu', () => {
   const menuLabels = (page: Page) => page.locator('.chat-menu[aria-label="Message actions"] > .chat-menu-row-wrap > [role="menuitem"] .chat-menu-label').allTextContents();
 
@@ -79,9 +122,9 @@ test.describe('context menu', () => {
     expect(await menuLabels(page)).toEqual([
       'Add Reaction', 'Reply', 'Forward', 'Create Thread',
       'Copy Text', 'Pin Message', 'Bookmark Message', 'Create Reminder', 'Apps', 'Mark Unread', 'Copy Message Link', 'Read Aloud',
-      'Delete Message', 'Copy Message ID',
+      'Delete Message', 'Report Message', 'Copy Message ID',
     ]);
-    await expect(page.locator('.chat-menu-item.danger')).toHaveText('Delete Message');
+    await expect(page.locator('.chat-menu-item.danger')).toHaveText(['Delete Message', 'Report Message']);
   });
 
   test('own message gets Edit Message after the separator', async ({ page }) => {
@@ -119,12 +162,73 @@ test.describe('context menu', () => {
     await expect(page.locator('.chat-unread-bar')).toHaveCount(0);
   });
 
+  test('menu opens at the pointer: top-left at the click, lifted above it when it would not fit below', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 1200 });
+    await openStockTalk(page);
+    const target = row(page, 'did you see the filing');
+    const box = (await target.boundingBox())!;
+    // low in the window there is no room below for the ~640px menu but enough above: it flips up and ends at the pointer
+    await target.click({ button: 'right', position: { x: 40, y: 8 } });
+    const menu = page.locator('.chat-menu[aria-label="Message actions"]');
+    const m1 = (await menu.boundingBox())!;
+    expect(Math.abs(m1.x - (box.x + 40))).toBeLessThan(2);
+    expect(Math.abs(m1.y + m1.height - (box.y + 8))).toBeLessThan(2);
+    await page.keyboard.press('Escape');
+    // a row near the top of the list has room below: the menu starts at the pointer
+    await scrollTop(page);
+    const first = page.locator('.chat-msg').first();
+    const fb = (await first.boundingBox())!;
+    await first.click({ button: 'right', position: { x: 60, y: 10 } });
+    const m2 = (await menu.boundingBox())!;
+    expect(Math.abs(m2.x - (fb.x + 60))).toBeLessThan(2);
+    expect(Math.abs(m2.y - (fb.y + 10))).toBeLessThan(2);
+  });
+
   test('Delete Message on own message asks first and removes it', async ({ page }) => {
     await openStockTalk(page);
     await row(page, 'reading it now').click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Delete Message' }).click();
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(page.locator('.chat-content', { hasText: 'reading it now' })).toHaveCount(0);
+  });
+});
+
+test('jump pill appears when scrolled far up, sits at the bottom centre and returns to the present', async ({ page }) => {
+  await openStockTalk(page);
+  await expect(page.locator('.chat-jump-bar')).toHaveCount(0);
+  await scrollTop(page);
+  const pill = page.locator('.chat-jump-bar');
+  await expect(pill).toBeVisible();
+  const list = (await page.locator('.chat-list').boundingBox())!;
+  const p = (await pill.boundingBox())!;
+  expect(Math.abs(p.x + p.width / 2 - (list.x + list.width / 2))).toBeLessThan(2);
+  expect(list.y + list.height - (p.y + p.height)).toBeGreaterThan(8);
+  await pill.getByRole('button', { name: 'Jump To Present' }).click();
+  await expect(pill).toHaveCount(0);
+});
+
+test.describe('new-messages divider', () => {
+  test('on a day boundary it is the day divider itself, red, with the NEW pill; sending clears it', async ({ page }) => {
+    await openStockTalk(page);
+    await row(page, '@everyone market opens').click({ button: 'right', position: { x: 160, y: 12 } });
+    await page.getByRole('menuitem', { name: 'Mark Unread' }).click();
+    const merged = page.locator('.chat-day-divider.unread');
+    await expect(merged).toHaveCount(1);
+    await expect(merged.locator('.chat-new-pill')).toHaveText('NEW');
+    await expect(page.locator('.chat-new-divider')).toHaveCount(0);
+    await expect(page.locator('.chat-unread-bar')).toBeVisible();
+    // leaving the channel ends the banner, the divider stays for the visit
+    await page.getByRole('textbox', { name: /Message #stock-talk/ }).fill('own send');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.chat-day-divider.unread')).toHaveCount(0);
+    await expect(page.locator('.chat-unread-bar')).toHaveCount(0);
+  });
+
+  test('mid-day it is a plain red line with the pill', async ({ page }) => {
+    await openStockTalk(page);
+    await row(page, 'did you see the filing').click({ button: 'right', position: { x: 160, y: 12 } });
+    await page.getByRole('menuitem', { name: 'Mark Unread' }).click();
+    await expect(page.locator('.chat-new-divider .chat-new-pill')).toHaveText('NEW');
   });
 });
 
@@ -141,12 +245,12 @@ test.describe('timestamps', () => {
   });
   test.describe('Swedish', () => {
     test.use({ locale: 'sv-SE' });
-    test('uses ISO-like dates and Idag/Igår', async ({ page }) => {
+    test('uses ISO-like dates and a bare time today', async ({ page }) => {
       await openStockTalk(page);
       await scrollTop(page);
       await expect(row(page, 'squeeze watch').locator('.chat-timestamp').first()).toHaveText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
       await page.locator('.chat-scroller').evaluate(el => { el.scrollTop = el.scrollHeight; });
-      await expect(row(page, 'reading it now').locator('.chat-timestamp').first()).toHaveText(/^Idag kl\. \d{2}:\d{2}$/);
+      await expect(row(page, 'reading it now').locator('.chat-timestamp').first()).toHaveText(/^\d{2}:\d{2}$/);
     });
   });
 });

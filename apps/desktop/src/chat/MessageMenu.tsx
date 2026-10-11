@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  AppWindow, Bell, Bookmark, ChevronRight, Copy, CornerUpLeft, Fingerprint, Forward, Link2, MailOpen, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
+  AppWindow, Bell, Bookmark, ChevronRight, Copy, CornerUpLeft, Fingerprint, Flag, Forward, Link2, MailOpen, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
 } from 'lucide-react';
 import { MessageType } from '../api/types';
 import type { Message } from '../api/types';
@@ -10,7 +10,7 @@ import { emojiShortcodeLabel, frequentEmoji, quickReactions } from './emojiData'
 import { messageStore } from './messageStore';
 import { isSystemMessage, type PendingMessage } from './messageState';
 import { toDisplay } from './mentionText';
-import { placeAtPoint, useLayer, useOutsideClose } from './shell';
+import { useLayer, useOutsideClose } from './shell';
 import { comingSoon } from './toast';
 import { isShiftDown } from './util';
 
@@ -33,10 +33,22 @@ interface Row {
 type Entry = Row | 'separator';
 
 const ICON = 20;
+const EDGE = 8;
+
+/**
+ * The menu's corner sits on the pointer. It flips to the left of the pointer when it would leave the window on the right and to above
+ * it when it would leave at the bottom (the menu is tall, so pinning it to the window edge would lose the link with the click).
+ */
+function placeAtPointer(x: number, y: number, width: number, height: number): { left: number; top: number } {
+  const left = x + width + EDGE > window.innerWidth ? Math.max(EDGE, x - width) : x;
+  let top = y;
+  if (y + height + EDGE > window.innerHeight) top = y - height >= EDGE ? y - height : Math.max(EDGE, window.innerHeight - height - EDGE);
+  return { left, top };
+}
 
 /**
  * Right-click / "More" menu of a message, in the reference order: four quick-reaction tiles, Add Reaction ›, | Edit, Reply, Forward,
- * Create Thread, | Copy Text, Pin, Bookmark, Create Reminder ›, Apps ›, Mark Unread, Copy Message Link, Read Aloud, | Delete, | Copy Message ID.
+ * Create Thread, | Copy Text, Pin, Bookmark, Create Reminder ›, Apps ›, Mark Unread, Copy Message Link, Read Aloud, | Delete, Report (others'), | Copy Message ID.
  * Chat-local because the shared context menu has no tile row and puts icons on the right.
  */
 export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageMenuTarget; onClose(): void; onMoreEmoji(message: Message): void }) {
@@ -110,10 +122,10 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
         },
       });
     }
-    if (canDelete) {
-      sep();
-      out.push({ id: 'delete', label: 'Delete Message', icon: <Trash2 size={ICON} />, danger: true, onSelect: () => chat.actions.requestDelete(message, isShiftDown()) });
-    }
+    const canReport = !isMine && !system && !pending;
+    if (canDelete || canReport) sep();
+    if (canDelete) out.push({ id: 'delete', label: 'Delete Message', icon: <Trash2 size={ICON} />, danger: true, onSelect: () => chat.actions.requestDelete(message, isShiftDown()) });
+    if (canReport) out.push({ id: 'report', label: 'Report Message', icon: <Flag size={ICON} />, danger: true, onSelect: () => comingSoon('Reporting messages') });
     sep();
     out.push({ id: 'copy-id', label: 'Copy Message ID', icon: <Fingerprint size={ICON} />, onSelect: () => void navigator.clipboard?.writeText(message.id) });
     return out;
@@ -122,7 +134,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
 
   useLayoutEffect(() => {
     const el = box.current;
-    if (el) setPos(placeAtPoint(target.x, target.y, el.offsetWidth, el.offsetHeight));
+    if (el) setPos(placeAtPointer(target.x, target.y, el.offsetWidth, el.offsetHeight));
   }, [target.x, target.y]);
 
   const rows = entries.filter((e): e is Row => e !== 'separator');
@@ -145,8 +157,8 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     return () => document.removeEventListener('keydown', onKey);
   });
 
-  return createPortal(<div className="chat-menu-layer" onContextMenu={e => { e.preventDefault(); e.stopPropagation(); }}>
-    <div ref={box} className="chat-menu" role="menu" aria-label="Message actions" style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}>
+  return createPortal(<div className="chat-menu-layer context-menu-layer" onContextMenu={e => { e.preventDefault(); e.stopPropagation(); }}>
+    <div ref={box} className="chat-menu context-menu" role="menu" aria-label="Message actions" style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}>
       {!pending && !system && <div className="chat-menu-tiles" role="group" aria-label="Quick reactions">
         {quick.map(e => <button key={e} type="button" className="chat-menu-tile" aria-label={`React with ${e}`} onClick={() => { onClose(); react(e); }}>{e}</button>)}
       </div>}
@@ -156,7 +168,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
         const hasSub = !!entry.children;
         return <div key={entry.id} className="chat-menu-row-wrap" onMouseEnter={() => { setActive(index); setOpen(hasSub ? entry.id : null); }}>
           <div role="menuitem" aria-disabled={entry.disabled || undefined} aria-haspopup={hasSub || undefined} aria-expanded={hasSub ? open === entry.id : undefined}
-            className={`chat-menu-item${entry.danger ? ' danger' : ''}${entry.disabled ? ' disabled' : ''}${active === index || open === entry.id ? ' focused' : ''}`}
+            className={`chat-menu-item context-menu-item${entry.danger ? ' danger' : ''}${entry.disabled ? ' disabled' : ''}${active === index || open === entry.id ? ' focused' : ''}`}
             onClick={() => { if (hasSub) { setOpen(entry.id); return; } if (entry.disabled) return; onClose(); entry.onSelect?.(); }}>
             <span className="chat-menu-icon" aria-hidden="true">{entry.icon}</span>
             <span className="chat-menu-label">{entry.label}</span>

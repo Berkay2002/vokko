@@ -1,13 +1,13 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { ArrowDown, Loader2 } from 'lucide-react';
+import { CheckCheck, Loader2 } from 'lucide-react';
 import type { Snowflake } from '../api/types';
 import { useChat } from './ChatContext';
 import { ChannelStart } from './ChannelStart';
 import { MessageItem } from './MessageItem';
 import { messageStore, useChannelState } from './messageStore';
 import { buildRows, type Row } from './messageState';
-import { compareIds, formatDivider, formatFullDate, sameDay } from './util';
+import { compareIds, formatDivider, formatTime, sameDay } from './util';
 
 export interface MessageListHandle {
   scrollToBottom(): void;
@@ -37,6 +37,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   const [atBottom, setAtBottom] = useState(true);
   const [highlightId, setHighlightId] = useState<Snowflake | null>(null);
   const [seenBottom, setSeenBottom] = useState(false);
+  const [farFromBottom, setFarFromBottom] = useState(false);
 
   const rows = useMemo<Row[]>(
     () => buildRows(state, formatDivider, sameDay, chat.me.id),
@@ -111,16 +112,19 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     return <div className="chat-list chat-list-empty"><ChannelStart /></div>;
   }
 
-  const showJump = state.hasMoreAfter || !atBottom;
+  // The pill is for "scrolled up a lot" (more than a screen from the bottom) or a window that is not anchored at the present.
+  const showJump = state.hasMoreAfter || (!atBottom && farFromBottom);
   const showUnread = unreadCount > 0 && (!seenBottom || !!state.markedUnread) && !!firstUnread;
+  // "since 11:13" for today, else the date (the reference banner shows the time of the first unread message).
+  const unreadSince = firstUnread ? (sameDay(new Date(firstUnread.timestamp), new Date()) ? formatTime(new Date(firstUnread.timestamp)) : formatDivider(new Date(firstUnread.timestamp))) : '';
 
   return <div className="chat-list" onWheel={gesture} onTouchMove={gesture} onKeyDown={gesture} onPointerDown={() => { pointerDown.current = true; gesture(); }}>
     {showUnread && <div className="chat-unread-bar" role="status">
       <button type="button" className="chat-unread-bar-main" onClick={() => {
         const i = rows.findIndex(r => r.message.id === firstUnread!.id);
         if (i >= 0) virtuoso.current?.scrollToIndex({ index: i, align: 'start', behavior: 'smooth' });
-      }}>{unreadCount}{state.hasMoreBefore ? '+' : ''} new message{unreadCount === 1 ? '' : 's'} since {formatFullDate(new Date(firstUnread!.timestamp))}</button>
-      <button type="button" className="chat-unread-bar-mark" onClick={() => { const last = state.messages[state.messages.length - 1]; if (last) messageStore.markRead(channelId, last.id); setSeenBottom(true); }}>Mark As Read</button>
+      }}>{unreadCount}{state.hasMoreBefore ? '+' : ''} new message{unreadCount === 1 ? '' : 's'} since {unreadSince}</button>
+      <button type="button" className="chat-unread-bar-mark" onClick={() => { const last = state.messages[state.messages.length - 1]; if (last) messageStore.markRead(channelId, last.id); setSeenBottom(true); }}>Mark As Read <CheckCheck size={18} aria-hidden="true" /></button>
     </div>}
     <Virtuoso<Row, { hasMoreBefore: boolean; hasMoreAfter: boolean; loading: boolean }>
       key={`${channelId}:${state.windowId}`}
@@ -135,6 +139,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       increaseViewportBy={{ top: 600, bottom: 400 }}
       atBottomThreshold={160}
       atBottomStateChange={onBottom}
+      onScroll={e => { const el = e.currentTarget; setFarFromBottom(el.scrollHeight - el.scrollTop - el.clientHeight > el.clientHeight); }}
       scrollerRef={el => { scroller.current = el instanceof HTMLElement ? el : null; }}
       totalListHeightChanged={() => {
         if (!stick.current || state.hasMoreAfter) return;
@@ -153,8 +158,9 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       components={{ Header, Footer }}
       itemContent={(index, row) => <div className="chat-row" role="listitem">
         {index === state.firstItemIndex && !state.hasMoreBefore && <ChannelStart />}
-        {row.dayLabel && <div className="chat-day-divider" role="separator"><span>{row.dayLabel}</span></div>}
-        {row.unreadDivider && <div className="chat-new-divider" role="separator"><span>NEW</span></div>}
+        {/* The new-messages divider on a day boundary is the day divider itself, in red with the pill at its right end. */}
+        {row.dayLabel && <div className={`chat-day-divider${row.unreadDivider ? ' unread' : ''}`} role="separator"><span>{row.dayLabel}</span>{row.unreadDivider && <b className="chat-new-pill">NEW</b>}</div>}
+        {row.unreadDivider && !row.dayLabel && <div className="chat-new-divider" role="separator"><b className="chat-new-pill">NEW</b></div>}
         <MessageItem
           message={row.message}
           pending={row.pending}
@@ -170,7 +176,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       <button type="button" onClick={() => {
         if (state.hasMoreAfter) void messageStore.jumpToPresent(channelId);
         else virtuoso.current?.scrollToIndex({ index: Math.max(0, rows.length - 1), align: 'end', behavior: 'smooth' });
-      }}>Jump To Present <ArrowDown size={16} /></button>
+      }}>Jump To Present</button>
     </div>}
   </div>;
 });

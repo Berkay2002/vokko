@@ -18,6 +18,8 @@ const states = new Map<Snowflake, ChannelState>();
 const touched = new Map<Snowflake, number>();
 const listeners = new Map<Snowflake, Set<Listener>>();
 const AROUND_LIMIT = 30;
+/** Nonces of sends cancelled while the POST was in flight: the created message is deleted again when the response arrives. */
+const cancelled = new Set<string>();
 const reactionChains =new Map<string, { tail: Promise<void>; pending: number; timer: ReturnType<typeof setTimeout> | null }>();
 const reactionGuard = (messageId: Snowflake, emoji: ReactionEmoji): string => `${messageId}:${emojiKey(emoji)}`;
 /** Channels the user marked unread by hand: the automatic ack stays off until they read it again on purpose, send, or leave. */
@@ -186,7 +188,8 @@ export const messageStore = {
       message_reference: input.reply ? { message_id: input.reply.id, channel_id: channelId, guild_id: input.reply.guild_id } : null,
       referenced_message: input.reply ?? null, nonce,
     };
-    update(channelId, s => ({ ...s, pending: [...s.pending, { nonce, message, state: 'sending', request: req }] }));
+    // Sending is an ack of everything above: the new-messages divider and the unread banner go away at once.
+    update(channelId, s => ({ ...s, lastReadAtOpen: null, markedUnread: false, pending: [...s.pending, { nonce, message, state: 'sending', request: req }] }));
     void this.dispatchPending(channelId, nonce);
   },
 
@@ -196,7 +199,12 @@ export const messageStore = {
     update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'sending', error: undefined } : x)) }));
     try {
       const m = await request<Message>('POST', `/channels/${channelId}/messages`, p.request);
+      if (cancelled.delete(nonce)) { // cancelled while in flight: the server has it already, so take it back
+        void request<null>('DELETE', `/channels/${channelId}/messages/${m.id}`).catch(() => undefined);
+        return;
+      }
       update(channelId, s => upsertMessage(s, m));
+      this.ack(channelId, m.id);
     } catch (e) {
       const error = e instanceof Error ? e.message : 'Failed to send';
       update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'failed', error } : x)) }));
@@ -206,6 +214,8 @@ export const messageStore = {
   retry(channelId: Snowflake, nonce: string): void { void this.dispatchPending(channelId, nonce); },
 
   discardPending(channelId: Snowflake, nonce: string): void {
+    const inFlight = states.get(channelId)?.pending.find(p => p.nonce === nonce)?.state === 'sending';
+    if (inFlight) cancelled.add(nonce);
     update(channelId, s => ({ ...s, pending: s.pending.filter(p => p.nonce !== nonce) }));
   },
 
@@ -279,8 +289,14 @@ export const messageStore = {
     update(channelId, s => ({ ...s, lastReadAtOpen: before, markedUnread: true }));
   },
 
-  /** Sending a message or leaving the channel ends a manual "unread" hold. */
-  releaseHold(channelId: Snowflake): void { heldUnread.delete(channelId); },
+  /**
+   * Sending a message or leaving the channel ends a manual "unread" hold and the banner that goes with it. The new-messages divider
+   * (lastReadAtOpen) stays for the rest of the visit and is recomputed from the acked pointer at the next open.
+   */
+  releaseHold(channelId: Snowflake): void {
+    heldUnread.delete(channelId);
+    update(channelId, s => (s.markedUnread ? { ...s, markedUnread: false } : s));
+  },
 
   getState(channelId: Snowflake): ChannelState { return states.get(channelId) ?? EMPTY; },
 };
