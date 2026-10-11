@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { NavLink, useLocation } from "react-router";
-import { Bell, ChevronDown, ChevronRight, CirclePlus, FolderPlus, Hash, LogOut, Plus, Settings, Trash2, UserPlus, Volume2, X } from "lucide-react";
+import { Bell, ChevronDown, ChevronRight, ChevronUp, CirclePlus, Copy, FolderPlus, Hash, LogOut, Plus, Settings, Trash2, UserPlus, Volume2 } from "lucide-react";
 import { channelMentionCount, displayName, isChannelUnread, useStore } from "../api/store";
 import { useVoiceOccupants } from "../api/voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
@@ -102,43 +102,56 @@ function GuildHeader({ guild }: { guild: Guild }) {
   const [open, setOpen] = useState(false);
   const isOwner = useStore(s => s.me?.id === guild.owner_id);
   const firstText = useStore(s => Object.values(s.channels).find(c => c.guild_id === guild.id && c.type === ChannelType.GuildText));
+  const invite = () => firstText && openModal({ type: "invite", channelId: firstText.id });
   const run = (fn: () => void) => () => {
     setOpen(false);
     fn();
   };
   return (
     <>
-      <button ref={setAnchor} type="button" className={`guild-header${open ? " open" : ""}`} onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}>
-        <span className="guild-header-name">{guild.name}</span>
-        {open ? <X size={18} /> : <ChevronDown size={18} />}
-      </button>
-      <Popout anchor={anchor} open={open} onClose={() => setOpen(false)} side="bottom" align="center" gap={4} className="guild-menu" style={{ width: anchor ? anchor.offsetWidth - 16 : 220 }}>
+      <div ref={setAnchor} className={`guild-header${open ? " open" : ""}`}>
+        <button type="button" className="guild-header-name-button" onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}>
+          <span className="guild-header-name">{guild.name}</span>
+          {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </button>
+        <Tooltip content="Invite People" side="bottom">
+          <button type="button" className="guild-header-invite" aria-label="Invite People" disabled={!firstText} onClick={invite}>
+            <UserPlus size={20} />
+          </button>
+        </Tooltip>
+      </div>
+      <Popout anchor={anchor} open={open} onClose={() => setOpen(false)} side="bottom" align="center" gap={4} className="guild-menu" style={{ width: 220 }}>
         <div role="menu" className="guild-menu-list">
-          <button type="button" role="menuitem" className="guild-menu-item brand" disabled={!firstText} onClick={run(() => firstText && openModal({ type: "invite", channelId: firstText.id }))}>
+          <button type="button" role="menuitem" className="guild-menu-item brand" disabled={!firstText} onClick={run(invite)}>
             <span>Invite People</span>
-            <UserPlus size={18} />
+            <UserPlus size={20} />
           </button>
           <button type="button" role="menuitem" className="guild-menu-item" onClick={run(() => openModal({ type: "serverSettings", guildId: guild.id }))}>
             <span>Server Settings</span>
-            <Settings size={18} />
+            <Settings size={20} />
           </button>
           <button type="button" role="menuitem" className="guild-menu-item" onClick={run(() => openModal({ type: "createChannel", guildId: guild.id }))}>
             <span>Create Channel</span>
-            <CirclePlus size={18} />
+            <CirclePlus size={20} />
           </button>
           <button type="button" role="menuitem" className="guild-menu-item" onClick={run(() => openModal({ type: "createChannel", guildId: guild.id, channelType: ChannelType.GuildCategory }))}>
             <span>Create Category</span>
-            <FolderPlus size={18} />
+            <FolderPlus size={20} />
           </button>
           <div className="guild-menu-separator" />
           <button type="button" role="menuitem" className="guild-menu-item" aria-disabled="true">
             <span>Notification Settings</span>
-            <Bell size={18} />
+            <Bell size={20} />
+          </button>
+          <div className="guild-menu-separator" />
+          <button type="button" role="menuitem" className="guild-menu-item" onClick={run(() => void navigator.clipboard?.writeText(guild.id))}>
+            <span>Copy Server ID</span>
+            <Copy size={20} />
           </button>
           <div className="guild-menu-separator" />
           <button type="button" role="menuitem" className="guild-menu-item danger" onClick={run(() => openModal({ type: isOwner ? "deleteServer" : "leaveServer", guildId: guild.id }))}>
             <span>{isOwner ? "Delete Server" : "Leave Server"}</span>
-            {isOwner ? <Trash2 size={18} /> : <LogOut size={18} />}
+            {isOwner ? <Trash2 size={20} /> : <LogOut size={20} />}
           </button>
         </div>
       </Popout>
@@ -183,8 +196,8 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
                 {category && (
                   <div className={`category-header${isCollapsed ? " collapsed" : ""}`}>
                     <button type="button" className="category-toggle" aria-expanded={!isCollapsed} onClick={() => toggle(category.id)}>
-                      {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                       <span className="category-name">{category.name}</span>
+                      {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                     </button>
                     {isOwner && (
                       <Tooltip content="Create Channel" side="top">

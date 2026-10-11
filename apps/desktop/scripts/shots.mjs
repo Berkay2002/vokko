@@ -97,6 +97,15 @@ await shot("10-rail-hover-tooltip");
 
 await page.click(".rail-add");
 await shot("11-create-server-modal");
+await page.click(".choice-row");
+await shot("11b-create-server-purpose");
+await page.click(".choice-row");
+await shot("11c-create-server-customize");
+await page.keyboard.press("Escape");
+
+await page.click(".guild-header-name-button");
+await page.click('.guild-menu-item:has-text("Create Channel")');
+await shot("11d-create-channel-modal");
 await page.keyboard.press("Escape");
 
 await page.click(".member-row");

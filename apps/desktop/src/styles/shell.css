@@ -721,10 +721,22 @@
   display: flex;
   flex: none;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   height: 49px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 8px;
+  border-bottom: 0.67px solid var(--border-subtle);
+}
+
+.guild-header-name-button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
   color: var(--text-strong);
   font-size: 16px;
   line-height: 20px;
@@ -733,9 +745,25 @@
   transition: background-color 0.1s ease;
 }
 
-.guild-header:hover,
-.guild-header.open {
+.guild-header-name-button:hover,
+.guild-header.open .guild-header-name-button {
   background: var(--interactive-background-hover);
+}
+
+.guild-header-invite {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  color: var(--interactive-icon-default);
+}
+
+.guild-header-invite:hover:not(:disabled) {
+  background: var(--interactive-background-hover);
+  color: var(--interactive-icon-hover);
 }
 
 .guild-header-name {
@@ -745,30 +773,32 @@
 }
 
 .guild-menu {
-  padding: 6px 8px;
-  border: 1px solid var(--border-subtle);
+  padding: 4px 0;
+  border: 0.67px solid var(--border-normal);
   border-radius: var(--radius-sm);
   background: var(--background-surface-high);
-  box-shadow: var(--elevation-high);
+  box-shadow: var(--shadow-high);
 }
 
 .guild-menu-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: 100%;
-  height: 32px;
+  width: calc(100% - 16px);
+  height: 36px;
+  margin: 2px 8px;
   padding: 0 8px;
   border-radius: var(--radius-xs);
   color: var(--interactive-text-default);
   font-size: 14px;
+  line-height: 18px;
   font-weight: 500;
   text-align: left;
 }
 
 .guild-menu-item:hover:not(:disabled) {
-  background: var(--brand-500);
-  color: #fff;
+  background: var(--interactive-background-hover);
+  color: var(--text-default);
 }
 
 .guild-menu-item.brand {
@@ -780,8 +810,8 @@
 }
 
 .guild-menu-item.danger:hover {
-  background: var(--status-danger);
-  color: #fff;
+  background: var(--background-voice-muted);
+  color: var(--text-feedback-critical);
 }
 
 .guild-menu-item[aria-disabled="true"],
@@ -792,7 +822,7 @@
 
 .guild-menu-separator {
   height: 1px;
-  margin: 4px 0;
+  margin: 4px 8px;
   background: var(--border-subtle);
 }
 
@@ -821,12 +851,12 @@
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
   color: inherit;
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 600;
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 500;
   text-align: left;
   text-transform: none;
 }
@@ -840,6 +870,10 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.category-toggle svg {
+  flex: none;
 }
 
 .category-add {
@@ -864,9 +898,9 @@
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 8px;
+  gap: 8px;
+  height: 32px;
+  padding: 4px 8px;
   border-radius: var(--radius-sm);
   color: var(--channels-default);
   cursor: pointer;
@@ -879,8 +913,12 @@
 }
 
 .channel-row.selected {
-  background: var(--interactive-background-selected);
-  color: var(--interactive-text-active);
+  background: var(--interactive-background-hover);
+  color: var(--text-default);
+}
+
+.channel-row.selected .channel-name {
+  font-weight: 500;
 }
 
 .channel-row.unread {
@@ -914,8 +952,8 @@
   flex: 1;
   overflow: hidden;
   font-size: 16px;
-  line-height: 20px;
-  font-weight: 500;
+  line-height: 24px;
+  font-weight: 400;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -936,6 +974,7 @@
 
 .channel-action {
   display: flex;
+  margin-left: 4px;
   color: var(--interactive-icon-default);
 }
 
@@ -1720,6 +1759,21 @@
 }
 
 /* ---- modal content ---- */
+.modal.modal-compact {
+  width: 480px;
+}
+
+.modal-compact .modal-header {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.modal-compact .modal-title {
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
 .modal-text {
   color: var(--text-muted);
   font-size: 16px;
@@ -1765,8 +1819,78 @@
   text-align: left;
 }
 
+.choice-row {
+  margin-bottom: 8px;
+  border-width: 0.67px;
+  background: var(--background-mod-muted);
+}
+
 .choice-row:hover {
   background: var(--interactive-background-hover);
+}
+
+.choice-icon.muted {
+  background: var(--background-mod-normal);
+  color: var(--text-default);
+}
+
+.modal-text.skip {
+  margin-top: 16px;
+  margin-bottom: 0;
+  font-size: 14px;
+}
+
+.link-button {
+  color: var(--text-link);
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.icon-uploader {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 50%;
+  color: var(--interactive-icon-default);
+  overflow: visible;
+}
+
+.icon-uploader img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.icon-uploader-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.icon-uploader-plus {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--brand-500);
+  color: #fff;
 }
 
 .choice-row > span:nth-child(2) {

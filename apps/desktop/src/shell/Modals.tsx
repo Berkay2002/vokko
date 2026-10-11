@@ -1,7 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Check, ChevronRight, Copy, Hash, Plus, Users, Volume2 } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Camera, Check, ChevronRight, Copy, Hash, Plus, Users, Volume2 } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
-import { request } from "../api/rest";
+import { request, uploadAttachment } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
 import { ChannelType, RelationshipType } from "../api/types";
 import { Modal } from "../ui";
@@ -59,12 +59,16 @@ function Confirm({ title, body, action, danger, onConfirm }: { title: string; bo
 }
 
 function CreateServer() {
-  const [step, setStep] = useState<"choose" | "create" | "join">("choose");
+  const [step, setStep] = useState<"choose" | "purpose" | "customize" | "join">("choose");
   const me = useStore(s => s.me);
+  const uploadChannel = useStore(s => s.privateChannels[0] ?? Object.values(s.channels).find(c => c.guild_id)?.id);
   const [name, setName] = useState(me ? `${me.global_name ?? me.username}'s server` : "");
   const [code, setCode] = useState("");
+  const [icon, setIcon] = useState<{ id: string; url: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const file = useRef<HTMLInputElement>(null);
 
   const run = (task: () => Promise<unknown>) => {
     setBusy(true);
@@ -77,11 +81,25 @@ function CreateServer() {
       });
   };
 
+  const pickIcon = async (selected: File | undefined) => {
+    if (!selected || !uploadChannel) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const attachment = await uploadAttachment(uploadChannel, selected);
+      setIcon({ id: attachment.id, url: attachment.url });
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
   if (step === "choose")
     return (
-      <Modal open onClose={closeModal} title="Create a server" className="modal-create-server">
+      <Modal open onClose={closeModal} title="Create Your Server" className="modal-create-server">
         <p className="modal-text center">Your server is where you and your friends hang out. Make yours and start talking.</p>
-        <button type="button" className="choice-row" onClick={() => setStep("create")}>
+        <button type="button" className="choice-row" onClick={() => setStep("purpose")}>
           <span className="choice-icon">
             <Plus size={20} />
           </span>
@@ -95,28 +113,71 @@ function CreateServer() {
       </Modal>
     );
 
-  if (step === "create")
+  if (step === "purpose")
     return (
       <Modal
         open
         onClose={closeModal}
-        title="Customize your server"
+        title="Tell Us More About Your Server"
         footer={
           <>
-            <button type="button" className="btn btn-link" onClick={() => setStep("choose")}>
+            <button type="button" className="btn btn-link footer-back" onClick={() => setStep("choose")}>
               Back
             </button>
-            <button type="button" className="btn btn-primary" disabled={busy || name.trim().length < 2} onClick={() => run(() => createGuild(name.trim()))}>
+          </>
+        }
+      >
+        <p className="modal-text center">In order to help you with your setup, is your new server for just a few friends or a larger community?</p>
+        <button type="button" className="choice-row" onClick={() => setStep("customize")}>
+          <span className="choice-icon muted">
+            <Users size={20} />
+          </span>
+          <span>For me and my friends</span>
+          <ChevronRight size={20} />
+        </button>
+        <button type="button" className="choice-row" onClick={() => setStep("customize")}>
+          <span className="choice-icon muted">
+            <Users size={20} />
+          </span>
+          <span>For a club or community</span>
+          <ChevronRight size={20} />
+        </button>
+        <p className="modal-text center skip">
+          Not sure? You can <button type="button" className="link-button" onClick={() => setStep("customize")}>skip this question</button> for now.
+        </p>
+      </Modal>
+    );
+
+  if (step === "customize")
+    return (
+      <Modal
+        open
+        onClose={closeModal}
+        title="Customize Your Server"
+        footer={
+          <>
+            <button type="button" className="btn btn-link footer-back" onClick={() => setStep("purpose")}>
+              Back
+            </button>
+            <button type="button" className="btn btn-primary" disabled={busy || uploading || name.trim().length < 2} onClick={() => run(() => createGuild(name.trim(), icon?.id))}>
               Create
             </button>
           </>
         }
       >
-        <p className="modal-text center">Give your new server a personality with a name. You can always change it later.</p>
+        <p className="modal-text center">Give your new server a personality with a name and an icon. You can always change it later.</p>
+        <button type="button" className="icon-uploader" aria-label="Upload an icon" disabled={uploading || !uploadChannel} onClick={() => file.current?.click()}>
+          {icon ? <img src={icon.url} alt="" width={80} height={80} /> : <Camera size={28} />}
+          <span className="icon-uploader-label">{uploading ? "…" : "Upload"}</span>
+          <span className="icon-uploader-plus">
+            <Plus size={14} />
+          </span>
+        </button>
+        <input ref={file} type="file" accept="image/*" hidden onChange={e => void pickIcon(e.target.files?.[0])} />
         <label className="field-label" htmlFor="server-name">
-          Server name
+          Server name <span className="required">*</span>
         </label>
-        <input id="server-name" className="input" value={name} maxLength={100} autoFocus onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && name.trim().length >= 2 && run(() => createGuild(name.trim()))} />
+        <input id="server-name" className="input" value={name} maxLength={100} autoFocus onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && name.trim().length >= 2 && run(() => createGuild(name.trim(), icon?.id))} />
         {error && <p className="field-error">{error}</p>}
       </Modal>
     );
@@ -125,10 +186,10 @@ function CreateServer() {
     <Modal
       open
       onClose={closeModal}
-      title="Join a server"
+      title="Join a Server"
       footer={
         <>
-          <button type="button" className="btn btn-link" onClick={() => setStep("choose")}>
+          <button type="button" className="btn btn-link footer-back" onClick={() => setStep("choose")}>
             Back
           </button>
           <button type="button" className="btn btn-primary" disabled={busy || !code.trim()} onClick={() => run(() => joinGuildWithInvite(code))}>
@@ -233,6 +294,7 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
       open
       onClose={closeModal}
       title={category ? "Create Category" : "Create Channel"}
+      className="modal-compact"
       footer={
         <>
           <button type="button" className="btn btn-link" onClick={closeModal}>
