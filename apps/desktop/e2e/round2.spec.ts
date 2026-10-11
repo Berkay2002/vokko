@@ -7,6 +7,14 @@ type Win = {
   __vokko: { request(m: string, p: string, b?: unknown): Promise<unknown>; gateway: { dispatch(t: string, d: unknown): void }; appStore: { getState(): { guilds: Record<string, { id: string; name: string }>; channels: Record<string, { id: string; name?: string; guild_id: string | null; last_message_id: string | null }>; readStates: Record<string, { last_message_id: string | null }> } } };
 };
 
+/** The mock READY has been applied: guild channels and users are in the store (evaluating right after goto races it). */
+async function storeReady(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const s = (window as unknown as Win).__vokko?.appStore.getState() as unknown as { channels: Record<string, { guild_id: string | null }>; users: Record<string, unknown> } | undefined;
+    return !!s && Object.values(s.channels).some(c => c.guild_id) && Object.keys(s.users).length > 1;
+  });
+}
+
 /** In-app navigation: a page reload re-seeds the mock backend and drops the session. */
 async function navigate(page: Page, to: string): Promise<void> {
   await page.evaluate(path => { history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, to);
@@ -27,6 +35,7 @@ test('start-of-DM intro sits directly above the first message and the column is 
 
 test('an empty DM shows the intro at the bottom of the list', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await storeReady(page);
   // create a DM with nova (no history)
   const id = await page.evaluate(async () => {
     const w = window as unknown as Win;
@@ -82,6 +91,8 @@ test('context menu Add Reaction submenu and View Reactions modal', async ({ page
   await openDm(page);
   await send(page, 'react to me through the menu');
   const m = message(page, 'react to me through the menu');
+  // a pending (unsent) message has no context menu
+  await expect(m).not.toHaveClass(/pending/);
   await m.click({ button: 'right', position: { x: 120, y: 12 } });
   await expect(page.getByRole('menuitem', { name: 'View Reactions' })).toHaveCount(0);
   await page.getByRole('menuitem', { name: 'Add Reaction' }).hover();
@@ -152,6 +163,7 @@ test('link embeds from the server render title, description, fields, colour bar 
 
 test('Shift+Escape marks the whole server read', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await storeReady(page);
   const ids = await page.evaluate(() => {
     const w = window as unknown as Win;
     const s = w.__vokko.appStore.getState();

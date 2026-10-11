@@ -2,6 +2,7 @@
 // so contract drift between the shell and the chat area is fixed in one file.
 import { useMemo } from 'react';
 import { useStore } from '../api/store';
+import { usePrefs } from '../ui';
 import type { Channel, Guild, GuildMember, ReadState, Relationship, Snowflake, User } from '../api/types';
 
 export { request, uploadAttachment, resolveUrl, ApiRequestError } from '../api/rest';
@@ -27,11 +28,28 @@ export function useMutualGuildsFromStore(userId: Snowflake | null | undefined): 
   return useStore(s => (userId ? s.guildOrder.filter(id => s.members[id]?.[userId]).map(id => s.guilds[id]!).filter(Boolean) : []));
 }
 
-/**
- * Message display density. The shell will own the appearance setting; until it lands every chat view is cozy. `ChatProvider` reads this
- * once and exposes it as `useChat().compact`, so adding compact layout later only touches CSS and MessageItem's header placement.
- */
-export function useCompactMode(): boolean { return false; }
+/** Message display density (Settings > Appearance). `ChatProvider` reads this once and exposes it as `useChat().compact`. */
+export function useCompactMode(): boolean { return usePrefs(s => s.messageDisplay === 'compact'); }
+
+/** The shell's message display toggles that change what chat renders (one selector each: a fresh object would loop the store hook). */
+export interface ChatDisplayPrefs {
+  showEmbeds: boolean;
+  showReactions: boolean;
+  /** Compact layout only: a small avatar in front of the name. */
+  showCompactAvatars: boolean;
+  roleColors: 'name' | 'dot' | 'none';
+  /** Streamer mode with "hide invite links" on: invite cards and invite links are not rendered. */
+  hideInvites: boolean;
+}
+export function useChatDisplayPrefs(): ChatDisplayPrefs {
+  return {
+    showEmbeds: usePrefs(s => s.showEmbeds),
+    showReactions: usePrefs(s => s.showReactions),
+    showCompactAvatars: usePrefs(s => s.showCompactAvatars),
+    roleColors: usePrefs(s => s.roleColors),
+    hideInvites: usePrefs(s => s.streamerMode && s.streamerHideInvites),
+  };
+}
 
 /** Channels of a guild, in position order (for #channel autocomplete and mention rendering). */
 export function useGuildChannels(guildId: Snowflake | null | undefined): Channel[] {
