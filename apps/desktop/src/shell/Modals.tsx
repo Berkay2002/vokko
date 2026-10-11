@@ -7,7 +7,9 @@ import { ChannelType, RelationshipType } from "../api/types";
 import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
 import { createChannel, createGroupDM, createGuild, createInvite, deleteGuild, joinGuildWithInvite, leaveGuild, type Invite } from "./actions";
+import { ChannelSettings } from "./ChannelSettings";
 import { FullProfileModal } from "./DmProfilePanel";
+import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
 import { closeModal, useModals } from "./modalStore";
 import { QuickSwitcher } from "./QuickSwitcher";
@@ -575,6 +577,16 @@ export function ModalHost() {
       return <ServerSettings key={id} guildId={spec.guildId} section={spec.section} />;
     case "editChannel":
       return <EditChannelModal key={id} channelId={spec.channelId} />;
+    case "channelSettings":
+      return <ChannelSettings key={id} channelId={spec.channelId} section={spec.section} />;
+    case "kickMember":
+      return <KickModal key={id} guildId={spec.guildId} userId={spec.userId} />;
+    case "banMember":
+      return <BanModal key={id} guildId={spec.guildId} userId={spec.userId} />;
+    case "timeoutMember":
+      return <TimeoutModal key={id} guildId={spec.guildId} userId={spec.userId} />;
+    case "nickname":
+      return <NicknameModal key={id} guildId={spec.guildId} userId={spec.userId} />;
     case "notificationSettings":
       return <NotificationSettingsModal key={id} scopeId={spec.scopeId} title={spec.title} guild={spec.guild} />;
     case "userSettings":

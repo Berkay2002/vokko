@@ -10,6 +10,11 @@ export type ModalSpec =
   | { type: "deleteChannel"; channelId: Snowflake }
   | { type: "serverSettings"; guildId: Snowflake; section?: string }
   | { type: "editChannel"; channelId: Snowflake }
+  | { type: "channelSettings"; channelId: Snowflake; section?: string }
+  | { type: "kickMember"; guildId: Snowflake; userId: Snowflake }
+  | { type: "banMember"; guildId: Snowflake; userId: Snowflake }
+  | { type: "timeoutMember"; guildId: Snowflake; userId: Snowflake }
+  | { type: "nickname"; guildId: Snowflake; userId: Snowflake }
   | { type: "notificationSettings"; scopeId: Snowflake; title: string; guild?: boolean }
   | { type: "createDM"; /** Users already in the conversation (the new group DM keeps them). */ base?: Snowflake[] }
   | { type: "quickSwitcher" }
