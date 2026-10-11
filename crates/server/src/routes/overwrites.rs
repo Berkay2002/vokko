@@ -160,6 +160,10 @@ pub async fn dispatch_visibility(state: &AppState, row: &ChannelRow, before: &[i
     state.hub.send(&lost, &GatewayEvent::ChannelDelete(channel.clone()));
     state.hub.send(&gained, &GatewayEvent::ChannelCreate(channel.clone()));
     state.hub.send(&kept, &GatewayEvent::ChannelUpdate(channel));
+    // Members in voice who lost VIEW_CHANNEL / CONNECT leave; SPEAK / STREAM changes reach LiveKit.
+    if let Some(guild_id) = row.guild_id {
+        crate::voice::state::recompute_guild(state, guild_id).await;
+    }
     Ok(())
 }
 

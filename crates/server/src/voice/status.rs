@@ -2,6 +2,7 @@
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::routing::put;
 use vokko_protocol::api::permissions::{MANAGE_CHANNELS, SET_VOICE_CHANNEL_STATUS};
 use vokko_protocol::api::{ChannelType, GatewayEvent, Snowflake, VOICE_STATUS_MAX_CHARS, VoiceChannelStatusUpdate, VoiceStatusRequest};
@@ -13,6 +14,11 @@ use crate::extract::{ApiJson, parse_id};
 use crate::state::AppState;
 use crate::store;
 
+/// Status changes per channel, shared by everyone who may set it: a burst of 10, then one per 6 s (each change is broadcast to
+/// every viewer of the channel, like a channel edit).
+pub const STATUS_BURST: f64 = 10.0;
+pub const STATUS_PER_SECOND: f64 = 1.0 / 6.0;
+
 pub fn routes() -> Router<AppState> {
     Router::new().route("/channels/{id}/voice-status", put(set_status))
 }
@@ -23,7 +29,7 @@ async fn set_status(
     AuthUser(user_id): AuthUser,
     Path(id): Path<String>,
     ApiJson(body): ApiJson<VoiceStatusRequest>,
-) -> ApiResult<StatusCode> {
+) -> ApiResult<Response> {
     let id = parse_id(&id).ok_or_else(ApiErr::unknown_channel)?;
     let access = channel_access(&state, user_id, id).await?;
     let Some(guild_id) = access.channel.guild_id.filter(|_| access.channel.channel_type() == ChannelType::GuildVoice) else {
@@ -38,9 +44,14 @@ async fn set_status(
     if status.as_ref().is_some_and(|text| text.chars().count() > VOICE_STATUS_MAX_CHARS) {
         return Err(ApiErr::invalid("status", &format!("Must be {VOICE_STATUS_MAX_CHARS} or fewer in length.")));
     }
+    if state.config.rate_limit.is_some()
+        && let Err(limited) = state.limiter.check_resource(id, "voice-status", STATUS_BURST, STATUS_PER_SECOND)
+    {
+        return Ok(crate::ratelimit::limited_response(limited));
+    }
     sqlx::query("UPDATE channels SET voice_status = $2 WHERE id = $1").bind(id).bind(&status).execute(&state.db).await?;
     announce(&state, id, guild_id, status).await;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 /// VOICE_CHANNEL_STATUS_UPDATE to everyone who can see the channel.

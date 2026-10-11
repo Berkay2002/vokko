@@ -55,6 +55,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(stickers::routes())
         .merge(crate::voice::status::routes())
         .merge(crate::voice::calls::routes())
+        .merge(crate::voice::stage::routes())
         .merge(threads::routes())
         .merge(forums::routes())
         .merge(follows::routes())

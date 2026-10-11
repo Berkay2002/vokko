@@ -510,6 +510,7 @@ async fn edit_member(
     let on_others = |ctx: &Ctx| -> ApiResult<()> { if own || ctx.can_act_on(target, &current_roles) { Ok(()) } else { Err(ApiErr::missing_permissions()) } };
 
     // Validate and authorise everything first so a rejected request changes nothing.
+    let voice = crate::voice::moderation::authorize(&state, user_id, &ctx.access, guild, target, &body).await?;
     let nick = match body.nick {
         Some(nick) => {
             let nick = clean_nick(nick)?;
@@ -583,6 +584,7 @@ async fn edit_member(
         }
         None => None,
     };
+    let permissions_changed = roles.is_some() || timeout.is_some();
 
     if let Some(nick) = nick {
         sqlx::query("UPDATE guild_members SET nick = $3 WHERE guild_id = $1 AND user_id = $2").bind(guild).bind(target).bind(nick).execute(&mut *tx).await?;
@@ -621,7 +623,9 @@ async fn edit_member(
                 .await?;
         }
     }
+    voice.store(&mut tx, guild, target).await?;
     tx.commit().await?;
+    voice.apply(&state, guild, target, permissions_changed).await?;
     Ok(Json(publish_member(&state, guild, target).await?))
 }
 
@@ -753,6 +757,10 @@ async fn update_role(
             .await?;
     let role = row.api();
     publish_role(&state, guild, role.clone(), false).await?;
+    // Cosmetic edits leave voice rights alone; recomputing holds the instance-wide admission lock.
+    if permissions != current.permissions as u64 {
+        crate::voice::state::recompute_guild(&state, guild).await;
+    }
     Ok(Json(role))
 }
 
@@ -830,5 +838,6 @@ async fn delete_role(State(state): State<AppState>, AuthUser(user_id): AuthUser,
             events::dispatch_channel(&state, &row, GatewayEvent::ChannelUpdate).await?;
         }
     }
+    crate::voice::state::recompute_guild(&state, guild).await;
     Ok(StatusCode::NO_CONTENT)
 }

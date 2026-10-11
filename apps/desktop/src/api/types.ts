@@ -54,7 +54,7 @@ export enum ChannelType {
   AnnouncementThread = 10, // thread in an announcement channel
   PublicThread = 11,
   PrivateThread = 12,
-  GuildStage = 13, // type stub until voice exists: can be created and listed, has no stage behaviour
+  GuildStage = 13, // stage channel: voice room with speakers and an audience, live while it has a StageInstance
   GuildForum = 15, // channel whose messages are posts (public threads)
 }
 export const isThreadType = (type: ChannelType): boolean => type === ChannelType.AnnouncementThread || type === ChannelType.PublicThread || type === ChannelType.PrivateThread;
@@ -188,6 +188,8 @@ export interface GuildMember {
   bio?: string | null;
   pronouns?: string | null;
   theme_colors?: [number, number] | null;
+  mute?: boolean; // server muted in voice (MUTE_MEMBERS); persists across rejoin; absent = false
+  deaf?: boolean; // server deafened in voice (DEAFEN_MEMBERS); absent = false
 }
 
 export interface Attachment {
@@ -565,6 +567,35 @@ export interface EditCallRequest {
   region: string | null; // PATCH /channels/{id}/call
 }
 
+// ---- Stage channels (type 13) ----
+
+export enum StagePrivacyLevel {
+  GuildOnly = 2, // the only level Vokko has (Discord's public level is deprecated)
+}
+export const STAGE_TOPIC_MAX_CHARS = 120;
+export interface StageInstance {
+  id: Snowflake;
+  guild_id: Snowflake;
+  channel_id: Snowflake; // one live stage per stage channel
+  topic: string; // 1-120 chars
+  privacy_level: StagePrivacyLevel;
+}
+export interface CreateStageInstanceRequest {
+  channel_id: Snowflake;
+  topic: string;
+  privacy_level?: StagePrivacyLevel;
+}
+export interface EditStageInstanceRequest {
+  topic?: string;
+  privacy_level?: StagePrivacyLevel;
+}
+// PATCH /guilds/{id}/voice-states/@me and /{user_id}; channel_id = the stage the user is in
+export interface EditVoiceStateRequest {
+  channel_id: Snowflake;
+  suppress?: boolean; // true = back to the audience; false = speaker (moderator, or inviting someone)
+  request_to_speak_timestamp?: ISO8601 | null; // @me only: raise (now) / lower (null) the hand; needs REQUEST_TO_SPEAK
+}
+
 // ---- REST payloads ----
 
 export interface AuthRequest {
@@ -870,6 +901,9 @@ export interface EditMemberRequest {
   nick?: string | null;
   roles?: Snowflake[]; // full replacement list (without @everyone)
   communication_disabled_until?: ISO8601 | null; // max 28 days ahead
+  mute?: boolean; // server mute, MUTE_MEMBERS
+  deaf?: boolean; // server deafen, DEAFEN_MEMBERS
+  channel_id?: Snowflake | null; // voice move (MOVE_MEMBERS in both channels) or null = disconnect; member must be in voice (400 40032)
 }
 export interface RoleRequest {
   name?: string;
@@ -1185,7 +1219,7 @@ export interface ReadyEvent {
   user: User;
   session_id: string;
   // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels); emojis absent = none
-  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[] })[];
+  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[] })[]; // stage_instances: live stages the user can see, omitted when none
   private_channels: Channel[]; // DMs and group DMs
   presences: Presence[];
   read_states: ReadState[];
@@ -1253,6 +1287,9 @@ export interface GatewayEvents {
   VOICE_SERVER_UPDATE: { guild_id: Snowflake | null; channel_id: Snowflake; endpoint: string; token: string; session_id: string }; // requesting session only; session_id = the VoiceState.session_id this token is for
   VOICE_CONNECT_FAILED: { guild_id: Snowflake | null; channel_id: Snowflake; reason: VoiceConnectFailure }; // Vokko-only, requesting session only
   VOICE_CHANNEL_STATUS_UPDATE: { id: Snowflake; guild_id: Snowflake; status: string | null }; // to viewers of the channel; cleared (null) when the channel empties
+  STAGE_INSTANCE_CREATE: StageInstance; // to viewers of the stage channel
+  STAGE_INSTANCE_UPDATE: StageInstance;
+  STAGE_INSTANCE_DELETE: StageInstance; // End Stage, or the last stage moderator left
   THREAD_CREATE: Channel; // newly_created: true for a fresh thread; also sent when the user gains access to a private thread
   THREAD_UPDATE: Channel; // archive/lock/rename/tags/pin changes, auto-archive
   THREAD_DELETE: { id: Snowflake; guild_id: Snowflake; parent_id: Snowflake; type: ChannelType };

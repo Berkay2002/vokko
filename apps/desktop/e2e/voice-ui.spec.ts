@@ -199,13 +199,13 @@ test('not connected and nobody there: the page offers Join Voice Channel, "Open 
   await expect(card(page).getByRole('status')).toHaveText('Voice Connected');
 });
 
-test('own row and tile menus: Mute / Deafen switches, no Message, server switches disabled', async ({ page }) => {
+test('own row and tile menus: Mute / Deafen switches, no Message, server switches for moderators', async ({ page }) => {
   await openGuild(page);
   await join(page);
   await page.locator('.voice-user', { hasText: 'Sam' }).click({ button: 'right' });
   await expect(page.getByRole('menuitem', { name: 'Profile', exact: true })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: 'Message', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('menuitemcheckbox', { name: 'Server Mute' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByRole('menuitemcheckbox', { name: 'Server Mute' })).not.toHaveAttribute('aria-disabled', 'true');
   await page.getByRole('menuitemcheckbox', { name: 'Deafen', exact: true }).click();
   await expect(userPanel(page).getByRole('button', { name: 'Undeafen' })).toBeVisible();
   // Soundboard is off while deafened.

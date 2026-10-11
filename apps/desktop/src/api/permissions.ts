@@ -36,6 +36,7 @@ export const PermBit = {
   MANAGE_WEBHOOKS: 29,
   MANAGE_GUILD_EXPRESSIONS: 30,
   USE_APPLICATION_COMMANDS: 31,
+  REQUEST_TO_SPEAK: 32,
   MANAGE_EVENTS: 33,
   MANAGE_THREADS: 34,
   CREATE_PUBLIC_THREADS: 35,
@@ -61,7 +62,7 @@ export const ALL_PERMISSIONS: bigint = (() => {
 })();
 
 /** Q4.4 fallback @everyone set, used when a guild has no @everyone role. */
-export const DEFAULT_EVERYONE: bigint = [0, 26, 10, 11, 14, 15, 16, 17, 18, 37, 6, 20, 21, 25, 9, 43, 44, 35, 36, 38, 49].reduce((acc, n) => acc | bit(n), 0n);
+export const DEFAULT_EVERYONE: bigint = [0, 26, 10, 11, 14, 15, 16, 17, 18, 37, 6, 20, 21, 25, 9, 43, 44, 35, 36, 38, 49, 32].reduce((acc, n) => acc | bit(n), 0n);
 
 export function parseBits(value: string | bigint | undefined | null): bigint {
   if (typeof value === "bigint") return value;

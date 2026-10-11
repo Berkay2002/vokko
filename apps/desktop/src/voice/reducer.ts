@@ -2,7 +2,7 @@
 // wraps this reducer and the engine (./engine.ts) turns model changes into op 4 frames and transport calls.
 // Wire contract: docs/api.md "Voice (V1)"; client plan: docs/design/voice.md §3.
 
-import type { Channel, Snowflake, VoiceConnectFailure, VoiceState } from "../api/types";
+import type { Channel, Snowflake, StageInstance, VoiceConnectFailure, VoiceState } from "../api/types";
 
 export type VoiceStatus = "idle" | "connecting" | "rtc_connecting" | "connected" | "reconnecting" | "disconnected";
 export type InputMode = "vad" | "ptt";
@@ -98,6 +98,8 @@ export interface VoiceModel {
   settings: VoiceSettings;
   /** Voice channel status text by channel id (Channel.status, VOICE_CHANNEL_STATUS_UPDATE); unset channels are absent. */
   channelStatus: Record<Snowflake, string>;
+  /** Live stages by stage channel id (READY / GUILD_CREATE `stage_instances`, STAGE_INSTANCE_*). */
+  stages: Record<Snowflake, StageInstance>;
 }
 
 export const initialVoiceModel: VoiceModel = {
@@ -123,12 +125,14 @@ export const initialVoiceModel: VoiceModel = {
   devices: { input: [], output: [], outputSelectable: false },
   settings: DEFAULT_SETTINGS,
   channelStatus: {},
+  stages: {},
 };
 
 interface GuildVoiceEntry {
   id: Snowflake;
   voice_states?: VoiceState[];
   channels?: Pick<Channel, "id" | "type" | "status">[];
+  stage_instances?: StageInstance[];
 }
 
 export type VoiceAction =
@@ -161,7 +165,9 @@ export type VoiceAction =
   | { type: "channelUpdate"; channel: Pick<Channel, "id" | "type" | "status"> }
   | { type: "channelDelete"; channelId: Snowflake }
   /** VOICE_CHANNEL_STATUS_UPDATE. */
-  | { type: "channelStatus"; channelId: Snowflake; status: string | null };
+  | { type: "channelStatus"; channelId: Snowflake; status: string | null }
+  /** STAGE_INSTANCE_CREATE / UPDATE (`ended: false`) and DELETE (`ended: true`). */
+  | { type: "stageInstance"; instance: StageInstance; ended: boolean };
 
 const isOwn = (model: VoiceModel, state: VoiceState) => model.meId !== null && state.user_id === model.meId;
 
@@ -218,6 +224,14 @@ function seedStatuses(map: Record<Snowflake, string>, channels: GuildVoiceEntry[
   return next;
 }
 
+/** Replaces the live stages of one guild. */
+function replaceGuildStages(stages: Record<Snowflake, StageInstance>, guildId: Snowflake, list: StageInstance[]): Record<Snowflake, StageInstance> {
+  const next: Record<Snowflake, StageInstance> = {};
+  for (const [id, stage] of Object.entries(stages)) if (stage.guild_id !== guildId) next[id] = stage;
+  for (const stage of list) next[stage.channel_id] = stage;
+  return next;
+}
+
 function onOwnState(model: VoiceModel, state: VoiceState): VoiceModel {
   if (state.channel_id === null) {
     const states = without(model.states, state.user_id);
@@ -255,19 +269,23 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
       const own = model.meId === action.meId ? model : { ...leaveLocally(model, null), status: "idle" as const };
       let channelStatus: Record<Snowflake, string> = {};
       for (const guild of action.guilds) channelStatus = seedStatuses(channelStatus, guild.channels);
-      return pruneSpeaking({ ...own, meId: action.meId, enabled: action.voiceEnabled, states, channelStatus });
+      let stages: Record<Snowflake, StageInstance> = {};
+      for (const guild of action.guilds) stages = replaceGuildStages(stages, guild.id, guild.stage_instances ?? []);
+      return pruneSpeaking({ ...own, meId: action.meId, enabled: action.voiceEnabled, states, channelStatus, stages });
     }
     case "guildCreate": {
       const next = {
         ...model,
         states: replaceGuildStates(model.states, action.guild.id, action.guild.voice_states ?? []),
         channelStatus: seedStatuses(model.channelStatus, action.guild.channels),
+        stages: replaceGuildStages(model.stages, action.guild.id, action.guild.stage_instances ?? []),
       };
       return pruneSpeaking(next);
     }
     case "guildDelete": {
       const states = replaceGuildStates(model.states, action.guildId, []);
-      const next = model.guildId === action.guildId ? leaveLocally({ ...model, states }, null) : { ...model, states };
+      const stages = replaceGuildStages(model.stages, action.guildId, []);
+      const next = model.guildId === action.guildId ? leaveLocally({ ...model, states, stages }, null) : { ...model, states, stages };
       return pruneSpeaking(next);
     }
     case "voiceStateUpdate": {
@@ -278,7 +296,10 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
     }
     case "voiceServerUpdate": {
       // Only the requesting session gets this; ignore it if we gave up on voice meanwhile.
-      if (model.channelId === null || action.channelId !== model.channelId) return model;
+      if (model.channelId === null) return model;
+      // A moderator moved us (MOVE_MEMBERS): same voice session, a token for the new channel; we follow it.
+      const serverMove = action.channelId !== model.channelId && !model.pendingJoin && model.sessionId !== null && action.sessionId === model.sessionId;
+      if (action.channelId !== model.channelId && !serverMove) return model;
       if (model.server?.token === action.token && model.server.endpoint === action.endpoint) return model;
       // Unasked (no op 4 pending) and not for our session: stale, e.g. an answer to an op 4 we already gave up on.
       if (!model.pendingJoin && action.sessionId !== model.sessionId) return model;
@@ -289,6 +310,7 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
         serverSessionId: action.sessionId,
         status: reconnecting ? "reconnecting" : "connecting",
       };
+      if (serverMove) return pruneSpeaking({ ...next, pendingJoin: false, channelId: action.channelId, guildId: action.guildId, status: "connecting" });
       // A fresh token for the session we already have (reconnect): the op 4 is answered.
       if (action.sessionId === model.sessionId) return { ...next, pendingJoin: false };
       // Our own state may already be listed (e.g. in READY).
@@ -386,7 +408,13 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
     }
     case "channelDelete": {
       const channelStatus = without(model.channelStatus, action.channelId);
-      return channelStatus === model.channelStatus ? model : { ...model, channelStatus };
+      const stages = without(model.stages, action.channelId);
+      return channelStatus === model.channelStatus && stages === model.stages ? model : { ...model, channelStatus, stages };
+    }
+    case "stageInstance": {
+      const id = action.instance.channel_id;
+      const stages = action.ended ? without(model.stages, id) : { ...model.stages, [id]: action.instance };
+      return stages === model.stages ? model : { ...model, stages };
     }
     case "channelStatus": {
       const channelStatus = setStatus(model.channelStatus, action.channelId, action.status);
@@ -418,6 +446,14 @@ export function isSpeaking(model: Pick<VoiceModel, "speaking" | "channelId" | "s
 export function playbackVolume(model: Pick<VoiceModel, "volumes" | "localMutes">, userId: Snowflake): number {
   if (model.localMutes[userId]) return 0;
   return (model.volumes[userId] ?? 100) / 100;
+}
+
+/** Stage speakers (not suppressed) and audience of a stage channel, each in join order; raised hands first in the audience. */
+export function stageRoster(model: Pick<VoiceModel, "states">, channelId: Snowflake): { speakers: VoiceState[]; audience: VoiceState[] } {
+  const inside = channelOccupants(model, channelId);
+  const audience = inside.filter(s => s.suppress);
+  const raised = audience.filter(s => s.request_to_speak_timestamp).sort((a, b) => ((a.request_to_speak_timestamp ?? "") < (b.request_to_speak_timestamp ?? "") ? -1 : 1));
+  return { speakers: inside.filter(s => !s.suppress), audience: [...raised, ...audience.filter(s => !s.request_to_speak_timestamp)] };
 }
 
 /** Is our media connection in this channel up (or on its way)? */

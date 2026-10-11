@@ -24,6 +24,7 @@ import "./calls";
 import { parsePoll, requirePollPerm } from "./polls";
 import { addPoll, isPoll } from "./pollData";
 import "./invites";
+import "./stage";
 import "./community";
 import "./status";
 

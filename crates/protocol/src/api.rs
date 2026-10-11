@@ -643,6 +643,11 @@ pub struct GuildMember {
     pub pronouns: Option<String>,
     #[serde(default)]
     pub theme_colors: Option<[u32; 2]>,
+    /// Server muted / deafened in voice (MUTE_MEMBERS / DEAFEN_MEMBERS); persists across leave and rejoin. Absent = false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mute: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub deaf: bool,
     /// `member_flags` bitfield; omitted from the JSON while 0.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub flags: u32,
@@ -1209,6 +1214,55 @@ pub struct EditCallRequest {
     pub region: Option<String>,
 }
 
+numeric_enum!(
+    /// Discord's values; Vokko only has guild-only stages (1 = public is deprecated in Discord too).
+    StagePrivacyLevel { GuildOnly = 2 }
+);
+
+/// Max length of a stage topic.
+pub const STAGE_TOPIC_MAX_CHARS: usize = 120;
+
+/// A live stage in a stage channel (type 13); at most one per channel. Ends when the last stage moderator leaves or on DELETE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StageInstance {
+    pub id: Snowflake,
+    pub guild_id: Snowflake,
+    pub channel_id: Snowflake,
+    /// 1-120 characters.
+    pub topic: String,
+    pub privacy_level: StagePrivacyLevel,
+}
+
+/// `POST /stage-instances` (stage moderator in the channel).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateStageInstanceRequest {
+    pub channel_id: Snowflake,
+    pub topic: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub privacy_level: Option<StagePrivacyLevel>,
+}
+
+/// `PATCH /stage-instances/{channel_id}`; only the keys that are present change.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct EditStageInstanceRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub privacy_level: Option<StagePrivacyLevel>,
+}
+
+/// `PATCH /guilds/{id}/voice-states/@me` and `/{user_id}` (stage channels). `channel_id` must be the stage the user is in.
+/// `@me`: `request_to_speak_timestamp` (ISO, or `null` to lower the hand; needs REQUEST_TO_SPEAK) and `suppress` (`true` =
+/// back to the audience, `false` = become a speaker, which needs stage moderator). `{user_id}`: `suppress` only (moderator).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct EditVoiceStateRequest {
+    pub channel_id: Snowflake,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppress: Option<bool>,
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub request_to_speak_timestamp: Option<Option<String>>,
+}
+
 // ---- REST payloads ----
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1641,6 +1695,15 @@ pub struct EditMemberRequest {
     pub roles: Option<Vec<Snowflake>>,
     #[serde(default, deserialize_with = "double_option")]
     pub communication_disabled_until: Option<Option<String>>,
+    /// Server mute (MUTE_MEMBERS) / deafen (DEAFEN_MEMBERS); persisted, applied to a connected member at once.
+    #[serde(default)]
+    pub mute: Option<bool>,
+    #[serde(default)]
+    pub deaf: Option<bool>,
+    /// Voice move (MOVE_MEMBERS in the current and the target channel): a voice channel of the guild, or `null` to disconnect.
+    /// The member must be in voice (400 40032).
+    #[serde(default, deserialize_with = "double_option")]
+    pub channel_id: Option<Option<Snowflake>>,
 }
 
 /// `PATCH /guilds/{id}/members/@me`
@@ -2184,6 +2247,9 @@ pub struct GuildWithState {
     /// Who is in the guild's voice channels the receiver can see.
     #[serde(default)]
     pub voice_states: Vec<VoiceState>,
+    /// Live stages in stage channels the receiver can see; omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stage_instances: Vec<StageInstance>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2757,6 +2823,9 @@ pub enum GatewayEvent {
     VoiceServerUpdate(VoiceServerUpdate),
     VoiceConnectFailed(VoiceConnectFailed),
     VoiceChannelStatusUpdate(VoiceChannelStatusUpdate),
+    StageInstanceCreate(StageInstance),
+    StageInstanceUpdate(StageInstance),
+    StageInstanceDelete(StageInstance),
     ThreadCreate(Channel),
     ThreadUpdate(Channel),
     ThreadDelete(ThreadDelete),
@@ -2822,6 +2891,9 @@ impl GatewayEvent {
             Self::VoiceServerUpdate(_) => "VOICE_SERVER_UPDATE",
             Self::VoiceConnectFailed(_) => "VOICE_CONNECT_FAILED",
             Self::VoiceChannelStatusUpdate(_) => "VOICE_CHANNEL_STATUS_UPDATE",
+            Self::StageInstanceCreate(_) => "STAGE_INSTANCE_CREATE",
+            Self::StageInstanceUpdate(_) => "STAGE_INSTANCE_UPDATE",
+            Self::StageInstanceDelete(_) => "STAGE_INSTANCE_DELETE",
             Self::ThreadCreate(_) => "THREAD_CREATE",
             Self::ThreadUpdate(_) => "THREAD_UPDATE",
             Self::ThreadDelete(_) => "THREAD_DELETE",
@@ -2878,6 +2950,7 @@ impl GatewayEvent {
             Self::VoiceServerUpdate(value) => serde_json::to_value(value),
             Self::VoiceConnectFailed(value) => serde_json::to_value(value),
             Self::VoiceChannelStatusUpdate(value) => serde_json::to_value(value),
+            Self::StageInstanceCreate(value) | Self::StageInstanceUpdate(value) | Self::StageInstanceDelete(value) => serde_json::to_value(value),
             Self::ThreadCreate(value) | Self::ThreadUpdate(value) => serde_json::to_value(value),
             Self::ThreadDelete(value) => serde_json::to_value(value),
             Self::ThreadMemberUpdate(value) => serde_json::to_value(value),
@@ -3591,5 +3664,38 @@ mod tests {
             "id": "700", "type": "bot", "name": "Echo", "enabled": true, "user": null, "role_id": "301",
             "application": {"id": "700", "name": "Echo", "description": "", "icon": null, "bot": user()}
         }));
+    }
+
+    #[test]
+    fn stage_and_voice_moderation_shapes_match_types_ts() {
+        let instance = json!({"id": "9", "guild_id": "300", "channel_id": "201", "topic": "Town hall", "privacy_level": 2});
+        round_trip::<StageInstance>(instance.clone());
+        let parsed: StageInstance = serde_json::from_value(instance.clone()).expect("instance");
+        for (event, name) in [
+            (GatewayEvent::StageInstanceCreate(parsed.clone()), "STAGE_INSTANCE_CREATE"),
+            (GatewayEvent::StageInstanceUpdate(parsed.clone()), "STAGE_INSTANCE_UPDATE"),
+            (GatewayEvent::StageInstanceDelete(parsed.clone()), "STAGE_INSTANCE_DELETE"),
+        ] {
+            assert_eq!((event.name(), event.data()), (name, instance.clone()));
+        }
+        assert!(serde_json::from_value::<StageInstance>(json!({"id": "9", "guild_id": "1", "channel_id": "2", "topic": "x", "privacy_level": 1})).is_err());
+        let create: CreateStageInstanceRequest = serde_json::from_value(json!({"channel_id": "201", "topic": "hi"})).expect("create");
+        assert_eq!((create.channel_id, create.privacy_level), (Snowflake(201), None));
+        let hand: EditVoiceStateRequest = serde_json::from_value(json!({"channel_id": "201", "request_to_speak_timestamp": null})).expect("lower hand");
+        assert_eq!((hand.suppress, hand.request_to_speak_timestamp), (None, Some(None)));
+        let invite: EditVoiceStateRequest = serde_json::from_value(json!({"channel_id": "201", "suppress": false})).expect("invite");
+        assert_eq!((invite.suppress, invite.request_to_speak_timestamp), (Some(false), None));
+        let edit: EditMemberRequest = serde_json::from_value(json!({"mute": true, "deaf": false, "channel_id": null})).expect("voice edit");
+        assert_eq!((edit.mute, edit.deaf, edit.channel_id), (Some(true), Some(false), Some(None)));
+        let untouched: EditMemberRequest = serde_json::from_value(json!({"nick": "x"})).expect("nick only");
+        assert_eq!((untouched.mute, untouched.deaf, untouched.channel_id), (None, None, None));
+        let mut member = json!({
+            "user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null,
+            "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null
+        });
+        round_trip::<GuildMember>(member.clone());
+        member["mute"] = json!(true);
+        member["deaf"] = json!(true);
+        round_trip::<GuildMember>(member);
     }
 }

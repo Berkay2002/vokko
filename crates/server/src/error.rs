@@ -18,7 +18,7 @@ pub struct ApiErr {
 pub type ApiResult<T> = Result<T, ApiErr>;
 
 impl ApiErr {
-    fn new(status: StatusCode, code: u32, message: &str) -> Self {
+    pub(crate) fn new(status: StatusCode, code: u32, message: &str) -> Self {
         Self { status, body: ApiError { code, message: message.to_owned(), errors: None }, retry_after: None }
     }
 

@@ -214,12 +214,15 @@ struct MemberRow {
     member_pronouns: Option<String>,
     member_theme_primary: Option<i32>,
     member_theme_accent: Option<i32>,
+    member_mute: bool,
+    member_deaf: bool,
     flags: i32,
 }
 
 /// Member columns after [`USER_COLS`] (alias `m` = `guild_members`).
 const MEMBER_COLS: &str = "m.nick, m.joined_at, m.timeout_until, m.avatar_path AS member_avatar_path, m.banner_path AS member_banner_path, \
-     m.bio AS member_bio, m.pronouns AS member_pronouns, m.theme_primary AS member_theme_primary, m.theme_accent AS member_theme_accent, m.flags";
+     m.bio AS member_bio, m.pronouns AS member_pronouns, m.theme_primary AS member_theme_primary, m.theme_accent AS member_theme_accent, m.flags, \
+     m.mute AS member_mute, m.deaf AS member_deaf";
 
 impl MemberRow {
     fn into_api(self, state: &AppState, roles: Vec<Snowflake>) -> GuildMember {
@@ -236,6 +239,8 @@ impl MemberRow {
             bio: self.member_bio,
             pronouns: self.member_pronouns,
             theme_colors: theme_colors(self.member_theme_primary, self.member_theme_accent),
+            mute: self.member_mute,
+            deaf: self.member_deaf,
             flags: self.flags.max(0) as u32,
         }
     }

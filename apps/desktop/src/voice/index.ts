@@ -24,6 +24,7 @@ export {
 export { getVoice, useChannelVoiceStates, useIsSpeaking, useVoice, voiceStore } from "./store";
 export type { ConnectionQuality, InputMode, VoiceError, VoiceErrorReason, VoiceModel, VoiceSettings, VoiceStatus } from "./reducer";
 export { VoiceChannelBadge, VoiceChannelUsers } from "./VoiceChannelUsers";
+export { StageLivePill, StageView } from "./StageView";
 export { VoiceChannelRow } from "./VoiceChannelRow";
 export { VoiceChannelPage } from "./VoiceChannelPage";
 export { VoiceConnectionPanel } from "./VoiceConnectionPanel";
@@ -32,6 +33,6 @@ export { CameraPreviewModal, ChannelStatusModal, ScreenSharePickerModal } from "
 export { useDeviceMenus } from "./deviceMenus";
 export { useVoiceUi } from "./uiStore";
 export { PttSettings } from "./PttSettings";
-export { inputDeviceMenu, outputDeviceMenu, voiceUserMenuItems } from "./voiceMenus";
+export { inputDeviceMenu, outputDeviceMenu, voiceModerationItems, voiceUserMenuItems } from "./voiceMenus";
 
 if (typeof window !== "undefined") wireVoice();

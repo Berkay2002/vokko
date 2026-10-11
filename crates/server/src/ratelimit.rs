@@ -37,6 +37,8 @@ const CALL_RING_PER_SECOND: f64 = 0.2;
 pub enum Caller {
     User(i64),
     Ip(IpAddr),
+    /// A shared resource (e.g. a channel) limited across all callers.
+    Resource(i64),
 }
 
 struct Bucket {
@@ -134,6 +136,13 @@ impl RateLimiter {
         take(&mut buckets, (Caller::User(id), format!("key:{key}")), burst, per_second, Instant::now())
     }
 
+    /// One bucket per `(resource, kind)` shared by every caller (on top of the per-user route buckets).
+    pub fn check_resource(&self, resource: i64, kind: &str, burst: f64, per_second: f64) -> Result<(), Limited> {
+        let mut buckets = self.buckets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        take(&mut buckets, (Caller::Resource(resource), kind.to_owned()), burst, per_second, Instant::now())
+            .map_err(|retry_after| Limited { retry_after, global: false })
+    }
+
     /// The coarse per-address bucket that precedes a token lookup.
     fn check_address(&self, ip: IpAddr, limit: &RateLimit, now: Instant) -> Result<(), Limited> {
         let mut buckets = self.buckets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -153,7 +162,7 @@ impl RateLimiter {
     }
 }
 
-fn limited_response(limited: Limited) -> Response {
+pub fn limited_response(limited: Limited) -> Response {
     let body = RateLimitError { message: "You are being rate limited.".to_owned(), retry_after: limited.retry_after, global: limited.global };
     let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
     let seconds = limited.retry_after.ceil().max(1.0) as u64;

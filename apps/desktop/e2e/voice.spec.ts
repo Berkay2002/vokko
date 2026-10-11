@@ -110,3 +110,58 @@ test('moving between channels keeps one connection', async ({ page }) => {
   await expect(panel(page)).toContainText("Gaming / Sam's server");
   await expect(panel(page).getByRole('status')).toHaveText('Voice Connected');
 });
+
+test('server mute, move and disconnect from the user context menu', async ({ page }) => {
+  await openGuild(page);
+  await page.getByRole('button', { name: 'General voice channel' }).click();
+  await expect(panel(page).getByRole('status')).toHaveText('Voice Connected');
+
+  await userRow(page, 'General', 'Alice').click({ button: 'right' });
+  await page.getByRole('menuitemcheckbox', { name: 'Server Mute' }).click();
+  await expect(userRow(page, 'General', 'Alice').getByRole('img', { name: 'Server Muted' })).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await userRow(page, 'General', 'Bob').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Disconnect' }).click();
+  await expect(page.locator('.voice-user', { hasText: 'Bob' })).toHaveCount(0);
+
+  await userRow(page, 'General', 'Alice').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move To' }).hover();
+  await page.getByRole('menuitem', { name: 'Gaming' }).click();
+  await expect(userRow(page, 'Gaming', 'Alice')).toBeVisible();
+  await expect(userRow(page, 'General', 'Alice')).toHaveCount(0);
+  await expect(userRow(page, 'Gaming', 'Alice').getByRole('img', { name: 'Server Muted' })).toBeVisible();
+});
+
+test('stage channel: create, join the audience, start the stage, become a speaker, end it', async ({ page }) => {
+  await openGuild(page);
+  await page.getByRole('button', { name: "Sam's server", exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Create Channel' }).click();
+  await page.getByRole('radio', { name: /^Stage/ }).click();
+  await page.locator('#channel-name').fill('town-hall');
+  await page.getByRole('dialog').getByRole('button', { name: 'Create Channel' }).click();
+  await page.getByRole('link', { name: /town-hall/ }).click();
+
+  const stage = page.getByRole('region', { name: 'town-hall stage' });
+  await expect(stage).toBeVisible();
+  await expect(stage.getByText('Join the stage to start it.')).toBeVisible();
+  await stage.getByRole('button', { name: 'Join Stage' }).click();
+  await expect(stage.getByRole('list', { name: 'Audience' }).getByLabel('Sam')).toBeVisible();
+
+  await stage.getByLabel('Topic').fill('Friday AMA');
+  await stage.getByRole('button', { name: 'Start Stage' }).click();
+  await expect(stage.getByRole('heading', { name: 'Friday AMA' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /town-hall/ }).getByLabel('Stage Live: Friday AMA')).toBeVisible();
+
+  const stageId = await page.evaluate(() => (window as unknown as MockWin).__vokkoMock.channelIdByName('town-hall'));
+  await page.evaluate(id => (window as unknown as MockWin).__vokkoMock.voice('alice', id), stageId);
+  await expect(stage.getByRole('list', { name: 'Audience' }).getByLabel('Alice')).toBeVisible();
+
+  await stage.getByRole('button', { name: 'Become a Speaker' }).click();
+  await expect(stage.getByRole('list', { name: 'Speakers' }).getByLabel(/^Sam/)).toBeVisible();
+
+  await stage.getByRole('button', { name: 'End Stage' }).click();
+  await expect(stage.getByText('Not live')).toBeVisible();
+  await expect(page.getByRole('link', { name: /town-hall/ }).getByLabel(/Stage Live/)).toHaveCount(0);
+  await expect(stage.getByRole('list', { name: 'Audience' }).getByLabel(/^Sam/)).toBeVisible();
+});

@@ -68,7 +68,7 @@ export function joinRefusal(channel: Channel): VoiceErrorReason | null {
   if (!model.enabled) return "media_unavailable";
   // DM calls (src/calls): every recipient may join; the server checks blocks and the 10-person cap.
   if (channel.type === ChannelType.DM || channel.type === ChannelType.GroupDM) return null;
-  if (channel.type !== ChannelType.GuildVoice || !channel.guild_id) return "missing_permissions";
+  if ((channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStage) || !channel.guild_id) return "missing_permissions";
   const state = appStore.getState();
   const guild = state.guilds[channel.guild_id];
   const meId = state.me?.id;
@@ -79,7 +79,7 @@ export function joinRefusal(channel: Channel): VoiceErrorReason | null {
     const timedOut = !!member.communication_disabled_until && Date.parse(member.communication_disabled_until) > Date.now();
     return timedOut ? "timed_out" : "missing_permissions";
   }
-  if (isChannelFull(channel, model) && !hasBit(bits, Perm.MOVE_MEMBERS)) return "channel_full";
+  if (channel.type === ChannelType.GuildVoice && isChannelFull(channel, model) && !hasBit(bits, Perm.MOVE_MEMBERS)) return "channel_full";
   return null;
 }
 
@@ -572,6 +572,9 @@ export function wireVoice(): void {
   gateway.on("CHANNEL_CREATE", channel => dispatch({ type: "channelUpdate", channel }));
   gateway.on("CHANNEL_UPDATE", channel => dispatch({ type: "channelUpdate", channel }));
   gateway.on("CHANNEL_DELETE", channel => dispatch({ type: "channelDelete", channelId: channel.id }));
+  gateway.on("STAGE_INSTANCE_CREATE", instance => dispatch({ type: "stageInstance", instance, ended: false }));
+  gateway.on("STAGE_INSTANCE_UPDATE", instance => dispatch({ type: "stageInstance", instance, ended: false }));
+  gateway.on("STAGE_INSTANCE_DELETE", instance => dispatch({ type: "stageInstance", instance, ended: true }));
   // Logout or a rejected token: the gateway is gone for good, so is the call (a reconnecting gateway keeps media running).
   gateway.onStatus(status => {
     if (status !== "disconnected" || getVoice().channelId === null) return;

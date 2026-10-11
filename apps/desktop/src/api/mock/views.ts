@@ -8,7 +8,7 @@ import { flagsField } from "./memberFlags";
 import { memberProfileFields } from "./perks";
 import { guildEmojis } from "./emojis";
 import { pollEmbedsFor, pollFor } from "./pollData";
-import { voiceStatesFor } from "./voice";
+import { stageInstancesFor, voiceStatesFor } from "./voice";
 
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
   const guild = m.guild_id ? db.guilds.get(m.guild_id) : undefined;
@@ -98,6 +98,8 @@ export function membersOf(guildId: string): (GuildMember & { guild_id?: never })
     ...(m.communication_disabled_until ? { communication_disabled_until: m.communication_disabled_until } : {}),
     ...memberProfileFields(m),
     ...flagsField(guildId, id),
+    ...(m.mute ? { mute: true } : {}),
+    ...(m.deaf ? { deaf: true } : {}),
   }));
 }
 
@@ -115,7 +117,7 @@ export function guildPayload(guildId: string, viewerId: string): GatewayEvents["
   });
   const stickers = (db.stickers.get(guildId) ?? []).map(s => ({ ...s }));
   const emojis = guildEmojis(guildId);
-  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, voice_states: voiceStatesFor(guildId, viewerId) };
+  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, voice_states: voiceStatesFor(guildId, viewerId), stage_instances: stageInstancesFor(guildId, viewerId) };
 }
 
 export function guildIdsFor(viewerId: string): string[] {

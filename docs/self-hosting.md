@@ -72,6 +72,7 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_LIVEKIT_API_SECRET` | unset | Its secret. Only vokko-server holds it; it signs every voice token and verifies LiveKit's webhooks. |
 | `VOKKO_LIVEKIT_API_URL` | derived from `VOKKO_LIVEKIT_URL` (`wss` → `https`) | Where vokko-server reaches LiveKit's RoomService, e.g. `http://127.0.0.1:7880` when both run on one host. |
 | `VOKKO_VOICE_BITRATE_MAX` | `128000` | Highest voice channel bitrate in bps (8000-384000). New channels start at 64000. |
+| `VOKKO_VOICE_CONNECT_TIMEOUT_SECS` | `30` | How long a client may take to reach LiveKit after getting its voice token (5-600 s) before its voice state is dropped. Raise it when clients connect over slow TURN/TCP. |
 | `RUST_LOG` | `vokko_server=info,warn` | Log filter. |
 
 Compose-only variables (`deploy/.env.example`): `POSTGRES_PASSWORD`, `VOKKO_SERVER_LISTEN` (host publish address for the server, default `127.0.0.1:8710`), `VOKKO_SITE_ADDRESS`, `VOKKO_WEB_HTTP_PORT`, `VOKKO_WEB_HTTPS_PORT`.

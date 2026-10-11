@@ -11,6 +11,7 @@ import { applyOwnMemberPerks, dropTagOnLeave, memberProfileFields } from "./perk
 import { ID, route, str } from "./router";
 import { dropIntegration, isManagedRole } from "./apps";
 import { emit } from "./socket";
+import { memberVoiceEdit } from "./voice";
 
 const DAY_MS = 86_400_000;
 const MAX_TIMEOUT_MS = 28 * DAY_MS;
@@ -36,6 +37,8 @@ function memberJson(guild: MockGuild, userId: string): GuildMember {
     joined_at: record.joined_at,
     ...(record.communication_disabled_until ? { communication_disabled_until: record.communication_disabled_until } : {}),
     ...memberProfileFields(record),
+    ...(record.mute ? { mute: true } : {}),
+    ...(record.deaf ? { deaf: true } : {}),
   };
 }
 
@@ -124,6 +127,9 @@ function editMember(guildId: string, viewerId: string, targetId: string, body: R
     }
   }
 
+  // Server mute / deafen / move / disconnect (validated here, applied after the rest).
+  const voice = memberVoiceEdit(guildId, viewerId, targetId, body);
+
   const before = visibilityOf(guildId);
   if (next.nick !== undefined) record.nick = next.nick;
   if (next.roles) {
@@ -135,9 +141,11 @@ function editMember(guildId: string, viewerId: string, targetId: string, body: R
     if (next.until === null) delete record.communication_disabled_until;
     else record.communication_disabled_until = next.until;
   }
+  voice.store(record);
   const json = memberJson(guild, targetId);
   emit(guild.members.keys(), "GUILD_MEMBER_UPDATE", { guild_id: guildId, ...json });
   emitVisibilityChanges(guildId, before);
+  voice.apply(next.roles !== undefined || next.until !== undefined);
   return json;
 }
 

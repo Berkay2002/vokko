@@ -3,7 +3,7 @@ import { intToHex } from "../perks/catalog";
 import { NavLink, useLocation } from "react-router";
 import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Megaphone, MessagesSquare, Plus, Radio, Settings, UserPlus } from "lucide-react";
 import { channelMentionCount, isChannelUnread, useStore } from "../api/store";
-import { VoiceChannelRow } from "../voice";
+import { StageLivePill, VoiceChannelRow, VoiceChannelUsers } from "../voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
 import { Popout, Tooltip, useContextMenu } from "../ui";
 import { EventsQuickLink } from "../community";
@@ -36,6 +36,7 @@ const ChannelRow = memo(function ChannelRow({ channel, guild, selected }: { chan
   const menu = useContextMenu();
   const className = `channel-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}`;
   const items = () => channelContextItems(channel, guild);
+  const stage = channel.type === ChannelType.GuildStage;
 
   const icon = isPrivateChannel(channel, guild.id) ? (
     <Lock size={20} className="channel-icon" />
@@ -72,10 +73,11 @@ const ChannelRow = memo(function ChannelRow({ channel, guild, selected }: { chan
       <NavLink to={guildPath(guild.id, channel.id)} className={className} onContextMenu={e => menu.open(e, items())}>
         {icon}
         <span className="channel-name">{channel.name}</span>
+        {stage && <StageLivePill channelId={channel.id} />}
         {mentions > 0 ? <span className="count-badge">{mentions}</span> : null}
         {actions}
       </NavLink>
-      <ChannelThreads channel={channel} />
+      {stage ? <VoiceChannelUsers channel={channel} guildId={guild.id} /> : <ChannelThreads channel={channel} />}
     </li>
   );
 });

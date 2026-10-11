@@ -424,7 +424,7 @@ async fn restart_restores_states_from_livekit_without_leave_events() {
     // An unknown room and a participant without Vokko metadata are ignored.
     rooms.add_participant("v1", Participant { identity: w.carl_id.clone(), metadata: "{}".into(), ..Participant::default() });
     let (mut owner, _) = Client::identify(&w.address, &w.owner).await;
-    vokko_server::voice::restore(&w.app.state).await;
+    vokko_server::voice::restore(&w.app.state).await.expect("restore");
     let (_, ready) = Client::identify(&w.address, &w.carl).await;
     let states = ready["guilds"][0]["voice_states"].as_array().cloned().expect("voice_states");
     assert_eq!(states.len(), 1);
@@ -601,6 +601,7 @@ async fn a_reconnects_old_connection_leaving_never_ends_the_state() {
 async fn reconciliation_removes_orphaned_livekit_participants() {
     let rooms = FakeRoomService::new();
     let w = world_with(livekit, rooms.clone()).await;
+    vokko_server::voice::restore(&w.app.state).await.expect("restore");
     let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
     alice.voice(Some(&w.voice), false).await;
     alice.voice_answer().await;
@@ -677,4 +678,325 @@ async fn a_join_cannot_slip_in_while_its_channel_is_deleted() {
     let (name, answer) = alice.voice_answer().await;
     assert_eq!((name.as_str(), answer["reason"].as_str()), ("VOICE_CONNECT_FAILED", Some("missing_permissions")));
     assert!(w.app.state.voice.all().is_empty());
+}
+
+// ---- Voice follow-ups (docs/cloud/voice-followups.md, part A) ----
+
+impl World {
+    async fn channel_overwrite(&self, channel: &str, target: &str, kind: u8, deny: u64) {
+        let body = json!({"type": kind, "allow": "0", "deny": deny.to_string()});
+        let (status, body) = self.app.put_json(&format!("/channels/{channel}/permissions/{target}"), &self.owner, body).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    }
+
+    async fn create_channel(&self, name: &str, kind: u8) -> String {
+        let (status, created) = self.app.post(&format!("/guilds/{}/channels", self.guild), &self.owner, json!({"name": name, "type": kind})).await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        created["id"].as_str().expect("id").to_owned()
+    }
+
+    async fn edit_member(&self, token: &str, user: &str, body: Value) -> (StatusCode, Value) {
+        self.app.patch(&format!("/guilds/{}/members/{user}", self.guild), token, body).await
+    }
+
+    fn calls_with(&self, prefix: &str) -> Vec<String> {
+        self.rooms.calls().into_iter().filter(|call| call.starts_with(prefix)).collect()
+    }
+}
+
+/// Joins `channel`, returns (session_id, token claims).
+async fn join(client: &mut Client, channel: &str) -> (String, token::Claims) {
+    client.voice(Some(channel), false).await;
+    let (name, answer) = client.voice_answer().await;
+    assert_eq!(name, "VOICE_SERVER_UPDATE", "{answer}");
+    let claims = token::verify(SECRET, answer["token"].as_str().expect("token"), vokko_server::voice::unix_now()).expect("signed");
+    (answer["session_id"].as_str().expect("session").to_owned(), claims)
+}
+
+/// A restore that cannot reach LiveKit is retried with backoff, and until one succeeds reconciliation kicks nobody.
+#[tokio::test]
+async fn an_unreachable_livekit_at_start_is_retried_and_nobody_is_kicked_meanwhile() {
+    let rooms = FakeRoomService::new();
+    let w = world_with(
+        |config| {
+            livekit(config);
+            config.voice_restore_backoff = Duration::from_millis(30);
+        },
+        rooms.clone(),
+    )
+    .await;
+    let metadata = json!({"session_id": "live", "token": "n"}).to_string();
+    rooms.add_participant(&w.room(), Participant { sid: "PA_c".into(), identity: w.carl_id.clone(), metadata, tracks: Vec::new() });
+    rooms.fail_lists(1);
+    assert!(vokko_server::voice::restore(&w.app.state).await.is_err());
+    assert!(!w.app.state.voice.restored());
+    // LiveKit answers again, but the table was never rebuilt: carl looks like an orphan and must be left alone.
+    vokko_server::voice::reconcile(&w.app.state).await;
+    assert!(w.calls_with("RemoveParticipant").is_empty(), "{:?}", w.rooms.calls());
+
+    rooms.fail_lists(2);
+    let lists_before = w.calls_with("ListRooms").len();
+    tokio::time::timeout(Duration::from_secs(5), vokko_server::voice::restore_with_retry(&w.app.state)).await.expect("restore finishes");
+    assert_eq!(w.calls_with("ListRooms").len() - lists_before, 3, "two failures, then success");
+    assert!(w.app.state.voice.restored());
+    let carl = w.app.state.voice.get(w.carl_id.parse().expect("id")).expect("carl restored");
+    assert_eq!(carl.session_id, "live");
+    vokko_server::voice::reconcile(&w.app.state).await;
+    assert!(w.calls_with("RemoveParticipant").is_empty(), "a restored participant is not an orphan");
+}
+
+/// A token reissued (and connected) between reconciliation's LiveKit listing and its removal keeps the state.
+#[tokio::test]
+async fn a_token_reissued_during_reconciliation_keeps_its_state() {
+    let rooms = FakeRoomService::new();
+    let w = world_with(livekit, rooms.clone()).await;
+    let alice_id: i64 = w.alice_id.parse().expect("id");
+    let (mut owner, _) = Client::identify(&w.address, &w.owner).await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    let (session, _) = join(&mut alice, &w.voice).await;
+    owner.wait_for("VOICE_STATE_UPDATE").await;
+    let first = w.nonce(&w.alice_id);
+    assert_eq!(w.event("participant_joined", w.participant(&w.alice_id, &session, &first)).await, StatusCode::OK);
+
+    // LiveKit's listing (taken while alice reconnects) does not show her.
+    let release = rooms.hold_next_list();
+    let state = w.app.state.clone();
+    let reconciling = tokio::spawn(async move { vokko_server::voice::reconcile(&state).await });
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let (again, _) = join(&mut alice, &w.voice).await;
+    assert_eq!(again, session);
+    let second = w.nonce(&w.alice_id);
+    assert_ne!(second, first);
+    assert_eq!(w.event("participant_joined", w.participant(&w.alice_id, &session, &second)).await, StatusCode::OK);
+    release.send(()).expect("reconcile waits");
+    reconciling.await.expect("reconcile");
+    let entry = w.app.state.voice.get(alice_id).expect("the reissued binding survives");
+    assert_eq!((entry.token_nonce.as_str(), entry.connected), (second.as_str(), true));
+    assert!(owner.silent_for("VOICE_STATE_UPDATE", Duration::from_millis(300)).await);
+}
+
+/// Losing CONNECT or VIEW_CHANNEL (overwrite, role edit), or a timeout, ends the call and removes the participant; losing SPEAK
+/// only narrows the LiveKit grant.
+#[tokio::test]
+async fn permission_changes_evict_or_narrow_mid_call() {
+    use vokko_protocol::api::permissions::DEFAULT_EVERYONE;
+    let w = world().await;
+    let room = w.room();
+    let (mut owner, _) = Client::identify(&w.address, &w.owner).await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    let (mut carl, _) = Client::identify(&w.address, &w.carl).await;
+
+    // SPEAK denied by an overwrite: still in the call, microphone gone from the grant, suppress broadcast.
+    join(&mut alice, &w.voice).await;
+    owner.wait_for("VOICE_STATE_UPDATE").await;
+    w.overwrite(&w.alice_id, 1, SPEAK).await;
+    let narrowed = owner.wait_for("VOICE_STATE_UPDATE").await;
+    assert_eq!((narrowed["channel_id"].as_str(), narrowed["suppress"].as_bool()), (Some(w.voice.as_str()), Some(true)));
+    let update = format!("UpdateParticipant {room} {} sources=camera,screen_share,screen_share_audio subscribe=true hidden=false", w.alice_id);
+    assert!(w.rooms.calls().contains(&update), "{:?}", w.rooms.calls());
+    assert!(w.calls_with("RemoveParticipant").is_empty());
+    // CONNECT denied: out.
+    w.overwrite(&w.alice_id, 1, SPEAK | CONNECT).await;
+    assert!(owner.wait_for("VOICE_STATE_UPDATE").await["channel_id"].is_null());
+    assert!(w.rooms.calls().contains(&format!("RemoveParticipant {room} {}", w.alice_id)));
+    w.clear_overwrite(&w.alice_id).await;
+
+    // CONNECT only through a role: editing the role ends carl's call.
+    let (status, _) =
+        w.app.patch(&format!("/guilds/{}/roles/{}", w.guild, w.guild), &w.owner, json!({"permissions": (DEFAULT_EVERYONE & !CONNECT).to_string()})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, role) = w.app.post(&format!("/guilds/{}/roles", w.guild), &w.owner, json!({"name": "voice", "permissions": CONNECT.to_string()})).await;
+    let role = role["id"].as_str().expect("role").to_owned();
+    assert_eq!(w.edit_member(&w.owner, &w.carl_id, json!({"roles": [role.clone()]})).await.0, StatusCode::OK);
+    join(&mut carl, &w.voice).await;
+    owner.wait_for("VOICE_STATE_UPDATE").await;
+    let (status, _) = w.app.patch(&format!("/guilds/{}/roles/{role}", w.guild), &w.owner, json!({"permissions": "0"})).await;
+    assert_eq!(status, StatusCode::OK);
+    let gone = owner.wait_for("VOICE_STATE_UPDATE").await;
+    assert_eq!((gone["user_id"].as_str(), gone["channel_id"].is_null()), (Some(w.carl_id.as_str()), true));
+    assert!(w.rooms.calls().contains(&format!("RemoveParticipant {room} {}", w.carl_id)));
+
+    // A timeout ends the call too.
+    let (status, _) = w.app.patch(&format!("/guilds/{}/roles/{}", w.guild, w.guild), &w.owner, json!({"permissions": DEFAULT_EVERYONE.to_string()})).await;
+    assert_eq!(status, StatusCode::OK);
+    join(&mut alice, &w.voice).await;
+    owner.wait_for("VOICE_STATE_UPDATE").await;
+    let until = (time::OffsetDateTime::now_utc() + time::Duration::hours(1)).format(&time::format_description::well_known::Rfc3339).expect("format");
+    assert_eq!(w.edit_member(&w.owner, &w.alice_id, json!({"communication_disabled_until": until})).await.0, StatusCode::OK);
+    assert!(owner.wait_for("VOICE_STATE_UPDATE").await["channel_id"].is_null());
+    assert!(w.app.state.voice.all().is_empty());
+}
+
+#[tokio::test]
+async fn voice_status_is_rate_limited_per_channel() {
+    use vokko_server::config::RateLimit;
+    let w = world_with(
+        |config| {
+            livekit(config);
+            config.rate_limit =
+                Some(RateLimit { route_burst: 1000.0, route_per_second: 1000.0, global_burst: 1000.0, global_per_second: 1000.0, ..RateLimit::default() });
+        },
+        FakeRoomService::new(),
+    )
+    .await;
+    let path = format!("/channels/{}/voice-status", w.voice);
+    for round in 0..10 {
+        assert_eq!(w.app.put_json(&path, &w.owner, json!({"status": format!("s{round}")})).await.0, StatusCode::NO_CONTENT);
+    }
+    let (status, body) = w.app.put_json(&path, &w.owner, json!({"status": "one too many"})).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert!(body["retry_after"].as_f64().expect("retry_after") > 0.0);
+    // Another channel has its own bucket.
+    let other = w.create_channel("Lounge", 2).await;
+    assert_eq!(w.app.put_json(&format!("/channels/{other}/voice-status"), &w.owner, json!({"status": "x"})).await.0, StatusCode::NO_CONTENT);
+}
+
+/// Server mute / deafen through LiveKit permissions (persisted across rejoin), move with a fresh token, disconnect.
+#[tokio::test]
+async fn server_mute_deafen_move_and_disconnect() {
+    let rooms = FakeRoomService::new();
+    let w = world_with(livekit, rooms.clone()).await;
+    let room = w.room();
+    let (mut owner, _) = Client::identify(&w.address, &w.owner).await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    let (session, _) = join(&mut alice, &w.voice).await;
+    owner.wait_for("VOICE_STATE_UPDATE").await;
+    let tracks = vec![vokko_server::voice::livekit::TrackInfo { sid: "TR_mic".into(), source: "MICROPHONE".into(), muted: false }];
+    let metadata = json!({"session_id": session, "token": w.nonce(&w.alice_id)}).to_string();
+    rooms.add_participant(&room, Participant { sid: "PA_a".into(), identity: w.alice_id.clone(), metadata, tracks });
+
+    // Only MUTE_MEMBERS / DEAFEN_MEMBERS / MOVE_MEMBERS holders.
+    assert_eq!(w.edit_member(&w.carl, &w.alice_id, json!({"mute": true})).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(w.edit_member(&w.carl, &w.alice_id, json!({"deaf": true})).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(w.edit_member(&w.carl, &w.alice_id, json!({"channel_id": null})).await.0, StatusCode::FORBIDDEN);
+
+    let (status, member) = w.edit_member(&w.owner, &w.alice_id, json!({"mute": true})).await;
+    assert_eq!((status, member["mute"].as_bool()), (StatusCode::OK, Some(true)));
+    let muted = owner.wait_for("VOICE_STATE_UPDATE").await;
+    assert_eq!((muted["mute"].as_bool(), muted["deaf"].as_bool()), (Some(true), Some(false)));
+    let update = format!("UpdateParticipant {room} {} sources=camera,screen_share,screen_share_audio subscribe=true hidden=false", w.alice_id);
+    assert!(rooms.calls().contains(&update), "{:?}", rooms.calls());
+    assert!(rooms.calls().contains(&format!("MutePublishedTrack {room} {} TR_mic", w.alice_id)));
+    assert_eq!(owner.wait_for("GUILD_MEMBER_UPDATE").await["mute"], true);
+
+    let (status, _) = w.edit_member(&w.owner, &w.alice_id, json!({"deaf": true})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(owner.wait_for("VOICE_STATE_UPDATE").await["deaf"], true);
+    assert!(w.calls_with("UpdateParticipant").last().is_some_and(|call| call.contains("subscribe=false")));
+
+    // Persisted: a rejoin gets a token without the microphone and without subscribing.
+    alice.voice(None, false).await;
+    owner.wait_for("VOICE_STATE_UPDATE").await;
+    let (_, claims) = join(&mut alice, &w.voice).await;
+    let grant = claims.video.expect("grant");
+    assert!(!grant.can_publish_sources.contains(&"microphone".to_owned()) && !grant.can_subscribe);
+    let rejoined = owner.wait_for("VOICE_STATE_UPDATE").await;
+    assert_eq!((rejoined["mute"].as_bool(), rejoined["deaf"].as_bool()), (Some(true), Some(true)));
+    let (status, _) = w.edit_member(&w.owner, &w.alice_id, json!({"mute": false, "deaf": false})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(owner.wait_for("VOICE_STATE_UPDATE").await["mute"], false);
+    assert!(w.calls_with("UpdateParticipant").last().is_some_and(|call| call.contains("sources=microphone,") && call.contains("subscribe=true")));
+
+    // Move: same voice session, a fresh token for the new room on alice's session, the old room left.
+    let lounge = w.create_channel("Lounge", 2).await;
+    let session = w.app.state.voice.get(w.alice_id.parse().expect("id")).expect("state").session_id;
+    assert_eq!(w.edit_member(&w.owner, &w.carl_id, json!({"channel_id": lounge})).await.1["code"], 40032, "carl is not in voice");
+    let (status, _) = w.edit_member(&w.owner, &w.alice_id, json!({"channel_id": lounge})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (name, answer) = alice.voice_answer().await;
+    assert_eq!(
+        (name.as_str(), answer["channel_id"].as_str(), answer["session_id"].as_str()),
+        ("VOICE_SERVER_UPDATE", Some(lounge.as_str()), Some(session.as_str()))
+    );
+    let claims = token::verify(SECRET, answer["token"].as_str().expect("token"), vokko_server::voice::unix_now()).expect("signed");
+    assert_eq!(claims.video.and_then(|grant| grant.room), Some(format!("v{lounge}")));
+    let moved = owner.wait_for("VOICE_STATE_UPDATE").await;
+    assert_eq!((moved["channel_id"].as_str(), moved["session_id"].as_str()), (Some(lounge.as_str()), Some(session.as_str())));
+    assert!(rooms.calls().contains(&format!("RemoveParticipant {room} {}", w.alice_id)));
+    // Not into a channel she cannot connect to.
+    w.channel_overwrite(&w.voice, &w.alice_id, 1, CONNECT).await;
+    assert_eq!(w.edit_member(&w.owner, &w.alice_id, json!({"channel_id": w.voice})).await.0, StatusCode::FORBIDDEN);
+    // Disconnect.
+    let (status, _) = w.edit_member(&w.owner, &w.alice_id, json!({"channel_id": null})).await;
+    assert_eq!(status, StatusCode::OK);
+    let left = owner.wait_for("VOICE_STATE_UPDATE").await;
+    assert!(left["channel_id"].is_null(), "{left}");
+    assert!(w.app.state.voice.all().is_empty());
+}
+
+// ---- Stage channels (part B) ----
+
+#[tokio::test]
+async fn stage_audience_raise_hand_invite_and_end() {
+    let rooms = FakeRoomService::new();
+    let w = world_with(livekit, rooms.clone()).await;
+    let stage = w.create_channel("Town Hall", 13).await;
+    let stage_room = format!("v{stage}");
+    let (mut owner, _) = Client::identify(&w.address, &w.owner).await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    let (mut carl, _) = Client::identify(&w.address, &w.carl).await;
+
+    // Everyone joins as audience: no publish source, hidden.
+    let (_, claims) = join(&mut alice, &stage).await;
+    let grant = claims.video.expect("grant");
+    assert!(grant.can_publish_sources.is_empty() && !grant.can_publish && grant.hidden && grant.can_subscribe, "{grant:?}");
+    assert_eq!(owner.wait_for("VOICE_STATE_UPDATE").await["suppress"], true);
+
+    // Only stage moderators start a stage.
+    let create = json!({"channel_id": stage, "topic": "  Weekly sync  "});
+    assert_eq!(w.app.post("/stage-instances", &w.alice, create.clone()).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(w.app.post("/stage-instances", &w.owner, json!({"channel_id": stage, "topic": "x".repeat(121)})).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(w.app.post("/stage-instances", &w.owner, json!({"channel_id": w.voice, "topic": "no"})).await.0, StatusCode::BAD_REQUEST);
+    let (status, instance) = w.app.post("/stage-instances", &w.owner, create.clone()).await;
+    assert_eq!((status, instance["topic"].as_str(), instance["privacy_level"].as_u64()), (StatusCode::OK, Some("Weekly sync"), Some(2)));
+    assert_eq!(alice.wait_for("STAGE_INSTANCE_CREATE").await, instance);
+    assert_eq!(w.app.post("/stage-instances", &w.owner, create).await.1["code"], 150006);
+    assert_eq!(w.app.get(&format!("/stage-instances/{stage}"), &w.carl).await.1, instance);
+    let (_, ready) = Client::identify(&w.address, &w.carl).await;
+    assert_eq!(ready["guilds"][0]["stage_instances"], json!([instance]));
+    let (status, edited) = w.app.patch(&format!("/stage-instances/{stage}"), &w.owner, json!({"topic": "Renamed"})).await;
+    assert_eq!((status, edited["topic"].as_str()), (StatusCode::OK, Some("Renamed")));
+    assert_eq!(alice.wait_for("STAGE_INSTANCE_UPDATE").await["topic"], "Renamed");
+
+    // Raise hand (REQUEST_TO_SPEAK), but no self-promotion without moderator rights.
+    let me = format!("/guilds/{}/voice-states/@me", w.guild);
+    let raised = w.app.patch(&me, &w.alice, json!({"channel_id": stage, "request_to_speak_timestamp": "2020-01-01T00:00:00Z"})).await;
+    assert_eq!(raised.0, StatusCode::NO_CONTENT, "{}", raised.1);
+    let hand = owner.wait_for("VOICE_STATE_UPDATE").await;
+    assert!(hand["request_to_speak_timestamp"].as_str().is_some_and(|at| !at.starts_with("2020")), "the server's clock: {hand}");
+    assert_eq!(w.app.patch(&me, &w.alice, json!({"channel_id": stage, "suppress": false})).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(w.app.patch(&me, &w.carl, json!({"channel_id": stage, "request_to_speak_timestamp": null})).await.1["code"], 40032, "carl is not there");
+    let alice_path = format!("/guilds/{}/voice-states/{}", w.guild, w.alice_id);
+    assert_eq!(w.app.patch(&alice_path, &w.carl, json!({"channel_id": stage, "suppress": false})).await.0, StatusCode::FORBIDDEN);
+
+    // A moderator invites her to speak: microphone (and STREAM sources), visible, hand lowered.
+    assert_eq!(w.app.patch(&alice_path, &w.owner, json!({"channel_id": stage, "suppress": false})).await.0, StatusCode::NO_CONTENT);
+    let speaker = owner.wait_for("VOICE_STATE_UPDATE").await;
+    assert_eq!((speaker["suppress"].as_bool(), speaker["request_to_speak_timestamp"].is_null()), (Some(false), true));
+    let promoted =
+        format!("UpdateParticipant {stage_room} {} sources=microphone,camera,screen_share,screen_share_audio subscribe=true hidden=false", w.alice_id);
+    assert!(rooms.calls().contains(&promoted), "{:?}", rooms.calls());
+
+    // The owner (a moderator) joins and leaves: the last moderator gone ends the stage, speakers go back to the audience.
+    join(&mut owner, &stage).await;
+    owner.wait_for("VOICE_STATE_UPDATE").await;
+    owner.voice(None, false).await;
+    assert_eq!(carl.wait_for("STAGE_INSTANCE_DELETE").await["channel_id"].as_str(), Some(stage.as_str()));
+    loop {
+        let update = carl.wait_for("VOICE_STATE_UPDATE").await;
+        if update["user_id"] == w.alice_id.as_str() {
+            assert_eq!(update["suppress"], true);
+            break;
+        }
+    }
+    let demoted = format!("UpdateParticipant {stage_room} {} sources= subscribe=true hidden=true", w.alice_id);
+    assert!(rooms.calls().contains(&demoted), "{:?}", rooms.calls());
+    assert_eq!(w.app.get(&format!("/stage-instances/{stage}"), &w.alice).await.1["code"], 10067);
+
+    // End Stage from the menu: DELETE.
+    let (status, _) = w.app.post("/stage-instances", &w.owner, json!({"channel_id": stage, "topic": "Again"})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(w.app.delete(&format!("/stage-instances/{stage}"), &w.alice).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(w.app.delete(&format!("/stage-instances/{stage}"), &w.owner).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(carl.wait_for("STAGE_INSTANCE_DELETE").await["topic"], "Again");
 }

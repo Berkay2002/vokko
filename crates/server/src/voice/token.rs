@@ -10,6 +10,8 @@ use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use vokko_protocol::api::permissions::{SPEAK, STREAM};
 
+use super::livekit::Permission;
+
 /// How long a minted token stays usable for a first connect (LiveKit refreshes it for connected participants).
 pub const TOKEN_TTL_SECS: i64 = 10 * 60;
 
@@ -67,19 +69,40 @@ pub struct Claims {
 /// Publish/subscribe rights for a member with `permissions` in the channel: microphone with SPEAK, camera and screen
 /// share with STREAM. Self mute/deafen never change the token (client state only).
 pub fn media_grant(room: &str, permissions: u64) -> VideoGrant {
+    grant(room, &rights(permissions, Moderation::default()))
+}
+
+/// Server-side restrictions on top of the channel permissions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Moderation {
+    /// Server muted: no microphone.
+    pub mute: bool,
+    /// Server deafened: no microphone and no subscribing.
+    pub deaf: bool,
+    /// Stage audience: nothing to publish, and hidden from the room.
+    pub audience: bool,
+}
+
+/// What the SFU lets the participant do (token grant and `UpdateParticipant`).
+pub fn rights(permissions: u64, moderation: Moderation) -> Permission {
     let mut sources = Vec::new();
-    if permissions & SPEAK != 0 {
+    if permissions & SPEAK != 0 && !moderation.mute && !moderation.deaf && !moderation.audience {
         sources.push("microphone".to_owned());
     }
-    if permissions & STREAM != 0 {
+    if permissions & STREAM != 0 && !moderation.audience {
         sources.extend(["camera", "screen_share", "screen_share_audio"].map(str::to_owned));
     }
+    Permission { can_subscribe: !moderation.deaf, sources, hidden: moderation.audience }
+}
+
+pub fn grant(room: &str, rights: &Permission) -> VideoGrant {
     VideoGrant {
         room: Some(room.to_owned()),
         room_join: true,
-        can_subscribe: true,
-        can_publish: !sources.is_empty(),
-        can_publish_sources: sources,
+        can_subscribe: rights.can_subscribe,
+        can_publish: !rights.sources.is_empty(),
+        can_publish_sources: rights.sources.clone(),
+        hidden: rights.hidden,
         ..VideoGrant::default()
     }
 }
@@ -152,6 +175,18 @@ mod tests {
         let listener = media_grant("v1", VIEW_CHANNEL | CONNECT);
         assert!(listener.can_publish_sources.is_empty() && !listener.can_publish && listener.can_subscribe);
         assert_eq!(media_grant("v1", CONNECT | STREAM).can_publish_sources.first().map(String::as_str), Some("camera"));
+    }
+
+    #[test]
+    fn server_mute_deafen_and_stage_audience_narrow_the_grant() {
+        let all = SPEAK | STREAM;
+        let muted = rights(all, Moderation { mute: true, ..Moderation::default() });
+        assert_eq!((muted.sources.len(), muted.can_subscribe), (3, true), "camera/screen stay");
+        assert!(!muted.sources.contains(&"microphone".to_owned()));
+        let deaf = rights(all, Moderation { deaf: true, ..Moderation::default() });
+        assert!(!deaf.can_subscribe && !deaf.sources.contains(&"microphone".to_owned()));
+        let audience = grant("v1", &rights(all, Moderation { audience: true, ..Moderation::default() }));
+        assert!(audience.can_publish_sources.is_empty() && !audience.can_publish && audience.hidden && audience.can_subscribe);
     }
 
     #[test]

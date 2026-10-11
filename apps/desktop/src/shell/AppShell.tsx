@@ -21,7 +21,7 @@ import { ServerRail } from "./ServerRail";
 import { NativeMenuBridge } from "./NativeMenuBridge";
 import { TitleBar } from "./TitleBar";
 import { UserPanel } from "./UserPanel";
-import { toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
+import { StageView, toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
 import { inChatPanel, useShortcut } from "../keyboard";
 import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } from "../keyboard/navigation";
 import { markChannelRead, markGuildRead } from "./actions";
@@ -258,7 +258,7 @@ export function AppShell() {
                   {channel.type === ChannelType.GuildForum ? (
                     <ForumChannel key={channel.id} channel={channel} />
                   ) : channel.type === ChannelType.GuildStage ? (
-                    <div className="main-empty">Stage channels are not supported yet.</div>
+                    <StageView key={channel.id} channel={channel} />
                   ) : text ? (
                     <>
                       {!channel.guild_id && channelSlots.ChannelTop && <channelSlots.ChannelTop channel={channel} />}

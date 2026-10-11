@@ -397,7 +397,7 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
             {option(ChannelType.GuildVoice, <Volume2 size={16} />, "Voice", "Hang out together with voice, video, and screen share")}
             {option(ChannelType.GuildAnnouncement, <Megaphone size={16} />, "Announcement", "Important updates for people in and out of the server, which other servers can follow")}
             {option(ChannelType.GuildForum, <MessagesSquare size={16} />, "Forum", "Create a space for organized discussions")}
-            {option(ChannelType.GuildStage, <Radio size={16} />, "Stage", "Host events with speakers and an audience (not available yet)")}
+            {option(ChannelType.GuildStage, <Radio size={16} />, "Stage", "Host events with speakers and an audience")}
           </div>
         </>
       )}

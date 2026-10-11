@@ -47,8 +47,11 @@ pub struct Config {
     pub livekit: Option<LiveKitConfig>,
     /// Highest channel bitrate (`VOKKO_VOICE_BITRATE_MAX`, default 128000, at most 384000).
     pub voice_bitrate_max: u32,
-    /// A joined state without LiveKit's `participant_joined` within this window is dropped.
+    /// A joined state without LiveKit's `participant_joined` within this window of its token being issued is dropped
+    /// (`VOKKO_VOICE_CONNECT_TIMEOUT_SECS`, default 30: slow TURN/TCP connects).
     pub voice_connect_timeout: Duration,
+    /// First retry delay when LiveKit cannot be reached for the startup restore (doubles up to 60 s).
+    pub voice_restore_backoff: Duration,
     /// A voice state outlives its gateway session (or, after a restart, waits for its client) this long.
     pub voice_gateway_grace: Duration,
     pub voice_reconcile_interval: Duration,
@@ -94,6 +97,16 @@ impl LiveKitConfig {
 }
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:8710";
+/// Default of `VOKKO_VOICE_CONNECT_TIMEOUT_SECS`.
+pub const DEFAULT_VOICE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// `VOKKO_VOICE_CONNECT_TIMEOUT_SECS`: whole seconds, 5..=600.
+pub fn parse_connect_timeout(value: &str) -> Result<Duration, String> {
+    match value.trim().parse::<u64>() {
+        Ok(seconds) if (5..=600).contains(&seconds) => Ok(Duration::from_secs(seconds)),
+        _ => Err(format!("VOKKO_VOICE_CONNECT_TIMEOUT_SECS must be whole seconds between 5 and 600, got {value}")),
+    }
+}
 /// Default of `VOKKO_MAX_UPLOAD_MB`.
 pub const DEFAULT_MAX_UPLOAD_MB: usize = 25;
 /// Total size of one user's pending (not attached, not avatar/icon) uploads.
@@ -235,6 +248,9 @@ impl Config {
             }
             config.voice_bitrate_max = bitrate;
         }
+        if let Some(value) = env.get("VOKKO_VOICE_CONNECT_TIMEOUT_SECS") {
+            config.voice_connect_timeout = parse_connect_timeout(&value)?;
+        }
         Ok(config)
     }
 
@@ -266,7 +282,8 @@ impl Config {
             registration_open: true,
             livekit: None,
             voice_bitrate_max: VOICE_BITRATE_GUILD_MAX,
-            voice_connect_timeout: Duration::from_secs(15),
+            voice_connect_timeout: DEFAULT_VOICE_CONNECT_TIMEOUT,
+            voice_restore_backoff: Duration::from_secs(1),
             voice_gateway_grace: Duration::from_secs(60),
             voice_reconcile_interval: Duration::from_secs(60),
             call_ring_timeout: Duration::from_secs(vokko_protocol::api::CALL_RING_TIMEOUT_SECS),
@@ -291,6 +308,17 @@ fn parse_cors_origins(value: &str) -> Result<Option<Vec<String>>, String> {
 #[cfg(test)]
 mod tests {
     use super::parse_cors_origins;
+
+    #[test]
+    fn voice_connect_timeout_defaults_to_30_seconds_and_is_configurable() {
+        use std::time::Duration;
+        let config = super::Config::new(String::new(), String::new(), "/tmp".into(), String::new());
+        assert_eq!(config.voice_connect_timeout, Duration::from_secs(30));
+        assert_eq!(super::parse_connect_timeout(" 45 "), Ok(Duration::from_secs(45)));
+        for bad in ["0", "4", "601", "ten", ""] {
+            assert!(super::parse_connect_timeout(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn livekit_api_url_is_derived_from_the_signal_url() {

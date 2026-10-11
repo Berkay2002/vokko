@@ -14,6 +14,8 @@ pub type RoomFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, String>> + Se
 /// A published track as far as voice state cares.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 pub struct TrackInfo {
+    #[serde(default)]
+    pub sid: String,
     /// `MICROPHONE`, `CAMERA`, `SCREEN_SHARE`, `SCREEN_SHARE_AUDIO` (LiveKit's enum names).
     #[serde(default)]
     pub source: String,
@@ -70,6 +72,33 @@ impl Participant {
     pub fn screen_share(&self) -> bool {
         self.has("SCREEN_SHARE", false)
     }
+
+    /// Sid of the published microphone track, if any.
+    pub fn mic_track(&self) -> Option<&str> {
+        self.tracks.iter().find(|track| track.source.eq_ignore_ascii_case("MICROPHONE") && !track.sid.is_empty()).map(|track| track.sid.as_str())
+    }
+}
+
+/// What a participant may do, as LiveKit's `ParticipantPermission` (sources in the token's lowercase names).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Permission {
+    pub can_subscribe: bool,
+    pub sources: Vec<String>,
+    pub hidden: bool,
+}
+
+impl Permission {
+    fn to_json(&self) -> Value {
+        let sources: Vec<String> = self.sources.iter().map(|source| source.to_ascii_uppercase()).collect();
+        json!({
+            "can_subscribe": self.can_subscribe,
+            "can_publish": !sources.is_empty(),
+            "can_publish_sources": sources,
+            "can_publish_data": false,
+            "can_update_metadata": false,
+            "hidden": self.hidden,
+        })
+    }
 }
 
 /// The RoomService calls vokko-server makes. Errors are strings: callers log them and carry on (LiveKit is best effort,
@@ -78,6 +107,9 @@ pub trait RoomService: Send + Sync {
     fn list_rooms(&self) -> RoomFuture<'_, Vec<String>>;
     fn list_participants<'a>(&'a self, room: &'a str) -> RoomFuture<'a, Vec<Participant>>;
     fn remove_participant<'a>(&'a self, room: &'a str, identity: &'a str) -> RoomFuture<'a, ()>;
+    /// Replaces the participant's permissions (publish sources, subscribe, hidden) without a reconnect.
+    fn update_participant<'a>(&'a self, room: &'a str, identity: &'a str, permission: &'a Permission) -> RoomFuture<'a, ()>;
+    fn mute_published_track<'a>(&'a self, room: &'a str, identity: &'a str, track_sid: &'a str) -> RoomFuture<'a, ()>;
 }
 
 /// Voice disabled: nothing to talk to.
@@ -94,6 +126,22 @@ impl RoomService for NoRoomService {
 
     fn remove_participant<'a>(&'a self, _room: &'a str, _identity: &'a str) -> RoomFuture<'a, ()> {
         Box::pin(async { Ok(()) })
+    }
+
+    fn update_participant<'a>(&'a self, _room: &'a str, _identity: &'a str, _permission: &'a Permission) -> RoomFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn mute_published_track<'a>(&'a self, _room: &'a str, _identity: &'a str, _track_sid: &'a str) -> RoomFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+/// A participant that is not (or no longer) in the room counts as done.
+fn gone_is_fine(result: Result<Value, String>) -> Result<(), String> {
+    match result {
+        Err(error) if error.contains("404") || error.contains("not_found") => Ok(()),
+        other => other.map(|_| ()),
     }
 }
 
@@ -159,12 +207,20 @@ impl RoomService for HttpRoomService {
     }
 
     fn remove_participant<'a>(&'a self, room: &'a str, identity: &'a str) -> RoomFuture<'a, ()> {
+        Box::pin(async move { gone_is_fine(self.call("RemoveParticipant", admin(room), json!({"room": room, "identity": identity})).await) })
+    }
+
+    fn update_participant<'a>(&'a self, room: &'a str, identity: &'a str, permission: &'a Permission) -> RoomFuture<'a, ()> {
         Box::pin(async move {
-            match self.call("RemoveParticipant", admin(room), json!({"room": room, "identity": identity})).await {
-                // Already gone counts as done.
-                Err(error) if error.contains("404") || error.contains("not_found") => Ok(()),
-                other => other.map(|_| ()),
-            }
+            let body = json!({"room": room, "identity": identity, "permission": permission.to_json()});
+            gone_is_fine(self.call("UpdateParticipant", admin(room), body).await)
+        })
+    }
+
+    fn mute_published_track<'a>(&'a self, room: &'a str, identity: &'a str, track_sid: &'a str) -> RoomFuture<'a, ()> {
+        Box::pin(async move {
+            let body = json!({"room": room, "identity": identity, "track_sid": track_sid, "muted": true});
+            gone_is_fine(self.call("MutePublishedTrack", admin(room), body).await)
         })
     }
 }
@@ -174,6 +230,10 @@ impl RoomService for HttpRoomService {
 pub struct FakeRoomService {
     rooms: Mutex<Vec<(String, Vec<Participant>)>>,
     calls: Mutex<Vec<String>>,
+    /// `ListRooms` calls that fail before the fake answers again (LiveKit unreachable).
+    failing_lists: Mutex<u32>,
+    /// The next `ListParticipants` waits for this before answering (a race between the listing and later work).
+    held_list: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -193,15 +253,35 @@ impl FakeRoomService {
         }
     }
 
-    /// `RemoveParticipant room identity`, `ListParticipants room`, `ListRooms` in call order.
+    /// `RemoveParticipant room identity`, `ListParticipants room`, `ListRooms`, `UpdateParticipant room identity
+    /// sources=a,b subscribe=bool hidden=bool`, `MutePublishedTrack room identity sid` in call order.
     pub fn calls(&self) -> Vec<String> {
         lock(&self.calls).clone()
+    }
+
+    /// The next `count` `ListRooms` calls fail.
+    pub fn fail_lists(&self, count: u32) {
+        *lock(&self.failing_lists) = count;
+    }
+
+    /// Holds the next `ListParticipants` until the returned sender fires (or is dropped).
+    pub fn hold_next_list(&self) -> tokio::sync::oneshot::Sender<()> {
+        let (release, held) = tokio::sync::oneshot::channel();
+        *lock(&self.held_list) = Some(held);
+        release
     }
 }
 
 impl RoomService for FakeRoomService {
     fn list_rooms(&self) -> RoomFuture<'_, Vec<String>> {
         lock(&self.calls).push("ListRooms".to_owned());
+        {
+            let mut failing = lock(&self.failing_lists);
+            if *failing > 0 {
+                *failing -= 1;
+                return Box::pin(async { Err("LiveKit ListRooms: connection refused".to_owned()) });
+            }
+        }
         let names = lock(&self.rooms).iter().map(|(name, _)| name.clone()).collect();
         Box::pin(async move { Ok(names) })
     }
@@ -209,7 +289,13 @@ impl RoomService for FakeRoomService {
     fn list_participants<'a>(&'a self, room: &'a str) -> RoomFuture<'a, Vec<Participant>> {
         lock(&self.calls).push(format!("ListParticipants {room}"));
         let list = lock(&self.rooms).iter().find(|(name, _)| name == room).map(|(_, list)| list.clone()).unwrap_or_default();
-        Box::pin(async move { Ok(list) })
+        let held = lock(&self.held_list).take();
+        Box::pin(async move {
+            if let Some(held) = held {
+                let _ = held.await;
+            }
+            Ok(list)
+        })
     }
 
     fn remove_participant<'a>(&'a self, room: &'a str, identity: &'a str) -> RoomFuture<'a, ()> {
@@ -217,6 +303,21 @@ impl RoomService for FakeRoomService {
         if let Some((_, list)) = lock(&self.rooms).iter_mut().find(|(name, _)| name == room) {
             list.retain(|participant| participant.identity != identity);
         }
+        Box::pin(async { Ok(()) })
+    }
+
+    fn update_participant<'a>(&'a self, room: &'a str, identity: &'a str, permission: &'a Permission) -> RoomFuture<'a, ()> {
+        lock(&self.calls).push(format!(
+            "UpdateParticipant {room} {identity} sources={} subscribe={} hidden={}",
+            permission.sources.join(","),
+            permission.can_subscribe,
+            permission.hidden
+        ));
+        Box::pin(async { Ok(()) })
+    }
+
+    fn mute_published_track<'a>(&'a self, room: &'a str, identity: &'a str, track_sid: &'a str) -> RoomFuture<'a, ()> {
+        lock(&self.calls).push(format!("MutePublishedTrack {room} {identity} {track_sid}"));
         Box::pin(async { Ok(()) })
     }
 }
@@ -234,8 +335,20 @@ mod tests {
         .expect("participant");
         assert_eq!((participant.user_id(), participant.session_id().as_deref()), (Some(42), Some("abc")));
         assert!(!participant.mic_muted() && participant.screen_share() && !participant.camera());
-        let silent = Participant { tracks: vec![TrackInfo { source: "MICROPHONE".into(), muted: true }], ..Participant::default() };
+        assert_eq!(participant.mic_track(), Some("TR_1"));
+        let silent = Participant { tracks: vec![TrackInfo { sid: String::new(), source: "MICROPHONE".into(), muted: true }], ..Participant::default() };
         assert!(silent.mic_muted());
         assert_eq!(Participant { metadata: "not json".into(), ..Participant::default() }.session_id(), None);
+    }
+
+    #[test]
+    fn permissions_use_livekit_source_names() {
+        let permission = Permission { can_subscribe: false, sources: vec!["microphone".into(), "screen_share_audio".into()], hidden: true };
+        assert_eq!(
+            permission.to_json(),
+            json!({"can_subscribe": false, "can_publish": true, "can_publish_sources": ["MICROPHONE", "SCREEN_SHARE_AUDIO"], "can_publish_data": false,
+                   "can_update_metadata": false, "hidden": true})
+        );
+        assert_eq!(Permission::default().to_json()["can_publish"], false);
     }
 }

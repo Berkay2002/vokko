@@ -2,9 +2,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import { AudioLines, Bug, LayoutGrid, Lock, Monitor, MonitorUp, MonitorX, Music, PhoneOff, Signal, SignalHigh, SignalLow, SignalMedium, Upload, Video, VideoOff, X } from "lucide-react";
 import { dmName, useStore } from "../api/store";
 import { openModal } from "../shell/modalStore";
+import { ChannelType } from "../api/types";
 import { Popout, Tooltip, setPref, usePrefs } from "../ui";
 import { resolveAudio } from "./audioProfile";
-import { dismissVoiceError, leaveVoice } from "./engine";
+import { dismissVoiceError, leaveVoice, stopCamera, stopScreenShare } from "./engine";
 import { useMedia } from "./mediaStore";
 import { toggleCamera, toggleScreenShare } from "./videoControls";
 import type { ConnectionQuality, VoiceErrorReason, VoiceStatus } from "./reducer";
@@ -178,10 +179,19 @@ export function VoiceConnectionPanel() {
   const noiseSuppression = resolved.noiseSuppression || resolved.rnnoise;
   const cameraOn = useMedia(s => s.cameraOn);
   const screenOn = useMedia(s => s.screenOn);
+  // Stage audience: the server grant has no camera or screen sources, so the buttons would only fail.
+  const audience = useVoice(s => !!(s.meId && s.states[s.meId]?.suppress)) && channel?.type === ChannelType.GuildStage;
   const [qualityAnchor, setQualityAnchor] = useState<HTMLElement | null>(null);
   const [qualityOpen, setQualityOpen] = useState(false);
   const [boardAnchor, setBoardAnchor] = useState<HTMLElement | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
+
+  // Moved back to the audience: the grant no longer allows camera or screen, and their buttons are gone, so stop capturing.
+  useEffect(() => {
+    if (!audience) return;
+    if (cameraOn) void stopCamera();
+    if (screenOn) void stopScreenShare();
+  }, [audience, cameraOn, screenOn]);
 
   useEffect(() => {
     if (!error) return;
@@ -239,16 +249,20 @@ export function VoiceConnectionPanel() {
       </div>
       {inCall && (
         <div className="voice-panel-actions">
-          <Tooltip content={cameraOn ? "Turn Off Camera" : "Turn On Camera"} side="top">
-            <button type="button" className={`voice-panel-wide${cameraOn ? " active" : ""}`} aria-label={cameraOn ? "Turn Off Camera" : "Turn On Camera"} aria-pressed={cameraOn} onClick={toggleCamera}>
-              {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
-            </button>
-          </Tooltip>
-          <Tooltip content={screenOn ? "Stop Streaming" : "Share Your Screen"} side="top">
-            <button type="button" className={`voice-panel-wide${screenOn ? " active streaming" : ""}`} aria-label={screenOn ? "Stop Streaming" : "Share Your Screen"} aria-pressed={screenOn} onClick={toggleScreenShare}>
-              {screenOn ? <MonitorX size={20} /> : <MonitorUp size={20} />}
-            </button>
-          </Tooltip>
+          {!audience && (
+            <>
+              <Tooltip content={cameraOn ? "Turn Off Camera" : "Turn On Camera"} side="top">
+                <button type="button" className={`voice-panel-wide${cameraOn ? " active" : ""}`} aria-label={cameraOn ? "Turn Off Camera" : "Turn On Camera"} aria-pressed={cameraOn} onClick={toggleCamera}>
+                  {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
+                </button>
+              </Tooltip>
+              <Tooltip content={screenOn ? "Stop Streaming" : "Share Your Screen"} side="top">
+                <button type="button" className={`voice-panel-wide${screenOn ? " active streaming" : ""}`} aria-label={screenOn ? "Stop Streaming" : "Share Your Screen"} aria-pressed={screenOn} onClick={toggleScreenShare}>
+                  {screenOn ? <MonitorX size={20} /> : <MonitorUp size={20} />}
+                </button>
+              </Tooltip>
+            </>
+          )}
           <Tooltip content="Activities aren't available yet" side="top">
             <button type="button" className="voice-panel-wide" aria-label="Start An Activity" aria-disabled="true">
               <LayoutGrid size={20} />

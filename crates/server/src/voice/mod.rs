@@ -2,6 +2,8 @@
 //! LiveKit webhooks and reconciliation. Media never passes through vokko-server.
 pub mod calls;
 pub mod livekit;
+pub mod moderation;
+pub mod stage;
 pub mod state;
 pub mod status;
 pub mod token;
@@ -16,7 +18,7 @@ use crate::config::Config;
 use crate::error::{ApiErr, ApiResult};
 use livekit::{HttpRoomService, NoRoomService, RoomService};
 
-pub use state::{Voice, handle_command, reconcile, restore, spawn_tasks};
+pub use state::{Voice, handle_command, reconcile, restore, restore_with_retry, spawn_tasks};
 
 pub fn unix_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|elapsed| elapsed.as_secs() as i64).unwrap_or(0)

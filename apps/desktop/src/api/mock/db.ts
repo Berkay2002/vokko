@@ -77,7 +77,7 @@ export interface MockGuild {
   guild: Guild;
   /** Members who joined through a temporary invite (docs/api.md "Invites"); the mock keeps the flag but never removes them. */
   temporary?: Set<string>;
-  members: Map<string, Pick<GuildMember, "nick" | "roles" | "joined_at" | "communication_disabled_until" | "avatar" | "banner" | "bio" | "pronouns" | "theme_colors">>;
+  members: Map<string, Pick<GuildMember, "nick" | "roles" | "joined_at" | "communication_disabled_until" | "avatar" | "banner" | "bio" | "pronouns" | "theme_colors" | "mute" | "deaf">>;
 }
 
 export interface MockInvite {

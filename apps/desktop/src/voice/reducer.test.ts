@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { VoiceState } from "../api/types";
-import { channelOccupants, initialVoiceModel, isSpeaking, playbackVolume, voiceReducer, type VoiceAction, type VoiceModel } from "./reducer";
+import { channelOccupants, initialVoiceModel, isSpeaking, playbackVolume, stageRoster, voiceReducer, type VoiceAction, type VoiceModel } from "./reducer";
 
 const ME = "100";
 const ALICE = "200";
@@ -393,5 +393,44 @@ describe("voice reducer: voice channel status", () => {
     expect(m.channelStatus).toEqual({ [GENERAL]: "Back" });
     m = voiceReducer(m, { type: "channelDelete", channelId: GENERAL });
     expect(m.channelStatus).toEqual({});
+  });
+});
+
+describe("voice reducer: server-side move and stages", () => {
+  it("a VOICE_SERVER_UPDATE for our session in another channel (moderator move) is followed, not dropped", () => {
+    const moved = voiceReducer(joined(), server("t-moved", GAMING, "s-me-1"));
+    expect(moved).toMatchObject({ channelId: GAMING, sessionId: "s-me-1", server: { token: "t-moved" }, pendingJoin: false, status: "connecting" });
+    const after = voiceReducer(moved, update(vs(ME, GAMING, { session_id: "s-me-1" })));
+    expect(after.channelId).toBe(GAMING);
+    expect(after.error).toBeNull();
+    // Another session's token for another channel is still ignored.
+    expect(voiceReducer(joined(), server("t-x", GAMING, "s-other")).channelId).toBe(GENERAL);
+  });
+
+  it("tracks live stages from READY, STAGE_INSTANCE_* and channel / guild deletes", () => {
+    const stage = { id: "1", guild_id: GUILD, channel_id: "30", topic: "AMA", privacy_level: 2 as const };
+    let m = apply({ type: "ready", meId: ME, voiceEnabled: true, guilds: [{ id: GUILD, voice_states: [], stage_instances: [stage] }] });
+    expect(m.stages["30"]?.topic).toBe("AMA");
+    m = voiceReducer(m, { type: "stageInstance", instance: { ...stage, topic: "Renamed" }, ended: false });
+    expect(m.stages["30"]?.topic).toBe("Renamed");
+    m = voiceReducer(m, { type: "stageInstance", instance: stage, ended: true });
+    expect(m.stages["30"]).toBeUndefined();
+    m = voiceReducer(m, { type: "stageInstance", instance: stage, ended: false });
+    expect(voiceReducer(m, { type: "channelDelete", channelId: "30" }).stages).toEqual({});
+    expect(voiceReducer(m, { type: "guildDelete", guildId: GUILD }).stages).toEqual({});
+  });
+
+  it("stageRoster splits speakers from the audience, raised hands first in raise order", () => {
+    const m = apply(
+      ready([
+        vs(ALICE, "30", { suppress: false, connected_at: "2026-10-11T10:00:03.000Z" }),
+        vs(BOB, "30", { suppress: true, connected_at: "2026-10-11T10:00:01.000Z" }),
+        vs(ME, "30", { suppress: true, request_to_speak_timestamp: "2026-10-11T10:05:00.000Z", connected_at: "2026-10-11T10:00:02.000Z" }),
+        vs("400", "30", { suppress: true, request_to_speak_timestamp: "2026-10-11T10:04:00.000Z", connected_at: "2026-10-11T10:00:04.000Z" }),
+      ]),
+    );
+    const roster = stageRoster(m, "30");
+    expect(roster.speakers.map(s => s.user_id)).toEqual([ALICE]);
+    expect(roster.audience.map(s => s.user_id)).toEqual(["400", ME, BOB]);
   });
 });

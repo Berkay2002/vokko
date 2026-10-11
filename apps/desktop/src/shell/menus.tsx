@@ -15,7 +15,7 @@ import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
 import { openProfile } from "./ProfileCard";
 import { userAppsItems } from "../apps/menus";
-import { voiceUserMenuItems } from "../voice/voiceMenus";
+import { voiceModerationItems, voiceUserMenuItems } from "../voice/voiceMenus";
 import { getVoice } from "../voice/store";
 import { useVoiceUi } from "../voice/uiStore";
 
@@ -305,15 +305,8 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
     ...(mayBan ? [{ id: "ban", label: `Ban ${name}`, danger: true, onSelect: () => openModal({ type: "banMember", ...target }) } satisfies MenuItem] : []),
   ];
 
-  // Moderators with Mute/Deafen Members see the server-wide switches for people who are in a voice channel of this server.
-  const voiceState = getVoice().states[user.id];
-  const serverVoice: MenuItem[] =
-    guild && viewer && voiceState?.guild_id === guild.id
-      ? [
-          ...(viewerPerms(guild).can(Perm.MUTE_MEMBERS) ? [{ ...unavailable("server-mute", "Server Mute"), danger: true, checked: !!voiceState.mute } satisfies MenuItem] : []),
-          ...(viewerPerms(guild).can(Perm.DEAFEN_MEMBERS) ? [{ ...unavailable("server-deafen", "Server Deafen"), danger: true, checked: !!voiceState.deaf } satisfies MenuItem] : []),
-        ]
-      : [];
+  // Moderators see the voice switches (Server Mute / Deafen, Move To, Disconnect, stage speaker controls) for people in voice here.
+  const serverVoice: MenuItem[] = guild ? voiceModerationItems(user.id, guild.id) : [];
 
   return groups(
     [
