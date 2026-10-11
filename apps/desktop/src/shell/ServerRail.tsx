@@ -2,18 +2,19 @@ import { useMemo, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router";
 import { Compass, Plus } from "lucide-react";
 import logo from "../../assets/icon.svg";
-import { appStore, avatarUrl, channelMentionCount, dmMentionCount, guildUnread, isChannelUnread, useStore } from "../api/store";
+import { avatarUrl, channelMentionCount, dmMentionCount, guildUnread, isChannelUnread, useStore } from "../api/store";
 import { ChannelType, type Channel, type Guild } from "../api/types";
-import { Tooltip, useContextMenu, type MenuItem } from "../ui";
+import { Tooltip, useContextMenu } from "../ui";
 import { GuildIcon } from "./Avatar";
-import { markGuildRead } from "./actions";
 import { firstTextChannel } from "./channels";
+import { useIsMuted } from "./localState";
+import { guildContextItems } from "./menus";
 import { guildPath } from "./nav";
 import { openModal } from "./modalStore";
 
-function RailItem({ state, mentions, tooltip, children }: { state: "selected" | "unread" | "idle"; mentions?: number; tooltip: ReactNode; children: ReactNode }) {
+function RailItem({ state, mentions, tooltip, muted, children }: { state: "selected" | "unread" | "idle"; mentions?: number; tooltip: ReactNode; muted?: boolean; children: ReactNode }) {
   return (
-    <div className="rail-item" data-state={state}>
+    <div className={`rail-item${muted ? " muted" : ""}`} data-state={state}>
       <span className="rail-pill" />
       <Tooltip content={tooltip} side="right">
         {children}
@@ -31,25 +32,12 @@ function GuildRailItem({ guild }: { guild: Guild }) {
   const channels = useStore(s => Object.values(s.channels).filter(c => c.guild_id === guild.id));
   const menu = useContextMenu();
   const target = (lastChannel && channels.find(c => c.id === lastChannel)?.id) ?? firstTextChannel(channels)?.id;
-  const state = selected ? "selected" : info.unread ? "unread" : "idle";
-
-  const items: MenuItem[] = [
-    { id: "read", label: "Mark As Read", disabled: !info.unread, onSelect: () => void markGuildRead(guild.id) },
-    { type: "separator" },
-    { id: "invite", label: "Invite People", disabled: !target, onSelect: () => target && openModal({ type: "invite", channelId: target }) },
-    { id: "copy", label: "Copy Server ID", onSelect: () => void navigator.clipboard?.writeText(guild.id) },
-    { type: "separator" },
-    {
-      id: "leave",
-      label: appStore.getState().me?.id === guild.owner_id ? "Delete Server" : "Leave Server",
-      danger: true,
-      onSelect: () => openModal({ type: appStore.getState().me?.id === guild.owner_id ? "deleteServer" : "leaveServer", guildId: guild.id }),
-    },
-  ];
+  const muted = useIsMuted(guild.id);
+  const state = selected ? "selected" : info.unread && !muted ? "unread" : "idle";
 
   return (
-    <RailItem state={state} mentions={info.mentions} tooltip={guild.name}>
-      <NavLink to={guildPath(guild.id, target)} className="rail-tile rail-guild" aria-label={guild.name} onContextMenu={e => menu.open(e, items)}>
+    <RailItem state={state} mentions={info.mentions} tooltip={guild.name} muted={muted}>
+      <NavLink to={guildPath(guild.id, target)} className="rail-tile rail-guild" aria-label={guild.name} onContextMenu={e => menu.open(e, guildContextItems(guild))}>
         <GuildIcon guild={guild} size={40} />
       </NavLink>
     </RailItem>

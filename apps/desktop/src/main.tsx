@@ -18,6 +18,10 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/ui.css";
 import "./styles/shell.css";
+import "./styles/settings.css";
+import "./styles/menus.css";
+import "./styles/server-settings.css";
+import "./ui/prefs";
 
 bootstrap();
 

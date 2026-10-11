@@ -4,7 +4,9 @@ import { channelMentionCount, dmName, isChannelUnread, useStore } from "../api/s
 import { ChannelType, RelationshipType, type Channel } from "../api/types";
 import { Tooltip, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
-import { closeDirectMessage, markChannelRead } from "./actions";
+import { closeDirectMessage } from "./actions";
+import { useIsMuted } from "./localState";
+import { dmContextItems } from "./menus";
 import { openModal } from "./modalStore";
 
 function DmRow({ channel }: { channel: Channel }) {
@@ -13,6 +15,7 @@ function DmRow({ channel }: { channel: Channel }) {
   const unread = useStore(s => isChannelUnread(s, channel.id));
   const mentions = useStore(s => channelMentionCount(s, channel.id));
   const menu = useContextMenu();
+  const muted = useIsMuted(channel.id);
   const recipients = channel.recipients ?? [];
   const group = channel.type === ChannelType.GroupDM;
   const first = recipients[0];
@@ -21,15 +24,8 @@ function DmRow({ channel }: { channel: Channel }) {
     <li className="dm-row-wrap">
       <NavLink
         to={`/channels/@me/${channel.id}`}
-        className={`dm-row${selected ? " selected" : ""}${unread ? " unread" : ""}`}
-        onContextMenu={e =>
-          menu.open(e, [
-            { id: "read", label: "Mark As Read", disabled: !unread, onSelect: () => void markChannelRead(channel.id) },
-            { type: "separator" },
-            { id: "close", label: "Close DM", onSelect: () => void closeDirectMessage(channel.id) },
-            { id: "copy", label: "Copy Channel ID", onSelect: () => void navigator.clipboard?.writeText(channel.id) },
-          ])
-        }
+        className={`dm-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}`}
+        onContextMenu={e => menu.open(e, dmContextItems(channel, { anchor: e.currentTarget }))}
       >
         {group || !first ? (
           <span className="dm-group-avatar">
