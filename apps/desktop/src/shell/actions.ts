@@ -7,6 +7,7 @@ import { appStore, isChannelUnread, type AppState } from "../api/store";
 import { ChannelType, GatewayOp, type Channel, type Guild, type PresenceStatus, type Snowflake } from "../api/types";
 import { dmPath, go, guildPath } from "./nav";
 import { firstTextChannel } from "./channels";
+import type { ServerTemplate } from "./templates";
 
 function waitFor<T>(read: (s: AppState) => T | undefined, timeoutMs = 2500): Promise<T | undefined> {
   const now = read(appStore.getState());
@@ -25,9 +26,23 @@ function waitFor<T>(read: (s: AppState) => T | undefined, timeoutMs = 2500): Pro
   });
 }
 
-export async function createGuild(name: string, iconAttachmentId?: Snowflake): Promise<Guild> {
+/** Adds a template's channels to a freshly created guild (sequential: positions follow creation order). */
+async function seedTemplate(guildId: Snowflake, template: ServerTemplate): Promise<void> {
+  const channels = await request<Channel[]>("GET", `/guilds/${guildId}/channels`);
+  const category = (name: string) => channels.find(c => c.type === ChannelType.GuildCategory && c.name === name)?.id ?? null;
+  const make = (name: string, type: ChannelType, parent: Snowflake | null) => request<Channel>("POST", `/guilds/${guildId}/channels`, { name, type, ...(parent ? { parent_id: parent } : {}) });
+  for (const extra of template.categories ?? []) {
+    const parent = await make(extra.name, ChannelType.GuildCategory, null);
+    for (const name of extra.text) await make(name, ChannelType.GuildText, parent.id);
+  }
+  for (const name of template.text) await make(name, ChannelType.GuildText, category("Text Channels"));
+  for (const name of template.voice) await make(name, ChannelType.GuildVoice, category("Voice Channels"));
+}
+
+export async function createGuild(name: string, iconAttachmentId?: Snowflake, template?: ServerTemplate): Promise<Guild> {
   const guild = await request<Guild>("POST", "/guilds", { name, ...(iconAttachmentId ? { icon_attachment_id: iconAttachmentId } : {}) });
   await waitFor(s => s.guilds[guild.id]);
+  if (template) await seedTemplate(guild.id, template).catch(() => undefined);
   const channels = Object.values(appStore.getState().channels).filter(c => c.guild_id === guild.id);
   const target = firstTextChannel(channels);
   go(target ? guildPath(guild.id, target.id) : guildPath(guild.id));

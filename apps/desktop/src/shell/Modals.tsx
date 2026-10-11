@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Camera, Check, ChevronRight, Copy, Hash, Plus, Users, Volume2 } from "lucide-react";
+import { BookOpen, Camera, MessagesSquare, Check, ChevronRight, Copy, Gamepad2, GraduationCap, Hash, Heart, MapPin, Palette, Plus, Users, Volume2, type LucideIcon } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
@@ -7,8 +7,13 @@ import { ChannelType, RelationshipType } from "../api/types";
 import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
 import { createChannel, createGroupDM, createGuild, createInvite, deleteGuild, joinGuildWithInvite, leaveGuild, type Invite } from "./actions";
+import { FullProfileModal } from "./DmProfilePanel";
+import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
 import { closeModal, useModals } from "./modalStore";
 import { QuickSwitcher } from "./QuickSwitcher";
+import { ServerSettings } from "./ServerSettings";
+import { RadioGroup, SwitchRow, Toggle } from "./settings/controls";
+import { SERVER_TEMPLATES, type ServerTemplate } from "./templates";
 import { UserSettings } from "./UserSettings";
 
 function errorText(error: unknown): string {
@@ -20,9 +25,11 @@ function errorText(error: unknown): string {
   return "Something went wrong. Try again.";
 }
 
-function Confirm({ title, body, action, danger, onConfirm }: { title: string; body: ReactNode; action: string; danger?: boolean; onConfirm: () => Promise<void> }) {
+function Confirm({ title, body, action, danger, onConfirm, requireText }: { title: string; body: ReactNode; action: string; danger?: boolean; onConfirm: () => Promise<void>; /** Typed confirmation, e.g. the server name. */ requireText?: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+  const [mismatch, setMismatch] = useState(false);
   return (
     <Modal
       open
@@ -38,6 +45,10 @@ function Confirm({ title, body, action, danger, onConfirm }: { title: string; bo
             className={`btn ${danger ? "btn-danger" : "btn-primary"}`}
             disabled={busy}
             onClick={() => {
+              if (requireText !== undefined && typed.trim() !== requireText) {
+                setMismatch(true);
+                return;
+              }
               setBusy(true);
               onConfirm()
                 .then(closeModal)
@@ -53,13 +64,32 @@ function Confirm({ title, body, action, danger, onConfirm }: { title: string; bo
       }
     >
       <p className="modal-text">{body}</p>
+      {requireText !== undefined && (
+        <>
+          <label className={`field-label${mismatch ? " error" : ""}`} htmlFor="confirm-text">
+            Enter server name
+          </label>
+          <input id="confirm-text" className="input" value={typed} autoFocus onChange={e => (setTyped(e.target.value), setMismatch(false))} />
+          {mismatch && <p className="field-error">You didn&apos;t enter the server name correctly</p>}
+        </>
+      )}
       {error && <p className="field-error">{error}</p>}
     </Modal>
   );
 }
 
+const TEMPLATE_ICONS: Record<string, LucideIcon> = {
+  gaming: Gamepad2,
+  "school-club": GraduationCap,
+  "study-group": BookOpen,
+  friends: Heart,
+  creators: Palette,
+  community: MapPin,
+};
+
 function CreateServer() {
   const [step, setStep] = useState<"choose" | "purpose" | "customize" | "join">("choose");
+  const [template, setTemplate] = useState<ServerTemplate | undefined>(undefined);
   const me = useStore(s => s.me);
   const uploadChannel = useStore(s => s.privateChannels[0] ?? Object.values(s.channels).find(c => c.guild_id)?.id);
   const [name, setName] = useState(me ? `${me.global_name ?? me.username}'s server` : "");
@@ -99,13 +129,41 @@ function CreateServer() {
     return (
       <Modal open onClose={closeModal} title="Create Your Server" className="modal-create-server">
         <p className="modal-text center">Your server is where you and your friends hang out. Make yours and start talking.</p>
-        <button type="button" className="choice-row" onClick={() => setStep("purpose")}>
+        <button
+          type="button"
+          className="choice-row"
+          onClick={() => {
+            setTemplate(undefined);
+            setStep("purpose");
+          }}
+        >
           <span className="choice-icon">
             <Plus size={20} />
           </span>
           <span>Create My Own</span>
           <ChevronRight size={20} />
         </button>
+        <div className="modal-subheading">Start from a template</div>
+        {SERVER_TEMPLATES.map(t => {
+          const Icon = TEMPLATE_ICONS[t.id] ?? Hash;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              className="choice-row"
+              onClick={() => {
+                setTemplate(t);
+                setStep("customize");
+              }}
+            >
+              <span className="choice-icon">
+                <Icon size={20} />
+              </span>
+              <span>{t.label}</span>
+              <ChevronRight size={20} />
+            </button>
+          );
+        })}
         <div className="modal-subheading">Have an invite already?</div>
         <button type="button" className="btn btn-secondary btn-wide" onClick={() => setStep("join")}>
           Join a Server
@@ -156,10 +214,10 @@ function CreateServer() {
         title="Customize Your Server"
         footer={
           <>
-            <button type="button" className="btn btn-link footer-back" onClick={() => setStep("purpose")}>
+            <button type="button" className="btn btn-link footer-back" onClick={() => setStep(template ? "choose" : "purpose")}>
               Back
             </button>
-            <button type="button" className="btn btn-primary" disabled={busy || uploading || name.trim().length < 2} onClick={() => run(() => createGuild(name.trim(), icon?.id))}>
+            <button type="button" className="btn btn-primary" disabled={busy || uploading || name.trim().length < 2} onClick={() => run(() => createGuild(name.trim(), icon?.id, template))}>
               Create
             </button>
           </>
@@ -177,7 +235,7 @@ function CreateServer() {
         <label className="field-label" htmlFor="server-name">
           Server name <span className="required">*</span>
         </label>
-        <input id="server-name" className="input" value={name} maxLength={100} autoFocus onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && name.trim().length >= 2 && run(() => createGuild(name.trim(), icon?.id))} />
+        <input id="server-name" className="input" value={name} maxLength={100} autoFocus onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && name.trim().length >= 2 && run(() => createGuild(name.trim(), icon?.id, template))} />
         {error && <p className="field-error">{error}</p>}
       </Modal>
     );
@@ -279,8 +337,17 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
         setBusy(false);
       });
   };
-  const option = (value: ChannelType, icon: ReactNode, label: string, description: string) => (
-    <button key={value} type="button" role="radio" aria-checked={type === value} className={`radio-row${type === value ? " selected" : ""}`} onClick={() => setType(value)}>
+  const option = (value: ChannelType, icon: ReactNode, label: string, description: string, disabled?: boolean) => (
+    <button
+      key={`${value}-${label}`}
+      type="button"
+      role="radio"
+      aria-checked={!disabled && type === value}
+      aria-disabled={disabled || undefined}
+      title={disabled ? "Not available yet" : undefined}
+      className={`radio-row${!disabled && type === value ? " selected" : ""}${disabled ? " disabled" : ""}`}
+      onClick={() => !disabled && setType(value)}
+    >
       <span className="radio-dot" />
       <span className="radio-text">
         <span className="radio-label">
@@ -315,6 +382,7 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
           <div role="radiogroup" className="radio-group">
             {option(ChannelType.GuildText, <Hash size={16} />, "Text", "Send messages, images, GIFs, emoji, opinions, and puns")}
             {option(ChannelType.GuildVoice, <Volume2 size={16} />, "Voice", "Hang out together with voice, video, and screen share")}
+            {option(ChannelType.GuildText, <MessagesSquare size={16} />, "Forum", "Create a space for organized discussions", true)}
           </div>
         </>
       )}
@@ -325,23 +393,104 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
         {!category && (type === ChannelType.GuildVoice ? <Volume2 size={16} /> : <Hash size={16} />)}
         <input id="channel-name" className="input" value={name} maxLength={100} autoFocus placeholder={category ? "New Category" : "new-channel"} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
       </div>
+      <div className="switch-row private-row" title="Not available yet">
+        <div className="switch-row-text">
+          <div className="switch-row-label">{category ? "Private Category" : "Private Channel"}</div>
+          <div className="switch-row-note">Only selected members and roles will be able to view this {category ? "category" : "channel"}.</div>
+        </div>
+        <Toggle checked={false} onChange={() => undefined} disabled label="Private" />
+      </div>
       {error && <p className="field-error">{error}</p>}
     </Modal>
   );
 }
 
-function CreateDM() {
-  const friends = useStore(s => Object.values(s.relationships).filter(r => r.type === RelationshipType.Friend));
-  const [selected, setSelected] = useState<string[]>([]);
-  const [query, setQuery] = useState("");
+function EditChannelModal({ channelId }: { channelId: string }) {
+  const channel = useStore(s => s.channels[channelId]);
+  const category = channel?.type === ChannelType.GuildCategory;
+  const [name, setName] = useState(channel?.name ?? "");
+  const [topic, setTopic] = useState(channel?.topic ?? "");
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const shown = friends.filter(r => !query || displayName(r.user).toLowerCase().includes(query.toLowerCase()) || r.user.username.includes(query.toLowerCase()));
-  const toggle = (id: string) => setSelected(list => (list.includes(id) ? list.filter(x => x !== id) : list.length < 9 ? [...list, id] : list));
+  if (!channel) return null;
+  const slug = category ? name : name.toLowerCase().replace(/\s+/g, "-");
+  const save = () => {
+    if (!slug.trim()) return;
+    setBusy(true);
+    request<typeof channel>("PATCH", `/channels/${channelId}`, { name: slug.trim(), ...(category ? {} : { topic: topic.trim() || null }) })
+      .then(updated => {
+        appStore.getState().upsertChannel(updated);
+        closeModal();
+      })
+      .catch(e => {
+        setError(errorText(e));
+        setBusy(false);
+      });
+  };
   return (
     <Modal
       open
       onClose={closeModal}
-      title="Select Friends"
+      title={category ? "Edit Category" : "Edit Channel"}
+      className="modal-compact"
+      footer={
+        <>
+          <button type="button" className="btn btn-secondary" onClick={closeModal}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" disabled={busy || !slug.trim()} onClick={save}>
+            Save Changes
+          </button>
+        </>
+      }
+    >
+      <label className="field-label" htmlFor="edit-channel-name">
+        {category ? "Category name" : "Channel name"}
+      </label>
+      <input id="edit-channel-name" className="input" value={name} maxLength={100} autoFocus onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && save()} />
+      {!category && (
+        <>
+          <label className="field-label" htmlFor="edit-channel-topic" style={{ marginTop: 16 }}>
+            Channel topic
+          </label>
+          <textarea id="edit-channel-topic" className="input textarea" rows={3} maxLength={1024} value={topic} placeholder="Let everyone know how to use this channel!" onChange={e => setTopic(e.target.value)} />
+        </>
+      )}
+      {error && <p className="field-error">{error}</p>}
+    </Modal>
+  );
+}
+
+function NotificationSettingsModal({ scopeId, title, guild }: { scopeId: string; title: string; guild?: boolean }) {
+  const level = useLocalState(s => s.notify[scopeId] ?? "default");
+  const everyone = useLocalState(s => !!s.suppressEveryone[scopeId]);
+  const roles = useLocalState(s => !!s.suppressRoles[scopeId]);
+  const options = (Object.keys(NOTIFY_LABELS) as Exclude<NotifyLevel, "default">[]).map(value => ({ value, label: NOTIFY_LABELS[value] }));
+  return (
+    <Modal open onClose={closeModal} title="Notification Settings" className="modal-compact">
+      <p className="modal-subtle">{title}</p>
+      <div className="field-label">Server notification settings</div>
+      <RadioGroup<NotifyLevel> name="Notification level" value={level === "default" && guild ? "all" : level} options={guild ? options : [{ value: "default", label: "Use Server Default" }, ...options]} onChange={next => setNotifyLevel(scopeId, next)} />
+      <SwitchRow label="Suppress @everyone and @here" checked={everyone} onChange={() => toggleFlag("suppressEveryone", scopeId)} />
+      <SwitchRow label="Suppress All Role @mentions" checked={roles} onChange={() => toggleFlag("suppressRoles", scopeId)} />
+      <p className="modal-subtle">These choices are saved on this device.</p>
+    </Modal>
+  );
+}
+
+function CreateDM({ base = [] }: { base?: string[] }) {
+  const friends = useStore(s => Object.values(s.relationships).filter(r => r.type === RelationshipType.Friend && !base.includes(r.id)));
+  const [selected, setSelected] = useState<string[]>([]);
+  const room = 9 - base.length;
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+  const shown = friends.filter(r => !query || displayName(r.user).toLowerCase().includes(query.toLowerCase()) || r.user.username.includes(query.toLowerCase()));
+  const toggle = (id: string) => setSelected(list => (list.includes(id) ? list.filter(x => x !== id) : list.length < room ? [...list, id] : list));
+  return (
+    <Modal
+      open
+      onClose={closeModal}
+      title={base.length > 0 ? "Add Friends to DM" : "Select Friends"}
       footer={
         <>
           <button type="button" className="btn btn-link" onClick={closeModal}>
@@ -353,17 +502,17 @@ function CreateDM() {
             disabled={busy || selected.length === 0}
             onClick={() => {
               setBusy(true);
-              createGroupDM(selected)
+              createGroupDM([...base, ...selected])
                 .then(closeModal)
                 .catch(() => setBusy(false));
             }}
           >
-            {selected.length > 1 ? "Create Group DM" : "Create DM"}
+            {selected.length + base.length > 1 ? "Create Group DM" : "Create DM"}
           </button>
         </>
       }
     >
-      <p className="modal-subtle">You can add {Math.max(0, 9 - selected.length)} more friends.</p>
+      <p className="modal-subtle">You can add {Math.max(0, room - selected.length)} more friends.</p>
       <input className="input" placeholder="Type the username of a friend" value={query} autoFocus onChange={e => setQuery(e.target.value)} />
       <ul className="pick-list">
         {shown.map(r => (
@@ -378,37 +527,6 @@ function CreateDM() {
         ))}
         {shown.length === 0 && <li className="pick-empty">No friends found.</li>}
       </ul>
-    </Modal>
-  );
-}
-
-function ServerSettings({ guildId }: { guildId: string }) {
-  const guild = useStore(s => s.guilds[guildId]);
-  const members = useStore(s => Object.keys(s.members[guildId] ?? {}).length);
-  const isOwner = useStore(s => s.me?.id === guild?.owner_id);
-  return (
-    <Modal open onClose={closeModal} title="Server Settings" className="modal-wide">
-      <div className="settings-readonly">
-        <div className="settings-row">
-          <span className="settings-key">Server name</span>
-          <span>{guild?.name}</span>
-        </div>
-        <div className="settings-row">
-          <span className="settings-key">Server ID</span>
-          <span>{guildId}</span>
-        </div>
-        <div className="settings-row">
-          <span className="settings-key">Members</span>
-          <span className="inline">
-            <Users size={14} /> {members}
-          </span>
-        </div>
-        <div className="settings-row">
-          <span className="settings-key">Your role</span>
-          <span>{isOwner ? "Owner" : "Member"}</span>
-        </div>
-        <p className="modal-subtle">Editing server settings is not implemented yet.</p>
-      </div>
     </Modal>
   );
 }
@@ -432,7 +550,7 @@ export function ModalHost() {
     case "leaveServer":
       return <Confirm key={id} title={`Leave '${guilds[spec.guildId]?.name ?? "server"}'`} body={`Are you sure you want to leave ${guilds[spec.guildId]?.name ?? "this server"}? You won't be able to rejoin this server unless you are re-invited.`} action="Leave Server" danger onConfirm={() => leaveGuild(spec.guildId)} />;
     case "deleteServer":
-      return <Confirm key={id} title={`Delete '${guilds[spec.guildId]?.name ?? "server"}'`} body={`Are you sure you want to delete ${guilds[spec.guildId]?.name ?? "this server"}? This action cannot be undone.`} action="Delete Server" danger onConfirm={() => deleteGuild(spec.guildId)} />;
+      return <Confirm key={id} title={`Delete '${guilds[spec.guildId]?.name ?? "server"}'`} body={`Are you sure you want to delete ${guilds[spec.guildId]?.name ?? "this server"}? This action cannot be undone.`} action="Delete Server" danger requireText={guilds[spec.guildId]?.name ?? ""} onConfirm={() => deleteGuild(spec.guildId)} />;
     case "deleteChannel":
       return (
         <Confirm
@@ -448,11 +566,17 @@ export function ModalHost() {
         />
       );
     case "createDM":
-      return <CreateDM key={id} />;
+      return <CreateDM key={id} base={spec.base} />;
     case "quickSwitcher":
       return <QuickSwitcher key={id} />;
+    case "profile":
+      return <FullProfileModal key={id} userId={spec.userId} guildId={spec.guildId} />;
     case "serverSettings":
-      return <ServerSettings key={id} guildId={spec.guildId} />;
+      return <ServerSettings key={id} guildId={spec.guildId} section={spec.section} />;
+    case "editChannel":
+      return <EditChannelModal key={id} channelId={spec.channelId} />;
+    case "notificationSettings":
+      return <NotificationSettingsModal key={id} scopeId={spec.scopeId} title={spec.title} guild={spec.guild} />;
     case "userSettings":
       return <UserSettings key={id} section={spec.section} />;
   }

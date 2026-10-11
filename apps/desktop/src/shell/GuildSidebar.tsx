@@ -1,13 +1,14 @@
 import { useMemo, useState } from "react";
 import { NavLink, useLocation } from "react-router";
-import { Bell, ChevronDown, ChevronRight, ChevronUp, CirclePlus, Copy, FolderPlus, Hash, LogOut, Plus, Settings, Trash2, UserPlus, Volume2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Plus, Settings, UserPlus, Volume2 } from "lucide-react";
 import { channelMentionCount, displayName, isChannelUnread, useStore } from "../api/store";
 import { useVoiceOccupants } from "../api/voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
 import { Popout, Tooltip, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
-import { markChannelRead } from "./actions";
 import { groupChannels } from "./channels";
+import { useIsMuted, useLocalState } from "./localState";
+import { channelContextItems, guildDropdownItems } from "./menus";
 import { guildPath } from "./nav";
 import { openModal } from "./modalStore";
 
@@ -47,18 +48,12 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
   const unread = useStore(s => isChannelUnread(s, channel.id));
   const mentions = useStore(s => channelMentionCount(s, channel.id));
   const isOwner = useStore(s => s.me?.id === guild.owner_id);
+  const muted = useIsMuted(channel.id) || useIsMuted(channel.parent_id);
   const menu = useContextMenu();
   const voice = channel.type === ChannelType.GuildVoice;
   const selected = location.pathname === `/channels/${guild.id}/${channel.id}`;
-  const className = `channel-row${selected ? " selected" : ""}${unread ? " unread" : ""}${voice ? " voice" : ""}`;
-
-  const items = [
-    { id: "read", label: "Mark As Read", disabled: !unread, onSelect: () => void markChannelRead(channel.id) },
-    { type: "separator" as const },
-    { id: "invite", label: "Invite People", onSelect: () => openModal({ type: "invite", channelId: channel.id }) },
-    { id: "copy", label: "Copy Channel ID", onSelect: () => void navigator.clipboard?.writeText(channel.id) },
-    ...(isOwner ? [{ type: "separator" as const }, { id: "delete", label: "Delete Channel", danger: true, onSelect: () => openModal({ type: "deleteChannel", channelId: channel.id }) }] : []),
-  ];
+  const className = `channel-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}${voice ? " voice" : ""}`;
+  const items = () => channelContextItems(channel, guild);
 
   const icon = voice ? <Volume2 size={20} className="channel-icon" /> : <Hash size={20} className="channel-icon" />;
   const actions = (
@@ -68,24 +63,26 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
           <UserPlus size={16} />
         </button>
       </Tooltip>
-      <Tooltip content="Edit Channel" side="top">
-        <button type="button" className="channel-action" aria-label="Edit Channel" onClick={e => e.preventDefault()}>
-          <Settings size={16} />
-        </button>
-      </Tooltip>
+      {isOwner && (
+        <Tooltip content="Edit Channel" side="top">
+          <button type="button" className="channel-action" aria-label="Edit Channel" onClick={e => (e.preventDefault(), openModal({ type: "editChannel", channelId: channel.id }))}>
+            <Settings size={16} />
+          </button>
+        </Tooltip>
+      )}
     </span>
   );
 
   return (
     <li className="channel-row-wrap">
       {voice ? (
-        <div className={className} role="button" tabIndex={0} aria-label={`${channel.name} voice channel`} onContextMenu={e => menu.open(e, items)}>
+        <div className={className} role="button" tabIndex={0} aria-label={`${channel.name} voice channel`} onContextMenu={e => menu.open(e, items())}>
           {icon}
           <span className="channel-name">{channel.name}</span>
           {actions}
         </div>
       ) : (
-        <NavLink to={guildPath(guild.id, channel.id)} className={className} onContextMenu={e => menu.open(e, items)}>
+        <NavLink to={guildPath(guild.id, channel.id)} className={className} onContextMenu={e => menu.open(e, items())}>
           {icon}
           <span className="channel-name">{channel.name}</span>
           {mentions > 0 ? <span className="count-badge">{mentions}</span> : null}
@@ -100,13 +97,10 @@ function ChannelRow({ channel, guild }: { channel: Channel; guild: Guild }) {
 function GuildHeader({ guild }: { guild: Guild }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
-  const isOwner = useStore(s => s.me?.id === guild.owner_id);
   const firstText = useStore(s => Object.values(s.channels).find(c => c.guild_id === guild.id && c.type === ChannelType.GuildText));
-  const invite = () => firstText && openModal({ type: "invite", channelId: firstText.id });
-  const run = (fn: () => void) => () => {
-    setOpen(false);
-    fn();
-  };
+  // Subscribing re-renders the menu when a mute/hide flag changes while it is open.
+  useLocalState(s => s.hideMuted[guild.id]);
+  const items = open ? guildDropdownItems(guild) : [];
   return (
     <>
       <div ref={setAnchor} className={`guild-header${open ? " open" : ""}`}>
@@ -115,44 +109,36 @@ function GuildHeader({ guild }: { guild: Guild }) {
           {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
         </button>
         <Tooltip content="Invite People" side="bottom">
-          <button type="button" className="guild-header-invite" aria-label="Invite People" disabled={!firstText} onClick={invite}>
+          <button type="button" className="guild-header-invite" aria-label="Invite People" disabled={!firstText} onClick={() => firstText && openModal({ type: "invite", channelId: firstText.id })}>
             <UserPlus size={20} />
           </button>
         </Tooltip>
       </div>
       <Popout anchor={anchor} open={open} onClose={() => setOpen(false)} side="bottom" align="center" gap={4} className="guild-menu" style={{ width: 220 }}>
         <div role="menu" className="guild-menu-list">
-          <button type="button" role="menuitem" className="guild-menu-item" disabled={!firstText} onClick={run(invite)}>
-            <span>Invite People</span>
-            <UserPlus size={20} />
-          </button>
-          <button type="button" role="menuitem" className="guild-menu-item" onClick={run(() => openModal({ type: "serverSettings", guildId: guild.id }))}>
-            <span>Server Settings</span>
-            <Settings size={20} />
-          </button>
-          <button type="button" role="menuitem" className="guild-menu-item" onClick={run(() => openModal({ type: "createChannel", guildId: guild.id }))}>
-            <span>Create Channel</span>
-            <CirclePlus size={20} />
-          </button>
-          <button type="button" role="menuitem" className="guild-menu-item" onClick={run(() => openModal({ type: "createChannel", guildId: guild.id, channelType: ChannelType.GuildCategory }))}>
-            <span>Create Category</span>
-            <FolderPlus size={20} />
-          </button>
-          <div className="guild-menu-separator" />
-          <button type="button" role="menuitem" className="guild-menu-item" aria-disabled="true">
-            <span>Notification Settings</span>
-            <Bell size={20} />
-          </button>
-          <div className="guild-menu-separator" />
-          <button type="button" role="menuitem" className="guild-menu-item" onClick={run(() => void navigator.clipboard?.writeText(guild.id))}>
-            <span>Copy Server ID</span>
-            <Copy size={20} />
-          </button>
-          <div className="guild-menu-separator" />
-          <button type="button" role="menuitem" className="guild-menu-item danger" onClick={run(() => openModal({ type: isOwner ? "deleteServer" : "leaveServer", guildId: guild.id }))}>
-            <span>{isOwner ? "Delete Server" : "Leave Server"}</span>
-            {isOwner ? <Trash2 size={20} /> : <LogOut size={20} />}
-          </button>
+          {items.map((item, index) => {
+            if ("type" in item) return <div key={`sep-${index}`} className="guild-menu-separator" />;
+            const checkbox = item.checked !== undefined;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role={checkbox ? "menuitemcheckbox" : "menuitem"}
+                aria-checked={item.checked}
+                aria-disabled={item.disabled || undefined}
+                title={item.tooltip}
+                className={`guild-menu-item${item.danger ? " danger" : ""}`}
+                onClick={() => {
+                  if (item.disabled) return;
+                  if (!checkbox) setOpen(false);
+                  item.onSelect?.();
+                }}
+              >
+                <span>{item.label}</span>
+                {checkbox ? <span className={`guild-menu-check${item.checked ? " on" : ""}`}>{item.checked && <Check size={14} strokeWidth={3} />}</span> : (item.icon ?? null)}
+              </button>
+            );
+          })}
         </div>
       </Popout>
     </>
@@ -161,26 +147,41 @@ function GuildHeader({ guild }: { guild: Guild }) {
 
 export function GuildSidebar({ guild }: { guild: Guild }) {
   const location = useLocation();
+  const menu = useContextMenu();
   const channels = useStore(s => Object.values(s.channels).filter(c => c.guild_id === guild.id));
   const unreadIds = useStore(s => channels.filter(c => isChannelUnread(s, c.id)).map(c => c.id));
   const [collapsed, setCollapsed] = useState<Set<Snowflake>>(loadCollapsed);
-  const groups = useMemo(() => groupChannels(channels), [channels]);
+  const mutedUntil = useLocalState(s => s.mutedUntil);
+  const hideMuted = useLocalState(s => !!s.hideMuted[guild.id]);
   const isOwner = useStore(s => s.me?.id === guild.owner_id);
   const selectedId = location.pathname.split("/")[3];
+  const isMuted = (id: Snowflake | null) => {
+    const until = id ? mutedUntil[id] : undefined;
+    return until === -1 || (until !== undefined && until > Date.now());
+  };
+  const shown = useMemo(
+    () => (hideMuted ? channels.filter(c => c.id === selectedId || !(isMuted(c.id) || isMuted(c.parent_id))) : channels),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [channels, hideMuted, mutedUntil, selectedId],
+  );
+  const groups = useMemo(() => groupChannels(shown), [shown]);
 
-  const toggle = (id: Snowflake) => {
+  const persist = (next: Set<Snowflake>) => {
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+    } catch {
+      /* ignore */
+    }
+    return next;
+  };
+  const toggle = (id: Snowflake) =>
     setCollapsed(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-      try {
-        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
-      } catch {
-        /* ignore */
-      }
-      return next;
+      return persist(next);
     });
-  };
+  const categoryIds = groups.flatMap(g => (g.category ? [g.category.id] : []));
 
   return (
     <div className="sidebar-list guild-sidebar">
@@ -194,7 +195,20 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
             return (
               <li key={category?.id ?? "loose"} className="category">
                 {category && (
-                  <div className={`category-header${isCollapsed ? " collapsed" : ""}`}>
+                  <div
+                    className={`category-header${isCollapsed ? " collapsed" : ""}${isMuted(category.id) ? " muted" : ""}`}
+                    onContextMenu={e =>
+                      menu.open(
+                        e,
+                        channelContextItems(category, guild, {
+                          collapsed: isCollapsed,
+                          onToggleCollapse: () => toggle(category.id),
+                          anyExpanded: categoryIds.some(id => !collapsed.has(id)),
+                          onCollapseAll: () => setCollapsed(persist(new Set(categoryIds))),
+                        }),
+                      )
+                    }
+                  >
                     <button type="button" className="category-toggle" aria-expanded={!isCollapsed} onClick={() => toggle(category.id)}>
                       <span className="category-name">{category.name}</span>
                       {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}

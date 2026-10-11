@@ -5,7 +5,7 @@ import { appStore } from "../api/store";
 import type { GuildMember, Role, Snowflake } from "../api/types";
 import { useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
-import { openDirectMessage } from "./actions";
+import { userContextItems } from "./menus";
 import { openProfile } from "./ProfileCard";
 
 interface Section {
@@ -18,21 +18,13 @@ function MemberRow({ member, guildId, offline }: { member: GuildMember; guildId:
   const menu = useContextMenu();
   const color = useStore(() => roleColor(guildId, member));
   const custom = useStore(s => s.presences[member.user.id]?.custom_status);
-  const isMe = useStore(s => s.me?.id === member.user.id);
   return (
     <li>
       <button
         type="button"
         className={`member-row${offline ? " offline" : ""}`}
         onClick={e => openProfile(e.currentTarget, member.user.id, guildId)}
-        onContextMenu={e =>
-          menu.open(e, [
-            { id: "profile", label: "Profile", onSelect: () => openProfile(e.currentTarget, member.user.id, guildId) },
-            { id: "message", label: "Message", disabled: isMe, onSelect: () => void openDirectMessage(member.user.id) },
-            { type: "separator" },
-            { id: "copy", label: "Copy User ID", onSelect: () => void navigator.clipboard?.writeText(member.user.id) },
-          ])
-        }
+        onContextMenu={e => menu.open(e, userContextItems(member.user, { guildId, anchor: e.currentTarget }))}
       >
         <Avatar user={member.user} size={32} status dim={offline} />
         <span className="member-text">
