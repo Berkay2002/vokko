@@ -16,6 +16,7 @@ export type ReducedMotion = "system" | "on" | "off";
 export type RoleColors = "name" | "dot" | "none";
 export type SpoilerContent = "click" | "always" | "moderated";
 export type InputMode = "vad" | "ptt";
+export type TimeFormat = "auto" | "12" | "24";
 
 export interface Prefs {
   // Appearance
@@ -69,6 +70,9 @@ export interface Prefs {
   autoSensitivity: boolean;
   inputSensitivity: number;
   alwaysPreviewVideo: boolean;
+  // Language & time (settings modal)
+  /** Clock of message timestamps: the locale's own ("auto"), 12-hour or 24-hour. Read by src/chat/util.ts. */
+  timeFormat: TimeFormat;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -112,6 +116,7 @@ export const DEFAULT_PREFS: Prefs = {
   autoSensitivity: true,
   inputSensitivity: 40,
   alwaysPreviewVideo: false,
+  timeFormat: "auto",
 };
 
 export interface ThemeCard {
@@ -172,6 +177,7 @@ export function migratePrefs(parsed: Partial<Record<keyof Prefs, unknown>>): Pre
   }
   // A theme id from a newer or older build must not leave the app without a theme class.
   if (!isThemeChoice(merged.theme)) merged.theme = DEFAULT_PREFS.theme;
+  if (!["auto", "12", "24"].includes(merged.timeFormat as string)) merged.timeFormat = DEFAULT_PREFS.timeFormat;
   const spacing = parsed.messageSpacing;
   const hasSpacing = spacing === "compact" || spacing === "balanced" || spacing === "roomy";
   if (!hasSpacing) {

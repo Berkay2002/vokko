@@ -1,6 +1,6 @@
 import { Fragment } from "react";
-import { Info } from "lucide-react";
 import { Category, Page } from "./controls";
+import { InfoBanner } from "./smControls";
 
 interface Bind {
   keys: string[];
@@ -49,32 +49,33 @@ export const GROUPS: { title: string; binds: Bind[] }[] = [
 export function KeybindsPage() {
   return (
     <Page title="Keybinds">
-      <div className="sm-banner">
-        <Info size={20} />
-        <span>Custom keybinds are not available yet. These are the built-in shortcuts.</span>
-      </div>
-      {GROUPS.map(group => (
-        <Category key={group.title} title={group.title}>
-          <table className="keybind-table">
-            <tbody>
+      <Category title="Custom Keybinds">
+        <p className="sm-sub-note">Custom keybinds let you perform specific actions in Vokko without clicking through menus.</p>
+        <InfoBanner>Custom keybinds are not available yet. The built-in shortcuts are listed below.</InfoBanner>
+      </Category>
+      <Category title="Default Keybinds">
+        {GROUPS.map(group => (
+          <section key={group.title} className="sm-keys-group" aria-label={group.title}>
+            <h3 className="sm-sub-heading">{group.title}</h3>
+            <div className="sm-keys-card">
               {group.binds.map(b => (
-                <tr key={b.action}>
-                  <td className="keybind-action">{b.action}</td>
-                  <td className="keybind-keys">
+                <div key={b.action} className="sm-keys-row">
+                  <span className="sm-keys-action">{b.action}</span>
+                  {!b.wired && <span className="sm-keys-tag">Not wired yet</span>}
+                  <span className="sm-keys-caps">
                     {b.keys.map((k, i) => (
                       <Fragment key={k}>
                         {i > 0 && <span className="keybind-plus" aria-hidden="true">+</span>}
-                        <kbd className="keybind-key">{k}</kbd>
+                        <kbd className="sm-keys-cap">{k}</kbd>
                       </Fragment>
                     ))}
-                  </td>
-                  <td className="keybind-status">{!b.wired && <span className="keybind-tag">Not wired yet</span>}</td>
-                </tr>
+                  </span>
+                </div>
               ))}
-            </tbody>
-          </table>
-        </Category>
-      ))}
+            </div>
+          </section>
+        ))}
+      </Category>
     </Page>
   );
 }

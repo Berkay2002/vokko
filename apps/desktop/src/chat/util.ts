@@ -1,6 +1,7 @@
 import { ApiRequestError } from '../api/errors';
 import { MAX_UPLOAD_BYTES } from '../api/limits';
 import type { Snowflake } from '../api/types';
+import { timeFormatPref } from './shell';
 
 const DISCORD_EPOCH = 1420070400000n;
 
@@ -51,13 +52,19 @@ function fmt(locale: string, key: string, opts: Intl.DateTimeFormatOptions): Int
 
 /** "9:24 PM" in 12-hour locales, "21:24" / "09:05" (two-digit hour, like Discord) in 24-hour ones. */
 export function formatTime(d: Date, locale = chatLocale()): string {
+  const choice = timeFormatPref();
+  if (choice === '12') return fmt(locale, 'time12x', { hour: 'numeric', minute: '2-digit', hourCycle: 'h12' }).format(d);
+  if (choice === '24') return fmt(locale, 'time24x', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d);
   const h12 = fmt(locale, 'time', { hour: 'numeric', minute: '2-digit' });
   const cycle = h12.resolvedOptions().hourCycle;
   return (cycle === 'h23' || cycle === 'h24' ? fmt(locale, 'time24', { hour: '2-digit', minute: '2-digit' }) : h12).format(d);
 }
 export const formatShortDate = (d: Date, locale = chatLocale()): string => fmt(locale, 'short', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-export const formatFullDate = (d: Date, locale = chatLocale()): string =>
-  fmt(locale, 'long', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d);
+export const formatFullDate = (d: Date, locale = chatLocale()): string => {
+  const choice = timeFormatPref();
+  const hourCycle = choice === '12' ? 'h12' : choice === '24' ? 'h23' : undefined;
+  return fmt(locale, `long${choice}`, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hourCycle }).format(d);
+};
 export const formatDivider = (d: Date, locale = chatLocale()): string => fmt(locale, 'divider', { year: 'numeric', month: 'long', day: 'numeric' }).format(d);
 
 // "Today at 9:24 PM": the day word plus the locale's connector. Unlisted languages fall back to Intl's relative word. An empty word means the

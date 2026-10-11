@@ -130,7 +130,7 @@
   flex: none;
   align-items: center;
   gap: 8px;
-  width: 221px;
+  width: 220px;
   height: 40px;
   margin: 16px 16px 8px;
   padding: 0 8px 0 12px;
@@ -570,4 +570,464 @@
   flex: none;
   margin-top: 1px;
   color: var(--text-feedback-info);
+}
+
+/* ---- unsaved-changes bar inside the modal: floats at the bottom of the page, shakes when a close or page switch is refused ----
+ * Bar geometry from the voice reference (740x73.5, centred; 16/20 w500 text, 60x32 reset link, 119x32 green save). The shake
+ * timing was not captured in the reference (spec "Not captured"); 400 ms, +-8px, with a red flash is our assumption. */
+.sm .cs-savebar {
+  position: sticky;
+  bottom: 24px;
+  margin: 24px -22px 0;
+  padding: 20px 20px 20px 24px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--background-surface-highest);
+  box-shadow: var(--shadow-high);
+}
+
+.sm .cs-savebar-text {
+  color: var(--text-strong);
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.sm .cs-savebar .btn {
+  height: 32px;
+  min-width: 60px;
+  border-radius: 8px;
+}
+
+.sm .cs-savebar .btn-success {
+  background: var(--control-connected-background-default);
+  color: var(--control-connected-text-default);
+}
+
+.sm .cs-savebar .btn-link {
+  color: var(--text-link);
+}
+
+.sm .cs-savebar[data-shake="a"] {
+  animation: sm-shake-a 400ms var(--ease-out);
+}
+
+.sm .cs-savebar[data-shake="b"] {
+  animation: sm-shake-b 400ms var(--ease-out);
+}
+
+/* two names so a second refused attempt restarts the animation */
+@keyframes sm-shake-a {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15%,
+  45%,
+  75% {
+    transform: translateX(-8px);
+    background: var(--control-critical-primary-background-default);
+  }
+  30%,
+  60%,
+  90% {
+    transform: translateX(8px);
+    background: var(--control-critical-primary-background-default);
+  }
+}
+
+@keyframes sm-shake-b {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  15%,
+  45%,
+  75% {
+    transform: translateX(-8px);
+    background: var(--control-critical-primary-background-default);
+  }
+  30%,
+  60%,
+  90% {
+    transform: translateX(8px);
+    background: var(--control-critical-primary-background-default);
+  }
+}
+
+.reduce-motion .sm .cs-savebar[data-shake] {
+  animation: none;
+  background: var(--control-critical-primary-background-default);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sm .cs-savebar[data-shake] {
+    animation: none;
+    background: var(--control-critical-primary-background-default);
+  }
+}
+
+/* ---- shared settings controls re-skinned for this column only (reference: settings-modal spec "Content styles", measured from the frames) ----
+ * Server and channel settings keep the base look from settings.css / ui.css. Changed shared selectors, all prefixed `.sm-column`:
+ * .field-label, .settings-field, .switch-row (+ -label, -note), .settings-field-note, .sr-group, .sr-row, .sr-label, .sr-note,
+ * .select, .slider-input (+ thumb), .input, .settings-unavailable. The switch itself keeps its markup (.switch > .switch-knob). */
+.sm-column .field-label {
+  margin-bottom: 8px;
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.sm-column .settings-field {
+  margin-bottom: 24px;
+}
+
+.sm-column .settings-field-note,
+.sm-column .switch-row-note,
+.sm-column .sr-note {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.sm-column .switch-row {
+  align-items: flex-start;
+  min-height: 56px;
+  padding: 16px 0;
+}
+
+.sm-column .switch-row-label {
+  padding-top: 2px;
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.sm-column .sr-group {
+  gap: 0;
+}
+
+.sm-column .sr-row,
+.sm-column .sr-row:hover,
+.sm-column .sr-row.selected {
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.sm-column .sr-label {
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+
+.sm-column .select {
+  border-color: var(--input-border-default);
+  border-radius: 8px;
+  background: var(--input-background-default);
+}
+
+.sm-column .select:hover:not(:disabled) {
+  border-color: var(--input-border-hover);
+}
+
+.sm-column .input {
+  border: 1px solid var(--input-border-default);
+  border-radius: 8px;
+  background: var(--input-background-default);
+}
+
+.sm-column .slider-input {
+  height: 4px;
+}
+
+.sm-column .slider-input::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+.sm-column .settings-unavailable {
+  margin-top: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+/* ---- blocks used by the pages built for this frame (settings/smControls.tsx) ---- */
+.sm-sub-heading {
+  margin: 0 0 8px;
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.sm-sub-note {
+  margin: -4px 0 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.sm-link {
+  color: var(--text-link);
+}
+
+.sm-link:hover {
+  text-decoration: underline;
+}
+
+/* "Related settings": icon tile 40, title 16 w500 + description 12 muted + chevron */
+.sm-related-title {
+  margin: 24px 0 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.sm-related {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 12px 16px 12px 12px;
+  border-radius: 8px;
+  color: var(--text-default);
+  text-align: left;
+}
+
+.sm-related:hover {
+  background: var(--interactive-background-default);
+}
+
+.sm-related-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--background-mod-subtle);
+  color: var(--interactive-icon-default);
+}
+
+.sm-related-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sm-related-label {
+  display: block;
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+}
+
+.sm-related-note {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.sm-related > svg:last-child {
+  flex: none;
+  color: var(--interactive-icon-default);
+}
+
+/* two-column control rows (Voice: microphone | speaker) */
+.sm-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* expandable "show advanced ..." row: text left, 40x40 chevron button right */
+.sm-expand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 0;
+}
+
+.sm-expand-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sm-expand-btn {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--background-mod-subtle);
+  color: var(--text-default);
+}
+
+.sm-expand-btn:hover {
+  background: var(--background-mod-normal);
+}
+
+/* server / app list (Activity privacy, connections): icon 40 + name + count + switch */
+.sm-list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.sm-list-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.sm-list-name {
+  display: block;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-list-sub {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.sm-card {
+  margin-bottom: 16px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--background-base-low);
+}
+
+.sm-provider-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sm-provider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--background-base-low);
+  color: var(--text-default);
+}
+
+.sm-provider:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.sm-empty {
+  padding: 32px 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* keybinds: card per group, rows 35 high with key caps at the right (reference: system/02-07) */
+.sm-keys-group {
+  margin-bottom: 24px;
+}
+
+.sm-keys-card {
+  border-radius: 8px;
+  background: var(--background-base-low);
+}
+
+.sm-keys-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 35px;
+  padding: 6px 12px;
+}
+
+.sm-keys-row + .sm-keys-row {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sm-keys-action {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.sm-keys-tag {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.sm-keys-caps {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.sm-keys-cap {
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--background-mod-normal);
+  color: var(--text-default);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 700;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* voice & video: buttons and the segmented mic meter follow the reference (voice-video/01) */
+.sm-column .sp-button {
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--control-primary-background-default);
+  color: var(--control-primary-text-default);
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.sm-column .mic-meter {
+  height: 24px;
+  border-radius: 0;
+  background: repeating-linear-gradient(90deg, var(--interactive-muted) 0 3px, transparent 3px 6px);
+}
+
+.sm-column .mic-meter-fill {
+  background: var(--brand-500);
+  -webkit-mask-image: repeating-linear-gradient(90deg, black 0 3px, transparent 3px 6px);
+  mask-image: repeating-linear-gradient(90deg, black 0 3px, transparent 3px 6px);
 }

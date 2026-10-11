@@ -10,12 +10,15 @@ import { Avatar } from "./Avatar";
 import { closeModal, openModal } from "./modalStore";
 import { AccessibilityPage } from "./settings/AccessibilityPage";
 import { AppearancePage } from "./settings/AppearancePage";
-import { Category, Page, RadioGroup, Select, SwitchRow, Unavailable } from "./settings/controls";
+import { DeveloperPage } from "./settings/DeveloperPage";
 import { KeybindsPage } from "./settings/KeybindsPage";
+import { LanguageTimePage } from "./settings/LanguageTimePage";
 import { NotificationsPage } from "./settings/NotificationsPage";
+import { ActivityPrivacyPage, ConnectedAppsPage, ContentSocialPage, DataPrivacyPage } from "./settings/PrivacyPages";
 import { ProfilesPage } from "./settings/ProfilesPage";
 import { SettingsBlock, SettingsModal, SettingsNavGroup, SettingsNavItem, SettingsNavSub, SettingsNavSubs, SettingsRow } from "./settings/SettingsModal";
 import { settingsSlots } from "./settings/slots";
+import { blockedByUnsaved } from "./settings/unsaved";
 import { VoiceVideoPage } from "./settings/VoiceVideoPage";
 import { WindowsPage } from "./settings/WindowsPage";
 
@@ -52,7 +55,7 @@ const ALL_SECTIONS: SectionDef[] = [
   { id: "windows", label: "Windows Settings", icon: Monitor, group: "Experience", desktopOnly: true, keywords: ["startup", "tray", "minimize", "close", "autostart", "login", "open on startup"] },
   { id: "activity", label: "Activity Privacy", icon: Gamepad2, group: "Games & Apps", outline: ["What Activity I Share", "Where I Share Activity"], keywords: ["status", "games", "share", "join"] },
   { id: "connections", label: "Connected Apps", icon: Plug, group: "Games & Apps", outline: ["Connections", "Authorized Apps"], keywords: ["connections", "accounts", "authorized", "integrations"] },
-  { id: "developer", label: "Developer", icon: Code, group: "Other", keywords: ["developer mode", "application test mode", "ids", "api"] },
+  { id: "developer", label: "Advanced", icon: Code, group: "Other", keywords: ["developer", "developer mode", "application test mode", "ids", "api"] },
   { id: "profiles", label: "Profiles", icon: UserIcon, group: "", hidden: true },
 ];
 
@@ -63,57 +66,6 @@ const BUILD = `Vokko ${String(import.meta.env.VITE_APP_BUILD ?? import.meta.env.
 
 /** Headings of a page that become sub-items in the sidebar (blocks and categories; the heading text is the label). */
 const HEADINGS = ".sm-block-title, .settings-category-title";
-
-function NotYet({ section }: { section: SectionDef }) {
-  return (
-    <Page title={section.label}>
-      <Unavailable>This section is not available yet.</Unavailable>
-      {section.outline?.map(title => (
-        <Category key={title} title={title}>
-          <p className="settings-todo">Not available yet.</p>
-        </Category>
-      ))}
-    </Page>
-  );
-}
-
-type TimeFormat = "auto" | "12" | "24";
-
-function LanguageTime() {
-  const [format, setFormat] = useState<TimeFormat>("auto");
-  return (
-    <Page title="Language & Time">
-      <Category title="Select a Language">
-        <Select<string> label="Language" value="en" options={[{ value: "en", label: "English" }]} onChange={() => undefined} />
-        <p className="settings-todo">More languages are not available yet.</p>
-      </Category>
-      <Category title="Time format">
-        <RadioGroup<TimeFormat>
-          name="Time format"
-          value={format}
-          onChange={setFormat}
-          options={[
-            { value: "auto", label: "Automatic", note: "Follows your device settings." },
-            { value: "12", label: "12-hour" },
-            { value: "24", label: "24-hour" },
-          ]}
-        />
-        <Unavailable>The time format is not applied to timestamps yet.</Unavailable>
-      </Category>
-    </Page>
-  );
-}
-
-function DeveloperPage() {
-  return (
-    <Page title="Developer">
-      <SwitchRow label="Developer Mode" note="Adds options such as Copy ID to menus." checked={false} disabled onChange={() => undefined} />
-      <SwitchRow label="Application Test Mode" note="Enter an application ID to test it." checked={false} disabled onChange={() => undefined} />
-      <input className="input" aria-label="Application ID" placeholder="Application ID" disabled />
-      <Unavailable>Developer options are not available yet.</Unavailable>
-    </Page>
-  );
-}
 
 function errorText(error: unknown): string {
   return error instanceof ApiRequestError ? error.message : "Something went wrong. Try again.";
@@ -252,6 +204,7 @@ export function UserSettings({ section }: { section?: string }) {
   const active = SECTIONS.find(s => s.id === current) ?? SECTIONS[0]!;
 
   const open = (id: string) => {
+    if (id !== current && blockedByUnsaved()) return;
     setCurrent(id);
     setAnchor(0);
     scroller.current?.scrollTo({ top: 0, behavior: "instant" });
@@ -299,11 +252,19 @@ export function UserSettings({ section }: { section?: string }) {
       case "keybinds":
         return <KeybindsPage />;
       case "language":
-        return <LanguageTime />;
+        return <LanguageTimePage />;
       case "developer":
         return <DeveloperPage />;
+      case "privacy":
+        return <DataPrivacyPage onOpen={open} />;
+      case "content":
+        return <ContentSocialPage onOpen={open} />;
+      case "activity":
+        return <ActivityPrivacyPage />;
+      case "connections":
+        return <ConnectedAppsPage />;
       default:
-        return <NotYet section={active} />;
+        return null;
     }
   };
 

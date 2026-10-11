@@ -10,6 +10,7 @@ import { TagChip } from "../../perks/TagChip";
 import { Avatar } from "../Avatar";
 import { Field, Select } from "./controls";
 import { SaveBar } from "./SaveBar";
+import { blockedByUnsaved } from "./unsaved";
 import { mergeMemberLocal } from "./shared";
 
 const BANNER_COLORS = ["#5865f2", "#3d9e60", "#ffcb6e", "#dc4247", "#c45bd0", "#2b8fb5", "#6d7380", "#1e1f22"];
@@ -395,14 +396,18 @@ function ServerProfilesTab({ me }: { me: User }) {
 
 export function ProfilesPage({ me }: { me: User }) {
   const [tab, setTab] = useState<"user" | "server">("user");
+  // A dirty draft would be dropped with the tab, so the unsaved guard answers the click with a shake instead.
+  const go = (next: "user" | "server") => {
+    if (next !== tab && !blockedByUnsaved()) setTab(next);
+  };
   return (
     <div className="settings-page profiles-page">
       <h1>Profiles</h1>
       <div className="pf-tabs" role="tablist" aria-label="Profile type">
-        <button type="button" role="tab" aria-selected={tab === "user"} className={`pf-tab${tab === "user" ? " active" : ""}`} onClick={() => setTab("user")}>
+        <button type="button" role="tab" aria-selected={tab === "user"} className={`pf-tab${tab === "user" ? " active" : ""}`} onClick={() => go("user")}>
           User Profile
         </button>
-        <button type="button" role="tab" aria-selected={tab === "server"} className={`pf-tab${tab === "server" ? " active" : ""}`} onClick={() => setTab("server")}>
+        <button type="button" role="tab" aria-selected={tab === "server"} className={`pf-tab${tab === "server" ? " active" : ""}`} onClick={() => go("server")}>
           Per-server profiles
         </button>
       </div>

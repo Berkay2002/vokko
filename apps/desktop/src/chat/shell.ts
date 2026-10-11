@@ -60,6 +60,8 @@ export interface ChatDisplayPrefs {
   roleColors: 'name' | 'dot' | 'none';
   /** Streamer mode with "hide invite links" on: invite cards and invite links are not rendered. */
   hideInvites: boolean;
+  /** Settings > Language & Time clock; part of the display prefs so timestamps re-render when it changes. */
+  timeFormat: 'auto' | '12' | '24';
 }
 export function useChatDisplayPrefs(): ChatDisplayPrefs {
   return {
@@ -68,8 +70,12 @@ export function useChatDisplayPrefs(): ChatDisplayPrefs {
     showCompactAvatars: usePrefs(s => s.showCompactAvatars),
     roleColors: usePrefs(s => s.roleColors),
     hideInvites: usePrefs(s => s.streamerMode && s.streamerHideInvites),
+    timeFormat: usePrefs(s => s.timeFormat),
   };
 }
+
+/** Current clock choice outside React (formatTime in util.ts). */
+export function timeFormatPref(): 'auto' | '12' | '24' { return usePrefs.getState().timeFormat; }
 
 /** Settings > Appearance > "Convert emoticons to emoji": applied to the text of a message when it is sent. */
 export function useConvertEmoticons(): boolean { return usePrefs(s => s.convertEmoticons); }

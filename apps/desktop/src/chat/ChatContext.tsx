@@ -87,7 +87,7 @@ export function ChatProvider({ channelId, actions, replyingId = null, children }
   const emoji = useEmojiDb();
   const shortcodes = emoji?.shortcodes;
   const compact = useCompactMode();
-  const { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites } = useChatDisplayPrefs();
+  const { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat } = useChatDisplayPrefs();
 
   const value = useMemo<ChatContextValue | null>(() => {
     if (!me) return null;
@@ -113,9 +113,9 @@ export function ChatProvider({ channelId, actions, replyingId = null, children }
       canManage: canManageMessages(guild, me, members[me.id]),
       colorOf: m => (guildId && roleColors === 'name' ? roleColor(guildId, members[m.author.id] ?? m.member ?? null) : null),
       roleDotOf: m => (guildId && roleColors === 'dot' ? roleColor(guildId, members[m.author.id] ?? m.member ?? null) : null),
-      display: { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites },
+      display: { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat },
     };
-  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites]);
+  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat]);
 
   if (!value) return null;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

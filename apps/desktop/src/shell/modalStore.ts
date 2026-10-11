@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { ChannelType, Snowflake } from "../api/types";
+import { blockedByUnsaved } from "./settings/unsaved";
 
 export type ModalSpec =
   | { type: "createServer" }
@@ -49,12 +50,16 @@ export const useModals = create<ModalStore>()(set => ({
   serial: 0,
   counter: 0,
   base: null,
-  open: modal =>
+  open: modal => {
+    const current = useModals.getState().modal;
+    // Shortcuts (Ctrl+I, Ctrl+Shift+N) must not replace User Settings while it has unsaved changes; dialogs park it instead.
+    if (current?.type === "userSettings" && !DIALOG_TYPES.has(modal.type) && blockedByUnsaved()) return;
     set(s => {
       const park = s.modal && SETTINGS_TYPES.has(s.modal.type) && DIALOG_TYPES.has(modal.type) ? { spec: s.modal, serial: s.serial } : null;
       const counter = s.counter + 1;
       return { modal, serial: counter, counter, base: park };
-    }),
+    });
+  },
   close: () => set(s => (s.base ? { modal: s.base.spec, serial: s.base.serial, base: null } : { modal: null })),
 }));
 

@@ -3,6 +3,7 @@ import type { ComponentType, ReactNode, RefObject, UIEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, X } from "lucide-react";
 import { useFocusTrap, useLayer } from "../../ui";
+import { blockedByUnsaved } from "./unsaved";
 
 /**
  * The settings frame Discord uses for User Settings: a rounded modal inset from the window with the app dimmed behind it,
@@ -43,6 +44,10 @@ export function SettingsModal({ label, title, side, onClose, children, scrollRef
   // Esc, the x and a scrim click all play the exit first, then unmount through the real onClose.
   const requestClose = useCallback(() => {
     if (timer.current !== undefined) return;
+    if (blockedByUnsaved()) {
+      setPane("page"); // phone layout: the save bar lives on the page pane, bring it into view
+      return;
+    }
     if (motionReduced()) {
       closeRef.current();
       return;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiRequestError } from '../api/errors';
+import { usePrefs } from '../ui/prefs';
 import { MAX_UPLOAD_BYTES } from '../api/limits';
 import { formatFullDate, formatMessageTimestamp, formatTime, uploadErrorMessage } from './util';
 
@@ -43,5 +44,18 @@ describe('formatMessageTimestamp', () => {
   it('time-only and full date follow the locale', () => {
     expect(formatTime(older, 'sv-SE')).toBe('21:24');
     expect(formatFullDate(older, 'en-US')).toMatch(/^Friday, October 9, 2026 at 9:24\s?PM$/);
+  });
+
+  it('the time format preference forces 12 or 24 hour in the time and the full date', () => {
+    try {
+      usePrefs.setState({ timeFormat: '24' });
+      expect(formatTime(older, 'en-US')).toBe('21:24');
+      expect(formatFullDate(older, 'en-US')).toMatch(/21:24/);
+      usePrefs.setState({ timeFormat: '12' });
+      expect(formatTime(older, 'sv-SE')).toMatch(/^9:24\s?(PM|em)/i);
+      expect(formatFullDate(older, 'sv-SE')).toMatch(/9:24/);
+    } finally {
+      usePrefs.setState({ timeFormat: 'auto' });
+    }
   });
 });
