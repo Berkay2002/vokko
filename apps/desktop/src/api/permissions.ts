@@ -1,6 +1,6 @@
 // Permission model (Discord bitfield, docs/research/discord-client-facts.md Q4). Pure functions shared by the UI and the mock backend.
 
-import { OverwriteType, type Channel, type Guild, type GuildMember, type Role, type Snowflake } from "./types";
+import { OverwriteType, isThreadType, type Channel, type Guild, type GuildMember, type Role, type Snowflake } from "./types";
 
 /** Bit positions (Q4.2). */
 export const PermBit = {
@@ -117,6 +117,20 @@ export function channelPermissions(guild: GuildLike, member: MemberLike, channel
 export function threadPermissions(parentBits: bigint): bigint {
   const bits = parentBits & ~Perm.SEND_MESSAGES;
   return hasBit(parentBits, Perm.SEND_MESSAGES_IN_THREADS) ? bits | Perm.SEND_MESSAGES : bits;
+}
+
+/**
+ * Can the member post in this channel (the composer's locked state, Reply)? A thread follows its parent's SEND_MESSAGES_IN_THREADS,
+ * and a locked one also needs MANAGE_THREADS. Whatever the client has not loaded (DM or unknown guild, the member beyond the READY
+ * member cap, a thread's parent) reads as true: the server is authoritative.
+ */
+export function canSendIn(guild: GuildLike | undefined, member: MemberLike | undefined, channel: Channel | undefined, parent?: Channel): boolean {
+  if (!guild || !member || !channel) return true;
+  if (!isThreadType(channel.type)) return hasBit(channelPermissions(guild, member, channel), Perm.SEND_MESSAGES);
+  if (!parent) return true;
+  const parentBits = channelPermissions(guild, member, parent);
+  const locked = channel.thread_metadata?.locked === true;
+  return hasBit(threadPermissions(parentBits), Perm.SEND_MESSAGES) && (!locked || hasBit(parentBits, Perm.MANAGE_THREADS));
 }
 
 export const rolePosition = (guild: GuildLike, roleId: Snowflake): number => guild.roles.find(r => r.id === roleId)?.position ?? 0;

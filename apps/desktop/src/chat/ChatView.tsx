@@ -213,14 +213,14 @@ function ChatBody(p: BodyProps) {
   function hasFiles(e: React.DragEvent): boolean { return [...e.dataTransfer.types].includes('Files'); }
 
   return <div className="chat-view" ref={root}
-    onDragEnter={e => { if (!hasFiles(e)) return; e.preventDefault(); p.dragDepth.current += 1; p.setDragging(true); }}
-    onDragOver={e => { if (hasFiles(e)) e.preventDefault(); }}
+    onDragEnter={e => { if (!hasFiles(e)) return; e.preventDefault(); p.dragDepth.current += 1; p.setDragging(chat.canSend); }}
+    onDragOver={e => { if (!hasFiles(e)) return; e.preventDefault(); if (!chat.canSend) e.dataTransfer.dropEffect = 'none'; }} // 'none': no copy cursor, and the browser does not open the file
     onDragLeave={e => { if (!hasFiles(e)) return; p.dragDepth.current = Math.max(0, p.dragDepth.current - 1); if (p.dragDepth.current === 0) p.setDragging(false); }}
     onDrop={e => {
       if (!hasFiles(e)) return;
       e.preventDefault();
       p.dragDepth.current = 0; p.setDragging(false);
-      addFiles(p.channelId, [...e.dataTransfer.files]);
+      if (chat.canSend) addFiles(p.channelId, [...e.dataTransfer.files]);
     }}>
     <MessageList ref={p.list} channelId={p.channelId} editingId={p.editingId} onStopEditing={p.stopEditing} onAtBottomChange={p.setAtBottom} />
     <Composer

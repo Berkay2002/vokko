@@ -1,8 +1,8 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Attachment, Channel, Guild, GuildMember, Message, Role, Snowflake, User } from '../api/types';
 import { ChannelType } from '../api/types';
 import type { MarkdownContext } from './markdown';
-import { AnimatedImage, cacheUser, closeModal, displayName, go, guildPath, openProfile, roleColor, useStableChannel, useChatDisplayPrefs, useCompactMode, useCustomColorScale, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
+import { AnimatedImage, cacheUser, canSendIn, closeModal, displayName, go, guildPath, openProfile, roleColor, useStableChannel, useChatDisplayPrefs, useCompactMode, useCustomColorScale, useGuild, useGuildChannels, useGuildMembers, useMe, useUsers, type ChatDisplayPrefs } from './shell';
 import { mentionTarget } from './mentions';
 import { cachedUser } from './userCache';
 import { useEmojiDb } from './emojiData';
@@ -31,6 +31,8 @@ export interface ChatContextValue {
   me: User;
   isDm: boolean;
   canManage: boolean;
+  /** The viewer may post here (SEND_MESSAGES, or SEND_MESSAGES_IN_THREADS in a thread); otherwise the composer is locked and Reply is hidden. */
+  canSend: boolean;
   md: MarkdownContext;
   roles: Role[];
   /** Channels of this guild (empty in DMs). */
@@ -85,6 +87,7 @@ export function ChatProvider({ channelId, actions, replyingId = null, onNavigate
   const me = useMe();
   const channel = useStableChannel(channelId);
   const guildId = channel?.guild_id ?? null;
+  const parent = useStableChannel(channel?.parent_id ?? '');
   const guild = useGuild(guildId);
   const members = useGuildMembers(guildId);
   const users = useUsers();
@@ -94,6 +97,16 @@ export function ChatProvider({ channelId, actions, replyingId = null, onNavigate
   const compact = useCompactMode();
   const { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat } = useChatDisplayPrefs();
   const scaleColor = useCustomColorScale();
+
+  // A timeout lifts by itself: recompute canSend when it ends (the delay is clamped to the 32-bit timer limit, the tick re-arms).
+  const until = me ? members[me.id]?.communication_disabled_until : undefined;
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const left = until ? Date.parse(until) - Date.now() : 0;
+    if (!(left > 0)) return;
+    const timer = setTimeout(() => setTick(n => n + 1), Math.min(left + 20, 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [until, tick]);
 
   const value = useMemo<ChatContextValue | null>(() => {
     if (!me) return null;
@@ -137,11 +150,12 @@ export function ChatProvider({ channelId, actions, replyingId = null, onNavigate
       channelId, channel, guild, guildId, me, md, roles, members, channels: guildChannels, actions, userById, nameOf, replyingId, compact,
       isDm: channel?.type === ChannelType.DM || channel?.type === ChannelType.GroupDM,
       canManage: canManageMessages(guild, me, members[me.id]),
+      canSend: canSendIn(guild, members[me.id] && { id: me.id, roles: members[me.id]!.roles, communication_disabled_until: members[me.id]!.communication_disabled_until }, channel, parent),
       colorOf: m => (guildId && roleColors === 'name' ? scaleColor(roleColor(guildId, members[m.author.id] ?? m.member ?? null)) : null),
       roleDotOf: m => (guildId && roleColors === 'dot' ? scaleColor(roleColor(guildId, members[m.author.id] ?? m.member ?? null)) : null),
       display: { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat },
     };
-  }, [me, channel, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, onNavigate, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, scaleColor]);
+  }, [me, channel, parent, tick, channelId, guild, guildId, members, users, guildChannels, shortcodes, actions, onNavigate, replyingId, compact, showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, scaleColor]);
 
   if (!value) return null;
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

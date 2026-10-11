@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { ALL_PERMISSIONS, DEFAULT_EVERYONE, Perm, basePermissions, canEditRole, canModerate, channelPermissions, hasBit, highestPosition, outranks, threadPermissions } from "./permissions";
-import { OverwriteType, type Role } from "./types";
+import { describe, expect, it, vi } from "vitest";
+import { ALL_PERMISSIONS, DEFAULT_EVERYONE, Perm, basePermissions, canEditRole, canModerate, canSendIn, channelPermissions, hasBit, highestPosition, outranks, threadPermissions } from "./permissions";
+import { ChannelType, OverwriteType, type Channel, type Role } from "./types";
 
 const GUILD = "100";
 const role = (id: string, position: number, permissions: bigint): Role => ({ id, name: id, color: 0, hoist: false, position, permissions: permissions.toString(), mentionable: false });
@@ -130,5 +130,63 @@ describe("threadPermissions", () => {
     const channel = { parent_id: null, permission_overwrites: [{ id: GUILD, type: OverwriteType.Role, allow: "0", deny: Perm.SEND_MESSAGES_IN_THREADS.toString() }] };
     expect(hasBit(threadPermissions(channelPermissions(guild, user("m"), channel)), Perm.SEND_MESSAGES)).toBe(false);
     expect(hasBit(threadPermissions(channelPermissions(guild, user("a", ["admin"]), channel)), Perm.SEND_MESSAGES)).toBe(true);
+  });
+});
+
+describe("canSendIn", () => {
+  const text = (overwrites: Channel["permission_overwrites"] = []): Channel => ({ id: "c", type: ChannelType.GuildText, guild_id: GUILD, parent_id: null, permission_overwrites: overwrites } as Channel);
+  const thread = (locked = false): Channel => ({ id: "t", type: ChannelType.PublicThread, guild_id: GUILD, parent_id: "c", thread_metadata: { locked } } as Channel);
+  const deny = (bit: bigint, id = GUILD) => ({ id, type: OverwriteType.Role, allow: "0", deny: bit.toString() });
+
+  it("is true without a guild or a loaded channel (DMs, the server decides)", () => {
+    expect(canSendIn(undefined, user("a"), text())).toBe(true);
+    expect(canSendIn(guild, user("a"), undefined)).toBe(true);
+  });
+
+  it("follows SEND_MESSAGES of the channel", () => {
+    expect(canSendIn(guild, user("plain"), text())).toBe(true);
+    expect(canSendIn(guild, user("plain"), text([deny(Perm.SEND_MESSAGES)]))).toBe(false);
+  });
+
+  it("lets a role overwrite re-allow it, and owners and administrators always send", () => {
+    const readOnly = text([deny(Perm.SEND_MESSAGES), { id: "helper", type: OverwriteType.Role, allow: Perm.SEND_MESSAGES.toString(), deny: "0" }]);
+    expect(canSendIn(guild, user("h", ["helper"]), readOnly)).toBe(true);
+    expect(canSendIn(guild, user("plain"), readOnly)).toBe(false);
+    expect(canSendIn(guild, user("owner"), readOnly)).toBe(true);
+    expect(canSendIn(guild, user("a", ["admin"]), readOnly)).toBe(true);
+  });
+
+  it("denies a member overwrite and a timeout", () => {
+    expect(canSendIn(guild, user("x"), text([{ id: "x", type: OverwriteType.Member, allow: "0", deny: Perm.SEND_MESSAGES.toString() }]))).toBe(false);
+    expect(canSendIn(guild, user("x", [], new Date(Date.now() + 60_000).toISOString()), text())).toBe(false);
+  });
+
+  it("sends in a thread by SEND_MESSAGES_IN_THREADS of the parent, not SEND_MESSAGES", () => {
+    const parentNoSend = text([deny(Perm.SEND_MESSAGES)]);
+    expect(canSendIn(guild, user("plain"), thread(), parentNoSend)).toBe(true);
+    expect(canSendIn(guild, user("plain"), thread(), text([deny(Perm.SEND_MESSAGES_IN_THREADS)]))).toBe(false);
+  });
+
+  it("is permissive for what is not loaded: a thread without its parent, a member beyond the READY cap", () => {
+    expect(canSendIn(guild, user("plain"), thread(true), undefined)).toBe(true);
+    expect(canSendIn(guild, undefined, text([deny(Perm.SEND_MESSAGES)]))).toBe(true);
+  });
+
+  it("lifts a timeout once it has ended", () => {
+    vi.useFakeTimers();
+    try {
+      const until = new Date(Date.now() + 60_000).toISOString();
+      expect(canSendIn(guild, user("x", [], until), text())).toBe(false);
+      vi.advanceTimersByTime(60_001);
+      expect(canSendIn(guild, user("x", [], until), text())).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("needs MANAGE_THREADS in a locked thread", () => {
+    expect(canSendIn(guild, user("plain"), thread(true), text())).toBe(false);
+    const withManage = { ...guild, roles: [...guild.roles, role("tm", 1, Perm.MANAGE_THREADS)] };
+    expect(canSendIn(withManage, user("t", ["tm"]), thread(true), text())).toBe(true);
   });
 });

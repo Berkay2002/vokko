@@ -351,7 +351,17 @@ export function seed(): void {
   textCategory.position = 1;
   voiceCategory.position = 2;
   const welcome = addChannel(guildId, { name: "welcome", type: ChannelType.GuildText, parent_id: info.id, topic: "Say hi and read the rules." });
-  const announcements = addChannel(guildId, { name: "announcements", type: ChannelType.GuildAnnouncement, parent_id: info.id, topic: "Release notes and news." });
+  // Read-only for @everyone, like a real announcement channel: only Moderators (and the owner / admins) can post.
+  const announcements = addChannel(guildId, {
+    name: "announcements",
+    type: ChannelType.GuildAnnouncement,
+    parent_id: info.id,
+    topic: "Release notes and news.",
+    permission_overwrites: [
+      { id: guildId, type: OverwriteType.Role, allow: "0", deny: Perm.SEND_MESSAGES.toString() },
+      { id: moderator, type: OverwriteType.Role, allow: Perm.SEND_MESSAGES.toString(), deny: "0" },
+    ],
+  });
   // a standing invite, so the /invite/vokkodev page has something to show in mock mode
   db.invites.set("vokkodev", { code: "vokkodev", guild_id: guildId, channel_id: welcome.id, expires_at: null });
   // Private channel: hidden from @everyone, visible to Moderators (and the owner / admins).

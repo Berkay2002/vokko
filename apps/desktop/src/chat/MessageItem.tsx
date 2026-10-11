@@ -250,7 +250,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
       <span className="chat-toolbar-sep" role="separator" />
       <Tooltip content="Add Reaction" side="top"><button ref={addBtn} type="button" className="chat-toolbar-btn" aria-label="Add Reaction" onClick={() => setPickerOpen(true)}><SmilePlus size={20} /></button></Tooltip>
       {canEdit && <Tooltip content="Edit" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Edit" onClick={() => chat.actions.edit(message)}><Pencil size={20} /></button></Tooltip>}
-      {!isMine && <Tooltip content="Reply" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Reply" onClick={() => chat.actions.reply(message)}><Reply size={20} /></button></Tooltip>}
+      {!isMine && chat.canSend && <Tooltip content="Reply" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Reply" onClick={() => chat.actions.reply(message)}><Reply size={20} /></button></Tooltip>}
       {canDelete && shift && <Tooltip content="Delete" side="top"><button type="button" className="chat-toolbar-btn danger" aria-label="Delete" onClick={e => chat.actions.requestDelete(message, e.shiftKey)}><Trash /></button></Tooltip>}
       {threadActions.canCreateThread && <Tooltip content="Create Thread" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Create Thread" onClick={threadActions.createThread}><MessageSquareText size={20} /></button></Tooltip>}
       {threadActions.canPublish && !threadActions.published && <Tooltip content="Publish" side="top"><button type="button" className="chat-toolbar-btn" aria-label="Publish" onClick={threadActions.publish}><Megaphone size={20} /></button></Tooltip>}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
-import { AtSign, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
+import { AtSign, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Lock, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
 import { request, Popout, Tooltip, useConvertEmoticons, useLegacyChatInput } from './shell';
@@ -108,7 +108,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
 
   // Shortcuts go to the composer holding focus, else to the newest mounted one (a thread panel's over the channel's).
   const root = useRef<HTMLDivElement>(null);
-  const mine = () => { const f = document.activeElement?.closest('.chat-composer'); return !f || f === root.current; };
+  const mine = () => { if (!chat.canSend) return false; const f = document.activeElement?.closest('.chat-composer'); return !f || f === root.current; };
   const toggleExpr = (tab: ExpressionTab) => () => { if (!mine()) return false; setExpr(v => (v === tab ? null : tab)); };
   useShortcut('emoji', toggleExpr('emoji'));
   useShortcut('gif', toggleExpr('gif'));
@@ -284,6 +284,14 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const remaining = MAX_LEN - rawContent.length;
   const replyName = replyTo ? chat.nameOf(replyTo.author, replyTo.member) : '';
   const hasText = text.length > 0;
+
+  if (!chat.canSend) return <div className="chat-composer" ref={root}>
+    <TypingIndicator channelId={channelId} />
+    <div className="chat-composer-box chat-composer-locked" role="note">
+      <Lock size={20} aria-hidden="true" />
+      <span>You do not have permission to send messages in this channel.</span>
+    </div>
+  </div>;
 
   return <div className="chat-composer" ref={root}>
     <TypingIndicator channelId={channelId} />

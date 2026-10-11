@@ -36,7 +36,7 @@ export function useMessageThreadActions(message: Message, pending: boolean): Mes
   const published = ((message.flags ?? 0) & MessageFlags.Crossposted) !== 0;
   const copy = ((message.flags ?? 0) & MessageFlags.IsCrosspost) !== 0;
   const user = !pending && isUserMessage(message);
-  const canCreateThread = user && hasThreadsType(channel) && !thread && can(Perm.CREATE_PUBLIC_THREADS);
+  const canCreateThread = user && hasThreadsType(channel) && !thread && can(Perm.CREATE_PUBLIC_THREADS) && can(Perm.READ_MESSAGE_HISTORY);
   const canPublish = user && announcement && !copy && (message.author.id === meId ? can(Perm.SEND_MESSAGES) : can(Perm.MANAGE_MESSAGES));
   return {
     thread,

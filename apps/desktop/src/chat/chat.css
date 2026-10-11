@@ -331,6 +331,7 @@ html.message-compact { --chat-gutter: 80px; }
 .chat-reply-mention.on { color: var(--chat-text-strong); }
 .chat-composer .chat-reply-close { display: grid; place-items: center; flex: none; width: 20px; height: 20px; padding: 0; border-radius: 50%; background-color: var(--chat-icon); color: var(--chat-reply-bar-bg); }
 .chat-composer .chat-reply-close:hover { background-color: var(--chat-icon-hover); }
+.chat-composer-locked { display: flex; align-items: center; gap: 8px; min-height: 57px; padding: 0 16px; color: var(--text-muted); cursor: not-allowed; user-select: none; }
 .chat-composer-row { display: flex; align-items: flex-start; min-height: 55px; } /* 55 + 2 border = 57 = --user-panel-height */
 .chat-composer-btn { flex: none; width: 32px; height: 32px; margin: 12px 0 0 4px; border-radius: 8px; display: grid; place-items: center; color: var(--chat-icon); }
 .chat-composer-btn:hover { color: var(--chat-icon-hover); }

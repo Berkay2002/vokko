@@ -90,7 +90,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     }
     if (canEdit) out.push({ id: 'edit', label: 'Edit Message', icon: <Pencil size={ICON} />, onSelect: () => chat.actions.edit(message) });
     if (!system) {
-      out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={ICON} />, onSelect: () => chat.actions.reply(message) });
+      if (chat.canSend) out.push({ id: 'reply', label: 'Reply', icon: <CornerUpLeft size={ICON} />, onSelect: () => chat.actions.reply(message) });
       if (!pending) out.push({ id: 'forward', label: 'Forward', icon: <Forward size={ICON} />, onSelect: () => openForward(message) });
       if (!pending && chat.guildId) {
         if (threadActions.thread) out.push({ id: 'thread', label: 'Open Thread', icon: <MessageSquareText size={ICON} />, onSelect: threadActions.openThread });
@@ -138,7 +138,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     out.push({ id: 'copy-id', label: 'Copy Message ID', icon: <Fingerprint size={ICON} />, onSelect: () => void navigator.clipboard?.writeText(message.id) });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message, pending, bookmarked, chat.guildId, chat.canManage, chat.isDm, chat.me.id, threadActions.thread?.id, threadActions.canCreateThread, threadActions.canPublish, threadActions.published, threadActions.announcement]);
+  }, [message, pending, bookmarked, chat.guildId, chat.canManage, chat.canSend, chat.isDm, chat.me.id, threadActions.thread?.id, threadActions.canCreateThread, threadActions.canPublish, threadActions.published, threadActions.announcement]);
 
   useLayoutEffect(() => {
     const el = box.current;
