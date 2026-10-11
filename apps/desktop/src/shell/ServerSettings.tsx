@@ -13,6 +13,8 @@ import { closeModal, openModal } from "./modalStore";
 import { Category, Field, Page, Select, Unavailable } from "./settings/controls";
 import { BansPage } from "./settings/BansPage";
 import { RolesPage } from "./settings/RolesPage";
+import { TagPage } from "./settings/TagPage";
+import { ThemePage } from "./settings/ThemePage";
 import { MembersPage } from "./settings/server-people";
 import { usePermissions } from "./usePermissions";
 
@@ -154,7 +156,7 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
 
   return (
     <Page title="Server Profile">
-      {!owner && <Unavailable>Only the server owner can change the server profile.</Unavailable>}
+      {!owner && <Unavailable>You need the Manage Server permission to change the server profile.</Unavailable>}
       <Field label="Name">
         <div className="account-inline">
           <input className="input" aria-label="Server name" value={name} maxLength={100} readOnly={!owner} disabled={!owner} onChange={e => setName(e.target.value)} />
@@ -297,6 +299,7 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
   if (!guild) return null;
 
   const owner = guild.owner_id === meId;
+  const canManage = owner || perms.can(Perm.MANAGE_GUILD);
   const visibleSections = SECTIONS.filter(s => (s.needs ?? MANAGE).some(bit => perms.can(bit)));
   const active = visibleSections.find(s => s.id === current) ?? visibleSections[0];
   if (!active) return null;
@@ -305,9 +308,13 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
   const page = () => {
     switch (active.id) {
       case "profile":
-        return <ProfilePage guild={guild} owner={owner} channels={channels} />;
+        return <ProfilePage guild={guild} owner={canManage} channels={channels} />;
       case "engagement":
-        return <EngagementPage guild={guild} owner={owner} channels={channels} />;
+        return <EngagementPage guild={guild} owner={canManage} channels={channels} />;
+      case "tag":
+        return <TagPage guildId={guildId} canEdit={canManage} />;
+      case "theme":
+        return <ThemePage guildId={guildId} canEdit={canManage} />;
       case "members":
         return <MembersPage guild={guild} members={members} />;
       case "roles":

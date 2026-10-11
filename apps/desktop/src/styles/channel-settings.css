@@ -250,3 +250,21 @@
   min-width: 0;
   font-size: 14px;
 }
+
+.cs-sync {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: var(--background-surface-high);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.cs-sync-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--text-default);
+}

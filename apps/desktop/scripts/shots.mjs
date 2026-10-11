@@ -254,6 +254,25 @@ await page.keyboard.press("Escape");
 await page.waitForTimeout(200);
 await shot("44-sidebar-private-channel");
 
+// ---- milestone E: server tag / theme, sync with category ----
+await page.click(".guild-header");
+await page.click('.guild-menu-item:has-text("Server Settings")');
+await page.waitForSelector(".settings-overlay");
+await page.click('.settings-item:has-text("Server Tag")');
+await page.waitForTimeout(300);
+await shot("48-server-tag");
+await page.click('.settings-item:has-text("Server Theme")');
+await page.waitForTimeout(300);
+await shot("49-server-theme");
+await page.keyboard.press("Escape");
+await page.hover(".channel-row.selected");
+await page.click('.channel-row.selected button[aria-label="Edit Channel"]');
+await page.waitForSelector(".settings-overlay");
+await page.click('.settings-item:has-text("Permissions")');
+await page.waitForTimeout(400);
+await shot("50-channel-permissions-synced");
+await page.keyboard.press("Escape");
+
 // As a moderator (alice): fewer rights
 await page.goto(`${base}/channels/@me?as=alice`);
 await page.waitForSelector(".dm-row");

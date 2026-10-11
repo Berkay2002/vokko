@@ -1272,3 +1272,10 @@
   --status-online: #3d9e60;
   --status-positive: #3d9e60;
 }
+
+/* Light: the Q6 light table gives --icon-status-online #01783e (the badge token measured in the captured client). */
+:root.theme-light,
+.theme-light {
+  --status-online: #01783e;
+  --status-positive: #01783e;
+}

@@ -447,3 +447,137 @@
   font-size: 12px;
   color: var(--text-muted);
 }
+
+.ss-tag-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.ss-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid;
+  border-radius: var(--radius-sm);
+}
+
+.ss-tag-preview-note {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.ss-tag-name {
+  max-width: 160px;
+  text-transform: uppercase;
+}
+
+.ss-badge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+  gap: 8px;
+}
+
+.ss-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  color: var(--text-default);
+  background: var(--background-surface-high);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.ss-badge:hover:not(:disabled) {
+  background: var(--background-mod-subtle);
+}
+
+.ss-badge.selected {
+  border-color: var(--background-brand);
+}
+
+.ss-swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ss-swatch {
+  width: 40px;
+  height: 40px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.ss-swatch.selected {
+  border-color: var(--text-default);
+}
+
+.ss-color-inputs {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.ss-color-inputs > * {
+  flex: 1;
+  max-width: 200px;
+}
+
+.ss-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.ss-theme-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  color: var(--text-default);
+  background: var(--background-surface-high);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.ss-theme-card.selected {
+  border-color: var(--background-brand);
+}
+
+.ss-theme-swatch {
+  height: 48px;
+  border-radius: var(--radius-sm);
+}
+
+.ss-theme-label {
+  font-size: 13px;
+}
+
+.ss-theme-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  border: 1px solid;
+  border-radius: var(--radius-md);
+}
+
+.ss-theme-preview-title {
+  font-weight: 600;
+}
+
+.ss-theme-preview-body {
+  font-size: 14px;
+  color: var(--text-default);
+}

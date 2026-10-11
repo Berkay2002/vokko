@@ -358,7 +358,7 @@ export function wireStoreToGateway(): void {
     const state = s();
     const guild = state.guilds[guildId];
     if (!guild) return;
-    const roles = change(guild.roles).sort((a, b) => b.position - a.position);
+    const roles = sortRoles(change(guild.roles));
     appStore.setState({ guilds: { ...state.guilds, [guildId]: { ...guild, roles } } });
   };
   const upsertRole = (guildId: Snowflake, role: Role) => patchRoles(guildId, roles => [...roles.filter(r => r.id !== role.id), role]);
@@ -429,6 +429,16 @@ wireStoreToGateway();
 /** Server nickname, then display name, then username. */
 export function displayName(user: Pick<User, "username" | "global_name">, member?: { nick: string | null } | null): string {
   return member?.nick || user.global_name || user.username;
+}
+
+/** Roles by position descending, ties by id ascending (numeric). Never relies on the order the server sent. */
+export function sortRoles(roles: readonly Role[]): Role[] {
+  return [...roles].sort((a, b) => {
+    if (a.position !== b.position) return b.position - a.position;
+    const x = BigInt(a.id);
+    const y = BigInt(b.id);
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
 }
 
 /** CSS colour of the highest role with a colour, or null (use the default text colour). */

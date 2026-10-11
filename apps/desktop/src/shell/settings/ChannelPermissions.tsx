@@ -3,7 +3,7 @@ import { Check, Lock, Minus, Plus, Search, X } from "lucide-react";
 import { ApiRequestError } from "../../api/errors";
 import { Perm, TEXT_OVERWRITE_BITS, VOICE_OVERWRITE_BITS, bit, hasBit, parseBits } from "../../api/permissions";
 import { request } from "../../api/rest";
-import { appStore, displayName } from "../../api/store";
+import { appStore, displayName, useStore } from "../../api/store";
 import { ChannelType, OverwriteType, type Channel, type Guild, type GuildMember, type PermissionOverwrite, type Role } from "../../api/types";
 import { Avatar } from "../Avatar";
 import { usePermissions } from "../usePermissions";
@@ -44,6 +44,16 @@ function bitsFor(type: ChannelType): number[] {
   if (type === ChannelType.GuildVoice) return [...VOICE_OVERWRITE_BITS];
   if (type === ChannelType.GuildCategory) return [...new Set([...TEXT_OVERWRITE_BITS, ...VOICE_OVERWRITE_BITS])];
   return [...TEXT_OVERWRITE_BITS];
+}
+
+function overwriteKeys(list: PermissionOverwrite[] | undefined): string[] {
+  return (list ?? []).map(o => `${o.id}:${o.type}:${o.allow}:${o.deny}`).sort();
+}
+
+function sameOverwrites(a: PermissionOverwrite[] | undefined, b: PermissionOverwrite[] | undefined): boolean {
+  const x = overwriteKeys(a);
+  const y = overwriteKeys(b);
+  return x.length === y.length && x.every((k, i) => k === y[i]);
 }
 
 function TriState({ value, disabled, label, onChange }: { value: Tri; disabled: boolean; label: string; onChange(next: Tri): void }) {
@@ -90,6 +100,8 @@ export function ChannelPermissionsPage({ channel, guild, members }: { channel: C
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   useEffect(() => setDrafts(original), [original]);
+  const category = useStore(s => (channel.parent_id ? s.channels[channel.parent_id] : undefined));
+  const [syncing, setSyncing] = useState(false);
 
   const roleById = useMemo(() => new Map<string, Role>(guild.roles.map(r => [r.id, r])), [guild.roles]);
 
@@ -185,6 +197,22 @@ export function ChannelPermissionsPage({ channel, guild, members }: { channel: C
     }
   };
 
+  const syncNow = async () => {
+    if (!channel.parent_id) return;
+    setSyncing(true);
+    setError(null);
+    try {
+      const updated = await request<Channel>("PATCH", `/channels/${channel.id}`, { parent_id: channel.parent_id, lock_permissions: true });
+      const state = appStore.getState();
+      state.upsertChannel({ ...(state.channels[channel.id] ?? channel), ...updated });
+      setSaved(false);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const available = useMemo(() => {
     const q = query.trim().toLowerCase();
     const roles = guild.roles.filter(r => r.id !== guild.id && !drafts[r.id] && r.name.toLowerCase().includes(q)).sort((a, b) => b.position - a.position);
@@ -210,6 +238,22 @@ export function ChannelPermissionsPage({ channel, guild, members }: { channel: C
   return (
     <Page title="Permissions">
       {!editable && <Unavailable>You need the Manage Permissions permission to change this {noun}'s permissions.</Unavailable>}
+      {category && channel.type !== ChannelType.GuildCategory && (
+        <div className="cs-sync" role="status">
+          {sameOverwrites(channel.permission_overwrites, category.permission_overwrites) ? (
+            <span className="cs-sync-text">Synced with category: {category.name ?? "Unnamed category"}</span>
+          ) : (
+            <>
+              <span className="cs-sync-text">Not synced with category</span>
+              {editable && (
+                <button type="button" className="btn btn-primary btn-sm" disabled={syncing || busy || dirty} onClick={() => void syncNow()}>
+                  {syncing ? "Syncing…" : "Sync Now"}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
       <SwitchRow label="Private Channel" note={`By making a ${noun} private, only select members and roles will be able to view it.`} checked={privateOn} disabled={!editable || !grantable(10)} onChange={setPrivate} />
       <Category title="Advanced Permissions">
         <div className="cs-perm-editor">

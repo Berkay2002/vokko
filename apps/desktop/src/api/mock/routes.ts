@@ -2,8 +2,9 @@
 
 import { ChannelType, MessageType, RelationshipType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
 import { compareIds } from "../snowflake";
-import { Perm } from "../permissions";
-import { db, nextId, sortedMessages, userOf, type MockAccount } from "./db";
+import { Perm, hasBit } from "../permissions";
+import { channelPermsOf } from "./access";
+import { db, nextId, sortedMessages, userOf, type MockAccount, type MockChannel } from "./db";
 import { addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, openDM, openGroupDM, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm, requireMessage, emitVisibilityChanges, visibilityOf } from "./ops";
 import { parseOverwrites } from "./moderation";
 import { ID, route, routes, str } from "./router";
@@ -393,6 +394,7 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
     attachments,
     reference_id: reference?.message_id ?? null,
     nonce: str(body.nonce) ?? null,
+    allowEveryone: hasBit(channelPermsOf(channel, viewer.user.id), Perm.MENTION_EVERYONE),
   });
   return messageFor(message, viewer.user.id);
 });
@@ -407,7 +409,7 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   message.content = content;
   message.edited_timestamp = new Date().toISOString();
   message.mention_ids = [...new Set([...content.matchAll(/<@!?(\d+)>/g)].map(m => m[1] ?? "").filter(id => db.accounts.has(id)))];
-  message.mention_everyone = /(^|\s)@(everyone|here)\b/.test(content);
+  message.mention_everyone = /(^|\s)@(everyone|here)\b/.test(content) && hasBit(channelPermsOf(channel, viewer.user.id), Perm.MENTION_EVERYONE);
   for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));
   return messageFor(message, viewer.user.id);
 });
@@ -463,6 +465,11 @@ route("GET", `/channels/${ID}/messages/${ID}/reactions/([^/]+)`, ({ viewer, para
 
 const MAX_PINS = 250;
 
+function requirePinPerm(channel: MockChannel, viewerId: string): void {
+  const bits = channelPermsOf(channel, viewerId);
+  if (!hasBit(bits, Perm.PIN_MESSAGES) && !hasBit(bits, Perm.MANAGE_MESSAGES)) fail(403, 50013, "Missing Permissions");
+}
+
 route("GET", `/channels/${ID}/messages/pins`, ({ viewer, params, query }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const limit = Math.min(50, Math.max(1, Number(query.get("limit") ?? 50) || 50));
@@ -478,6 +485,7 @@ route("GET", `/channels/${ID}/messages/pins`, ({ viewer, params, query }) => {
 route("PUT", `/channels/${ID}/messages/pins/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
+  requirePinPerm(channel, viewer.user.id);
   if (message.pinned) return undefined;
   if (sortedMessages(channel.id).filter(m => m.pinned).length >= MAX_PINS) fail(400, 30003, `Maximum number of pins reached (${MAX_PINS})`);
   message.pinned = true;
@@ -490,6 +498,7 @@ route("PUT", `/channels/${ID}/messages/pins/${ID}`, ({ viewer, params }) => {
 route("DELETE", `/channels/${ID}/messages/pins/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
+  requirePinPerm(channel, viewer.user.id);
   if (!message.pinned) return undefined;
   message.pinned = false;
   message.pinned_at = null;
@@ -499,6 +508,7 @@ route("DELETE", `/channels/${ID}/messages/pins/${ID}`, ({ viewer, params }) => {
 
 route("POST", `/channels/${ID}/typing`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  requireChannelPerm(channel, viewer.user.id, Perm.SEND_MESSAGES);
   emit(
     channelAudience(channel).filter(id => id !== viewer.user.id),
     "TYPING_START",

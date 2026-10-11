@@ -320,9 +320,10 @@ route("DELETE", `/guilds/${ID}/roles/${ID}`, ({ viewer, params }) => {
   const g = guild.guild;
   const role = g.roles.find(r => r.id === params[1]);
   if (!role) fail(404, 10011, "Unknown Role");
-  if (role.id === g.id || !canEditRole(g, actor, role)) forbidden();
+  if (role.id === g.id) fail(400, 50028, "Invalid Role");
+  if (!canEditRole(g, actor, role)) forbidden();
   const before = visibilityOf(guildId);
-  g.roles = g.roles.filter(r => r.id !== role.id);
+  g.roles =g.roles.filter(r => r.id !== role.id);
   for (const record of guild.members.values()) record.roles = record.roles.filter(id => id !== role.id);
   const touched: string[] = [];
   for (const channel of db.channels.values()) {

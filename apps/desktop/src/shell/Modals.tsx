@@ -4,7 +4,7 @@ import { logout } from "../api/auth";
 import { ApiRequestError } from "../api/errors";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
-import { ChannelType, RelationshipType } from "../api/types";
+import { ChannelType, OverwriteType, RelationshipType } from "../api/types";
 import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
 import { createChannel, createGroupDM, createGuild, createInvite, deleteGuild, joinGuildWithInvite, leaveGuild, type Invite } from "./actions";
@@ -339,9 +339,9 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
       type,
       parent_id: category ? null : (parentId ?? null),
       // Private channel: @everyone is denied VIEW_CHANNEL (bit 10).
-      ...(isPrivate ? { permission_overwrites: [{ id: guildId, type: 0, allow: "0", deny: String(1n << 10n) }] } : {}),
+      ...(isPrivate ? { permission_overwrites: [{ id: guildId, type: OverwriteType.Role, allow: "0", deny: String(1n << 10n) }] } : {}),
     };
-    createChannel(guildId, body as Parameters<typeof createChannel>[1])
+    createChannel(guildId, body)
       .then(closeModal)
       .catch(e => {
         setError(errorText(e));

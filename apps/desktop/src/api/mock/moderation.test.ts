@@ -171,11 +171,67 @@ describe("roles", () => {
     call("owner", "PATCH", `/guilds/${guildId}/roles/${guildId}`, { name: "ignored", permissions: Perm.VIEW_CHANNEL.toString() });
     expect(roleOf("@everyone").name).toBe("@everyone");
     expect(roleOf("@everyone").permissions).toBe(Perm.VIEW_CHANNEL.toString());
-    expect(errorOf(() => call("owner", "DELETE", `/guilds/${guildId}/roles/${guildId}`)).code).toBe(50013);
+    expect(errorOf(() => call("owner", "DELETE", `/guilds/${guildId}/roles/${guildId}`))).toEqual({ status: 400, code: 50028 });
     expect(errorOf(() => call("mod", "DELETE", `/guilds/${guildId}/roles/9002`)).code).toBe(50013); // not below mod
     call("mod", "DELETE", `/guilds/${guildId}/roles/9003`);
     expect(db.guilds.get(guildId)!.members.get(ids.helper!)!.roles).toEqual([]);
     expect(eventsOf("GUILD_ROLE_DELETE")).toHaveLength(1);
+  });
+});
+
+describe("message gates", () => {
+  const deny = (bit: bigint) => {
+    db.channels.get(generalId)!.permission_overwrites = [{ id: guildId, type: OverwriteType.Role, allow: "0", deny: bit.toString() }];
+  };
+
+  it("@everyone is kept as text but does not ping without MENTION_EVERYONE", () => {
+    const ok = call("plain", "POST", `/channels/${generalId}/messages`, { content: "hey @everyone" }) as Message;
+    expect(ok.mention_everyone).toBe(true);
+    deny(Perm.MENTION_EVERYONE);
+    const quiet = call("plain", "POST", `/channels/${generalId}/messages`, { content: "hey @here" }) as Message;
+    expect(quiet.content).toBe("hey @here");
+    expect(quiet.mention_everyone).toBe(false);
+    const edited = call("plain", "PATCH", `/channels/${generalId}/messages/${quiet.id}`, { content: "again @everyone" }) as Message;
+    expect(edited.mention_everyone).toBe(false);
+    expect(db.accounts.get(ids.other!)!.readStates.get(generalId)?.mention_count ?? 0).toBe(1); // only the permitted one pinged
+  });
+
+  it("pin and unpin need PIN_MESSAGES or MANAGE_MESSAGES", () => {
+    const message = addMessage({ channel: db.channels.get(generalId)!, author_id: ids.plain!, content: "pin me", silent: true });
+    const pins = `/channels/${generalId}/messages/pins/${message.id}`;
+    expect(errorOf(() => call("plain", "PUT", pins))).toEqual({ status: 403, code: 50013 });
+    call("helper", "PUT", pins); // MANAGE_MESSAGES
+    expect(db.messages.get(generalId)!.find(m => m.id === message.id)!.pinned).toBe(true);
+    expect(errorOf(() => call("plain", "DELETE", pins)).code).toBe(50013);
+    db.guilds.get(guildId)!.guild.roles.find(r => r.id === guildId)!.permissions = (DEFAULT_EVERYONE | Perm.PIN_MESSAGES).toString();
+    call("plain", "DELETE", pins);
+    expect(db.messages.get(generalId)!.find(m => m.id === message.id)!.pinned).toBe(false);
+  });
+
+  it("typing needs SEND_MESSAGES", () => {
+    call("plain", "POST", `/channels/${generalId}/typing`);
+    expect(eventsOf("TYPING_START")).toHaveLength(1);
+    deny(Perm.SEND_MESSAGES);
+    expect(errorOf(() => call("plain", "POST", `/channels/${generalId}/typing`))).toEqual({ status: 403, code: 50013 });
+  });
+});
+
+describe("role contract answers", () => {
+  it("DELETE @everyone is 400 50028; unknown ban is 404 10026", () => {
+    expect(errorOf(() => call("owner", "DELETE", `/guilds/${guildId}/roles/${guildId}`))).toEqual({ status: 400, code: 50028 });
+    expect(errorOf(() => call("mod", "DELETE", `/guilds/${guildId}/bans/${ids.outsider}`))).toEqual({ status: 404, code: 10026 });
+  });
+
+  it("a new role without permissions copies the current @everyone permissions", () => {
+    const wanted = Perm.VIEW_CHANNEL | Perm.SEND_MESSAGES;
+    call("owner", "PATCH", `/guilds/${guildId}/roles/${guildId}`, { permissions: wanted.toString() });
+    const role = call("owner", "POST", `/guilds/${guildId}/roles`, { name: "Copy" }) as Role;
+    expect(role.permissions).toBe(wanted.toString());
+  });
+
+  it("PATCH /roles returns every role, @everyone included", () => {
+    const roles = call("owner", "PATCH", `/guilds/${guildId}/roles`, [{ id: "9003", position: 2 }]) as Role[];
+    expect(roles.map(r => r.id).sort()).toEqual([guildId, "9001", "9002", "9003"].sort());
   });
 });
 

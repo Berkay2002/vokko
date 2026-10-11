@@ -1,6 +1,6 @@
 import { Search } from "lucide-react";
 import { ApiRequestError } from "../../api/errors";
-import { appStore } from "../../api/store";
+import { appStore, sortRoles } from "../../api/store";
 import type { GuildMember, Role, Snowflake } from "../../api/types";
 
 /** Helpers shared by the server settings people pages (members, roles, bans). */
@@ -29,7 +29,7 @@ export function upsertRoles(guildId: Snowflake, roles: Role[]): void {
   if (!guild) return;
   const byId = new Map(guild.roles.map(r => [r.id, r]));
   for (const role of roles) byId.set(role.id, role);
-  appStore.setState({ guilds: { ...state.guilds, [guildId]: { ...guild, roles: [...byId.values()] } } });
+  appStore.setState({ guilds: { ...state.guilds, [guildId]: { ...guild, roles: sortRoles([...byId.values()]) } } });
 }
 
 export function removeRoleLocal(guildId: Snowflake, roleId: Snowflake): void {

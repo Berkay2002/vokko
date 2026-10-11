@@ -198,6 +198,8 @@ export interface NewMessage {
   timestamp?: number;
   /** Seed mode: don't emit events. */
   silent?: boolean;
+  /** False: the author lacks MENTION_EVERYONE, so @everyone/@here is kept as text but does not ping. Default true. */
+  allowEveryone?: boolean;
 }
 
 function parseMentions(content: string, referenceAuthor: string | null): { ids: string[]; everyone: boolean } {
@@ -212,6 +214,7 @@ export function addMessage(input: NewMessage): MockMessage {
   const { channel } = input;
   const referenced = input.reference_id ? sortedMessages(channel.id).find(m => m.id === input.reference_id) : undefined;
   const mentions = parseMentions(input.content, referenced?.author_id ?? null);
+  if (input.allowEveryone === false) mentions.everyone = false;
   const ms = input.timestamp ?? Date.now();
   const message: MockMessage = {
     id: nextId(ms),
