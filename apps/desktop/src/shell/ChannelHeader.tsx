@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Bell, Hash, Lock, MessageSquareText, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
+import { Bell, Hash, Lock, MessageSquareText, Phone, Pin, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
 import { dmName } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
 import { PinnedMessages } from "../chat/PinnedMessages";
+import { ChannelSearchBox } from "../search";
 import { Popout, Tooltip, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
 import { isPrivateChannel } from "./channelPrivacy";
@@ -119,10 +120,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             <UserRound size={24} />
           </ToolbarButton>
         )}
-        <div className="header-search">
-          <input className="header-search-input" placeholder={"Search"} aria-label="Search" />
-          <Search size={16} />
-        </div>
+        <ChannelSearchBox channel={channel} />
       </div>
       <Popout anchor={pinsAnchor} open={pinsOpen} onClose={() => setPinsOpen(false)} side="bottom" align="end" gap={8} className="pins-popout-host">
         <PinnedMessages channelId={channel.id} />

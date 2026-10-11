@@ -10,6 +10,7 @@ import { parseOverwrites } from "./moderation";
 import { ID, route, routes, str } from "./router";
 import { emit } from "./socket";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
+import "./search";
 
 export { route, str, requireGuildMember };
 

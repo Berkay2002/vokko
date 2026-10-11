@@ -1,0 +1,231 @@
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  AtSign, ChevronLeft, ChevronRight, File, Hash, Image as ImageIcon, Link as LinkIcon, Music, Paperclip, Pin, Search, SlidersHorizontal, StickyNote, User as UserIcon, Video, X,
+  Globe,
+} from 'lucide-react';
+import { ChannelType, type Channel, type User } from '../api/types';
+import { Avatar } from '../chat/Avatar';
+import { HAS_VALUES, isoDay, pendingKeyword, type FilterKind, type SearchFilter } from './query';
+import { Popout, displayName, useStore } from './shell';
+import { scopeOf, searchActions, searchStore } from './store';
+
+const DATE_KINDS: readonly FilterKind[] = ['before', 'during', 'after'];
+
+interface Option {
+  key: string;
+  icon?: ReactNode;
+  title: ReactNode;
+  hint?: ReactNode;
+  onPick(): void;
+}
+
+const HAS_ICONS: Record<string, ReactNode> = {
+  image: <ImageIcon size={20} />, video: <Video size={20} />, link: <LinkIcon size={20} />, file: <File size={20} />,
+  embed: <Globe size={20} />, sound: <Music size={20} />, sticker: <StickyNote size={20} />,
+};
+
+const dateLabel = (iso: string): string => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+function Calendar({ onPick }: { onPick(iso: string): void }) {
+  const [month, setMonth] = useState(() => { const now = new Date(); return new Date(now.getFullYear(), now.getMonth(), 1); });
+  const today = new Date();
+  const todayIso = isoDay(today);
+  const atCurrent = month.getFullYear() === today.getFullYear() && month.getMonth() === today.getMonth();
+  const offset = (month.getDay() + 6) % 7; // Monday first
+  const cells = Array.from({ length: 42 }, (_, i) => new Date(month.getFullYear(), month.getMonth(), 1 - offset + i));
+  const weekdays = Array.from({ length: 7 }, (_, i) => new Date(2024, 0, 1 + i).toLocaleDateString(undefined, { weekday: 'short' }).slice(0, 2).toUpperCase());
+  const title = `${month.toLocaleDateString(undefined, { month: 'long' }).toUpperCase()} ${month.getFullYear()}`;
+  return <div className="search-calendar" role="group" aria-label="Pick a date">
+    <div className="search-calendar-head">
+      <button type="button" className="search-calendar-nav" aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><ChevronLeft size={16} /></button>
+      <span>{title}</span>
+      {atCurrent ? <span className="search-calendar-nav" aria-hidden="true" /> : <button type="button" className="search-calendar-nav" aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><ChevronRight size={16} /></button>}
+    </div>
+    <div className="search-calendar-grid">
+      {weekdays.map((w, i) => <span key={i} className="search-calendar-weekday">{w}</span>)}
+      {cells.map(date => {
+        const iso = isoDay(date);
+        const future = iso > todayIso;
+        const outside = date.getMonth() !== month.getMonth();
+        return <button key={iso} type="button" disabled={future} data-date={iso} aria-label={dateLabel(iso)}
+          className={`search-calendar-day${outside ? ' outside' : ''}${iso === todayIso ? ' today' : ''}`} onClick={() => onPick(iso)}>{date.getDate()}</button>;
+      })}
+    </div>
+  </div>;
+}
+
+export function ChannelSearchBox({ channel }: { channel: Channel }) {
+  const scope = scopeOf(channel);
+  const mine = searchStore(s => s.scope === scope);
+  const text = searchStore(s => (s.scope === scope ? s.text : ''));
+  const filters = searchStore(s => (s.scope === scope ? s.filters : EMPTY_FILTERS));
+  const active = searchStore(s => s.scope === scope && s.active);
+  const me = useStore(s => s.me);
+  const guild = useStore(s => (channel.guild_id ? s.guilds[channel.guild_id] : undefined));
+  const members = useStore(s => (channel.guild_id ? s.members[channel.guild_id] : undefined));
+  const channels = useStore(s => s.channels);
+
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [more, setMore] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { searchActions.enter(channel); }, [channel.id, channel.guild_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The results panel's Filter button asks for the box.
+  const focusToken = searchStore(s => s.focusToken);
+  useEffect(() => {
+    if (focusToken === 0) return;
+    input.current?.focus();
+    setOpen(true);
+  }, [focusToken]);
+
+  const keyword = useMemo(() => pendingKeyword(text), [text]);
+  const query = keyword?.query.toLowerCase() ?? '';
+
+  const commit = (kind: FilterKind, value: string, label: string) => {
+    const before = keyword ? text.slice(0, keyword.start).trimEnd() : text;
+    searchActions.addFilter({ kind, value, label });
+    searchActions.setText(before);
+    setMore(false);
+    input.current?.focus();
+  };
+  const startKeyword = (kind: FilterKind) => {
+    const base = keyword ? text.slice(0, keyword.start) : text;
+    searchActions.setText(`${base}${base && !base.endsWith(' ') ? ' ' : ''}${kind}:`);
+    setMore(false);
+    input.current?.focus();
+  };
+
+  const people = useMemo<{ user: User; name: string }[]>(() => {
+    const list: { user: User; name: string }[] = [];
+    if (channel.guild_id) {
+      for (const member of Object.values(members ?? {})) list.push({ user: member.user, name: displayName(member.user, member) });
+    } else {
+      for (const user of [...(channel.recipients ?? []), ...(me ? [me] : [])]) list.push({ user, name: displayName(user) });
+    }
+    return list;
+  }, [channel, members, me]);
+
+  const options: Option[] = useMemo(() => {
+    const out: Option[] = [];
+    if (!keyword) return out;
+    const { kind } = keyword;
+    if (kind === 'from' || kind === 'mentions') {
+      const rank = (p: { user: User; name: string }): number => {
+        const hay = [p.name, p.user.username, p.user.global_name ?? ''].map(v => v.toLowerCase());
+        if (!query) return 1;
+        if (hay.some(v => v.startsWith(query))) return 0;
+        return hay.some(v => v.includes(query)) ? 1 : 2;
+      };
+      people.filter(p => rank(p) < 2).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).slice(0, 10).forEach(p => out.push({
+        key: p.user.id,
+        icon: <Avatar user={p.user} size={20} />,
+        title: <><b>{p.name}</b>{p.name !== p.user.username && <span className="search-opt-muted"> {p.user.username}</span>}</>,
+        onPick: () => commit(kind, p.user.id, p.name),
+      }));
+    } else if (kind === 'has') {
+      HAS_VALUES.filter(v => v.startsWith(query)).forEach(v => out.push({ key: v, icon: HAS_ICONS[v], title: <b>{v}</b>, onPick: () => commit('has', v, v) }));
+    } else if (kind === 'in') {
+      const texts = Object.values(channels).filter(c => c.guild_id === channel.guild_id && c.type === ChannelType.GuildText && (c.name ?? '').toLowerCase().includes(query));
+      texts.sort((a, b) => (a.id === channel.id ? -1 : b.id === channel.id ? 1 : a.position - b.position));
+      texts.slice(0, 15).forEach(c => out.push({ key: c.id, icon: <Hash size={20} />, title: <b>{c.name}</b>, onPick: () => commit('in', c.id, c.name ?? '') }));
+    } else if (kind === 'pinned') {
+      for (const v of ['true', 'false']) if (v.startsWith(query)) out.push({ key: v, icon: <Pin size={20} />, title: <b>{v}</b>, onPick: () => commit('pinned', v, v) });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keyword, query, people, channels, channel.id, channel.guild_id]);
+
+  const rootRows: Option[] = [
+    { key: 'from', icon: <UserIcon size={20} />, title: 'From a specific user', hint: 'from: user', onPick: () => startKeyword('from') },
+    { key: 'in', icon: <Hash size={20} />, title: 'Sent in a specific channel', hint: 'in: channel', onPick: () => startKeyword('in') },
+    { key: 'has', icon: <Paperclip size={20} />, title: 'Includes a specific type of data', hint: 'has: link, embed or file', onPick: () => startKeyword('has') },
+    { key: 'mentions', icon: <AtSign size={20} />, title: 'Mentions a specific user', hint: 'mentions: user', onPick: () => startKeyword('mentions') },
+    { key: 'more', icon: <SlidersHorizontal size={20} />, title: 'More filters', hint: 'date and pinned', onPick: () => setMore(true) },
+  ];
+  const moreRows: Option[] = [
+    { key: 'before', icon: <SlidersHorizontal size={20} />, title: 'Sent before a date', hint: 'before: date', onPick: () => startKeyword('before') },
+    { key: 'during', icon: <SlidersHorizontal size={20} />, title: 'Sent on a date', hint: 'during: date', onPick: () => startKeyword('during') },
+    { key: 'after', icon: <SlidersHorizontal size={20} />, title: 'Sent after a date', hint: 'after: date', onPick: () => startKeyword('after') },
+    { key: 'pinned', icon: <Pin size={20} />, title: 'Pinned or not', hint: 'pinned: true or false', onPick: () => startKeyword('pinned') },
+  ];
+  const dateMode = keyword && DATE_KINDS.includes(keyword.kind);
+  const listMode = keyword && !dateMode;
+  const freeText = text.trim();
+  const rows: Option[] = listMode ? options : dateMode ? [] : [
+    ...(freeText ? [{ key: 'search', icon: <Search size={20} />, title: <>Search for <b>{freeText}</b></>, onPick: () => submit() }] : []),
+    ...(more ? moreRows : rootRows),
+  ];
+
+  useEffect(() => { setCursor(0); }, [keyword?.kind, query, more, freeText === '']);
+
+  function submit() {
+    searchActions.submit();
+    setOpen(false);
+    input.current?.blur();
+  }
+
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (rows.length === 0) return;
+      e.preventDefault();
+      setOpen(true);
+      setCursor(c => (c + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (listMode) { rows[cursor]?.onPick(); return; }
+      if (dateMode) return;
+      submit();
+    } else if (e.key === 'Backspace' && text === '' && filters.length > 0) {
+      searchActions.removeFilter(filters.length - 1);
+    } else if (e.key === 'Escape') {
+      // First Escape closes the suggestions, a second one with the results showing drops the search.
+      if (open) setOpen(false);
+      else if (active) searchActions.clear();
+      else input.current?.blur();
+    }
+  }
+
+  const placeholder = !text && filters.length === 0 ? (guild ? `Search ${guild.name}` : 'Search') : '';
+  const hasContent = !!text || filters.length > 0 || active;
+  const header = keyword?.kind === 'from' ? 'From user' : keyword?.kind === 'mentions' ? 'Mentions user' : keyword?.kind === 'has' ? 'Message includes' : keyword?.kind === 'in' ? 'In channel'
+    : keyword?.kind === 'pinned' ? 'Pinned' : dateMode ? `${keyword!.kind[0]!.toUpperCase()}${keyword!.kind.slice(1)} date` : more ? 'More filters' : 'Filter';
+
+  return <div className="header-search search-box" ref={setAnchor} role="search" data-search-active={active || undefined}>
+    {mine && filters.map((f, i) => <FilterChip key={`${f.kind}:${f.value}`} filter={f} onRemove={() => searchActions.removeFilter(i)} />)}
+    <input ref={input} className="header-search-input" placeholder={placeholder} aria-label="Search" role="combobox" aria-expanded={open} aria-autocomplete="list" value={text}
+      autoComplete="off" spellCheck={false}
+      onChange={e => { searchActions.setText(e.target.value); setOpen(true); }}
+      onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onKeyDown={onKeyDown} />
+    {hasContent
+      ? <button type="button" className="search-box-clear" aria-label="Clear search" onMouseDown={e => e.preventDefault()} onClick={() => { searchActions.clear(); searchActions.enter(channel); input.current?.focus(); }}><X size={16} /></button>
+      : <Search size={16} />}
+    <Popout anchor={anchor} open={open} onClose={() => { setOpen(false); setMore(false); }} side="bottom" align="end" gap={8} className="search-popout">
+      <div className="search-suggest" role="listbox" aria-label="Search suggestions" onMouseDown={e => e.preventDefault()}>
+        <div className="search-suggest-head">{header}</div>
+        {dateMode && <Calendar onPick={iso => commit(keyword!.kind, iso, dateLabel(iso))} />}
+        {!dateMode && rows.length === 0 && <div className="search-suggest-empty">No matches</div>}
+        {rows.map((row, i) => <button key={row.key} type="button" role="option" aria-selected={i === cursor} data-suggest={row.key}
+          className={`search-suggest-row${i === cursor ? ' active' : ''}${listMode ? ' compact' : ''}`} onMouseEnter={() => setCursor(i)} onClick={row.onPick}>
+          {row.icon && <span className="search-suggest-icon">{row.icon}</span>}
+          <span className="search-suggest-text"><span className="search-suggest-title">{row.title}</span>{row.hint && <span className="search-suggest-hint">{row.hint}</span>}</span>
+        </button>)}
+      </div>
+    </Popout>
+  </div>;
+}
+
+const EMPTY_FILTERS: SearchFilter[] = [];
+
+function FilterChip({ filter, onRemove }: { filter: SearchFilter; onRemove(): void }) {
+  return <span className="search-chip" data-kind={filter.kind}>
+    <span className="search-chip-key">{filter.kind}:</span>
+    <span className="search-chip-value">{filter.label}</span>
+    <button type="button" className="search-chip-remove" aria-label={`Remove ${filter.kind} filter`} onClick={onRemove}><X size={12} /></button>
+  </span>;
+}
