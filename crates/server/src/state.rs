@@ -31,7 +31,7 @@ impl Deref for AppState {
 
 impl AppState {
     pub fn new(db: PgPool, config: Config) -> Self {
-        let hub = Hub::new(config.replay_capacity, config.session_ttl);
+        let hub = Hub::new(config.replay_capacity, config.session_ttl, config.outgoing_queue);
         let unfurler = Unfurler::new(config.unfurl);
         Self(Arc::new(Inner { db, config, ids: SnowflakeGenerator::new(1), hub, limiter: RateLimiter::default(), unfurler }))
     }

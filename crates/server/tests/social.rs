@@ -37,13 +37,31 @@ async fn friend_request_flow() {
     assert_eq!(app.post("/users/@me/relationships", &sam, json!({"username": "ghost"})).await.1["code"], 10013);
 }
 
+/// Makes `a` and `b` accepted friends.
+async fn befriend(app: &TestApp, a: (&str, &Value), b: (&str, &Value)) {
+    let name = b.1["username"].as_str().expect("username");
+    assert_eq!(app.post("/users/@me/relationships", a.0, json!({"username": name})).await.0, StatusCode::NO_CONTENT);
+    let a_id = a.1["id"].as_str().expect("id");
+    assert_eq!(app.put(&format!("/users/@me/relationships/{a_id}"), b.0).await.0, StatusCode::NO_CONTENT);
+}
+
 #[tokio::test]
 async fn direct_and_group_messages_channels() {
     let app = TestApp::new().await;
     let (sam, sam_user) = app.register("sam").await;
-    let (_, alice_user) = app.register("alice").await;
-    let (_, bob_user) = app.register("bob").await;
+    let (alice, alice_user) = app.register("alice").await;
+    let (bob, bob_user) = app.register("bob").await;
     let (nova, nova_user) = app.register("nova").await;
+    befriend(&app, (&sam, &sam_user), (&alice, &alice_user)).await;
+    befriend(&app, (&sam, &sam_user), (&bob, &bob_user)).await;
+
+    // strangers cannot be DM'd, and a group DM only takes the creator's friends
+    let (status, error) = app.post("/users/@me/channels", &sam, json!({"recipient_id": nova_user["id"]})).await;
+    assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50007)));
+    let (status, error) = app.post("/users/@me/channels", &sam, json!({"recipient_ids": [alice_user["id"], nova_user["id"]]})).await;
+    assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50007)));
+    let (status, error) = app.post("/users/@me/channels", &nova, json!({"recipient_id": sam_user["id"]})).await;
+    assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50007)));
 
     let (status, dm) = app.post("/users/@me/channels", &sam, json!({"recipient_id": alice_user["id"]})).await;
     assert_eq!(status, StatusCode::OK);
@@ -98,6 +116,8 @@ async fn blocking_ends_the_friendship_and_only_the_blocker_can_undo_it() {
     app.post("/users/@me/relationships", &sam, json!({"username": "alice"})).await;
     assert_eq!(app.put_json(&sam_path, &alice, json!({"type": 1})).await.0, StatusCode::NO_CONTENT);
     assert_eq!(app.get("/users/@me/relationships", &alice).await.1[0]["type"], 1);
+    let (status, dm) = app.post("/users/@me/channels", &sam, json!({"recipient_id": alice_id})).await;
+    assert_eq!(status, StatusCode::OK);
 
     // sam blocks alice: only sam keeps a row, of type 2
     assert_eq!(app.put_json(&alice_path, &sam, json!({"type": 2})).await.0, StatusCode::NO_CONTENT);
@@ -113,8 +133,15 @@ async fn blocking_ends_the_friendship_and_only_the_blocker_can_undo_it() {
     assert_eq!(app.delete(&sam_path, &alice).await.0, StatusCode::NO_CONTENT);
     assert_eq!(app.get("/users/@me/relationships", &sam).await.1[0]["type"], 2);
 
-    // a 1:1 DM is closed for new messages in both directions
-    let (_, dm) = app.post("/users/@me/channels", &sam, json!({"recipient_id": alice_id})).await;
+    // a blocked pair cannot open or reopen a DM in either direction
+    for (token, other) in [(&sam, alice_id), (&alice, sam_id)] {
+        let (status, error) = app.post("/users/@me/channels", token, json!({"recipient_id": other})).await;
+        assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50007)));
+        let (status, error) = app.post("/users/@me/channels", token, json!({"recipient_ids": [other]})).await;
+        assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50007)));
+    }
+
+    // a 1:1 DM opened before the block is closed for new messages in both directions
     let messages = format!("/channels/{}/messages", dm["id"].as_str().expect("dm id"));
     for token in [&sam, &alice] {
         let (status, error) = app.post(&messages, token, json!({"content": "hi"})).await;
@@ -185,4 +212,48 @@ async fn profile_shows_mutual_guilds_friends_and_the_guild_member() {
     assert!(stranger.get("guild_member").is_none(), "no guild member info for a guild the caller is not in");
     assert_eq!(app.get(&format!("/users/{sam_id}/profile"), &alice).await.1["mutual_guilds"][0]["nick"], Value::Null);
     assert_eq!(app.get("/users/1/profile", &sam).await.1["code"], 10013);
+}
+
+#[tokio::test]
+async fn presence_is_only_shared_with_accepted_relationships() {
+    let app = TestApp::new().await;
+    let (sam, sam_user) = app.register("sam").await;
+    let (alice, alice_user) = app.register("alice").await;
+    let (_, bob_user) = app.register("bob").await;
+    let (carol, carol_user) = app.register("carol").await;
+    let id = |user: &Value| user["id"].as_str().expect("id").parse::<i64>().expect("number");
+    let (sam_id, alice_id, bob_id, carol_id) = (id(&sam_user), id(&alice_user), id(&bob_user), id(&carol_user));
+    let audience = |user: i64| {
+        let state = app.state.clone();
+        async move { vokko_server::events::user_audience(&state, user).await.expect("audience") }
+    };
+
+    // a pending request (either direction) shares nothing
+    assert_eq!(app.post("/users/@me/relationships", &sam, json!({"username": "bob"})).await.0, StatusCode::NO_CONTENT);
+    assert!(!audience(sam_id).await.contains(&bob_id));
+    assert!(!audience(bob_id).await.contains(&sam_id));
+
+    // an accepted friendship shares presence
+    befriend(&app, (&sam, &sam_user), (&alice, &alice_user)).await;
+    assert!(audience(sam_id).await.contains(&alice_id));
+    assert!(audience(alice_id).await.contains(&sam_id));
+
+    // a DM that the other side never opened shares nothing once the friendship is gone
+    let (_, dm) = app.post("/users/@me/channels", &sam, json!({"recipient_id": alice_user["id"]})).await;
+    assert_eq!(app.delete(&format!("/users/@me/relationships/{alice_id}"), &sam).await.0, StatusCode::NO_CONTENT);
+    assert!(!audience(sam_id).await.contains(&alice_id));
+    assert!(!audience(alice_id).await.contains(&sam_id));
+
+    // the first message opens it on both sides
+    let (status, _) = app.post(&format!("/channels/{}/messages", dm["id"].as_str().expect("id")), &sam, json!({"content": "hi"})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(audience(sam_id).await.contains(&alice_id));
+    assert!(audience(alice_id).await.contains(&sam_id));
+
+    // guild mates still share presence
+    let (_, channel) = app.guild_with_channel(&sam).await;
+    let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &sam, json!({})).await;
+    app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &carol, json!({})).await;
+    assert!(audience(sam_id).await.contains(&carol_id));
+    assert!(audience(carol_id).await.contains(&sam_id));
 }

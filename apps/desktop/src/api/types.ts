@@ -4,7 +4,7 @@
 export type Snowflake = string;
 export type ISO8601 = string;
 
-export type PresenceStatus = "online" | "idle" | "dnd" | "offline";
+export type PresenceStatus = "online" | "idle" | "dnd" | "invisible" | "offline"; // invisible only in op 3 and your own presence
 
 export interface User {
   id: Snowflake;
