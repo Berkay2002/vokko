@@ -223,7 +223,11 @@ export interface GatewayEvents {
   CHANNEL_UPDATE: Channel;
   CHANNEL_DELETE: Channel;
   GUILD_CREATE: ReadyEvent["guilds"][number];
+  GUILD_UPDATE: Guild; // roles included, no channels/members
+  GUILD_DELETE: { id: Snowflake };
   GUILD_MEMBER_ADD: GuildMember & { guild_id: Snowflake };
+  GUILD_MEMBER_REMOVE: { guild_id: Snowflake; user: User };
+  RESUMED: Record<string, never>; // after a successful op 6 replay
   PRESENCE_UPDATE: Presence;
   MESSAGE_ACK: { channel_id: Snowflake; message_id: Snowflake };
   RELATIONSHIP_ADD: Relationship;

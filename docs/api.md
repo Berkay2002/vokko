@@ -64,3 +64,5 @@ General rules:
 5. `op 6 Resume {token, session_id, seq}` replays missed dispatches if the session buffer still has them; otherwise `op 9 InvalidSession`, and the client re-identifies.
 
 Events are delivered only to users who can see the channel/guild. Event names and payloads: `GatewayEvents` in types.ts. Presence: connected → online, last connection closed → offline; `op 3 {status, custom_status}` updates it.
+
+Semantics notes: a reply puts the replied-to author in `mentions` (Discord default). Pinning emits MESSAGE_UPDATE for the pinned message plus a type 6 system message (MESSAGE_CREATE). `referenced_message.reactions` is always `[]`. Role mentions only drive `mention_count` (no `mention_roles` field).
