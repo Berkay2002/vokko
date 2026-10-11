@@ -12,7 +12,7 @@ mod reactions;
 pub mod relationships;
 mod users;
 
-pub fn api() -> Router<AppState> {
+pub fn api(max_upload_bytes: usize) -> Router<AppState> {
     Router::new()
         .merge(auth::routes())
         .merge(users::routes())
@@ -22,5 +22,5 @@ pub fn api() -> Router<AppState> {
         .merge(relationships::routes())
         .merge(messages::routes())
         .merge(reactions::routes())
-        .merge(attachments::routes())
+        .merge(attachments::routes(max_upload_bytes))
 }

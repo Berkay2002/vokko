@@ -13,7 +13,7 @@ use vokko_protocol::api::permissions::ATTACH_FILES;
 
 use crate::access::channel_access;
 use crate::auth::AuthUser;
-use crate::config::{MAX_PENDING_BYTES_PER_USER, MAX_UPLOAD_BYTES};
+use crate::config::MAX_PENDING_BYTES_PER_USER;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::parse_id;
 use crate::media::{self, encode_filename, plain_content_type, sanitize_filename, sniff_image};
@@ -25,9 +25,10 @@ fn multipart_error(error: MultipartError, message: &str) -> ApiErr {
     if error.status() == StatusCode::PAYLOAD_TOO_LARGE { ApiErr::payload_too_large() } else { ApiErr::invalid("file", message) }
 }
 
-pub fn routes() -> Router<AppState> {
+/// `max_upload_bytes` is the largest file; the body limit leaves 1 MiB for the multipart envelope.
+pub fn routes(max_upload_bytes: usize) -> Router<AppState> {
     Router::new()
-        .route("/channels/{id}/attachments", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES + 1024 * 1024)))
+        .route("/channels/{id}/attachments", post(upload).layer(DefaultBodyLimit::max(max_upload_bytes + 1024 * 1024)))
         .route("/attachments/{id}/{key}/{filename}", get(download))
 }
 
@@ -43,7 +44,7 @@ async fn upload(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
         let declared = field.content_type().map(str::to_owned);
         let mut bytes: Vec<u8> = Vec::new();
         while let Some(chunk) = field.chunk().await.map_err(|error| multipart_error(error, "Upload interrupted."))? {
-            if bytes.len() + chunk.len() > MAX_UPLOAD_BYTES {
+            if bytes.len() + chunk.len() > state.config.max_upload_bytes {
                 return Err(ApiErr::payload_too_large());
             }
             bytes.extend_from_slice(&chunk);

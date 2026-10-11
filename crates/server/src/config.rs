@@ -19,6 +19,8 @@ pub struct Config {
     /// `None` disables REST rate limiting.
     pub rate_limit: Option<RateLimit>,
     pub unfurl: UnfurlConfig,
+    /// Largest accepted attachment, in bytes (`VOKKO_MAX_UPLOAD_MB`, default 25 MiB).
+    pub max_upload_bytes: usize,
     /// Frames queued per gateway connection before it is dropped as a slow reader (must exceed `replay_capacity`).
     pub outgoing_queue: usize,
     /// A single socket write that takes longer ends the connection.
@@ -34,7 +36,8 @@ pub struct Config {
 }
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:8710";
-pub const MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
+/// Default of `VOKKO_MAX_UPLOAD_MB`.
+pub const DEFAULT_MAX_UPLOAD_MB: usize = 25;
 /// Total size of one user's pending (not attached, not avatar/icon) uploads.
 pub const MAX_PENDING_BYTES_PER_USER: i64 = 100 * 1024 * 1024;
 /// Pending uploads older than this are deleted by the cleanup task, which runs every `CLEANUP_INTERVAL`.
@@ -113,6 +116,13 @@ impl Config {
         let mut config = Self::new(database_url, bind, data_dir, public_url);
         // `VOKKO_UNFURL=off` disables link previews (no outbound requests at all).
         config.unfurl.enabled = !env.get("VOKKO_UNFURL").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "off" | "0" | "false" | "no"));
+        if let Some(value) = env.get("VOKKO_MAX_UPLOAD_MB") {
+            let megabytes: usize = value.trim().parse().map_err(|_| format!("VOKKO_MAX_UPLOAD_MB must be a whole number of MiB, got {value}"))?;
+            if megabytes == 0 {
+                return Err("VOKKO_MAX_UPLOAD_MB must be at least 1".to_owned());
+            }
+            config.max_upload_bytes = megabytes.saturating_mul(1024 * 1024);
+        }
         // `VOKKO_TRUST_PROXY=on` behind a reverse proxy that appends the client address to X-Forwarded-For.
         config.trust_proxy = env.get("VOKKO_TRUST_PROXY").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "on" | "1" | "true" | "yes"));
         Ok(config)
@@ -130,6 +140,7 @@ impl Config {
             replay_capacity: 1000,
             rate_limit: Some(RateLimit::default()),
             unfurl: UnfurlConfig::default(),
+            max_upload_bytes: DEFAULT_MAX_UPLOAD_MB * 1024 * 1024,
             outgoing_queue: 2048,
             write_timeout: Duration::from_secs(10),
             handshake_timeout: Duration::from_secs(30),
