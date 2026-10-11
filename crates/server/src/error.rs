@@ -66,6 +66,11 @@ impl ApiErr {
         Self::new(StatusCode::NOT_FOUND, 10011, "Unknown Role")
     }
 
+    /// 400 / 50028: the operation does not apply to this role (deleting @everyone).
+    pub fn invalid_role() -> Self {
+        Self::new(StatusCode::BAD_REQUEST, 50028, "Invalid role")
+    }
+
     pub fn unknown_ban() -> Self {
         Self::new(StatusCode::NOT_FOUND, 10026, "Unknown Ban")
     }

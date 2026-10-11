@@ -2,7 +2,7 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::routing::get;
-use vokko_protocol::api::{GatewayEvent, Guild, GuildMemberAdd, Invite, Snowflake};
+use vokko_protocol::api::{GatewayEvent, Guild, GuildMemberAdd, Invite, MessageType, Snowflake};
 
 use crate::access;
 use crate::auth::AuthUser;
@@ -10,6 +10,7 @@ use crate::error::{ApiErr, ApiResult};
 use crate::events;
 use crate::presence;
 use crate::routes::channels::invite_view;
+use crate::routes::messages::{Draft, Resolved, insert_message};
 use crate::state::AppState;
 use crate::store;
 
@@ -75,6 +76,30 @@ async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
             state.hub.send(&others, &GatewayEvent::GuildMemberAdd(GuildMemberAdd { member, guild_id: Snowflake::from(guild_id) }));
         }
         presence::announce_join(&state, guild_id, user_id).await?;
+        if let Err(error) = post_join_message(&state, guild_id, user_id).await {
+            tracing::warn!("join message failed: {error:?}");
+        }
     }
     store::guild(&state, guild_id).await?.map(Json).ok_or_else(ApiErr::unknown_guild)
+}
+
+/// A UserJoin (type 7) system message from the joiner in the guild's system channel, when one is set.
+async fn post_join_message(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
+    let channel: Option<(Option<i64>,)> = sqlx::query_as("SELECT system_channel_id FROM guilds WHERE id = $1").bind(guild_id).fetch_optional(&state.db).await?;
+    let Some((Some(channel_id),)) = channel else { return Ok(()) };
+    let Some(channel) = store::channel_row(state, channel_id).await? else { return Ok(()) };
+    if channel.guild_id != Some(guild_id) {
+        return Ok(());
+    }
+    let draft = Draft {
+        content: String::new(),
+        kind: MessageType::UserJoin,
+        reference: None,
+        attachments: Vec::new(),
+        nonce: None,
+        mentions: Resolved { users: Vec::new(), roles: Vec::new(), everyone: false },
+        ping_replied: false,
+    };
+    insert_message(state, &channel, user_id, draft).await?;
+    Ok(())
 }
