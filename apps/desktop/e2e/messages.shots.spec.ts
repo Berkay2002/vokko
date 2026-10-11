@@ -132,11 +132,15 @@ test('emoji: hover tooltip, info popout, jumbo, emoticon on send, reply to image
   await page.locator('.md-jumbo').last().waitFor();
   await shot(page, '22-jumbo-emoji');
   await toTop(page);
-  const chart = page.locator('.chat-msg').filter({ has: page.locator('.chat-image') }).filter({ hasNot: page.locator('.chat-image-actions.own') }).first();
-  await chart.hover();
-  await chart.getByRole('button', { name: 'Reply' }).click();
+  // "nice chart" replies to an attachment-only message: jump to it, then reply to that row
+  await row(page, 'nice chart').locator('.chat-reply').click();
+  const target = page.locator('.chat-msg.flash').first();
+  await target.waitFor();
+  await target.click({ button: 'right', position: { x: 30, y: 10 } });
+  await page.getByRole('menuitem', { name: 'Reply' }).click();
   await shot(page, '23-replying-to-image');
   await box(page).fill('thanks');
   await page.keyboard.press('Enter');
+  await page.waitForTimeout(1500);
   await shot(page, '24-reply-to-image-sent');
 });

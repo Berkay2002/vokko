@@ -47,7 +47,13 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   rowsRef.current = rows;
 
   useImperativeHandle(ref, () => ({
-    scrollToBottom() { virtuoso.current?.scrollToIndex({ index: Math.max(0, rowsRef.current.length - 1), align: 'end', behavior: 'auto' }); },
+    scrollToBottom() {
+      virtuoso.current?.scrollToIndex({ index: Math.max(0, rowsRef.current.length - 1), align: 'end', behavior: 'auto' });
+      // scrollToIndex aligns the last row (not the footer) and row heights settle after the jump: finish at the real end.
+      stick.current = true;
+      const toEnd = () => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; };
+      requestAnimationFrame(() => { toEnd(); requestAnimationFrame(toEnd); });
+    },
   }), []);
 
   // Jump-to-message (reply click, pinned "Jump"): scroll then flash.

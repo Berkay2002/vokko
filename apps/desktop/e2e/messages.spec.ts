@@ -373,3 +373,18 @@ test.describe('emoji', () => {
     await expect(pop).toHaveCount(0);
   });
 });
+
+test('sending from far up lands on the new message, fully above the composer', async ({ page }) => {
+  await openStockTalk(page);
+  await page.locator('.chat-scroller').hover();
+  for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, -1500); await page.waitForTimeout(200); }
+  await stockBox(page).fill('landed at the bottom');
+  await page.keyboard.press('Enter');
+  const sent = row(page, 'landed at the bottom');
+  await expect(sent).toBeVisible();
+  await expect.poll(async () => {
+    const m = (await sent.boundingBox())!;
+    const c = (await page.locator('.chat-composer').boundingBox())!;
+    return c.y - (m.y + m.height);
+  }).toBeGreaterThanOrEqual(0);
+});
