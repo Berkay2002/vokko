@@ -1,7 +1,29 @@
 //! Attachment storage (`<data dir>/attachments/<attachment id>`), content-type sniffing and image dimensions.
 use std::path::PathBuf;
+use std::time::Duration;
 
+use crate::auth::random_hex;
+use crate::config::{CLEANUP_INTERVAL, PENDING_MAX_AGE};
 use crate::state::AppState;
+
+/// 128-bit random download key (32 hex chars) from the CSPRNG.
+pub fn new_key() -> String {
+    random_hex(16)
+}
+
+/// Constant-time string comparison (the length is not secret: keys are always 32 chars).
+pub fn keys_match(stored: &str, given: &str) -> bool {
+    let (a, b) = (stored.as_bytes(), given.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0_u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Stored asset path `<id>/<key>/<percent-encoded filename>`; `AppState::asset_url` prefixes the origin and `/api/v1/attachments/`.
+pub fn asset_path(id: i64, key: &str, filename: &str) -> String {
+    format!("{id}/{key}/{}", encode_filename(filename))
+}
 
 pub fn file_path(state: &AppState, attachment_id: i64) -> PathBuf {
     state.attachments_dir().join(attachment_id.to_string())
@@ -12,6 +34,43 @@ pub async fn remove_files(state: &AppState, attachment_ids: &[i64]) {
     for id in attachment_ids {
         let _ = tokio::fs::remove_file(file_path(state, *id)).await;
     }
+}
+
+/// Deletes pending uploads (`message_id IS NULL AND claimed_at IS NULL`) older than `max_age`, rows and files; returns how many.
+/// Avatars and icons are attachments with a NULL `message_id` too, but they have `claimed_at` set when they are
+/// assigned (`routes::users::owned_attachment_path`), so they are never matched here.
+pub async fn cleanup_pending(state: &AppState, max_age: Duration) -> usize {
+    let deleted: Result<Vec<(i64,)>, _> = sqlx::query_as(
+        "DELETE FROM attachments WHERE message_id IS NULL AND claimed_at IS NULL AND created_at < now() - make_interval(secs => $1) RETURNING id",
+    )
+    .bind(max_age.as_secs_f64())
+    .fetch_all(&state.db)
+    .await;
+    match deleted {
+        Ok(rows) => {
+            let ids: Vec<i64> = rows.into_iter().map(|(id,)| id).collect();
+            remove_files(state, &ids).await;
+            ids.len()
+        }
+        Err(error) => {
+            tracing::warn!("pending attachment cleanup failed: {error}");
+            0
+        }
+    }
+}
+
+/// Periodic `cleanup_pending`; the task ends with the runtime.
+pub fn spawn_cleanup(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(CLEANUP_INTERVAL);
+        loop {
+            interval.tick().await;
+            let removed = cleanup_pending(&state, PENDING_MAX_AGE).await;
+            if removed > 0 {
+                tracing::info!("removed {removed} stale pending uploads");
+            }
+        }
+    });
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

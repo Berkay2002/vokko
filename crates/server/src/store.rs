@@ -306,6 +306,7 @@ pub const MESSAGE_SELECT: &str = "SELECT m.id, m.channel_id, c.guild_id, m.autho
 struct AttachmentRow {
     id: i64,
     message_id: i64,
+    key: Option<String>,
     filename: String,
     content_type: Option<String>,
     size: i64,
@@ -313,9 +314,11 @@ struct AttachmentRow {
     height: Option<i32>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn attachment_api(
     state: &AppState,
     id: i64,
+    key: &str,
     filename: String,
     content_type: Option<String>,
     size: i64,
@@ -324,7 +327,7 @@ pub fn attachment_api(
 ) -> Attachment {
     Attachment {
         id: flake(id),
-        url: state.asset_url(&format!("{id}/{filename}")),
+        url: state.asset_url(&crate::media::asset_path(id, key, &filename)),
         filename,
         content_type,
         size: size.max(0) as u64,
@@ -363,7 +366,7 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
     let mention_rows: Vec<(i64, i64)> =
         sqlx::query_as("SELECT message_id, user_id FROM message_mentions WHERE message_id = ANY($1) ORDER BY user_id").bind(&ids).fetch_all(&state.db).await?;
     let attachment_rows: Vec<AttachmentRow> =
-        sqlx::query_as("SELECT id, message_id, filename, content_type, size, width, height FROM attachments WHERE message_id = ANY($1) ORDER BY id")
+        sqlx::query_as("SELECT id, message_id, key, filename, content_type, size, width, height FROM attachments WHERE message_id = ANY($1) ORDER BY id")
             .bind(&ids)
             .fetch_all(&state.db)
             .await?;
@@ -386,7 +389,18 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
     }
     let mut attachments: HashMap<i64, Vec<Attachment>> = HashMap::new();
     for row in attachment_rows {
-        attachments.entry(row.message_id).or_default().push(attachment_api(state, row.id, row.filename, row.content_type, row.size, row.width, row.height));
+        // rows from before keys existed cannot be served, so they are not listed
+        let Some(key) = row.key else { continue };
+        attachments.entry(row.message_id).or_default().push(attachment_api(
+            state,
+            row.id,
+            &key,
+            row.filename,
+            row.content_type,
+            row.size,
+            row.width,
+            row.height,
+        ));
     }
     // message → ordered (emoji, users)
     let mut reactions: HashMap<i64, Vec<(ReactionEmoji, Vec<i64>)>> = HashMap::new();

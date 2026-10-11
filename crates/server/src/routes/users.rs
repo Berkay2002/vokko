@@ -50,15 +50,18 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     Ok(Json(user))
 }
 
-/// `<id>/<filename>` of an attachment uploaded by `user_id` (used for avatars and guild icons).
+/// Asset path (`<id>/<key>/<filename>`) of an attachment uploaded by `user_id`, used for avatars and guild icons.
+/// Marks the row `claimed_at` so the pending-upload cleanup never deletes it while it is in use.
 pub async fn owned_attachment_path(state: &AppState, attachment_id: i64, user_id: i64) -> ApiResult<String> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT filename FROM attachments WHERE id = $1 AND uploader_id = $2")
-        .bind(attachment_id)
-        .bind(user_id)
-        .fetch_optional(&state.db)
-        .await?;
+    let row: Option<(String, String)> = sqlx::query_as(
+        "UPDATE attachments SET claimed_at = COALESCE(claimed_at, now())          WHERE id = $1 AND uploader_id = $2 AND key IS NOT NULL AND message_id IS NULL RETURNING filename, key",
+    )
+    .bind(attachment_id)
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await?;
     match row {
-        Some((filename,)) => Ok(format!("{attachment_id}/{filename}")),
+        Some((filename, key)) => Ok(crate::media::asset_path(attachment_id, &key, &filename)),
         None => Err(ApiErr::invalid("attachment_id", "Unknown attachment.")),
     }
 }

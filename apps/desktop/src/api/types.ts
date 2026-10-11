@@ -4,7 +4,7 @@
 export type Snowflake = string;
 export type ISO8601 = string;
 
-export type PresenceStatus = "online" | "idle" | "dnd" | "offline";
+export type PresenceStatus = "online" | "idle" | "dnd" | "invisible" | "offline"; // invisible only in op 3 and your own presence
 
 export interface User {
   id: Snowflake;
@@ -313,7 +313,7 @@ export interface GatewayEvents {
   CHANNEL_CREATE: Channel;
   CHANNEL_UPDATE: Channel;
   CHANNEL_DELETE: Channel;
-  GUILD_CREATE: ReadyEvent["guilds"][number];
+  GUILD_CREATE: ReadyEvent["guilds"][number] & { presences?: Presence[] }; // presences of the guild's online members (Discord-style)
   GUILD_UPDATE: Guild; // roles included, no channels/members
   GUILD_DELETE: { id: Snowflake };
   GUILD_MEMBER_ADD: GuildMember & { guild_id: Snowflake };

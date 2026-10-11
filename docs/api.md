@@ -64,7 +64,7 @@ General rules:
 | POST | /read-states/ack-bulk | `{read_states: [{channel_id, message_id}]}` → 204 ("mark server as read") |
 | POST | /channels/{id}/typing | 204, emits TYPING_START (expires after 10 s client-side) |
 | POST | /channels/{id}/messages/{mid}/ack | updates read state, 204 |
-| POST | /channels/{id}/attachments | multipart `file` (max 10 MiB, Discord's default) → `Attachment` (pending until referenced by a message) |
+| POST | /channels/{id}/attachments | multipart `file` (max 25 MiB, configurable) → `Attachment` (pending until referenced by a message) |
 | GET | /attachments/{id}/{key}/{filename} | serves the file; `key` = 32 hex chars (128-bit random per attachment); wrong key or filename → 404. Avatars/icons use the same URLs. Clients treat `Attachment.url`, `User.avatar`, `Guild.icon` as opaque absolute URLs |
 
 ## Gateway
@@ -84,7 +84,7 @@ Semantics notes: a reply puts the replied-to author in `mentions` (Discord defau
 Read states: READY includes a read state for every channel the user can see that has messages. When a user joins a guild or a DM is created, their read state starts at the channel's latest message (nothing is unread). A channel without a read state counts as unread on the client.
 
 ## Adopted from Discord client facts (docs/research/discord-client-facts.md)
-We match Discord's user-visible behaviour, not its wire protocol byte for byte. Adopted: `allowed_mentions` on send (reply ping toggle), paginated pins with `pinned_at` and the 250-pin cap, 10 files per message and 10 MiB per file, bulk ack, 429 responses with `RateLimitError` + `Retry-After` header (code 20016 for slowmode later).
+We match Discord's user-visible behaviour, not its wire protocol byte for byte. Adopted: `allowed_mentions` on send (reply ping toggle), paginated pins with `pinned_at` and the 250-pin cap, 10 files per message (25 MiB per file, configurable), bulk ack, 429 responses with `RateLimitError` + `Retry-After` header (code 20016 for slowmode later).
 Client gateway behaviour (shell): first heartbeat after `random() * interval`, then every interval; no ACK before the next beat → close and reconnect; Hello must arrive within 30 s; resume only if the last ACK is under 3 minutes old, else identify; reconnect backoff 1 s doubling to 60 s with jitter; stop reconnecting only on close 4004 (bad token); the client closes its own sockets with 4000.
 Not adopted for now: op 40 QoS heartbeat, ETF encoding, zstd/zlib compression, capabilities/client_state in Identify, the cloud upload flow (resumable PUT to an upload URL), ack tokens.
 
@@ -92,4 +92,12 @@ Embeds: on message create/edit the server extracts up to 5 http(s) URLs (not ins
 
 Moderation: missing permission → 403 50013; acting on someone at or above your highest role (or the owner) → 403 50013. Role/role-position edits are limited to roles below the actor's highest role (owner exempt). Channel overwrites resolve in Discord's order (@everyone, roles combined, member); ADMINISTRATOR in an overwrite is ignored. On guild join the server posts a UserJoin (type 7) system message in `system_channel_id` when set.
 
-Further semantics: `embed.url` is the normalised parsed URL; `proxy_url` is never set (clients load og:image/video straight from the origin; CSP + IP-exposure trade-off, revisit with a media proxy). Only the author may set message flags. Unfurling has no cache. A block closes 1:1 DMs both ways (403 50007) and DELETE never lifts the other side's block. A closed DM is hidden for that user until a new message arrives. Category overwrites are not inherited by children (no sync). Pending (unreferenced) attachments are deleted after 1 h.
+Further semantics: `embed.url` is the normalised parsed URL; `proxy_url` is never set (clients load og:image/video straight from the origin; CSP + IP-exposure trade-off, revisit with a media proxy). Only the author may set message flags. Unfurling has no cache. A block closes 1:1 DMs both ways (403 50007) and DELETE never lifts the other side's block. Presence (READY and PRESENCE_UPDATE) is shared only with guild members, accepted friends and peers of DMs open on both sides. A closed DM is hidden for that user until a new message arrives. Pending (unreferenced) attachments are deleted after 1 h.
+
+Presence on join: when a user joins a guild, existing members who didn't already share a guild/DM/relationship with them get GUILD_MEMBER_ADD followed by a PRESENCE_UPDATE with the joiner's current presence (if not offline). The joiner's GUILD_CREATE carries `presences` for the guild's online members. On leave/kick/ban, members who no longer share anything with the user get PRESENCE_UPDATE offline for them (and vice versa).
+
+Presence status: `PresenceStatus` includes `invisible` (valid in op 3 and in the user's own READY presence; everyone else sees `offline`). The chosen status and custom_status are stored and restored on the user's first connection (default online); on the last disconnect others see offline but the choice is kept.
+
+Category sync: a channel created with `parent_id` copies the category's overwrites. PATCH /channels/{id} takes `lock_permissions?: boolean` together with `parent_id` (true = copy the new parent's overwrites, false/absent = keep its own). PUT/DELETE of an overwrite on a category also applies to every child whose overwrites equalled the category's before the change (CHANNEL_UPDATE per child). Clients show "synced" by comparing the arrays.
+
+Limits and abuse controls: uploads max 25 MiB per file (server setting `VOKKO_MAX_UPLOAD_MB`, deliberately moderate: Vokko gives Nitro perks free but not Nitro's 500 MiB), 10 files per message, pending uploads quota 100 MiB per user (413, code 40005). Attachment files are streamed with `Cache-Control: private`. Gateway: frames over 16 KiB end the connection; custom_status over 128 chars → close 4002; op 3 more than 5/min per session or Identify more than 10/min per user → close 4008; a slow reader (queue full or a write stalled 10 s) → close 1013 (resumable); no Identify within 30 s → dropped; more than 16 unidentified sockets per address → HTTP 429. Logout closes that token's sessions with 4004. REST rate limits are per user, and per client address on /auth/* (burst 10, then 1 per 2 s). ack-bulk max 100 entries.
