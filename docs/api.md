@@ -17,7 +17,7 @@ General rules:
 | POST | /auth/login | `AuthRequest` → `AuthResponse` |
 | POST | /auth/logout | revokes token, 204 |
 | GET | /users/@me | `User` |
-| PATCH | /users/@me | `{global_name?, bio?, banner_color?, avatar_attachment_id?}` → `User` |
+| PATCH | /users/@me | `EditUserRequest` → `User` (profile perks included: banner, pronouns, theme colours, decoration, effect, server tag) |
 | GET | /users/{id} | `User` |
 | GET | /users/@me/guilds | `Guild[]` |
 | GET | /users/@me/channels | DM + group DM `Channel[]` |
@@ -29,7 +29,7 @@ General rules:
 | DELETE | /users/@me/relationships/{user_id} | remove friend / cancel / decline / unblock (204) |
 | POST | /guilds | `{name, icon_attachment_id?}` → `Guild` (creates @everyone role, "Text Channels"/"Voice Channels" categories, #general, General voice) |
 | GET | /guilds/{id} | `Guild` |
-| PATCH | /guilds/{id} | `{name?, icon_attachment_id?, system_channel_id?}` → `Guild` |
+| PATCH | /guilds/{id} | `{name?, icon_attachment_id?, system_channel_id?, tag?: GuildTag \| null, theme?: GuildTheme \| null}` → `Guild` (MANAGE_GUILD) |
 | DELETE | /guilds/{id} | owner only, 204 |
 | GET | /guilds/{id}/channels | `Channel[]` |
 | POST | /guilds/{id}/channels | `{name, type, parent_id?, topic?, permission_overwrites?}` → `Channel` (private channel = @everyone deny VIEW_CHANNEL overwrite) |
@@ -39,7 +39,7 @@ General rules:
 | DELETE | /users/@me/guilds/{id} | leave guild, 204 |
 | DELETE | /guilds/{id}/members/{uid} | kick (KICK_MEMBERS + hierarchy), 204, emits GUILD_MEMBER_REMOVE to the guild and GUILD_DELETE to the kicked user |
 | PATCH | /guilds/{id}/members/{uid} | `EditMemberRequest` → `GuildMember`: nick needs MANAGE_NICKNAMES, roles MANAGE_ROLES (only roles below your highest), timeout MODERATE_MEMBERS (not on admins/owner, max 28 days); only sent keys change; emits GUILD_MEMBER_UPDATE |
-| PATCH | /guilds/{id}/members/@me | `{nick}` (CHANGE_NICKNAME) → `GuildMember` |
+| PATCH | /guilds/{id}/members/@me | `EditOwnMemberRequest` → `GuildMember` (nick needs CHANGE_NICKNAME; per-server avatar/banner/bio/pronouns/theme colours need nothing) |
 | GET | /guilds/{id}/bans | `Ban[]` (BAN_MEMBERS) |
 | PUT | /guilds/{id}/bans/{uid} | `BanRequest`, 204; works on non-members; removes the member, emits GUILD_BAN_ADD + GUILD_MEMBER_REMOVE; banned users can't rejoin via invite (403 40007) |
 | DELETE | /guilds/{id}/bans/{uid} | unban, 204, emits GUILD_BAN_REMOVE |
@@ -101,3 +101,5 @@ Presence status: `PresenceStatus` includes `invisible` (valid in op 3 and in the
 Category sync: a channel created with `parent_id` copies the category's overwrites. PATCH /channels/{id} takes `lock_permissions?: boolean` together with `parent_id` (true = copy the new parent's overwrites, false/absent = keep its own). PUT/DELETE of an overwrite on a category also applies to every child whose overwrites equalled the category's before the change (CHANNEL_UPDATE per child). Clients show "synced" by comparing the arrays.
 
 Limits and abuse controls: uploads max 25 MiB per file (server setting `VOKKO_MAX_UPLOAD_MB`, deliberately moderate: Vokko gives Nitro perks free but not Nitro's 500 MiB), 10 files per message, pending uploads quota 100 MiB per user (413, code 40005). Attachment files are streamed with `Cache-Control: private`. Gateway: frames over 16 KiB end the connection; custom_status over 128 chars → close 4002; op 3 more than 5/min per session or Identify more than 10/min per user → close 4008; a slow reader (queue full or a write stalled 10 s) → close 1013 (resumable); no Identify within 30 s → dropped; more than 16 unidentified sockets per address → HTTP 429. Logout closes that token's sessions with 4004. REST rate limits are per user, and per client address on /auth/* (burst 10, then 1 per 2 s). ack-bulk max 100 entries.
+
+Profile perks (docs/research/discord-nitro-perks.md): every Discord Nitro profile perk is free. Animated avatars/banners are accepted as GIF/WebP with moderate caps (avatar ≤8 MiB in, 512x512 out, animated ≤2 MiB stored; banner ≤10 MiB in, ≤1360x480 out, animated ≤4 MiB stored). Decorations, profile effects and tag badges are ids into Vokko's own open asset set (shipped with the client), never Discord assets. Per-server member profile fields override the user's inside that guild; USER_UPDATE / GUILD_MEMBER_UPDATE carry the changes. Message length stays 2000 for now (the 4000 perk is a later decision with the composer). No boost levels: per-server limits are one owner-editable config block.
