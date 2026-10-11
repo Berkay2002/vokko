@@ -12,6 +12,7 @@ import { ModifyAttachmentModal } from './AttachmentModals';
 import { fromDisplay, type MentionToken } from './mentionText';
 import { convertEmoticons } from './emoticons';
 import { messageStore } from './messageStore';
+import { TypingIndicator } from './TypingIndicator';
 import { activeTypers } from './messageState';
 import { isSpoilerName, stripSpoiler } from './util';
 
@@ -238,6 +239,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const hasText = text.length > 0;
 
   return <div className="chat-composer">
+    <TypingIndicator channelId={channelId} />
     {replyTo && <div className="chat-reply-bar">
       <span className="chat-reply-bar-text">Replying to <b>{replyName}</b></span>
       {!chat.isDm && <button type="button" className={`chat-reply-mention${mentionReply ? ' on' : ''}`} aria-pressed={mentionReply} onClick={onToggleMention}><AtSign size={14} /> {mentionReply ? 'ON' : 'OFF'}</button>}

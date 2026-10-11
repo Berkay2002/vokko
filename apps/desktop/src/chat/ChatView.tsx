@@ -6,7 +6,6 @@ import { DeleteAttachmentModal, ModifyAttachmentModal } from './AttachmentModals
 import { ChatProvider, useChat, type ChatActions } from './ChatContext';
 import { Composer } from './Composer';
 import { MessageList, type MessageListHandle } from './MessageList';
-import { TypingIndicator } from './TypingIndicator';
 import { Lightbox } from './Attachments';
 import { ChatToasts } from './toast';
 import { ReactionsModal } from './ReactionsModal';
@@ -211,7 +210,6 @@ function ChatBody(p: BodyProps) {
       onEditLast={editLast}
       focusToken={p.focusToken}
     />
-    <TypingIndicator channelId={p.channelId} />
     <ChatToasts />
     {p.dragging && <div className="chat-drop-overlay" aria-hidden="true">
       <div className="chat-drop-card">
