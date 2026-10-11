@@ -229,6 +229,7 @@ export interface GatewayEvents {
   GUILD_MEMBER_REMOVE: { guild_id: Snowflake; user: User };
   RESUMED: Record<string, never>; // after a successful op 6 replay
   PRESENCE_UPDATE: Presence;
+  USER_UPDATE: User; // profile/avatar change; sent to the user and everyone sharing a guild, DM or relationship with them
   MESSAGE_ACK: { channel_id: Snowflake; message_id: Snowflake };
   RELATIONSHIP_ADD: Relationship;
   RELATIONSHIP_REMOVE: { id: Snowflake };
