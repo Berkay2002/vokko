@@ -927,7 +927,7 @@ pub async fn move_member(state: &AppState, guild_id: i64, user_id: i64, channel_
     if let (Some(livekit), Some(owner)) = (state.config.livekit.clone(), owner)
         && let Some(token) = mint(state, &livekit, &entry, &nonce).await
     {
-        send_server_update(&owner, guild_id, Snowflake::from(channel_id), &livekit.url, token, &entry.session_id);
+        send_server_update(&owner, Some(guild_id), Snowflake::from(channel_id), &livekit.url, token, &entry.session_id);
     }
     let viewers = broadcast(state, &entry, false).await;
     moved_away(state, &previous, viewers).await;

@@ -72,7 +72,7 @@ pub fn validate(request: &PollCreateRequest) -> ApiResult<PollDraft> {
         let text = text_of(&answer.poll_media, "poll.answers.poll_media.text", POLL_ANSWER_MAX_CHARS)?;
         let emoji = match &answer.poll_media.emoji {
             Some(emoji) if !valid_emoji(emoji) => return Err(ApiErr::invalid("poll.answers.poll_media.emoji", "Unknown Emoji")),
-            Some(emoji) => Some(ReactionEmoji { id: emoji.id, name: emoji.name.trim().to_owned() }),
+            Some(emoji) => Some(ReactionEmoji { id: emoji.id, name: emoji.name.trim().to_owned(), animated: None }),
             None => None,
         };
         answers.push(DraftAnswer { text, emoji });
@@ -170,7 +170,7 @@ pub async fn load(state: &AppState, message_ids: &[i64]) -> ApiResult<HashMap<i6
     }
     let mut by_poll: HashMap<i64, Vec<(PollAnswer, Vec<i64>)>> = HashMap::new();
     for (message_id, answer_id, text, emoji_id, emoji_name) in answers {
-        let emoji = emoji_name.map(|name| ReactionEmoji { id: emoji_id.map(Snowflake::from), name });
+        let emoji = emoji_name.map(|name| ReactionEmoji { id: emoji_id.map(Snowflake::from), name, animated: None });
         let answer = PollAnswer { answer_id: answer_id.max(0) as u32, poll_media: PollMedia { text: Some(text), emoji } };
         by_poll.entry(message_id).or_default().push((answer, voters.remove(&(message_id, answer_id)).unwrap_or_default()));
     }
