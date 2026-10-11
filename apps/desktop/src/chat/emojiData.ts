@@ -131,7 +131,7 @@ export function quickReactions(): string[] {
   const recent = getRecentEmoji();
   return [...recent, ...DEFAULT_QUICK.filter(e => !recent.includes(e))].slice(0, 4);
 }
-const FILLER_QUICK = ['😀', '😢', '😮', '🔥', '👀', '🙏', '😍', '😡', '👏', '💯'];
+const FILLER_QUICK = ['😀', '😢', '😮', '🔥', '👀', '🙏', '😍', '😡', '👏', '💯', '😊', '🤔', '😭', '👋', '🙌', '✅'];
 /** Up to `limit` unicode emoji for the "Add Reaction" submenu: recents first, then the defaults. */
 export function frequentEmoji(limit = 12): string[] {
   const out: string[] = [];
@@ -143,7 +143,9 @@ export function frequentEmoji(limit = 12): string[] {
 }
 /** `:shortcode:` for a unicode emoji when the database is already loaded, else the glyph itself. */
 export function emojiShortcodeLabel(ch: string): string {
-  const entry = db?.list.find(e => e.emoji === ch);
+  // emojibase spells some emoji with a variation selector (👍 is "👍️"): match with and without it
+  const bare = ch.replace(/️/g, '');
+  const entry = db?.list.find(e => e.emoji === ch) ?? db?.list.find(e => e.emoji.replace(/️/g, '') === bare);
   return entry?.shortcodes[0] ? `:${entry.shortcodes[0]}:` : ch;
 }
 export function getSkinTone(): number {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Perm } from '../api/permissions';
 import { ChannelType, OverwriteType, StickerFormat, type Attachment, type Bookmark, type Channel, type Embed, type Gif, type Guild, type GuildMember, type Message, type Reminder, type Sticker, type User } from '../api/types';
 import {
-  MAX_FORWARD_DESTINATIONS, canUseSticker, forwardDestinations, gifMessageMedia, groupStickers, isGifOnlyMessage, looksLikeDirectGif, messageSnippet, parseCustomReminder, presetReminderTime,
+  MAX_FORWARD_DESTINATIONS, canUseSticker, forwardDestinations, gifMessageMedia, groupStickers, isGifOnlyMessage, looksLikeDirectGif, messageSnippet, parseCustomReminder, presetReminderTime, REMINDER_PRESETS, reminderPresetLabel,
   safeMediaUrl, stickerMatches, toDatetimeLocal, toggleDestination,
 } from './helpers';
 import { addFavorite, dropNotice, isBookmarked, purgeBookmarks, purgeReminders, pushNotice, removeBookmark, removeFavorite, removeReminder, reminderOf, sortReminders, upsertBookmark, upsertReminder } from './lists';
@@ -12,9 +12,29 @@ const user = (id: string, name = id): User => ({ id, username: name, global_name
 describe('reminder presets', () => {
   const now = new Date(2026, 5, 15, 14, 30, 0); // 15 June 2026, 14:30 local
 
-  it('computes in 1 hour and in 3 hours from now', () => {
+  it('computes in 30 min, 1 hour and 4 hours from now', () => {
+    expect(presetReminderTime('half-hour', now).getTime() - now.getTime()).toBe(1800_000);
     expect(presetReminderTime('hour', now).getTime() - now.getTime()).toBe(3600_000);
-    expect(presetReminderTime('three-hours', now).getTime() - now.getTime()).toBe(3 * 3600_000);
+    expect(presetReminderTime('four-hours', now).getTime() - now.getTime()).toBe(4 * 3600_000);
+  });
+
+  it('lists the presets in Discord order and words the 09:00 with the given time format', () => {
+    const h12 = (d: Date) => `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+    const h24 = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    expect(REMINDER_PRESETS.map(p => reminderPresetLabel(p, h12))).toEqual(['In 30 min', 'In 1 hour', 'In 4 hours', 'Tomorrow at 9:00 AM', 'Monday at 9:00 AM']);
+    expect(REMINDER_PRESETS.map(p => reminderPresetLabel(p, h24)).slice(3)).toEqual(['Tomorrow at 09:00', 'Monday at 09:00']);
+  });
+
+  it('puts Monday at 09:00 local time on the next Monday, a week ahead when today is Monday', () => {
+    // 15 June 2026 is a Monday
+    for (const [day, expected] of [[15, 22], [16, 22], [20, 22], [21, 22], [22, 29]] as const) {
+      for (const hour of [0, 8, 9, 23]) {
+        const at = presetReminderTime('monday', new Date(2026, 5, day, hour, 15));
+        expect([at.getDay(), at.getMonth(), at.getDate(), at.getHours(), at.getMinutes(), at.getSeconds()]).toEqual([1, 5, expected, 9, 0, 0]);
+      }
+    }
+    const nye = presetReminderTime('monday', new Date(2026, 11, 31, 12, 0)); // Thursday
+    expect([nye.getFullYear(), nye.getMonth(), nye.getDate(), nye.getHours()]).toEqual([2027, 0, 4, 9]);
   });
 
   it('puts tomorrow at 09:00 local time on the next calendar day, whatever the time now', () => {

@@ -95,6 +95,7 @@
 .media-forward-footer { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* ---- reminder submenu ---- */
+.media-reminder-header { padding: 4px 16px 8px; font-size: 12px; font-weight: 600; line-height: 16px; color: var(--chat-text-muted); user-select: none; }
 .media-reminder-custom { display: flex; flex-direction: column; gap: 8px; margin: 4px 8px 8px; padding: 8px; border-radius: 4px; background: var(--chat-bg-tertiary); }
 .media-reminder-custom input { width: 100%; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--chat-border-strong); background: var(--chat-bg-secondary); color: var(--chat-text); font: inherit; font-size: 14px; color-scheme: dark light; box-sizing: border-box; }
 .media-reminder-error { font-size: 12px; color: var(--chat-danger); }

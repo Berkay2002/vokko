@@ -6,7 +6,7 @@ import {
 import { MessageType } from '../api/types';
 import type { Message } from '../api/types';
 import { useChat } from './ChatContext';
-import { emojiShortcodeLabel, frequentEmoji, quickReactions } from './emojiData';
+import { emojiShortcodeLabel, frequentEmoji, quickReactions, useEmojiDb } from './emojiData';
 import { messageStore } from './messageStore';
 import { isSystemMessage, type PendingMessage } from './messageState';
 import { toDisplay } from './mentionText';
@@ -62,6 +62,8 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [active, setActive] = useState(-1);
+  /** The open submenu was opened from the keyboard: it takes focus so arrow keys move through its rows. */
+  const [subByKey, setSubByKey] = useState(false);
   const layer = useLayer(true, onClose);
   useOutsideClose(true, () => [box.current], onClose, layer.isTop);
 
@@ -80,11 +82,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     if (!pending && !system) {
       out.push({
         id: 'add-reaction', label: 'Add Reaction', icon: <SmilePlus size={ICON} />,
-        children: close => <div className="chat-menu-emoji-grid" role="menu" aria-label="Add Reaction">
-          {frequentEmoji(12).map(ch => <button key={ch} type="button" role="menuitem" className="chat-menu-emoji-btn" title={emojiShortcodeLabel(ch)} aria-label={emojiShortcodeLabel(ch)}
-            onClick={() => { close(); react(ch); }}>{ch}</button>)}
-          <button type="button" role="menuitem" className="chat-menu-more" onClick={() => { close(); onMoreEmoji(message); }}>View More</button>
-        </div>,
+        children: close => <ReactionMenu onPick={ch => { close(); react(ch); }} onMore={() => { close(); onMoreEmoji(message); }} />,
       });
       if (message.reactions.length > 0) out.push({ id: 'view-reactions', label: 'View Reactions', icon: <SmilePlus size={ICON} />, onSelect: () => chat.actions.viewReactions(message) });
       sep();
@@ -157,14 +155,14 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
         const row = rows[active];
         if (!row) return;
         e.preventDefault();
-        if (row.children) setOpen(row.id);
+        if (row.children) { setOpen(row.id); setSubByKey(true); }
         else if (!row.disabled) { onClose(); row.onSelect?.(); }
       } else if (e.key === 'Tab') {
         // no focusable rows: let Tab move on and close the menu behind it, unless focus is on a control inside the menu
         if (!document.activeElement?.closest('.context-menu')) onClose();
       }
       else if (e.key === 'ArrowLeft') setOpen(null);
-      else if (e.key === 'ArrowRight' && active >= 0 && rows[active]?.children) { e.preventDefault(); setOpen(rows[active]!.id); }
+      else if (e.key === 'ArrowRight' && active >= 0 && rows[active]?.children) { e.preventDefault(); setOpen(rows[active]!.id); setSubByKey(true); }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -179,28 +177,80 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
         if (entry === 'separator') return <div key={`sep-${i}`} className="chat-menu-sep" role="separator" />;
         const index = rows.indexOf(entry);
         const hasSub = !!entry.children;
-        return <div key={entry.id} className="chat-menu-row-wrap" onMouseEnter={() => { setActive(index); setOpen(hasSub ? entry.id : null); }}>
-          <div role="menuitem" aria-disabled={entry.disabled || undefined} aria-haspopup={hasSub || undefined} aria-expanded={hasSub ? open === entry.id : undefined}
+        return <div key={entry.id} className="chat-menu-row-wrap" onMouseEnter={() => { setActive(index); setOpen(hasSub ? entry.id : null); setSubByKey(false); }}>
+          <div role="menuitem" tabIndex={hasSub ? -1 : undefined} aria-disabled={entry.disabled || undefined} aria-haspopup={hasSub || undefined} aria-expanded={hasSub ? open === entry.id : undefined}
             className={`chat-menu-item context-menu-item${entry.danger ? ' danger' : ''}${entry.disabled ? ' disabled' : ''}${active === index || open === entry.id ? ' focused' : ''}`}
             onClick={() => { if (hasSub) { setOpen(entry.id); return; } if (entry.disabled) return; onClose(); entry.onSelect?.(); }}>
             <span className="chat-menu-icon" aria-hidden="true">{entry.icon}</span>
             <span className="chat-menu-label">{entry.label}</span>
             {hasSub && <ChevronRight size={16} className="chat-menu-chevron" />}
           </div>
-          {hasSub && open === entry.id && <SubMenu>{typeof entry.children === 'function' ? entry.children(onClose) : entry.children}</SubMenu>}
+          {hasSub && open === entry.id && <SubMenu label={entry.label} focusFirst={subByKey}>{typeof entry.children === 'function' ? entry.children(onClose) : entry.children}</SubMenu>}
         </div>;
       })}
     </div>
   </div>, document.body);
 }
 
-/** Opens to the right of its row, flips left when the viewport edge is in the way. */
-function SubMenu({ children }: { children: ReactNode }) {
+/**
+ * "Add Reaction" submenu: the frequent emoji as a scrolling list of rows (glyph and :shortcode:, like Discord), then "View More" for the
+ * full picker. Subscribes to the emoji database so the shortcodes fill in once it has loaded.
+ */
+function ReactionMenu({ onPick, onMore }: { onPick(ch: string): void; onMore(): void }) {
+  useEmojiDb();
+  const list = useMemo(() => frequentEmoji(20), []);
+  return <div className="chat-menu-list chat-menu-reactions">
+    <div className="chat-menu-reaction-scroll">
+      {list.map(ch => {
+        const code = emojiShortcodeLabel(ch);
+        return <button key={ch} type="button" role="menuitem" className="chat-menu-reaction" aria-label={code} onClick={() => onPick(ch)}>
+          <span className="chat-menu-reaction-emoji" aria-hidden="true">{ch}</span>
+          {code !== ch && <span className="chat-menu-reaction-code">{code}</span>}
+        </button>;
+      })}
+    </div>
+    <div className="chat-menu-sep" role="separator" />
+    <button type="button" role="menuitem" onClick={onMore}>View More</button>
+  </div>;
+}
+
+const subItems = (root: HTMLElement): HTMLElement[] => [...root.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)')];
+
+/**
+ * Opens to the right of its row, flips left when the viewport edge is in the way. Opened from the keyboard it focuses its first row; while
+ * focus is inside, Up/Down/Home/End move through its rows (DOM focus, so a scrolling list follows) and Enter/Space activate the focused
+ * control natively instead of reaching the parent menu's handler. Left closes it (the parent's handler) and puts focus back on its row.
+ */
+function SubMenu({ label, children, focusFirst }: { label: string; children: ReactNode; focusFirst: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [flip, setFlip] = useState(false);
   useLayoutEffect(() => {
     const r = ref.current?.getBoundingClientRect();
     if (r && r.right + 8 > window.innerWidth) setFlip(true);
   }, []);
-  return <div ref={ref} className={`chat-menu chat-submenu${flip ? ' flip' : ''}`} role="menu">{children}</div>;
+  useEffect(() => {
+    if (focusFirst && ref.current) subItems(ref.current)[0]?.focus();
+  }, [focusFirst]);
+  return <div ref={ref} className={`chat-menu chat-submenu${flip ? ' flip' : ''}`} role="menu" aria-label={label}
+    onKeyDown={e => {
+      const root = ref.current;
+      if (!root) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
+        if ((e.target as HTMLElement).matches('input, textarea, select')) { e.stopPropagation(); return; }
+        const items = subItems(root);
+        if (items.length === 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const at = items.indexOf(document.activeElement as HTMLElement);
+        const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
+          : e.key === 'ArrowDown' ? (at + 1) % items.length : at <= 0 ? items.length - 1 : at - 1;
+        items[next]?.focus();
+      } else if (e.key === 'ArrowLeft') {
+        if ((e.target as HTMLElement).matches('input, textarea, select')) { e.stopPropagation(); return; }
+        // the parent's handler unmounts this submenu; focus its row first so focus does not fall to <body>
+        root.parentElement?.querySelector<HTMLElement>(':scope > [role="menuitem"]')?.focus();
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.stopPropagation();
+      }
+    }}>{children}</div>;
 }

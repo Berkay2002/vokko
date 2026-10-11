@@ -89,7 +89,24 @@ test('context menu Add Reaction submenu and View Reactions modal', async ({ page
   await expect(m).not.toHaveClass(/pending/);
   await m.click({ button: 'right', position: { x: 120, y: 12 } });
   await expect(page.getByRole('menuitem', { name: 'View Reactions' })).toHaveCount(0);
+  // keyboard: Down picks "Add Reaction", Right opens the list and focuses its first row, Down moves to the next row
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
+  const rows = page.locator('.chat-submenu .chat-menu-reaction');
+  await expect(rows).toHaveCount(20);
+  await expect(rows.first()).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(rows.nth(1)).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await expect(page.locator('.chat-submenu').getByRole('menuitem', { name: 'View More' })).toBeFocused();
+  await expect(page.getByRole('menu', { name: 'Add Reaction' })).toBeVisible();
+  // Left closes the submenu and gives focus back to its row
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('.chat-submenu')).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: 'Add Reaction' })).toBeFocused();
   await page.getByRole('menuitem', { name: 'Add Reaction' }).hover();
+  await expect(rows.first().locator('.chat-menu-reaction-code')).toHaveText(/^:.+:$/);
   await page.getByRole('menuitem', { name: /^:/ }).first().click();
   await expect(m.locator('.chat-reaction.me')).toHaveCount(1);
   await m.click({ button: 'right', position: { x: 120, y: 12 } });

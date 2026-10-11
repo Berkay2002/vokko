@@ -308,9 +308,9 @@ test.describe('bookmarks and reminders', () => {
     const row = message(page, text);
     await row.click({ button: 'right', position: { x: 200, y: 10 } });
     await page.getByRole('menuitem', { name: 'Create Reminder' }).hover();
-    await expect(page.getByRole('menuitem', { name: 'In 1 hour' })).toBeVisible();
-    await expect(page.getByRole('menuitem', { name: 'In 3 hours' })).toBeVisible();
-    await expect(page.getByRole('menuitem', { name: 'Tomorrow' })).toBeVisible();
+    const sub = page.locator('.chat-submenu');
+    await expect(sub.locator('.media-reminder-header')).toHaveText('Remind me');
+    await expect(sub.getByRole('menuitem')).toHaveText(['In 30 min', 'In 1 hour', 'In 4 hours', /^Tomorrow at 0?9:00/, /^Monday at 0?9:00/, 'Custom…']);
     await page.getByRole('menuitem', { name: 'In 1 hour' }).click();
     await expect(page.locator('.chat-toast', { hasText: 'Reminder set for' })).toBeVisible();
 

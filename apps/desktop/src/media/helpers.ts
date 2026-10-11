@@ -5,24 +5,41 @@ import { ChannelType, type Channel, type Embed, type Guild, type GuildMember, ty
 
 // ---- reminders ----
 
-export type ReminderPreset = 'hour' | 'three-hours' | 'tomorrow';
+export type ReminderPreset = 'half-hour' | 'hour' | 'four-hours' | 'tomorrow' | 'monday';
 
+/** The submenu order. Tomorrow and Monday carry the 09:00 time in their label, worded per the time-format pref (see reminderPresetLabel). */
 export const REMINDER_PRESETS: { id: ReminderPreset; label: string }[] = [
+  { id: 'half-hour', label: 'In 30 min' },
   { id: 'hour', label: 'In 1 hour' },
-  { id: 'three-hours', label: 'In 3 hours' },
+  { id: 'four-hours', label: 'In 4 hours' },
   { id: 'tomorrow', label: 'Tomorrow' },
+  { id: 'monday', label: 'Monday' },
 ];
 
 /** The server rejects reminders further than a year out (docs/api.md). */
 export const MAX_REMIND_AHEAD_MS = 365 * 24 * 3600 * 1000;
-const HOUR_MS = 3600 * 1000;
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
 
-/** When a preset fires: 1 h / 3 h from now, "tomorrow" = 09:00 local time on the next calendar day (DST-safe: built from calendar fields). */
+/** The 09:00 used by the calendar presets, for formatting their label. */
+export const PRESET_MORNING = new Date(2000, 0, 1, 9, 0, 0, 0);
+
+/** "In 30 min", "Tomorrow at 9:00 AM" / "Tomorrow at 09:00": `formatTime` words the 09:00 (12 h or 24 h). */
+export function reminderPresetLabel(preset: { id: ReminderPreset; label: string }, formatTime: (d: Date) => string): string {
+  return preset.id === 'tomorrow' || preset.id === 'monday' ? `${preset.label} at ${formatTime(PRESET_MORNING)}` : preset.label;
+}
+
+/**
+ * When a preset fires: 30 min / 1 h / 4 h from now; "tomorrow" = 09:00 local time on the next calendar day; "monday" = 09:00 local time on
+ * the next Monday (a week ahead when today is Monday). Calendar presets are built from calendar fields, so they are DST-safe.
+ */
 export function presetReminderTime(preset: ReminderPreset, now: Date = new Date()): Date {
   switch (preset) {
+    case 'half-hour': return new Date(now.getTime() + 30 * MINUTE_MS);
     case 'hour': return new Date(now.getTime() + HOUR_MS);
-    case 'three-hours': return new Date(now.getTime() + 3 * HOUR_MS);
+    case 'four-hours': return new Date(now.getTime() + 4 * HOUR_MS);
     case 'tomorrow': return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0, 0, 0);
+    case 'monday': return new Date(now.getFullYear(), now.getMonth(), now.getDate() + ((8 - now.getDay()) % 7 || 7), 9, 0, 0, 0);
   }
 }
 

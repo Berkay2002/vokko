@@ -187,7 +187,7 @@ Vokko is free: nothing here is gated behind a plan. Server-side limits (sticker 
 
 **Bookmarks** are per-user saved messages. A bookmark is only listed while the owner can still read the message (left the guild, lost the channel → hidden, not deleted); deleting the message removes the bookmark.
 
-**Reminders.** The client turns presets (1 h, 3 h, tomorrow, custom) into an absolute `remind_at`. A background task (every `VOKKO_REMINDER_POLL_SECS`, default 15) marks due reminders delivered exactly once and sends REMINDER_DUE to the owner's sessions: this is the "notice from the instance"; it is not a real DM channel. Delivered reminders stay in `GET /users/@me/reminders` (inbox) until `DELETE`. If the owner can no longer read the message, `message` is `null`. Deleting the message removes the reminder.
+**Reminders.** The client turns presets (30 min, 1 h, 4 h, tomorrow 09:00, next Monday 09:00, custom) into an absolute `remind_at`. A background task (every `VOKKO_REMINDER_POLL_SECS`, default 15) marks due reminders delivered exactly once and sends REMINDER_DUE to the owner's sessions: this is the "notice from the instance"; it is not a real DM channel. Delivered reminders stay in `GET /users/@me/reminders` (inbox) until `DELETE`. If the owner can no longer read the message, `message` is `null`. Deleting the message removes the reminder.
 
 Non-Discord error codes: 30090 bookmark limit, 30091 reminder limit, 30092 favourite GIF limit (500). 30039 is Discord's own sticker limit code.
 
