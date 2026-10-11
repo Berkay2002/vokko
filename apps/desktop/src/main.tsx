@@ -31,6 +31,7 @@ import "./styles/profiles.css";
 import "./styles/server-perks.css";
 import "./styles/invite.css";
 import "./ui/prefs";
+import "./search";
 
 bootstrap();
 startNotify();

@@ -43,7 +43,9 @@ impl TestApp {
     /// `adjust` runs on a config with rate limiting disabled.
     pub async fn with_config(adjust: impl FnOnce(&mut Config)) -> Self {
         let admin_options = PgConnectOptions::from_str(&test_database_url()).expect("valid TEST_DATABASE_URL");
-        let db_name = format!("vokko_test_{}_{}", unix_seconds(), vokko_server::auth::random_hex(4));
+        // VOKKO_TEST_DB_PREFIX (e.g. `vokko_test_search`) lets parallel workers keep their databases apart.
+        let prefix = std::env::var("VOKKO_TEST_DB_PREFIX").unwrap_or_else(|_| "vokko_test".to_owned());
+        let db_name = format!("{prefix}_{}_{}", unix_seconds(), vokko_server::auth::random_hex(4));
         assert!(db_name.starts_with("vokko_test"));
         let mut admin = PgConnection::connect_with(&admin_options).await.expect("connect to the test database server");
         sweep_stale(&mut admin).await;

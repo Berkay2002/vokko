@@ -239,6 +239,26 @@ export interface PinnedMessagesPage {
   items: { message: Message; pinned_at: ISO8601 }[];
   has_more: boolean;
 }
+// GET /guilds/{id}/messages/search and GET /channels/{id}/messages/search (Discord-shaped; array filters use repeated keys).
+export type SearchHas = "link" | "embed" | "file" | "image" | "video" | "sound" | "sticker";
+export interface MessageSearchQuery {
+  content?: string; // all words must match (case-insensitive); "quoted phrase" and -excluded supported
+  author_id?: Snowflake[];
+  mentions?: Snowflake[];
+  has?: SearchHas[]; // all must hold
+  channel_id?: Snowflake[]; // guild route only
+  pinned?: boolean;
+  min_id?: Snowflake; // exclusive: "after"
+  max_id?: Snowflake; // exclusive: "before"
+  offset?: number; // 0-9975
+  limit?: number; // 1-25, default 25
+  sort_by?: "timestamp" | "relevance";
+  sort_order?: "desc" | "asc";
+}
+export interface MessageSearchResponse {
+  total_results: number; // all matches the caller may read, before offset/limit
+  messages: Message[][]; // each hit is a one-element array (Discord's shape)
+}
 export interface RateLimitError {
   message: string;
   retry_after: number; // seconds (float); also sent as the Retry-After header
