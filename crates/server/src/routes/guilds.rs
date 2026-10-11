@@ -270,5 +270,6 @@ async fn leave_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser,
     state.hub.send(&[user_id], &GatewayEvent::GuildDelete(IdOnly { id: Snowflake::from(id) }));
     let remaining = access::guild_member_ids(&state, id).await?;
     state.hub.send(&remaining, &GatewayEvent::GuildMemberRemove(GuildMemberRemove { guild_id: Snowflake::from(id), user }));
+    crate::presence::announce_leave(&state, id, user_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -8,6 +8,7 @@ use crate::access;
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
+use crate::presence;
 use crate::routes::channels::invite_view;
 use crate::state::AppState;
 use crate::store;
@@ -34,6 +35,11 @@ async fn preview(State(state): State<AppState>, AuthUser(_): AuthUser, Path(code
 
 async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(code): Path<String>) -> ApiResult<Json<Guild>> {
     let (guild_id, _) = live_invite(&state, &code).await?;
+    let banned: Option<(i64,)> =
+        sqlx::query_as("SELECT user_id FROM guild_bans WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).fetch_optional(&state.db).await?;
+    if banned.is_some() {
+        return Err(ApiErr::banned());
+    }
     // The member insert and the use are one transaction; the conditional UPDATE re-checks max_uses / expiry under the row lock,
     // so concurrent accepts of the last use cannot both succeed. An existing member does not consume a use.
     let mut tx = state.db.begin().await?;
@@ -61,12 +67,14 @@ async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
             .bind(guild_id)
             .execute(&state.db)
             .await?;
-        let full = events::guild_with_state(&state, guild_id, user_id).await?;
+        let mut full = events::guild_with_state(&state, guild_id, user_id).await?;
+        full.presences = Some(presence::guild_presences(&state, guild_id, user_id).await?);
         state.hub.send(&[user_id], &GatewayEvent::GuildCreate(Box::new(full)));
         if let Some(member) = store::member(&state, guild_id, user_id).await? {
             let others: Vec<i64> = access::guild_member_ids(&state, guild_id).await?.into_iter().filter(|id| *id != user_id).collect();
             state.hub.send(&others, &GatewayEvent::GuildMemberAdd(GuildMemberAdd { member, guild_id: Snowflake::from(guild_id) }));
         }
+        presence::announce_join(&state, guild_id, user_id).await?;
     }
     store::guild(&state, guild_id).await?.map(Json).ok_or_else(ApiErr::unknown_guild)
 }

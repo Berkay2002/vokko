@@ -58,6 +58,23 @@ impl ApiErr {
         Self::new(StatusCode::NOT_FOUND, 10006, "Unknown Invite")
     }
 
+    pub fn unknown_member() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10007, "Unknown Member")
+    }
+
+    pub fn unknown_role() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10011, "Unknown Role")
+    }
+
+    pub fn unknown_ban() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10026, "Unknown Ban")
+    }
+
+    /// 40007: the user is banned from the guild an invite leads to.
+    pub fn banned() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 40007, "The user is banned from this guild")
+    }
+
     pub fn unknown_attachment() -> Self {
         Self::new(StatusCode::NOT_FOUND, 10015, "Unknown Attachment")
     }

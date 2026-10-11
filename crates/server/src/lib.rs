@@ -10,6 +10,7 @@ pub mod hub;
 pub mod ids;
 pub mod media;
 pub mod net;
+pub mod presence;
 pub mod ratelimit;
 pub mod routes;
 pub mod seed;

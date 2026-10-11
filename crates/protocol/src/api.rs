@@ -1084,7 +1084,9 @@ mod tests {
         let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false});
         round_trip::<Role>(role.clone());
         round_trip::<Guild>(json!({"id": "300", "name": "Sam's server", "icon": null, "owner_id": "100", "roles": [role], "system_channel_id": "200"}));
-        round_trip::<GuildMember>(json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null}));
+        round_trip::<GuildMember>(
+            json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null}),
+        );
     }
 
     #[test]
@@ -1172,7 +1174,8 @@ mod tests {
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
-            value["members"] = json!([{"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null}]);
+            value["members"] =
+                json!([{"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null}]);
             value["member_count"] = json!(1);
             value
         };
@@ -1180,7 +1183,9 @@ mod tests {
         round_trip::<ReadyEvent>(json!({
             "v": 1, "user": user(), "session_id": "abc", "guilds": [with_state], "private_channels": [], "presences": [], "read_states": [], "relationships": []
         }));
-        round_trip::<GuildMemberAdd>(json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": "2026-10-12T10:00:00.000Z", "guild_id": "300"}));
+        round_trip::<GuildMemberAdd>(
+            json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": "2026-10-12T10:00:00.000Z", "guild_id": "300"}),
+        );
         round_trip::<MessageDelete>(json!({"id": "1", "channel_id": "2", "guild_id": null}));
         round_trip::<MessageReaction>(json!({"user_id": "1", "channel_id": "2", "message_id": "3", "emoji": {"id": null, "name": "🎉"}}));
         round_trip::<TypingStart>(json!({"channel_id": "2", "user_id": "1", "timestamp": 1_760_000_000}));
