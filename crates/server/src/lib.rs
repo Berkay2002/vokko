@@ -1,5 +1,6 @@
 //! Vokko chat server: REST under `/api/v1` and a WebSocket gateway on `/gateway`, backed by PostgreSQL.
 pub mod access;
+pub mod account;
 pub mod auth;
 pub mod config;
 pub mod error;

@@ -4,7 +4,7 @@ import { MOCK, getToken, setToken } from "./config";
 import { gateway } from "./gateway";
 import { request, setUnauthorizedHandler } from "./rest";
 import { appStore, wireStoreToGateway } from "./store";
-import type { AuthResponse, RegisterRequest } from "./types";
+import type { AuthResponse, LoginResponse, MfaRequiredResponse, RegisterRequest } from "./types";
 
 function startSession(token: string): void {
   setToken(token);
@@ -19,10 +19,21 @@ export function clearSession(): void {
   appStore.getState().reset();
 }
 
-export async function login(loginName: string, password: string): Promise<void> {
-  const response = await request<AuthResponse>("POST", "/auth/login", { login: loginName, password });
+/** Signs in with a login response: a session starts, or the two-factor step is returned for the caller to finish. */
+export function acceptLogin(response: LoginResponse): MfaRequiredResponse | null {
+  if (response.token === null) return response;
   appStore.getState().cacheUsers([response.user]);
   startSession(response.token);
+  return null;
+}
+
+/** Resolves to the two-factor step when the account has it on (finish with `mfaLogin`), otherwise to null once signed in. */
+export async function login(loginName: string, password: string): Promise<MfaRequiredResponse | null> {
+  return acceptLogin(await request<LoginResponse>("POST", "/auth/login", { login: loginName, password }));
+}
+
+export async function mfaLogin(ticket: string, code: string): Promise<void> {
+  acceptLogin(await request<AuthResponse>("POST", "/auth/mfa/totp", { ticket, code }));
 }
 
 export async function register(input: RegisterRequest): Promise<void> {

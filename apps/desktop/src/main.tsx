@@ -36,6 +36,7 @@ import "./styles/responsive.css";
 import "./ui/prefs";
 import "./search";
 import "./community";
+import "./account";
 import "./media";
 import "./voice";
 

@@ -10,6 +10,8 @@ import { db, nextId } from "./db";
 import { seedOnboardingGuild, type SeededGuild } from "./community";
 import { addMessage, createAccount } from "./ops";
 import { handleRoute } from "./routes";
+import "./accounts";
+import { setCurrentToken } from "./sessions";
 import { seed } from "./seed";
 import { sweepArchivedThreads } from "./threads";
 import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromToken } from "./socket";
@@ -54,6 +56,7 @@ export async function mockRequest(method: string, path: string, body: unknown, t
   }
   try {
     // Round-trip through JSON so callers can never mutate the database through a returned object.
+    setCurrentToken(token);
     const result = handleRoute(method, path, body, userIdFromToken(token));
     return result === undefined ? undefined : JSON.parse(JSON.stringify(result));
   } catch (error) {

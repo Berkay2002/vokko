@@ -35,7 +35,14 @@ futures-util.workspace = true
 tokio-util.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
+oauth2 = { version = "5", default-features = false }
+openidconnect = { version = "4", default-features = false }
+http = "1"
+sha1 = "0.10"
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "hostname", "tokio1-rustls-tls"] }
 
 [dev-dependencies]
+rsa = { version = "0.9", features = ["pem"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect"] }

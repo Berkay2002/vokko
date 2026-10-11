@@ -90,7 +90,7 @@ impl Api {
         if let Some(addr) = &addr {
             request = request.header("x-forwarded-for", addr);
         }
-        let body = serde_json::json!({"email": format!("{name}@loadtest.invalid"), "username": name, "password": password});
+        let body = serde_json::json!({"email": format!("{name}@loadtest.invalid"), "username": name, "password": password, "date_of_birth": "1990-01-01", "consent": true});
         let metrics = self.shared.m();
         let started = Instant::now();
         let response = request.header("content-type", "application/json").body(body.to_string()).send().await;

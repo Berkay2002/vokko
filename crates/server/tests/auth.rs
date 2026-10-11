@@ -45,17 +45,32 @@ async fn bad_credentials_and_validation() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(error["code"], 50035);
 
-    let (status, error) = app.send(Method::POST, "/auth/register", None, Some(json!({"email": "a@x.io", "username": "alice", "password": "12345678"}))).await;
+    let (status, error) = app
+        .send(
+            Method::POST,
+            "/auth/register",
+            None,
+            Some(json!({"email": "a@x.io", "username": "alice", "password": "correct horse battery", "date_of_birth": "1990-01-01"})),
+        )
+        .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "duplicate username");
     assert_eq!(error["code"], 50035);
     assert!(error["errors"]["username"].is_object());
 
-    let (status, error) =
-        app.send(Method::POST, "/auth/register", None, Some(json!({"email": "x@x.io", "username": "Bad Name!", "password": "12345678"}))).await;
+    let (status, error) = app
+        .send(
+            Method::POST,
+            "/auth/register",
+            None,
+            Some(json!({"email": "x@x.io", "username": "Bad Name!", "password": "correct horse battery", "date_of_birth": "1990-01-01"})),
+        )
+        .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(error["errors"]["username"].is_object());
 
-    let (status, error) = app.send(Method::POST, "/auth/register", None, Some(json!({"email": "x@x.io", "username": "okname", "password": "short"}))).await;
+    let (status, error) = app
+        .send(Method::POST, "/auth/register", None, Some(json!({"email": "x@x.io", "username": "okname", "password": "short", "date_of_birth": "1990-01-01"})))
+        .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(error["errors"]["password"].is_object());
 

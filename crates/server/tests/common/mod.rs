@@ -67,6 +67,7 @@ impl TestApp {
         config.heartbeat_interval_ms = 60_000;
         config.rate_limit = None;
         config.unfurl.enabled = false; // tests that exercise link previews opt in
+        config.accounts.mail = vokko_server::account::config::MailConfig::Memory;
         adjust(&mut config);
         let state = make(pool, config);
         let router = vokko_server::router(state.clone());
@@ -127,10 +128,39 @@ impl TestApp {
 
     /// Registers a user; returns (token, user json).
     pub async fn register(&self, username: &str) -> (String, Value) {
-        let body = json!({"email": format!("{username}@example.test"), "username": username, "password": "correct horse battery"});
+        let body =
+            json!({"email": format!("{username}@example.test"), "username": username, "password": "correct horse battery", "date_of_birth": "1990-01-01"});
         let (status, value) = self.send(Method::POST, "/auth/register", None, Some(body)).await;
         assert_eq!(status, StatusCode::OK, "register {username}: {value}");
         (value["token"].as_str().expect("token").to_owned(), value["user"].clone())
+    }
+
+    /// The token of the latest `<page>#token=` link mailed to `to`.
+    pub fn mailed_token(&self, to: &str, page: &str) -> String {
+        let marker = format!("/{page}#token=");
+        let mails = self.state.accounts.mailer.sent();
+        let mail = mails.iter().rev().find(|mail| mail.to == to && mail.body.contains(&marker)).unwrap_or_else(|| panic!("no {page} mail to {to}: {mails:?}"));
+        let start = mail.body.find(&marker).expect("marker") + marker.len();
+        mail.body[start..].chars().take_while(char::is_ascii_hexdigit).collect()
+    }
+
+    /// Like `mailed_token`, for mails sent in the background (password reset): waits up to 5 s.
+    pub async fn mailed_token_soon(&self, to: &str, page: &str) -> String {
+        let marker = format!("/{page}#token=");
+        for _ in 0..100 {
+            if self.state.accounts.mailer.sent().iter().any(|mail| mail.to == to && mail.body.contains(&marker)) {
+                return self.mailed_token(to, page);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        self.mailed_token(to, page)
+    }
+
+    /// Opens the verification link mailed to `to` (marks the address verified).
+    pub async fn verify_email(&self, to: &str) {
+        let token = self.mailed_token(to, "verify");
+        let (status, body) = self.send(Method::POST, "/auth/verify", None, Some(json!({"token": token}))).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "verify {to}: {body}");
     }
 
     /// Serves the router on an ephemeral loopback port (never an 87xx port) for WebSocket tests.

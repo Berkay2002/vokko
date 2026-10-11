@@ -3,6 +3,7 @@
 
 import { GatewayOp, type GatewayEvents, type GatewayPayload, type PresenceStatus, type VoiceStateUpdateCommand } from "../types";
 import { db } from "./db";
+import { tokenUserId } from "./sessions";
 import { readyFor } from "./views";
 import { handleVoiceStateUpdate } from "./voice";
 
@@ -21,9 +22,7 @@ const sessions = new Map<string, Session>();
 let sessionCounter = 0;
 
 export function userIdFromToken(token: string | null): string | null {
-  if (!token?.startsWith("mock:")) return null;
-  const id = token.slice(5);
-  return db.accounts.has(id) ? id : null;
+  return tokenUserId(token);
 }
 
 export function tokenFor(userId: string): string {

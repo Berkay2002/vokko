@@ -56,8 +56,16 @@ pub fn hash_token(token: &str) -> Vec<u8> {
 
 /// Looks a token up; `None` if it is unknown or revoked.
 pub async fn user_for_token(state: &AppState, token: &str) -> ApiResult<Option<i64>> {
-    let row: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM sessions WHERE token_hash = $1").bind(hash_token(token)).fetch_optional(&state.db).await?;
-    Ok(row.map(|(id,)| id))
+    let hash = hash_token(token);
+    let row: Option<(i64, bool)> = sqlx::query_as("SELECT user_id, last_used_at < now() - interval '5 minutes' FROM sessions WHERE token_hash = $1")
+        .bind(&hash)
+        .fetch_optional(&state.db)
+        .await?;
+    // "last used" for the devices list, written at most every 5 minutes per session
+    if let Some((_, true)) = row {
+        sqlx::query("UPDATE sessions SET last_used_at = now() WHERE token_hash = $1").bind(&hash).execute(&state.db).await?;
+    }
+    Ok(row.map(|(id, _)| id))
 }
 
 /// The raw `Authorization` header value (no scheme prefix), if present and non-empty.

@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod account;
 pub mod api;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

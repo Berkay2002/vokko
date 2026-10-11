@@ -3,7 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-route
 import { useStore } from "./api/store";
 import { ContextMenuHost } from "./ui";
 import { AppShell } from "./shell/AppShell";
-import { LoginPage, RegisterPage } from "./shell/AuthPages";
+import { LoginPage, OAuthCallbackPage, RegisterPage, ResetPage, VerifyPage } from "./shell/AuthPages";
 import { NotifyBanners, Splash } from "./notify";
 import { invitePath, onDeepLink } from "./desktop";
 import { InvitePage } from "./shell/InvitePage";
@@ -48,6 +48,9 @@ export function App() {
       <Routes>
         <Route path="/login" element={<Guest><LoginPage /></Guest>} />
         <Route path="/register" element={<Guest><RegisterPage /></Guest>} />
+        <Route path="/verify" element={<VerifyPage />} />
+        <Route path="/reset" element={<ResetPage />} />
+        <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
         <Route path="/invite/:code" element={<InvitePage />} />
         <Route path="/channels/:guildId" element={<Protected />} />
         <Route path="/channels/:guildId/:channelId" element={<Protected />} />

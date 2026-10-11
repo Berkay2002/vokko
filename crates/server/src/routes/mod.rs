@@ -3,7 +3,7 @@ use axum::Router;
 use crate::state::AppState;
 
 mod attachments;
-mod auth;
+pub mod auth;
 mod channels;
 mod follows;
 mod forums;
@@ -11,7 +11,7 @@ mod gifs;
 mod guilds;
 mod invites;
 pub mod messages;
-mod moderation;
+pub mod moderation;
 mod onboarding;
 mod overwrites;
 mod reactions;
@@ -27,6 +27,7 @@ mod users;
 pub fn api(max_upload_bytes: usize) -> Router<AppState> {
     Router::new()
         .merge(auth::routes())
+        .merge(crate::account::routes())
         .merge(users::routes())
         .merge(guilds::routes())
         .merge(moderation::routes())

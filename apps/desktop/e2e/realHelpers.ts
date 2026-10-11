@@ -48,7 +48,7 @@ export async function openGuild(page: Page, name: string): Promise<void> {
 export async function registerUser(tag: string): Promise<{ token: string; userId: string; username: string }> {
   const username = `e2e${tag}${RUN}`.toLowerCase().slice(0, 30);
   const r = await api<{ token: string; user: { id: string } }>(null, 'POST', '/auth/register', {
-    username, email: `${username}@example.test`, password: PASSWORD, global_name: `E2E ${tag}`,
+    username, email: `${username}@example.test`, password: PASSWORD, global_name: `E2E ${tag}`, date_of_birth: '1990-01-01', consent: true,
   });
   return { token: r.token, userId: r.user.id, username };
 }

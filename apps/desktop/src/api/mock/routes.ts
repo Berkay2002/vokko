@@ -32,30 +32,6 @@ const sameEmoji = (a: ReactionEmoji, b: ReactionEmoji) => a.id === b.id && a.nam
 
 // ---- auth ----
 
-route("POST", "/auth/register", ({ body }) => {
-  const email = str(body.email)?.trim() ?? "";
-  const username = str(body.username)?.trim().toLowerCase() ?? "";
-  const password = str(body.password) ?? "";
-  const errors: Record<string, unknown> = {};
-  if (!/^[^@\s]+@[^@\s]+$/.test(email)) errors.email = { code: "BASE_TYPE_BAD_FORMAT", message: "Not a well formed email address." };
-  if (!/^[a-z0-9_.]{2,32}$/.test(username)) errors.username = { code: "USERNAME_INVALID", message: "Username must be 2-32 characters: a-z, 0-9, _ and ." };
-  else if ([...db.accounts.values()].some(a => a.user.username === username)) errors.username = { code: "USERNAME_ALREADY_TAKEN", message: "Username is already taken" };
-  if (password.length < 6) errors.password = { code: "BASE_TYPE_MIN_LENGTH", message: "Must be 6 or more in length." };
-  if (Object.keys(errors).length > 0) fail(400, 50035, "Invalid Form Body", errors);
-  const account = createAccount({ username, email, password, global_name: str(body.global_name)?.trim() || null });
-  return { token: `mock:${account.user.id}`, user: account.user };
-});
-
-route("POST", "/auth/login", ({ body }) => {
-  const login = (str(body.login) ?? "").trim().toLowerCase();
-  const account = [...db.accounts.values()].find(a => a.user.username === login || a.email.toLowerCase() === login);
-  if (!account || account.password !== str(body.password)) {
-    fail(400, 50035, "Invalid Form Body", { login: { code: "INVALID_LOGIN", message: "Login or password is invalid." } });
-  }
-  return { token: `mock:${account.user.id}`, user: account.user };
-});
-
-route("POST", "/auth/logout", () => undefined);
 
 // ---- users ----
 

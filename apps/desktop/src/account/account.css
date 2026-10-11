@@ -1,0 +1,152 @@
+/* My Account (src/account): dialogs and rows rendered into the User Settings slots. */
+.acct-dialog {
+  width: 440px;
+}
+
+.acct-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.acct-subtitle {
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.acct-field .input {
+  margin-top: 8px;
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+}
+
+.acct-reveal {
+  margin-left: 4px;
+  padding: 0;
+  background: none;
+  color: var(--text-link);
+  font-size: 14px;
+}
+
+.acct-reveal:hover {
+  text-decoration: underline;
+}
+
+.acct-notice {
+  margin: 4px 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-modifier-hover, rgba(255, 255, 255, 0.06));
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.acct-notice.warning {
+  border-left: 3px solid var(--text-feedback-warning);
+}
+
+.acct-codes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 24px;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 15px;
+}
+
+.acct-codes .used {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.acct-qr {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.acct-qr svg {
+  flex: none;
+  width: 168px;
+  height: 168px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.acct-secret {
+  word-break: break-all;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 13px;
+  color: var(--text-default);
+}
+
+.acct-sessions {
+  display: flex;
+  flex-direction: column;
+}
+
+.acct-session {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.acct-session-icon {
+  flex: none;
+  color: var(--interactive-normal);
+}
+
+.acct-session-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.acct-session-name {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.acct-session-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.acct-provider-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  fill: currentColor;
+}
+
+.sm-subhead {
+  margin: 24px 0 4px;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sm-btn.danger {
+  color: var(--text-feedback-critical);
+}
+
+.acct-logout-all {
+  margin-top: 12px;
+}
+
+.acct-provider {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.acct-reconfirm {
+  margin: 8px 8px 0 0;
+}

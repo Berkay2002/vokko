@@ -109,8 +109,14 @@ async fn closed_registration_refuses_sign_ups_but_not_existing_users() {
 
     // the default stays open
     let (status, _) = json_of(
-        call(&app.router, request("/api/v1/auth/register", json!({"email": "new@example.test", "username": "newbie", "password": "correct horse battery"})))
-            .await,
+        call(
+            &app.router,
+            request(
+                "/api/v1/auth/register",
+                json!({"email": "new@example.test", "username": "newbie", "password": "correct horse battery", "date_of_birth": "1990-01-01"}),
+            ),
+        )
+        .await,
     )
     .await;
     assert_eq!(status, StatusCode::OK);

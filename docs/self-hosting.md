@@ -58,6 +58,15 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_TRUST_PROXY` | off | `on`/`1`/`true`/`yes`: take the client address from the last `X-Forwarded-For` entry. Only behind a proxy that sets it (the bundled Caddy does), otherwise clients can spoof their address and dodge rate limits. |
 | `VOKKO_CORS_ORIGINS` | unset (localhost on any port) | Comma-separated exact origins allowed to call the API from a browser, e.g. `https://chat.example.com,https://web.example.com`. Scheme and host (and port if not default), no path, no `*`. When set it replaces the localhost defaults; the Tauri origins stay allowed. Bad entries stop the server at start. |
 | `VOKKO_REGISTRATION` | `open` | `closed`: `POST /api/v1/auth/register` answers 403 (code 40002). Existing accounts, login and `seed` are unaffected, so create the accounts you need first, then close it. Anything else than `open`/`closed` stops the server at start. |
+| `VOKKO_MIN_AGE` | `13` | Minimum age in years, checked against the date of birth at sign-up. |
+| `VOKKO_TERMS_TEXT` / `VOKKO_TERMS_URL` | unset | Either one adds a required consent checkbox to sign-up (plain-text label, optional link). |
+| `VOKKO_WEB_URL` | `VOKKO_PUBLIC_URL` | Origin of the web client, used in emailed verification and password-reset links. |
+| `VOKKO_SMTP_HOST` | unset | SMTP server for account mail. Unset: every mail (with its link) is written to the server log instead, see below. |
+| `VOKKO_SMTP_PORT` / `VOKKO_SMTP_SECURITY` | `587` / `starttls` | `starttls`, `tls` (implicit TLS, default port 465) or `none` (port 25, local relays only). |
+| `VOKKO_SMTP_USERNAME` / `VOKKO_SMTP_PASSWORD` / `VOKKO_SMTP_FROM` | unset | Credentials (optional) and the sender address (required with a host), e.g. `Vokko <noreply@chat.example.com>`. |
+| `VOKKO_OAUTH_GITHUB_CLIENT_ID` / `_SECRET` | unset | "Sign in with GitHub" (GitHub OAuth app). See "Sign-in providers" below. |
+| `VOKKO_OAUTH_GOOGLE_CLIENT_ID` / `_SECRET` | unset | "Sign in with Google" (Google OAuth client, web application type). |
+| `VOKKO_OIDC_<NAME>_ISSUER` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_DISPLAY_NAME` | unset | Any OpenID Connect provider (GitLab, Microsoft Entra, Keycloak, Authentik...). `<NAME>` becomes the provider id (lowercased); the display name defaults to it. |
 | `VOKKO_LIVEKIT_URL` | unset | Public LiveKit signal URL handed to clients, e.g. `wss://lk.example.com`. Voice needs this and the two below; with none of them set voice is off (joining a voice channel fails with `media_unavailable`); setting only some stops the server at start. See [Voice](#voice-livekit). |
 | `VOKKO_LIVEKIT_API_KEY` | unset | LiveKit API key name (the key in `livekit.yaml` `keys:`). |
 | `VOKKO_LIVEKIT_API_SECRET` | unset | Its secret. Only vokko-server holds it; it signs every voice token and verifies LiveKit's webhooks. |
@@ -68,6 +77,30 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 Compose-only variables (`deploy/.env.example`): `POSTGRES_PASSWORD`, `VOKKO_SERVER_LISTEN` (host publish address for the server, default `127.0.0.1:8710`), `VOKKO_SITE_ADDRESS`, `VOKKO_WEB_HTTP_PORT`, `VOKKO_WEB_HTTPS_PORT`.
 
 The binary has two subcommands: `serve` (default) and `seed`. Both connect and migrate first.
+
+## Account mail
+
+Sign-up sends an email verification link; email changes and password resets send links too. Invalid `VOKKO_SMTP_*` settings (bad sender address, unknown security mode, username without password, any `VOKKO_SMTP_*` without `VOKKO_SMTP_HOST`) stop the server at start. Without `VOKKO_SMTP_HOST` nothing is mailed: the server logs each mail at info level, so a self-hoster on a private instance can hand the link over by hand:
+
+```sh
+docker compose logs server | grep -A4 "mail (SMTP not configured)"
+```
+
+Links point at `VOKKO_WEB_URL` (`/verify#token=...`, `/reset#token=...`) and are single use: verification links expire after 24 hours, reset links after one hour. Anyone who can read the log can use them, so keep the log private or configure SMTP.
+
+## Sign-in providers
+
+Each provider shows up on the login and register pages only when its variables are set. Register this redirect (callback) URL with the provider, using the provider id (`github`, `google`, or the lowercased `<NAME>`):
+
+```
+<VOKKO_PUBLIC_URL>/api/v1/auth/oauth/<id>/callback
+```
+
+- GitHub: Settings > Developer settings > OAuth Apps > New OAuth App; "Authorization callback URL" as above. Vokko asks for `read:user` and `user:email` and only trusts a primary, verified email.
+- Google: Google Cloud console > APIs & Services > Credentials > OAuth client ID (Web application); add the URL under "Authorized redirect URIs".
+- OpenID Connect: create a confidential client with the authorization code flow and the redirect URL; set `VOKKO_OIDC_<NAME>_ISSUER` to the issuer URL (the one whose `/.well-known/openid-configuration` exists), e.g. `https://gitlab.com`, `https://login.microsoftonline.com/<tenant>/v2.0`, `https://keycloak.example.com/realms/<realm>`, `https://authentik.example.com/application/o/<slug>/`.
+
+The server talks to the provider itself (token exchange, ID token signature and nonce checks); client secrets stay on the server. A first sign-in asks for a username and date of birth and creates the account; an email that already belongs to an account is not merged automatically, the user links the provider from My Account > Sign-in Methods instead. The desktop app gets the result through the `vokko://auth/callback` link.
 
 ## Voice (LiveKit)
 
@@ -213,7 +246,7 @@ Serve the web client from the same origin as the API where you can: same-origin 
 - Voice V1 has no server mute/deafen, moves or DM calls yet; camera and screen share are not available (later milestones in `docs/design/voice.md`).
 - Single instance only: the gateway hub, replay buffers, presence and rate limiters live in process memory. No horizontal scaling; a restart drops every websocket (clients resume or reconnect).
 - Uploads are on local disk (no S3 or object storage), and there is no built-in backup, retention or admin tooling.
-- Registration is open by default, and there is no email verification or password reset. Set `VOKKO_REGISTRATION=closed` once your accounts exist, or keep the server private (VPN/LAN, or an auth layer in the proxy).
+- Registration is open by default; set `VOKKO_REGISTRATION=closed` once your accounts exist. There is no invite-only mode or captcha.
 - `seed` creates accounts with a published password; development only.
 - The server speaks plain HTTP; TLS comes from the proxy. No audit logs, metrics endpoint or log rotation beyond Docker's own.
 - Link previews fetch URLs from the server's network (private and loopback addresses are blocked); turn them off with `VOKKO_UNFURL=off` if you do not want outbound requests.

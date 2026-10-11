@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::account::config::AccountsConfig;
 use vokko_protocol::api::{VOICE_BITRATE_CEILING_MAX, VOICE_BITRATE_GUILD_MAX, VOICE_BITRATE_MIN};
 
 use crate::unfurl::UnfurlConfig;
@@ -40,6 +41,8 @@ pub struct Config {
     pub cors_origins: Option<Vec<String>>,
     /// `VOKKO_REGISTRATION=open|closed`: with `closed`, `POST /auth/register` answers 403 (existing users and the seed are unaffected).
     pub registration_open: bool,
+    /// Registration, age limit, terms, emailed links and outgoing mail (`account::config`).
+    pub accounts: AccountsConfig,
     /// LiveKit (`VOKKO_LIVEKIT_URL`, `VOKKO_LIVEKIT_API_KEY`, `VOKKO_LIVEKIT_API_SECRET`); `None` disables voice.
     pub livekit: Option<LiveKitConfig>,
     /// Highest channel bitrate (`VOKKO_VOICE_BITRATE_MAX`, default 128000, at most 384000).
@@ -150,6 +153,11 @@ impl DotEnv {
         Self(values)
     }
 
+    /// Every key of the environment and the file (the environment wins on lookups).
+    pub fn keys(&self) -> Vec<String> {
+        std::env::vars().map(|(key, _)| key).chain(self.0.keys().cloned()).collect()
+    }
+
     /// Real environment first, then the file.
     pub fn get(&self, key: &str) -> Option<String> {
         std::env::var(key).ok().filter(|value| !value.is_empty()).or_else(|| self.0.get(key).cloned())
@@ -207,6 +215,7 @@ impl Config {
                 _ => return Err(format!("VOKKO_REGISTRATION must be `open` or `closed`, got {value}")),
             };
         }
+        config.accounts = AccountsConfig::from_env(&env, &config.public_url)?;
         let livekit = (env.get("VOKKO_LIVEKIT_URL"), env.get("VOKKO_LIVEKIT_API_KEY"), env.get("VOKKO_LIVEKIT_API_SECRET"));
         config.livekit = match livekit {
             (Some(url), Some(api_key), Some(api_secret)) => {
@@ -228,11 +237,13 @@ impl Config {
     }
 
     pub fn new(database_url: String, bind: String, data_dir: PathBuf, public_url: String) -> Self {
+        let public_url = public_url.trim_end_matches('/').to_owned();
         Self {
+            accounts: AccountsConfig::new(&public_url),
             database_url,
             bind,
             data_dir,
-            public_url: public_url.trim_end_matches('/').to_owned(),
+            public_url,
             heartbeat_interval_ms: 41_250,
             heartbeat_misses: 2,
             session_ttl: Duration::from_secs(300),

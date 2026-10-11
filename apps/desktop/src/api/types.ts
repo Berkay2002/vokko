@@ -440,13 +440,139 @@ export interface AuthRequest {
 }
 export interface RegisterRequest {
   email: string;
-  username: string;
+  username: string; // 2-32 chars [a-z0-9_.], no ".."; trimmed and lowercased by the server
   global_name?: string;
-  password: string;
+  password: string; // 8-128 chars, not too weak or common
+  date_of_birth: string; // YYYY-MM-DD; at least InstanceInfo.min_age years old
+  consent?: boolean; // required true when InstanceInfo.terms is not null
 }
 export interface AuthResponse {
   token: string;
   user: User;
+}
+
+// ---- accounts ----
+
+export interface InstanceInfo {
+  registration: "open" | "closed"; // VOKKO_REGISTRATION
+  min_age: number; // VOKKO_MIN_AGE (default 13)
+  terms: string | null; // plain-text checkbox label; null = no consent checkbox
+  terms_url: string | null;
+}
+export interface UsernameAttemptRequest {
+  username: string;
+}
+export interface UsernameAttemptResponse {
+  taken: boolean;
+}
+export interface VerifyEmailRequest {
+  token: string; // from the emailed /verify#token=... link
+}
+export interface AccountInfo {
+  email: string;
+  pending_email: string | null; // requested change waiting for its verification link
+  verified: boolean; // email verified
+  has_password: boolean; // false for accounts created through OAuth that never set one
+  mfa_enabled: boolean; // TOTP two-factor
+}
+export interface EditAccountRequest {
+  password?: string; // current password; required for every change when has_password
+  username?: string;
+  email?: string; // becomes pending_email until verified
+  new_password?: string; // revokes the user's other sessions
+  code?: string; // accounts without a password but with two-factor on: TOTP or backup code
+}
+export interface EditAccountResponse {
+  user: User;
+  account: AccountInfo;
+}
+export interface PasswordConfirmRequest {
+  password?: string; // POST /users/@me/disable and /users/@me/delete; omitted only when has_password is false
+  code?: string; // required when mfa_enabled: TOTP or backup code
+}
+export interface MfaRequiredResponse {
+  token: null;
+  mfa: true;
+  ticket: string; // POST /auth/mfa/totp {ticket, code}; valid 5 minutes
+  totp: boolean;
+  backup: boolean;
+}
+export type LoginResponse = AuthResponse | MfaRequiredResponse; // POST /auth/login, /auth/reset
+export interface MfaLoginRequest {
+  ticket: string;
+  code: string; // 6-digit TOTP code or a backup code
+}
+export interface EnableTotpRequest {
+  password?: string;
+  secret: string; // base32 (RFC 4648, no padding), at least 16 chars; made by the client
+  code: string;
+}
+export interface BackupCode {
+  code: string | null; // only in clear right after (re)generation
+  consumed: boolean;
+}
+export interface BackupCodesResponse {
+  backup_codes: BackupCode[];
+}
+export interface BackupCodesRequest {
+  password?: string;
+  code?: string; // accounts without a password
+  regenerate: boolean;
+}
+export interface UserSession {
+  id_hash: string;
+  approx_last_used_time: ISO8601;
+  client_info: { os: string | null; platform: string | null };
+  current: boolean; // the session making the request
+}
+export interface AuthProvider {
+  id: string; // "github", "google" or a lowercased OIDC name ("gitlab", "keycloak"...)
+  name: string; // display name
+  kind: "github" | "google" | "oidc";
+}
+export interface OAuthAuthorizeRequest {
+  target: "web" | "desktop"; // where the server sends the browser back: <web>/oauth/callback or vokko://auth/callback
+  client_challenge: string; // base64url(SHA-256(client_verifier)), verifier kept by the client
+  link?: boolean; // link to the signed-in caller (needs Authorization) instead of signing in
+  password?: string; // with link: identity check of accounts with a password
+  code?: string; // with link: TOTP or backup code of accounts without a password but with two-factor
+}
+export interface OAuthCompleteRequest {
+  code: string; // result code from the callback redirect
+  client_verifier: string;
+}
+export interface OAuthRegistration {
+  ticket: string; // POST /auth/oauth/register; valid 10 minutes
+  provider: string;
+  email: string | null; // verified email from the provider; null = the form asks for one
+  suggested_username: string | null;
+  global_name: string | null;
+}
+export type OAuthCompleteResponse =
+  | { kind: "login"; login: LoginResponse }
+  | { kind: "register"; registration: OAuthRegistration }
+  | { kind: "linked"; provider: string }
+  | { kind: "reauthenticated"; provider: string }; // a link flow for an already linked provider: the session counts as freshly signed in for 5 minutes
+export interface OAuthRegisterRequest {
+  ticket: string;
+  username: string;
+  date_of_birth: string; // YYYY-MM-DD
+  consent?: boolean;
+  email?: string; // only when OAuthRegistration.email is null
+  global_name?: string;
+}
+export interface LinkedProvider {
+  provider: string; // AuthProvider.id
+  name: string;
+  email: string | null;
+  linked_at: ISO8601;
+}
+export interface ForgotPasswordRequest {
+  login: string; // email or username
+}
+export interface ResetPasswordRequest {
+  token: string; // from the /reset#token=... link
+  password: string;
 }
 
 export interface CreateMessageRequest {

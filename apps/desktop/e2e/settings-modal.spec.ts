@@ -41,7 +41,7 @@ test('My Account is one scrolling page: sub-items follow the sections and Displa
   const dialog = page.getByRole('dialog', { name: 'User Settings' });
 
   const subs = dialog.locator('.sm-sub');
-  await expect(subs).toHaveText(['Account Info', 'Password & Security', 'Account Status']);
+  await expect(subs).toHaveText(['Account Info', 'Password & Security', 'Sign-in Methods', 'Account Status']);
   await expect(subs.first()).toHaveAttribute('aria-current', 'location');
   await subs.nth(1).click();
   // the last item takes over once the page has scrolled to its end, so only the count of current items is stable

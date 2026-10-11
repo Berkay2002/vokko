@@ -943,6 +943,11 @@ pub struct RegisterRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub global_name: Option<String>,
     pub password: String,
+    /// `YYYY-MM-DD`; optional here so a missing value gets a 50035 field error instead of a body error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date_of_birth: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consent: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -17,8 +17,31 @@ General rules:
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| POST | /auth/register | `RegisterRequest` → `AuthResponse` |
-| POST | /auth/login | `AuthRequest` → `AuthResponse` |
+| POST | /auth/register | `RegisterRequest` → `AuthResponse`. 403 40002 while registration is closed. Sends a verification link to the email (the account works unverified) |
+| GET | /auth/instance | `InstanceInfo`: registration open/closed, minimum age, terms checkbox text (no auth) |
+| POST | /auth/username-attempt | `{username}` → `{taken}`; invalid names → 400 50035 `errors.username` (no auth; rate limited per address) |
+| POST | /auth/verify | `{token}` from an emailed link → 204; confirms the address (or switches to the pending new address) |
+| POST | /auth/verify/resend | auth required; 204; mails a fresh link to the pending or unverified address |
+| POST | /auth/mfa/totp | `{ticket, code}` → `AuthResponse`; `code` is a 6-digit TOTP code or an unused backup code. Tickets live 5 minutes and allow 5 wrong codes |
+| POST | /auth/forgot | `{login}` (email or username) → 204 always; mails a reset link when the account exists |
+| POST | /auth/reset | `{token, password}` → `LoginResponse`; sets the password, verifies the email, revokes every session |
+| GET | /auth/sessions | `{user_sessions: UserSession[]}` of the caller, newest use first |
+| POST | /auth/sessions/logout | `{session_id_hashes: []}` → 204; revokes those sessions of the caller (gateways close 4004) |
+| POST | /users/@me/mfa/totp/enable | `{password, secret, code}` → `{backup_codes}`; the client generates the base32 secret (at least 16 chars) and shows the QR code |
+| POST | /users/@me/mfa/totp/disable | `{code}` → 204 (TOTP or backup code) |
+| POST | /users/@me/mfa/codes-verification | `{password, regenerate}` → `{backup_codes}`; codes are stored hashed, so only a regenerate returns them in clear (otherwise `code: null` with the used state) |
+| GET | /auth/providers | `AuthProvider[]`: the OAuth / OpenID Connect sign-in providers this instance has configured (no auth) |
+| POST | /auth/oauth/{provider}/authorize | `OAuthAuthorizeRequest` → `{url}` to open in the browser; with `link: true` (and the Authorization header) the provider is linked to the caller instead of signing in |
+| GET | /auth/oauth/{provider}/callback | the provider's redirect target (`?code&state`); answers 303 to `<VOKKO_WEB_URL>/oauth/callback#code=<result>` (web) or `vokko://auth/callback?code=<result>` (desktop), `error=<message>` instead on failure |
+| POST | /auth/oauth/complete | `{code, client_verifier}` → `OAuthCompleteResponse` |
+| POST | /auth/oauth/register | `OAuthRegisterRequest` → `AuthResponse`: first sign-in with a provider creates the account |
+| GET | /users/@me/oauth | `LinkedProvider[]`: the caller's linked sign-in providers |
+| DELETE | /users/@me/oauth/{provider} | unlink, 204; refused (400 50035 `provider`) when it is the last way to sign in and the account has no password |
+| GET | /users/@me/account | `AccountInfo`: email, pending email change, verified, has password (only for the user themselves) |
+| PATCH | /users/@me/account | `EditAccountRequest` → `EditAccountResponse` (`{user, account}`); username, email, password changes; `password` = current password, required when the account has one |
+| POST | /users/@me/disable | `{password, code?}` → 204 (`code` required with two-factor on); signs out every session (gateways close 4004); logging in again re-enables the account |
+| POST | /users/@me/delete | `{password, code?}` → 204 (`code` required with two-factor on); owners must transfer or delete their guilds first (400 40011); the account is anonymised, messages stay as "Deleted User" |
+| POST | /auth/login | `AuthRequest` → `LoginResponse`: `AuthResponse`, or `MfaRequiredResponse` (`token: null, mfa: true, ticket`) when the account has two-factor on |
 | POST | /auth/logout | revokes token, 204 |
 | GET | /users/@me | `User` |
 | PATCH | /users/@me | `EditUserRequest` → `User` (profile perks included: banner, pronouns, theme colours, decoration, effect, server tag) |
@@ -209,6 +232,43 @@ Category sync: a channel created with `parent_id` copies the category's overwrit
 Limits and abuse controls: uploads max 25 MiB per file (server setting `VOKKO_MAX_UPLOAD_MB`, deliberately moderate: Vokko gives Nitro perks free but not Nitro's 500 MiB), 10 files per message, pending uploads quota 100 MiB per user (413, code 40005). Attachment files are streamed with `Cache-Control: private`. Gateway: frames over 16 KiB end the connection; custom_status over 128 chars → close 4002; op 3 more than 5/min per session or Identify more than 10/min per user → close 4008; a slow reader (queue full or a write stalled 10 s) → close 1013 (resumable); no Identify within 30 s → dropped; more than 16 unidentified sockets per address → HTTP 429. Logout closes that token's sessions with 4004. REST rate limits are per user, and per client address on /auth/* (burst 10, then 1 per 2 s). ack-bulk max 100 entries.
 
 Profile perks (docs/research/discord-nitro-perks.md): every Discord Nitro profile perk is free. Animated avatars/banners are accepted as GIF/WebP with moderate caps (avatar ≤8 MiB in, 512x512 out, animated ≤2 MiB stored; banner ≤10 MiB in, ≤1360x480 out, animated ≤4 MiB stored). Decorations, profile effects and tag badges are ids into Vokko's own open asset set (shipped with the client), never Discord assets. Per-server member profile fields override the user's inside that guild; USER_UPDATE / GUILD_MEMBER_UPDATE carry the changes. Message length stays 2000 for now (the 4000 perk is a later decision with the composer). No boost levels: per-server limits are one owner-editable config block.
+
+## Accounts
+
+Registration (`RegisterRequest`): `email`, `username`, `password`, `date_of_birth` (`YYYY-MM-DD`, required) and `consent` (required `true` when `InstanceInfo.terms` is not null); `global_name` optional. Errors are 50035 with the field name: `username` 2-32 chars of `a-z 0-9 _ .`, no `..`, input is trimmed and lowercased, "Already taken."; `password` 8-128 chars and not too weak or common ("Password is too weak or common to use.", also when it contains the username or the email's local part); `date_of_birth` must be a real past date and the user at least `min_age` (`VOKKO_MIN_AGE`, default 13) years old; `consent` "You need to agree to the terms." The username check (`POST /auth/username-attempt`) never says why a name is taken.
+
+Email links: `<VOKKO_WEB_URL>/verify#token=<t>` and `<VOKKO_WEB_URL>/reset#token=<t>` (default `VOKKO_PUBLIC_URL`). Tokens are 32 random bytes, stored as SHA-256, single use; verification links live 24 h, reset links 1 h. A new link of the same kind replaces the previous one.
+
+Account editing (`PATCH /users/@me/account`, Discord puts this on `PATCH /users/@me`; Vokko keeps it separate so the profile route stays password-free): only sent keys change, all in one request. Wrong or missing current password → 50035 `password` "Password does not match.". `username` follows the registration rules and emits USER_UPDATE. `email` does not change the address yet: it becomes `pending_email`, a verification link goes to the new address and a notice to the old one; the switch happens when the link is used (`POST /auth/verify`), and a new request replaces the pending one. `new_password` follows the registration password rules and revokes every other session of the user (their gateways close with 4004); the calling token stays valid. An account without a password (OAuth-only) sets its first one with `new_password` alone.
+
+Disable keeps everything but signs the user out everywhere; the next successful login clears it. Delete removes the user from every guild (GUILD_MEMBER_REMOVE), drops relationships (RELATIONSHIP_REMOVE to the others), sessions, tokens and linked sign-in methods, and rewrites the user row: username `deleted_user_<12 hex>`, display name "Deleted User", no avatar, banner, bio or other profile fields, email freed; USER_UPDATE carries that to everyone who shared something with them. Their messages and DMs stay and render with the anonymised author.
+
+Two-factor (TOTP, RFC 6238: SHA-1, 6 digits, 30 s steps, ±1 step accepted, a step is never accepted twice): enabling needs the password, the client-made secret and a current code from it; the answer has 10 backup codes (8 chars `a-z 0-9`), stored as SHA-256 and single use. Login with two-factor on answers `{token: null, mfa: true, ticket, totp: true, backup: true}`; the client then posts the code to `/auth/mfa/totp`. Wrong codes → 400 50035 `code` "Invalid two-factor code"; an expired or used-up ticket → 400 50035 `ticket`. Disabling two-factor deletes the backup codes. Disable/delete account then also need `code`.
+
+Sessions (`UserSession`): `id_hash` (opaque, stable per session), `approx_last_used_time` (updated at most every 5 minutes), `client_info.os` / `client_info.platform` parsed from the User-Agent at sign-in (e.g. "Windows" / "Chrome", "Vokko Desktop"), `current` for the calling token. No location is recorded.
+
+Password reset: `/auth/forgot` never reveals whether an account exists and is rate limited per address like every `/auth/*` route. The link is `<VOKKO_WEB_URL>/reset#token=<t>`, valid 1 h, single use; a later password change or reset invalidates it.
+
+Sign in with GitHub, Google and OpenID Connect (Vokko extension, Discord has no equivalent). A provider is offered only when its variables are set: `VOKKO_OAUTH_GITHUB_CLIENT_ID/SECRET` (GitHub OAuth app, id `github`), `VOKKO_OAUTH_GOOGLE_CLIENT_ID/SECRET` (Google OIDC, id `google`), `VOKKO_OIDC_<NAME>_ISSUER/CLIENT_ID/SECRET` (+ optional `_DISPLAY_NAME`; id `<name>` lowercased, e.g. GitLab, Microsoft, Keycloak, Authentik). The provider redirect URI to register is `<VOKKO_PUBLIC_URL>/api/v1/auth/oauth/<id>/callback`. Authorization code flow with PKCE (S256), `state` and (OIDC) `nonce`, all checked by the server, which also does the token exchange; client secrets and provider tokens never reach the client and are not stored. OIDC identities are the ID token's `sub`, GitHub's the numeric user id; the provider's email counts only when the provider says it is verified.
+
+The client starts with `POST /auth/oauth/{id}/authorize {target, client_challenge}`: `client_challenge` is base64url(SHA-256(client_verifier)) of a random verifier the client keeps, so a result code that leaks (another app claiming `vokko://`, browser history) cannot be redeemed elsewhere. The browser goes to the provider, back to the server callback, then to the client with a single-use result code (10 minutes). `POST /auth/oauth/complete` answers `{kind: "login", login: LoginResponse}` for a linked identity (two-factor still applies), `{kind: "register", registration}` for a new one, or `{kind: "linked", provider}` after a link. A new identity whose verified email belongs to an existing account is not merged automatically (that would let a provider take over the account): registration answers 50035 `email` and the user links the provider from My Account instead. Linking an identity that belongs to another account fails with `error`. Unlinking the last sign-in method of an account without a password is refused.
+
+Security rules (review of PR #10):
+- Identity check for sensitive actions (account edits, setting a first password, disable, delete, enabling two-factor, viewing or regenerating backup codes): accounts with a password send `password`. Accounts without a password send `code` (TOTP or backup) when two-factor is on. Otherwise the session must have signed in with, or re-confirmed through, a linked provider in the last 5 minutes; if not, the answer is 400 50035 `reauth`. To re-confirm, the client runs `POST /auth/oauth/{id}/authorize {link: true}` for a provider that is already linked; `complete` answers `{kind: "reauthenticated", provider}` and marks the calling session fresh. Disable and delete also need `code` when two-factor is on (password accounts).
+- Linking: the callback only records a pending `link` result. The identity is written in `/auth/oauth/complete`, after the client verifier is checked and only when the caller's token belongs to the user who started the link (otherwise 400 `code`), so a provider URL sent to someone else links nothing.
+- Pre-hijack: linking a new provider and enabling two-factor need a verified email (400 50035 `email`). A password reset of an account whose email was not verified yet also removes every linked provider, because the reset proves the inbox and the links may belong to whoever created the account.
+- Password changes and resets cancel a pending email change (the pending address and its verification links); a change requested in the same call is kept.
+- Failed second-factor codes are counted per account across tickets and routes: 10 failures in 15 minutes, then 429 until the window passes.
+- `/auth/forgot` does its work after answering, so known and unknown logins take the same time.
+- Invalid `VOKKO_SMTP_*` settings stop the server at start; mail goes to the log only when `VOKKO_SMTP_HOST` is unset.
+
+Security rules, round 2:
+- Linking a new provider needs the identity check. Accounts with a password or with two-factor send `password` / `code` in `OAuthAuthorizeRequest` together with `link: true` (checked at authorize). Accounts with neither need a session that is fresh (under 5 minutes) when `complete` inserts the identity. Authorize cannot know yet whether the provider account is new, so accounts with a password or two-factor also send `password` / `code` to re-confirm an already-linked provider; for accounts with neither, re-confirming needs no credentials (it is how they get a fresh session).
+- Second-factor attempts are recorded before they are counted, so parallel requests cannot get past the 10-per-15-minutes limit.
+- `users.email_verified_at` stores when the account's email was first verified (verify link, reset, or a provider-verified sign-up); later email changes keep it. A password reset removes every provider link made before that time (all of them if the email was never verified). Verifying an email never removes sign-in methods.
+- Any `VOKKO_SMTP_*` variable without `VOKKO_SMTP_HOST` stops the server at start.
+- Reset mail goes out at most once a minute per account.
+- Registration answers "Already taken." for an existing email or username. This leaks that the account exists; it is a deliberate trade-off (Discord does the same) for a usable sign-up form, and `/auth/*` rate limits slow down scraping.
 
 ## Voice (V1, docs/design/voice.md)
 

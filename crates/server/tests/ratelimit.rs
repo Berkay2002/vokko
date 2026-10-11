@@ -81,7 +81,7 @@ async fn auth_routes_are_limited_per_client_address() {
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(body["global"], false);
     // registering shares the address but has its own route bucket
-    let register = json!({"email": "a@example.test", "username": "newbie", "password": "correct horse battery"});
+    let register = json!({"email": "a@example.test", "username": "newbie", "password": "correct horse battery", "date_of_birth": "1990-01-01"});
     assert_eq!(app.send(Method::POST, "/auth/register", None, Some(register)).await.0, StatusCode::OK);
 }
 
