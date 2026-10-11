@@ -23,18 +23,21 @@ function loadCollapsed(): Set<Snowflake> {
 
 function VoiceOccupants({ channelId, guildId }: { channelId: Snowflake; guildId: Snowflake }) {
   const occupants = useVoiceOccupants(channelId);
-  const users = useStore(s => occupants.map(id => ({ user: s.users[id], member: s.members[guildId]?.[id] })).filter(entry => !!entry.user));
-  if (users.length === 0) return null;
+  const users = useStore(s => s.users);
+  const members = useStore(s => s.members[guildId]);
+  if (occupants.length === 0) return null;
   return (
     <ul className="voice-occupants">
-      {users.map(({ user, member }) =>
-        user ? (
-          <li key={user.id} className="voice-occupant">
+      {occupants.map(id => {
+        const user = users[id];
+        if (!user) return null;
+        return (
+          <li key={id} className="voice-occupant">
             <Avatar user={user} size={24} />
-            <span className="voice-occupant-name">{displayName(user, member)}</span>
+            <span className="voice-occupant-name">{displayName(user, members?.[id])}</span>
           </li>
-        ) : null,
-      )}
+        );
+      })}
     </ul>
   );
 }

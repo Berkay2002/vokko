@@ -1,5 +1,5 @@
 import { useEffect, useState, type ComponentType } from "react";
-import { AtSign, Bell, Hash, Inbox, MessageSquareText, Pin, Search, Users, Volume2 } from "lucide-react";
+import { AtSign, Bell, Hash, MessageSquareText, Pin, Search, Users, Volume2 } from "lucide-react";
 import { request } from "../api/rest";
 import { dmName, displayName, useStore } from "../api/store";
 import { ChannelType, type Channel, type Message } from "../api/types";
@@ -111,9 +111,6 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers }: Channel
           <input className="header-search-input" placeholder="Search" aria-label="Search" />
           <Search size={16} />
         </div>
-        <ToolbarButton label="Inbox">
-          <Inbox size={24} />
-        </ToolbarButton>
       </div>
       <Popout anchor={pinsAnchor} open={pinsOpen} onClose={() => setPinsOpen(false)} side="bottom" align="end" gap={8} className="pins-popout-host">
         <Pins channelId={channel.id} />
