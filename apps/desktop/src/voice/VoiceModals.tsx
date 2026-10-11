@@ -1,14 +1,18 @@
-// Modals opened from the voice UI: channel status, camera preview (device preview only: the camera in calls is V2) and
-// the screen share picker shell (sharing is V3; the webview cannot list windows yet).
+// Modals opened from the voice UI: channel status, the camera preview ("Turn On Camera" publishes the very capture shown
+// here, background included) and Go Live (quality choice, then the system's own picker chooses the screen or window).
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AppWindow, Cable, Camera, ChevronDown, Monitor, SmilePlus, VideoOff } from "lucide-react";
+import { useState } from "react";
+import { Camera, ChevronDown, Monitor, SmilePlus, VideoOff } from "lucide-react";
 import { useStore } from "../api/store";
 import { closeModal } from "../shell/modalStore";
-import { Modal } from "../ui";
+import { Modal, setPref, usePrefs } from "../ui";
 import { ApiRequestError } from "../api/rest";
-import { setVoiceChannelStatus } from "./engine";
+import { screenChoiceFromPrefs, setVoiceChannelStatus, startCamera, startScreenShare } from "./engine";
+import { useMedia } from "./mediaStore";
 import { useVoice } from "./store";
+import { CAMERA_RESOLUTIONS, RESOLUTION_LABEL, SCREEN_FPS, SCREEN_RESOLUTIONS, describeScreenShare, isCameraResolution, isScreenFps, isScreenResolution, type CameraResolution, type ScreenFps, type ScreenResolution, type StreamContent } from "./video/options";
+import { useCameraPreview } from "./video/useCameraPreview";
+import { VideoBackgroundPicker } from "./video/VideoBackgroundPicker";
 
 const STATUS_MAX = 500;
 
@@ -77,41 +81,25 @@ export function ChannelStatusModal({ channelId }: { channelId: string }) {
   );
 }
 
-type Background = "none" | "blur" | "custom";
-
 export function CameraPreviewModal() {
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [deviceId, setDeviceId] = useState("");
-  const [blocked, setBlocked] = useState(false);
-  const [background, setBackground] = useState<Background>("none");
-  const [alwaysPreview, setAlwaysPreview] = useState(true);
-  const video = useRef<HTMLVideoElement>(null);
+  const deviceId = usePrefs(s => s.cameraDevice);
+  const resolutionPref = usePrefs(s => s.cameraResolution);
+  const background = usePrefs(s => s.videoBackground);
+  const alwaysPreview = usePrefs(s => s.alwaysPreviewVideo);
+  const connected = useVoice(s => s.channelId !== null && s.status === "connected");
+  const resolution: CameraResolution = isCameraResolution(resolutionPref) ? resolutionPref : "720p";
+  const preview = useCameraPreview({ deviceId: deviceId === "default" ? "" : deviceId, resolution, background });
+  const [busy, setBusy] = useState(false);
+  const unavailable = preview.status === "blocked" || preview.status === "missing" || preview.status === "failed";
 
-  // Preview the selected camera locally (nothing is sent anywhere); stop every track when the modal closes or the device changes.
-  useEffect(() => {
-    const media = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
-    if (!media?.getUserMedia) {
-      setBlocked(true);
-      return;
-    }
-    let stream: MediaStream | null = null;
-    let live = true;
-    media
-      .getUserMedia({ video: deviceId ? { deviceId: { exact: deviceId } } : true })
-      .then(async s => {
-        if (!live) return s.getTracks().forEach(t => t.stop());
-        stream = s;
-        setBlocked(false);
-        if (video.current) video.current.srcObject = s;
-        const list = await media.enumerateDevices();
-        if (live) setDevices(list.filter(d => d.kind === "videoinput"));
-      })
-      .catch(() => live && setBlocked(true));
-    return () => {
-      live = false;
-      stream?.getTracks().forEach(t => t.stop());
-    };
-  }, [deviceId]);
+  const turnOn = async () => {
+    if (busy) return;
+    setBusy(true);
+    // The preview's capture (already processed) is what goes out; the modal no longer owns it.
+    const session = preview.take();
+    closeModal();
+    await startCamera(session);
+  };
 
   return (
     <Modal
@@ -122,65 +110,84 @@ export function CameraPreviewModal() {
       footer={
         <>
           <label className="voice-camera-check">
-            <input type="checkbox" checked={alwaysPreview} onChange={e => setAlwaysPreview(e.target.checked)} /> Always preview video
+            <input type="checkbox" checked={alwaysPreview} onChange={e => setPref("alwaysPreviewVideo", e.target.checked)} /> Always preview video
           </label>
-          <button type="button" className="btn btn-primary" disabled title="Video in calls arrives in a later update">
+          <button type="button" className="btn btn-primary" disabled={!connected || busy || unavailable} title={connected ? undefined : "Join a voice channel first"} onClick={() => void turnOn()}>
             Turn On Camera
           </button>
         </>
       }
     >
-      <div className="voice-camera-preview">
-        {blocked ? (
-          <div className="voice-camera-empty">
+      <div className="cam-preview" data-status={preview.status}>
+        <video ref={preview.videoRef} autoPlay muted playsInline aria-label="Camera preview" hidden={unavailable} />
+        {unavailable && (
+          <div className="cam-preview-empty">
             <VideoOff size={36} aria-hidden="true" />
-            <p>No camera available. Check that a camera is connected and that access is allowed.</p>
+            <p>
+              {preview.status === "blocked"
+                ? "Vokko can't use the camera. Allow camera access in your system or browser settings."
+                : "No camera available. Check that a camera is connected and not in use by another app."}
+            </p>
           </div>
-        ) : (
-          <video ref={video} className={`voice-camera-video${background === "blur" ? " blur" : ""}`} autoPlay muted playsInline />
         )}
       </div>
       <div className="voice-camera-device">
         <Camera size={16} aria-hidden="true" />
-        <select aria-label="Camera" className="voice-camera-select" value={deviceId} onChange={e => setDeviceId(e.target.value)}>
+        <select aria-label="Camera" className="voice-camera-select" value={deviceId === "default" ? "" : deviceId} onChange={e => setPref("cameraDevice", e.target.value || "default")}>
           <option value="">Default camera</option>
-          {devices.map((d, i) => (
-            <option key={d.deviceId} value={d.deviceId}>
-              {d.label || `Camera ${i + 1}`}
+          {preview.devices
+            .filter(d => d.deviceId && d.deviceId !== "default")
+            .map((d, i) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label || `Camera ${i + 1}`}
+              </option>
+            ))}
+        </select>
+        <ChevronDown size={16} aria-hidden="true" />
+      </div>
+      <div className="voice-camera-device">
+        <Monitor size={16} aria-hidden="true" />
+        <select aria-label="Camera resolution" className="voice-camera-select" value={resolution} onChange={e => isCameraResolution(e.target.value) && setPref("cameraResolution", e.target.value)}>
+          {CAMERA_RESOLUTIONS.map(r => (
+            <option key={r} value={r}>
+              {r === "720p" ? "720p (default)" : r}
             </option>
           ))}
         </select>
         <ChevronDown size={16} aria-hidden="true" />
       </div>
       <h3 className="voice-camera-heading">Video Background</h3>
-      <div className="voice-camera-backgrounds" role="radiogroup" aria-label="Video background">
-        {(
-          [
-            ["none", "None"],
-            ["blur", "Blur"],
-            ["custom", "Custom"],
-          ] as [Background, string][]
-        ).map(([value, label]) => (
-          <button key={value} type="button" role="radio" aria-checked={background === value} className={`voice-camera-bg${background === value ? " selected" : ""}`} onClick={() => setBackground(value)}>
-            {label}
-          </button>
-        ))}
-      </div>
+      <VideoBackgroundPicker value={background} onChange={next => setPref("videoBackground", next)} error={preview.backgroundError} />
     </Modal>
   );
 }
 
-type PickerTab = "apps" | "screen" | "devices";
+const CONTENT_OPTIONS: { value: StreamContent; title: string; note: string }[] = [
+  { value: "motion", title: "Gaming", note: "Smoother motion; resolution drops first on a weak connection" },
+  { value: "detail", title: "Screen sharing", note: "Clearer text; frame rate drops first on a weak connection" },
+];
 
 export function ScreenSharePickerModal() {
-  const [tab, setTab] = useState<PickerTab>("apps");
-  const [mode, setMode] = useState<"gaming" | "text">("gaming");
-  const [hd, setHd] = useState(false);
-  const tabs: { id: PickerTab; label: string; icon: ReactNode }[] = [
-    { id: "apps", label: "Applications", icon: <AppWindow size={16} /> },
-    { id: "screen", label: "Entire Screen", icon: <Monitor size={16} /> },
-    { id: "devices", label: "Devices", icon: <Cable size={16} /> },
-  ];
+  const defaults = screenChoiceFromPrefs();
+  const [resolution, setResolution] = useState<ScreenResolution>(defaults.resolution);
+  const [fps, setFps] = useState<ScreenFps>(defaults.fps);
+  const [audio, setAudio] = useState(defaults.audio);
+  const [content, setContent] = useState<StreamContent>(defaults.fps >= 60 ? "motion" : "detail");
+  const connected = useVoice(s => s.channelId !== null && s.status === "connected");
+  const error = useMedia(s => s.error);
+  const [busy, setBusy] = useState(false);
+
+  const goLive = async () => {
+    if (busy) return;
+    setBusy(true);
+    // Remember the choice as the new default (User Settings > Voice & Video > Streaming).
+    setPref("streamResolution", resolution);
+    setPref("streamFps", fps);
+    setPref("streamAudio", audio);
+    closeModal();
+    await startScreenShare({ resolution, fps, audio, content });
+  };
+
   return (
     <Modal
       open
@@ -192,38 +199,57 @@ export function ScreenSharePickerModal() {
           <button type="button" className="btn btn-secondary" onClick={closeModal}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" disabled title="Screen sharing arrives in a later update">
+          <button type="button" className="btn btn-primary" disabled={!connected || busy} title={connected ? undefined : "Join a voice channel first"} onClick={() => void goLive()}>
             Go Live
           </button>
         </>
       }
     >
-      <div className="voice-share-tabs" role="tablist">
-        {tabs.map(t => (
-          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={`voice-share-tab${tab === t.id ? " selected" : ""}`} onClick={() => setTab(t.id)}>
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
-      <div className="voice-share-empty" role="tabpanel">
-        <Monitor size={36} aria-hidden="true" />
-        <p>Choosing a window or screen to share needs the desktop app, which is coming in a later update.</p>
+      <p className="modal-subtle">Pick the quality, then choose the screen or window to share in the next step.</p>
+      <div className="golive-grid">
+        <label className="settings-field">
+          <span className="field-label">Resolution</span>
+          <select aria-label="Resolution" className="voice-camera-select" value={resolution} onChange={e => isScreenResolution(e.target.value) && setResolution(e.target.value)}>
+            {SCREEN_RESOLUTIONS.map(r => (
+              <option key={r} value={r}>
+                {RESOLUTION_LABEL[r]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="settings-field">
+          <span className="field-label">Frame rate</span>
+          <select aria-label="Frame rate" className="voice-camera-select" value={fps} onChange={e => isScreenFps(Number(e.target.value)) && setFps(Number(e.target.value) as ScreenFps)}>
+            {SCREEN_FPS.map(f => (
+              <option key={f} value={f}>
+                {f} fps
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
       <div className="voice-share-options">
         <div className="voice-share-mode" role="radiogroup" aria-label="Stream mode">
-          <button type="button" role="radio" aria-checked={mode === "gaming"} className={`voice-share-mode-option${mode === "gaming" ? " selected" : ""}`} onClick={() => setMode("gaming")}>
-            <span className="voice-share-mode-title">Gaming</span>
-            <span className="voice-share-mode-note">Smoother video · 720p · 30 fps</span>
-          </button>
-          <button type="button" role="radio" aria-checked={mode === "text"} className={`voice-share-mode-option${mode === "text" ? " selected" : ""}`} onClick={() => setMode("text")}>
-            <span className="voice-share-mode-title">Screen sharing</span>
-            <span className="voice-share-mode-note">Clearer text · source · 5 fps</span>
-          </button>
+          {CONTENT_OPTIONS.map(o => (
+            <button key={o.value} type="button" role="radio" aria-checked={content === o.value} className={`voice-share-mode-option${content === o.value ? " selected" : ""}`} onClick={() => setContent(o.value)}>
+              <span className="voice-share-mode-title">{o.title}</span>
+              <span className="voice-share-mode-note">{o.note}</span>
+            </button>
+          ))}
         </div>
         <label className="voice-camera-check">
-          <input type="checkbox" checked={hd} onChange={e => setHd(e.target.checked)} /> HD (1080p, 60 fps)
+          <input type="checkbox" checked={audio} onChange={e => setAudio(e.target.checked)} /> Share audio
         </label>
       </div>
+      <p className="golive-summary" aria-live="polite">
+        {describeScreenShare({ resolution, fps, audio, content })} · {content === "motion" ? "Gaming" : "Screen sharing"} · {audio ? "with audio" : "no audio"}
+      </p>
+      <p className="golive-note">The system's picker decides what is shared and whether its audio is available; some platforms only share audio from a browser tab.</p>
+      {error && (
+        <p className="field-error" role="alert">
+          {error}
+        </p>
+      )}
     </Modal>
   );
 }

@@ -35,6 +35,14 @@ export interface VoiceSettings {
   echoCancellation: boolean;
   noiseSuppression: boolean;
   autoGainControl: boolean;
+  /** Input volume 0..2 (0-200 %), applied with a GainNode in the input chain. */
+  inputGain: number;
+  /** RNNoise instead of (never together with) the browser's noise suppression. */
+  rnnoise: boolean;
+  /** Output volume 0..2 (0-200 %): scales every remote voice. */
+  outputGain: number;
+  /** 0..1 multiplier on other voices while we watch a stream with stream attenuation on (1 = untouched). */
+  duck: number;
 }
 
 export const DEFAULT_SETTINGS: VoiceSettings = {
@@ -48,6 +56,10 @@ export const DEFAULT_SETTINGS: VoiceSettings = {
   echoCancellation: true,
   noiseSuppression: true,
   autoGainControl: true,
+  inputGain: 1,
+  rnnoise: false,
+  outputGain: 1,
+  duck: 1,
 };
 
 export const VOLUME_MAX = 200;

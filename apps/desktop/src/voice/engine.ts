@@ -11,12 +11,18 @@ import { Perm, channelPermissions, hasBit } from "../api/permissions";
 import { ChannelType, type Channel, type Snowflake } from "../api/types";
 import { playSound } from "../notify/sounds";
 import { getPrefs, usePrefs, type Prefs } from "../ui/prefs";
+import { resolveAudio } from "./audioProfile";
+import { voiceDebug } from "./debugLog";
+import { getMedia, resetMedia, setLocalState, setStreamQuality, setVideo, setWatching, useMedia, type VideoSource } from "./mediaStore";
 import { bindPtt } from "./ptt";
 import { channelOccupants, playbackVolume, type VoiceAction, type VoiceDevice, type VoiceErrorReason, type VoiceModel, type VoiceSettings } from "./reducer";
 import { getVoice, voiceStore } from "./store";
 import { FakeTransport } from "./fakeTransport";
 import { isMockEndpoint, type TransportCallbacks, type VoiceTransport } from "./transport";
 import { sensitivityToDb } from "./vad";
+import { parseBackground } from "./video/backgrounds";
+import { openCamera, type CameraSession } from "./video/cameraSession";
+import { DEFAULT_SCREEN_SHARE, isCameraResolution, isViewerQuality, type ScreenShareChoice, type ViewerQuality } from "./video/options";
 
 /** Media reconnect: re-send op 4 with this backoff (1 s → 5 s) after a close and give up after two minutes (§3.6). */
 export const RETRY_BASE_MS = 1000;
@@ -170,11 +176,107 @@ export async function refreshVoiceDevices(): Promise<void> {
   }
 }
 
+// ---- camera, screen share, watching ----
+
+/** The streaming defaults from User Settings > Voice & Video, as a Go Live choice. */
+export function screenChoiceFromPrefs(prefs: Prefs = getPrefs()): ScreenShareChoice {
+  const resolution = (["720p", "1080p", "1440p", "source"] as const).find(r => r === prefs.streamResolution) ?? DEFAULT_SCREEN_SHARE.resolution;
+  const fps = prefs.streamFps === 15 || prefs.streamFps === 60 ? prefs.streamFps : 30;
+  return { resolution, fps, audio: prefs.streamAudio };
+}
+
+export const cameraResolutionFromPrefs = (prefs: Prefs = getPrefs()) => (isCameraResolution(prefs.cameraResolution) ? prefs.cameraResolution : "720p");
+
+const inCall = (): boolean => getVoice().channelId !== null && getVoice().status === "connected";
+
+/**
+ * Publishes our camera. `session` is the preview modal's open (and background processed) capture; without it the transport
+ * opens the camera itself. Resolves true once published; failures arrive as `media.error`.
+ */
+export async function startCamera(session?: CameraSession | null): Promise<boolean> {
+  if (!transport?.setCamera || !inCall()) {
+    await session?.stop();
+    return false;
+  }
+  const prefs = getPrefs();
+  const resolution = cameraResolutionFromPrefs(prefs);
+  let capture = session ?? null;
+  if (!capture && transportKind !== "fake") {
+    // No preview was open: capture here so the saved background applies before the first frame is published
+    // (the fake transport paints its own picture when it gets no capture).
+    try {
+      capture = await openCamera({ deviceId: prefs.cameraDevice || undefined, resolution });
+      const background = parseBackground(prefs.videoBackground);
+      if (background.kind !== "none") await capture.setBackground(background).catch(() => undefined);
+    } catch (error) {
+      const name = (error as { name?: string } | null)?.name;
+      setLocalState({ error: VIDEO_ERRORS[name === "NotAllowedError" || name === "SecurityError" ? "permission_denied" : name === "NotFoundError" || name === "OverconstrainedError" ? "not_found" : "failed"] });
+      return false;
+    }
+  }
+  await transport.setCamera(true, { resolution, session: capture, deviceId: prefs.cameraDevice || undefined });
+  if (!getMedia().cameraOn) await capture?.stop();
+  return getMedia().cameraOn;
+}
+
+export async function stopCamera(): Promise<void> {
+  await transport?.setCamera?.(false);
+}
+
+export async function startScreenShare(choice: ScreenShareChoice = screenChoiceFromPrefs()): Promise<boolean> {
+  if (!transport?.setScreenShare || !inCall()) return false;
+  await transport.setScreenShare(true, choice);
+  return getMedia().screenOn;
+}
+
+export async function stopScreenShare(): Promise<void> {
+  await transport?.setScreenShare?.(false);
+}
+
+/** "Watch Stream" / stop watching another user's screen share (costs nothing until watched). */
+export function watchStream(userId: Snowflake, watch: boolean): void {
+  setWatching(userId, watch);
+  transport?.watchStream?.(userId, watch);
+  if (!watch) setVideo(userId, "screen", null);
+}
+
+export function setViewerQuality(userId: Snowflake, source: VideoSource, quality: ViewerQuality): void {
+  setStreamQuality(userId, source, quality);
+  transport?.setViewerQuality?.(userId, source, quality);
+}
+
+export function dismissVideoError(): void {
+  setLocalState({ error: null });
+}
+
+const VIDEO_ERRORS = {
+  permission_denied: "Vokko needs permission to use the camera or screen. Allow it in your system or browser settings and try again.",
+  not_found: "No camera or screen source was found.",
+  failed: "Could not start the video. Try again.",
+} as const;
+
+/** Per-user stream quality: the user's own choice, or the default from settings. */
+function viewerQualityOf(userId: Snowflake, source: VideoSource): ViewerQuality {
+  const chosen = getMedia().quality[`${userId}:${source}`];
+  if (chosen) return chosen;
+  const preferred = getPrefs().viewerQuality;
+  return isViewerQuality(preferred) ? preferred : "auto";
+}
+
 // ---- op 4 ----
 
 function sendOp4(guildId: Snowflake | null, channelId: Snowflake | null): void {
   const { selfMute, selfDeaf } = getVoice();
-  gateway.sendVoiceStateUpdate({ guild_id: guildId, channel_id: channelId, self_mute: selfMute, self_deaf: selfDeaf, self_video: false });
+  const { cameraOn, screenOn } = getMedia();
+  gateway.sendVoiceStateUpdate({
+    guild_id: guildId,
+    channel_id: channelId,
+    self_mute: selfMute,
+    self_deaf: selfDeaf,
+    self_video: channelId !== null && cameraOn,
+    // The real server derives the stream flag from LiveKit; the mock backend (fake transport) has no LiveKit to ask.
+    ...(transportKind === "fake" ? { self_stream: channelId !== null && screenOn } : {}),
+  });
 }
 
 // ---- transport ----
@@ -182,16 +284,31 @@ function sendOp4(guildId: Snowflake | null, channelId: Snowflake | null): void {
 const callbacks: TransportCallbacks = {
   status: status => {
     if (getVoice().channelId === null) return;
+    voiceDebug("status", status);
     dispatch({ type: "transportStatus", status });
     if (status === "connected") stopRetry();
   },
   speaking: userIds => dispatch({ type: "speaking", userIds }),
   selfSpeaking: speaking => dispatch({ type: "selfSpeaking", speaking }),
-  quality: (quality, pingMs) => dispatch({ type: "quality", quality, pingMs }),
+  quality: (quality, pingMs) => {
+    voiceDebug("quality", { quality, pingMs });
+    dispatch({ type: "quality", quality, pingMs });
+  },
   devices: (input, output, outputSelectable) => dispatch({ type: "devices", input, output, outputSelectable }),
   micFailed: reason => {
     dispatch({ type: "setSelfMute", mute: true });
     dispatch({ type: "error", error: { reason, channelId: getVoice().channelId } });
+  },
+  video: (userId, source, handle) => {
+    voiceDebug("video", { userId, source, on: !!handle });
+    setVideo(userId, source, handle);
+    if (userId !== getVoice().meId) return;
+    setLocalState(source === "camera" ? { cameraOn: !!handle } : { screenOn: !!handle });
+  },
+  localVideoEnded: source => setLocalState(source === "camera" ? { cameraOn: false } : { screenOn: false }),
+  videoFailed: (source, reason) => {
+    voiceDebug("video failed", { source, reason });
+    setLocalState({ error: VIDEO_ERRORS[reason], ...(source === "camera" ? { cameraOn: false } : { screenOn: false }) });
   },
   closed: ({ final, reason }) => {
     activeToken = null;
@@ -229,6 +346,12 @@ function transportOptions(model: VoiceModel) {
       const now = getVoice();
       return now.channelId ? channelOccupants(now, now.channelId).map(s => s.user_id).filter(id => id !== now.meId) : [];
     },
+    selfId: model.meId,
+    videoOf: (userId: Snowflake) => {
+      const state = getVoice().states[userId];
+      return { camera: !!state?.self_video, screen: !!state?.self_stream };
+    },
+    viewerQuality: viewerQualityOf,
   };
 }
 
@@ -292,16 +415,27 @@ function stopRetry(): void {
 
 // ---- store → transport ----
 
-function settingsFromPrefs(prefs: Prefs): Partial<VoiceSettings> {
+/** 0..1: how far other voices are lowered while we watch a stream with "stream attenuation" on. */
+function duckFor(prefs: Prefs, watching: boolean): number {
+  if (!prefs.streamAttenuation || !watching) return 1;
+  return 1 - Math.max(0, Math.min(100, prefs.streamAttenuationStrength)) / 100;
+}
+
+export function settingsFromPrefs(prefs: Prefs, watching = Object.keys(getMedia().watching).length > 0): Partial<VoiceSettings> {
+  const audio = resolveAudio(prefs);
   return {
     inputMode: prefs.inputMode,
     vadThresholdDb: sensitivityToDb(prefs.inputSensitivity),
     vadAuto: prefs.autoSensitivity,
     inputDeviceId: prefs.inputDevice || "default",
     outputDeviceId: prefs.outputDevice || "default",
-    echoCancellation: prefs.echoCancellation,
-    noiseSuppression: prefs.noiseSuppression,
-    autoGainControl: prefs.autoGainControl,
+    echoCancellation: audio.echoCancellation,
+    noiseSuppression: audio.noiseSuppression,
+    autoGainControl: audio.autoGainControl,
+    rnnoise: audio.rnnoise,
+    inputGain: Math.max(0, Math.min(2, prefs.inputVolume / 100)),
+    outputGain: Math.max(0, Math.min(2, prefs.outputVolume / 100)),
+    duck: duckFor(prefs, watching),
   };
 }
 
@@ -311,7 +445,11 @@ function syncPtt(model: VoiceModel): void {
   unbindPtt?.();
   unbindPtt = null;
   boundPtt = want;
-  if (want) unbindPtt = bindPtt(want, pressed => transport?.setPttPressed(pressed));
+  if (want)
+    unbindPtt = bindPtt(want, pressed => {
+      transport?.setPttPressed(pressed);
+      playSound(pressed ? "ptt-activate" : "ptt-deactivate");
+    });
 }
 
 function occupantIds(model: VoiceModel): Set<Snowflake> {
@@ -324,7 +462,8 @@ function sync(next: VoiceModel, prev: VoiceModel): void {
     activeToken = null;
     stopRetry();
     void transport?.disconnect();
-    if (prev.status === "connected" || prev.status === "reconnecting") playSound("voice-leave");
+    resetMedia();
+    if (prev.status === "connected" || prev.status === "reconnecting") playSound("voice-disconnected");
   } else if (next.server && next.channelId && next.server.token !== activeToken && next.server !== prev.server) {
     // A new token always means the server expects it to be used (join, move, re-identify, reconnect answer); the
     // server only sends one while we are not connecting with another for the same session (see reconnect()).
@@ -332,12 +471,25 @@ function sync(next: VoiceModel, prev: VoiceModel): void {
   }
 
   // Own join / others joining or leaving our call.
-  if (next.status === "connected" && prev.status !== "connected" && prev.status !== "reconnecting") playSound("voice-join");
+  if (next.status === "connected" && prev.status === "reconnecting") playSound("connection-restored");
+  else if (next.status === "reconnecting" && prev.status === "connected") playSound("connection-lost");
+  else if (next.status === "connected" && prev.status !== "connected" && prev.status !== "reconnecting") playSound("voice-connected");
   else if (next.status === "connected" && prev.status === "connected" && next.channelId === prev.channelId && next.states !== prev.states) {
     const before = occupantIds(prev);
     const after = occupantIds(next);
-    if ([...after].some(id => !before.has(id))) playSound("voice-join");
-    else if ([...before].some(id => !after.has(id))) playSound("voice-leave");
+    const joined = [...after].filter(id => !before.has(id) && id !== next.meId);
+    const left = [...before].filter(id => !after.has(id) && id !== next.meId);
+    // A user who shows up from, or goes to, another voice channel was moved (or moved themselves) rather than joining.
+    const elsewhere = (state: VoiceModel, id: Snowflake) => state.states[id]?.channel_id != null && state.states[id]?.channel_id !== state.channelId;
+    if (joined.length) playSound(joined.every(id => elsewhere(prev, id)) ? "user-moved" : "user-join");
+    else if (left.length) playSound(left.every(id => elsewhere(next, id)) ? "user-moved" : "user-leave");
+    // A moderator muting or deafening us.
+    const me = next.meId ? next.states[next.meId] : undefined;
+    const was = prev.meId ? prev.states[prev.meId] : undefined;
+    if (me && was) {
+      if (me.deaf && !was.deaf) playSound("server-deaf");
+      else if (me.mute && !was.mute && !me.deaf) playSound("server-mute");
+    }
   }
 
   // Self mute / deafen: transport + op 4 so others see the icons.
@@ -345,7 +497,12 @@ function sync(next: VoiceModel, prev: VoiceModel): void {
     transport?.setSelfMute(next.selfMute);
     transport?.setSelfDeaf(next.selfDeaf);
     if (next.channelId) sendOp4(next.guildId, next.channelId);
+    if (next.selfDeaf !== prev.selfDeaf) playSound(next.selfDeaf ? "deafen" : "undeafen");
+    else playSound(next.selfMute ? "mute" : "unmute");
   }
+
+  // Others' cameras and screen shares follow the voice states (self_video / self_stream).
+  if (next.states !== prev.states && next.channelId) transport?.syncVideo?.();
 
   if (next.volumes !== prev.volumes || next.localMutes !== prev.localMutes) {
     const ids = new Set([...Object.keys(next.volumes), ...Object.keys(prev.volumes), ...Object.keys(next.localMutes), ...Object.keys(prev.localMutes)]);
@@ -371,6 +528,22 @@ export function wireVoice(): void {
     if ((Object.keys(a) as (keyof VoiceSettings)[]).some(k => a[k] !== b[k])) dispatch({ type: "settings", settings: a });
   });
   voiceStore.subscribe((next, prev) => sync(next, prev));
+  useMedia.subscribe((next, prev) => {
+    // Our own camera / screen share started or ended: tell the server (op 4) and play the sound.
+    if (next.cameraOn !== prev.cameraOn || next.screenOn !== prev.screenOn) {
+      const { guildId, channelId } = getVoice();
+      if (channelId) {
+        sendOp4(guildId, channelId);
+        if (next.cameraOn !== prev.cameraOn) playSound(next.cameraOn ? "camera-on" : "camera-off");
+        if (next.screenOn !== prev.screenOn) playSound(next.screenOn ? "stream-start" : "stream-stop");
+      }
+    }
+    // Stream attenuation follows whether we watch anything.
+    if (Object.keys(next.watching).length !== Object.keys(prev.watching).length) {
+      const a = settingsFromPrefs(getPrefs(), Object.keys(next.watching).length > 0);
+      if (a.duck !== getVoice().settings.duck) dispatch({ type: "settings", settings: a });
+    }
+  });
 
   gateway.on("READY", ready => {
     dispatch({ type: "ready", meId: ready.user.id, voiceEnabled: !!ready.media?.voice_enabled, guilds: ready.guilds });

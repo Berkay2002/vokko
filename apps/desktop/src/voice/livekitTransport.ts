@@ -20,11 +20,16 @@ import {
 } from "livekit-client";
 import type { Snowflake } from "../api/types";
 import { resolveDeviceId, withDeviceFallback } from "./devices";
+import { summariseRtpStats, voiceDebug, voiceDebugEnabled } from "./debugLog";
 import { GateProcessor } from "./gate";
 import type { ConnectionQuality, VoiceDevice, VoiceSettings } from "./reducer";
-import type { TransportCallbacks, TransportOptions, VoiceTransport } from "./transport";
+import type { TransportCallbacks, TransportOptions, VoiceTransport, CameraStart } from "./transport";
+import { LiveKitVideo } from "./livekitVideo";
+import type { VideoSource } from "./mediaStore";
+import type { ScreenShareChoice, ViewerQuality } from "./video/options";
 
 const PING_POLL_MS = 2000;
+const STATS_POLL_MS = 5000;
 
 const QUALITY: Record<string, ConnectionQuality> = {
   [LkQuality.Excellent]: "excellent",
@@ -51,8 +56,10 @@ export class LiveKitTransport implements VoiceTransport {
   private volumes = new Map<Snowflake, number>();
   private leaving = false;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
   private lastQuality: ConnectionQuality = "unknown";
   private audioHost: HTMLElement | null = null;
+  private readonly video: LiveKitVideo;
   /** room.connect() finished for the current room (publishing before that is not possible). */
   private joined = false;
   /** Room a microphone publish is in flight for (createTracks → publishTrack). */
@@ -64,6 +71,7 @@ export class LiveKitTransport implements VoiceTransport {
 
   constructor(private readonly cb: TransportCallbacks) {
     this.media?.addEventListener?.("devicechange", this.onDeviceChange);
+    this.video = new LiveKitVideo(cb, () => this.room, () => this.joined, () => this.room?.localParticipant.identity ?? null);
   }
 
   async connect(endpoint: string, token: string, options: TransportOptions): Promise<void> {
@@ -81,7 +89,7 @@ export class LiveKitTransport implements VoiceTransport {
       adaptiveStream: true,
       dynacast: true,
       webAudioMix: true, // per-user volume above 100 % goes through Web Audio gain
-      audioCaptureDefaults: { echoCancellation: s.echoCancellation, noiseSuppression: s.noiseSuppression, autoGainControl: s.autoGainControl },
+      audioCaptureDefaults: { echoCancellation: s.echoCancellation, noiseSuppression: this.noiseConstraint(s), autoGainControl: s.autoGainControl },
       audioOutput: outputId !== "default" ? { deviceId: outputId } : undefined,
     });
     this.room = room;
@@ -104,6 +112,8 @@ export class LiveKitTransport implements VoiceTransport {
     this.cb.status("connected");
     for (const participant of room.remoteParticipants.values()) for (const pub of participant.trackPublications.values()) this.consider(pub, participant);
     this.pingTimer = setInterval(() => this.reportQuality(), PING_POLL_MS);
+    this.statsTimer = setInterval(() => void this.logStats(room), STATS_POLL_MS);
+    voiceDebug("connected", { room: room.name });
     void room.startAudio().catch(() => undefined);
     // Self-muted: publish nothing; the first unmute publishes the microphone.
     if (!this.selfMute) await this.publishMic();
@@ -156,13 +166,34 @@ export class LiveKitTransport implements VoiceTransport {
     // Without a published microphone (muted) there is nothing to switch: the next publish reads the new settings.
     if (prev.inputDeviceId !== settings.inputDeviceId && this.micPublication()) void this.switchDevice(room, "audioinput", settings.inputDeviceId);
     if (prev.outputDeviceId !== settings.outputDeviceId && supportsAudioOutputSelection()) void this.switchDevice(room, "audiooutput", settings.outputDeviceId);
-    const constraints = (v: VoiceSettings) => `${v.echoCancellation}${v.noiseSuppression}${v.autoGainControl}`;
+    const constraints = (v: VoiceSettings) => `${v.echoCancellation}${v.noiseSuppression}${v.autoGainControl}${v.rnnoise}`;
     const track = this.micPublication()?.audioTrack;
     if (track && constraints(prev) !== constraints(settings)) void this.restartMic(room, track, settings);
+    if (prev.outputGain !== settings.outputGain || prev.duck !== settings.duck) this.applyVolumes();
   }
 
   setPttPressed(pressed: boolean): void {
     this.gate?.setKey(pressed);
+  }
+
+  setCamera(on: boolean, start?: CameraStart): Promise<void> {
+    return this.video.setCamera(on, start);
+  }
+
+  setScreenShare(on: boolean, choice?: ScreenShareChoice): Promise<void> {
+    return this.video.setScreenShare(on, choice);
+  }
+
+  watchStream(userId: Snowflake, watch: boolean): void {
+    const participant = this.room?.remoteParticipants.get(userId);
+    this.video.watch(userId, watch, participant?.trackPublications.values() ?? [], participant, this.selfDeaf ? 0 : this.volumeOf(userId));
+  }
+
+  setViewerQuality(userId: Snowflake, source: VideoSource, quality: ViewerQuality): void {
+    const participant = this.room?.remoteParticipants.get(userId);
+    const wanted = source === "screen" ? Track.Source.ScreenShare : Track.Source.Camera;
+    const pub = participant ? [...participant.trackPublications.values()].find(p => p.source === wanted) : undefined;
+    this.video.setQuality(userId, source, quality, pub);
   }
 
   /** Switches to a stored device (id, or a label from older prefs), falling back to the default device; keeps the mute. */
@@ -183,7 +214,7 @@ export class LiveKitTransport implements VoiceTransport {
       track.restartTrack({
         deviceId: deviceId !== "default" ? deviceId : undefined,
         echoCancellation: settings.echoCancellation,
-        noiseSuppression: settings.noiseSuppression,
+        noiseSuppression: this.noiseConstraint(settings),
         autoGainControl: settings.autoGainControl,
       });
     await withDeviceFallback(id, attempt).catch(error => console.warn("voice: microphone restart failed", error));
@@ -216,15 +247,34 @@ export class LiveKitTransport implements VoiceTransport {
     }
   }
 
+  /** Debug logging only: RTP summaries for every published and subscribed track, so a quality complaint has numbers. */
+  private async logStats(room: Room): Promise<void> {
+    if (this.room !== room || !voiceDebugEnabled()) return;
+    const tracks: (Track | undefined)[] = [...room.localParticipant.trackPublications.values()].map(p => p.track);
+    for (const participant of room.remoteParticipants.values()) for (const pub of participant.trackPublications.values()) tracks.push(pub.track);
+    for (const track of tracks) {
+      if (!track) continue;
+      try {
+        const report = await track.getRTCStatsReport();
+        if (report) voiceDebug(`stats ${track.source}`, summariseRtpStats(report));
+      } catch {
+        // Statistics are best effort.
+      }
+    }
+  }
+
   private wire(room: Room): void {
     room
-      .on(RoomEvent.SignalConnected, () => this.room === room && this.cb.status("rtc_connecting"))
-      .on(RoomEvent.Reconnecting, () => this.room === room && this.cb.status("reconnecting"))
-      .on(RoomEvent.SignalReconnecting, () => this.room === room && this.cb.status("reconnecting"))
-      .on(RoomEvent.Reconnected, () => this.room === room && this.cb.status("connected"))
+      .on(RoomEvent.SignalConnected, () => this.room === room && (voiceDebug("signal connected"), this.cb.status("rtc_connecting")))
+      .on(RoomEvent.Reconnecting, () => this.room === room && (voiceDebug("reconnecting"), this.cb.status("reconnecting")))
+      .on(RoomEvent.SignalReconnecting, () => this.room === room && (voiceDebug("signal reconnecting"), this.cb.status("reconnecting")))
+      .on(RoomEvent.Reconnected, () => this.room === room && (voiceDebug("reconnected"), this.cb.status("connected")))
       .on(RoomEvent.TrackPublished, (pub, participant) => this.consider(pub, participant))
       .on(RoomEvent.TrackSubscribed, (track, pub, participant) => this.attach(track, pub, participant))
-      .on(RoomEvent.TrackUnsubscribed, track => track.detach().forEach(el => el.remove()))
+      .on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
+        if (this.video.detach(track, pub, participant)) return;
+        track.detach().forEach(el => el.remove());
+      })
       .on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
         if (this.room !== room) return;
         this.cb.speaking(speakers.filter(p => p.identity !== room.localParticipant.identity).map(p => p.identity));
@@ -247,13 +297,15 @@ export class LiveKitTransport implements VoiceTransport {
 
   /** Subscription policy: every microphone track, unless locally muted (volume 0 = unsubscribed, saves egress). */
   private consider(pub: RemoteTrackPublication, participant: RemoteParticipant): void {
-    if (pub.kind !== Track.Kind.Audio || pub.source !== Track.Source.Microphone) return;
     const volume = this.volumeOf(participant.identity);
+    if (this.video.consider(pub, participant, this.selfDeaf ? 0 : volume)) return;
+    if (pub.kind !== Track.Kind.Audio || pub.source !== Track.Source.Microphone) return;
     pub.setSubscribed(volume > 0);
     if (pub.track instanceof RemoteAudioTrack) pub.track.setVolume(this.selfDeaf ? 0 : volume);
   }
 
   private attach(track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant): void {
+    if (this.video.attach(track, pub, participant)) return;
     if (track.kind !== Track.Kind.Audio || !this.audioHost) return;
     const el = track.attach();
     el.dataset.userId = participant.identity; // e2e (real.voice.spec.ts) reads subscriptions from these elements
@@ -267,8 +319,25 @@ export class LiveKitTransport implements VoiceTransport {
     for (const participant of room.remoteParticipants.values()) for (const pub of participant.trackPublications.values()) this.consider(pub, participant);
   }
 
+  /** Per-user volume x output volume x stream attenuation (0..2 before the playback clamp in LiveKit). */
   private volumeOf(userId: Snowflake): number {
-    return this.volumes.get(userId) ?? this.options?.volumeOf(userId) ?? 1;
+    const own = this.volumes.get(userId) ?? this.options?.volumeOf(userId) ?? 1;
+    const s = this.settings;
+    return own * (s?.outputGain ?? 1) * (s?.duck ?? 1);
+  }
+
+  /** The browser's noise suppression covers for RNNoise when RNNoise could not start (never both at once). */
+  private denoiseFallback = false;
+
+  private noiseConstraint(s: VoiceSettings): boolean {
+    return s.noiseSuppression || (s.rnnoise && this.denoiseFallback);
+  }
+
+  private useBrowserDenoise(room: Room): void {
+    if (this.room !== room || this.denoiseFallback) return;
+    this.denoiseFallback = true;
+    const track = this.micPublication()?.audioTrack;
+    if (track && this.settings) void this.restartMic(room, track, this.settings);
   }
 
   private micPublication(): LocalTrackPublication | undefined {
@@ -292,7 +361,7 @@ export class LiveKitTransport implements VoiceTransport {
           audio: {
             deviceId: deviceId !== "default" ? deviceId : undefined,
             echoCancellation: settings.echoCancellation,
-            noiseSuppression: settings.noiseSuppression,
+            noiseSuppression: this.noiseConstraint(settings),
             autoGainControl: settings.autoGainControl,
           },
         });
@@ -304,6 +373,7 @@ export class LiveKitTransport implements VoiceTransport {
       if (this.selfMute) await track.mute();
       this.gate?.destroy().catch(() => undefined);
       const gate = new GateProcessor(this.settings ?? settings, this.selfMute, open => this.cb.selfSpeaking(open));
+      gate.onDenoiseUnavailable = () => this.useBrowserDenoise(room);
       try {
         await track.setProcessor(gate);
         this.gate = gate;
@@ -336,13 +406,18 @@ export class LiveKitTransport implements VoiceTransport {
     this.joined = false;
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = null;
+    if (this.statsTimer) clearInterval(this.statsTimer);
+    this.statsTimer = null;
     const gate = this.gate;
     this.gate = null;
     void gate?.destroy().catch(() => undefined);
+    void this.video.reset();
     this.audioHost?.remove();
     this.audioHost = null;
     this.room?.removeAllListeners();
     this.room = null;
     this.lastQuality = "unknown";
+    // RNNoise gets another try on the next connection (the failure may have been a one-off load error).
+    this.denoiseFallback = false;
   }
 }

@@ -12,7 +12,7 @@
   "app": {
     "windows": [{ "label": "main", "title": "Vokko", "backgroundColor": "#070709", "width": 1440, "height": 900, "minWidth": 940, "minHeight": 500, "visible": false }],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:8710 http://localhost:8710; connect-src ipc: http://ipc.localhost http://127.0.0.1:8710 http://localhost:8710 ws://127.0.0.1:8710 ws://localhost:8710"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:8710 http://localhost:8710; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8710 http://localhost:8710 ws://127.0.0.1:8710 ws://localhost:8710"
     }
   },
   "bundle": { "active": false, "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"] },

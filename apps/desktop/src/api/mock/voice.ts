@@ -41,7 +41,13 @@ export function voiceStatesFor(guildId: string, viewerId: string): VoiceState[] 
   });
 }
 
-function stateFor(userId: string, channel: MockChannel, sessionId: string, cmd: Pick<VoiceStateUpdateCommand, "self_mute" | "self_deaf">, connectedAt?: string): VoiceState {
+function stateFor(
+  userId: string,
+  channel: MockChannel,
+  sessionId: string,
+  cmd: Pick<VoiceStateUpdateCommand, "self_mute" | "self_deaf"> & Partial<Pick<VoiceStateUpdateCommand, "self_video" | "self_stream">>,
+  connectedAt?: string,
+): VoiceState {
   const perms = channelPermsOf(channel, userId);
   return {
     guild_id: channel.guild_id,
@@ -52,8 +58,8 @@ function stateFor(userId: string, channel: MockChannel, sessionId: string, cmd: 
     mute: false,
     self_deaf: cmd.self_deaf,
     self_mute: cmd.self_mute || cmd.self_deaf,
-    self_video: false,
-    self_stream: false,
+    self_video: !!cmd.self_video,
+    self_stream: !!cmd.self_stream,
     suppress: !hasBit(perms, Perm.SPEAK),
     request_to_speak_timestamp: null,
     connected_at: connectedAt ?? new Date().toISOString(),
@@ -144,8 +150,8 @@ export function handleVoiceStateUpdate(sessionId: string, userId: string, cmd: V
   }
   if (current && current.channel_id === channel.id && owners.get(userId) === sessionId) {
     const next = stateFor(userId, channel, current.session_id, cmd, current.connected_at);
-    if (next.self_mute !== current.self_mute || next.self_deaf !== current.self_deaf) {
-      // Same session, same channel, mute/deafen changed: a toggle, no new token.
+    if (next.self_mute !== current.self_mute || next.self_deaf !== current.self_deaf || next.self_video !== current.self_video || next.self_stream !== current.self_stream) {
+      // Same session, same channel, mute/deafen/camera/stream changed: a toggle, no new token.
       voiceStates.set(userId, next);
       broadcast(emit, next, channel);
       return;
@@ -174,7 +180,7 @@ function serverUpdate(channel: MockChannel, userId: string, voiceSessionId: stri
 }
 
 /** Test / dev hook: put another user into a voice channel (or out with null). */
-export function setMockVoice(userId: string, channelId: string | null, emit: Emit, opts: { selfMute?: boolean; selfDeaf?: boolean } = {}): void {
+export function setMockVoice(userId: string, channelId: string | null, emit: Emit, opts: { selfMute?: boolean; selfDeaf?: boolean; selfVideo?: boolean; selfStream?: boolean } = {}): void {
   const current = voiceStates.get(userId);
   if (channelId === null) {
     if (!current) return;
@@ -187,7 +193,7 @@ export function setMockVoice(userId: string, channelId: string | null, emit: Emi
   const channel = db.channels.get(channelId);
   if (!channel) throw new Error("unknown channel");
   const same = current?.channel_id === channelId;
-  const next = stateFor(userId, channel, same && current ? current.session_id : newSessionId(), { self_mute: !!opts.selfMute, self_deaf: !!opts.selfDeaf }, same ? current?.connected_at : undefined);
+  const next = stateFor(userId, channel, same && current ? current.session_id : newSessionId(), { self_mute: !!opts.selfMute, self_deaf: !!opts.selfDeaf, self_video: !!opts.selfVideo, self_stream: !!opts.selfStream }, same ? current?.connected_at : undefined);
   voiceStates.set(userId, next);
   if (current?.channel_id && !same) broadcastLeave(emit, current, new Set(audience(channel)));
   broadcast(emit, next, channel);

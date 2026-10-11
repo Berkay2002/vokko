@@ -18,6 +18,7 @@ export type ReducedMotion = "system" | "on" | "off";
 export type RoleColors = "name" | "dot" | "none";
 export type SpoilerContent = "click" | "always" | "moderated";
 export type InputMode = "vad" | "ptt";
+export type InputProfileChoice = "isolation" | "studio" | "custom";
 export type TimeFormat = "auto" | "12" | "24";
 
 export interface Prefs {
@@ -72,6 +73,31 @@ export interface Prefs {
   autoSensitivity: boolean;
   inputSensitivity: number;
   alwaysPreviewVideo: boolean;
+  /** Set once the "always preview video" default moved from off to on (see migratePrefs); never offered in the UI. */
+  previewVideoDefaultMigrated: boolean;
+  /** Voice Isolation / Studio / Custom (src/voice/audioProfile.ts turns it into constraints). */
+  inputProfile: InputProfileChoice;
+  /** Which noise suppression runs when it is on: the browser's or RNNoise. */
+  noiseSuppressionKind: "standard" | "rnnoise";
+  bypassSystemProcessing: boolean;
+  /** Streaming quality defaults (src/voice/video/options.ts): "720p" | "1080p" | "1440p" | "source", 15 | 30 | 60. */
+  streamResolution: string;
+  streamFps: number;
+  streamAudio: boolean;
+  cameraResolution: string;
+  /** What viewers ask for on a stream: "auto" | "source" | "720p" | "480p". */
+  viewerQuality: string;
+  showStreamPreviews: boolean;
+  /** Lower other voices while watching a stream, by `streamAttenuationStrength` percent. */
+  streamAttenuation: boolean;
+  streamAttenuationStrength: number;
+  /** Camera background, serialised (src/voice/video/backgrounds.ts): "none", "blur-light", "blur-strong", "builtin:<id>", "custom:<id>". */
+  videoBackground: string;
+  /** Comma separated sound ids that are turned off (src/notify/soundCatalog.ts); empty = all on. */
+  disabledSounds: string;
+  soundboardVolume: number;
+  /** Writes WebRTC stats and voice events to the console (Advanced > diagnostic settings). */
+  debugLogging: boolean;
   // Language & time (settings modal)
   /** Clock of message timestamps: the locale's own ("auto"), 12-hour or 24-hour. Read by src/chat/util.ts. */
   timeFormat: TimeFormat;
@@ -119,7 +145,23 @@ export const DEFAULT_PREFS: Prefs = {
   autoGainControl: true,
   autoSensitivity: true,
   inputSensitivity: 40,
-  alwaysPreviewVideo: false,
+  alwaysPreviewVideo: true,
+  previewVideoDefaultMigrated: true,
+  inputProfile: "custom",
+  noiseSuppressionKind: "standard",
+  bypassSystemProcessing: false,
+  streamResolution: "1080p",
+  streamFps: 30,
+  streamAudio: true,
+  cameraResolution: "720p",
+  viewerQuality: "auto",
+  showStreamPreviews: true,
+  streamAttenuation: false,
+  streamAttenuationStrength: 50,
+  videoBackground: "none",
+  disabledSounds: "",
+  soundboardVolume: 100,
+  debugLogging: false,
   timeFormat: "auto",
   appIcon: DEFAULT_APP_ICON,
 };
@@ -193,6 +235,9 @@ export function migratePrefs(parsed: Partial<Record<keyof Prefs, unknown>>): Pre
     // Only accept values of the same type as the default, so an old or hand-edited file can't break the UI.
     if (typeof parsed[key] === typeof DEFAULT_PREFS[key]) merged[key] = parsed[key];
   }
+  // Saved before the camera preview default moved to on: the old default (off) was stored as if chosen, so it moves once;
+  // after this the flag is saved with the rest and a later "off" is the user's own choice.
+  if (parsed.previewVideoDefaultMigrated !== true) merged.alwaysPreviewVideo = DEFAULT_PREFS.alwaysPreviewVideo;
   // A theme id from a newer or older build must not leave the app without a theme class.
   if (!isThemeChoice(merged.theme)) merged.theme = DEFAULT_PREFS.theme;
   if (!["auto", "12", "24"].includes(merged.timeFormat as string)) merged.timeFormat = DEFAULT_PREFS.timeFormat;

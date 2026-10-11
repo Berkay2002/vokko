@@ -63,6 +63,16 @@ describe("theme migration", () => {
   });
 });
 
+describe("camera preview default migration", () => {
+  it("prefs saved before the default moved to on get it once; a later off is kept", () => {
+    expect(migratePrefs({ alwaysPreviewVideo: false }).alwaysPreviewVideo).toBe(true);
+    expect(migratePrefs({}).alwaysPreviewVideo).toBe(true);
+    const saved = migratePrefs({ alwaysPreviewVideo: false });
+    expect(saved.previewVideoDefaultMigrated).toBe(true);
+    expect(migratePrefs({ ...saved, alwaysPreviewVideo: false }).alwaysPreviewVideo).toBe(false);
+  });
+});
+
 describe("gradient colour themes", () => {
   it("are valid saved choices and survive migration", () => {
     for (const t of GRADIENT_THEMES) {

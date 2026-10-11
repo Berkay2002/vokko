@@ -420,6 +420,7 @@ export interface VoiceStateUpdateCommand {
   self_mute: boolean;
   self_deaf: boolean;
   self_video: boolean; // hint only; truth comes from LiveKit
+  self_stream?: boolean; // mock backend only (no LiveKit to ask); the real server derives it from the published screen share
 }
 export interface VoiceStatusRequest {
   status: string | null; // PUT /channels/{id}/voice-status; null or "" clears

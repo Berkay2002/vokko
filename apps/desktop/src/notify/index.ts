@@ -3,6 +3,6 @@
 export { startNotify, openMessage } from "./controller";
 export { NotifyBanners } from "./Banners";
 export { Splash } from "./Splash";
-export { playSound, type SoundName } from "./sounds";
+export { playSound, previewSound, type SoundName } from "./sounds";
 export { notificationAdapter, type NotificationAdapter, type PermissionState } from "./desktop";
 export { decide, type NotifyDecision, type NotifyInput } from "./decide";

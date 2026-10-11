@@ -1,8 +1,8 @@
 // The page a voice channel opens in the main area: participant tiles, the alone/empty state, the control bar and the
 // text-in-voice side panel. Camera, screen share and activities are later milestones: their buttons open the UI shells.
 
-import { useRef, useState, type CSSProperties } from "react";
-import { ChevronDown, Ellipsis, LayoutGrid, Maximize2, Mic, MicOff, Minimize2, Monitor, MonitorUp, Music, PhoneOff, SquareArrowOutUpRight, UserPlus, Users, Video, VideoOff, Volume2, HeadphoneOff } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { ChevronDown, Ellipsis, LayoutGrid, Maximize2, Mic, MicOff, Minimize2, Monitor, MonitorUp, Music, PhoneOff, SquareArrowOutUpRight, UserPlus, Users, Video, VideoOff, Volume2, HeadphoneOff, X } from "lucide-react";
 import { Perm } from "../api/permissions";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
@@ -12,11 +12,15 @@ import { openModal } from "../shell/modalStore";
 import { usePermissions } from "../shell/usePermissions";
 import { Tooltip, useContextMenu } from "../ui";
 import { useDeviceMenus } from "./deviceMenus";
-import { joinVoiceChannel, leaveVoice, toggleSelfMute } from "./engine";
+import { dismissVideoError, joinVoiceChannel, leaveVoice, setViewerQuality, toggleSelfMute, watchStream } from "./engine";
+import { useMedia, useVideo, type VideoHandle, type VideoSource } from "./mediaStore";
 import { SoundboardPopout } from "./SoundboardPopout";
 import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
 import { useVoiceUi } from "./uiStore";
 import { VoiceChatPanel } from "./VoiceChatPanel";
+import { openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
+import { VIEWER_QUALITIES, VIEWER_QUALITY_LABEL, type ViewerQuality } from "./video/options";
+import "./video/video.css";
 
 /** Stable tile colour for people without a profile colour. */
 function tileColor(userId: Snowflake, bannerColor: string | null | undefined): string {
@@ -26,6 +30,18 @@ function tileColor(userId: Snowflake, bannerColor: string | null | undefined): s
   return `hsl(${hash} 28% 38%)`;
 }
 
+/** A <video> fed by a LiveKit track (or the fake transport's picture); the element belongs to React, the handle only attaches. */
+function TileVideo({ handle, source, mirror }: { handle: VideoHandle; source: VideoSource; mirror: boolean }) {
+  const element = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    const el = element.current;
+    if (!el) return;
+    handle.attach(el);
+    return () => handle.detach(el);
+  }, [handle]);
+  return <video ref={element} className={`voice-tile-video ${source}${mirror ? " mirror" : ""}`} autoPlay muted playsInline data-source={source} />;
+}
+
 function Tile({ state, guildId, solo }: { state: VoiceState; guildId: Snowflake | null; solo: boolean }) {
   const user = useStore(s => s.users[state.user_id]) ?? state.member?.user;
   const member = useStore(s => (guildId ? s.members[guildId]?.[state.user_id] : undefined)) ?? state.member;
@@ -33,6 +49,11 @@ function Tile({ state, guildId, solo }: { state: VoiceState; guildId: Snowflake 
   const own = useVoice(s => s.meId === state.user_id);
   const menu = useContextMenu();
   const tile = useRef<HTMLDivElement>(null);
+  const camera = useVideo(state.user_id, "camera");
+  const screen = useVideo(state.user_id, "screen");
+  const watching = useMedia(s => !!s.watching[state.user_id]);
+  const quality = useMedia(s => s.quality[`${state.user_id}:screen`]);
+  const streaming = state.self_stream;
   if (!user) return null;
   const name = displayName(user, member);
   const muted = state.mute || state.self_mute || state.suppress;
@@ -48,7 +69,39 @@ function Tile({ state, guildId, solo }: { state: VoiceState; guildId: Snowflake 
       style={{ background: tileColor(user.id, user.banner_color) } as CSSProperties}
       onContextMenu={e => menu.open(e, userContextItems(user, { guildId, anchor: tile.current }))}
     >
-      <Avatar user={user} member={member} size={solo ? 100 : 80} decoration={false} className="voice-tile-avatar" />
+      {screen ? (
+        <TileVideo key="screen" handle={screen} source="screen" mirror={false} />
+      ) : camera ? (
+        <TileVideo key="camera" handle={camera} source="camera" mirror={own} />
+      ) : (
+        <Avatar user={user} member={member} size={solo ? 100 : 80} decoration={false} className="voice-tile-avatar" />
+      )}
+      {streaming && <span className="voice-tile-live">LIVE</span>}
+      {streaming && !own && !watching && (
+        <button type="button" className="voice-tile-watch" onClick={() => watchStream(state.user_id, true)}>
+          <Monitor size={28} aria-hidden="true" />
+          Watch Stream
+        </button>
+      )}
+      {streaming && !own && watching && (
+        <div className="voice-tile-tools">
+          <button
+            type="button"
+            className="voice-tile-tool"
+            aria-label="Stream quality"
+            onClick={e => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [
+                ...VIEWER_QUALITIES.map((q: ViewerQuality) => ({ id: `quality-${q}`, label: VIEWER_QUALITY_LABEL[q], checked: (quality ?? "auto") === q, onSelect: () => setViewerQuality(state.user_id, "screen", q) })),
+                { type: "separator" as const },
+                { id: "stop-watching", label: "Stop Watching", onSelect: () => watchStream(state.user_id, false) },
+              ]);
+            }}
+          >
+            {VIEWER_QUALITY_LABEL[quality ?? "auto"]} <ChevronDown size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
       <span className="voice-tile-name">
         <span className="voice-tile-name-text">{name}</span>
         {muted && <MicOff size={14} aria-label="Muted" role="img" />}
@@ -79,6 +132,8 @@ function BarButton({ label, tooltip, active, danger, disabled, onClick, buttonRe
 function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject<HTMLElement | null> }) {
   const muted = useVoice(s => s.selfMute);
   const deafened = useVoice(s => s.selfDeaf);
+  const cameraOn = useMedia(s => s.cameraOn);
+  const screenOn = useMedia(s => s.screenOn);
   const menu = useContextMenu();
   const { micItems } = useDeviceMenus();
   const chatOpen = useVoiceUi(s => s.chatOpen);
@@ -105,15 +160,15 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
         <BarButton label="Input options" tooltip="Input Options" onClick={e => menu.open(below(e), micItems())}>
           <ChevronDown size={16} />
         </BarButton>
-        <BarButton label="Turn on camera" tooltip="Turn On Camera" onClick={() => openModal({ type: "cameraPreview" })}>
-          <VideoOff size={20} />
+        <BarButton label={cameraOn ? "Turn off camera" : "Turn on camera"} tooltip={cameraOn ? "Turn Off Camera" : "Turn On Camera"} active={cameraOn} onClick={toggleCamera}>
+          {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
         </BarButton>
-        <BarButton label="Camera options" tooltip="Camera Options" onClick={() => openModal({ type: "cameraPreview" })}>
+        <BarButton label="Camera options" tooltip="Camera Options" onClick={openCameraOptions}>
           <ChevronDown size={16} />
         </BarButton>
       </div>
       <div className="voice-bar-group">
-        <BarButton label="Share your screen" onClick={() => openModal({ type: "screenShare" })}>
+        <BarButton label={screenOn ? "Stop streaming" : "Share your screen"} tooltip={screenOn ? "Stop Streaming" : "Share Your Screen"} active={screenOn} onClick={toggleScreenShare}>
           <MonitorUp size={20} />
         </BarButton>
         <BarButton label="Start an activity" tooltip="Activities aren't available yet" disabled>
@@ -152,6 +207,19 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
         </BarButton>
       </div>
       <SoundboardPopout anchor={boardAnchor} open={boardOpen} onClose={() => setBoardOpen(false)} />
+    </div>
+  );
+}
+
+function VideoError() {
+  const error = useMedia(s => s.error);
+  if (!error) return null;
+  return (
+    <div className="voice-video-error" role="alert">
+      <span>{error}</span>
+      <button type="button" className="voice-video-error-close" aria-label="Dismiss" onClick={dismissVideoError}>
+        <X size={14} aria-hidden="true" />
+      </button>
     </div>
   );
 }
@@ -208,6 +276,7 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
               <Tile key={state.user_id} state={state} guildId={channel.guild_id} solo={states.length === 1} />
             ))}
           </div>
+          {connected && <VideoError />}
           {connected && !hasPeers && <AloneCard channel={channel} />}
           {connected ? (
             <ControlBar channel={channel} page={page} />

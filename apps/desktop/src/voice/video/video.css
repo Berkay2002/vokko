@@ -1,0 +1,283 @@
+/* Video: background picker, camera preview modal, Go Live modal, stream tiles and the stream quality menu.
+   Colours come from theme tokens only (13 themes); no literals. */
+
+/* ---- Video background picker ---- */
+
+.vbg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 8px;
+}
+
+.vbg-cell {
+  position: relative;
+}
+
+.vbg-disabled-wrap {
+  display: block;
+}
+
+.vbg-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--background-surface-higher);
+  color: var(--interactive-icon-default);
+  cursor: pointer;
+}
+
+.vbg-tile:hover:not(:disabled) {
+  border-color: var(--border-normal);
+}
+
+.vbg-tile.selected {
+  border-color: var(--brand-500);
+}
+
+.vbg-tile:focus-visible {
+  outline: 2px solid var(--brand-500);
+  outline-offset: 2px;
+}
+
+.vbg-tile:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.vbg-upload {
+  border-style: dashed;
+  border-color: var(--border-normal);
+}
+
+.vbg-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.vbg-blur {
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 30% 40%, var(--text-muted) 0 18%, transparent 19%),
+    radial-gradient(circle at 70% 60%, var(--interactive-icon-default) 0 22%, transparent 23%),
+    var(--background-surface-highest);
+}
+
+.vbg-blur.light {
+  filter: blur(3px);
+}
+
+.vbg-blur.strong {
+  filter: blur(7px);
+}
+
+.vbg-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--background-base-lowest);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.vbg-cell:hover .vbg-remove,
+.vbg-remove:focus-visible {
+  display: flex;
+}
+
+.vbg-note,
+.vbg-error {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.vbg-note {
+  color: var(--text-muted);
+}
+
+.vbg-error {
+  color: var(--text-feedback-critical);
+}
+
+/* ---- Camera preview (modal and settings "Test Video") ---- */
+
+.cam-preview {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--background-base-lowest);
+}
+
+.cam-preview video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.cam-preview-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.cam-preview-empty p {
+  margin: 0;
+}
+
+/* ---- Go Live modal ---- */
+
+.golive-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.golive-note {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.golive-summary {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--background-surface-higher);
+  color: var(--text-default);
+  font-size: 13px;
+}
+
+/* ---- Stream tiles ---- */
+
+.voice-tile-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--background-base-lowest);
+}
+
+.voice-tile-video.camera {
+  object-fit: cover;
+}
+
+.voice-tile-video.mirror {
+  transform: scaleX(-1);
+}
+
+.voice-tile-live {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--control-critical-primary-background-default);
+  color: var(--text-on-brand);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.voice-tile-watch {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  background: color-mix(in srgb, var(--background-base-lowest) 55%, transparent);
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.voice-tile-watch:hover {
+  background: color-mix(in srgb, var(--background-base-lowest) 40%, transparent);
+}
+
+.voice-tile-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.voice-tile-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 8px;
+  gap: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--background-base-lowest) 70%, transparent);
+  color: var(--text-strong);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.voice-tile-tool:hover {
+  background: var(--background-base-lowest);
+}
+
+/* ---- Start failures (permission denied, no camera) ---- */
+
+.voice-video-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  align-self: center;
+  max-width: 480px;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--background-surface-high);
+  color: var(--text-feedback-critical);
+  font-size: 13px;
+}
+
+.voice-video-error-close {
+  display: flex;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--interactive-icon-default);
+  cursor: pointer;
+}

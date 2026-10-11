@@ -1,40 +1,219 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { setPref, usePrefs } from "../../ui";
-import type { InputMode } from "../../ui/prefs";
-import { Category, Divider, Field, Page, RadioGroup, Select, Slider, SwitchRow, Unavailable } from "./controls";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Camera, ChevronDown, ChevronRight, Mic, Volume2, type LucideIcon } from "lucide-react";
+import { Modal, resetPrefs, setPref, usePrefs, type Prefs } from "../../ui";
+import { previewSound } from "../../notify/sounds";
+import { VOICE_SOUNDS, isSoundEnabled, withSoundEnabled, type VoiceSoundId } from "../../notify/soundCatalog";
+import { fromSuppressionChoice, resolveAudio, suppressionChoice, type InputProfile } from "../../voice/audioProfile";
+import { useMicTest } from "../../voice/micTest";
 import { PttSettings } from "../../voice/PttSettings";
+import { SOUNDBOARD_ROUTES_AVAILABLE } from "../../voice/soundboardSupport";
+import { useVoice } from "../../voice/store";
+import { sensitivityToDb } from "../../voice/vad";
+import { useCameraPreview } from "../../voice/video/useCameraPreview";
+import { VideoBackgroundPicker } from "../../voice/video/VideoBackgroundPicker";
+import {
+  CAMERA_RESOLUTIONS,
+  RESOLUTION_LABEL,
+  SCREEN_FPS,
+  SCREEN_RESOLUTIONS,
+  VIEWER_QUALITIES,
+  VIEWER_QUALITY_LABEL,
+  type CameraResolution,
+  type ScreenFps,
+  type ScreenResolution,
+  type ViewerQuality,
+} from "../../voice/video/options";
+import { openModal } from "../modalStore";
+import { Category, Divider, Field, Page, RadioGroup, Select, Slider, SwitchRow, Toggle, Unavailable } from "./controls";
+import { listedDevice, useMediaDevices, type DeviceOption } from "./useMediaDevices";
+import { METER_FLOOR_DB, levelToSegments, splitDeviceLabel } from "./voiceVideoHelpers";
+import "./voice-video.css";
 
-interface Device {
-  value: string;
-  label: string;
+type InputModeChoice = Prefs["inputMode"];
+type NoiseChoice = "none" | "standard" | "rnnoise";
+
+const SEGMENTS = 40;
+const PTT_SOUNDS: VoiceSoundId[] = ["ptt-activate", "ptt-deactivate"];
+
+/** Every preference this page owns; "Reset Voice & Video Settings" restores exactly these. */
+const VOICE_VIDEO_KEYS: (keyof Prefs)[] = [
+  "inputDevice",
+  "outputDevice",
+  "cameraDevice",
+  "inputVolume",
+  "outputVolume",
+  "inputMode",
+  "noiseSuppression",
+  "noiseSuppressionKind",
+  "echoCancellation",
+  "autoGainControl",
+  "autoSensitivity",
+  "inputSensitivity",
+  "inputProfile",
+  "bypassSystemProcessing",
+  "alwaysPreviewVideo",
+  "cameraResolution",
+  "videoBackground",
+  "streamResolution",
+  "streamFps",
+  "streamAudio",
+  "viewerQuality",
+  "showStreamPreviews",
+  "streamAttenuation",
+  "streamAttenuationStrength",
+  "disabledSounds",
+  "soundboardVolume",
+  "debugLogging",
+];
+
+const PROFILE_CARDS: { value: InputProfile; label: string; note: string }[] = [
+  { value: "isolation", label: "Voice Isolation", note: "Noise suppression, echo cancellation and automatic gain on" },
+  { value: "studio", label: "Studio", note: "Your microphone as it is, with no processing" },
+  { value: "custom", label: "Custom", note: "Choose each setting yourself" },
+];
+
+const NOISE_OPTIONS: { value: NoiseChoice; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "standard", label: "Standard" },
+  { value: "rnnoise", label: "RNNoise" },
+];
+
+const QUALITY_LABEL: Record<string, string> = { excellent: "Excellent", good: "Good", poor: "Poor", lost: "Lost", unknown: "Unknown" };
+const STATUS_LABEL: Record<string, string> = {
+  idle: "Not connected",
+  connecting: "Connecting",
+  rtc_connecting: "Connecting",
+  connected: "Connected",
+  reconnecting: "Reconnecting",
+  disconnected: "Disconnected",
+};
+
+/** Device picker: a listbox so each entry can carry an icon and a greyed driver / group name (a native <select> cannot). */
+function DeviceSelect({ label, value, options, onChange, disabled, icon: Icon }: { label: string; value: string; options: DeviceOption[]; onChange(next: string): void; disabled?: boolean; icon: LucideIcon }) {
+  const id = useId();
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const selected = Math.max(0, options.findIndex(o => o.value === value));
+  const current = splitDeviceLabel(options[selected]?.label ?? "Default");
+
+  useEffect(() => {
+    if (!open) return;
+    list.current?.focus();
+    const onDown = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [open]);
+
+  const show = () => {
+    setActive(selected);
+    setOpen(true);
+  };
+  const choose = (index: number) => {
+    const option = options[index];
+    if (option) onChange(option.value);
+    setOpen(false);
+    (root.current?.querySelector("button") as HTMLButtonElement | null)?.focus();
+  };
+  const onListKey = (event: KeyboardEvent) => {
+    if (event.key === "ArrowDown") setActive(a => Math.min(options.length - 1, a + 1));
+    else if (event.key === "ArrowUp") setActive(a => Math.max(0, a - 1));
+    else if (event.key === "Home") setActive(0);
+    else if (event.key === "End") setActive(options.length - 1);
+    else if (event.key === "Enter" || event.key === " ") choose(active);
+    else if (event.key === "Escape" || event.key === "Tab") {
+      setOpen(false);
+      if (event.key === "Escape") (root.current?.querySelector("button") as HTMLButtonElement | null)?.focus();
+    } else return;
+    if (event.key !== "Tab") event.preventDefault();
+    event.stopPropagation();
+  };
+
+  return (
+    <div className="vv-select" ref={root}>
+      <button type="button" className="vv-select-button" aria-label={label} aria-haspopup="listbox" aria-expanded={open} disabled={disabled} onClick={() => (open ? setOpen(false) : show())}>
+        <Icon size={18} aria-hidden className="vv-select-icon" />
+        <span className="vv-device-name">{current.name}</span>
+        {current.detail && <span className="vv-device-detail">({current.detail})</span>}
+        <ChevronDown size={18} aria-hidden className="vv-select-chevron" />
+      </button>
+      {open && (
+        <ul ref={list} className="vv-select-list" role="listbox" tabIndex={-1} aria-label={label} aria-activedescendant={`${id}-${active}`} onKeyDown={onListKey}>
+          {options.map((o, i) => {
+            const parts = splitDeviceLabel(o.label);
+            return (
+              <li key={o.value} id={`${id}-${i}`} role="option" aria-selected={i === selected} className={`vv-select-option${i === active ? " active" : ""}${i === selected ? " selected" : ""}`} onPointerEnter={() => setActive(i)} onClick={() => choose(i)}>
+                <Icon size={16} aria-hidden className="vv-select-icon" />
+                <span className="vv-device-name">{parts.name}</span>
+                {parts.detail && <span className="vv-device-detail">({parts.detail})</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
 }
 
-interface DeviceLists {
-  inputs: Device[];
-  outputs: Device[];
-  cameras: Device[];
+/** Segmented level meter; with `threshold` set a slider sits over it so the sensitivity is set against the live signal. */
+function LevelMeter({ levelDb, label, threshold, onThreshold }: { levelDb: number; label: string; threshold?: number; onThreshold?(next: number): void }) {
+  const lit = levelToSegments(levelDb, SEGMENTS);
+  const mark = threshold === undefined ? -1 : levelToSegments(sensitivityToDb(threshold), SEGMENTS);
+  return (
+    <div className="vv-meter-wrap">
+      <div className="vv-meter" role="meter" aria-label={label} aria-valuemin={METER_FLOOR_DB} aria-valuemax={0} aria-valuenow={Math.round(levelDb)}>
+        {Array.from({ length: SEGMENTS }, (_, i) => (
+          <span key={i} className={`vv-seg${i < lit ? (mark >= 0 && i < mark ? " below" : " on") : ""}`} />
+        ))}
+      </div>
+      {threshold !== undefined && onThreshold && (
+        <input type="range" className="vv-threshold" aria-label="Input sensitivity" aria-valuetext={`${threshold}%`} min={0} max={100} value={threshold} onChange={e => onThreshold(Number(e.target.value))} />
+      )}
+    </div>
+  );
 }
 
-const DEFAULT_DEVICE: Device = { value: "default", label: "Default" };
-const EMPTY_LISTS: DeviceLists = { inputs: [DEFAULT_DEVICE], outputs: [DEFAULT_DEVICE], cameras: [DEFAULT_DEVICE] };
-
-function hasMediaApi(): boolean {
-  return typeof navigator !== "undefined" && !!navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === "function";
+function Expander({ label, open, onToggle, controls }: { label: string; open: boolean; onToggle(): void; controls: string }) {
+  return (
+    <button type="button" className="vv-expander" aria-expanded={open} aria-controls={controls} onClick={onToggle}>
+      <span className="vv-expander-chevron" aria-hidden>
+        {open ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+      </span>
+      <span>{label}</span>
+    </button>
+  );
 }
 
-function stopStream(stream: MediaStream | null): void {
-  stream?.getTracks().forEach(t => t.stop());
-}
-
-function toOptions(devices: MediaDeviceInfo[], kind: MediaDeviceKind): Device[] {
-  const list = devices
-    .filter(d => d.kind === kind && d.deviceId !== "default" && d.deviceId !== "")
-    .map((d, i) => ({ value: d.deviceId, label: d.label || `Device ${i + 1}` }));
-  return [DEFAULT_DEVICE, ...list];
-}
-
-function withCurrent(list: Device[], current: string): string {
-  return list.some(d => d.value === current) ? current : "default";
+function ResetDialog({ onClose }: { onClose(): void }) {
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Reset Voice & Video Settings"
+      footer={
+        <>
+          <button type="button" className="btn btn-link" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn btn-danger"
+            onClick={() => {
+              resetPrefs(VOICE_VIDEO_KEYS);
+              onClose();
+            }}
+          >
+            Reset
+          </button>
+        </>
+      }
+    >
+      <p className="modal-text">Devices, volumes, input mode, noise settings, camera, streaming defaults and sounds go back to their defaults. This cannot be undone.</p>
+    </Modal>
+  );
 }
 
 export function VoiceVideoPage() {
@@ -44,188 +223,141 @@ export function VoiceVideoPage() {
   const inputVolume = usePrefs(s => s.inputVolume);
   const outputVolume = usePrefs(s => s.outputVolume);
   const inputMode = usePrefs(s => s.inputMode);
-  const autoSensitivity = usePrefs(s => s.autoSensitivity);
-  const sensitivity = usePrefs(s => s.inputSensitivity);
+  const inputProfile = usePrefs(s => s.inputProfile);
   const noiseSuppression = usePrefs(s => s.noiseSuppression);
+  const noiseKind = usePrefs(s => s.noiseSuppressionKind);
   const echoCancellation = usePrefs(s => s.echoCancellation);
   const autoGainControl = usePrefs(s => s.autoGainControl);
+  const bypass = usePrefs(s => s.bypassSystemProcessing);
+  const autoSensitivity = usePrefs(s => s.autoSensitivity);
+  const sensitivity = usePrefs(s => s.inputSensitivity);
+  const alwaysPreview = usePrefs(s => s.alwaysPreviewVideo);
+  const cameraResolution = usePrefs(s => s.cameraResolution);
+  const videoBackground = usePrefs(s => s.videoBackground);
+  const streamResolution = usePrefs(s => s.streamResolution);
+  const streamFps = usePrefs(s => s.streamFps);
+  const streamAudio = usePrefs(s => s.streamAudio);
+  const viewerQuality = usePrefs(s => s.viewerQuality);
+  const showPreviews = usePrefs(s => s.showStreamPreviews);
+  const attenuation = usePrefs(s => s.streamAttenuation);
+  const attenuationStrength = usePrefs(s => s.streamAttenuationStrength);
+  const disabledSounds = usePrefs(s => s.disabledSounds);
+  const soundboardVolume = usePrefs(s => s.soundboardVolume);
+  const debugLogging = usePrefs(s => s.debugLogging);
 
-  const [lists, setLists] = useState<DeviceLists>(EMPTY_LISTS);
-  const [apiOk] = useState(hasMediaApi);
-  const [error, setError] = useState<string | null>(null);
+  const voiceStatus = useVoice(s => s.status);
+  const voiceQuality = useVoice(s => s.quality);
+  const pingMs = useVoice(s => s.pingMs);
 
-  const [testing, setTesting] = useState(false);
-  const [level, setLevel] = useState(0);
-  const micRef = useRef<{ stream: MediaStream; ctx: AudioContext; raf: number } | null>(null);
+  const devices = useMediaDevices();
+  const mic = useMicTest();
+  const [troubleshoot, setTroubleshoot] = useState(false);
+  const [advancedVoice, setAdvancedVoice] = useState(false);
+  const [advancedStream, setAdvancedStream] = useState(false);
+  const [diagnostics, setDiagnostics] = useState(false);
+  const [moreSounds, setMoreSounds] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [previewOn, setPreviewOn] = useState(false);
+  const ids = useId();
 
-  const [previewing, setPreviewing] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const camStreamRef = useRef<MediaStream | null>(null);
-
-  const refresh = useCallback(async () => {
-    if (!hasMediaApi()) return;
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      setLists({ inputs: toOptions(devices, "audioinput"), outputs: toOptions(devices, "audiooutput"), cameras: toOptions(devices, "videoinput") });
-    } catch {
-      setLists(EMPTY_LISTS);
-    }
-  }, []);
-
+  // Device names appear once a permission has been granted, which the mic test or camera test does.
+  const { refresh } = devices;
   useEffect(() => {
-    if (!hasMediaApi()) return;
-    void refresh();
-    const md = navigator.mediaDevices;
-    md.addEventListener("devicechange", refresh);
-    return () => md.removeEventListener("devicechange", refresh);
-  }, [refresh]);
+    if (mic.testing || previewOn) void refresh();
+  }, [mic.testing, previewOn, refresh]);
 
-  const stopMic = useCallback(() => {
-    const m = micRef.current;
-    if (!m) return;
-    cancelAnimationFrame(m.raf);
-    stopStream(m.stream);
-    void m.ctx.close().catch(() => undefined);
-    micRef.current = null;
-    setTesting(false);
-    setLevel(0);
-  }, []);
+  const camera = useCameraPreview({
+    enabled: previewOn,
+    deviceId: cameraDevice === "default" ? "" : cameraDevice,
+    resolution: (cameraResolution === "1080p" ? "1080p" : "720p") as CameraResolution,
+    background: videoBackground,
+  });
 
-  const stopCamera = useCallback(() => {
-    stopStream(camStreamRef.current);
-    camStreamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setPreviewing(false);
-  }, []);
+  const resolved = resolveAudio({ inputProfile, noiseSuppression, noiseSuppressionKind: noiseKind, echoCancellation, autoGainControl, bypassSystemProcessing: bypass });
+  const custom = inputProfile === "custom";
+  const noiseValue: NoiseChoice = custom ? suppressionChoice(noiseSuppression, noiseKind) : resolved.rnnoise ? "rnnoise" : resolved.noiseSuppression ? "standard" : "none";
+  const pttSoundOn = PTT_SOUNDS.every(id => isSoundEnabled(disabledSounds, id));
+  const primarySounds = VOICE_SOUNDS.filter(s => s.group === "primary");
+  const moreList = VOICE_SOUNDS.filter(s => s.group === "more");
+  const shownSounds = moreSounds ? VOICE_SOUNDS : primarySounds;
 
-  // Never leave a stream running after the page unmounts.
-  useEffect(
-    () => () => {
-      const m = micRef.current;
-      if (m) {
-        cancelAnimationFrame(m.raf);
-        stopStream(m.stream);
-        void m.ctx.close().catch(() => undefined);
-        micRef.current = null;
-      }
-      stopStream(camStreamRef.current);
-      camStreamRef.current = null;
-    },
-    [],
-  );
+  const setSound = (id: VoiceSoundId, on: boolean) => setPref("disabledSounds", withSoundEnabled(getDisabled(), id, on));
+  // Read the freshest value so toggling two sounds in a row does not overwrite the first change.
+  const getDisabled = () => usePrefs.getState().disabledSounds;
 
-  const allowMic = async () => {
-    setError(null);
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stopStream(s);
-      await refresh();
-    } catch {
-      setError("Microphone access was not granted.");
-    }
-  };
+  const cameraEmpty =
+    camera.status === "blocked"
+      ? "Camera access is blocked. Allow it in your browser or system settings."
+      : camera.status === "missing"
+        ? "No camera was found."
+        : camera.status === "failed"
+          ? "The camera could not be started."
+          : null;
 
-  const toggleMicTest = async () => {
-    if (micRef.current) {
-      stopMic();
-      return;
-    }
-    setError(null);
-    try {
-      const constraints: MediaTrackConstraints = { noiseSuppression, echoCancellation, autoGainControl };
-      if (inputDevice !== "default") constraints.deviceId = { exact: inputDevice };
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: constraints });
-      const ctx = new AudioContext();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      ctx.createMediaStreamSource(stream).connect(analyser);
-      const data = new Uint8Array(analyser.fftSize);
-      const state = { stream, ctx, raf: 0 };
-      const tick = () => {
-        analyser.getByteTimeDomainData(data);
-        let peak = 0;
-        for (const v of data) peak = Math.max(peak, Math.abs(v - 128));
-        setLevel(Math.min(100, Math.round((peak / 128) * 100)));
-        state.raf = requestAnimationFrame(tick);
-      };
-      state.raf = requestAnimationFrame(tick);
-      micRef.current = state;
-      setTesting(true);
-      void refresh();
-    } catch {
-      setError("Could not start the microphone test.");
-    }
-  };
-
-  const toggleCamera = async () => {
-    if (camStreamRef.current) {
-      stopCamera();
-      return;
-    }
-    setError(null);
-    try {
-      const video: MediaTrackConstraints = cameraDevice !== "default" ? { deviceId: { exact: cameraDevice } } : {};
-      const stream = await navigator.mediaDevices.getUserMedia({ video });
-      camStreamRef.current = stream;
-      setPreviewing(true);
-      void refresh();
-    } catch {
-      setError("Could not start the camera.");
-    }
-  };
-
-  // Attach the stream once the <video> element has rendered.
-  useEffect(() => {
-    if (previewing && videoRef.current && camStreamRef.current) {
-      videoRef.current.srcObject = camStreamRef.current;
-      void videoRef.current.play().catch(() => undefined);
-    }
-  }, [previewing]);
-
-  const noLabels = apiOk && lists.inputs.length > 1 && lists.inputs.every(d => d.label.startsWith("Device "));
+  const noAccess = !devices.apiOk;
 
   return (
     <Page title="Voice & Video">
       <Category title="Voice">
-        {!apiOk && <Unavailable>Audio devices cannot be listed here, so only the default device is shown.</Unavailable>}
-        <div className="voice-device-row">
-          <Field label="Input device">
-            <Select<string> label="Input device" value={withCurrent(lists.inputs, inputDevice)} options={lists.inputs} onChange={v => setPref("inputDevice", v)} disabled={!apiOk} />
+        {noAccess && <Unavailable>Audio devices cannot be listed here, so only the default device is shown.</Unavailable>}
+        <div className="vv-columns">
+          <Field label="Microphone">
+            <DeviceSelect label="Microphone" icon={Mic} value={listedDevice(devices.inputs, inputDevice)} options={devices.inputs} onChange={v => setPref("inputDevice", v)} disabled={noAccess} />
           </Field>
-          <Field label="Output device">
-            <Select<string> label="Output device" value={withCurrent(lists.outputs, outputDevice)} options={lists.outputs} onChange={v => setPref("outputDevice", v)} disabled={!apiOk} />
+          <Field label="Speaker">
+            <DeviceSelect label="Speaker" icon={Volume2} value={listedDevice(devices.outputs, outputDevice)} options={devices.outputs} onChange={v => setPref("outputDevice", v)} disabled={noAccess} />
           </Field>
         </div>
-        {apiOk && (
-          <div className="sp-actions">
-            <button type="button" className="sp-button" onClick={() => void allowMic()}>
-              Allow microphone access
-            </button>
-            {noLabels && <span className="settings-field-note">Allow access to see device names.</span>}
-          </div>
-        )}
-        <div className="voice-device-row">
+        {devices.noLabels && <div className="settings-field-note vv-gap">Start a microphone test to see device names.</div>}
+        <div className="vv-columns">
           <Field label="Input volume">
-            <Slider label="Input volume" value={inputVolume} min={0} max={100} onChange={v => setPref("inputVolume", v)} format={v => `${v}%`} />
+            <Slider label="Input volume" value={inputVolume} min={0} max={200} onChange={v => setPref("inputVolume", v)} format={v => `${v}%`} />
           </Field>
           <Field label="Output volume">
-            <Slider label="Output volume" value={outputVolume} min={0} max={100} onChange={v => setPref("outputVolume", v)} format={v => `${v}%`} />
+            <Slider label="Output volume" value={outputVolume} min={0} max={200} onChange={v => setPref("outputVolume", v)} format={v => `${v}%`} />
           </Field>
         </div>
-        <Field label="Mic test" note="Speak and watch the meter. Nothing is recorded or sent.">
-          <div className="sp-actions">
-            <button type="button" className="sp-button" disabled={!apiOk} onClick={() => void toggleMicTest()}>
-              {testing ? "Stop testing" : "Let's check"}
+
+        <Field label="Mic test" note="Plays your microphone back through the speaker so you hear what others hear. Use headphones to avoid feedback. Nothing is recorded or sent.">
+          <div className="vv-test-row">
+            <button type="button" className="sp-button" disabled={noAccess} onClick={mic.toggle}>
+              {mic.testing ? "Stop Testing" : "Let's Check"}
             </button>
-            <div className="mic-meter" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={level}>
-              <div className="mic-meter-fill" style={{ width: `${level}%` }} />
+            <LevelMeter levelDb={mic.levelDb} label="Microphone level" />
+          </div>
+          {mic.error && (
+            <div className="settings-field-note vv-error" role="alert">
+              {mic.error}
             </div>
+          )}
+        </Field>
+        <div className="vv-link-row">
+          <button type="button" className="vv-link" aria-expanded={troubleshoot} aria-controls={`${ids}-trouble`} onClick={() => setTroubleshoot(t => !t)}>
+            Voice troubleshooting
+          </button>
+        </div>
+        {troubleshoot && (
+          <ul id={`${ids}-trouble`} className="vv-trouble">
+            <li>Check that the right microphone and speaker are selected above.</li>
+            <li>Check that your system lets Vokko use the microphone (Privacy settings of your operating system or browser).</li>
+            <li>Try the Studio input profile if Voice Isolation cuts you off.</li>
+          </ul>
+        )}
+
+        <Divider />
+        <Field label="Input profile">
+          <div className="vv-profiles" role="radiogroup" aria-label="Input profile">
+            {PROFILE_CARDS.map(card => (
+              <button key={card.value} type="button" role="radio" aria-checked={inputProfile === card.value} className={`vv-profile${inputProfile === card.value ? " selected" : ""}`} onClick={() => setPref("inputProfile", card.value)}>
+                <span className="vv-profile-label">{card.label}</span>
+                <span className="vv-profile-note">{card.note}</span>
+              </button>
+            ))}
           </div>
         </Field>
-        {error && <div className="settings-field-note" role="alert">{error}</div>}
-        <Divider />
+
         <Field label="Input mode">
-          <RadioGroup<InputMode>
+          <RadioGroup<InputModeChoice>
             name="Input mode"
             value={inputMode}
             onChange={v => setPref("inputMode", v)}
@@ -235,32 +367,204 @@ export function VoiceVideoPage() {
             ]}
           />
         </Field>
-        {inputMode === "ptt" && <PttSettings />}
-        <SwitchRow label="Automatically determine input sensitivity" checked={autoSensitivity} onChange={v => setPref("autoSensitivity", v)} />
-        <Field label="Input sensitivity">
-          <Slider label="Input sensitivity" value={sensitivity} min={0} max={100} disabled={autoSensitivity} onChange={v => setPref("inputSensitivity", v)} format={v => `${v}%`} />
+        {inputMode === "ptt" && (
+          <>
+            <PttSettings />
+            <SwitchRow label="Push to talk sound" note="Plays a short sound when push to talk turns on and off." checked={pttSoundOn} onChange={on => PTT_SOUNDS.forEach(id => setSound(id, on))} />
+          </>
+        )}
+
+        <Field label="Input sensitivity" note={mic.testing ? undefined : "Press Let's Check to see your level"}>
+          <SwitchRow label="Automatically determine input sensitivity" checked={autoSensitivity} onChange={v => setPref("autoSensitivity", v)} />
+          <div className="vv-sensitivity">
+            <LevelMeter levelDb={mic.levelDb} label="Input level" threshold={autoSensitivity ? undefined : sensitivity} onThreshold={v => setPref("inputSensitivity", v)} />
+          </div>
         </Field>
+
+        <Field label="Noise suppression" note={noiseValue === "rnnoise" ? "Removes keyboard and fan noise with a small neural model" : undefined}>
+          <Select<NoiseChoice>
+            label="Noise suppression"
+            value={noiseValue}
+            options={NOISE_OPTIONS}
+            disabled={!custom}
+            onChange={v => {
+              const next = fromSuppressionChoice(v, noiseKind);
+              setPref("noiseSuppression", next.noiseSuppression);
+              setPref("noiseSuppressionKind", next.noiseSuppressionKind);
+            }}
+          />
+        </Field>
+        <SwitchRow label="Echo cancellation" checked={custom ? echoCancellation : resolved.echoCancellation} disabled={!custom} onChange={v => setPref("echoCancellation", v)} />
+
+        <Expander label="Show advanced voice settings" open={advancedVoice} onToggle={() => setAdvancedVoice(o => !o)} controls={`${ids}-advvoice`} />
+        {advancedVoice && (
+          <div id={`${ids}-advvoice`} className="vv-expanded">
+            <SwitchRow label="Automatic Gain Control" checked={custom ? autoGainControl : resolved.autoGainControl} disabled={!custom} onChange={v => setPref("autoGainControl", v)} />
+            <SwitchRow label="Advanced Voice Activity" note="Not available yet: needs voice detection from the noise suppressor" checked={false} disabled onChange={() => undefined} />
+            <SwitchRow label="Bypass System Input Processing" note="Asks for the raw microphone signal with no echo, noise or gain processing from the system." checked={bypass} onChange={v => setPref("bypassSystemProcessing", v)} />
+            <SwitchRow label="Attenuation" note="Lowering other apps needs OS integration that the desktop client does not have yet" checked={false} disabled onChange={() => undefined} />
+            <SwitchRow label="Skip QoS packet priority" note="Packet priority marking is not available in a webview" checked={false} disabled onChange={() => undefined} />
+          </div>
+        )}
       </Category>
 
       <Category title="Camera">
-        <Field label="Camera">
-          <Select<string> label="Camera" value={withCurrent(lists.cameras, cameraDevice)} options={lists.cameras} onChange={v => setPref("cameraDevice", v)} disabled={!apiOk} />
-        </Field>
-        <div className="camera-preview">
-          {previewing ? <video ref={videoRef} muted playsInline aria-label="Camera preview" /> : <span>Camera preview is off</span>}
+        <div className="vv-camera">
+          <div className="cam-preview">
+            {previewOn && cameraEmpty === null && <video ref={camera.videoRef} autoPlay muted playsInline aria-label="Camera preview" />}
+            {(!previewOn || cameraEmpty !== null || camera.status === "starting") && (
+              <div className="cam-preview-empty">
+                <Camera size={28} aria-hidden />
+                <p>{!previewOn ? "Camera preview is off" : camera.status === "starting" ? "Starting camera..." : cameraEmpty}</p>
+              </div>
+            )}
+          </div>
+          <div className="sp-actions">
+            <button type="button" className="sp-button" disabled={noAccess} onClick={() => setPreviewOn(p => !p)}>
+              {previewOn ? "Stop Test" : "Test Video"}
+            </button>
+          </div>
         </div>
-        <div className="sp-actions">
-          <button type="button" className="sp-button" disabled={!apiOk} onClick={() => void toggleCamera()}>
-            {previewing ? "Stop Video" : "Test Video"}
+        <SwitchRow label="Always preview video" note="Show a camera preview before you turn your camera on in a call." checked={alwaysPreview} onChange={v => setPref("alwaysPreviewVideo", v)} />
+        <div className="vv-columns">
+          <Field label="Camera">
+            <DeviceSelect label="Camera" icon={Camera} value={listedDevice(devices.cameras, cameraDevice)} options={devices.cameras} onChange={v => setPref("cameraDevice", v)} disabled={noAccess} />
+          </Field>
+          <Field label="Resolution">
+            <Select<CameraResolution>
+              label="Camera resolution"
+              value={cameraResolution === "1080p" ? "1080p" : "720p"}
+              options={CAMERA_RESOLUTIONS.map(r => ({ value: r, label: r === "720p" ? "720p (default)" : r }))}
+              onChange={v => setPref("cameraResolution", v)}
+            />
+          </Field>
+        </div>
+        <Field label="Video background">
+          <VideoBackgroundPicker value={videoBackground} onChange={v => setPref("videoBackground", v)} error={camera.backgroundError} />
+        </Field>
+      </Category>
+
+      <Category title="Streaming">
+        <SwitchRow
+          label="Show stream previews"
+          note="Shows a small preview of live streams in the channel list. Stream previews need server support that is not available yet, so this only affects this device."
+          checked={showPreviews}
+          onChange={v => setPref("showStreamPreviews", v)}
+        />
+        <Expander label="Show advanced stream settings" open={advancedStream} onToggle={() => setAdvancedStream(o => !o)} controls={`${ids}-advstream`} />
+        {advancedStream && (
+          <div id={`${ids}-advstream`} className="vv-expanded">
+            <SwitchRow label="Stream attenuation" note="Lowers other voices on your device while you watch a stream" checked={attenuation} onChange={v => setPref("streamAttenuation", v)} />
+            <Field label="Attenuation strength">
+              <Slider label="Attenuation strength" value={attenuationStrength} min={0} max={100} disabled={!attenuation} onChange={v => setPref("streamAttenuationStrength", v)} format={v => `${v}%`} />
+            </Field>
+            <Divider />
+            <div className="vv-sub-title">Default stream quality</div>
+            <div className="vv-columns">
+              <Field label="Resolution">
+                <Select<ScreenResolution>
+                  label="Stream resolution"
+                  value={(SCREEN_RESOLUTIONS as readonly string[]).includes(streamResolution) ? (streamResolution as ScreenResolution) : "1080p"}
+                  options={SCREEN_RESOLUTIONS.map(r => ({ value: r, label: RESOLUTION_LABEL[r] }))}
+                  onChange={v => setPref("streamResolution", v)}
+                />
+              </Field>
+              <Field label="Frame rate">
+                <Select<string>
+                  label="Stream frame rate"
+                  value={String((SCREEN_FPS as readonly number[]).includes(streamFps) ? streamFps : 30)}
+                  options={SCREEN_FPS.map((f: ScreenFps) => ({ value: String(f), label: `${f} fps` }))}
+                  onChange={v => setPref("streamFps", Number(v))}
+                />
+              </Field>
+            </div>
+            <SwitchRow label="Share audio" note="Include the sound of the shared window or screen." checked={streamAudio} onChange={v => setPref("streamAudio", v)} />
+            <Field label="Watching quality">
+              <Select<ViewerQuality>
+                label="Watching quality"
+                value={(VIEWER_QUALITIES as readonly string[]).includes(viewerQuality) ? (viewerQuality as ViewerQuality) : "auto"}
+                options={VIEWER_QUALITIES.map(q => ({ value: q, label: VIEWER_QUALITY_LABEL[q] }))}
+                onChange={v => setPref("viewerQuality", v)}
+              />
+            </Field>
+          </div>
+        )}
+      </Category>
+
+      <Category title="Sounds">
+        <div className="vv-sounds">
+          {shownSounds.map(s => (
+            <SoundRow key={s.id} label={s.label} enabled={isSoundEnabled(disabledSounds, s.id)} onPreview={() => previewSound(s.id)} onChange={on => setSound(s.id, on)} />
+          ))}
+        </div>
+        {moreList.length > 0 && (
+          <button type="button" className="vv-link" aria-expanded={moreSounds} onClick={() => setMoreSounds(m => !m)}>
+            {moreSounds ? "Show less" : `Show ${moreList.length} more`}
           </button>
+        )}
+        <div className="settings-field-note vv-gap">
+          Message and mention sounds are in{" "}
+          <button type="button" className="vv-link vv-inline" onClick={() => openModal({ type: "userSettings", section: "notifications" })}>
+            Notifications settings
+          </button>
+          .
         </div>
       </Category>
 
-      <Category title="Advanced">
-        <SwitchRow label="Noise suppression" checked={noiseSuppression} onChange={v => setPref("noiseSuppression", v)} />
-        <SwitchRow label="Echo cancellation" checked={echoCancellation} onChange={v => setPref("echoCancellation", v)} />
-        <SwitchRow label="Automatic gain control" checked={autoGainControl} onChange={v => setPref("autoGainControl", v)} />
+      <Category title="Soundboard">
+        <Field label="Soundboard volume">
+          <Slider label="Soundboard volume" value={soundboardVolume} min={0} max={100} onChange={v => setPref("soundboardVolume", v)} format={v => `${v}%`} />
+        </Field>
+        <div className="vv-columns">
+          <Field label="Server">
+            <Select<string> label="Entrance sound server" value="all" options={[{ value: "all", label: "All servers" }]} disabled={!SOUNDBOARD_ROUTES_AVAILABLE} onChange={() => undefined} />
+          </Field>
+          <Field label="Sound">
+            <Select<string> label="Entrance sound" value="none" options={[{ value: "none", label: "None" }]} disabled={!SOUNDBOARD_ROUTES_AVAILABLE} onChange={() => undefined} />
+          </Field>
+        </div>
+        {!SOUNDBOARD_ROUTES_AVAILABLE && <div className="settings-field-note">Entrance sounds are coming soon.</div>}
       </Category>
+
+      <Category title="Advanced">
+        <Expander label="Show diagnostic settings" open={diagnostics} onToggle={() => setDiagnostics(o => !o)} controls={`${ids}-diag`} />
+        {diagnostics && (
+          <div id={`${ids}-diag`} className="vv-expanded">
+            <SwitchRow label="Debug logging" note="Writes voice connection events and WebRTC statistics to the developer console" checked={debugLogging} onChange={v => setPref("debugLogging", v)} />
+            <Field label="Connection">
+              <dl className="vv-stats">
+                <dt>Status</dt>
+                <dd>{STATUS_LABEL[voiceStatus] ?? voiceStatus}</dd>
+                <dt>Quality</dt>
+                <dd>{QUALITY_LABEL[voiceQuality] ?? voiceQuality}</dd>
+                <dt>Ping</dt>
+                <dd>{pingMs === null ? "Not available" : `${Math.round(pingMs)} ms`}</dd>
+              </dl>
+            </Field>
+          </div>
+        )}
+        <Divider />
+        <div className="sp-actions">
+          <button type="button" className="btn btn-danger" onClick={() => setConfirmReset(true)}>
+            Reset Voice &amp; Video Settings
+          </button>
+        </div>
+      </Category>
+      {confirmReset && <ResetDialog onClose={() => setConfirmReset(false)} />}
     </Page>
+  );
+}
+
+function SoundRow({ label, enabled, onPreview, onChange }: { label: string; enabled: boolean; onPreview(): void; onChange(next: boolean): void }): ReactNode {
+  return (
+    <div className="switch-row vv-sound-row">
+      <div className="switch-row-text">
+        <div className="switch-row-label">{label}</div>
+      </div>
+      <button type="button" className="vv-preview" aria-label={`Preview ${label}`} onClick={onPreview}>
+        Preview
+      </button>
+      <Toggle checked={enabled} onChange={onChange} label={label} />
+    </div>
   );
 }

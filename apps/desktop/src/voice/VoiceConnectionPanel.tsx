@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { AudioLines, Bug, LayoutGrid, Lock, Music, MonitorUp, PhoneOff, Signal, SignalHigh, SignalLow, SignalMedium, Upload, VideoOff, X } from "lucide-react";
+import { AudioLines, Bug, LayoutGrid, Lock, Music, MonitorUp, PhoneOff, Signal, SignalHigh, SignalLow, SignalMedium, Upload, Video, VideoOff, X } from "lucide-react";
 import { useStore } from "../api/store";
-import { openModal } from "../shell/modalStore";
 import { Popout, Tooltip, setPref, usePrefs } from "../ui";
+import { resolveAudio } from "./audioProfile";
 import { dismissVoiceError, leaveVoice } from "./engine";
+import { useMedia } from "./mediaStore";
+import { toggleCamera, toggleScreenShare } from "./videoControls";
 import type { ConnectionQuality, VoiceErrorReason, VoiceStatus } from "./reducer";
 import { SoundboardPopout } from "./SoundboardPopout";
 import { useVoice } from "./store";
@@ -146,7 +148,11 @@ export function VoiceConnectionPanel() {
   const deafened = useVoice(s => s.selfDeaf);
   const channel = useStore(s => (channelId ? s.channels[channelId] : undefined));
   const guild = useStore(s => (guildId ? s.guilds[guildId] : undefined));
-  const noiseSuppression = usePrefs().noiseSuppression;
+  const prefs = usePrefs();
+  const resolved = resolveAudio(prefs);
+  const noiseSuppression = resolved.noiseSuppression || resolved.rnnoise;
+  const cameraOn = useMedia(s => s.cameraOn);
+  const screenOn = useMedia(s => s.screenOn);
   const [qualityAnchor, setQualityAnchor] = useState<HTMLElement | null>(null);
   const [qualityOpen, setQualityOpen] = useState(false);
   const [boardAnchor, setBoardAnchor] = useState<HTMLElement | null>(null);
@@ -186,7 +192,11 @@ export function VoiceConnectionPanel() {
         </div>
         {inCall ? (
           <>
-            <PanelButton label="Noise Suppression" tooltip={noiseSuppression ? "Noise Suppression: on" : "Noise Suppression: off"} pressed={noiseSuppression} onClick={() => setPref("noiseSuppression", !noiseSuppression)}>
+            <PanelButton label="Noise Suppression" tooltip={noiseSuppression ? "Noise Suppression: on" : "Noise Suppression: off"} pressed={noiseSuppression} onClick={() => {
+              // A profile other than Custom decides noise suppression itself: leave it so the button does what it says.
+              setPref("inputProfile", "custom");
+              setPref("noiseSuppression", !noiseSuppression);
+            }}>
               <AudioLines size={20} />
             </PanelButton>
             <Tooltip content="Disconnect" side="top">
@@ -203,13 +213,13 @@ export function VoiceConnectionPanel() {
       </div>
       {inCall && (
         <div className="voice-panel-actions">
-          <Tooltip content="Turn On Camera" side="top">
-            <button type="button" className="voice-panel-wide" aria-label="Turn On Camera" onClick={() => openModal({ type: "cameraPreview" })}>
-              <VideoOff size={20} />
+          <Tooltip content={cameraOn ? "Turn Off Camera" : "Turn On Camera"} side="top">
+            <button type="button" className={`voice-panel-wide${cameraOn ? " active" : ""}`} aria-label={cameraOn ? "Turn Off Camera" : "Turn On Camera"} aria-pressed={cameraOn} onClick={toggleCamera}>
+              {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
             </button>
           </Tooltip>
-          <Tooltip content="Share Your Screen" side="top">
-            <button type="button" className="voice-panel-wide" aria-label="Share Your Screen" onClick={() => openModal({ type: "screenShare" })}>
+          <Tooltip content={screenOn ? "Stop Streaming" : "Share Your Screen"} side="top">
+            <button type="button" className={`voice-panel-wide${screenOn ? " active" : ""}`} aria-label={screenOn ? "Stop Streaming" : "Share Your Screen"} aria-pressed={screenOn} onClick={toggleScreenShare}>
               <MonitorUp size={20} />
             </button>
           </Tooltip>

@@ -1,8 +1,9 @@
 // Notification sounds, synthesised with Web Audio (no audio files, so no licences to carry). Open assets only.
 
 import { getPrefs } from "../ui/prefs";
+import { isSoundEnabled, type VoiceSoundId } from "./soundCatalog";
 
-export type SoundName = "message" | "mention" | "voice-join" | "voice-leave";
+export type SoundName = "message" | "mention" | VoiceSoundId;
 
 interface Note {
   /** Seconds after the sound starts. */
@@ -26,9 +27,70 @@ const SOUNDS: Record<SoundName, Note[]> = {
     { at: 0.09, freq: 987.77, dur: 0.1, gain: 0.7 },
     { at: 0.18, freq: 1318.51, dur: 0.24, gain: 0.6, type: "triangle" },
   ],
-  "voice-join": [{ at: 0, freq: 440, to: 740, dur: 0.18, gain: 0.7 }],
-  "voice-leave": [{ at: 0, freq: 740, to: 392, dur: 0.18, gain: 0.7 }],
+  mute: [{ at: 0, freq: 622, to: 415, dur: 0.12, gain: 0.6 }],
+  unmute: [{ at: 0, freq: 415, to: 622, dur: 0.12, gain: 0.6 }],
+  deafen: [
+    { at: 0, freq: 523, dur: 0.08, gain: 0.55 },
+    { at: 0.08, freq: 330, to: 262, dur: 0.14, gain: 0.55 },
+  ],
+  undeafen: [
+    { at: 0, freq: 262, dur: 0.08, gain: 0.55 },
+    { at: 0.08, freq: 330, to: 523, dur: 0.14, gain: 0.55 },
+  ],
+  "camera-on": [
+    { at: 0, freq: 587, dur: 0.07, gain: 0.55, type: "triangle" },
+    { at: 0.07, freq: 880, dur: 0.12, gain: 0.55, type: "triangle" },
+  ],
+  "camera-off": [
+    { at: 0, freq: 880, dur: 0.07, gain: 0.55, type: "triangle" },
+    { at: 0.07, freq: 587, dur: 0.12, gain: 0.55, type: "triangle" },
+  ],
+  "voice-connected": [{ at: 0, freq: 440, to: 740, dur: 0.18, gain: 0.7 }],
+  "voice-disconnected": [{ at: 0, freq: 740, to: 392, dur: 0.18, gain: 0.7 }],
+  "user-join": [
+    { at: 0, freq: 523, dur: 0.07, gain: 0.55 },
+    { at: 0.07, freq: 659, dur: 0.1, gain: 0.55 },
+  ],
+  "user-leave": [
+    { at: 0, freq: 659, dur: 0.07, gain: 0.55 },
+    { at: 0.07, freq: 440, dur: 0.1, gain: 0.55 },
+  ],
+  "user-moved": [
+    { at: 0, freq: 587, dur: 0.06, gain: 0.5 },
+    { at: 0.1, freq: 587, dur: 0.06, gain: 0.5 },
+  ],
+  "stream-start": [
+    { at: 0, freq: 392, dur: 0.08, gain: 0.6, type: "triangle" },
+    { at: 0.08, freq: 523, dur: 0.08, gain: 0.6, type: "triangle" },
+    { at: 0.16, freq: 784, dur: 0.16, gain: 0.6, type: "triangle" },
+  ],
+  "stream-stop": [
+    { at: 0, freq: 784, dur: 0.08, gain: 0.6, type: "triangle" },
+    { at: 0.08, freq: 523, dur: 0.08, gain: 0.6, type: "triangle" },
+    { at: 0.16, freq: 392, dur: 0.16, gain: 0.6, type: "triangle" },
+  ],
+  "ptt-activate": [{ at: 0, freq: 880, dur: 0.04, gain: 0.45 }],
+  "ptt-deactivate": [{ at: 0, freq: 660, dur: 0.04, gain: 0.45 }],
+  "server-mute": [
+    { at: 0, freq: 330, dur: 0.1, gain: 0.6, type: "triangle" },
+    { at: 0.12, freq: 247, dur: 0.16, gain: 0.6, type: "triangle" },
+  ],
+  "server-deaf": [
+    { at: 0, freq: 262, dur: 0.1, gain: 0.6, type: "triangle" },
+    { at: 0.12, freq: 196, dur: 0.18, gain: 0.6, type: "triangle" },
+  ],
+  "connection-lost": [
+    { at: 0, freq: 330, dur: 0.12, gain: 0.55, type: "triangle" },
+    { at: 0.14, freq: 262, dur: 0.12, gain: 0.55, type: "triangle" },
+    { at: 0.28, freq: 196, dur: 0.2, gain: 0.55, type: "triangle" },
+  ],
+  "connection-restored": [
+    { at: 0, freq: 262, dur: 0.1, gain: 0.55, type: "triangle" },
+    { at: 0.1, freq: 392, dur: 0.14, gain: 0.55, type: "triangle" },
+  ],
 };
+
+const isVoiceSound = (name: SoundName): name is VoiceSoundId => name !== "message" && name !== "mention";
 
 /** Master level: quiet by design, the output-volume pref scales it. */
 const MASTER = 0.22;
@@ -68,8 +130,18 @@ export function wireAudioUnlock(): void {
 
 /** Plays a notification sound at the user's output volume. Returns false when nothing was played. */
 export function playSound(name: SoundName, now = Date.now()): boolean {
+  if (isVoiceSound(name) && !isSoundEnabled(getPrefs().disabledSounds, name)) return false;
+  return play(name, now, false);
+}
+
+/** The Preview button: plays even when the sound is switched off, and without the burst guard. */
+export function previewSound(name: SoundName): boolean {
+  return play(name, Date.now(), true);
+}
+
+function play(name: SoundName, now: number, preview: boolean): boolean {
   const last = lastPlayed.get(name);
-  if (last !== undefined && now - last < MIN_GAP_MS) return false;
+  if (!preview && last !== undefined && now - last < MIN_GAP_MS) return false;
   const volume = Math.max(0, Math.min(1, getPrefs().outputVolume / 100));
   if (volume === 0) return false;
   const ctx = audio();

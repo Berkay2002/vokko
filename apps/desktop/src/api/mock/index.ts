@@ -120,7 +120,7 @@ interface MockHooks {
   addUser(username: string, globalName?: string): string;
   channelIdByName(name: string): string | null;
   /** Another user joins (or with null leaves) a voice channel, optionally self-muted / deafened. */
-  voice(username: string, channelId: string | null, opts?: { selfMute?: boolean; selfDeaf?: boolean }): void;
+  voice(username: string, channelId: string | null, opts?: { selfMute?: boolean; selfDeaf?: boolean; selfVideo?: boolean; selfStream?: boolean }): void;
   messageTimestamp(id: string): number;
   /** A guild owned by `owner` (default alice) with onboarding (a required question, rules, default channels), an invite code and a stranger member. */
   seedOnboardingGuild(owner?: string): SeededGuild;
