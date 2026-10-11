@@ -1,7 +1,7 @@
 /*
  * Settings modal frame (src/shell/settings/SettingsModal.tsx). Tokens only.
- * Measurements come from the 1.25x desktop reference (screenshot px / 1.25): modal inset 40/44, sidebar 252, header 48,
- * nav items 36 on a 40 pitch, content column 696, block headings 24, rows 72 high with a 40 high button.
+ * Numbers come from the measured Discord web modal: scrim .72 over the whole viewport, dialog max 1400 wide with a 72px top and
+ * bottom inset, radius 12, sidebar 253, header strip 49, content column 696, nav items 220x36, block headings 24/30.
  */
 .sm-layer {
   position: fixed;
@@ -12,44 +12,90 @@
 .sm-backdrop {
   position: absolute;
   inset: 0;
-  background: #000;
-  opacity: 0.7;
-  animation: backdrop-in 0.15s linear;
+  background: rgba(0, 0, 0, 0.72);
+  animation: sm-scrim-in 90ms linear;
 }
 
 .sm {
   position: absolute;
-  inset: 40px 44px;
+  inset: 72px 40px;
   display: flex;
+  max-width: 1400px;
+  margin: 0 auto;
   overflow: hidden;
-  border: 1px solid var(--border-normal);
-  border-radius: 10px;
-  background: var(--background-base-lower);
-  box-shadow: var(--shadow-high);
-  animation: modal-in 0.2s var(--ease-out);
+  border-radius: 12px;
+  background: var(--background-base-lowest);
+  box-shadow: 0 12px 24px 0 rgba(0, 0, 0, 0.24);
+  animation: sm-dialog-in 180ms var(--ease-out);
 }
 
 .sm:focus {
   outline: none;
 }
 
-/* ---- sidebar ---- */
+@keyframes sm-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes sm-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes sm-scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes sm-dialog-out {
+  to {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+.sm-layer.closing .sm-backdrop {
+  animation: sm-scrim-out 115ms linear forwards;
+}
+
+.sm-layer.closing .sm {
+  animation: sm-dialog-out 115ms var(--ease-out) forwards;
+  pointer-events: none;
+}
+
+.reduce-motion .sm-backdrop,
+.reduce-motion .sm {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sm-backdrop,
+  .sm {
+    animation: none;
+  }
+}
+
+/* ---- sidebar: fixed profile header and search, scrolling list ---- */
 .sm-side {
   display: flex;
-  flex: 0 0 252px;
+  flex: 0 0 253px;
   flex-direction: column;
-  width: 252px;
-  padding: 24px 16px 16px;
-  overflow-y: auto;
+  width: 253px;
+  min-height: 0;
   border-right: 1px solid var(--border-subtle);
-  background: var(--background-base-low);
 }
 
 .sm-profile {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 12px;
-  padding: 0 8px;
+  padding: 24px 16px 0 24px;
 }
 
 .sm-profile-names {
@@ -72,7 +118,7 @@
   gap: 4px;
   color: var(--text-muted);
   font-size: 14px;
-  line-height: 20px;
+  line-height: 18px;
 }
 
 .sm-profile-edit:hover {
@@ -81,11 +127,13 @@
 
 .sm-search {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 8px;
+  width: 221px;
   height: 40px;
-  margin: 16px 0 12px;
-  padding: 0 12px;
+  margin: 16px 16px 8px;
+  padding: 0 8px 0 12px;
   border: 1px solid var(--input-border-default);
   border-radius: 8px;
   color: var(--text-muted);
@@ -114,42 +162,67 @@
   display: none;
 }
 
+.sm-search-clear {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.sm-search-clear:hover {
+  color: var(--text-strong);
+}
+
+.sm-side-list {
+  flex: 1;
+  min-height: 0;
+  padding: 0 16px 16px;
+  overflow-y: auto;
+}
+
 .sm-group + .sm-group {
-  margin-top: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--border-subtle);
 }
 
 .sm-group-title {
-  padding: 11px 8px 7px;
+  height: 30px;
+  margin: 8px 8px 4px;
   color: var(--text-muted);
   font-size: 14px;
-  line-height: 20px;
+  line-height: 30px;
   font-weight: 500;
 }
 
 .sm-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   height: 36px;
   margin-bottom: 4px;
-  padding: 0 10px;
+  padding: 8px;
   border-radius: 8px;
   color: var(--interactive-text-default);
   font-size: 16px;
-  font-weight: 500;
+  line-height: 20px;
   text-align: left;
 }
 
 .sm-item:hover {
-  background: var(--interactive-background-hover);
-  color: var(--interactive-text-hover);
+  background: var(--interactive-background-default);
+  color: var(--text-default);
 }
 
 .sm-item.selected {
   background: var(--interactive-background-selected);
-  color: var(--interactive-text-active);
+  color: var(--text-default);
+  font-weight: 500;
 }
 
 .sm-item.danger {
@@ -167,7 +240,7 @@
   white-space: nowrap;
 }
 
-/* sub-items hang on a rail centred under the parent's icon; the current one carries a bar over it */
+/* sub-items hang on a 2px rail under the parent's icon; the current one is brighter and carries a white bar over it */
 .sm-subs {
   position: relative;
   margin-top: -4px;
@@ -179,9 +252,8 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 18px;
+  left: 17px;
   width: 2px;
-  border-radius: 1px;
   background: var(--border-normal);
 }
 
@@ -190,31 +262,87 @@
   display: block;
   width: 100%;
   height: 36px;
-  padding: 0 10px 0 34px;
+  padding: 0 8px 0 36px;
   border-radius: 8px;
   color: var(--text-muted);
   font-size: 16px;
+  line-height: 20px;
+  font-weight: 400;
   text-align: left;
 }
 
 .sm-sub:hover {
-  color: var(--text-strong);
+  color: var(--text-default);
 }
 
 .sm-sub.active {
   color: var(--text-strong);
-  font-weight: 500;
 }
 
 .sm-sub.active::before {
   content: "";
   position: absolute;
-  top: 6px;
-  bottom: 6px;
+  top: 4px;
+  bottom: 4px;
   left: 17px;
-  width: 3px;
-  border-radius: 2px;
+  width: 2px;
   background: var(--text-strong);
+}
+
+.sm-side-empty {
+  padding: 32px 8px;
+  text-align: center;
+}
+
+.sm-side-empty strong {
+  display: block;
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.sm-side-empty span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.sm-side-footer {
+  margin: 16px 8px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.sm-build {
+  display: block;
+  color: inherit;
+  font-size: inherit;
+  text-align: left;
+}
+
+.sm-build:hover {
+  color: var(--text-default);
+}
+
+.sm-side-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 4px;
+  margin-top: 4px;
+}
+
+.sm-side-links button {
+  color: inherit;
+  font-size: inherit;
+}
+
+.sm-side-links button:hover {
+  color: var(--text-default);
+  text-decoration: underline;
 }
 
 /* ---- header and content ---- */
@@ -231,12 +359,12 @@
   align-items: center;
   justify-content: space-between;
   height: 49px;
-  padding: 0 6px 0 16px;
+  padding: 0 8px 0 16px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .sm-title {
-  color: var(--text-strong);
+  color: var(--text-default);
   font-size: 16px;
   line-height: 20px;
   font-weight: 500;
@@ -246,15 +374,15 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  color: var(--interactive-icon-default);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  color: var(--text-muted);
 }
 
 .sm-close:hover {
-  background: var(--interactive-background-hover);
-  color: var(--interactive-icon-hover);
+  background: var(--interactive-background-default);
+  color: var(--text-strong);
 }
 
 .sm-scroll {
@@ -268,18 +396,18 @@
   width: 696px;
   max-width: 100%;
   margin: 0 auto;
-  padding: 64px 16px 120px;
+  padding: 54px 16px 120px;
   box-sizing: content-box;
 }
 
 /* ---- single-page blocks and rows ---- */
 .sm-block {
-  padding-bottom: 36px;
+  padding-bottom: 48px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .sm-block + .sm-block {
-  padding-top: 40px;
+  padding-top: 48px;
 }
 
 .sm-block:last-child {
@@ -288,9 +416,9 @@
 
 .sm-block-title {
   margin-bottom: 16px;
-  color: var(--text-strong);
+  color: var(--text-default);
   font-size: 24px;
-  line-height: 32px;
+  line-height: 30px;
   font-weight: 400;
 }
 
@@ -304,17 +432,19 @@
 .sm-row-label {
   flex: 1;
   min-width: 0;
-  color: var(--text-strong);
+  color: var(--text-default);
   font-size: 16px;
+  line-height: 20px;
   font-weight: 500;
 }
 
 .sm-row-value {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-strong);
+  color: var(--text-default);
   font-size: 16px;
-  font-weight: 500;
+  line-height: 20px;
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -329,15 +459,16 @@
   min-width: 100px;
   height: 40px;
   padding: 0 16px;
+  border: 1px solid var(--border-normal);
   border-radius: 8px;
-  background: var(--background-mod-subtle);
-  color: var(--text-strong);
+  background: var(--interactive-background-hover);
+  color: var(--text-default);
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .sm-btn:hover:not(:disabled) {
-  background: var(--background-mod-strong);
+  background: var(--interactive-background-active);
 }
 
 .sm-btn:disabled {
@@ -346,6 +477,7 @@
 }
 
 .sm-btn.primary {
+  border-color: transparent;
   background: var(--brand-500);
   color: #fff;
 }
@@ -368,11 +500,11 @@
 
 .sm-column .settings-category {
   margin-bottom: 0;
-  padding-bottom: 36px;
+  padding-bottom: 48px;
 }
 
 .sm-column .settings-category + .settings-category {
-  padding-top: 40px;
+  padding-top: 48px;
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -380,8 +512,9 @@
   padding-bottom: 0;
   margin-bottom: 16px;
   border-bottom: 0;
+  color: var(--text-default);
   font-size: 24px;
-  line-height: 32px;
+  line-height: 30px;
   font-weight: 400;
 }
 
@@ -392,4 +525,49 @@
 
 .sm-column .profile-preview .profile-body {
   padding-top: 64px;
+}
+
+/* sticky preview card pinned at the top of the page scroller (Accessibility) */
+.sm-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -16px 0 32px;
+  padding: 16px 0;
+  background: var(--background-base-lowest);
+}
+
+.sm-sticky-card {
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--background-base-low);
+}
+
+.sm-sticky-label {
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.sm-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 32px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-feedback-info);
+  border-radius: 8px;
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.sm-banner svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-feedback-info);
 }
