@@ -138,7 +138,7 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
   const canThread = !!guildId && hasThreadsType(channel) && can(Perm.CREATE_PUBLIC_THREADS) && can(Perm.READ_MESSAGE_HISTORY) && can(Perm.SEND_MESSAGES_IN_THREADS);
   const canNick = !!guildId && can(Perm.CHANGE_NICKNAME);
   const ttsPlayback = usePrefs(s => s.ttsPlayback);
-  const canTts = ttsPlayback && !!guildId && can(Perm.SEND_TTS_MESSAGES);
+  const canTts = ttsPlayback && (!guildId || can(Perm.SEND_TTS_MESSAGES)); // DMs allow tts
   const commands = useMemo(() => withBuiltins(appCommands ?? [], { nick: canNick, threads: canThread, tts: canTts }), [appCommands, canNick, canThread, canTts]);
   const parsed: ParsedInput = useMemo(() => parseInput(text, caret, commands), [text, caret, commands]);
   const command = parsed.command;

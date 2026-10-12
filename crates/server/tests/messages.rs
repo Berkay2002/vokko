@@ -410,4 +410,12 @@ async fn tts_needs_send_tts_messages() {
     assert_eq!(allowed["tts"], true);
     let (_, off) = s.app.post(&base, &s.member, json!({"content": "explicit off", "tts": false})).await;
     assert_eq!(off["tts"], false);
+
+    // DMs allow tts, as on Discord
+    let (status, dm) = s.app.post("/users/@me/channels", &s.member, json!({"recipient_id": s.owner_id})).await;
+    assert_eq!(status, StatusCode::OK, "{dm}");
+    let dm_messages = format!("/channels/{}/messages", dm["id"].as_str().expect("dm id"));
+    let (status, in_dm) = s.app.post(&dm_messages, &s.member, json!({"content": "hi there", "tts": true})).await;
+    assert_eq!(status, StatusCode::OK, "{in_dm}");
+    assert_eq!(in_dm["tts"], true);
 }

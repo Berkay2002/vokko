@@ -5,7 +5,7 @@ vi.mock("./socket", () => ({ emit: () => undefined }));
 import { Perm } from "../permissions";
 import type { Message } from "../types";
 import { db } from "./db";
-import { createAccount, createGuildRecord } from "./ops";
+import { createAccount, createGuildRecord, openDM } from "./ops";
 import { handleRoute } from "./routes";
 
 const ids: Record<string, string> = {};
@@ -42,5 +42,10 @@ describe("mock tts messages", () => {
     expect(sent.content).toBe("shout");
     db.channels.get(general)!.permission_overwrites = [{ id: guildId, type: 0, allow: Perm.SEND_TTS_MESSAGES.toString(), deny: "0" }];
     expect(say("alice", { content: "allowed now", tts: true }).tts).toBe(true);
+  });
+
+  it("keeps tts in a DM, as on Discord", () => {
+    const dm = openDM(ids.alice!, ids.owner!);
+    expect((call("alice", "POST", `/channels/${dm.id}/messages`, { content: "hi there", tts: true }) as Message).tts).toBe(true);
   });
 });

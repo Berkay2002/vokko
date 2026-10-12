@@ -3,7 +3,9 @@ use std::collections::HashMap;
 
 use std::cmp::Ordering;
 
-use vokko_protocol::api::permissions::{ADD_REACTIONS, ADMINISTRATOR, ALL, ATTACH_FILES, READ_MESSAGE_HISTORY, SEND_MESSAGES, TIMEOUT_ALLOWED, VIEW_CHANNEL};
+use vokko_protocol::api::permissions::{
+    ADD_REACTIONS, ADMINISTRATOR, ALL, ATTACH_FILES, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_TTS_MESSAGES, TIMEOUT_ALLOWED, VIEW_CHANNEL,
+};
 
 use crate::error::{ApiErr, ApiResult};
 use crate::state::AppState;
@@ -11,7 +13,7 @@ use crate::store::{self, ChannelRow};
 use crate::threads;
 
 /// What participants of a DM or group DM may do.
-pub const DM_PERMISSIONS: u64 = VIEW_CHANNEL | SEND_MESSAGES | ATTACH_FILES | ADD_REACTIONS | READ_MESSAGE_HISTORY;
+pub const DM_PERMISSIONS: u64 = VIEW_CHANNEL | SEND_MESSAGES | SEND_TTS_MESSAGES | ATTACH_FILES | ADD_REACTIONS | READ_MESSAGE_HISTORY;
 
 #[derive(Clone, Debug)]
 pub struct Overwrite {
