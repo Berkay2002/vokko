@@ -5,6 +5,13 @@ import { openChannel, panel } from './threadHelpers';
 
 const card = (page: import('@playwright/test').Page, name: string) => page.locator('.forum-post', { hasText: name });
 
+/** Right-clicks a card after scrolling it into view: a scroll event after the menu opened would close it. */
+async function rightClick(page: import('@playwright/test').Page, target: import('@playwright/test').Locator) {
+  await target.scrollIntoViewIfNeeded();
+  await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await target.click({ button: 'right' });
+}
+
 test('unread posts are marked and turn read once opened', async ({ page }) => {
   await openChannel(page, 'support');
   const idea = card(page, 'Idea: show joined threads');
@@ -51,4 +58,37 @@ test('tag pills on cards, and the list / gallery toggle is remembered per forum'
   await expect(page.locator('.forum-posts.gallery')).toBeVisible();
   await page.getByRole('button', { name: 'List view' }).click();
   await expect(page.locator('.forum-posts.list')).toBeVisible();
+});
+
+test('a post is muted and unmuted from its context menu: dimmed card with a muted icon, the Until label, no unread state', async ({ page }) => {
+  await openChannel(page, 'support');
+  const idea = card(page, 'Gateway reconnect loop'); // sam is in this post
+  await rightClick(page, idea);
+  await page.getByRole('menuitem', { name: 'Mute Thread' }).hover();
+  await page.getByRole('menuitem', { name: 'For 1 Hour' }).click();
+  await expect(idea).toHaveClass(/muted/);
+  await expect(idea.getByLabel('Muted')).toBeVisible();
+  await expect(idea).toHaveCSS('opacity', '0.5');
+
+  await rightClick(page, idea);
+  await expect(page.getByRole('menuitem', { name: 'Unmute Thread' })).toContainText(/Until /);
+  await page.getByRole('menuitem', { name: 'Unmute Thread' }).click();
+  await expect(idea).not.toHaveClass(/muted/);
+  await expect(idea.getByLabel('Muted')).toHaveCount(0);
+  await expect(idea).toHaveCSS('opacity', '1');
+});
+
+test('muting the forum from the sidebar dims its posts and drops their unread state', async ({ page }) => {
+  await openChannel(page, 'support');
+  const unread = card(page, 'Idea: show joined threads');
+  await expect(unread).toHaveClass(/unread/);
+  await page.getByRole('link', { name: /^support/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: /^Mute Channel/ }).hover();
+  await page.getByRole('menuitem', { name: 'Until I turn it back on' }).click();
+  await expect(unread).toHaveClass(/muted/);
+  await expect(unread).not.toHaveClass(/unread/);
+  await page.getByRole('link', { name: /^support/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: /^Unmute Channel/ }).click();
+  await expect(unread).not.toHaveClass(/muted/);
+  await expect(unread).toHaveClass(/unread/);
 });

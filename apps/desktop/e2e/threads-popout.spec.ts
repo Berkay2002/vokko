@@ -54,3 +54,21 @@ test('search filters by name and sort switches between activity and creation tim
   await popout.getByLabel('Search for thread name').fill('nothing like this');
   await expect(popout.getByText('No threads match your search.')).toBeVisible();
 });
+
+test('a thread is muted from its row menu in the popout and the sidebar; both rows dim and unmuting restores them', async ({ page }) => {
+  await openChannel(page, 'general');
+  const link = page.locator('.thread-row-link', { hasText: 'gateway docs' });
+  await expect(link).not.toHaveClass(/muted/);
+  await page.getByRole('button', { name: 'Threads', exact: true }).click();
+  const row = page.getByRole('dialog', { name: 'Threads' }).getByRole('button', { name: /gateway docs/ });
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Mute Thread' }).hover();
+  await page.getByRole('menuitem', { name: 'Until I turn it back on' }).click();
+  await expect(row).toHaveClass(/muted/);
+  await expect(link).toHaveClass(/muted/);
+  await expect(link.getByLabel('Muted')).toBeVisible();
+
+  await link.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Unmute Thread' }).click();
+  await expect(link).not.toHaveClass(/muted/);
+});

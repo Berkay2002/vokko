@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { MessageSquareText, Pin, Lock } from "lucide-react";
+import { BellOff, MessageSquareText, Pin, Lock } from "lucide-react";
 import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Message } from "../api/types";
 import { MessageType } from "../api/types";
+import { useContextMenu } from "../ui";
+import { threadBellItems, useThreadMuted } from "./mute";
 import { isPinned, lastActivityMs, messageCountLabel, previewText, timeAgo } from "./util";
 
 const previews = new Map<string, Message | null>();
@@ -43,8 +45,10 @@ export function ThreadRow({ thread, onOpen }: { thread: Channel; onOpen(thread: 
   const author = last ? displayName(last.author, members?.[last.author.id]) : null;
   const text = last ? previewText(last.type === MessageType.ThreadStarterMessage ? (last.referenced_message?.content ?? "") : last.content || (last.attachments.length > 0 ? "Sent an attachment" : "")) : "";
   const archived = thread.thread_metadata?.archived === true;
+  const muted = useThreadMuted(thread);
+  const menu = useContextMenu();
   return (
-    <button type="button" className={`thread-row${archived ? " archived" : ""}`} onClick={() => onOpen(thread)}>
+    <button type="button" className={`thread-row${archived ? " archived" : ""}${muted ? " muted" : ""}`} onClick={() => onOpen(thread)} onContextMenu={e => menu.open(e, threadBellItems(thread))}>
       <span className="thread-row-icon" aria-hidden="true">
         <MessageSquareText size={20} />
       </span>
@@ -52,6 +56,7 @@ export function ThreadRow({ thread, onOpen }: { thread: Channel; onOpen(thread: 
         <span className="thread-row-title">
           {isPinned(thread) && <Pin size={13} aria-label="Pinned" />}
           {thread.thread_metadata?.locked && <Lock size={13} aria-label="Locked" />}
+          {muted && <BellOff size={13} aria-label="Muted" />}
           <span className="thread-row-name">{thread.name}</span>
         </span>
         <span className="thread-row-preview">{author && text ? `${author}: ${text}` : last === undefined ? "" : "No messages yet"}</span>

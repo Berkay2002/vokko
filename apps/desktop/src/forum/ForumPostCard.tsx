@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, Lock, MessageSquareText, Pin, SmilePlus } from "lucide-react";
+import { Archive, BellOff, Lock, MessageSquareText, Pin, SmilePlus } from "lucide-react";
 import { request, resolveUrl } from "../api/rest";
 import { displayName, useStore } from "../api/store";
 import type { Channel, ForumTag, Message, Reaction, ReactionEmoji } from "../api/types";
 import { chatToast } from "../chat/toast";
 import { Avatar } from "../shell/Avatar";
+import { useContextMenu } from "../ui";
+import { threadBellItems, useThreadMuted } from "../threads/mute";
 import { isPinned, isThreadUnread, lastActivityMs, previewText, timeAgo, topReaction } from "../threads/util";
 import "./forum.css";
 
@@ -82,10 +84,12 @@ export function ForumPostCard({ thread, first, forum, layout, selected, onOpen }
   const archived = thread.thread_metadata?.archived === true;
   const image = layout === "gallery" ? imageOf(first) : undefined;
   const replies = thread.message_count ?? 0;
-  const unread = useStore(s => isThreadUnread(thread, s.readStates[thread.id]));
+  const muted = useThreadMuted(thread);
+  const menu = useContextMenu();
+  const unread = useStore(s => isThreadUnread(thread, s.readStates[thread.id])) && !muted;
   const text = first ? previewText(first.content || (first.attachments.length > 0 ? "Sent an attachment" : ""), layout === "gallery" ? 120 : 240) : "";
   return (
-    <article className={`forum-post ${layout}${selected ? " selected" : ""}${archived ? " archived" : ""}${unread ? " unread" : ""}`} aria-label={thread.name ?? undefined}>
+    <article className={`forum-post ${layout}${selected ? " selected" : ""}${archived ? " archived" : ""}${unread ? " unread" : ""}${muted ? " muted" : ""}`} aria-label={thread.name ?? undefined} onContextMenu={e => menu.open(e, threadBellItems(thread))}>
       {layout === "gallery" && (
         <span className="forum-post-media">
           {image ? <img src={resolveUrl(image.url)} alt={image.description ?? ""} draggable={false} /> : <span className="forum-post-media-text">{text}</span>}
@@ -96,6 +100,7 @@ export function ForumPostCard({ thread, first, forum, layout, selected, onOpen }
           {isPinned(thread) && <Pin size={14} aria-label="Pinned" />}
           {thread.thread_metadata?.locked && <Lock size={14} aria-label="Locked" />}
           {archived && <Archive size={14} aria-label="Archived" />}
+          {muted && <BellOff size={14} aria-label="Muted" />}
           <span className="forum-post-name">{thread.name}</span>
         </span>
         {tags.length > 0 && (

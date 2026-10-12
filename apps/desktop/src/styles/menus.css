@@ -16,6 +16,9 @@
 }
 
 .channel-row.muted:not(.selected),
+.forum-post.muted:not(.selected),
+.thread-row.muted,
+.thread-row-link.muted:not(.selected),
 .category-header.muted,
 .dm-row.muted:not(.selected),
 .rail-item.muted .rail-tile {

@@ -102,8 +102,8 @@ const THREAD_LEVELS: { id: string; label: string; flags: number }[] = [
 /** "Mute Thread" durations, or "Unmute Thread" while muted; disabled until the viewer has joined (`member` undefined). */
 export function threadMuteItem(member: ThreadMember | undefined, apply: (patch: UpdateThreadMemberRequest) => void, now = Date.now()): MenuItem {
   if (!member) return { id: "mute", label: "Mute Thread", disabled: true, hint: JOIN_FIRST };
-  if (member.muted) {
-    const end = member.mute_config?.end_time;
+  const end = member.mute_config?.end_time;
+  if (member.muted && (!end || Date.parse(end) > now)) {
     const hint = end ? untilLabel(Date.parse(end), now) : undefined;
     return { id: "unmute", label: "Unmute Thread", hint, onSelect: () => apply({ muted: false }) };
   }

@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Archive, ArchiveRestore, Bell, Copy, Lock, LockOpen, LogIn, LogOut, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Settings, Trash2, Users, X } from "lucide-react";
+import { Archive, ArchiveRestore, Bell, BellOff, Copy, Lock, LockOpen, LogIn, LogOut, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Settings, Trash2, Users, X } from "lucide-react";
 import { editChannel, joinThread, leaveThread } from "../api/rest";
 import { appStore, useStore } from "../api/store";
-import { ChannelFlags, ChannelType, type Channel, type UpdateThreadMemberRequest } from "../api/types";
+import { ChannelFlags, ChannelType, type Channel } from "../api/types";
 import { ChatView } from "../chat/ChatView";
 import { PinnedMessages } from "../chat/PinnedMessages";
 import { chatToast } from "../chat/toast";
-import { threadMuteItem, threadNotificationItem } from "../shell/menus";
 import { Popout, Tooltip, useContextMenu, type MenuItem } from "../ui";
 import { getPrefs } from "../ui/prefs";
-import { patchThreadMember } from "./memberSettings";
+import { threadBellItems, useThreadMuted } from "./mute";
 import { ThreadMembers } from "./ThreadMembers";
 import { DeleteThreadModal, EditThreadModal } from "./ThreadModals";
 import { useThreadRights } from "./rights";
@@ -117,6 +116,7 @@ function ThreadTags({ thread, parent }: { thread: Channel; parent: Channel }) {
 /** Discord's split view: the thread next to its channel. Header with name and parent, actions by permission, then the shared chat view. */
 export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Channel }) {
   const rights = useThreadRights(thread);
+  const muted = useThreadMuted(thread);
   const menu = useContextMenu();
   const [dialog, setDialog] = useState<Dialog>(null);
   const [membersAnchor, setMembersAnchor] = useState<HTMLElement | null>(null);
@@ -192,11 +192,10 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
               aria-label="Notification Settings"
               onClick={e => {
                 const rect = e.currentTarget.getBoundingClientRect();
-                const apply = (patch: UpdateThreadMemberRequest) => void patchThreadMember(thread.id, patch);
-                menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [threadMuteItem(thread.member, apply), threadNotificationItem(thread.member, apply)]);
+                menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, threadBellItems(thread));
               }}
             >
-              <Bell size={20} />
+              {muted ? <BellOff size={20} /> : <Bell size={20} />}
             </button>
           </Tooltip>
           <Tooltip content="Pinned Messages" side="bottom">

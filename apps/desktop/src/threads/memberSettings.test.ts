@@ -98,6 +98,11 @@ describe("thread bell menu builders", () => {
     expect(apply).toHaveBeenCalledWith({ muted: false });
   });
 
+  it("offers Mute Thread again once a timed mute has lapsed", () => {
+    const item = threadMuteItem(member({ muted: true, mute_config: { end_time: new Date(1_000).toISOString() } }), vi.fn(), 2_000);
+    expect(item).toMatchObject({ id: "mute", label: "Mute Thread" });
+  });
+
   it("radios map to the notify bits; no bit checks Use Channel Default", () => {
     const apply = vi.fn();
     const radios = (m: ThreadMember) => {
