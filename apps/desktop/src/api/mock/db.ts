@@ -24,6 +24,8 @@ export interface MockChannel extends Channel {
   hidden_for?: Set<string>;
   /** Threads: joined members (user id → join timestamp). */
   thread_members?: Map<string, string>;
+  /** Threads: per-member notify bits and mute (user id → settings); absent = defaults. */
+  thread_member_settings?: Map<string, { flags: number; muted: boolean; end_time: string | null }>;
 }
 
 export interface MockReaction {

@@ -555,7 +555,40 @@ pub struct ThreadMember {
     pub id: Snowflake,
     pub user_id: Snowflake,
     pub join_timestamp: String,
+    /// `thread_member_flags` bits.
     pub flags: u32,
+    /// Always false once a timed mute has ended (computed on read).
+    #[serde(default)]
+    pub muted: bool,
+    #[serde(default)]
+    pub mute_config: Option<MuteConfig>,
+}
+
+/// `ThreadMember::flags` bits. None of the notify bits set means the thread follows its parent channel's setting.
+pub mod thread_member_flags {
+    pub const HAS_INTERACTED: u32 = 1 << 0;
+    pub const ALL_MESSAGES: u32 = 1 << 1;
+    pub const ONLY_MENTIONS: u32 = 1 << 2;
+    pub const NO_MESSAGES: u32 = 1 << 3;
+    pub const NOTIFY_MASK: u32 = ALL_MESSAGES | ONLY_MENTIONS | NO_MESSAGES;
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MuteConfig {
+    /// ISO 8601; `None` = until turned back on.
+    pub end_time: Option<String>,
+}
+
+/// `PATCH /channels/{id}/thread-members/@me`: only sent keys change.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct UpdateThreadMemberRequest {
+    #[serde(default)]
+    pub flags: Option<u32>,
+    #[serde(default)]
+    pub muted: Option<bool>,
+    /// `Some(None)` = explicit `null` (forever while muted).
+    #[serde(default, deserialize_with = "double_option")]
+    pub mute_config: Option<Option<MuteConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -4109,7 +4142,7 @@ mod tests {
         let thread = json!({
             "id": "11", "type": 11, "guild_id": "300", "name": "a thread", "topic": null, "position": 0, "parent_id": "200", "nsfw": false, "last_message_id": "12",
             "owner_id": "100", "permission_overwrites": [], "message_count": 3, "member_count": 2, "newly_created": true, "applied_tags": ["900"],
-            "member": {"id": "11", "user_id": "100", "join_timestamp": "2026-10-11T10:00:00.000Z", "flags": 0},
+            "member": {"id": "11", "user_id": "100", "join_timestamp": "2026-10-11T10:00:00.000Z", "flags": 0, "muted": false, "mute_config": null},
             "thread_metadata": {"archived": false, "auto_archive_duration": 1440, "archive_timestamp": "2026-10-11T10:00:00.000Z", "locked": false, "invitable": true, "create_timestamp": "2026-10-11T10:00:00.000Z"}
         });
         round_trip::<Channel>(thread.clone());
@@ -4143,7 +4176,14 @@ mod tests {
 
     #[test]
     fn thread_events_match_the_contract() {
-        let member = ThreadMember { id: Snowflake(11), user_id: Snowflake(100), join_timestamp: "2026-10-11T10:00:00.000Z".to_owned(), flags: 0 };
+        let member = ThreadMember {
+            id: Snowflake(11),
+            user_id: Snowflake(100),
+            join_timestamp: "2026-10-11T10:00:00.000Z".to_owned(),
+            flags: 0,
+            muted: false,
+            mute_config: None,
+        };
         let deleted = GatewayEvent::ThreadDelete(ThreadDelete {
             id: Snowflake(11),
             guild_id: Snowflake(300),
@@ -4153,7 +4193,17 @@ mod tests {
         assert_eq!((deleted.name(), deleted.data()), ("THREAD_DELETE", json!({"id": "11", "guild_id": "300", "parent_id": "200", "type": 11})));
         let update = GatewayEvent::ThreadMemberUpdate(ThreadMemberUpdate { member: member.clone(), guild_id: Snowflake(300) });
         assert_eq!(update.name(), "THREAD_MEMBER_UPDATE");
-        assert_eq!(update.data(), json!({"id": "11", "user_id": "100", "join_timestamp": "2026-10-11T10:00:00.000Z", "flags": 0, "guild_id": "300"}));
+        assert_eq!(
+            update.data(),
+            json!({"id": "11", "user_id": "100", "join_timestamp": "2026-10-11T10:00:00.000Z", "flags": 0, "muted": false, "mute_config": null, "guild_id": "300"})
+        );
+        let muted: ThreadMember =
+            serde_json::from_value(json!({"id": "11", "user_id": "100", "join_timestamp": "t", "flags": 3, "muted": true, "mute_config": {"end_time": null}}))
+                .expect("muted");
+        assert_eq!(muted.mute_config, Some(MuteConfig { end_time: None }));
+        let patch: UpdateThreadMemberRequest = serde_json::from_value(json!({"muted": false, "mute_config": null})).expect("patch");
+        assert_eq!((patch.flags, patch.muted, patch.mute_config), (None, Some(false), Some(None)));
+        assert_eq!(serde_json::from_value::<UpdateThreadMemberRequest>(json!({})).expect("empty").mute_config, None);
         let members = GatewayEvent::ThreadMembersUpdate(ThreadMembersUpdate {
             id: Snowflake(11),
             guild_id: Snowflake(300),

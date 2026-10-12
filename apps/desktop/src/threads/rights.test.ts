@@ -55,7 +55,7 @@ describe("threadRights", () => {
   it("adding members: the owner, MANAGE_THREADS, or a member of an invitable private thread", () => {
     expect(rights("plain", [], thread()).canAddMembers).toBe(false);
     expect(rights("starter", [], thread()).canAddMembers).toBe(true);
-    const privateThread = thread({ type: ChannelType.PrivateThread, member: { id: "300", user_id: "plain", join_timestamp: "2026-01-01T00:00:00.000Z", flags: 0 } });
+    const privateThread = thread({ type: ChannelType.PrivateThread, member: { id: "300", user_id: "plain", join_timestamp: "2026-01-01T00:00:00.000Z", flags: 0, muted: false, mute_config: null } });
     expect(rights("plain", [], privateThread).canAddMembers).toBe(true);
     const closed = { ...privateThread, thread_metadata: { ...privateThread.thread_metadata!, invitable: false } };
     expect(rights("plain", [], closed).canAddMembers).toBe(false);

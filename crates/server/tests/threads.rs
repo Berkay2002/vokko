@@ -329,6 +329,86 @@ async fn thread_member_endpoints() {
 }
 
 #[tokio::test]
+async fn thread_member_settings_set_the_level_and_mute() {
+    let w = world().await;
+    let mut carol = Client::connect(&w.address, &w.carol.token).await;
+    let mut owner = Client::connect(&w.address, &w.owner.token).await;
+    let original = w.say(&w.general, &w.owner, "x").await;
+    let mid = id(&original);
+    w.thread_from(&w.general, &mid, &w.alice, "settings").await;
+    let me = format!("/channels/{mid}/thread-members/@me");
+
+    // not a member: 404 10065
+    let (status, error) = w.app.patch(&me, &w.carol.token, json!({"flags": 2})).await;
+    assert_eq!((status, code(&error)), (StatusCode::NOT_FOUND, Some(10065)));
+    assert_eq!(w.app.put(&me, &w.carol.token).await.0, StatusCode::NO_CONTENT);
+    carol.wait_match("THREAD_MEMBER_UPDATE", |data| data["id"] == mid.as_str()).await;
+
+    // set the level, read it back, hear about it
+    let (status, member) = w.app.patch(&me, &w.carol.token, json!({"flags": 4})).await;
+    assert_eq!(
+        (status, member["flags"].clone(), member["muted"].clone(), member["mute_config"].clone()),
+        (StatusCode::OK, json!(4), json!(false), Value::Null)
+    );
+    let event = carol.wait_match("THREAD_MEMBER_UPDATE", |data| data["id"] == mid.as_str() && data["flags"] == 4).await;
+    assert_eq!(event["guild_id"], json!(w.guild));
+    assert_eq!(w.app.get(&me, &w.carol.token).await.1["flags"], 4);
+    // HAS_INTERACTED is kept; clearing the notify bits goes back to the channel default
+    let (_, member) = w.app.patch(&me, &w.carol.token, json!({"flags": 0})).await;
+    assert_eq!(member["flags"], 0);
+
+    // more than one notify bit, or unknown bits: 400 50035
+    for flags in [6, 14, 16] {
+        let (status, error) = w.app.patch(&me, &w.carol.token, json!({"flags": flags})).await;
+        assert_eq!((status, code(&error)), (StatusCode::BAD_REQUEST, Some(50035)), "flags {flags}");
+    }
+
+    // mute forever, then a timed mute, then unmute
+    let (_, member) = w.app.patch(&me, &w.carol.token, json!({"muted": true, "mute_config": null})).await;
+    assert_eq!((member["muted"].clone(), member["mute_config"].clone()), (json!(true), json!({"end_time": null})));
+    let (_, member) = w.app.patch(&me, &w.carol.token, json!({"muted": true, "mute_config": {"end_time": "2999-01-01T00:00:00.000Z"}})).await;
+    assert_eq!((member["muted"].clone(), member["mute_config"]["end_time"].clone()), (json!(true), json!("2999-01-01T00:00:00Z")));
+    let (status, error) = w.app.patch(&me, &w.carol.token, json!({"muted": true, "mute_config": {"end_time": "2000-01-01T00:00:00.000Z"}})).await;
+    assert_eq!((status, code(&error)), (StatusCode::BAD_REQUEST, Some(50035)));
+    let (_, member) = w.app.patch(&me, &w.carol.token, json!({"muted": false})).await;
+    assert_eq!((member["muted"].clone(), member["mute_config"].clone()), (json!(false), Value::Null));
+
+    // a mute whose end has passed reads as unmuted
+    let thread_id: i64 = mid.parse().expect("thread id");
+    sqlx::query("UPDATE thread_members SET muted = TRUE, mute_end = now() - interval '1 minute' WHERE thread_id = $1 AND user_id = $2")
+        .bind(thread_id)
+        .bind(w.carol.id.parse::<i64>().expect("user id"))
+        .execute(&w.app.state.db)
+        .await
+        .expect("expire the mute");
+    let own = w.app.get(&me, &w.carol.token).await.1;
+    assert_eq!((own["muted"].clone(), own["mute_config"].clone()), (json!(false), Value::Null));
+    // `mute_config: null` alone changes nothing (the expired mute does not turn into a forever one)
+    let (_, member) = w.app.patch(&me, &w.carol.token, json!({"mute_config": null})).await;
+    assert_eq!((member["muted"].clone(), member["mute_config"].clone()), (json!(false), Value::Null));
+    // a config object alone mutes
+    let (_, member) = w.app.patch(&me, &w.carol.token, json!({"mute_config": {"end_time": null}})).await;
+    assert_eq!((member["muted"].clone(), member["mute_config"].clone()), (json!(true), json!({"end_time": null})));
+
+    // HAS_INTERACTED survives a level change; the caller's own numeric id works like @me, anyone else's is 403
+    sqlx::query("UPDATE thread_members SET flags = 1 WHERE thread_id = $1 AND user_id = $2")
+        .bind(thread_id)
+        .bind(w.carol.id.parse::<i64>().expect("user id"))
+        .execute(&w.app.state.db)
+        .await
+        .expect("mark interacted");
+    let (status, member) = w.app.patch(&format!("/channels/{mid}/thread-members/{}", w.carol.id), &w.carol.token, json!({"flags": 2})).await;
+    assert_eq!((status, member["flags"].clone()), (StatusCode::OK, json!(3)));
+    let (status, _) = w.app.patch(&format!("/channels/{mid}/thread-members/{}", w.owner.id), &w.carol.token, json!({"flags": 2})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // archived threads still take settings; nobody else hears about it
+    assert_eq!(w.patch(&mid, &w.alice, json!({"archived": true})).await.0, StatusCode::OK);
+    assert_eq!(w.app.patch(&me, &w.carol.token, json!({"flags": 8})).await.0, StatusCode::OK);
+    assert!(owner.silent_for("THREAD_MEMBER_UPDATE", Duration::from_millis(300), |data| data["flags"] == 8).await);
+}
+
+#[tokio::test]
 async fn archived_lists_page_by_archive_time() {
     let w = world().await;
     let mut ids = Vec::new();

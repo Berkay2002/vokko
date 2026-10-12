@@ -11,7 +11,7 @@ import { getPrefs, usePrefs } from "../ui/prefs";
 import { applyUnread, pageLabel, summarizeUnread } from "./badge";
 import { requestAttention } from "../desktop/attention";
 import { IS_MAC } from "../desktop/tauri";
-import { decide, shouldBounce, type NotifyInput } from "./decide";
+import { decide, shouldBounce, withThreadMember, type NotifyInput } from "./decide";
 import { flashTaskbar, notificationAdapter } from "./desktop";
 import { playSound, wireAudioUnlock } from "./sounds";
 import { notificationTitle, plainBody } from "./text";
@@ -45,7 +45,7 @@ export function buildInput(message: Message, now = Date.now()): NotifyInput | nu
   const category = (parent ?? channel)?.parent_id;
   if (category) scopes.push(category);
   if (guildId) scopes.push(guildId);
-  const local = useLocalState.getState();
+  const local = thread ? withThreadMember(useLocalState.getState(), thread.id, thread.member) : useLocalState.getState();
   const prefs = getPrefs();
   return {
     message,

@@ -9,7 +9,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::permissions::{CREATE_PRIVATE_THREADS, CREATE_PUBLIC_THREADS, MANAGE_THREADS, READ_MESSAGE_HISTORY, SEND_MESSAGES_IN_THREADS};
 use vokko_protocol::api::{
-    Channel, ChannelType, MessageType, StartThreadFromMessageRequest, StartThreadRequest, ThreadListResponse, ThreadMember, UpdateChannelRequest, channel_flags,
+    Channel, ChannelType, MessageType, StartThreadFromMessageRequest, StartThreadRequest, ThreadListResponse, ThreadMember, UpdateChannelRequest,
+    UpdateThreadMemberRequest, channel_flags,
 };
 
 use crate::access::{self, ChannelAccess, channel_access};
@@ -27,7 +28,7 @@ pub fn routes() -> Router<AppState> {
         .route("/channels/{id}/messages/{mid}/threads", post(start_from_message))
         .route("/channels/{id}/threads", post(start_thread))
         .route("/channels/{id}/thread-members", get(list_members))
-        .route("/channels/{id}/thread-members/{uid}", get(get_member).put(add_member).delete(remove_member))
+        .route("/channels/{id}/thread-members/{uid}", get(get_member).put(add_member).patch(update_member).delete(remove_member))
         .route("/guilds/{id}/threads/active", get(active_threads))
         .route("/channels/{id}/threads/archived/public", get(archived_public))
         .route("/channels/{id}/threads/archived/private", get(archived_private))
@@ -214,6 +215,20 @@ async fn get_member(State(state): State<AppState>, AuthUser(user_id): AuthUser, 
     let access = thread_of(&state, user_id, &id).await?;
     let target = target_user(&uid, user_id)?;
     threads::member(&state, access.channel.id, target).await?.map(Json).ok_or_else(ApiErr::unknown_thread_member)
+}
+
+/// Only `@me` has settings; the route shares the `{uid}` segment with the other member routes.
+async fn update_member(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path((id, uid)): Path<(String, String)>,
+    ApiJson(body): ApiJson<UpdateThreadMemberRequest>,
+) -> ApiResult<Json<ThreadMember>> {
+    let access = thread_of(&state, user_id, &id).await?;
+    if uid != "@me" && parse_id(&uid) != Some(user_id) {
+        return Err(ApiErr::missing_permissions());
+    }
+    Ok(Json(threads::update_member(&state, &access.channel, user_id, &body).await?))
 }
 
 async fn add_member(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, uid)): Path<(String, String)>) -> ApiResult<StatusCode> {

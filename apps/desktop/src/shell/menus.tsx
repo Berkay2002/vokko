@@ -6,7 +6,7 @@ import { Bell, CalendarPlus, CirclePlus, Copy, FolderPlus, Link2, LayoutGrid, Lo
 import { appStore, displayName, guildUnread, isChannelUnread } from "../api/store";
 import { request } from "../api/rest";
 import { Perm, basePermissions, canEditRole, canModerate, channelPermissions, hasBit, memberLike } from "../api/permissions";
-import { ChannelType, RelationshipType, type Channel, type Guild, type Snowflake, type User } from "../api/types";
+import { ChannelType, RelationshipType, ThreadMemberFlags, type Channel, type Guild, type Snowflake, type ThreadMember, type UpdateThreadMemberRequest, type User } from "../api/types";
 import type { MenuItem } from "../ui";
 import { openCreateEvent } from "../community/communityModals";
 import { closeDirectMessage, copyText, markChannelRead, markGuildRead, openDirectMessage } from "./actions";
@@ -86,6 +86,36 @@ export function notificationItem(id: Snowflake, opts: { guild?: boolean; default
       unavailable("mute-events", "Mute New Events"),
     );
   }
+  return { id: "notifications", label: "Notification Settings", children };
+}
+
+// ---- thread bell (the settings live on the thread member, not in the local prefs) ----
+
+const JOIN_FIRST = "Join the thread first";
+const THREAD_LEVELS: { id: string; label: string; flags: number }[] = [
+  { id: "default", label: "Use Channel Default", flags: 0 },
+  { id: "all", label: NOTIFY_LABELS.all, flags: ThreadMemberFlags.AllMessages },
+  { id: "mentions", label: NOTIFY_LABELS.mentions, flags: ThreadMemberFlags.OnlyMentions },
+  { id: "none", label: NOTIFY_LABELS.none, flags: ThreadMemberFlags.NoMessages },
+];
+
+/** "Mute Thread" durations, or "Unmute Thread" while muted; disabled until the viewer has joined (`member` undefined). */
+export function threadMuteItem(member: ThreadMember | undefined, apply: (patch: UpdateThreadMemberRequest) => void, now = Date.now()): MenuItem {
+  if (!member) return { id: "mute", label: "Mute Thread", disabled: true, hint: JOIN_FIRST };
+  if (member.muted) {
+    const end = member.mute_config?.end_time;
+    const hint = end ? `Until ${new Date(end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : undefined;
+    return { id: "unmute", label: "Unmute Thread", hint, onSelect: () => apply({ muted: false }) };
+  }
+  const mute = (ms: number) => () => apply({ muted: true, mute_config: { end_time: ms < 0 ? null : new Date(now + ms).toISOString() } });
+  return { id: "mute", label: "Mute Thread", children: MUTE_DURATIONS.map(d => ({ id: d.id, label: d.label, onSelect: mute(d.ms) })) };
+}
+
+/** Notification Settings radios mapped to the member's notify bits; no bit set = Use Channel Default. */
+export function threadNotificationItem(member: ThreadMember | undefined, apply: (patch: UpdateThreadMemberRequest) => void): MenuItem {
+  if (!member) return { id: "notifications", label: "Notification Settings", disabled: true, hint: JOIN_FIRST };
+  const bits = member.flags & (ThreadMemberFlags.AllMessages | ThreadMemberFlags.OnlyMentions | ThreadMemberFlags.NoMessages);
+  const children = THREAD_LEVELS.map(level => ({ id: level.id, label: level.label, checked: bits === level.flags, onSelect: () => apply({ flags: level.flags }) }));
   return { id: "notifications", label: "Notification Settings", children };
 }
 

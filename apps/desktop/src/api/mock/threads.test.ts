@@ -15,6 +15,7 @@ import {
   MessageFlags,
   MessageType,
   OverwriteType,
+  ThreadMemberFlags,
   type Channel,
   type ChannelFollower,
   type FollowedChannel,
@@ -218,6 +219,43 @@ describe("members", () => {
     const left = eventsOf("THREAD_MEMBERS_UPDATE")[0]?.d as { member_count: number; removed_member_ids?: string[] };
     expect(left).toMatchObject({ member_count: 1, removed_member_ids: [ids.other] });
     expect(errorOf(() => call("other", "GET", `/channels/${thread.id}/thread-members/${ids.other}`)).code).toBe(10065);
+  });
+
+  it("PATCH @me sets the notify level and mute, to that user only", () => {
+    const thread = startThread("plain", general, { name: "talk" });
+    const me = `/channels/${thread.id}/thread-members/@me`;
+    expect(errorOf(() => call("other", "PATCH", me, { flags: 2 })).code).toBe(10065);
+    call("other", "PUT", me);
+    events.length = 0;
+    const member = call("other", "PATCH", me, { flags: ThreadMemberFlags.OnlyMentions }) as ThreadMember;
+    expect(member).toMatchObject({ flags: 4, muted: false, mute_config: null });
+    expect(eventsOf("THREAD_MEMBER_UPDATE")).toHaveLength(1);
+    expect(eventsOf("THREAD_MEMBER_UPDATE")[0]).toMatchObject({ users: [ids.other], d: { id: thread.id, flags: 4, guild_id: guildId } });
+    expect((call("other", "GET", me) as ThreadMember).flags).toBe(4);
+    expect((call("plain", "GET", `/channels/${thread.id}/thread-members/${ids.other}`) as ThreadMember).flags).toBe(4);
+    expect((call("other", "GET", `/guilds/${guildId}/threads/active`) as ThreadListResponse).members.find(m => m.id === thread.id)?.flags).toBe(4);
+    for (const flags of [6, 14, 16]) expect(errorOf(() => call("other", "PATCH", me, { flags })).code).toBe(50035);
+    expect((call("other", "PATCH", me, { flags: 0 }) as ThreadMember).flags).toBe(0);
+
+    expect(call("other", "PATCH", me, { muted: true, mute_config: null })).toMatchObject({ muted: true, mute_config: { end_time: null } });
+    const end = new Date(Date.now() + 3_600_000).toISOString();
+    expect(call("other", "PATCH", me, { muted: true, mute_config: { end_time: end } })).toMatchObject({ muted: true, mute_config: { end_time: end } });
+    expect(errorOf(() => call("other", "PATCH", me, { mute_config: { end_time: "2000-01-01T00:00:00.000Z" } })).code).toBe(50035);
+    expect(call("other", "PATCH", me, { muted: false })).toMatchObject({ muted: false, mute_config: null });
+  });
+
+  it("a timed mute that has ended reads as unmuted; archived threads still take settings", () => {
+    const thread = startThread("plain", general, { name: "talk" });
+    const me = `/channels/${thread.id}/thread-members/@me`;
+    call("other", "PUT", me);
+    call("other", "PATCH", me, { muted: true, mute_config: { end_time: new Date(Date.now() + 60_000).toISOString() } });
+    db.channels.get(thread.id)?.thread_member_settings?.set(ids.other ?? "", { flags: 0, muted: true, end_time: new Date(Date.now() - 1000).toISOString() });
+    expect(call("other", "GET", me)).toMatchObject({ muted: false, mute_config: null });
+    // `mute_config: null` alone changes nothing; a config object alone mutes
+    expect(call("other", "PATCH", me, { mute_config: null })).toMatchObject({ muted: false, mute_config: null });
+    expect(call("other", "PATCH", me, { mute_config: { end_time: null } })).toMatchObject({ muted: true, mute_config: { end_time: null } });
+    patch("plain", thread.id, { archived: true });
+    expect((call("other", "PATCH", me, { flags: ThreadMemberFlags.NoMessages }) as ThreadMember).flags).toBe(8);
   });
 
   it("sending joins the sender; mentioning does not", () => {

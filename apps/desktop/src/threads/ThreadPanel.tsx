@@ -2,13 +2,14 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { Archive, ArchiveRestore, Bell, Copy, Lock, LockOpen, LogIn, LogOut, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Settings, Trash2, Users, X } from "lucide-react";
 import { editChannel, joinThread, leaveThread } from "../api/rest";
 import { appStore, useStore } from "../api/store";
-import { ChannelFlags, ChannelType, type Channel } from "../api/types";
+import { ChannelFlags, ChannelType, type Channel, type UpdateThreadMemberRequest } from "../api/types";
 import { ChatView } from "../chat/ChatView";
 import { PinnedMessages } from "../chat/PinnedMessages";
 import { chatToast } from "../chat/toast";
-import { muteItem, notificationItem } from "../shell/menus";
+import { threadMuteItem, threadNotificationItem } from "../shell/menus";
 import { Popout, Tooltip, useContextMenu, type MenuItem } from "../ui";
 import { getPrefs } from "../ui/prefs";
+import { patchThreadMember } from "./memberSettings";
 import { ThreadMembers } from "./ThreadMembers";
 import { DeleteThreadModal, EditThreadModal } from "./ThreadModals";
 import { useThreadRights } from "./rights";
@@ -191,7 +192,8 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
               aria-label="Notification Settings"
               onClick={e => {
                 const rect = e.currentTarget.getBoundingClientRect();
-                menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [muteItem(thread.id, "Thread"), notificationItem(thread.id, { defaultLabel: "Use Channel Default" })]);
+                const apply = (patch: UpdateThreadMemberRequest) => void patchThreadMember(thread.id, patch);
+                menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [threadMuteItem(thread.member, apply), threadNotificationItem(thread.member, apply)]);
               }}
             >
               <Bell size={20} />

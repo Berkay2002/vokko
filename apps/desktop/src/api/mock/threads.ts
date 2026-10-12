@@ -9,6 +9,7 @@ import {
   MessageFlags,
   MessageType,
   THREAD_AUTO_ARCHIVE_DURATIONS,
+  ThreadMemberFlags,
   isThreadType,
   type Channel,
   type ChannelFollower,
@@ -27,7 +28,7 @@ import { db, nextId, sortedMessages, type MockChannel, type MockMessage } from "
 import { addMessage, channelAudience, fail, messageHooks, pendingAttachment, requireChannel, requireChannelPerm, requireGuildMember, requireMessage, MISSING_PERMISSIONS } from "./ops";
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
-import { channelFor, messageFor } from "./views";
+import { channelFor, messageFor, threadMemberOf } from "./views";
 
 const NAME_MAX = 100;
 const TAG_NAME_MAX = 20;
@@ -66,10 +67,7 @@ export function canManageThreads(thread: MockChannel, userId: string): boolean {
 
 // ---- views ----
 
-function threadMember(thread: MockChannel, userId: string): ThreadMember | null {
-  const joined = thread.thread_members?.get(userId);
-  return joined ? { id: thread.id, user_id: userId, join_timestamp: joined, flags: 0 } : null;
-}
+const threadMember = threadMemberOf;
 
 const membershipsOf = (threads: MockChannel[], userId: string): ThreadMember[] => threads.flatMap(t => threadMember(t, userId) ?? []);
 
@@ -118,6 +116,7 @@ function addMember(thread: MockChannel, userId: string): boolean {
 
 function removeMember(thread: MockChannel, userId: string): void {
   if (!thread.thread_members?.delete(userId)) return;
+  thread.thread_member_settings?.delete(userId);
   emitMembers(thread, { removed: [userId] }, [userId]);
 }
 
@@ -350,9 +349,52 @@ route("GET", `/channels/${ID}/thread-members`, ({ viewer, params }) => {
   return [...(thread.thread_members?.keys() ?? [])].flatMap(id => threadMember(thread, id) ?? []);
 });
 
+route("GET", `/channels/${ID}/thread-members/@me`, ({ viewer, params }) => {
+  const thread = requireThread(params[0] ?? "", viewer.user.id);
+  return threadMember(thread, viewer.user.id) ?? fail(404, 10065, "Unknown Thread Member");
+});
+
 route("GET", `/channels/${ID}/thread-members/${ID}`, ({ viewer, params }) => {
   const thread = requireThread(params[0] ?? "", viewer.user.id);
   return threadMember(thread, params[1] ?? "") ?? fail(404, 10065, "Unknown Thread Member");
+});
+
+const NOTIFY_BITS = ThreadMemberFlags.AllMessages | ThreadMemberFlags.OnlyMentions | ThreadMemberFlags.NoMessages;
+
+route("PATCH", `/channels/${ID}/thread-members/@me`, ({ viewer, params, body }) => {
+  const thread = requireThread(params[0] ?? "", viewer.user.id);
+  const userId = viewer.user.id;
+  if (!thread.thread_members?.has(userId)) fail(404, 10065, "Unknown Thread Member");
+  const current = thread.thread_member_settings?.get(userId) ?? { flags: 0, muted: false, end_time: null };
+  let { flags, muted, end_time } = current;
+  if (body.flags !== undefined) {
+    const raw = body.flags;
+    if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0 || (raw & ~(ThreadMemberFlags.HasInteracted | NOTIFY_BITS)) !== 0) invalid("flags", "BASE_TYPE_CHOICES", "Unknown flag bits.");
+    const notify = raw & NOTIFY_BITS;
+    if ((notify & (notify - 1)) !== 0) invalid("flags", "BASE_TYPE_CHOICES", "Choose at most one notification level.");
+    flags = (flags & ThreadMemberFlags.HasInteracted) | notify;
+  }
+  // A mute_config object mutes (timed, or forever with a null end); `mute_config: null` alone changes nothing.
+  let timed: string | null | undefined;
+  const cfg = body.mute_config as { end_time?: unknown } | null | undefined;
+  if (cfg) {
+    const raw = cfg.end_time;
+    if (raw === undefined || raw === null) timed = null;
+    else {
+      const at = typeof raw === "string" ? Date.parse(raw) : NaN;
+      if (Number.isNaN(at)) invalid("mute_config", "BASE_TYPE_INVALID", "Must be an ISO 8601 timestamp.");
+      if (at <= Date.now()) invalid("mute_config", "BASE_TYPE_INVALID", "Must be in the future.");
+      timed = raw as string;
+    }
+  }
+  const wantMuted = body.muted === false ? false : body.muted === true || timed !== undefined ? true : undefined;
+  if (wantMuted !== undefined) muted = wantMuted;
+  // Unmuting clears the end; muting without a config is forever; the end is only written together with `muted`.
+  if (wantMuted !== undefined) end_time = wantMuted ? (timed ?? null) : null;
+  (thread.thread_member_settings ??= new Map()).set(userId, { flags, muted, end_time });
+  const member = threadMember(thread, userId);
+  if (member) emit([userId], "THREAD_MEMBER_UPDATE", { ...member, guild_id: thread.guild_id ?? "" });
+  return member;
 });
 
 // ---- routes: lists ----

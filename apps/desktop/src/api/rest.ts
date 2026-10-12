@@ -19,6 +19,7 @@ import type {
   ThreadMember,
   ThreadSearchQuery,
   ThreadSearchResponse,
+  UpdateThreadMemberRequest,
 } from "./types";
 
 export { ApiRequestError, RateLimitedError };
@@ -179,6 +180,7 @@ export const addThreadMember = (threadId: Snowflake, userId: Snowflake): Promise
 export const removeThreadMember = (threadId: Snowflake, userId: Snowflake): Promise<void> => request("DELETE", `/channels/${threadId}/thread-members/${userId}`);
 export const listThreadMembers = (threadId: Snowflake): Promise<ThreadMember[]> => request("GET", `/channels/${threadId}/thread-members`);
 export const getThreadMember = (threadId: Snowflake, userId: Snowflake): Promise<ThreadMember> => request("GET", `/channels/${threadId}/thread-members/${userId}`);
+export const updateThreadMember = (threadId: Snowflake, body: UpdateThreadMemberRequest): Promise<ThreadMember> => request("PATCH", `/channels/${threadId}/thread-members/@me`, body);
 export const listActiveThreads = (guildId: Snowflake): Promise<ThreadListResponse> => request("GET", `/guilds/${guildId}/threads/active`);
 /** Archived threads, newest archive first; `before` is the ISO `archive_timestamp` of the last row of the previous page. */
 export const listArchivedThreads = (channelId: Snowflake, kind: "public" | "private" | "joined-private", page: { before?: string; limit?: number } = {}): Promise<ThreadListResponse> =>

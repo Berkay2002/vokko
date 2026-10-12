@@ -86,7 +86,24 @@ export interface ThreadMember {
   id: Snowflake; // thread id
   user_id: Snowflake;
   join_timestamp: ISO8601;
-  flags: number; // 0
+  flags: number; // ThreadMemberFlags bits; no notify bit = use the parent channel's setting
+  muted: boolean; // false once a timed mute has ended
+  mute_config: MuteConfig | null; // muted forever = {end_time: null}; null when not muted
+}
+export const ThreadMemberFlags = {
+  HasInteracted: 1 << 0,
+  AllMessages: 1 << 1,
+  OnlyMentions: 1 << 2,
+  NoMessages: 1 << 3,
+} as const;
+export interface MuteConfig {
+  end_time: ISO8601 | null; // null = until turned back on; a timed mute ends (muted false, mute_config null) once end_time passes
+}
+// PATCH /channels/{id}/thread-members/@me: only sent keys change; only the notify bits of flags can change (at most one, else 400 50035)
+export interface UpdateThreadMemberRequest {
+  flags?: number;
+  muted?: boolean;
+  mute_config?: MuteConfig | null; // null while muting = forever
 }
 export interface ForumTag {
   id: Snowflake;

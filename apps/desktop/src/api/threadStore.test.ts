@@ -37,7 +37,7 @@ const thread = (id: string, extra: Partial<Channel> = {}): Channel => ({
   thread_metadata: { archived: false, auto_archive_duration: 1440, archive_timestamp: "2026-01-01T00:00:00.000Z", locked: false },
   ...extra,
 });
-const member = (id: string, userId = ME) => ({ id, user_id: userId, join_timestamp: "2026-01-01T00:00:00.000Z", flags: 0 });
+const member = (id: string, userId = ME) => ({ id, user_id: userId, join_timestamp: "2026-01-01T00:00:00.000Z", flags: 0, muted: false, mute_config: null });
 const message = (channelId: string, id: string, extra: Partial<Message> = {}): Message => ({
   id,
   channel_id: channelId,

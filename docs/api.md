@@ -134,6 +134,10 @@ General rules:
 | DELETE | /channels/{id}/thread-members/{uid} | remove (owner or MANAGE_THREADS), 204 |
 | GET | /channels/{id}/thread-members | `ThreadMember[]` of a thread you can see |
 | GET | /channels/{id}/thread-members/{uid} | `ThreadMember`, 404 10065 when not a member |
+| PATCH | /channels/{id}/thread-members/@me | `UpdateThreadMemberRequest` `{flags?, muted?, mute_config?}` → `ThreadMember`; only the notify bits of `flags` change (more than one, or unknown bits → 400 50035), `muted: false` clears `mute_config`, a past `end_time` → 400 50035; the thread must be visible, not a member → 404 10065, archived threads are allowed; sends THREAD_MEMBER_UPDATE (with `guild_id`) to that user only |
+
+`ThreadMember` is `{id (thread), user_id, join_timestamp, flags, muted, mute_config}`. `flags`: HAS_INTERACTED 1<<0 (kept as stored), ALL_MESSAGES 1<<1, ONLY_MENTIONS 1<<2, NO_MESSAGES 1<<3; none of the last three set = the thread uses its parent channel's setting. `mute_config` is `{end_time: ISO8601 | null}` (the same `MuteConfig` as user guild settings; null `end_time` = until turned back on) or null when not muted; a timed mute whose `end_time` has passed reads as `muted: false, mute_config: null` (computed on read). `muted: true` with `mute_config: null` in a PATCH mutes forever. GET members, THREAD_MEMBER_UPDATE and the `member` on thread/channel payloads all carry these fields.
+
 | GET | /guilds/{id}/threads/active | `ThreadListResponse`: unarchived threads the caller can see (private ones only if a member or MANAGE_THREADS) |
 | GET | /channels/{id}/threads/archived/public?before&limit | `ThreadListResponse` of archived public threads (READ_MESSAGE_HISTORY), newest archive first; `before` = ISO `archive_timestamp`, limit 1-100 (default 50) |
 | GET | /channels/{id}/threads/archived/private?before&limit | archived private threads of the channel, MANAGE_THREADS |

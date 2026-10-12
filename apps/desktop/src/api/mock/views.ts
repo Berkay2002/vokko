@@ -1,6 +1,6 @@
 // Per-viewer JSON builders: the mock stores neutral rows and renders them like the server would.
 
-import { ChannelType, MessageReferenceType, MessageType, RelationshipType, isThreadType, type Channel, type GatewayEvents, type GuildMember, type Message, type MessageSnapshot, type Reaction, type ReadState, type ReadyEvent, type Relationship } from "../types";
+import { ChannelType, MessageReferenceType, MessageType, RelationshipType, isThreadType, type Channel, type GatewayEvents, type GuildMember, type Message, type MessageSnapshot, type Reaction, type ReadState, type ReadyEvent, type Relationship, type ThreadMember } from "../types";
 import { compareIds } from "../snowflake";
 import { canView } from "./access";
 import { db, sortedMessages, userOf, type MockAccount, type MockChannel, type MockMessage } from "./db";
@@ -61,9 +61,19 @@ function threadMessageCount(thread: MockChannel): number {
   return sortedMessages(thread.id).filter(m => m.id !== thread.id && m.type !== MessageType.ThreadStarterMessage).length;
 }
 
+/** The user's membership of a thread with their notification settings; an ended timed mute reads as unmuted. */
+export function threadMemberOf(thread: MockChannel, userId: string): ThreadMember | null {
+  const joined = thread.thread_members?.get(userId);
+  if (!joined) return null;
+  const s = thread.thread_member_settings?.get(userId);
+  const muted = !!s?.muted && (s.end_time === null || Date.parse(s.end_time) > Date.now());
+  return { id: thread.id, user_id: userId, join_timestamp: joined, flags: s?.flags ?? 0, muted, mute_config: muted ? { end_time: s?.end_time ?? null } : null };
+}
+
 export function channelFor(ch: MockChannel, viewerId: string): Channel {
-  const { participant_ids, hidden_for, thread_members, ...rest } = ch;
+  const { participant_ids, hidden_for, thread_members, thread_member_settings, ...rest } = ch;
   void hidden_for;
+  void thread_member_settings;
   const last = sortedMessages(ch.id).at(-1);
   const out: Channel = { ...rest, last_message_id: last?.id ?? null };
   if (rest.permission_overwrites) out.permission_overwrites = rest.permission_overwrites.map(o => ({ ...o }));
@@ -73,8 +83,8 @@ export function channelFor(ch: MockChannel, viewerId: string): Channel {
   if (isThreadType(ch.type)) {
     out.member_count = thread_members?.size ?? 0;
     out.message_count = threadMessageCount(ch);
-    const joined = thread_members?.get(viewerId);
-    if (joined) out.member = { id: ch.id, user_id: viewerId, join_timestamp: joined, flags: 0 };
+    const member = threadMemberOf(ch, viewerId);
+    if (member) out.member = member;
   }
   if (participant_ids) out.recipients = participant_ids.filter(id => id !== viewerId).map(userOf);
   return out;

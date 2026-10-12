@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use sqlx::FromRow;
 use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::permissions::{MANAGE_THREADS, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS};
 use vokko_protocol::api::{
-    Channel, ChannelType, DEFAULT_AUTO_ARCHIVE_DURATION, DefaultReaction, ForumTag, GatewayEvent, Snowflake, THREAD_AUTO_ARCHIVE_DURATIONS, ThreadDelete,
-    ThreadMember, ThreadMemberUpdate, ThreadMembersUpdate, ThreadMetadata,
+    Channel, ChannelType, DEFAULT_AUTO_ARCHIVE_DURATION, DefaultReaction, ForumTag, GatewayEvent, MuteConfig, Snowflake, THREAD_AUTO_ARCHIVE_DURATIONS,
+    ThreadDelete, ThreadMember, ThreadMemberUpdate, ThreadMembersUpdate, ThreadMetadata, UpdateThreadMemberRequest, thread_member_flags,
 };
 
 use crate::access::{self, ChannelAccess};
@@ -60,11 +61,21 @@ struct MemberRow {
     user_id: i64,
     joined_at: OffsetDateTime,
     flags: i32,
+    muted: bool,
+    mute_end: Option<OffsetDateTime>,
 }
 
 impl MemberRow {
     fn into_api(self) -> ThreadMember {
-        ThreadMember { id: flake(self.thread_id), user_id: flake(self.user_id), join_timestamp: iso(self.joined_at), flags: self.flags.max(0) as u32 }
+        let mute_config = self.muted.then(|| MuteConfig { end_time: self.mute_end.map(iso) });
+        ThreadMember {
+            id: flake(self.thread_id),
+            user_id: flake(self.user_id),
+            join_timestamp: iso(self.joined_at),
+            flags: self.flags.max(0) as u32,
+            muted: self.muted,
+            mute_config,
+        }
     }
 }
 
@@ -78,7 +89,7 @@ pub async fn is_member(state: &AppState, thread_id: i64, user_id: i64) -> ApiRes
 }
 
 pub async fn member(state: &AppState, thread_id: i64, user_id: i64) -> ApiResult<Option<ThreadMember>> {
-    let row: Option<MemberRow> = sqlx::query_as("SELECT thread_id, user_id, joined_at, flags FROM thread_members WHERE thread_id = $1 AND user_id = $2")
+    let row: Option<MemberRow> = sqlx::query_as("SELECT thread_id, user_id, joined_at, flags, (muted AND (mute_end IS NULL OR mute_end > now())) AS muted, mute_end FROM thread_members WHERE thread_id = $1 AND user_id = $2")
         .bind(thread_id)
         .bind(user_id)
         .fetch_optional(&state.db)
@@ -88,7 +99,7 @@ pub async fn member(state: &AppState, thread_id: i64, user_id: i64) -> ApiResult
 
 pub async fn members_of(state: &AppState, thread_id: i64) -> ApiResult<Vec<ThreadMember>> {
     let rows: Vec<MemberRow> =
-        sqlx::query_as("SELECT thread_id, user_id, joined_at, flags FROM thread_members WHERE thread_id = $1 ORDER BY joined_at, user_id")
+        sqlx::query_as("SELECT thread_id, user_id, joined_at, flags, (muted AND (mute_end IS NULL OR mute_end > now())) AS muted, mute_end FROM thread_members WHERE thread_id = $1 ORDER BY joined_at, user_id")
             .bind(thread_id)
             .fetch_all(&state.db)
             .await?;
@@ -100,7 +111,7 @@ pub async fn memberships(state: &AppState, user_id: i64, thread_ids: &[i64]) -> 
     if thread_ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let rows: Vec<MemberRow> = sqlx::query_as("SELECT thread_id, user_id, joined_at, flags FROM thread_members WHERE user_id = $1 AND thread_id = ANY($2)")
+    let rows: Vec<MemberRow> = sqlx::query_as("SELECT thread_id, user_id, joined_at, flags, (muted AND (mute_end IS NULL OR mute_end > now())) AS muted, mute_end FROM thread_members WHERE user_id = $1 AND thread_id = ANY($2)")
         .bind(user_id)
         .bind(thread_ids)
         .fetch_all(&state.db)
@@ -366,6 +377,63 @@ pub async fn add_member(state: &AppState, thread: &ChannelRow, user_id: i64) -> 
     };
     state.hub.send(&viewers, &GatewayEvent::ThreadMembersUpdate(update));
     Ok(true)
+}
+
+/// Applies a PATCH of the caller's own settings on a thread; 404 10065 when they are not a member. Only the notify bits of `flags`
+/// can change (HAS_INTERACTED stays as stored). Sends THREAD_MEMBER_UPDATE to that user only.
+pub async fn update_member(state: &AppState, thread: &ChannelRow, user_id: i64, request: &UpdateThreadMemberRequest) -> ApiResult<ThreadMember> {
+    if let Some(flags) = request.flags {
+        if flags & !(thread_member_flags::HAS_INTERACTED | thread_member_flags::NOTIFY_MASK) != 0 {
+            return Err(ApiErr::invalid("flags", "Unknown flag bits."));
+        }
+        if (flags & thread_member_flags::NOTIFY_MASK).count_ones() > 1 {
+            return Err(ApiErr::invalid("flags", "Choose at most one notification level."));
+        }
+    }
+    let config_end = match &request.mute_config {
+        Some(Some(MuteConfig { end_time: Some(raw) })) => {
+            let end = OffsetDateTime::parse(raw.trim(), &Rfc3339).map_err(|_| ApiErr::invalid("mute_config", "Must be an ISO 8601 timestamp."))?;
+            if end <= OffsetDateTime::now_utc() {
+                return Err(ApiErr::invalid("mute_config", "Must be in the future."));
+            }
+            Some(Some(end))
+        }
+        Some(_) => Some(None),
+        None => None,
+    };
+    // A mute_config object mutes (timed, or forever with a null end); `mute_config: null` alone changes nothing.
+    let muted = if request.muted == Some(false) {
+        Some(false)
+    } else if request.muted == Some(true) || matches!(request.mute_config, Some(Some(_))) {
+        Some(true)
+    } else {
+        None
+    };
+    // Unmuting clears the end; muting without a config is forever; the end is only written together with `muted`.
+    let end: Option<Option<OffsetDateTime>> = match muted {
+        Some(false) => Some(None),
+        Some(true) => Some(config_end.flatten()),
+        None => None,
+    };
+    let updated = sqlx::query(
+        "UPDATE thread_members SET flags = CASE WHEN $3::int4 IS NULL THEN flags ELSE (flags & 1) | $3 END, muted = COALESCE($4, muted), \
+         mute_end = CASE WHEN $5 THEN $6 ELSE mute_end END WHERE thread_id = $1 AND user_id = $2",
+    )
+    .bind(thread.id)
+    .bind(user_id)
+    .bind(request.flags.map(|flags| (flags & thread_member_flags::NOTIFY_MASK) as i32))
+    .bind(muted)
+    .bind(end.is_some())
+    .bind(end.flatten())
+    .execute(&state.db)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(ApiErr::unknown_thread_member());
+    }
+    let member = member(state, thread.id, user_id).await?.ok_or_else(ApiErr::unknown_thread_member)?;
+    let guild_id = thread.guild_id.map(flake).unwrap_or(Snowflake(0));
+    state.hub.send(&[user_id], &GatewayEvent::ThreadMemberUpdate(ThreadMemberUpdate { member: member.clone(), guild_id }));
+    Ok(member)
 }
 
 /// Removes `user_id` from a thread; false when they were not a member. A user who loses sight of a private thread gets THREAD_DELETE.

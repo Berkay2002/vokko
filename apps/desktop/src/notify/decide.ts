@@ -1,7 +1,7 @@
 // The pure "should this message notify me" decision. No store, DOM or timers in here: the controller gathers the inputs
 // (local mute/level state, prefs, focus, route) and acts on the result, so every rule is unit-testable.
 
-import { MessageType, type Message, type PresenceStatus, type Snowflake } from "../api/types";
+import { MessageType, ThreadMemberFlags, type Message, type PresenceStatus, type Snowflake, type ThreadMember } from "../api/types";
 
 export type NotifyLevel = "default" | "all" | "unreads-mentions" | "mentions" | "none";
 export type NotifyKind = "mention" | "message";
@@ -74,6 +74,23 @@ export function effectiveLevel(local: Pick<NotifyLocalState, "notify">, scopes: 
     if (level && level !== "default") return level;
   }
   return "all";
+}
+
+/**
+ * A thread's mute and level live on the viewer's thread member, not in the local prefs: overlay them on the thread's own id.
+ * No notify bit means "Use Channel Default" (the parent's scopes decide); a member that is not muted lifts any stale local mute.
+ */
+export function withThreadMember(local: NotifyLocalState, threadId: Snowflake, member: Pick<ThreadMember, "flags" | "muted" | "mute_config"> | undefined): NotifyLocalState {
+  if (!member) return local;
+  const { [threadId]: _mute, ...mutedUntil } = local.mutedUntil;
+  const { [threadId]: _level, ...notify } = local.notify;
+  void _mute;
+  void _level;
+  if (member.muted) mutedUntil[threadId] = member.mute_config?.end_time ? Date.parse(member.mute_config.end_time) : -1;
+  if (member.flags & ThreadMemberFlags.AllMessages) notify[threadId] = "all";
+  else if (member.flags & ThreadMemberFlags.OnlyMentions) notify[threadId] = "mentions";
+  else if (member.flags & ThreadMemberFlags.NoMessages) notify[threadId] = "none";
+  return { ...local, mutedUntil, notify };
 }
 
 /** `<@&id>` role mention in the raw content that targets one of my roles. */
