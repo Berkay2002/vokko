@@ -3,15 +3,33 @@
 {
 	# Do not serve the admin API on a published container.
 	admin off
+
+	servers {
+		# Behind another proxy on a private address (cloudflared on the host, Docker's port forward), take the client from
+		# the rightmost untrusted X-Forwarded-For entry. Public peers are not trusted, so they cannot spoof it.
+		trusted_proxies static private_ranges
+		trusted_proxies_strict
+	}
 }
 
 {$VOKKO_SITE_ADDRESS::80} {
 	encode zstd gzip
 
-	@server path /api/* /gateway
+	# /internal/livekit/webhook is the only /internal path exposed: LiveKit Cloud must reach it and signs every call.
+	@server path /api/* /gateway /healthz /internal/livekit/webhook
 	handle @server {
-		# Caddy appends the client address to X-Forwarded-For and upgrades websockets automatically.
-		reverse_proxy server:8710
+		# Upgrades websockets automatically. The server reads the last X-Forwarded-For entry, so send the resolved client
+		# rather than Caddy's default (which appends the immediate peer, i.e. the proxy in front of Caddy).
+		reverse_proxy server:8710 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+
+	# Desktop installers from deploy/downloads on the host (docker-compose.yml). No listing; a missing file is a 404.
+	handle_path /downloads/* {
+		root * /downloads
+		header Content-Disposition attachment
+		file_server
 	}
 
 	handle {

@@ -245,6 +245,35 @@ Caddy upgrades the `/gateway` websocket and appends `X-Forwarded-For` without ex
 
 Serve the web client from the same origin as the API where you can: same-origin requests need no CORS at all. A web client on another origin must be listed in `VOKKO_CORS_ORIGINS`; without it the allowlist is only `http://localhost[:port]`, `http://127.0.0.1[:port]` and the Tauri origins, and the browser blocks everything else. CORS does not apply to the websocket gateway (it is authenticated by the token in Identify).
 
+### Behind Cloudflare Tunnel
+
+To publish the `web` profile without opening router ports, let `cloudflared` on the same host terminate TLS and forward plain HTTP to Caddy on loopback. In `deploy/.env`:
+
+```
+VOKKO_PUBLIC_URL=https://chat.example.com
+VOKKO_SITE_ADDRESS=:80
+VOKKO_WEB_HTTP_PORT=127.0.0.1:8780
+VOKKO_WEB_HTTPS_PORT=127.0.0.1:8781
+VOKKO_TRUST_PROXY=on
+```
+
+Then route the hostname to an existing or new tunnel and add an ingress rule above the catch-all in `~/.cloudflared/config.yml`:
+
+```yaml
+  - hostname: chat.example.com
+    service: http://127.0.0.1:8780
+```
+
+```
+cloudflared tunnel route dns <tunnel> chat.example.com
+cloudflared tunnel ingress validate
+cloudflared tunnel ingress rule https://chat.example.com
+```
+
+and restart `cloudflared`. The `/gateway` websocket works through the tunnel without extra settings. The bundled Caddyfile trusts proxies on private addresses (`trusted_proxies static private_ranges`, strict) and forwards the resolved client address to the server, so rate limits see each visitor's address rather than the tunnel's. LiveKit Cloud reaches `/internal/livekit/webhook` through the same hostname (see docs/self-hosting-free.md).
+
+Desktop installers placed in `deploy/downloads/` are served at `/downloads/<file>` with `Content-Disposition: attachment` and no directory listing; the web client's Download Apps dialog links `Vokko-windows-setup.exe` and `Vokko-mac.dmg`.
+
 ## Health check
 
 `GET /healthz` needs no authentication and is not rate limited. It runs a `SELECT 1` against the database (2 second limit) and answers `200 {"status":"ok","version":"<server version>","db":"ok"}`, or `503 {"status":"unavailable","version":"...","db":"error"}` when the database does not answer. Point an uptime monitor or a compose healthcheck at it, e.g. `curl -fsS http://127.0.0.1:8710/healthz`. Through the reverse proxy it is only reachable if the proxy forwards `/healthz` (the sample Caddyfile above forwards `/api/*` and `/gateway` only, so add `/healthz` to the matcher if you want it public).

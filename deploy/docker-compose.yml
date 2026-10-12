@@ -50,6 +50,11 @@ services:
       VOKKO_DB_MAX_CONNECTIONS: ${VOKKO_DB_MAX_CONNECTIONS:-10}
       VOKKO_GIF_PROVIDER: ${VOKKO_GIF_PROVIDER:-none}
       VOKKO_GIF_API_KEY: ${VOKKO_GIF_API_KEY:-}
+      # Voice (all three or none; docs/self-hosting.md "Voice (LiveKit)"). Empty = voice off.
+      VOKKO_LIVEKIT_URL: ${VOKKO_LIVEKIT_URL:-}
+      VOKKO_LIVEKIT_API_KEY: ${VOKKO_LIVEKIT_API_KEY:-}
+      VOKKO_LIVEKIT_API_SECRET: ${VOKKO_LIVEKIT_API_SECRET:-}
+      VOKKO_REGISTRATION: ${VOKKO_REGISTRATION:-open}
       # `on` only when every request arrives through a reverse proxy that appends the client address (the bundled Caddy does).
       VOKKO_TRUST_PROXY: ${VOKKO_TRUST_PROXY:-off}
       RUST_LOG: ${RUST_LOG:-vokko_server=info,warn}
@@ -80,6 +85,8 @@ services:
       - "${VOKKO_WEB_HTTP_PORT:-80}:80"
       - "${VOKKO_WEB_HTTPS_PORT:-443}:443"
     volumes:
+      # Desktop installers served at /downloads/ (Vokko-mac.dmg, Vokko-windows-setup.exe). Empty directory = 404s.
+      - ${VOKKO_DOWNLOADS_DIR:-./downloads}:/downloads:ro
       - caddy-data:/data
       - caddy-config:/config
 
