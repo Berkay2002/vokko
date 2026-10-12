@@ -34,6 +34,8 @@ export type ModalSpec =
 
 /** Full-screen settings stay mounted underneath these small dialogs and come back when the dialog closes. */
 const SETTINGS_TYPES = new Set<ModalSpec["type"]>(["serverSettings", "channelSettings", "editChannel", "userSettings"]);
+/** Settings frames whose save bar is wired to the unsaved guard (Server Settings is not, yet). */
+const GUARDED_TYPES = new Set<ModalSpec["type"]>(["userSettings", "channelSettings", "editChannel"]);
 const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout", "removeFriend", "blockUser", "channelTopic", "quickSwitcher", "shortcuts", "voiceStatus", "cameraPreview", "screenShare"]);
 
 interface ModalStore {
@@ -55,10 +57,10 @@ export const useModals = create<ModalStore>()(set => ({
   base: null,
   open: modal => {
     const { modal: current, base } = useModals.getState();
-    // Shortcuts (Ctrl+I, Ctrl+Shift+N) must not replace User Settings while it has unsaved changes, also when it is parked under a
-    // dialog; dialogs park it instead, and a dialog opened over a dialog keeps the parked settings.
+    // Modal shortcuts (Ctrl+I, Ctrl+Shift+N) must not replace User or Channel Settings while it has unsaved changes, also when it is
+    // parked under a dialog; dialogs park it instead, and a dialog opened over a dialog keeps the parked settings.
     const settings = current && SETTINGS_TYPES.has(current.type) ? current : base?.spec;
-    if (settings?.type === "userSettings" && !DIALOG_TYPES.has(modal.type) && blockedByUnsaved()) return;
+    if (settings && GUARDED_TYPES.has(settings.type) && !DIALOG_TYPES.has(modal.type) && blockedByUnsaved()) return;
     // A profile card left open would end up under (or, from a dialog, over) the new modal.
     useProfile.getState().close();
     set(s => {

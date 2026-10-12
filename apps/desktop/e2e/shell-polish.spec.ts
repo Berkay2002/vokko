@@ -94,7 +94,8 @@ test('the header topic opens a dialog that renders the topic as markdown (link, 
     await w.__vokko.request('PATCH', `/channels/${stock.id}`, { topic: `Read **the rules** at https://example.com/rules then see <#${general.id}> :smile: ${'and a long tail of words '.repeat(12)}` });
   });
   const topic = page.locator('button.channel-header-topic');
-  await expect(topic).toBeVisible();
+  // The PATCH resolves before the gateway CHANNEL_UPDATE reaches the store, so the seeded one-line topic is visible until then.
+  await expect(topic).toHaveAccessibleName(/^Channel topic: Read \*\*the rules\*\*/);
   // The header cuts the topic, never the channel name.
   const cut = await page.evaluate(() => {
     const t = document.querySelector('button.channel-header-topic')!;
@@ -103,7 +104,6 @@ test('the header topic opens a dialog that renders the topic as markdown (link, 
   });
   expect(cut).toEqual({ topic: true, name: false });
   await expect(topic).toHaveAttribute('aria-haspopup', 'dialog');
-  await expect(topic).toHaveAccessibleName(/^Channel topic: Read \*\*the rules\*\*/);
   await topic.click();
   const dialog = page.getByRole('dialog', { name: /stock-talk/ });
   await expect(dialog.locator('strong')).toHaveText('the rules');
@@ -119,6 +119,30 @@ test('the header topic opens a dialog that renders the topic as markdown (link, 
   await expect(leaving).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
+});
+
+test('channel header toolbar: 32 px buttons at a 40 px pitch, search 244x32 with radius 8, focus ring and filter popout; Threads opens the thread list', async ({ page }) => {
+  await openGuild(page);
+  await page.getByRole('link', { name: /^stock-talk/ }).first().click();
+  const header = page.locator('.channel-header');
+  const search = header.locator('.header-search');
+  await expect(search).toBeVisible();
+  const buttons = await header.locator('.toolbar-button').evaluateAll(els => els.map(e => e.getBoundingClientRect()).map(r => ({ x: r.x, w: r.width, h: r.height })));
+  buttons.forEach(b => (expect(b.w).toBeCloseTo(32, 0), expect(b.h).toBeCloseTo(32, 0)));
+  buttons.slice(1).forEach((b, i) => expect(b.x - buttons[i]!.x).toBeCloseTo(40, 0));
+  const box = (await search.boundingBox())!;
+  expect(box.width).toBeCloseTo(244, 0);
+  expect(box.height).toBeCloseTo(32, 0);
+  expect(buttons.at(-1)!.x + 32 + 8).toBeCloseTo(box.x, 0);
+  await expect(search).toHaveCSS('border-radius', '8px');
+
+  await header.getByRole('combobox', { name: 'Search' }).click();
+  await expect(search).toHaveCSS('outline-style', 'solid');
+  await expect(page.getByRole('listbox', { name: 'Search suggestions' })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await header.getByRole('button', { name: 'Threads', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Threads' })).toBeVisible();
 });
 
 test('friend row right-click menu: Message, Remove Friend, Block, Copy User ID; Block moves the friend to Blocked', async ({ page, context }) => {

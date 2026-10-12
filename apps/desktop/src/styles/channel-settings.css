@@ -326,6 +326,27 @@
   font-size: 14px;
 }
 
+/* A refused leave attempt (settings/unsaved.ts) shakes the bar as in User Settings; the keyframes live in settings-modal.css. */
+.fss .cs-savebar[data-shake="a"] {
+  animation: sm-shake-a 400ms var(--ease-out);
+}
+
+.fss .cs-savebar[data-shake="b"] {
+  animation: sm-shake-b 400ms var(--ease-out);
+}
+
+.reduce-motion .fss .cs-savebar[data-shake] {
+  animation: none;
+  background: var(--control-critical-primary-background-default);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.full-motion) .fss .cs-savebar[data-shake] {
+    animation: none;
+    background: var(--control-critical-primary-background-default);
+  }
+}
+
 .cs-sync {
   display: flex;
   align-items: center;

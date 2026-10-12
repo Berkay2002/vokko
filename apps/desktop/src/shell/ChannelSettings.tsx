@@ -14,6 +14,7 @@ import { Category, Divider, Field, Page, RadioGroup, Select, Slider, Unavailable
 import { useVoiceUi } from "../voice";
 import { FullScreenSettings, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { SaveBar } from "./settings/SaveBar";
+import { blockedByUnsaved } from "./settings/unsaved";
 import { usePermissions } from "./usePermissions";
 import { ChannelIntegrations } from "../apps/IntegrationsPage";
 import { InviteList } from "../invites/InviteList";
@@ -280,8 +281,14 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
       eyebrowTitle={channel.name ?? undefined}
       groups={groups}
       current={current}
-      onSelect={id => setCurrent(id as SectionId)}
-      onClose={closeModal}
+      // A visible save bar refuses the switch / close and shakes instead (settings/unsaved.ts), like in User Settings.
+      onSelect={id => {
+        if (id !== current && blockedByUnsaved()) return;
+        setCurrent(id as SectionId);
+      }}
+      onClose={() => {
+        if (!blockedByUnsaved()) closeModal();
+      }}
     >
       {page()}
     </FullScreenSettings>

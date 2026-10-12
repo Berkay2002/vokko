@@ -33,3 +33,42 @@ test('a plain member does not see Edit Channel', async ({ page }) => {
   await page.locator('.chat-msg').first().waitFor(); // member, roles and messages are in the store before the absence means anything
   await expect(page.locator('.chat-start').getByRole('button', { name: 'Edit Channel' })).toHaveCount(0);
 });
+
+test('channel settings: an unsaved name blocks Esc, Close and page switches with a shake until Reset', async ({ page }) => {
+  await openRandom(page, 'sam');
+  await page.locator('.chat-start').getByRole('button', { name: 'Edit Channel' }).click();
+  const dialog = page.getByRole('dialog', { name: /Channel Settings/ });
+  const bar = dialog.locator('.cs-savebar');
+  await expect(bar).toHaveCount(0);
+  await dialog.getByRole('textbox', { name: 'Channel name' }).fill('random-draft');
+  await expect(bar).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expect(bar).toHaveAttribute('data-shake', /^[ab]$/);
+  const first = await bar.getAttribute('data-shake');
+
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toBeVisible();
+  await expect(bar).not.toHaveAttribute('data-shake', first!);
+
+  const second = await bar.getAttribute('data-shake');
+  await dialog.getByRole('button', { name: 'Permissions' }).click();
+  await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('Overview');
+  await expect(dialog.getByRole('textbox', { name: 'Channel name' })).toHaveValue('random-draft');
+  await expect(bar).not.toHaveAttribute('data-shake', second!);
+  await expect(bar).toHaveCSS('animation-name', /^sm-shake-[ab]$/);
+
+  // Mod+I is a modal shortcut (it replaces the open modal), so the guard has to refuse it too
+  await page.keyboard.press('ControlOrMeta+i');
+  await expect(page.locator('.inbox-popout')).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole('textbox', { name: 'Channel name' })).toHaveValue('random-draft');
+
+  await bar.getByRole('button', { name: 'Reset' }).click();
+  await expect(bar).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Permissions' }).click();
+  await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('Channel Permissions');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
