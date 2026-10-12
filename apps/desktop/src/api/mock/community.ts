@@ -27,6 +27,7 @@ import { addChannel, createAccount, createGuildRecord, fail, pendingAttachment, 
 import { memberProfileFields } from "./perks";
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
+import { mutualFriendsOf } from "./mutualFriends";
 
 function invalid(field: string, message: string): never {
   return fail(400, 50035, "Invalid Form Body", { [field]: { code: "INVALID", message } });
@@ -614,7 +615,8 @@ route("GET", "/users/@me/friend-suggestions", ({ viewer, query }) => {
   for (const id of candidates) {
     const account = db.accounts.get(id);
     if (!account || account.user.bot || optedOut.has(id) || dismissed.get(me)?.has(id) || relationBetween(me, id)) continue;
-    ranked.push({ user: account.user, mutual_guilds: guildsWith.get(id) ?? [], mutual_friends_count: mutual.get(id) ?? 0 });
+    // The count the profile shows: none without a shared guild or a DM with a message (mutualFriendsOf).
+    ranked.push({ user: account.user, mutual_guilds: guildsWith.get(id) ?? [], mutual_friends_count: mutualFriendsOf(viewer, account).length });
   }
   ranked.sort((a, b) => b.mutual_friends_count - a.mutual_friends_count || b.mutual_guilds.length - a.mutual_guilds.length || compareIds(a.user.id, b.user.id));
   return { enabled: true, suggestions: ranked.slice(0, limit) };

@@ -393,13 +393,15 @@ describe("onboarding", () => {
 describe("friend suggestions", () => {
   const names = (who: string) => call<FriendSuggestionsResponse>(who, "GET", "/users/@me/friend-suggestions").suggestions.map(s => s.user.username);
 
-  it("ranks mutual friends above shared guilds and respects relationships", () => {
+  it("ranks shared guilds above hidden mutual friends and respects relationships", () => {
     setRelationship(ids.owner!, ids.carl!, RelationshipType.Friend, RelationshipType.Friend);
     setRelationship(ids.carl!, ids.dana!, RelationshipType.Friend, RelationshipType.Friend);
-    expect(names("owner")).toEqual(["dana", "alice", "bob"]);
-    const first = call<FriendSuggestionsResponse>("owner", "GET", "/users/@me/friend-suggestions").suggestions[0]!;
-    expect(first.mutual_friends_count).toBe(1);
-    expect(call<FriendSuggestionsResponse>("owner", "GET", "/users/@me/friend-suggestions").suggestions[1]!.mutual_guilds).toEqual([{ id: guildId, nick: null }]);
+    // dana shares no guild or DM with owner: no mutual friend count (as on dana's profile), so it ranks after shared guilds.
+    expect(names("owner")).toEqual(["alice", "bob", "dana"]);
+    const list = call<FriendSuggestionsResponse>("owner", "GET", "/users/@me/friend-suggestions").suggestions;
+    expect(list[2]!.mutual_friends_count).toBe(0);
+    expect(call<{ mutual_friends_count: number }>("owner", "GET", `/users/${ids.dana}/profile`).mutual_friends_count).toBe(0);
+    expect(list[0]!.mutual_guilds).toEqual([{ id: guildId, nick: null }]);
     expect(names("dana")).toEqual(["owner"]);
     expect(errorOf(() => call("owner", "GET", "/users/@me/friend-suggestions?limit=0")).code).toBe(50035);
     setRelationship(ids.owner!, ids.dana!, RelationshipType.OutgoingRequest, RelationshipType.IncomingRequest);

@@ -49,13 +49,15 @@ async fn mutual_friends_rank_above_shared_guilds() {
     befriend(&app, &ann, &dan).await;
     befriend(&app, &dan, &cat).await;
 
-    assert_eq!(suggested(&app, &ann).await, vec!["cat", "ben"]);
+    // cat shares no guild or DM with ann, so (as on cat's profile) no mutual friend count is shown and it does not rank.
+    assert_eq!(suggested(&app, &ann).await, vec!["ben", "cat"]);
     let (_, body) = app.get("/users/@me/friend-suggestions", &ann.token).await;
     assert_eq!(body["enabled"], true);
-    assert_eq!(body["suggestions"][0]["mutual_friends_count"], 1);
-    assert_eq!(body["suggestions"][0]["mutual_guilds"], json!([]));
-    assert_eq!(body["suggestions"][1]["mutual_guilds"][0]["id"], guild);
+    assert_eq!(body["suggestions"][0]["mutual_guilds"][0]["id"], guild);
+    assert_eq!(body["suggestions"][0]["mutual_friends_count"], 0);
     assert_eq!(body["suggestions"][1]["mutual_friends_count"], 0);
+    assert_eq!(body["suggestions"][1]["mutual_guilds"], json!([]));
+    assert_eq!(app.get(&format!("/users/{}/profile", cat.id), &ann.token).await.1["mutual_friends_count"], 0);
     // symmetrical: ben sees ann, cat sees ann, eve sees nobody
     assert_eq!(suggested(&app, &ben).await, vec!["ann"]);
     assert_eq!(suggested(&app, &cat).await, vec!["ann"]);
@@ -70,6 +72,74 @@ async fn mutual_friends_rank_above_shared_guilds() {
     assert_eq!(app.post("/users/@me/relationships", &ann.token, json!({"username": "cat"})).await.0, StatusCode::NO_CONTENT);
     assert_eq!(suggested(&app, &ann).await, vec!["ben"]);
     assert!(!suggested(&app, &cat).await.contains(&"ann".to_owned()));
+}
+
+#[tokio::test]
+async fn suggestion_counts_match_the_profile_once_there_is_context() {
+    let app = TestApp::new().await;
+    let ann = person(&app, "ann").await;
+    let cat = person(&app, "cat").await; // friend of two of ann's friends
+    let ben = person(&app, "ben").await; // shares a guild with ann
+    let (dan, fay) = (person(&app, "dan").await, person(&app, "fay").await);
+    let (_, channel) = app.guild_with_channel(&ann.token).await;
+    join(&app, &ann, &channel, &ben).await;
+    for friend in [&dan, &fay] {
+        befriend(&app, &ann, friend).await;
+        befriend(&app, friend, &cat).await;
+    }
+    let counts = |body: &serde_json::Value| {
+        body["suggestions"]
+            .as_array()
+            .expect("list")
+            .iter()
+            .map(|s| (s["user"]["username"].as_str().expect("name").to_owned(), s["mutual_friends_count"].clone()))
+            .collect::<Vec<_>>()
+    };
+    let (_, body) = app.get("/users/@me/friend-suggestions", &ann.token).await;
+    assert_eq!(counts(&body), [("ben".to_owned(), json!(0)), ("cat".to_owned(), json!(0))], "no context: no count, no rank");
+
+    // Once cat shares a guild with ann, the count shows (the same as the profile) and ranks first.
+    join(&app, &ann, &channel, &cat).await;
+    let (_, body) = app.get("/users/@me/friend-suggestions", &ann.token).await;
+    assert_eq!(counts(&body), [("cat".to_owned(), json!(2)), ("ben".to_owned(), json!(0))]);
+    assert_eq!(app.get(&format!("/users/{}/profile", cat.id), &ann.token).await.1["mutual_friends_count"], 2);
+    let (_, list) = app.get(&format!("/users/{}/relationships", cat.id), &ann.token).await;
+    assert_eq!(list.as_array().map(Vec::len), Some(2));
+}
+
+#[tokio::test]
+async fn a_dm_with_a_message_is_context_for_the_count() {
+    let app = TestApp::new().await;
+    let ann = person(&app, "ann").await;
+    let cat = person(&app, "cat").await; // DM'd by ann, then left the guild
+    let gus = person(&app, "gus").await; // DM opened by ann but never written in, then left the guild
+    let dan = person(&app, "dan").await; // friend of all three
+    let (guild, channel) = app.guild_with_channel(&ann.token).await;
+    for who in [&cat, &gus] {
+        join(&app, &ann, &channel, who).await;
+        befriend(&app, &dan, who).await;
+        let (status, dm) = app.post("/users/@me/channels", &ann.token, json!({"recipient_id": who.id})).await;
+        assert_eq!(status, StatusCode::OK, "{dm}");
+        if who.id == cat.id {
+            let path = format!("/channels/{}/messages", dm["id"].as_str().expect("dm id"));
+            assert_eq!(app.post(&path, &ann.token, json!({"content": "hi"})).await.0, StatusCode::OK);
+        }
+    }
+    befriend(&app, &ann, &dan).await;
+    for who in [&cat, &gus] {
+        assert_eq!(app.delete(&format!("/users/@me/guilds/{guild}"), &who.token).await.0, StatusCode::NO_CONTENT);
+    }
+    let (_, body) = app.get("/users/@me/friend-suggestions", &ann.token).await;
+    let counts: Vec<(String, serde_json::Value)> = body["suggestions"]
+        .as_array()
+        .expect("list")
+        .iter()
+        .map(|s| (s["user"]["username"].as_str().expect("name").to_owned(), s["mutual_friends_count"].clone()))
+        .collect();
+    assert_eq!(counts, [("cat".to_owned(), json!(1)), ("gus".to_owned(), json!(0))]);
+    for (who, count) in [(&cat, 1), (&gus, 0)] {
+        assert_eq!(app.get(&format!("/users/{}/profile", who.id), &ann.token).await.1["mutual_friends_count"], count);
+    }
 }
 
 #[tokio::test]
