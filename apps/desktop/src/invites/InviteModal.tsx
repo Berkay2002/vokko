@@ -134,7 +134,7 @@ export function InviteModal({ channelId, onClose }: { channelId: Snowflake; onCl
   const title = editing ? "Server invite link settings" : guild ? `Invite friends to ${guild.name}` : "Invite friends";
 
   return (
-    <Modal open onClose={onClose} title={title} className="invite-modal">
+    <Modal open onClose={onClose} title={title} className="invite-modal" sheet>
       {editing ? (
         <LinkSettings initial={settings} busy={busy} error={error} onCancel={() => setEditing(false)} onSubmit={next => void regenerate(next)} />
       ) : (

@@ -15,7 +15,7 @@ export { openModal, closeModal } from '../shell/modalStore';
 export { openProfile } from '../shell/profileStore';
 export { usePermissions } from '../shell/usePermissions';
 export { Perm, canSendIn } from '../api/permissions';
-export { Tooltip, Popout, Modal, useContextMenu, useLayer, useOutsideClose, placeAtPoint } from '../ui';
+export { Tooltip, Popout, Modal, BottomSheet, usePhone, useContextMenu, useLayer, useOutsideClose, placeAtPoint } from '../ui';
 export { AnimatedImage, AnimatedVideo } from '../ui/AnimatedMedia';
 export type { MenuItem } from '../ui';
 

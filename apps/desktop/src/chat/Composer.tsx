@@ -3,7 +3,7 @@ import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Lock, 
 import { Perm, channelPermissions, hasBit, memberLike } from '../api/permissions';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
-import { request, Popout, Tooltip, resolveUrl, useComposerOptions, useConvertEmoticons, useGuild, useGuildMembers, useLegacyChatInput } from './shell';
+import { request, BottomSheet, Popout, Tooltip, usePhone, resolveUrl, useComposerOptions, useConvertEmoticons, useGuild, useGuildMembers, useLegacyChatInput } from './shell';
 import { useMedia } from '../media/store';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
@@ -103,6 +103,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const fileInput = useRef<HTMLInputElement>(null);
   const [caret, setCaret] = useState(0);
   const [plusOpen, setPlusOpen] = useState(false);
+  const phone = usePhone();
   const [pollOpen, setPollOpen] = useState(false);
   const pollGuild = useGuild(chat.guildId);
   const pollMembers = useGuildMembers(chat.guildId);
@@ -383,13 +384,21 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       </div>}
       <div className="chat-composer-row">
         <Tooltip content="Attach" side="top"><button ref={plusBtn} type="button" className="chat-composer-btn plus" aria-label="Attach a file" onClick={() => setPlusOpen(v => !v)}><Plus size={20} /></button></Tooltip>
-        <Popout anchor={plusBtn} open={plusOpen} onClose={() => setPlusOpen(false)} side="top">
+        {phone
+          ? <BottomSheet open={plusOpen} onClose={() => setPlusOpen(false)} label="Attach">
+            <div className="sheet-group" role="menu">
+              <button type="button" role="menuitem" className="sheet-row" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><span className="sheet-row-icon"><FileUp size={22} /></span><span className="sheet-row-label">Upload a File</span></button>
+              <button type="button" role="menuitem" className="sheet-row" onClick={() => { setPlusOpen(false); setAppsOpen(true); }}><span className="sheet-row-icon"><AppsGlyph size={22} /></span><span className="sheet-row-label">Use Apps</span></button>
+              {canPoll && <button type="button" role="menuitem" className="sheet-row" onClick={() => { setPlusOpen(false); setPollOpen(true); }}><span className="sheet-row-icon"><ChartBarBig size={22} /></span><span className="sheet-row-label">Create Poll</span></button>}
+            </div>
+          </BottomSheet>
+          : <Popout anchor={plusBtn} open={plusOpen} onClose={() => setPlusOpen(false)} side="top">
           <div className="chat-attach-menu" role="menu">
             <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); fileInput.current?.click(); }}><FileUp size={20} /> Upload a File</button>
             <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); setAppsOpen(true); }}><AppsGlyph size={20} /> Use Apps</button>
             {canPoll && <button type="button" role="menuitem" onClick={() => { setPlusOpen(false); setPollOpen(true); }}><ChartBarBig size={20} /> Create Poll</button>}
           </div>
-        </Popout>
+        </Popout>}
         {pollOpen && <CreatePollModal channelId={channelId} onClose={() => { setPollOpen(false); area.current?.focus(); }} />}
         <input ref={fileInput} type="file" multiple hidden onChange={e => { addFiles(channelId, [...(e.target.files ?? [])]); e.target.value = ''; }} />
         <ComposerInput fieldRef={area} value={text} placeholder={placeholder} mentions={draft.tokens.map(t => t.display)} resetKey={channelId}

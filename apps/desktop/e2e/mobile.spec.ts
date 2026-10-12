@@ -65,36 +65,62 @@ test.describe('Home', () => {
 });
 
 test.describe('message actions by touch', () => {
-  test('a tap shows the toolbar of that message only, a tap elsewhere hides it', async ({ page }) => {
+  test('a tap shows no toolbar: touch has no hover toolbar, the long press sheet is the way in', async ({ page }) => {
     await openStockTalk(page);
-    await expect(page.locator('.chat-toolbar')).toHaveCount(0);
     const a = await visibleRow(page, 0);
     await page.touchscreen.tap(a.x, a.y);
-    await expect(page.locator('.chat-msg.touch-open .chat-toolbar')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Add Reaction' })).toBeVisible();
-    const b = await visibleRow(page, 1);
-    await page.touchscreen.tap(b.x, b.y);
-    await expect(page.locator('.chat-msg.touch-open')).toHaveCount(1);
-    await expect(page.locator('.chat-msg.touch-open .chat-toolbar')).toBeVisible();
-    await page.touchscreen.tap(200, 60); // the channel header
-    await expect(page.locator('.chat-msg.touch-open')).toHaveCount(0);
+    await page.waitForTimeout(200);
+    await expect(page.locator('.chat-toolbar:visible')).toHaveCount(0);
+    await expect(page.locator('.sheet')).toHaveCount(0);
   });
 
-  test('the toolbar replies by touch', async ({ page }) => {
+  test('the long press sheet replies by touch', async ({ page }) => {
     await openStockTalk(page);
     const m = await visibleRow(page, 0);
-    await page.touchscreen.tap(m.x, m.y);
-    await page.locator('.chat-msg.touch-open').getByRole('button', { name: 'Reply' }).tap();
+    await longPress(page, m.x, m.y);
+    await page.waitForTimeout(300);
+    await page.getByRole('menuitem', { name: 'Reply' }).tap();
     await expect(page.locator('.chat-msg.replying')).toHaveCount(1);
+    await expect(page.locator('.sheet')).toHaveCount(0);
   });
 
-  test('a long press opens the message menu and stays open', async ({ page }) => {
+  test('a long press opens the message actions as a bottom sheet and it stays open', async ({ page }) => {
     await openStockTalk(page);
     const p = await visibleRow(page, 0);
     await longPress(page, p.x, p.y);
-    await expect(page.getByRole('menu')).toBeVisible();
+    const sheet = page.getByRole('dialog', { name: 'Message actions' });
+    await expect(sheet).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(sheet).toBeVisible();
+    const b = (await page.locator('.sheet').boundingBox())!;
+    expect(b.x).toBe(0);
+    expect(b.width).toBe(390);
+    expect(b.y + b.height).toBe(844);
+    await expect(page.getByRole('group', { name: 'Quick reactions' }).getByRole('button')).toHaveCount(5);
+    for (const name of ['Reply', 'Copy Text', 'Pin Message']) await expect(page.getByRole('menuitem', { name })).toBeVisible();
+    // a tap on the backdrop closes it
+    await page.touchscreen.tap(195, 40);
+    await expect(page.locator('.sheet')).toHaveCount(0);
+  });
+
+  test('a row with a submenu drills down inside the sheet and back', async ({ page }) => {
+    await openStockTalk(page);
+    const p = await visibleRow(page, 0);
+    await longPress(page, p.x, p.y);
     await page.waitForTimeout(400);
-    await expect(page.getByRole('menu')).toBeVisible();
+    await page.getByRole('menuitem', { name: 'Create Reminder' }).tap();
+    await expect(page.getByText('Remind me', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Create Reminder' }).tap();
+    await expect(page.getByRole('menuitem', { name: 'Reply' })).toBeVisible();
+  });
+
+  test('a quick reaction reacts and closes the sheet', async ({ page }) => {
+    await openStockTalk(page);
+    const p = await visibleRow(page, 0);
+    await longPress(page, p.x, p.y);
+    await page.waitForTimeout(400);
+    await page.getByRole('group', { name: 'Quick reactions' }).getByRole('button').first().tap();
+    await expect(page.locator('.sheet')).toHaveCount(0);
   });
 
   test('scrolling does not open the menu', async ({ page }) => {
@@ -164,6 +190,27 @@ test.describe('settings', () => {
     await dialog.getByRole('button', { name: 'Close' }).tap();
     await expect(dialog).toHaveCount(0);
   });
+
+  test('the section lists are grouped rows: 50px rows in rounded cards, drill-down to a page', async ({ page }) => {
+    await page.goto('/channels/@me?as=sam&mockLatency=0');
+    await page.locator('.dm-row').first().waitFor({ state: 'attached' });
+    await page.getByRole('button', { name: /User Settings/ }).first().tap();
+    const dialog = page.getByRole('dialog', { name: /User Settings/ });
+    const rows = dialog.locator('.sm-item');
+    await expect(rows.first()).toBeVisible();
+    for (const row of await rows.all()) {
+      if (!(await row.isVisible())) continue;
+      expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+    }
+    const card = dialog.locator('.sm-group > div').first();
+    expect(await card.evaluate(e => getComputedStyle(e).borderTopLeftRadius)).toBe('16px');
+    await expect(dialog.locator('.sm-subs')).toBeHidden(); // sub-items belong to the wide layout
+    await rows.nth(1).tap();
+    await expect(dialog.locator('.sm-side')).toBeHidden();
+    await dialog.getByRole('button', { name: 'Back to sections' }).tap();
+    await expect(rows.first()).toBeVisible();
+    await noHorizontalScroll(page);
+  });
 });
 
 test.describe('voice', () => {
@@ -171,6 +218,9 @@ test.describe('voice', () => {
     await page.getByRole('button', { name: 'Show Channels' }).tap();
     await page.locator('.sidebar-scroller').evaluate(el => { el.scrollTop = el.scrollHeight; });
     await page.getByRole('button', { name: 'General voice channel' }).tap();
+    // A tap opens the channel's preview; the call starts with its Join button.
+    await expect(page.locator('.voice-panel.in-call')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Join Voice' }).tap();
     await expect(page.locator('.voice-panel.in-call')).toBeAttached();
   }
 
@@ -186,6 +236,37 @@ test.describe('voice', () => {
     await expect(page.locator('.voice-panel')).toBeHidden();
     await page.getByRole('button', { name: 'Show Channels' }).tap();
     await expect(page.locator('.voice-panel')).toBeVisible();
+  });
+
+  test('tapping a voice channel shows the preview with a wide Join button, the call is a single control row, chat is a sheet', async ({ page }) => {
+    await openStockTalk(page);
+    await page.getByRole('button', { name: 'Show Channels' }).tap().catch(() => undefined);
+    await page.locator('.sidebar-scroller').evaluate(el => { el.scrollTop = el.scrollHeight; });
+    await page.getByRole('button', { name: 'General voice channel' }).tap();
+    const joinButton = page.getByRole('button', { name: 'Join Voice' });
+    await expect(joinButton).toBeVisible();
+    await expect(page.locator('.voice-panel.in-call')).toHaveCount(0);
+    const jb = (await joinButton.boundingBox())!;
+    expect(jb.width).toBeGreaterThan(300);
+    expect(jb.height).toBeGreaterThanOrEqual(44);
+    await joinButton.tap();
+    const bar = page.locator('.voice-bar');
+    await expect(bar).toBeVisible();
+    const ys = await bar.locator('.voice-bar-button:visible, .voice-hangup').evaluateAll(els => els.map(e => Math.round(e.getBoundingClientRect().top)));
+    expect(new Set(ys).size).toBe(1);
+    // The chat icon in the header opens the call's text chat as a full-height sheet with its composer.
+    await page.getByRole('button', { name: /Show Chat|Open Chat/ }).first().tap();
+    const sheet = page.getByRole('dialog', { name: /chat$/ });
+    await expect(sheet).toBeVisible();
+    await page.waitForTimeout(400);
+    const sb = (await sheet.boundingBox())!;
+    expect(sb.x).toBe(0);
+    expect(sb.width).toBe(390);
+    expect(sb.height).toBeGreaterThan(700);
+    await expect(sheet.locator('.chat-textarea')).toBeVisible();
+    await noHorizontalScroll(page);
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
   });
 
   test('the call view keeps a 40px+ disconnect button on a 360px phone', async ({ page }) => {
@@ -297,11 +378,15 @@ test.describe('touch targets', () => {
       expect(await hit(cx, cy - d)).toBe(name);
     }
     const row = await visibleRow(page, 0);
-    await page.touchscreen.tap(row.x, row.y);
-    const btn = (await page.locator('.chat-msg.touch-open .chat-toolbar-btn').first().boundingBox())!;
-    expect(btn.width).toBeGreaterThanOrEqual(36);
-    expect(btn.height).toBeGreaterThanOrEqual(40);
-    const bar = (await page.locator('.chat-msg.touch-open .chat-toolbar').boundingBox())!;
+    await longPress(page, row.x, row.y);
+    await page.waitForTimeout(400);
+    // sheet rows and reaction tiles are finger sized, and the sheet stays inside the window
+    const reply = (await page.getByRole('menuitem', { name: 'Reply' }).boundingBox())!;
+    expect(reply.height).toBeGreaterThanOrEqual(48);
+    const tile = (await page.getByRole('group', { name: 'Quick reactions' }).getByRole('button').first().boundingBox())!;
+    expect(tile.width).toBeGreaterThanOrEqual(44);
+    expect(tile.height).toBeGreaterThanOrEqual(44);
+    const bar = (await page.locator('.sheet').boundingBox())!;
     expect(bar.x).toBeGreaterThanOrEqual(0);
     expect(bar.x + bar.width).toBeLessThanOrEqual(360);
   });
@@ -324,3 +409,82 @@ test('a dialog title does not run under the close button', async ({ page }) => {
   expect(title.x + title.width).toBeLessThanOrEqual(close.x);
 });
 
+
+test.describe('composer', () => {
+  test('a pill with +, the field and one emoji button; the emoji picker docks under the composer and the composer stays above it', async ({ page }) => {
+    await openStockTalk(page);
+    await expect(page.getByRole('button', { name: 'Open GIF picker' })).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Open sticker picker' })).toBeHidden();
+    await page.getByRole('button', { name: 'Select emoji' }).tap();
+    await expect(page.getByRole('dialog', { name: 'Emoji, GIFs and stickers' })).toBeVisible();
+    await page.waitForTimeout(300); // the slide-in
+    const s = (await page.locator('.sheet').boundingBox())!;
+    expect(s.x).toBe(0);
+    expect(s.width).toBe(390);
+    expect(s.y + s.height).toBe(844);
+    expect(s.height).toBeGreaterThan(844 * 0.45);
+    expect(s.height).toBeLessThan(844 * 0.55);
+    // the composer is above the sheet, the chat shrank instead of going under it
+    const c = (await page.locator('.chat-composer-box').boundingBox())!;
+    expect(c.y + c.height).toBeLessThanOrEqual(s.y);
+    await page.locator('.sheet .chat-emoji-cell').first().tap();
+    await expect(page.locator('.sheet')).toHaveCount(0);
+    await expect(composer(page)).toHaveAttribute('data-empty', 'false');
+    await expect(page.locator('html')).not.toHaveClass(/sheet-docked/);
+  });
+
+  test('"+" opens a sheet with the attach actions; a tap on the backdrop closes it', async ({ page }) => {
+    await openStockTalk(page);
+    await page.getByRole('button', { name: 'Attach a file' }).tap();
+    await expect(page.getByRole('dialog', { name: 'Attach' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Upload a File' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Use Apps' })).toBeVisible();
+    await page.waitForTimeout(400); // the slide-in, and the tap guard right after opening
+    const s = (await page.locator('.sheet').boundingBox())!;
+    expect(s.y + s.height).toBe(844);
+    await page.touchscreen.tap(195, 60);
+    await expect(page.locator('.sheet')).toHaveCount(0);
+  });
+});
+
+test.describe('menus as sheets', () => {
+  test('a long press on a channel row opens its menu as a bottom sheet; a tap on a row of it acts and closes', async ({ page }) => {
+    await openStockTalk(page);
+    await page.getByRole('button', { name: 'Show Channels' }).tap();
+    const row = (await page.locator('a.channel-row').nth(1).boundingBox())!;
+    await longPress(page, row.x + row.width / 2, row.y + row.height / 2);
+    await expect(page.locator('.sheet')).toBeVisible();
+    await expect(page.locator('.context-menu')).toHaveCount(0);
+    await page.waitForTimeout(400); // the slide-in
+    const s = (await page.locator('.sheet').boundingBox())!;
+    expect(s.y + s.height).toBe(844);
+    await expect(page.locator('.sheet .sheet-title')).toHaveText(/^# /); // header: the channel's name
+    // the finger lifting after the press did not follow the row's link
+    await expect(page.locator('.app-frame')).toHaveClass(/nav-open/);
+    await page.waitForTimeout(400);
+    // a row with a submenu drills down inside the sheet (back returns); a leaf row acts and closes it
+    await page.getByRole('menuitem', { name: 'Mute Channel' }).tap();
+    await expect(page.locator('.sheet-back')).toBeVisible();
+    await page.locator('.sheet-back').tap();
+    await page.getByRole('menuitem', { name: 'Copy Link' }).tap();
+    await expect(page.locator('.sheet')).toHaveCount(0);
+  });
+
+  test('the server menu, the profile card and the invite dialog are sheets', async ({ page }) => {
+    await openStockTalk(page);
+    await page.getByRole('button', { name: 'Show Channels' }).tap();
+    await page.locator('.guild-header').first().tap();
+    await expect(page.getByRole('dialog', { name: 'Server menu' })).toBeVisible();
+    await page.waitForTimeout(400);
+    await page.getByRole('menuitem', { name: /^Invite/ }).first().tap();
+    await expect(page.locator('.sheet.invite-modal')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.sheet')).toHaveCount(0);
+    await page.locator('.user-panel-account').tap();
+    await expect(page.getByRole('dialog', { name: 'User profile' })).toBeVisible();
+    await page.waitForTimeout(400);
+    const s = (await page.locator('.sheet').boundingBox())!;
+    expect(s.width).toBe(390);
+    expect(s.y + s.height).toBe(844);
+  });
+});

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  AppWindow, Bell, ChartBarBig, Bookmark, ChevronRight, Copy, CornerUpLeft, Fingerprint, Flag, Forward, Link2, MailOpen, Megaphone, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
+  AppWindow, Bell, ChartBarBig, Bookmark, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Fingerprint, Flag, Forward, Link2, MailOpen, Megaphone, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
 } from 'lucide-react';
 import { MessageType } from '../api/types';
 import type { Message } from '../api/types';
@@ -10,7 +10,7 @@ import { emojiShortcodeLabel, frequentEmoji, quickReactions, useEmojiDb } from '
 import { messageStore } from './messageStore';
 import { isSystemMessage, type PendingMessage } from './messageState';
 import { toDisplay } from './mentionText';
-import { isDeveloperMode, openModal, useLayer, useOutsideClose } from './shell';
+import { BottomSheet, isDeveloperMode, openModal, useLayer, useOutsideClose, usePhone } from './shell';
 import { comingSoon } from './toast';
 import { ReminderMenu } from '../media/ReminderMenu';
 import { openForward, toggleBookmark, useIsBookmarked } from '../media/store';
@@ -66,8 +66,10 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
   const [active, setActive] = useState(-1);
   /** The open submenu was opened from the keyboard: it takes focus so arrow keys move through its rows. */
   const [subByKey, setSubByKey] = useState(false);
-  const layer = useLayer(true, onClose);
-  useOutsideClose(true, () => [box.current], onClose, layer.isTop);
+  // At phone widths the menu is a BottomSheet (its own layer and outside close); the positioned menu below is the desktop one.
+  const phone = usePhone();
+  const layer = useLayer(!phone, onClose);
+  useOutsideClose(!phone, () => [box.current], onClose, layer.isTop);
 
   const isMine = message.author.id === chat.me.id;
   const system = isSystemMessage(message);
@@ -151,6 +153,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
 
   const rows = entries.filter((e): e is Row => e !== 'separator');
   useEffect(() => {
+    if (phone) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -172,6 +175,35 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   });
+
+  if (phone) {
+    // Spec 04: quick reactions on top, then the actions as grouped rows; a row with a submenu drills down inside the sheet.
+    const groups: Row[][] = [[]];
+    for (const e of entries) {
+      if (e === 'separator') groups.push([]);
+      else if (e.id !== 'add-reaction') groups[groups.length - 1]!.push(e); // the "more" tile of the reaction row opens the full picker
+    }
+    const sub = rows.find(r => r.id === open && r.children);
+    return <BottomSheet open onClose={onClose} label="Message actions" className="sheet-message">
+      {sub ? <>
+        <button type="button" className="sheet-back" onClick={() => setOpen(null)}><ChevronLeft size={20} aria-hidden="true" /> {sub.label}</button>
+        <div className="chat-menu chat-menu-inline">{typeof sub.children === 'function' ? sub.children(onClose) : sub.children}</div>
+      </> : <>
+        {!pending && !system && <div className="sheet-reactions" role="group" aria-label="Quick reactions">
+          {quick.map(e => <button key={e} type="button" className="sheet-reaction" aria-label={`React with ${e}`} onClick={() => { onClose(); react(e); }}>{e}</button>)}
+          <button type="button" className="sheet-reaction" aria-label="More reactions" onClick={() => { onClose(); onMoreEmoji(message); }}><SmilePlus size={22} aria-hidden="true" /></button>
+        </div>}
+        {groups.filter(g => g.length > 0).map((g, i) => <div key={i} className="sheet-group" role="menu">
+          {g.map(row => <button key={row.id} type="button" role="menuitem" className={`sheet-row${row.danger ? ' danger' : ''}`} disabled={row.disabled} aria-haspopup={row.children ? true : undefined}
+            onClick={() => { if (row.children) { setOpen(row.id); return; } onClose(); row.onSelect?.(); }}>
+            <span className="sheet-row-icon" aria-hidden="true">{row.icon}</span>
+            <span className="sheet-row-label">{row.label}</span>
+            {row.children && <span className="sheet-row-trailing"><ChevronRight size={18} aria-hidden="true" /></span>}
+          </button>)}
+        </div>)}
+      </>}
+    </BottomSheet>;
+  }
 
   return createPortal(<div className="chat-menu-layer context-menu-layer" onContextMenu={e => { e.preventDefault(); e.stopPropagation(); }}>
     <div ref={box} className="chat-menu context-menu" role="menu" aria-label="Message actions" style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? 'visible' : 'hidden' }}>

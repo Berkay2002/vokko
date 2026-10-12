@@ -400,20 +400,64 @@
     background: var(--icon-voice-connected);
   }
 
-  /* call view: the bar wraps instead of squeezing the disconnect button; pop out / fullscreen make no sense on a phone */
+  /* call view: one rounded control bar of evenly spaced 48px buttons ending in the red hang-up; the device chevrons, the
+     disabled activities button, pop out and fullscreen make no sense on a phone (devices live in Voice & Video settings) */
   .voice-bar {
-    flex-wrap: wrap;
-    row-gap: 8px;
-    padding: 0 8px;
+    flex-wrap: nowrap;
+    gap: 4px;
+    margin: 0 8px calc(8px + env(safe-area-inset-bottom, 0px));
+    padding: 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 20px;
+    background: var(--background-base-low);
   }
 
+  .voice-bar-group {
+    display: contents;
+  }
+
+  .voice-bar-button {
+    flex: 1;
+    min-width: 0;
+    height: 48px;
+  }
+
+  .voice-bar-button[aria-label="Input options"],
+  .voice-bar-button[aria-label="Camera options"],
+  .voice-bar-button[aria-label="Start an activity"],
   .voice-bar-side {
     display: none;
   }
 
   .voice-hangup {
-    flex: none;
-    width: 64px;
+    flex: 1.4;
+    width: auto;
+    min-width: 48px;
+    height: 48px;
+  }
+
+  /* preview before joining: a wide green Join button at the bottom, thumb height */
+  .voice-join {
+    padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .voice-join-button,
+  .voice-empty-join {
+    width: 100%;
+    min-height: 48px;
+    border-radius: var(--radius-lg);
+    background: var(--status-positive-background);
+    color: var(--status-positive-text);
+    justify-content: center;
+    font-weight: 600;
+  }
+
+  .voice-empty-state {
+    padding: 0 16px;
+  }
+
+  .voice-empty-state .voice-empty-join {
+    margin-top: 8px;
   }
 
   /* channel header: the name shrinks with an ellipsis instead of running under the icons, the search box is an icon until focused
@@ -546,6 +590,40 @@
     font-size: 16px;
   }
 
+  /* composer (spec 02/21): a pill with "+", the field and the emoji button; GIFs and stickers are tabs of the emoji sheet (docked
+     under the composer, ui/BottomSheet.tsx) and Apps is in the "+" sheet */
+  .chat-composer-box:not(.has-reply) {
+    border-radius: 28px;
+  }
+
+  .chat-composer-actions .chat-composer-btn[aria-label="Open GIF picker"],
+  .chat-composer-actions .chat-composer-btn[aria-label="Open sticker picker"],
+  .chat-composer-actions .chat-composer-btn[aria-label="Apps"] {
+    display: none;
+  }
+
+  /* a held finger on these opens their menu as a sheet (ui/ContextMenu.tsx): no native link or text callout on top of it */
+  .rail-item,
+  .channel-row,
+  .category-header,
+  .dm-row,
+  .member-row,
+  .thread-row-link,
+  .guild-header {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* every thread / forum / member search field: the text keeps clear of the magnifier and a long placeholder ends in an ellipsis */
+  .threads-search {
+    gap: 8px;
+  }
+
+  .threads-search input {
+    text-overflow: ellipsis;
+  }
+
   /* touch targets: 40px hit areas on the small icon buttons without changing how they look (the pseudo-element is the extra area) */
   .title-bar-button,
   .chat-composer-btn,
@@ -673,5 +751,172 @@
 
   .toolbar-button.secondary {
     display: none;
+  }
+}
+
+/* ---- phone settings (<= 485px): the section lists as grouped rows (rounded cards, 50px rows, chevrons), like the iOS settings list.
+   The drill-down itself (list, then one page, back button) is the <= 485px block above. ---- */
+@media (max-width: 485px) {
+  /* User Settings: one card per group; the sub-items under the open section only make sense next to the page */
+  .sm-subs {
+    display: none;
+  }
+
+  .sm-side-list {
+    padding: 0 16px 24px;
+  }
+
+  .sm-search {
+    width: auto;
+  }
+
+  .sm-group,
+  .sm-group + .sm-group {
+    margin-top: 16px;
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .sm-group-title {
+    height: auto;
+    margin: 0 4px 8px;
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .sm-item {
+    height: 50px;
+    margin-bottom: 0;
+    padding: 0 16px;
+    border-radius: 0;
+    background-color: var(--background-surface-high);
+    background-image: linear-gradient(var(--border-subtle), var(--border-subtle));
+    background-repeat: no-repeat;
+    background-position: right top;
+    background-size: calc(100% - 52px) 1px;
+    color: var(--text-default);
+  }
+
+  /* every row sits in its own wrapper div, so the card corners go on the wrappers: first after the title (or first child), last child */
+  .sm-group > div:not(.sm-group-title) {
+    overflow: hidden;
+  }
+
+  .sm-group > div:first-child:not(.sm-group-title),
+  .sm-group-title + div {
+    border-radius: 16px 16px 0 0;
+  }
+
+  .sm-group > div:last-child {
+    border-radius: 0 0 16px 16px;
+  }
+
+  .sm-group > div:first-child:last-child,
+  .sm-group-title + div:last-child {
+    border-radius: 16px;
+  }
+
+  .sm-group-title + div > .sm-item,
+  .sm-group > div:first-child > .sm-item,
+  .sm-group > .sm-item {
+    background-image: none;
+  }
+
+  /* Log Out is a lone row straight in its group (no wrapper) */
+  .sm-group > .sm-item {
+    border-radius: 16px;
+  }
+
+  .sm-item.selected {
+    background-color: var(--background-surface-high);
+    font-weight: 400;
+  }
+
+  .sm-item-icon {
+    width: 24px;
+    height: 24px;
+    color: var(--interactive-icon-default);
+  }
+
+  .sm-item.danger .sm-item-icon {
+    color: inherit;
+  }
+
+  .sm-item::after {
+    content: "";
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin: 0 4px 0 auto;
+    border-top: 2px solid var(--interactive-icon-default);
+    border-right: 2px solid var(--interactive-icon-default);
+    transform: rotate(45deg);
+  }
+
+  .sm-item.danger::after {
+    display: none;
+  }
+
+  /* Server / channel / category settings: the same cards from the flat list (a group is the rows between two separators) */
+  .fss-eyebrow {
+    padding: 0 4px 8px;
+  }
+
+  .fss-eyebrow-top {
+    padding-bottom: 12px;
+    font-size: 13px;
+  }
+
+  .fss-separator {
+    width: auto;
+    height: 0;
+    margin: 12px 0;
+    background: none;
+  }
+
+  .fss-item {
+    width: 100%;
+    height: 50px;
+    margin-bottom: 0;
+    padding: 0 16px;
+    border-radius: 0;
+    background-color: var(--background-surface-high);
+    background-image: linear-gradient(var(--border-subtle), var(--border-subtle));
+    background-repeat: no-repeat;
+    background-position: right top;
+    background-size: calc(100% - 16px) 1px;
+  }
+
+  .fss-item.selected {
+    background-color: var(--background-surface-high);
+  }
+
+  .fss-eyebrow + .fss-item,
+  .fss-separator + .fss-item {
+    border-radius: 16px 16px 0 0;
+    background-image: none;
+  }
+
+  .fss-item:has(+ .fss-separator),
+  .fss-item:last-child {
+    border-radius: 0 0 16px 16px;
+  }
+
+  .fss-eyebrow + .fss-item:has(+ .fss-separator),
+  .fss-separator + .fss-item:has(+ .fss-separator),
+  .fss-eyebrow + .fss-item:last-child,
+  .fss-separator + .fss-item:last-child {
+    border-radius: 16px;
+  }
+
+  .fss-item:not(:has(svg))::after {
+    content: "";
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-right: 4px;
+    border-top: 2px solid var(--interactive-icon-default);
+    border-right: 2px solid var(--interactive-icon-default);
+    transform: rotate(45deg);
   }
 }

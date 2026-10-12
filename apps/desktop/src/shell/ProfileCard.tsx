@@ -51,7 +51,7 @@ export function ProfileCardHost() {
 
   return (
     <Popout anchor={anchor} open={open} onClose={close} side="right" align="start" gap={8} className={`profile-card${aboveModal ? " above-modal" : ""}${look?.themeColors ? " pv-themed" : ""}`} style={themeVars(look?.themeColors)}
-      trapFocus={aboveModal} role={aboveModal ? "dialog" : undefined} label={aboveModal && user ? displayName(user, member) : undefined}>
+      sheet="Profile" trapFocus={aboveModal} role={aboveModal ? "dialog" : undefined} label={aboveModal && user ? displayName(user, member) : undefined}>
       {user && look && (
         <>
           <ProfileBanner look={look} className="profile-banner" />

@@ -160,18 +160,11 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   // mount constantly while scrolling a windowed list and the toolbar is most of a row's elements.
   const [armed, setArmed] = useState(false);
   const arm = () => { if (!armed) setArmed(true); };
-  // Touch: there is no hover, so a tap toggles the toolbar (one row at a time) and a ~500 ms press opens the message menu there.
-  const [touchOpen, setTouchOpen] = useState(false);
+  // Touch: there is no hover toolbar; a ~500 ms press opens the message actions (a bottom sheet at phone widths, see MessageMenu).
   const touchRef = useRef(false);
   const press = useRef<{ x: number; y: number; timer: number; fired: boolean } | null>(null);
   const stopPress = () => { if (press.current) window.clearTimeout(press.current.timer); };
   const ownTap = (target: EventTarget) => { const hit = (target as Element).closest(OWN_TAP); return !!hit && rowRef.current !== hit && !!rowRef.current?.contains(hit); };
-  useEffect(() => {
-    if (!touchOpen) return;
-    const away = (e: PointerEvent) => { if (!rowRef.current?.contains(e.target as Node)) setTouchOpen(false); };
-    document.addEventListener('pointerdown', away, true);
-    return () => document.removeEventListener('pointerdown', away, true);
-  }, [touchOpen]);
   const showToolbar = !pending && !editing && !ephemeral && (armed || pickerOpen);
   const cls = ['chat-msg'];
   if (grouped) cls.push('grouped');
@@ -185,7 +178,6 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   if (ephemeral) cls.push('ephemeral');
   if (system) cls.push('system');
   if (chat.replyingId === message.id) cls.push('replying');
-  if (touchOpen) cls.push('touch-open');
 
   if (system) {
     return <div className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id} onContextMenu={e => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
@@ -212,12 +204,6 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
     onPointerUp={stopPress} onPointerCancel={stopPress}
     // the mousedown that follows a touch would close the menu the long press just opened (the menu closes on outside mousedown)
     onTouchEnd={e => { if (press.current?.fired && e.cancelable) e.preventDefault(); }}
-    onClick={e => {
-      if (!touchRef.current || press.current?.fired) return;
-      if (pending || ephemeral || editing || ownTap(e.target)) return;
-      arm();
-      setTouchOpen(open => !open);
-    }}
     onMouseMove={e => { arm(); if (e.shiftKey !== shift) setShift(e.shiftKey); }} onMouseLeave={() => shift && setShift(false)}
     onContextMenu={e => { if (pending || ephemeral || e.target instanceof HTMLAnchorElement) return; e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
     {!grouped && <ReplyPreview message={message} />}

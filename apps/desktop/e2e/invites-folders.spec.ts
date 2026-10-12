@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { pickOption } from './helpers';
+import { appOrigin, pickOption } from './helpers';
 
 // Server folders on the rail and invite link settings (mock mode; docs/api.md "Invites and user settings").
 
@@ -64,7 +64,7 @@ test('the invite modal creates a limited invite and lists friends to send it to'
   await page.getByRole('link', { name: "Sam's server" }).click();
   await page.getByRole('button', { name: 'Invite People' }).click();
   const dialog = page.getByRole('dialog', { name: /Invite friends to/ });
-  await expect(dialog.locator('#invite-link')).toHaveValue(/^vokko\.gg\/[a-z0-9]+$/);
+  await expect(dialog.locator('#invite-link')).toHaveValue(new RegExp(`^${appOrigin(page)}/invite/[a-z0-9]+$`));
   await expect(dialog.getByRole('list', { name: 'Friends' }).getByRole('listitem').first()).toBeVisible();
   await expect(dialog).toContainText('Your invite link expires in 7 days.');
 

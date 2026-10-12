@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { create } from "zustand";
-import { Check, ChevronRight } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight } from "lucide-react";
+import { BottomSheet, usePhone } from "./BottomSheet";
 import { useLayer, useOutsideClose } from "./layers";
 import { placeAtPoint } from "./position";
 
@@ -34,7 +35,9 @@ interface MenuState {
   x: number;
   y: number;
   items: MenuItem[];
-  show(x: number, y: number, items: MenuItem[]): void;
+  /** Phone sheet header: the name of the row the menu was opened on. */
+  title: string;
+  show(x: number, y: number, items: MenuItem[], title?: string): void;
   hide(): void;
 }
 
@@ -43,9 +46,20 @@ const useMenuStore = create<MenuState>()(set => ({
   x: 0,
   y: 0,
   items: [],
-  show: (x, y, items) => set({ open: true, x, y, items }),
+  title: "",
+  show: (x, y, items, title = "") => set({ open: true, x, y, items, title }),
   hide: () => set({ open: false }),
 }));
+
+/** The name on the DM or channel row a menu opened on (a phone sheet's header); "" elsewhere. */
+function rowTitle(target: EventTarget | null | undefined): string {
+  if (!(target instanceof Element)) return "";
+  const dm = target.closest(".dm-row")?.querySelector(".dm-name")?.textContent;
+  if (dm) return dm;
+  const row = target.closest(".channel-row");
+  const name = row?.querySelector(".channel-name")?.textContent;
+  return name ? (row?.classList.contains("voice") ? name : `# ${name}`) : "";
+}
 
 /** `open(event, items)` shows the menu at the pointer (or the element's corner for keyboard events). */
 export function useContextMenu(): { open: (event: ReactMouseEvent | MouseEvent | { clientX: number; clientY: number; preventDefault?: () => void }, items: MenuItem[]) => void; close: () => void } {
@@ -55,7 +69,7 @@ export function useContextMenu(): { open: (event: ReactMouseEvent | MouseEvent |
     (event: { clientX: number; clientY: number; preventDefault?: () => void }, items: MenuItem[]) => {
       if (items.length === 0) return;
       event.preventDefault?.();
-      show(event.clientX, event.clientY, items);
+      show(event.clientX, event.clientY, items, rowTitle((event as { target?: EventTarget | null }).target));
     },
     [show],
   );
@@ -188,10 +202,135 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
   );
 }
 
+/** Phone widths: the menu as a bottom sheet of grouped rows (separators start a new group); a row with children drills down in place. */
+function MenuSheet({ items, title, onClose }: { items: MenuItem[]; title: string; onClose: () => void }) {
+  const [trail, setTrail] = useState<{ label: string; items: MenuItem[] }[]>([]);
+  const here = trail.length > 0 ? trail[trail.length - 1]! : null;
+  const groups: Exclude<MenuItem, { type: "separator" }>[][] = [[]];
+  for (const item of here?.items ?? items) {
+    if ("type" in item) groups.push([]);
+    else groups[groups.length - 1]!.push(item);
+  }
+  return (
+    <BottomSheet open onClose={onClose} label={here?.label ?? (title || "Menu")} className="sheet-menu">
+      {!here && title && <h2 className="sheet-title">{title}</h2>}
+      {here && (
+        <button type="button" className="sheet-back" onClick={() => setTrail(t => t.slice(0, -1))}>
+          <ChevronLeft size={20} aria-hidden="true" /> {here.label}
+        </button>
+      )}
+      {groups
+        .filter(g => g.length > 0)
+        .map((group, g) => (
+          <div key={g} className="sheet-group" role="menu">
+            {group.map(item => {
+              if (item.render) {
+                return (
+                  <div key={item.id} className="sheet-row sheet-row-custom" role="none">
+                    {item.render()}
+                  </div>
+                );
+              }
+              const drill = !!item.children?.length;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+                  aria-checked={item.checked}
+                  disabled={item.disabled}
+                  title={item.tooltip}
+                  className={`sheet-row${item.danger ? " danger" : ""}${item.icon ? "" : " no-icon"}`}
+                  onClick={() => {
+                    if (drill) {
+                      setTrail(t => [...t, { label: item.label, items: item.children ?? [] }]);
+                      return;
+                    }
+                    onClose();
+                    item.onSelect?.();
+                  }}
+                >
+                  {item.icon && <span className="sheet-row-icon">{item.icon}</span>}
+                  <span className="sheet-row-label">
+                    {item.label}
+                    {item.sub && <span className="sheet-row-sub">{item.sub}</span>}
+                  </span>
+                  {item.hint && <span className="sheet-row-trailing">{item.hint}</span>}
+                  {item.checked !== undefined && (
+                    <span className="sheet-row-trailing">
+                      <span className={`context-menu-check${item.checked ? " on" : ""}`}>{item.checked && <Check size={14} strokeWidth={3} />}</span>
+                    </span>
+                  )}
+                  {drill && (
+                    <span className="sheet-row-trailing">
+                      <ChevronRight size={18} aria-hidden="true" />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+    </BottomSheet>
+  );
+}
+
+const LONG_PRESS_MS = 550;
+const LONG_PRESS_SLOP = 10;
+/** Where a held finger does not become a context menu: text entry, and message rows (they have their own press, see chat/MessageItem.tsx). */
+const NO_LONG_PRESS = "input, textarea, [contenteditable], .chat-msg, .sheet";
+
 /** Mount once near the app root. */
 export function ContextMenuHost() {
-  const { open, x, y, items, hide } = useMenuStore();
-  const layer = useLayer(open, hide);
+  const { open, x, y, items, title, hide } = useMenuStore();
+  const phone = usePhone();
+  const layer = useLayer(open && !phone, hide);
+  useEffect(() => {
+    // Touch has no right click (iOS Safari fires no contextmenu event at all): a held finger ~550 ms on something that handles
+    // `contextmenu` opens its menu, as a long press does on a phone. Android Chrome sends its own contextmenu event at about the
+    // same time; that one cancels this timer so a handler runs once.
+    let timer = 0;
+    let at = { x: 0, y: 0 };
+    let swallowClickUntil = 0;
+    const stop = () => window.clearTimeout(timer);
+    const onDown = (event: PointerEvent) => {
+      stop();
+      if (event.pointerType !== "touch" || !(event.target instanceof Element) || event.target.closest(NO_LONG_PRESS)) return;
+      at = { x: event.clientX, y: event.clientY };
+      const target = event.target;
+      timer = window.setTimeout(() => {
+        const menu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: at.x, clientY: at.y });
+        if (!target.dispatchEvent(menu)) swallowClickUntil = Date.now() + 700;
+      }, LONG_PRESS_MS);
+    };
+    const onMove = (event: PointerEvent) => {
+      if (Math.hypot(event.clientX - at.x, event.clientY - at.y) > LONG_PRESS_SLOP) stop();
+    };
+    const onNative = (event: Event) => {
+      if (event.isTrusted) stop();
+    };
+    const onClick = (event: MouseEvent) => {
+      if (Date.now() > swallowClickUntil) return;
+      swallowClickUntil = 0;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", stop, true);
+    document.addEventListener("pointercancel", stop, true);
+    document.addEventListener("contextmenu", onNative, true);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      stop();
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", stop, true);
+      document.removeEventListener("pointercancel", stop, true);
+      document.removeEventListener("contextmenu", onNative, true);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, []);
   useEffect(() => {
     // Shift+F10 and the Menu key: Chromium on Windows/Linux may turn them into a native `contextmenu` event (Windows: on keyup),
     // macOS and Tauri's WKWebView do not. Dispatch one ourselves at the focused element so every onContextMenu handler works from
@@ -239,9 +378,9 @@ export function ContextMenuHost() {
       document.removeEventListener("contextmenu", onNative, true);
     };
   }, []);
-  useOutsideClose(open, () => [...document.querySelectorAll(".context-menu")], hide, layer.isTop);
+  useOutsideClose(open && !phone, () => [...document.querySelectorAll(".context-menu")], hide, layer.isTop);
   useEffect(() => {
-    if (!open) return;
+    if (!open || phone) return;
     const close = () => hide();
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
@@ -251,8 +390,9 @@ export function ContextMenuHost() {
       window.removeEventListener("blur", close);
       document.removeEventListener("scroll", close, true);
     };
-  }, [open, hide]);
+  }, [open, hide, phone]);
   if (!open) return null;
+  if (phone) return <MenuSheet key={`${x}:${y}`} items={items} title={title} onClose={hide} />;
   return createPortal(
     <div className="context-menu-layer" onContextMenu={e => e.preventDefault()}>
       <MenuList key={`${x}:${y}`} items={items} onClose={hide} x={x} y={y} />

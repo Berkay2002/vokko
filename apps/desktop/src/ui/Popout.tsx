@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useFocusTrap, useLayer, useOutsideClose } from "./layers";
+import { BottomSheet, usePhone } from "./BottomSheet";
 import { placeNear, type Align, type Side } from "./position";
 
 export interface PopoutProps {
@@ -18,6 +19,8 @@ export interface PopoutProps {
   label?: string;
   /** Move focus in and keep Tab inside; for a popout opened over a dialog, whose own focus trap would otherwise keep the keyboard out. */
   trapFocus?: boolean;
+  /** At phone widths render as a BottomSheet with this accessible name instead of a floating panel (the placement props are ignored there). */
+  sheet?: string;
   children: ReactNode;
 }
 
@@ -27,13 +30,15 @@ function resolve(anchor: PopoutProps["anchor"]): HTMLElement | null {
 }
 
 /** Floating panel anchored to an element: closes on Escape and on outside clicks (the anchor itself is "inside"). */
-export function Popout({ anchor, open, onClose, side = "bottom", align = "center", gap = 8, className, style, role, label, trapFocus, children }: PopoutProps) {
+export function Popout({ anchor, open, onClose, side = "bottom", align = "center", gap = 8, className, style, role, label, trapFocus, sheet, children }: PopoutProps) {
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const layer = useLayer(open, onClose);
-  useOutsideClose(open, () => [box.current, resolve(anchor)], onClose, layer.isTop);
+  const phone = usePhone();
+  const asSheet = !!sheet && phone;
+  const layer = useLayer(open && !asSheet, onClose);
+  useOutsideClose(open && !asSheet, () => [box.current, resolve(anchor)], onClose, layer.isTop);
   // Only once placed: the box is visibility:hidden until then and cannot take focus.
-  useFocusTrap(open && !!trapFocus && pos !== null, () => box.current);
+  useFocusTrap(open && !!trapFocus && pos !== null && !asSheet, () => box.current);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -53,6 +58,8 @@ export function Popout({ anchor, open, onClose, side = "bottom", align = "center
   }, [open, anchor, side, align, gap, children]);
 
   if (!open) return null;
+  // the classes go on an inner box: the card keeps its own look (banner, absolutely placed avatar) inside the sheet
+  if (asSheet) return <BottomSheet open onClose={onClose} label={sheet}><div className={`popout-sheet ${className ?? ""}`} style={{ ...style, width: undefined }}>{children}</div></BottomSheet>;
   return createPortal(
     <div ref={box} role={role} aria-label={label} className={`popout ${className ?? ""}`} style={{ ...style, left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}>
       {children}

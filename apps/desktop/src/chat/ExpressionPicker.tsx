@@ -1,6 +1,6 @@
 import { useState, type RefObject } from 'react';
 import { Search, Sticker as StickerIcon, X } from 'lucide-react';
-import { Popout } from './shell';
+import { BottomSheet, Popout, usePhone } from './shell';
 import { EmojiPicker, type PickedEmoji } from './EmojiPicker';
 import type { Gif, Snowflake, Sticker } from '../api/types';
 import { GifPicker } from '../media/GifPicker';
@@ -51,7 +51,11 @@ export function ExpressionPickerPopout({ anchor, open, initialTab, onClose, onPi
   anchor: RefObject<HTMLElement | null>; open: boolean; initialTab: ExpressionTab; onClose: () => void; onPickEmoji: (e: PickedEmoji) => void;
   channelId?: Snowflake; onPickGif?: (gif: Gif) => void; onPickSticker?: (sticker: Sticker) => void;
 }) {
-  return <Popout anchor={anchor} open={open} onClose={onClose} side="top"><ExpressionPicker key={initialTab} initialTab={initialTab} onPickEmoji={onPickEmoji} channelId={channelId} onPickGif={onPickGif} onPickSticker={onPickSticker} /></Popout>;
+  const phone = usePhone();
+  const picker = <ExpressionPicker key={initialTab} initialTab={initialTab} onPickEmoji={onPickEmoji} channelId={channelId} onPickGif={onPickGif} onPickSticker={onPickSticker} />;
+  // On a phone the picker is a sheet docked under the composer, which stays visible above it.
+  if (phone) return <BottomSheet dock open={open} onClose={onClose} anchor={anchor} label="Emoji, GIFs and stickers">{picker}</BottomSheet>;
+  return <Popout anchor={anchor} open={open} onClose={onClose} side="top">{picker}</Popout>;
 }
 
 /** Small popout for the "Apps" button: there are no apps yet. */

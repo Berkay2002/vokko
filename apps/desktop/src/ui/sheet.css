@@ -1,0 +1,285 @@
+/* Bottom sheet (ui/BottomSheet.tsx) and the grouped rows that go in it. Phone widths only: nothing renders it above 767px. Tokens only. */
+.sheet-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: flex-end;
+}
+
+/* a docked sheet has no page-wide layer: the chat above it stays touchable */
+.sheet-layer.dock {
+  inset: auto 0 0;
+  pointer-events: none;
+}
+
+.sheet-layer.dock .sheet {
+  pointer-events: auto;
+}
+
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--background-scrim);
+  animation: backdrop-in 0.15s linear;
+}
+
+.sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 90vh;
+  max-height: 90dvh;
+  border-radius: 16px 16px 0 0;
+  background: var(--background-base-low);
+  color: var(--text-default);
+  box-shadow: var(--elevation-high);
+  animation: sheet-in 0.18s var(--ease-out);
+  outline: 0;
+}
+
+.sheet-layer.dock .sheet {
+  height: 50vh;
+  height: 50dvh;
+  border-top: 1px solid var(--border-subtle);
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+
+.sheet-grabber {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 4px;
+  touch-action: none;
+}
+
+.sheet-grabber span {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--interactive-icon-default);
+  opacity: 0.6;
+}
+
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+}
+
+/* the chat shifts up by the docked sheet's height, so the composer stays above it */
+html.sheet-docked .app-frame {
+  padding-bottom: 50vh;
+  padding-bottom: 50dvh;
+}
+
+/* a Popout rendered as a sheet (ui/Popout.tsx `sheet`): the panel fills the sheet and drops its card chrome */
+.sheet .popout-sheet {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.sheet .popout-sheet.profile-card {
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--background-surface-high);
+}
+
+.sheet-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+/* message actions (chat/MessageMenu.tsx): the quick reaction row on top, then grouped rows */
+.sheet-reactions {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.sheet-reaction {
+  display: grid;
+  flex: 1;
+  height: 52px;
+  place-items: center;
+  border-radius: 16px;
+  background: var(--background-surface-high);
+  color: var(--text-strong);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.sheet-reaction:active {
+  background: var(--background-mod-normal);
+}
+
+.sheet-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin: 0 0 8px;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* a submenu of the desktop menu (reactions, reminders, apps) drilled into inside the sheet: finger-sized rows */
+.sheet .chat-menu-inline {
+  border-radius: 16px;
+  background: var(--background-surface-high);
+}
+
+.sheet .chat-menu-inline .chat-menu-list button {
+  min-height: 48px;
+  font-size: 16px;
+}
+
+/* the full emoji picker as a reaction sheet: the sheet's width, a fixed share of the viewport */
+.sheet-picker .sheet-body {
+  padding: 0;
+}
+
+.sheet .chat-emoji-picker {
+  width: 100%;
+  max-width: none;
+  height: 60vh;
+  height: 60dvh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+}
+
+/* ---- grouped rows (spec 04 / 10 / 15): a rounded card per group, rows about 50px, separator inset to the label ---- */
+.sheet-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 4px 12px;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.sheet-group {
+  margin: 0 0 12px;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--background-surface-high);
+}
+
+.sheet-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 50px;
+  padding: 0 16px;
+  color: var(--text-strong);
+  font-size: 16px;
+  line-height: 20px;
+  text-align: left;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.sheet-row + .sheet-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 52px;
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.sheet-row.no-icon + .sheet-row::before,
+.sheet-row.no-icon::before {
+  left: 16px;
+}
+
+.sheet-row:active {
+  background: var(--interactive-background-active, var(--interactive-background-hover));
+}
+
+.sheet-row.danger {
+  color: var(--text-danger);
+}
+
+.sheet-row:disabled {
+  opacity: 0.5;
+}
+
+.sheet-row-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  color: var(--interactive-icon-default);
+}
+
+.sheet-row.danger .sheet-row-icon {
+  color: inherit;
+}
+
+.sheet-row-label {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sheet-row-sub {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.sheet-row-trailing {
+  display: flex;
+  flex: none;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* the call's text chat: full height, the chat fills the sheet and keeps its own scrolling and composer */
+.sheet.voice-chat-sheet {
+  height: calc(100vh - 48px);
+  height: calc(100dvh - 48px);
+  max-height: none;
+}
+
+.voice-chat-sheet .sheet-body {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.voice-chat-sheet .sheet-title {
+  flex: none;
+  padding: 0 16px 8px;
+  text-align: center;
+}

@@ -123,7 +123,7 @@ function GuildHeader({ guild, overBanner }: { guild: Guild; overBanner: boolean 
           </Tooltip>
         )}
       </div>
-      <Popout anchor={anchor} open={open} onClose={() => setOpen(false)} side="bottom" align="center" gap={4} className="guild-menu" style={{ width: 220 }}>
+      <Popout anchor={anchor} open={open} onClose={() => setOpen(false)} side="bottom" align="center" gap={4} className="guild-menu" style={{ width: 220 }} sheet="Server menu">
         <div role="menu" className="guild-menu-list">
           {items.map((item, index) => {
             if ("type" in item) return <div key={`sep-${index}`} className="guild-menu-separator" />;

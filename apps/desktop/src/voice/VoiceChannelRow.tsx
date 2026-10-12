@@ -11,7 +11,7 @@ import { channelContextItems } from "../shell/menus";
 import { openModal } from "../shell/modalStore";
 import { go, guildPath } from "../shell/nav";
 import { usePermissions } from "../shell/usePermissions";
-import { Tooltip, useContextMenu } from "../ui";
+import { PHONE_QUERY, Tooltip, useContextMenu } from "../ui";
 import { joinVoiceChannel } from "./engine";
 import { useVoice } from "./store";
 import { formatElapsed, useElapsedSeconds, useVoiceUi } from "./uiStore";
@@ -50,7 +50,8 @@ export function VoiceChannelRow({ channel, guild }: { channel: Channel; guild: G
   const canInvite = can(Perm.CREATE_INSTANT_INVITE);
   const className = `channel-row voice${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}${inVoice ? " connected" : ""}${showStatus ? " has-status" : ""}`;
   const open = () => {
-    joinVoiceChannel(channel);
+    // A phone opens the channel's preview (Join button) first; joining at once is the desktop behaviour.
+    if (!window.matchMedia(PHONE_QUERY).matches) joinVoiceChannel(channel);
     go(guildPath(guild.id, channel.id));
   };
   const stop = (e: { stopPropagation(): void }) => e.stopPropagation();

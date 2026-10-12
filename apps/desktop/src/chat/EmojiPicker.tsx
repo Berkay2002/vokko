@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Clock, Dog, Flag, Hand, Lightbulb, Pizza, Plane, Search, Smile, Trophy, Hash, X } from 'lucide-react';
-import { Popout, scrollBehavior } from './shell';
+import { BottomSheet, Popout, scrollBehavior, usePhone } from './shell';
 import { SuperReactToggle } from '../perks/SuperReactions';
 import { getRecentEmoji, getSkinTone, pushRecentEmoji, setSkinTone, useEmojiDb, type EmojiEntry } from './emojiData';
 import { CustomEmojiRail, CustomEmojiSections, CustomSearchResults, hasCustomResults, usePickerSections, type CustomHover, type CustomPick } from '../emoji/PickerSections';
@@ -117,5 +117,8 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
 }
 
 export function EmojiPickerPopout({ anchor, open, onClose, onPick, reactionChannelId, superReactions }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; onPick: (e: PickedEmoji, burst: boolean) => void; reactionChannelId?: string; superReactions?: boolean }) {
-  return <Popout anchor={anchor} open={open} onClose={onClose} side="top"><EmojiPicker onPick={onPick} reactionChannelId={reactionChannelId} superReactions={superReactions} /></Popout>;
+  const phone = usePhone();
+  const picker = <EmojiPicker onPick={onPick} reactionChannelId={reactionChannelId} superReactions={superReactions} />;
+  if (phone) return <BottomSheet open={open} onClose={onClose} label="Emoji" className="sheet-picker">{picker}</BottomSheet>;
+  return <Popout anchor={anchor} open={open} onClose={onClose} side="top">{picker}</Popout>;
 }

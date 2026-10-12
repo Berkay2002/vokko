@@ -61,7 +61,7 @@ export function UserPanelPopout({ anchor, open, onClose, status, onStatus, custo
 
   // The anchor (the account button) sits ~7px below the panel's top edge: 18px leaves a ~10px gap above the panel, as in Discord.
   return (
-    <Popout anchor={anchor} open={open} onClose={onClose} side="top" align="start" gap={18} role="dialog" label="User profile" className={`profile-card user-popout${look.themeColors ? " pv-themed" : ""}`} style={themeVars(look.themeColors)}>
+    <Popout anchor={anchor} open={open} onClose={onClose} side="top" align="start" gap={18} role="dialog" label="User profile" className={`profile-card user-popout${look.themeColors ? " pv-themed" : ""}`} style={themeVars(look.themeColors)} sheet="User profile">
       <ProfileBanner look={look} className="profile-banner" />
       <div className="profile-avatar">
         <Avatar user={me} size={80} status />

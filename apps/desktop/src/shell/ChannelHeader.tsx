@@ -6,7 +6,7 @@ import { dmName, useStore } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
 import { PinnedMessages } from "../chat/PinnedMessages";
 import { ThreadsToolbar } from "../threads/ThreadsToolbar";
-import { Popout, Tooltip, useContextMenu } from "../ui";
+import { Popout, Tooltip, useContextMenu, usePhone } from "../ui";
 import { Avatar } from "./Avatar";
 import { isPrivateChannel } from "./channelPrivacy";
 import { NavToggle } from "./NavToggle";
@@ -73,9 +73,10 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
   const group = channel.type === ChannelType.GroupDM;
   useShortcut("pins", () => setPinsOpen(o => !o), !voice && !forum && !gated);
   const oneToOne = !guild && !group && !!first;
-  // "N online" under the name on a phone (CSS hides it elsewhere); counted only for server channels.
+  // "N online" under the name, phone only (it walks every member on each store update); counted only for server channels.
+  const phone = usePhone();
   const online = useStore(s => {
-    if (!channel.guild_id) return 0;
+    if (!phone || !channel.guild_id) return 0;
     let n = 0;
     for (const id in s.members[channel.guild_id]) if ((s.presences[id]?.status ?? "offline") !== "offline") n++;
     return n;
@@ -108,7 +109,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             <div className="channel-header-name-wrap">
               <h1 className="channel-header-name">{channel.name}</h1>
               <ChevronRight size={16} className="channel-header-chevron" aria-hidden="true" />
-              {!voice && !gated && <span className="channel-header-online">{online} online</span>}
+              {phone && !voice && !gated && <span className="channel-header-online">{online} online</span>}
               {/* Covers the name where the topic hides (responsive.css), so the topic dialog stays reachable without taking header width. It is described by the (hidden) topic button, so screen readers still get the text. */}
               {channel.topic && !gated && (
                 <button type="button" className="channel-header-topic-entry" title={channel.topic} aria-describedby={`channel-topic-${channel.id}`} aria-haspopup="dialog" aria-label={`${channel.name}, channel topic`} onClick={() => openModal({ type: "channelTopic", channelId: channel.id })} />

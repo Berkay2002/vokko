@@ -1,6 +1,7 @@
 export { Tooltip, type TooltipProps } from "./Tooltip";
 export { Popout, type PopoutProps } from "./Popout";
 export { Modal, type ModalProps } from "./Modal";
+export { BottomSheet, usePhone, PHONE_QUERY, type BottomSheetProps } from "./BottomSheet";
 export { Dropdown, type DropdownOption, type DropdownProps } from "./Dropdown";
 export { ContextMenuHost, useContextMenu, type MenuItem } from "./ContextMenu";
 export { hasOpenLayer, useFocusTrap, useLayer, useOutsideClose } from "./layers";
