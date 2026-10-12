@@ -237,13 +237,14 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
 
   function send() {
     if (tooLong) return;
-    const command = uploads.length === 0 ? commands.submit(rawContent) : 'none';
+    const command = commands.submit(rawContent, uploads.length > 0); // app commands are not run with files attached
+    const sendText = typeof command === 'object' ? command.content : rawContent; // a built-in command sends its text like a typed message, files included
     if (command === 'blocked') return;
     if (command === 'sent') { finishSend(); return; }
     if (anyUploading) {
       // Enter while a file is still uploading: the message waits (as the "Uploading N files" card) and posts when the uploads settle.
       messageStore.sendAfterUploads(channelId, chat.me, {
-        content: convert ? convertEmoticons(rawContent) : rawContent,
+        content: convert ? convertEmoticons(sendText) : sendText,
         uploads: uploads.filter(u => u.status !== 'error'),
         reply: replyTo,
         mention: mentionReply,
@@ -255,7 +256,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     // Renamed / alt-texted / spoiler files go as CreateMessageRequest.attachments[]; untouched ones keep the plain id list.
     const modified = readyUploads.some(u => u.filename !== undefined || u.description !== undefined);
     messageStore.send(channelId, chat.me, {
-      content: convert ? convertEmoticons(rawContent) : rawContent,
+      content: convert ? convertEmoticons(sendText) : sendText,
       attachments: readyUploads.map(u => ({
         ...u.attachment!,
         ...(u.filename !== undefined ? { filename: u.filename } : {}),
@@ -284,7 +285,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
 
   function onKeyDown(e: KeyboardEvent<HTMLElement>) {
     if (e.nativeEvent.isComposing) return;
-    if (commands.onKeyDown(e)) return;
+    if (suggestions.length === 0 && commands.onKeyDown(e)) return; // an open @mention / :emoji / #channel picker wins inside built-ins
     if (suggestions.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSelected(s => (s + 1) % suggestions.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setSelected(s => (s - 1 + suggestions.length) % suggestions.length); return; }

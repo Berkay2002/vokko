@@ -52,6 +52,56 @@ test('run /echo from the picker and see the ephemeral reply, then dismiss it', a
   await expect(page.locator('.chat-msg', { hasText: secret })).toHaveCount(0);
 });
 
+test('typing / opens the panel with the app rail and sections, and the rail scrolls to a section', async ({ page }) => {
+  await openGeneral(page);
+  const box = composer(page);
+  await box.click();
+  await box.pressSequentially('/');
+  const picker = page.getByRole('listbox', { name: 'Commands' });
+  const rail = page.getByRole('navigation', { name: 'Command sources' });
+  await expect(rail.getByRole('button', { name: 'Echo' })).toBeVisible();
+  await expect(rail.getByRole('button', { name: 'Built-in' })).toBeVisible();
+  await expect(rail.getByRole('button', { name: 'Frequently Used' })).toHaveCount(0);
+  await expect(picker.locator('.apps-picker-group', { hasText: 'Echo' })).toBeVisible();
+  await expect(picker.locator('.apps-picker-group', { hasText: 'Built-in' })).toHaveCount(1);
+  await expect(picker.getByRole('option', { name: /\/shrug/ })).toHaveCount(1);
+  await expect(picker.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
+  await rail.getByRole('button', { name: 'Built-in' }).click();
+  await expect(picker.locator('.apps-picker-group', { hasText: 'Built-in' })).toBeInViewport();
+  await expect(rail.getByRole('button', { name: 'Built-in' })).toHaveClass(/active/);
+  await rail.getByRole('button', { name: 'Echo' }).click();
+  await expect(picker.locator('.apps-picker-group', { hasText: 'Echo' })).toBeInViewport();
+  await box.pressSequentially('ec'); // filtering drops the rail and the sections without matches
+  await expect(rail).toHaveCount(0);
+  await expect(picker.locator('.apps-picker-group')).toHaveCount(1);
+});
+
+test('built-in /shrug posts the message with the face, and Echo shows under Frequently Used after a run', async ({ page }) => {
+  await openGeneral(page);
+  const box = composer(page);
+  await box.click();
+  await box.pressSequentially('/shrug hi');
+  await box.press('Enter');
+  await expect(box).toHaveText('');
+  await expect(row(page, 'hi ¯\\_(ツ)_/¯')).toBeVisible();
+
+  await box.pressSequentially('/shrug me'); // "me" is a prefix of the option name, but free text sends
+  await box.press('Enter');
+  await expect(box).toHaveText('');
+  await expect(row(page, 'me ¯\\_(ツ)_/¯')).toBeVisible();
+
+  await box.pressSequentially('/echo text:again');
+  await box.press('Enter');
+  await expect(row(page, 'again')).toBeVisible();
+  await box.pressSequentially('/');
+  const picker = page.getByRole('listbox', { name: 'Commands' });
+  await expect(picker.locator('.apps-picker-group').first()).toHaveText('Frequently Used');
+  const recent = picker.getByRole('group', { name: 'Frequently Used' });
+  await expect(recent.getByRole('option').first()).toContainText('/shrug'); // used twice, ahead of /echo
+  await expect(recent.getByRole('option', { name: /\/echo/ })).toHaveCount(1);
+  await expect(page.getByRole('navigation', { name: 'Command sources' }).getByRole('button', { name: 'Frequently Used' })).toBeVisible();
+});
+
 test('a deferred /roll thinks first, then shows the result to everyone', async ({ page }) => {
   await openGeneral(page);
   const box = composer(page);

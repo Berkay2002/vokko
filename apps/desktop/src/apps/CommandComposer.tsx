@@ -1,15 +1,14 @@
 // The `/` command picker of the composer: commands grouped by app, option chips, choices and autocomplete, keyboard navigation,
 // and running the command instead of sending a message. The composer only forwards keys, its text and the submit.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { Check, CircleAlert, LayoutGrid, Loader2, X } from "lucide-react";
-import { appStore } from "../api/store";
+import { Check, CircleAlert, Clock, LayoutGrid, Loader2, SquareSlash, X } from "lucide-react";
+import { appStore, useStore } from "../api/store";
 import { ApplicationCommandOptionType, type ApplicationCommand, type ApplicationCommandOption, type ApplicationCommandOptionChoice, type InteractionDataOption, type Snowflake } from "../api/types";
-import { Popout } from "../ui";
+import { Popout, Tooltip } from "../ui";
 import {
   buildOptions,
   commandInsertText,
   matchChoices,
-  matchCommands,
   parseInput,
   remainingOptions,
   replaceValue,
@@ -17,6 +16,8 @@ import {
   type ValueResolvers,
 } from "./commandParser";
 import { AppIcon } from "./AppIcon";
+import { BUILTIN_APP_ID, BUILTIN_APP_NAME, builtinContent, builtinsFor, isBuiltin, withBuiltins } from "./builtins";
+import { bumpRecent, buildSections, loadRecents, saveRecents, type PanelSection, type Recents } from "./panel";
 import { dismissRun, loadIndex, requestAutocomplete, runCommand, useAppsStore } from "./store";
 import "./apps.css";
 
@@ -31,7 +32,7 @@ const OPTION_TYPE_LABEL: Record<ApplicationCommandOptionType, string> = {
 };
 
 type Item =
-  | { kind: "command"; key: string; command: ApplicationCommand; appName: string; appIcon: string | null; groupStart: boolean }
+  | { kind: "command"; key: string; command: ApplicationCommand; appName: string; appIcon: string | null; section: PanelSection["kind"] }
   | { kind: "option"; key: string; option: ApplicationCommandOption }
   | { kind: "choice"; key: string; choice: ApplicationCommandOptionChoice; insert: string }
   | { kind: "boolean"; key: string; value: boolean };
@@ -53,13 +54,34 @@ function resolversFor(channelId: Snowflake): ValueResolvers {
   };
 }
 
+/** Same limit as the composer's own. */
+const MAX_MESSAGE = 2000;
+
+/** An app's icon, or the slash tile of the built-in commands. */
+function AppBadge({ name, icon, size, builtin }: { name: string; icon: string | null; size: number; builtin: boolean }) {
+  if (!builtin) return <AppIcon name={name} icon={icon} size={size} />;
+  return (
+    <span className="apps-icon apps-icon-builtin" aria-hidden="true" style={{ width: size, height: size }}>
+      <SquareSlash size={Math.round(size * 0.7)} />
+    </span>
+  );
+}
+
+/** The icon of a panel section: a clock for Frequently Used, the app's icon, the slash tile for Built-in. */
+function SectionIcon({ section, size }: { section: PanelSection; size: number }) {
+  if (section.kind === "recent") return <Clock size={size === 16 ? 14 : 20} aria-hidden="true" />;
+  if (section.kind === "builtin") return <AppBadge name={section.name} icon={null} size={size} builtin />;
+  return <AppIcon name={section.name} icon={section.app?.icon ?? null} size={size} />;
+}
+
 export interface CommandComposer {
   /** The text is a slash command the picker handles. */
   active: boolean;
   /** Keys the picker consumed (arrows, Enter/Tab on a suggestion, Escape). */
   onKeyDown(event: KeyboardEvent<HTMLElement>): boolean;
-  /** Enter on the composer: "sent" ran the command, "blocked" kept the text (an error is shown), "none" = not a command. */
-  submit(rawText: string): "sent" | "blocked" | "none";
+  /** Enter on the composer: "sent" ran the command, "blocked" kept the text (an error is shown), "none" = not a command,
+   *  a message = the text of a built-in command, for the composer to send like a typed message. */
+  submit(rawText: string, hasUploads?: boolean): "sent" | "blocked" | "none" | { kind: "message"; content: string };
   panel: ReactNode;
 }
 
@@ -75,7 +97,14 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
   const entry = useAppsStore(s => s.indexes[channelId]);
   const runs = useAppsStore(s => s.runs);
   const index = entry?.data;
+  const meId = useStore(s => s.me?.id ?? null);
+  const [recents, setRecents] = useState<Recents>(() => loadRecents(meId));
+  useEffect(() => setRecents(loadRecents(meId)), [meId]);
   const [selected, setSelected] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
+  const keyNav = useRef(false);
+  const railLock = useRef(0);
+  const [railActive, setRailActive] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [autocomplete, setAutocomplete] = useState<{ nonce: string; key: string } | null>(null);
@@ -90,10 +119,15 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
     if (slash && !entry) void loadIndex(channelId);
   }, [slash, entry, channelId]);
 
-  const commands = index?.application_commands;
-  const parsed: ParsedInput = useMemo(() => parseInput(text, caret, commands ?? []), [text, caret, commands]);
+  // The channel's commands plus the client-side built-ins (they work before the index loads and in channels without apps).
+  const appCommands = index?.application_commands;
+  const commands = useMemo(() => withBuiltins(appCommands ?? []), [appCommands]);
+  const parsed: ParsedInput = useMemo(() => parseInput(text, caret, commands), [text, caret, commands]);
   const command = parsed.command;
   const appOf = (id: Snowflake) => index?.applications.find(a => a.id === id);
+  const appInfo = (id: Snowflake): { name: string; icon: string | null } => (id === BUILTIN_APP_ID ? { name: BUILTIN_APP_NAME, icon: null } : appOf(id) ?? { name: "App", icon: null });
+  const commandQuery = parsed.slash && parsed.active?.kind === "command" ? parsed.active.query : null;
+  const sections = useMemo(() => (commandQuery === null ? [] : buildSections(commands, index?.applications ?? [], commandQuery, recents)), [commands, index, commandQuery, recents]);
 
   // Autocomplete: ask the bot (debounced) while a value of an autocomplete option is typed.
   const focusedOption = parsed.active?.kind === "option-value" && parsed.active.option.autocomplete ? parsed.active : null;
@@ -112,21 +146,19 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
 
   const items: Item[] = useMemo(() => {
     const active = parsed.active;
-    if (!parsed.slash || !commands) return [];
+    if (!parsed.slash) return [];
+    // One row per command of each section, in section order (a Frequently Used command is listed again under its app).
     if (active?.kind === "command") {
-      // Grouped by app (a stable sort keeps the match order inside each app), with a header at each group start.
-      const list = matchCommands(commands, active.query)
-        .slice(0, 25)
-        .map(c => ({ c, app: appOf(c.application_id) }))
-        .sort((a, b) => (a.app?.name ?? "").localeCompare(b.app?.name ?? ""));
-      let last: Snowflake | null = null;
-      return list.map(({ c, app }) => {
-        const item: Item = { kind: "command", key: `c${c.id}`, command: c, appName: app?.name ?? "App", appIcon: app?.icon ?? null, groupStart: c.application_id !== last };
-        last = c.application_id;
-        return item;
-      });
+      return sections.flatMap(sec =>
+        sec.commands.map((c): Item => {
+          const app = sec.kind === "recent" ? appInfo(c.application_id) : sec.app ?? { name: sec.name, icon: null };
+          return { kind: "command", key: `${sec.id}:${c.id}`, command: c, appName: app.name, appIcon: app.icon, section: sec.kind };
+        }),
+      );
     }
     if (!command) return [];
+    // Free text after a built-in (`/shrug me`) is the message, not an option name: no list, so Enter sends it.
+    if (active?.kind === "option-name" && isBuiltin(command) && parsed.options.length === 0) return [];
     if (active?.kind === "option-name") return remainingOptions(parsed, active.query).map(o => ({ kind: "option", key: `o${o.name}`, option: o }));
     // A value followed by a space is finished: no list, so Enter runs the command.
     if (active?.kind === "option-value" && !/\s$/.test(active.query)) {
@@ -137,11 +169,42 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
     }
     return [];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, commands, command, choices, autocomplete, focusKey, index]);
+  }, [parsed, sections, command, choices, autocomplete, focusKey, index]);
 
-  // Command groups keep their app header in order after sorting.
   const listKey = `${parsed.active?.kind ?? ""}:${parsed.name}:${parsed.active && "query" in parsed.active ? parsed.active.query : ""}`;
   useEffect(() => setSelected(0), [listKey]);
+  useEffect(() => setRailActive(null), [listKey]);
+  // Arrow keys keep the selected row in view (the first row also shows the header above it).
+  useEffect(() => {
+    if (!keyNav.current) return;
+    keyNav.current = false;
+    const list = listRef.current;
+    if (!list) return;
+    if (selected === 0) list.scrollTop = 0;
+    else list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [selected]);
+
+  /** The section the rail highlights follows the list's scroll position. */
+  function syncRail(): void {
+    const list = listRef.current;
+    if (!list || Date.now() < railLock.current) return;
+    let current = sections[0]?.id ?? null;
+    for (const sec of sections) {
+      const el = list.querySelector<HTMLElement>(`[data-section="${sec.id}"]`);
+      if (el && el.offsetTop <= list.scrollTop + 8) current = sec.id;
+    }
+    if (list.scrollHeight > list.clientHeight && list.scrollTop + list.clientHeight >= list.scrollHeight - 2) current = sections[sections.length - 1]?.id ?? current;
+    setRailActive(current);
+  }
+
+  function jumpTo(id: string): void {
+    const list = listRef.current;
+    const el = list?.querySelector<HTMLElement>(`[data-section="${id}"]`);
+    if (!list || !el) return;
+    railLock.current = Date.now() + 300;
+    setRailActive(id);
+    list.scrollTo({ top: el.offsetTop });
+  }
   useEffect(() => setError(null), [text]);
   const open = items.length > 0 && dismissed !== listKey;
 
@@ -170,11 +233,13 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
     if (!open) return false;
     if (e.key === "ArrowDown") {
       e.preventDefault();
+      keyNav.current = true;
       setSelected(s => (s + 1) % items.length);
       return true;
     }
     if (e.key === "ArrowUp") {
       e.preventDefault();
+      keyNav.current = true;
       setSelected(s => (s - 1 + items.length) % items.length);
       return true;
     }
@@ -193,25 +258,54 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
     return false;
   }
 
-  function submit(rawText: string): "sent" | "blocked" | "none" {
+  function noteUsed(used: ApplicationCommand): void {
+    const next = bumpRecent(loadRecents(meId), used.id, Date.now());
+    saveRecents(meId, next);
+    setRecents(next);
+  }
+
+  function submit(rawText: string, hasUploads = false): "sent" | "blocked" | "none" | { kind: "message"; content: string } {
     if (!rawText.startsWith("/")) return "none";
-    const raw = parseInput(rawText, rawText.length, commands ?? []);
-    const target = raw.command ?? (raw.nameDone ? null : (commands ?? []).find(c => c.type === 1 && c.name === raw.name.toLowerCase()) ?? null);
+    const raw = parseInput(rawText, rawText.length, commands);
+    const target = raw.command ?? (raw.nameDone ? null : commands.find(c => c.type === 1 && c.name === raw.name.toLowerCase()) ?? null);
     if (!target) {
-      if (!commands) {
+      if (!index) {
         setError("Commands are still loading.");
         return "blocked";
       }
       return "none"; // not a command: sent as a normal message
     }
+    if (hasUploads && !isBuiltin(target)) return "none";
+    // An app may own the name of a built-in: wait for the index (after a failed load the built-in is used).
+    if (isBuiltin(target) && !index) {
+      setError("Commands are still loading.");
+      return "blocked";
+    }
     const withCommand = raw.command ? raw : { ...raw, command: target };
     const built = buildOptions(withCommand, resolversFor(channelId));
     const problems = Object.entries(built.errors);
-    if (built.missing.length > 0 || problems.length > 0) {
+    // A built-in without `message:` takes the rest of the text as its message (`/shrug hi`).
+    const free = isBuiltin(target) && raw.options.length === 0;
+    if (!free && (built.missing.length > 0 || problems.length > 0)) {
       setError(built.missing.length > 0 ? `Missing required option${built.missing.length > 1 ? "s" : ""}: ${built.missing.join(", ")}` : problems.map(([name, message]) => `${name}: ${message}`).join(" · "));
       return "blocked";
     }
+    if (isBuiltin(target)) {
+      const message = free ? rawText.slice(raw.name.length + 1) : String(built.options.find(o => o.name === "message")?.value ?? "");
+      const content = builtinContent(target.name, message);
+      if (content === null) {
+        setError("Missing required option: message");
+        return "blocked";
+      }
+      if (content.length > MAX_MESSAGE) {
+        setError(`Message is too long (${MAX_MESSAGE} characters at most, with what the command adds).`);
+        return "blocked";
+      }
+      noteUsed(target);
+      return { kind: "message", content };
+    }
     runCommand(channelId, target, built.options);
+    noteUsed(target); // counted when sent: the store has no cheap success hook (a failed run still counts)
     return "sent";
   }
 
@@ -221,67 +315,119 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
   const built = command ? buildOptions(parsed, resolversFor(channelId)) : null;
   const activeOption = parsed.active?.kind === "option-value" ? parsed.active.option : null;
 
+  function renderRow(item: Item, i: number): ReactNode {
+    const optional = item.kind === "command" ? (item.command.options ?? []).filter(o => !o.required).length : 0;
+    return (
+      <div
+        key={item.key}
+        role="option"
+        aria-selected={i === selected}
+        className={`chat-autocomplete-item apps-picker-item${item.kind === "command" ? " apps-command-row" : ""}${i === selected ? " selected" : ""}`}
+        onMouseEnter={() => {
+          keyNav.current = false;
+          setSelected(i);
+        }}
+        onMouseDown={e => {
+          e.preventDefault();
+          apply(item);
+        }}
+      >
+        {item.kind === "command" && (
+          <>
+            {item.section === "recent" && <AppBadge name={item.appName} icon={item.appIcon} size={32} builtin={isBuiltin(item.command)} />}
+            <span className="apps-row-text">
+              <span className="apps-row-head">
+                <span className="chat-autocomplete-label">/{item.command.name}</span>
+                {item.command.options?.filter(o => o.required).map(o => <span key={o.name} className="apps-option-chip ghost">{o.name}</span>)}
+                {optional > 0 && (
+                  <>
+                    <span className="apps-row-sep" aria-hidden="true" />
+                    <span className="apps-row-optional">+{optional} optional</span>
+                  </>
+                )}
+              </span>
+              <span className="apps-picker-desc">{item.command.description}</span>
+            </span>
+          </>
+        )}
+        {item.kind === "option" && (
+          <>
+            <span className="chat-autocomplete-label">{item.option.name}</span>
+            {item.option.required && <span className="apps-required">required</span>}
+            <span className="apps-picker-desc">{item.option.description}</span>
+            <span className="chat-autocomplete-hint">{OPTION_TYPE_LABEL[item.option.type]}</span>
+          </>
+        )}
+        {item.kind === "choice" && <span className="chat-autocomplete-label">{item.choice.name}</span>}
+        {item.kind === "boolean" && <span className="chat-autocomplete-label">{item.value ? "True" : "False"}</span>}
+      </div>
+    );
+  }
+
   const panel =
     open || showHeader || error || channelRuns.length > 0 ? (
       <div className="apps-command-layer">
-        {open && (
-          <div className="chat-autocomplete apps-picker" role="listbox" aria-label={parsed.active?.kind === "command" ? "Commands" : "Command options"}>
+        {open && commandQuery !== null && (
+          <div className="chat-autocomplete apps-picker apps-panel">
+            {commandQuery === "" && (
+              <nav className="apps-rail" aria-label="Command sources">
+                {sections.map(sec => (
+                  <div key={sec.id} className="apps-rail-entry">
+                    {sec.kind === "builtin" && sections.length > 1 && <hr className="apps-rail-divider" />}
+                    <Tooltip content={sec.name} side="right">
+                      <button
+                        type="button"
+                        className={`apps-rail-btn${(railActive ?? sections[0]?.id) === sec.id ? " active" : ""}`}
+                        aria-label={sec.name}
+                        onMouseDown={e => e.preventDefault()}
+                        onClick={() => jumpTo(sec.id)}
+                      >
+                        <SectionIcon section={sec} size={32} />
+                      </button>
+                    </Tooltip>
+                  </div>
+                ))}
+              </nav>
+            )}
+            <div ref={listRef} className="apps-panel-list" role="listbox" aria-label="Commands" onScroll={syncRail}>
+              {sections.map(sec => (
+                <div key={sec.id} role="group" aria-labelledby={`apps-sec-${sec.id}`} data-section={sec.id}>
+                  <div id={`apps-sec-${sec.id}`} className="apps-picker-group">
+                    <SectionIcon section={sec} size={16} />
+                    {sec.name}
+                  </div>
+                  {items.map((item, i) => (item.kind === "command" && item.key.startsWith(`${sec.id}:`) ? renderRow(item, i) : null))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {open && commandQuery === null && (
+          <div className="chat-autocomplete apps-picker" role="listbox" aria-label="Command options">
             {items.map((item, i) => (
               <div key={item.key}>
-                {item.kind === "command" && item.groupStart && (
-                  <div className="chat-autocomplete-title apps-picker-group">
-                    <AppIcon name={item.appName} icon={item.appIcon} size={16} />
-                    {item.appName}
-                  </div>
-                )}
                 {i === 0 && item.kind === "option" && <div className="chat-autocomplete-title">Options</div>}
                 {i === 0 && (item.kind === "choice" || item.kind === "boolean") && <div className="chat-autocomplete-title">{activeOption?.name ?? "Choices"}</div>}
-                <div
-                  role="option"
-                  aria-selected={i === selected}
-                  className={`chat-autocomplete-item apps-picker-item${i === selected ? " selected" : ""}`}
-                  onMouseEnter={() => setSelected(i)}
-                  onMouseDown={e => {
-                    e.preventDefault();
-                    apply(item);
-                  }}
-                >
-                  {item.kind === "command" && (
-                    <>
-                      <span className="chat-autocomplete-label">/{item.command.name}</span>
-                      {item.command.options?.filter(o => o.required).map(o => <span key={o.name} className="apps-option-chip ghost">{o.name}</span>)}
-                      <span className="apps-picker-desc">{item.command.description}</span>
-                      <span className="chat-autocomplete-hint">{item.appName}</span>
-                    </>
-                  )}
-                  {item.kind === "option" && (
-                    <>
-                      <span className="chat-autocomplete-label">{item.option.name}</span>
-                      {item.option.required && <span className="apps-required">required</span>}
-                      <span className="apps-picker-desc">{item.option.description}</span>
-                      <span className="chat-autocomplete-hint">{OPTION_TYPE_LABEL[item.option.type]}</span>
-                    </>
-                  )}
-                  {item.kind === "choice" && <span className="chat-autocomplete-label">{item.choice.name}</span>}
-                  {item.kind === "boolean" && <span className="chat-autocomplete-label">{item.value ? "True" : "False"}</span>}
-                </div>
+                {renderRow(item, i)}
               </div>
             ))}
           </div>
         )}
         {showHeader && command && (
           <div className="apps-command-bar" aria-label={`Command /${command.name}`}>
-            <AppIcon name={app?.name ?? "App"} icon={app?.icon ?? null} size={20} />
+            <AppBadge name={app?.name ?? "App"} icon={app?.icon ?? null} size={20} builtin={isBuiltin(command)} />
             <span className="apps-command-name">/{command.name}</span>
             {(command.options ?? []).map(option => {
               const typed = parsed.options.find(o => o.name === option.name);
               const problem = built?.errors[option.name];
-              const filled = !!typed && !problem && typed.raw !== "";
+              // `/shrug hi`: the text after a built-in's name stands for its message.
+              const free = isBuiltin(command) && parsed.options.length === 0 && text.slice(parsed.name.length + 1).trim() !== "";
+              const filled = (!!typed && !problem && typed.raw !== "") || free;
               const cls = ["apps-option-chip"];
               if (activeOption?.name === option.name) cls.push("active");
               if (filled) cls.push("filled");
               if (problem) cls.push("invalid");
-              if (option.required && !typed) cls.push("missing");
+              if (option.required && !typed && !free) cls.push("missing");
               return (
                 <button
                   key={option.name}
@@ -327,7 +473,8 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
       </div>
     ) : null;
 
-  return { active: parsed.slash && !!command, onKeyDown, submit, panel };
+  // Built-ins take plain text, so the composer keeps its @mention, :emoji and #channel pickers inside them.
+  return { active: parsed.slash && !!command && !isBuiltin(command), onKeyDown, submit, panel };
 }
 
 /** The composer's apps button: every command of the channel by app; picking one starts it in the composer. */
@@ -344,10 +491,10 @@ export function AppLauncherPopout({ anchor, open, onClose, channelId, onPick }: 
         <h3>Apps</h3>
         {entry?.loading && !index && <p>Loading…</p>}
         {index && byApp.length === 0 && <p>No apps with commands in this channel.</p>}
-        {byApp.map(({ app, commands }) => (
+        {[...byApp, { app: { id: BUILTIN_APP_ID, name: BUILTIN_APP_NAME, icon: null }, commands: builtinsFor(index?.application_commands ?? []) }].map(({ app, commands }) => (
           <section key={app.id} className="apps-launcher-app">
             <div className="apps-launcher-title">
-              <AppIcon name={app.name} icon={app.icon} size={20} /> {app.name}
+              <AppBadge name={app.name} icon={app.icon} size={20} builtin={app.id === BUILTIN_APP_ID} /> {app.name}
             </div>
             {commands.map(command => (
               <button
