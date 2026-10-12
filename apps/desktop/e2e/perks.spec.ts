@@ -118,17 +118,24 @@ test('reduced motion: no particles on a super reaction', async ({ page }) => {
 test('decoration, effect, nameplate and name style show in the popout and the member list', async ({ page }) => {
   await openStockTalk(page);
   await page.getByRole('button', { name: 'User Settings' }).click();
-  const dialog = page.getByRole('dialog', { name: 'User Settings' });
-  await dialog.locator('.sm-profile-edit').click();
-  await dialog.getByRole('radiogroup', { name: 'Avatar decoration' }).getByRole('radio', { name: 'Halo' }).click();
-  await dialog.getByRole('radiogroup', { name: 'Profile effect' }).getByRole('radio', { name: 'Snowfall' }).click();
-  await dialog.getByRole('radiogroup', { name: 'Nameplate' }).getByRole('radio', { name: 'Aurora' }).click();
-  await dialog.getByRole('radiogroup', { name: 'Display name font' }).getByRole('radio', { name: 'Serif' }).click();
-  await dialog.getByRole('radiogroup', { name: 'Display name effect' }).getByRole('radio', { name: 'Gradient' }).click();
-  await expect(dialog.getByTestId('nameplate-preview').locator('.nameplate')).toHaveCount(1);
-  await dialog.getByRole('textbox', { name: 'About me' }).fill('I like **bold** things');
-  await dialog.getByRole('button', { name: 'Save Changes' }).click();
-  await expect(dialog.getByRole('alert').filter({ hasText: 'unsaved changes' })).toHaveCount(0);
+  const settings = page.getByRole('dialog', { name: 'User Settings' });
+  await settings.locator('.sm-profile-edit').click();
+  // the profile editor is its own dialog over settings; each tile opens one inline panel at a time
+  const editor = page.getByRole('dialog', { name: 'Edit Profile' });
+  await expect(editor).toBeVisible();
+  const pick = async (tile: string, ...options: [group: string, option: string][]) => {
+    await editor.getByRole('button', { name: tile, exact: true }).click();
+    for (const [group, option] of options) await editor.getByRole('radiogroup', { name: group }).getByRole('radio', { name: option }).click();
+  };
+  await pick('Avatar decoration', ['Avatar decoration', 'Halo']);
+  await pick('Profile effect', ['Profile effect', 'Snowfall']);
+  await pick('Nameplate', ['Nameplate', 'Aurora']);
+  await pick('Display name style', ['Display name font', 'Serif'], ['Display name effect', 'Gradient']);
+  await expect(editor.getByRole('button', { name: 'Nameplate', exact: true }).locator('.nameplate')).toHaveCount(1);
+  await editor.getByRole('button', { name: 'Edit Bio' }).click();
+  await editor.getByRole('textbox', { name: 'Bio' }).fill('I like **bold** things');
+  await editor.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(editor.getByRole('alert').filter({ hasText: 'unsaved changes' })).toHaveCount(0);
 
   const me = await page.evaluate(() => (window as unknown as { __vokko: { appStore: { getState(): { me: Record<string, unknown> } } } }).__vokko.appStore.getState().me);
   expect(me.nameplate).toBe('aurora');
@@ -136,7 +143,9 @@ test('decoration, effect, nameplate and name style show in the popout and the me
   expect((me.display_name_styles as { colors: number[] }).colors).toHaveLength(2);
 
   await page.keyboard.press('Escape');
-  await expect(dialog).toHaveCount(0);
+  await expect(editor).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(settings).toHaveCount(0);
   const row = page.locator('.member-row', { hasText: /sam/i }).first();
   await expect(row.locator('.nameplate[data-nameplate="aurora"]')).toHaveCount(1);
   await expect(row.locator('.avatar-deco[data-decoration="halo"]')).toHaveCount(1);
