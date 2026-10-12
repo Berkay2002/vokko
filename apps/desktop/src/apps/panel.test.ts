@@ -36,13 +36,13 @@ describe("buildSections", () => {
     expect(sections.map(s => s.id)).toEqual(["recent", "app:2", "app:1", "builtin"]);
     expect(sections[0]!.commands.map(c => c.name)).toEqual(["roll"]);
     expect(sections[2]!.commands.map(c => c.name)).toEqual(["echo", "roll"]); // also stays in its app
-    expect(sections[3]!.commands.map(c => c.name)).toEqual(["me", "shrug", "spoiler", "tableflip", "unflip"]);
+    expect(sections[3]!.commands.map(c => c.name)).toEqual(["gif", "me", "msg", "nick", "shrug", "spoiler", "tableflip", "thread", "unflip"]);
   });
   it("has no Frequently Used section when nothing was used", () => {
     expect(buildSections(commands, apps, "", {}).map(s => s.id)).not.toContain("recent");
   });
   it("shows only sections with matches while filtering, without Frequently Used", () => {
-    const sections = buildSections(commands, apps, "ec", { "10": { count: 3, last: 1 } });
+    const sections = buildSections(commands, apps, "ech", { "10": { count: 3, last: 1 } });
     expect(sections.map(s => s.id)).toEqual(["app:1"]);
     expect(sections[0]!.commands.map(c => c.name)).toEqual(["echo"]);
   });

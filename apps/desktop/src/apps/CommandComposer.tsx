@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { Check, CircleAlert, Clock, LayoutGrid, Loader2, SquareSlash, X } from "lucide-react";
 import { appStore, useStore } from "../api/store";
-import { ApplicationCommandOptionType, type ApplicationCommand, type ApplicationCommandOption, type ApplicationCommandOptionChoice, type InteractionDataOption, type Snowflake } from "../api/types";
+import { ApplicationCommandOptionType, type ApplicationCommand, type ApplicationCommandOption, type ApplicationCommandOptionChoice, type Gif, type InteractionDataOption, type Snowflake } from "../api/types";
 import { Popout, Tooltip } from "../ui";
 import {
   buildOptions,
@@ -16,7 +16,11 @@ import {
   type ValueResolvers,
 } from "./commandParser";
 import { AppIcon } from "./AppIcon";
-import { BUILTIN_APP_ID, BUILTIN_APP_NAME, builtinContent, builtinsFor, isBuiltin, withBuiltins } from "./builtins";
+import { Perm } from "../api/permissions";
+import { usePermissions } from "../shell/usePermissions";
+import { hasThreadsType } from "../threads/util";
+import { BUILTIN_APP_ID, BUILTIN_APP_NAME, builtinContent, builtinsFor, isActionBuiltin, isBuiltin, takesFreeText, withBuiltins } from "./builtins";
+import { NICK_MAX, latestOnly, runMsg, runNick, runThread, searchGifs, type ActionValues } from "./builtinActions";
 import { bumpRecent, buildSections, loadRecents, saveRecents, type PanelSection, type Recents } from "./panel";
 import { dismissRun, loadIndex, requestAutocomplete, runCommand, useAppsStore } from "./store";
 import "./apps.css";
@@ -107,6 +111,16 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
   const [railActive, setRailActive] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [gifs, setGifs] = useState<{ q: string; list: Gif[]; failed: boolean } | null>(null);
+  const gifLatest = useRef(latestOnly());
+  /** Set when an action built-in clears the draft: that clearing must not wipe the notice or error the action reports. */
+  const skipClear = useRef(false);
+  /** The GIF picked from the list: the text it put in the composer and the URL that Enter sends. */
+  const gifPick = useRef<{ text: string; url: string } | null>(null);
+  const channel = useStore(s => s.channels[channelId] ?? s.threads[channelId]);
+  const guildId = channel?.guild_id ?? null;
+  const { can } = usePermissions(guildId, channelId);
   const [autocomplete, setAutocomplete] = useState<{ nonce: string; key: string } | null>(null);
   const choices = useAppsStore(s => (autocomplete ? s.choices[autocomplete.nonce] : undefined));
 
@@ -121,9 +135,33 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
 
   // The channel's commands plus the client-side built-ins (they work before the index loads and in channels without apps).
   const appCommands = index?.application_commands;
-  const commands = useMemo(() => withBuiltins(appCommands ?? []), [appCommands]);
+  const canThread = !!guildId && hasThreadsType(channel) && can(Perm.CREATE_PUBLIC_THREADS) && can(Perm.READ_MESSAGE_HISTORY) && can(Perm.SEND_MESSAGES_IN_THREADS);
+  const canNick = !!guildId && can(Perm.CHANGE_NICKNAME);
+  const commands = useMemo(() => withBuiltins(appCommands ?? [], { nick: canNick, threads: canThread }), [appCommands, canNick, canThread]);
   const parsed: ParsedInput = useMemo(() => parseInput(text, caret, commands), [text, caret, commands]);
   const command = parsed.command;
+  // /gif: the search text (typed as `query:` or as free text) drives a debounced GIF search shown as choices.
+  const isGif = !!command && isBuiltin(command) && command.name === "gif";
+  const gifQuery = isGif ? parsed.options.find(o => o.name === "query")?.raw ?? (parsed.options.length === 0 ? text.slice(parsed.name.length + 1).trim() : "") : "";
+  useEffect(() => {
+    if (!gifQuery || gifPick.current?.text === text.trim()) return; // picking a GIF puts its title in the composer: no new search for it
+    const timer = setTimeout(() => {
+      // Only the latest search may answer: "cat" arriving after "cats" is dropped.
+      gifLatest.current(searchGifs(gifQuery)).then(
+        list => list && setGifs({ q: gifQuery, list, failed: false }),
+        () => setGifs({ q: gifQuery, list: [], failed: true }),
+      );
+    }, 250);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gifQuery]);
+  const gifNote = isGif && gifQuery && gifs?.q === gifQuery && gifPick.current?.text !== text.trim() && gifs.list.length === 0 ? (gifs.failed ? "Could not search GIFs." : "No GIFs found.") : null;
+  // Another channel: nothing from the last one stays on the strip.
+  useEffect(() => {
+    setError(null);
+    setNotice(null);
+    gifPick.current = null;
+  }, [channelId]);
   const appOf = (id: Snowflake) => index?.applications.find(a => a.id === id);
   const appInfo = (id: Snowflake): { name: string; icon: string | null } => (id === BUILTIN_APP_ID ? { name: BUILTIN_APP_NAME, icon: null } : appOf(id) ?? { name: "App", icon: null });
   const commandQuery = parsed.slash && parsed.active?.kind === "command" ? parsed.active.query : null;
@@ -157,8 +195,12 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
       );
     }
     if (!command) return [];
-    // Free text after a built-in (`/shrug me`) is the message, not an option name: no list, so Enter sends it.
-    if (active?.kind === "option-name" && isBuiltin(command) && parsed.options.length === 0) return [];
+    if (isGif && gifQuery) {
+      if (gifPick.current?.text === text.trim()) return []; // picked: Enter sends it
+      return gifs?.q === gifQuery ? gifs.list.map((g): Item => ({ kind: "choice", key: `gif${g.id}`, choice: { name: g.title || g.url, value: g.url }, insert: g.url })) : [];
+    }
+    // Free text after a built-in (`/shrug me`) is its option, not an option name: no list, so Enter sends it.
+    if (active?.kind === "option-name" && takesFreeText(command) && parsed.options.length === 0) return [];
     if (active?.kind === "option-name") return remainingOptions(parsed, active.query).map(o => ({ kind: "option", key: `o${o.name}`, option: o }));
     // A value followed by a space is finished: no list, so Enter runs the command.
     if (active?.kind === "option-value" && !/\s$/.test(active.query)) {
@@ -169,7 +211,7 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
     }
     return [];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, sections, command, choices, autocomplete, focusKey, index]);
+  }, [parsed, sections, command, choices, autocomplete, focusKey, index, isGif, gifQuery, gifs, text]);
 
   const listKey = `${parsed.active?.kind ?? ""}:${parsed.name}:${parsed.active && "query" in parsed.active ? parsed.active.query : ""}`;
   useEffect(() => setSelected(0), [listKey]);
@@ -205,7 +247,15 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
     setRailActive(id);
     list.scrollTo({ top: el.offsetTop });
   }
-  useEffect(() => setError(null), [text]);
+  // Typing clears them, and so does an emptied draft, except the clearing after an action built-in (it reports after the draft is gone).
+  useEffect(() => {
+    if (skipClear.current && text === "") {
+      skipClear.current = false;
+      return;
+    }
+    setError(null);
+    setNotice(null);
+  }, [text]);
   const open = items.length > 0 && dismissed !== listKey;
 
   function apply(item: Item): void {
@@ -219,6 +269,12 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
       const insert = `${item.option.name}:`;
       const next = text.slice(0, active.start) + insert + text.slice(caret);
       setText(next, active.start + insert.length);
+      return;
+    }
+    if (item.kind === "choice" && isGif) {
+      const next = `/gif ${item.choice.name}`;
+      gifPick.current = { text: next.trim(), url: String(item.choice.value) };
+      setText(next, next.length);
       return;
     }
     if ((item.kind === "choice" || item.kind === "boolean") && active?.kind === "option-value") {
@@ -276,6 +332,11 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
       return "none"; // not a command: sent as a normal message
     }
     if (hasUploads && !isBuiltin(target)) return "none";
+    // The actions clear the draft, which would drop the attachments (and the reply) with it.
+    if (hasUploads && isBuiltin(target) && target.name !== "gif" && isActionBuiltin(target.name)) {
+      setError(`Remove the attachments to use /${target.name}.`);
+      return "blocked";
+    }
     // An app may own the name of a built-in: wait for the index (after a failed load the built-in is used).
     if (isBuiltin(target) && !index) {
       setError("Commands are still loading.");
@@ -284,11 +345,40 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
     const withCommand = raw.command ? raw : { ...raw, command: target };
     const built = buildOptions(withCommand, resolversFor(channelId));
     const problems = Object.entries(built.errors);
-    // A built-in without `message:` takes the rest of the text as its message (`/shrug hi`).
-    const free = isBuiltin(target) && raw.options.length === 0;
+    // A built-in with one option takes the rest of the text as it (`/shrug hi`).
+    const free = takesFreeText(target) && raw.options.length === 0;
+    const freeValue = rawText.slice(raw.name.length + 1).trim();
+    const firstOption = target.options?.[0];
+    if (free && firstOption?.required && freeValue === "") {
+      setError(`Missing required option: ${firstOption.name}`);
+      return "blocked";
+    }
     if (!free && (built.missing.length > 0 || problems.length > 0)) {
       setError(built.missing.length > 0 ? `Missing required option${built.missing.length > 1 ? "s" : ""}: ${built.missing.join(", ")}` : problems.map(([name, message]) => `${name}: ${message}`).join(" · "));
       return "blocked";
+    }
+    if (isBuiltin(target) && target.name === "gif") {
+      const pick = gifPick.current;
+      if (!pick || pick.text !== rawText.trim()) {
+        setError("Pick a GIF from the list.");
+        return "blocked";
+      }
+      noteUsed(target);
+      return { kind: "message", content: pick.url };
+    }
+    if (isBuiltin(target) && isActionBuiltin(target.name)) {
+      // Side effects run only now that the options are valid; their errors go to the error strip.
+      const values: ActionValues = free && firstOption ? { [firstOption.name]: freeValue } : Object.fromEntries(built.options.map(o => [o.name, o.value]));
+      if (target.name === "nick" && String(values.new_nick ?? "").trim().length > NICK_MAX) {
+        setError(`Nicknames can be ${NICK_MAX} characters at most.`);
+        return "blocked";
+      }
+      skipClear.current = true;
+      const env = { channelId, guildId };
+      const run = target.name === "nick" ? runNick(env, values).then(setNotice) : target.name === "msg" ? runMsg(env, values) : runThread(env, values);
+      run.catch((e: unknown) => setError(e instanceof Error ? e.message : "Something went wrong."));
+      noteUsed(target);
+      return "sent";
     }
     if (isBuiltin(target)) {
       const message = free ? rawText.slice(raw.name.length + 1) : String(built.options.find(o => o.name === "message")?.value ?? "");
@@ -365,7 +455,7 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
   }
 
   const panel =
-    open || showHeader || error || channelRuns.length > 0 ? (
+    open || showHeader || error || notice || gifNote || channelRuns.length > 0 ? (
       <div className="apps-command-layer">
         {open && commandQuery !== null && (
           <div className="chat-autocomplete apps-picker apps-panel">
@@ -421,7 +511,7 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
               const typed = parsed.options.find(o => o.name === option.name);
               const problem = built?.errors[option.name];
               // `/shrug hi`: the text after a built-in's name stands for its message.
-              const free = isBuiltin(command) && parsed.options.length === 0 && text.slice(parsed.name.length + 1).trim() !== "";
+              const free = takesFreeText(command) && parsed.options.length === 0 && text.slice(parsed.name.length + 1).trim() !== "";
               const filled = (!!typed && !problem && typed.raw !== "") || free;
               const cls = ["apps-option-chip"];
               if (activeOption?.name === option.name) cls.push("active");
@@ -457,6 +547,16 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
         {error && (
           <div className="apps-command-error" role="alert">
             <CircleAlert size={14} aria-hidden="true" /> {error}
+          </div>
+        )}
+        {gifNote && (
+          <div className="apps-run" role="status">
+            {gifNote}
+          </div>
+        )}
+        {notice && (
+          <div className="apps-run" role="status">
+            <Check size={14} aria-hidden="true" /> {notice}
           </div>
         )}
         {channelRuns.map(run => (

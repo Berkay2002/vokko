@@ -71,7 +71,7 @@ test('typing / opens the panel with the app rail and sections, and the rail scro
   await expect(rail.getByRole('button', { name: 'Built-in' })).toHaveClass(/active/);
   await rail.getByRole('button', { name: 'Echo' }).click();
   await expect(picker.locator('.apps-picker-group', { hasText: 'Echo' })).toBeInViewport();
-  await box.pressSequentially('ec'); // filtering drops the rail and the sections without matches
+  await box.pressSequentially('ech'); // filtering drops the rail and the sections without matches
   await expect(rail).toHaveCount(0);
   await expect(picker.locator('.apps-picker-group')).toHaveCount(1);
 });
@@ -100,6 +100,68 @@ test('built-in /shrug posts the message with the face, and Echo shows under Freq
   await expect(recent.getByRole('option').first()).toContainText('/shrug'); // used twice, ahead of /echo
   await expect(recent.getByRole('option', { name: /\/echo/ })).toHaveCount(1);
   await expect(page.getByRole('navigation', { name: 'Command sources' }).getByRole('button', { name: 'Frequently Used' })).toBeVisible();
+});
+
+test('/nick changes the nickname in a server and shows a notice, and is not offered in a DM', async ({ page }) => {
+  await openGeneral(page);
+  const box = composer(page);
+  await box.click();
+  await box.pressSequentially('/nick Zed Zero');
+  await box.press('Enter');
+  await expect(box).toHaveText('');
+  await expect(page.getByRole('status').filter({ hasText: 'Your nickname on this server has been changed to Zed Zero.' })).toBeVisible();
+  await box.pressSequentially('/nick ');
+  await page.waitForTimeout(500); // the member update dropped the cached command index; typing / reloads it and Enter waits for that
+  await box.press('Enter'); // an empty value resets it
+  await expect(page.getByRole('status').filter({ hasText: 'has been reset' })).toBeVisible();
+
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.getByRole('link', { name: /^alice/i }).first().click();
+  const dm = composer(page);
+  await dm.click();
+  await dm.pressSequentially('/ni');
+  await expect(page.getByRole('listbox', { name: 'Commands' }).getByRole('option', { name: /\/nick/ })).toHaveCount(0);
+  await dm.clear();
+  await dm.pressSequentially('/msg');
+  await expect(page.getByRole('listbox', { name: 'Commands' }).getByRole('option', { name: /\/msg/ })).toHaveCount(1);
+});
+
+test('/msg sends a direct message and goes to the DM', async ({ page }) => {
+  await openGeneral(page);
+  const box = composer(page);
+  await box.click();
+  const text = `slash dm ${Date.now()}`;
+  await box.pressSequentially(`/msg user:Alice message:${text}`);
+  await box.press('Enter');
+  await expect(page).toHaveURL(/\/channels\/@me\/\d+/);
+  await expect(row(page, text)).toBeVisible();
+});
+
+test('/thread creates a thread, posts the message in it and opens the thread panel', async ({ page }) => {
+  await openGeneral(page);
+  const box = composer(page);
+  await box.click();
+  const text = `first post ${Date.now()}`;
+  await box.pressSequentially(`/thread name:Slash plans message:${text}`);
+  await box.press('Enter');
+  const panel = page.getByRole('complementary', { name: 'Thread: Slash plans' });
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('.chat-msg', { hasText: text })).toBeVisible();
+});
+
+test('/gif lists search results as choices and sends the picked GIF URL', async ({ page }) => {
+  await openGeneral(page);
+  const box = composer(page);
+  await box.click();
+  await box.pressSequentially('/gif cat');
+  const options = page.getByRole('listbox', { name: 'Command options' }).getByRole('option');
+  await expect(options.first()).toBeVisible();
+  await box.press('Enter'); // picks the first result
+  await expect(page.getByRole('listbox')).toHaveCount(0);
+  await box.press('Enter'); // sends its URL
+  await expect(box).toHaveText('');
+  await expect(page.locator('.chat-msg').last()).toBeVisible();
+  await expect(page.locator('.chat-msg img').last()).toBeVisible();
 });
 
 test('a deferred /roll thinks first, then shows the result to everyone', async ({ page }) => {

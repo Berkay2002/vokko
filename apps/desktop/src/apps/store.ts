@@ -2,6 +2,7 @@
 import { create } from "zustand";
 import { gateway } from "../api/gateway";
 import { ApiRequestError } from "../api/errors";
+import { appStore } from "../api/store";
 import {
   InteractionType,
   type ApplicationCommand,
@@ -81,8 +82,19 @@ export function bindAppsGateway(): void {
   gateway.on("GUILD_MEMBER_ADD", member => member.user.bot && invalidate());
   gateway.on("GUILD_MEMBER_REMOVE", ({ user }) => user.bot && invalidate());
   gateway.on("GUILD_ROLE_UPDATE", invalidate);
-  gateway.on("GUILD_MEMBER_UPDATE", invalidate);
+  // Only the own member decides what you can run (a nickname change of someone else changes nothing), and only in that guild.
+  gateway.on("GUILD_MEMBER_UPDATE", member => {
+    if (member.user.id === appStore.getState().me?.id) invalidateGuildIndexes(member.guild_id);
+  });
   gateway.on("CHANNEL_UPDATE", invalidate);
+}
+
+/** Drops the cached command indexes of the channels of one guild (`guildOf` maps a channel id to its guild). */
+export function invalidateGuildIndexes(guildId: Snowflake, guildOf: (channelId: Snowflake) => Snowflake | null | undefined = id => {
+  const state = appStore.getState();
+  return (state.channels[id] ?? state.threads[id])?.guild_id;
+}): void {
+  useAppsStore.setState(s => ({ indexes: Object.fromEntries(Object.entries(s.indexes).filter(([channelId]) => guildOf(channelId) !== guildId)) }));
 }
 
 function errorText(error: unknown): string {
