@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { AtSign, Bookmark, CalendarClock, Hash, Inbox as InboxIcon, Bell } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AtSign, Hash, Inbox as InboxIcon } from "lucide-react";
 import { channelMentionCount, dmName, isChannelUnread, useStore } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
 import { Popout } from "../ui";
@@ -8,23 +8,16 @@ import { ReminderList, SavedMessages } from "../media/InboxLists";
 import { closeModal } from "./modalStore";
 import { dmPath, go, guildPath } from "./nav";
 
-type Tab = "unreads" | "mentions" | "bookmarks" | "reminders" | "scheduled";
+type Tab = "unreads" | "mentions" | "bookmarks" | "reminders";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "unreads", label: "Unreads" },
   { id: "mentions", label: "Mentions" },
   { id: "bookmarks", label: "Bookmarks" },
   { id: "reminders", label: "Reminders" },
-  { id: "scheduled", label: "Scheduled" },
 ];
 
-const EMPTY: Record<Exclude<Tab, "unreads" | "mentions">, { icon: ReactNode; title: string; body: string }> = {
-  bookmarks: { icon: <Bookmark size={40} />, title: "No bookmarks yet", body: "Bookmarked messages will show up here. Not available yet." },
-  reminders: { icon: <Bell size={40} />, title: "No reminders", body: "Messages you set a reminder on will show up here. Not available yet." },
-  scheduled: { icon: <CalendarClock size={40} />, title: "Nothing scheduled", body: "Scheduled messages will show up here. Not available yet." },
-};
-
-/** Inbox popout under the title-bar button. Unreads and Mentions are real; the other tabs are visual. */
+/** Inbox popout under the title-bar button. Unreads and Mentions come from read states, Bookmarks and Reminders from the server. */
 export function InboxPopout({ anchor, open }: { anchor: HTMLElement | null; open: boolean }) {
   const [tab, setTab] = useState<Tab>("unreads");
   const channels = useStore(s => s.channels);
@@ -93,13 +86,6 @@ export function InboxPopout({ anchor, open }: { anchor: HTMLElement | null; open
           })}
         {tab === "bookmarks" && <SavedMessages onNavigate={closeModal} />}
         {tab === "reminders" && <ReminderList onNavigate={closeModal} />}
-        {tab === "scheduled" && (
-          <div className="inbox-empty">
-            {EMPTY[tab].icon}
-            <div className="inbox-empty-title">{EMPTY[tab].title}</div>
-            <div className="inbox-empty-body">{EMPTY[tab].body}</div>
-          </div>
-        )}
       </div>
     </Popout>
   );
