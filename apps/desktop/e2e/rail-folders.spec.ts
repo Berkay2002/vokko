@@ -100,3 +100,81 @@ test('dragging a server out of a folder puts it back on the rail, and a folder o
   await expect(nav.locator('.rail-folder')).toHaveCount(0);
   await expect(nav.getByRole('link', { name: "Sam's server" })).toBeVisible();
 });
+
+test('Move Up / Move Down from the keyboard reorder a server, a folder and a server inside a folder, and the order is saved', async ({ page }) => {
+  await openHome(page);
+  await createGuild(page, 'Alpha');
+  await createGuild(page, 'Beta');
+  const nav = rail(page);
+  // The announcement goes through the chat toast region, which lives in the chat view.
+  await nav.getByRole('link', { name: "Sam's server" }).click();
+  await page.locator('.chat-composer, textarea').first().waitFor();
+  const toast = page.locator('.chat-toasts');
+  const ids = async () => nav.locator('a.rail-guild').evaluateAll(els => els.map(e => e.getAttribute('href')!.split('/')[2]!));
+  const names = async () => nav.locator('a.rail-guild').evaluateAll(els => els.map(e => e.getAttribute('aria-label')!.replace(/, \d+ mentions?$/, '')));
+  const saved = async () => (await page.evaluate(() => (window as unknown as Win).__vokko.request('GET', '/users/@me/guild-layout'))) as { guild_positions: string[]; guild_folders: { guild_ids: string[] }[] };
+
+  // Shift+F10 opens the menu on the focused tile, the arrow keys walk to the row and Enter picks it.
+  async function move(tile: Locator, row: 'Move Up' | 'Move Down', shot?: string): Promise<void> {
+    await tile.focus();
+    await page.keyboard.press('Shift+F10');
+    await expect(page.getByRole('menu')).toBeVisible();
+    for (let i = 0; i < 40; i++) {
+      await page.keyboard.press('ArrowDown');
+      if ((await page.locator('.context-menu-item.focused', { hasText: row }).count()) > 0) break;
+    }
+    if (shot && process.env.VOKKO_SHOTS_DIR) await page.screenshot({ path: `${process.env.VOKKO_SHOTS_DIR}/${shot}.png` });
+    await page.keyboard.press('Enter');
+  }
+
+  // A top-level server.
+  expect(await names()).toEqual(["Sam's server", 'Alpha', 'Beta']);
+  const alpha = nav.getByRole('link', { name: 'Alpha' });
+  await move(alpha, 'Move Up', 'GLD-016-server-move-menu');
+  await expect.poll(names).toEqual(['Alpha', "Sam's server", 'Beta']);
+  await expect(alpha).toBeFocused();
+  await expect(toast).toContainText('Moved Alpha up to 1 of 3 on the server rail.');
+  expect((await saved()).guild_positions).toEqual(await ids());
+
+  // A folder as a whole: Beta onto Sam's server makes one (it opens), Move Up puts the folder above Alpha.
+  await nav.getByRole('link', { name: 'Beta' }).dragTo(nav.getByRole('link', { name: "Sam's server" }));
+  const folder = nav.locator('.rail-folder');
+  const tile = folder.getByRole('button', { name: /^Folder/ });
+  await expect(folder.getByRole('link')).toHaveCount(2);
+  await move(tile, 'Move Up', 'GLD-016-folder-move-menu');
+  await expect.poll(names).toEqual(["Sam's server", 'Beta', 'Alpha']);
+  await expect(tile).toBeFocused();
+  await expect(toast).toContainText('Moved folder');
+  await expect(toast).toContainText('up to 1 of 2 on the server rail.');
+  expect((await saved()).guild_positions).toEqual(await ids());
+
+  // A server inside the folder swaps with its neighbour there ...
+  const beta = folder.getByRole('link', { name: 'Beta' });
+  await move(beta, 'Move Up');
+  await expect.poll(names).toEqual(['Beta', "Sam's server", 'Alpha']);
+  await expect(beta).toBeFocused();
+  await expect(toast).toContainText('Moved Beta up to 1 of 2 in ');
+  // ... and at the folder's edge steps out above it.
+  await move(beta, 'Move Up');
+  await expect(folder.getByRole('link')).toHaveCount(1);
+  await expect(nav.getByRole('link', { name: 'Beta' })).toBeFocused();
+  await expect(toast).toContainText('Moved Beta up to 1 of 3 on the server rail.');
+  expect(await names()).toEqual(['Beta', "Sam's server", 'Alpha']);
+  const layout = await saved();
+  expect(layout.guild_positions).toEqual(await ids());
+  expect(layout.guild_folders.map(f => f.guild_ids.length)).toEqual([1]);
+
+  // A fresh READY rebuilds the order from the server: change the layout through the API while the socket is down (the update
+  // event is missed), so the new order can only come from READY.
+  const reversed = [...(await ids())].reverse();
+  await page.evaluate(
+    ([positions, folders]) => {
+      const w = window as unknown as Win & { __vokkoMock: { dropConnections(): void } };
+      w.__vokkoMock.dropConnections();
+      return w.__vokko.request('PATCH', '/users/@me/guild-layout', { guild_positions: positions, guild_folders: folders });
+    },
+    [reversed, layout.guild_folders] as const,
+  );
+  await expect.poll(names).toEqual(['Alpha', "Sam's server", 'Beta']);
+  expect((await saved()).guild_positions).toEqual(reversed);
+});

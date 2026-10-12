@@ -158,6 +158,53 @@ export function moveFolder(entries: readonly RailEntry[], folderId: string, targ
   return out;
 }
 
+/** A server or a folder on the rail, as the keyboard and menu moves name it. */
+export type RailItem = { kind: "guild"; id: Snowflake } | { kind: "folder"; id: string };
+
+const entryTarget = (entry: RailEntry, kind: "before" | "after"): DropTarget => (entry.kind === "guild" ? { kind, guildId: entry.guildId } : { kind, folderId: entry.folder.id });
+
+/**
+ * Where moving `item` one place up or down lands, as the drop target `moveGuild` / `moveFolder` take; null at the ends of the rail.
+ * A top-level server or a folder swaps with the next top-level entry (a server steps past a whole folder, it never joins it).
+ * A server in a folder swaps with its neighbour there and, at the folder's edge, steps out just above or below the folder, like
+ * dropping it on the folder tile's top or bottom edge. The only server of a folder steps relative to the folder's neighbour.
+ */
+export function stepTarget(entries: readonly RailEntry[], item: RailItem, direction: "up" | "down"): DropTarget | null {
+  const kind = direction === "up" ? "before" : "after";
+  const delta = direction === "up" ? -1 : 1;
+  if (item.kind === "guild") {
+    const holder = holderIndex(entries, item.id);
+    const entry = entries[holder];
+    if (!entry) return null;
+    if (entry.kind === "folder" && entry.folder.guild_ids.length > 1) {
+      const ids = entry.folder.guild_ids;
+      const sibling = ids[ids.indexOf(item.id) + delta];
+      return sibling ? { kind, guildId: sibling } : { kind, folderId: entry.folder.id };
+    }
+    const neighbour = entries[holder + delta];
+    return neighbour ? entryTarget(neighbour, kind) : null;
+  }
+  const neighbour = entries[folderIndex(entries, item.id) + delta];
+  return neighbour ? entryTarget(neighbour, kind) : null;
+}
+
+/** `entries` with `item` moved one place; null when it cannot move that way. */
+export function stepItem(entries: readonly RailEntry[], item: RailItem, direction: "up" | "down"): RailEntry[] | null {
+  const target = stepTarget(entries, item, direction);
+  if (!target) return null;
+  return item.kind === "guild" ? moveGuild(entries, item.id, target) : moveFolder(entries, item.id, target);
+}
+
+/** Where `item` sits: its 1-based place among `total` siblings, which are the folder's servers or the rail's top-level entries. */
+export function placeOf(entries: readonly RailEntry[], item: RailItem): { place: number; total: number; folderId: string | null } {
+  if (item.kind === "guild") {
+    const folder = entries.find((e): e is RailEntry & { kind: "folder" } => e.kind === "folder" && e.folder.guild_ids.includes(item.id));
+    if (folder) return { place: folder.folder.guild_ids.indexOf(item.id) + 1, total: folder.folder.guild_ids.length, folderId: folder.folder.id };
+  }
+  const index = item.kind === "guild" ? holderIndex(entries, item.id) : folderIndex(entries, item.id);
+  return { place: index + 1, total: entries.length, folderId: null };
+}
+
 /** Replaces a folder by its servers, in place. */
 export function ungroupFolder(entries: readonly RailEntry[], folderId: string): RailEntry[] {
   return entries.flatMap(entry => (entry.kind === "folder" && entry.folder.id === folderId ? entry.folder.guild_ids.map(guildId => ({ kind: "guild" as const, guildId })) : [entry]));

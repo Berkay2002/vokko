@@ -18,6 +18,7 @@ import { guildContextItems } from "./menus";
 import { guildPath } from "./nav";
 import { openModal } from "./modalStore";
 import { RailGuilds } from "../rail/RailGuilds";
+import { railMoveItems } from "../rail/railMove";
 
 function RailItem({ state, mentions, tooltip, muted, voice, children }: { state: "selected" | "unread" | "idle"; mentions?: number; tooltip: ReactNode; muted?: boolean; voice?: boolean; children: ReactNode }) {
   return (
@@ -55,7 +56,7 @@ function GuildRailItem({ guild }: { guild: Guild }) {
 
   return (
     <RailItem state={state} mentions={info.mentions} tooltip={guild.name} muted={muted} voice={inCall}>
-      <NavLink to={guildPath(guild.id, target)} className="rail-tile rail-guild" aria-label={[guild.name, muted ? null : unreadLabel(info.mentions, false), inCall ? "Voice call active" : null].filter(Boolean).join(", ")} onContextMenu={e => menu.open(e, guildContextItems(guild))}>
+      <NavLink to={guildPath(guild.id, target)} className="rail-tile rail-guild" aria-label={[guild.name, muted ? null : unreadLabel(info.mentions, false), inCall ? "Voice call active" : null].filter(Boolean).join(", ")} onContextMenu={e => menu.open(e, [...guildContextItems(guild), { type: "separator" }, ...railMoveItems({ kind: "guild", id: guild.id })])}>
         <GuildIcon guild={guild} size={40} />
       </NavLink>
     </RailItem>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { GuildLayout } from "../api/types";
-import { EMPTY_SETTINGS, dropZone, editFolder, entriesToSettings, flatGuildIds, moveFolder, moveGuild, railEntries, rollUp, ungroupFolder, type RailEntry } from "./railOrder";
+import { EMPTY_SETTINGS, dropZone, editFolder, entriesToSettings, flatGuildIds, moveFolder, moveGuild, placeOf, railEntries, rollUp, stepItem, stepTarget, ungroupFolder, type RailEntry } from "./railOrder";
 
 const joined = ["1", "2", "3", "4", "5"];
 const shape = (entries: RailEntry[]) => entries.map(e => (e.kind === "guild" ? e.guildId : `${e.folder.id}[${e.folder.guild_ids.join(",")}]`));
@@ -100,5 +100,43 @@ describe("badges and drop zones", () => {
 
   it("splits a tile into before / middle / after", () => {
     expect([dropZone(2, 48), dropZone(24, 48), dropZone(46, 48)]).toEqual(["before", "middle", "after"]);
+  });
+});
+
+describe("stepItem", () => {
+  const entries = railEntries(joined, { guild_folders: [{ id: "f", name: null, color: null, guild_ids: ["2", "3"] }], guild_positions: ["1", "2", "3", "4", "5"] });
+  const step = (item: Parameters<typeof stepItem>[1], direction: "up" | "down") => {
+    const next = stepItem(entries, item, direction);
+    return next && shape(next);
+  };
+
+  it("swaps a top-level server with the next entry and steps past a whole folder", () => {
+    expect(step({ kind: "guild", id: "4" }, "up")).toEqual(["1", "4", "f[2,3]", "5"]);
+    expect(step({ kind: "guild", id: "1" }, "down")).toEqual(["f[2,3]", "1", "4", "5"]);
+    expect(step({ kind: "guild", id: "1" }, "up")).toBeNull();
+    expect(step({ kind: "guild", id: "5" }, "down")).toBeNull();
+  });
+
+  it("moves a folder as a whole", () => {
+    expect(step({ kind: "folder", id: "f" }, "up")).toEqual(["f[2,3]", "1", "4", "5"]);
+    expect(step({ kind: "folder", id: "f" }, "down")).toEqual(["1", "4", "f[2,3]", "5"]);
+  });
+
+  it("swaps inside a folder and leaves it at the edge", () => {
+    expect(step({ kind: "guild", id: "3" }, "up")).toEqual(["1", "f[3,2]", "4", "5"]);
+    expect(step({ kind: "guild", id: "2" }, "up")).toEqual(["1", "2", "f[3]", "4", "5"]);
+    expect(step({ kind: "guild", id: "3" }, "down")).toEqual(["1", "f[2]", "3", "4", "5"]);
+  });
+
+  it("steps the only server of a folder relative to the folder's neighbour", () => {
+    const lone = railEntries(joined, { guild_folders: [{ id: "f", name: null, color: null, guild_ids: ["3"] }], guild_positions: [] });
+    expect(shape(stepItem(lone, { kind: "guild", id: "3" }, "up")!)).toEqual(["1", "3", "2", "4", "5"]);
+    expect(stepTarget(railEntries(joined, { guild_folders: [{ id: "f", name: null, color: null, guild_ids: ["1"] }], guild_positions: [] }), { kind: "guild", id: "1" }, "up")).toBeNull();
+  });
+
+  it("reports the place among the siblings", () => {
+    expect(placeOf(entries, { kind: "guild", id: "3" })).toEqual({ place: 2, total: 2, folderId: "f" });
+    expect(placeOf(entries, { kind: "guild", id: "4" })).toEqual({ place: 3, total: 4, folderId: null });
+    expect(placeOf(entries, { kind: "folder", id: "f" })).toEqual({ place: 2, total: 4, folderId: null });
   });
 });

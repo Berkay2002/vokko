@@ -15,6 +15,7 @@ import { isMutedAt, useLocalState } from "../shell/localState";
 import { FolderSettingsModal } from "./FolderSettingsModal";
 import { dropZone, editFolder, entriesToSettings, moveFolder, moveGuild, railEntries, rollUp, ungroupFolder, type DropTarget, type RailEntry } from "./railOrder";
 import { saveGuildLayout, guildLayoutStore } from "./guildLayoutStore";
+import { railMoveItems } from "./railMove";
 import "./rail.css";
 
 type Dragged = { kind: "guild"; id: Snowflake } | { kind: "folder"; id: string };
@@ -196,6 +197,8 @@ export function RailGuilds({ renderGuild }: { renderGuild: (guild: Guild) => Rea
     const unread = ids.some(id => guildUnread(appStore.getState(), id).unread);
     return [
       { id: "folder-read", label: "Mark Folder As Read", disabled: !unread, onSelect: () => void Promise.all(ids.map(markGuildRead)).catch(() => undefined) },
+      { type: "separator" },
+      ...railMoveItems({ kind: "folder", id: entry.folder.id }),
       { type: "separator" },
       { id: "folder-toggle", label: open ? "Collapse Folder" : "Expand Folder", onSelect: () => toggle(entry.folder.id) },
       { id: "folder-settings", label: "Folder Settings", onSelect: () => setEditing(entry.folder.id) },
