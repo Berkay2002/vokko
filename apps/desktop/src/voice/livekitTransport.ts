@@ -24,6 +24,7 @@ import { summariseRtpStats, voiceDebug, voiceDebugEnabled } from "./debugLog";
 import { GateProcessor } from "./gate";
 import type { ConnectionQuality, VoiceDevice, VoiceSettings } from "./reducer";
 import type { TransportCallbacks, TransportOptions, VoiceTransport, CameraStart } from "./transport";
+import { PingSmoother, selectedPairRttMs } from "./ping";
 import { LiveKitVideo } from "./livekitVideo";
 import type { VideoSource } from "./mediaStore";
 import type { ScreenShareChoice, ViewerQuality } from "./video/options";
@@ -58,6 +59,10 @@ export class LiveKitTransport implements VoiceTransport {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private lastQuality: ConnectionQuality = "unknown";
+  private readonly smoother = new PingSmoother();
+  private lastPing: number | null = null;
+  /** A getStats call for the ping is in flight (the next poll skips instead of queueing behind it). */
+  private pingSampling = false;
   private audioHost: HTMLElement | null = null;
   private readonly video: LiveKitVideo;
   /** room.connect() finished for the current room (publishing before that is not possible). */
@@ -111,7 +116,7 @@ export class LiveKitTransport implements VoiceTransport {
     this.joined = true;
     this.cb.status("connected");
     for (const participant of room.remoteParticipants.values()) for (const pub of participant.trackPublications.values()) this.consider(pub, participant);
-    this.pingTimer = setInterval(() => this.reportQuality(), PING_POLL_MS);
+    this.startPingTimer(room);
     this.statsTimer = setInterval(() => void this.logStats(room), STATS_POLL_MS);
     voiceDebug("connected", { room: room.name });
     void room.startAudio().catch(() => undefined);
@@ -268,7 +273,7 @@ export class LiveKitTransport implements VoiceTransport {
       .on(RoomEvent.SignalConnected, () => this.room === room && (voiceDebug("signal connected"), this.cb.status("rtc_connecting")))
       .on(RoomEvent.Reconnecting, () => this.room === room && (voiceDebug("reconnecting"), this.cb.status("reconnecting")))
       .on(RoomEvent.SignalReconnecting, () => this.room === room && (voiceDebug("signal reconnecting"), this.cb.status("reconnecting")))
-      .on(RoomEvent.Reconnected, () => this.room === room && (voiceDebug("reconnected"), this.cb.status("connected")))
+      .on(RoomEvent.Reconnected, () => this.room === room && (voiceDebug("reconnected"), this.smoother.reset(), this.cb.status("connected")))
       .on(RoomEvent.TrackPublished, (pub, participant) => this.consider(pub, participant))
       .on(RoomEvent.TrackSubscribed, (track, pub, participant) => this.attach(track, pub, participant))
       .on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
@@ -397,9 +402,46 @@ export class LiveKitTransport implements VoiceTransport {
     }
   }
 
-  private reportQuality(): void {
-    const rtt = this.room?.engine?.client?.rtt;
-    this.cb.quality(this.lastQuality, typeof rtt === "number" && rtt > 0 ? Math.round(rtt) : null);
+  /** One timer per room: any earlier one is cleared first, so reconnects and superseded connects never stack timers. */
+  private startPingTimer(room: Room): void {
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.pingTimer = setInterval(() => void this.samplePing(room), PING_POLL_MS);
+  }
+
+  /**
+   * The ping is the round trip of the selected ICE candidate pair (the media path, answered by the browser's network thread),
+   * falling back to the signalling WebSocket RTT (`engine.client.rtt`, which LiveKit refreshes once per server ping interval
+   * and measures with Date.now() on the main thread). Either way it is shown as a rolling average, not the raw latest value.
+   */
+  private async samplePing(room: Room): Promise<void> {
+    if (this.room !== room || this.pingSampling) return;
+    this.pingSampling = true;
+    let raw: number | null = null;
+    try {
+      const pcm = room.engine?.pcManager;
+      for (const transport of [pcm?.publisher, pcm?.subscriber]) {
+        const report = await transport?.getStats();
+        raw = report ? selectedPairRttMs(report) : null;
+        if (raw !== null) break;
+      }
+    } catch {
+      // Statistics are best effort; the signalling RTT below is the fallback.
+    } finally {
+      this.pingSampling = false;
+    }
+    if (this.room !== room) return;
+    if (raw === null) {
+      const signal = room.engine?.client?.rtt;
+      raw = typeof signal === "number" && signal > 0 ? signal : null;
+    }
+    this.reportQuality(raw);
+  }
+
+  /** `raw` = a fresh measurement in ms (added to the rolling average); omitted = re-report the current average. */
+  private reportQuality(raw?: number | null): void {
+    if (raw !== undefined && raw !== null) this.lastPing = this.smoother.push(raw);
+    else if (raw === null) this.lastPing = null;
+    this.cb.quality(this.lastQuality, this.lastPing);
   }
 
   private teardownRoom(): void {
@@ -408,6 +450,9 @@ export class LiveKitTransport implements VoiceTransport {
     this.pingTimer = null;
     if (this.statsTimer) clearInterval(this.statsTimer);
     this.statsTimer = null;
+    this.pingSampling = false;
+    this.smoother.reset();
+    this.lastPing = null;
     const gate = this.gate;
     this.gate = null;
     void gate?.destroy().catch(() => undefined);

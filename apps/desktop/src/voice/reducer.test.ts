@@ -286,6 +286,7 @@ describe("voice reducer: misc", () => {
   it("quality, devices and settings are stored", () => {
     let m = voiceReducer(joined(), { type: "quality", quality: "good", pingMs: 42 });
     expect(m).toMatchObject({ quality: "good", pingMs: 42 });
+    expect(voiceReducer(m, { type: "quality", quality: "good", pingMs: 42 })).toBe(m); // the 2 s poll with no change is a no-op
     m = voiceReducer(m, { type: "devices", input: [{ deviceId: "a", label: "Mic" }], output: [], outputSelectable: false });
     expect(m.devices.input).toEqual([{ deviceId: "a", label: "Mic" }]);
     m = voiceReducer(m, { type: "settings", settings: { inputMode: "ptt", pttKey: "F13" } });

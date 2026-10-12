@@ -365,6 +365,7 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
       return { ...model, speaking: on ? { ...model.speaking, [model.meId]: true } : without(model.speaking, model.meId) };
     }
     case "quality":
+      if (model.quality === action.quality && model.pingMs === action.pingMs) return model;
       return { ...model, quality: action.quality, pingMs: action.pingMs };
     case "setSelfMute": {
       if (!action.mute && model.selfDeaf) {
