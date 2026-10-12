@@ -8,7 +8,6 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -21,12 +20,13 @@ use vokko_protocol::api::{
     CALL_PARTICIPANT_MAX, ChannelType, GatewayEvent, Snowflake, VoiceConnectFailed, VoiceConnectFailure, VoiceServerUpdate, VoiceState, VoiceStateUpdateCommand,
 };
 
+use super::backends::Backends;
 use super::livekit::{Participant, Permission, RoomService};
 use super::token::{self, Claims, Moderation};
 use super::{room_channel, room_name, unix_now};
 use crate::access;
 use crate::auth::random_hex;
-use crate::config::LiveKitConfig;
+use crate::config::{Config, LiveKitConfig};
 use crate::hub::Session;
 use crate::state::AppState;
 use crate::store::{self, ChannelRow, iso};
@@ -38,6 +38,9 @@ pub const DM_CALL_PERMISSIONS: u64 = VIEW_CHANNEL | CONNECT | SPEAK | STREAM | U
 pub struct VoiceEntry {
     pub guild_id: Option<i64>,
     pub channel_id: i64,
+    /// The LiveKit backend (index into `Config::livekit`) the channel's room lives on: every participant of a room is on the
+    /// same one, and it stays there for the room's whole life.
+    pub backend: usize,
     pub user_id: i64,
     /// Voice session id, also in the LiveKit participant metadata.
     pub session_id: String,
@@ -108,7 +111,8 @@ pub fn is_stage_moderator(permissions: u64) -> bool {
 const ISSUE_GRACE: Duration = Duration::from_secs(15);
 
 pub struct Voice {
-    pub rooms: Arc<dyn RoomService>,
+    /// The LiveKit backends: the RoomService of each, which are in rotation for new rooms, and which were restored.
+    pub backends: Backends,
     states: Mutex<HashMap<i64, VoiceEntry>>,
     /// One async lock per user: op 4 handling and every removal (state + LiveKit `RemoveParticipant`) run under it, so a
     /// removal by identity can never land after a newer binding of the same user was handed out. Entries go away with their
@@ -119,9 +123,6 @@ pub struct Voice {
     admission: tokio::sync::RwLock<()>,
     /// DM and group DM calls riding on these states.
     pub calls: super::calls::Calls,
-    /// A restore from LiveKit succeeded since start; until then reconciliation removes no LiveKit participant (it would take
-    /// everyone still in a call for an orphan).
-    restored: AtomicBool,
 }
 
 /// A user's serial lock; dropping it forgets the per-user mutex once nobody else holds or waits for it.
@@ -147,19 +148,27 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Voice {
-    pub fn new(rooms: Arc<dyn RoomService>) -> Self {
+    /// One RoomService per LiveKit backend, in the order of `config.livekit`.
+    pub fn new(rooms: Vec<Arc<dyn RoomService>>, config: &Config) -> Self {
         Self {
-            rooms,
+            backends: Backends::new(rooms, config),
             states: Mutex::new(HashMap::new()),
             users: Mutex::new(HashMap::new()),
             admission: tokio::sync::RwLock::new(()),
             calls: Default::default(),
-            restored: AtomicBool::new(false),
         }
     }
 
+    /// Every backend was restored from since start. Until one is, reconciliation removes none of its LiveKit participants (it
+    /// would take everyone still in a call for an orphan).
     pub fn restored(&self) -> bool {
-        self.restored.load(Ordering::SeqCst)
+        self.backends.all_restored()
+    }
+
+    /// The backend a room in `channel_id` lives on: the one its participants are on, else (an empty room) the first backend in
+    /// rotation. Call with the states lock held, so the pick and the insert of the joining user's state are one step.
+    fn backend_for(&self, states: &HashMap<i64, VoiceEntry>, channel_id: i64) -> usize {
+        states.values().filter(|entry| entry.channel_id == channel_id).map(|entry| entry.backend).min().unwrap_or_else(|| self.backends.pick())
     }
 
     /// The user's serial lock (op 4, removals and every LiveKit call about them run under it).
@@ -221,9 +230,9 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         }
         return;
     };
-    let Some(livekit) = state.config.livekit.clone() else {
+    if state.config.livekit.is_empty() {
         return fail(session, &command, target, VoiceConnectFailure::MediaUnavailable);
-    };
+    }
     let channel_id = target.db();
     let row = match store::channel_row(state, channel_id).await {
         Ok(Some(row)) if matches!(row.channel_type(), ChannelType::GuildVoice | ChannelType::GuildStage) || row.is_dm() => row,
@@ -262,7 +271,10 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         if !fresh.stage {
             fresh.suppress = permissions & SPEAK == 0;
         }
-        let Some(token) = mint(state, &livekit, &fresh, &nonce).await else {
+        // The room stays on its backend: the token is signed with that backend's secret and points at its URL.
+        let name = display_name(state, user_id).await;
+        let Some((livekit, token)) = state.config.livekit.get(fresh.backend).and_then(|livekit| Some((livekit, sign_token(livekit, &fresh, &nonce, &name)?)))
+        else {
             return fail(session, &command, target, VoiceConnectFailure::MediaUnavailable);
         };
         let reissued = state.voice.update_if(user_id, |current| {
@@ -297,9 +309,10 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
     let session_id = random_hex(16);
     let nonce = random_hex(8);
     let issued = Instant::now();
-    let entry = VoiceEntry {
+    let mut entry = VoiceEntry {
         guild_id,
         channel_id,
+        backend: 0,
         user_id,
         session_id: session_id.clone(),
         token_nonce: nonce.clone(),
@@ -320,18 +333,26 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         connected_at: OffsetDateTime::now_utc(),
         unbound_since: None,
     };
-    let Some(livekit_token) = mint(state, &livekit, &entry, &nonce).await else {
-        return fail(session, &command, target, VoiceConnectFailure::MediaUnavailable);
-    };
-    // The limit check and the insert share one lock, so concurrent joins cannot both take the last slot.
-    let previous = {
+    let name = display_name(state, user_id).await;
+    // The backend pick, the limit check and the insert share one lock: concurrent joins cannot both take the last slot, nor
+    // put the same room on two backends.
+    let (previous, livekit, livekit_token) = {
         let mut states = lock(&state.voice.states);
+        entry.backend = state.voice.backend_for(&states, channel_id);
+        let Some(livekit) = state.config.livekit.get(entry.backend) else {
+            drop(states);
+            return fail(session, &command, target, VoiceConnectFailure::MediaUnavailable);
+        };
+        let Some(livekit_token) = sign_token(livekit, &entry, &nonce, &name) else {
+            drop(states);
+            return fail(session, &command, target, VoiceConnectFailure::MediaUnavailable);
+        };
         let inside = states.values().filter(|other| other.channel_id == channel_id && other.user_id != user_id).count();
         if limited && inside >= user_limit as usize {
             drop(states);
             return fail(session, &command, target, VoiceConnectFailure::ChannelFull);
         }
-        states.insert(user_id, entry.clone())
+        (states.insert(user_id, entry.clone()), livekit, livekit_token)
     };
 
     // Joining or moving into the channel (not another device re-binding in place) plays the entrance sound.
@@ -414,13 +435,18 @@ async fn member_flags(state: &AppState, guild_id: i64, user_id: i64) -> (bool, b
     flags.ok().flatten().unwrap_or((false, false))
 }
 
-/// A LiveKit token for `entry`'s binding (its channel, session and rights) with token nonce `nonce`.
-async fn mint(state: &AppState, livekit: &LiveKitConfig, entry: &VoiceEntry, nonce: &str) -> Option<String> {
-    let (user_id, permissions, session_id) = (entry.user_id, entry.permissions, entry.session_id.as_str());
-    let display_name = match store::user(state, user_id).await {
+/// The name LiveKit shows for the user (their token's `name`).
+async fn display_name(state: &AppState, user_id: i64) -> String {
+    match store::user(state, user_id).await {
         Ok(Some(user)) => user.global_name.unwrap_or(user.username),
         _ => String::new(),
-    };
+    }
+}
+
+/// A token for `entry`'s binding (its channel, session and rights) with token nonce `nonce`, signed with the key and secret of
+/// the backend `livekit` that hosts the room.
+fn sign_token(livekit: &LiveKitConfig, entry: &VoiceEntry, nonce: &str, display_name: &str) -> Option<String> {
+    let (user_id, permissions, session_id) = (entry.user_id, entry.permissions, entry.session_id.as_str());
     let mut attributes = Map::new();
     if permissions & PRIORITY_SPEAKER != 0 {
         attributes.insert("vokko.priority".to_owned(), Value::from("1"));
@@ -434,7 +460,7 @@ async fn mint(state: &AppState, livekit: &LiveKitConfig, entry: &VoiceEntry, non
         sub: user_id.to_string(),
         nbf: now,
         exp: now + token::TOKEN_TTL_SECS,
-        name: display_name,
+        name: display_name.to_owned(),
         metadata: json!({"session_id": session_id, "token": nonce}).to_string(),
         attributes,
         video: Some(token::grant(&room_name(entry.channel_id), &entry.rights())),
@@ -499,7 +525,7 @@ pub fn gateway_detached(state: &AppState, gateway_session: String) {
 /// Removal from the LiveKit room, awaited under the user's lock (see `Voice::users`). Best effort: a failed call is logged
 /// and the room's participant is removed by the next reconciliation or its stale `participant_joined`.
 async fn forget_participant(state: &AppState, entry: &VoiceEntry) {
-    if let Err(error) = state.voice.rooms.remove_participant(&room_name(entry.channel_id), &entry.user_id.to_string()).await {
+    if let Err(error) = state.voice.backends.room(entry.backend).remove_participant(&room_name(entry.channel_id), &entry.user_id.to_string()).await {
         tracing::warn!("voice: {error}");
     }
 }
@@ -607,14 +633,28 @@ fn latest_token(entry: &VoiceEntry, participant: &Participant) -> bool {
     same_binding(entry, participant) && participant.token_nonce() == entry.token_nonce
 }
 
-/// Startup: rebuilds the table from LiveKit's rooms without emitting anything; restored states wait for their clients to
-/// re-send op 4 (`voice_gateway_grace`), see `reconcile`.
+/// Startup: rebuilds the table from the rooms of every LiveKit backend that was not restored yet, without emitting anything;
+/// restored states wait for their clients to re-send op 4 (`voice_gateway_grace`), see `reconcile`. Every participant's state
+/// carries the backend it was listed on, which is what keeps its room there. Fails when any backend could not be restored (the
+/// others stay restored).
 pub async fn restore(state: &AppState) -> Result<(), String> {
-    let rooms = state.voice.rooms.list_rooms().await?;
+    let mut failures = Vec::new();
+    for (index, backend) in state.voice.backends.iter().filter(|(_, backend)| !backend.is_restored()) {
+        match restore_backend(state, index).await {
+            Ok(()) => backend.set_restored(),
+            Err(error) => failures.push(format!("{}: {error}", backend.label())),
+        }
+    }
+    if failures.is_empty() { Ok(()) } else { Err(failures.join("; ")) }
+}
+
+async fn restore_backend(state: &AppState, backend: usize) -> Result<(), String> {
+    let service = state.voice.backends.room(backend);
+    let rooms = service.list_rooms().await?;
     for room in rooms {
         let Some(channel_id) = room_channel(&room) else { continue };
         let Ok(Some(row)) = store::channel_row(state, channel_id).await else { continue };
-        let participants = state.voice.rooms.list_participants(&room).await?;
+        let participants = service.list_participants(&room).await?;
         let stage = row.channel_type() == ChannelType::GuildStage;
         for participant in participants {
             let (Some(user_id), Some(session_id)) = (participant.user_id(), participant.session_id()) else { continue };
@@ -630,6 +670,7 @@ pub async fn restore(state: &AppState) -> Result<(), String> {
             let entry = VoiceEntry {
                 guild_id: row.guild_id,
                 channel_id,
+                backend,
                 user_id,
                 session_id,
                 token_nonce: participant.token_nonce(),
@@ -649,18 +690,47 @@ pub async fn restore(state: &AppState) -> Result<(), String> {
                 connected_at: OffsetDateTime::now_utc(),
                 unbound_since: Some(Instant::now()),
             };
-            lock(&state.voice.states).entry(user_id).or_insert(entry);
+            let mut states = lock(&state.voice.states);
+            if states.values().any(|other| other.channel_id == channel_id && other.backend != backend) {
+                // A backend restored late (it was out of rotation at start) must not split a call that already lives on
+                // another one: reconciliation removes these participants, and their clients rejoin the live room.
+                tracing::warn!("voice: not restoring channel {channel_id} participants of a late backend: the room lives on another one");
+                continue;
+            }
+            states.entry(user_id).or_insert(entry);
         }
     }
-    state.voice.restored.store(true, Ordering::SeqCst);
     Ok(())
 }
 
 /// `restore` until it succeeds, backing off from `voice_restore_backoff` doubling up to 60 s.
 pub async fn restore_with_retry(state: &AppState) {
+    restore_until_done(state, false).await;
+}
+
+/// How long DM-call recovery waits for every backend to be restored before it goes ahead with the ones that were.
+const RECOVER_DEADLINE: Duration = Duration::from_secs(120);
+
+/// Calls are recovered when every backend was restored (calls on one that was not would look empty and end), or, with at
+/// least one restored, once `deadline` has passed: a backend that stays unreachable must not keep the others' calls from coming
+/// back for ever (the calls that lived on it end).
+fn recover_now(all_restored: bool, any_restored: bool, waited: Duration, deadline: Duration) -> bool {
+    all_restored || (any_restored && waited >= deadline)
+}
+
+/// `restore_with_retry`; with `recover_calls`, DM calls are recovered as `recover_now` says.
+async fn restore_until_done(state: &AppState, recover_calls: bool) {
+    let started = Instant::now();
     let mut delay = state.config.voice_restore_backoff;
+    let mut recovered = !recover_calls;
     loop {
-        match restore(state).await {
+        let result = restore(state).await;
+        let backends = &state.voice.backends;
+        if !recovered && recover_now(backends.all_restored(), backends.any_restored(), started.elapsed(), RECOVER_DEADLINE) {
+            recovered = true;
+            super::calls::recover(state).await;
+        }
+        match result {
             Ok(()) => return,
             Err(error) => tracing::warn!("voice: cannot restore states from LiveKit (retrying in {delay:?}): {error}"),
         }
@@ -672,6 +742,8 @@ pub async fn restore_with_retry(state: &AppState) {
 /// One reconciliation pass: restored states nobody claimed within the grace period end; states LiveKit no longer lists end;
 /// states it lists become connected; and LiveKit participants in `v<id>` rooms that match no state are removed (a failed
 /// `RemoveParticipant` after a kick, a delete or a restart), sparing users whose binding is younger than `ISSUE_GRACE`.
+/// Rooms are looked at on their own backend, and every backend is listed: that also probes the health of the ones that are out
+/// of rotation.
 pub async fn reconcile(state: &AppState) {
     let grace = state.config.voice_gateway_grace;
     for entry in state.voice.all().into_iter().filter(|entry| entry.unbound_since.is_some_and(|since| since.elapsed() >= grace)) {
@@ -681,16 +753,26 @@ pub async fn reconcile(state: &AppState) {
             broadcast(state, &entry, true).await;
         }
     }
-    let mut channels: HashSet<i64> = state.voice.all().iter().map(|entry| entry.channel_id).collect();
-    match state.voice.rooms.list_rooms().await {
-        Ok(rooms) => channels.extend(rooms.iter().filter_map(|room| room_channel(room))),
-        Err(error) => tracing::warn!("voice: reconcile cannot list rooms: {error}"),
+    let mut rooms: HashSet<(usize, i64)> = state.voice.all().iter().map(|entry| (entry.backend, entry.channel_id)).collect();
+    // Backends that cannot serve us right now: their rooms are skipped this pass (every call would wait out its timeout).
+    let mut unavailable: HashSet<usize> = HashSet::new();
+    for (index, backend) in state.voice.backends.iter() {
+        match backend.list_rooms().await {
+            Ok(listed) => rooms.extend(listed.iter().filter_map(|room| room_channel(room)).map(|channel_id| (index, channel_id))),
+            Err(error) => {
+                if error.is_unavailable() {
+                    unavailable.insert(index);
+                }
+                tracing::warn!("voice: reconcile cannot list rooms of {}: {error}", backend.label());
+            }
+        }
     }
-    for channel_id in channels {
+    for (backend, channel_id) in rooms.into_iter().filter(|(backend, _)| !unavailable.contains(backend)) {
+        let service = state.voice.backends.room(backend);
         let room = room_name(channel_id);
         // Snapshot before listing: a token issued after this snapshot is newer than the listing, and keeps its state below.
-        let snapshot: Vec<VoiceEntry> = state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id).collect();
-        let Ok(participants) = state.voice.rooms.list_participants(&room).await else { continue };
+        let snapshot: Vec<VoiceEntry> = state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id && entry.backend == backend).collect();
+        let Ok(participants) = service.list_participants(&room).await else { continue };
         for entry in snapshot {
             let present = participants.iter().any(|participant| same_binding(&entry, participant));
             if present && !entry.connected {
@@ -707,16 +789,19 @@ pub async fn reconcile(state: &AppState) {
                 }
             }
         }
-        if !state.voice.restored() {
+        if !state.voice.backends.get(backend).is_some_and(|backend| backend.is_restored()) {
             // Without a restore every live call looks orphaned; leave LiveKit's participants alone until one succeeds.
             continue;
         }
         for participant in &participants {
             let Some(user_id) = participant.user_id() else { continue };
             let _serial = state.voice.user_lock(user_id).await;
-            // Removal is by identity: never while the user holds any state in this room, or a young binding anywhere.
-            let keep = state.voice.get(user_id).is_some_and(|entry| entry.channel_id == channel_id || entry.issued_at.elapsed() < ISSUE_GRACE);
-            if !keep && let Err(error) = state.voice.rooms.remove_participant(&room, &participant.identity).await {
+            // Removal is by identity: never while the user holds a state in this room (on this backend), or a young binding anywhere.
+            let keep = state
+                .voice
+                .get(user_id)
+                .is_some_and(|entry| (entry.channel_id == channel_id && entry.backend == backend) || entry.issued_at.elapsed() < ISSUE_GRACE);
+            if !keep && let Err(error) = service.remove_participant(&room, &participant.identity).await {
                 tracing::warn!("voice: {error}");
             }
         }
@@ -725,16 +810,13 @@ pub async fn reconcile(state: &AppState) {
 
 /// Restores from LiveKit, then reconciles every `voice_reconcile_interval`. Does nothing when voice is off.
 pub fn spawn_tasks(state: AppState) {
-    if state.config.livekit.is_none() {
+    if state.config.livekit.is_empty() {
         // No voice: no call can still be going on.
         tokio::spawn(async move { super::calls::recover(&state).await });
         return;
     }
     let restoring = state.clone();
-    tokio::spawn(async move {
-        restore_with_retry(&restoring).await;
-        super::calls::recover(&restoring).await;
-    });
+    tokio::spawn(async move { restore_until_done(&restoring, true).await });
     tokio::spawn(async move {
         let period = state.config.voice_reconcile_interval;
         let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
@@ -746,38 +828,39 @@ pub fn spawn_tasks(state: AppState) {
 }
 
 /// Webhook effects, keyed by the participant's binding (see `webhook`).
-pub(crate) async fn participant_joined(state: &AppState, channel_id: i64, participant: &Participant) {
+/// `backend` is the LiveKit backend the webhook came from: a state only follows events of the backend its room lives on.
+pub(crate) async fn participant_joined(state: &AppState, backend: usize, channel_id: i64, participant: &Participant) {
     let Some(user_id) = participant.user_id() else { return };
     let _serial = state.voice.user_lock(user_id).await;
     let marked = state.voice.update_if(user_id, |entry| {
-        let matches = entry.channel_id == channel_id && latest_token(entry, participant);
+        let matches = entry.channel_id == channel_id && entry.backend == backend && latest_token(entry, participant);
         entry.connected |= matches;
         matches
     });
-    if marked.is_none() && state.voice.get(user_id).is_none_or(|entry| entry.channel_id != channel_id) {
+    if marked.is_none() && state.voice.get(user_id).is_none_or(|entry| entry.channel_id != channel_id || entry.backend != backend) {
         // Nobody granted this participant a place in this room any more (left, moved, timed out): remove it.
-        if let Err(error) = state.voice.rooms.remove_participant(&room_name(channel_id), &user_id.to_string()).await {
+        if let Err(error) = state.voice.backends.room(backend).remove_participant(&room_name(channel_id), &user_id.to_string()).await {
             tracing::warn!("voice: {error}");
         }
     }
 }
 
-pub(crate) async fn participant_left(state: &AppState, channel_id: i64, participant: &Participant, created_at: Option<i64>) {
+pub(crate) async fn participant_left(state: &AppState, backend: usize, channel_id: i64, participant: &Participant, created_at: Option<i64>) {
     let Some(user_id) = participant.user_id() else { return };
     let _serial = state.voice.user_lock(user_id).await;
     let removed = state.voice.remove_if(user_id, |entry| {
         let stale = created_at.is_some_and(|at| at < entry.connected_at.unix_timestamp());
-        entry.channel_id == channel_id && latest_token(entry, participant) && !stale
+        entry.channel_id == channel_id && entry.backend == backend && latest_token(entry, participant) && !stale
     });
     if let Some(entry) = removed {
         broadcast(state, &entry, true).await;
     }
 }
 
-pub(crate) async fn track_changed(state: &AppState, channel_id: i64, participant: &Participant, source: &str, published: bool) {
+pub(crate) async fn track_changed(state: &AppState, backend: usize, channel_id: i64, participant: &Participant, source: &str, published: bool) {
     let Some(user_id) = participant.user_id() else { return };
     let changed = state.voice.update_if(user_id, |entry| {
-        if entry.channel_id != channel_id || !same_binding(entry, participant) {
+        if entry.channel_id != channel_id || entry.backend != backend || !same_binding(entry, participant) {
             return false;
         }
         let flag = if source.eq_ignore_ascii_case("CAMERA") {
@@ -796,8 +879,9 @@ pub(crate) async fn track_changed(state: &AppState, channel_id: i64, participant
     }
 }
 
-pub(crate) async fn room_finished(state: &AppState, channel_id: i64) {
-    for entry in state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id && entry.connected) {
+pub(crate) async fn room_finished(state: &AppState, backend: usize, channel_id: i64) {
+    // An empty leftover room timing out on another backend says nothing about the live one.
+    for entry in state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id && entry.backend == backend && entry.connected) {
         let _serial = state.voice.user_lock(entry.user_id).await;
         if let Some(gone) = state.voice.remove_if(entry.user_id, |current| current.session_id == entry.session_id) {
             broadcast(state, &gone, true).await;
@@ -814,15 +898,16 @@ pub(crate) async fn sync_rights(state: &AppState, before: &VoiceEntry, after: &V
     }
     let room = room_name(after.channel_id);
     let identity = after.user_id.to_string();
-    if let Err(error) = state.voice.rooms.update_participant(&room, &identity, &new).await {
+    let service = state.voice.backends.room(after.backend);
+    if let Err(error) = service.update_participant(&room, &identity, &new).await {
         tracing::warn!("voice: {error}");
     }
     let mic = "microphone".to_owned();
     if old.sources.contains(&mic) && !new.sources.contains(&mic) {
-        let participants = state.voice.rooms.list_participants(&room).await.unwrap_or_default();
+        let participants = service.list_participants(&room).await.unwrap_or_default();
         let track = participants.iter().find(|participant| participant.identity == identity).and_then(Participant::mic_track);
         if let Some(track) = track
-            && let Err(error) = state.voice.rooms.mute_published_track(&room, &identity, track).await
+            && let Err(error) = service.mute_published_track(&room, &identity, track).await
         {
             tracing::warn!("voice: {error}");
         }
@@ -924,6 +1009,7 @@ pub async fn move_member(state: &AppState, guild_id: i64, user_id: i64, channel_
     }
     let nonce = random_hex(8);
     let issued = Instant::now();
+    let name = display_name(state, user_id).await;
     let mut entry = previous.clone();
     entry.channel_id = channel_id;
     entry.token_nonce = nonce.clone();
@@ -935,10 +1021,15 @@ pub async fn move_member(state: &AppState, guild_id: i64, user_id: i64, channel_
     entry.request_to_speak = None;
     entry.self_video = false;
     entry.self_stream = false;
-    lock(&state.voice.states).insert(user_id, entry.clone());
+    {
+        // The target room's backend, not the old one's: a room never changes backend, so a move is a rejoin on the other side.
+        let mut states = lock(&state.voice.states);
+        entry.backend = state.voice.backend_for(&states, channel_id);
+        states.insert(user_id, entry.clone());
+    }
     let owner = entry.gateway_session.as_deref().and_then(|id| state.hub.session(id));
-    if let (Some(livekit), Some(owner)) = (state.config.livekit.clone(), owner)
-        && let Some(token) = mint(state, &livekit, &entry, &nonce).await
+    if let (Some(livekit), Some(owner)) = (state.config.livekit.get(entry.backend), owner)
+        && let Some(token) = sign_token(livekit, &entry, &nonce, &name)
     {
         send_server_update(&owner, Some(guild_id), Snowflake::from(channel_id), &livekit.url, token, &entry.session_id);
     }
@@ -946,4 +1037,19 @@ pub async fn move_member(state: &AppState, guild_id: i64, user_id: i64, channel_
     moved_away(state, &previous, viewers).await;
     spawn_connect_timeout(state.clone(), user_id, entry.session_id.clone(), nonce, issued);
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::recover_now;
+    use std::time::Duration;
+
+    #[test]
+    fn calls_are_recovered_when_everything_is_restored_or_the_deadline_passed() {
+        let deadline = Duration::from_secs(120);
+        assert!(recover_now(true, true, Duration::ZERO, deadline), "all backends restored");
+        assert!(!recover_now(false, true, Duration::from_secs(5), deadline), "one backend still failing: calls on it would look empty");
+        assert!(recover_now(false, true, deadline, deadline), "waited long enough");
+        assert!(!recover_now(false, false, Duration::from_secs(600), deadline), "nothing restored: nothing to recover from");
+    }
 }

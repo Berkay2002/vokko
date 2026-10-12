@@ -109,11 +109,22 @@ struct World {
 }
 
 fn livekit(config: &mut Config) {
-    config.livekit = Some(LiveKitConfig { url: "wss://lk.test".into(), api_url: "http://127.0.0.1:9".into(), api_key: KEY.into(), api_secret: SECRET.into() });
+    config.livekit = vec![LiveKitConfig {
+        url: "wss://lk.test".into(),
+        api_url: "http://127.0.0.1:9".into(),
+        api_key: KEY.into(),
+        api_secret: SECRET.into(),
+        label: "test".into(),
+    }];
 }
 
 async fn world_with(adjust: impl FnOnce(&mut Config), rooms: Arc<FakeRoomService>) -> World {
-    let app = TestApp::with_room_service(adjust, rooms.clone()).await;
+    world_over(adjust, vec![rooms.clone()], rooms).await
+}
+
+/// One RoomService per LiveKit backend; `rooms` (the first backend's fake) is the one `World` reports on.
+async fn world_over(adjust: impl FnOnce(&mut Config), backends: Vec<Arc<dyn RoomService>>, rooms: Arc<FakeRoomService>) -> World {
+    let app = TestApp::with_room_services(adjust, backends).await;
     let address = app.serve().await;
     let (owner, _) = app.register("sam").await;
     let (alice, alice_user) = app.register("alice").await;
@@ -151,9 +162,14 @@ impl World {
 
     /// POSTs a webhook body signed with `secret`.
     async fn webhook(&self, body: Value, secret: &str) -> StatusCode {
+        self.webhook_as(body, KEY, secret).await
+    }
+
+    /// POSTs a webhook body from the LiveKit backend with API key `key`.
+    async fn webhook_as(&self, body: Value, key: &str, secret: &str) -> StatusCode {
         let bytes = body.to_string();
         let claims = token::Claims {
-            iss: KEY.into(),
+            iss: key.into(),
             exp: vokko_server::voice::unix_now() + 60,
             sha256: Some(token::body_hash(bytes.as_bytes())),
             ..Default::default()
@@ -999,4 +1015,192 @@ async fn stage_audience_raise_hand_invite_and_end() {
     assert_eq!(w.app.delete(&format!("/stage-instances/{stage}"), &w.alice).await.0, StatusCode::FORBIDDEN);
     assert_eq!(w.app.delete(&format!("/stage-instances/{stage}"), &w.owner).await.0, StatusCode::NO_CONTENT);
     assert_eq!(carl.wait_for("STAGE_INSTANCE_DELETE").await["topic"], "Again");
+}
+
+// ---- multiple LiveKit backends with failover ----
+
+const KEY_2: &str = "second";
+const SECRET_2: &str = "second-secret";
+
+/// Backend 0 is `livekit()`'s, backend 1 is another project at `wss://lk2.test`; the cooldown is short enough to wait out.
+async fn two_backends() -> (World, Arc<FakeRoomService>) {
+    let second = FakeRoomService::new();
+    let first = FakeRoomService::new();
+    let w = world_over(
+        |config| {
+            livekit(config);
+            config.livekit.push(LiveKitConfig {
+                url: "wss://lk2.test".into(),
+                api_url: "http://127.0.0.1:9".into(),
+                api_key: KEY_2.into(),
+                api_secret: SECRET_2.into(),
+                label: "second".into(),
+            });
+            config.voice_backend_cooldown = Duration::from_millis(600);
+        },
+        vec![first.clone(), second.clone()],
+        first,
+    )
+    .await;
+    (w, second)
+}
+
+/// Joins and returns (endpoint, claims of the token verified with the secret of the backend the endpoint names).
+async fn join_on(client: &mut Client, channel: &str) -> (String, token::Claims) {
+    client.voice(Some(channel), false).await;
+    let (name, answer) = client.voice_answer().await;
+    assert_eq!(name, "VOICE_SERVER_UPDATE", "{answer}");
+    let endpoint = answer["endpoint"].as_str().expect("endpoint").to_owned();
+    let secret = if endpoint == "wss://lk2.test" { SECRET_2 } else { SECRET };
+    let claims = token::verify(secret, answer["token"].as_str().expect("token"), vokko_server::voice::unix_now()).expect("signed with that backend's secret");
+    (endpoint, claims)
+}
+
+#[tokio::test]
+async fn a_quota_error_sends_new_rooms_to_the_next_backend_and_live_rooms_stay_put() {
+    let (w, second) = two_backends().await;
+    let first = w.rooms.clone();
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    let (mut carl, _) = Client::identify(&w.address, &w.carl).await;
+    let (endpoint, claims) = join_on(&mut alice, &w.voice).await;
+    assert_eq!((endpoint.as_str(), claims.iss.as_str()), ("wss://lk.test", KEY), "the first backend while it is healthy");
+
+    // The first project runs out of quota: reconciliation's calls learn it.
+    first.fail_api(429, r#"{"code":"resource_exhausted","msg":"quota"}"#);
+    vokko_server::voice::reconcile(&w.app.state).await;
+    // The live room stays where it is: carl joins alice's room, on the first backend.
+    let (endpoint, claims) = join_on(&mut carl, &w.voice).await;
+    assert_eq!((endpoint.as_str(), claims.iss.as_str()), ("wss://lk.test", KEY));
+    // Once the room is empty, the next join starts a new room on the second backend: its URL, key and secret.
+    for client in [&mut alice, &mut carl] {
+        client.voice(None, false).await;
+        client.wait_for("VOICE_STATE_UPDATE").await;
+    }
+    let (endpoint, claims) = join_on(&mut alice, &w.voice).await;
+    assert_eq!((endpoint.as_str(), claims.iss.as_str()), ("wss://lk2.test", KEY_2));
+    assert_eq!(claims.video.and_then(|grant| grant.room), Some(w.room()));
+    assert_eq!(w.app.state.voice.get(w.alice_id.parse().expect("id")).map(|entry| entry.backend), Some(1));
+
+    // The first project is back and its cooldown is over, but the room does not move: carl joins alice's room on the second.
+    first.heal();
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    vokko_server::voice::reconcile(&w.app.state).await;
+    let (endpoint, claims) = join_on(&mut carl, &w.voice).await;
+    assert_eq!((endpoint.as_str(), claims.iss.as_str()), ("wss://lk2.test", KEY_2));
+
+    // Moderation calls go to the room's backend only.
+    let before = first.calls().len();
+    let (status, _) = w.edit_member(&w.owner, &w.alice_id, json!({"mute": true})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(second.calls().iter().any(|call| call.starts_with("UpdateParticipant")), "{:?}", second.calls());
+    assert!(first.calls()[before..].iter().all(|call| !call.starts_with("UpdateParticipant")), "{:?}", first.calls());
+
+    // Both leave; with the first backend in rotation again, the next new room is back on it.
+    for client in [&mut alice, &mut carl] {
+        client.voice(None, false).await;
+    }
+    for _ in 0..40 {
+        if w.app.state.voice.all().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let (endpoint, _) = join_on(&mut alice, &w.voice).await;
+    assert_eq!(endpoint, "wss://lk.test");
+}
+
+#[tokio::test]
+async fn webhooks_belong_to_the_backend_that_signed_them() {
+    let (w, _second) = two_backends().await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    w.rooms.fail_api(403, r#"{"code":"permission_denied"}"#);
+    vokko_server::voice::reconcile(&w.app.state).await;
+    let (endpoint, _) = join_on(&mut alice, &w.voice).await;
+    assert_eq!(endpoint, "wss://lk2.test");
+    let session = w.app.state.voice.get(w.alice_id.parse().expect("id")).expect("state").session_id;
+    let joined = json!({"event": "participant_joined", "room": {"name": w.room()}, "participant": w.participant(&w.alice_id, &session, &w.nonce(&w.alice_id))});
+    let connected = || w.app.state.voice.get(w.alice_id.parse().expect("id")).is_some_and(|entry| entry.connected);
+
+    assert_eq!(w.webhook_as(joined.clone(), "third", "third-secret").await, StatusCode::UNAUTHORIZED, "a key no backend has");
+    assert_eq!(w.webhook_as(joined.clone(), KEY_2, SECRET).await, StatusCode::UNAUTHORIZED, "the second key signed with the first secret");
+    assert!(!connected());
+    // The first backend's webhook about this channel: not where the room lives, so the state is not touched ...
+    assert_eq!(w.webhook_as(joined.clone(), KEY, SECRET).await, StatusCode::OK);
+    assert!(!connected());
+    assert_eq!(w.webhook_as(json!({"event": "room_finished", "room": {"name": w.room()}}), KEY, SECRET).await, StatusCode::OK);
+    assert!(w.app.state.voice.get(w.alice_id.parse().expect("id")).is_some());
+    // ... and the second's is.
+    assert_eq!(w.webhook_as(joined, KEY_2, SECRET_2).await, StatusCode::OK);
+    assert!(connected());
+    assert_eq!(w.webhook_as(json!({"event": "room_finished", "room": {"name": w.room()}}), KEY_2, SECRET_2).await, StatusCode::OK);
+    assert!(w.app.state.voice.get(w.alice_id.parse().expect("id")).is_none());
+}
+
+#[tokio::test]
+async fn a_restart_rebuilds_the_rooms_backends_from_every_backend() {
+    let (w, second) = two_backends().await;
+    // Carl was in this channel's room on the second backend when the server stopped.
+    let metadata = json!({"session_id": "live", "token": "n"}).to_string();
+    second.add_participant(&w.room(), Participant { sid: "PA_c".into(), identity: w.carl_id.clone(), metadata, tracks: Vec::new() });
+    vokko_server::voice::restore(&w.app.state).await.expect("both backends restore");
+    assert_eq!(w.app.state.voice.get(w.carl_id.parse().expect("id")).map(|entry| entry.backend), Some(1));
+    assert!(w.app.state.voice.restored());
+    // Alice joins the same channel: the first backend is healthy, but the room is on the second.
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    let (endpoint, claims) = join_on(&mut alice, &w.voice).await;
+    assert_eq!((endpoint.as_str(), claims.iss.as_str()), ("wss://lk2.test", KEY_2));
+    // An orphan listed on the first backend is removed there; the second backend's participants are not touched.
+    let first = w.rooms.clone();
+    let metadata = json!({"session_id": "stale", "token": "n"}).to_string();
+    first.add_participant(&w.room(), Participant { sid: "PA_s".into(), identity: "424242".into(), metadata, tracks: Vec::new() });
+    vokko_server::voice::reconcile(&w.app.state).await;
+    assert_eq!(w.calls_with("RemoveParticipant"), [format!("RemoveParticipant {} 424242", w.room())]);
+    assert!(second.calls().iter().all(|call| !call.starts_with("RemoveParticipant")), "{:?}", second.calls());
+}
+
+/// One unreachable backend does not keep the other one from being restored (nor its calls from being reconciled).
+#[tokio::test]
+async fn an_unreachable_backend_does_not_block_restoring_the_others() {
+    let (w, second) = two_backends().await;
+    let metadata = json!({"session_id": "live", "token": "n"}).to_string();
+    w.rooms.add_participant(&w.room(), Participant { sid: "PA_c".into(), identity: w.carl_id.clone(), metadata, tracks: Vec::new() });
+    second.fail_lists(1);
+    assert!(vokko_server::voice::restore(&w.app.state).await.is_err());
+    assert!(w.app.state.voice.get(w.carl_id.parse().expect("id")).is_some(), "the first backend was restored");
+    assert!(!w.app.state.voice.restored(), "the second was not");
+    vokko_server::voice::restore(&w.app.state).await.expect("the second answers now");
+    assert!(w.app.state.voice.restored());
+    assert_eq!(w.calls_with("ListRooms").len(), 1, "the first backend is not restored twice");
+}
+
+/// A backend that restores late must not re-insert participants of a room that already lives on another backend.
+#[tokio::test]
+async fn a_late_backend_restore_does_not_split_a_live_call() {
+    let (w, second) = two_backends().await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    let (endpoint, _) = join_on(&mut alice, &w.voice).await;
+    assert_eq!(endpoint, "wss://lk.test");
+    // The second backend still lists carl in a leftover room for the same channel.
+    let metadata = json!({"session_id": "old", "token": "n"}).to_string();
+    second.add_participant(&w.room(), Participant { sid: "PA_c".into(), identity: w.carl_id.clone(), metadata, tracks: Vec::new() });
+    vokko_server::voice::restore(&w.app.state).await.expect("both backends restore");
+    assert!(w.app.state.voice.get(w.carl_id.parse().expect("id")).is_none(), "carl's room is on the first backend: nothing to restore");
+    assert!(w.app.state.voice.all().iter().all(|entry| entry.backend == 0));
+    // Reconciliation removes him from the late backend, so his client rejoins the live room.
+    vokko_server::voice::reconcile(&w.app.state).await;
+    assert!(second.calls().contains(&format!("RemoveParticipant {} {}", w.room(), w.carl_id)), "{:?}", second.calls());
+}
+
+/// A backend whose listing fails with a quota error is not asked about its rooms again during the same pass.
+#[tokio::test]
+async fn reconciliation_skips_the_rooms_of_a_backend_that_is_out_of_quota() {
+    let (w, _second) = two_backends().await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    join_on(&mut alice, &w.voice).await;
+    let first = w.rooms.clone();
+    first.fail_api(429, r#"{"code":"resource_exhausted"}"#);
+    let before = first.calls().len();
+    vokko_server::voice::reconcile(&w.app.state).await;
+    let calls = first.calls();
+    assert_eq!(&calls[before..], ["ListRooms"], "the listing failed, so no ListParticipants per room: {calls:?}");
 }

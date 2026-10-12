@@ -79,6 +79,8 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_LIVEKIT_API_KEY` | unset | LiveKit API key name (the key in `livekit.yaml` `keys:`). |
 | `VOKKO_LIVEKIT_API_SECRET` | unset | Its secret. Only vokko-server holds it; it signs every voice token and verifies LiveKit's webhooks. |
 | `VOKKO_LIVEKIT_API_URL` | derived from `VOKKO_LIVEKIT_URL` (`wss` → `https`) | Where vokko-server reaches LiveKit's RoomService, e.g. `http://127.0.0.1:7880` when both run on one host. |
+| `VOKKO_LIVEKIT_LABEL` | `livekit-1` | Name of the backend in logs. |
+| `VOKKO_LIVEKIT_URL_2`, `_API_KEY_2`, `_API_SECRET_2`, `_API_URL_2`, `_LABEL_2` (then `_3`, ...) | unset | More LiveKit backends: the same settings as backend 1, with a number. Numbering continues until the first index with none of URL, API_KEY and API_SECRET set; a backend with only some of them set, or numbered after a gap, stops the server at start. See [Multiple LiveKit backends with failover](#multiple-livekit-backends-with-failover). |
 | `VOKKO_VOICE_BITRATE_MAX` | `128000` | Highest voice channel bitrate in bps (8000-384000). New channels start at 64000. |
 | `VOKKO_VOICE_CONNECT_TIMEOUT_SECS` | `30` | How long a client may take to reach LiveKit after getting its voice token (5-600 s) before its voice state is dropped. Raise it when clients connect over slow TURN/TCP. |
 | `RUST_LOG` | `vokko_server=info,warn` | Log filter. |
@@ -193,6 +195,16 @@ services:
 Caddy for the signal websocket: `lk.example.com { reverse_proxy 127.0.0.1:7880 }`. TURN needs its own hostname with a certificate (`turn.example.com`; point `cert_file`/`key_file` at a copy of Caddy's certificate).
 
 Sizing: the SFU forwards and never transcodes, so CPU stays low (a 10-person voice room is well under 10 % of a core); upload bandwidth is the limit. Each speaker costs about 70 kbit/s per listener (silence ~1 kbit/s), so a 20 Mbit/s uplink carries dozens of voice users. Voice states live in vokko-server's memory and are rebuilt from LiveKit after a restart, so restarting vokko-server does not drop calls.
+
+### Multiple LiveKit backends with failover
+
+The server can use an ordered list of LiveKit backends: backend 1 is `VOKKO_LIVEKIT_URL` / `_API_KEY` / `_API_SECRET`, backend 2 is the same names with `_2`, and so on.
+
+- A voice room lives on one backend for as long as anyone is in it, because everyone in a call has to be on the same project. A new room goes to the first backend that is in rotation; live rooms never move.
+- A backend leaves rotation for 5 minutes when one of its API calls fails with HTTP 401, 403 or 429, a Twirp `resource_exhausted`, `unauthenticated` or `permission_denied` code, or cannot be reached. The server calls every backend's API once per reconciliation pass (every 60 s), which is how it notices; after the cooldown the next call decides whether the backend is back.
+- Each backend needs its own key and secret (two backends with the same pair stop the server at start) and its own webhook pointing at `/internal/livekit/webhook`, signed with that backend's key. The server finds the backend by the key and secret that signed the request; anything else gets 401.
+- The server tells each client the signal URL of the room's backend, so clients need no setting. The packaged desktop app's content security policy (`connect-src` in `apps/desktop/release.production.json`) has to allow the signal host of every backend (`wss://*.livekit.cloud` is there; a self-hosted host must be added).
+- `docker-compose.yml` passes backends 2 and 3 through; add more variables there for more backends.
 
 ## Backups
 

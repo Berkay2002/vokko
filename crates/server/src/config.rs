@@ -48,8 +48,9 @@ pub struct Config {
     pub registration_open: bool,
     /// Registration, age limit, terms, emailed links and outgoing mail (`account::config`).
     pub accounts: AccountsConfig,
-    /// LiveKit (`VOKKO_LIVEKIT_URL`, `VOKKO_LIVEKIT_API_KEY`, `VOKKO_LIVEKIT_API_SECRET`); `None` disables voice.
-    pub livekit: Option<LiveKitConfig>,
+    /// LiveKit backends in failover order: backend 0 is `VOKKO_LIVEKIT_URL` / `_API_KEY` / `_API_SECRET`, further ones carry a
+    /// `_2`, `_3`, ... suffix (see `parse_livekit`). Empty disables voice.
+    pub livekit: Vec<LiveKitConfig>,
     /// Highest channel bitrate (`VOKKO_VOICE_BITRATE_MAX`, default 128000, at most 384000).
     pub voice_bitrate_max: u32,
     /// A joined state without LiveKit's `participant_joined` within this window of its token being issued is dropped
@@ -60,6 +61,9 @@ pub struct Config {
     /// A voice state outlives its gateway session (or, after a restart, waits for its client) this long.
     pub voice_gateway_grace: Duration,
     pub voice_reconcile_interval: Duration,
+    /// How long a LiveKit backend whose API answered with a quota, limit or auth error (or was unreachable) is passed over
+    /// for new rooms before it is tried again.
+    pub voice_backend_cooldown: Duration,
     /// How long a DM call rings a recipient before it shows as missed for them (3 minutes; tests shorten it).
     pub call_ring_timeout: Duration,
     /// Stickers per guild (one owner-editable block instead of boost levels).
@@ -86,6 +90,8 @@ pub struct LiveKitConfig {
     pub api_url: String,
     pub api_key: String,
     pub api_secret: String,
+    /// Name in logs (`VOKKO_LIVEKIT_LABEL[_N]`).
+    pub label: String,
 }
 
 /// `VOKKO_DB_MAX_CONNECTIONS`: 1..=1000.
@@ -112,6 +118,58 @@ impl LiveKitConfig {
 pub const DEFAULT_BIND: &str = "127.0.0.1:8710";
 /// Default of `VOKKO_VOICE_CONNECT_TIMEOUT_SECS`.
 pub const DEFAULT_VOICE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a LiveKit backend that failed with a quota, limit or auth error is passed over for new rooms.
+pub const DEFAULT_VOICE_BACKEND_COOLDOWN: Duration = Duration::from_secs(5 * 60);
+
+/// Names of the LiveKit variables of backend `index` (0-based): backend 0 has no suffix, backend 1 is `_2`, and so on.
+fn livekit_var(name: &str, index: usize) -> String {
+    if index == 0 { format!("VOKKO_LIVEKIT_{name}") } else { format!("VOKKO_LIVEKIT_{name}_{}", index + 1) }
+}
+
+/// Backend 0 (`VOKKO_LIVEKIT_URL`, `_API_KEY`, `_API_SECRET`, optional `_API_URL` and `_LABEL`) and the backends after it
+/// (`_2`, `_3`, ... until the first index with none of URL, API_KEY and API_SECRET set). A backend with only some of the three
+/// set, or one numbered after a gap, is an error rather than silently ignored.
+pub fn parse_livekit(env: &DotEnv) -> Result<Vec<LiveKitConfig>, String> {
+    let mut backends = Vec::new();
+    loop {
+        let index = backends.len();
+        let [url, api_key, api_secret] = ["URL", "API_KEY", "API_SECRET"].map(|name| env.get(&livekit_var(name, index)));
+        if url.is_none() && api_key.is_none() && api_secret.is_none() {
+            // Anything numbered after the gap would be ignored without a word.
+            let later = env.keys().into_iter().filter_map(|key| {
+                let (name, number) = key.strip_prefix("VOKKO_LIVEKIT_")?.rsplit_once('_')?;
+                let number: usize = number.parse().ok()?;
+                (number > index + 1 && matches!(name, "URL" | "API_KEY" | "API_SECRET")).then_some((key, number))
+            });
+            if let Some((key, _)) = later.filter(|(key, _)| env.get(key).is_some()).min_by_key(|(_, number)| *number) {
+                let missing = livekit_var("URL", index);
+                return Err(format!("{key} is set but LiveKit backend {} is not ({missing} is missing): number backends without gaps", index + 1));
+            }
+            return Ok(backends);
+        }
+        let (Some(url), Some(api_key), Some(api_secret)) = (url, api_key, api_secret) else {
+            let (url, key, secret) = (livekit_var("URL", index), livekit_var("API_KEY", index), livekit_var("API_SECRET", index));
+            return Err(if index == 0 {
+                format!("voice needs all of {url}, {key} and {secret} (or none of them)")
+            } else {
+                format!("LiveKit backend {} needs all of {url}, {key} and {secret} (or none of them)", index + 1)
+            });
+        };
+        if let Some(same) = backends.iter().position(|other: &LiveKitConfig| other.api_key == api_key && other.api_secret == api_secret) {
+            // Webhooks are told apart by the key and secret that signed them.
+            return Err(format!(
+                "{} and {} repeat the API key and secret of LiveKit backend {}: give each backend its own key pair",
+                livekit_var("API_KEY", index),
+                livekit_var("API_SECRET", index),
+                same + 1
+            ));
+        }
+        let url = url.trim_end_matches('/').to_owned();
+        let api_url = env.get(&livekit_var("API_URL", index)).unwrap_or_else(|| LiveKitConfig::derive_api_url(&url));
+        let label = env.get(&livekit_var("LABEL", index)).unwrap_or_else(|| format!("livekit-{}", index + 1));
+        backends.push(LiveKitConfig { url, api_url, api_key, api_secret, label });
+    }
+}
 
 /// `VOKKO_VOICE_CONNECT_TIMEOUT_SECS`: whole seconds, 5..=600.
 pub fn parse_connect_timeout(value: &str) -> Result<Duration, String> {
@@ -251,16 +309,7 @@ impl Config {
             };
         }
         config.accounts = AccountsConfig::from_env(&env, &config.public_url)?;
-        let livekit = (env.get("VOKKO_LIVEKIT_URL"), env.get("VOKKO_LIVEKIT_API_KEY"), env.get("VOKKO_LIVEKIT_API_SECRET"));
-        config.livekit = match livekit {
-            (Some(url), Some(api_key), Some(api_secret)) => {
-                let url = url.trim_end_matches('/').to_owned();
-                let api_url = env.get("VOKKO_LIVEKIT_API_URL").unwrap_or_else(|| LiveKitConfig::derive_api_url(&url));
-                Some(LiveKitConfig { url, api_url, api_key, api_secret })
-            }
-            (None, None, None) => None,
-            _ => return Err("voice needs all of VOKKO_LIVEKIT_URL, VOKKO_LIVEKIT_API_KEY and VOKKO_LIVEKIT_API_SECRET (or none of them)".to_owned()),
-        };
+        config.livekit = parse_livekit(&env)?;
         if let Some(value) = env.get("VOKKO_VOICE_BITRATE_MAX") {
             let bitrate: u32 = value.trim().parse().map_err(|_| format!("VOKKO_VOICE_BITRATE_MAX must be bps, got {value}"))?;
             if !(VOICE_BITRATE_MIN..=VOICE_BITRATE_CEILING_MAX).contains(&bitrate) {
@@ -302,12 +351,13 @@ impl Config {
             reminder_poll: Duration::from_secs(15),
             cors_origins: None,
             registration_open: true,
-            livekit: None,
+            livekit: Vec::new(),
             voice_bitrate_max: VOICE_BITRATE_GUILD_MAX,
             voice_connect_timeout: DEFAULT_VOICE_CONNECT_TIMEOUT,
             voice_restore_backoff: Duration::from_secs(1),
             voice_gateway_grace: Duration::from_secs(60),
             voice_reconcile_interval: Duration::from_secs(60),
+            voice_backend_cooldown: DEFAULT_VOICE_BACKEND_COOLDOWN,
             call_ring_timeout: Duration::from_secs(vokko_protocol::api::CALL_RING_TIMEOUT_SECS),
         }
     }
@@ -338,7 +388,7 @@ fn parse_max_upload_mb(value: &str) -> Result<usize, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_cors_origins, parse_max_upload_mb};
+    use super::{DotEnv, parse_cors_origins, parse_livekit, parse_max_upload_mb};
 
     #[test]
     fn upload_limit_is_the_lower_of_the_setting_and_the_nitro_limit() {
@@ -365,6 +415,50 @@ mod tests {
     fn livekit_api_url_is_derived_from_the_signal_url() {
         assert_eq!(super::LiveKitConfig::derive_api_url("wss://lk.example.org"), "https://lk.example.org");
         assert_eq!(super::LiveKitConfig::derive_api_url("ws://127.0.0.1:7880"), "http://127.0.0.1:7880");
+    }
+
+    fn livekit(pairs: &[(&str, &str)]) -> Result<Vec<(String, String, String, String)>, String> {
+        let backends = parse_livekit(&DotEnv::from_pairs(pairs))?;
+        Ok(backends.into_iter().map(|b| (b.url, b.api_url, b.api_key, b.label)).collect())
+    }
+
+    const BACKEND_0: [(&str, &str); 3] = [("VOKKO_LIVEKIT_URL", "wss://a.example/"), ("VOKKO_LIVEKIT_API_KEY", "ka"), ("VOKKO_LIVEKIT_API_SECRET", "sa")];
+
+    #[test]
+    fn livekit_backends_parse_in_order() {
+        assert_eq!(livekit(&[]), Ok(Vec::new()), "no backends: voice off");
+        let one = livekit(&BACKEND_0).expect("one backend");
+        assert_eq!(one, [("wss://a.example".into(), "https://a.example".into(), "ka".into(), "livekit-1".into())]);
+        let mut two = BACKEND_0.to_vec();
+        two.extend([
+            ("VOKKO_LIVEKIT_URL_2", "ws://127.0.0.1:7880"),
+            ("VOKKO_LIVEKIT_API_KEY_2", "kb"),
+            ("VOKKO_LIVEKIT_API_SECRET_2", "sb"),
+            ("VOKKO_LIVEKIT_LABEL_2", "home"),
+            ("VOKKO_LIVEKIT_API_URL_2", "http://livekit:7880"),
+        ]);
+        let two = livekit(&two).expect("two backends");
+        assert_eq!(two.len(), 2);
+        assert_eq!(two[1], ("ws://127.0.0.1:7880".into(), "http://livekit:7880".into(), "kb".into(), "home".into()));
+    }
+
+    #[test]
+    fn partial_or_gapped_livekit_backends_are_errors() {
+        let mut partial = BACKEND_0.to_vec();
+        partial.push(("VOKKO_LIVEKIT_URL_2", "wss://b.example"));
+        let error = livekit(&partial).expect_err("partial backend 2");
+        assert!(error.contains("VOKKO_LIVEKIT_API_KEY_2") && error.contains("VOKKO_LIVEKIT_API_SECRET_2"), "{error}");
+        assert!(livekit(&[("VOKKO_LIVEKIT_URL", "wss://a.example")]).is_err(), "partial backend 0");
+        let gap = [BACKEND_0.to_vec(), vec![("VOKKO_LIVEKIT_URL_3", "x"), ("VOKKO_LIVEKIT_API_KEY_3", "x"), ("VOKKO_LIVEKIT_API_SECRET_3", "x")]].concat();
+        assert!(livekit(&gap).expect_err("gap").contains("_3 is set but LiveKit backend 2 is not"));
+        let only_second = [("VOKKO_LIVEKIT_URL_2", "x"), ("VOKKO_LIVEKIT_API_KEY_2", "x"), ("VOKKO_LIVEKIT_API_SECRET_2", "x")];
+        assert!(livekit(&only_second).is_err(), "backend 2 without backend 1");
+        let same_pair =
+            [BACKEND_0.to_vec(), vec![("VOKKO_LIVEKIT_URL_2", "x"), ("VOKKO_LIVEKIT_API_KEY_2", "ka"), ("VOKKO_LIVEKIT_API_SECRET_2", "sa")]].concat();
+        assert!(livekit(&same_pair).expect_err("same key pair").contains("repeat the API key and secret of LiveKit backend 1"));
+        let same_key =
+            [BACKEND_0.to_vec(), vec![("VOKKO_LIVEKIT_URL_2", "x"), ("VOKKO_LIVEKIT_API_KEY_2", "ka"), ("VOKKO_LIVEKIT_API_SECRET_2", "other")]].concat();
+        assert_eq!(livekit(&same_key).map(|backends| backends.len()), Ok(2), "the same key name with another secret is fine");
     }
 
     #[test]

@@ -207,6 +207,21 @@ pub fn verify_webhook(api_key: &str, secret: &str, authorization: &str, body: &[
     Ok(())
 }
 
+/// Which backend (`(api_key, api_secret)` pairs in config order) a webhook comes from: the one whose key the token names and
+/// whose secret signed it. A key no backend has, or a signature none of them made, is refused with the most specific reason
+/// any backend gave.
+pub fn verify_webhook_any(backends: &[(&str, &str)], authorization: &str, body: &[u8], now: i64) -> Result<usize, WebhookRefusal> {
+    let mut refusal = WebhookRefusal::BadSignature;
+    for (index, (api_key, secret)) in backends.iter().enumerate() {
+        match verify_webhook(api_key, secret, authorization, body, now) {
+            Ok(()) => return Ok(index),
+            Err(WebhookRefusal::BadSignature) => {}
+            Err(other) => refusal = other,
+        }
+    }
+    Err(refusal)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,5 +285,26 @@ mod tests {
         assert_eq!(verify_webhook("key", "secret", &token, body, 2_001), Err(WebhookRefusal::Expired));
         let unhashed = sign("secret", &Claims { iss: "key".into(), exp: 2_000, ..Claims::default() }).expect("sign");
         assert_eq!(verify_webhook("key", "secret", &unhashed, body, 1_000), Err(WebhookRefusal::BodyHashMismatch), "no sha256 claim");
+    }
+
+    #[test]
+    fn webhooks_are_verified_against_the_backend_whose_key_they_name() {
+        let body = br#"{"event":"room_finished"}"#;
+        let signed =
+            |key: &str, secret: &str| sign(secret, &Claims { iss: key.into(), exp: 2_000, sha256: Some(body_hash(body)), ..Claims::default() }).expect("sign");
+        let backends = [("key-a", "secret-a"), ("key-b", "secret-b")];
+        assert_eq!(verify_webhook_any(&backends, &signed("key-a", "secret-a"), body, 1_000), Ok(0));
+        assert_eq!(verify_webhook_any(&backends, &signed("key-b", "secret-b"), body, 1_000), Ok(1));
+        assert_eq!(verify_webhook_any(&backends, &format!("Bearer {}", signed("key-b", "secret-b")), body, 1_000), Ok(1));
+        // An unknown key, a known key with another backend's secret, and an unsigned request are all refused.
+        assert!(verify_webhook_any(&backends, &signed("key-c", "secret-c"), body, 1_000).is_err());
+        assert!(verify_webhook_any(&backends, &signed("key-b", "secret-a"), body, 1_000).is_err());
+        assert_eq!(verify_webhook_any(&backends, "", body, 1_000), Err(WebhookRefusal::MissingHeader));
+        // A tampered body is reported as such, not as an unknown key.
+        assert_eq!(verify_webhook_any(&backends, &signed("key-b", "secret-b"), b"{}", 1_000), Err(WebhookRefusal::BodyHashMismatch));
+        // Two backends may share an API key name: the secret tells them apart.
+        let same_key = [("vokko", "secret-a"), ("vokko", "secret-b")];
+        assert_eq!(verify_webhook_any(&same_key, &signed("vokko", "secret-b"), body, 1_000), Ok(1));
+        assert!(verify_webhook_any(&[], &signed("vokko", "secret-b"), body, 1_000).is_err());
     }
 }

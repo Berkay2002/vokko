@@ -1,5 +1,6 @@
 //! Voice channels (docs/design/voice.md, milestone V1): permission checks, LiveKit tokens, the in-memory voice-state table,
 //! LiveKit webhooks and reconciliation. Media never passes through vokko-server.
+pub mod backends;
 pub mod calls;
 pub mod livekit;
 pub mod moderation;
@@ -14,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use vokko_protocol::api::{InstanceMediaConfig, VOICE_BITRATE_DEFAULT, VOICE_BITRATE_MIN, VOICE_USER_LIMIT_MAX};
 
-use crate::config::Config;
+use crate::config::{Config, LiveKitConfig};
 use crate::error::{ApiErr, ApiResult};
 use livekit::{HttpRoomService, NoRoomService, RoomService};
 
@@ -33,23 +34,23 @@ pub fn room_channel(room: &str) -> Option<i64> {
     room.strip_prefix('v')?.parse().ok()
 }
 
-/// The RoomService the config asks for: HTTP to LiveKit, or nothing when voice is off.
-pub fn room_service(config: &Config) -> Arc<dyn RoomService> {
-    match &config.livekit {
-        Some(livekit) => match HttpRoomService::new(&livekit.api_url, &livekit.api_key, &livekit.api_secret) {
+/// The RoomServices the config asks for, one per LiveKit backend in config order: HTTP to LiveKit (none when voice is off).
+pub fn room_services(config: &Config) -> Vec<Arc<dyn RoomService>> {
+    let service = |livekit: &LiveKitConfig| -> Arc<dyn RoomService> {
+        match HttpRoomService::new(&livekit.api_url, &livekit.api_key, &livekit.api_secret) {
             Ok(service) => Arc::new(service),
             Err(error) => {
-                tracing::error!("LiveKit RoomService client: {error}; voice moderation calls are disabled");
+                tracing::error!("LiveKit RoomService client of {}: {error}; its voice moderation calls are disabled", livekit.label);
                 Arc::new(NoRoomService)
             }
-        },
-        None => Arc::new(NoRoomService),
-    }
+        }
+    };
+    config.livekit.iter().map(service).collect()
 }
 
 pub fn media_config(config: &Config) -> InstanceMediaConfig {
     InstanceMediaConfig {
-        voice_enabled: config.livekit.is_some(),
+        voice_enabled: !config.livekit.is_empty(),
         voice_bitrate_ceiling: config.voice_bitrate_max,
         // Screen share and camera arrive in V4/V5; the qualities are what the instance would allow.
         screenshare_qualities: vec!["720p30".to_owned(), "1080p60".to_owned()],

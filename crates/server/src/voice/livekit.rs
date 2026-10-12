@@ -9,7 +9,55 @@ use serde_json::{Value, json};
 
 use super::token::{self, Claims, VideoGrant};
 
-pub type RoomFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send + 'a>>;
+pub type RoomFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, RoomError>> + Send + 'a>>;
+
+/// A failed RoomService call. `unavailable` marks the failures that say the backend itself cannot serve us (a quota, limit or
+/// auth error, or no connection): `voice::backends` takes such a backend out of rotation for new rooms.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoomError {
+    message: String,
+    unavailable: bool,
+}
+
+impl RoomError {
+    /// Any other failure: logged, the next reconciliation repairs what it left behind.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self { message: message.into(), unavailable: false }
+    }
+
+    /// The backend cannot be reached.
+    pub fn unreachable(message: impl Into<String>) -> Self {
+        Self { message: message.into(), unavailable: true }
+    }
+
+    /// LiveKit answered `status` with `body`. HTTP 401/403/429 and Twirp's `resource_exhausted`, `unauthenticated` and
+    /// `permission_denied` codes mean the project's quota, limits or credentials, not this one call.
+    pub fn http(method: &str, status: u16, body: &str) -> Self {
+        let code = serde_json::from_str::<Value>(body).ok().and_then(|value| value.get("code")?.as_str().map(str::to_owned)).unwrap_or_default();
+        let unavailable = matches!(status, 401 | 403 | 429) || matches!(code.as_str(), "resource_exhausted" | "unauthenticated" | "permission_denied");
+        Self { message: format!("LiveKit {method}: HTTP {status}: {body}"), unavailable }
+    }
+
+    pub fn is_unavailable(&self) -> bool {
+        self.unavailable
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for RoomError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl From<RoomError> for String {
+    fn from(error: RoomError) -> Self {
+        error.message
+    }
+}
 
 /// A published track as far as voice state cares.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -101,7 +149,7 @@ impl Permission {
     }
 }
 
-/// The RoomService calls vokko-server makes. Errors are strings: callers log them and carry on (LiveKit is best effort,
+/// The RoomService calls vokko-server makes. Callers log the errors and carry on (LiveKit is best effort,
 /// the next reconciliation repairs what a failed call left behind).
 pub trait RoomService: Send + Sync {
     fn list_rooms(&self) -> RoomFuture<'_, Vec<String>>;
@@ -138,9 +186,9 @@ impl RoomService for NoRoomService {
 }
 
 /// A participant that is not (or no longer) in the room counts as done.
-fn gone_is_fine(result: Result<Value, String>) -> Result<(), String> {
+fn gone_is_fine(result: Result<Value, RoomError>) -> Result<(), RoomError> {
     match result {
-        Err(error) if error.contains("404") || error.contains("not_found") => Ok(()),
+        Err(error) if error.message().contains("404") || error.message().contains("not_found") => Ok(()),
         other => other.map(|_| ()),
     }
 }
@@ -165,8 +213,8 @@ impl HttpRoomService {
         token::sign(&self.api_secret, &claims).ok_or_else(|| "cannot sign a LiveKit admin token".to_owned())
     }
 
-    async fn call(&self, method: &str, grant: VideoGrant, body: Value) -> Result<Value, String> {
-        let token = self.admin_token(grant)?;
+    async fn call(&self, method: &str, grant: VideoGrant, body: Value) -> Result<Value, RoomError> {
+        let token = self.admin_token(grant).map_err(RoomError::new)?;
         let response = self
             .client
             .post(format!("{}/twirp/livekit.RoomService/{method}", self.api_url))
@@ -175,13 +223,16 @@ impl HttpRoomService {
             .body(body.to_string())
             .send()
             .await
-            .map_err(|error| format!("LiveKit {method}: {error}"))?;
+            .map_err(|error| {
+                let message = format!("LiveKit {method}: {error}");
+                if error.is_connect() || error.is_timeout() { RoomError::unreachable(message) } else { RoomError::new(message) }
+            })?;
         let status = response.status();
-        let bytes = response.bytes().await.map_err(|error| format!("LiveKit {method}: {error}"))?;
+        let bytes = response.bytes().await.map_err(|error| RoomError::new(format!("LiveKit {method}: {error}")))?;
         if !status.is_success() {
-            return Err(format!("LiveKit {method}: HTTP {status}: {}", String::from_utf8_lossy(&bytes)));
+            return Err(RoomError::http(method, status.as_u16(), &String::from_utf8_lossy(&bytes)));
         }
-        serde_json::from_slice(&bytes).map_err(|error| format!("LiveKit {method}: bad JSON: {error}"))
+        serde_json::from_slice(&bytes).map_err(|error| RoomError::new(format!("LiveKit {method}: bad JSON: {error}")))
     }
 }
 
@@ -202,7 +253,7 @@ impl RoomService for HttpRoomService {
         Box::pin(async move {
             let value = self.call("ListParticipants", admin(room), json!({"room": room})).await?;
             let list = value.get("participants").cloned().unwrap_or(Value::Array(Vec::new()));
-            serde_json::from_value(list).map_err(|error| format!("LiveKit ListParticipants: {error}"))
+            serde_json::from_value(list).map_err(|error| RoomError::new(format!("LiveKit ListParticipants: {error}")))
         })
     }
 
@@ -234,6 +285,8 @@ pub struct FakeRoomService {
     failing_lists: Mutex<u32>,
     /// The next `ListParticipants` waits for this before answering (a race between the listing and later work).
     held_list: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+    /// Every call is answered with this HTTP status and body until healed (a quota or auth error of the project).
+    api_failure: Mutex<Option<(u16, String)>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -264,6 +317,19 @@ impl FakeRoomService {
         *lock(&self.failing_lists) = count;
     }
 
+    /// Every call fails like LiveKit's API with `status` and `body` (e.g. `429`, `{"code":"resource_exhausted"}`) until `heal`.
+    pub fn fail_api(&self, status: u16, body: &str) {
+        *lock(&self.api_failure) = Some((status, body.to_owned()));
+    }
+
+    pub fn heal(&self) {
+        *lock(&self.api_failure) = None;
+    }
+
+    fn refused(&self, method: &str) -> Option<RoomError> {
+        lock(&self.api_failure).as_ref().map(|(status, body)| RoomError::http(method, *status, body))
+    }
+
     /// Holds the next `ListParticipants` until the returned sender fires (or is dropped).
     pub fn hold_next_list(&self) -> tokio::sync::oneshot::Sender<()> {
         let (release, held) = tokio::sync::oneshot::channel();
@@ -279,8 +345,11 @@ impl RoomService for FakeRoomService {
             let mut failing = lock(&self.failing_lists);
             if *failing > 0 {
                 *failing -= 1;
-                return Box::pin(async { Err("LiveKit ListRooms: connection refused".to_owned()) });
+                return Box::pin(async { Err(RoomError::unreachable("LiveKit ListRooms: connection refused")) });
             }
+        }
+        if let Some(error) = self.refused("ListRooms") {
+            return Box::pin(async move { Err(error) });
         }
         let names = lock(&self.rooms).iter().map(|(name, _)| name.clone()).collect();
         Box::pin(async move { Ok(names) })
@@ -288,6 +357,9 @@ impl RoomService for FakeRoomService {
 
     fn list_participants<'a>(&'a self, room: &'a str) -> RoomFuture<'a, Vec<Participant>> {
         lock(&self.calls).push(format!("ListParticipants {room}"));
+        if let Some(error) = self.refused("ListParticipants") {
+            return Box::pin(async move { Err(error) });
+        }
         let list = lock(&self.rooms).iter().find(|(name, _)| name == room).map(|(_, list)| list.clone()).unwrap_or_default();
         let held = lock(&self.held_list).take();
         Box::pin(async move {
@@ -300,6 +372,9 @@ impl RoomService for FakeRoomService {
 
     fn remove_participant<'a>(&'a self, room: &'a str, identity: &'a str) -> RoomFuture<'a, ()> {
         lock(&self.calls).push(format!("RemoveParticipant {room} {identity}"));
+        if let Some(error) = self.refused("RemoveParticipant") {
+            return Box::pin(async move { Err(error) });
+        }
         if let Some((_, list)) = lock(&self.rooms).iter_mut().find(|(name, _)| name == room) {
             list.retain(|participant| participant.identity != identity);
         }
@@ -313,11 +388,17 @@ impl RoomService for FakeRoomService {
             permission.can_subscribe,
             permission.hidden
         ));
+        if let Some(error) = self.refused("UpdateParticipant") {
+            return Box::pin(async move { Err(error) });
+        }
         Box::pin(async { Ok(()) })
     }
 
     fn mute_published_track<'a>(&'a self, room: &'a str, identity: &'a str, track_sid: &'a str) -> RoomFuture<'a, ()> {
         lock(&self.calls).push(format!("MutePublishedTrack {room} {identity} {track_sid}"));
+        if let Some(error) = self.refused("MutePublishedTrack") {
+            return Box::pin(async move { Err(error) });
+        }
         Box::pin(async { Ok(()) })
     }
 }
@@ -339,6 +420,20 @@ mod tests {
         let silent = Participant { tracks: vec![TrackInfo { sid: String::new(), source: "MICROPHONE".into(), muted: true }], ..Participant::default() };
         assert!(silent.mic_muted());
         assert_eq!(Participant { metadata: "not json".into(), ..Participant::default() }.session_id(), None);
+    }
+
+    #[test]
+    fn quota_auth_and_connection_errors_mark_the_backend_unavailable() {
+        for (status, body) in
+            [(429, ""), (401, ""), (403, "{}"), (500, r#"{"code":"resource_exhausted","msg":"quota"}"#), (400, r#"{"code":"permission_denied"}"#)]
+        {
+            assert!(RoomError::http("ListRooms", status, body).is_unavailable(), "{status} {body}");
+        }
+        for (status, body) in [(404, r#"{"code":"not_found"}"#), (400, r#"{"code":"invalid_argument"}"#), (500, "oops")] {
+            assert!(!RoomError::http("ListRooms", status, body).is_unavailable(), "{status} {body}");
+        }
+        assert!(RoomError::unreachable("connection refused").is_unavailable());
+        assert!(!RoomError::new("bad JSON").is_unavailable());
     }
 
     #[test]

@@ -50,6 +50,11 @@ impl TestApp {
         Self::build(adjust, move |pool, config| AppState::with_room_service(pool, config, rooms)).await
     }
 
+    /// Like `with_room_service`, with one RoomService per LiveKit backend (in the order of `config.livekit`).
+    pub async fn with_room_services(adjust: impl FnOnce(&mut Config), rooms: Vec<std::sync::Arc<dyn vokko_server::voice::livekit::RoomService>>) -> Self {
+        Self::build(adjust, move |pool, config| AppState::with_room_services(pool, config, rooms)).await
+    }
+
     /// Like `with_config`, with an attachment backend of the test's choosing (upload tests pass one that fails or stalls).
     pub async fn with_storage(adjust: impl FnOnce(&mut Config), storage: std::sync::Arc<dyn vokko_server::storage::Storage>) -> Self {
         Self::build(adjust, move |pool, config| AppState::with_storage(pool, config, storage)).await

@@ -123,6 +123,30 @@ on top of the existing `reqwest` + a JWT crate. Config env vars: `VOKKO_LIVEKIT_
 `VOKKO_LIVEKIT_API_URL` (internal http URL, default derived), `VOKKO_LIVEKIT_KEY`, `VOKKO_LIVEKIT_SECRET`; voice is disabled
 (op 4 → `VOICE_CONNECT_FAILED media_unavailable`) when unset. No new crate, so `cargo xtask layers` is unaffected.
 
+#### Multiple LiveKit backends with failover
+`Config::livekit` is an ordered list (backend 0 = the variables above; `_2`, `_3`, ... add `URL`, `API_KEY`, `API_SECRET`, optional
+`API_URL` and `LABEL`, until the first index with none of the first three set; a partial or gapped backend is a config error).
+`voice/backends.rs` holds one RoomService per backend plus its health:
+
+- **Placement.** A room (`v<channel id>`) lives on one backend while anyone is in it; `VoiceEntry::backend` records it, so the
+  channel's backend is the one its participants are on. A join into an empty channel picks the first backend in rotation (all
+  out: backend 0), under the same lock as the insert of the joiner's state, so two joins cannot split a room. A restore lists
+  rooms on every backend and gives each restored state the backend it was listed on.
+- **Health.** An API call that fails with HTTP 401/403/429, Twirp `resource_exhausted`/`unauthenticated`/`permission_denied`
+  or connect/timeout (`RoomError::is_unavailable`) takes the backend out of rotation for `voice_backend_cooldown` (5 min). The
+  cooldown is passive: reconciliation lists every backend each pass, and the first call after the cooldown either leaves it in
+  or starts another one. Rooms already on it stay; nothing moves a live call.
+- **Tokens.** The token is signed with the room's backend key/secret and `VOICE_SERVER_UPDATE.endpoint` is that backend's URL
+  (the client connects to whatever endpoint the server sends).
+- **Webhooks.** Verified against each backend's key and secret; the matching backend decides which states the event can touch
+  (a leftover empty room finishing on another backend does not end a live call).
+- **Restore.** Per backend: an unreachable one is retried with backoff while the others are restored and reconciled; DM calls
+  are recovered once every backend is restored, or after 2 minutes with at least one restored (calls that lived on a
+  still-unreachable one end). A backend that restores late skips participants of channels whose room already lives on
+  another backend; reconciliation removes them there and their clients rejoin the live room. Reconciliation skips the rooms
+  of a backend whose `ListRooms` failed with a quota/auth/unreachable error for that pass.
+- **Config.** Two backends with the same API key and secret are a config error (webhooks could not tell them apart).
+
 ## 2. Wire contract proposal
 
 Not applied to `types.ts` / `api.md` (owned elsewhere). Style follows those files: Discord shapes where they fit, snake_case,

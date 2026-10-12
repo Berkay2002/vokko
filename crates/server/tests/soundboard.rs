@@ -142,8 +142,13 @@ async fn join(app: &TestApp, owner: &str, channel: &str, user: &str) {
 async fn world() -> World {
     let app = TestApp::with_room_service(
         |config| {
-            config.livekit =
-                Some(LiveKitConfig { url: "wss://lk.test".into(), api_url: "http://127.0.0.1:9".into(), api_key: "vokko".into(), api_secret: "s".into() })
+            config.livekit = vec![LiveKitConfig {
+                url: "wss://lk.test".into(),
+                api_url: "http://127.0.0.1:9".into(),
+                api_key: "vokko".into(),
+                api_secret: "s".into(),
+                label: "test".into(),
+            }]
         },
         FakeRoomService::new(),
     )

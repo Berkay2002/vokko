@@ -73,8 +73,13 @@ struct User {
 }
 
 fn livekit(config: &mut Config) {
-    config.livekit =
-        Some(LiveKitConfig { url: "wss://lk.test".into(), api_url: "http://127.0.0.1:9".into(), api_key: "vokko".into(), api_secret: SECRET.into() });
+    config.livekit = vec![LiveKitConfig {
+        url: "wss://lk.test".into(),
+        api_url: "http://127.0.0.1:9".into(),
+        api_key: "vokko".into(),
+        api_secret: SECRET.into(),
+        label: "test".into(),
+    }];
 }
 
 async fn app_with(adjust: impl FnOnce(&mut Config)) -> (TestApp, String) {
