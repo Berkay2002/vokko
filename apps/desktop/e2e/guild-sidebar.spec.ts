@@ -205,6 +205,10 @@ test('5. keyboard reorder: Move Up / Move to Category from the context menu, ann
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await namesIn(page, 'Text Channels')).indexOf('memes')).toBe(index - 1);
   await expect(toast).toContainText(`Moved memes above ${before[index - 1]}.`);
+  // Read out once: the visual toast is aria-hidden and the shell announcer is the only live region holding the text.
+  const said = `Moved memes above ${before[index - 1]}.`;
+  await expect(page.locator('[role="status"], [role="alert"], [aria-live]:not([aria-live="off"])').filter({ hasText: said })).toHaveCount(1);
+  await expect(page.getByTestId('announcer')).toHaveText(said);
 
   // the request is refused (429 here; a 403 takes the same path): the toast says so and the list stays as it was
   const settled = await namesIn(page, 'Text Channels');

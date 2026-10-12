@@ -2,8 +2,7 @@
 // Drag-and-drop stays in RailGuilds; both save through the same guild-layout PATCH.
 
 import { appStore } from "../api/store";
-import { chatToast } from "../chat/toast";
-import type { MenuItem } from "../ui";
+import { announce, type MenuItem } from "../ui";
 import { guildLayoutStore, saveGuildLayout } from "./guildLayoutStore";
 import { entriesToSettings, placeOf, railEntries, stepItem, stepTarget, type RailEntry, type RailItem } from "./railOrder";
 
@@ -39,7 +38,7 @@ export function stepRailItem(item: RailItem, direction: "up" | "down"): void {
   refocus(item);
   const { place, total, folderId } = placeOf(next, item);
   const where = folderId ? `in ${nameOf({ kind: "folder", id: folderId }, next)}` : "on the server rail";
-  chatToast(`Moved ${item.kind === "folder" ? "folder " : ""}${nameOf(item, next)} ${direction === "up" ? "up" : "down"} to ${place} of ${total} ${where}.`);
+  announce(`Moved ${item.kind === "folder" ? "folder " : ""}${nameOf(item, next)} ${direction === "up" ? "up" : "down"} to ${place} of ${total} ${where}.`);
 }
 
 /** Move Up / Move Down rows for a server's or folder's menu; a row is disabled where the item cannot move that way. */

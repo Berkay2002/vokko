@@ -19,7 +19,7 @@ const guildChannels = (guildId: Snowflake) => Object.values(appStore.getState().
 
 /**
  * Sends PATCH /guilds/{id}/channels for moving `id` to `target`. The sidebar only moves on the CHANNEL_UPDATE events, so a
- * rejected request leaves every row where it was; the reason goes to the toast (a polite live region). Resolves true on success.
+ * rejected request leaves every row where it was; the reason goes to the toast (read out by the shell announcer). Resolves true on success.
  */
 export async function moveChannel(guild: Guild, id: Snowflake, target: DropTarget): Promise<boolean> {
   const updates = channelMoves(guildChannels(guild.id), id, target, canLockIn(guild));

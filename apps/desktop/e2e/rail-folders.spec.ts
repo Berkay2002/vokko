@@ -106,10 +106,10 @@ test('Move Up / Move Down from the keyboard reorder a server, a folder and a ser
   await createGuild(page, 'Alpha');
   await createGuild(page, 'Beta');
   const nav = rail(page);
-  // The announcement goes through the chat toast region, which lives in the chat view.
-  await nav.getByRole('link', { name: "Sam's server" }).click();
-  await page.locator('.chat-composer, textarea').first().waitFor();
-  const toast = page.locator('.chat-toasts');
+  // The announcement goes through the shell announcer, so it works here on Friends home (no chat view mounted).
+  await expect(page.getByRole('main', { name: 'Friends' })).toBeVisible();
+  await expect(page.locator('.chat-toasts')).toHaveCount(0);
+  const toast = page.getByTestId('announcer');
   const ids = async () => nav.locator('a.rail-guild').evaluateAll(els => els.map(e => e.getAttribute('href')!.split('/')[2]!));
   const names = async () => nav.locator('a.rail-guild').evaluateAll(els => els.map(e => e.getAttribute('aria-label')!.replace(/, \d+ mentions?$/, '')));
   const saved = async () => (await page.evaluate(() => (window as unknown as Win).__vokko.request('GET', '/users/@me/guild-layout'))) as { guild_positions: string[]; guild_folders: { guild_ids: string[] }[] };

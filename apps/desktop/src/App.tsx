@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router";
 import { useStore } from "./api/store";
-import { ContextMenuHost } from "./ui";
+import { Announcer, ContextMenuHost } from "./ui";
 import { AppShell } from "./shell/AppShell";
 import { LoginPage, OAuthCallbackPage, RegisterPage, ResetPage, VerifyPage } from "./shell/AuthPages";
 import { NotifyBanners, Splash } from "./notify";
@@ -62,6 +62,7 @@ export function App() {
         <Route path="/channels/:guildId/:channelId" element={<Protected />} />
         <Route path="*" element={<Navigate to="/channels/@me" replace />} />
       </Routes>
+      <Announcer />
       <ContextMenuHost />
       <WindowFrame />
       <NotifyBanners />
