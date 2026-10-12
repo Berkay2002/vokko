@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApplicationCommandType, type ApplicationCommand } from "../api/types";
-import { BUILTIN_COMMANDS, builtinContent, builtinsFor, isActionBuiltin, isBuiltin, takesFreeText, withBuiltins } from "./builtins";
+import { BUILTIN_COMMANDS, builtinContent, builtinsFor, canOfferTts, isActionBuiltin, isBuiltin, takesFreeText, withBuiltins } from "./builtins";
 
 const app: ApplicationCommand = { id: "10", type: ApplicationCommandType.ChatInput, application_id: "1", guild_id: null, name: "shrug", description: "Mine", default_member_permissions: null, version: "1" };
 
@@ -58,5 +58,15 @@ describe("built-in commands", () => {
     expect(builtinsFor([app]).map(c => c.name)).not.toContain("shrug");
     expect(withBuiltins([app]).filter(c => c.name === "shrug")).toEqual([app]);
     expect(builtinsFor([]).length).toBe(BUILTIN_COMMANDS.length);
+  });
+});
+
+describe("canOfferTts", () => {
+  it("hides /tts until the channel is known, allows it in DMs, and needs the permission in servers", () => {
+    expect(canOfferTts(true, undefined, true)).toBe(false);
+    expect(canOfferTts(true, { guild_id: null }, false)).toBe(true);
+    expect(canOfferTts(true, { guild_id: "1" }, false)).toBe(false);
+    expect(canOfferTts(true, { guild_id: "1" }, true)).toBe(true);
+    expect(canOfferTts(false, { guild_id: null }, true)).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Snowflake } from "../api/types";
+import { chatLocale, formatTime } from "../chat/util";
 
 /**
  * Per-device notification/visibility choices the backend has no field for yet (channel/server mute, notification level,
@@ -91,5 +92,15 @@ export function toggleFlag(key: FlagKey, id: Snowflake): void {
 export function mutedUntilText(id: Snowflake): string | null {
   const until = useLocalState.getState().mutedUntil[id];
   if (until === undefined || until === FOREVER || until <= Date.now()) return null;
-  return `Until ${new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  return untilLabel(until);
+}
+
+/** "Until 14:05" today; "Until Oct 13, 09:00" on another day, with the year when it is not this one. */
+export function untilLabel(until: number, now = Date.now(), locale = chatLocale()): string {
+  const end = new Date(until);
+  const time = formatTime(end, locale); // follows the 12/24-hour preference like message timestamps
+  if (end.toDateString() === new Date(now).toDateString()) return `Until ${time}`;
+  const sameYear = end.getFullYear() === new Date(now).getFullYear();
+  const date = end.toLocaleDateString(locale, { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
+  return `Until ${date}, ${time}`;
 }

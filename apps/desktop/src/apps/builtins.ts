@@ -16,6 +16,10 @@ export interface BuiltinContext {
   /** The viewer holds SEND_TTS_MESSAGES here and has "Allow playback and usage of /tts command" on. */
   tts: boolean;
 }
+/** Whether /tts is offered: unknown channel (not loaded yet) is hidden, not treated as a DM; DMs allow it, servers need SEND_TTS_MESSAGES. */
+export function canOfferTts(playback: boolean, channel: { guild_id?: string | null } | undefined, canSendTts: boolean): boolean {
+  return playback && !!channel && (!channel.guild_id || canSendTts);
+}
 export const ANY_CONTEXT: BuiltinContext = { nick: true, threads: true, tts: true };
 
 interface BuiltinDef {

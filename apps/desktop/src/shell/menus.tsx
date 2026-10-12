@@ -10,7 +10,7 @@ import { ChannelType, RelationshipType, ThreadMemberFlags, type Channel, type Gu
 import type { MenuItem } from "../ui";
 import { openCreateEvent } from "../community/communityModals";
 import { closeDirectMessage, copyText, markChannelRead, markGuildRead, openDirectMessage } from "./actions";
-import { isMutedAt, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setNotifyLevel, toggleFlag, unmute, useLocalState, type NotifyLevel } from "./localState";
+import { isMutedAt, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setNotifyLevel, toggleFlag, unmute, untilLabel, useLocalState, type NotifyLevel } from "./localState";
 import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
 import { openProfile } from "./ProfileCard";
@@ -104,7 +104,7 @@ export function threadMuteItem(member: ThreadMember | undefined, apply: (patch: 
   if (!member) return { id: "mute", label: "Mute Thread", disabled: true, hint: JOIN_FIRST };
   if (member.muted) {
     const end = member.mute_config?.end_time;
-    const hint = end ? `Until ${new Date(end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : undefined;
+    const hint = end ? untilLabel(Date.parse(end), now) : undefined;
     return { id: "unmute", label: "Unmute Thread", hint, onSelect: () => apply({ muted: false }) };
   }
   const mute = (ms: number) => () => apply({ muted: true, mute_config: { end_time: ms < 0 ? null : new Date(now + ms).toISOString() } });

@@ -20,7 +20,7 @@ import { AppIcon } from "./AppIcon";
 import { Perm } from "../api/permissions";
 import { usePermissions } from "../shell/usePermissions";
 import { hasThreadsType } from "../threads/util";
-import { BUILTIN_APP_ID, BUILTIN_APP_NAME, builtinContent, builtinsFor, isActionBuiltin, isBuiltin, takesFreeText, withBuiltins } from "./builtins";
+import { BUILTIN_APP_ID, BUILTIN_APP_NAME, builtinContent, builtinsFor, canOfferTts, isActionBuiltin, isBuiltin, takesFreeText, withBuiltins } from "./builtins";
 import { usePrefs } from "../ui/prefs";
 import { NICK_MAX, latestOnly, runMsg, runNick, runThread, searchGifs, type ActionValues } from "./builtinActions";
 import { bumpRecent, buildSections, loadRecents, saveRecents, type PanelSection, type Recents } from "./panel";
@@ -138,7 +138,7 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
   const canThread = !!guildId && hasThreadsType(channel) && can(Perm.CREATE_PUBLIC_THREADS) && can(Perm.READ_MESSAGE_HISTORY) && can(Perm.SEND_MESSAGES_IN_THREADS);
   const canNick = !!guildId && can(Perm.CHANGE_NICKNAME);
   const ttsPlayback = usePrefs(s => s.ttsPlayback);
-  const canTts = ttsPlayback && (!guildId || can(Perm.SEND_TTS_MESSAGES)); // DMs allow tts
+  const canTts = canOfferTts(ttsPlayback, channel, can(Perm.SEND_TTS_MESSAGES));
   const commands = useMemo(() => withBuiltins(appCommands ?? [], { nick: canNick, threads: canThread, tts: canTts }), [appCommands, canNick, canThread, canTts]);
   const parsed: ParsedInput = useMemo(() => parseInput(text, caret, commands), [text, caret, commands]);
   const command = parsed.command;

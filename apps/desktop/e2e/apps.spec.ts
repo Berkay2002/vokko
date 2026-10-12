@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { composer } from './helpers';
+import { composer, stays } from './helpers';
 
 // Bots, slash commands and webhooks against the in-memory mock. The seed has the Echo application (owned by sam); the tests add
 // its bot to "Sam's server" with __vokkoMock.installEchoBot(). Its handler answers like examples/echo-bot.
@@ -84,6 +84,31 @@ test('built-in /tts posts the plain message', async ({ page }) => {
   await box.press('Enter');
   await expect(box).toHaveText('');
   await expect(row(page, 'hello there')).toBeVisible();
+});
+
+test('/tts is listed only for members who hold SEND_TTS_MESSAGES, and appears when the role gains it', async ({ page }) => {
+  await page.goto('/channels/@me?as=bob&mockLatency=0');
+  await page.waitForFunction(() => Object.values((window as unknown as StoreWin).__vokko.appStore.getState().channels).some(c => c.name === 'general' && c.guild_id));
+  const target = await page.evaluate(() => {
+    const c = Object.values((window as unknown as StoreWin).__vokko.appStore.getState().channels).find(x => x.name === 'general' && x.guild_id)!;
+    history.pushState({}, '', `/channels/${c.guild_id}/${c.id}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+    return c.guild_id!;
+  });
+  await page.locator('.chat-msg').first().waitFor();
+  const box = composer(page);
+  await box.click();
+  await box.pressSequentially('/');
+  const picker = page.getByRole('listbox', { name: 'Commands' });
+  await expect(picker.getByRole('option', { name: /\/shrug/ })).toBeVisible();
+  await stays(() => picker.getByRole('option', { name: /\/tts/ }).count(), 0);
+  // The @everyone role of the server gains SEND_TTS_MESSAGES (bit 12): the open menu picks it up.
+  await page.evaluate(id => {
+    const w = window as unknown as { __vokko: { appStore: { getState(): { guilds: Record<string, { roles: { id: string; permissions: string }[] }> } } }; __vokkoMock: { requestAs(u: string, m: string, p: string, b?: unknown): unknown } };
+    const role = w.__vokko.appStore.getState().guilds[id]!.roles.find(r => r.id === id)!;
+    w.__vokkoMock.requestAs('sam', 'PATCH', `/guilds/${id}/roles/${id}`, { permissions: (BigInt(role.permissions) | (1n << 12n)).toString() });
+  }, target);
+  await expect(picker.getByRole('option', { name: /\/tts/ })).toHaveCount(1);
 });
 
 test('built-in /shrug posts the message with the face, and Echo shows under Frequently Used after a run', async ({ page }) => {
