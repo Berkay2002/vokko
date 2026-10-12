@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { BINDINGS } from '../src/keyboard/bindings';
 import { openDm } from './helpers';
 import { openChannel as openForum, panel } from './threadHelpers';
 
@@ -208,7 +209,7 @@ test('dialog: Mod+/ lists every shortcut with OS keys; shortcuts stay off while 
   const dialog = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
   await expect(dialog).toBeVisible();
   await expect(dialog.locator('.shortcuts-heading')).toHaveText(['Navigation', 'Unreads', 'Chat', 'Voice', 'Panels']);
-  await expect(dialog.locator('.shortcut-card')).toHaveCount(21);
+  await expect(dialog.locator('.shortcut-card')).toHaveCount(BINDINGS.filter(b => b.keys.length).length);
   const mac = await page.evaluate(() => /Mac/.test(navigator.platform));
   await expect(dialog.locator('.shortcut-card', { hasText: 'Navigate between servers' }).locator('.shortcut-cap')).toHaveText(mac ? ['⌘', '⌥', '↑ ↓'] : ['Ctrl', 'Alt', '↑ ↓']);
 
@@ -313,12 +314,12 @@ for (const [platform, mod, alt] of [['MacIntel', '⌘', '⌥'], ['Win32', 'Ctrl'
     const dialog = page.getByRole('dialog');
     await dialog.getByRole('button', { name: 'Keybinds', exact: true }).click();
     await expect(dialog.getByRole('heading', { name: 'Default Keybinds', level: 2 })).toBeVisible();
-    await expect(dialog.locator('.sm-keys-group h3')).toHaveText(['Navigation', 'Unreads', 'Chat', 'Voice', 'Panels']);
-    await expect(dialog.locator('.sm-keys-row')).toHaveCount(21);
+    // The page is an editable table (one row per key set, so each up/down pair is two rows), not the grouped list of the shortcuts dialog.
+    await expect(dialog.locator('.keybind-table tbody tr')).toHaveCount(BINDINGS.reduce((n, b) => n + b.keys.length, 0));
     await expect(dialog.getByText('Not wired yet')).toHaveCount(0);
-    const caps = (action: string) => dialog.locator('.sm-keys-row', { hasText: action }).locator('.shortcut-cap');
+    const caps = (action: string) => dialog.getByRole('button', { name: `Keybind for ${action}:`, exact: false }).locator('.keybind-key');
     await expect(caps('Quick switcher')).toHaveText([mod, 'K']);
-    await expect(caps('Navigate between channels')).toHaveText([alt, '↑ ↓']);
+    await expect(caps('Navigate between channels (up)')).toHaveText([alt, '↑']);
     await expect(caps('Toggle mute')).toHaveText([mod, platform === 'MacIntel' ? '⇧' : 'Shift', 'M']);
   });
 }

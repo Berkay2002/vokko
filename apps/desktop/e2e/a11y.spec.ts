@@ -162,7 +162,8 @@ test.describe('keyboard: tab order and focus rings', () => {
     const regions = ['.server-rail', '.sidebar', '.channel-header', '.chat-scroller', '.chat-composer', '.member-list', '.user-panel'];
     const firstStop: Record<string, number> = {};
     let composerStop = 0;
-    for (let i = 1; i <= 70; i += 1) {
+    // The member list is a run of Tab stops of unknown length (the mock's population varies), so go on until every region has been reached.
+    for (let i = 1; i <= 400 && regions.some(r => !(r in firstStop)); i += 1) {
       await page.keyboard.press('Tab');
       const region = await page.evaluate(list => list.find(sel => document.activeElement?.closest(sel)) ?? '', regions);
       if (region && !(region in firstStop)) firstStop[region] = i;

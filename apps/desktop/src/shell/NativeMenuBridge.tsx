@@ -27,7 +27,7 @@ export function NativeMenuBridge() {
   useEffect(() => {
     const unlisten = onNativeMenu(id => {
       const shortcut = MENU_SHORTCUT[id];
-      // Settings and Help have no key binding; a binding with no handler mounted falls back to opening its modal.
+      // Help has no key binding (Settings has Mod+,); a binding with no handler mounted falls back to opening its modal.
       if (!shortcut || !runShortcut(shortcut)) openModal(menuModal(id));
     });
     return () => void unlisten.then(stop => stop());

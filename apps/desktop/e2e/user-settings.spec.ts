@@ -110,18 +110,18 @@ test('Keybinds: rebinding moves the action, conflicts are refused, reset restore
   await expect(dialog.getByRole('heading', { name: 'Default Keybinds' })).toBeVisible();
 
   await dialog.getByRole('button', { name: /^Keybind for Quick switcher/ }).click();
-  await page.keyboard.press('Control+J');
+  await page.keyboard.press('ControlOrMeta+J');
   await expect(dialog.getByRole('heading', { name: 'Custom Keybinds' })).toBeVisible();
 
   // Ctrl+I already toggles the inbox: recording it for Toggle mute is refused
   await dialog.getByRole('button', { name: /^Keybind for Toggle mute/ }).click();
-  await page.keyboard.press('Control+I');
+  await page.keyboard.press('ControlOrMeta+I');
   await expect(dialog.getByRole('alert')).toContainText('Ctrl+I is already used by "Toggle inbox"');
 
   await closeSettings(page);
-  await page.keyboard.press('Control+K');
+  await page.keyboard.press('ControlOrMeta+K');
   await expect(page.locator('.quick-switcher')).toHaveCount(0);
-  await page.keyboard.press('Control+J');
+  await page.keyboard.press('ControlOrMeta+J');
   await expect(page.locator('.quick-switcher')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await blob(page)).settings.keybinds as { action: string; keys: string }[]).toContainEqual({ action: 'quickSwitcher', keys: 'Ctrl+J' });

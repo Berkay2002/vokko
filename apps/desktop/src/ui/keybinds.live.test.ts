@@ -12,6 +12,9 @@ const press = (k: string, mods: Partial<Record<"ctrlKey" | "metaKey" | "altKey" 
   for (const fn of listeners) fn(e as unknown as KeyboardEvent);
 };
 
+// The platform modifier, as the table reads it (IS_MAC): Cmd on macOS, Ctrl elsewhere.
+const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? { metaKey: true } : { ctrlKey: true };
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe("keybinds over the shortcut table", () => {
@@ -26,13 +29,13 @@ describe("keybinds over the shortcut table", () => {
       runs += 1;
       open = !open;
     });
-    press("k", { ctrlKey: true });
+    press("k", mod);
     expect(runs).toBe(1);
     expect(open).toBe(true);
     // The table's other defaults are off while a custom list is set.
     let inbox = 0;
     const stopInbox = registerShortcut("inbox", () => void (inbox += 1));
-    press("i", { ctrlKey: true });
+    press("i", mod);
     expect(inbox).toBe(0);
     stop();
     stopInbox();

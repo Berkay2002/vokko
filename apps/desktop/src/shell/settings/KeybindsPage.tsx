@@ -1,7 +1,7 @@
 import { Fragment, useState, type KeyboardEvent } from "react";
 import { Plus, RotateCcw, X } from "lucide-react";
 import { isDesktop } from "../../desktop";
-import { IS_MAC, keyCaps } from "../../keyboard";
+import { Caps, IS_MAC, keyCaps } from "../../keyboard";
 import { DEFAULT_KEYBINDS, KEYBIND_ACTIONS, actionById, canBindKeys, effectiveKeybinds, eventKeys, findConflicts, normalizeKeys, toAccelerator } from "../../ui/keybinds";
 import { setPref, usePrefs, type KeybindPref } from "../../ui/prefs";
 import { Category, Page, Select, Toggle } from "./controls";
@@ -170,7 +170,7 @@ export function KeybindsPage() {
         {rows.length === 0 && draft === null && <p className="settings-todo">No keybinds. Add one, or reset to the defaults.</p>}
       </Category>
       <p className="settings-field-note">
-        {desktop ? "Global keybinds also work while Vokko is in the background." : "Global keybinds are available in the desktop app."} These are the same shortcuts as the Keyboard shortcuts list (Ctrl+/).
+        {desktop ? "Global keybinds also work while Vokko is in the background." : "Global keybinds are available in the desktop app."} These are the same shortcuts as the Keyboard shortcuts list (<Caps caps={keyCaps("Mod+/", IS_MAC)} />).
       </p>
     </Page>
   );
