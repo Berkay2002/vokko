@@ -134,7 +134,7 @@ export function guildContextItems(guild: Guild): MenuItem[] {
   const unread = guildUnread(appStore.getState(), guild.id).unread;
   const invite = firstTextChannelId(guild.id);
   return groups(
-    [{ id: "mark-read", label: "Mark As Read", disabled: !unread, onSelect: () => void markGuildRead(guild.id) }],
+    [{ id: "mark-read", label: "Mark As Read", disabled: !unread, onSelect: () => void markGuildRead(guild.id).catch(() => undefined) }],
     can(Perm.CREATE_INSTANT_INVITE) ? [{ id: "invite", label: "Invite to Server", disabled: !invite, onSelect: () => invite && openModal({ type: "invite", channelId: invite }) }] : [],
     [muteItem(guild.id, "Server"), notificationItem(guild.id, { guild: true }), hideMutedItem(guild)],
     [

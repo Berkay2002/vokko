@@ -295,3 +295,18 @@ test('guild Privacy Settings: Direct Messages switch persists per server (GLD-01
   dialog = await open();
   await expect(dialog.getByRole('switch', { name: 'Direct Messages' })).not.toBeChecked();
 });
+
+test('Hide Muted Channels brings a channel back when its timed mute lapses, without another update', async ({ page }) => {
+  await page.clock.install();
+  await openChannel(page, 'general');
+  await page.clock.resume();
+  await row(page, 'memes').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Mute Channel' }).hover();
+  await page.getByRole('menuitem', { name: 'For 15 Minutes' }).click();
+  await page.locator('.guild-header').getByRole('button', { name: "Sam's server" }).click();
+  await page.locator('.guild-menu').getByRole('menuitemcheckbox', { name: 'Hide Muted Channels' }).click();
+  await page.keyboard.press('Escape');
+  await expect(row(page, 'memes')).toHaveCount(0);
+  await page.clock.fastForward('16:00');
+  await expect(row(page, 'memes')).toHaveCount(1);
+});

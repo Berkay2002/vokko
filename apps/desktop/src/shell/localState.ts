@@ -71,9 +71,9 @@ export function msUntilLapse(untils: readonly (number | undefined)[], now: numbe
   return pending.length === 0 ? null : Math.min(Math.min(...pending) - now + 50, 2 ** 31 - 1);
 }
 
-/** Re-renders once the soonest of `untils` lapses, so a timed mute stops showing as muted without another update. */
-export function useMuteLapse(untils: readonly (number | undefined)[]): void {
-  const [, bump] = useReducer((n: number) => n + 1, 0);
+/** Re-renders once the soonest of `untils` lapses, so a timed mute stops showing as muted without another update. Returns a count that grows per lapse, for memo deps. */
+export function useMuteLapse(untils: readonly (number | undefined)[]): number {
+  const [lapses, bump] = useReducer((n: number) => n + 1, 0);
   const delay = msUntilLapse(untils, Date.now());
   const next = delay === null ? null : Date.now() + delay;
   useEffect(() => {
@@ -81,6 +81,7 @@ export function useMuteLapse(untils: readonly (number | undefined)[]): void {
     const timer = setTimeout(bump, Math.max(next - Date.now(), 0));
     return () => clearTimeout(timer);
   }, [next]);
+  return lapses;
 }
 
 export const useIsMuted = (id: Snowflake | null | undefined): boolean => {

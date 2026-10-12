@@ -10,7 +10,7 @@ import { Popout, Tooltip, useContextMenu } from "../ui";
 import { EventsQuickLink } from "../community";
 import { MembersQuickLink } from "../members";
 import { groupChannels } from "./channels";
-import { useIsMuted, useLocalState } from "./localState";
+import { useIsMuted, useLocalState, useMuteLapse } from "./localState";
 import { channelContextItems, guildDropdownItems } from "./menus";
 import { Perm } from "../api/permissions";
 import { ChannelThreads } from "../threads/ChannelThreads";
@@ -169,10 +169,12 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
     const until = id ? mutedUntil[id] : undefined;
     return until === -1 || (until !== undefined && until > Date.now());
   };
+  // a lapsed timed mute brings its channel back: re-filter when the soonest one ends
+  const lapses = useMuteLapse(hideMuted ? channels.flatMap(c => [mutedUntil[c.id], c.parent_id ? mutedUntil[c.parent_id] : undefined]) : []);
   const shown = useMemo(
     () => (hideMuted ? channels.filter(c => c.id === selectedId || !(isMuted(c.id) || isMuted(c.parent_id))) : channels),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [channels, hideMuted, mutedUntil, selectedId],
+    [channels, hideMuted, mutedUntil, selectedId, lapses],
   );
   const groups = useMemo(() => groupChannels(shown), [shown]);
 
