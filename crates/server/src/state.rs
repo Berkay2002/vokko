@@ -57,7 +57,20 @@ impl AppState {
         let gifs = GifProxy::new(config.gif.clone());
         let voice = Voice::new(rooms);
         let storage = storage::build(&config.storage, &config.data_dir);
-        Self(Arc::new(Inner { db, config, ids: SnowflakeGenerator::new(1), hub, limiter: RateLimiter::default(), unfurler, accounts, gifs, voice, storage, soundboard: Plays::default(), entrances: Plays::default() }))
+        Self(Arc::new(Inner {
+            db,
+            config,
+            ids: SnowflakeGenerator::new(1),
+            hub,
+            limiter: RateLimiter::default(),
+            unfurler,
+            accounts,
+            gifs,
+            voice,
+            storage,
+            soundboard: Plays::default(),
+            entrances: Plays::default(),
+        }))
     }
 
     /// Absolute URL of a stored asset path (`<attachment id>/<filename>`).

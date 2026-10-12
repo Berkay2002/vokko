@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
-use vokko_protocol::api::permissions::{ADMINISTRATOR, CONNECT, MANAGE_CHANNELS, MOVE_MEMBERS, MUTE_MEMBERS, PRIORITY_SPEAKER, SPEAK, STREAM, USE_VAD, VIEW_CHANNEL};
+use vokko_protocol::api::permissions::{
+    ADMINISTRATOR, CONNECT, MANAGE_CHANNELS, MOVE_MEMBERS, MUTE_MEMBERS, PRIORITY_SPEAKER, SPEAK, STREAM, USE_VAD, VIEW_CHANNEL,
+};
 use vokko_protocol::api::{
     CALL_PARTICIPANT_MAX, ChannelType, GatewayEvent, Snowflake, VoiceConnectFailed, VoiceConnectFailure, VoiceServerUpdate, VoiceState, VoiceStateUpdateCommand,
 };

@@ -309,7 +309,10 @@ mod tests {
             answers: (1..=counts.len() as u32)
                 .map(|id| PollAnswer {
                     answer_id: id,
-                    poll_media: PollMedia { text: Some(format!("A{id}")), emoji: (id == 2).then(|| ReactionEmoji { id: None, name: "🍕".to_owned() }) },
+                    poll_media: PollMedia {
+                        text: Some(format!("A{id}")),
+                        emoji: (id == 2).then(|| ReactionEmoji { id: None, name: "🍕".to_owned(), animated: None }),
+                    },
                 })
                 .collect(),
             expiry: String::new(),
