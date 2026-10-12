@@ -92,6 +92,13 @@
   }
 }
 
+/* up to 815px the header is about 440px wide or less (rail + sidebar docked from 768px): 5 toolbar buttons plus the search icon need the title floor below its 140px default */
+@media (max-width: 815px) {
+  .channel-header-title {
+    min-width: 112px;
+  }
+}
+
 @media (max-width: 600px) {
   .channel-header-topic,
   .channel-header-divider {

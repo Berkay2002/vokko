@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openStockTalk } from './helpers';
+import { composer, openStockTalk } from './helpers';
 
 // Narrow-window layouts (styles/responsive.css): <=1000 side panels start hidden, <=767 rail+sidebar drawer, <=485 fullscreen settings.
 
@@ -49,6 +49,34 @@ test.describe('700px: rail and sidebar are a drawer', () => {
     await expect(page.locator('.sidebar')).toBeHidden();
   });
 });
+
+for (const width of [390, 768]) {
+  test.describe(`${width}px: a user can open #general, see its header and type`, () => {
+    test.use({ viewport: { width, height: 844 } });
+    test('the channel name stays visible next to the search box', async ({ page }) => {
+      await openStockTalk(page);
+      if (width <= 767) await page.getByRole('button', { name: 'Show Channels' }).click(); // 768 still has the sidebar in the layout
+      await page.locator('.sidebar a[href*="/channels/"]', { hasText: /^general$/ }).first().click();
+      const heading = page.locator('.channel-header').getByRole('heading', { name: 'general', exact: true });
+      await expect(heading).toBeVisible();
+      expect((await heading.boundingBox())!.width).toBeGreaterThan(40);
+      await composer(page).click();
+      await composer(page).pressSequentially('hello from a phone');
+      await expect(composer(page)).toHaveText('hello from a phone');
+    });
+
+    test('the toolbar of a 1:1 DM and of an announcement channel stays inside the window', async ({ page }) => {
+      await openStockTalk(page);
+      for (const pick of [(c: { name?: string; guild_id: string | null; type: number }) => !c.guild_id && c.type === 1, (c: { name?: string; guild_id: string | null }) => c.name === 'announcements' && !!c.guild_id]) {
+        const target = await page.evaluate(`(() => { const c = Object.values(window.__vokko.appStore.getState().channels).find(${pick.toString()}); return '/channels/' + (c.guild_id ?? '@me') + '/' + c.id; })()`) as string;
+        await page.evaluate(path => { history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, target);
+        await expect(page.locator('.channel-header-toolbar .toolbar-button')).toHaveCount(5);
+        const right = await page.locator('.channel-header-toolbar .toolbar-button').last().evaluate(el => el.getBoundingClientRect().right);
+        expect(right).toBeLessThanOrEqual(width);
+      }
+    });
+  });
+}
 
 test.describe('780px: user settings fit', () => {
   test.use({ viewport: { width: 780, height: 700 } });
