@@ -3,7 +3,7 @@ import { Hash, Plus, Trash2, Volume2 } from "lucide-react";
 import { ChannelType, OnboardingMode, OnboardingPromptType, type GuildOnboarding, type Snowflake } from "../api/types";
 import { errorText } from "./errors";
 import { LIMITS, draftProblems, draftsEqual, emptyOption, emptyPrompt, fromConfig, ruleLines, toRequest, type Draft, type DraftOption, type DraftPrompt } from "./onboardingDraft";
-import { Category, Page, Perm, SwitchRow, Toggle, request, usePermissions, useStore } from "./shell";
+import { Category, Page, Perm, SaveBar, SwitchRow, Toggle, request, usePermissions, useStore } from "./shell";
 
 function Chips<T extends string>({ label, items, selected, onToggle }: { label: string; items: { id: T; name: string; icon?: "text" | "voice" | "role"; color?: string }[]; selected: readonly T[]; onToggle(id: T): void }) {
   if (items.length === 0) return <p className="cm-muted">None yet.</p>;
@@ -213,17 +213,12 @@ export function OnboardingSettings({ guildId }: { guildId: Snowflake }) {
           {state.error}
         </p>
       )}
-      <div className="cm-save-row">
-        <button type="button" className="btn" disabled={!allowed || !dirty || problems.length > 0 || state.busy} onClick={() => void save()}>
-          Save Changes
-        </button>
-        {dirty && (
-          <button type="button" className="btn btn-link" disabled={state.busy} onClick={() => setDraft(saved)}>
-            Reset
-          </button>
-        )}
-        {state.done && !dirty && <span className="cm-saved" role="status">Saved</span>}
-      </div>
+      {state.done && !dirty && (
+        <div className="cm-save-row">
+          <span className="cm-saved" role="status">Saved</span>
+        </div>
+      )}
+      <SaveBar visible={allowed && dirty} busy={state.busy} error={null} saveDisabled={problems.length > 0} onReset={() => setDraft(saved)} onSave={() => void save()} />
     </Page>
   );
 }

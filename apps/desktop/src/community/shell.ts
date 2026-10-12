@@ -10,3 +10,4 @@ export { usePermissions } from "../shell/usePermissions";
 export { Avatar, GuildIcon } from "../shell/Avatar";
 export { Modal, Tooltip } from "../ui";
 export { Page, Category, SwitchRow, Toggle } from "../shell/settings/controls";
+export { SaveBar } from "../shell/settings/SaveBar";

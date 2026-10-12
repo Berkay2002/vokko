@@ -7,6 +7,7 @@ import { Modal } from "../ui";
 import { Avatar, GuildIcon } from "./Avatar";
 import { openDirectMessage } from "./actions";
 import { closeModal, useModals } from "./modalStore";
+import { blockedByUnsaved } from "./settings/unsaved";
 import { dmPath, go, guildPath } from "./nav";
 
 const RECENT_KEY = "vokko.recentChannels";
@@ -135,6 +136,8 @@ export function QuickSwitcher() {
 
   const choose = (r: Result | undefined) => {
     if (!r) return;
+    // A parked settings frame with unsaved changes refuses the jump: back to the frame, which shakes, draft intact.
+    if (useModals.getState().base && blockedByUnsaved()) return closeModal();
     // Leave parked settings behind too: the result navigates away from them.
     useModals.setState({ modal: null, base: null });
     r.run();

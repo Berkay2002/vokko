@@ -415,23 +415,6 @@
   border-bottom-color: var(--text-strong);
 }
 
-.ss-savebar {
-  position: sticky;
-  bottom: 24px;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 24px;
-  padding: 8px 8px 8px 16px;
-  color: var(--text-default);
-  background: var(--background-surface-highest);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
 .ss-icon-row {
   display: flex;
   align-items: center;
@@ -700,12 +683,6 @@
   background: var(--background-base-low);
   border: 1px solid var(--status-danger);
   border-radius: var(--radius-sm);
-}
-
-.ss-savebar-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .ss-drag-handle {

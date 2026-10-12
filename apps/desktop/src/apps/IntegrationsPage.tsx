@@ -8,6 +8,7 @@ import { ChannelType, type Channel, type Guild, type GuildIntegration, type Snow
 import { Modal } from "../ui";
 import { Avatar } from "../chat/Avatar";
 import { Category, Page } from "../shell/settings/controls";
+import { SaveBar } from "../shell/settings/SaveBar";
 import { createWebhook, deleteWebhook, editWebhook, listChannelWebhooks, listGuildWebhooks, listIntegrations, removeIntegration } from "./api";
 import { AppIcon } from "./AppIcon";
 import { bindAppsGateway, useAppsStore } from "./store";
@@ -113,22 +114,26 @@ function WebhookCard({ hook, channels, onChanged, defaultOpen }: { hook: Webhook
               </select>
             </div>
           </div>
-          {error && <p className="field-error">{error}</p>}
+          {error && !dirty && <p className="field-error">{error}</p>}
           <div className="apps-card-actions">
             <button type="button" className="btn btn-secondary btn-sm" disabled={!hook.url} onClick={() => hook.url && copy("url", hook.url)}>
               <Copy size={14} aria-hidden="true" /> {copied === "url" ? "Copied!" : "Copy Webhook URL"}
             </button>
-            {dirty && (
-              <button type="button" className="btn btn-sm" disabled={busy || !name.trim()} onClick={() => void save({ ...(name.trim() !== hook.name ? { name: name.trim() } : {}), ...(channelId !== hook.channel_id ? { channel_id: channelId } : {}) })}>
-                Save Changes
-              </button>
-            )}
             <button type="button" className="btn-link apps-danger-link" onClick={() => setConfirmDelete(true)}>
               <Trash2 size={14} aria-hidden="true" /> Delete Webhook
             </button>
           </div>
         </div>
       )}
+      {/* Outside the open body: collapsing a card keeps its draft, so the bar (and the guard) must stay. */}
+      <SaveBar
+        visible={dirty}
+        busy={busy}
+        error={error}
+        saveDisabled={!name.trim()}
+        onReset={() => (setName(hook.name), setChannelId(hook.channel_id))}
+        onSave={() => void save({ ...(name.trim() !== hook.name ? { name: name.trim() } : {}), ...(channelId !== hook.channel_id ? { channel_id: channelId } : {}) })}
+      />
       <Modal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}

@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 
 /**
  * Unsaved-changes guard shared by SaveBar and the User, Channel and Server Settings frames. A visible SaveBar registers
@@ -28,4 +28,21 @@ export function useUnsavedShakes(): number {
     cb => (listeners.add(cb), () => void listeners.delete(cb)),
     () => shakes,
   );
+}
+
+/**
+ * Guard for anything that shows unsaved edits: registers while `active` and returns the `data-shake` value ("a"/"b", alternating
+ * so the CSS animation restarts) for the element that should shake after each refused leave attempt.
+ */
+export function useUnsavedShake(active: boolean): "a" | "b" | undefined {
+  useEffect(() => (active ? registerUnsaved() : undefined), [active]);
+  const shakes = useUnsavedShakes();
+  const mountedAt = useRef(shakes);
+  // Re-baseline while inactive so a bar that comes back after Reset does not start out shaking from earlier refusals.
+  if (!active) {
+    mountedAt.current = shakes;
+    return undefined;
+  }
+  const shaken = shakes - mountedAt.current;
+  return shaken > 0 ? (shaken % 2 ? "a" : "b") : undefined;
 }

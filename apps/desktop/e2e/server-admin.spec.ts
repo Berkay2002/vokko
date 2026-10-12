@@ -159,3 +159,119 @@ test('server settings: an unsaved name blocks Esc, Close, page switches and Mod+
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 });
+
+// The hand-rolled pages (Roles, Onboarding, webhooks) go through the same guard as the shared bar: Esc is refused with a shake until
+// the draft is reset or saved, and a clean page never blocks.
+async function expectEscRefused(page: Page, dialog: ReturnType<Page['getByRole']>, bar: ReturnType<Page['locator']>): Promise<void> {
+  await expect(bar).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expect(bar).toHaveAttribute('data-shake', /^[ab]$/);
+}
+
+test('server settings: a dirty role editor refuses Esc until Reset, then closes', async ({ page }) => {
+  await openGuild(page);
+  await openServerSettings(page, 'Roles');
+  const dialog = page.getByRole('dialog', { name: /Server Settings/ });
+  const bar = dialog.locator('.cs-savebar');
+  await roleRow(page, 'Member').click();
+  const name = dialog.getByRole('textbox', { name: 'Role Name' });
+  await expect(bar).toHaveCount(0);
+  await name.fill('Draft role');
+  await expectEscRefused(page, dialog, bar);
+  await expect(name).toHaveValue('Draft role');
+
+  // Back and the other roles in the aside would drop the draft: refused with a shake too.
+  const first = await bar.getAttribute('data-shake');
+  await dialog.getByRole('button', { name: 'Back' }).click();
+  await expect(bar).not.toHaveAttribute('data-shake', first!);
+  const second = await bar.getAttribute('data-shake');
+  await dialog.getByRole('navigation', { name: 'Roles' }).getByRole('button', { name: 'Moderator' }).click();
+  await expect(bar).not.toHaveAttribute('data-shake', second!);
+  await expect(name).toHaveValue('Draft role');
+
+  await bar.getByRole('button', { name: 'Reset' }).click();
+  await expect(bar).toHaveCount(0);
+  await dialog.getByRole('navigation', { name: 'Roles' }).getByRole('button', { name: 'Moderator' }).click(); // clean: switches
+  await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('Edit Role - Moderator');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('server settings: dirty onboarding refuses Esc until saved, then closes', async ({ page }) => {
+  await openGuild(page);
+  await openServerSettings(page, 'Onboarding');
+  const dialog = page.getByRole('dialog', { name: /Server Settings/ });
+  const bar = dialog.locator('.cs-savebar');
+  const rules = dialog.getByLabel(/^Rules \(one per line/);
+  await expect(rules).toBeVisible();
+  await expect(bar).toHaveCount(0);
+  await rules.fill('Be kind.');
+  await expectEscRefused(page, dialog, bar);
+  await expect(rules).toHaveValue('Be kind.');
+
+  await bar.getByRole('button', { name: 'Reset' }).click();
+  await expect(bar).toHaveCount(0);
+  await rules.fill('Be kind.');
+  await bar.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(dialog.getByRole('status')).toHaveText('Saved');
+  await expect(bar).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('server settings: a dirty webhook refuses Esc until saved, then closes', async ({ page }) => {
+  await openGuild(page);
+  await openServerSettings(page, 'Integrations');
+  const dialog = page.getByRole('dialog', { name: /Server Settings/ });
+  await dialog.getByRole('button', { name: 'New Webhook' }).click();
+  const hooks = dialog.getByRole('list', { name: 'Webhooks' });
+  const bar = hooks.locator('.cs-savebar');
+  await expect(hooks).toContainText('New Webhook');
+  await expect(bar).toHaveCount(0);
+  await page.keyboard.press('Escape'); // a clean card does not block
+  await expect(dialog).toHaveCount(0);
+
+  await openServerSettings(page, 'Integrations');
+  await hooks.getByRole('button', { name: /New Webhook/ }).first().click();
+  await hooks.getByLabel('Name').fill('Deploys');
+  await expectEscRefused(page, dialog, bar);
+  await expect(hooks.getByLabel('Name')).toHaveValue('Deploys');
+
+  await bar.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(hooks.locator('.apps-card-name')).toHaveText('Deploys');
+  await expect(bar).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('quick switcher over a dirty settings frame refuses the jump and keeps the draft', async ({ page }) => {
+  await openGuild(page);
+  await openServerSettings(page, 'Server Profile');
+  const dialog = page.getByRole('dialog', { name: /Server Settings/ });
+  const bar = dialog.locator('.cs-savebar');
+  const name = dialog.getByRole('textbox', { name: 'Server name' });
+  const url = page.url();
+  await name.fill('Draft server');
+  await expect(bar).toBeVisible();
+  await name.blur();
+
+  const jump = async () => {
+    await page.keyboard.press('ControlOrMeta+k');
+    await page.locator('.quick-input').fill('random');
+    await page.locator('.quick-row').first().click();
+  };
+  await jump();
+  await expect(page.locator('.quick-input')).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(name).toHaveValue('Draft server');
+  await expect(bar).toHaveAttribute('data-shake', /^[ab]$/);
+  expect(page.url()).toBe(url);
+
+  // Clean again: the same jump leaves the settings behind and navigates.
+  await bar.getByRole('button', { name: 'Reset' }).click();
+  await name.blur();
+  await jump();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('.channel-row.selected')).toContainText(/random/i);
+});

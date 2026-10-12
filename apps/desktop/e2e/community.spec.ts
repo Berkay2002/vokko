@@ -230,7 +230,7 @@ test('the owner sets up onboarding in server settings', async ({ page }) => {
   // a question without a title cannot be saved yet, and the page says why
   const save = settings.getByRole('button', { name: 'Save Changes' });
   await expect(save).toBeDisabled();
-  await expect(settings.getByRole('alert')).toContainText('Question 1 needs a title.');
+  await expect(settings.locator('.cm-problems')).toContainText('Question 1 needs a title.');
   await settings.getByLabel('Question 1 title').fill('What brings you here?');
   await settings.getByLabel('Answer 1 title').fill('Games');
   await settings.getByLabel('Answer 1 emoji').fill('🎮');

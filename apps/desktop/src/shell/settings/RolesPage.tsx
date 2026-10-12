@@ -10,6 +10,8 @@ import { Avatar } from "../Avatar";
 import { Category, Divider, Field, Page, RadioGroup, SwitchRow } from "./controls";
 import { useFrameLayout } from "./FullScreenSettings";
 import { PERMISSION_GROUPS } from "./permissions";
+import { SaveBar } from "./SaveBar";
+import { blockedByUnsaved } from "./unsaved";
 import { SearchBox, errorText, mergeMemberLocal, removeRoleLocal, roleColor, upsertRoles } from "./shared";
 import { fetchRoleMemberCounts, nudgeRole } from "./admin";
 import { gateway } from "../../api/gateway";
@@ -371,19 +373,7 @@ function RoleEditor({ guild, role, members, actor, onBack }: { guild: Guild; rol
 
       {error && <p className="field-error">{error}</p>}
 
-      {editable && dirty && (
-        <div className="ss-savebar" role="region" aria-label="Unsaved changes">
-          <span>Careful — you have unsaved changes!</span>
-          <div className="ss-savebar-actions">
-            <button type="button" className="btn btn-link" disabled={busy} onClick={reset}>
-              Reset
-            </button>
-            <button type="button" className="btn btn-success" disabled={busy} onClick={() => void save()}>
-              Save Changes
-            </button>
-          </div>
-        </div>
-      )}
+      <SaveBar visible={editable && dirty} busy={busy} error={null} onReset={reset} onSave={() => void save()} />
 
       {picker && (
         <MemberPicker
@@ -447,11 +437,15 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
 
   if (active) {
     const asideRoles = [...roles, ...(everyone ? [everyone] : [])];
+    // A dirty RoleEditor would be dropped with the role, so the unsaved guard answers Back and a role switch with a shake instead.
+    const leaveTo = (id: string | null) => {
+      if (!blockedByUnsaved()) setSelected(id);
+    };
     return (
       <div className="ss-roles-layout">
         <nav className="ss-roles-aside" aria-label="Roles">
           <div className="ss-aside-head">
-            <button type="button" className="ss-aside-back" onClick={() => setSelected(null)}>
+            <button type="button" className="ss-aside-back" onClick={() => leaveTo(null)}>
               <ChevronLeft size={14} aria-hidden="true" /> Back
             </button>
             <button type="button" className="ss-icon-btn" aria-label="Create Role" disabled={creating} onClick={() => void create()}>
@@ -462,7 +456,7 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
           {asideRoles.map(r => {
             const open = r.id === guild.id || canEditRole(guild, actor, r);
             return (
-              <button key={r.id} type="button" className={`ss-aside-row${r.id === active.id ? " selected" : ""}`} aria-current={r.id === active.id ? "true" : undefined} disabled={!open} onClick={() => setSelected(r.id)}>
+              <button key={r.id} type="button" className={`ss-aside-row${r.id === active.id ? " selected" : ""}`} aria-current={r.id === active.id ? "true" : undefined} disabled={!open} onClick={() => r.id !== active.id && leaveTo(r.id)}>
                 <span className="ss-role-dot" style={{ background: roleColor(r) }} aria-hidden="true" />
                 <span className="ss-aside-name">{r.id === guild.id ? "@everyone" : r.name}</span>
               </button>
