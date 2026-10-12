@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { NavToggle } from "./NavToggle";
-import { Check, MessageCircle, MoreVertical, Search, Users, Volume2, X } from "lucide-react";
+import { Check, Gamepad2, MessageCircle, MoreVertical, Search, Users, Volume2, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
 import { RelationshipType, type Relationship } from "../api/types";
 import { useVoice } from "../voice/store";
+import { ActivityLine } from "./ActivityLine";
 import { activeFriends, type ActiveEntry } from "./activeNow";
 import { Tooltip, useContextMenu } from "../ui";
 import { getPrefs } from "../ui/prefs";
@@ -178,9 +179,14 @@ function ActiveCard({ entry }: { entry: ActiveEntry }) {
       <Avatar user={relationship.user} size={32} status />
       <span className="active-card-text">
         <span className="active-card-name">{displayName(relationship.user)}</span>
-        <span className="active-card-sub">{entry.text}</span>
+        {(entry.voice || !entry.activity) && <span className="active-card-sub">{entry.text}</span>}
+        {entry.activity && <ActivityLine activity={entry.activity} className="active-card-sub" />}
       </span>
-      {entry.voice && <Volume2 size={16} className="active-card-voice" aria-label="In a voice channel" />}
+      {entry.voice ? (
+        <Volume2 size={16} className="active-card-voice" aria-label="In a voice channel" />
+      ) : (
+        entry.activity && <Gamepad2 size={16} className="active-card-game" aria-hidden="true" />
+      )}
     </button>
   );
 }

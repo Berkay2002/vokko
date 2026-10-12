@@ -2089,6 +2089,12 @@ button.channel-header-topic:hover {
   color: var(--status-positive);
 }
 
+.active-card-game {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--interactive-normal);
+}
+
 /* ---- modal content ---- */
 .modal.modal-compact {
   width: 480px;

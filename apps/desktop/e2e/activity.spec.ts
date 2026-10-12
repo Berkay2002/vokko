@@ -51,6 +51,31 @@ test('the DM list shows the game of the other person', async ({ page }) => {
   await expect(page.locator('.dm-row [data-testid="activity-line"]').first()).toContainText('Factorio');
 });
 
+test('the Friends page Active Now shows a game card after the voice cards, and the game under the channel for friends in voice', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.locator('.dm-row').first().waitFor();
+  const column = page.getByRole('complementary', { name: 'Active Now' });
+  await expect(column.locator('.active-card').first()).toBeVisible();
+  await expect(column.getByTestId('activity-line')).toHaveCount(0);
+  await everyonePlays(page);
+  // every seeded friend sits in voice: befriend a user who does not, so a game-only card shows too
+  const gamer = await page.evaluate(() => {
+    const store = (window as unknown as Hooks).__vokko.appStore;
+    const { me, users, relationships } = store.getState() as unknown as { me: { id: string }; users: Record<string, { id: string; username: string }>; relationships: Record<string, unknown> };
+    const user = Object.values(users).find(u => u.id !== me.id && !relationships[u.id])!;
+    store.setState({ relationships: { ...relationships, [user.id]: { id: user.id, type: 1, nickname: null, user } } });
+    return user.username;
+  });
+  const cards = column.locator('.active-card');
+  const game = cards.filter({ hasText: gamer });
+  await expect(game.getByTestId('activity-line')).toHaveText('Playing Factorio · 12m');
+  await expect(game).not.toContainText(/In .+ · /);
+  await expect(cards.last()).toContainText(gamer);
+  const voice = cards.first();
+  await expect(voice).toContainText(/In .+ · /);
+  await expect(voice.getByTestId('activity-line')).toContainText('Playing Factorio · 12m');
+});
+
 test('presence update with activities is kept when absent and cleared by an empty list', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.locator('.dm-row').first().waitFor();

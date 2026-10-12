@@ -60,7 +60,7 @@ Status as of main at 2905540
 | FRIEND-003 | Pending tab with empty state illustration and text | done | done | Incoming/outgoing lists with accept, ignore, cancel via PUT/DELETE relationships; empty states have our own small SVG (two speech bubbles) and our own text; spec text for Pending ("Click Add Friend to send requests"); no "show spam requests" button (no spam concept) |
 | FRIEND-004 | Suggestions list | - | - | No suggestions tab or server route |
 | FRIEND-005 | Add Friend form with username input and send button | partial | done | FriendsPage.tsx AddFriend: POST /users/@me/relationships by username, success and error messages |
-| FRIEND-006 | Active Now column with activity cards | partial | partial | ActiveNow in FriendsPage.tsx: 420 px column; friends in a voice channel come first ("In <channel> · <server>", shell/activeNow.ts, activeNow.test.ts), then custom statuses; no game or activity data exists |
+| FRIEND-006 | Active Now column with activity cards | partial | partial | ActiveNow in FriendsPage.tsx: 420 px column; friends in a voice channel come first ("In <channel> · <server>", shell/activeNow.ts, activeNow.test.ts), then friends playing a game (Presence.activities from DESK-05: "Playing X · 12m" with a gamepad icon; a friend in voice shows the game under the channel), then custom statuses. Missing: Discord's richer cards (game art, the voice channel's member avatars, Join buttons, hover expansion); not compared against the reference screenshots |
 | FRIEND-007 | Search bar in the friends list with filter | partial | done | FriendsPage.tsx people-search filters by display name or username (client side) |
 
 ## DM: DM channel frame
