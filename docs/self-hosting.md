@@ -255,6 +255,7 @@ VOKKO_SITE_ADDRESS=:80
 VOKKO_WEB_HTTP_PORT=127.0.0.1:8780
 VOKKO_WEB_HTTPS_PORT=127.0.0.1:8781
 VOKKO_TRUST_PROXY=on
+VOKKO_TRUSTED_PROXIES=private_ranges
 ```
 
 Then route the hostname to an existing or new tunnel and add an ingress rule above the catch-all in `~/.cloudflared/config.yml`:
@@ -270,7 +271,7 @@ cloudflared tunnel ingress validate
 cloudflared tunnel ingress rule https://chat.example.com
 ```
 
-and restart `cloudflared`. The `/gateway` websocket works through the tunnel without extra settings. The bundled Caddyfile trusts proxies on private addresses (`trusted_proxies static private_ranges`, strict) and forwards the resolved client address to the server, so rate limits see each visitor's address rather than the tunnel's. LiveKit Cloud reaches `/internal/livekit/webhook` through the same hostname (see docs/self-hosting-free.md).
+and restart `cloudflared`. The `/gateway` websocket works through the tunnel without extra settings. `VOKKO_TRUSTED_PROXIES=private_ranges` lets Caddy take the client from the rightmost untrusted `X-Forwarded-For` entry (the one Cloudflare appends) and forward it to the server, so rate limits see each visitor's address rather than the tunnel's. Keep the web port on loopback: the setting trusts any private peer, and with Docker Desktop or OrbStack every peer looks private. LiveKit Cloud reaches `/internal/livekit/webhook` through the same hostname (see docs/self-hosting-free.md).
 
 Desktop installers placed in `deploy/downloads/` are served at `/downloads/<file>` with `Content-Disposition: attachment` and no directory listing; the web client's Download Apps dialog links `Vokko-windows-setup.exe` and `Vokko-mac.dmg`.
 

@@ -5,9 +5,11 @@
 	admin off
 
 	servers {
-		# Behind another proxy on a private address (cloudflared on the host, Docker's port forward), take the client from
-		# the rightmost untrusted X-Forwarded-For entry. Public peers are not trusted, so they cannot spoof it.
-		trusted_proxies static private_ranges
+		# Off by default: X-Forwarded-For is ignored and the client is the TCP peer. Behind a proxy on this host or a private
+		# network (cloudflared, nginx), set VOKKO_TRUSTED_PROXIES=private_ranges (or its CIDRs) so the client is the
+		# rightmost untrusted X-Forwarded-For entry. Leave it unset when Caddy faces the internet itself: with Docker
+		# Desktop/OrbStack every peer looks private, so trusting private ranges would let clients spoof the header.
+		trusted_proxies static {$VOKKO_TRUSTED_PROXIES:127.0.0.1/32}
 		trusted_proxies_strict
 	}
 }
