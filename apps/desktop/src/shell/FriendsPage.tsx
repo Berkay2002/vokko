@@ -4,10 +4,11 @@ import { Check, Gamepad2, MessageCircle, MoreVertical, Search, Users, Volume2, X
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
-import { RelationshipType, type Channel, type Relationship } from "../api/types";
+import { RelationshipType, type Activity, type Channel, type Relationship } from "../api/types";
 import { joinVoiceChannel } from "../voice";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
-import { ActivityLine } from "./ActivityLine";
+import { ActivityLine, useNow } from "./ActivityLine";
+import { formatClock } from "../activity/format";
 import { activeFriends, type ActiveEntry } from "./activeNow";
 import { Tooltip, useContextMenu } from "../ui";
 import { getPrefs } from "../ui/prefs";
@@ -164,8 +165,8 @@ function ActiveNow() {
       <h2>Active Now</h2>
       {active.length === 0 ? (
         <div className="active-now-empty">
-          <div className="active-now-empty-title">It&apos;s quiet for now...</div>
-          <div className="active-now-empty-text">When a friend starts an activity, like playing a game or hanging out on voice, we&apos;ll show it here!</div>
+          <div className="active-now-empty-title">Nothing going on yet</div>
+          <div className="active-now-empty-text">Friends who jump into a voice channel or start a game will appear in this column.</div>
         </div>
       ) : (
         active.map(e => <ActiveCard key={e.relationship.id} entry={e} />)
@@ -185,13 +186,31 @@ function ActiveCard({ entry }: { entry: ActiveEntry }) {
           {(entry.voice || !entry.activity) && <span className="active-card-sub">{entry.text}</span>}
           {entry.activity && <ActivityLine activity={entry.activity} className="active-card-sub" />}
         </span>
-        {entry.voice ? (
-          <Volume2 size={16} className="active-card-voice" aria-label="In a voice channel" />
-        ) : (
-          entry.activity && <Gamepad2 size={16} className="active-card-game" aria-hidden="true" />
+        {(entry.voice || entry.activity) && (
+          <span className={`active-card-icon ${entry.voice ? "active-card-voice" : "active-card-game"}`} {...(entry.voice ? { role: "img", "aria-label": "In a voice channel" } : { "aria-hidden": true })}>
+            {entry.voice ? <Volume2 size={16} /> : <Gamepad2 size={16} />}
+          </span>
         )}
       </button>
+      {entry.activity && <ActiveBody activity={entry.activity} />}
       {entry.channel && <VoiceDetails channel={entry.channel} />}
+    </div>
+  );
+}
+
+/** The game under the header: placeholder art (no asset source), its name and a live elapsed clock. */
+function ActiveBody({ activity }: { activity: Activity }) {
+  const now = useNow(1000);
+  const start = activity.timestamps?.start;
+  return (
+    <div className="active-card-body">
+      <span className="active-card-art" aria-hidden="true">
+        <Gamepad2 size={20} />
+      </span>
+      <span className="active-card-body-text">
+        <span className="active-card-title">{activity.name}</span>
+        {start ? <span className="active-card-body-sub">{formatClock(start, now)} elapsed</span> : null}
+      </span>
     </div>
   );
 }

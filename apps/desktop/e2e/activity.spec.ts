@@ -77,6 +77,56 @@ test('the Friends page Active Now shows a game card after the voice cards, and t
   await expect(voice.getByTestId('activity-line')).toContainText('Playing Factorio · 12m');
 });
 
+test('Active Now card geometry follows the reference: 420 column, 387 card, radius 16, 32 avatar, 24 icon tile, 32 art tile', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.locator('.dm-row').first().waitFor();
+  await everyonePlays(page);
+  const column = page.getByRole('complementary', { name: 'Active Now' });
+  const card = column.locator('.active-card').first();
+  await expect(card.locator('.active-card-body')).toBeVisible();
+  const box = async (locator: ReturnType<typeof card.locator>) => (await locator.boundingBox())!;
+  expect((await box(column)).width).toBeCloseTo(420, 0);
+  expect((await box(card)).width).toBeCloseTo(387, 0);
+  expect(await card.evaluate(el => getComputedStyle(el).borderRadius)).toBe('16px');
+  for (const [locator, size] of [[card.locator('.active-card-main .avatar').first(), 32], [card.locator('.active-card-icon'), 24], [card.locator('.active-card-art'), 32]] as const) {
+    const b = await box(locator);
+    expect(b.width).toBeCloseTo(size, 0);
+    expect(b.height).toBeCloseTo(size, 0);
+  }
+  // only the header carries the muted background; the body sits on the column
+  const bg = (sel: string) => card.locator(sel).evaluate(el => getComputedStyle(el).backgroundColor);
+  expect(await bg('.active-card-main')).not.toBe('rgba(0, 0, 0, 0)');
+  expect(await bg('.active-card-body')).toBe('rgba(0, 0, 0, 0)');
+  await expect(card.locator('.active-card-title')).toHaveText('Factorio');
+  await expect(card.locator('.active-card-body-sub')).toHaveText(/^\d+:\d{2} elapsed$/);
+  // a friend outside voice gets a game-only card: header 68 and body 64 px, as in the reference
+  const gamer = await page.evaluate(() => {
+    const store = (window as unknown as Hooks).__vokko.appStore;
+    const { me, users, relationships } = store.getState() as unknown as { me: { id: string }; users: Record<string, { id: string; username: string }>; relationships: Record<string, unknown> };
+    const user = Object.values(users).find(u => u.id !== me.id && !relationships[u.id])!;
+    store.setState({ relationships: { ...relationships, [user.id]: { id: user.id, type: 1, nickname: null, user } } });
+    return user.username;
+  });
+  const game = column.locator('.active-card', { hasText: gamer });
+  // a custom-status-only friend gets no activity icon and no body
+  await page.evaluate(() => {
+    const store = (window as unknown as Hooks).__vokko.appStore;
+    const { me, users, relationships, presences } = store.getState() as unknown as { me: { id: string }; users: Record<string, { id: string; username: string }>; relationships: Record<string, unknown>; presences: Record<string, unknown> };
+    const user = Object.values(users).find(u => u.id !== me.id && !relationships[u.id])!;
+    store.setState({
+      relationships: { ...relationships, [user.id]: { id: user.id, type: 1, nickname: null, user } },
+      presences: { ...presences, [user.id]: { user_id: user.id, status: 'online', custom_status: 'Out for lunch', activities: [] } },
+    } as never);
+  });
+  const custom = column.locator('.active-card', { hasText: 'Out for lunch' });
+  await expect(custom).toHaveCount(1);
+  await expect(custom.locator('.active-card-icon')).toHaveCount(0);
+  await expect(custom.locator('.active-card-body')).toHaveCount(0);
+  await expect(game).not.toContainText(/In .+ · /);
+  expect((await box(game.locator('.active-card-main'))).height).toBeCloseTo(68, 0);
+  expect((await box(game.locator('.active-card-body'))).height).toBeCloseTo(64, 0);
+});
+
 test('a voice card in Active Now unfolds the channel members and Join on hover, and Join takes you into the channel', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.locator('.dm-row').first().waitFor();

@@ -5,7 +5,7 @@ import { useStore } from "../api/store";
 import type { Activity, Snowflake } from "../api/types";
 
 /** Re-renders every `intervalMs` while mounted; the value is Date.now(). */
-function useNow(intervalMs: number): number {
+export function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     setNow(Date.now());

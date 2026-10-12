@@ -2055,7 +2055,6 @@ button.channel-header-topic:hover {
   margin-top: 12px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  background: var(--background-mod-muted);
   box-shadow: var(--shadow-low);
 }
 
@@ -2064,8 +2063,63 @@ button.channel-header-topic:hover {
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 16px;
+  /* the reference header is 68 px: 16 + 20 + 18 + 16 would be 70 */
+  padding: 15px 16px;
+  background: var(--background-mod-muted);
+  /* round the header's own top corners: the card does not clip, so the focus ring stays whole */
+  border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0;
   text-align: left;
+}
+
+.active-card-body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 16px;
+}
+
+.active-card-art,
+.active-card-icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-xs);
+}
+
+.active-card-art {
+  width: 32px;
+  height: 32px;
+  background: var(--background-mod-subtle);
+  color: var(--interactive-normal);
+}
+
+.active-card-icon {
+  width: 24px;
+  height: 24px;
+  margin-left: auto;
+}
+
+.active-card-body-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.active-card-title {
+  overflow: hidden;
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-card-body-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
 }
 
 /* voice cards unfold the channel's members and Join on hover or keyboard focus; still focusable while folded */
@@ -2149,15 +2203,15 @@ button.channel-header-topic:hover {
   white-space: nowrap;
 }
 
+.active-card-sub strong {
+  font-weight: inherit;
+}
+
 .active-card-voice {
-  flex-shrink: 0;
-  margin-left: auto;
   color: var(--status-positive);
 }
 
 .active-card-game {
-  flex-shrink: 0;
-  margin-left: auto;
   color: var(--interactive-normal);
 }
 
