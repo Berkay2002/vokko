@@ -31,6 +31,8 @@
 	handle_path /downloads/* {
 		root * /downloads
 		header Content-Disposition attachment
+		# Revalidate every time: installers keep the same file name across releases, so an edge cache would serve stale builds.
+		header Cache-Control "no-cache"
 		file_server
 	}
 
