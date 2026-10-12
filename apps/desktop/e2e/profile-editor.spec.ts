@@ -140,7 +140,7 @@ test('avatar menu: decoration opens its panel, previews live and saves; Remove a
   expect((await me(page)).avatar_decoration).toBeTruthy();
 });
 
-test('tiles: theme, banner colour and effect preview on the card; pickers owned by another branch say coming soon', async ({ page }) => {
+test('tiles: theme, banner colour and effect preview on the card; nameplate and display name style tiles are live', async ({ page }) => {
   const { editor } = await openEditor(page);
   await editor.getByRole('button', { name: 'Profile theme' }).click();
   await editor.getByRole('radio', { name: 'Forest' }).click();
@@ -154,11 +154,13 @@ test('tiles: theme, banner colour and effect preview on the card; pickers owned 
   await editor.getByRole('radiogroup', { name: 'Profile effect' }).getByRole('radio').nth(1).click();
   await expect(editor.getByTestId('pe-card').locator('.profile-effect')).toHaveCount(1);
 
-  // the registry slot is empty until the nameplate / display name style pickers land: the tile says so and stays inert
-  const soon = editor.getByRole('button', { name: 'Nameplate' });
+  // the perks pickers are registered, so these tiles are live (perks.spec.ts drives them)
+  await expect(editor.getByRole('button', { name: 'Nameplate' })).toBeEnabled();
+  await expect(editor.getByRole('button', { name: 'Display name style' })).toBeEnabled();
+  // the frame picker is still unregistered: its tile says so and stays inert
+  const soon = editor.getByRole('button', { name: 'Profile frame' });
   await expect(soon).toBeDisabled();
   await expect(soon).toContainText('Coming soon');
-  await expect(editor.getByRole('button', { name: 'Display name style' })).toBeDisabled();
 });
 
 test('the profile switcher lists the servers; a server profile edits its own pronouns and locks shared tiles', async ({ page }) => {

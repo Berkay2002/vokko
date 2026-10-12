@@ -46,6 +46,8 @@ test('age-restricted server and rules channel are saved, and the gate shows once
   await expect(gate).toBeVisible();
   await gate.getByRole('button', { name: 'Nevermind' }).click();
   await expect(page).toHaveURL(/\/channels\/@me/);
+  // the URL changes before React commits the home view: reopening now would leave the old gate (and its focus) mounted
+  await expect(gate).toHaveCount(0);
 
   await openChannel(page, 'general');
   await expect(gate).toBeVisible();
