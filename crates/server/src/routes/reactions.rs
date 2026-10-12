@@ -37,10 +37,18 @@ pub fn parse_emoji(raw: &str) -> ApiResult<ReactionEmoji> {
         return Ok(ReactionEmoji { id: Some(Snowflake::from(id)), name: name.to_owned(), animated: None });
     }
     let name = raw.trim();
-    if name.is_empty() || name.len() > 64 || name.chars().any(|c| c.is_ascii_alphanumeric() || c.is_control() || c.is_whitespace()) {
+    if name.is_empty() || name.len() > 64 || (!is_keycap(name) && name.chars().any(|c| c.is_ascii_alphanumeric() || c.is_control() || c.is_whitespace())) {
         return Err(invalid());
     }
     Ok(ReactionEmoji { id: None, name: name.to_owned(), animated: None })
+}
+
+/// A keycap emoji (`1️⃣`, `#️⃣`, `*️⃣`): `0`-`9`, `#` or `*`, an optional U+FE0F, then U+20E3. The only emoji with an ASCII
+/// digit in them; the unqualified form without U+FE0F (`1⃣`) is still the same keycap, so it is accepted too.
+fn is_keycap(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(base) = chars.next() else { return false };
+    (base.is_ascii_digit() || base == '#' || base == '*') && matches!(chars.as_str(), "\u{20E3}" | "\u{FE0F}\u{20E3}")
 }
 
 /// `?type=0|1` on the reaction routes; absent = 0 (normal), like Discord.
@@ -201,4 +209,51 @@ async fn list_reactors(
     let ids: Vec<i64> = rows.into_iter().map(|(id,)| id).collect();
     let mut users = store::users(&state, &ids).await?;
     Ok(Json(ids.into_iter().filter_map(|id| users.remove(&id)).collect()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_emoji;
+
+    #[test]
+    fn keycaps_are_unicode_emoji() {
+        for raw in ["1\u{FE0F}\u{20E3}", "0\u{FE0F}\u{20E3}", "9\u{FE0F}\u{20E3}", "#\u{FE0F}\u{20E3}", "*\u{FE0F}\u{20E3}", "1\u{20E3}", "#\u{20E3}"] {
+            let emoji = parse_emoji(raw).unwrap_or_else(|_| panic!("{raw:?} should parse"));
+            assert_eq!((emoji.id, emoji.name.as_str()), (None, raw));
+        }
+    }
+
+    #[test]
+    fn plain_ascii_and_broken_keycaps_are_rejected() {
+        let bad = [
+            "",
+            " ",
+            "1",
+            "a",
+            "abc",
+            "12\u{20E3}",
+            "a\u{20E3}",
+            "a\u{FE0F}\u{20E3}",
+            "1\u{FE0F}",
+            "1\u{20E3}\u{20E3}",
+            "1\u{FE0F}\u{20E3}1",
+            "1 \u{20E3}",
+            "\u{1F600}a",
+            "\u{1F600} \u{1F600}",
+            "\u{1F600}\u{7}\u{1F600}",
+        ];
+        for raw in bad {
+            assert!(parse_emoji(raw).is_err(), "{raw:?} should be rejected");
+        }
+        assert!(parse_emoji(&"\u{1F600}".repeat(17)).is_err(), "over 64 bytes");
+    }
+
+    #[test]
+    fn plain_unicode_and_custom_emoji_still_parse() {
+        assert_eq!(parse_emoji("\u{1F600}").unwrap().name, "\u{1F600}");
+        assert_eq!(parse_emoji("\u{1F44D}\u{1F3FD}").unwrap().name, "\u{1F44D}\u{1F3FD}");
+        let custom = parse_emoji("party_1:123").unwrap();
+        assert_eq!((custom.id.map(|id| id.db()), custom.name.as_str()), (Some(123), "party_1"));
+        assert!(parse_emoji("1\u{FE0F}\u{20E3}:123").is_err(), "a keycap is not a custom emoji name");
+    }
 }

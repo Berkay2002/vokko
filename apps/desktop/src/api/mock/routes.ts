@@ -35,7 +35,7 @@ import "./soundboard";
 import "./reports";
 import { purgeGuildJoinRequests } from "./joinRequests";
 
-export { route, str, requireGuildMember };
+export { route, str, requireGuildMember, parseEmoji };
 
 /** Like the server's parse_emoji: `name:id` for a custom emoji, otherwise a unicode emoji; 400 50035 for anything else. */
 function parseEmoji(raw: string): ReactionEmoji {
@@ -55,9 +55,12 @@ function parseEmoji(raw: string): ReactionEmoji {
     return { id: BigInt(id).toString(), name };
   }
   const name = decoded.trim();
-  if (name === "" || new TextEncoder().encode(name).length > 64 || /[A-Za-z0-9\p{Cc}\p{White_Space}]/u.test(name)) return invalid();
+  if (name === "" || new TextEncoder().encode(name).length > 64 || (!KEYCAP.test(name) && /[A-Za-z0-9\p{Cc}\p{White_Space}]/u.test(name))) return invalid();
   return { id: null, name };
 }
+
+/** Like the server's is_keycap: `1️⃣`, `#️⃣`, `*️⃣` (0-9, # or *, optional U+FE0F, U+20E3), the only emoji with an ASCII digit; `1⃣` without U+FE0F too. */
+const KEYCAP = /^[0-9#*]\uFE0F?\u20E3$/;
 
 const sameEmoji = sameReactionEmoji;
 
