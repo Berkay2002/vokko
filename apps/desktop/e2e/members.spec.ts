@@ -88,6 +88,8 @@ test('the role filter keeps members with that role', async ({ page }) => {
 });
 
 test('the row menu offers the member actions', async ({ page }) => {
+  // Copy User ID is a developer-mode item (Settings > Advanced), off by default.
+  await page.addInitScript(() => localStorage.setItem('vokko.prefs', JSON.stringify({ developerMode: true })));
   await openMembers(page);
   await rows(page).first().getByRole('button', { name: /^More actions for/ }).click();
   const menu = page.getByRole('menu');

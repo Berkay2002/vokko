@@ -28,6 +28,8 @@ test('a member sees the locked bar in a read-only channel: no textbox, no compos
 });
 
 test('Reply is missing from the menu and the hover toolbar, Create Thread and the other items stay', async ({ page }) => {
+  // Copy Message ID is a developer-mode item (Settings > Advanced), off by default.
+  await page.addInitScript(() => localStorage.setItem('vokko.prefs', JSON.stringify({ developerMode: true })));
   await openChannel(page, 'announcements', 'bob');
   await row(page).hover();
   const toolbar = row(page).getByRole('toolbar', { name: 'Message actions' });

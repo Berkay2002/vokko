@@ -55,7 +55,8 @@ test('upload an emoji in Server Settings, use it in a message and react with it'
   await expect(option).toBeVisible();
   await expect(option.locator('img')).toHaveCount(1);
   await box.press('Enter');
-  await expect(box).toHaveValue(/^<:probe_wave:\d+> $/);
+  // The live editor shows the emoji as an image chip; the message source is on the chip (`data-raw`).
+  await expect(box.locator('[data-atom="emoji"]')).toHaveAttribute('data-raw', /^<:probe_wave:\d+>$/);
   await box.press('Enter');
   const sent = page.locator('.chat-msg').last();
   const glyph = sent.locator('img.md-emoji-custom[alt=":probe_wave:"]');
