@@ -23,6 +23,12 @@ describe("activeFriends", () => {
     ]);
   });
 
+  it("names a DM call by its channel, or \"a call\" without a name, and omits the server", () => {
+    const dm = { d1: { id: "d1", type: ChannelType.DM, guild_id: null, name: null } as Channel };
+    const out = activeFriends({ a: friend("a") }, { a: presence("a", null) }, { a: inVoice("a", "d1") }, dm, guilds);
+    expect(out.map(e => e.text)).toEqual(["In a call"]);
+  });
+
   it("puts friends playing a game between voice and custom statuses, and keeps the game of a friend in voice", () => {
     const game = { name: "Factorio", type: 0 as const };
     const out = activeFriends(

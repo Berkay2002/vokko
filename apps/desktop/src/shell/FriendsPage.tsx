@@ -188,7 +188,7 @@ function ActiveCard({ entry }: { entry: ActiveEntry }) {
           {entry.activity && <ActivityLine activity={entry.activity} className="active-card-sub" />}
         </span>
         {(entry.voice || entry.activity) && (
-          <span className={`active-card-icon ${entry.voice ? "active-card-voice" : "active-card-game"}`} {...(entry.voice ? { role: "img", "aria-label": "In a voice channel" } : { "aria-hidden": true })}>
+          <span className={`active-card-icon ${entry.voice ? "active-card-voice" : "active-card-game"}`} aria-hidden="true">
             {entry.voice ? <Volume2 size={16} /> : <Gamepad2 size={16} />}
           </span>
         )}
@@ -248,26 +248,25 @@ function VoiceDetails({ channel }: { channel: Channel }) {
   return (
     <div className="active-card-more">
       <div className="active-card-more-inner">
-        {guildId ? (
-          <button type="button" className="active-card-channel" onClick={() => go(guildPath(guildId, channel.id))}>
-            <span className="active-card-channel-name">
-              {channel.name ?? "voice"}
-              {guild ? ` · ${guild.name}` : ""}
-            </span>
-            {faces}
-            <span className="sr-only">{`, ${states.length} in voice`}</span>
-          </button>
-        ) : (
-          <div className="active-card-channel" role="group" aria-label={`${states.length} in voice`}>
-            {faces}
-          </div>
-        )}
-        {guildId && (
-          // aria-disabled, not disabled: a focused button that becomes disabled drops focus and folds the card
-          <button type="button" className="btn btn-sm active-card-join" aria-disabled={inside} onClick={join}>
-            {inside ? "Joined" : "Join Voice"}
-          </button>
-        )}
+        <div className="active-card-more-row">
+          {guildId ? (
+            <button type="button" className="active-card-channel" onClick={() => go(guildPath(guildId, channel.id))}>
+              {/* the place is in the name only: the header line above already shows it, so it is not repeated on screen */}
+              <span className="sr-only">{`Open ${channel.name ?? "voice"}${guild ? ` · ${guild.name}` : ""}, ${states.length} in voice`}</span>
+              {faces}
+            </button>
+          ) : (
+            <div className="active-card-channel" role="group" aria-label={`${states.length} in voice`}>
+              {faces}
+            </div>
+          )}
+          {guildId && (
+            // aria-disabled, not disabled: a focused button that becomes disabled drops focus and folds the card
+            <button type="button" className="btn btn-sm active-card-join" aria-disabled={inside} onClick={join}>
+              {inside ? "Joined" : "Join Voice"}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
