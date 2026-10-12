@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { ChannelType, Snowflake } from "../api/types";
 import { blockedByUnsaved } from "./settings/unsaved";
 import { useProfile } from "./profileStore";
+import type { ReportTarget } from "./ReportModal";
 
 export type ModalSpec =
   | { type: "createServer" }
@@ -27,6 +28,7 @@ export type ModalSpec =
   | { type: "logout" }
   | { type: "removeFriend"; userId: Snowflake }
   | { type: "blockUser"; userId: Snowflake; /** The guild the menu was opened in: the dialog names the member by nickname. */ guildId?: Snowflake | null }
+  | { type: "report"; target: ReportTarget }
   | { type: "voiceStatus"; channelId: Snowflake }
   | { type: "cameraPreview" }
   | { type: "screenShare" }
@@ -36,7 +38,7 @@ export type ModalSpec =
 const SETTINGS_TYPES = new Set<ModalSpec["type"]>(["serverSettings", "channelSettings", "editChannel", "userSettings"]);
 /** Settings frames whose save bar is wired to the unsaved guard (Server Settings is not, yet). */
 const GUARDED_TYPES = new Set<ModalSpec["type"]>(["userSettings", "channelSettings", "editChannel"]);
-const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout", "removeFriend", "blockUser", "channelTopic", "quickSwitcher", "shortcuts", "voiceStatus", "cameraPreview", "screenShare"]);
+const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout", "removeFriend", "blockUser", "report", "channelTopic", "quickSwitcher", "shortcuts", "voiceStatus", "cameraPreview", "screenShare"]);
 
 interface ModalStore {
   modal: ModalSpec | null;

@@ -2725,6 +2725,73 @@ pub struct Reminder {
     pub message: Option<Message>,
 }
 
+/// Why a message or member is reported (the reason picker).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportReason {
+    Spam,
+    Harassment,
+    Hate,
+    Sexual,
+    Violence,
+    SelfHarm,
+    Impersonation,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportStatus {
+    Open,
+    Resolved,
+    Dismissed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportTargetType {
+    Message,
+    User,
+}
+
+/// `POST /channels/{id}/messages/{mid}/report` and `POST /guilds/{id}/members/{uid}/report`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CreateReportRequest {
+    pub reason: ReportReason,
+    /// Optional free text, at most 1000 characters (trimmed; blank is `null`).
+    #[serde(default)]
+    pub details: Option<String>,
+}
+
+/// `PATCH /guilds/{id}/reports/{report_id}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UpdateReportRequest {
+    pub status: ReportStatus,
+}
+
+/// A report for a guild's moderators (or, for a DM message, `guild_id: null`: kept for the instance operator).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Report {
+    pub id: Snowflake,
+    pub guild_id: Option<Snowflake>,
+    pub target_type: ReportTargetType,
+    pub reporter: User,
+    /// The reported member, or the reported message's author.
+    pub target_user: User,
+    /// Message reports only.
+    pub channel_id: Option<Snowflake>,
+    pub message_id: Option<Snowflake>,
+    /// The message text as it was when reported (it may since have been edited or deleted).
+    pub message_content: Option<String>,
+    pub reason: ReportReason,
+    pub details: Option<String>,
+    pub status: ReportStatus,
+    pub created_at: String,
+    /// Set when a moderator resolves or dismisses it (cleared when reopened).
+    pub closed_by: Option<Snowflake>,
+    pub closed_at: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GuildStickersUpdate {
     pub guild_id: Snowflake,

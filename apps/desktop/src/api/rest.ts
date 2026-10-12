@@ -6,11 +6,13 @@ import type {
   Attachment,
   Channel,
   ChannelFollower,
+  CreateReportRequest,
   EditChannelRequest,
   FollowChannelRequest,
   FollowedChannel,
   ForumPost,
   Message,
+  Report,
   Snowflake,
   StartForumPostRequest,
   StartThreadFromMessageRequest,
@@ -174,6 +176,8 @@ function queryString(params: Record<string, string | number | boolean | readonly
 export const startThreadFromMessage = (channelId: Snowflake, messageId: Snowflake, body: StartThreadFromMessageRequest): Promise<Channel> => request("POST", `/channels/${channelId}/messages/${messageId}/threads`, body);
 export const startThread = (channelId: Snowflake, body: StartThreadRequest): Promise<Channel> => request("POST", `/channels/${channelId}/threads`, body);
 export const startForumPost = (forumId: Snowflake, body: StartForumPostRequest): Promise<ForumPost> => request("POST", `/channels/${forumId}/threads`, body);
+export const reportMessage = (channelId: Snowflake, messageId: Snowflake, body: CreateReportRequest): Promise<Report> => request("POST", `/channels/${channelId}/messages/${messageId}/report`, body);
+export const reportMember = (guildId: Snowflake, userId: Snowflake, body: CreateReportRequest): Promise<Report> => request("POST", `/guilds/${guildId}/members/${userId}/report`, body);
 export const joinThread = (threadId: Snowflake): Promise<void> => request("PUT", `/channels/${threadId}/thread-members/@me`);
 export const leaveThread = (threadId: Snowflake): Promise<void> => request("DELETE", `/channels/${threadId}/thread-members/@me`);
 export const addThreadMember = (threadId: Snowflake, userId: Snowflake): Promise<void> => request("PUT", `/channels/${threadId}/thread-members/${userId}`);

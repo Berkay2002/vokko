@@ -10,7 +10,7 @@ import { emojiShortcodeLabel, frequentEmoji, quickReactions, useEmojiDb } from '
 import { messageStore } from './messageStore';
 import { isSystemMessage, type PendingMessage } from './messageState';
 import { toDisplay } from './mentionText';
-import { isDeveloperMode, useLayer, useOutsideClose } from './shell';
+import { isDeveloperMode, openModal, useLayer, useOutsideClose } from './shell';
 import { comingSoon } from './toast';
 import { ReminderMenu } from '../media/ReminderMenu';
 import { openForward, toggleBookmark, useIsBookmarked } from '../media/store';
@@ -135,7 +135,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     const canReport = !isMine && !system && !pending;
     if (canDelete || canReport) sep();
     if (canDelete) out.push({ id: 'delete', label: 'Delete Message', icon: <Trash2 size={ICON} />, danger: true, onSelect: () => chat.actions.requestDelete(message, isShiftDown()) });
-    if (canReport) out.push({ id: 'report', label: 'Report Message', icon: <Flag size={ICON} />, danger: true, onSelect: () => comingSoon('Reporting messages') });
+    if (canReport) out.push({ id: 'report', label: 'Report Message', icon: <Flag size={ICON} />, danger: true, onSelect: () => openModal({ type: 'report', target: { kind: 'message', channelId: message.channel_id, messageId: message.id, dm: chat.isDm } }) });
     if (isDeveloperMode()) {
       sep();
       out.push({ id: 'copy-id', label: 'Copy Message ID', icon: <Fingerprint size={ICON} />, onSelect: () => void navigator.clipboard?.writeText(message.id) });

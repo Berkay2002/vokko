@@ -1904,3 +1904,28 @@ export interface GuildIntegration {
   user: User | null; // who added it
   role_id: Snowflake | null; // the bot's role
 }
+
+// ---- Reports (MOD-009) ----
+export type ReportReason = "spam" | "harassment" | "hate" | "sexual" | "violence" | "self_harm" | "impersonation" | "other";
+export type ReportStatus = "open" | "resolved" | "dismissed";
+export const REPORT_DETAILS_MAX = 1000;
+export interface CreateReportRequest {
+  reason: ReportReason;
+  details?: string | null; // trimmed server-side, at most REPORT_DETAILS_MAX, blank = null
+}
+export interface Report {
+  id: Snowflake;
+  guild_id: Snowflake | null; // null for a DM message
+  target_type: "message" | "user";
+  reporter: User;
+  target_user: User;
+  channel_id: Snowflake | null;
+  message_id: Snowflake | null;
+  message_content: string | null; // text when reported
+  reason: ReportReason;
+  details: string | null;
+  status: ReportStatus;
+  created_at: string;
+  closed_by: Snowflake | null;
+  closed_at: string | null;
+}

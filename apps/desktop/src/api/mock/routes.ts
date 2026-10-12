@@ -31,6 +31,7 @@ import { assertAcceptsFriendRequest, assertCanOpenDm } from "./settings";
 import "./community";
 import "./status";
 import "./soundboard";
+import "./reports";
 
 export { route, str, requireGuildMember };
 

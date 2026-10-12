@@ -384,6 +384,7 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
       : [
           unavailable("invite-to-server", "Invite to Server"),
           ...relationshipItems(user, options.guildId),
+          ...(guild && member ? [{ id: "report-user", label: "Report User", danger: true, onSelect: () => openModal({ type: "report", target: { kind: "user", guildId: guild.id, userId: user.id } }) } satisfies MenuItem] : []),
           ...(mayNick ? [{ id: "change-nickname", label: "Change Nickname", onSelect: () => openModal({ type: "nickname", ...target }) } satisfies MenuItem] : []),
         ],
     guild && mayRoles && assignable.length > 0

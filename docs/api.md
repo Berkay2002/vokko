@@ -386,6 +386,24 @@ Forum channels take no messages, so no polls (50024).
 - **AutoMod** (keyword rules only: `trigger_type` 1, `event_type` 1, action 1 BLOCK_MESSAGE; anything else → 400 50035). At most 6 keyword rules per guild (400 30035). `keyword_filter` ≤1000 entries of 1-60 chars, `allow_list` ≤100, `exempt_roles` ≤20 (roles of the guild), `exempt_channels` ≤50 (channels of the guild), `name` 1-100. Matching is case-insensitive on whole words: `cat` matches the word cat, `cat*` words starting with cat, `*cat` words ending with it, `*cat*` anywhere; a keyword may contain spaces. A word matched by `allow_list` never triggers. Checked on message create and on content edits (messages, thread and forum post starters) for enabled rules; exempt: the owner, members with MANAGE_GUILD or ADMINISTRATOR, members holding an exempt role, and exempt channels (a thread uses its parent). A blocked message is not stored: 400 code 200000 "Message was blocked by automatic moderation" (`errors.content._errors[0].message` = the custom message when set) plus an audit entry 143. AUTO_MODERATION_RULE_* go to members with MANAGE_GUILD.
 - Errors: 50009 verification level, 200000 AutoMod block, 10066 unknown AutoMod rule, 30035 too many AutoMod rules.
 
+## Reports (MOD-009)
+
+Discord sends reports to its own Trust & Safety team through an undocumented API. Vokko has no central team, so a report goes to the guild's moderators: members with MANAGE_MESSAGES or MODERATE_MEMBERS (administrators and the owner included; bot accounts never, 403 50013). A moderator never sees, or closes, a report about themselves (the owner neither: their reports go to the other moderators).
+
+| Method | Path | Body → Response |
+|---|---|---|
+| POST | /channels/{id}/messages/{mid}/report | `CreateReportRequest` `{reason, details?}` → `Report`. Needs read access to the message (403 50001/50013 like reading it, unknown message 404 10008). Not your own message, not a system message (400 50035 `errors.message_id`). A DM message report has `guild_id: null` and is kept for the instance operator (no in-app queue; see self-hosting.md) |
+| POST | /guilds/{id}/members/{uid}/report | `CreateReportRequest` → `Report`. Reporter must be a member (403 50001); target must be a current member (404 10007); not yourself (400 50035 `errors.user_id`) |
+| GET | /guilds/{id}/reports?status&before&limit | `Report[]` newest first (moderators only, else 403 50013). `status` `open` (default), `resolved`, `dismissed` or `all`; `limit` 1-100 (default 50); next page: `before` = last id. Left out: reports about the caller, message reports from channels the caller cannot read (VIEW_CHANNEL and READ_MESSAGE_HISTORY), and message reports from deleted channels unless the caller is an administrator (the channel may have been private) |
+| PATCH | /guilds/{id}/reports/{report_id} | `UpdateReportRequest` `{status}` → `Report` (moderators; a report they cannot see is 404). `resolved`/`dismissed` set `closed_by` and `closed_at`, `open` clears them; reopening while the reporter has a newer open report of the same target is 400 50035 |
+
+- `reason`: `spam`, `harassment`, `hate`, `sexual`, `violence`, `self_harm`, `impersonation`, `other`. `details`: optional, trimmed, at most 1000 characters (blank is `null`).
+- `Report`: `{id, guild_id, target_type: "message" | "user", reporter: User, target_user: User, channel_id, message_id, message_content, reason, details, status, created_at, closed_by, closed_at}`. `message_content` is the text when it was reported (edits and deletion do not change it). The reporter is shown to moderators.
+- One open report per reporter and target: reporting the same message (or member of that guild) again returns the open report unchanged, also with a different reason.
+- Rate limit per reporter: 5 new reports, then 1 per minute (429 `RateLimitError`); repeating an open report does not count. At most 50 open reports per reporter in a guild and 20 for DM messages (400 30093).
+- Closing or reopening is not in the audit log yet.
+- No gateway event yet: moderators load the list.
+
 ## Gateway
 
 `GET /gateway` (at the server root, not under `/api/v1`; e.g. `ws://127.0.0.1:8710/gateway`) upgrades to WebSocket. Text frames carrying `GatewayPayload`.
