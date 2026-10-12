@@ -18,10 +18,37 @@ test('pinning a message adds a pin row: pin icon in the gutter and the bold name
   const row = page.locator('.chat-msg.system').filter({ hasText: 'pinned' }).last();
   await expect(row).toContainText('Sam pinned a message to this channel. See all pinned messages.');
   await expect(row.locator('.chat-system-icon.pin')).toBeVisible();
-  await expect(row.locator('.chat-system-text b')).toHaveText('Sam');
+  await expect(row.locator('.chat-system-name')).toHaveText('Sam');
   const gutter = (await row.locator('.chat-msg-gutter').boundingBox())!;
   const icon = (await row.locator('.chat-system-icon').boundingBox())!;
   expect(icon.x).toBeLessThan(gutter.x + gutter.width); // the icon sits left of the text, in the gutter
+
+  // The 17 px group gap above the row (dm-chat/22), the bold "a message" / "pinned messages" in the strong text colour and the muted verb.
+  await expect(row).toHaveCSS('margin-top', '17px');
+  const strong = await row.locator('.chat-system-name').evaluate(el => getComputedStyle(el).color);
+  for (const link of ['a message', 'pinned messages']) {
+    const el = row.getByRole('button', { name: link });
+    await expect(el).toHaveCSS('font-weight', '600');
+    await expect(el).toHaveCSS('color', strong);
+  }
+  await expect(row.locator('.chat-system-text')).not.toHaveCSS('color', strong);
+});
+
+test('a pin row: the name opens the profile card and "pinned messages" opens the pins popout', async ({ page }) => {
+  await openStockTalk(page);
+  const target = page.locator('.chat-msg').filter({ hasText: /\S/ }).nth(2);
+  await target.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Pin Message' }).click();
+  await page.getByRole('dialog', { name: 'Pin this message?' }).getByRole('button', { name: 'Pin it' }).click();
+  const row = page.locator('.chat-msg.system').filter({ hasText: 'pinned' }).last();
+
+  await row.getByRole('button', { name: 'pinned messages' }).click();
+  await expect(page.locator('.pins-popout-host')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.pins-popout-host')).toHaveCount(0);
+
+  await row.locator('.chat-system-name').click();
+  await expect(page.locator('.profile-card')).toBeVisible();
 });
 
 test('joining through an invite posts a join row from the new member in the server\'s system channel', async ({ page }) => {
@@ -33,6 +60,6 @@ test('joining through an invite posts a join row from the new member in the serv
   const row = page.locator('.chat-msg.system');
   await expect(row).toHaveCount(1);
   await expect(row.locator('.chat-system-icon.join')).toBeVisible();
-  await expect(row.locator('.chat-system-text b')).toHaveText('Sam');
+  await expect(row.locator('.chat-system-name')).toHaveText('Sam');
   await expect(row.locator('.chat-system-text')).toContainText(/joined the party|brought snacks|just showed up|just landed|Everyone welcome|Good to see you|hopped into|Glad you are here|slid into|Say hi to/);
 });

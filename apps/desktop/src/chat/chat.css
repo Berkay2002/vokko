@@ -144,7 +144,8 @@
 .chat-failed button:hover { text-decoration: underline; }
 
 /* system messages */
-.chat-msg.system { margin-top: 0; padding-top: 4px; padding-bottom: 4px; }
+/* margin-top stays the group gap of .chat-msg: the reference has 17 px above a system row (dm-chat/22). */
+.chat-msg.system { padding-top: 4px; padding-bottom: 4px; }
 .chat-msg.system .chat-msg-gutter { display: grid; place-items: center; top: 4px; height: 22px; }
 .chat-msg-body.system { display: flex; align-items: flex-start; gap: 8px; color: var(--chat-text-muted); }
 .chat-msg.system .chat-msg-gutter + .chat-msg-body { position: relative; }
@@ -152,10 +153,10 @@
 .chat-system-icon.pin, .chat-system-icon.leave { color: var(--chat-text-muted); }
 .chat-system-icon.join { color: var(--chat-green); }
 .chat-system-text { color: var(--chat-text-muted); font-size: var(--chat-font-size); line-height: var(--chat-line-height); }
-.chat-system-text b { color: var(--chat-text-strong); font-weight: 500; }
-.chat-system-link { color: var(--chat-text-strong); font-weight: 600; }
-.chat-system-link:hover { text-decoration: underline; }
-.chat-system-link-static { color: var(--chat-text-strong); font-weight: 600; }
+/* Two classes: `.chat-view button` (font and colour inherit) would otherwise win over the link rules. */
+.chat-system-text b, .chat-system-text .chat-system-name { color: var(--chat-text-strong); font-weight: 500; }
+.chat-system-text .chat-system-link, .chat-system-text .chat-system-link-static { color: var(--chat-text-strong); font-weight: 600; }
+.chat-system-text .chat-system-link:hover, .chat-system-text .chat-system-name:hover { text-decoration: underline; }
 
 /* reply preview */
 .chat-reply { position: relative; display: flex; align-items: center; gap: 4px; margin-left: calc(16px - var(--chat-gutter)); padding-left: calc(var(--chat-gutter) - 16px); height: 20px; margin-bottom: 2px; font-size: 14px; line-height: 18px; color: var(--chat-text-muted); white-space: nowrap; user-select: none; cursor: pointer; }

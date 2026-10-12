@@ -1106,7 +1106,7 @@
 
 .channel-row:hover {
   background: var(--interactive-background-hover);
-  color: var(--interactive-text-hover);
+  color: var(--text-default);
   text-decoration: none;
 }
 

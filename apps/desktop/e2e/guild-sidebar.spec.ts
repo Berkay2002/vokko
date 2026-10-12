@@ -221,3 +221,53 @@ test('5. keyboard reorder: Move Up / Move to Category from the context menu, ann
   await expect.poll(() => namesIn(page, 'Info')).toContain('memes');
   await expect(toast).toContainText('Moved memes to Info.');
 });
+
+test('6. channel row states (GLD-006): rest, hover, selected, unread with badge and muted against guild/spec.md', async ({ page }) => {
+  await openChannel(page, 'general');
+  const style = (name: string) => row(page, name).evaluate(a => {
+    const css = (e: Element) => getComputedStyle(e);
+    const cs = css(a), nameCs = css(a.querySelector('.channel-name')!), pill = getComputedStyle(a, '::before'), badge = a.querySelector('.count-badge');
+    const rect = a.getBoundingClientRect(), icon = a.querySelector('.channel-icon')!.getBoundingClientRect();
+    return {
+      height: rect.height, padding: cs.padding, radius: cs.borderRadius, gap: cs.gap, bg: cs.backgroundColor, color: cs.color, opacity: cs.opacity,
+      nameWeight: nameCs.fontWeight, nameSize: nameCs.fontSize, nameLine: nameCs.lineHeight, icon: [icon.width, icon.height],
+      pill: pill.position === 'absolute' ? [pill.width, pill.height] : null, badge: badge ? [badge.getBoundingClientRect().height, css(badge).borderRadius, css(badge).fontWeight] : null,
+    };
+  });
+  // A token resolved through the property it is used for (a colour, or the border radius).
+  const token = (name: string, prop: 'color' | 'borderRadius' | 'backgroundColor' = 'color') => page.evaluate(([n, p]) => { const probe = document.createElement('i'); probe.style[p as 'color'] = `var(${n})`; document.body.append(probe); const c = getComputedStyle(probe)[p as 'color']; probe.remove(); return c; }, [name, prop] as const);
+  const fill = await token('--interactive-background-hover', 'backgroundColor');
+  const rest = await token('--channels-default'), text = await token('--text-default'), strong = await token('--text-strong');
+
+  // rest: 32 high, padding 4/8, radius 8, 20 px icon, 8 gap, 16/24 w400 in --channels-default, no fill
+  const idle = await style('memes');
+  expect(idle).toMatchObject({ height: 32, padding: '4px 8px', radius: await token('--radius-sm', 'borderRadius'), gap: '8px', bg: 'rgba(0, 0, 0, 0)', color: rest, nameWeight: '400', nameSize: '16px', nameLine: '24px', icon: [20, 20], pill: null, badge: null, opacity: '1' });
+
+  // hover: the 12 % fill and the text moves to --text-default
+  await row(page, 'memes').hover();
+  expect(await style('memes')).toMatchObject({ bg: fill, color: text, nameWeight: '400' });
+
+  // selected: same fill, w500 --text-default
+  await page.mouse.move(700, 400);
+  expect(await style('general')).toMatchObject({ bg: fill, color: text, nameWeight: '500' });
+
+  // unread: strong text at w600 with the 4x8 left pill; a mention adds the 16 px red count badge
+  const randomId = await page.evaluate(() => (window as unknown as Win).__vokkoMock.channelIdByName('random')!);
+  await page.evaluate(id => (window as unknown as Win).__vokkoMock.say(id, 'alice', 'something to read'), randomId);
+  await expect(row(page, 'random')).toHaveClass(/unread/);
+  expect(await style('random')).toMatchObject({ color: strong, nameWeight: '600', pill: ['4px', '8px'], bg: 'rgba(0, 0, 0, 0)' });
+  await page.evaluate(id => (window as unknown as Win).__vokkoMock.say(id, 'alice', '@everyone look'), randomId);
+  await expect(row(page, 'random').locator('.count-badge')).toBeVisible();
+  expect((await style('random')).badge).toEqual([16, '8px', '700']);
+  await row(page, 'random').hover();
+  expect(await style('random')).toMatchObject({ bg: fill, color: strong, nameWeight: '600' });
+
+  // muted: half opacity at rest, no unread pill even when something arrives
+  await row(page, 'memes').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Mute Channel' }).hover();
+  await page.getByRole('menuitem', { name: 'For 15 Minutes' }).click();
+  await page.mouse.move(700, 400);
+  const memesId = await page.evaluate(() => (window as unknown as Win).__vokkoMock.channelIdByName('memes')!);
+  await page.evaluate(id => (window as unknown as Win).__vokkoMock.say(id, 'alice', 'quiet'), memesId);
+  expect(await style('memes')).toMatchObject({ opacity: '0.5', color: rest, pill: null, nameWeight: '400' });
+});

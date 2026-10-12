@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { MessageType } from '../api/types';
 import type { Message, User } from '../api/types';
 
-vi.mock('./ChatContext', () => ({ useChat: () => ({ nameOf: (u: User) => u.username, actions: { jumpTo: () => undefined } }) }));
+const chatState = vi.hoisted(() => ({ type: 0 }));
+vi.mock('./ChatContext', () => ({ useChat: () => ({ guildId: null, channel: { type: chatState.type }, isDm: chatState.type === 1 || chatState.type === 3, nameOf: (u: User) => u.username, actions: { jumpTo: () => undefined } }) }));
 vi.mock('../threads/threadUi', () => ({ openThreadById: () => undefined, openThreadList: () => undefined }));
 vi.mock('../api/store', () => ({ useStore: (select: (s: unknown) => unknown) => select({ me: { id: 'me' }, channels: {} }) }));
 vi.mock('../voice/store', () => ({ useVoice: (select: (s: unknown) => unknown) => select({ channelId: null }) }));
@@ -18,17 +19,37 @@ const render = (m: Message) => renderToStaticMarkup(<SystemBody message={m} name
 const text = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&#x27;/g, "'");
 
 describe('SystemBody', () => {
-  it('pin: muted pin icon, "pinned a message to this channel"', () => {
+  it('pin: muted pin icon, name, "a message" and "pinned messages" are buttons', () => {
     const html = render(message(MessageType.ChannelPinnedMessage, { message_reference: { message_id: '9', channel_id: 'c', guild_id: null } }));
     expect(html).toContain('chat-system-icon pin');
+    expect(html).toContain('<button type="button" class="chat-system-name">Sam</button>');
+    expect(html).toContain('<button type="button" class="chat-system-link">a message</button>');
+    expect(html).toContain('<button type="button" class="chat-system-link">pinned messages</button>');
     expect(text(html)).toBe('Sam pinned a message to this channel. See all pinned messages.');
+  });
+
+  it('pin: "pinned messages" is a button only where the header pins popout belongs to the channel', () => {
+    const pin = message(MessageType.ChannelPinnedMessage, { message_reference: { message_id: '9', channel_id: 'c', guild_id: null } });
+    const button = '<button type="button" class="chat-system-link">pinned messages</button>';
+    for (const type of [0, 1, 3, 5]) { // text, DM, group DM, announcement
+      chatState.type = type;
+      expect(render(pin)).toContain(button);
+    }
+    for (const type of [2, 11, 12, 13]) { // voice, public and private thread, stage
+      chatState.type = type;
+      const html = render(pin);
+      expect(html).not.toContain(button);
+      expect(html).toContain('<span class="chat-system-link-static">pinned messages</span>');
+      expect(text(html)).toBe('Sam pinned a message to this channel. See all pinned messages.');
+    }
+    chatState.type = 0;
   });
 
   it('join: green arrow icon and the bold name inside one of the join lines', () => {
     const m = message(MessageType.UserJoin);
     const html = render(m);
     expect(html).toContain('chat-system-icon join');
-    expect(html).toContain('<b>Sam</b>');
+    expect(html).toContain('<button type="button" class="chat-system-name">Sam</button>');
     const [before, after] = joinLine(m.timestamp);
     expect(text(html)).toBe(`${before}Sam${after}`);
   });
@@ -39,18 +60,32 @@ describe('SystemBody', () => {
     expect(text(html)).toBe('Sam started a thread: gateway docs. See all threads.');
   });
 
-  it('group add and remove (not sent by the server yet): add is green, remove is muted', () => {
+  it('group add and remove (not sent by the server yet): add is green, remove is muted, both names open a profile', () => {
     const add = render(message(MessageType.RecipientAdd, { mentions: [user('alice')] }));
     expect(add).toContain('chat-system-icon join');
     expect(text(add)).toBe('Sam added alice to the group.');
+    expect(add.match(/class="chat-system-name"/g)).toHaveLength(2);
     const remove = render(message(MessageType.RecipientRemove, { mentions: [user('alice')] }));
     expect(remove).toContain('chat-system-icon leave');
     expect(text(remove)).toBe('Sam removed alice from the group.');
+    expect(remove.match(/class="chat-system-name"/g)).toHaveLength(2);
+  });
+
+  it('group leave (remove where the author is the removed user, or nobody is named): "left the group"', () => {
+    expect(text(render(message(MessageType.RecipientRemove, { mentions: [user('sam')] })))).toBe('Sam left the group.');
+    expect(text(render(message(MessageType.RecipientRemove)))).toBe('Sam left the group.');
+  });
+
+  it('add with nobody named falls back to "someone" (a plain name, no profile to open)', () => {
+    const html = render(message(MessageType.RecipientAdd));
+    expect(text(html)).toBe('Sam added someone to the group.');
+    expect(html).toContain('<b>someone</b>');
   });
 
   it('rename (not sent by the server yet): "changed the channel name" with the new name', () => {
     const html = render(message(MessageType.ChannelNameChange, { content: 'lounge' }));
     expect(html).toContain('chat-system-icon');
+    expect(html).toContain('<b>lounge</b>');
     expect(text(html)).toBe('Sam changed the channel name: lounge');
   });
 
