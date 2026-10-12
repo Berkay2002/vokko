@@ -116,3 +116,33 @@ test.describe('485px: user settings are fullscreen with a section list and a pag
     await expect(dialog.getByRole('button', { name: 'Appearance' })).toBeVisible();
   });
 });
+
+for (const [width, topicShown] of [[768, false], [1440, true]] as const) {
+  test.describe(`${width}px: channel topic in the header`, () => {
+    test.use({ viewport: { width, height: 844 } });
+    test(topicShown ? 'the topic and its divider show next to the name' : 'no divider or topic sliver, the name stays', async ({ page }) => {
+      await openStockTalk(page); // #stock-talk has a topic
+      const header = page.locator('.channel-header');
+      await expect(header.getByRole('heading', { name: 'stock-talk', exact: true })).toBeVisible();
+      for (const part of ['.channel-header-divider', '.channel-header-topic']) {
+        if (topicShown) await expect(header.locator(part)).toBeVisible();
+        else await expect(header.locator(part)).toBeHidden();
+      }
+    });
+  });
+}
+
+test.describe('1050px: the topic follows the header width, not the window', () => {
+  test.use({ viewport: { width: 1050, height: 800 } });
+  test('the topic shows with the default sidebar and hides with a wide one', async ({ page, browser }) => {
+    await openStockTalk(page);
+    await expect(page.locator('.channel-header-topic')).toBeVisible();
+    const wide = await browser.newContext({ viewport: { width: 1050, height: 800 } });
+    const wp = await wide.newPage();
+    await wp.addInitScript(() => localStorage.setItem('vokko.sidebarWidth', '360'));
+    await openStockTalk(wp);
+    await expect(wp.locator('.channel-header').getByRole('heading', { name: 'stock-talk', exact: true })).toBeVisible();
+    await expect(wp.locator('.channel-header-topic')).toBeHidden();
+    await wide.close();
+  });
+});

@@ -99,7 +99,8 @@
   }
 }
 
-@media (max-width: 600px) {
+/* header content box (width minus 24px padding) of 625px or less: the topic would be under ~64px, a sliver after the name (search at its 244px width); a window of about 1025px has 626px */
+@container (max-width: 625px) {
   .channel-header-topic,
   .channel-header-divider {
     display: none;
