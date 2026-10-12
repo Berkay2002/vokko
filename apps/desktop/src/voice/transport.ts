@@ -21,6 +21,8 @@ export interface TransportCallbacks {
   micFailed?(reason: Extract<VoiceErrorReason, "permission_denied" | "no_microphone">): void;
   /** A video became available (or went away with null) for a user's camera / screen share; ours are reported too. */
   video?(userId: Snowflake, source: VideoSource, handle: VideoHandle | null): void;
+  /** A remote user's screen share became published (live, not muted) or went away; reported by the LiveKit transport only. */
+  screenLive?(userId: Snowflake, live: boolean): void;
   /** Our camera or screen share ended without us asking (the browser's "Stop sharing" bar, camera unplugged). */
   localVideoEnded?(source: VideoSource): void;
   /** A camera / screen share start failed (permission denied, no camera). Cancelling the picker is not an error. */

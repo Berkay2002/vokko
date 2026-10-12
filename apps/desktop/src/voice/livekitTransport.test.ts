@@ -57,6 +57,8 @@ const lk = vi.hoisted(() => {
     /** Every publishTrack with the track's mute state at that moment. */
     published: [] as { deviceId: string; muted: boolean }[],
     switches: [] as { kind: string; deviceId: string; mutedAfter: boolean | null }[],
+    /** Remote participants already in the room when a new Room connects. */
+    remotes: [] as { identity: string }[],
   };
 
   class FakeLocalParticipant {
@@ -90,6 +92,7 @@ const lk = vi.hoisted(() => {
     connectGate: Promise<void> = Promise.resolve();
     constructor(readonly options: unknown) {
       state.rooms.push(this);
+      for (const participant of state.remotes) this.remoteParticipants.set(participant.identity, participant);
     }
     on(event: string, fn: Listener) {
       this.listeners.set(event, [...(this.listeners.get(event) ?? []), fn]);
@@ -125,7 +128,7 @@ vi.mock("livekit-client", () => ({
   ConnectionQuality: { Excellent: "excellent", Good: "good", Poor: "poor", Lost: "lost" },
   DisconnectReason: { DUPLICATE_IDENTITY: 2, PARTICIPANT_REMOVED: 4 },
   RemoteAudioTrack: class {},
-  Track: { Kind: { Audio: "audio" }, Source: { Microphone: "microphone" } },
+  Track: { Kind: { Audio: "audio", Video: "video" }, Source: { Microphone: "microphone", Camera: "camera", ScreenShare: "screen_share", ScreenShareAudio: "screen_share_audio" } },
   supportsAudioOutputSelection: () => true,
 }));
 vi.mock("./gate", () => ({
@@ -144,6 +147,8 @@ vi.mock("./gate", () => ({
 }));
 
 const { LiveKitTransport } = await import("./livekitTransport");
+type RoomEmit = { listeners: Map<string, ((...args: unknown[]) => void)[]> };
+const emit = (room: unknown, event: string, ...args: unknown[]) => void ((room as RoomEmit).listeners.get(event) ?? []).forEach(fn => fn(...args));
 
 const callbacks = (): TransportCallbacks & { closedCalls: unknown[]; micFailures: unknown[] } => {
   const closedCalls: unknown[] = [];
@@ -177,6 +182,7 @@ let mediaDevices: EventTarget & { added: number; removed: number };
 
 beforeEach(() => {
   lk.state.rooms.length = 0;
+  lk.state.remotes.length = 0;
   lk.state.published.length = 0;
   lk.state.switches.length = 0;
   lk.state.broken.clear();
@@ -272,6 +278,45 @@ describe("LiveKitTransport: device choice", () => {
     await settle();
     expect(lk.state.switches.at(-1)).toMatchObject({ kind: "audioinput", deviceId: "default" });
     await t.dispose();
+  });
+});
+
+describe("LiveKitTransport: remote screen shares", () => {
+  const screen = (muted = false) => ({ source: "screen_share", kind: "video", isMuted: muted, isSubscribed: false, setSubscribed() {} });
+  const remote = (identity: string, pubs: ReturnType<typeof screen>[] = []) => ({ identity, trackPublications: new Map(pubs.map((pub, i) => [String(i), pub])) });
+
+  it("reports a screen share from the room's own publications, whether or not the webhook ever arrives", async () => {
+    const reports: [string, boolean][] = [];
+    const t = new LiveKitTransport({ ...callbacks(), screenLive: (id, live) => void reports.push([id, live]) });
+    const alice = remote("200", [screen()]);
+    const bob = remote("300");
+    lk.state.remotes.push(alice, bob);
+    await t.connect("wss://x", "token", options(true));
+    const room = lk.state.rooms.at(-1)!;
+    expect(reports).toEqual([["200", true], ["300", false]]);
+
+    // Bob starts sharing.
+    bob.trackPublications.set("0", screen());
+    emit(room, "TrackPublished", bob.trackPublications.get("0"), bob);
+    // The server's guild cap mutes Alice's share: not live any more; unmuted: live again.
+    const aliceShare = alice.trackPublications.get("0")!;
+    aliceShare.isMuted = true;
+    emit(room, "TrackMuted", aliceShare, alice);
+    aliceShare.isMuted = false;
+    emit(room, "TrackUnmuted", aliceShare, alice);
+    // Bob stops, Alice leaves.
+    bob.trackPublications.clear();
+    emit(room, "TrackUnpublished", {}, bob);
+    emit(room, "ParticipantDisconnected", alice);
+    expect(reports.slice(2)).toEqual([["300", true], ["200", false], ["200", true], ["300", false], ["200", false]]);
+  });
+
+  it("ignores events for participants that are not in the room (the local participant)", async () => {
+    const reports: [string, boolean][] = [];
+    const t = new LiveKitTransport({ ...callbacks(), screenLive: (id, live) => void reports.push([id, live]) });
+    await t.connect("wss://x", "token", options(true));
+    emit(lk.state.rooms.at(-1), "TrackMuted", {}, { identity: "100", trackPublications: new Map() });
+    expect(reports).toEqual([]);
   });
 });
 

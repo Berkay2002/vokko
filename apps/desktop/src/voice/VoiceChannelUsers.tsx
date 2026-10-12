@@ -10,6 +10,7 @@ import { userContextItems } from "../shell/menus";
 import { openModal } from "../shell/modalStore";
 import { openProfile } from "../shell/ProfileCard";
 import { isChannelFull } from "./engine";
+import { useIsStreaming } from "./mediaStore";
 import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
 import { SoundEffectBadge, useSoundFlashClass } from "../soundboard";
 import { LivePill, StreamCard } from "./StreamCard";
@@ -138,7 +139,7 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
   const menu = useContextMenu();
   const row = useRef<HTMLLIElement>(null);
   const playing = usePlaying(state.user_id);
-  const streaming = !!state.self_stream;
+  const streaming = useIsStreaming(state);
   const card = useStreamCard(streaming, row);
   if (!user) return null;
   const name = displayName(user, member);

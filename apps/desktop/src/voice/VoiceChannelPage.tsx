@@ -15,7 +15,7 @@ import { hasOpenLayer, Tooltip, useContextMenu } from "../ui";
 import { useDeviceMenus } from "./deviceMenus";
 import { GRID_GAP, gridLayout } from "./gridLayout";
 import { dismissVideoError, joinVoiceChannel, leaveVoice, setViewerQuality, toggleSelfMute, watchStream } from "./engine";
-import { useMedia, useVideo, type VideoHandle, type VideoSource } from "./mediaStore";
+import { useIsStreaming, useMedia, useStreamingCheck, useVideo, type VideoHandle, type VideoSource } from "./mediaStore";
 import { SoundboardPopout } from "./SoundboardPopout";
 import { SoundEffectBadge, useSoundFlashClass } from "../soundboard";
 import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
@@ -63,7 +63,7 @@ export function Tile({ state, guildId, variant, onActivate }: { state: VoiceStat
   const screen = useVideo(state.user_id, "screen");
   const watching = useMedia(s => !!s.watching[state.user_id]);
   const quality = useMedia(s => s.quality[`${state.user_id}:screen`]);
-  const streaming = state.self_stream;
+  const streaming = useIsStreaming(state);
   if (!user) return null;
   const name = displayName(user, member);
   const muted = state.mute || state.self_mute || state.suppress;
@@ -335,7 +335,8 @@ function FocusView({ states, focused, guildId }: { states: VoiceState[]; focused
   const hidden = useVoiceUi(s => s.membersHidden);
   const setFocusedTile = useVoiceUi(s => s.setFocusedTile);
   const others = states.filter(s => s.user_id !== focused.user_id);
-  const pip = hidden ? others.find(s => s.self_stream) : undefined;
+  const isStreaming = useStreamingCheck();
+  const pip = hidden ? others.find(isStreaming) : undefined;
   return (
     <div className={`voice-focus${hidden ? " members-hidden" : ""}`}>
       <div className="voice-focus-main">

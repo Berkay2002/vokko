@@ -35,12 +35,29 @@ fn seconds(value: &Value) -> Option<i64> {
 }
 
 pub async fn receive(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> StatusCode {
-    let Some(livekit) = &state.config.livekit else { return StatusCode::NOT_FOUND };
+    let Some(livekit) = &state.config.livekit else {
+        tracing::warn!("livekit webhook: received but LiveKit is not configured on this server");
+        return StatusCode::NOT_FOUND;
+    };
     let authorization = headers.get(header::AUTHORIZATION).and_then(|value| value.to_str().ok()).unwrap_or("");
-    if !super::token::verify_webhook(&livekit.api_key, &livekit.api_secret, authorization, &body, unix_now()) {
+    if let Err(refusal) = super::token::verify_webhook(&livekit.api_key, &livekit.api_secret, authorization, &body, unix_now()) {
+        tracing::warn!("livekit webhook: rejected ({}), {} body bytes", refusal.reason(), body.len());
         return StatusCode::UNAUTHORIZED;
     }
-    let Ok(event) = serde_json::from_slice::<WebhookEvent>(&body) else { return StatusCode::BAD_REQUEST };
+    let event = match serde_json::from_slice::<WebhookEvent>(&body) {
+        Ok(event) => event,
+        Err(error) => {
+            tracing::warn!("livekit webhook: signed body is not an event: {error}");
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+    tracing::info!(
+        "livekit webhook: {} room={:?} identity={:?} source={:?}",
+        event.event,
+        event.room.as_ref().map_or("", |room| room.name.as_str()),
+        event.participant.as_ref().map_or("", |participant| participant.identity.as_str()),
+        event.track.as_ref().map_or("", |track| track.source.as_str()),
+    );
     let Some(channel_id) = event.room.as_ref().and_then(|room| room_channel(&room.name)) else { return StatusCode::OK };
     let participant = event.participant.unwrap_or_default();
     match event.event.as_str() {

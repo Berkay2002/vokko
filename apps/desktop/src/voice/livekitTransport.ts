@@ -115,7 +115,10 @@ export class LiveKitTransport implements VoiceTransport {
     if (this.room !== room) return;
     this.joined = true;
     this.cb.status("connected");
-    for (const participant of room.remoteParticipants.values()) for (const pub of participant.trackPublications.values()) this.consider(pub, participant);
+    for (const participant of room.remoteParticipants.values()) {
+      for (const pub of participant.trackPublications.values()) this.consider(pub, participant);
+      this.reportScreen(participant);
+    }
     this.startPingTimer(room);
     this.statsTimer = setInterval(() => void this.logStats(room), STATS_POLL_MS);
     voiceDebug("connected", { room: room.name });
@@ -274,7 +277,15 @@ export class LiveKitTransport implements VoiceTransport {
       .on(RoomEvent.Reconnecting, () => this.room === room && (voiceDebug("reconnecting"), this.cb.status("reconnecting")))
       .on(RoomEvent.SignalReconnecting, () => this.room === room && (voiceDebug("signal reconnecting"), this.cb.status("reconnecting")))
       .on(RoomEvent.Reconnected, () => this.room === room && (voiceDebug("reconnected"), this.smoother.reset(), this.cb.status("connected")))
-      .on(RoomEvent.TrackPublished, (pub, participant) => this.consider(pub, participant))
+      .on(RoomEvent.TrackPublished, (pub, participant) => {
+        this.consider(pub, participant);
+        this.reportScreen(participant);
+      })
+      .on(RoomEvent.TrackUnpublished, (_pub, participant) => this.reportScreen(participant))
+      .on(RoomEvent.TrackMuted, (_pub, participant) => this.reportScreen(participant))
+      .on(RoomEvent.TrackUnmuted, (_pub, participant) => this.reportScreen(participant))
+      .on(RoomEvent.ParticipantConnected, participant => this.reportScreen(participant))
+      .on(RoomEvent.ParticipantDisconnected, participant => this.cb.screenLive?.(participant.identity, false))
       .on(RoomEvent.TrackSubscribed, (track, pub, participant) => this.attach(track, pub, participant))
       .on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
         if (this.video.detach(track, pub, participant)) return;
@@ -298,6 +309,15 @@ export class LiveKitTransport implements VoiceTransport {
         else if (reason === DisconnectReason.PARTICIPANT_REMOVED) this.cb.closed({ final: true, reason: "kicked" });
         else this.cb.closed({ final: false });
       });
+  }
+
+  /** Tells the engine whether this participant has a live (published, not muted) screen share; muted = capped by the server. */
+  private reportScreen(participant: Participant): void {
+    const remote = this.room?.remoteParticipants.get(participant.identity);
+    if (!remote || remote !== participant) return;
+    let live = false;
+    for (const pub of remote.trackPublications.values()) if (pub.source === Track.Source.ScreenShare && !pub.isMuted) live = true;
+    this.cb.screenLive?.(participant.identity, live);
   }
 
   /** Subscription policy: every microphone track, unless locally muted (volume 0 = unsubscribed, saves egress). */

@@ -13,7 +13,7 @@ import { playSound } from "../notify/sounds";
 import { getPrefs, usePrefs, type Prefs } from "../ui/prefs";
 import { resolveAudio } from "./audioProfile";
 import { voiceDebug } from "./debugLog";
-import { getMedia, resetMedia, setLocalState, setStreamQuality, setVideo, setWatching, useMedia, type VideoSource } from "./mediaStore";
+import { getMedia, resetMedia, setLiveScreen, setLocalState, setStreamQuality, setVideo, setWatching, useMedia, type VideoSource } from "./mediaStore";
 import { bindPtt } from "./ptt";
 import { channelOccupants, playbackVolume, type VoiceAction, type VoiceDevice, type VoiceErrorReason, type VoiceModel, type VoiceSettings } from "./reducer";
 import { getVoice, voiceStore } from "./store";
@@ -306,6 +306,10 @@ const callbacks: TransportCallbacks = {
     setVideo(userId, source, handle);
     if (userId !== getVoice().meId) return;
     setLocalState(source === "camera" ? { cameraOn: !!handle } : { screenOn: !!handle });
+  },
+  screenLive: (userId, live) => {
+    voiceDebug("screenLive", { userId, live });
+    setLiveScreen(userId, live);
   },
   localVideoEnded: source => setLocalState(source === "camera" ? { cameraOn: false } : { screenOn: false }),
   videoFailed: (source, reason) => {

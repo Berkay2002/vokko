@@ -126,6 +126,15 @@ pub fn sign(secret: &str, claims: &Claims) -> Option<String> {
 
 /// Verifies an HS256 JWT signed with `secret` (constant-time MAC check) and its `nbf`/`exp` against `now` (unix seconds).
 pub fn verify(secret: &str, token: &str, now: i64) -> Option<Claims> {
+    verify_signature(secret, token).filter(|claims| in_window(claims, now))
+}
+
+fn in_window(claims: &Claims, now: i64) -> bool {
+    !((claims.exp != 0 && claims.exp < now) || claims.nbf > now + 60)
+}
+
+/// The signature and structure check of `verify`, without the time window.
+fn verify_signature(secret: &str, token: &str) -> Option<Claims> {
     let mut parts = token.split('.');
     let (header, payload, signature) = (parts.next()?, parts.next()?, parts.next()?);
     if parts.next().is_some() {
@@ -138,11 +147,7 @@ pub fn verify(secret: &str, token: &str, now: i64) -> Option<Claims> {
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).ok()?;
     mac.update(format!("{}.{payload}", token.split('.').next()?).as_bytes());
     mac.verify_slice(&URL_SAFE_NO_PAD.decode(signature).ok()?).ok()?;
-    let claims: Claims = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).ok()?).ok()?;
-    if (claims.exp != 0 && claims.exp < now) || claims.nbf > now + 60 {
-        return None;
-    }
-    Some(claims)
+    serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).ok()?).ok()
 }
 
 /// Reads the claims without checking the signature (tests and diagnostics only).
@@ -156,10 +161,50 @@ pub fn body_hash(body: &[u8]) -> String {
     STANDARD.encode(Sha256::digest(body))
 }
 
+/// Why a webhook was refused (the handler logs the category, never the token).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WebhookRefusal {
+    /// No `Authorization` header (or an empty one).
+    MissingHeader,
+    /// Not a JWT, not HS256, or not signed with our API secret.
+    BadSignature,
+    /// Signed by us but outside its `nbf`/`exp` window (or the server clock is off).
+    Expired,
+    /// Signed with our secret but issued for another API key.
+    WrongKey,
+    /// The `sha256` claim is missing or is not the hash of the body.
+    BodyHashMismatch,
+}
+
+impl WebhookRefusal {
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::MissingHeader => "missing Authorization header",
+            Self::BadSignature => "bad signature",
+            Self::Expired => "expired token",
+            Self::WrongKey => "token issued for another API key",
+            Self::BodyHashMismatch => "body hash mismatch",
+        }
+    }
+}
+
 /// A webhook is genuine when its `Authorization` token is signed by `secret`, issued for `api_key`, and hashes `body`.
-pub fn verify_webhook(api_key: &str, secret: &str, authorization: &str, body: &[u8], now: i64) -> bool {
+pub fn verify_webhook(api_key: &str, secret: &str, authorization: &str, body: &[u8], now: i64) -> Result<(), WebhookRefusal> {
     let token = authorization.strip_prefix("Bearer ").unwrap_or(authorization).trim();
-    verify(secret, token, now).is_some_and(|claims| claims.iss == api_key && claims.sha256.as_deref() == Some(body_hash(body).as_str()))
+    if token.is_empty() {
+        return Err(WebhookRefusal::MissingHeader);
+    }
+    let claims = verify_signature(secret, token).ok_or(WebhookRefusal::BadSignature)?;
+    if !in_window(&claims, now) {
+        return Err(WebhookRefusal::Expired);
+    }
+    if claims.iss != api_key {
+        return Err(WebhookRefusal::WrongKey);
+    }
+    if claims.sha256.as_deref() != Some(body_hash(body).as_str()) {
+        return Err(WebhookRefusal::BodyHashMismatch);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -214,11 +259,16 @@ mod tests {
         let body = br#"{"event":"participant_joined"}"#;
         let claims = Claims { iss: "key".into(), exp: 2_000, sha256: Some(body_hash(body)), ..Claims::default() };
         let token = sign("secret", &claims).expect("sign");
-        assert!(verify_webhook("key", "secret", &token, body, 1_000));
-        assert!(verify_webhook("key", "secret", &format!("Bearer {token}"), body, 1_000));
-        assert!(!verify_webhook("key", "secret", &token, br#"{"event":"participant_left"}"#, 1_000), "other body");
-        assert!(!verify_webhook("other", "secret", &token, body, 1_000), "other key");
-        assert!(!verify_webhook("key", "nope", &token, body, 1_000), "other secret");
-        assert!(!verify_webhook("key", "secret", "garbage", body, 1_000));
+        assert_eq!(verify_webhook("key", "secret", &token, body, 1_000), Ok(()));
+        assert_eq!(verify_webhook("key", "secret", &format!("Bearer {token}"), body, 1_000), Ok(()));
+        assert_eq!(verify_webhook("key", "secret", &token, br#"{"event":"participant_left"}"#, 1_000), Err(WebhookRefusal::BodyHashMismatch), "other body");
+        assert_eq!(verify_webhook("other", "secret", &token, body, 1_000), Err(WebhookRefusal::WrongKey), "other key");
+        assert_eq!(verify_webhook("key", "nope", &token, body, 1_000), Err(WebhookRefusal::BadSignature), "other secret");
+        assert_eq!(verify_webhook("key", "secret", "garbage", body, 1_000), Err(WebhookRefusal::BadSignature));
+        assert_eq!(verify_webhook("key", "secret", "", body, 1_000), Err(WebhookRefusal::MissingHeader));
+        assert_eq!(verify_webhook("key", "secret", "Bearer ", body, 1_000), Err(WebhookRefusal::MissingHeader));
+        assert_eq!(verify_webhook("key", "secret", &token, body, 2_001), Err(WebhookRefusal::Expired));
+        let unhashed = sign("secret", &Claims { iss: "key".into(), exp: 2_000, ..Claims::default() }).expect("sign");
+        assert_eq!(verify_webhook("key", "secret", &unhashed, body, 1_000), Err(WebhookRefusal::BodyHashMismatch), "no sha256 claim");
     }
 }
