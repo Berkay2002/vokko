@@ -14,7 +14,7 @@ const TABS: { id: ExpressionTab; label: string }[] = [
   { id: 'emoji', label: 'Emoji' },
 ];
 
-/** GIF / sticker tabs are visual shells: search box plus an honest empty state until the server has a provider for them. */
+/** Fallback when the composer passes no GIF or sticker handler: search box plus an empty state. */
 function UnavailablePanel({ tab }: { tab: 'gif' | 'sticker' }) {
   const [query, setQuery] = useState('');
   const gif = tab === 'gif';

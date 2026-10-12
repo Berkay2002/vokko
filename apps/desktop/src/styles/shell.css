@@ -2075,7 +2075,14 @@ button.channel-header-topic:hover {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
   padding: 15px 16px;
+  text-align: left;
+}
+
+/* the card does not clip, so round the focus ring of a body that ends the card */
+.active-card-body:last-child {
+  border-radius: 0 0 calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px);
 }
 
 .active-card-art,

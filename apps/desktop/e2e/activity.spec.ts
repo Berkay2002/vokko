@@ -159,6 +159,38 @@ test('the Join button of a voice card is reachable from the keyboard', async ({ 
   await expect.poll(async () => (await card.boundingBox())!.height).toBeGreaterThan(folded + 20);
 });
 
+/** Befriends a user who is not in voice and gives everyone a game, so a game-only card shows; returns the card and the user's name. */
+async function gameOnlyCard(page: Page) {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.locator('.dm-row').first().waitFor();
+  await everyonePlays(page);
+  const gamer = await page.evaluate(() => {
+    const store = (window as unknown as Hooks).__vokko.appStore;
+    const { me, users, relationships } = store.getState() as unknown as { me: { id: string }; users: Record<string, { id: string; username: string; global_name?: string | null }>; relationships: Record<string, unknown> };
+    const user = Object.values(users).find(u => u.id !== me.id && !relationships[u.id])!;
+    store.setState({ relationships: { ...relationships, [user.id]: { id: user.id, type: 1, nickname: null, user } } });
+    return user.global_name ?? user.username;
+  });
+  return { card: page.getByRole('complementary', { name: 'Active Now' }).locator('.active-card', { hasText: gamer }), gamer };
+}
+
+test('clicking the body of an Active Now card opens the friend\'s profile card', async ({ page }) => {
+  const { card, gamer } = await gameOnlyCard(page);
+  await card.locator('.active-card-body').click();
+  await expect(page.locator('.profile-card')).toContainText(gamer);
+});
+
+test('the body of an Active Now card is a keyboard stop: Tab from the header, Enter opens the profile card', async ({ page }) => {
+  const { card, gamer } = await gameOnlyCard(page);
+  await card.locator('.active-card-main').focus();
+  await page.keyboard.press('Tab');
+  const body = card.getByRole('button', { name: /'s profile$/ });
+  await expect(body).toBeFocused();
+  await expect(body).toHaveCSS('outline-style', 'solid');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.profile-card')).toContainText(gamer);
+});
+
 test('presence update with activities is kept when absent and cleared by an empty list', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.locator('.dm-row').first().waitFor();

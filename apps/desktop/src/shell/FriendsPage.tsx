@@ -4,7 +4,7 @@ import { Check, Gamepad2, MessageCircle, MoreVertical, Search, Users, Volume2, X
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
-import { RelationshipType, type Activity, type Channel, type Relationship } from "../api/types";
+import { RelationshipType, type Activity, type Channel, type Relationship, type User } from "../api/types";
 import { joinVoiceChannel } from "../voice";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
 import { ActivityLine, useNow } from "./ActivityLine";
@@ -15,6 +15,7 @@ import { getPrefs } from "../ui/prefs";
 import { FriendSuggestionsTab } from "../community";
 import { Avatar } from "./Avatar";
 import { copyText, openDirectMessage } from "./actions";
+import { openProfile } from "./profileStore";
 import { go, guildPath } from "./nav";
 import { UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
@@ -192,18 +193,18 @@ function ActiveCard({ entry }: { entry: ActiveEntry }) {
           </span>
         )}
       </button>
-      {entry.activity && <ActiveBody activity={entry.activity} />}
+      {entry.activity && <ActiveBody activity={entry.activity} user={relationship.user} />}
       {entry.channel && <VoiceDetails channel={entry.channel} />}
     </div>
   );
 }
 
-/** The game under the header: placeholder art (no asset source), its name and a live elapsed clock. */
-function ActiveBody({ activity }: { activity: Activity }) {
+/** The game under the header, a button that opens the friend's profile card: placeholder art (no asset source), its name and a live elapsed clock. */
+function ActiveBody({ activity, user }: { activity: Activity; user: User }) {
   const now = useNow(1000);
   const start = activity.timestamps?.start;
   return (
-    <div className="active-card-body">
+    <button type="button" className="active-card-body" aria-label={`${activity.name}, ${displayName(user)}'s profile`} onClick={e => openProfile(e.currentTarget, user.id, null)}>
       <span className="active-card-art" aria-hidden="true">
         <Gamepad2 size={20} />
       </span>
@@ -211,7 +212,7 @@ function ActiveBody({ activity }: { activity: Activity }) {
         <span className="active-card-title">{activity.name}</span>
         {start ? <span className="active-card-body-sub">{formatClock(start, now)} elapsed</span> : null}
       </span>
-    </div>
+    </button>
   );
 }
 
