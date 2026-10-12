@@ -62,6 +62,9 @@ export async function openStockTalk(page: Page, query = ''): Promise<string> {
   });
   // A reload would re-seed the mock and drop the session: navigate in-app.
   await page.evaluate(path => { history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, target);
+  // Phone widths: Home is the list page and a server picked in the rail keeps it open, so open the chat like a user does.
+  const open = page.locator('.app-frame.nav-open a.channel-row[aria-current="page"]').first();
+  if (await page.locator('.app-frame.nav-open').count()) await open.click();
   await page.locator('.chat-textarea').waitFor();
   await page.locator('.chat-msg').first().waitFor();
   await page.waitForTimeout(400);

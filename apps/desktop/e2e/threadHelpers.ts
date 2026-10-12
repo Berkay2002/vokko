@@ -15,6 +15,8 @@ export async function openChannel(page: Page, name: string, as = 'sam'): Promise
     return `/channels/${c.guild_id}/${c.id}`;
   }, name);
   await page.evaluate(path => { history.pushState({}, '', path); window.dispatchEvent(new PopStateEvent('popstate')); }, target);
+  // Phone widths: Home is the list page and a server picked in the rail keeps it open; tapping the open channel shows the chat.
+  if (await page.locator('.app-frame.nav-open').count()) await page.locator('.app-frame.nav-open a.channel-row[aria-current="page"]').first().click();
   await page.locator('.channel-header').getByRole('heading', { name, exact: true }).waitFor();
   return target.split('/').pop()!;
 }

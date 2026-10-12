@@ -1,6 +1,6 @@
 import { createContext, Fragment, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { ChevronLeft, X } from "lucide-react";
 import { useFocusTrap, useLayer } from "../../ui";
 
 /** Full-screen settings layer shared by server, channel and category settings (styles in src/styles/server-settings.css). */
@@ -58,12 +58,17 @@ export function FullScreenSettings({
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState<FrameLayout>("narrow");
+  // Phone layout (<= 485px, styles/responsive.css): the section list and one page take turns, like User Settings.
+  const [pane, setPane] = useState<"nav" | "page">(() => (window.matchMedia("(max-width: 485px)").matches ? "nav" : "page"));
   useLayer(true, onClose);
   useFocusTrap(true, () => root.current);
 
   return createPortal(
-    <div ref={root} className={`fss fss-${layout}`} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
-      <nav className="fss-sidebar" aria-label={navLabel}>
+    <div ref={root} className={`fss fss-${layout}`} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} data-pane={pane}>
+      <nav className="fss-sidebar" aria-label={navLabel} onClick={e => (e.target as HTMLElement).closest(".fss-item:not(.danger)") && setPane("page")}>
+        <button type="button" className="fss-nav-close" aria-label="Close" onClick={onClose}>
+          <X size={20} />
+        </button>
         <div className="fss-sidebar-column">
           <div className="fss-eyebrow fss-eyebrow-top" title={eyebrowTitle}>
             {eyebrow}
@@ -89,6 +94,9 @@ export function FullScreenSettings({
         </div>
       </nav>
       <main className="fss-content">
+        <button type="button" className="fss-back" aria-label="Back to sections" onClick={() => setPane("nav")}>
+          <ChevronLeft size={20} />
+        </button>
         <div className="fss-row">
           <FrameLayoutContext.Provider value={setLayout}>
             <div className="fss-column">{children}</div>

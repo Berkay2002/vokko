@@ -3,9 +3,16 @@
  *   <= 1000px  the member list / DM profile panel start hidden (handled in AppShell.tsx; the header toggle still opens them)
  *   <=  767px  the server rail and sidebar collapse into a drawer opened by the menu button in the header (.nav-toggle)
  *   <=  780px  settings: server/channel pages go 30/70 (server-settings.css) and the User Settings modal tightens its insets
- *   <=  485px  User Settings fills the window and shows either the section list or one page (back button in the header)
+ *   <=  485px  User Settings fills the window and shows either the section list or one page (back button in the header);
+ *              server / channel / category settings (FullScreenSettings) do the same with .fss-back
  * The measured Discord breakpoints are 780 and 485 (settings-modal/spec.md); 1000 and 767 are Vokko's, see docs/parity.md SHELL-015.
  */
+
+/* viewport-fit=cover (index.html) lets the page run under a notch / home indicator: keep the frame inside the safe area.
+   The insets are 0 on desktop and in Tauri, so nothing moves there. */
+.app-frame {
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
 
 .nav-toggle {
   display: none;
@@ -24,11 +31,29 @@
   background: var(--background-mod-subtle);
 }
 
-.nav-backdrop {
+.nav-backdrop,
+.panel-backdrop {
   display: none;
 }
 
-.sm-back {
+.channel-header-details,
+.channel-header-chevron,
+.channel-header-online {
+  display: none;
+}
+
+.channel-header-online::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-online);
+}
+
+.sm-back,
+.fss-back,
+.fss-nav-close {
   display: none;
 }
 
@@ -56,14 +81,6 @@
     display: none;
   }
 
-  .app-frame.nav-open .nav-backdrop {
-    display: block;
-    position: absolute;
-    inset: 0;
-    z-index: 39;
-    background: rgba(0, 0, 0, 0.5);
-  }
-
   .app-frame.nav-open .app-body > .server-rail {
     display: flex;
     position: absolute;
@@ -80,15 +97,113 @@
     top: 0;
     bottom: 0;
     left: var(--rail-width);
+    right: 0;
     z-index: 40;
-    width: min(var(--sidebar-width), calc(100vw - var(--rail-width) - 56px));
+    width: auto;
     border-top-left-radius: 0;
   }
 
+  /* the list page covers the chat: nothing behind it takes taps or focus */
+  .app-frame.nav-open .app-main {
+    visibility: hidden;
+  }
+
+  /* the account card: a pill over the list with the avatar bigger than the card, so it sticks out above and below
+     (depth); the right-hand button is the settings gear, mute and deafen only show in a call */
   .app-frame.nav-open .user-panel {
     display: flex;
     z-index: 45;
-    width: calc(min(var(--sidebar-width), 100vw - var(--rail-width) - 56px) + var(--rail-width) - 16px);
+    bottom: 14px;
+    width: calc(100% - 16px);
+    height: 56px;
+    padding: 0 8px 0 0;
+    border: 0;
+    border-radius: 28px;
+    background: linear-gradient(90deg, var(--background-surface-high) 0%, var(--background-surface-high) 30%, var(--brand-500) 100%);
+    box-shadow: var(--elevation-high);
+  }
+
+  .app-frame.nav-open .sidebar-scroller,
+  .app-frame.nav-open .server-rail {
+    margin-bottom: 84px;
+  }
+
+  .app-frame.nav-open .user-panel-account {
+    height: 56px;
+    margin: 0;
+    padding: 0 4px 0 0;
+    gap: 12px;
+    background: none;
+  }
+
+  .app-frame.nav-open .user-panel-account .avatar {
+    width: 72px !important;
+    height: 72px !important;
+    margin: -8px 0;
+  }
+
+  .app-frame.nav-open .user-panel-account .avatar-status {
+    right: 2px;
+    bottom: 2px;
+  }
+
+  .app-frame.nav-open .user-panel-name-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .app-frame.nav-open .user-panel-name-chevron {
+    display: block;
+    flex: none;
+    color: var(--text-strong);
+  }
+
+  .app-frame.nav-open .user-panel-name {
+    font-size: 18px;
+    line-height: 22px;
+    font-weight: 700;
+  }
+
+  .app-frame.nav-open .user-panel-sub {
+    height: 16px;
+    font-size: 14px;
+    line-height: 16px;
+  }
+
+  .app-frame.nav-open .user-panel-account:hover .user-panel-sub-status {
+    display: block;
+  }
+
+  .app-frame.nav-open .user-panel-account:hover .user-panel-sub-username {
+    display: none;
+  }
+
+  .app-frame.nav-open .user-panel-split,
+  .app-frame.nav-open .user-panel-chevron {
+    display: none;
+  }
+
+  .app-frame.nav-open .user-panel:has(.user-panel-account.in-voice) .user-panel-split:first-child {
+    display: flex;
+  }
+
+  /* no title bar on a phone (page title, Inbox, Help): the Inbox moves to the card, Help is dropped */
+  .title-bar {
+    display: none;
+  }
+
+  .app-frame.nav-open .user-panel-buttons .user-panel-inbox {
+    display: flex;
+  }
+
+  .app-frame.nav-open .user-panel-buttons .user-panel-button {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    background: var(--background-mod-normal);
+    color: var(--text-strong);
   }
 }
 
@@ -184,5 +299,379 @@
 
   .sm-header .sm-close {
     margin-left: auto;
+  }
+
+  /* server / channel / category settings: section list first, then one page */
+  .fss-sidebar {
+    flex: 1 0 100%;
+    padding: 56px 12px 24px;
+  }
+
+  .fss-content {
+    flex: 1 0 100%;
+  }
+
+  .fss[data-pane="nav"] .fss-content,
+  .fss[data-pane="page"] .fss-sidebar {
+    display: none;
+  }
+
+  .fss-sidebar-column {
+    width: 100%;
+  }
+
+  .fss-back,
+  .fss-nav-close {
+    position: absolute;
+    top: 8px;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-sm);
+    color: var(--interactive-icon-default);
+  }
+
+  .fss-back {
+    left: 8px;
+  }
+
+  .fss-nav-close {
+    right: 8px;
+  }
+
+  .fss-row {
+    padding: 56px 16px 40px;
+  }
+
+  .fss-tools {
+    top: 8px;
+    right: 8px;
+  }
+
+  .fss-close-label {
+    display: none;
+  }
+}
+
+/* ---- phone browsers (<= 767px): everything below only applies in this range, wider layouts are untouched ---- */
+@media (max-width: 767px) {
+  /* Home: the 420px Active Now column would leave the friends list no width and cover the drawer button */
+  .active-now {
+    display: none;
+  }
+
+  /* six tabs do not fit: the strip scrolls sideways so Add Friend stays reachable */
+  .friends-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .friends-tab {
+    flex: none;
+  }
+
+  /* voice: the connection card lives in the drawer next to the user panel (it floated over the messages); a green dot on the
+     menu button says a call is up while the drawer is closed */
+  .voice-panel {
+    display: none;
+  }
+
+  .app-frame.nav-open .voice-panel {
+    display: flex;
+    z-index: 45;
+    width: calc(100% - 16px);
+  }
+
+  .nav-toggle:not(.nav-toggle-floating) {
+    position: relative;
+  }
+
+  .app-body:has(.voice-panel.in-call) .nav-toggle::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--icon-voice-connected);
+  }
+
+  /* call view: the bar wraps instead of squeezing the disconnect button; pop out / fullscreen make no sense on a phone */
+  .voice-bar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 0 8px;
+  }
+
+  .voice-bar-side {
+    display: none;
+  }
+
+  .voice-hangup {
+    flex: none;
+    width: 64px;
+  }
+
+  /* channel header: the name shrinks with an ellipsis instead of running under the icons, the search box is an icon until focused
+     (then it covers the title and the toolbar), the 32px icon buttons get ~40px hit areas */
+  .channel-header {
+    gap: 8px;
+  }
+
+  .channel-header-title,
+  .channel-header-name-wrap,
+  .channel-header-name {
+    min-width: 0;
+  }
+
+  .channel-header-name-wrap,
+  .channel-header-name {
+    flex-shrink: 1;
+  }
+
+  .channel-header-toolbar {
+    gap: 4px;
+  }
+
+  .toolbar-button {
+    position: relative;
+  }
+
+  .toolbar-button::before {
+    content: "";
+    position: absolute;
+    inset: -4px -2px;
+  }
+
+  .header-search.search-box:not(:focus-within):not([data-search-active]) {
+    position: relative;
+    flex: 0 0 32px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .header-search.search-box:not(:focus-within):not([data-search-active]) .header-search-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    opacity: 0;
+  }
+
+  /* The extra class outranks search.css, which pins the box to 244px and is loaded later. */
+  .channel-header .header-search.search-box:focus-within,
+  .channel-header .header-search.search-box[data-search-active] {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    left: 48px;
+    z-index: 5;
+    width: auto;
+    background:
+      linear-gradient(var(--input-background-default), var(--input-background-default)),
+      var(--background-gradient-chat, var(--chat-background));
+  }
+
+  .header-search-input {
+    font-size: 16px;
+  }
+
+  /* popovers and media sized for a desktop column: cap them to the window (Popout places by the measured width) */
+  .pins-popout-host,
+  .chat-pins {
+    width: min(420px, calc(100vw - 16px));
+  }
+
+  .inbox-popout {
+    width: min(480px, calc(100vw - 16px));
+  }
+
+  .inbox-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .chat-video,
+  .chat-embed-image-only,
+  .chat-embed-media-link {
+    max-width: 100%;
+  }
+
+  /* images: the inline pixel sizes (a 550px box) give way to the column; single images keep their aspect ratio via the inline aspect-ratio */
+  .chat-image-grid.single .chat-image-wrap {
+    max-width: 100%;
+    height: auto !important;
+  }
+
+  .chat-image-grid.multi {
+    width: 100%;
+  }
+
+  .chat-image-grid.three {
+    height: auto;
+    aspect-ratio: 550 / 350;
+  }
+
+  .chat-image-grid.three > .chat-image-wrap {
+    flex: 2 1 0;
+    min-width: 0;
+  }
+
+  .chat-image-col {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .chat-image-row {
+    height: auto !important;
+    aspect-ratio: 550 / 160;
+  }
+
+  .chat-image-grid[data-count="2"] .chat-image-row {
+    aspect-ratio: 550 / 273;
+  }
+
+  .chat-image-grid[data-count="4"] .chat-image-row {
+    aspect-ratio: 550 / 173;
+  }
+
+  /* iOS Safari zooms the page when a field under 16px gets focus: every text field is 16px on a phone (the ones written
+     with their own sizes are outranked by the :not() chain) */
+  html input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  html textarea,
+  html select {
+    font-size: 16px;
+  }
+
+  /* touch targets: 40px hit areas on the small icon buttons without changing how they look (the pseudo-element is the extra area) */
+  .title-bar-button,
+  .chat-composer-btn,
+  .user-panel-button,
+  .user-panel-chevron,
+  .guild-header-invite,
+  .channel-action,
+  .category-toggle {
+    position: relative;
+  }
+
+  .nav-toggle::before,
+  .chat-composer-btn::before,
+  .user-panel-button::before,
+  .guild-header-invite::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
+  }
+
+  .title-bar-button::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
+  }
+
+  .user-panel-chevron::before {
+    content: "";
+    position: absolute;
+    inset: -4px;
+  }
+
+  .channel-action::before {
+    content: "";
+    position: absolute;
+    inset: -12px -6px;
+  }
+
+  .category-toggle::before {
+    content: "";
+    position: absolute;
+    inset: -10px 0;
+  }
+
+  .channel-row {
+    height: 40px;
+  }
+
+  .thread-row-link {
+    min-height: 36px;
+  }
+
+  /* message toolbar (opened by tap): finger-sized buttons, 8 of them still fit a 360px row */
+  .chat-toolbar {
+    top: -22px;
+  }
+
+  .chat-toolbar-btn {
+    width: 36px;
+    height: 40px;
+  }
+
+  /* dialogs: the title is centred and runs the full header width, so a long one went under the absolutely placed close button */
+  .modal-header {
+    padding-right: 48px;
+    padding-left: 48px;
+  }
+
+  .modal-close::before {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+
+  /* chat header: back arrow, icon + name + chevron (with "N online" under it), the name opens the details page; secondary toolbar
+     buttons (threads, notifications, pins, members, profile) live on that page, what stays is search (and the DM call buttons) */
+  .channel-header-title {
+    position: relative;
+    flex: 1;
+  }
+
+  .channel-header-details {
+    display: block;
+    position: absolute;
+    inset: 0 0 0 40px;
+    border-radius: var(--radius-sm);
+  }
+
+  .channel-header-name-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, auto) auto;
+    align-items: center;
+    justify-content: start;
+    column-gap: 4px;
+  }
+
+  .channel-header-chevron {
+    display: block;
+    flex: none;
+    color: var(--interactive-icon-default);
+  }
+
+  .channel-header-title > .channel-header-chevron {
+    margin-left: -4px;
+  }
+
+  .channel-header-online {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    grid-column: 1 / -1;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .channel-header-topic,
+  .channel-header-divider,
+  .channel-header-topic-entry {
+    display: none;
+  }
+
+  .toolbar-button.secondary {
+    display: none;
   }
 }

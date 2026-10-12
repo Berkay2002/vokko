@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Headphones, HeadphoneOff, Mic, MicOff, Monitor, Settings, Volume2 } from "lucide-react";
+import { ChevronDown, Headphones, HeadphoneOff, Inbox, Mic, MicOff, Monitor, Settings, Volume2 } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import { Tooltip, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
 import { loadStoredStatus, setOwnStatus, type SelectableStatus } from "./actions";
-import { openModal } from "./modalStore";
+import { InboxPopout } from "./Inbox";
+import { closeModal, openModal, useModals } from "./modalStore";
+import { NARROW_QUERY } from "./navDrawer";
+import { useMediaQuery } from "./useMediaQuery";
 import { UserPanelPopout } from "./UserPanelPopout";
 import { toggleSelfDeaf, toggleSelfMute, useDeviceMenus, useVoice } from "../voice";
 
@@ -26,6 +29,10 @@ export function UserPanel() {
   const presence = useStore(s => (s.me ? s.presences[s.me.id] : undefined));
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
+  const [inboxAnchor, setInboxAnchor] = useState<HTMLElement | null>(null);
+  const inboxModal = useModals(s => s.modal?.type === "inbox");
+  const narrow = useMediaQuery(NARROW_QUERY);
+  const inboxOpen = inboxModal && narrow;
   const muted = useVoice(s => s.selfMute);
   const deafened = useVoice(s => s.selfDeaf);
   const stored = useRef(loadStoredStatus());
@@ -67,7 +74,10 @@ export function UserPanel() {
       <button ref={setAnchor} type="button" className={`user-panel-account${open ? " active" : ""}${inVoice ? " in-voice" : ""}`} onClick={() => setOpen(o => !o)} aria-haspopup="dialog" aria-expanded={open}>
         <Avatar user={me} size={32} status />
         <span className="user-panel-names">
-          <span className="user-panel-name">{displayName(me)}</span>
+          <span className="user-panel-name-row">
+            <span className="user-panel-name">{displayName(me)}</span>
+            <ChevronDown size={16} className="user-panel-name-chevron" aria-hidden="true" />
+          </span>
           <span className="user-panel-sub">
             <span className="user-panel-sub-status">
               {inVoice && sharing && <Monitor size={12} className="user-panel-voice-icon user-panel-stream-icon" aria-hidden="true" />}
@@ -95,12 +105,16 @@ export function UserPanel() {
           </Tooltip>
           <DeviceChevron label="Output Options" onOpen={rect => menu.open({ clientX: rect.left, clientY: rect.top }, headphoneItems())} />
         </div>
+        <button ref={setInboxAnchor} type="button" className="user-panel-button user-panel-inbox" aria-label="Inbox" aria-expanded={inboxOpen} onClick={() => (inboxOpen ? closeModal() : openModal({ type: "inbox" }))}>
+          <Inbox size={20} />
+        </button>
         <Tooltip content="User Settings" side="top">
           <button type="button" className="user-panel-button" aria-label="User Settings" onClick={() => openModal({ type: "userSettings" })}>
             <Settings size={20} />
           </button>
         </Tooltip>
       </div>
+      <InboxPopout anchor={inboxAnchor} open={inboxOpen} />
       <UserPanelPopout
         anchor={anchor}
         open={open}

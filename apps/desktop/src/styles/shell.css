@@ -770,6 +770,16 @@
   min-width: 0;
 }
 
+/* the phone card puts a chevron after the name (responsive.css); the row only exists for that */
+.user-panel-name-row {
+  display: contents;
+}
+
+.user-panel-name-chevron,
+.user-panel-inbox {
+  display: none;
+}
+
 .user-panel-name {
   overflow: hidden;
   color: var(--text-strong);

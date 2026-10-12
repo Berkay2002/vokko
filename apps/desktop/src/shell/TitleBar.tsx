@@ -5,6 +5,8 @@ import { ChannelType } from "../api/types";
 import { Tooltip } from "../ui";
 import { InboxPopout } from "./Inbox";
 import { closeModal, openModal, useModals } from "./modalStore";
+import { NARROW_QUERY } from "./navDrawer";
+import { useMediaQuery } from "./useMediaQuery";
 import { useRegisterTitleBar, WindowControls } from "./WindowControls";
 
 /** The 32 px title bar: current page title centred, Inbox and Help on the right, and in the desktop app (off macOS) the window buttons after them and a drag region over the whole bar. Help opens the keybinds page, the only shortcut list we have. */
@@ -12,6 +14,8 @@ export function TitleBar() {
   const [inboxButton, setInboxButton] = useState<HTMLElement | null>(null);
   useRegisterTitleBar();
   const inboxOpen = useModals(s => s.modal?.type === "inbox");
+  // the phone has no title bar: the user card on the list page opens the Inbox
+  const narrow = useMediaQuery(NARROW_QUERY);
   const title = useStore(s => {
     const channel = s.route.channelId ? s.channels[s.route.channelId] : undefined;
     if (!channel) return { icon: "friends" as const, text: s.route.guildId ? (s.guilds[s.route.guildId]?.name ?? "") : "Friends" };
@@ -39,7 +43,7 @@ export function TitleBar() {
         </Tooltip>
       </div>
       <WindowControls />
-      <InboxPopout anchor={inboxButton} open={inboxOpen} />
+      <InboxPopout anchor={inboxButton} open={inboxOpen && !narrow} />
     </header>
   );
 }

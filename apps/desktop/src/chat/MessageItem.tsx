@@ -123,6 +123,11 @@ function InlineEdit({ message, onDone }: { message: Message; onDone(): void }) {
   </div>;
 }
 
+/** Parts of a row that keep their own tap behaviour (links, buttons, mentions, spoilers, media controls). */
+const OWN_TAP = 'a, button, input, textarea, video, audio, summary, [role=button], [role=link], [tabindex], [class*=spoiler], .chat-toolbar';
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_SLOP = 10;
+
 function MessageItemImpl({ message, pending, grouped, editing, highlighted, onStopEditing }: MessageItemProps) {
   const chat = useChat();
   const threadActions = useMessageThreadActions(message, !!pending);
@@ -155,6 +160,18 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   // mount constantly while scrolling a windowed list and the toolbar is most of a row's elements.
   const [armed, setArmed] = useState(false);
   const arm = () => { if (!armed) setArmed(true); };
+  // Touch: there is no hover, so a tap toggles the toolbar (one row at a time) and a ~500 ms press opens the message menu there.
+  const [touchOpen, setTouchOpen] = useState(false);
+  const touchRef = useRef(false);
+  const press = useRef<{ x: number; y: number; timer: number; fired: boolean } | null>(null);
+  const stopPress = () => { if (press.current) window.clearTimeout(press.current.timer); };
+  const ownTap = (target: EventTarget) => { const hit = (target as Element).closest(OWN_TAP); return !!hit && rowRef.current !== hit && !!rowRef.current?.contains(hit); };
+  useEffect(() => {
+    if (!touchOpen) return;
+    const away = (e: PointerEvent) => { if (!rowRef.current?.contains(e.target as Node)) setTouchOpen(false); };
+    document.addEventListener('pointerdown', away, true);
+    return () => document.removeEventListener('pointerdown', away, true);
+  }, [touchOpen]);
   const showToolbar = !pending && !editing && !ephemeral && (armed || pickerOpen);
   const cls = ['chat-msg'];
   if (grouped) cls.push('grouped');
@@ -168,6 +185,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   if (ephemeral) cls.push('ephemeral');
   if (system) cls.push('system');
   if (chat.replyingId === message.id) cls.push('replying');
+  if (touchOpen) cls.push('touch-open');
 
   if (system) {
     return <div className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id} onContextMenu={e => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
@@ -182,6 +200,24 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
 
   return <div ref={rowRef} className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id}
     onMouseEnter={arm} onFocus={arm}
+    onPointerDown={e => {
+      touchRef.current = e.pointerType === 'touch';
+      press.current = null;
+      if (!touchRef.current || pending || ephemeral || editing || ownTap(e.target)) return;
+      const { clientX: x, clientY: y } = e;
+      stopPress();
+      press.current = { x, y, fired: false, timer: window.setTimeout(() => { if (press.current) { press.current.fired = true; arm(); setMenuAt({ x, y }); } }, LONG_PRESS_MS) };
+    }}
+    onPointerMove={e => { if (press.current && Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y) > LONG_PRESS_SLOP) stopPress(); }}
+    onPointerUp={stopPress} onPointerCancel={stopPress}
+    // the mousedown that follows a touch would close the menu the long press just opened (the menu closes on outside mousedown)
+    onTouchEnd={e => { if (press.current?.fired && e.cancelable) e.preventDefault(); }}
+    onClick={e => {
+      if (!touchRef.current || press.current?.fired) return;
+      if (pending || ephemeral || editing || ownTap(e.target)) return;
+      arm();
+      setTouchOpen(open => !open);
+    }}
     onMouseMove={e => { arm(); if (e.shiftKey !== shift) setShift(e.shiftKey); }} onMouseLeave={() => shift && setShift(false)}
     onContextMenu={e => { if (pending || ephemeral || e.target instanceof HTMLAnchorElement) return; e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
     {!grouped && <ReplyPreview message={message} />}

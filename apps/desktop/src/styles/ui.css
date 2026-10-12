@@ -233,6 +233,7 @@
   width: var(--modal-width-small);
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   background: var(--bg-primary);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-border), var(--shadow-high);

@@ -29,13 +29,13 @@ export function ThreadsToolbar({ channel }: { channel: Channel }) {
     <>
       {announcement && (
         <Tooltip content="Follow" side="bottom">
-          <button type="button" className="toolbar-button" aria-label="Follow" onClick={() => openFollowDialog(channel.id)}>
+          <button type="button" className="toolbar-button secondary" aria-label="Follow" onClick={() => openFollowDialog(channel.id)}>
             <Rss size={24} />
           </button>
         </Tooltip>
       )}
       <Tooltip content="Threads" side="bottom">
-        <button ref={setAnchor} type="button" className={`toolbar-button${open ? " active" : ""}`} aria-label="Threads" aria-pressed={open} onClick={() => setOpen(o => !o)}>
+        <button ref={setAnchor} type="button" className={`toolbar-button secondary${open ? " active" : ""}`} aria-label="Threads" aria-pressed={open} onClick={() => setOpen(o => !o)}>
           <MessageSquareText size={24} />
         </button>
       </Tooltip>

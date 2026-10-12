@@ -2,6 +2,7 @@
 .modal.shortcuts-modal {
   width: 949px;
   max-height: min(645px, calc(100vh - 32px));
+  max-height: min(645px, calc(100dvh - 32px));
 }
 
 .shortcuts-modal .modal-header {

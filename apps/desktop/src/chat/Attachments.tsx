@@ -64,7 +64,7 @@ function ImageGrid({ message, images }: { message: Message; images: { a: Attachm
     const w = a.width ?? MAX_SINGLE_W, h = a.height ?? MAX_SINGLE_H;
     const scale = Math.min(1, MAX_SINGLE_W / w, MAX_SINGLE_H / h);
     const width = Math.max(40, Math.round(w * scale)), height = Math.max(40, Math.round(h * scale));
-    return <div className="chat-image-grid single"><ImageTile message={message} attachment={a} index={index} style={{ width, height }} /></div>;
+    return <div className="chat-image-grid single"><ImageTile message={message} attachment={a} index={index} style={{ width, height, aspectRatio: `${width} / ${height}` }} /></div>;
   }
   const n = Math.min(images.length, 10);
   const shown = images.slice(0, n);

@@ -12,6 +12,7 @@ import { Measure } from "../perf/Measure";
 import { AgeGate } from "./AgeGate";
 import { ChannelHeader } from "./ChannelHeader";
 import { useAgeGated } from "./AgeGate";
+import { DetailsPage } from "./DetailsPage";
 import { DmProfilePanel } from "./DmProfilePanel";
 import { DmSidebar } from "./DmSidebar";
 import { FriendsPage } from "./FriendsPage";
@@ -150,12 +151,13 @@ export function AppShell() {
   const compact = useMediaQuery(COMPACT_QUERY);
   const [compactMembers, setCompactMembers] = useState(false);
   const [compactProfile, setCompactProfile] = useState(false);
-  const membersVisible = compact ? compactMembers : membersOpen;
-  const profileVisible = compact ? compactProfile : profileOpen;
+  const narrow = useMediaQuery(NARROW_QUERY);
+  const membersVisible = !narrow && (compact ? compactMembers : membersOpen);
+  const profileVisible = !narrow && (compact ? compactProfile : profileOpen);
   const toggleMembers = useCallback(
     () =>
       compact
-        ? setCompactMembers(open => !open)
+        ? (setCompactProfile(false), useNavDrawer.getState().close(), setCompactMembers(open => !open))
         : setMembersOpen(open => {
             localStorage.setItem(MEMBERS_KEY, open ? "0" : "1");
             return !open;
@@ -165,7 +167,7 @@ export function AppShell() {
   const toggleProfile = useCallback(
     () =>
       compact
-        ? setCompactProfile(open => !open)
+        ? (setCompactMembers(false), useNavDrawer.getState().close(), setCompactProfile(open => !open))
         : setProfileOpen(open => {
             localStorage.setItem(PROFILE_KEY, open ? "0" : "1");
             return !open;
@@ -173,20 +175,36 @@ export function AppShell() {
     [compact],
   );
 
-  // Narrow windows: the rail and sidebar are a drawer. It closes when you pick a destination and when the window grows again.
-  const narrow = useMediaQuery(NARROW_QUERY);
+  // Phone: the rail and sidebar are a page of their own and the chat is the next one (back arrow in the header). The list shows by itself
+  // where there is no chat (Home, an empty server), stays open while you pick a server in the rail, and closes when a channel or DM is
+  // picked in it. The details page (header name) closes with a channel change.
   const navOpen = useNavDrawer(s => s.open);
+  const detailsOpen = useNavDrawer(s => s.details);
+  const lastPlace = useRef({ guildId, channelId });
   useEffect(() => {
-    useNavDrawer.getState().close();
-  }, [guildId, channelId, narrow]);
+    const was = lastPlace.current;
+    lastPlace.current = { guildId, channelId };
+    const nav = useNavDrawer.getState();
+    if (!narrow) return nav.setOpen(false), nav.setDetails(false);
+    if (was.guildId !== guildId || was.channelId !== channelId) nav.setDetails(false);
+    if (!channelId && !membersPage) nav.setOpen(true);
+    else if (was.guildId === guildId && was.channelId !== channelId) nav.setOpen(false);
+  }, [guildId, channelId, membersPage, narrow]);
   useEffect(() => {
-    if (!narrow || !navOpen) return;
+    if (!narrow || !(navOpen || detailsOpen)) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !useModals.getState().modal) useNavDrawer.getState().close();
+      if (e.key !== "Escape" || useModals.getState().modal) return;
+      if (detailsOpen) useNavDrawer.getState().setDetails(false);
+      else if (channelId) useNavDrawer.getState().setOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [narrow, navOpen]);
+  }, [narrow, navOpen, detailsOpen, channelId]);
+  // Tapping the destination that is already open (the same channel, Friends on Home) leaves the list: no route change closes it.
+  const leaveListOnSameRoute = (e: React.MouseEvent) => {
+    const link = narrow ? (e.target as HTMLElement).closest("a[href]") : null;
+    if (link && link.getAttribute("href") === window.location.pathname) useNavDrawer.getState().setOpen(false);
+  };
 
   // Keyboard shortcuts owned by the shell (the table is in src/keyboard/bindings.ts).
   const go = (p: Place | undefined) => (p ? (void navigate(p.guildId ? `/channels/${p.guildId}/${p.channelId}` : `/channels/@me/${p.channelId}`), true) : false);
@@ -250,7 +268,7 @@ export function AppShell() {
       <TitleBar />
       <div className="app-body">
         <Rail />
-        <div className="sidebar">
+        <div className="sidebar" onClick={leaveListOnSameRoute}>
           <Sidebar guild={guild} />
         </div>
         <div className="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize Sidebar" {...handlers} />
@@ -266,7 +284,7 @@ export function AppShell() {
           )}
           {channel && (
             <>
-              <ChannelHeader channel={channel} gated={gated} membersOpen={membersVisible && !!guild} onToggleMembers={toggleMembers} profileOpen={profileVisible && !!dmRecipient} onToggleProfile={toggleProfile} />
+              <ChannelHeader channel={channel} gated={gated} membersOpen={membersVisible && !!guild} onToggleMembers={toggleMembers} profileOpen={profileVisible && !!dmRecipient} onToggleProfile={toggleProfile} onOpenDetails={() => useNavDrawer.getState().setDetails(true)} />
               <div className={`channel-body${threadOpen && !threadSplitView ? " thread-full" : ""}`}>
                 <div className="channel-chat">
                   <AgeGate key={channel.id} channel={channel}>
@@ -295,6 +313,7 @@ export function AppShell() {
                   </>
                 )}
               </div>
+              {narrow && detailsOpen && !gated && <DetailsPage channel={channel} onClose={() => useNavDrawer.getState().setDetails(false)} />}
             </>
           )}
         </main>

@@ -98,8 +98,7 @@ test.describe('485px: user settings are fullscreen with a section list and a pag
   test.use({ viewport: { width: 485, height: 800 } });
   test('list first, page after picking, back returns', async ({ page }) => {
     await page.goto('/channels/@me?as=sam&mockLatency=0');
-    await page.getByRole('button', { name: 'Show Channels' }).waitFor();
-    await page.getByRole('button', { name: 'Show Channels' }).click();
+    await expect(page.locator('.sidebar')).toBeVisible(); // Home on a phone is the list page
     await page.getByRole('button', { name: 'User Settings' }).click();
     const dialog = page.getByRole('dialog', { name: 'User Settings' });
     // layout size, not the animated bounding box (the dialog scales in)
@@ -135,7 +134,7 @@ for (const [width, topicShown] of [[390, false], [768, false], [1440, true]] as 
       await openStockTalk(page);
       const header = page.locator('.channel-header');
       const entry = header.getByRole('button', { name: 'stock-talk, channel topic', exact: true });
-      if (topicShown) return expect(entry).toBeHidden();
+      if (topicShown || width <= 767) return expect(entry).toBeHidden(); // a phone shows the topic on the details page (mobile.spec.ts)
       await expect(entry).toBeVisible();
       await expect(entry).toHaveAccessibleDescription('Channel topic: Charts, takes and bad ideas.');
       await entry.click();

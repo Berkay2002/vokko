@@ -267,6 +267,7 @@
   flex-direction: column;
   width: 480px;
   max-height: min(640px, calc(100vh - 48px));
+  max-height: min(640px, calc(100dvh - 48px));
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: var(--background-surface-high);

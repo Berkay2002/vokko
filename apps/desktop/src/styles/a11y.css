@@ -504,4 +504,5 @@ html.ui-zoomed body {
 html.ui-zoomed body {
   width: calc(100vw / var(--ui-zoom, 1));
   height: calc(100vh / var(--ui-zoom, 1));
+  height: calc(100dvh / var(--ui-zoom, 1));
 }
