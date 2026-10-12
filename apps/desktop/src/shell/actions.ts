@@ -124,10 +124,16 @@ export async function markChannelRead(channelId: Snowflake): Promise<void> {
   await request<void>("POST", `/channels/${channelId}/messages/${channel.last_message_id}/ack`);
 }
 
-export async function markGuildRead(guildId: Snowflake): Promise<void> {
+export function markGuildRead(guildId: Snowflake): Promise<void> {
+  return markGuildsRead([guildId]);
+}
+
+/** Mark every unread channel of these guilds read with as few bulk acks as possible (100 entries per request). */
+export async function markGuildsRead(guildIds: readonly Snowflake[]): Promise<void> {
   const state = appStore.getState();
+  const wanted = new Set(guildIds);
   const read_states = Object.values(state.channels)
-    .filter(c => c.guild_id === guildId && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement || c.type === ChannelType.GuildVoice) && c.last_message_id && isChannelUnread(state, c.id))
+    .filter(c => c.guild_id != null && wanted.has(c.guild_id) && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement || c.type === ChannelType.GuildVoice) && c.last_message_id && isChannelUnread(state, c.id))
     .map(c => ({ channel_id: c.id, message_id: c.last_message_id as Snowflake }));
   for (let i = 0; i < read_states.length; i += 100) await request<void>("POST", "/read-states/ack-bulk", { read_states: read_states.slice(i, i + 100) });
 }

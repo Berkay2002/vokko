@@ -10,7 +10,7 @@ import type { Guild, Snowflake } from "../api/types";
 import { Tooltip, useContextMenu, type MenuItem } from "../ui";
 import { GuildIcon } from "../shell/Avatar";
 import { unreadLabel } from "../shell/DmSidebar";
-import { markGuildRead } from "../shell/actions";
+import { markGuildsRead } from "../shell/actions";
 import { isMutedAt, useLocalState } from "../shell/localState";
 import { FolderSettingsModal } from "./FolderSettingsModal";
 import { dropZone, editFolder, entriesToSettings, moveFolder, moveGuild, railEntries, rollUp, ungroupFolder, type DropTarget, type RailEntry } from "./railOrder";
@@ -196,7 +196,7 @@ export function RailGuilds({ renderGuild }: { renderGuild: (guild: Guild) => Rea
     const open = expanded.has(entry.folder.id);
     const unread = ids.some(id => guildUnread(appStore.getState(), id).unread);
     return [
-      { id: "folder-read", label: "Mark Folder As Read", disabled: !unread, onSelect: () => void Promise.all(ids.map(markGuildRead)).catch(() => undefined) },
+      { id: "folder-read", label: "Mark Folder As Read", disabled: !unread, onSelect: () => void markGuildsRead(ids).catch(() => undefined) },
       { type: "separator" },
       ...railMoveItems({ kind: "folder", id: entry.folder.id }),
       { type: "separator" },
