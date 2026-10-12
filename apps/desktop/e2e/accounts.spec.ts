@@ -88,6 +88,32 @@ test('My Account: username change checks availability and asks for the password'
   await expect(settings.locator('.sm-row', { hasText: 'Username' })).toContainText('sam.renamed');
 });
 
+test('My Account: email change waits for the link sent to the new address', async ({ page }) => {
+  const settings = await openMyAccount(page);
+  const row = settings.locator('.sm-row', { hasText: 'Email' });
+  await row.getByRole('button', { name: 'Edit' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Enter an email address' });
+  await dialog.getByLabel('Email').fill('sam.new@example.test');
+  await dialog.getByLabel('Current Password').fill('vokko-dev');
+  await dialog.getByRole('button', { name: 'Done' }).click();
+  await expect(dialog).toHaveCount(0);
+  // the old address stays until the link is opened, and is told about the change
+  await expect(settings.getByText('We sent a verification link to sam.new@example.test.', { exact: false })).toBeVisible();
+  await row.getByRole('button', { name: 'Reveal' }).click();
+  await expect(row).not.toContainText('sam.new@example.test');
+  expect((await lastMail(page, 'sam@vokko.local')).subject).toBe('Your Vokko email is changing');
+
+  const link = new URL((await lastMail(page, 'sam.new@example.test')).body);
+  await settings.getByRole('button', { name: 'Close' }).click();
+  await expect(settings).toHaveCount(0);
+  await goInApp(page, `${link.pathname}${link.hash}`);
+  await goInApp(page, '/channels/@me');
+  await page.getByRole('button', { name: 'User Settings' }).click();
+  const reopened = page.getByRole('dialog', { name: 'User Settings' }).locator('.sm-row', { hasText: 'Email' });
+  await reopened.getByRole('button', { name: 'Reveal' }).click();
+  await expect(reopened).toContainText('sam.new@example.test');
+});
+
 test('My Account: password change, then only the new password logs in', async ({ page }) => {
   const settings = await openMyAccount(page);
   await settings.getByRole('button', { name: 'Change Password' }).click();
