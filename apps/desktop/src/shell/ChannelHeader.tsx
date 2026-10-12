@@ -95,15 +95,15 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             )}
             <div className="channel-header-name-wrap">
               <h1 className="channel-header-name">{channel.name}</h1>
-              {/* Covers the name where the topic hides (responsive.css), so the topic dialog stays reachable without taking header width. */}
+              {/* Covers the name where the topic hides (responsive.css), so the topic dialog stays reachable without taking header width. It is described by the (hidden) topic button, so screen readers still get the text. */}
               {channel.topic && !gated && (
-                <button type="button" className="channel-header-topic-entry" title={channel.topic} aria-haspopup="dialog" aria-label={`${channel.name}, channel topic`} onClick={() => openModal({ type: "channelTopic", channelId: channel.id })} />
+                <button type="button" className="channel-header-topic-entry" title={channel.topic} aria-describedby={`channel-topic-${channel.id}`} aria-haspopup="dialog" aria-label={`${channel.name}, channel topic`} onClick={() => openModal({ type: "channelTopic", channelId: channel.id })} />
               )}
             </div>
             {channel.topic && !gated && (
               <>
                 <span className="channel-header-divider" />
-                <button type="button" className="channel-header-topic" title={channel.topic} aria-haspopup="dialog" aria-label={`Channel topic: ${channel.topic.length > 120 ? `${channel.topic.slice(0, 120)}...` : channel.topic}`} onClick={() => openModal({ type: "channelTopic", channelId: channel.id })}>
+                <button type="button" id={`channel-topic-${channel.id}`} className="channel-header-topic" title={channel.topic} aria-haspopup="dialog" aria-label={`Channel topic: ${channel.topic.length > 120 ? `${channel.topic.slice(0, 120)}...` : channel.topic}`} onClick={() => openModal({ type: "channelTopic", channelId: channel.id })}>
                   {channel.topic}
                 </button>
               </>

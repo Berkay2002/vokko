@@ -137,6 +137,7 @@ for (const [width, topicShown] of [[390, false], [768, false], [1440, true]] as 
       const entry = header.getByRole('button', { name: 'stock-talk, channel topic', exact: true });
       if (topicShown) return expect(entry).toBeHidden();
       await expect(entry).toBeVisible();
+      await expect(entry).toHaveAccessibleDescription('Channel topic: Charts, takes and bad ideas.');
       await entry.click();
       const dialog = page.getByRole('dialog');
       await expect(dialog).toContainText('Charts, takes and bad ideas.');
