@@ -474,6 +474,10 @@ test('a role mention highlights the row when I hold the role', async ({ page }) 
   await openStockTalk(page);
   await reveal(page, 'can an admin sign off');
   await expect(row(page, 'can an admin sign off')).toHaveClass(/mentioned/);
+  // The role pill carries the role colour (Admin is #f0b232) on a 10% tint of it, not the default brand pill.
+  const pill = row(page, 'can an admin sign off').locator('.md-mention-role');
+  await expect(pill).toHaveCSS('color', 'rgb(240, 178, 50)');
+  await expect(pill).toHaveCSS('background-color', /^(rgba\(240, 178, 50, 0\.1\)|color\(srgb 0\.941\d* 0\.698\d* 0\.196\d* \/ 0\.1\))$/);
 });
 
 test('inline edit has an emoji button that inserts at the caret, and the hint wording', async ({ page }) => {

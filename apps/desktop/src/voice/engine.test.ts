@@ -246,6 +246,26 @@ describe("voice engine: never live on join", () => {
     expect(t.mic).toEqual({ deviceId: "fake-mic", muted: true });
   });
 
+  it("a device picked in the user panel menus: the input pick switches the transport's mic, the output pick reaches the voice settings", async () => {
+    const { FakeTransport } = await import("./fakeTransport");
+    const { setPref } = await import("../ui");
+    let fake: InstanceType<typeof FakeTransport> | null = null;
+    engine.setTransportFactory((_kind, cb) => (fake = new FakeTransport(cb)));
+    await startCall("s1", "mock-token");
+    await vi.advanceTimersByTimeAsync(500);
+    engine.setSelfMute(false);
+    try {
+      setPref("inputDevice", "fake-mic");
+      expect(store.getVoice().settings).toMatchObject({ inputDeviceId: "fake-mic" });
+      expect((fake as unknown as InstanceType<typeof FakeTransport>).micLog.at(-1)).toEqual({ event: "switch", deviceId: "fake-mic", muted: false });
+      setPref("outputDevice", "speakers");
+      expect(store.getVoice().settings).toMatchObject({ outputDeviceId: "speakers" });
+    } finally {
+      setPref("inputDevice", "default");
+      setPref("outputDevice", "default");
+    }
+  });
+
   it("passes the persisted mute to the transport at connect time", async () => {
     vi.resetModules();
     const saved = new Map<string, string>([["vokko.voice", JSON.stringify({ selfMute: true, selfDeaf: true })]]);

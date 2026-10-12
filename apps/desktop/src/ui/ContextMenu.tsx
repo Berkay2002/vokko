@@ -16,6 +16,10 @@ export type MenuItem =
       checked?: boolean;
       /** Right-aligned hint text (e.g. a shortcut). */
       hint?: string;
+      /** Muted second line under the label that wraps (the current device on a device row). */
+      sub?: string;
+      /** Draw the icon before the label instead of after it. */
+      iconStart?: boolean;
       /** Native tooltip, used for disabled rows ("Not available yet"). */
       tooltip?: string;
       onSelect?: () => void;
@@ -162,9 +166,17 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
               }}
               onClick={e => activate(index, e.currentTarget)}
             >
-              <span className="context-menu-label">{item.label}</span>
+              {item.icon && item.iconStart && <span className="context-menu-icon">{item.icon}</span>}
+              {item.sub ? (
+                <span className="context-menu-text">
+                  <span className="context-menu-label">{item.label}</span>
+                  <span className="context-menu-sub">{item.sub}</span>
+                </span>
+              ) : (
+                <span className="context-menu-label">{item.label}</span>
+              )}
               {item.hint && <span className="context-menu-hint">{item.hint}</span>}
-              {item.icon && <span className="context-menu-icon">{item.icon}</span>}
+              {item.icon && !item.iconStart && <span className="context-menu-icon">{item.icon}</span>}
               {item.checked !== undefined && <span className={`context-menu-check${item.checked ? " on" : ""}`}>{item.checked && <Check size={14} strokeWidth={3} />}</span>}
               {submenu && <ChevronRight size={16} className="context-menu-chevron" />}
             </div>

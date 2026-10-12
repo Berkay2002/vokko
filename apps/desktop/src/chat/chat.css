@@ -504,6 +504,8 @@ html.message-compact { --chat-gutter: 80px; }
 .md-mention[role="button"] { cursor: pointer; }
 .md-mention[role="button"]:hover { background: var(--chat-brand); color: var(--chat-on-brand); }
 .md-mention-everyone { background: var(--chat-mention-bg); }
+/* Role pills take the role colour (set inline as --md-mention-color when the role has one): colour text on a 10% tint. They are never buttons, so no hover state. */
+.md-mention-role[style*="--md-mention-color"] { color: var(--md-mention-color); background: color-mix(in srgb, var(--md-mention-color) 10%, transparent); }
 .md-spoiler { border-radius: 3px; }
 .md-spoiler[role="button"] { background: var(--chat-spoiler-hidden); color: transparent; cursor: pointer; user-select: none; }
 .md-spoiler[role="button"] * { color: transparent !important; visibility: hidden; }

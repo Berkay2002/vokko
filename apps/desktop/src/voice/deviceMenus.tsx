@@ -1,9 +1,11 @@
 // Microphone and headphone menus behind the chevrons: the user panel and the voice page control bar share them.
 
 import { useEffect } from "react";
+import { Settings } from "lucide-react";
 import { openModal } from "../shell/modalStore";
 import { setPref, usePrefs, type MenuItem } from "../ui";
 import { refreshVoiceDevices } from "./engine";
+import type { InputProfile } from "./audioProfile";
 import { inputDeviceMenu, outputDeviceMenu } from "./voiceMenus";
 import { getVoice } from "./store";
 
@@ -11,7 +13,7 @@ import { getVoice } from "./store";
 function VolumeRow({ label, pref }: { label: string; pref: "inputVolume" | "outputVolume" }) {
   const value = usePrefs()[pref];
   return (
-    <label className="voice-volume">
+    <label className="voice-volume wide">
       <span className="voice-volume-label">{label}</span>
       <input
         type="range"
@@ -26,7 +28,6 @@ function VolumeRow({ label, pref }: { label: string; pref: "inputVolume" | "outp
         onChange={e => setPref(pref, Number(e.currentTarget.value))}
         onKeyDown={e => e.stopPropagation()}
       />
-      <span className="voice-volume-value">{value}%</span>
     </label>
   );
 }
@@ -37,22 +38,25 @@ function currentDevice(kind: "input" | "output", saved: string): string {
   return list.find(d => d.deviceId === saved)?.label ?? list.find(d => d.deviceId === "default")?.label ?? "Default";
 }
 
+const PROFILES: { value: InputProfile; label: string }[] = [
+  { value: "isolation", label: "Voice Isolation" },
+  { value: "studio", label: "Studio" },
+  { value: "custom", label: "Custom" },
+];
+
 /** Item builders for the "Input Options" / "Output Options" menus. Re-enumerates devices once when first used. */
 export function useDeviceMenus(): { micItems: () => MenuItem[]; headphoneItems: () => MenuItem[] } {
   const prefs = usePrefs();
   useEffect(() => void refreshVoiceDevices(), []);
-  const voiceSettings = (): MenuItem => ({ id: "voice-settings", label: "Voice Settings", onSelect: () => openModal({ type: "userSettings", section: "voice" }) });
-  const withHint = (items: MenuItem[], hint: string): MenuItem[] => items.map(item => ("type" in item ? item : { ...item, hint }));
+  const voiceSettings = (): MenuItem => ({ id: "voice-settings", label: "Voice Settings", icon: <Settings size={20} />, iconStart: true, onSelect: () => openModal({ type: "userSettings", section: "voice" }) });
+  const withSub = (items: MenuItem[], sub: string): MenuItem[] => items.map(item => ("type" in item ? item : { ...item, sub }));
   const micItems = (): MenuItem[] => [
-    ...withHint(inputDeviceMenu(), currentDevice("input", prefs.inputDevice)),
+    ...withSub(inputDeviceMenu(), currentDevice("input", prefs.inputDevice)),
     {
-      id: "input-mode",
-      label: "Input Mode",
-      hint: prefs.inputMode === "ptt" ? "Push to Talk" : "Voice Activity",
-      children: [
-        { id: "mode-vad", label: "Voice Activity", checked: prefs.inputMode === "vad", onSelect: () => setPref("inputMode", "vad") },
-        { id: "mode-ptt", label: "Push to Talk", checked: prefs.inputMode === "ptt", onSelect: () => setPref("inputMode", "ptt") },
-      ],
+      id: "input-profile",
+      label: "Input Profile",
+      sub: PROFILES.find(p => p.value === prefs.inputProfile)?.label ?? "Custom",
+      children: PROFILES.map(p => ({ id: `profile-${p.value}`, label: p.label, checked: prefs.inputProfile === p.value, onSelect: () => setPref("inputProfile", p.value) })),
     },
     { type: "separator" },
     { id: "input-volume", label: "Input Volume", render: () => <VolumeRow label="Input Volume" pref="inputVolume" /> },
@@ -60,7 +64,7 @@ export function useDeviceMenus(): { micItems: () => MenuItem[]; headphoneItems: 
     voiceSettings(),
   ];
   const headphoneItems = (): MenuItem[] => [
-    ...withHint(outputDeviceMenu(), currentDevice("output", prefs.outputDevice)),
+    ...withSub(outputDeviceMenu(), currentDevice("output", prefs.outputDevice)),
     { type: "separator" },
     { id: "output-volume", label: "Output Volume", render: () => <VolumeRow label="Output Volume" pref="outputVolume" /> },
     { type: "separator" },

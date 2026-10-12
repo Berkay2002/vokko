@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { ReactNode } from "react";
 import { Dropdown } from "../../ui";
 
@@ -21,22 +22,23 @@ export function Category({ title, children }: { title: string; children: ReactNo
   );
 }
 
-export function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange(next: boolean): void; disabled?: boolean; label: string }) {
+export function Toggle({ checked, onChange, disabled, label, describedBy }: { checked: boolean; onChange(next: boolean): void; disabled?: boolean; label: string; describedBy?: string }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} className={`switch${checked ? " on" : ""}`} onClick={() => onChange(!checked)}>
+    <button type="button" role="switch" aria-checked={checked} aria-label={label} aria-describedby={describedBy} disabled={disabled} className={`switch${checked ? " on" : ""}`} onClick={() => onChange(!checked)}>
       <span className="switch-knob" />
     </button>
   );
 }
 
 export function SwitchRow({ label, note, checked, onChange, disabled }: { label: string; note?: ReactNode; checked: boolean; onChange(next: boolean): void; disabled?: boolean }) {
+  const noteId = useId();
   return (
     <div className={`switch-row${disabled ? " disabled" : ""}`}>
       <div className="switch-row-text">
         <div className="switch-row-label">{label}</div>
-        {note && <div className="switch-row-note">{note}</div>}
+        {note && <div className="switch-row-note" id={noteId}>{note}</div>}
       </div>
-      <Toggle checked={checked} onChange={onChange} disabled={disabled} label={label} />
+      <Toggle checked={checked} onChange={onChange} disabled={disabled} label={label} describedBy={note ? noteId : undefined} />
     </div>
   );
 }
@@ -67,9 +69,9 @@ export function Slider({ value, min, max, step = 1, onChange, label, format, dis
 }
 
 /** Radio list in Discord's settings style (round dot, label, optional description). */
-export function RadioGroup<T extends string>({ value, options, onChange, name, disabled }: { value: T; options: { value: T; label: string; note?: string }[]; onChange(next: T): void; name: string; disabled?: boolean }) {
+export function RadioGroup<T extends string>({ value, options, onChange, name, disabled, describedBy }: { value: T; options: { value: T; label: string; note?: string }[]; onChange(next: T): void; name: string; disabled?: boolean; describedBy?: string }) {
   return (
-    <div className="sr-group" role="radiogroup" aria-label={name}>
+    <div className="sr-group" role="radiogroup" aria-label={name} aria-describedby={describedBy}>
       {options.map(o => (
         <button key={o.value} type="button" role="radio" aria-checked={value === o.value} disabled={disabled} className={`sr-row${value === o.value ? " selected" : ""}`} onClick={() => onChange(o.value)}>
           <span className="sr-dot" />

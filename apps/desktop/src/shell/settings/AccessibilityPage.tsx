@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { FONT_SIZES, setPref, usePrefs } from "../../ui";
@@ -27,14 +28,18 @@ const TTS_TICKS: MarkerTick[] = TTS_RATES.map(v => ({ value: v, label: v === 0.5
 
 const TTS_SAMPLE = "This is how text to speech sounds at this speed.";
 
-/** A labelled control with its description above it, as on Discord's page. */
-/** A labelled control. `inline` puts the control to the right of the label (Discord's select rows) instead of below it. */
-function Row({ label, note, inline, children }: { label: string; note?: ReactNode; inline?: boolean; children: ReactNode }) {
+/**
+ * A labelled control with its description above it, as on Discord's page. `inline` puts the control to the right of the label (Discord's select rows) instead of below it.
+ * `children` may be a function that gets the id of the note, so the control can name it as its description.
+ */
+function Row({ label, note, inline, children }: { label: string; note?: ReactNode; inline?: boolean; children: ReactNode | ((noteId: string | undefined) => ReactNode) }) {
+  const noteId = useId();
+  const body = typeof children === "function" ? children(note ? noteId : undefined) : children;
   return (
     <div className={`settings-field a11y-field${inline ? " a11y-field-inline" : ""}`}>
       <div className="field-label">{label}</div>
-      {note && <div className="settings-field-note">{note}</div>}
-      {inline ? <div className="a11y-field-control">{children}</div> : children}
+      {note && <div className="settings-field-note" id={noteId}>{note}</div>}
+      {inline ? <div className="a11y-field-control">{body}</div> : body}
     </div>
   );
 }
@@ -72,7 +77,7 @@ export function AccessibilityPage({ onOpenSection }: { onOpenSection?: (id: stri
 
       <Category title="Text Readability">
         <Row label="Chat font size" note="Scales message text. The interface around it keeps its size; use the zoom level below for that.">
-          <MarkerSlider ticks={FONT_TICKS} value={fontSize} onChange={v => setPref("fontSize", v)} label="Chat font size" format={px} />
+          {id => <MarkerSlider ticks={FONT_TICKS} value={fontSize} onChange={v => setPref("fontSize", v)} label="Chat font size" format={px} describedBy={id} />}
         </Row>
         <SwitchRow label="Always underline links" note="Underline links in messages even when they are not hovered." checked={underlineLinks} onChange={v => setPref("underlineLinks", v)} />
         <SwitchRow label="Display name styles" note="Show fonts, effects and colours that people chose for their display name. Turn off to see plain names." checked={displayNameStyles} onChange={v => setPref("displayNameStyles", v)} />
@@ -80,16 +85,19 @@ export function AccessibilityPage({ onOpenSection }: { onOpenSection?: (id: stri
 
       <Category title="Visual Density">
         <Row label="UI density" note="How much space the server list, channel list and member list leave between items.">
-          <RadioGroup<Density>
-            name="UI density"
-            value={density}
-            onChange={v => setPref("density", v)}
-            options={[
-              { value: "compact", label: "Compact" },
-              { value: "default", label: "Default" },
-              { value: "cozy", label: "Spacious" },
-            ]}
-          />
+          {id => (
+            <RadioGroup<Density>
+              describedBy={id}
+              name="UI density"
+              value={density}
+              onChange={v => setPref("density", v)}
+              options={[
+                { value: "compact", label: "Compact" },
+                { value: "default", label: "Default" },
+                { value: "cozy", label: "Spacious" },
+              ]}
+            />
+          )}
         </Row>
         <Row label="Chat message display">
           <RadioGroup<MessageDisplay>
@@ -103,16 +111,16 @@ export function AccessibilityPage({ onOpenSection }: { onOpenSection?: (id: stri
           />
         </Row>
         <Row label="Space between message groups" note="The gap between messages from different people.">
-          <MarkerSlider ticks={GAP_TICKS} value={messageGroupGap} onChange={v => setPref("messageGroupGap", v)} label="Space between message groups" format={px} />
+          {id => <MarkerSlider ticks={GAP_TICKS} value={messageGroupGap} onChange={v => setPref("messageGroupGap", v)} label="Space between message groups" format={px} describedBy={id} />}
         </Row>
         <Row label="Zoom level" note="Scales the whole app. Ctrl and +, Ctrl and -, and Ctrl and 0 also work from anywhere.">
-          <MarkerSlider ticks={ZOOM_TICKS} value={zoom} onChange={v => setPref("zoom", v)} label="Zoom level" format={percent} />
+          {id => <MarkerSlider ticks={ZOOM_TICKS} value={zoom} onChange={v => setPref("zoom", v)} label="Zoom level" format={percent} describedBy={id} />}
         </Row>
       </Category>
 
       <Category title="Color & Contrast">
         <Row label="Saturation" note="Lower it to mute the interface colours. Images, videos and other people's content keep their colours.">
-          <MarkerSlider ticks={SATURATION_TICKS} value={saturation} onChange={v => setPref("saturation", v)} label="Saturation" format={percent} />
+          {id => <MarkerSlider ticks={SATURATION_TICKS} value={saturation} onChange={v => setPref("saturation", v)} label="Saturation" format={percent} describedBy={id} />}
         </Row>
         <SwitchRow
           label="Apply saturation to custom colors"
@@ -142,30 +150,37 @@ export function AccessibilityPage({ onOpenSection }: { onOpenSection?: (id: stri
         <SwitchRow label="Enable reduced motion" note="Turns off sliding, fading and other interface animations." checked={reducedMotionEnabled} onChange={v => setPref("reducedMotionEnabled", v)} />
         <SwitchRow label="Sync with computer" note="Also reduce motion when your computer asks for it." checked={syncReducedMotion} onChange={v => setPref("syncReducedMotion", v)} />
         <Row label="Minimum notification duration" note="How long pop-ups and toasts stay on screen at least.">
-          <MarkerSlider ticks={NOTIFICATION_TICKS} value={minNotificationDuration} onChange={v => setPref("minNotificationDuration", v)} label="Minimum notification duration" format={v => `${v} seconds`} />
+          {id => <MarkerSlider ticks={NOTIFICATION_TICKS} value={minNotificationDuration} onChange={v => setPref("minNotificationDuration", v)} label="Minimum notification duration" format={v => `${v} seconds`} describedBy={id} />}
         </Row>
         <SwitchRow label="Play GIFs when Vokko is focused" note="Otherwise GIFs show their first frame and play when you hover them." checked={playGifs} onChange={v => setPref("playGifs", v)} />
         <SwitchRow label="Play animated emoji" checked={playAnimatedEmoji} onChange={v => setPref("playAnimatedEmoji", v)} />
         <Row label="Sticker animations" note="Animated stickers can play all the time, only when you hover or focus them, or never.">
-          <RadioGroup<StickerAnimation>
-            name="Sticker animations"
-            value={stickerAnimation}
-            onChange={v => setPref("stickerAnimation", v)}
-            options={[
-              { value: "always", label: "Always animate" },
-              { value: "interaction", label: "Animate on interaction" },
-              { value: "never", label: "Never animate" },
-            ]}
-          />
+          {id => (
+            <RadioGroup<StickerAnimation>
+              describedBy={id}
+              name="Sticker animations"
+              value={stickerAnimation}
+              onChange={v => setPref("stickerAnimation", v)}
+              options={[
+                { value: "always", label: "Always animate" },
+                { value: "interaction", label: "Animate on interaction" },
+                { value: "never", label: "Never animate" },
+              ]}
+            />
+          )}
         </Row>
       </Category>
 
       <Category title="Audio & Screen Reader">
         <Row label="Text-to-speech rate" note="How fast messages are read aloud.">
-          <MarkerSlider ticks={TTS_TICKS} value={ttsRate} onChange={v => setPref("ttsRate", v)} label="Text-to-speech rate" format={v => `${v}x`} />
-          <button type="button" className="btn btn-secondary btn-sm a11y-tts-preview" disabled={!speechAvailable()} onClick={() => speak(TTS_SAMPLE, ttsRate)}>
-            Preview
-          </button>
+          {id => (
+            <>
+              <MarkerSlider ticks={TTS_TICKS} value={ttsRate} onChange={v => setPref("ttsRate", v)} label="Text-to-speech rate" format={v => `${v}x`} describedBy={id} />
+              <button type="button" className="btn btn-secondary btn-sm a11y-tts-preview" aria-label="Preview text-to-speech" disabled={!speechAvailable()} onClick={() => speak(TTS_SAMPLE, ttsRate)}>
+                Preview
+              </button>
+            </>
+          )}
         </Row>
         <SwitchRow label="Show image descriptions" note="Show the description (alt text) under images and attachments that have one." checked={imageDescriptions} onChange={v => setPref("showImageDescriptions", v)} />
         <SwitchRow label="Use legacy chat input" note="A plain text box without the live formatting preview or emoticon conversion, which some screen readers handle better. @mentions, #channels and :emoji: still autocomplete." checked={legacyChatInput} onChange={v => setPref("legacyChatInput", v)} />

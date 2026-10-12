@@ -158,7 +158,12 @@ test('stage channel: create, join the audience, start the stage, become a speake
   await expect(stage.getByRole('list', { name: 'Audience' }).getByLabel('Alice')).toBeVisible();
 
   await stage.getByRole('button', { name: 'Become a Speaker' }).click();
-  await expect(stage.getByRole('list', { name: 'Speakers' }).getByLabel(/^Sam/)).toBeVisible();
+  const tile = stage.getByRole('list', { name: 'Speakers' }).getByLabel(/^Sam/);
+  await expect(tile).toBeVisible();
+  // a speaker is the call page's tile: 16:9, radius 8
+  const box = (await tile.boundingBox())!;
+  expect(box.width / box.height).toBeCloseTo(16 / 9, 1);
+  await expect(tile).toHaveCSS('border-radius', '8px');
 
   await stage.getByRole('button', { name: 'End Stage' }).click();
   await expect(stage.getByText('Not live')).toBeVisible();

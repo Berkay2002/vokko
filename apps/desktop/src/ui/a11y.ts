@@ -11,15 +11,38 @@ export const ZOOM_STEPS = [50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200] as 
 export const SATURATION_STEPS = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100] as const;
 /** Minimum time a pop-up notification stays on screen (seconds). */
 export const NOTIFICATION_SECONDS = [3, 5, 10, 15, 20] as const;
-/** Speech rate multipliers of the text-to-speech slider. */
-export const TTS_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+/**
+ * Speech rate multipliers of the text-to-speech slider: main's 0.5..2 range with 1.0x kept as a stop, 11 stops instead of 7.
+ * shortcut: 1.0x is a third of the way along 0.5..2, so 11 stops cannot be all equal steps and still contain it (0.1 below, 0.2
+ * above); the reference's real stop values were never read, only that it has 11 ticks.
+ */
+export const TTS_RATES = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.2, 1.4, 1.6, 1.8, 2] as const;
 
 export const DEFAULT_ZOOM = 100;
 
-export function nearestStep(steps: readonly number[], value: number): number {
+/** The step closest to `value`; a value halfway between two steps goes to the one closer to `towards` (the lower one by default). */
+export function nearestStep(steps: readonly number[], value: number, towards?: number): number {
   let best = steps[0] ?? value;
-  for (const step of steps) if (Math.abs(step - value) < Math.abs(best - value)) best = step;
+  for (const step of steps) {
+    const d = Math.abs(step - value);
+    const bestD = Math.abs(best - value);
+    const tie = Math.abs(d - bestD) < 1e-9 && towards !== undefined && Math.abs(step - towards) < Math.abs(best - towards);
+    if (d < bestD - 1e-9 || tie) best = step;
+  }
   return best;
+}
+
+/** Settings that sit on a slider stop, with the value ties settle towards. Used for stored and for synced values alike. */
+const STEPPED: Record<string, { steps: readonly number[]; towards?: number }> = {
+  zoom: { steps: ZOOM_STEPS },
+  minNotificationDuration: { steps: NOTIFICATION_SECONDS },
+  ttsRate: { steps: TTS_RATES, towards: 1 },
+};
+
+/** `value` moved onto its slider stop when the setting has stops; any other setting comes back unchanged. */
+export function snapStepped(key: string, value: number): number {
+  const entry = STEPPED[key];
+  return entry && Number.isFinite(value) ? nearestStep(entry.steps, value, entry.towards) : value;
 }
 
 /** One Ctrl + / Ctrl - press: the next zoom level up or down (a value between two levels moves to the neighbour on that side). */
@@ -53,17 +76,17 @@ export function sanitizeA11y<T extends Record<string, unknown>>(prefs: T): T {
     const v = out[key];
     out[key] = typeof v === "number" && Number.isFinite(v) ? clamp(v, lo, hi) : fallback;
   };
-  const snap = (key: string, steps: readonly number[]) => {
-    out[key] = nearestStep(steps, out[key] as number);
+  const snap = (key: string) => {
+    out[key] = snapStepped(key, out[key] as number);
   };
   num("zoom", ZOOM_STEPS[0], ZOOM_STEPS[ZOOM_STEPS.length - 1]!, DEFAULT_ZOOM);
-  snap("zoom", ZOOM_STEPS);
+  snap("zoom");
   num("saturation", 0, 100, 100);
   num("messageGroupGap", 0, 24, 16);
   num("minNotificationDuration", NOTIFICATION_SECONDS[0], NOTIFICATION_SECONDS[NOTIFICATION_SECONDS.length - 1]!, 3);
-  snap("minNotificationDuration", NOTIFICATION_SECONDS);
+  snap("minNotificationDuration");
   num("ttsRate", TTS_RATES[0], TTS_RATES[TTS_RATES.length - 1]!, 1);
-  snap("ttsRate", TTS_RATES);
+  snap("ttsRate");
   if (out.stickerAnimation !== "always" && out.stickerAnimation !== "interaction" && out.stickerAnimation !== "never") out.stickerAnimation = "always";
   return out as T;
 }

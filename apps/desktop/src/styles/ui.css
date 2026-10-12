@@ -144,6 +144,24 @@
   text-overflow: ellipsis;
 }
 
+.context-menu-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.context-menu-sub {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.context-menu-item.focused .context-menu-sub {
+  color: inherit;
+}
+
 .context-menu-hint {
   color: var(--text-muted);
   font-size: 12px;

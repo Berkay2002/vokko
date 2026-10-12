@@ -116,6 +116,9 @@ describe("registry", () => {
     expect(prefFromBlob("keybinds", { keybinds: "x" })).toEqual([]);
     expect(prefFromBlob("theme", { theme: "onyx" })).toBe("onyx");
     expect(prefFromBlob("theme", { theme: "a-theme-from-a-newer-build" })).toBe(DEFAULT_PREFS.theme);
+    // a slider value between two stops (another device, an older build) is snapped like a stored one; ties go towards 1x
+    expect(prefFromBlob("ttsRate", { [wireKey("ttsRate")]: 1.25 })).toBe(1.2);
+    expect(prefFromBlob("ttsRate", { [wireKey("ttsRate")]: 0.75 })).toBe(0.8);
     expect(prefFromBlob("timeFormat", { time_format: "25" })).toBe("auto");
   });
 

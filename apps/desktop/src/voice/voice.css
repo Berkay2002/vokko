@@ -1496,9 +1496,29 @@
   grid-column: 1 / -1;
 }
 
+/* Device menu volume row: label over a full-width slider, 58 px high like the reference. */
+.voice-volume.wide {
+  grid-template-columns: 1fr;
+  gap: 8px 0;
+  padding: 6px 0;
+}
+
+/* Voice spec 4: 4 px track, brand fill, 16 px white thumb. */
 .voice-volume-range {
   width: 100%;
-  accent-color: var(--brand-500);
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--brand-500) var(--fill, 0%), var(--slider-track-background) var(--fill, 0%));
+  appearance: none;
+}
+
+.voice-volume-range::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--white);
+  box-shadow: var(--shadow-low);
+  appearance: none;
 }
 
 .voice-volume-value {
@@ -1541,7 +1561,7 @@
   padding: 0 6px;
   border-radius: 8px;
   background: var(--status-online);
-  color: #fff;
+  color: var(--text-on-brand);
   font-size: 11px;
   font-weight: 700;
   line-height: 16px;
@@ -1577,7 +1597,7 @@
 
 .stage-status.live {
   background: var(--status-online);
-  color: #fff;
+  color: var(--text-on-brand);
 }
 
 .stage-topic {
@@ -1631,21 +1651,35 @@
 
 .stage-speakers {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* Same tile as the call page (voice spec 6): 16:9, radius 8, 8 px between tiles, speaking ring inside the edge. */
 .stage-speaker {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 8px;
-  padding: 16px 8px;
-  border-radius: var(--radius-md);
+  padding: 8px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
   background: var(--background-surface-high);
+  box-shadow: inset 0 0 0 0 var(--status-speaking);
+  transition: box-shadow 0.1s ease;
+}
+
+.stage-speaker.speaking {
+  box-shadow: inset 0 0 0 3px var(--status-speaking);
+}
+
+/* the tile ring is the speaking mark, as on the call page; no second ring round the avatar */
+.stage-speaker .voice-user-avatar::after {
+  content: none;
 }
 
 .stage-speaker-name {

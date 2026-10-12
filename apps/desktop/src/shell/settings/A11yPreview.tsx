@@ -64,7 +64,7 @@ export function A11yPreview() {
           <div className="chat-msg-body">
             {header}
             <div className="chat-content">
-              Here is a link: <a className="md-link" href="https://example.org/accessibility" onClick={e => e.preventDefault()}>https://example.org/accessibility</a>
+              Here is a link: <a className="md-link" href="https://example.org/accessibility" tabIndex={-1} onClick={e => e.preventDefault()}>https://example.org/accessibility</a>
             </div>
           </div>
         </div>

@@ -17,6 +17,7 @@
 import { ApiRequestError } from "../api/errors";
 import type { UserSettings, UserSettingsData } from "../api/types";
 import { isSoundId, parseDisabledSounds, serializeDisabledSounds } from "../notify/soundCatalog";
+import { snapStepped } from "./a11y";
 import { DEFAULT_PREFS, GROUP_GAPS, isThemeChoice, type Prefs } from "./prefs";
 
 type PrefKey = keyof Prefs;
@@ -202,7 +203,9 @@ export function prefFromBlob(key: PrefKey, settings: UserSettingsData): Prefs[Pr
   const raw = settings[registry.get(key) ?? wireKey(key)];
   const codec = codecs.get(key);
   const value = codec && raw !== undefined && raw !== null ? codec.fromWire(raw) : raw;
-  return (fits(key, value) ? value : DEFAULT_PREFS[key]) as Prefs[PrefKey];
+  if (!fits(key, value)) return DEFAULT_PREFS[key] as Prefs[PrefKey];
+  // A slider setting from another device (or an older build) may sit between two stops: snap it like stored prefs are.
+  return (typeof value === "number" ? snapStepped(key, value) : value) as Prefs[PrefKey];
 }
 
 /** Wire value of a pref: `null` (remove the key) when it equals the default, so the blob only holds what the user changed. */

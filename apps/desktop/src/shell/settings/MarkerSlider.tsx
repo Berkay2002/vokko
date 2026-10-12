@@ -21,9 +21,11 @@ export interface MarkerSliderProps {
   /** Text for assistive tech and the highlighted (current) label above the knob. */
   format?: (value: number) => string;
   disabled?: boolean;
+  /** Id of the element that describes the slider (the row note). */
+  describedBy?: string;
 }
 
-export function MarkerSlider({ ticks, value, onChange, label, format, disabled }: MarkerSliderProps) {
+export function MarkerSlider({ ticks, value, onChange, label, format, disabled, describedBy }: MarkerSliderProps) {
   const rail = useRef<HTMLDivElement>(null);
   const min = ticks[0]?.value ?? 0;
   const max = ticks[ticks.length - 1]?.value ?? 1;
@@ -81,6 +83,7 @@ export function MarkerSlider({ ticks, value, onChange, label, format, disabled }
           role="slider"
           tabIndex={disabled ? -1 : 0}
           aria-label={label}
+          aria-describedby={describedBy}
           aria-valuemin={min}
           aria-valuemax={max}
           aria-valuenow={value}

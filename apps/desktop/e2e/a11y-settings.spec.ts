@@ -84,6 +84,11 @@ test.describe('page', () => {
     await expect(preview.locator('.chat-reaction')).toHaveCount(2);
     await expect(preview.locator('.a11y-sample-avatar')).toHaveCount(3);
     await expect(preview.locator('.a11y-sample-button')).toBeVisible();
+    // screen reader pass: the sample content is not a tab stop, and a control names its row note as its description
+    await expect(preview.getByRole('link')).toHaveAttribute('tabindex', '-1');
+    await expect(slider(dialog, 'Zoom level')).toHaveAccessibleDescription(/Scales the whole app/);
+    await expect(toggle(dialog, 'Enable high contrast mode')).toHaveAccessibleDescription(/Stronger text, borders/);
+    await expect(dialog.getByRole('radiogroup', { name: 'UI density' })).toHaveAccessibleDescription(/How much space the server list/);
     // pinned: still in view after the page scrolls to the bottom
     await dialog.locator('.sm-scroll, .sm-main, .settings-content-inner').first().evaluate(el => { el.scrollTop = el.scrollHeight; });
     const box = await preview.boundingBox();
@@ -469,12 +474,15 @@ test.describe('audio and screen reader', () => {
       Object.defineProperty(synth, 'cancel', { value: () => undefined });
     });
     const dialog = await openAccessibility(page);
-    await setSlider(dialog, 'Text-to-speech rate', 1.5);
-    await expect(slider(dialog, 'Text-to-speech rate')).toHaveAttribute('aria-valuetext', '1.5x');
+    // 11 stops between 0.5x and 2x, 1x (the default) among them
+    await expect(slider(dialog, 'Text-to-speech rate').locator('.ms-tick')).toHaveCount(11);
+    await expect(slider(dialog, 'Text-to-speech rate')).toHaveAttribute('aria-valuetext', '1x');
+    await setSlider(dialog, 'Text-to-speech rate', 1.4);
+    await expect(slider(dialog, 'Text-to-speech rate')).toHaveAttribute('aria-valuetext', '1.4x');
     await dialog.getByRole('button', { name: 'Preview' }).click();
     const spoken = await page.evaluate(() => (window as unknown as { __spoken: { text: string; rate: number }[] }).__spoken);
     expect(spoken).toHaveLength(1);
-    expect(spoken[0]!.rate).toBe(1.5);
+    expect(spoken[0]!.rate).toBeCloseTo(1.4, 5); // utterance.rate is a float32
     expect(spoken[0]!.text.length).toBeGreaterThan(10);
   });
 

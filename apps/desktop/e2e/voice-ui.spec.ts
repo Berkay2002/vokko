@@ -230,6 +230,9 @@ test('connection details popout and device menus', async ({ page }) => {
 
   await userPanel(page).getByRole('button', { name: 'Input Options' }).click();
   await expect(page.getByRole('menuitem', { name: /Input Device/ })).toBeVisible();
+  // the current device and profile sit under the label, as on Discord; Voice Settings has its cog in front
+  await expect(page.getByRole('menuitem', { name: /Input Device/ })).toContainText('Default');
+  await expect(page.getByRole('menuitem', { name: /Input Profile/ })).toContainText('Custom');
   const volume = page.getByRole('slider', { name: 'Input Volume' });
   await volume.fill('70');
   await expect(volume).toHaveValue('70');

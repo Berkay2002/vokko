@@ -188,7 +188,10 @@ describe("accessibility prefs defaults and migration", () => {
   });
 
   it("snaps stored values that sit between two ticks to the nearest tick", () => {
-    expect(sanitizeA11y({ zoom: 120, ttsRate: 1.2, minNotificationDuration: 8 })).toMatchObject({ zoom: 125, ttsRate: 1.25, minNotificationDuration: 10 });
+    expect(sanitizeA11y({ zoom: 120, ttsRate: 1.1, minNotificationDuration: 8 })).toMatchObject({ zoom: 125, ttsRate: 1, minNotificationDuration: 10 });
+    // rates stored by the old 7-stop slider land on a stop of the 11-stop one; a tie goes towards 1.0x, not down
+    const old = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(r => sanitizeA11y({ ttsRate: r }).ttsRate);
+    expect(old).toEqual([0.5, 0.8, 1, 1.2, 1.4, 1.8, 2]);
     expect(sanitizeA11y({ zoom: 100, ttsRate: 1, minNotificationDuration: 3 })).toMatchObject({ zoom: 100, ttsRate: 1, minNotificationDuration: 3 });
   });
 });
@@ -199,8 +202,9 @@ describe("scales and zoom steps", () => {
     expect([...GROUP_GAPS]).toEqual([0, 4, 8, 16, 24]);
     expect([...NOTIFICATION_SECONDS]).toEqual([3, 5, 10, 15, 20]);
     expect(SATURATION_STEPS).toHaveLength(11);
-    expect(TTS_RATES[0]).toBe(0.5);
-    expect(TTS_RATES[TTS_RATES.length - 1]).toBe(2);
+    expect(TTS_RATES).toHaveLength(11);
+    expect([TTS_RATES[0], TTS_RATES[TTS_RATES.length - 1]]).toEqual([0.5, 2]);
+    expect(TTS_RATES).toContain(1);
   });
 
   it("steps zoom with Ctrl +/-/0", () => {
