@@ -117,7 +117,7 @@ General rules:
 | POST | /channels/{id}/invites | `CreateInviteRequest` `{max_age?, max_uses?, temporary?, unique?}` → `InviteMetadata` (CREATE_INSTANT_INVITE; see Invites) |
 | GET | /channels/{id}/invites | `InviteMetadata[]` of the channel's live invites (MANAGE_CHANNELS on the channel) |
 | GET | /guilds/{id}/invites | `InviteMetadata[]` of the guild's live invites (MANAGE_GUILD) |
-| GET | /invites/{code} | `Invite` preview |
+| GET | /invites/{code} | `Invite` preview `{code, guild: {id, name, icon, member_count}, channel: {id, name}, expires_at}`. Works signed out (same body; no inviter, uses or permissions for anyone); an invalid token is still 401. Unknown or expired → 404 10006. Signed-out callers are rate limited per address: burst 10, then 1 per 5 s (429) |
 | POST | /invites/{code} | accept → `Guild`; a new member records the invite code, its inviter and join source INVITE (see Members page) |
 | DELETE | /invites/{code} | revoke → `InviteMetadata` (MANAGE_CHANNELS on the invite's channel or MANAGE_GUILD), emits INVITE_DELETE |
 | GET | /users/@me/guild-layout | `GuildLayout` `{guild_folders, guild_positions}` |

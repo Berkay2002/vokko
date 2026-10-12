@@ -108,3 +108,22 @@ async fn gif_routes_share_one_bucket_per_user_to_protect_the_provider_quota() {
     assert_eq!(app.get("/gifs/trending", &other).await.0, 200, "another user has their own bucket");
     assert_eq!(app.get("/users/@me", &token).await.0, 200, "other routes are unaffected");
 }
+
+#[tokio::test]
+async fn signed_out_invite_previews_have_a_small_bucket_per_address() {
+    // default limits: 30 per route; a signed-out preview gets 10 and then one every 5 seconds
+    let app = TestApp::with_config(|config| config.rate_limit = Some(RateLimit::default())).await;
+    let (token, _) = app.register("sam").await;
+    let (_, channel) = app.guild_with_channel(&token).await;
+    let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &token, json!({})).await;
+    let path = format!("/invites/{}", invite["code"].as_str().expect("code"));
+    for _ in 0..10 {
+        assert_eq!(app.send(Method::GET, &path, None, None).await.0, StatusCode::OK);
+    }
+    let (status, body) = app.send(Method::GET, &path, None, None).await;
+    assert_eq!((status, body["global"].clone()), (StatusCode::TOO_MANY_REQUESTS, json!(false)));
+    // Signed-in previews keep the normal route bucket.
+    for _ in 0..15 {
+        assert_eq!(app.get(&path, &token).await.0, StatusCode::OK);
+    }
+}

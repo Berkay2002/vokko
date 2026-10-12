@@ -114,3 +114,16 @@ impl FromRequestParts<AppState> for AuthUser {
         }
     }
 }
+
+/// `Option<AuthUser>` for routes that also serve anonymous callers: no `Authorization` header is `None`, while a header with
+/// an unknown or expired token is still 401 (the client signs in again instead of silently seeing the anonymous view).
+impl axum::extract::OptionalFromRequestParts<AppState> for AuthUser {
+    type Rejection = ApiErr;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Option<Self>, Self::Rejection> {
+        if parts.extensions.get::<ResolvedUser>().is_none() && bearer_header(&parts.headers).is_none() {
+            return Ok(None);
+        }
+        <Self as FromRequestParts<AppState>>::from_request_parts(parts, state).await.map(Some)
+    }
+}

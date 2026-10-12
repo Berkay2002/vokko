@@ -303,7 +303,9 @@ pub async fn remove_temporary_memberships(state: &AppState, user_id: i64) -> Api
     Ok(())
 }
 
-async fn preview(State(state): State<AppState>, AuthUser(_): AuthUser, Path(code): Path<String>) -> ApiResult<Json<Invite>> {
+/// Open to anonymous callers (the invite landing page before sign-in): `Invite` only carries the public card fields, so both
+/// get the same body. Anonymous callers are held to a stricter per-address limit (`ratelimit::ANON_INVITE_*`).
+async fn preview(State(state): State<AppState>, _caller: Option<AuthUser>, Path(code): Path<String>) -> ApiResult<Json<Invite>> {
     let row = live_row(&state, &code).await?;
     let member_count = store::member_count(&state, row.guild_id).await?;
     Ok(Json(preview_of(&state, &row, member_count)))

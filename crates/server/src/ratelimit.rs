@@ -29,6 +29,11 @@ const ADDRESS_FLOOR_FACTOR: f64 = 10.0;
 const GIF_ROUTE: &str = "GET /gifs";
 const GIF_BURST: f64 = 10.0;
 const GIF_PER_SECOND: f64 = 2.0;
+/// Anonymous invite previews (`GET /invites/{code}` without a token) are keyed on the client address and kept slow, so the
+/// open route cannot be used to enumerate invite codes: 10 at once, then one every 5 seconds.
+const ANON_INVITE_ROUTE: &str = "/invites/{code}";
+const ANON_INVITE_BURST: f64 = 10.0;
+const ANON_INVITE_PER_SECOND: f64 = 0.2;
 /// `POST /channels/{id}/call/ring` re-rings the other people of a DM: a few rings, then one every 5 s.
 const CALL_RING_BURST: f64 = 5.0;
 const CALL_RING_PER_SECOND: f64 = 0.2;
@@ -192,11 +197,14 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
         }
     }
     let is_gif = request.method() == axum::http::Method::GET && route.contains("/gifs/");
+    let anon_invite = request.method() == axum::http::Method::GET && matches!(caller, Caller::Ip(_)) && route.ends_with(ANON_INVITE_ROUTE);
     let route = if is_gif { GIF_ROUTE.to_owned() } else { format!("{} {route}", request.method()) };
     // The limits are never raised above the configured route bucket (tests and operators may set it lower).
     let is_ring = request.method() == axum::http::Method::POST && route.ends_with("/call/ring");
     let bucket = if is_gif {
         Some((GIF_BURST.min(limit.route_burst), GIF_PER_SECOND.min(limit.route_per_second)))
+    } else if anon_invite {
+        Some((ANON_INVITE_BURST.min(limit.route_burst), ANON_INVITE_PER_SECOND.min(limit.route_per_second)))
     } else if is_ring {
         Some((CALL_RING_BURST.min(limit.route_burst), CALL_RING_PER_SECOND.min(limit.route_per_second)))
     } else {

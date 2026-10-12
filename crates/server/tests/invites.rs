@@ -3,7 +3,7 @@ mod common;
 
 use std::time::Duration;
 
-use axum::http::StatusCode;
+use axum::http::{Method, StatusCode};
 use common::TestApp;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -339,4 +339,40 @@ async fn guild_layout_round_trip_through_rest_ready_and_events() {
         assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "{body}");
     }
     assert_eq!(w.app.get("/users/@me/guild-layout", &w.owner).await.1, positions_only);
+}
+
+#[tokio::test]
+async fn signed_out_callers_see_the_public_invite_card() {
+    let w = world().await;
+    let invite = w.invite(&w.owner, json!({"max_age": 1800})).await;
+    let path = format!("/invites/{}", code(&invite));
+    let (status, signed_in) = w.app.get(&path, &w.owner).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, anonymous) = w.app.send(Method::GET, &path, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{anonymous}");
+    // The same public card either way: no inviter, uses, member list or permissions.
+    assert_eq!(anonymous, signed_in);
+    let mut keys: Vec<&str> = anonymous.as_object().expect("invite").keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["channel", "code", "expires_at", "guild"]);
+    let mut guild_keys: Vec<&str> = anonymous["guild"].as_object().expect("guild").keys().map(String::as_str).collect();
+    guild_keys.sort_unstable();
+    assert_eq!(guild_keys, ["icon", "id", "member_count", "name"]);
+    assert_eq!((anonymous["guild"]["id"].as_str(), anonymous["guild"]["member_count"].clone()), (Some(w.guild.as_str()), json!(1)));
+    assert_eq!(anonymous["channel"]["name"], "general");
+
+    // A token that no longer works is still 401 (sign in again), not the signed-out view.
+    assert_eq!(w.app.send(Method::GET, &path, Some("not-a-token"), None).await.0, StatusCode::UNAUTHORIZED);
+
+    sqlx::query("UPDATE invites SET expires_at = now() - interval '1 second' WHERE code = $1")
+        .bind(code(&invite))
+        .execute(&w.app.state.db)
+        .await
+        .expect("expire");
+    let (status, error) = w.app.send(Method::GET, &path, None, None).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::NOT_FOUND, json!(10006)));
+    let (status, error) = w.app.send(Method::GET, "/invites/nosuchcode", None, None).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::NOT_FOUND, json!(10006)));
+    // Joining still needs an account.
+    assert_eq!(w.app.send(Method::POST, &path, None, Some(json!({}))).await.0, StatusCode::UNAUTHORIZED);
 }
