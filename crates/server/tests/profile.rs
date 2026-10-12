@@ -813,3 +813,23 @@ async fn profile_edit_without_images_does_not_wait_on_a_locked_upload() {
     let (status, me) = app.patch("/users/@me", &owner, json!({"avatar_attachment_id": pending["id"]})).await;
     assert_eq!(status, StatusCode::OK, "{me}");
 }
+
+/// Naming someone else's upload locks nothing: the request neither waits on it nor holds it, it is just rejected.
+#[tokio::test]
+async fn naming_another_users_upload_does_not_lock_it() {
+    let (app, owner, member, channel, guild) = setup().await;
+    let theirs = upload(&app, &owner, &channel, "theirs.png", "image/png", &png()).await;
+    let theirs_id: i64 = theirs["id"].as_str().expect("id").parse().expect("id");
+    let mut holder = app.state.db.begin().await.expect("begin");
+    sqlx::query("SELECT id FROM attachments WHERE id = $1 FOR UPDATE").bind(theirs_id).execute(&mut *holder).await.expect("lock");
+    let wait = std::time::Duration::from_secs(5);
+
+    let profile = app.patch("/users/@me", &member, json!({"avatar_attachment_id": theirs["id"], "banner_attachment_id": theirs["id"]}));
+    let (status, error) = tokio::time::timeout(wait, profile).await.expect("the profile edit waited on another user's upload");
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    let path = format!("/guilds/{guild}/members/@me");
+    let server_profile = app.patch(&path, &member, json!({"avatar_attachment_id": theirs["id"]}));
+    let (status, error) = tokio::time::timeout(wait, server_profile).await.expect("the server profile edit waited on another user's upload");
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+    holder.rollback().await.expect("rollback");
+}

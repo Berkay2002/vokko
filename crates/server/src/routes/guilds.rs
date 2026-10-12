@@ -182,7 +182,7 @@ async fn update_guild(
     // transaction locking the same uploads.
     let mut uploads: Vec<i64> = body.icon_attachment_id.into_iter().chain(body.banner_attachment_id.flatten()).map(|upload| upload.db()).collect();
     uploads.sort_unstable();
-    media::lock_uploads(&mut tx, &uploads).await?;
+    media::lock_own_uploads(&mut tx, &uploads, user_id).await?;
     let icon_path = match body.icon_attachment_id {
         Some(icon) => Some(image_path_on(&mut tx, icon.db(), user_id, ImageKind::Avatar, "icon_attachment_id", false).await?),
         None => None,
@@ -343,14 +343,25 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     // The FK clears their primary guild; their audience hears about it as USER_UPDATE once the guild is gone.
     let adopters: Vec<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE primary_guild_id = $1").bind(id).fetch_all(&state.db).await?;
     crate::routes::scheduled_events::release_guild_covers(&state, id).await;
+    // Locked first in one statement by ascending id; the delete touches only the rows locked here.
+    let mut tx = state.db.begin().await?;
+    let locked: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM attachments WHERE channel_id IN (SELECT id FROM channels WHERE guild_id = $1) AND NOT sticker_asset \
+         AND NOT (message_id IS NULL AND claimed_at IS NOT NULL) ORDER BY id FOR UPDATE",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
     let attachments: Vec<(i64,)> = sqlx::query_as(&format!(
-        "DELETE FROM attachments a WHERE channel_id IN (SELECT id FROM channels WHERE guild_id = $1) AND NOT sticker_asset \
+        "DELETE FROM attachments a WHERE a.id = ANY($2) AND channel_id IN (SELECT id FROM channels WHERE guild_id = $1) AND NOT sticker_asset \
          AND NOT (message_id IS NULL AND (claimed_at IS NOT NULL OR {})) RETURNING id",
         media::IN_USE
     ))
     .bind(id)
-    .fetch_all(&state.db)
+    .bind(&locked)
+    .fetch_all(&mut *tx)
     .await?;
+    tx.commit().await?;
     // emoji images are claimed uploads, so nothing else would ever sweep them once the guild's rows cascade away
     let emoji_attachments: Vec<(i64,)> = sqlx::query_as("SELECT attachment_id FROM emojis WHERE guild_id = $1").bind(id).fetch_all(&state.db).await?;
     let emoji_attachments: Vec<i64> = emoji_attachments.into_iter().map(|(attachment,)| attachment).collect();
@@ -359,7 +370,10 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     if let Some(path) = banner.and_then(|(path,)| path) {
         release_upload(&state, &path).await;
     }
-    let removed: Vec<(i64,)> = sqlx::query_as("DELETE FROM attachments WHERE id = ANY($1) RETURNING id").bind(&emoji_attachments).fetch_all(&state.db).await?;
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT id FROM attachments WHERE id = ANY($1) ORDER BY id FOR UPDATE").bind(&emoji_attachments).execute(&mut *tx).await?;
+    let removed: Vec<(i64,)> = sqlx::query_as("DELETE FROM attachments WHERE id = ANY($1) RETURNING id").bind(&emoji_attachments).fetch_all(&mut *tx).await?;
+    tx.commit().await?;
     let mut files: Vec<i64> = attachments.into_iter().map(|(id,)| id).collect();
     files.extend(removed.into_iter().map(|(attachment,)| attachment));
     media::remove_files(&state, &files).await;

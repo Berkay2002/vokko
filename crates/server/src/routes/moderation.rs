@@ -461,7 +461,7 @@ async fn edit_own_member(
     // both uploads are locked up front in one statement by ascending id, so this never deadlocks with another transaction locking them
     let mut uploads: Vec<i64> = [body.avatar_attachment_id, body.banner_attachment_id].into_iter().flatten().flatten().map(|upload| upload.db()).collect();
     uploads.sort_unstable();
-    crate::media::lock_uploads(&mut tx, &uploads).await?;
+    crate::media::lock_own_uploads(&mut tx, &uploads, user_id).await?;
     let avatar = match body.avatar_attachment_id {
         None => None,
         Some(None) => Some(None),

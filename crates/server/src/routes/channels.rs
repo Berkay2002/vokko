@@ -197,14 +197,25 @@ async fn delete_channel(
     let guild_id = access.channel.guild_id;
     let _eviction = crate::voice::state::channel_deleted(&state, id).await;
     // Uploads in use as an avatar, icon or event cover (claimed, not on a message) outlive the channel they came through.
+    // Locked first in one statement by ascending id; the delete touches only the rows locked here.
+    let mut tx = state.db.begin().await?;
+    let locked: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM attachments WHERE channel_id = $1 AND NOT sticker_asset AND NOT (message_id IS NULL AND claimed_at IS NOT NULL) \
+         ORDER BY id FOR UPDATE",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
     let attachments: Vec<(i64,)> = sqlx::query_as(&format!(
-        "DELETE FROM attachments a WHERE channel_id = $1 AND NOT sticker_asset \
+        "DELETE FROM attachments a WHERE a.id = ANY($2) AND channel_id = $1 AND NOT sticker_asset \
          AND NOT (message_id IS NULL AND (claimed_at IS NOT NULL OR {})) RETURNING id",
         crate::media::IN_USE
     ))
     .bind(id)
-    .fetch_all(&state.db)
+    .bind(&locked)
+    .fetch_all(&mut *tx)
     .await?;
+    tx.commit().await?;
     // Members learn of a cleared system or rules channel through GUILD_UPDATE, after the CHANNEL_DELETE below.
     let cleared: Option<(i64,)> = sqlx::query_as(
         "UPDATE guilds SET system_channel_id = NULLIF(system_channel_id, $2), rules_channel_id = NULLIF(rules_channel_id, $2) \

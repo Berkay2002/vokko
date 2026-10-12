@@ -314,7 +314,7 @@ pub async fn create_post(state: &AppState, user_id: i64, access: &ChannelAccess,
     if !attachments.is_empty() {
         // locked first in one statement by ascending id, like every multi-upload lock, rather than in the UPDATE's own scan order
         let mut tx = state.db.begin().await?;
-        crate::media::lock_uploads(&mut tx, &attachments).await?;
+        crate::media::lock_own_uploads(&mut tx, &attachments, user_id).await?;
         sqlx::query("UPDATE attachments SET channel_id = $2 WHERE id = ANY($1)").bind(&attachments).bind(id).execute(&mut *tx).await?;
         tx.commit().await?;
     }

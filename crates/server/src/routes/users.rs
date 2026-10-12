@@ -159,7 +159,7 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
             }
             locked.sort_unstable();
             locked.dedup();
-            crate::media::lock_uploads(&mut tx, &locked).await?;
+            crate::media::lock_own_uploads(&mut tx, &locked, user_id).await?;
         }
         sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
         if widgets.is_none() {

@@ -82,14 +82,18 @@ pub const IN_USE: &str = "(EXISTS (SELECT 1 FROM users u WHERE a.id::text IN (sp
      OR EXISTS (SELECT 1 FROM applications ap WHERE split_part(ap.icon_path, '/', 1) = a.id::text) \
      OR EXISTS (SELECT 1 FROM webhooks w WHERE split_part(w.avatar_path, '/', 1) = a.id::text))";
 
-/// Row-locks the given uploads in one statement, by ascending id. Every transaction that locks more than one `attachments` row takes
-/// them this way (or with another single `ORDER BY id FOR UPDATE` over a superset, as account delete does) before it claims, attaches
-/// or releases any of them, so two transactions can never hold each other's uploads. Nothing happens for an empty list.
-pub async fn lock_uploads(conn: &mut sqlx::PgConnection, ids: &[i64]) -> Result<(), sqlx::Error> {
+/// Row-locks those of the given uploads that `uploader_id` uploaded, in one statement by ascending id; ids of anyone else's uploads lock
+/// nothing (the caller's ownership check rejects them), so a client can't hold another user's upload. Nothing happens for an empty list.
+///
+/// Lock order: every statement that can lock more than one `attachments` row takes them in one `SELECT ... ORDER BY id FOR UPDATE` (this,
+/// or the same over a wider set, as account delete and the channel, thread and guild deletes do) before it claims, attaches, releases or
+/// deletes any of them, and the later writes touch only rows it locked. The pending sweep does the same with `SKIP LOCKED`, so it never
+/// waits. Two transactions therefore can never each hold an upload the other is waiting for.
+pub async fn lock_own_uploads(conn: &mut sqlx::PgConnection, ids: &[i64], uploader_id: i64) -> Result<(), sqlx::Error> {
     if ids.is_empty() {
         return Ok(());
     }
-    sqlx::query("SELECT id FROM attachments WHERE id = ANY($1) ORDER BY id FOR UPDATE").bind(ids).execute(conn).await?;
+    sqlx::query("SELECT id FROM attachments WHERE id = ANY($1) AND uploader_id = $2 ORDER BY id FOR UPDATE").bind(ids).bind(uploader_id).execute(conn).await?;
     Ok(())
 }
 
@@ -138,12 +142,26 @@ pub async fn remove_files(state: &AppState, attachment_ids: &[i64]) {
 /// assigned (`routes::users::image_path_on`), so they are never matched here; [`IN_USE`] keeps them even when a claim
 /// was cleared while they were being assigned.
 pub async fn cleanup_pending(state: &AppState, max_age: Duration) -> usize {
-    let deleted: Result<Vec<(i64,)>, _> = sqlx::query_as(&format!(
-        "DELETE FROM attachments a WHERE message_id IS NULL AND claimed_at IS NULL AND created_at < now() - make_interval(secs => $1) \
-         AND NOT {IN_USE} RETURNING id"
-    ))
-    .bind(max_age.as_secs_f64())
-    .fetch_all(&state.db)
+    // The candidates are locked first by ascending id, skipping any a request holds (it is claiming or attaching them, so they are
+    // not pending for long); the delete then touches only the rows locked here.
+    let deleted: Result<Vec<(i64,)>, sqlx::Error> = async {
+        let mut tx = state.db.begin().await?;
+        let locked: Vec<i64> = sqlx::query_scalar(
+            "SELECT id FROM attachments WHERE message_id IS NULL AND claimed_at IS NULL AND created_at < now() - make_interval(secs => $1) \
+             ORDER BY id FOR UPDATE SKIP LOCKED",
+        )
+        .bind(max_age.as_secs_f64())
+        .fetch_all(&mut *tx)
+        .await?;
+        let rows = sqlx::query_as(&format!(
+            "DELETE FROM attachments a WHERE a.id = ANY($1) AND message_id IS NULL AND claimed_at IS NULL AND NOT {IN_USE} RETURNING id"
+        ))
+        .bind(&locked)
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(rows)
+    }
     .await;
     match deleted {
         Ok(rows) => {

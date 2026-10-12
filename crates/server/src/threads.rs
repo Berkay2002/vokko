@@ -505,13 +505,23 @@ pub async fn delete_threads(state: &AppState, rows: Vec<ChannelRow>, refresh_sta
         audiences.push(access::channel_viewers(state, row).await?);
     }
     let ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
+    // Locked first in one statement by ascending id; the delete touches only the rows locked here.
+    let mut tx = state.db.begin().await?;
+    let locked: Vec<i64> = sqlx::query_scalar(
+        "SELECT id FROM attachments WHERE channel_id = ANY($1) AND NOT (message_id IS NULL AND claimed_at IS NOT NULL) ORDER BY id FOR UPDATE",
+    )
+    .bind(&ids)
+    .fetch_all(&mut *tx)
+    .await?;
     let attachments: Vec<(i64,)> = sqlx::query_as(&format!(
-        "DELETE FROM attachments a WHERE channel_id = ANY($1) AND NOT (message_id IS NULL AND (claimed_at IS NOT NULL OR {})) RETURNING id",
+        "DELETE FROM attachments a WHERE a.id = ANY($2) AND channel_id = ANY($1) AND NOT (message_id IS NULL AND (claimed_at IS NOT NULL OR {})) RETURNING id",
         crate::media::IN_USE
     ))
     .bind(&ids)
-    .fetch_all(&state.db)
+    .bind(&locked)
+    .fetch_all(&mut *tx)
     .await?;
+    tx.commit().await?;
     sqlx::query("DELETE FROM channels WHERE id = ANY($1)").bind(&ids).execute(&state.db).await?;
     crate::media::remove_files(state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
     for (row, viewers) in rows.iter().zip(&audiences) {
