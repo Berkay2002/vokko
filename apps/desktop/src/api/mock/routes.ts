@@ -37,11 +37,26 @@ import { purgeGuildJoinRequests } from "./joinRequests";
 
 export { route, str, requireGuildMember };
 
+/** Like the server's parse_emoji: `name:id` for a custom emoji, otherwise a unicode emoji; 400 50035 for anything else. */
 function parseEmoji(raw: string): ReactionEmoji {
-  const decoded = decodeURIComponent(raw);
-  const idx = decoded.lastIndexOf(":");
-  if (idx > 0 && /^\d+$/.test(decoded.slice(idx + 1))) return { id: decoded.slice(idx + 1), name: decoded.slice(0, idx) };
-  return { id: null, name: decoded };
+  const invalid = (): never => fail(400, 50035, "Invalid Form Body", { emoji: { code: "INVALID", message: "Unknown Emoji" } });
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    return invalid();
+  }
+  const idx = decoded.indexOf(":");
+  if (idx >= 0) {
+    const name = decoded.slice(0, idx);
+    const id = decoded.slice(idx + 1);
+    if (!/^\d+$/.test(id) || BigInt(id) === 0n || BigInt(id) > 0x7fffffffffffffffn) return invalid();
+    if (!/^[A-Za-z0-9_]{2,32}$/.test(name)) return invalid();
+    return { id: BigInt(id).toString(), name };
+  }
+  const name = decoded.trim();
+  if (name === "" || new TextEncoder().encode(name).length > 64 || /[A-Za-z0-9\p{Cc}\p{White_Space}]/u.test(name)) return invalid();
+  return { id: null, name };
 }
 
 const sameEmoji = sameReactionEmoji;
@@ -473,6 +488,8 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   assertCanPost(channel, viewer.user.id);
   requireChannelPerm(channel, viewer.user.id, Perm.SEND_MESSAGES);
+  // Like the server's create_message: the DM rule (403) comes before any body validation (400).
+  assertDmOpen(channel, viewer.user.id);
   const content = (str(body.content) ?? "").trim();
   // `attachments` (id + optional rename / alt text) replaces `attachment_ids`; a "SPOILER_" filename prefix marks a spoiler.
   const metas = Array.isArray(body.attachments)
@@ -503,7 +520,6 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   if (content === "" && attachments.length === 0 && stickers.length === 0 && !forwarding && !poll) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
   const forward = forwarding ? buildForward(viewer.user.id, reference, channel) : undefined;
   if (reference?.message_id && !forwarding) requireMessage(channel.id, reference.message_id);
-  assertDmOpen(channel, viewer.user.id);
   checkSend(channel, viewer.user.id, content);
   for (const id of ids) db.pending.delete(id);
   // A poll is registered under the message's id first, so MESSAGE_CREATE already carries it.
@@ -581,14 +597,17 @@ const reactionEvent = (userId: string, channelId: string, messageId: string, emo
   user_id: userId, channel_id: channelId, message_id: messageId, emoji, type: burst ? ReactionType.Burst : ReactionType.Normal, burst,
 });
 
+// Same order as the server's add_reaction: emoji and type (400) before the channel and message (404), then
+// permissions, the archived thread and the DM rule (403), and only then whether a custom emoji is usable.
 route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, params, query }) => {
+  const parsed = parseEmoji(params[2] ?? "");
+  const burst = reactionBurst(query);
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   requireChannelPerm(channel, viewer.user.id, Perm.ADD_REACTIONS);
   assertThreadOpen(channel);
   assertDmOpen(channel, viewer.user.id);
-  const emoji = resolveReactionEmoji(channel, viewer.user.id, parseEmoji(params[2] ?? ""));
-  const burst = reactionBurst(query);
+  const emoji = resolveReactionEmoji(channel, viewer.user.id, parsed);
   let reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
   if (!reaction) {
     if (message.reactions.length >= 20) fail(400, 30010, "Maximum number of reactions reached (20)");
@@ -603,10 +622,10 @@ route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, 
 });
 
 route("DELETE", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, params, query }) => {
-  const channel = requireChannel(params[0] ?? "", viewer.user.id);
-  const message = requireMessage(channel.id, params[1] ?? "");
   const emoji = parseEmoji(params[2] ?? "");
   const burst = reactionBurst(query);
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
   const reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
   const list = burst ? reaction?.burst_ids : reaction?.user_ids;
   if (reaction && list?.includes(viewer.user.id)) {
@@ -619,10 +638,10 @@ route("DELETE", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewe
 });
 
 route("GET", `/channels/${ID}/messages/${ID}/reactions/([^/]+)`, ({ viewer, params, query }) => {
-  const channel = requireChannel(params[0] ?? "", viewer.user.id);
-  const message = requireMessage(channel.id, params[1] ?? "");
   const emoji = parseEmoji(params[2] ?? "");
   const burst = reactionBurst(query);
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
   const reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
   return ((burst ? reaction?.burst_ids : reaction?.user_ids) ?? []).map((id): User => userOf(id));
 });
@@ -649,10 +668,11 @@ route("GET", `/channels/${ID}/messages/pins`, ({ viewer, params, query }) => {
 });
 
 route("PUT", `/channels/${ID}/messages/pins/${ID}`, ({ viewer, params }) => {
+  // Same order as the server's pin_message: permission and the DM rule (403) before the message lookup (404).
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
-  const message = requireMessage(channel.id, params[1] ?? "");
   requirePinPerm(channel, viewer.user.id);
   assertDmOpen(channel, viewer.user.id);
+  const message = requireMessage(channel.id, params[1] ?? "");
   if (message.pinned) return undefined;
   if (sortedMessages(channel.id).filter(m => m.pinned).length >= MAX_PINS) fail(400, 30003, `Maximum number of pins reached (${MAX_PINS})`);
   message.pinned = true;

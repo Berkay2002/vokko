@@ -111,7 +111,7 @@ describe("mock reactions with custom emoji", () => {
     expect(errorOf(() => reactThere("outsider"))).toEqual({ status: 403, code: 50013 });
     const everyone = db.guilds.get(other)!.guild.roles.find(r => r.id === other)!;
     everyone.permissions = (BigInt(everyone.permissions) & ~Perm.USE_EXTERNAL_EMOJIS).toString();
-    call("member", "DELETE", `/channels/${there.id}/messages/${remote.id}/reactions/${encodeURIComponent(`x:${open.id}`)}/@me`);
+    call("member", "DELETE", `/channels/${there.id}/messages/${remote.id}/reactions/${encodeURIComponent(`renamed:${open.id}`)}/@me`);
     expect(errorOf(() => reactThere("member"))).toEqual({ status: 403, code: 50013 });
 
     const [listed] = call("member", "GET", `/channels/${channelId}/messages?limit=1`) as Message[];

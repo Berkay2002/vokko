@@ -91,18 +91,29 @@ export function setPollExpiry(messageId: string, expiry: number): void {
   if (poll) poll.expiry = expiry;
 }
 
-function target(viewerId: string, channelId: string, messageId: string, answerRaw: string, votable = false) {
+/**
+ * Same order as the server's vote_target / list_voters: the answer id's shape (400), the channel and message (404), read
+ * permission, for a vote the archived thread (403), and whether the message has a poll (404). Whether the answer exists
+ * is `pollAnswer`, checked later, so the DM rule (403) comes before it like on the server.
+ */
+function target(viewerId: string, channelId: string, messageId: string, answerRaw: string, voting: boolean) {
+  const answerId = Number(answerRaw);
+  if (!Number.isInteger(answerId) || answerId <= 0 || answerId > 0x7fffffff) invalid("answer_id", "Unknown answer.");
   const channel = requireChannel(channelId, viewerId);
   const message = requireMessage(channel.id, messageId);
-  const answerId = Number(answerRaw);
   requireChannelPerm(channel, viewerId, Perm.READ_MESSAGE_HISTORY);
+  if (voting) assertThreadOpen(channel);
   const poll = polls.get(message.id);
   if (!poll) fail(404, 10008, "Unknown Message");
-  // Like the server's open_poll: an ended poll answers 520001 before an unknown answer is considered.
-  if (votable && (poll.finalized || poll.expiry <= Date.now())) fail(400, 520001, "Poll expired");
+  return { channel, message, poll, answerId };
+}
+
+/** Like the server's open_poll: for a vote, an ended poll answers 520001 before an unknown answer is considered. */
+function pollAnswer(poll: MockPoll, answerId: number, voting: boolean) {
+  if (voting && (poll.finalized || poll.expiry <= Date.now())) fail(400, 520001, "Poll expired");
   const answer = poll.answers.find(a => a.answer_id === answerId);
   if (!answer) invalid("answer_id", "Unknown answer.");
-  return { channel, message, poll, answer };
+  return answer;
 }
 
 function voteEvent(channel: MockChannel, userId: string, messageId: string, answerId: number) {
@@ -110,9 +121,9 @@ function voteEvent(channel: MockChannel, userId: string, messageId: string, answ
 }
 
 route("PUT", `/channels/${ID}/polls/${ID}/answers/(\\d+)/@me`, ({ viewer, params }) => {
-  const { channel, message, poll, answer } = target(viewer.user.id, params[0] ?? "", params[1] ?? "", params[2] ?? "", true);
-  assertThreadOpen(channel);
+  const { channel, message, poll, answerId } = target(viewer.user.id, params[0] ?? "", params[1] ?? "", params[2] ?? "", true);
   assertDmOpen(channel, viewer.user.id);
+  const answer = pollAnswer(poll, answerId, true);
   const me = viewer.user.id;
   if (!poll.allow_multiselect) {
     for (const other of poll.answers) {
@@ -130,8 +141,8 @@ route("PUT", `/channels/${ID}/polls/${ID}/answers/(\\d+)/@me`, ({ viewer, params
 });
 
 route("DELETE", `/channels/${ID}/polls/${ID}/answers/(\\d+)/@me`, ({ viewer, params }) => {
-  const { channel, message, poll, answer } = target(viewer.user.id, params[0] ?? "", params[1] ?? "", params[2] ?? "", true);
-  assertThreadOpen(channel);
+  const { channel, message, poll, answerId } = target(viewer.user.id, params[0] ?? "", params[1] ?? "", params[2] ?? "", true);
+  const answer = pollAnswer(poll, answerId, true);
   if (answer.voters.includes(viewer.user.id)) {
     answer.voters = answer.voters.filter(id => id !== viewer.user.id);
     emit(channelAudience(channel), "MESSAGE_POLL_VOTE_REMOVE", voteEvent(channel, viewer.user.id, message.id, answer.answer_id));
@@ -140,9 +151,10 @@ route("DELETE", `/channels/${ID}/polls/${ID}/answers/(\\d+)/@me`, ({ viewer, par
 });
 
 route("GET", `/channels/${ID}/polls/${ID}/answers/(\\d+)`, ({ viewer, params, query }) => {
-  const { answer } = target(viewer.user.id, params[0] ?? "", params[1] ?? "", params[2] ?? "");
+  const { poll, answerId } = target(viewer.user.id, params[0] ?? "", params[1] ?? "", params[2] ?? "", false);
   const limit = Number(query.get("limit") ?? 25);
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) invalid("limit", "Must be between 1 and 100.");
+  const answer = pollAnswer(poll, answerId, false);
   const after = BigInt(query.get("after") ?? "0");
   const users: User[] = [...answer.voters].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1)).filter(id => BigInt(id) > after).slice(0, limit).map(userOf);
   return { users };

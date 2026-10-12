@@ -14,6 +14,12 @@ const pinnedTexts = (page: Page) => page.evaluate(
   channelIdOf(page),
 ).then(r => r.items.map(i => i.message.content));
 
+// A pending (optimistic) row ignores right-click, so menus are only opened once the server's copy has replaced it.
+async function sendConfirmed(page: Page, text: string): Promise<void> {
+  await send(page, text);
+  await expect(message(page, text)).not.toHaveClass(/pending/);
+}
+
 async function openMenu(page: Page, text: string): Promise<void> {
   await message(page, text).click({ button: 'right' });
   await expect(page.getByRole('menu', { name: 'Message actions' })).toBeVisible();
@@ -21,8 +27,7 @@ async function openMenu(page: Page, text: string): Promise<void> {
 
 test('Pin Message asks first: Cancel leaves it unpinned, "Pin it" pins it', async ({ page }) => {
   await openDm(page);
-  await send(page, 'pin me politely');
-  await message(page, 'pin me politely').waitFor();
+  await sendConfirmed(page, 'pin me politely');
 
   await openMenu(page, 'pin me politely');
   await page.getByRole('menuitem', { name: 'Pin Message' }).click();
@@ -52,13 +57,14 @@ test('Pin Message asks first: Cancel leaves it unpinned, "Pin it" pins it', asyn
 
 test('Enter confirms the pin', async ({ page }) => {
   await openDm(page);
-  await send(page, 'pin me with enter');
-  await message(page, 'pin me with enter').waitFor();
+  await sendConfirmed(page, 'pin me with enter');
 
   await openMenu(page, 'pin me with enter');
   await page.getByRole('menuitem', { name: 'Pin Message' }).click();
   const dialog = page.getByRole('dialog', { name: PIN_TITLE });
   await expect(dialog).toBeVisible();
+  // Enter goes to whatever has focus: wait for the dialog to own it (the confirm button autofocuses) before pressing.
+  await expect(dialog.getByRole('button', { name: 'Pin it' })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(dialog).toHaveCount(0);
   await expect.poll(() => pinnedTexts(page)).toContain('pin me with enter');
@@ -66,8 +72,7 @@ test('Enter confirms the pin', async ({ page }) => {
 
 test('Shift+click on Pin Message pins without the modal', async ({ page }) => {
   await openDm(page);
-  await send(page, 'pin me fast');
-  await message(page, 'pin me fast').waitFor();
+  await sendConfirmed(page, 'pin me fast');
 
   await openMenu(page, 'pin me fast');
   await page.getByRole('menuitem', { name: 'Pin Message' }).click({ modifiers: ['Shift'] });
@@ -77,10 +82,8 @@ test('Shift+click on Pin Message pins without the modal', async ({ page }) => {
 
 test('Unpin Message asks first and "Unpin" unpins; Shift+click skips the question', async ({ page }) => {
   await openDm(page);
-  await send(page, 'unpin me politely');
-  await message(page, 'unpin me politely').waitFor();
-  await send(page, 'unpin me fast');
-  await message(page, 'unpin me fast').waitFor();
+  await sendConfirmed(page, 'unpin me politely');
+  await sendConfirmed(page, 'unpin me fast');
 
   for (const text of ['unpin me politely', 'unpin me fast']) {
     await openMenu(page, text);

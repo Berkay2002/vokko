@@ -296,7 +296,8 @@ describe("forward", () => {
     });
     const old = addMessage({ channel: quiet, author_id: ids.owner!, content: "old" });
     expect(errorOf(forward(old.id, quiet.id))).toEqual({ status: 404, code: 10008 });
-    // an outsider (not in the guild) cannot forward from it either
+    // an outsider (not in the guild) cannot forward from it either; friends, so the DM rule (checked first) lets them write
+    setRelationship(ids.outsider!, ids.member!, RelationshipType.Friend, RelationshipType.Friend);
     expect(errorOf(() => call("outsider", "POST", `/channels/${openDM(ids.outsider!, ids.member!).id}/messages`, { message_reference: { type: 1, message_id: addMessage({ channel: db.channels.get(general)!, author_id: ids.owner!, content: "pub" }).id, channel_id: general } }))).toEqual({ status: 404, code: 10008 });
   });
 

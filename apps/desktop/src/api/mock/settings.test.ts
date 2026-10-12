@@ -128,6 +128,40 @@ describe("mock per-guild privacy and DM enforcement", () => {
     expect(code(() => as(me, "PUT", `/channels/${dm}/messages/pins/${sent.id}`))).toBe(50007);
   });
 
+  it("checks in the server's order: body shape (400) before the block (403) before lookups and later 400s", () => {
+    const dm = (openDm(other, me) as { id: string }).id;
+    const sent = as(other, "POST", `/channels/${dm}/messages`, { content: "hi" }) as { id: string };
+    const poll = as(other, "POST", `/channels/${dm}/messages`, { poll: { question: { text: "Lunch?" }, answers: [{ poll_media: { text: "A" } }], duration: 1 } }) as { id: string };
+    setRelationship(other, me, RelationshipType.Blocked, null);
+    const react = (emoji: string, mid = sent.id, query = "") => () => as(me, "PUT", `/channels/${dm}/messages/${mid}/reactions/${encodeURIComponent(emoji)}/@me${query}`);
+    // reactions: a malformed emoji or type is a 400 even from a blocked user (parse_emoji runs first) ...
+    expect(code(react("abc"))).toBe(50035);
+    expect(code(react("x:1"))).toBe(50035);
+    expect(code(react("party:0"))).toBe(50035);
+    expect(code(react(" "))).toBe(50035);
+    // ... but the block wins over an unknown custom emoji, which is only looked up afterwards
+    expect(code(react("ghost:42"))).toBe(50007);
+    expect(code(react("👍"))).toBe(50007);
+    // a missing message is a 404 before the block
+    expect(code(react("👍", "999999999"))).toBe(10008);
+    // pins: the block comes before the message lookup
+    expect(code(() => as(me, "PUT", `/channels/${dm}/messages/pins/999999999`))).toBe(50007);
+    // poll votes: the answer id's shape is checked first, then the block, then whether that answer exists
+    const vote = (answer: string) => () => as(me, "PUT", `/channels/${dm}/polls/${poll.id}/answers/${answer}/@me`);
+    expect(code(vote("0"))).toBe(50035);
+    expect(code(vote("9"))).toBe(50007);
+    expect(code(vote("1"))).toBe(50007);
+    // messages: the block comes before body validation
+    expect(code(() => as(me, "POST", `/channels/${dm}/messages`, { content: "" }))).toBe(50007);
+    expect(code(() => as(me, "POST", `/channels/${dm}/messages`, { content: "x".repeat(2001) }))).toBe(50007);
+    // unblocked, the same requests fail for their own reasons
+    setRelationship(other, me, null, null);
+    expect(code(react("ghost:42"))).toBe(10014);
+    expect(code(() => as(me, "PUT", `/channels/${dm}/messages/pins/999999999`))).toBe(10008);
+    expect(code(vote("9"))).toBe(50035);
+    expect(code(() => as(me, "POST", `/channels/${dm}/messages`, { content: "" }))).toBe(50035);
+  });
+
   it("the data export lists the restricted guilds", () => {
     as(other, "PATCH", `/users/@me/guilds/${g2}/privacy`, { direct_messages: false });
     expect((as(other, "GET", "/users/@me/export") as { dm_restricted_guild_ids: string[] }).dm_restricted_guild_ids).toEqual([g2]);
