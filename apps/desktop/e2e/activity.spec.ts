@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { goInApp } from './accountHelpers';
 import { openStockTalk } from './helpers';
 
 // Rich presence ("Playing X") in the member list, DM list and profile card, and the desktop-only pieces staying out of the
@@ -74,6 +75,38 @@ test('the Friends page Active Now shows a game card after the voice cards, and t
   const voice = cards.first();
   await expect(voice).toContainText(/In .+ · /);
   await expect(voice.getByTestId('activity-line')).toContainText('Playing Factorio · 12m');
+});
+
+test('a voice card in Active Now unfolds the channel members and Join on hover, and Join takes you into the channel', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.locator('.dm-row').first().waitFor();
+  const card = page.getByRole('complementary', { name: 'Active Now' }).locator('.active-card', { hasText: /In .+ · / }).first();
+  const join = card.getByRole('button', { name: 'Join Voice' });
+  const where = (await card.locator('.active-card-sub').first().textContent())!;
+  const folded = await card.boundingBox();
+  await card.hover();
+  await expect(join).toBeVisible();
+  await expect.poll(async () => (await card.boundingBox())!.height).toBeGreaterThan(folded!.height + 20);
+  await expect(card.getByRole('group', { name: /\d+ in voice/ }).locator('.avatar, img').first()).toBeVisible();
+  await join.click();
+  await expect(page).toHaveURL(/\/channels\/\d+\/\d+$/);
+  // back on Friends (client-side: a reload re-seeds the mock) the same card says Joined
+  await goInApp(page, '/channels/@me');
+  const again = page.getByRole('complementary', { name: 'Active Now' }).locator('.active-card', { hasText: where });
+  await again.first().hover();
+  await expect(again.first().getByRole('button', { name: 'Joined' })).toHaveAttribute('aria-disabled', 'true');
+});
+
+test('the Join button of a voice card is reachable from the keyboard', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.locator('.dm-row').first().waitFor();
+  const card = page.getByRole('complementary', { name: 'Active Now' }).locator('.active-card', { hasText: /In .+ · / }).first();
+  const folded = (await card.boundingBox())!.height;
+  await card.locator('.active-card-main').focus();
+  await page.keyboard.press('Tab');
+  await expect(card.getByRole('button', { name: 'Join Voice' })).toBeFocused();
+  // focus unfolds the card (toBeVisible alone passes for the clipped, folded row)
+  await expect.poll(async () => (await card.boundingBox())!.height).toBeGreaterThan(folded + 20);
 });
 
 test('presence update with activities is kept when absent and cleared by an empty list', async ({ page }) => {

@@ -2048,17 +2048,79 @@ button.channel-header-topic:hover {
 }
 
 .active-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
   margin-top: 12px;
-  padding: 16px;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   background: var(--background-mod-muted);
   box-shadow: var(--shadow-low);
+}
+
+.active-card-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px;
   text-align: left;
+}
+
+/* voice cards unfold the channel's members and Join on hover or keyboard focus; still focusable while folded */
+.active-card-more {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 150ms var(--ease-out);
+}
+
+.active-card:hover .active-card-more,
+.active-card:focus-within .active-card-more {
+  grid-template-rows: 1fr;
+}
+
+.active-card-more-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 16px;
+}
+
+.active-card:hover .active-card-more-inner,
+.active-card:focus-within .active-card-more-inner {
+  padding-bottom: 16px;
+}
+
+.active-card-faces {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.active-card-face-more {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.active-card-join {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.active-card-join[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.reduce-motion .active-card-more {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .active-card-more {
+    transition: none;
+  }
 }
 
 .active-card-text {

@@ -4,8 +4,9 @@ import { Check, Gamepad2, MessageCircle, MoreVertical, Search, Users, Volume2, X
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
-import { RelationshipType, type Relationship } from "../api/types";
-import { useVoice } from "../voice/store";
+import { RelationshipType, type Channel, type Relationship } from "../api/types";
+import { joinVoiceChannel } from "../voice";
+import { useChannelVoiceStates, useVoice } from "../voice/store";
 import { ActivityLine } from "./ActivityLine";
 import { activeFriends, type ActiveEntry } from "./activeNow";
 import { Tooltip, useContextMenu } from "../ui";
@@ -13,6 +14,7 @@ import { getPrefs } from "../ui/prefs";
 import { FriendSuggestionsTab } from "../community";
 import { Avatar } from "./Avatar";
 import { copyText, openDirectMessage } from "./actions";
+import { go, guildPath } from "./nav";
 import { UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
 
@@ -175,19 +177,61 @@ function ActiveNow() {
 function ActiveCard({ entry }: { entry: ActiveEntry }) {
   const { relationship } = entry;
   return (
-    <button type="button" className="active-card" onClick={() => void openDirectMessage(relationship.id)}>
-      <Avatar user={relationship.user} size={32} status />
-      <span className="active-card-text">
-        <span className="active-card-name">{displayName(relationship.user)}</span>
-        {(entry.voice || !entry.activity) && <span className="active-card-sub">{entry.text}</span>}
-        {entry.activity && <ActivityLine activity={entry.activity} className="active-card-sub" />}
-      </span>
-      {entry.voice ? (
-        <Volume2 size={16} className="active-card-voice" aria-label="In a voice channel" />
-      ) : (
-        entry.activity && <Gamepad2 size={16} className="active-card-game" aria-hidden="true" />
-      )}
-    </button>
+    <div className="active-card">
+      <button type="button" className="active-card-main" onClick={() => void openDirectMessage(relationship.id)}>
+        <Avatar user={relationship.user} size={32} status />
+        <span className="active-card-text">
+          <span className="active-card-name">{displayName(relationship.user)}</span>
+          {(entry.voice || !entry.activity) && <span className="active-card-sub">{entry.text}</span>}
+          {entry.activity && <ActivityLine activity={entry.activity} className="active-card-sub" />}
+        </span>
+        {entry.voice ? (
+          <Volume2 size={16} className="active-card-voice" aria-label="In a voice channel" />
+        ) : (
+          entry.activity && <Gamepad2 size={16} className="active-card-game" aria-hidden="true" />
+        )}
+      </button>
+      {entry.channel && <VoiceDetails channel={entry.channel} />}
+    </div>
+  );
+}
+
+const MAX_FACES = 6;
+
+/** Voice card extras: who is in the channel, and Join, which unfold on hover or keyboard focus (as on Discord). DM calls get no
+ *  Join here: answering one goes through the call UI of the DM. */
+function VoiceDetails({ channel }: { channel: Channel }) {
+  const states = useChannelVoiceStates(channel.id);
+  const users = useStore(s => s.users);
+  const inside = useVoice(s => s.channelId === channel.id);
+  const people = states.map(state => users[state.user_id]).filter(user => user !== undefined);
+  const guildId = channel.guild_id;
+  const join = () => {
+    if (inside || !guildId) return;
+    joinVoiceChannel(channel);
+    go(guildPath(guildId, channel.id));
+  };
+  return (
+    <div className="active-card-more">
+      <div className="active-card-more-inner">
+        <div className="active-card-faces" aria-label={`${states.length} in voice`} role="group">
+          {people.slice(0, MAX_FACES).map(user => (
+            <Tooltip key={user.id} content={displayName(user)}>
+              <span className="active-card-face">
+                <Avatar user={user} size={24} />
+              </span>
+            </Tooltip>
+          ))}
+          {states.length > MAX_FACES && <span className="active-card-face-more">+{states.length - MAX_FACES}</span>}
+        </div>
+        {guildId && (
+          // aria-disabled, not disabled: a focused button that becomes disabled drops focus and folds the card
+          <button type="button" className="btn btn-sm active-card-join" aria-disabled={inside} onClick={join}>
+            {inside ? "Joined" : "Join Voice"}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
