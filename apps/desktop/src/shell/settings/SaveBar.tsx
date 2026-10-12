@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { registerUnsaved, useUnsavedShakes } from "./unsaved";
 
 /**
- * "Careful, you have unsaved changes" bar shared by the settings pages. While visible it blocks leaving the User Settings and Channel Settings modals
+ * "Careful, you have unsaved changes" bar shared by the settings pages. While visible it blocks leaving the User, Channel and Server Settings modals
  * (see unsaved.ts) and answers each refused attempt with a shake. Styles: channel-settings.css (`.cs-savebar`), settings-modal.css (`.sm`).
  */
 export function SaveBar({ visible, busy, error, onReset, onSave }: { visible: boolean; busy: boolean; error: string | null; onReset(): void; onSave(): void }) {

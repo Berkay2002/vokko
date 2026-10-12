@@ -101,3 +101,61 @@ test('audit log lists actions and filters by action type', async ({ page }) => {
   await pickOption(page, page.getByRole('combobox', { name: 'Filter by action' }), 'Ban Member');
   await expect(page.getByText('No logs yet.')).toBeVisible();
 });
+
+test('server settings: an unsaved name blocks Esc, Close, page switches and Mod+I with a shake until Reset', async ({ page }) => {
+  await openGuild(page);
+  await openServerSettings(page, 'Server Profile');
+  const dialog = page.getByRole('dialog', { name: /Server Settings/ });
+  const bar = dialog.locator('.cs-savebar');
+  const name = dialog.getByRole('textbox', { name: 'Server name' });
+  const original = await name.inputValue();
+  await expect(bar).toHaveCount(0);
+
+  // A clean frame is never blocked: switching pages works with no shake.
+  await dialog.getByRole('button', { name: 'Engagement', exact: true }).click();
+  await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('Engagement');
+  await dialog.getByRole('button', { name: 'Server Profile', exact: true }).click();
+
+  await name.fill('Draft server');
+  await expect(bar).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expect(bar).toHaveAttribute('data-shake', /^[ab]$/);
+  const first = await bar.getAttribute('data-shake');
+
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toBeVisible();
+  await expect(bar).not.toHaveAttribute('data-shake', first!);
+
+  const second = await bar.getAttribute('data-shake');
+  await dialog.getByRole('button', { name: 'Roles', exact: true }).click();
+  await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('Server Profile');
+  await expect(name).toHaveValue('Draft server');
+  await expect(bar).not.toHaveAttribute('data-shake', second!);
+  await expect(bar).toHaveCSS('animation-name', /^sm-shake-[ab]$/);
+
+  // Mod+I is a modal shortcut (it replaces the open modal), so the guard has to refuse it too.
+  const third = await bar.getAttribute('data-shake');
+  await page.keyboard.press('ControlOrMeta+i');
+  await expect(page.locator('.inbox-popout')).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(bar).not.toHaveAttribute('data-shake', third!);
+  await expect(name).toHaveValue('Draft server');
+
+  // Delete Server is a dialog: it parks the frame with the draft intact, then hands it back.
+  await dialog.getByRole('button', { name: 'Delete Server' }).click();
+  const confirm = page.getByRole('dialog', { name: /Delete/ });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole('button', { name: 'Cancel' }).click();
+  await expect(confirm).toHaveCount(0);
+  await expect(name).toHaveValue('Draft server');
+
+  await bar.getByRole('button', { name: 'Reset' }).click();
+  await expect(bar).toHaveCount(0);
+  await expect(name).toHaveValue(original);
+  await dialog.getByRole('button', { name: 'Roles', exact: true }).click();
+  await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('Roles');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});

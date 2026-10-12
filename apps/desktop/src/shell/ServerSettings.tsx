@@ -15,6 +15,7 @@ import { AuditLogPage } from "./settings/AuditLogPage";
 import { BansPage } from "./settings/BansPage";
 import { AutoModPage, SafetyPage } from "./settings/SafetyPage";
 import { SaveBar } from "./settings/SaveBar";
+import { blockedByUnsaved } from "./settings/unsaved";
 import { RolesPage } from "./settings/RolesPage";
 import { TagPage } from "./settings/TagPage";
 import { ThemePage } from "./settings/ThemePage";
@@ -356,8 +357,14 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
       eyebrowTitle={guild.name}
       groups={groups}
       current={active.id}
-      onSelect={setCurrent}
-      onClose={closeModal}
+      // A visible save bar refuses the switch / close and shakes instead (settings/unsaved.ts); Delete Server is a dialog and just parks the frame.
+      onSelect={id => {
+        if (id !== active.id && blockedByUnsaved()) return;
+        setCurrent(id);
+      }}
+      onClose={() => {
+        if (!blockedByUnsaved()) closeModal();
+      }}
     >
       {page()}
     </FullScreenSettings>

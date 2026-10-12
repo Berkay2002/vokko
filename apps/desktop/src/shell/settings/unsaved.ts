@@ -1,9 +1,8 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Unsaved-changes guard shared by SaveBar, the User Settings frame and the Channel Settings frame. A visible SaveBar registers
- * itself; closing the modal or leaving the page asks `blockedByUnsaved()`, which refuses and shakes the bar instead. Without a
- * caller (the Server Settings frame) registering is harmless and nothing is blocked.
+ * Unsaved-changes guard shared by SaveBar and the User, Channel and Server Settings frames. A visible SaveBar registers
+ * itself; closing the modal or leaving the page asks `blockedByUnsaved()`, which refuses and shakes the bar instead.
  */
 const open = new Set<symbol>();
 const listeners = new Set<() => void>();
