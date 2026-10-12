@@ -9,6 +9,7 @@ import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
 import { createChannel, createGroupDM, createGuild, deleteGuild, joinGuildWithInvite, leaveGuild } from "./actions";
 import { InviteModal } from "../invites/InviteModal";
+import { blockUser } from "./menus";
 import { FullProfileModal } from "./DmProfilePanel";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
@@ -527,6 +528,8 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
   const guilds = useStore(s => s.guilds);
   const channels = useStore(s => s.channels);
   const relationships = useStore(s => s.relationships);
+  const users = useStore(s => s.users);
+  const members = useStore(s => s.members);
   switch (spec.type) {
     case "createServer":
       return <CreateServer key={id} />;
@@ -555,6 +558,11 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
     case "removeFriend": {
       const name = relationships[spec.userId] ? displayName(relationships[spec.userId].user) : "this friend";
       return <Confirm key={id} title={`Remove '${name}'`} body={`Are you sure you want to permanently remove ${name} from your friends?`} action="Remove Friend" danger onConfirm={() => request<void>("DELETE", `/users/@me/relationships/${spec.userId}`)} />;
+    }
+    case "blockUser": {
+      const user = users[spec.userId];
+      const name = user ? displayName(user, spec.guildId ? members[spec.guildId]?.[spec.userId] : null) : "this user";
+      return <Confirm key={id} title={`Block ${name}`} body={<>Are you sure you want to block <b>{name}</b>? Blocking also removes them from your friends.</>} action="Block" danger onConfirm={() => blockUser(spec.userId)} />;
     }
     case "logout":
       return (

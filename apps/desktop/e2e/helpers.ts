@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 
 /** Picks `option` in one of the app's custom dropdowns (ui/Dropdown.tsx): opens the combobox, then clicks the option.
  * The listbox is portalled out of the trigger's parent, so the option is looked up on the page, not inside the dialog. */
@@ -6,6 +6,15 @@ export async function pickOption(page: Page, combobox: Locator, option: string):
   await combobox.click();
   const name = (await combobox.getAttribute('aria-label')) ?? undefined;
   await page.getByRole('listbox', { name, exact: true }).getByRole('option', { name: option, exact: true }).click();
+}
+
+/** Asserts `read()` equals `expected` on every check for `ms`: a plain expect after a click would pass before a late request lands. */
+export async function stays<T>(read: () => Promise<T>, expected: T, ms = 500): Promise<void> {
+  const end = Date.now() + ms;
+  do {
+    expect(await read()).toBe(expected);
+    await new Promise(resolve => setTimeout(resolve, 100));
+  } while (Date.now() < end);
 }
 
 /** Signs in to the mock backend as sam and opens the DM with `name`. */

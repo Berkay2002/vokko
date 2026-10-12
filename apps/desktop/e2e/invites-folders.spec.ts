@@ -70,6 +70,7 @@ test('the invite modal creates a limited invite and lists friends to send it to'
 
   await dialog.getByRole('button', { name: 'Edit invite link.' }).click();
   const settings = page.getByRole('dialog', { name: 'Server invite link settings' });
+  if (process.env.VOKKO_SHOTS_DIR) await settings.screenshot({ path: `${process.env.VOKKO_SHOTS_DIR}/GLD-018-invite-settings.png` });
   // A backdrop click while a dropdown is open closes only the dropdown, not the dialog.
   await settings.getByRole('combobox', { name: 'Expire After' }).click();
   await expect(settings.getByRole('listbox', { name: 'Expire After' })).toBeVisible(); // portalled inside the aria-modal dialog
@@ -86,17 +87,25 @@ test('the invite modal creates a limited invite and lists friends to send it to'
   const invite = (await page.evaluate(c => (window as unknown as Win).__vokko.request('GET', `/invites/${c}`), code)) as { code: string; expires_at: string };
   expect(invite.code).toBe(code);
   expect(Date.parse(invite.expires_at) - Date.now()).toBeLessThanOrEqual(30 * 60_000);
+  // The values chosen in the settings are what the server stored (the list route returns the metadata).
+  const guildId = new URL(page.url()).pathname.split('/')[2];
+  const stored = ((await page.evaluate(c => (window as unknown as Win).__vokko.request('GET', `/guilds/${c}/invites`), guildId)) as { code: string; max_age: number; max_uses: number }[]).find(i => i.code === code);
+  expect(stored).toMatchObject({ max_age: 1800, max_uses: 5 });
 
   // Sending to a friend posts the link in their DM.
-  const first = main.getByRole('list', { name: 'Friends' }).getByRole('button').first();
-  await first.click();
-  await expect(main.getByRole('list', { name: 'Friends' }).getByRole('button').first()).toHaveText('Sent');
+  const inviteAlice = main.getByRole('listitem').filter({ hasText: 'Alice' }).getByRole('button'); // its name flips to "Invite sent to Alice"
+  await inviteAlice.click();
+  await expect(inviteAlice).toHaveText('Sent');
+  const dms = (await page.evaluate(() => (window as unknown as Win).__vokko.request('GET', '/users/@me/channels'))) as { id: string; recipients?: { username: string }[] }[];
+  const dm = dms.find(c => c.recipients?.length === 1 && c.recipients[0]?.username === 'alice');
+  const latest = (await page.evaluate(c => (window as unknown as Win).__vokko.request('GET', `/channels/${c}/messages?limit=1`), dm?.id)) as { content: string }[];
+  expect(latest[0]?.content).toContain(`vokko.gg/${code}`);
 
   // Server Settings > Invites lists it with its uses and can revoke it.
   await page.keyboard.press('Escape');
   await rail(page).getByRole('link', { name: "Sam's server" }).click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Server Settings' }).click();
-  await page.getByRole('navigation', { name: 'Server settings sections' }).getByRole('button', { name: 'Invites', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Server Settings' }).hover();
+  await page.getByRole('menuitem', { name: 'Invites', exact: true }).click();
   const row = page.locator(`tr[data-code="${code}"]`);
   await expect(row).toContainText('0/5');
   await row.getByRole('button', { name: `Revoke invite ${code}` }).click();

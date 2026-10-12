@@ -12,7 +12,7 @@ import { getPrefs } from "../ui/prefs";
 import { FriendSuggestionsTab } from "../community";
 import { Avatar } from "./Avatar";
 import { copyText, openDirectMessage } from "./actions";
-import { blockUser, UNAVAILABLE } from "./menus";
+import { UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
 
 type Tab = "online" | "all" | "pending" | "suggestions" | "blocked" | "add";
@@ -60,7 +60,7 @@ function PersonRow({ relationship, mode }: { relationship: Relationship; mode: "
           ...(mode === "friend"
             ? [
                 { id: "remove", label: "Remove Friend", danger: true, onSelect: () => openModal({ type: "removeFriend", userId: user.id }) },
-                { id: "block", label: "Block", danger: true, onSelect: () => void blockUser(user.id) },
+                { id: "block", label: "Block", danger: true, onSelect: () => openModal({ type: "blockUser", userId: user.id }) },
               ]
             : []),
           ...(getPrefs().developerMode ? [{ id: "copy", label: "Copy User ID", onSelect: () => copyText(user.id) }] : []),

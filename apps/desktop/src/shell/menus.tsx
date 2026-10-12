@@ -259,7 +259,7 @@ async function duplicateChannel(channel: Channel): Promise<void> {
 
 export const blockUser = (userId: Snowflake): Promise<void> => request<void>("PUT", `/users/@me/relationships/${userId}`, { type: RelationshipType.Blocked });
 
-function relationshipItems(user: User): MenuItem[] {
+function relationshipItems(user: User, guildId?: Snowflake | null): MenuItem[] {
   const state = appStore.getState();
   const type = state.relationships[user.id]?.type;
   const items: MenuItem[] = [];
@@ -271,7 +271,10 @@ function relationshipItems(user: User): MenuItem[] {
     items.push({ id: "add-friend", label: "Add Friend", onSelect: () => void request("PUT", `/users/@me/relationships/${user.id}`, {}) });
   }
   if (type === RelationshipType.Blocked) items.push({ id: "unblock", label: "Unblock", onSelect: () => void request("DELETE", `/users/@me/relationships/${user.id}`) });
-  else items.push({ id: "block", label: "Block", danger: true, onSelect: () => void blockUser(user.id) });
+  else items.push({ id: "block", label: "Block", danger: true, onSelect: () => {
+    appStore.getState().cacheUsers([user]); // the dialog names the user from the cache, a plain member may not be in it yet
+    openModal({ type: "blockUser", userId: user.id, guildId });
+  } });
   return items;
 }
 
@@ -334,7 +337,7 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
       ? [unavailable("per-server-profile", "Edit Per-server Profile"), ...(mayNick ? [{ id: "change-nickname", label: "Change Nickname", onSelect: () => openModal({ type: "nickname", ...target }) } satisfies MenuItem] : [])]
       : [
           unavailable("invite-to-server", "Invite to Server"),
-          ...relationshipItems(user),
+          ...relationshipItems(user, options.guildId),
           ...(mayNick ? [{ id: "change-nickname", label: "Change Nickname", onSelect: () => openModal({ type: "nickname", ...target }) } satisfies MenuItem] : []),
         ],
     guild && mayRoles && assignable.length > 0

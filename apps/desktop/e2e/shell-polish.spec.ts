@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { stays } from './helpers';
 
 // Shell polish round (mac-shell-polish): voice row hooks, channel list under the user panel, topic dialog, friend More menu.
 
@@ -122,6 +123,7 @@ test('the header topic opens a dialog that renders the topic as markdown (link, 
 
 test('friend row right-click menu: Message, Remove Friend, Block, Copy User ID; Block moves the friend to Blocked', async ({ page, context }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => localStorage.setItem('vokko.prefs', JSON.stringify({ developerMode: true }))); // Copy User ID is a developer-mode item
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.locator('.dm-row').first().waitFor();
   await page.getByRole('tab', { name: 'All' }).click();
@@ -133,6 +135,15 @@ test('friend row right-click menu: Message, Remove Friend, Block, Copy User ID; 
   expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^\d+$/);
   await row.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Block' }).click();
+  // Cancel keeps the friend; only the dialog's Block sends the PUT
+  const dialog = page.getByRole('dialog', { name: 'Block Alice' });
+  await expect(dialog).toContainText('Are you sure you want to block Alice?');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  await stays(() => row.count(), 1);
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Block' }).click();
+  await dialog.getByRole('button', { name: 'Block' }).click();
   await expect(row).toHaveCount(0);
   await page.getByRole('tab', { name: 'Blocked' }).click();
   await expect(page.locator('.people-row', { hasText: 'Alice' })).toHaveCount(1);
