@@ -8,6 +8,7 @@ import { request } from "../api/rest";
 import { appStore, isChannelUnread, type AppState } from "../api/store";
 import { isDesktop } from "../desktop";
 import { ChannelType, GatewayOp, type Activity, type Channel, type Guild, type PermissionOverwrite, type PresenceStatus, type Snowflake } from "../api/types";
+import { isApplyRequired } from "./inviteView";
 import { openModal } from "./modalStore";
 import { dmPath, go, guildPath } from "./nav";
 import { firstTextChannel } from "./channels";
@@ -59,6 +60,17 @@ export async function joinGuildWithInvite(code: string): Promise<Guild> {
   await waitFor(s => s.guilds[guild.id]);
   go(guildPath(guild.id));
   return guild;
+}
+
+/** Joins with an invite, or opens the Apply to Join dialog (and resolves null) when the server takes applications. */
+export async function joinOrApply(code: string): Promise<Guild | null> {
+  try {
+    return await joinGuildWithInvite(code);
+  } catch (e) {
+    if (!isApplyRequired(e)) throw e;
+    openModal({ type: "applyToJoin", code: code.trim().replace(/^.*\//, "") });
+    return null;
+  }
 }
 
 export async function createChannel(guildId: Snowflake, input: { name: string; type: ChannelType; parent_id?: Snowflake | null; topic?: string; permission_overwrites?: PermissionOverwrite[] }): Promise<Channel> {

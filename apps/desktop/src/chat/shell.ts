@@ -9,7 +9,7 @@ import type { Channel, Guild, GuildMember, ReadState, Relationship, Snowflake, U
 export { request, uploadAttachment, resolveUrl, ApiRequestError } from '../api/rest';
 export { gateway } from '../api/gateway';
 export { displayName, roleColor, avatarUrl, dmName, guildIconUrl, guildInitials } from '../api/store';
-export { markGuildRead, joinGuildWithInvite } from '../shell/actions';
+export { markGuildRead, joinGuildWithInvite, joinOrApply } from '../shell/actions';
 export { go, guildPath } from '../shell/nav';
 export { openModal, closeModal } from '../shell/modalStore';
 export { openProfile } from '../shell/profileStore';

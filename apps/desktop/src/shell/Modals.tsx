@@ -7,8 +7,9 @@ import { appStore, displayName, useStore } from "../api/store";
 import { ChannelType, OverwriteType, RelationshipType } from "../api/types";
 import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
-import { createChannel, createGroupDM, createGuild, deleteGuild, joinGuildWithInvite, leaveGuild } from "./actions";
+import { createChannel, createGroupDM, createGuild, deleteGuild, joinOrApply, leaveGuild } from "./actions";
 import { InviteModal } from "../invites/InviteModal";
+import { ApplyToJoin } from "../invites/ApplyToJoin";
 import { blockUser } from "./menus";
 import { FullProfileModal } from "./DmProfilePanel";
 import { GuildPrivacyModal } from "./GuildPrivacyModal";
@@ -167,7 +168,9 @@ function CreateServer() {
     setBusy(true);
     setError(null);
     task()
-      .then(closeModal)
+      .then(result => {
+        if (result !== null) closeModal(); // null: the Apply to Join dialog took over
+      })
       .catch(e => {
         setError(errorText(e));
         setBusy(false);
@@ -313,7 +316,7 @@ function CreateServer() {
           <button type="button" className="btn btn-link footer-back" onClick={() => setStep("choose")}>
             Back
           </button>
-          <button type="button" className="btn btn-primary" disabled={busy || !code.trim()} onClick={() => run(() => joinGuildWithInvite(code))}>
+          <button type="button" className="btn btn-primary" disabled={busy || !code.trim()} onClick={() => run(() => joinOrApply(code))}>
             Join Server
           </button>
         </>
@@ -323,7 +326,7 @@ function CreateServer() {
       <label className="field-label" htmlFor="invite-code">
         Invite link <span className="required">*</span>
       </label>
-      <input id="invite-code" className="input" value={code} placeholder="hTKzmak or vokko.gg/hTKzmak" autoFocus onChange={e => setCode(e.target.value)} onKeyDown={e => e.key === "Enter" && code.trim() && run(() => joinGuildWithInvite(code))} />
+      <input id="invite-code" className="input" value={code} placeholder="hTKzmak or vokko.gg/hTKzmak" autoFocus onChange={e => setCode(e.target.value)} onKeyDown={e => e.key === "Enter" && code.trim() && run(() => joinOrApply(code))} />
       {error && <p className="field-error">{error}</p>}
     </Modal>
   );
@@ -539,6 +542,8 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
       return <CreateServer key={id} />;
     case "invite":
       return <InviteModal key={id} channelId={spec.channelId} onClose={closeModal} />;
+    case "applyToJoin":
+      return <ApplyToJoin key={id} code={spec.code} onClose={closeModal} />;
     case "createChannel":
       return <CreateChannelModal key={id} guildId={spec.guildId} parentId={spec.parentId} channelType={spec.channelType} />;
     case "leaveServer":

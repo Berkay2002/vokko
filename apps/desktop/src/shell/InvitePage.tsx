@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { MailX, TriangleAlert } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request, resolveUrl } from "../api/rest";
 import { guildIconUrl, guildInitials, useStore } from "../api/store";
 import type { Invite } from "../api/types";
+import { ApplyToJoin } from "../invites/ApplyToJoin";
 import { joinGuildWithInvite } from "./actions";
-import { errorText, loadFailed, shownLoad, type InviteLoad } from "./inviteView";
+import { errorText, isApplyRequired, loadFailed, shownLoad, type InviteLoad } from "./inviteView";
 import { guildPath } from "./nav";
 import { pendingInvite } from "./pendingInvite";
 
@@ -25,6 +26,8 @@ export function InvitePage() {
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
+  const closeApply = useCallback(() => setApplying(false), []);
 
   // A visitor who is not signed in keeps the code through login and register; the guest routes send them back here.
   useEffect(() => {
@@ -132,6 +135,10 @@ export function InvitePage() {
       void navigate(target);
       return;
     }
+    if (guild.join_mode === 1) {
+      setApplying(true);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -139,7 +146,8 @@ export function InvitePage() {
       void navigate(target);
     } catch (failure) {
       // Revoked or used up since the preview: the card no longer applies.
-      if (failure instanceof ApiRequestError && failure.status === 404) setLoad({ status: "invalid" });
+      if (isApplyRequired(failure)) setApplying(true);
+      else if (failure instanceof ApiRequestError && failure.status === 404) setLoad({ status: "invalid" });
       else setError(errorText(failure, "Could not join this server. Try again."));
       setBusy(false);
     }
@@ -162,8 +170,9 @@ export function InvitePage() {
           </p>
         )}
         <button type="button" className="btn btn-primary invite-button" disabled={busy} aria-busy={busy} onClick={() => void accept()}>
-          {busy ? "Joining…" : joined ? "Continue to Server" : "Accept Invite"}
+          {busy ? "Joining…" : joined ? "Continue to Server" : guild.join_mode === 1 ? "Apply to Join" : "Accept Invite"}
         </button>
+        {applying && token && <ApplyToJoin code={code} onClose={closeApply} />}
         {token ? (
           <Link className="invite-skip" to={home} onClick={() => pendingInvite.clear()}>
             No thanks

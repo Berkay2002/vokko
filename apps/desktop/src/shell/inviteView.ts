@@ -29,3 +29,6 @@ export function loadFailed(error: unknown): InviteLoad {
 export function shownLoad(load: InviteLoad, signedIn: boolean, ready: boolean): InviteLoad {
   return load.status === "ok" && signedIn && !ready ? { status: "loading" } : load;
 }
+
+/** POST /invites/{code} answers this for a non-member while the server takes applications (docs/api.md "Apply to Join"). */
+export const isApplyRequired = (error: unknown): boolean => error instanceof ApiRequestError && error.status === 403 && error.code === 150009;

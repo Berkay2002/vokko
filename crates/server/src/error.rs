@@ -99,6 +99,15 @@ impl ApiErr {
         Self::new(StatusCode::FORBIDDEN, 40007, "The user is banned from this guild")
     }
 
+    /// 403 / 150009: the guild is in Apply to Join mode, so an invite alone does not let anyone in.
+    pub fn application_required() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 150009, "This server requires an application to join")
+    }
+
+    pub fn unknown_join_request() -> Self {
+        Self::new(StatusCode::NOT_FOUND, 10070, "Unknown Join Request")
+    }
+
     /// 404 with a specific Discord code (e.g. 10060 unknown sticker).
     pub fn new_unknown(message: &str, code: u32) -> Self {
         Self::new(StatusCode::NOT_FOUND, code, message)

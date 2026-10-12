@@ -7,6 +7,7 @@ import type { ReportTarget } from "./ReportModal";
 export type ModalSpec =
   | { type: "createServer" }
   | { type: "invite"; channelId: Snowflake }
+  | { type: "applyToJoin"; code: string }
   | { type: "createChannel"; guildId: Snowflake; parentId?: Snowflake | null; channelType?: ChannelType }
   | { type: "leaveServer"; guildId: Snowflake }
   | { type: "deleteServer"; guildId: Snowflake }

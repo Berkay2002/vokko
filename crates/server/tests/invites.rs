@@ -357,7 +357,7 @@ async fn signed_out_callers_see_the_public_invite_card() {
     assert_eq!(keys, ["channel", "code", "expires_at", "guild"]);
     let mut guild_keys: Vec<&str> = anonymous["guild"].as_object().expect("guild").keys().map(String::as_str).collect();
     guild_keys.sort_unstable();
-    assert_eq!(guild_keys, ["icon", "id", "member_count", "name"]);
+    assert_eq!(guild_keys, ["icon", "id", "join_mode", "member_count", "name"]);
     assert_eq!((anonymous["guild"]["id"].as_str(), anonymous["guild"]["member_count"].clone()), (Some(w.guild.as_str()), json!(1)));
     assert_eq!(anonymous["channel"]["name"], "general");
 

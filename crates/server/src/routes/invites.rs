@@ -7,8 +7,8 @@ use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use vokko_protocol::api::permissions::{CREATE_INSTANT_INVITE, MANAGE_CHANNELS, MANAGE_GUILD};
 use vokko_protocol::api::{
-    AuditLogEvent, CreateInviteRequest, GatewayEvent, Guild, GuildMemberAdd, Invite, InviteChannel, InviteDelete, InviteGuild, InviteMetadata, MessageType,
-    Snowflake,
+    AuditLogEvent, CreateInviteRequest, GatewayEvent, Guild, GuildMemberAdd, Invite, InviteChannel, InviteDelete, InviteGuild, InviteMetadata, JoinMode,
+    MessageType, Snowflake,
 };
 
 use crate::access::{self, channel_access, guild_access};
@@ -49,11 +49,11 @@ pub fn invite_code() -> String {
 }
 
 #[derive(sqlx::FromRow)]
-struct InviteRow {
-    code: String,
-    guild_id: i64,
+pub(crate) struct InviteRow {
+    pub(crate) code: String,
+    pub(crate) guild_id: i64,
     channel_id: i64,
-    inviter_id: i64,
+    pub(crate) inviter_id: i64,
     guild_name: String,
     icon_path: Option<String>,
     channel_name: Option<String>,
@@ -63,6 +63,7 @@ struct InviteRow {
     max_uses: i32,
     max_age: i32,
     temporary: bool,
+    join_mode: i16,
 }
 
 /// Which live invites to load.
@@ -81,7 +82,7 @@ async fn live_rows(state: &AppState, filter: Filter<'_>) -> ApiResult<Vec<Invite
     };
     let sql = format!(
         "SELECT i.code, i.guild_id, i.channel_id, i.inviter_id, g.name AS guild_name, g.icon_path, c.name AS channel_name, i.expires_at, i.created_at, \
-         i.uses, i.max_uses, i.max_age, i.temporary \
+         i.uses, i.max_uses, i.max_age, i.temporary, g.join_mode \
          FROM invites i JOIN guilds g ON g.id = i.guild_id JOIN channels c ON c.id = i.channel_id \
          WHERE {column} = $1 AND {LIVE} ORDER BY i.created_at, i.code LIMIT 1000"
     );
@@ -93,7 +94,7 @@ async fn live_rows(state: &AppState, filter: Filter<'_>) -> ApiResult<Vec<Invite
     Ok(query.fetch_all(&state.db).await?)
 }
 
-async fn live_row(state: &AppState, code: &str) -> ApiResult<InviteRow> {
+pub(crate) async fn live_row(state: &AppState, code: &str) -> ApiResult<InviteRow> {
     live_rows(state, Filter::Code(code)).await?.into_iter().next().ok_or_else(ApiErr::unknown_invite)
 }
 
@@ -105,6 +106,7 @@ fn preview_of(state: &AppState, row: &InviteRow, member_count: u32) -> Invite {
             name: row.guild_name.clone(),
             icon: row.icon_path.as_ref().map(|path| state.asset_url(path)),
             member_count,
+            join_mode: JoinMode::from_u8(row.join_mode as u8).unwrap_or_default(),
         },
         channel: InviteChannel { id: Snowflake::from(row.channel_id), name: row.channel_name.clone() },
         expires_at: row.expires_at.map(iso),
@@ -324,21 +326,22 @@ async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
     let mut tx = state.db.begin().await?;
     // The shared guild row lock orders this against a ban (which takes it exclusively before writing the ban row and removing
     // the member): the ban is either visible to the conditional insert below or removes the member inserted here.
-    sqlx::query("SELECT id FROM guilds WHERE id = $1 FOR SHARE").bind(guild_id).execute(&mut *tx).await?;
-    // A new member records the invite, its creator and the join source for the members page.
-    let inserted = sqlx::query(
-        "INSERT INTO guild_members (guild_id, user_id, temporary, source_invite_code, inviter_id, join_source_type) SELECT $1, $2, $3, $4, $5, $6 \
-         WHERE NOT EXISTS (SELECT 1 FROM guild_bans WHERE guild_id = $1 AND user_id = $2) ON CONFLICT DO NOTHING",
-    )
-    .bind(guild_id)
-    .bind(user_id)
-    .bind(temporary)
-    .bind(&invite.code)
-    .bind(invite.inviter_id)
-    .bind(i16::from(vokko_protocol::api::join_source_type::INVITE))
-    .execute(&mut *tx)
-    .await?;
-    if inserted.rows_affected() == 0 {
+    // The join mode is read under the same lock, so a switch to Apply to Join cannot race an accept: an invite alone then lets no one in.
+    let locked: Option<(i16,)> = sqlx::query_as("SELECT join_mode FROM guilds WHERE id = $1 FOR SHARE").bind(guild_id).fetch_optional(&mut *tx).await?;
+    let (join_mode,) = locked.ok_or_else(ApiErr::unknown_invite)?;
+    if join_mode == i16::from(JoinMode::Apply.as_u8()) {
+        let member: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM guild_members WHERE guild_id = $1 AND user_id = $2")
+            .bind(guild_id)
+            .bind(user_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if member.is_none() {
+            return Err(ApiErr::application_required());
+        }
+    }
+    let joined = Via { code: Some(&invite.code), inviter_id: Some(invite.inviter_id), temporary };
+    let is_new = insert_member(&mut tx, guild_id, user_id, &joined).await?;
+    if !is_new {
         // Nothing inserted: already a member, or banned since the check above.
         let banned: Option<(i64,)> =
             sqlx::query_as("SELECT user_id FROM guild_bans WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).fetch_optional(&mut *tx).await?;
@@ -353,28 +356,7 @@ async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
                 .execute(&mut *tx)
                 .await?;
         }
-    }
-    if inserted.rows_affected() > 0 {
-        // Guilds with onboarding switched on show new members the flow until they finish it.
-        sqlx::query(
-            "UPDATE guild_members SET flags = flags | $3 WHERE guild_id = $1 AND user_id = $2 \
-             AND EXISTS (SELECT 1 FROM guild_onboarding WHERE guild_id = $1 AND enabled)",
-        )
-        .bind(guild_id)
-        .bind(user_id)
-        .bind(vokko_protocol::api::member_flags::STARTED_ONBOARDING as i32)
-        .execute(&mut *tx)
-        .await?;
-        // A timeout still running from before they left or were kicked comes back with them.
-        sqlx::query(
-            "UPDATE guild_members m SET timeout_until = t.until FROM guild_timeouts t \
-             WHERE m.guild_id = $1 AND m.user_id = $2 AND t.guild_id = $1 AND t.user_id = $2 AND t.until > now()",
-        )
-        .bind(guild_id)
-        .bind(user_id)
-        .execute(&mut *tx)
-        .await?;
-        sqlx::query("DELETE FROM guild_timeouts WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).execute(&mut *tx).await?;
+    } else {
         let consumed = sqlx::query(
             "UPDATE invites SET uses = uses + 1 WHERE code = $1 AND (max_uses = 0 OR uses < max_uses) AND (expires_at IS NULL OR expires_at > now())",
         )
@@ -387,25 +369,79 @@ async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
         }
     }
     tx.commit().await?;
-    if inserted.rows_affected() > 0 {
-        sqlx::query("INSERT INTO read_states (user_id, channel_id, last_message_id) SELECT $1, id, last_message_id FROM channels WHERE guild_id = $2 AND kind IN (0, 2, 5) ON CONFLICT DO NOTHING")
-            .bind(user_id)
-            .bind(guild_id)
-            .execute(&state.db)
-            .await?;
-        let mut full = events::guild_with_state(&state, guild_id, user_id).await?;
-        full.presences = Some(presence::guild_presences(&state, guild_id, user_id).await?);
-        state.hub.send(&[user_id], &GatewayEvent::GuildCreate(Box::new(full)));
-        if let Some(member) = store::member(&state, guild_id, user_id).await? {
-            let others: Vec<i64> = access::guild_member_ids(&state, guild_id).await?.into_iter().filter(|id| *id != user_id).collect();
-            state.hub.send(&others, &GatewayEvent::GuildMemberAdd(GuildMemberAdd { member, guild_id: Snowflake::from(guild_id) }));
-        }
-        presence::announce_join(&state, guild_id, user_id).await?;
-        if let Err(error) = post_join_message(&state, guild_id, user_id).await {
-            tracing::warn!("join message failed: {error:?}");
-        }
+    if is_new {
+        announce_new_member(&state, guild_id, user_id).await?;
     }
     store::guild(&state, guild_id).await?.map(Json).ok_or_else(ApiErr::unknown_guild)
+}
+
+/// How a new member came in, recorded for the members page.
+pub struct Via<'a> {
+    pub code: Option<&'a str>,
+    pub inviter_id: Option<i64>,
+    pub temporary: bool,
+}
+
+/// Inserts the member inside `tx` (callers hold the shared guild row lock) unless banned or already a member; `false` then.
+/// A new member also gets the onboarding flag and a timeout still running from before they left.
+pub async fn insert_member(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>, guild_id: i64, user_id: i64, via: &Via<'_>) -> ApiResult<bool> {
+    let inserted = sqlx::query(
+        "INSERT INTO guild_members (guild_id, user_id, temporary, source_invite_code, inviter_id, join_source_type) SELECT $1, $2, $3, $4, $5, $6 \
+         WHERE NOT EXISTS (SELECT 1 FROM guild_bans WHERE guild_id = $1 AND user_id = $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(guild_id)
+    .bind(user_id)
+    .bind(via.temporary)
+    .bind(via.code)
+    .bind(via.inviter_id)
+    .bind(i16::from(vokko_protocol::api::join_source_type::INVITE))
+    .execute(&mut **tx)
+    .await?;
+    if inserted.rows_affected() == 0 {
+        return Ok(false);
+    }
+    // Guilds with onboarding switched on show new members the flow until they finish it.
+    sqlx::query(
+        "UPDATE guild_members SET flags = flags | $3 WHERE guild_id = $1 AND user_id = $2 \
+         AND EXISTS (SELECT 1 FROM guild_onboarding WHERE guild_id = $1 AND enabled)",
+    )
+    .bind(guild_id)
+    .bind(user_id)
+    .bind(vokko_protocol::api::member_flags::STARTED_ONBOARDING as i32)
+    .execute(&mut **tx)
+    .await?;
+    // A timeout still running from before they left or were kicked comes back with them.
+    sqlx::query(
+        "UPDATE guild_members m SET timeout_until = t.until FROM guild_timeouts t \
+         WHERE m.guild_id = $1 AND m.user_id = $2 AND t.guild_id = $1 AND t.user_id = $2 AND t.until > now()",
+    )
+    .bind(guild_id)
+    .bind(user_id)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query("DELETE FROM guild_timeouts WHERE guild_id = $1 AND user_id = $2").bind(guild_id).bind(user_id).execute(&mut **tx).await?;
+    Ok(true)
+}
+
+/// After the commit of a new member: read states, GUILD_CREATE to them, GUILD_MEMBER_ADD to the others, presence and the join message.
+pub async fn announce_new_member(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
+    sqlx::query("INSERT INTO read_states (user_id, channel_id, last_message_id) SELECT $1, id, last_message_id FROM channels WHERE guild_id = $2 AND kind IN (0, 2, 5) ON CONFLICT DO NOTHING")
+        .bind(user_id)
+        .bind(guild_id)
+        .execute(&state.db)
+        .await?;
+    let mut full = events::guild_with_state(state, guild_id, user_id).await?;
+    full.presences = Some(presence::guild_presences(state, guild_id, user_id).await?);
+    state.hub.send(&[user_id], &GatewayEvent::GuildCreate(Box::new(full)));
+    if let Some(member) = store::member(state, guild_id, user_id).await? {
+        let others: Vec<i64> = access::guild_member_ids(state, guild_id).await?.into_iter().filter(|id| *id != user_id).collect();
+        state.hub.send(&others, &GatewayEvent::GuildMemberAdd(GuildMemberAdd { member, guild_id: Snowflake::from(guild_id) }));
+    }
+    presence::announce_join(state, guild_id, user_id).await?;
+    if let Err(error) = post_join_message(state, guild_id, user_id).await {
+        tracing::warn!("join message failed: {error:?}");
+    }
+    Ok(())
 }
 
 /// A UserJoin (type 7) system message from the joiner in the guild's system channel, when one is set.

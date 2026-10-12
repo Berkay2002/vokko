@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MailX, Play, Users } from 'lucide-react';
 import type { Embed, Message, Snowflake } from '../api/types';
-import { AnimatedVideo, guildIconUrl, guildInitials, joinGuildWithInvite, request, resolveUrl, useGuilds } from './shell';
+import { AnimatedVideo, guildIconUrl, guildInitials, joinOrApply, request, resolveUrl, useGuilds } from './shell';
 import { useChat } from './ChatContext';
 import { Markdown } from './markdown';
 import { embedColor, findInviteCodes, isVideoUrl, safeHttpUrl } from './embedUtil';
@@ -11,7 +11,7 @@ import { formatFullDate } from './util';
 
 interface InviteInfo {
   code: string;
-  guild: { id: Snowflake; name: string; icon: string | null; member_count?: number };
+  guild: { id: Snowflake; name: string; icon: string | null; member_count?: number; join_mode?: number };
   member_count?: number;
 }
 
@@ -60,7 +60,7 @@ function InviteEmbed({ code, own }: { code: string; own: boolean }) {
     if (busy || joined) return;
     setBusy(true);
     setError(null);
-    try { await joinGuildWithInvite(code); }
+    try { await joinOrApply(code); }
     catch (e) { setError(e instanceof Error ? e.message : 'Could not join this server.'); }
     setBusy(false);
   }
@@ -73,7 +73,7 @@ function InviteEmbed({ code, own }: { code: string; own: boolean }) {
         {memberCount !== undefined && <div className="chat-invite-sub"><Users size={12} /> {memberCount} Member{memberCount === 1 ? '' : 's'}</div>}
         {error && <div className="chat-invite-error" role="alert">{error}</div>}
       </div>
-      <button type="button" className="chat-invite-join" disabled={busy || joined} onClick={() => void join()}>{joined ? 'Joined' : 'Join'}</button>
+      <button type="button" className="chat-invite-join" disabled={busy || joined} onClick={() => void join()}>{joined ? 'Joined' : info.guild.join_mode === 1 ? 'Apply' : 'Join'}</button>
     </div>
   </div>;
 }

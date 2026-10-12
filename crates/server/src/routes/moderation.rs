@@ -26,6 +26,7 @@ use crate::events;
 use crate::extract::{ApiJson, ApiQuery, parse_id};
 use crate::media;
 use crate::routes::auth::clean_text;
+use crate::routes::join_requests;
 use crate::routes::users::{self, ImageKind};
 use crate::state::AppState;
 use crate::store;
@@ -353,9 +354,13 @@ async fn ban_member(
     .execute(&mut *tx)
     .await?;
     let removed = delete_member(&mut tx, guild, target, false).await?;
+    let request = join_requests::delete_for_ban(&mut tx, guild, target).await?;
     tx.commit().await?;
     if let Some(removed) = removed {
         announce_removal(&state, guild, target, removed).await?;
+    }
+    if let Some(request) = request {
+        join_requests::announce_ban_removal(&state, guild, request, target).await?;
     }
     if delete_seconds > 0 {
         delete_recent_messages(&state, guild, target, delete_seconds).await?;

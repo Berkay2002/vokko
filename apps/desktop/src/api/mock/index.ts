@@ -164,6 +164,8 @@ interface MockHooks {
   playSound(username: string, soundId: string, sourceGuildId?: string): void;
   /** Another user sets (or with null clears) their global entrance sound. */
   entranceSound(username: string, soundId: string | null, sourceGuildId?: string): void;
+  /** Calls a REST route as another user (their gateway events still reach their sockets); the result is a JSON copy. */
+  requestAs(username: string, method: string, path: string, body?: unknown): unknown;
   reset(): void;
 }
 
@@ -251,6 +253,10 @@ const hooks: MockHooks = {
   maintenance: (message, startsAt = null) => {
     setMockMaintenance(message ? { message, starts_at: startsAt } : null);
     window.dispatchEvent(new Event("vokko:status-changed"));
+  },
+  requestAs: (username, method, path, body) => {
+    const result = handleRoute(method, path, body ?? null, userByName(username));
+    return result === undefined ? undefined : JSON.parse(JSON.stringify(result));
   },
   reset: () => {
     window.localStorage.removeItem("vokko.token");

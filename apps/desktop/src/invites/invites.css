@@ -120,3 +120,27 @@
   background: var(--status-danger, #da373c);
   color: #fff;
 }
+
+/* Apply to Join (ApplyToJoin.tsx) */
+.apply-modal .apply-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.apply-modal .apply-rules {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-muted);
+}
+
+.apply-modal .apply-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.apply-modal .apply-description {
+  white-space: pre-wrap;
+}

@@ -5,7 +5,7 @@ import { Perm, hasBit } from "../permissions";
 import { AuditLogEvent, ChannelType, JoinSourceType, MessageType, isThreadType, type GuildFolder, type Invite, type InviteMetadata, type GuildLayout } from "../types";
 import { channelPermsOf, guildPermsOf } from "./access";
 import { change, recordAudit } from "./admin";
-import { db, userOf, type MockAccount, type MockInvite } from "./db";
+import { db, userOf, type MockAccount, type MockGuild, type MockInvite } from "./db";
 import { addMessage, fail, guildAudience, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm } from "./ops";
 import { onboardingStartedFor } from "./community";
 import { flagsField } from "./memberFlags";
@@ -25,7 +25,7 @@ function isLive(invite: MockInvite, now = Date.now()): boolean {
   return max === 0 || (invite.uses ?? 0) < max;
 }
 
-function liveInvite(code: string): MockInvite {
+export function liveInvite(code: string): MockInvite {
   const invite = db.invites.get(code);
   if (!invite || !isLive(invite) || !db.guilds.has(invite.guild_id) || !db.channels.has(invite.channel_id)) fail(404, 10006, "Unknown Invite");
   return invite;
@@ -37,7 +37,7 @@ function previewOf(invite: MockInvite): Invite {
   if (!guild || !channel) fail(404, 10006, "Unknown Invite");
   return {
     code: invite.code,
-    guild: { id: guild.guild.id, name: guild.guild.name, icon: guild.guild.icon, member_count: guild.members.size },
+    guild: { id: guild.guild.id, name: guild.guild.name, icon: guild.guild.icon, member_count: guild.members.size, join_mode: guild.guild.join_mode ?? 0 },
     channel: { id: channel.id, name: channel.name },
     expires_at: invite.expires_at,
   };
@@ -130,24 +130,31 @@ route("GET", `/guilds/${ID}/invites`, ({ viewer, params }) => {
 
 route("GET", `/invites/${CODE}`, ({ params }) => previewOf(liveInvite(params[0] ?? "")));
 
+/** Adds the user the way an invite accept does (join source, onboarding flag, GUILD_CREATE/GUILD_MEMBER_ADD, join message); a request approval passes consume=false. */
+export function joinViaInvite(guild: MockGuild, userId: string, invite: MockInvite | undefined, consume: boolean): void {
+  const member = { nick: null, roles: [], joined_at: new Date().toISOString() };
+  // The join source stays server side (members-search); the gateway event carries the plain member.
+  const inviterId = invite?.inviter_id ?? guild.guild.owner_id;
+  guild.members.set(userId, { ...member, source_invite_code: invite?.code ?? null, inviter_id: inviterId, join_source_type: JoinSourceType.Invite });
+  if (invite && consume) invite.uses = (invite.uses ?? 0) + 1;
+  // only an invite join is temporary: an approved application makes a permanent member, like the server
+  if (consume && invite?.temporary) (guild.temporary ??= new Set()).add(userId);
+  onboardingStartedFor(guild.guild.id, userId);
+  emit([userId], "GUILD_CREATE", guildPayload(guild.guild.id, userId));
+  emit([...guild.members.keys()].filter(id => id !== userId), "GUILD_MEMBER_ADD", { guild_id: guild.guild.id, user: userOf(userId), ...member, ...flagsField(guild.guild.id, userId) });
+  // The real server posts a UserJoin row from the joiner in the system channel (routes/invites.rs post_join_message).
+  const system = guild.guild.system_channel_id ? db.channels.get(guild.guild.system_channel_id) : undefined;
+  if (system?.guild_id === guild.guild.id) addMessage({ channel: system, author_id: userId, content: "", type: MessageType.UserJoin });
+}
+
 route("POST", `/invites/${CODE}`, ({ viewer, params }) => {
   const invite = liveInvite(params[0] ?? "");
   const guild = db.guilds.get(invite.guild_id);
   if (!guild) return fail(404, 10006, "Unknown Invite");
   if (db.bans.get(guild.guild.id)?.has(viewer.user.id)) fail(403, 40007, "The user is banned from this guild");
   if (!guild.members.has(viewer.user.id)) {
-    const member = { nick: null, roles: [], joined_at: new Date().toISOString() };
-    // The join source stays server side (members-search); the gateway event carries the plain member.
-    const inviterId = invite.inviter_id ?? guild.guild.owner_id;
-    guild.members.set(viewer.user.id, { ...member, source_invite_code: invite.code, inviter_id: inviterId, join_source_type: JoinSourceType.Invite });
-    invite.uses = (invite.uses ?? 0) + 1;
-    if (invite.temporary) (guild.temporary ??= new Set()).add(viewer.user.id);
-    onboardingStartedFor(guild.guild.id, viewer.user.id);
-    emit([viewer.user.id], "GUILD_CREATE", guildPayload(guild.guild.id, viewer.user.id));
-    emit([...guild.members.keys()].filter(id => id !== viewer.user.id), "GUILD_MEMBER_ADD", { guild_id: guild.guild.id, user: viewer.user, ...member, ...flagsField(guild.guild.id, viewer.user.id) });
-    // The real server posts a UserJoin row from the joiner in the system channel (routes/invites.rs post_join_message).
-    const system = guild.guild.system_channel_id ? db.channels.get(guild.guild.system_channel_id) : undefined;
-    if (system?.guild_id === guild.guild.id) addMessage({ channel: system, author_id: viewer.user.id, content: "", type: MessageType.UserJoin });
+    if (guild.guild.join_mode === 1) fail(403, 150009, "This server requires an application to join");
+    joinViaInvite(guild, viewer.user.id, invite, true);
   } else if (!invite.temporary) {
     guild.temporary?.delete(viewer.user.id);
   }

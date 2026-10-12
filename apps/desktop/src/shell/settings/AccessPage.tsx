@@ -1,32 +1,55 @@
 import { useEffect, useMemo, useState } from "react";
+import { ApiRequestError } from "../../api/errors";
 import { request } from "../../api/rest";
 import { appStore, useStore } from "../../api/store";
-import { ChannelType, NsfwLevel, type Guild } from "../../api/types";
+import { ChannelType, JoinMode, NsfwLevel, type Guild, type MemberVerificationForm } from "../../api/types";
 import { Category, Field, Page, Select, SwitchRow, Unavailable } from "./controls";
+import { JoinFormEditor, formDraft, formFromDraft, type FormDraft } from "./JoinFormEditor";
 import { SaveBar } from "./SaveBar";
 import { errorText } from "./shared";
 
 const NO_RULES = "none";
 const MODES = [
-  { label: "Invite Only", note: "People can only join with an invite link." },
-  { label: "Apply to Join", note: "Not available yet" },
-  { label: "Discoverable", note: "Not available yet" },
+  { label: "Invite Only", note: "People can only join with an invite link.", mode: JoinMode.InviteOnly },
+  { label: "Apply to Join", note: "People fill in a form and a moderator approves them before they get in.", mode: JoinMode.ApplyToJoin },
+  { label: "Discoverable", note: "Not available yet", mode: null },
 ];
+const EMPTY_FORM: MemberVerificationForm = { description: null, form_fields: [] };
 
-/** Access: age restriction and rules channel (PATCH /guilds/{id}). Invite Only is the only join mode Vokko has, so it has no field. */
+/** Access: join mode, the Apply to Join form (PUT /guilds/{id}/member-verification), age restriction and rules channel (PATCH /guilds/{id}). */
 export function AccessPage({ guild, canEdit }: { guild: Guild; canEdit: boolean }) {
   const channels = useStore(s => s.channels);
   const rulesId = guild.rules_channel_id && channels[guild.rules_channel_id]?.type === ChannelType.GuildText ? guild.rules_channel_id : NO_RULES;
-  const stored = { nsfw: guild.nsfw_level === NsfwLevel.AgeRestricted, rules: rulesId };
+  const stored = { nsfw: guild.nsfw_level === NsfwLevel.AgeRestricted, rules: rulesId, joinMode: guild.join_mode ?? JoinMode.InviteOnly };
+  const [joinMode, setJoinMode] = useState<number>(stored.joinMode);
+  const [storedForm, setStoredForm] = useState<MemberVerificationForm | null>(null);
+  const [form, setForm] = useState<FormDraft>(formDraft(EMPTY_FORM));
   const [nsfw, setNsfw] = useState(stored.nsfw);
   const [rules, setRules] = useState(stored.rules);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    let live = true;
+    request<MemberVerificationForm>("GET", `/guilds/${guild.id}/member-verification`).then(
+      f => {
+        if (!live) return;
+        setStoredForm(f);
+        setForm(formDraft(f));
+      },
+      e => live && setError(errorText(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [guild.id]);
+  useEffect(() => {
+    setJoinMode(guild.join_mode ?? JoinMode.InviteOnly);
     setNsfw(guild.nsfw_level === NsfwLevel.AgeRestricted);
     setRules(rulesId);
-  }, [guild.nsfw_level, rulesId]);
-  const dirty = nsfw !== stored.nsfw || rules !== stored.rules;
+  }, [guild.nsfw_level, guild.join_mode, rulesId]);
+  const canonical = storedForm ? JSON.stringify(formFromDraft(formDraft(storedForm))) : null;
+  const formDirty = canonical !== null && JSON.stringify(formFromDraft(form)) !== canonical;
+  const dirty = nsfw !== stored.nsfw || rules !== stored.rules || joinMode !== stored.joinMode || formDirty;
   const options = useMemo(
     () => [
       { value: NO_RULES, label: "No rules channel" },
@@ -43,13 +66,24 @@ export function AccessPage({ guild, canEdit }: { guild: Guild; canEdit: boolean 
     setError(null);
     try {
       const body: Record<string, unknown> = {};
+      if (formDirty) {
+        const next = formFromDraft(form);
+        if (next.form_fields.some(f => f.field_type !== "TERMS" && !f.label)) throw new Error("Every question needs a label.");
+        // The form first: applicants must never meet Apply to Join without it.
+        const saved = await request<MemberVerificationForm>("PUT", `/guilds/${guild.id}/member-verification`, next);
+        setStoredForm(saved);
+        setForm(formDraft(saved));
+      }
+      if (joinMode !== stored.joinMode) body.join_mode = joinMode;
       if (nsfw !== stored.nsfw) body.nsfw_level = nsfw ? NsfwLevel.AgeRestricted : NsfwLevel.Default;
       if (rules !== stored.rules) body.rules_channel_id = rules === NO_RULES ? null : rules;
-      const updated = await request<Guild>("PATCH", `/guilds/${guild.id}`, body);
-      const state = appStore.getState();
-      appStore.setState({ guilds: { ...state.guilds, [guild.id]: { ...state.guilds[guild.id], ...updated } } });
+      if (Object.keys(body).length > 0) {
+        const updated = await request<Guild>("PATCH", `/guilds/${guild.id}`, body);
+        const state = appStore.getState();
+        appStore.setState({ guilds: { ...state.guilds, [guild.id]: { ...state.guilds[guild.id], ...updated } } });
+      }
     } catch (e) {
-      setError(errorText(e));
+      setError(e instanceof Error && !(e instanceof ApiRequestError) ? e.message : errorText(e));
     } finally {
       setBusy(false);
     }
@@ -60,8 +94,16 @@ export function AccessPage({ guild, canEdit }: { guild: Guild; canEdit: boolean 
       {!canEdit && <Unavailable>You need the Manage Server permission to change access settings.</Unavailable>}
       <Category title="Access Options">
         <div className="sr-group" role="radiogroup" aria-label="Access mode">
-          {MODES.map((m, i) => (
-            <button key={m.label} type="button" role="radio" aria-checked={i === 0} aria-disabled={i !== 0} tabIndex={i === 0 ? 0 : -1} className={`sr-row${i === 0 ? " selected" : ""}`}>
+          {MODES.map(m => (
+            <button
+              key={m.label}
+              type="button"
+              role="radio"
+              aria-checked={m.mode === joinMode}
+              aria-disabled={m.mode === null || !canEdit}
+              className={`sr-row${m.mode === joinMode ? " selected" : ""}`}
+              onClick={() => m.mode !== null && canEdit && setJoinMode(m.mode)}
+            >
               <span className="sr-dot" />
               <span className="sr-text">
                 <span className="sr-label">{m.label}</span>
@@ -71,6 +113,7 @@ export function AccessPage({ guild, canEdit }: { guild: Guild; canEdit: boolean 
           ))}
         </div>
       </Category>
+      {joinMode === JoinMode.ApplyToJoin && <JoinFormEditor draft={form} onChange={setForm} disabled={!canEdit || storedForm === null} />}
       <Category title="Age-Restricted Server">
         <SwitchRow label="Age-Restricted Server" note="Users will need to confirm they are over the legal age to view the content in this server." checked={nsfw} onChange={setNsfw} disabled={!canEdit} />
       </Category>
@@ -86,6 +129,8 @@ export function AccessPage({ guild, canEdit }: { guild: Guild; canEdit: boolean 
         onReset={() => {
           setNsfw(stored.nsfw);
           setRules(stored.rules);
+          setJoinMode(stored.joinMode);
+          if (storedForm) setForm(formDraft(storedForm));
           setError(null);
         }}
         onSave={() => void save()}

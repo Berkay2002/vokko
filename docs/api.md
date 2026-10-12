@@ -408,6 +408,28 @@ Discord sends reports to its own Trust & Safety team through an undocumented API
 - Closing or reopening records audit entry 250 (`ReportUpdate`, Vokko-only): `target_id` is the report id, the one change is `status` (old to new), `reason` comes from `X-Audit-Log-Reason`. The reporter, the target and the reason for the report are left out, since VIEW_AUDIT_LOG members need not be moderators. Setting the status a report already has records nothing.
 - No gateway event yet: moderators load the list.
 
+## Apply to Join (join requests, Server Settings > Access)
+
+Discord's member verification form and guild join requests. A guild's `join_mode` (also on `Invite.guild`) is `0` Invite Only (default) or `1` Apply to Join; MANAGE_GUILD switches it through PATCH /guilds/{id} `{join_mode}` (other values → 400 50035), audit key `join_mode`.
+
+**Every way in is gated.** While `join_mode` is 1, nobody becomes a member without an approved request: POST /invites/{code} by a non-member → 403 code 150009 "This server requires an application to join" (members keep working: no change), temporary invites included; approval is the only path. Exceptions, both actions of a server manager: the owner at creation, and a bot added through OAuth2 authorize by a MANAGE_GUILD member (Discord lets bots in the same way).
+
+Shapes:
+- `MemberVerificationForm { description: string | null, form_fields: MemberVerificationField[] }`; `MemberVerificationField { field_type: "TERMS" | "TEXT_INPUT" | "PARAGRAPH" | "MULTIPLE_CHOICE", label: string, required: boolean, values?: string[] | null, description?: string | null, placeholder?: string | null, response?: boolean | number | string | null }`. `values` are the rules (TERMS, 1-16 entries of 1-300 chars) or the choices (MULTIPLE_CHOICE, 1-8 of 1-150); TEXT_INPUT and PARAGRAPH have none. At most one TERMS field and 5 others; `label` 1-300, `description` up to 300 (form) / 300 (field), `placeholder` up to 100. `response`: TERMS `true`; TEXT_INPUT a string up to 150 chars, PARAGRAPH up to 1000; MULTIPLE_CHOICE the index of the choice. A required field needs a (non-blank) response.
+- `GuildJoinRequest { id, guild_id, user_id, user: User, created_at, application_status: "SUBMITTED" | "APPROVED" | "REJECTED", form_responses: MemberVerificationField[], rejection_reason: string | null, actioned_at: string | null, actioned_by_user: User | null }`. One request per user and guild.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | /guilds/{id}/member-verification?invite_code= | `MemberVerificationForm`; members may read it, a non-member needs `invite_code` of a live invite to this guild (else 404 10004, so it does not reveal the guild). A guild with no form returns `{description: null, form_fields: []}` |
+| PUT | /guilds/{id}/member-verification | MANAGE_GUILD; body `MemberVerificationForm` (responses ignored) → the stored form; limits above → 400 50035; audit `GUILD_UPDATE` key `member_verification` |
+| PUT | /guilds/{id}/requests/@me | body `{invite_code, form_fields}` (the form's fields in order, each with `response`) → `GuildJoinRequest` SUBMITTED. Needs `join_mode` 1 (else 400 50035 `join_mode`), a live invite of this guild (else 404 10006), not banned (403 40007), not a member (400 50035). Answers must match the current form (same count, order and field types, required ones answered) else 400 50035. A SUBMITTED request is replaced; a REJECTED one may reapply (the new request replaces it: Discord allows reapplying, any cooldown is unverified so Vokko has none); an APPROVED one whose user has since left is replaced too. The invite use is not consumed. Bots cannot apply (403 20001); 10 applications per user, then one per 10 s (429) |
+| GET | /guilds/{id}/requests/@me | the caller's `GuildJoinRequest`, 404 10070 none |
+| DELETE | /guilds/{id}/requests/@me | withdraw a SUBMITTED request → 204; none or not SUBMITTED → 404 10070 |
+| GET | /guilds/{id}/requests?status=SUBMITTED&before=&limit= | KICK_MEMBERS or MANAGE_GUILD → `{guild_join_requests: GuildJoinRequest[], total}` newest first, `status` default SUBMITTED, `limit` 1-100 (default 50) |
+| PATCH | /guilds/{id}/requests/{request_id} | KICK_MEMBERS or MANAGE_GUILD; `{action: "APPROVED" \| "REJECTED", rejection_reason?: string (up to 160)}` on a SUBMITTED request (else 400 50035; unknown → 404 10070) → `GuildJoinRequest`. Approving re-checks the ban list (banned → 403 40007, request untouched) and adds the member like an invite join, but always permanent and without using up the invite (join source and inviter from the request's invite; onboarding flag, read states, GUILD_CREATE to the user, GUILD_MEMBER_ADD, join message), in one transaction with the status change. Audit `MEMBER_UPDATE`-style entries are not written (Discord shows these in the requests list instead) |
+
+Gateway `GUILD_JOIN_REQUEST_CREATE` / `GUILD_JOIN_REQUEST_UPDATE` `{guild_id, status, request}` and `GUILD_JOIN_REQUEST_DELETE` `{guild_id, id, user_id}` go to the applicant and to members with KICK_MEMBERS or MANAGE_GUILD. The applicant's copies (events, `GET`/`PUT` `@me`) have `actioned_by_user` null. Banning a user deletes their request (DELETE event); deleting the guild deletes all of them. Applicants see nothing of the guild beyond the invite preview and the form until approved.
+
 ## Gateway
 
 `GET /gateway` (at the server root, not under `/api/v1`; e.g. `ws://127.0.0.1:8710/gateway`) upgrades to WebSocket. Text frames carrying `GatewayPayload`.

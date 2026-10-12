@@ -15,6 +15,7 @@ pub mod guild_privacy;
 mod guilds;
 mod interactions;
 pub mod invites;
+pub mod join_requests;
 mod member_search;
 pub mod messages;
 pub mod moderation;
@@ -48,6 +49,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(channels::routes())
         .merge(overwrites::routes())
         .merge(invites::routes())
+        .merge(join_requests::routes())
         .merge(relationships::routes())
         .merge(messages::routes())
         .merge(reactions::routes())

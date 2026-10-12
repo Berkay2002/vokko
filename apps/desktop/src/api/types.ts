@@ -214,6 +214,44 @@ export interface Guild {
   explicit_content_filter?: ExplicitContentFilter;
   nsfw_level?: NsfwLevel; // Access (MANAGE_GUILD); always sent by the server. AgeRestricted gates every channel of the server
   rules_channel_id?: Snowflake | null; // Access: the rules channel (a text channel of the guild); always sent, null when unset
+  join_mode?: JoinMode; // Access: how people get in (MANAGE_GUILD); absent = InviteOnly
+}
+/** docs/api.md "Apply to Join": with ApplyToJoin nobody becomes a member (invite accept included) without an approved request. */
+export enum JoinMode {
+  InviteOnly = 0,
+  ApplyToJoin = 1,
+}
+export type MemberVerificationFieldType = "TERMS" | "TEXT_INPUT" | "PARAGRAPH" | "MULTIPLE_CHOICE";
+export interface MemberVerificationField {
+  field_type: MemberVerificationFieldType;
+  label: string; // 1-300
+  required: boolean;
+  values?: string[] | null; // TERMS: the rules (1-16 x 1-300); MULTIPLE_CHOICE: the choices (1-8 x 1-150)
+  description?: string | null;
+  placeholder?: string | null;
+  response?: boolean | number | string | null; // applicant's answer: TERMS true, text, or the choice index
+}
+export interface MemberVerificationForm {
+  description: string | null;
+  form_fields: MemberVerificationField[];
+}
+export type JoinRequestStatus = "SUBMITTED" | "APPROVED" | "REJECTED";
+export interface GuildJoinRequest {
+  id: Snowflake;
+  guild_id: Snowflake;
+  user_id: Snowflake;
+  user: User;
+  created_at: ISO8601;
+  application_status: JoinRequestStatus;
+  form_responses: MemberVerificationField[];
+  rejection_reason: string | null;
+  actioned_at: ISO8601 | null;
+  actioned_by_user: User | null;
+}
+/** GET /guilds/{id}/requests. */
+export interface GuildJoinRequestList {
+  guild_join_requests: GuildJoinRequest[];
+  total: number;
 }
 /** Discord's guild NSFW level; only Default and AgeRestricted can be set. */
 export enum NsfwLevel {
@@ -1553,6 +1591,7 @@ export interface InviteGuild {
   name: string;
   icon: string | null;
   member_count: number;
+  join_mode?: JoinMode; // Apply to Join: a non-member must apply instead of accepting
 }
 export interface InviteChannel {
   id: Snowflake;
@@ -1662,6 +1701,9 @@ export interface GatewayEvents {
   GUILD_MEMBER_UPDATE: GuildMember & { guild_id: Snowflake };
   GUILD_BAN_ADD: { guild_id: Snowflake; user: User };
   GUILD_BAN_REMOVE: { guild_id: Snowflake; user: User };
+  GUILD_JOIN_REQUEST_CREATE: { guild_id: Snowflake; status: JoinRequestStatus; request: GuildJoinRequest }; // to the applicant and KICK_MEMBERS/MANAGE_GUILD members
+  GUILD_JOIN_REQUEST_UPDATE: { guild_id: Snowflake; status: JoinRequestStatus; request: GuildJoinRequest };
+  GUILD_JOIN_REQUEST_DELETE: { guild_id: Snowflake; id: Snowflake; user_id: Snowflake }; // withdrawn, replaced or the applicant was banned
   GUILD_ROLE_CREATE: { guild_id: Snowflake; role: Role };
   GUILD_ROLE_UPDATE: { guild_id: Snowflake; role: Role };
   GUILD_ROLE_DELETE: { guild_id: Snowflake; role_id: Snowflake };

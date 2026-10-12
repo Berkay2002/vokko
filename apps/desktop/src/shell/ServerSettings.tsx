@@ -14,6 +14,7 @@ import { FullScreenSettings, useFrameLayout, type SettingsNavGroup } from "./set
 import { AuditLogPage } from "./settings/AuditLogPage";
 import { BansPage } from "./settings/BansPage";
 import { AccessPage } from "./settings/AccessPage";
+import { JoinRequestsPage } from "./settings/JoinRequestsPage";
 import { ReportsPage } from "./settings/ReportsPage";
 import { AutoModPage, SafetyPage } from "./settings/SafetyPage";
 import { SaveBar } from "./settings/SaveBar";
@@ -63,6 +64,7 @@ const SECTIONS: SectionDef[] = [
   { id: "stickers", label: "Stickers", group: "expression", needs: EXPRESSIONS, outline: ["Upload Sticker", "Stickers"] },
   { id: "soundboard", label: "Soundboard", group: "expression", needs: [...EXPRESSIONS, Perm.CREATE_GUILD_EXPRESSIONS] },
   { id: "members", label: "Members", group: "people", needs: [Perm.MANAGE_GUILD, Perm.KICK_MEMBERS, Perm.BAN_MEMBERS, Perm.MODERATE_MEMBERS, Perm.MANAGE_NICKNAMES, Perm.MANAGE_ROLES] },
+  { id: "requests", label: "Join Requests", group: "people", needs: [Perm.KICK_MEMBERS, Perm.MANAGE_GUILD] },
   { id: "roles", label: "Roles", group: "people", needs: [Perm.MANAGE_ROLES] },
   { id: "invites", label: "Invites", group: "people", needs: [Perm.CREATE_INSTANT_INVITE, Perm.MANAGE_GUILD] },
   { id: "onboarding", label: "Onboarding", group: "people" },
@@ -313,6 +315,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
             <MembersPage guild={guild} members={members} />
           </Wide>
         );
+      case "requests":
+        return <JoinRequestsPage guild={guild} />;
       case "roles":
         return <RolesPage guild={guild} members={members} />;
       case "invites":

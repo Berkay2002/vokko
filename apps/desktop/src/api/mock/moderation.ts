@@ -13,6 +13,7 @@ import { dropIntegration, isManagedRole } from "./apps";
 import { emit } from "./socket";
 import { memberVoiceEdit } from "./voice";
 import { change, recordAudit } from "./admin";
+import { dropJoinRequest } from "./joinRequests";
 
 const DAY_MS = 86_400_000;
 const MAX_TIMEOUT_MS = 28 * DAY_MS;
@@ -223,6 +224,7 @@ route("PUT", `/guilds/${ID}/bans/${ID}`, ({ viewer, params, body }) => {
     emit(moderators, "GUILD_BAN_ADD", { guild_id: guildId, user });
   }
   removeMember(guild, targetId);
+  dropJoinRequest(guildId, targetId);
   recordAudit(guildId, viewer.user.id, AuditLogEvent.MemberBanAdd, targetId, { reason: reasonRaw ? reasonRaw : null });
 
   if (seconds > 0) {

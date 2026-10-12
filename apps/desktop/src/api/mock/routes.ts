@@ -33,6 +33,7 @@ import "./community";
 import "./status";
 import "./soundboard";
 import "./reports";
+import { purgeGuildJoinRequests } from "./joinRequests";
 
 export { route, str, requireGuildMember };
 
@@ -234,9 +235,13 @@ route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
       fail(400, 50035, "Invalid Form Body", { rules_channel_id: { code: "CHANNEL_INVALID", message: "Must be a text channel of this server." } });
     }
   }
+  if (body.join_mode !== undefined && body.join_mode !== 0 && body.join_mode !== 1) {
+    fail(400, 50035, "Invalid Form Body", { join_mode: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 1)." } });
+  }
   const name = typeof body.name === "string" ? body.name.trim() : undefined;
   if (name !== undefined && (name.length < 2 || name.length > 100)) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 2 and 100 in length." } });
   if (nsfwLevel !== undefined) guild.guild.nsfw_level = nsfwLevel;
+  if (body.join_mode !== undefined) guild.guild.join_mode = body.join_mode;
   if ("rules_channel_id" in body) guild.guild.rules_channel_id = body.rules_channel_id as string | null;
   if (typeof level === "number") guild.guild.verification_level = level;
   if (typeof filter === "number") guild.guild.explicit_content_filter = filter;
@@ -254,6 +259,7 @@ route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
       change("system_channel_id", before.system_channel_id, after.system_channel_id),
       change("verification_level", before.verification_level ?? 0, after.verification_level ?? 0),
       change("explicit_content_filter", before.explicit_content_filter ?? 0, after.explicit_content_filter ?? 0),
+      change("join_mode", before.join_mode ?? 0, after.join_mode ?? 0),
     ],
     skipIfUnchanged: true,
   });
@@ -273,6 +279,7 @@ route("DELETE", `/guilds/${ID}`, ({ viewer, params }) => {
     db.messages.delete(channel.id);
   }
   purgeGuildStickers(guildId);
+  purgeGuildJoinRequests(guildId);
   return undefined;
 });
 

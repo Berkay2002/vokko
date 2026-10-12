@@ -1186,3 +1186,80 @@
     display: none;
   }
 }
+
+/* Join form editor and join request list (Access, Join Requests) */
+.jf-editor {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.jf-editor .input {
+  width: 100%;
+}
+
+.jf-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.jf-question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--background-mod-subtle);
+}
+
+.jf-choices {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+}
+
+.apply-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jr-answers {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jr-answer-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.jr-answer-text {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.jr-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.jr-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jr-head .ss-member-text {
+  flex: 1;
+}

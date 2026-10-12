@@ -719,7 +719,20 @@ pub struct Guild {
     /// Access: the text channel shown as the server rules; always sent, `null` when unset.
     #[serde(default)]
     pub rules_channel_id: Option<Snowflake>,
+    /// Access: how people get in (MANAGE_GUILD edits it).
+    #[serde(default)]
+    pub join_mode: JoinMode,
 }
+
+numeric_enum!(
+    /// `Invite`: an invite link is enough. `Apply`: nobody joins without an approved join request.
+    #[derive(Default)]
+    JoinMode {
+        #[default]
+        Invite = 0,
+        Apply = 1,
+    }
+);
 
 numeric_enum!(
     /// Discord's guild NSFW level. Only `Default` and `AgeRestricted` can be set (Discord's UI offers the same two).
@@ -1754,6 +1767,9 @@ pub struct UpdateGuildRequest {
     /// A text channel of this guild; `null` clears it.
     #[serde(default, deserialize_with = "double_option")]
     pub rules_channel_id: Option<Option<Snowflake>>,
+    /// `Invite` or `Apply` (anything else is 400 50035).
+    #[serde(default)]
+    pub join_mode: Option<JoinMode>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2321,6 +2337,111 @@ pub struct InviteDelete {
     pub channel_id: Snowflake,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum MemberVerificationFieldType {
+    Terms,
+    TextInput,
+    Paragraph,
+    MultipleChoice,
+}
+
+/// A field's answer: TERMS `true`, TEXT_INPUT / PARAGRAPH a string, MULTIPLE_CHOICE the index of the choice.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MemberVerificationResponse {
+    Bool(bool),
+    Index(u32),
+    Text(String),
+}
+
+/// One field of the member verification form (`values` are the rules or the choices).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MemberVerificationField {
+    pub field_type: MemberVerificationFieldType,
+    pub label: String,
+    pub required: bool,
+    #[serde(default)]
+    pub values: Option<Vec<String>>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub placeholder: Option<String>,
+    /// Only in a submitted request and in `GuildJoinRequest.form_responses`.
+    #[serde(default)]
+    pub response: Option<MemberVerificationResponse>,
+}
+
+/// `GET` / `PUT /guilds/{id}/member-verification`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MemberVerificationForm {
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub form_fields: Vec<MemberVerificationField>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum JoinRequestStatus {
+    Submitted,
+    Approved,
+    Rejected,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildJoinRequest {
+    pub id: Snowflake,
+    pub guild_id: Snowflake,
+    pub user_id: Snowflake,
+    pub user: User,
+    pub created_at: String,
+    pub application_status: JoinRequestStatus,
+    pub form_responses: Vec<MemberVerificationField>,
+    pub rejection_reason: Option<String>,
+    pub actioned_at: Option<String>,
+    pub actioned_by_user: Option<User>,
+}
+
+/// `GET /guilds/{id}/requests`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildJoinRequestList {
+    pub guild_join_requests: Vec<GuildJoinRequest>,
+    /// Requests with the asked status, regardless of paging.
+    pub total: u32,
+}
+
+/// `PUT /guilds/{id}/requests/@me`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SubmitJoinRequest {
+    pub invite_code: String,
+    pub form_fields: Vec<MemberVerificationField>,
+}
+
+/// `PATCH /guilds/{id}/requests/{request_id}`; `action` is `APPROVED` or `REJECTED`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActionJoinRequest {
+    pub action: JoinRequestStatus,
+    #[serde(default)]
+    pub rejection_reason: Option<String>,
+}
+
+/// GUILD_JOIN_REQUEST_CREATE / GUILD_JOIN_REQUEST_UPDATE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildJoinRequestEvent {
+    pub guild_id: Snowflake,
+    pub status: JoinRequestStatus,
+    pub request: GuildJoinRequest,
+}
+
+/// GUILD_JOIN_REQUEST_DELETE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildJoinRequestDelete {
+    pub guild_id: Snowflake,
+    pub id: Snowflake,
+    pub user_id: Snowflake,
+}
+
 /// A server folder on the rail. `id` is chosen by the client (any snowflake-shaped string, unique among the user's folders).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GuildFolder {
@@ -2364,6 +2485,8 @@ pub struct InviteGuild {
     pub name: String,
     pub icon: Option<String>,
     pub member_count: u32,
+    #[serde(default)]
+    pub join_mode: JoinMode,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3798,6 +3921,10 @@ pub enum GatewayEvent {
     InviteCreate(Box<InviteMetadata>),
     InviteDelete(InviteDelete),
     GuildLayoutUpdate(GuildLayout),
+    /// GUILD_JOIN_REQUEST_*: to the applicant and members with KICK_MEMBERS or MANAGE_GUILD.
+    GuildJoinRequestCreate(Box<GuildJoinRequestEvent>),
+    GuildJoinRequestUpdate(Box<GuildJoinRequestEvent>),
+    GuildJoinRequestDelete(GuildJoinRequestDelete),
 }
 
 impl GatewayEvent {
@@ -3877,6 +4004,9 @@ impl GatewayEvent {
             Self::InviteCreate(_) => "INVITE_CREATE",
             Self::InviteDelete(_) => "INVITE_DELETE",
             Self::GuildLayoutUpdate(_) => "GUILD_LAYOUT_UPDATE",
+            Self::GuildJoinRequestCreate(_) => "GUILD_JOIN_REQUEST_CREATE",
+            Self::GuildJoinRequestUpdate(_) => "GUILD_JOIN_REQUEST_UPDATE",
+            Self::GuildJoinRequestDelete(_) => "GUILD_JOIN_REQUEST_DELETE",
         }
     }
 
@@ -3942,6 +4072,8 @@ impl GatewayEvent {
             Self::InviteCreate(value) => serde_json::to_value(value),
             Self::InviteDelete(value) => serde_json::to_value(value),
             Self::GuildLayoutUpdate(value) => serde_json::to_value(value),
+            Self::GuildJoinRequestCreate(value) | Self::GuildJoinRequestUpdate(value) => serde_json::to_value(value),
+            Self::GuildJoinRequestDelete(value) => serde_json::to_value(value),
         };
         result.unwrap_or(Value::Null)
     }
@@ -4009,12 +4141,12 @@ mod tests {
         let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false, "unicode_emoji": null});
         round_trip::<Role>(role.clone());
         round_trip::<Guild>(
-            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null}),
+            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0}),
         );
         round_trip::<Guild>(json!({
             "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null,
             "tag": {"tag": "VKO", "badge": "bolt", "color_primary": 5793266, "color_secondary": 3878800}, "theme": {"preset": null, "primary": 1, "accent": 2},
-            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201"
+            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201", "join_mode": 1
         }));
         round_trip::<GuildMember>(
             json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}),
@@ -4181,7 +4313,7 @@ mod tests {
 
     #[test]
     fn ready_and_flattened_guild_events() {
-        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null});
+        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0});
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
@@ -4420,7 +4552,7 @@ mod tests {
         round_trip::<ReactionEmoji>(json!({"id": "700", "name": "blob_wave", "animated": true}));
         round_trip::<ReactionEmoji>(json!({"id": null, "name": "👍"}));
         let guild = json!({
-            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null,
+            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0,
             "channels": [], "members": [], "member_count": 0, "stickers": [], "emojis": [emoji.clone()], "voice_states": []
         });
         round_trip::<GuildWithState>(guild);
@@ -4506,7 +4638,7 @@ mod tests {
     #[test]
     fn invite_and_settings_shapes_match_types_ts() {
         let invite = json!({
-            "code": "abc", "guild": {"id": "300", "name": "g", "icon": null, "member_count": 2}, "channel": {"id": "200", "name": "general"},
+            "code": "abc", "guild": {"id": "300", "name": "g", "icon": null, "member_count": 2, "join_mode": 1}, "channel": {"id": "200", "name": "general"},
             "expires_at": "2026-10-12T10:00:00.000Z"
         });
         round_trip::<Invite>(invite.clone());
@@ -4549,7 +4681,7 @@ mod tests {
             (Some(VerificationLevel::Medium), Some(ExplicitContentFilter::MembersWithoutRoles))
         );
         assert!(serde_json::from_value::<UpdateGuildRequest>(json!({"verification_level": 5})).is_err());
-        let access: UpdateGuildRequest = serde_json::from_value(json!({"nsfw_level": 3, "rules_channel_id": null})).expect("access");
+        let access: UpdateGuildRequest = serde_json::from_value(json!({"nsfw_level": 3, "rules_channel_id": null, "join_mode": 0})).expect("access");
         assert_eq!((access.nsfw_level, access.rules_channel_id), (Some(NsfwLevel::AgeRestricted), Some(None)));
         assert_eq!(serde_json::from_value::<UpdateGuildRequest>(json!({})).expect("empty").rules_channel_id, None);
         let role: RoleRequest = serde_json::from_value(json!({"unicode_emoji": null})).expect("role icon");
@@ -4589,6 +4721,36 @@ mod tests {
             guild_id: Some(Snowflake(4)),
         });
         assert_eq!((bulk.name(), bulk.data()), ("MESSAGE_DELETE_BULK", json!({"ids": ["1", "2"], "channel_id": "3", "guild_id": "4"})));
+    }
+
+    #[test]
+    fn join_request_shapes() {
+        let field = json!({"field_type": "MULTIPLE_CHOICE", "label": "Pick", "required": true, "values": ["a", "b"], "description": null, "placeholder": null, "response": 1});
+        let text =
+            json!({"field_type": "TEXT_INPUT", "label": "Why", "required": false, "values": null, "description": "d", "placeholder": "p", "response": "hi"});
+        let terms = json!({"field_type": "TERMS", "label": "Rules", "required": true, "values": ["be nice"], "description": null, "placeholder": null, "response": true});
+        round_trip::<MemberVerificationForm>(json!({"description": null, "form_fields": [field.clone(), text.clone(), terms.clone()]}));
+        let bare: MemberVerificationField = serde_json::from_value(json!({"field_type": "PARAGRAPH", "label": "x", "required": false})).expect("bare field");
+        assert_eq!((bare.values, bare.response), (None, None));
+        assert!(serde_json::from_value::<MemberVerificationField>(json!({"field_type": "NOPE", "label": "x", "required": false})).is_err());
+        let request = json!({
+            "id": "900", "guild_id": "300", "user_id": "100", "user": user(), "created_at": "2026-10-13T10:00:00.000Z", "application_status": "SUBMITTED",
+            "form_responses": [field, text, terms], "rejection_reason": null, "actioned_at": null, "actioned_by_user": null
+        });
+        round_trip::<GuildJoinRequest>(request.clone());
+        round_trip::<GuildJoinRequestList>(json!({"guild_join_requests": [request.clone()], "total": 1}));
+        round_trip::<SubmitJoinRequest>(json!({"invite_code": "abc", "form_fields": []}));
+        let action: ActionJoinRequest = serde_json::from_value(json!({"action": "REJECTED", "rejection_reason": "no"})).expect("action");
+        assert_eq!((action.action, action.rejection_reason.as_deref()), (JoinRequestStatus::Rejected, Some("no")));
+        let created = GatewayEvent::GuildJoinRequestCreate(Box::new(
+            serde_json::from_value(json!({"guild_id": "300", "status": "SUBMITTED", "request": request})).expect("event"),
+        ));
+        assert_eq!((created.name(), created.data()["status"].clone()), ("GUILD_JOIN_REQUEST_CREATE", json!("SUBMITTED")));
+        let deleted = GatewayEvent::GuildJoinRequestDelete(GuildJoinRequestDelete { guild_id: Snowflake(300), id: Snowflake(900), user_id: Snowflake(100) });
+        assert_eq!((deleted.name(), deleted.data()), ("GUILD_JOIN_REQUEST_DELETE", json!({"guild_id": "300", "id": "900", "user_id": "100"})));
+        let guild: UpdateGuildRequest = serde_json::from_value(json!({"join_mode": 1})).expect("join mode");
+        assert_eq!(guild.join_mode, Some(JoinMode::Apply));
+        assert!(serde_json::from_value::<UpdateGuildRequest>(json!({"join_mode": 2})).is_err());
     }
 
     #[test]
