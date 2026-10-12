@@ -509,3 +509,93 @@ async fn deleting_the_guild_deletes_its_form_and_requests() {
         assert_eq!(left, 0, "{table}");
     }
 }
+
+async fn submitted(w: &World, invite: &str, name: &str) -> (String, String, String) {
+    let (token, user) = w.app.register(name).await;
+    let (status, request) = w.apply(&token, invite, json!([])).await;
+    assert_eq!(status, StatusCode::OK, "{request}");
+    (token, user["id"].as_str().expect("id").to_owned(), request["id"].as_str().expect("id").to_owned())
+}
+
+#[tokio::test]
+async fn the_request_list_pages_newest_first_with_the_full_total() {
+    let w = world().await;
+    let invite = w.invite(json!({})).await;
+    w.set_mode(1).await;
+    let mut ids = Vec::new();
+    for name in ["a1", "a2", "a3"] {
+        ids.push(submitted(&w, &invite, name).await.2);
+    }
+    let ids_of = |body: &Value| -> Vec<String> {
+        body["guild_join_requests"].as_array().expect("list").iter().map(|r| r["id"].as_str().expect("id").to_owned()).collect()
+    };
+
+    let (status, first) = w.requests(&w.owner, "?limit=2").await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    let first_ids = ids_of(&first);
+    assert_eq!((first_ids.clone(), first["total"].clone()), (vec![ids[2].clone(), ids[1].clone()], json!(3)));
+    let (_, second) = w.requests(&w.owner, &format!("?limit=2&before={}", first_ids[1])).await;
+    assert_eq!((ids_of(&second), second["total"].clone()), (vec![ids[0].clone()], json!(3)));
+    assert_eq!(w.requests(&w.owner, "?limit=0").await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(w.requests(&w.owner, "?limit=101").await.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn two_handlers_acting_at_once_leave_one_winner_and_one_membership() {
+    let w = world().await;
+    let (moderator, moderator_id) = w.member("mod").await;
+    w.role(&moderator_id, KICK_MEMBERS).await;
+    let invite = w.invite(json!({})).await;
+    w.set_mode(1).await;
+    let clean_loss = |status: StatusCode, body: &Value| {
+        assert_eq!((status, error_code(body)), (StatusCode::BAD_REQUEST, 50035), "the loser sees the request already handled: {body}");
+    };
+
+    for round in 0..5 {
+        let (_, user, request) = submitted(&w, &invite, &format!("approve{round}")).await;
+        let path = w.path(&format!("/requests/{request}"));
+        let body = json!({"action": "APPROVED"});
+        let ((status_a, body_a), (status_b, body_b)) = tokio::join!(w.app.patch(&path, &w.owner, body.clone()), w.app.patch(&path, &moderator, body));
+        assert_eq!([status_a, status_b].iter().filter(|s| s.is_success()).count(), 1, "{body_a} / {body_b}");
+        if status_a.is_success() {
+            clean_loss(status_b, &body_b)
+        } else {
+            clean_loss(status_a, &body_a)
+        }
+        assert_eq!(members_of(&w, &user).await, 1);
+        assert_eq!(status_of(&w, &request).await, "APPROVED");
+
+        let (_, user, request) = submitted(&w, &invite, &format!("race{round}")).await;
+        let path = w.path(&format!("/requests/{request}"));
+        let ((status_a, body_a), (status_b, body_b)) =
+            tokio::join!(w.app.patch(&path, &w.owner, json!({"action": "APPROVED"})), w.app.patch(&path, &moderator, json!({"action": "REJECTED"})));
+        assert_eq!([status_a, status_b].iter().filter(|s| s.is_success()).count(), 1, "{body_a} / {body_b}");
+        let approved_won = status_a.is_success();
+        if approved_won {
+            clean_loss(status_b, &body_b)
+        } else {
+            clean_loss(status_a, &body_a)
+        }
+        assert_eq!(status_of(&w, &request).await, if approved_won { "APPROVED" } else { "REJECTED" });
+        assert_eq!(members_of(&w, &user).await, i64::from(approved_won));
+    }
+}
+
+async fn members_of(w: &World, user: &str) -> i64 {
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM guild_members WHERE guild_id = $1 AND user_id = $2")
+        .bind(w.guild.parse::<i64>().expect("id"))
+        .bind(user.parse::<i64>().expect("id"))
+        .fetch_one(&w.app.state.db)
+        .await
+        .expect("count");
+    count
+}
+
+async fn status_of(w: &World, request: &str) -> String {
+    let (status,): (String,) = sqlx::query_as("SELECT status FROM guild_join_requests WHERE id = $1")
+        .bind(request.parse::<i64>().expect("id"))
+        .fetch_one(&w.app.state.db)
+        .await
+        .expect("status");
+    status
+}

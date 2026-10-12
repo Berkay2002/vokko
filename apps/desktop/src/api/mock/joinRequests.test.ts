@@ -169,4 +169,18 @@ describe("mock apply to join", () => {
     expect(errorOf(() => act("owner", request.id, { action: "APPROVED" }))).toEqual({ status: 403, code: 40007 });
     expect(list("owner").total).toBe(1);
   });
+
+  it("pages the reviewer queue newest first with before/limit and the full total", () => {
+    const names = ["u1", "u2", "u3"];
+    const made = names.map(n => {
+      ids[n] = createAccount({ username: n }).user.id;
+      return apply(n).id;
+    });
+    const page = (q: string) => call("owner", "GET", `/guilds/${guildId}/requests?${q}`) as GuildJoinRequestList;
+    const first = page("limit=2");
+    const second = page(`limit=2&before=${first.guild_join_requests[1]!.id}`);
+    expect(first.guild_join_requests.map(r => r.id)).toEqual([made[2], made[1]]);
+    expect(second.guild_join_requests.map(r => r.id)).toEqual([made[0]]);
+    expect([first.total, second.total]).toEqual([3, 3]);
+  });
 });

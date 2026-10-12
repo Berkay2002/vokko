@@ -133,3 +133,30 @@ test('Join a Server with an apply-mode invite keeps the apply form open', async 
   await page.waitForTimeout(300);
   await expect(dialog).toBeVisible();
 });
+
+test('Join Requests pages 50 at a time with Load more', async ({ page }) => {
+  await start(page, 'sam');
+  const { guildId, code } = await prepare(page, [], false);
+  await page.evaluate(
+    ({ guildId, code }) => {
+      const w = window as unknown as Win & { __vokkoMock: { addUser(name: string): string } };
+      w.__vokkoMock.requestAs('sam', 'PATCH', `/guilds/${guildId}`, { join_mode: 1 });
+      for (let i = 0; i < 55; i++) {
+        const name = `applicant${i}`;
+        w.__vokkoMock.addUser(name);
+        w.__vokkoMock.requestAs(name, 'PUT', `/guilds/${guildId}/requests/@me`, { invite_code: code, form_fields: [] });
+      }
+    },
+    { guildId, code },
+  );
+  await page.getByRole('link', { name: /^Sam's server/ }).click();
+  await page.waitForURL(/\/channels\/\d+\/\d+/);
+  await page.locator('.guild-header-name-button').click();
+  await page.getByRole('menuitem', { name: 'Server Settings' }).click();
+  await page.getByRole('button', { name: 'Join Requests', exact: true }).click();
+  const rows = page.getByTestId('join-request');
+  await expect(rows).toHaveCount(50);
+  await page.getByRole('button', { name: 'Load more' }).click();
+  await expect(rows).toHaveCount(55);
+  await expect(page.getByRole('button', { name: 'Load more' })).toHaveCount(0);
+});

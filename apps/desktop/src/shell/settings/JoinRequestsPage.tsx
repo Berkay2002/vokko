@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { gateway } from "../../api/gateway";
 import { request } from "../../api/rest";
 import type { Guild, GuildJoinRequest, GuildJoinRequestList, JoinRequestStatus, MemberVerificationField } from "../../api/types";
@@ -11,6 +11,8 @@ const TABS: { id: JoinRequestStatus; label: string; empty: string }[] = [
   { id: "APPROVED", label: "Approved", empty: "No approved applications." },
   { id: "REJECTED", label: "Rejected", empty: "No rejected applications." },
 ];
+
+const PAGE = 50;
 
 function answerText(f: MemberVerificationField): string {
   if (f.field_type === "TERMS") return f.response === true ? "Agreed to the rules" : "Did not agree";
@@ -27,13 +29,21 @@ export function JoinRequestsPage({ guild }: { guild: Guild }) {
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [total, setTotal] = useState(0);
+  // Bumped by every first-page load: a response from an older load or page (other tab, or reset by an event) is dropped.
+  const generation = useRef(0);
 
+  // Always the first page: live events and decisions reset the list, "Load more" appends older pages.
   const load = useCallback(async () => {
+    const gen = ++generation.current;
     try {
-      const list = await request<GuildJoinRequestList>("GET", `/guilds/${guild.id}/requests?status=${tab}&limit=100`);
+      const list = await request<GuildJoinRequestList>("GET", `/guilds/${guild.id}/requests?status=${tab}&limit=${PAGE}`);
+      if (gen !== generation.current) return;
       setRows(list.guild_join_requests);
+      setTotal(list.total);
       setError(null);
     } catch (e) {
+      if (gen !== generation.current) return;
       setError(errorText(e));
       setRows(current => current ?? []);
     }
@@ -49,6 +59,23 @@ export function JoinRequestsPage({ guild }: { guild: Guild }) {
     const offs = [gateway.on("GUILD_JOIN_REQUEST_CREATE", again), gateway.on("GUILD_JOIN_REQUEST_UPDATE", again), gateway.on("GUILD_JOIN_REQUEST_DELETE", again)];
     return () => offs.forEach(off => off());
   }, [guild.id, load]);
+
+  const loadMore = async () => {
+    const oldest = rows?.[rows.length - 1];
+    if (!oldest) return;
+    const gen = generation.current;
+    setBusy(true);
+    try {
+      const list = await request<GuildJoinRequestList>("GET", `/guilds/${guild.id}/requests?status=${tab}&limit=${PAGE}&before=${oldest.id}`);
+      if (gen !== generation.current) return;
+      setRows(current => [...(current ?? []), ...list.guild_join_requests.filter(r => !current?.some(c => c.id === r.id))]);
+      setTotal(list.total);
+    } catch (e) {
+      if (gen === generation.current) setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const decide = async (row: GuildJoinRequest, action: "APPROVED" | "REJECTED") => {
     setBusy(true);
@@ -129,6 +156,11 @@ export function JoinRequestsPage({ guild }: { guild: Guild }) {
             );
           })}
         </ul>
+      )}
+      {rows !== null && rows.length >= PAGE && rows.length < total && (
+        <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void loadMore()}>
+          Load more
+        </button>
       )}
     </Page>
   );
