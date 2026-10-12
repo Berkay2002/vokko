@@ -345,14 +345,31 @@ function seedMemberCrowd(ctx: { guildId: string; welcomeId: string; memberRole: 
   hideFromSuggestions(ids);
 }
 
+/**
+ * A seed user keeps its id across page reloads of the same tab (sessionStorage): the settings sync treats a new id as another
+ * account and would reset the device's theme and other synced prefs to the fresh mock's defaults on every reload.
+ */
+function stableUserId(username: string): string {
+  const key = `vokko.mock.userId.${username}`;
+  try {
+    const stored = sessionStorage.getItem(key);
+    if (stored) return stored;
+    const id = nextId();
+    sessionStorage.setItem(key, id);
+    return id;
+  } catch {
+    return nextId(); // no sessionStorage (unit tests, blocked storage)
+  }
+}
+
 /** Populate an empty database. Safe to call once at module load. */
 export function seed(): void {
   if (db.accounts.size > 0) return;
-  const sam = createAccount({ username: "sam", global_name: "Sam", status: "online", bio: "Building Vokko.", banner_color: "#5b6cf0" });
-  const carol = createAccount({ username: "carol", global_name: "Carol", status: "online", bio: "Server side of things.", banner_color: "#3ba55d" });
-  const alice = createAccount({ username: "alice", global_name: "Alice", status: "online", custom_status: "Writing docs", banner_color: "#d1495b" });
-  const bob = createAccount({ username: "bob", global_name: "Bob", status: "idle", banner_color: "#f4a259" });
-  const nova = createAccount({ username: "nova", global_name: "Nova", status: "dnd", custom_status: "Heads down", banner_color: "#8e5bd9" });
+  const sam = createAccount({ id: stableUserId("sam"), username: "sam", global_name: "Sam", status: "online", bio: "Building Vokko.", banner_color: "#5b6cf0" });
+  const carol = createAccount({ id: stableUserId("carol"), username: "carol", global_name: "Carol", status: "online", bio: "Server side of things.", banner_color: "#3ba55d" });
+  const alice = createAccount({ id: stableUserId("alice"), username: "alice", global_name: "Alice", status: "online", custom_status: "Writing docs", banner_color: "#d1495b" });
+  const bob = createAccount({ id: stableUserId("bob"), username: "bob", global_name: "Bob", status: "idle", banner_color: "#f4a259" });
+  const nova = createAccount({ id: stableUserId("nova"), username: "nova", global_name: "Nova", status: "dnd", custom_status: "Heads down", banner_color: "#8e5bd9" });
   const R = sam.user.id;
   const B = carol.user.id;
   const A = alice.user.id;
