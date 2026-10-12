@@ -114,7 +114,7 @@ describe("registry", () => {
     expect(wireValue("theme", "light")).toBe("light");
     expect(prefFromBlob("fontSize", { font_size: "big" })).toBe(DEFAULT_PREFS.fontSize);
     expect(prefFromBlob("keybinds", { keybinds: "x" })).toEqual([]);
-    expect(prefFromBlob("theme", { theme: "onyx" })).toBe("onyx");
+    expect(prefFromBlob("theme", { theme: "dark" })).toBe("dark");
     expect(prefFromBlob("theme", { theme: "a-theme-from-a-newer-build" })).toBe(DEFAULT_PREFS.theme);
     // a slider value between two stops (another device, an older build) is snapped like a stored one; ties go towards 1x
     expect(prefFromBlob("ttsRate", { [wireKey("ttsRate")]: 1.25 })).toBe(1.2);
@@ -143,14 +143,14 @@ describe("settings sync", () => {
     active = sync;
     await sync.start();
     set("theme", "light");
-    set("theme", "onyx");
+    set("theme", "dark");
     set("timeFormat", "24");
     set("outputVolume", 40); // device-local
     await vi.advanceTimersByTimeAsync(499);
     expect(server.patches).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);
-    expect(server.patches).toEqual([{ version: 0, settings: { theme: "onyx", time_format: "24" } }]);
-    expect(server.blob).toEqual({ version: 1, settings: { theme: "onyx", time_format: "24" } });
+    expect(server.patches).toEqual([{ version: 0, settings: { theme: "dark", time_format: "24" } }]);
+    expect(server.blob).toEqual({ version: 1, settings: { theme: "dark", time_format: "24" } });
     expect(sync.version).toBe(1);
     expect(sync.pending).toEqual([]);
     expect(store.getState().outputVolume).toBe(40);
@@ -158,7 +158,7 @@ describe("settings sync", () => {
     // Back to the default removes the key.
     set("timeFormat", "auto");
     await vi.advanceTimersByTimeAsync(500);
-    expect(server.blob).toEqual({ version: 2, settings: { theme: "onyx" } });
+    expect(server.blob).toEqual({ version: 2, settings: { theme: "dark" } });
   });
 
   it("applies the account blob on start (server wins) and uploads local values on a fresh account", async () => {
@@ -209,10 +209,10 @@ describe("settings sync", () => {
     // B's account has settings: they win, and A's values for the keys B never set are not uploaded either.
     const existing = setup({ dmsFromServerMembers: false, theme: "light" }, { account: "2", device: syncedDevice("1") });
     active = existing.sync;
-    existing.server.blob = { version: 2, settings: { theme: "onyx" } };
+    existing.server.blob = { version: 2, settings: { theme: "dark" } };
     await existing.sync.start();
     expect(existing.server.patches).toHaveLength(0);
-    expect(existing.store.getState().theme).toBe("onyx");
+    expect(existing.store.getState().theme).toBe("dark");
     expect(existing.store.getState().dmsFromServerMembers).toBe(true);
   });
 
@@ -234,14 +234,14 @@ describe("settings sync", () => {
     active = sync;
     await sync.start();
     // Another device saves while this one has not heard about it (no event delivered).
-    server.save({ theme: "onyx", locale: "en-GB" });
+    server.save({ theme: "dark", locale: "en-GB" });
     set("theme", "light"); // conflicts with the other device: server wins
     set("developerMode", true); // untouched elsewhere: re-applied
     await vi.advanceTimersByTimeAsync(500);
     expect(server.patches.map(p => p.version)).toEqual([0, 1]);
     expect(server.patches[1]).toEqual({ version: 1, settings: { developer_mode: true } });
-    expect(server.blob).toEqual({ version: 2, settings: { theme: "onyx", locale: "en-GB", developer_mode: true } });
-    expect(store.getState().theme).toBe("onyx");
+    expect(server.blob).toEqual({ version: 2, settings: { theme: "dark", locale: "en-GB", developer_mode: true } });
+    expect(store.getState().theme).toBe("dark");
     expect(store.getState().locale).toBe("en-GB");
     expect(store.getState().developerMode).toBe(true);
     expect(sync.pending).toEqual([]);
@@ -257,12 +257,12 @@ describe("settings sync", () => {
     set("theme", "light");
     await vi.advanceTimersByTimeAsync(500);
     // Another device changes the theme and its event arrives while our PATCH (based on version 0) is out.
-    sync.applyRemote(server.save({ theme: "onyx" }));
+    sync.applyRemote(server.save({ theme: "dark" }));
     server.patch = original;
     release();
     await vi.advanceTimersByTimeAsync(0);
-    expect(server.blob.settings).toEqual({ theme: "onyx" });
-    expect(store.getState().theme).toBe("onyx");
+    expect(server.blob.settings).toEqual({ theme: "dark" });
+    expect(store.getState().theme).toBe("dark");
     expect(sync.pending).toEqual([]);
   });
 
@@ -275,13 +275,13 @@ describe("settings sync", () => {
     server.patch = body => new Promise(resolve => (release = () => resolve(slow(body))));
     set("theme", "light");
     await vi.advanceTimersByTimeAsync(500);
-    set("theme", "onyx");
+    set("theme", "dark");
     release();
     await vi.advanceTimersByTimeAsync(0);
     expect(sync.pending).toEqual(["theme"]);
     server.patch = slow;
     await vi.advanceTimersByTimeAsync(500);
-    expect(server.blob.settings).toEqual({ theme: "onyx" });
+    expect(server.blob.settings).toEqual({ theme: "dark" });
     expect(sync.pending).toEqual([]);
   });
 });
@@ -312,7 +312,7 @@ describe("unsent changes", () => {
     const device = syncedDevice();
     device.pending.set("1", { version: 0, base: { theme: null }, values: { theme: "light" } });
     device.syncedFor = "2";
-    const { server, sync, store } = setup({ theme: "onyx" }, { device });
+    const { server, sync, store } = setup({ theme: "dark" }, { device });
     active = sync;
     await sync.start();
     expect(store.getState().theme).toBe("light");

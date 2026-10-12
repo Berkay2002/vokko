@@ -174,7 +174,7 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  theme: "dark",
+  theme: "onyx",
   fontSize: 16,
   messageDisplay: "cozy",
   density: "default",

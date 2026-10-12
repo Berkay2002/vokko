@@ -61,6 +61,12 @@ describe("theme migration", () => {
     expect(migratePrefs({ theme: "dracula" }).theme).toBe("dracula");
     expect(migratePrefs({ theme: "system" }).theme).toBe("system");
   });
+
+  it("Onyx is the default, and a stored Dark stays Dark", () => {
+    expect(DEFAULT_PREFS.theme).toBe("onyx");
+    expect(migratePrefs({}).theme).toBe("onyx");
+    expect(migratePrefs({ theme: "dark" }).theme).toBe("dark");
+  });
 });
 
 describe("camera preview default migration", () => {

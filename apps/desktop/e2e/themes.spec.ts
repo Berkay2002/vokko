@@ -38,7 +38,7 @@ test('picking Dracula survives a reload and paints the app with the Dracula pale
 test('hovering or focusing a community swatch previews it; leaving, blurring and Esc put the saved theme back', async ({ page }) => {
   const dialog = await openAppearance(page);
   const saved = await htmlClasses(page);
-  expect(saved).toContain('theme-dark');
+  expect(saved).toContain('theme-onyx');
   expect(saved).not.toContain('theme-nord');
 
   const nord = dialog.getByRole('radio', { name: 'Nord' });
@@ -55,7 +55,7 @@ test('hovering or focusing a community swatch previews it; leaving, blurring and
   await expect.poll(() => htmlClasses(page)).not.toContain('theme-nord');
   // Esc is also the modal's own close key, so the preview ends with the page whichever handler runs first
   await expect(dialog).toHaveCount(0);
-  expect(await htmlClasses(page)).toContain('theme-dark');
+  expect(await htmlClasses(page)).toContain('theme-onyx');
 });
 
 test('a light community theme sits on the light base set', async ({ page }) => {

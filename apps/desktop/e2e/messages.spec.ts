@@ -60,6 +60,7 @@ test.describe('replies', () => {
 });
 
 test('messages that mention me are highlighted, others are not', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('vokko.prefs', JSON.stringify({ theme: 'dark' }))); // the bar colour asserted below is Dark's
   await openStockTalk(page);
   await expect(row(page, 'did you see the filing')).toHaveClass(/mentioned/);
   await expect(row(page, '@everyone').first()).toHaveClass(/mentioned/);
