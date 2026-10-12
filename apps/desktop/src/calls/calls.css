@@ -140,9 +140,12 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* only the toasts catch the pointer, not the gap between them */
+  pointer-events: none;
 }
 
 .incoming-call {
+  pointer-events: auto;
   position: relative;
   display: flex;
   flex-direction: column;

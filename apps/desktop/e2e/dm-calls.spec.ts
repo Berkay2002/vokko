@@ -59,6 +59,21 @@ test('incoming call: overlay with accept, accept with video and decline; accepti
   await expect(callRow(page)).toHaveText(/Alice started a call\./);
 });
 
+test('stacked incoming calls: the gap between the toasts is not caught by the overlay', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.getByRole('navigation', { name: 'Servers sidebar' }).waitFor();
+  await ringFrom(page, 'alice');
+  await ringFrom(page, 'bob');
+  await expect(incoming(page)).toHaveCount(2);
+  const hit = await page.evaluate(() => {
+    const [a, b] = [...document.querySelectorAll('.incoming-call')].map(el => el.getBoundingClientRect());
+    if (!(b.top > a.bottom)) return null; // the toasts must be stacked with a gap, or the probe would land inside one
+    const el = document.elementFromPoint(a.x + a.width / 2, (a.bottom + b.top) / 2);
+    return el?.classList.contains('incoming-calls') ?? false;
+  });
+  expect(hit).toBe(false);
+});
+
 test('declined and hung up: the call shows as missed', async ({ page }) => {
   await openDm(page, 'alice');
   await ringFrom(page, 'alice');
