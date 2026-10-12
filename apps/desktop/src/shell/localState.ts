@@ -1,3 +1,4 @@
+import { useEffect, useReducer } from "react";
 import { create } from "zustand";
 import type { Snowflake } from "../api/types";
 import { chatLocale, formatTime } from "../chat/util";
@@ -64,7 +65,28 @@ export const isMutedAt = (state: LocalState, id: Snowflake, now = Date.now()): b
   return until === FOREVER || (until !== undefined && until > now);
 };
 
-export const useIsMuted = (id: Snowflake | null | undefined): boolean => useLocalState(s => (id ? isMutedAt(s, id) : false));
+/** Ms until the soonest timed mute among `untils` lapses (a little late, so the check sees it expired); null when none is pending. */
+export function msUntilLapse(untils: readonly (number | undefined)[], now: number): number | null {
+  const pending = untils.filter((u): u is number => u !== undefined && u !== FOREVER && u > now);
+  return pending.length === 0 ? null : Math.min(Math.min(...pending) - now + 50, 2 ** 31 - 1);
+}
+
+/** Re-renders once the soonest of `untils` lapses, so a timed mute stops showing as muted without another update. */
+export function useMuteLapse(untils: readonly (number | undefined)[]): void {
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  const delay = msUntilLapse(untils, Date.now());
+  const next = delay === null ? null : Date.now() + delay;
+  useEffect(() => {
+    if (next === null) return;
+    const timer = setTimeout(bump, Math.max(next - Date.now(), 0));
+    return () => clearTimeout(timer);
+  }, [next]);
+}
+
+export const useIsMuted = (id: Snowflake | null | undefined): boolean => {
+  useMuteLapse([id ? useLocalState.getState().mutedUntil[id] : undefined]);
+  return useLocalState(s => (id ? isMutedAt(s, id) : false));
+};
 export const useNotifyLevel = (id: Snowflake): NotifyLevel => useLocalState(s => s.notify[id] ?? "default");
 
 export function muteFor(id: Snowflake, ms: number): void {

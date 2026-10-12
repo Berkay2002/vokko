@@ -72,3 +72,20 @@ test('a thread is muted from its row menu in the popout and the sidebar; both ro
   await page.getByRole('menuitem', { name: 'Unmute Thread' }).click();
   await expect(link).not.toHaveClass(/muted/);
 });
+
+test('a timed thread mute lapses on its own: the sidebar row undims at the end time without another update', async ({ page }) => {
+  await openChannel(page, 'general');
+  const link = page.locator('.thread-row-link', { hasText: 'gateway docs' });
+  await expect(link).not.toHaveClass(/muted/);
+  await page.evaluate(() => {
+    type Th = { name?: string; member?: Record<string, unknown> };
+    const store = (window as unknown as { __vokko: { appStore: { getState(): { threads: Record<string, Th> }; setState(p: unknown): void } } }).__vokko.appStore;
+    const threads = store.getState().threads;
+    const [id, thread] = Object.entries(threads).find(([, t]) => t.name === 'gateway docs')!;
+    const end_time = new Date(Date.now() + 2000).toISOString();
+    store.setState({ threads: { ...threads, [id]: { ...thread, member: { ...thread.member, muted: true, mute_config: { end_time } } } } });
+  });
+  await expect(link).toHaveClass(/muted/);
+  await expect(link).not.toHaveClass(/muted/, { timeout: 5000 });
+  await expect(link.getByLabel('Muted')).toHaveCount(0);
+});

@@ -2,7 +2,7 @@ import { appStore, useStore } from "../api/store";
 import type { Channel, ThreadMember, UpdateThreadMemberRequest } from "../api/types";
 import { isMutedAt, withThreadMember, type NotifyLocalState } from "../notify/decide";
 import { threadMuteItem, threadNotificationItem } from "../shell/menus";
-import { useLocalState } from "../shell/localState";
+import { useLocalState, useMuteLapse } from "../shell/localState";
 import type { MenuItem } from "../ui";
 import { patchThreadMember } from "./memberSettings";
 
@@ -23,7 +23,10 @@ export function useThreadMuted(thread: Channel): boolean {
   const categoryId = useStore(s => (thread.parent_id ? s.channels[thread.parent_id]?.parent_id : null));
   const mutedUntil = useLocalState(s => s.mutedUntil);
   const notify = useLocalState(s => s.notify);
-  return isThreadMuted(thread, member, categoryId, { ...useLocalState.getState(), mutedUntil, notify });
+  const local = { ...useLocalState.getState(), mutedUntil, notify };
+  const overlaid = withThreadMember(local, thread.id, member);
+  useMuteLapse([thread.id, thread.parent_id, categoryId].map(id => (id ? overlaid.mutedUntil[id] : undefined)));
+  return isThreadMuted(thread, member, categoryId, local);
 }
 
 /** Mute Thread / Notification Settings, the same items as the panel's bell, for a thread's context menu. */
