@@ -3,7 +3,7 @@
 import type { GuildEmoji, Snowflake } from '../api/types';
 import { useStore } from '../api/store';
 import { GuildRailIcon } from './CustomEmoji';
-import { searchCustomEmoji, useUsableSections, type EmojiSection } from './store';
+import { searchCustomEmoji, useReactionSections, useUsableSections, type EmojiSection } from './store';
 
 export interface CustomPick { id: Snowflake; name: string; animated: boolean }
 export interface CustomHover { src: string; label: string }
@@ -11,9 +11,9 @@ export interface CustomHover { src: string; label: string }
 export const sectionKey = (guildId: Snowflake) => `guild:${guildId}`;
 
 /** Sections for the picker: every usable server emoji, the server being viewed first. */
-export function usePickerSections(): EmojiSection[] {
+export function usePickerSections(reactionChannelId?: Snowflake): EmojiSection[] {
   const current = useStore(s => s.route.guildId);
-  return useUsableSections(current);
+  return useReactionSections(reactionChannelId, useUsableSections(current));
 }
 
 export function CustomEmojiCell({ emoji, onPick, onHover }: { emoji: GuildEmoji; onPick: (e: CustomPick) => void; onHover: (h: CustomHover) => void }) {

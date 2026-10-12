@@ -101,7 +101,7 @@ function Pop({ anchor, id, name, src, onClose }: { anchor: DOMRect; id: Snowflak
         <b>:{name}:</b>
         <p>{known && guild
           ? <>This emoji is from <strong>{guild.name}</strong>. You can use it anywhere on Vokko.</>
-          : 'A custom emoji from a server you are not in.'}</p>
+          : known ? 'A custom server emoji. You can use it anywhere on Vokko.' : 'This emoji belongs to a server you are not in, so you can’t use it.'}</p>
       </div>
     </div>,
     document.body,

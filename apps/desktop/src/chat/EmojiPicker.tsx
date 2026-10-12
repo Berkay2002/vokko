@@ -17,13 +17,13 @@ function variant(e: EmojiEntry, tone: number): string {
   return e.skins.find(s => s.tone === tone)?.emoji ?? e.emoji;
 }
 
-export function EmojiPicker({ onPick, autoFocus = true, embedded = false }: { onPick: (e: PickedEmoji) => void; autoFocus?: boolean; /** Inside ExpressionPicker: fills its parent and drops the popout chrome. */ embedded?: boolean }) {
+export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reactionChannelId }: { onPick: (e: PickedEmoji) => void; autoFocus?: boolean; /** Reacting in this channel: hides emoji the server would refuse there. */ reactionChannelId?: string; /** Inside ExpressionPicker: fills its parent and drops the popout chrome. */ embedded?: boolean }) {
   const db = useEmojiDb();
   const [query, setQuery] = useState('');
   const [tone, setTone] = useState(getSkinTone);
   const [toneOpen, setToneOpen] = useState(false);
   const [hover, setHover] = useState<{ emoji: string; label: string; src?: string } | null>(null);
-  const sections = usePickerSections();
+  const sections = usePickerSections(reactionChannelId);
   const [active, setActive] = useState('recent');
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -103,6 +103,6 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false }: { on
   </div>;
 }
 
-export function EmojiPickerPopout({ anchor, open, onClose, onPick }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; onPick: (e: PickedEmoji) => void }) {
-  return <Popout anchor={anchor} open={open} onClose={onClose} side="top"><EmojiPicker onPick={onPick} /></Popout>;
+export function EmojiPickerPopout({ anchor, open, onClose, onPick, reactionChannelId }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; onPick: (e: PickedEmoji) => void; reactionChannelId?: string }) {
+  return <Popout anchor={anchor} open={open} onClose={onClose} side="top"><EmojiPicker onPick={onPick} reactionChannelId={reactionChannelId} /></Popout>;
 }

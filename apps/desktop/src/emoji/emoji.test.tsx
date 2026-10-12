@@ -2,8 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { isJumbo, parseMarkdown } from '../chat/markdown/parse';
 import { Markdown, type MarkdownContext } from '../chat/markdown/render';
-import type { Guild, GuildEmoji, GuildMember, User } from '../api/types';
-import { canUseEmoji, customEmojiUrl, emojiMarkup, findEmoji, searchCustomEmoji, usableSections, type EmojiState } from './store';
+import type { Channel, Guild, GuildEmoji, GuildMember, User } from '../api/types';
+import { canUseEmoji, canUseExternalEmoji, customEmojiUrl, externalEmojiBlocked, emojiMarkup, findEmoji, reactionSections, searchCustomEmoji, usableSections, type EmojiState } from './store';
 import { checkEmojiFile, nameFromFile } from './EmojiSettingsPage';
 
 const paragraph = (src: string) => {
@@ -101,8 +101,36 @@ describe('emoji store helpers', () => {
     expect(emojiMarkup(emoji('21', 'party', [], true))).toBe('<a:party:21>');
     expect(findEmoji('21', state)?.guildId).toBe('g2');
     expect(customEmojiUrl('12', state)).toBe('blob:12');
-    // the test run has no VITE_VOKKO_API, i.e. mock mode: an unknown emoji has no URL and renders as text
-    expect(customEmojiUrl('999', state)).toBeNull();
+    // the test run has no VITE_VOKKO_API, i.e. mock mode: an unknown emoji still gets an image (a placeholder), never null
+    expect(customEmojiUrl('999', state)).toMatch(/^data:image\/svg\+xml/);
+  });
+
+  it('reactions keep only the channel server unless the viewer may use external emoji there', () => {
+    const sections = usableSections(app, state, null);
+    const guildChannel = { id: 'c1', guild_id: 'g2' } as Parameters<typeof reactionSections>[1];
+    expect(reactionSections(sections, guildChannel, true)).toBe(sections);
+    expect(reactionSections(sections, guildChannel, false).map(s => s.guild.id)).toEqual(['g2']);
+    // a DM has no server to restrict to, and an unloaded channel is left to the server
+    expect(reactionSections(sections, { id: 'd1', guild_id: null } as Parameters<typeof reactionSections>[1], false)).toBe(sections);
+    expect(reactionSections(sections, undefined, false)).toBe(sections);
+  });
+
+  it('reads the external-emoji right from the channel, and from the parent for a thread', () => {
+    const g: Guild = { ...guild('g1', 'One'), owner_id: '9', roles: [{ id: 'g1', name: '@everyone', permissions: '0', position: 0 }] as Guild['roles'] };
+    const m = member([]);
+    const text = { id: 'c1', guild_id: 'g1', type: 0, permission_overwrites: [] } as unknown as Channel;
+    const thread = { id: 't1', guild_id: 'g1', type: 11, parent_id: 'c1', permission_overwrites: [] } as unknown as Channel;
+    expect(canUseExternalEmoji(g, m, text, undefined)).toBe(false);
+    expect(canUseExternalEmoji(g, m, thread, text)).toBe(false);
+    // parent not loaded: can't tell, keep everything
+    expect(canUseExternalEmoji(g, m, thread, undefined)).toBe(true);
+    expect(canUseExternalEmoji(undefined, m, text, undefined)).toBe(true);
+    // the pill rule: another server's emoji is blocked, the channel's own and DMs are not
+    expect(externalEmojiBlocked('g2', text, false)).toBe(true);
+    expect(externalEmojiBlocked('g1', text, false)).toBe(false);
+    expect(externalEmojiBlocked(undefined, text, false)).toBe(true);
+    expect(externalEmojiBlocked('g2', text, true)).toBe(false);
+    expect(externalEmojiBlocked('g2', { id: 'd', guild_id: null } as unknown as Channel, false)).toBe(false);
   });
 });
 

@@ -5,7 +5,8 @@ import { AnimatedImage, request, Tooltip } from './shell';
 import { useChat } from './ChatContext';
 import { emojiKey } from './messageState';
 import { EmojiPickerPopout } from './EmojiPicker';
-import { useCustomEmojiUrl } from '../emoji/store';
+import { externalEmojiBlocked, findEmoji, useCanUseExternalEmoji, useCustomEmojiUrl } from '../emoji/store';
+import { chatToast } from './toast';
 
 function emojiNode(e: ReactionEmoji, customUrl: string | null) {
   if (e.id && customUrl) return <AnimatedImage kind="emoji" className="chat-reaction-emoji" src={customUrl} alt={`:${e.name}:`} draggable={false} data-emoji-id={e.id} />;
@@ -29,6 +30,13 @@ function ReactionPill({ message, reaction }: { message: Message; reaction: React
   const fetched = useRef<number>(-1);
   const key = emojiKey(reaction.emoji);
   const customUrl = useCustomEmojiUrl();
+  const { channel, canExternal } = useCanUseExternalEmoji(message.channel_id);
+  const emojiId = reaction.emoji.id;
+  // adding a reaction the server would refuse here (removing your own is always allowed)
+  const onClick = () => {
+    if (!reaction.me && emojiId && externalEmojiBlocked(findEmoji(emojiId)?.guildId, channel, canExternal)) chatToast("You can't add emoji from other servers in this channel.");
+    else chat.actions.react(message, reaction.emoji);
+  };
 
   function load() {
     if (fetched.current === reaction.count) return;
@@ -40,7 +48,7 @@ function ReactionPill({ message, reaction }: { message: Message; reaction: React
 
   return <Tooltip content={who ?? 'Loading…'} side="top">
     <button type="button" className={`chat-reaction${reaction.me ? ' me' : ''}`} aria-pressed={reaction.me} aria-label={`${reaction.count} ${reaction.emoji.name}`}
-      onMouseEnter={load} onFocus={load} onClick={() => chat.actions.react(message, reaction.emoji)}>
+      onMouseEnter={load} onFocus={load} onClick={onClick}>
       {emojiNode(reaction.emoji, reaction.emoji.id ? customUrl(reaction.emoji.id) : null)}
       <span className="chat-reaction-count">{reaction.count}</span>
     </button>
@@ -55,6 +63,6 @@ export function Reactions({ message }: { message: Message }) {
   return <div className="chat-reactions" role="group" aria-label="Reactions">
     {message.reactions.map(r => <ReactionPill key={emojiKey(r.emoji)} message={message} reaction={r} />)}
     <button ref={anchor} type="button" className="chat-reaction chat-reaction-add" aria-label="Add Reaction" onClick={() => setOpen(true)}><SmilePlus size={16} /></button>
-    <EmojiPickerPopout anchor={anchor} open={open} onClose={() => setOpen(false)} onPick={e => { setOpen(false); chat.actions.react(message, e); }} />
+    <EmojiPickerPopout anchor={anchor} open={open} onClose={() => setOpen(false)} onPick={e => { setOpen(false); chat.actions.react(message, e); }} reactionChannelId={message.channel_id} />
   </div>;
 }

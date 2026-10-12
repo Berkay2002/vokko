@@ -108,3 +108,22 @@ test('role-restricted emoji only show up for members with the role', async ({ pa
   await composer(page).pressSequentially(':ship_');
   await expect(page.locator('.chat-autocomplete-item', { hasText: ':ship_it:' })).toBeVisible();
 });
+
+test('an emoji from a server you are not in still renders, and its popout says it is not usable', async ({ page }) => {
+  await openChannel(page, 'general');
+  const box = composer(page);
+  await box.click();
+  // an id no server of sam's has: not in the emoji store, so the mock hands out its placeholder image
+  await box.fill('<:far_away:99887766554433221>');
+  await box.press('Enter');
+  const glyph = page.locator('.chat-msg').last().locator('img.md-emoji-custom[alt=":far_away:"]');
+  await expect(glyph).toBeVisible();
+  await expect(page.locator('.chat-msg').last().locator('.md-jumbo')).toHaveCount(1);
+  await glyph.hover();
+  await expect(page.getByRole('tooltip')).toContainText(':far_away:');
+  await glyph.click();
+  const pop = page.getByRole('dialog', { name: ':far_away:' });
+  await expect(pop).toContainText('not in');
+  await expect(pop).toContainText('can’t use');
+  await expect(pop.locator('img')).toBeVisible();
+});

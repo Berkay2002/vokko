@@ -6,7 +6,8 @@ import { create } from 'zustand';
 import { gateway } from '../api/gateway';
 import { MOCK, REST_BASE } from '../api/config';
 import { useStore, type AppState } from '../api/store';
-import type { Guild, GuildEmoji, Snowflake } from '../api/types';
+import { Perm, channelPermissions, hasBit, memberLike } from '../api/permissions';
+import { isThreadType, type Channel, type Guild, type GuildEmoji, type GuildMember, type Snowflake } from '../api/types';
 
 export interface EmojiState {
   /** guild id → its emoji (server order: oldest first). */
@@ -37,6 +38,8 @@ export function installEmojiSync(): void {
 }
 installEmojiSync();
 
+const MOCK_FOREIGN_EMOJI = `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="26" fill="#7d8590"/><path d="M22 26h20M22 38h20" stroke="#fff" stroke-width="5" stroke-linecap="round"/></svg>')}`;
+
 /** The emoji with this id among the user's guilds, with its guild id. */
 export function findEmoji(id: Snowflake, state: EmojiState = emojiStore.getState()): { emoji: GuildEmoji; guildId: Snowflake } | null {
   for (const [guildId, list] of Object.entries(state.byGuild)) {
@@ -48,12 +51,12 @@ export function findEmoji(id: Snowflake, state: EmojiState = emojiStore.getState
 
 /**
  * Image URL for `<:name:id>` / a reaction. Known emoji use their own `url`; others (a guild the viewer is not in) use the public
- * `GET /emojis/{id}` route. The mock has no such route, so an unknown emoji there yields null and renders as `:name:`.
+ * `GET /emojis/{id}` route. The mock has no such route (an <img> never reaches it), so there an unknown emoji gets a plain placeholder tile.
  */
 export function customEmojiUrl(id: Snowflake, state: EmojiState = emojiStore.getState()): string | null {
   const known = findEmoji(id, state);
   if (known) return known.emoji.url;
-  return MOCK ? null : `${REST_BASE}/emojis/${id}`;
+  return MOCK ? MOCK_FOREIGN_EMOJI : `${REST_BASE}/emojis/${id}`;
 }
 
 /** Re-renders when any guild's emoji change; the resolver only changes identity then. */
@@ -99,6 +102,45 @@ export function useUsableSections(firstGuildId: Snowflake | null): EmojiSection[
   const members = useStore(s => s.members);
   const me = useStore(s => s.me);
   return useMemo(() => usableSections({ guilds, guildOrder, members, me }, { byGuild }, firstGuildId), [guilds, guildOrder, members, me, byGuild, firstGuildId]);
+}
+
+/**
+ * Reaction rule (the server's, MSG-012): another server's emoji in a guild channel needs USE_EXTERNAL_EMOJIS there, so without it only
+ * the channel's own server stays. DMs and channels the client has not loaded keep everything (the server is authoritative).
+ */
+export function reactionSections(sections: EmojiSection[], channel: Channel | undefined, canExternal: boolean): EmojiSection[] {
+  if (!channel?.guild_id || canExternal) return sections;
+  return sections.filter(s => s.guild.id === channel.guild_id);
+}
+
+/**
+ * Whether the viewer may use another server's emoji in `channel`. A thread has no overwrites of its own, so its parent's apply; anything
+ * not loaded (guild, member beyond the READY cap, a thread's parent) reads as true: the server is authoritative.
+ */
+export function canUseExternalEmoji(guild: Guild | undefined, member: GuildMember | undefined, channel: Channel | undefined, parent: Channel | undefined): boolean {
+  if (!guild || !member || !channel) return true;
+  if (isThreadType(channel.type) && !parent) return true;
+  return hasBit(channelPermissions(guild, memberLike(member), isThreadType(channel.type) ? parent : channel), Perm.USE_EXTERNAL_EMOJIS);
+}
+
+/** Picking this emoji (from `emojiGuildId`, undefined when none of your servers has it) as a new reaction in the channel would be refused. */
+export const externalEmojiBlocked = (emojiGuildId: Snowflake | undefined, channel: Channel | undefined, canExternal: boolean): boolean =>
+  !!channel?.guild_id && !canExternal && emojiGuildId !== channel.guild_id;
+
+/** The viewer's external-emoji right in a channel (true when not a guild channel or not loaded). */
+export function useCanUseExternalEmoji(channelId: Snowflake | undefined): { channel: Channel | undefined; canExternal: boolean } {
+  const channel = useStore(s => (channelId ? s.channels[channelId] ?? s.threads[channelId] : undefined));
+  const parent = useStore(s => (channel?.parent_id ? s.channels[channel.parent_id] : undefined));
+  const guild = useStore(s => (channel?.guild_id ? s.guilds[channel.guild_id] : undefined));
+  const member = useStore(s => (channel?.guild_id && s.me ? s.members[channel.guild_id]?.[s.me.id] : undefined));
+  const canExternal = useMemo(() => canUseExternalEmoji(guild, member, channel, parent), [guild, member, channel, parent]);
+  return { channel, canExternal };
+}
+
+/** Picker sections for a reaction on a message in `channelId` (undefined: not a reaction picker, sections unchanged). */
+export function useReactionSections(channelId: Snowflake | undefined, sections: EmojiSection[]): EmojiSection[] {
+  const { channel, canExternal } = useCanUseExternalEmoji(channelId);
+  return useMemo(() => reactionSections(sections, channel, canExternal), [sections, channel, canExternal]);
 }
 
 /** Case-insensitive name search over the sections: prefix matches first, then substring matches. */
