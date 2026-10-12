@@ -1,5 +1,5 @@
 // Composer drafts and upload tray, kept per channel outside React so they survive channel switches.
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import type { Attachment, Snowflake } from '../api/types';
 import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES } from '../api/limits';
 import { uploadAttachment } from './shell';
@@ -42,17 +42,23 @@ function patch(channelId: Snowflake, fn: (d: Draft) => Draft): void {
   emit(channelId);
 }
 
+/** Listen to one channel's draft (the listener set is dropped with its last listener). */
+export function subscribeDraft(channelId: Snowflake, cb: () => void): () => void {
+  let set = listeners.get(channelId);
+  if (!set) { set = new Set(); listeners.set(channelId, set); }
+  const target = set;
+  target.add(cb);
+  return () => {
+    target.delete(cb);
+    if (target.size === 0 && listeners.get(channelId) === target) listeners.delete(channelId);
+  };
+}
+
 export function useDraft(channelId: Snowflake): Draft {
-  return useSyncExternalStore(
-    cb => {
-      let set = listeners.get(channelId);
-      if (!set) { set = new Set(); listeners.set(channelId, set); }
-      const target = set;
-      target.add(cb);
-      return () => { target.delete(cb); };
-    },
-    () => drafts.get(channelId) ?? EMPTY,
-  );
+  // Stable per channel: a new subscribe function every render makes React unsubscribe and resubscribe after each commit.
+  const subscribe = useCallback((cb: () => void) => subscribeDraft(channelId, cb), [channelId]);
+  const snapshot = useCallback(() => getDraft(channelId), [channelId]);
+  return useSyncExternalStore(subscribe, snapshot);
 }
 
 export function getDraft(channelId: Snowflake): Draft { return drafts.get(channelId) ?? EMPTY; }

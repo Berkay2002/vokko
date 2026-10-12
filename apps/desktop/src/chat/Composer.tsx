@@ -23,6 +23,7 @@ import { isSpoilerName, stripSpoiler } from './util';
 import { CreatePollModal } from '../polls/CreatePollModal';
 import { ComposerInput, type ComposerField } from './composer/ComposerInput';
 import { useShortcut } from '../keyboard';
+import { useKeyToken, useKeyedState } from './keyedState';
 
 const MAX_LEN = 2000;
 // Discord client timings: POST at most every 8 s; the first one waits 1.5 s unless the previous was 16+ s ago;
@@ -62,6 +63,8 @@ interface Suggestion {
   image?: string;
   sticker?: StickerData;
   color?: string | null;
+  /** names the query is ranked against: a custom emoji's name, every shortcode of a unicode one */
+  names?: string[];
 }
 
 interface Trigger { kind: 'user' | 'channel' | 'emoji'; query: string; start: number }
@@ -111,7 +114,6 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   }, [pollGuild, pollMembers, chat.channel, chat.me.id]);
   const [expr, setExpr] = useState<ExpressionTab | null>(null);
   const [appsOpen, setAppsOpen] = useState(false);
-  const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
   const [modifying, setModifying] = useState<string | null>(null); // localId of the tray card whose "Modify Attachment" dialog is open
   const legacyInput = useLegacyChatInput(); // Settings > Accessibility > "Use legacy chat input": plain text box
@@ -151,6 +153,8 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   // ---- autocomplete ----
   const trigger = useMemo(() => (commands.active ? null : detectTrigger(text, caret)), [text, caret, commands.active]);
   const triggerKey = trigger ? `${trigger.kind}:${trigger.start}:${trigger.query}` : null;
+  // The highlight goes back to the first row when the query changes (keyed, not reset from an effect: see keyedState.ts).
+  const [selected, setSelected] = useKeyedState(useKeyToken(triggerKey), 0);
 
   const suggestions = useMemo<Suggestion[]>(() => {
     if (!trigger || dismissed === triggerKey) return [];
@@ -187,13 +191,15 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     // Settings > Chat: ":emoji: autocomplete" and "sticker autocomplete" decide what a `:` query lists.
     const custom: Suggestion[] = options.emojiAutocomplete
       ? searchCustomEmoji(emojiSections, q, 10).map(({ emoji, guild }) => ({
-        key: `x${emoji.id}`, label: `:${emoji.name}:`, hint: guild.name, insert: emojiMarkup(emoji), lead: 'emoji' as const, image: emoji.url,
+        key: `x${emoji.id}`, label: `:${emoji.name}:`, hint: guild.name, insert: emojiMarkup(emoji), lead: 'emoji' as const, image: emoji.url, names: [emoji.name],
       }))
       : [];
     const unicode: Suggestion[] = options.emojiAutocomplete && emojiDb
-      ? emojiDb.search(q, 10).map(e => ({ key: `e${e.order}`, label: `:${e.shortcodes[0] ?? e.label}:`, insert: e.emoji, lead: 'emoji' as const, emoji: e.emoji }))
+      ? emojiDb.search(q, 10).map(e => ({ key: `e${e.order}`, label: `:${e.shortcodes[0] ?? e.label}:`, insert: e.emoji, lead: 'emoji' as const, emoji: e.emoji, names: e.shortcodes.length ? e.shortcodes : [e.label] }))
       : [];
-    const out: Suggestion[] = [...custom, ...unicode].slice(0, 10);
+    // Exact names first, then prefix matches (on any shortcode), then the rest (so `:smile` leads with 😄, not :vokko_smile:); custom before unicode within a rank.
+    const rank = (s: Suggestion) => Math.min(2, ...(s.names ?? []).map(n => { const name = n.toLowerCase(); return name === q ? 0 : name.startsWith(q) ? 1 : 2; }));
+    const out: Suggestion[] = [...custom, ...unicode].map((s, i) => ({ s, i, r: rank(s) })).sort((a, b) => a.r - b.r || a.i - b.i).map(x => x.s).slice(0, 10);
     if (options.stickerAutocomplete) {
       for (const s of stickers.filter(s => s.name.toLowerCase().includes(q)).slice(0, 4)) out.push({ key: `s${s.id}`, label: s.name, hint: 'Sticker', insert: '', lead: 'sticker', sticker: s });
     }
@@ -206,8 +212,6 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     if (!options.stickerSuggestions || trigger || word.length < 2 || /\s/.test(word)) return [];
     return stickers.filter(s => s.name.toLowerCase() === word || s.tags.split(',').some(t => t.trim().toLowerCase() === word)).slice(0, 5);
   }, [options.stickerSuggestions, trigger, text, stickers]);
-
-  useEffect(() => { setSelected(0); }, [triggerKey]);
 
   const apply = useCallback((s: Suggestion) => {
     if (!trigger) return;
@@ -416,7 +420,13 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
           <span className="chat-autocomplete-label" style={s.color ? { color: s.color } : undefined}>{s.label}</span>
           {s.hint && <span className="chat-autocomplete-hint">{s.hint}</span>}
         </div>)}
-        {trigger?.kind === 'emoji' && suggestions[selected]?.emoji && <div className="chat-autocomplete-preview" aria-hidden="true"><span className="chat-autocomplete-preview-emoji">{suggestions[selected]?.emoji}</span><span>{suggestions[selected]?.label}</span></div>}
+        {trigger?.kind === 'emoji' && (() => {
+          const s = suggestions[selected];
+          if (!s || s.lead !== 'emoji') return null;
+          return <div className="chat-autocomplete-preview" aria-hidden="true">
+            <span className="chat-autocomplete-preview-emoji">{s.image ? <img src={s.image} alt="" width={32} height={32} draggable={false} /> : s.emoji}</span><span>{s.label}</span>
+          </div>;
+        })()}
       </div>}
     </div>
   </div>;

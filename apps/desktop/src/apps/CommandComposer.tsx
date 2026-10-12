@@ -5,6 +5,7 @@ import { Check, CircleAlert, Clock, LayoutGrid, Loader2, SquareSlash, X } from "
 import { appStore, useStore } from "../api/store";
 import { ApplicationCommandOptionType, type ApplicationCommand, type ApplicationCommandOption, type ApplicationCommandOptionChoice, type Gif, type InteractionDataOption, type Snowflake } from "../api/types";
 import { Popout, Tooltip } from "../ui";
+import { afterNextKey, useKeyToken, useKeyedState } from "../chat/keyedState";
 import {
   buildOptions,
   commandInsertText,
@@ -104,18 +105,16 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
   const meId = useStore(s => s.me?.id ?? null);
   const [recents, setRecents] = useState<Recents>(() => loadRecents(meId));
   useEffect(() => setRecents(loadRecents(meId)), [meId]);
-  const [selected, setSelected] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const keyNav = useRef(false);
   const railLock = useRef(0);
-  const [railActive, setRailActive] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // Typing clears them: keyed on the draft text, not reset from an effect (see keyedState.ts).
+  const textToken = useKeyToken(text);
+  const [error, setError] = useKeyedState<string | null>(textToken, null);
+  const [notice, setNotice] = useKeyedState<string | null>(textToken, null);
   const [gifs, setGifs] = useState<{ q: string; list: Gif[]; failed: boolean } | null>(null);
   const gifLatest = useRef(latestOnly());
-  /** Set when an action built-in clears the draft: that clearing must not wipe the notice or error the action reports. */
-  const skipClear = useRef(false);
   /** The GIF picked from the list: the text it put in the composer and the URL that Enter sends. */
   const gifPick = useRef<{ text: string; url: string } | null>(null);
   const channel = useStore(s => s.channels[channelId] ?? s.threads[channelId]);
@@ -214,8 +213,9 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
   }, [parsed, sections, command, choices, autocomplete, focusKey, index, isGif, gifQuery, gifs, text]);
 
   const listKey = `${parsed.active?.kind ?? ""}:${parsed.name}:${parsed.active && "query" in parsed.active ? parsed.active.query : ""}`;
-  useEffect(() => setSelected(0), [listKey]);
-  useEffect(() => setRailActive(null), [listKey]);
+  const listToken = useKeyToken(listKey);
+  const [selected, setSelected] = useKeyedState(listToken, 0);
+  const [railActive, setRailActive] = useKeyedState<string | null>(listToken, null);
   // Arrow keys keep the selected row in view (the first row also shows the header above it).
   useEffect(() => {
     if (!keyNav.current) return;
@@ -247,15 +247,6 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
     setRailActive(id);
     list.scrollTo({ top: el.offsetTop });
   }
-  // Typing clears them, and so does an emptied draft, except the clearing after an action built-in (it reports after the draft is gone).
-  useEffect(() => {
-    if (skipClear.current && text === "") {
-      skipClear.current = false;
-      return;
-    }
-    setError(null);
-    setNotice(null);
-  }, [text]);
   const open = items.length > 0 && dismissed !== listKey;
 
   function apply(item: Item): void {
@@ -373,10 +364,14 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
         setError(`Nicknames can be ${NICK_MAX} characters at most.`);
         return "blocked";
       }
-      skipClear.current = true;
       const env = { channelId, guildId };
-      const run = target.name === "nick" ? runNick(env, values).then(setNotice) : target.name === "msg" ? runMsg(env, values) : runThread(env, values);
-      run.catch((e: unknown) => setError(e instanceof Error ? e.message : "Something went wrong."));
+      // The result belongs to the empty draft this send leaves (not the command text, not a later draft): dropped once that is edited.
+      const submitted = textToken;
+      const run = target.name === "nick" ? runNick(env, values).then(n => afterNextKey(submitted, t => setNotice(n, t))) : target.name === "msg" ? runMsg(env, values) : runThread(env, values);
+      run.catch((e: unknown) => {
+        const message = e instanceof Error ? e.message : "Something went wrong.";
+        afterNextKey(submitted, t => setError(message, t));
+      });
       noteUsed(target);
       return "sent";
     }
