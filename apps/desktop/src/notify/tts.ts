@@ -60,7 +60,18 @@ export function spokenText(message: Pick<Message, "content">, ctx: SpokenContext
   return plain ? `${ctx.authorName} said ${plain}` : "";
 }
 
-const STALE_MS = 2 * 60_000;
+/** How old a message replayed after a reconnect may be and still be read aloud. */
+export const TTS_STALE_MS = 2 * 60_000;
+
+/**
+ * The replay window: only while `replaying` (right after a reconnect) is a message older than `TTS_STALE_MS` skipped.
+ * Live messages are never stale, whatever their timestamp; an unparsable timestamp is not stale either.
+ */
+export function isStaleReplay(timestamp: string, replaying: boolean, now: number): boolean {
+  const sent = Date.parse(timestamp);
+  return replaying && Number.isFinite(sent) && now - sent > TTS_STALE_MS;
+}
+
 const MAX_REMEMBERED = 200;
 const spokenIds = new Set<Snowflake>();
 
@@ -74,7 +85,6 @@ function windowFocused(): boolean {
 export function speakMessage(message: Message, replaying = false, now = Date.now()): void {
   if (message.tts !== true) return;
   const state = appStore.getState();
-  const sent = Date.parse(message.timestamp);
   const decided = shouldSpeak({
     message,
     meId: state.me?.id ?? null,
@@ -83,7 +93,7 @@ export function speakMessage(message: Message, replaying = false, now = Date.now
     focused: windowFocused(),
     playback: getPrefs().ttsPlayback,
     available: speechAvailable(),
-    stale: replaying && Number.isFinite(sent) && now - sent > STALE_MS,
+    stale: isStaleReplay(message.timestamp, replaying, now),
     spoken: spokenIds,
   });
   if (!decided) return;

@@ -22,6 +22,7 @@ import { messageStore } from "./chat/messageStore";
 import { preloadHighlighter } from "./chat/markdown";
 import { preloadSettings } from "./shell/Modals";
 import { startNotify } from "./notify";
+import { startThreadMuteMigration } from "./threads/muteMigration";
 import "./styles/tokens.css";
 import "./styles/themes.generated.css";
 import "./styles/base.css";
@@ -59,6 +60,7 @@ if (MOCK) await loadMockBackend();
 
 bootstrap();
 startNotify();
+startThreadMuteMigration(); // old per-device thread mutes move onto the server thread member, once
 void initDesktop(); // deep links + updater + tray unread dot; no-op outside the Tauri webview
 startGameDetection(); // desktop only: detected game goes out as presence
 
