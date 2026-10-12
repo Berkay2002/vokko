@@ -5,6 +5,8 @@ import { RelationshipType, type Snowflake } from "../api/types";
 import { ProfileBanner } from "../perks/ProfileBanner";
 import { resolveProfile, themeVars } from "../perks/profile";
 import { TagChip } from "../perks/TagChip";
+import { StyledName } from "../perks/NameStyles";
+import { ProfileBio } from "../perks/ProfileBio";
 import { useCustomColor } from "../ui/useCustomColor";
 import { Popout } from "../ui";
 import { InVoiceCard } from "../voice";
@@ -59,7 +61,7 @@ export function ProfileCardHost() {
           <div className="profile-body">
             <div className="profile-names">
               <div className="profile-name" style={color ? { color } : undefined}>
-                {displayName(user, member)}
+                <StyledName styles={user.display_name_styles}>{displayName(user, member)}</StyledName>
                 <TimeoutBadge until={member?.communication_disabled_until} />
               </div>
               <div className="pv-name-row">
@@ -117,7 +119,7 @@ export function ProfileCardHost() {
             {look.bio && (
               <section className="profile-section">
                 <h3>About Me</h3>
-                <p>{look.bio}</p>
+                <ProfileBio text={look.bio} />
               </section>
             )}
             {roles.length > 0 && (

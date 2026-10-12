@@ -33,8 +33,10 @@ export function chatLocale(): string {
 export function uploadErrorMessage(e: unknown, fileSize?: number): string {
   if (e instanceof ApiRequestError && (e.status === 413 || e.code === 40005)) {
     const limit = `${MAX_UPLOAD_BYTES / (1024 * 1024)} MiB`;
-    if (fileSize === undefined || fileSize > MAX_UPLOAD_BYTES) return `This file is larger than the server's limit of ${limit} per file.`;
-    return `The server refused this upload because your pending uploads are over its size quota (the per-file limit is ${limit}).`;
+    if (fileSize !== undefined && fileSize > MAX_UPLOAD_BYTES) return `This file is larger than the limit of ${limit} per file.`;
+    if (/pending uploads/i.test(e.message)) return `The server refused this upload because your pending uploads are over its size quota. Send or remove some first.`;
+    // under 500 MiB but still too large: a self-hosted server with a lower VOKKO_MAX_UPLOAD_MB
+    return `This file is larger than this server's upload limit (at most ${limit} per file).`;
   }
   return e instanceof Error ? e.message : 'Upload failed';
 }

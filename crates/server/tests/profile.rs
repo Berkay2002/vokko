@@ -324,6 +324,105 @@ async fn per_server_member_profile_round_trips() {
     assert_eq!(cleared["nick"], "Ali");
 }
 
+#[tokio::test]
+async fn nameplate_and_display_name_styles_round_trip_and_validate() {
+    let (app, owner, member, _, _) = setup().await;
+    let (_, me) = app.get("/users/@me", &owner).await;
+    assert!(is_null(&me, "nameplate") && is_null(&me, "display_name_styles"), "{me}");
+
+    let style = json!({"font_id": "serif", "effect_id": "gradient", "colors": [0xff0000, 0x0000ff]});
+    let (status, updated) = app.patch("/users/@me", &owner, json!({"nameplate": "aurora", "display_name_styles": style})).await;
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(updated["nameplate"], "aurora");
+    assert_eq!(updated["display_name_styles"], style);
+    let (_, seen) = app.get(&format!("/users/{}", user_id(&updated)), &member).await;
+    assert_eq!(seen["display_name_styles"], style);
+    assert_eq!(seen["nameplate"], "aurora");
+
+    let bad = [
+        ("nameplate", json!("Bad Id")),
+        ("display_name_styles", json!({"font_id": "serif", "effect_id": "solid", "colors": []})),
+        ("display_name_styles", json!({"font_id": "serif", "effect_id": "solid", "colors": [1, 2, 3]})),
+        ("display_name_styles", json!({"font_id": "serif", "effect_id": "solid", "colors": [0x1000000]})),
+        ("display_name_styles", json!({"font_id": "", "effect_id": "solid", "colors": [1]})),
+        ("display_name_styles", json!({"font_id": "serif", "effect_id": "NOPE!", "colors": [1]})),
+        ("display_name_styles", json!({"font_id": "serif", "colors": [1]})),
+    ];
+    for (key, value) in bad {
+        let (status, error) = app.patch("/users/@me", &owner, json!({key: value, "global_name": "Changed"})).await;
+        assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "{key}: {error}");
+    }
+    let (_, me) = app.get("/users/@me", &owner).await;
+    assert_eq!(me["nameplate"], "aurora", "rejected requests change nothing");
+    assert!(is_null(&me, "global_name"), "{me}");
+
+    // a single colour works; null clears both
+    let (_, solid) = app.patch("/users/@me", &owner, json!({"display_name_styles": {"font_id": "mono", "effect_id": "solid", "colors": [7]}})).await;
+    assert_eq!(solid["display_name_styles"]["colors"], json!([7]));
+    let (_, cleared) = app.patch("/users/@me", &owner, json!({"display_name_styles": null, "nameplate": null})).await;
+    assert!(is_null(&cleared, "display_name_styles") && is_null(&cleared, "nameplate"), "{cleared}");
+}
+
+#[tokio::test]
+async fn profile_images_take_ten_mib_animated_or_not() {
+    let (app, owner, _, channel, _) = setup().await;
+    let mut gif = b"GIF89a".to_vec();
+    gif.extend_from_slice(&[4, 0, 4, 0, 0, 0, 0, 0x3b]);
+    // the stored size is set directly: what matters is the limit check, not shipping 10 MiB through the test
+    for (name, bytes, size, ok) in [
+        ("a.gif", gif.clone(), 9 * 1024 * 1024, true),
+        ("b.gif", gif.clone(), 10 * 1024 * 1024, true),
+        ("c.gif", gif.clone(), 10 * 1024 * 1024 + 1, false),
+        ("d.png", png(), 10 * 1024 * 1024, true),
+    ] {
+        for field in ["avatar_attachment_id", "banner_attachment_id"] {
+            let attachment = upload(&app, &owner, &channel, name, "image/gif", &bytes).await;
+            let id: i64 = attachment["id"].as_str().expect("id").parse().expect("id");
+            sqlx::query("UPDATE attachments SET size = $2 WHERE id = $1").bind(id).bind(size).execute(&app.state.db).await.expect("size");
+            let (status, body) = app.patch("/users/@me", &owner, json!({field: attachment["id"]})).await;
+            assert_eq!(status == StatusCode::OK, ok, "{name} {size} {field}: {body}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn per_server_profiles_stay_in_their_server() {
+    let (app, owner, member, channel, guild) = setup().await;
+    let member_id = {
+        let (_, me) = app.patch("/users/@me", &member, json!({"bio": "global bio", "pronouns": "she/her"})).await;
+        user_id(&me)
+    };
+    // a second guild the member also belongs to
+    let (_, other) = app.post("/guilds", &owner, json!({"name": "Second guild"})).await;
+    let other_id = other["id"].as_str().expect("id").to_owned();
+    let (_, channels) = app.get(&format!("/guilds/{other_id}/channels"), &owner).await;
+    let other_channel = channels.as_array().expect("channels").iter().find(|c| c["name"] == "general").expect("general")["id"].as_str().expect("id").to_owned();
+    let (_, invite) = app.post(&format!("/channels/{other_channel}/invites"), &owner, json!({})).await;
+    app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &member, json!({})).await;
+
+    let avatar = upload(&app, &member, &channel, "here.png", "image/png", &png()).await;
+    let (status, _) = app.patch(&format!("/guilds/{guild}/members/@me"), &member, json!({"bio": "server bio", "avatar_attachment_id": avatar["id"]})).await;
+    assert_eq!(status, 200);
+
+    // the first guild has the override next to the unchanged global user
+    let (_, here) = app.get(&format!("/users/{member_id}/profile?guild_id={guild}"), &owner).await;
+    assert_eq!(here["guild_member"]["bio"], "server bio");
+    assert_eq!(here["guild_member"]["avatar"], avatar["url"]);
+    assert_eq!(here["user"]["bio"], "global bio");
+    assert!(is_null(&here["user"], "avatar"), "{here}");
+    // the second guild has none, so clients fall back to the user's own
+    let (_, there) = app.get(&format!("/users/{member_id}/profile?guild_id={other_id}"), &owner).await;
+    assert!(is_null(&there["guild_member"], "bio") && is_null(&there["guild_member"], "avatar"), "{there}");
+    assert_eq!(there["user"]["bio"], "global bio");
+    // the member list of the first guild carries the override, the second does not
+    let (_, members) = app.get(&format!("/guilds/{guild}/members"), &owner).await;
+    let listed = members.as_array().expect("members").iter().find(|m| m["user"]["id"] == member_id.as_str()).expect("member").clone();
+    assert_eq!(listed["bio"], "server bio");
+    let (_, members) = app.get(&format!("/guilds/{other_id}/members"), &owner).await;
+    let listed = members.as_array().expect("members").iter().find(|m| m["user"]["id"] == member_id.as_str()).expect("member").clone();
+    assert!(is_null(&listed, "bio"), "{listed}");
+}
+
 async fn claimed(app: &TestApp, attachment: &Value) -> Option<bool> {
     let id: i64 = attachment["id"].as_str().expect("id").parse().expect("numeric id");
     sqlx::query_scalar("SELECT claimed_at IS NOT NULL FROM attachments WHERE id = $1").bind(id).fetch_optional(&app.state.db).await.expect("claimed")
@@ -499,15 +598,48 @@ async fn an_upload_still_in_use_survives_cleanup_even_when_unclaimed() {
 async fn deleting_the_account_takes_the_widgets_and_their_images() {
     let (app, owner, member, channel, _) = setup().await;
     let image = upload(&app, &member, &channel, "tile.png", "image/png", &png()).await;
-    let (status, updated) =
-        app.patch("/users/@me", &member, json!({"widgets": {"games_i_like": [{"name": "Celeste", "image_attachment_id": image["id"]}]}})).await;
+    let style = json!({"font_id": "serif", "effect_id": "gradient", "colors": [0xff0000, 0x0000ff]});
+    let (status, updated) = app
+        .patch(
+            "/users/@me",
+            &member,
+            json!({
+                "widgets": {"games_i_like": [{"name": "Celeste", "image_attachment_id": image["id"]}]},
+                "nameplate": "aurora",
+                "display_name_styles": style,
+            }),
+        )
+        .await;
     assert_eq!(status, 200, "{updated}");
     assert_eq!(claimed(&app, &image).await, Some(true));
+    // the owner shares a guild with the member, so the USER_UPDATE for the anonymised account reaches this session
+    let (_, me) = app.get("/users/@me", &owner).await;
+    let owner_id: i64 = user_id(&me).parse().expect("owner id");
+    let (link, mut receiver) = vokko_server::hub::link(64);
+    app.state.hub.open_session(owner_id, "profile-delete-watch".into(), Vec::new(), link, json!({}));
     let (status, _) = app.post("/users/@me/delete", &member, json!({"password": "correct horse battery"})).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(claimed(&app, &image).await, None, "the upload went with the account");
     let (_, gone) = app.get(&format!("/users/{}", user_id(&updated)), &owner).await;
     assert!(is_null(&gone, "widgets"), "{gone}");
+    assert!(is_null(&gone, "nameplate") && is_null(&gone, "display_name_styles"), "{gone}");
+    let member_id: i64 = user_id(&updated).parse().expect("member id");
+    let row: (Option<String>, Option<String>, Option<String>, Option<Vec<i32>>) =
+        sqlx::query_as("SELECT nameplate, name_font, name_effect, name_colors FROM users WHERE id = $1")
+            .bind(member_id)
+            .fetch_one(&app.state.db)
+            .await
+            .expect("row");
+    assert_eq!(row, (None, None, None, None), "the cosmetics went with the account");
+    let mut seen = 0;
+    while let Ok(frame) = receiver.queue.try_recv() {
+        let frame: Value = serde_json::from_str(&frame).expect("frame");
+        if frame["t"] == "USER_UPDATE" && frame["d"]["id"] == updated["id"] {
+            seen += 1;
+            assert!(is_null(&frame["d"], "nameplate") && is_null(&frame["d"], "display_name_styles"), "{frame}");
+        }
+    }
+    assert!(seen > 0, "the anonymised account was broadcast");
 }
 
 #[tokio::test]

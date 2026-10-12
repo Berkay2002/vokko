@@ -1,9 +1,9 @@
 // Profile perks of docs/api.md ("Profile perks"): banner, pronouns, theme colours, avatar decoration, profile effect, server tag,
-// per-server member profiles and the guild tag/theme blocks. Validation mirrors what the server will enforce; ids are checked
-// against the open asset set the client ships (src/perks/catalog.ts).
+// per-server member profiles and the guild tag/theme blocks. Validation mirrors what the server enforces; asset ids are checked
+// for their format only (1-64 of a-z 0-9 _ -), so ids the client does not ship (src/perks/catalog.ts) are stored and ignored.
 
-import { BADGES, BIO_MAX, PRONOUNS_MAX, TAG_RE, decorationById, effectById, isThemeColors } from "../../perks/catalog";
-import type { Attachment, GuildMember, GuildTag, GuildTheme, ProfileWidgets, User } from "../types";
+import { BADGES, BIO_MAX, PRONOUNS_MAX, TAG_RE, isThemeColors } from "../../perks/catalog";
+import type { Attachment, DisplayNameStyles, GuildMember, GuildTag, GuildTheme, ProfileWidgets, User } from "../types";
 import { db } from "./db";
 import type { MockGuild } from "./db";
 import { fail } from "./ops";
@@ -28,6 +28,32 @@ const colors = (value: unknown, field: string): [number, number] | null => {
 };
 
 const attachmentId = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
+
+const ASSET_ID = /^[a-z0-9_-]{1,64}$/;
+
+/** An id into the client's open asset set, checked as the server does: trimmed, 1-64 of `a-z 0-9 _ -`; empty clears. Unknown ids are kept. */
+function assetId(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return invalid(field, "BASE_TYPE_STRING", "Not a string.");
+  const id = value.trim();
+  if (id === "") return null;
+  if (!ASSET_ID.test(id)) invalid(field, "INVALID_ASSET_ID", "Must be 1-64 characters: lowercase letters, numbers, '_' and '-'.");
+  return id;
+}
+
+const isRgb = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= 0xffffff;
+
+function parseNameStyle(value: unknown): DisplayNameStyles | null {
+  if (value === null) return null;
+  const v = value as Partial<DisplayNameStyles> | undefined;
+  if (typeof v !== "object" || v === null) return invalid("display_name_styles", "BASE_TYPE_OBJECT", "Not an object.");
+  const font = assetId(v.font_id, "display_name_styles") ?? invalid("display_name_styles", "INVALID_FONT", "A font is required.");
+  const effect = assetId(v.effect_id, "display_name_styles") ?? invalid("display_name_styles", "INVALID_EFFECT", "An effect is required.");
+  if (!Array.isArray(v.colors) || v.colors.length < 1 || v.colors.length > 2 || !v.colors.every(isRgb)) {
+    invalid("display_name_styles", "COLOR_TYPE_CONVERT", "Must have one or two RGB colours.");
+  }
+  return { font_id: font, effect_id: effect, colors: [...(v.colors as number[])] };
+}
 
 export const WIDGET_NAME_MAX = 64;
 export const WIDGET_REASON_MAX = 190;
@@ -127,15 +153,11 @@ export function applyUserPerks(user: User, body: Record<string, unknown>, resolv
   if ("pronouns" in body) user.pronouns = text(body.pronouns, "pronouns", PRONOUNS_MAX);
   if ("theme_colors" in body) user.theme_colors = colors(body.theme_colors, "theme_colors");
   if ("avatar_decoration" in body) {
-    const id = body.avatar_decoration;
-    if (id !== null && !(typeof id === "string" && decorationById(id))) invalid("avatar_decoration", "INVALID_DECORATION", "Unknown avatar decoration.");
-    user.avatar_decoration = id as string | null;
+    user.avatar_decoration = assetId(body.avatar_decoration, "avatar_decoration");
   }
-  if ("profile_effect" in body) {
-    const id = body.profile_effect;
-    if (id !== null && !(typeof id === "string" && effectById(id))) invalid("profile_effect", "INVALID_EFFECT", "Unknown profile effect.");
-    user.profile_effect = id as string | null;
-  }
+  if ("profile_effect" in body) user.profile_effect = assetId(body.profile_effect, "profile_effect");
+  if ("nameplate" in body) user.nameplate = assetId(body.nameplate, "nameplate");
+  if ("display_name_styles" in body) user.display_name_styles = parseNameStyle(body.display_name_styles);
   if ("primary_guild_id" in body) {
     const id = body.primary_guild_id;
     if (id === null) {

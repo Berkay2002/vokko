@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { Clock, Dog, Flag, Hand, Lightbulb, Pizza, Plane, Search, Smile, Trophy, Hash, X } from 'lucide-react';
 import { Popout, scrollBehavior } from './shell';
+import { SuperReactToggle } from '../perks/SuperReactions';
 import { getRecentEmoji, getSkinTone, pushRecentEmoji, setSkinTone, useEmojiDb, type EmojiEntry } from './emojiData';
 import { CustomEmojiRail, CustomEmojiSections, CustomSearchResults, hasCustomResults, usePickerSections, type CustomHover, type CustomPick } from '../emoji/PickerSections';
 
@@ -17,7 +18,17 @@ function variant(e: EmojiEntry, tone: number): string {
   return e.skins.find(s => s.tone === tone)?.emoji ?? e.emoji;
 }
 
-export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reactionChannelId }: { onPick: (e: PickedEmoji) => void; autoFocus?: boolean; /** Reacting in this channel: hides emoji the server would refuse there. */ reactionChannelId?: string; /** Inside ExpressionPicker: fills its parent and drops the popout chrome. */ embedded?: boolean }) {
+export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reactionChannelId, superReactions = false }: {
+  /** `burst` is true when the Super Reaction switch is on (only with `superReactions`). */
+  onPick: (e: PickedEmoji, burst: boolean) => void;
+  autoFocus?: boolean;
+  /** Reacting in this channel: hides emoji the server would refuse there. */
+  reactionChannelId?: string;
+  /** Inside ExpressionPicker: fills its parent and drops the popout chrome. */
+  embedded?: boolean;
+  /** Reaction pickers: show the Super Reaction switch. */
+  superReactions?: boolean;
+}) {
   const db = useEmojiDb();
   const [query, setQuery] = useState('');
   const [tone, setTone] = useState(getSkinTone);
@@ -25,6 +36,7 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
   const [hover, setHover] = useState<{ emoji: string; label: string; src?: string } | null>(null);
   const sections = usePickerSections(reactionChannelId);
   const [active, setActive] = useState('recent');
+  const [burst, setBurst] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const recent = useMemo(() => getRecentEmoji(), []);
@@ -33,12 +45,12 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
 
   const results = useMemo(() => (db && query.trim() ? db.search(query, 120) : null), [db, query]);
 
-  const pickCustom = (e: CustomPick) => onPick(e);
+  const pickCustom = (e: CustomPick) => onPick(e, superReactions && burst);
   const hoverCustom = (h: CustomHover) => setHover({ emoji: '', label: h.label, src: h.src });
 
   function pick(emoji: string) {
     pushRecentEmoji(emoji);
-    onPick({ id: null, name: emoji });
+    onPick({ id: null, name: emoji }, superReactions && burst);
   }
 
   function scrollTo(id: string) {
@@ -66,6 +78,7 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
         <input ref={input} value={query} onChange={e => setQuery(e.target.value)} placeholder="Find the perfect emoji" aria-label="Search emoji" spellCheck={false} />
         {query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={16} /></button> : <Search size={16} aria-hidden="true" />}
       </div>
+      {superReactions && <SuperReactToggle on={burst} onChange={setBurst} />}
     </div>
     <div className="chat-emoji-body">
       <nav className="chat-emoji-cats" aria-label="Categories">
@@ -103,6 +116,6 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
   </div>;
 }
 
-export function EmojiPickerPopout({ anchor, open, onClose, onPick, reactionChannelId }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; onPick: (e: PickedEmoji) => void; reactionChannelId?: string }) {
-  return <Popout anchor={anchor} open={open} onClose={onClose} side="top"><EmojiPicker onPick={onPick} reactionChannelId={reactionChannelId} /></Popout>;
+export function EmojiPickerPopout({ anchor, open, onClose, onPick, reactionChannelId, superReactions }: { anchor: RefObject<HTMLElement | null>; open: boolean; onClose: () => void; onPick: (e: PickedEmoji, burst: boolean) => void; reactionChannelId?: string; superReactions?: boolean }) {
+  return <Popout anchor={anchor} open={open} onClose={onClose} side="top"><EmojiPicker onPick={onPick} reactionChannelId={reactionChannelId} superReactions={superReactions} /></Popout>;
 }

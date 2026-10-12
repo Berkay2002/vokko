@@ -149,6 +149,29 @@ async fn login_send_and_gateway_receive() {
 }
 
 #[tokio::test]
+async fn reaction_events_carry_the_type() {
+    let w = world().await;
+    let mut alice = Client::connect(&w.address).await;
+    alice.identify(&w.member).await;
+    let (_, sent) = w.app.post(&format!("/channels/{}/messages", w.channel), &w.owner, json!({"content": "react"})).await;
+    let base = format!("/channels/{}/messages/{}/reactions/%F0%9F%8E%89/@me", w.channel, sent["id"].as_str().expect("id"));
+
+    assert_eq!(w.app.put(&format!("{base}?type=1"), &w.owner).await.0, 204);
+    let add = alice.wait_for("MESSAGE_REACTION_ADD").await;
+    assert_eq!((add["type"].clone(), add["burst"].clone(), add["emoji"]["name"].clone()), (json!(1), json!(true), json!("🎉")));
+    assert_eq!(w.app.put(&base, &w.owner).await.0, 204);
+    let add = alice.wait_for("MESSAGE_REACTION_ADD").await;
+    assert_eq!((add["type"].clone(), add["burst"].clone()), (json!(0), json!(false)));
+
+    assert_eq!(w.app.delete(&format!("{base}?type=1"), &w.owner).await.0, 204);
+    let removed = alice.wait_for("MESSAGE_REACTION_REMOVE").await;
+    assert_eq!((removed["type"].clone(), removed["burst"].clone()), (json!(1), json!(true)));
+    // deleting a burst that is not there sends nothing
+    assert_eq!(w.app.delete(&format!("{base}?type=1"), &w.owner).await.0, 204);
+    assert!(alice.silent_for("MESSAGE_REACTION_REMOVE", Duration::from_millis(300)).await);
+}
+
+#[tokio::test]
 async fn resume_replays_missed_events() {
     let w = world().await;
     let mut alice = Client::connect(&w.address).await;

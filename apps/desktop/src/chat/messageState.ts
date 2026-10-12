@@ -1,6 +1,6 @@
 // Pure state transitions for one channel's message window. No React, no I/O: unit-tested in messageState.test.ts.
 import { MessageType } from '../api/types';
-import type { CreateMessageRequest, Message, ReactionEmoji, Snowflake, User } from '../api/types';
+import type { CreateMessageRequest, Message, Reaction, ReactionEmoji, Snowflake, User } from '../api/types';
 import { compareIds } from './util';
 
 export interface PendingMessage {
@@ -114,8 +114,21 @@ export function appendPage(s: ChannelState, page: Message[], limit = PAGE_SIZE):
   };
 }
 
+/** A reaction from a server without super reactions (no `count_details` / `me_burst`) reads as normal reactions only. */
+export function normalizeReaction(r: Reaction): Reaction {
+  if (r.count_details && r.burst_colors && typeof r.me_burst === 'boolean') return r;
+  return { ...r, count_details: r.count_details ?? { normal: r.count, burst: 0 }, burst_colors: r.burst_colors ?? [], me_burst: r.me_burst ?? false };
+}
+
+/** Fills in what an older server leaves out, where messages enter the store (pages, gateway, REST responses). */
+export function normalizeMessage(m: Message): Message {
+  const reactions = m.reactions ?? [];
+  return reactions.every(r => r === normalizeReaction(r)) && m.reactions ? m : { ...m, reactions: reactions.map(normalizeReaction) };
+}
+
 /** Insert or update a server message (REST response or MESSAGE_CREATE/UPDATE). Idempotent; resolves pending sends by nonce. */
-export function upsertMessage(s: ChannelState, m: Message): ChannelState {
+export function upsertMessage(s: ChannelState, raw: Message): ChannelState {
+  const m = normalizeMessage(raw);
   const pending = m.nonce ? s.pending.filter(p => p.nonce !== m.nonce) : s.pending;
   const i = indexOfId(s.messages, m.id);
   if (i >= 0) {
@@ -134,7 +147,8 @@ export function upsertMessage(s: ChannelState, m: Message): ChannelState {
 }
 
 /** Apply an update only if the message is currently loaded (never inserts). */
-export function updateIfPresent(s: ChannelState, m: Message): ChannelState {
+export function updateIfPresent(s: ChannelState, raw: Message): ChannelState {
+  const m = normalizeMessage(raw);
   const i = indexOfId(s.messages, m.id);
   if (i < 0) return s;
   const messages = s.messages.slice();
@@ -157,25 +171,35 @@ export function deleteMessage(s: ChannelState, id: Snowflake): ChannelState {
 
 export const emojiKey = (e: ReactionEmoji): string => (e.id ? `${e.name}:${e.id}` : e.name);
 
-export function applyReaction(s: ChannelState, messageId: Snowflake, emoji: ReactionEmoji, byMe: boolean, add: boolean): ChannelState {
+/** Adds or removes one normal or burst (super) reaction; normal and burst reactions of an emoji share one `Reaction` entry. */
+export function applyReaction(s: ChannelState, messageId: Snowflake, emoji: ReactionEmoji, byMe: boolean, add: boolean, burst = false): ChannelState {
   const i = indexOfId(s.messages, messageId);
   if (i < 0) return s;
   const m = s.messages[i]!;
   const key = emojiKey(emoji);
   const ri = m.reactions.findIndex(r => emojiKey(r.emoji) === key);
+  const kind = burst ? 'burst' : 'normal';
+  const mine = (r: Reaction): boolean => (burst ? r.me_burst : r.me);
   let reactions = m.reactions;
   if (add) {
-    if (ri < 0) reactions = [...m.reactions, { emoji, count: 1, me: byMe }];
-    else {
+    if (ri < 0) {
+      const fresh: Reaction = { emoji, count: 1, count_details: { normal: burst ? 0 : 1, burst: burst ? 1 : 0 }, burst_colors: [], me: byMe && !burst, me_burst: byMe && burst };
+      reactions = [...m.reactions, fresh];
+    } else {
       const r = m.reactions[ri]!;
-      if (byMe && r.me) return s; // optimistic toggle already applied; the gateway echo is a no-op
-      reactions = m.reactions.map((x, k) => (k === ri ? { ...x, count: x.count + 1, me: x.me || byMe } : x));
+      if (byMe && mine(r)) return s; // optimistic toggle already applied; the gateway echo is a no-op
+      const next: Reaction = { ...r, count: r.count + 1, count_details: { ...r.count_details, [kind]: r.count_details[kind] + 1 } };
+      if (byMe) { if (burst) next.me_burst = true; else next.me = true; }
+      reactions = m.reactions.map((x, k) => (k === ri ? next : x));
     }
   } else {
     if (ri < 0) return s;
     const r = m.reactions[ri]!;
-    if (byMe && !r.me) return s;
-    reactions = r.count <= 1 ? m.reactions.filter((_, k) => k !== ri) : m.reactions.map((x, k) => (k === ri ? { ...x, count: x.count - 1, me: byMe ? false : x.me } : x));
+    if (byMe && !mine(r)) return s;
+    if (r.count_details[kind] <= 0) return s;
+    const next: Reaction = { ...r, count: r.count - 1, count_details: { ...r.count_details, [kind]: r.count_details[kind] - 1 } };
+    if (byMe) { if (burst) next.me_burst = false; else next.me = false; }
+    reactions = next.count <= 0 ? m.reactions.filter((_, k) => k !== ri) : m.reactions.map((x, k) => (k === ri ? next : x));
   }
   const messages = s.messages.slice();
   messages[i] = { ...m, reactions };

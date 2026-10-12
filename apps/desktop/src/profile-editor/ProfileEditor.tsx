@@ -15,6 +15,7 @@ import { LeftColumn, useEditorGuilds } from "./LeftColumn";
 import { RightColumn } from "./RightColumn";
 import { errorText, useUploadChannel } from "./upload";
 import "./tiles";
+import "../perks/editorTiles";
 import "./profile-editor.css";
 
 /** Exit animation length (ms); keep in step with `.pe-layer.closing` in profile-editor.css. */

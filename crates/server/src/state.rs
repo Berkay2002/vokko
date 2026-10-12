@@ -31,6 +31,8 @@ pub struct Inner {
     pub entrances: Plays,
     /// Attachment bytes (`storage::StorageConfig`).
     pub storage: Arc<dyn Storage>,
+    /// In-flight uploads per user (`media::MAX_CONCURRENT_UPLOADS`).
+    pub uploads: crate::media::UploadSlots,
 }
 
 #[derive(Clone)]
@@ -70,6 +72,7 @@ impl AppState {
             storage,
             soundboard: Plays::default(),
             entrances: Plays::default(),
+            uploads: Default::default(),
         }))
     }
 
@@ -81,5 +84,10 @@ impl AppState {
     /// Where the local backend keeps files (unused by the other backends).
     pub fn attachments_dir(&self) -> PathBuf {
         self.config.data_dir.join("attachments")
+    }
+
+    /// Where uploads are staged while they stream in, before they move to `storage` (every backend).
+    pub fn incoming_dir(&self) -> PathBuf {
+        self.config.data_dir.join("incoming")
     }
 }

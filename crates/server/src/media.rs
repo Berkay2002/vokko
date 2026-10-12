@@ -1,10 +1,50 @@
 //! Attachment keys and file cleanup (bytes live in `storage`), content-type sniffing and image dimensions.
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::auth::random_hex;
 use crate::config::{CLEANUP_INTERVAL, PENDING_MAX_AGE};
 use crate::state::AppState;
+
+/// Uploads one user may stream at once: each can stage up to the per-file limit on disk before the quota re-check.
+pub const MAX_CONCURRENT_UPLOADS: usize = 3;
+
+/// In-flight uploads per user.
+#[derive(Default)]
+pub struct UploadSlots(Arc<Mutex<HashMap<i64, usize>>>);
+
+/// Held for the length of one upload; dropping it frees the slot.
+pub struct UploadSlot {
+    slots: Arc<Mutex<HashMap<i64, usize>>>,
+    user_id: i64,
+}
+
+impl UploadSlots {
+    /// `None` when the user already has `MAX_CONCURRENT_UPLOADS` uploads in flight.
+    pub fn acquire(&self, user_id: i64) -> Option<UploadSlot> {
+        let mut map = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let count = map.entry(user_id).or_insert(0);
+        if *count >= MAX_CONCURRENT_UPLOADS {
+            return None;
+        }
+        *count += 1;
+        Some(UploadSlot { slots: self.0.clone(), user_id })
+    }
+}
+
+impl Drop for UploadSlot {
+    fn drop(&mut self) {
+        let mut map = self.slots.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(count) = map.get_mut(&self.user_id) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                map.remove(&self.user_id);
+            }
+        }
+    }
+}
 
 /// 128-bit random download key (32 hex chars) from the CSPRNG.
 pub fn new_key() -> String {
@@ -248,6 +288,17 @@ pub fn encode_filename(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upload_slots_cap_each_user_and_free_on_drop() {
+        let slots = UploadSlots::default();
+        let held: Vec<UploadSlot> = (0..MAX_CONCURRENT_UPLOADS).map(|_| slots.acquire(1).expect("slot")).collect();
+        assert!(slots.acquire(1).is_none(), "a fourth upload waits");
+        assert!(slots.acquire(2).is_some(), "other users are not affected");
+        drop(held);
+        assert!(slots.acquire(1).is_some());
+        assert!(slots.0.lock().expect("lock").is_empty(), "freed entries are removed");
+    }
 
     #[test]
     fn png_gif_dimensions() {

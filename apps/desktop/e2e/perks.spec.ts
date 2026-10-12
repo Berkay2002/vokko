@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { message, openDm, openStockTalk, send } from './helpers';
 
 // Profile perks (free in Vokko): banner colour, pronouns, theme colours, avatar decoration, profile effect, per-server profile.
 
@@ -59,4 +60,93 @@ test('a per-server profile overrides the global fields only in that server', asy
   });
   expect(stored.global).toBeNull();
   expect(stored.perServer).toContain('server/pronouns');
+});
+
+async function pickReaction(page: import('@playwright/test').Page, target: import('@playwright/test').Locator, query: string, burst: boolean) {
+  await target.hover();
+  await target.getByRole('button', { name: 'Add Reaction' }).first().click();
+  if (burst) {
+    await page.getByRole('button', { name: 'Super Reaction' }).click();
+    await expect(page.getByRole('button', { name: 'Super Reaction' })).toHaveAttribute('aria-pressed', 'true');
+  }
+  await page.getByRole('textbox', { name: 'Search emoji' }).fill(query);
+  await page.locator('.chat-emoji-cell').first().click();
+}
+
+test('super react from the picker: glowing burst pill, particles, split tooltip', async ({ page }) => {
+  await openDm(page);
+  await send(page, 'super react to this');
+  const target = message(page, 'super react to this');
+  await expect(target).not.toHaveClass(/pending/);
+
+  await pickReaction(page, target, 'rocket', true);
+  const burst = target.locator('.chat-reaction.burst.me');
+  await expect(burst).toHaveCount(1);
+  await expect(burst).toHaveAttribute('aria-pressed', 'true');
+  // glow in the emoji's own colours, and a short particle burst that cleans up after itself
+  await expect(burst).toHaveAttribute('style', /--burst-a/);
+  await expect(burst.getByTestId('burst-particles')).toHaveCount(1);
+  await expect(burst.getByTestId('burst-particles')).toHaveCount(0, { timeout: 3000 });
+
+  // a normal reaction with the same emoji is a separate pill; the tooltip splits super and normal reactors
+  await pickReaction(page, target, 'rocket', false);
+  await expect(target.locator('.chat-reaction:not(.burst).me')).toHaveCount(1);
+  await burst.hover();
+  const tip = page.locator('.reactors-split');
+  await expect(tip).toContainText('Super Reactions');
+  await expect(tip).toContainText('super reacted with 🚀');
+  await expect(tip).toContainText('reacted with 🚀');
+
+  // clicking the burst pill takes only the super reaction back
+  await burst.click();
+  await expect(target.locator('.chat-reaction.burst')).toHaveCount(0);
+  await expect(target.locator('.chat-reaction.me')).toHaveCount(1);
+});
+
+test('reduced motion: no particles on a super reaction', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await openDm(page);
+  await send(page, 'calm super reaction');
+  const target = message(page, 'calm super reaction');
+  await expect(target).not.toHaveClass(/pending/);
+  await pickReaction(page, target, 'rocket', true);
+  await expect(target.locator('.chat-reaction.burst.me')).toHaveCount(1);
+  await page.waitForTimeout(100);
+  await expect(target.getByTestId('burst-particles')).toHaveCount(0);
+});
+
+test('decoration, effect, nameplate and name style show in the popout and the member list', async ({ page }) => {
+  await openStockTalk(page);
+  await page.getByRole('button', { name: 'User Settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'User Settings' });
+  await dialog.locator('.sm-profile-edit').click();
+  await dialog.getByRole('radiogroup', { name: 'Avatar decoration' }).getByRole('radio', { name: 'Halo' }).click();
+  await dialog.getByRole('radiogroup', { name: 'Profile effect' }).getByRole('radio', { name: 'Snowfall' }).click();
+  await dialog.getByRole('radiogroup', { name: 'Nameplate' }).getByRole('radio', { name: 'Aurora' }).click();
+  await dialog.getByRole('radiogroup', { name: 'Display name font' }).getByRole('radio', { name: 'Serif' }).click();
+  await dialog.getByRole('radiogroup', { name: 'Display name effect' }).getByRole('radio', { name: 'Gradient' }).click();
+  await expect(dialog.getByTestId('nameplate-preview').locator('.nameplate')).toHaveCount(1);
+  await dialog.getByRole('textbox', { name: 'About me' }).fill('I like **bold** things');
+  await dialog.getByRole('button', { name: 'Save Changes' }).click();
+  await expect(dialog.getByRole('alert').filter({ hasText: 'unsaved changes' })).toHaveCount(0);
+
+  const me = await page.evaluate(() => (window as unknown as { __vokko: { appStore: { getState(): { me: Record<string, unknown> } } } }).__vokko.appStore.getState().me);
+  expect(me.nameplate).toBe('aurora');
+  expect(me.display_name_styles).toMatchObject({ font_id: 'serif', effect_id: 'gradient' });
+  expect((me.display_name_styles as { colors: number[] }).colors).toHaveLength(2);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  const row = page.locator('.member-row', { hasText: /sam/i }).first();
+  await expect(row.locator('.nameplate[data-nameplate="aurora"]')).toHaveCount(1);
+  await expect(row.locator('.avatar-deco[data-decoration="halo"]')).toHaveCount(1);
+  await expect(row.locator('.styled-name.dn-gradient')).toHaveCount(1);
+
+  await row.click();
+  const card = page.locator('.profile-card').last();
+  await expect(card.locator('.avatar-deco[data-decoration="halo"]')).toHaveCount(1);
+  await expect(card.locator('.profile-effect[data-effect="snowfall"]')).toHaveCount(1);
+  await expect(card.locator('.styled-name.dn-gradient')).toHaveCount(1);
+  // the bio is Markdown, rendered as elements (not HTML from the text)
+  await expect(card.locator('.pv-bio strong')).toHaveText('bold');
 });

@@ -27,7 +27,7 @@ pub struct Config {
     /// `None` disables REST rate limiting.
     pub rate_limit: Option<RateLimit>,
     pub unfurl: UnfurlConfig,
-    /// Largest accepted attachment, in bytes (`VOKKO_MAX_UPLOAD_MB`, default 25 MiB).
+    /// Largest accepted attachment, in bytes (`VOKKO_MAX_UPLOAD_MB`, default and ceiling 500 MiB, Nitro's limit).
     pub max_upload_bytes: usize,
     /// Frames queued per gateway connection before it is dropped as a slow reader (must exceed `replay_capacity`).
     pub outgoing_queue: usize,
@@ -122,9 +122,9 @@ pub fn parse_connect_timeout(value: &str) -> Result<Duration, String> {
 }
 /// Default of `VOKKO_DB_MAX_CONNECTIONS`.
 pub const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
-/// Default of `VOKKO_MAX_UPLOAD_MB`.
-pub const DEFAULT_MAX_UPLOAD_MB: usize = 25;
-/// Total size of one user's pending (not attached, not avatar/icon) uploads.
+/// Default and ceiling of `VOKKO_MAX_UPLOAD_MB`: Discord Nitro's per-file limit, free for everyone. A self-host may set it lower.
+pub const DEFAULT_MAX_UPLOAD_MB: usize = 500;
+/// Total size of one user's pending (not attached, not avatar/icon) uploads, raised to the per-file limit when that is larger.
 pub const MAX_PENDING_BYTES_PER_USER: i64 = 100 * 1024 * 1024;
 /// Pending uploads older than this are deleted by the cleanup task, which runs every `CLEANUP_INTERVAL`.
 pub const PENDING_MAX_AGE: Duration = Duration::from_secs(60 * 60);
@@ -217,11 +217,7 @@ impl Config {
         // `VOKKO_UNFURL=off` disables link previews (no outbound requests at all).
         config.unfurl.enabled = !env.get("VOKKO_UNFURL").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "off" | "0" | "false" | "no"));
         if let Some(value) = env.get("VOKKO_MAX_UPLOAD_MB") {
-            let megabytes: usize = value.trim().parse().map_err(|_| format!("VOKKO_MAX_UPLOAD_MB must be a whole number of MiB, got {value}"))?;
-            if megabytes == 0 {
-                return Err("VOKKO_MAX_UPLOAD_MB must be at least 1".to_owned());
-            }
-            config.max_upload_bytes = megabytes.saturating_mul(1024 * 1024);
+            config.max_upload_bytes = parse_max_upload_mb(&value)?;
         }
         // `VOKKO_TRUST_PROXY=on` behind a reverse proxy that appends the client address to X-Forwarded-For.
         config.trust_proxy = env.get("VOKKO_TRUST_PROXY").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "on" | "1" | "true" | "yes"));
@@ -331,9 +327,28 @@ fn parse_cors_origins(value: &str) -> Result<Option<Vec<String>>, String> {
     Ok(if origins.is_empty() { None } else { Some(origins) })
 }
 
+/// `VOKKO_MAX_UPLOAD_MB` in bytes: a whole number of MiB, at least 1; values above the Nitro limit (500) are lowered to it.
+fn parse_max_upload_mb(value: &str) -> Result<usize, String> {
+    let megabytes: usize = value.trim().parse().map_err(|_| format!("VOKKO_MAX_UPLOAD_MB must be a whole number of MiB, got {value}"))?;
+    if megabytes == 0 {
+        return Err("VOKKO_MAX_UPLOAD_MB must be at least 1".to_owned());
+    }
+    Ok(megabytes.min(DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_cors_origins;
+    use super::{parse_cors_origins, parse_max_upload_mb};
+
+    #[test]
+    fn upload_limit_is_the_lower_of_the_setting_and_the_nitro_limit() {
+        assert_eq!(super::Config::new(String::new(), String::new(), "d".into(), String::new()).max_upload_bytes, 500 * 1024 * 1024);
+        assert_eq!(parse_max_upload_mb(" 25 "), Ok(25 * 1024 * 1024));
+        assert_eq!(parse_max_upload_mb("500"), Ok(500 * 1024 * 1024));
+        assert_eq!(parse_max_upload_mb("4096"), Ok(500 * 1024 * 1024));
+        assert!(parse_max_upload_mb("0").is_err());
+        assert!(parse_max_upload_mb("1.5").is_err());
+    }
 
     #[test]
     fn voice_connect_timeout_defaults_to_30_seconds_and_is_configurable() {

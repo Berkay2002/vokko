@@ -21,7 +21,15 @@ export interface User {
   avatar_decoration?: string | null; // id of a Vokko-owned decoration asset
   profile_effect?: string | null; // id of a Vokko-owned profile effect
   primary_guild?: UserPrimaryGuild | null; // server tag shown next to the name
+  nameplate?: string | null; // id of a Vokko-owned nameplate (background of the user's member/DM list row)
+  display_name_styles?: DisplayNameStyles | null;
   widgets?: ProfileWidgets | null; // profile editor board widgets; absent/null = none
+}
+/** Display name style: font and effect ids from Vokko's own set, one or two RGB colours. */
+export interface DisplayNameStyles {
+  font_id: string;
+  effect_id: string;
+  colors: number[]; // 1-2 RGB ints
 }
 /** Profile board widgets (max two kinds). Images are the owner's uploads. */
 export interface ProfileWidgets {
@@ -366,10 +374,19 @@ export interface EditGuildEmojiRequest {
   roles?: Snowflake[] | null; // null or [] = every member
 }
 
+/** Reaction `type`: normal or burst (super reaction). Vokko has no burst limit. */
+export enum ReactionType {
+  Normal = 0,
+  Burst = 1,
+}
+
 export interface Reaction {
   emoji: ReactionEmoji;
-  count: number;
-  me: boolean;
+  count: number; // normal + burst
+  count_details: { burst: number; normal: number };
+  burst_colors: string[]; // "#rrggbb"; the Vokko server sends [] and clients compute the glow from the emoji
+  me: boolean; // the viewer reacted normally
+  me_burst: boolean; // the viewer super reacted
 }
 
 export enum MessageType {
@@ -1146,17 +1163,28 @@ export interface ChannelFollower {
   source_guild_name: string;
 }
 
+export interface MessageReactionEvent {
+  user_id: Snowflake;
+  channel_id: Snowflake;
+  message_id: Snowflake;
+  emoji: ReactionEmoji;
+  type: ReactionType;
+  burst: boolean; // type === Burst
+}
+
 export interface EditUserRequest {
   global_name?: string | null;
   bio?: string | null;
   banner_color?: string | null;
-  avatar_attachment_id?: Snowflake | null; // PNG/JPEG/WebP/GIF (animated allowed), ≤8 MiB in, stored as 512x512
-  banner_attachment_id?: Snowflake | null; // ≤10 MiB in, ≤1360x480 out
+  avatar_attachment_id?: Snowflake | null; // PNG/JPEG/WebP/GIF (animated allowed), ≤10 MiB, stored as uploaded
+  banner_attachment_id?: Snowflake | null; // ≤10 MiB, animated allowed
   pronouns?: string | null;
   theme_colors?: [number, number] | null;
   avatar_decoration?: string | null;
   profile_effect?: string | null;
   primary_guild_id?: Snowflake | null; // adopt that guild's tag (must be a member and the guild must have a tag); null clears
+  nameplate?: string | null;
+  display_name_styles?: DisplayNameStyles | null;
   widgets?: ProfileWidgetsInput | null; // replaces the whole value; null clears
 }
 export interface EditOwnMemberRequest {
@@ -1688,8 +1716,8 @@ export interface GatewayEvents {
   MESSAGE_CREATE: Message;
   MESSAGE_UPDATE: Message;
   MESSAGE_DELETE: { id: Snowflake; channel_id: Snowflake; guild_id: Snowflake | null };
-  MESSAGE_REACTION_ADD: { user_id: Snowflake; channel_id: Snowflake; message_id: Snowflake; emoji: ReactionEmoji };
-  MESSAGE_REACTION_REMOVE: { user_id: Snowflake; channel_id: Snowflake; message_id: Snowflake; emoji: ReactionEmoji };
+  MESSAGE_REACTION_ADD: MessageReactionEvent;
+  MESSAGE_REACTION_REMOVE: MessageReactionEvent;
   TYPING_START: { channel_id: Snowflake; user_id: Snowflake; timestamp: number };
   CHANNEL_CREATE: Channel;
   CHANNEL_UPDATE: Channel;

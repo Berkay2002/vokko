@@ -84,7 +84,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
       if (isShiftDown()) applyPin(m);
       else setPinning(m);
     },
-    react: (m, emoji) => { void messageStore.toggleReaction(m.channel_id, m.id, emoji); },
+    react: (m, emoji, burst) => { void messageStore.toggleReaction(m.channel_id, m.id, emoji, burst); },
     jumpTo: id => { void messageStore.jumpToMessage(channelId, id); },
     openLink: href => setLink(href),
     openImage: (message, index) => setImage({ message, index }),

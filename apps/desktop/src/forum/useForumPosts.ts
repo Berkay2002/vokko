@@ -61,13 +61,13 @@ export function useForumPosts(forumId: Snowflake, query: ForumQuery): ForumPosts
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     // Cards only show the starter's reactions (the starter message id is the post id): patch it in place, no refetch, loaded pages stay.
-    const patchReaction = (r: { user_id: Snowflake; channel_id: Snowflake; message_id: Snowflake; emoji: ReactionEmoji }, delta: 1 | -1) => {
+    const patchReaction = (r: { user_id: Snowflake; channel_id: Snowflake; message_id: Snowflake; emoji: ReactionEmoji; burst?: boolean }, delta: 1 | -1) => {
       if (r.message_id !== r.channel_id) return;
       const mine = r.user_id === appStore.getState().me?.id;
       setState(cur => {
         const first = cur.first[r.channel_id];
         if (!first) return cur;
-        return { ...cur, first: { ...cur.first, [r.channel_id]: { ...first, reactions: applyReactionEvent(first.reactions, r.emoji, delta, mine) } } };
+        return { ...cur, first: { ...cur.first, [r.channel_id]: { ...first, reactions: applyReactionEvent(first.reactions, r.emoji, delta, mine, r.burst === true) } } };
       });
     };
     const bump = () => {

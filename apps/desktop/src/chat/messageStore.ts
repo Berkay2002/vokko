@@ -3,11 +3,13 @@
 import { useSyncExternalStore } from 'react';
 import { ApiRequestError } from '../api/errors';
 import { MessageType } from '../api/types';
-import type { CreateMessageRequest, EditMessageRequest, Message, PendingAttachmentMeta, ReactionEmoji, Snowflake, StickerItem, User } from '../api/types';
+import { ReactionType } from '../api/types';
+import { announceBurst } from '../perks/SuperReactions';
+import type { CreateMessageRequest, EditMessageRequest, Message, MessageReactionEvent, PendingAttachmentMeta, ReactionEmoji, Snowflake, StickerItem, User } from '../api/types';
 import { gateway, request, setLocalReadPointer } from './shell';
 import {
   PAGE_SIZE, TYPING_TTL_MS, appendPage, applyReaction, deleteMessage, emojiKey, emptyState, indexOfId, prependPage, replaceWindow, setTyping,
-  applyUserUpdate, updateIfPresent, upsertMessage, withLateArrivals, type ChannelState, type PendingMessage,
+  applyUserUpdate, normalizeMessage, updateIfPresent, upsertMessage, withLateArrivals, type ChannelState, type PendingMessage,
 } from './messageState';
 import { rememberMessage, rememberMessages } from './userCache';
 import { newNonce } from './util';
@@ -25,7 +27,7 @@ const cancelled = new Set<string>();
 /** Sends queued behind in-flight uploads, by nonce: calling the entry aborts those uploads (the card's cancel X). */
 const waiting = new Map<string, () => void>();
 const reactionChains =new Map<string, { tail: Promise<void>; pending: number; timer: ReturnType<typeof setTimeout> | null }>();
-const reactionGuard = (messageId: Snowflake, emoji: ReactionEmoji): string => `${messageId}:${emojiKey(emoji)}`;
+const reactionGuard = (messageId: Snowflake, emoji: ReactionEmoji, burst: boolean): string => `${messageId}:${emojiKey(emoji)}:${burst ? 1 : 0}`;
 /** Channels the user marked unread by hand: the automatic ack stays off until they read it again on purpose, send, or leave. */
 const heldUnread = new Set<Snowflake>();
 let currentUserId: Snowflake | null = null;
@@ -62,10 +64,12 @@ function bindGateway(): void {
   gateway.on('MESSAGE_DELETE', d => update(d.channel_id, s => deleteMessage(s, d.id)));
   gateway.on('MESSAGE_DELETE_BULK', d => update(d.channel_id, s => d.ids.reduce((acc, id) => deleteMessage(acc, id), s)));
   // Our own reaction echoes are ignored while a local toggle for the same message+emoji is queued or just settled: the optimistic state wins.
-  const onReaction = (add: boolean) => (d: { channel_id: Snowflake; message_id: Snowflake; user_id: Snowflake; emoji: ReactionEmoji }): void => {
+  const onReaction = (add: boolean) => (d: MessageReactionEvent): void => {
     const byMe = d.user_id === currentUserId;
-    if (byMe && reactionChains.has(reactionGuard(d.message_id, d.emoji))) return;
-    update(d.channel_id, s => applyReaction(s, d.message_id, d.emoji, byMe, add));
+    const burst = d.type === ReactionType.Burst;
+    if (byMe && reactionChains.has(reactionGuard(d.message_id, d.emoji, burst))) return;
+    if (add && burst) announceBurst(d.message_id, emojiKey(d.emoji));
+    update(d.channel_id, s => applyReaction(s, d.message_id, d.emoji, byMe, add, burst));
   };
   gateway.on('MESSAGE_REACTION_ADD', onReaction(true));
   gateway.on('MESSAGE_REACTION_REMOVE', onReaction(false));
@@ -91,7 +95,7 @@ function bindGateway(): void {
 async function fetchPage(channelId: Snowflake, params: Record<string, string>): Promise<Message[]> {
   // The jump-to-message window is 30 (contract); paging is PAGE_SIZE.
   const q = new URLSearchParams({ limit: String('around' in params ? AROUND_LIMIT : PAGE_SIZE), ...params });
-  const page = await request<Message[]>('GET', `/channels/${channelId}/messages?${q}`);
+  const page = (await request<Message[]>('GET', `/channels/${channelId}/messages?${q}`)).map(normalizeMessage);
   rememberMessages(page);
   return page;
 }
@@ -312,24 +316,27 @@ export const messageStore = {
     update(channelId, s => deleteMessage(s, messageId));
   },
 
-  async toggleReaction(channelId: Snowflake, messageId: Snowflake, emoji: ReactionEmoji): Promise<void> {
+  /** Toggles the viewer's normal reaction, or with `burst` their super reaction (`?type=1`). */
+  async toggleReaction(channelId: Snowflake, messageId: Snowflake, emoji: ReactionEmoji, burst = false): Promise<void> {
     const s = states.get(channelId);
     const m = s?.messages[s ? indexOfId(s.messages, messageId) : -1];
     if (!m) return;
     const key = emojiKey(emoji);
-    const guard = reactionGuard(messageId, emoji);
+    const guard = reactionGuard(messageId, emoji, burst);
     // Rapid toggles are applied optimistically right away and sent in order, one request at a time per message+emoji.
     const chain = reactionChains.get(guard) ?? { tail: Promise.resolve(), pending: 0, timer: null };
     if (chain.timer) { clearTimeout(chain.timer); chain.timer = null; }
     chain.pending++;
     reactionChains.set(guard, chain);
-    const had = m.reactions.find(r => emojiKey(r.emoji) === key)?.me ?? false;
-    update(channelId, x => applyReaction(x, messageId, emoji, true, !had));
+    const current = m.reactions.find(r => emojiKey(r.emoji) === key);
+    const had = (burst ? current?.me_burst : current?.me) ?? false;
+    if (burst && !had) announceBurst(messageId, key);
+    update(channelId, x => applyReaction(x, messageId, emoji, true, !had, burst));
     const run = chain.tail.then(async () => {
       try {
-        await request<null>(had ? 'DELETE' : 'PUT', `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(key)}/@me`);
+        await request<null>(had ? 'DELETE' : 'PUT', `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(key)}/@me${burst ? '?type=1' : ''}`);
       } catch {
-        update(channelId, x => applyReaction(x, messageId, emoji, true, had));
+        update(channelId, x => applyReaction(x, messageId, emoji, true, had, burst));
       }
     });
     chain.tail = run;

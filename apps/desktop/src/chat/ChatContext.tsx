@@ -66,7 +66,8 @@ export interface ChatActions {
   edit(m: Message): void;
   requestDelete(m: Message, skipConfirm: boolean): void;
   togglePin(m: Message): void;
-  react(m: Message, emoji: { id: string | null; name: string }): void;
+  /** Toggles the viewer's reaction; `burst` = super reaction. */
+  react(m: Message, emoji: { id: string | null; name: string }, burst?: boolean): void;
   jumpTo(messageId: Snowflake): void;
   openLink(href: string): void;
   openImage(message: Message, index: number): void;

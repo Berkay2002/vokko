@@ -5,7 +5,7 @@ pub mod s3;
 
 use std::collections::HashMap;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -30,6 +30,14 @@ pub struct Presign<'a> {
 
 pub trait Storage: Send + Sync {
     fn put(&self, id: i64, bytes: Bytes) -> BoxFuture<'_, io::Result<()>>;
+    /// Stores the file at `path` (a staging file; it may be moved, and the caller removes it if it is still there).
+    /// The default reads it into memory and calls `put`.
+    fn put_file<'a>(&'a self, id: i64, path: &'a Path) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move {
+            let bytes = tokio::fs::read(path).await?;
+            self.put(id, Bytes::from(bytes)).await
+        })
+    }
     /// `ErrorKind::NotFound` when there is no such file.
     fn open(&self, id: i64) -> BoxFuture<'_, io::Result<Object>>;
     /// The whole file in memory (small files only: stickers).
@@ -98,6 +106,18 @@ impl Storage for LocalStorage {
         Box::pin(async move {
             tokio::fs::create_dir_all(&self.dir).await?;
             tokio::fs::write(self.path(id), &bytes).await
+        })
+    }
+
+    /// A rename when the staging file is on the same filesystem, else a copy.
+    fn put_file<'a>(&'a self, id: i64, path: &'a Path) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(async move {
+            tokio::fs::create_dir_all(&self.dir).await?;
+            let target = self.path(id);
+            if tokio::fs::rename(path, &target).await.is_ok() {
+                return Ok(());
+            }
+            tokio::fs::copy(path, &target).await.map(|_| ())
         })
     }
 

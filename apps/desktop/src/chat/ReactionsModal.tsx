@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
+import { Sparkles } from 'lucide-react';
 import type { Message, Reaction, User } from '../api/types';
 import { Modal, request } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { emojiKey } from './messageState';
 
-type Loaded = User[] | 'error';
+/** Super reactors first (marked), then normal reactors. */
+type Loaded = { user: User; burst: boolean }[] | 'error';
 
 function EmojiFace({ reaction }: { reaction: Reaction }) {
   const e = reaction.emoji;
@@ -28,8 +30,10 @@ export function ReactionsModal({ message, onClose }: { message: Message | null; 
   useEffect(() => {
     if (!message || !key || cache[key]) return;
     let live = true;
-    request<User[]>('GET', `/channels/${message.channel_id}/messages/${message.id}/reactions/${encodeURIComponent(key)}`)
-      .then(users => { if (live) setCache(c => ({ ...c, [key]: users })); })
+    const url = `/channels/${message.channel_id}/messages/${message.id}/reactions/${encodeURIComponent(key)}`;
+    const wantsBurst = (active?.count_details.burst ?? 0) > 0;
+    Promise.all([wantsBurst ? request<User[]>('GET', `${url}?type=1`) : Promise.resolve([]), request<User[]>('GET', url)])
+      .then(([bursts, normals]) => { if (live) setCache(c => ({ ...c, [key]: [...bursts.map(user => ({ user, burst: true })), ...normals.map(user => ({ user, burst: false }))] })); })
       .catch(() => { if (live) setCache(c => ({ ...c, [key]: 'error' })); });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -50,10 +54,11 @@ export function ReactionsModal({ message, onClose }: { message: Message | null; 
         {users === undefined && <li className="chat-reactions-note">Loading…</li>}
         {users === 'error' && <li className="chat-reactions-note">Couldn&rsquo;t load reactions.</li>}
         {Array.isArray(users) && users.length === 0 && <li className="chat-reactions-note">No one reacted with this emoji.</li>}
-        {Array.isArray(users) && users.map(u => <li key={u.id} className="chat-reactions-user">
+        {Array.isArray(users) && users.map(({ user: u, burst }) => <li key={`${u.id}:${burst ? 1 : 0}`} className="chat-reactions-user">
           <Avatar user={u} size={32} />
           <span className="chat-reactions-name">{chat.nameOf(u)}</span>
           <span className="chat-reactions-username">{u.username}</span>
+          {burst && <span className="reactions-super-badge" title="Super Reaction" aria-label="Super Reaction"><Sparkles size={16} /></span>}
         </li>)}
       </ul>
     </div>

@@ -5,7 +5,7 @@ Vokko's server is one Rust binary (`vokko-server`) plus PostgreSQL. Uploaded fil
 ## Requirements
 
 - Linux (or any host with Docker Engine + the compose plugin), 1-2 CPU cores, 1-2 GB RAM. That is the target size: the server idles in tens of MB and PostgreSQL is the larger consumer. Building the image from source needs about 2 GB RAM and a few minutes; build elsewhere and `docker save`/push if the box is smaller.
-- Disk: the database plus uploads. Budget uploads at roughly (users x 100 MiB pending quota) at the very worst; real usage is far lower.
+- Disk: the database plus uploads. Budget uploads at roughly (users x the pending quota: 100 MiB, or the per-file limit when larger, 500 MiB by default) at the very worst; real usage is far lower.
 - A domain name and open ports 80/443 if you want HTTPS (recommended for anything beyond a LAN).
 
 ## Quick start
@@ -57,7 +57,7 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_S3_SERVE` | `proxy` | `proxy`: downloads stream through vokko-server (the bucket stays private). `presigned`: after the same key/filename check the server answers `302` to a short-lived presigned bucket URL, so file bytes skip the server. |
 | `VOKKO_S3_PRESIGN_TTL_SECS` | `300` | Lifetime of presigned URLs (1-604800). |
 | `VOKKO_PUBLIC_URL` | `http://<bind>` | Origin used in absolute attachment URLs. Set it to what clients type. |
-| `VOKKO_MAX_UPLOAD_MB` | `25` | Per-file upload limit in MiB (whole number, at least 1). |
+| `VOKKO_MAX_UPLOAD_MB` | `500` | Per-file upload limit in MiB (whole number, at least 1). Values above 500 (Nitro's limit) are lowered to 500. |
 | `VOKKO_UNFURL` | on | `off`/`0`/`false`/`no` disables link previews (no outbound requests at all). |
 | `VOKKO_GIF_PROVIDER` | `none` | `klipy`, `giphy`, `tenor` or `none`. The server proxies GIF search/trending/categories so the key never reaches clients; with `none` the GIF picker shows each user's favourites only. Needs outbound HTTPS to the provider. |
 | `VOKKO_GIF_API_KEY` | empty | Provider API key; required when `VOKKO_GIF_PROVIDER` is not `none`. |
@@ -251,7 +251,7 @@ Serve the web client from the same origin as the API where you can: same-origin 
 
 ## Upload limit
 
-`VOKKO_MAX_UPLOAD_MB` (default 25) caps one file; a message holds up to 10 files, and each user may have 100 MiB of not-yet-sent uploads (those are deleted after an hour). Change it in `deploy/.env` and `docker compose up -d`. A reverse proxy in front must allow at least that much (nginx: `client_max_body_size`; Caddy has no limit by default). The bundled client currently enforces its own limit in the composer, so raising the server limit does not raise it in the UI until the client is changed.
+Every user gets Discord Nitro's upload limit for free: one file may be up to 500 MiB, or `VOKKO_MAX_UPLOAD_MB` when you set it lower, whichever is lower (values above 500 are lowered to 500). Uploads are streamed to disk and from there to the storage backend (S3 included), so a large file does not sit in memory. A message holds up to 10 files, a user streams at most 3 uploads at once, and each user may have 100 MiB of not-yet-sent uploads, or one file's worth when the per-file limit is larger (those are deleted after an hour). Budget disk accordingly: at 500 MiB that is up to 500 MiB of pending uploads per active user. Change the limit in `deploy/.env` and `docker compose up -d`. A reverse proxy in front must allow at least that much (nginx: `client_max_body_size 501m`; Caddy has no limit by default). The bundled client checks the 500 MiB limit in the composer; a file under that but over a lower server limit is refused by the server (413) and the client says so.
 
 ## Not production-ready yet
 

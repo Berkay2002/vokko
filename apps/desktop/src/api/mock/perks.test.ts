@@ -54,13 +54,15 @@ describe("user profile perks", () => {
     expect(update?.users).toContain(ids.owner);
   });
 
-  it("clears with null and rejects unknown ids, bad colours and long pronouns", () => {
+  it("clears with null and rejects malformed ids, bad colours and long pronouns", () => {
     call("member", "PATCH", "/users/@me", { avatar_decoration: "halo", pronouns: "she/her" });
     const cleared = call("member", "PATCH", "/users/@me", { avatar_decoration: null, pronouns: "" }) as User;
     expect(cleared.avatar_decoration).toBeNull();
     expect(cleared.pronouns).toBeNull();
-    expect(errorOf(() => call("member", "PATCH", "/users/@me", { avatar_decoration: "nitro-gold" })).status).toBe(400);
-    expect(errorOf(() => call("member", "PATCH", "/users/@me", { profile_effect: "nope" })).status).toBe(400);
+    // unknown but well-formed ids are stored, as on the server (the client ignores ids it does not ship)
+    expect((call("member", "PATCH", "/users/@me", { avatar_decoration: "nitro-gold" }) as User).avatar_decoration).toBe("nitro-gold");
+    expect(errorOf(() => call("member", "PATCH", "/users/@me", { avatar_decoration: "Nitro Gold" })).status).toBe(400);
+    expect(errorOf(() => call("member", "PATCH", "/users/@me", { profile_effect: "NOPE!" })).status).toBe(400);
     expect(errorOf(() => call("member", "PATCH", "/users/@me", { theme_colors: [1, 0x1000000] })).status).toBe(400);
     expect(errorOf(() => call("member", "PATCH", "/users/@me", { pronouns: "x".repeat(41) })).status).toBe(400);
   });
@@ -121,6 +123,57 @@ describe("per-server profiles", () => {
 
   it("requires membership", () => {
     expect(errorOf(() => call("outsider", "PATCH", `/guilds/${guildId}/members/@me`, { pronouns: "x" })).status).toBe(403);
+  });
+});
+
+describe("nameplate and display name styles", () => {
+  it("stores well-formed ids (known or not, like the server) and rejects malformed ones", () => {
+    const style = { font_id: "serif", effect_id: "gradient", colors: [0xff0000, 0x0000ff] };
+    const me = call("owner", "PATCH", "/users/@me", { nameplate: "aurora", display_name_styles: style }) as User;
+    expect(me.nameplate).toBe("aurora");
+    expect(me.display_name_styles).toEqual(style);
+    expect((call("owner", "PATCH", "/users/@me", { nameplate: "nope" }) as User).nameplate).toBe("nope");
+    expect((call("owner", "PATCH", "/users/@me", { display_name_styles: { font_id: "comic", effect_id: "solid", colors: [1] } }) as User).display_name_styles?.font_id).toBe("comic");
+    expect(errorOf(() => call("owner", "PATCH", "/users/@me", { nameplate: "Bad Id" })).code).toBe(50035);
+    for (const bad of [
+      { font_id: "", effect_id: "solid", colors: [1] },
+      { font_id: "serif", effect_id: "NOPE!", colors: [1] },
+      { font_id: "serif", colors: [1] },
+      { font_id: "serif", effect_id: "solid", colors: [] },
+      { font_id: "serif", effect_id: "solid", colors: [1, 2, 3] },
+      { font_id: "serif", effect_id: "solid", colors: [0x1000000] },
+    ]) {
+      expect(errorOf(() => call("owner", "PATCH", "/users/@me", { display_name_styles: bad })).code).toBe(50035);
+    }
+    const cleared = call("owner", "PATCH", "/users/@me", { nameplate: null, display_name_styles: null }) as User;
+    expect(cleared.nameplate).toBeNull();
+    expect(cleared.display_name_styles).toBeNull();
+  });
+});
+
+describe("super reactions", () => {
+  const channelOf = () => [...db.channels.values()].find(c => c.guild_id === guildId && c.name === "general")!.id;
+
+  it("counts bursts apart from normal reactions and announces the type", () => {
+    const channel = channelOf();
+    const message = call("owner", "POST", `/channels/${channel}/messages`, { content: "react" }) as { id: string };
+    const base = `/channels/${channel}/messages/${message.id}/reactions/${encodeURIComponent("🔥")}`;
+    call("owner", "PUT", `${base}/@me?type=1`);
+    call("member", "PUT", `${base}/@me?type=1`);
+    call("member", "PUT", `${base}/@me`);
+    const add = eventsOf("MESSAGE_REACTION_ADD").map(e => e.d as { type: number; burst: boolean });
+    expect(add.map(e => [e.type, e.burst])).toEqual([[1, true], [1, true], [0, false]]);
+
+    const [seen] = call("owner", "GET", `/channels/${channel}/messages`) as { reactions: { count: number; count_details: unknown; me: boolean; me_burst: boolean; burst_colors: unknown }[] }[];
+    expect(seen!.reactions).toEqual([{ emoji: { id: null, name: "🔥" }, count: 3, count_details: { normal: 1, burst: 2 }, burst_colors: [], me: false, me_burst: true }]);
+    expect((call("owner", "GET", `${base}?type=1`) as User[]).length).toBe(2);
+    expect((call("owner", "GET", base) as User[]).map(u => u.id)).toEqual([ids.member]);
+    expect(errorOf(() => call("owner", "GET", `${base}?type=3`)).code).toBe(50035);
+
+    call("owner", "DELETE", `${base}/@me?type=1`);
+    expect((eventsOf("MESSAGE_REACTION_REMOVE")[0]!.d as { type: number }).type).toBe(1);
+    const [after] = call("owner", "GET", `/channels/${channel}/messages`) as { reactions: { count_details: unknown; me_burst: boolean }[] }[];
+    expect(after!.reactions[0]).toMatchObject({ count_details: { normal: 1, burst: 1 }, me_burst: false });
   });
 });
 

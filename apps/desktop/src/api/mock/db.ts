@@ -30,7 +30,10 @@ export interface MockChannel extends Channel {
 
 export interface MockReaction {
   emoji: ReactionEmoji;
+  /** Normal reactions. */
   user_ids: string[];
+  /** Burst (super) reactions; absent = none. */
+  burst_ids?: string[];
 }
 
 export interface MockMessage {

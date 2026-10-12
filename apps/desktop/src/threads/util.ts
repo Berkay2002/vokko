@@ -89,13 +89,26 @@ export function clampPanelWidth(width: number, available: number): number {
 
 const sameEmoji = (a: ReactionEmoji, b: ReactionEmoji): boolean => (a.id ?? a.name) === (b.id ?? b.name);
 
-/** Reactions after a MESSAGE_REACTION_ADD (+1) or _REMOVE (-1) event; `mine` sets the viewer's flag. Returns a new array. */
-export function applyReactionEvent(reactions: readonly Reaction[], emoji: ReactionEmoji, delta: 1 | -1, mine: boolean): Reaction[] {
+/**
+ * Reactions after a MESSAGE_REACTION_ADD (+1) or _REMOVE (-1) event; `mine` sets the viewer's flag (`me`, or `me_burst` for a super
+ * reaction). Returns a new array.
+ */
+export function applyReactionEvent(reactions: readonly Reaction[], emoji: ReactionEmoji, delta: 1 | -1, mine: boolean, burst = false): Reaction[] {
+  const kind = burst ? "burst" : "normal";
   const found = reactions.find(r => sameEmoji(r.emoji, emoji));
-  if (!found) return delta > 0 ? [...reactions, { emoji, count: 1, me: mine }] : [...reactions];
+  if (!found) {
+    if (delta < 0) return [...reactions];
+    return [...reactions, { emoji, count: 1, count_details: { normal: burst ? 0 : 1, burst: burst ? 1 : 0 }, burst_colors: [], me: mine && !burst, me_burst: mine && burst }];
+  }
   return reactions.flatMap(r => {
     if (r !== found) return [r];
     const count = r.count + delta;
-    return count > 0 ? [{ ...r, count, me: mine ? delta > 0 : r.me }] : [];
+    const details = r.count_details ?? { normal: r.count, burst: 0 };
+    const next: Reaction = { ...r, count, count_details: { ...details, [kind]: Math.max(0, details[kind] + delta) } };
+    if (mine) {
+      if (burst) next.me_burst = delta > 0;
+      else next.me = delta > 0;
+    }
+    return count > 0 ? [next] : [];
   });
 }

@@ -11,8 +11,8 @@ const DEFAULT_THEME: [number, number] = [hexToInt("#5865f2"), hexToInt("#8d96f7"
 const LOCKED_NOTE = "Part of your main profile";
 const STRIP = { banner: null, bannerColor: "#2b2d31", themeColors: null } as const;
 
-/** A tile and (when open) its inline panel, which spans the whole row of the tile grid. */
-function Tile({ label, open, onToggle, locked, disabled, className, children, panel, onClick }: {
+/** A tile and (when open) its inline panel, which spans the whole row of the tile grid. Pickers registered from outside use it too. */
+export function Tile({ label, open, onToggle, locked, disabled, className, children, panel, onClick }: {
   label: string;
   open?: boolean;
   onToggle?(): void;

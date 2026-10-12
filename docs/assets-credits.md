@@ -42,3 +42,22 @@ All default sounds are synthesized by Vokko's own code; there are no recorded cl
 
 The server renders them to 16-bit mono WAV at 22.05 kHz (`GET /api/v1/soundboard-default-sounds/{id}/file`); the in-memory mock
 renders the same recipes in the browser. License: same as the Vokko source.
+
+## Profile perks and super reactions
+
+Vokko's profile perk art is its own. Nothing here is taken, traced or adapted from Discord (no Discord images, SVGs, fonts, sounds or
+CSS). Every item is generated at runtime from a few parameters in `apps/desktop/src/perks/catalog.ts` (colours, counts, timings),
+drawn with inline SVG or CSS, so there are no image files to license.
+
+| Set | Items | How it is drawn | Author / licence |
+| --- | --- | --- | --- |
+| Avatar decorations | Halo, Aurora, Ember, Frost, Neon, Starlight, Petals, Pixel Frame, Crystal (9) | SVG ring with a gradient, optional dash pattern, glow filter, spin/pulse animation and star/dot/diamond ornaments (`perks/AvatarDecoration.tsx`) | Vokko contributors, same licence as the repository |
+| Profile effects | Sparkles, Snowfall, Embers, Rain, Bubbles, Fireflies, Confetti, Petal Drift (8) | CSS particles (dot, flake, spark, streak, ring) with rise/fall/drift/twinkle keyframes (`perks/ProfileEffect.tsx`, `styles/perks.css`) | Vokko contributors, same licence as the repository |
+| Nameplates | Aurora, Ember, Tide, Meadow, Dusk, Circuit, Candy, Starfield (8) | CSS gradient with an optional dots/stripes/grid/waves pattern and light sweep (`perks/NameStyles.tsx`, `perks/name-styles.css`) | Vokko contributors, same licence as the repository |
+| Display name fonts | Default, Serif, Mono, Rounded, Script, Display, Light, Condensed (8) | Font stacks of the bundled Noto Sans and the viewer's system/generic families; no font files are downloaded | Noto Sans: SIL Open Font License 1.1; system fonts belong to the viewer's OS |
+| Display name effects | Solid, Gradient, Neon, Toon, Pop, Shimmer, Glitch, Embossed (8) | CSS colour, gradient text, text-shadow and keyframes (`perks/name-styles.css`) | Vokko contributors, same licence as the repository |
+| Profile themes, server tag badges | 8 theme presets; tag badges use Lucide icons | Colour pairs; `lucide-react` glyphs | Lucide: ISC licence |
+| Super reaction glow and particles | one style, coloured per emoji | Colours sampled from the emoji at runtime (`perks/emojiColors.ts`), CSS particles (`perks/super-reactions.css`) | Vokko contributors; emoji glyphs are the viewer's system emoji font |
+
+Animated items respect reduced motion (the app setting and the OS setting); the super reaction particles also stop when "Play
+animated emoji" is off.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../api/types';
-import { buildRows, emptyState, mentionsRole, replaceWindow, withLateArrivals } from './messageState';
+import { applyReaction, buildRows, type ChannelState, emptyState, mentionsRole, replaceWindow, upsertMessage, withLateArrivals } from './messageState';
 import { sameDay } from './util';
 
 const BASE = Date.UTC(2026, 9, 10, 12, 0, 0);
@@ -71,3 +71,32 @@ describe('withLateArrivals', () => {
   });
 });
 
+
+describe('applyReaction with super reactions', () => {
+  const fire = { id: null, name: '🔥' };
+  const start = (): ChannelState => ({ ...emptyState(), status: 'ready', messages: [msg('1', 'a', 0)] });
+  const reactionOf = (s: ChannelState) => s.messages[0]!.reactions[0];
+
+  it('keeps normal and burst counts apart on one entry', () => {
+    let s = start();
+    s = applyReaction(s, '1', fire, true, true, true);
+    expect(reactionOf(s)).toMatchObject({ count: 1, count_details: { normal: 0, burst: 1 }, me: false, me_burst: true });
+    s = applyReaction(s, '1', fire, false, true);
+    s = applyReaction(s, '1', fire, true, true, true); // our own echo after the optimistic add: no change
+    expect(reactionOf(s)).toMatchObject({ count: 2, count_details: { normal: 1, burst: 1 }, me: false, me_burst: true });
+    s = applyReaction(s, '1', fire, true, false, true);
+    expect(reactionOf(s)).toMatchObject({ count: 1, count_details: { normal: 1, burst: 0 }, me_burst: false });
+    s = applyReaction(s, '1', fire, false, false);
+    expect(s.messages[0]!.reactions).toEqual([]);
+  });
+});
+
+describe('reactions from a server without super reactions', () => {
+  it('reads them as normal reactions, so the pills and later updates still work', () => {
+    const legacy = { ...msg('1', 'a', 0), reactions: [{ emoji: { id: null, name: '🔥' }, count: 2, me: true }] } as unknown as Message;
+    let s = upsertMessage({ ...emptyState(), status: 'ready' }, legacy);
+    expect(s.messages[0]!.reactions[0]).toEqual({ emoji: { id: null, name: '🔥' }, count: 2, me: true, me_burst: false, count_details: { normal: 2, burst: 0 }, burst_colors: [] });
+    s = applyReaction(s, '1', { id: null, name: '🔥' }, false, true);
+    expect(s.messages[0]!.reactions[0]).toMatchObject({ count: 3, count_details: { normal: 3, burst: 0 } });
+  });
+});

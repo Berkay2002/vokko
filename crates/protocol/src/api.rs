@@ -162,6 +162,10 @@ numeric_enum!(
     /// `Sticker.format_type`. Discord's LOTTIE (3) is not supported; WebP (5) is Vokko's addition.
     StickerFormat { Png = 1, Apng = 2, Gif = 4, Webp = 5 }
 );
+numeric_enum!(
+    /// Reaction `type`: 0 = normal, 1 = burst (super reaction).
+    ReactionType { Normal = 0, Burst = 1 }
+);
 numeric_enum!(OverwriteType { Role = 0, Member = 1 });
 numeric_enum!(ScheduledEventEntityType { StageInstance = 1, Voice = 2, External = 3 });
 numeric_enum!(ScheduledEventStatus { Scheduled = 1, Active = 2, Completed = 3, Canceled = 4 });
@@ -389,9 +393,22 @@ pub struct User {
     /// Server tag shown next to the name.
     #[serde(default)]
     pub primary_guild: Option<UserPrimaryGuild>,
+    /// Id of a nameplate (the background of the user's row in member and DM lists) in the client's open set.
+    #[serde(default)]
+    pub nameplate: Option<String>,
+    #[serde(default)]
+    pub display_name_styles: Option<DisplayNameStyles>,
     /// Profile board widgets; `null` when none are set.
     #[serde(default)]
     pub widgets: Option<ProfileWidgets>,
+}
+
+/// Display name style: a font and an effect from the client's open set, with one or two RGB colours.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DisplayNameStyles {
+    pub font_id: String,
+    pub effect_id: String,
+    pub colors: Vec<u32>,
 }
 
 /// The profile board: at most these two widgets.
@@ -984,11 +1001,26 @@ pub struct EditGuildEmojiRequest {
     pub roles: Option<Option<Vec<Snowflake>>>,
 }
 
+/// One emoji on a message. Normal and burst (super) reactions of the same emoji share the entry; `count` is their sum.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Reaction {
     pub emoji: ReactionEmoji,
     pub count: u32,
+    #[serde(default)]
+    pub count_details: ReactionCountDetails,
+    /// Glow colours of the burst pill (`#rrggbb`). Vokko clients compute them from the emoji, so the server always sends `[]`.
+    #[serde(default)]
+    pub burst_colors: Vec<String>,
     pub me: bool,
+    /// The viewer added a burst reaction with this emoji.
+    #[serde(default)]
+    pub me_burst: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReactionCountDetails {
+    pub burst: u32,
+    pub normal: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1677,7 +1709,7 @@ pub struct UpdateUserRequest {
     pub bio: Option<Option<String>>,
     #[serde(default, deserialize_with = "double_option")]
     pub banner_color: Option<Option<String>>,
-    /// PNG/JPEG/WebP/GIF (animated allowed), at most 8 MiB.
+    /// PNG/JPEG/WebP/GIF (animated allowed), at most 10 MiB.
     #[serde(default, deserialize_with = "double_option")]
     pub avatar_attachment_id: Option<Option<Snowflake>>,
     /// At most 10 MiB.
@@ -1694,6 +1726,10 @@ pub struct UpdateUserRequest {
     /// Adopt that guild's tag (must be a member of a guild that has one); `null` clears.
     #[serde(default, deserialize_with = "double_option")]
     pub primary_guild_id: Option<Option<Snowflake>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub nameplate: Option<Option<String>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub display_name_styles: Option<Option<DisplayNameStyles>>,
     /// Replaces the whole board; `null` clears, absent leaves it.
     #[serde(default, deserialize_with = "double_option")]
     pub widgets: Option<Option<ProfileWidgetsInput>>,
@@ -3347,6 +3383,16 @@ pub struct MessageReaction {
     pub channel_id: Snowflake,
     pub message_id: Snowflake,
     pub emoji: ReactionEmoji,
+    /// Absent on old payloads = normal.
+    #[serde(rename = "type", default = "normal_reaction")]
+    pub kind: ReactionType,
+    /// `type == 1`, kept for Discord parity.
+    #[serde(default)]
+    pub burst: bool,
+}
+
+fn normal_reaction() -> ReactionType {
+    ReactionType::Normal
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -4093,7 +4139,7 @@ mod tests {
     }
 
     fn user() -> Value {
-        json!({"id": "100", "username": "sam", "global_name": null, "avatar": null, "banner_color": "#5865f2", "bio": null, "bot": false, "banner": null, "pronouns": null, "theme_colors": null, "avatar_decoration": null, "profile_effect": null, "primary_guild": null, "widgets": null})
+        json!({"id": "100", "username": "sam", "global_name": null, "avatar": null, "banner_color": "#5865f2", "bio": null, "bot": false, "banner": null, "pronouns": null, "theme_colors": null, "avatar_decoration": null, "profile_effect": null, "primary_guild": null, "nameplate": null, "display_name_styles": null, "widgets": null})
     }
 
     #[test]
@@ -4164,7 +4210,14 @@ mod tests {
         perks["avatar_decoration"] = json!("sparkle");
         perks["profile_effect"] = json!("snow");
         perks["primary_guild"] = json!({"guild_id": "300", "tag": "VKO", "badge": "bolt", "color_primary": 1, "color_secondary": 2});
+        perks["nameplate"] = json!("aurora");
+        perks["display_name_styles"] = json!({"font_id": "serif", "effect_id": "gradient", "colors": [1, 2]});
         round_trip::<User>(perks);
+        let styled: UpdateUserRequest =
+            serde_json::from_value(json!({"nameplate": null, "display_name_styles": {"font_id": "mono", "effect_id": "solid", "colors": [3]}}))
+                .expect("styled");
+        assert_eq!(styled.nameplate, Some(None));
+        assert_eq!(styled.display_name_styles, Some(Some(DisplayNameStyles { font_id: "mono".into(), effect_id: "solid".into(), colors: vec![3] })));
         let edit: UpdateUserRequest = serde_json::from_value(json!({"pronouns": null, "theme_colors": [5, 6], "banner_attachment_id": "7"})).expect("edit");
         assert_eq!(edit.pronouns, Some(None));
         assert_eq!(edit.theme_colors, Some(Some([5, 6])));
@@ -4192,7 +4245,9 @@ mod tests {
     #[test]
     fn message_with_reply_attachment_and_reaction() {
         let attachment = json!({"id": "9", "filename": "a.png", "content_type": "image/png", "size": 12, "url": "http://x/a.png", "width": 4, "height": 3});
-        let reaction = json!({"emoji": {"id": null, "name": "👍"}, "count": 2, "me": true});
+        let reaction = json!({
+            "emoji": {"id": null, "name": "👍"}, "count": 3, "count_details": {"burst": 1, "normal": 2}, "burst_colors": [], "me": true, "me_burst": false
+        });
         let embed = json!({
             "type": "article", "title": "T", "description": "D", "url": "https://example.com/a", "color": 5793266,
             "image": {"url": "https://example.com/i.png", "width": 640, "height": 360}, "thumbnail": {"url": "https://example.com/t.png"},
@@ -4335,7 +4390,13 @@ mod tests {
             json!({"user": user(), "nick": null, "roles": [], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": "2026-10-12T10:00:00.000Z", "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null, "guild_id": "300"}),
         );
         round_trip::<MessageDelete>(json!({"id": "1", "channel_id": "2", "guild_id": null}));
-        round_trip::<MessageReaction>(json!({"user_id": "1", "channel_id": "2", "message_id": "3", "emoji": {"id": null, "name": "🎉"}}));
+        round_trip::<MessageReaction>(
+            json!({"user_id": "1", "channel_id": "2", "message_id": "3", "emoji": {"id": null, "name": "🎉"}, "type": 1, "burst": true}),
+        );
+        // an old payload without `type` reads as a normal reaction
+        let old: MessageReaction =
+            serde_json::from_value(json!({"user_id": "1", "channel_id": "2", "message_id": "3", "emoji": {"id": null, "name": "🎉"}})).expect("old");
+        assert_eq!((old.kind, old.burst), (ReactionType::Normal, false));
         round_trip::<TypingStart>(json!({"channel_id": "2", "user_id": "1", "timestamp": 1_760_000_000}));
         round_trip::<MessageAck>(json!({"channel_id": "2", "message_id": "3"}));
     }

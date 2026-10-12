@@ -5,9 +5,9 @@ use sqlx::FromRow;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::{
-    Attachment, Channel, ChannelType, ExplicitContentFilter, FavoriteGame, GameEntry, Guild, GuildMember, GuildTag, GuildTheme, JoinMode, Message, MessageCall,
-    MessageMember, MessageReference, MessageReferenceType, MessageSnapshot, MessageType, NsfwLevel, OverwriteType, PermissionOverwrite, ProfileWidgets,
-    Reaction, ReactionEmoji, Role, Snowflake, StickerFormat, StickerItem, User, UserPrimaryGuild, VerificationLevel,
+    Attachment, Channel, ChannelType, DisplayNameStyles, ExplicitContentFilter, FavoriteGame, GameEntry, Guild, GuildMember, GuildTag, GuildTheme, JoinMode,
+    Message, MessageCall, MessageMember, MessageReference, MessageReferenceType, MessageSnapshot, MessageType, NsfwLevel, OverwriteType, PermissionOverwrite,
+    ProfileWidgets, Reaction, ReactionCountDetails, ReactionEmoji, Role, Snowflake, StickerFormat, StickerItem, User, UserPrimaryGuild, VerificationLevel,
 };
 
 use crate::error::ApiResult;
@@ -47,12 +47,15 @@ pub struct UserRow {
     pub tag_badge: Option<String>,
     pub tag_color_primary: Option<i32>,
     pub tag_color_secondary: Option<i32>,
+    pub nameplate: Option<String>,
+    pub name_font: Option<String>,
+    pub name_effect: Option<String>,
+    pub name_colors: Option<Vec<i32>>,
 }
 
 /// Columns of [`UserRow`]; select them `FROM {USER_FROM}` (aliases `u` and `pg`).
 pub const USER_COLS: &str = "u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, \
-     u.theme_accent, u.avatar_decoration, u.profile_effect, u.widgets::text AS widgets, pg.id AS tag_guild_id, pg.tag AS tag_text, pg.tag_badge, \
-     pg.tag_color_primary, pg.tag_color_secondary";
+     u.theme_accent, u.avatar_decoration, u.profile_effect, u.widgets::text AS widgets, pg.id AS tag_guild_id, pg.tag AS tag_text, pg.tag_badge,      pg.tag_color_primary, pg.tag_color_secondary, u.nameplate, u.name_font, u.name_effect, u.name_colors";
 
 /// `users u` joined to the guild whose tag the user adopted, while they still belong to it and it still has a tag.
 pub const USER_FROM: &str = "users u LEFT JOIN guilds pg ON pg.id = u.primary_guild_id AND pg.tag IS NOT NULL \
@@ -135,6 +138,12 @@ impl UserRow {
             }),
             _ => None,
         };
+        let display_name_styles = match (self.name_font, self.name_effect, self.name_colors) {
+            (Some(font_id), Some(effect_id), Some(colors)) => {
+                Some(DisplayNameStyles { font_id, effect_id, colors: colors.into_iter().map(|color| color.max(0) as u32).collect() })
+            }
+            _ => None,
+        };
         User {
             id: flake(self.id),
             username: self.username,
@@ -149,6 +158,8 @@ impl UserRow {
             avatar_decoration: self.avatar_decoration,
             profile_effect: self.profile_effect,
             primary_guild,
+            nameplate: self.nameplate,
+            display_name_styles,
             widgets: self.widgets.and_then(|text| serde_json::from_str::<StoredWidgets>(&text).ok()).map(|stored| stored.into_api(state)),
         }
     }
@@ -621,10 +632,31 @@ pub fn attachment_api(
     }
 }
 
-/// A message plus who reacted with what, so `Reaction.me` can be filled in per viewer (REST and gateway fan-out).
+/// Who reacted with one emoji, split into normal and burst reactions.
+#[derive(Clone, Default)]
+struct Reactors {
+    normal: Vec<i64>,
+    burst: Vec<i64>,
+}
+
+impl Reactors {
+    fn into_api(self, emoji: ReactionEmoji, viewer: Option<i64>) -> Reaction {
+        let details = ReactionCountDetails { burst: self.burst.len() as u32, normal: self.normal.len() as u32 };
+        Reaction {
+            emoji,
+            count: details.burst + details.normal,
+            count_details: details,
+            burst_colors: Vec::new(),
+            me: viewer.is_some_and(|viewer| self.normal.contains(&viewer)),
+            me_burst: viewer.is_some_and(|viewer| self.burst.contains(&viewer)),
+        }
+    }
+}
+
+/// A message plus who reacted with what, so `Reaction.me` / `me_burst` can be filled in per viewer (REST and gateway fan-out).
 pub struct MessageView {
     pub message: Message,
-    reaction_users: Vec<Vec<i64>>,
+    reaction_users: Vec<Reactors>,
     poll: Option<crate::polls::LoadedPoll>,
 }
 
@@ -632,7 +664,8 @@ impl MessageView {
     pub fn for_viewer(&self, viewer: i64) -> Message {
         let mut message = self.message.clone();
         for (reaction, users) in message.reactions.iter_mut().zip(&self.reaction_users) {
-            reaction.me = users.contains(&viewer);
+            reaction.me = users.normal.contains(&viewer);
+            reaction.me_burst = users.burst.contains(&viewer);
         }
         if let Some(poll) = &self.poll {
             message.poll = Some(Box::new(poll.for_viewer(Some(viewer))));
@@ -666,8 +699,8 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
     .bind(&ids)
     .fetch_all(&state.db)
     .await?;
-    let reaction_rows: Vec<(i64, String, i64, i64, Option<bool>)> = sqlx::query_as(
-        "SELECT r.message_id, r.emoji_name, r.emoji_id, r.user_id, e.animated FROM reactions r LEFT JOIN emojis e ON r.emoji_id <> 0 AND e.id = r.emoji_id
+    let reaction_rows: Vec<(i64, String, i64, i64, bool, Option<bool>)> = sqlx::query_as(
+        "SELECT r.message_id, r.emoji_name, r.emoji_id, r.user_id, r.burst, e.animated FROM reactions r LEFT JOIN emojis e ON r.emoji_id <> 0 AND e.id = r.emoji_id
          WHERE r.message_id = ANY($1) ORDER BY r.created_at, r.user_id",
     )
     .bind(&ids)
@@ -702,16 +735,21 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
             url: state.asset_url(&path),
         });
     }
-    // message → ordered (emoji, users)
-    let mut reactions: HashMap<i64, Vec<(ReactionEmoji, Vec<i64>)>> = HashMap::new();
-    for (message_id, name, emoji_id, user_id, animated) in reaction_rows {
+    // message → ordered (emoji, users); an emoji keeps the position of its first reaction of either type
+    let mut reactions: HashMap<i64, Vec<(ReactionEmoji, Reactors)>> = HashMap::new();
+    for (message_id, name, emoji_id, user_id, burst, animated) in reaction_rows {
         let emoji = ReactionEmoji { id: (emoji_id != 0).then(|| flake(emoji_id)), name, animated };
         let list = reactions.entry(message_id).or_default();
         // A custom emoji is one reaction whatever name it was stored with.
-        match list.iter_mut().find(|(existing, _)| if emoji.id.is_some() { existing.id == emoji.id } else { *existing == emoji }) {
-            Some((_, users)) => users.push(user_id),
-            None => list.push((emoji, vec![user_id])),
-        }
+        let index = match list.iter().position(|(existing, _)| if emoji.id.is_some() { existing.id == emoji.id } else { *existing == emoji }) {
+            Some(index) => index,
+            None => {
+                list.push((emoji, Reactors::default()));
+                list.len() - 1
+            }
+        };
+        let users = &mut list[index].1;
+        if burst { users.burst.push(user_id) } else { users.normal.push(user_id) }
     }
 
     // member info (nick + roles) for guild messages
@@ -746,11 +784,8 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
             author.avatar = row.webhook_avatar.clone();
         }
         let raw = reactions.remove(&row.id).unwrap_or_default();
-        let reaction_users: Vec<Vec<i64>> = raw.iter().map(|(_, users)| users.clone()).collect();
-        let reactions_api: Vec<Reaction> = raw
-            .into_iter()
-            .map(|(emoji, users)| Reaction { emoji, count: users.len() as u32, me: viewer.is_some_and(|viewer| users.contains(&viewer)) })
-            .collect();
+        let reaction_users: Vec<Reactors> = raw.iter().map(|(_, users)| users.clone()).collect();
+        let reactions_api: Vec<Reaction> = raw.into_iter().map(|(emoji, users)| users.into_api(emoji, viewer)).collect();
         let message = Message {
             id: flake(row.id),
             channel_id: flake(row.channel_id),

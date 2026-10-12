@@ -52,7 +52,15 @@ test('send, edit, reply, react and delete against the mock backend', async ({ pa
 test('upload limits show the Discord-style modals', async ({ page }) => {
   await openDm(page);
   const input = page.locator('input[type=file]');
-  await input.setInputFiles({ name: 'huge.bin', mimeType: 'application/octet-stream', buffer: Buffer.alloc(26 * 1024 * 1024) });
+  // over the 500 MiB limit: a file that reports that size (Playwright cannot ship a 500 MiB buffer)
+  await input.evaluate((el: HTMLInputElement) => {
+    const file = new File(['x'], 'huge.bin', { type: 'application/octet-stream' });
+    Object.defineProperty(file, 'size', { value: 500 * 1024 * 1024 + 1 });
+    const files = new DataTransfer();
+    files.items.add(file);
+    el.files = files.files;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
   await expect(page.getByRole('dialog')).toContainText('Your files are too powerful');
   await page.getByRole('button', { name: 'Okay' }).click();
   await expect(page.locator('.chat-tray-item')).toHaveCount(0);

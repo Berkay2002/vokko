@@ -10,6 +10,7 @@ import { Avatar } from "./Avatar";
 import { userContextItems } from "./menus";
 import { openProfile, TimeoutBadge } from "./ProfileCard";
 import { TagChip } from "../perks/TagChip";
+import { Nameplate, StyledName, nameplateRowClass } from "../perks/NameStyles";
 
 /** A section title ("Admin — 3") or a member; the list is one flat windowed column. */
 type Row = { kind: "title"; key: string; text: string; first: boolean } | { kind: "member"; key: string; member: GuildMember; offline: boolean };
@@ -24,14 +25,15 @@ const MemberRow = memo(function MemberRow({ member, guildId, offline }: { member
   return (
     <button
       type="button"
-      className={`member-row${offline ? " offline" : ""}`}
+      className={`member-row${offline ? " offline" : ""}${nameplateRowClass(member.user.nameplate)}`}
       onClick={e => openProfile(e.currentTarget, member.user.id, guildId)}
       onContextMenu={e => menu.open(e, userContextItems(member.user, { guildId, anchor: e.currentTarget }))}
     >
+      <Nameplate id={member.user.nameplate} />
       <Avatar user={member.user} member={member} size={32} status dim={offline} />
       <span className="member-text">
         <span className="member-name" style={color ? { color } : undefined}>
-          {displayName(member.user, member)}
+          <StyledName styles={member.user.display_name_styles}>{displayName(member.user, member)}</StyledName>
           <TagChip tag={member.user.primary_guild} />
           <TimeoutBadge until={member.communication_disabled_until} />
         </span>

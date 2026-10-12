@@ -3,7 +3,7 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::routing::get;
 use sqlx::{PgConnection, Postgres, QueryBuilder};
-use vokko_protocol::api::{GatewayEvent, MutualGuild, ProfileWidgetsInput, Snowflake, UpdateUserRequest, User, UserProfile};
+use vokko_protocol::api::{DisplayNameStyles, GatewayEvent, MutualGuild, ProfileWidgetsInput, Snowflake, UpdateUserRequest, User, UserProfile};
 
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
@@ -53,6 +53,17 @@ pub fn rgb(value: u32, field: &str) -> ApiResult<i32> {
     Ok(value as i32)
 }
 
+/// A display name style as its (font, effect, colours) column values: asset ids for font and effect, one or two RGB colours.
+pub fn name_style(style: DisplayNameStyles, field: &str) -> ApiResult<(String, String, Vec<i32>)> {
+    let font = asset_id(Some(style.font_id), field)?.ok_or_else(|| ApiErr::invalid(field, "A font is required."))?;
+    let effect = asset_id(Some(style.effect_id), field)?.ok_or_else(|| ApiErr::invalid(field, "An effect is required."))?;
+    if !(1..=2).contains(&style.colors.len()) {
+        return Err(ApiErr::invalid(field, "Must have one or two colours."));
+    }
+    let colors = style.colors.into_iter().map(|color| rgb(color, field)).collect::<ApiResult<Vec<i32>>>()?;
+    Ok((font, effect, colors))
+}
+
 /// A `[primary, accent]` profile theme as its two column values.
 pub fn theme_pair(colors: [u32; 2], field: &str) -> ApiResult<(i32, i32)> {
     Ok((rgb(colors[0], field)?, rgb(colors[1], field)?))
@@ -92,6 +103,12 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     };
     let decoration = body.avatar_decoration.map(|value| asset_id(value, "avatar_decoration")).transpose()?;
     let effect = body.profile_effect.map(|value| asset_id(value, "profile_effect")).transpose()?;
+    let nameplate = body.nameplate.map(|value| asset_id(value, "nameplate")).transpose()?;
+    let name_style = match body.display_name_styles {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(style)) => Some(Some(name_style(style, "display_name_styles")?)),
+    };
     let widgets = match body.widgets {
         None => None,
         Some(None) => Some(None),
@@ -182,6 +199,18 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     }
     if let Some(value) = primary_guild {
         sets.push("primary_guild_id = ").push_bind_unseparated(value);
+    }
+    if let Some(value) = nameplate {
+        sets.push("nameplate = ").push_bind_unseparated(value);
+    }
+    if let Some(value) = name_style {
+        let (font, effect, colors) = match value {
+            Some((font, effect, colors)) => (Some(font), Some(effect), Some(colors)),
+            None => (None, None, None),
+        };
+        sets.push("name_font = ").push_bind_unseparated(font);
+        sets.push("name_effect = ").push_bind_unseparated(effect);
+        sets.push("name_colors = ").push_bind_unseparated(colors);
     }
     if let Some(value) = widgets {
         sets.push("widgets = ").push_bind_unseparated(value).push_unseparated("::jsonb");
@@ -333,11 +362,10 @@ pub enum ImageKind {
 }
 
 impl ImageKind {
-    /// (largest file, largest animated GIF) in bytes. Nothing is re-encoded, so the animated cap stands in for the stored size.
-    fn limits(self) -> (i64, i64) {
+    /// Largest file in bytes, static or animated: every Vokko user gets the top (Nitro) limit. Nothing is re-encoded.
+    fn limit(self) -> i64 {
         match self {
-            Self::Avatar => (8 * MIB, 2 * MIB),
-            Self::Banner => (10 * MIB, 4 * MIB),
+            Self::Avatar | Self::Banner => 10 * MIB,
         }
     }
 }
@@ -362,9 +390,8 @@ pub async fn image_path_on(conn: &mut PgConnection, attachment_id: i64, user_id:
     if !matches!(content_type.as_str(), "image/png" | "image/jpeg" | "image/gif" | "image/webp") {
         return Err(ApiErr::invalid(field, "Must be a PNG, JPEG, GIF or WebP image."));
     }
-    let (max, max_animated) = kind.limits();
-    if size > max || (content_type == "image/gif" && size > max_animated) {
-        let limit = if content_type == "image/gif" { max_animated } else { max };
+    let limit = kind.limit();
+    if size > limit {
         return Err(ApiErr::invalid(field, &format!("The image is too large ({} MiB at most).", limit / MIB)));
     }
     // Claiming is one statement, so two requests racing for the same upload cannot both win.

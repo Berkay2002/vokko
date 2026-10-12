@@ -173,7 +173,81 @@ export const badgeById = (id: string): BadgeDef | undefined => BADGES.find(b => 
 /** Tag text: 1-4 letters or digits. */
 export const TAG_RE = /^[A-Za-z0-9]{1,4}$/;
 
+// ---- nameplates: the background of the user's row in member and DM lists ----
+
+export interface NameplateDef {
+  id: string;
+  name: string;
+  /** Gradient stops, left to right; the row's right end fades to transparent so text stays readable. */
+  colors: string[];
+  /** Diagonal light sweep across the plate. */
+  sheen?: boolean;
+  /** Repeating pattern drawn over the gradient. */
+  pattern?: "dots" | "stripes" | "grid" | "waves";
+}
+
+export const NAMEPLATES: NameplateDef[] = [
+  { id: "aurora", name: "Aurora", colors: ["#1f6b55", "#3a4f9a", "#6b3f9a"], sheen: true },
+  { id: "ember", name: "Ember", colors: ["#7a2618", "#b5521f", "#5a1a12"], pattern: "dots" },
+  { id: "tide", name: "Tide", colors: ["#0f3d63", "#1d6f9a"], pattern: "waves" },
+  { id: "meadow", name: "Meadow", colors: ["#25502a", "#5c8a2e"], pattern: "dots" },
+  { id: "dusk", name: "Dusk", colors: ["#3a2357", "#8a3f6b", "#d07a4f"] },
+  { id: "circuit", name: "Circuit", colors: ["#0e2a2f", "#14505a"], pattern: "grid", sheen: true },
+  { id: "candy", name: "Candy", colors: ["#8a2f6b", "#4f5fc4"], pattern: "stripes" },
+  { id: "starfield", name: "Starfield", colors: ["#0b0f2e", "#2a2160"], pattern: "dots", sheen: true },
+];
+
+export const nameplateById = (id: string | null | undefined): NameplateDef | undefined => NAMEPLATES.find(n => n.id === id);
+
+// ---- display name styles: font + effect + one or two colours ----
+
+export interface NameFontDef {
+  id: string;
+  name: string;
+  /** CSS font stack; only system and generic families (no downloaded fonts). */
+  family: string;
+  weight?: number;
+  /** Extra letter spacing in em. */
+  spacing?: number;
+  uppercase?: boolean;
+}
+
+export const NAME_FONTS: NameFontDef[] = [
+  { id: "default", name: "Default", family: "var(--font-primary)" },
+  { id: "serif", name: "Serif", family: "'Noto Serif', Georgia, 'Times New Roman', serif" },
+  { id: "mono", name: "Mono", family: "var(--font-code, ui-monospace, monospace)" },
+  { id: "rounded", name: "Rounded", family: "ui-rounded, 'SF Pro Rounded', 'Nunito', var(--font-primary)", weight: 700 },
+  { id: "script", name: "Script", family: "'Segoe Script', 'Brush Script MT', cursive" },
+  { id: "display", name: "Display", family: "var(--font-primary)", weight: 800, spacing: 0.06, uppercase: true },
+  { id: "light", name: "Light", family: "var(--font-primary)", weight: 300, spacing: 0.02 },
+  { id: "condensed", name: "Condensed", family: "'Arial Narrow', 'Roboto Condensed', var(--font-primary)", weight: 700, spacing: -0.02 },
+];
+
+export interface NameEffectDef {
+  id: string;
+  name: string;
+  /** How many colours the effect uses (1 or 2). */
+  colors: 1 | 2;
+}
+
+export const NAME_EFFECTS: NameEffectDef[] = [
+  { id: "solid", name: "Solid", colors: 1 },
+  { id: "gradient", name: "Gradient", colors: 2 },
+  { id: "neon", name: "Neon", colors: 1 },
+  { id: "toon", name: "Toon", colors: 2 },
+  { id: "pop", name: "Pop", colors: 2 },
+  { id: "shimmer", name: "Shimmer", colors: 2 },
+  { id: "glitch", name: "Glitch", colors: 2 },
+  { id: "embossed", name: "Embossed", colors: 1 },
+];
+
+export const nameFontById = (id: string | null | undefined): NameFontDef | undefined => NAME_FONTS.find(f => f.id === id);
+export const nameEffectById = (id: string | null | undefined): NameEffectDef | undefined => NAME_EFFECTS.find(e => e.id === id);
+
 // ---- limits ----
 
 export const PRONOUNS_MAX = 40;
+/** Bio length; the bio renders Markdown (same parser as messages). */
 export const BIO_MAX = 190;
+/** Avatars and banners, static or animated: everyone gets the Nitro limit. */
+export const PROFILE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;

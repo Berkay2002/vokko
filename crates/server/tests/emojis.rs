@@ -237,8 +237,8 @@ async fn reactions_with_custom_emoji_follow_membership_roles_and_external_rules(
     assert_eq!(
         reactions,
         json!([
-            {"emoji": {"id": id(&open), "name": "party", "animated": true}, "count": 2, "me": true},
-            {"emoji": {"id": id(&locked), "name": "vip", "animated": false}, "count": 1, "me": false}
+            {"emoji": {"id": id(&open), "name": "party", "animated": true}, "count": 2, "count_details": {"normal": 2, "burst": 0}, "burst_colors": [], "me": true, "me_burst": false},
+            {"emoji": {"id": id(&locked), "name": "vip", "animated": false}, "count": 1, "count_details": {"normal": 1, "burst": 0}, "burst_colors": [], "me": false, "me_burst": false}
         ])
     );
     let (status, users) = world.app.get(&format!("/channels/{general}/messages/{mid}/reactions/x_x:{}", id(&open)), &world.alice.token).await;
@@ -272,7 +272,10 @@ async fn reactions_with_custom_emoji_follow_membership_roles_and_external_rules(
     let messages = world.messages(&general, &world.carol).await;
     let reactions = messages.iter().find(|m| m["id"] == mid.as_str()).expect("message")["reactions"].clone();
     let party = reactions.as_array().expect("reactions").iter().find(|r| r["emoji"]["id"] == id(&open).as_str()).expect("party stays").clone();
-    assert_eq!(party, json!({"emoji": {"id": id(&open), "name": "party"}, "count": 1, "me": true}));
+    assert_eq!(
+        party,
+        json!({"emoji": {"id": id(&open), "name": "party"}, "count": 1, "count_details": {"normal": 1, "burst": 0}, "burst_colors": [], "me": true, "me_burst": false})
+    );
 }
 
 #[tokio::test]

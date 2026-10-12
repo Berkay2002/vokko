@@ -225,7 +225,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
       </div>}
     </div>
     {menuAt && <MessageMenu target={{ message, pending, ...menuAt }} onClose={() => setMenuAt(null)} onMoreEmoji={() => setMenuPickerOpen(true)} />}
-    <EmojiPickerPopout anchor={rowRef} open={menuPickerOpen} onClose={() => setMenuPickerOpen(false)} onPick={e => { setMenuPickerOpen(false); chat.actions.react(message, e); }} reactionChannelId={message.channel_id} />
+    <EmojiPickerPopout anchor={rowRef} open={menuPickerOpen} onClose={() => setMenuPickerOpen(false)} superReactions onPick={(e, burst) => { setMenuPickerOpen(false); chat.actions.react(message, e, burst); }} reactionChannelId={message.channel_id} />
     {showToolbar && <div className={`chat-toolbar${pickerOpen ? ' open' : ''}`} role="toolbar" aria-label="Message actions">
       {quick.map(e => <Tooltip key={e} content="React" side="top"><button type="button" className="chat-toolbar-btn emoji" aria-label={`React with ${e}`} onClick={() => chat.actions.react(message, { id: null, name: e })}>{e}</button></Tooltip>)}
       <span className="chat-toolbar-sep" role="separator" />
@@ -240,7 +240,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
         const r = e.currentTarget.getBoundingClientRect();
         setMenuAt({ x: r.left, y: r.bottom + 4 });
       }}><MoreHorizontal size={20} /></button></Tooltip>
-      <EmojiPickerPopout anchor={addBtn} open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={e => { setPickerOpen(false); chat.actions.react(message, e); }} reactionChannelId={message.channel_id} />
+      <EmojiPickerPopout anchor={addBtn} open={pickerOpen} onClose={() => setPickerOpen(false)} superReactions onPick={(e, burst) => { setPickerOpen(false); chat.actions.react(message, e, burst); }} reactionChannelId={message.channel_id} />
     </div>}
   </div>;
 }

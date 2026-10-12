@@ -1,0 +1,119 @@
+/* Super (burst) reactions: the glowing pill, its particle burst and the picker switch. Glow colours come from the emoji (perks/emojiColors.ts). */
+
+.chat-reaction.burst {
+  position: relative;
+  border-color: color-mix(in srgb, var(--burst-a) 55%, transparent) !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--burst-a) 22%, var(--chat-bg-secondary)), color-mix(in srgb, var(--burst-b) 22%, var(--chat-bg-secondary))) !important;
+  box-shadow: 0 0 8px -2px var(--burst-a);
+}
+
+.chat-reaction.burst.me {
+  border-color: var(--burst-a) !important;
+  box-shadow: 0 0 10px -1px var(--burst-a), inset 0 0 6px -2px var(--burst-b);
+}
+
+.burst-emoji {
+  display: inline-flex;
+  filter: drop-shadow(0 0 3px var(--burst-a));
+}
+
+.burst-particles {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.burst-particle {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: var(--bp-color);
+  box-shadow: 0 0 4px var(--bp-color);
+  opacity: 0;
+  animation: burst-fly 650ms ease-out forwards;
+}
+
+@keyframes burst-fly {
+  0% {
+    transform: translate(0, 0) scale(0.6);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--bp-x), var(--bp-y)) scale(0.2);
+    opacity: 0;
+  }
+}
+
+.reduce-motion .burst-particles {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .burst-particles {
+    display: none;
+  }
+}
+
+.super-react-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--interactive-text-default);
+  cursor: pointer;
+}
+
+.super-react-toggle:hover {
+  background: var(--interactive-background-hover);
+  color: var(--interactive-text-hover);
+}
+
+.super-react-toggle.on {
+  background: var(--brand-500);
+  color: var(--white);
+}
+
+.reactors-split {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.reactors-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.chat-emoji-top:has(.super-react-toggle) {
+  display: flex;
+  align-items: center;
+}
+
+.chat-emoji-top:has(.super-react-toggle) .chat-emoji-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.reactions-super-badge {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--brand-360);
+}

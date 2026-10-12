@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::routing::{get, put};
 use serde::Deserialize;
 use vokko_protocol::api::permissions::{ADD_REACTIONS, READ_MESSAGE_HISTORY, USE_EXTERNAL_EMOJIS};
-use vokko_protocol::api::{GatewayEvent, MessageReaction, ReactionEmoji, Snowflake, User};
+use vokko_protocol::api::{GatewayEvent, MessageReaction, ReactionEmoji, ReactionType, Snowflake, User};
 
 use crate::access::{self, channel_access};
 use crate::auth::AuthUser;
@@ -43,6 +43,32 @@ pub fn parse_emoji(raw: &str) -> ApiResult<ReactionEmoji> {
     Ok(ReactionEmoji { id: None, name: name.to_owned(), animated: None })
 }
 
+/// `?type=0|1` on the reaction routes; absent = 0 (normal), like Discord.
+#[derive(Deserialize)]
+struct TypeQuery {
+    #[serde(rename = "type")]
+    kind: Option<u8>,
+}
+
+fn reaction_type(kind: Option<u8>) -> ApiResult<ReactionType> {
+    match kind {
+        None | Some(0) => Ok(ReactionType::Normal),
+        Some(1) => Ok(ReactionType::Burst),
+        Some(_) => Err(ApiErr::invalid("type", "Must be 0 (normal) or 1 (burst).")),
+    }
+}
+
+fn reaction_event(user_id: i64, channel_id: i64, message_id: i64, emoji: ReactionEmoji, kind: ReactionType) -> MessageReaction {
+    MessageReaction {
+        user_id: Snowflake::from(user_id),
+        channel_id: Snowflake::from(channel_id),
+        message_id: Snowflake::from(message_id),
+        emoji,
+        kind,
+        burst: kind == ReactionType::Burst,
+    }
+}
+
 async fn locate(state: &AppState, user_id: i64, channel: &str, message: &str) -> ApiResult<(access::ChannelAccess, i64)> {
     let channel_id = parse_id(channel).ok_or_else(ApiErr::unknown_channel)?;
     let message_id = parse_id(message).ok_or_else(ApiErr::unknown_message)?;
@@ -59,8 +85,10 @@ async fn add_reaction(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path((id, mid, emoji)): Path<(String, String, String)>,
+    ApiQuery(query): ApiQuery<TypeQuery>,
 ) -> ApiResult<StatusCode> {
     let mut emoji = parse_emoji(&emoji)?;
+    let kind = reaction_type(query.kind)?;
     let (access, message_id) = locate(&state, user_id, &id, &mid).await?;
     access.require(READ_MESSAGE_HISTORY)?;
     access.require(ADD_REACTIONS)?;
@@ -90,25 +118,22 @@ async fn add_reaction(
     if !existing && distinct >= MAX_DISTINCT_REACTIONS {
         return Err(ApiErr::conflict(30010, "Maximum number of reactions reached (20)"));
     }
+    // Burst reactions have no weekly limit in Vokko; the 20 distinct emoji cap covers both types together.
     let inserted = sqlx::query(
-        "INSERT INTO reactions (message_id, user_id, emoji_name, emoji_id) SELECT $1, $4, $2, $3
-         WHERE NOT EXISTS (SELECT 1 FROM reactions WHERE message_id = $1 AND user_id = $4 AND emoji_id = $3 AND ($3 <> 0 OR emoji_name = $2))
+        "INSERT INTO reactions (message_id, user_id, emoji_name, emoji_id, burst) SELECT $1, $4, $2, $3, $5
+         WHERE NOT EXISTS (SELECT 1 FROM reactions WHERE message_id = $1 AND user_id = $4 AND emoji_id = $3 AND ($3 <> 0 OR emoji_name = $2) AND burst = $5)
          ON CONFLICT DO NOTHING",
     )
     .bind(message_id)
     .bind(&emoji.name)
     .bind(emoji_id)
     .bind(user_id)
+    .bind(kind == ReactionType::Burst)
     .execute(&state.db)
     .await?;
     if inserted.rows_affected() > 0 {
         let viewers = access::channel_viewers(&state, &access.channel).await?;
-        let event = MessageReaction {
-            user_id: Snowflake::from(user_id),
-            channel_id: Snowflake::from(access.channel.id),
-            message_id: Snowflake::from(message_id),
-            emoji,
-        };
+        let event = reaction_event(user_id, access.channel.id, message_id, emoji, kind);
         state.hub.send(&viewers, &GatewayEvent::MessageReactionAdd(event));
     }
     Ok(StatusCode::NO_CONTENT)
@@ -118,28 +143,26 @@ async fn remove_reaction(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path((id, mid, emoji)): Path<(String, String, String)>,
+    ApiQuery(query): ApiQuery<TypeQuery>,
 ) -> ApiResult<StatusCode> {
     let mut emoji = parse_emoji(&emoji)?;
+    let kind = reaction_type(query.kind)?;
     let (access, message_id) = locate(&state, user_id, &id, &mid).await?;
     let emoji_id = emoji.id.map(Snowflake::db).unwrap_or(0);
     let removed: Vec<(String,)> =
-        sqlx::query_as(&format!("DELETE FROM reactions WHERE message_id = $1 AND user_id = $4 AND {SAME_EMOJI} RETURNING emoji_name"))
+        sqlx::query_as(&format!("DELETE FROM reactions WHERE message_id = $1 AND user_id = $4 AND {SAME_EMOJI} AND burst = $5 RETURNING emoji_name"))
             .bind(message_id)
             .bind(&emoji.name)
             .bind(emoji_id)
             .bind(user_id)
+            .bind(kind == ReactionType::Burst)
             .fetch_all(&state.db)
             .await?;
     if let Some((name,)) = removed.into_iter().next() {
         emoji.name = name;
         emoji.animated = emojis::animated_flags(&state, &[emoji_id]).await?.get(&emoji_id).copied();
         let viewers = access::channel_viewers(&state, &access.channel).await?;
-        let event = MessageReaction {
-            user_id: Snowflake::from(user_id),
-            channel_id: Snowflake::from(access.channel.id),
-            message_id: Snowflake::from(message_id),
-            emoji,
-        };
+        let event = reaction_event(user_id, access.channel.id, message_id, emoji, kind);
         state.hub.send(&viewers, &GatewayEvent::MessageReactionRemove(event));
     }
     Ok(StatusCode::NO_CONTENT)
@@ -149,6 +172,8 @@ async fn remove_reaction(
 struct ReactorsQuery {
     limit: Option<i64>,
     after: Option<Snowflake>,
+    #[serde(rename = "type")]
+    kind: Option<u8>,
 }
 
 async fn list_reactors(
@@ -158,18 +183,21 @@ async fn list_reactors(
     ApiQuery(query): ApiQuery<ReactorsQuery>,
 ) -> ApiResult<Json<Vec<User>>> {
     let emoji = parse_emoji(&emoji)?;
+    let kind = reaction_type(query.kind)?;
     let (access, message_id) = locate(&state, user_id, &id, &mid).await?;
     access.require(READ_MESSAGE_HISTORY)?;
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
-    let rows: Vec<(i64,)> =
-        sqlx::query_as(&format!("SELECT user_id FROM reactions WHERE message_id = $1 AND {SAME_EMOJI} AND user_id > $4 ORDER BY user_id LIMIT $5"))
-            .bind(message_id)
-            .bind(&emoji.name)
-            .bind(emoji.id.map(Snowflake::db).unwrap_or(0))
-            .bind(query.after.map(Snowflake::db).unwrap_or(0))
-            .bind(limit)
-            .fetch_all(&state.db)
-            .await?;
+    let rows: Vec<(i64,)> = sqlx::query_as(&format!(
+        "SELECT user_id FROM reactions WHERE message_id = $1 AND {SAME_EMOJI} AND burst = $4 AND user_id > $5 ORDER BY user_id LIMIT $6"
+    ))
+    .bind(message_id)
+    .bind(&emoji.name)
+    .bind(emoji.id.map(Snowflake::db).unwrap_or(0))
+    .bind(kind == ReactionType::Burst)
+    .bind(query.after.map(Snowflake::db).unwrap_or(0))
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await?;
     let ids: Vec<i64> = rows.into_iter().map(|(id,)| id).collect();
     let mut users = store::users(&state, &ids).await?;
     Ok(Json(ids.into_iter().filter_map(|id| users.remove(&id)).collect()))

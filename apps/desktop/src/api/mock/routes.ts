@@ -1,6 +1,6 @@
 // Mock REST router: every route of docs/api.md that the UI uses, with the same status codes and error codes.
 
-import { AuditLogEvent, ChannelType, ExplicitContentFilter, JoinSourceType, MessageType, RelationshipType, VerificationLevel, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
+import { AuditLogEvent, ChannelType, ExplicitContentFilter, JoinSourceType, MessageType, ReactionType, RelationshipType, VerificationLevel, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
 import { compareIds } from "../snowflake";
 import { Perm, hasBit } from "../permissions";
 import { channelPermsOf } from "./access";
@@ -569,40 +569,62 @@ route("DELETE", `/channels/${ID}/messages/${ID}`, ({ viewer, params }) => {
 
 // ---- reactions ----
 
-route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, params }) => {
+/** `?type=0|1` (absent = 0): normal or burst (super) reaction. Vokko has no burst limit. */
+function reactionBurst(query: URLSearchParams): boolean {
+  const raw = query.get("type");
+  if (raw === null || raw === "0") return false;
+  if (raw === "1") return true;
+  return fail(400, 50035, "Invalid Form Body", { type: { code: "BASE_TYPE_BAD_FORMAT", message: "Must be 0 (normal) or 1 (burst)." } });
+}
+
+const reactionEvent = (userId: string, channelId: string, messageId: string, emoji: ReactionEmoji, burst: boolean) => ({
+  user_id: userId, channel_id: channelId, message_id: messageId, emoji, type: burst ? ReactionType.Burst : ReactionType.Normal, burst,
+});
+
+route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, params, query }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   requireChannelPerm(channel, viewer.user.id, Perm.ADD_REACTIONS);
   assertThreadOpen(channel);
   assertDmOpen(channel, viewer.user.id);
   const emoji = resolveReactionEmoji(channel, viewer.user.id, parseEmoji(params[2] ?? ""));
+  const burst = reactionBurst(query);
   let reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
-  if (!reaction) message.reactions.push((reaction = { emoji, user_ids: [] }));
-  if (!reaction.user_ids.includes(viewer.user.id)) {
-    reaction.user_ids.push(viewer.user.id);
-    emit(channelAudience(channel), "MESSAGE_REACTION_ADD", { user_id: viewer.user.id, channel_id: channel.id, message_id: message.id, emoji });
+  if (!reaction) {
+    if (message.reactions.length >= 20) fail(400, 30010, "Maximum number of reactions reached (20)");
+    message.reactions.push((reaction = { emoji, user_ids: [] }));
+  }
+  const list = burst ? (reaction.burst_ids ??= []) : reaction.user_ids;
+  if (!list.includes(viewer.user.id)) {
+    list.push(viewer.user.id);
+    emit(channelAudience(channel), "MESSAGE_REACTION_ADD", reactionEvent(viewer.user.id, channel.id, message.id, emoji, burst));
   }
   return undefined;
 });
 
-route("DELETE", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, params }) => {
+route("DELETE", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, params, query }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   const emoji = parseEmoji(params[2] ?? "");
+  const burst = reactionBurst(query);
   const reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
-  if (reaction?.user_ids.includes(viewer.user.id)) {
-    reaction.user_ids = reaction.user_ids.filter(id => id !== viewer.user.id);
-    if (reaction.user_ids.length === 0) message.reactions = message.reactions.filter(r => r !== reaction);
-    emit(channelAudience(channel), "MESSAGE_REACTION_REMOVE", { user_id: viewer.user.id, channel_id: channel.id, message_id: message.id, emoji: { ...reaction.emoji } });
+  const list = burst ? reaction?.burst_ids : reaction?.user_ids;
+  if (reaction && list?.includes(viewer.user.id)) {
+    if (burst) reaction.burst_ids = list.filter(id => id !== viewer.user.id);
+    else reaction.user_ids = list.filter(id => id !== viewer.user.id);
+    if (reaction.user_ids.length + (reaction.burst_ids?.length ?? 0) === 0) message.reactions = message.reactions.filter(r => r !== reaction);
+    emit(channelAudience(channel), "MESSAGE_REACTION_REMOVE", reactionEvent(viewer.user.id, channel.id, message.id, { ...reaction.emoji }, burst));
   }
   return undefined;
 });
 
-route("GET", `/channels/${ID}/messages/${ID}/reactions/([^/]+)`, ({ viewer, params }) => {
+route("GET", `/channels/${ID}/messages/${ID}/reactions/([^/]+)`, ({ viewer, params, query }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   const emoji = parseEmoji(params[2] ?? "");
-  return (message.reactions.find(r => sameEmoji(r.emoji, emoji))?.user_ids ?? []).map((id): User => userOf(id));
+  const burst = reactionBurst(query);
+  const reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
+  return ((burst ? reaction?.burst_ids : reaction?.user_ids) ?? []).map((id): User => userOf(id));
 });
 
 // ---- pins, typing, ack ----

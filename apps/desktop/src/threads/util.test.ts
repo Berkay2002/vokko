@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { timestampToSnowflake } from "../api/snowflake";
-import { ChannelType, type Channel } from "../api/types";
+import { ChannelType, type Channel, type Reaction, type ReactionEmoji } from "../api/types";
 import { applyReactionEvent, clampPanelWidth, groupActiveThreads, isThreadUnread, PANEL_MIN, panelMax, sortThreads, topReaction } from "./util";
 
 const T0 = Date.parse("2026-10-01T12:00:00Z");
@@ -59,11 +59,14 @@ describe("isThreadUnread", () => {
   });
 });
 
+/** A reaction with only normal (not super) reactions. */
+const rx = (emoji: ReactionEmoji, count: number, me: boolean): Reaction => ({ emoji, count, count_details: { normal: count, burst: 0 }, burst_colors: [], me, me_burst: false });
+
 describe("topReaction", () => {
   it("picks the highest count, the first one on a tie", () => {
-    const a = { emoji: { id: null, name: "👍" }, count: 2, me: false };
-    const b = { emoji: { id: null, name: "🎉" }, count: 3, me: true };
-    const c = { emoji: { id: null, name: "❤️" }, count: 3, me: false };
+    const a = rx({ id: null, name: "👍" }, 2, false);
+    const b = rx({ id: null, name: "🎉" }, 3, true);
+    const c = rx({ id: null, name: "❤️" }, 3, false);
     expect(topReaction([a, b, c])).toBe(b);
     expect(topReaction([])).toBeUndefined();
     expect(topReaction(undefined)).toBeUndefined();
@@ -86,17 +89,17 @@ describe("applyReactionEvent", () => {
   const tada = { id: null, name: "🎉" };
   it("adds a new reaction, counts up and down, and drops it at zero", () => {
     const one = applyReactionEvent([], up, 1, false);
-    expect(one).toEqual([{ emoji: up, count: 1, me: false }]);
+    expect(one).toEqual([rx(up, 1, false)]);
     const two = applyReactionEvent(one, up, 1, true);
-    expect(two).toEqual([{ emoji: up, count: 2, me: true }]);
-    expect(applyReactionEvent(two, up, -1, true)).toEqual([{ emoji: up, count: 1, me: false }]);
-    expect(applyReactionEvent(two, up, -1, false)).toEqual([{ emoji: up, count: 1, me: true }]);
+    expect(two).toEqual([rx(up, 2, true)]);
+    expect(applyReactionEvent(two, up, -1, true)).toEqual([rx(up, 1, false)]);
+    expect(applyReactionEvent(two, up, -1, false)).toEqual([rx(up, 1, true)]);
     expect(applyReactionEvent(one, up, -1, false)).toEqual([]);
   });
   it("leaves other reactions alone and ignores removing an unknown one", () => {
-    const list = [{ emoji: tada, count: 3, me: false }];
+    const list = [rx(tada, 3, false)];
     expect(applyReactionEvent(list, up, -1, false)).toEqual(list);
     expect(applyReactionEvent(list, up, 1, false)).toHaveLength(2);
-    expect(applyReactionEvent([{ emoji: { id: "5", name: "blob" }, count: 1, me: false }], { id: "5", name: "renamed" }, 1, false)[0]?.count).toBe(2);
+    expect(applyReactionEvent([rx({ id: "5", name: "blob" }, 1, false)], { id: "5", name: "renamed" }, 1, false)[0]?.count).toBe(2);
   });
 });

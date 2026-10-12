@@ -116,8 +116,8 @@ describe("mock reactions with custom emoji", () => {
 
     const [listed] = call("member", "GET", `/channels/${channelId}/messages?limit=1`) as Message[];
     expect(listed!.reactions).toEqual([
-      { emoji: { id: open.id, name: "party", animated: true }, count: 1, me: true },
-      { emoji: { id: vip.id, name: "vip", animated: false }, count: 1, me: true },
+      { emoji: { id: open.id, name: "party", animated: true }, count: 1, count_details: { normal: 1, burst: 0 }, burst_colors: [], me: true, me_burst: false },
+      { emoji: { id: vip.id, name: "vip", animated: false }, count: 1, count_details: { normal: 1, burst: 0 }, burst_colors: [], me: true, me_burst: false },
     ]);
   });
 });

@@ -2,11 +2,14 @@ import { useRef, useState } from "react";
 import { ApiRequestError } from "../../api/errors";
 import { request, uploadAttachment } from "../../api/rest";
 import { appStore, displayName, useStore } from "../../api/store";
-import type { Guild, GuildMember, GuildTag, User } from "../../api/types";
+import type { DisplayNameStyles, Guild, GuildMember, GuildTag, User } from "../../api/types";
 import { AVATAR_DECORATIONS, BIO_MAX, HEX_COLOR_RE, PRONOUNS_MAX, PROFILE_EFFECTS, PROFILE_THEMES, hexToInt, intToHex, themeGradient } from "../../perks/catalog";
 import { ProfileBanner } from "../../perks/ProfileBanner";
 import { resolveProfile, themeVars, type ProfileLook } from "../../perks/profile";
 import { TagChip } from "../../perks/TagChip";
+import { Nameplate, StyledName } from "../../perks/NameStyles";
+import { DisplayNameStyleFields, NameplateGrid, sameNameStyle } from "../../perks/NameStylePickers";
+import { ProfileBio } from "../../perks/ProfileBio";
 import { Avatar } from "../Avatar";
 import { Field, Select } from "./controls";
 import { SaveBar } from "./SaveBar";
@@ -137,7 +140,7 @@ function TextFields({ pronouns, bio, onPronouns, onBio }: { pronouns: string; bi
 }
 
 /** The popout profile card, static, for the live preview. */
-function PreviewCard({ user, look, tag, guildName }: { user: User; look: ProfileLook; tag?: GuildTag | null; guildName?: string }) {
+function PreviewCard({ user, look, tag, guildName, nameStyle, nameplate }: { user: User; look: ProfileLook; tag?: GuildTag | null; guildName?: string; nameStyle?: DisplayNameStyles | null; nameplate?: string | null }) {
   const previewUser = { id: user.id, avatar: look.avatar, avatar_decoration: look.decoration };
   return (
     <div className="profile-preview">
@@ -149,7 +152,7 @@ function PreviewCard({ user, look, tag, guildName }: { user: User; look: Profile
         </div>
         <div className="profile-body">
           <div className="pv-name-row">
-            <span className="profile-name">{displayName(user)}</span>
+            <StyledName className="profile-name" styles={nameStyle ?? user.display_name_styles}>{displayName(user)}</StyledName>
             {tag && <TagChip tag={tag} guildName={guildName} />}
           </div>
           <div className="profile-username">{user.username}</div>
@@ -157,11 +160,21 @@ function PreviewCard({ user, look, tag, guildName }: { user: User; look: Profile
           {look.bio && (
             <section className="profile-section">
               <h3>About Me</h3>
-              <p>{look.bio}</p>
+              <ProfileBio text={look.bio} />
             </section>
           )}
         </div>
       </div>
+      {nameplate !== undefined && (
+        <div className="pf-nameplate-preview">
+          <div className="field-label">Member list</div>
+          <span className={`pf-nameplate-row${nameplate ? " has-nameplate" : ""}`} data-testid="nameplate-preview">
+            <Nameplate id={nameplate} />
+            <Avatar user={{ id: user.id, avatar: look.avatar }} size={24} decoration={false} />
+            <StyledName className="pf-nameplate-name" styles={nameStyle}>{displayName(user)}</StyledName>
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -220,6 +233,8 @@ function UserProfileTab({ me }: { me: User }) {
     decoration: me.avatar_decoration ?? null,
     effect: me.profile_effect ?? null,
     tagGuild: me.primary_guild?.guild_id ?? null,
+    nameplate: me.nameplate ?? null,
+    nameStyle: me.display_name_styles ?? null,
   });
   const [draft, setDraft] = useState(init);
   const [formKey, setFormKey] = useState(0);
@@ -237,7 +252,9 @@ function UserProfileTab({ me }: { me: User }) {
     draft.bio.trim() !== initial.bio ||
     draft.decoration !== initial.decoration ||
     draft.effect !== initial.effect ||
-    draft.tagGuild !== initial.tagGuild;
+    draft.tagGuild !== initial.tagGuild ||
+    draft.nameplate !== initial.nameplate ||
+    !sameNameStyle(draft.nameStyle, initial.nameStyle);
 
   const reset = () => {
     setDraft(init());
@@ -256,6 +273,8 @@ function UserProfileTab({ me }: { me: User }) {
     if (draft.decoration !== initial.decoration) patch.avatar_decoration = draft.decoration;
     if (draft.effect !== initial.effect) patch.profile_effect = draft.effect;
     if (draft.tagGuild !== initial.tagGuild) patch.primary_guild_id = draft.tagGuild;
+    if (draft.nameplate !== initial.nameplate) patch.nameplate = draft.nameplate;
+    if (!sameNameStyle(draft.nameStyle, initial.nameStyle)) patch.display_name_styles = draft.nameStyle;
     setState({ busy: true, error: null });
     try {
       const user = await request<User>("PATCH", "/users/@me", patch);
@@ -286,13 +305,19 @@ function UserProfileTab({ me }: { me: User }) {
     <>
       <div className="profiles-layout">
         <div className="profiles-form" key={formKey}>
-          <ImageField label="Avatar" hint="GIF and WebP avatars animate. Up to 8 MiB." current={me.avatar} staged={draft.avatar} onStage={avatar => set({ avatar })} />
-          <ImageField label="Banner" hint="Up to 10 MiB, shown at 17:6" current={me.banner ?? null} staged={draft.banner} onStage={banner => set({ banner })} />
+          <ImageField label="Avatar" hint="GIF and WebP avatars animate. Up to 10 MiB." current={me.avatar} staged={draft.avatar} onStage={avatar => set({ avatar })} />
+          <ImageField label="Banner" hint="GIF and WebP banners animate. Up to 10 MiB, shown at 17:6" current={me.banner ?? null} staged={draft.banner} onStage={banner => set({ banner })} />
           <BannerColorField value={draft.bannerColor} onChange={bannerColor => set({ bannerColor })} />
           <ThemeField value={draft.theme} onChange={theme => set({ theme })} />
           <TextFields pronouns={draft.pronouns} bio={draft.bio} onPronouns={pronouns => set({ pronouns })} onBio={bio => set({ bio })} />
           <DecorationGrid user={me} avatar={avatarUrl} value={draft.decoration} onChange={decoration => set({ decoration })} />
           <EffectGrid value={draft.effect} onChange={effect => set({ effect })} />
+          <Field label="Nameplate" note="Shown behind your name in member and DM lists.">
+            <NameplateGrid user={{ id: me.id, avatar: avatarUrl }} name={displayName(me)} value={draft.nameplate} onChange={nameplate => set({ nameplate })} />
+          </Field>
+          <Field label="Display name style">
+            <DisplayNameStyleFields name={displayName(me)} value={draft.nameStyle} onChange={nameStyle => set({ nameStyle })} />
+          </Field>
           <Field label="Server tag">
             {tagGuilds.length === 0 ? (
               <p className="settings-todo">None of your servers has a tag yet.</p>
@@ -309,7 +334,7 @@ function UserProfileTab({ me }: { me: User }) {
             )}
           </Field>
         </div>
-        <PreviewCard user={me} look={look} tag={tagGuild?.tag} guildName={tagGuild?.name} />
+        <PreviewCard user={me} look={look} tag={tagGuild?.tag} guildName={tagGuild?.name} nameStyle={draft.nameStyle} nameplate={draft.nameplate} />
       </div>
       <SaveBar visible={dirty} busy={state.busy} error={state.error} onReset={reset} onSave={() => void save()} />
     </>
@@ -366,7 +391,7 @@ function ServerForm({ me, guild }: { me: User; guild: Guild }) {
       <div className="profiles-layout">
         <div className="profiles-form" key={formKey}>
           <p className="settings-todo">Overrides your profile only in this server.</p>
-          <ImageField label="Server avatar" hint="GIF and WebP avatars animate. Up to 8 MiB." current={member?.avatar ?? null} staged={draft.avatar} onStage={avatar => set({ avatar })} />
+          <ImageField label="Server avatar" hint="GIF and WebP avatars animate. Up to 10 MiB." current={member?.avatar ?? null} staged={draft.avatar} onStage={avatar => set({ avatar })} />
           <ImageField label="Server banner" hint="Up to 10 MiB, shown at 17:6" current={member?.banner ?? null} staged={draft.banner} onStage={banner => set({ banner })} />
           <ThemeField value={draft.theme} onChange={theme => set({ theme })} note="Clear a field to fall back to your main profile." />
           <TextFields pronouns={draft.pronouns} bio={draft.bio} onPronouns={pronouns => set({ pronouns })} onBio={bio => set({ bio })} />

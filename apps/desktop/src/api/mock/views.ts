@@ -21,8 +21,18 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
   const startedThread = thread && isThreadType(thread.type) && thread.parent_id === m.channel_id && canView(thread, viewerId) ? channelFor(thread, viewerId) : undefined;
   const poll = pollFor(m.id, viewerId);
   const reactions: Reaction[] = m.reactions
-    .filter(r => r.user_ids.length > 0)
-    .map(r => ({ emoji: { ...r.emoji }, count: r.user_ids.length, me: r.user_ids.includes(viewerId) }));
+    .filter(r => r.user_ids.length + (r.burst_ids?.length ?? 0) > 0)
+    .map(r => {
+      const burst = r.burst_ids ?? [];
+      return {
+        emoji: { ...r.emoji },
+        count: r.user_ids.length + burst.length,
+        count_details: { normal: r.user_ids.length, burst: burst.length },
+        burst_colors: [],
+        me: r.user_ids.includes(viewerId),
+        me_burst: burst.includes(viewerId),
+      };
+    });
   return {
     id: m.id,
     channel_id: m.channel_id,

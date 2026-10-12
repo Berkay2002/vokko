@@ -29,7 +29,7 @@ export function TagChip({ tag, selected, onClick }: { tag: ForumTag; selected?: 
  */
 function CardReaction({ thread, first, forum }: { thread: Channel; first: Message; forum: Channel }) {
   const top = topReaction(first.reactions);
-  const fallback = forum.default_reaction_emoji?.emoji_name ? { emoji: { id: forum.default_reaction_emoji.emoji_id, name: forum.default_reaction_emoji.emoji_name }, count: 0, me: false } : undefined;
+  const fallback = forum.default_reaction_emoji?.emoji_name ? { emoji: { id: forum.default_reaction_emoji.emoji_id, name: forum.default_reaction_emoji.emoji_name }, count: 0, count_details: { normal: 0, burst: 0 }, burst_colors: [], me: false, me_burst: false } : undefined;
   const shown: Reaction | undefined = top ?? fallback;
   const [local, setLocal] = useState<Reaction | undefined>(shown);
   const [pending, setPending] = useState(false);

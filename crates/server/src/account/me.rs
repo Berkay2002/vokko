@@ -242,7 +242,7 @@ pub async fn delete_account(
     sqlx::query(
         "UPDATE users SET username = $2, email = $3, global_name = 'Deleted User', avatar_path = NULL, banner_color = NULL, bio = NULL, \
          banner_path = NULL, pronouns = NULL, theme_primary = NULL, theme_accent = NULL, avatar_decoration = NULL, profile_effect = NULL, \
-         widgets = NULL, primary_guild_id = NULL, password_hash = NULL, mfa_secret = NULL, mfa_last_step = NULL, pending_email = NULL, email_verified = FALSE, date_of_birth = NULL, \
+         widgets = NULL, nameplate = NULL, name_font = NULL, name_effect = NULL, name_colors = NULL, primary_guild_id = NULL, password_hash = NULL, mfa_secret = NULL, mfa_last_step = NULL, pending_email = NULL, email_verified = FALSE, date_of_birth = NULL, \
          disabled_at = NULL, deleted_at = now() WHERE id = $1",
     )
     .bind(user_id)

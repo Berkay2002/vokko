@@ -1,0 +1,210 @@
+/* Nameplates (member/DM row backgrounds) and display name styles. Art is Vokko's own: gradients and CSS patterns from perks/catalog.ts. */
+
+.has-nameplate {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.nameplate {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--np-gradient);
+  /* fade out toward the right so the name and status stay readable on any theme */
+  mask-image: linear-gradient(90deg, rgb(0 0 0 / 0.85) 0%, rgb(0 0 0 / 0.55) 55%, transparent 100%);
+  pointer-events: none;
+}
+
+.nameplate.np-dots::after,
+.nameplate.np-stripes::after,
+.nameplate.np-grid::after,
+.nameplate.np-waves::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.35;
+}
+
+.nameplate.np-dots::after {
+  background-image: radial-gradient(circle, var(--white) 1px, transparent 1.5px);
+  background-size: 10px 10px;
+}
+
+.nameplate.np-stripes::after {
+  background-image: repeating-linear-gradient(135deg, var(--white) 0 2px, transparent 2px 10px);
+  opacity: 0.18;
+}
+
+.nameplate.np-grid::after {
+  background-image: linear-gradient(var(--white) 1px, transparent 1px), linear-gradient(90deg, var(--white) 1px, transparent 1px);
+  background-size: 12px 12px;
+  opacity: 0.15;
+}
+
+.nameplate.np-waves::after {
+  background-image: radial-gradient(ellipse 10px 4px at 50% 100%, transparent 70%, var(--white) 72%, transparent 80%);
+  background-size: 20px 8px;
+  opacity: 0.25;
+}
+
+.nameplate.np-sheen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgb(255 255 255 / 0.22) 45%, transparent 60%);
+  background-size: 250% 100%;
+  animation: np-sheen 4.5s ease-in-out infinite;
+}
+
+@keyframes np-sheen {
+  0% {
+    background-position: 120% 0;
+  }
+  60%,
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+/* ---- display name styles ---- */
+
+.styled-name {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+
+.styled-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dn-solid .styled-name-text {
+  color: var(--dn-a);
+}
+
+.dn-gradient .styled-name-text,
+.dn-shimmer .styled-name-text {
+  background: linear-gradient(90deg, var(--dn-a), var(--dn-b));
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+.dn-shimmer .styled-name-text {
+  background: linear-gradient(90deg, var(--dn-a), var(--dn-b), var(--dn-a));
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: dn-shimmer 3s linear infinite;
+}
+
+@keyframes dn-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.dn-neon .styled-name-text {
+  color: var(--dn-a);
+  text-shadow: 0 0 4px var(--dn-a), 0 0 10px var(--dn-a);
+}
+
+.dn-toon .styled-name-text {
+  color: var(--dn-a);
+  -webkit-text-stroke: 0.5px var(--dn-b);
+  text-shadow: 1px 1px 0 var(--dn-b);
+}
+
+.dn-pop .styled-name-text {
+  color: var(--dn-a);
+  text-shadow: 2px 2px 0 var(--dn-b);
+}
+
+.dn-embossed .styled-name-text {
+  color: var(--dn-a);
+  text-shadow: 0 1px 0 rgb(255 255 255 / 0.35), 0 -1px 0 rgb(0 0 0 / 0.5);
+}
+
+.dn-glitch .styled-name-text {
+  color: var(--dn-a);
+  text-shadow: -1px 0 var(--dn-b), 1px 0 var(--dn-a);
+  animation: dn-glitch 2.6s steps(1) infinite;
+}
+
+@keyframes dn-glitch {
+  0%,
+  90%,
+  100% {
+    text-shadow: -1px 0 var(--dn-b), 1px 0 var(--dn-a);
+  }
+  92% {
+    text-shadow: -2px 0 var(--dn-b), 2px 0 var(--dn-a);
+  }
+  95% {
+    text-shadow: 2px 0 var(--dn-b), -2px 0 var(--dn-a);
+  }
+}
+
+.reduce-motion .nameplate.np-sheen::before,
+.reduce-motion .dn-shimmer .styled-name-text,
+.reduce-motion .dn-glitch .styled-name-text {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nameplate.np-sheen::before,
+  .dn-shimmer .styled-name-text,
+  .dn-glitch .styled-name-text {
+    animation: none;
+  }
+}
+
+/* ---- pickers (Settings > Profiles) ---- */
+
+.pf-grid-wide {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+.pf-name-style {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pf-name-sample {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pf-nameplate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  background: var(--background-base-lower);
+}
+
+.pf-nameplate-name {
+  overflow: hidden;
+  color: var(--interactive-text-active);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pf-nameplate-preview {
+  margin-top: 12px;
+}

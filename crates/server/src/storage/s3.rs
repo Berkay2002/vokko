@@ -2,6 +2,7 @@
 //! addressing (`<endpoint>/<bucket>/<prefix><id>`) and a small AWS Signature V4 signer, so no SDK is needed.
 use std::fmt;
 use std::io;
+use std::path::Path;
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
@@ -140,9 +141,14 @@ impl S3Storage {
 
     /// A signed request for `id`; `copy_source` adds `x-amz-copy-source`.
     async fn send(&self, method: Method, id: i64, body: Option<Bytes>, copy_source: Option<String>) -> io::Result<reqwest::Response> {
+        let payload = body.map(|bytes| Payload { hash: hex(&Sha256::digest(&bytes)), length: None, body: reqwest::Body::from(bytes) });
+        self.send_payload(method, id, payload, copy_source).await
+    }
+
+    async fn send_payload(&self, method: Method, id: i64, body: Option<Payload>, copy_source: Option<String>) -> io::Result<reqwest::Response> {
         let client = self.client.as_ref().ok_or_else(|| io::Error::other("object storage client unavailable"))?;
         let url = self.config.object_url(id)?;
-        let payload_hash = body.as_ref().map(|bytes| hex(&Sha256::digest(bytes))).unwrap_or_else(|| EMPTY_SHA256.to_owned());
+        let payload_hash = body.as_ref().map(|payload| payload.hash.clone()).unwrap_or_else(|| EMPTY_SHA256.to_owned());
         let amz_date = amz_date(OffsetDateTime::now_utc());
         let mut headers = vec![("x-amz-content-sha256", payload_hash.clone()), ("x-amz-date", amz_date.clone())];
         if let Some(source) = &copy_source {
@@ -153,8 +159,12 @@ impl S3Storage {
         for (name, value) in headers {
             request = request.header(name, value);
         }
-        if let Some(bytes) = body {
-            request = request.body(bytes);
+        if let Some(payload) = body {
+            // an explicit length keeps a streamed body from going out chunked, which S3 rejects for a plain PUT
+            if let Some(length) = payload.length {
+                request = request.header(reqwest::header::CONTENT_LENGTH, length);
+            }
+            request = request.body(payload.body);
         }
         request.send().await.map_err(io::Error::other)
     }
@@ -172,11 +182,49 @@ impl S3Storage {
         let response = self.send(Method::PUT, id, Some(bytes), None).await?;
         if response.status().is_success() { Ok(()) } else { Err(s3_error(&Method::PUT, response.status())) }
     }
+
+    /// Streams a staged upload from disk: one pass to hash it for the signature, a second as the request body, so a
+    /// large file never sits in memory.
+    async fn put_path(&self, id: i64, path: &Path) -> io::Result<()> {
+        let owned = path.to_owned();
+        let hash = tokio::task::spawn_blocking(move || hash_file(&owned)).await.map_err(io::Error::other)??;
+        let file = tokio::fs::File::open(path).await?;
+        let length = file.metadata().await?.len();
+        let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::with_capacity(file, 256 * 1024));
+        let response = self.send_payload(Method::PUT, id, Some(Payload { hash, length: Some(length), body }), None).await?;
+        if response.status().is_success() { Ok(()) } else { Err(s3_error(&Method::PUT, response.status())) }
+    }
+}
+
+/// A request body with the SHA-256 the signature covers.
+struct Payload {
+    hash: String,
+    /// Set for a streamed body; a buffered one carries its own.
+    length: Option<u64>,
+    body: reqwest::Body,
+}
+
+fn hash_file(path: &Path) -> io::Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(hex(&hasher.finalize()));
+        }
+        hasher.update(&buffer[..read]);
+    }
 }
 
 impl Storage for S3Storage {
     fn put(&self, id: i64, bytes: Bytes) -> BoxFuture<'_, io::Result<()>> {
         Box::pin(self.put_bytes(id, bytes))
+    }
+
+    fn put_file<'a>(&'a self, id: i64, path: &'a Path) -> BoxFuture<'a, io::Result<()>> {
+        Box::pin(self.put_path(id, path))
     }
 
     fn open(&self, id: i64) -> BoxFuture<'_, io::Result<Object>> {
@@ -425,6 +473,66 @@ mod tests {
             let extra = if bad.0 == "VOKKO_S3_PRESIGN_TTL_SECS" { vec![("VOKKO_S3_SERVE", "presigned"), bad] } else { vec![bad] };
             assert!(S3Config::from_env(&env(&extra)).is_err(), "{bad:?} is rejected");
         }
+    }
+
+    /// A one-request HTTP server on a thread: returns the request head (lower-cased) and body.
+    fn capture_one_request() -> (String, std::thread::JoinHandle<(String, Vec<u8>)>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let endpoint = format!("http://{}", listener.local_addr().expect("addr"));
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut received = Vec::new();
+            let mut chunk = [0u8; 64 * 1024];
+            let head_end = loop {
+                let read = stream.read(&mut chunk).expect("read");
+                assert!(read > 0, "connection closed before the headers ended");
+                received.extend_from_slice(&chunk[..read]);
+                if let Some(at) = received.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break at + 4;
+                }
+            };
+            let head = String::from_utf8_lossy(&received[..head_end]).to_lowercase();
+            let length: usize =
+                head.lines().find_map(|line| line.strip_prefix("content-length:")).map(|value| value.trim().parse().expect("length")).unwrap_or(0);
+            let mut body = received[head_end..].to_vec();
+            while body.len() < length {
+                let read = stream.read(&mut chunk).expect("read");
+                assert!(read > 0, "connection closed before the body ended");
+                body.extend_from_slice(&chunk[..read]);
+            }
+            stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").expect("respond");
+            (head, body)
+        });
+        (endpoint, handle)
+    }
+
+    #[tokio::test]
+    async fn put_file_streams_with_a_length_and_the_payload_hash() {
+        let (endpoint, server) = capture_one_request();
+        let config = S3Config {
+            endpoint,
+            bucket: "vokko".to_owned(),
+            region: "auto".to_owned(),
+            access_key_id: "id".to_owned(),
+            secret_access_key: "secret".to_owned(),
+            prefix: "attachments/".to_owned(),
+            presign_ttl: None,
+        };
+        let storage = S3Storage::new(config);
+        // bigger than one read buffer, so the body really arrives in pieces
+        let contents: Vec<u8> = (0..700_000u32).map(|i| (i % 251) as u8).collect();
+        let path = std::env::temp_dir().join(format!("vokko-s3-put-file-{}", crate::auth::random_hex(6)));
+        std::fs::write(&path, &contents).expect("write");
+        let result = storage.put_file(9, &path).await;
+        let _ = std::fs::remove_file(&path);
+        result.expect("put_file");
+        let (head, body) = server.join().expect("server");
+        assert!(head.starts_with("put /vokko/attachments/9 http/1.1"), "{head}");
+        assert!(head.contains(&format!("content-length: {}", contents.len())), "{head}");
+        assert!(!head.contains("transfer-encoding"), "{head}");
+        assert!(head.contains(&format!("x-amz-content-sha256: {}", hex(&Sha256::digest(&contents)))), "{head}");
+        assert_eq!(body, contents);
     }
 
     #[test]

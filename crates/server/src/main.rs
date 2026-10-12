@@ -34,6 +34,8 @@ async fn serve(state: AppState) -> Result<(), String> {
     if matches!(state.config.storage, vokko_server::storage::StorageConfig::Local) {
         tokio::fs::create_dir_all(state.attachments_dir()).await.map_err(|error| format!("cannot create the data directory: {error}"))?;
     }
+    // Staged uploads left by a killed process are never moved into storage.
+    let _ = tokio::fs::remove_dir_all(state.incoming_dir()).await;
     vokko_server::media::spawn_cleanup(state.clone());
     vokko_server::reminders::spawn(state.clone());
     vokko_server::voice::spawn_tasks(state.clone());

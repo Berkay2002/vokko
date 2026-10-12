@@ -83,6 +83,59 @@ async fn reaction_counts_and_me_are_per_viewer() {
 }
 
 #[tokio::test]
+async fn burst_reactions_are_counted_apart_and_have_no_cap() {
+    let (app, owner, member, channel, _) = setup().await;
+    let (_, message) = app.post(&format!("/channels/{channel}/messages"), &owner, json!({"content": "super react to me"})).await;
+    let base = format!("/channels/{channel}/messages/{}/reactions/{THUMBS_UP}", message["id"].as_str().expect("id"));
+    let normal = format!("{base}/@me");
+    let burst = format!("{base}/@me?type=1");
+    assert_eq!(app.put(&normal, &owner).await.0, 204);
+    assert_eq!(app.put(&burst, &owner).await.0, 204, "a burst next to a normal reaction of the same emoji");
+    assert_eq!(app.put(&burst, &member).await.0, 204);
+    assert_eq!(app.put(&burst, &member).await.0, 204, "idempotent");
+    assert_eq!(app.put(&format!("{base}/@me?type=0"), &member).await.0, 204);
+
+    let reaction = |messages: &Value| messages[0]["reactions"].as_array().expect("reactions").iter().find(|r| r["emoji"]["name"] == "👍").cloned();
+    let (_, as_owner) = app.get(&format!("/channels/{channel}/messages"), &owner).await;
+    let thumbs = reaction(&as_owner).expect("one entry for both types");
+    assert_eq!(as_owner[0]["reactions"].as_array().expect("reactions").len(), 1);
+    assert_eq!(thumbs["count"], 4);
+    assert_eq!(thumbs["count_details"], json!({"burst": 2, "normal": 2}));
+    assert_eq!(thumbs["burst_colors"], json!([]));
+    assert_eq!((thumbs["me"].clone(), thumbs["me_burst"].clone()), (json!(true), json!(true)));
+
+    // the reactor list is per type
+    let (_, bursters) = app.get(&format!("{base}?type=1"), &owner).await;
+    assert_eq!(bursters.as_array().expect("users").len(), 2);
+    let (_, normals) = app.get(&base, &owner).await;
+    assert_eq!(normals.as_array().expect("users").len(), 2);
+    let (status, error) = app.get(&format!("{base}?type=2"), &owner).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "{error}");
+    assert_eq!(app.put(&format!("{base}/@me?type=7"), &owner).await.0, StatusCode::BAD_REQUEST);
+
+    // removing the burst leaves the normal reaction, per viewer
+    assert_eq!(app.delete(&burst, &owner).await.0, 204);
+    let (_, as_owner) = app.get(&format!("/channels/{channel}/messages"), &owner).await;
+    let thumbs = reaction(&as_owner).expect("still there");
+    assert_eq!((thumbs["count"].clone(), thumbs["count_details"].clone()), (json!(3), json!({"burst": 1, "normal": 2})));
+    assert_eq!((thumbs["me"].clone(), thumbs["me_burst"].clone()), (json!(true), json!(false)));
+    let (_, as_member) = app.get(&format!("/channels/{channel}/messages"), &member).await;
+    assert_eq!(reaction(&as_member).expect("member view")["me_burst"], true);
+
+    // no weekly burst limit: one user can super react with many emoji
+    let encoded = |index: u32| char::from_u32(0x1F600 + index).expect("emoji").to_string().bytes().map(|b| format!("%{b:02X}")).collect::<String>();
+    for index in 0..19 {
+        let status =
+            app.put(&format!("/channels/{channel}/messages/{}/reactions/{}/@me?type=1", message["id"].as_str().expect("id"), encoded(index)), &owner).await.0;
+        assert_eq!(status, 204, "burst {index}");
+    }
+    // the 20 distinct emoji cap counts both types together
+    let (status, body) =
+        app.put(&format!("/channels/{channel}/messages/{}/reactions/{}/@me?type=1", message["id"].as_str().expect("id"), encoded(19)), &owner).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::BAD_REQUEST, json!(30010)));
+}
+
+#[tokio::test]
 async fn reaction_limits_and_access() {
     let (app, owner, _, channel, _) = setup().await;
     let (outsider, _) = app.register("bob").await;
@@ -276,7 +329,8 @@ async fn cleanup_removes_only_stale_pending_uploads() {
 
 #[tokio::test]
 async fn pending_uploads_have_a_quota() {
-    let (app, owner, member, channel, _) = setup().await;
+    // a self-host with a per-file limit below 100 MiB keeps the 100 MiB pending quota
+    let (app, owner, member, channel, _) = setup_with(|config| config.max_upload_bytes = 25 * 1024 * 1024).await;
     // pre-fill 95 MiB of pending rows for the owner directly in the database
     sqlx::query(
         "INSERT INTO attachments (id, channel_id, uploader_id, filename, size, key) \
@@ -295,4 +349,62 @@ async fn pending_uploads_have_a_quota() {
     // quota is per user
     let (status, _) = upload(&app, &member, &channel, "mine.bin", "application/octet-stream", &chunk).await;
     assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn the_pending_quota_counts_the_bytes_that_arrive_not_the_declared_size() {
+    let (app, owner, _, channel, _) = setup_with(|config| config.max_upload_bytes = 25 * 1024 * 1024).await;
+    // 98 MiB pending: 2 MiB of the 100 MiB quota left
+    sqlx::query(
+        "INSERT INTO attachments (id, channel_id, uploader_id, filename, size, key)          SELECT 9200000000000 + g, $1, u.id, 'filler', 7 * 1024 * 1024, 'k' FROM generate_series(1, 14) g, users u WHERE u.username = 'sam'",
+    )
+    .bind(channel.parse::<i64>().expect("channel"))
+    .execute(&app.state.db)
+    .await
+    .expect("filler");
+    let rows = || async {
+        let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM attachments WHERE filename <> 'filler'").fetch_one(&app.state.db).await.expect("count");
+        count
+    };
+    let before = rows().await;
+    // Only the bytes that really arrive count: 3 MiB is more than is left, with the per-file limit (25 MiB) far away.
+    let (status, error) = upload(&app, &owner, &channel, "big.bin", "application/octet-stream", &vec![b'a'; 3 * 1024 * 1024]).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::PAYLOAD_TOO_LARGE, json!(40005)), "{error}");
+    assert!(error["message"].as_str().expect("message").contains("100 MiB"), "{error}");
+    assert_eq!(rows().await, before, "nothing was recorded");
+    // nothing is left on disk either: not in storage, not in the staging directory
+    let leftovers = std::fs::read_dir(app.state.incoming_dir()).map(|dir| dir.count()).unwrap_or(0);
+    assert_eq!(leftovers, 0);
+    let stored = std::fs::read_dir(app.state.attachments_dir()).map(|dir| dir.count()).unwrap_or(0);
+    assert_eq!(stored, 0);
+
+    // what is left of the quota still fits
+    let (status, body) = upload(&app, &owner, &channel, "fits.bin", "application/octet-stream", &vec![b'a'; 2 * 1024 * 1024]).await;
+    assert_eq!(status, 200, "{body}");
+    // and a user at the quota is refused before anything is streamed
+    let (status, body) = upload(&app, &owner, &channel, "one-more.bin", "application/octet-stream", b"x").await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::PAYLOAD_TOO_LARGE, json!(40005)), "{body}");
+}
+
+#[tokio::test]
+async fn default_upload_limit_is_nitro_sized() {
+    // default config: 500 MiB per file, and the pending quota grows to fit one such file
+    let (app, owner, _, channel, _) = setup().await;
+    assert_eq!(app.state.config.max_upload_bytes, 500 * 1024 * 1024);
+    sqlx::query(
+        "INSERT INTO attachments (id, channel_id, uploader_id, filename, size, key) \
+         SELECT 9100000000000 + g, $1, u.id, 'filler', 5 * 1024 * 1024, 'k' FROM generate_series(1, 99) g, users u WHERE u.username = 'sam'",
+    )
+    .bind(channel.parse::<i64>().expect("channel"))
+    .execute(&app.state.db)
+    .await
+    .expect("filler");
+    // 495 MiB pending: a 4 MiB file still fits (well past the old 100 MiB quota), the next one does not
+    let chunk = vec![b'a'; 4 * 1024 * 1024];
+    let (status, body) = upload(&app, &owner, &channel, "ok.bin", "application/octet-stream", &chunk).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["size"], 4 * 1024 * 1024);
+    let (status, body) = upload(&app, &owner, &channel, "too-much.bin", "application/octet-stream", &chunk).await;
+    assert_eq!((status, body["code"].clone()), (StatusCode::PAYLOAD_TOO_LARGE, json!(40005)), "{body}");
+    assert!(body["message"].as_str().expect("message").contains("500 MiB"), "{body}");
 }

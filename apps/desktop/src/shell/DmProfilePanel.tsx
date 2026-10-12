@@ -6,6 +6,8 @@ import type { Snowflake, User, UserProfile } from "../api/types";
 import { ProfileBanner } from "../perks/ProfileBanner";
 import { resolveProfile, themeVars } from "../perks/profile";
 import { TagChip } from "../perks/TagChip";
+import { StyledName } from "../perks/NameStyles";
+import { ProfileBio } from "../perks/ProfileBio";
 import { Modal } from "../ui";
 import { Avatar, GuildIcon } from "./Avatar";
 import { closeModal, openModal } from "./modalStore";
@@ -45,13 +47,13 @@ export function DmProfilePanel({ user }: { user: User }) {
           <Avatar user={user} size={80} status />
         </div>
         <div className="dm-profile-body">
-          <div className="dm-profile-name">{displayName(user)}</div>
+          <div className="dm-profile-name"><StyledName styles={user.display_name_styles}>{displayName(user)}</StyledName></div>
           <div className="pv-name-row">
             <span className="dm-profile-username">{user.username}</span>
             <TagChip tag={user.primary_guild} guildName={tagGuildName} />
           </div>
           {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
-          {look.bio && <p className="dm-profile-bio">{look.bio}</p>}
+          {look.bio && <ProfileBio text={look.bio} className="dm-profile-bio" />}
           <div className="dm-profile-mutual">
             <span className="dm-profile-mutual-icons">
               {mutual.slice(0, 3).map(g => (
@@ -110,7 +112,7 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
         <div className="full-profile-head">
           <Avatar user={user} member={member} size={80} status />
           <div>
-            <div className="dm-profile-name">{displayName(user, member)}</div>
+            <div className="dm-profile-name"><StyledName styles={user.display_name_styles}>{displayName(user, member)}</StyledName></div>
             <div className="pv-name-row">
               <span className="dm-profile-username">{user.username}</span>
               <TagChip tag={user.primary_guild} guildName={tagGuildName} />
@@ -130,7 +132,7 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
             {look.bio && (
               <section>
                 <div className="dm-profile-label">About Me</div>
-                <p className="dm-profile-bio">{look.bio}</p>
+                <ProfileBio text={look.bio} className="dm-profile-bio" />
               </section>
             )}
             <section>

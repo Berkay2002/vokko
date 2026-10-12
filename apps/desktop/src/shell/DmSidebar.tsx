@@ -5,6 +5,7 @@ import { channelMentionCount, dmName, isChannelUnread, useStore } from "../api/s
 import { ChannelType, RelationshipType, type Channel, type PresenceStatus } from "../api/types";
 import { Tooltip, useContextMenu } from "../ui";
 import { TagChip } from "../perks/TagChip";
+import { Nameplate, nameplateRowClass } from "../perks/NameStyles";
 import { Avatar } from "./Avatar";
 import { closeDirectMessage } from "./actions";
 import { useIsMuted } from "./localState";
@@ -52,10 +53,11 @@ function DmRow({ channel }: { channel: Channel }) {
     <li className="dm-row-wrap">
       <NavLink
         to={`/channels/@me/${channel.id}`}
-        className={`dm-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}`}
+        className={`dm-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}${group ? "" : nameplateRowClass(first?.nameplate)}`}
         aria-label={label}
         onContextMenu={e => menu.open(e, dmContextItems(channel, { anchor: e.currentTarget }))}
       >
+        {!group && <Nameplate id={first?.nameplate} />}
         {group || !first ? (
           <span className="dm-group-avatar">
             {recipients.slice(0, 2).map((r, i) => (

@@ -41,6 +41,8 @@ interface Line {
   gap?: number;
   reply?: number;
   react?: [string, ("R" | "B")[]][];
+  /** Super (burst) reactions, merged into the same emoji's entry. */
+  burst?: [string, ("R" | "B")[]][];
   edited?: boolean;
   image?: boolean;
   pin?: boolean;
@@ -70,7 +72,7 @@ const DM: Line[] = [
     text: "```ts\nconst unread = (channel: Channel, read?: ReadState) =>\n  compareIds(channel.last_message_id ?? \"0\", read?.last_message_id ?? \"0\") > 0;\n```",
   },
   { who: "B", text: "clean. ship it" },
-  { who: "B", text: "ok that works really well", react: [["❤️", ["R", "B"]], ["🔥", ["B"]]] },
+  { who: "B", text: "ok that works really well", react: [["❤️", ["R", "B"]], ["🔥", ["B"]]], burst: [["🔥", ["B"]]] },
   { who: "R", text: "thanks!" },
   { who: "B", text: "btw how did the typography pass go" },
   { who: "R", text: "Noto Sans at 16px with 1.375 line height, close enough for now" },
@@ -142,6 +144,11 @@ function addDmConversation(channel: MockChannel, ids: Record<"R" | "B", string>)
       message.pinned_at = new Date(Date.parse(message.timestamp) + MIN).toISOString();
     }
     for (const [name, who] of line.react ?? []) message.reactions.push({ emoji: { id: null, name }, user_ids: who.map(w => ids[w]) });
+    for (const [name, who] of line.burst ?? []) {
+      const existing = message.reactions.find(r => r.emoji.id === null && r.emoji.name === name);
+      if (existing) existing.burst_ids = who.map(w => ids[w]);
+      else message.reactions.push({ emoji: { id: null, name }, user_ids: [], burst_ids: who.map(w => ids[w]) });
+    }
   });
 }
 
