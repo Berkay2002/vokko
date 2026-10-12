@@ -324,6 +324,271 @@ async fn per_server_member_profile_round_trips() {
     assert_eq!(cleared["nick"], "Ali");
 }
 
+async fn claimed(app: &TestApp, attachment: &Value) -> Option<bool> {
+    let id: i64 = attachment["id"].as_str().expect("id").parse().expect("numeric id");
+    sqlx::query_scalar("SELECT claimed_at IS NOT NULL FROM attachments WHERE id = $1").bind(id).fetch_optional(&app.state.db).await.expect("claimed")
+}
+
+#[tokio::test]
+async fn profile_widgets_round_trip_echo_and_clear() {
+    let (app, owner, member, channel, _) = setup().await;
+    let cover = upload(&app, &owner, &channel, "cover.png", "image/png", &png()).await;
+    let tile = upload(&app, &owner, &channel, "tile.png", "image/png", &png()).await;
+
+    let (_, me) = app.get("/users/@me", &owner).await;
+    assert!(is_null(&me, "widgets"), "{me}");
+
+    let (status, updated) = app
+        .patch(
+            "/users/@me",
+            &owner,
+            json!({"widgets": {
+                "favorite_game": {"name": " Hades ", "image_attachment_id": cover["id"], "reason": " fast and stylish ", "tags": [" roguelike ", "action"]},
+                "games_i_like": [{"name": "Celeste", "image_attachment_id": tile["id"]}, {"name": "Hollow Knight"}],
+            }}),
+        )
+        .await;
+    assert_eq!(status, 200, "{updated}");
+    let widgets = updated["widgets"].clone();
+    assert_eq!(widgets["favorite_game"]["name"], "Hades");
+    assert_eq!(widgets["favorite_game"]["reason"], "fast and stylish");
+    assert_eq!(widgets["favorite_game"]["tags"], json!(["roguelike", "action"]));
+    assert_eq!(widgets["favorite_game"]["image"], cover["url"]);
+    assert_eq!(widgets["favorite_game"]["image_attachment_id"], cover["id"]);
+    assert_eq!(widgets["games_i_like"][0]["image"], tile["url"]);
+    assert_eq!(widgets["games_i_like"][1], json!({"name": "Hollow Knight", "image": null, "image_attachment_id": null}));
+    assert_eq!(status_of(&app, widgets["favorite_game"]["image"].as_str().expect("image")).await, 200);
+
+    // everyone reads the same value
+    let (_, mine) = app.get("/users/@me", &owner).await;
+    assert_eq!(mine["widgets"], widgets);
+    let (_, seen) = app.get(&format!("/users/{}", user_id(&updated)), &member).await;
+    assert_eq!(seen["widgets"], widgets);
+
+    // an unrelated change leaves them, and echoing the current value back (images by their ids) keeps the images
+    let (_, partial) = app.patch("/users/@me", &owner, json!({"bio": "hi"})).await;
+    assert_eq!(partial["widgets"], widgets);
+    let echo = json!({"widgets": {
+        "favorite_game": {"name": "Hades", "image_attachment_id": widgets["favorite_game"]["image_attachment_id"], "reason": "fast and stylish", "tags": ["roguelike", "action"]},
+        "games_i_like": widgets["games_i_like"],
+    }});
+    let (status, echoed) = app.patch("/users/@me", &owner, echo).await;
+    assert_eq!(status, 200, "{echoed}");
+    assert_eq!(echoed["widgets"], widgets);
+    assert_eq!(claimed(&app, &cover).await, Some(true));
+
+    // replaced as a whole: the favourite is gone when it is left out
+    let (_, replaced) = app.patch("/users/@me", &owner, json!({"widgets": {"games_i_like": [{"name": "Celeste", "image_attachment_id": tile["id"]}]}})).await;
+    assert!(replaced["widgets"].get("favorite_game").is_none_or(Value::is_null), "{replaced}");
+    assert_eq!(replaced["widgets"]["games_i_like"].as_array().map(Vec::len), Some(1));
+
+    let (status, cleared) = app.patch("/users/@me", &owner, json!({"widgets": null})).await;
+    assert_eq!(status, 200, "{cleared}");
+    assert!(is_null(&cleared, "widgets"), "{cleared}");
+    let (_, member_view) = app.get(&format!("/users/{}", user_id(&updated)), &member).await;
+    assert!(is_null(&member_view, "widgets"), "{member_view}");
+}
+
+#[tokio::test]
+async fn profile_widgets_validation_rejects_without_changing_anything() {
+    let (app, owner, member, channel, _) = setup().await;
+    let mine = upload(&app, &owner, &channel, "mine.png", "image/png", &png()).await;
+    let theirs = upload(&app, &member, &channel, "theirs.png", "image/png", &png()).await;
+    let text = upload(&app, &owner, &channel, "notes.txt", "text/plain", b"not an image").await;
+    let (status, _) = app.patch("/users/@me", &owner, json!({"widgets": {"games_i_like": [{"name": "Celeste", "image_attachment_id": mine["id"]}]}})).await;
+    assert_eq!(status, 200);
+
+    let games: Vec<Value> = (0..21).map(|n| json!({"name": format!("Game {n}")})).collect();
+    let bad = [
+        json!({"favorite_game": {"name": "Hades", "reason": "r".repeat(191)}}),
+        json!({"favorite_game": {"name": "Hades", "tags": ["a", "b", "c", "d", "e", "f"]}}),
+        json!({"favorite_game": {"name": "Hades", "tags": ["a", ""]}}),
+        json!({"favorite_game": {"name": "Hades", "tags": ["a", "A"]}}),
+        json!({"favorite_game": {"name": "Hades", "tags": ["t".repeat(21)]}}),
+        json!({"favorite_game": {"name": "  "}}),
+        json!({"favorite_game": {"name": "n".repeat(65)}}),
+        json!({"games_i_like": games}),
+        json!({"games_i_like": [{"name": ""}]}),
+        json!({"games_i_like": [{"name": "Celeste", "image_attachment_id": theirs["id"]}]}),
+        json!({"games_i_like": [{"name": "Celeste", "image_attachment_id": text["id"]}]}),
+        json!({"games_i_like": [{"name": "Celeste", "image_attachment_id": "123456789"}]}),
+        json!({"favorite_game": {"name": "Hades", "image_attachment_id": theirs["id"]}}),
+        json!({"favorite_game": null, "wishlist": []}),
+    ];
+    for widgets in bad {
+        let (status, error) = app.patch("/users/@me", &owner, json!({"widgets": widgets, "global_name": "Changed"})).await;
+        assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "{widgets}: {error}");
+    }
+    let (_, me) = app.get("/users/@me", &owner).await;
+    assert!(is_null(&me, "global_name"), "{me}");
+    assert_eq!(me["widgets"]["games_i_like"][0]["image_attachment_id"], mine["id"]);
+    assert_eq!(claimed(&app, &theirs).await, Some(false), "somebody else's upload is never claimed through widgets");
+
+    // a board at exactly the limits is fine
+    let games: Vec<Value> = (0..20).map(|n| json!({"name": format!("Game {n}")})).collect();
+    let limit =
+        json!({"favorite_game": {"name": "n".repeat(64), "reason": "r".repeat(190), "tags": ["a", "b", "c", "d", "t".repeat(20)]}, "games_i_like": games});
+    let (status, ok) = app.patch("/users/@me", &owner, json!({"widgets": limit})).await;
+    assert_eq!(status, 200, "{ok}");
+}
+
+#[tokio::test]
+async fn profile_widget_images_are_claimed_and_released() {
+    let (app, owner, _, channel, _) = setup().await;
+    let first = upload(&app, &owner, &channel, "first.png", "image/png", &png()).await;
+    let second = upload(&app, &owner, &channel, "second.png", "image/png", &png()).await;
+    let shared = upload(&app, &owner, &channel, "shared.png", "image/png", &png()).await;
+    assert_eq!(claimed(&app, &first).await, Some(false));
+
+    let board = json!({"widgets": {
+        "favorite_game": {"name": "Hades", "image_attachment_id": first["id"]},
+        "games_i_like": [{"name": "Celeste", "image_attachment_id": second["id"]}, {"name": "Tunic", "image_attachment_id": shared["id"]}],
+    }});
+    let (status, _) = app.patch("/users/@me", &owner, board).await;
+    assert_eq!(status, 200);
+    for attachment in [&first, &second, &shared] {
+        assert_eq!(claimed(&app, attachment).await, Some(true));
+    }
+
+    // the avatar uses `shared` too, so dropping it from the board must not release it
+    let (status, _) = app.patch("/users/@me", &owner, json!({"avatar_attachment_id": shared["id"]})).await;
+    assert_eq!(status, 200);
+    let (status, kept) = app.patch("/users/@me", &owner, json!({"widgets": {"games_i_like": [{"name": "Tunic", "image_attachment_id": first["id"]}]}})).await;
+    assert_eq!(status, 200, "{kept}");
+    assert_eq!(claimed(&app, &first).await, Some(true), "still shown");
+    assert_eq!(claimed(&app, &second).await, Some(false), "no longer used: pending again");
+    assert_eq!(claimed(&app, &shared).await, Some(true), "the avatar still uses it");
+
+    // clearing releases the last widget image; the avatar upload stays
+    let (status, _) = app.patch("/users/@me", &owner, json!({"widgets": null})).await;
+    assert_eq!(status, 200);
+    assert_eq!(claimed(&app, &first).await, Some(false));
+    assert_eq!(claimed(&app, &shared).await, Some(true));
+    let removed = vokko_server::media::cleanup_pending(&app.state, std::time::Duration::ZERO).await;
+    assert_eq!(removed, 2, "the two released uploads are removed by the periodic cleanup");
+    assert_eq!(claimed(&app, &first).await, None);
+    assert_eq!(claimed(&app, &shared).await, Some(true));
+}
+
+#[tokio::test]
+async fn an_upload_still_in_use_survives_cleanup_even_when_unclaimed() {
+    let (app, owner, _, channel, _) = setup().await;
+    let avatar = upload(&app, &owner, &channel, "avatar.png", "image/png", &png()).await;
+    let tile = upload(&app, &owner, &channel, "tile.png", "image/png", &png()).await;
+    let (status, _) = app
+        .patch(
+            "/users/@me",
+            &owner,
+            json!({"avatar_attachment_id": avatar["id"], "widgets": {"games_i_like": [{"name": "Celeste", "image_attachment_id": tile["id"]}]}}),
+        )
+        .await;
+    assert_eq!(status, 200);
+    // a lost claim (the race the shared in-use check guards against) must not cost the profile its images
+    sqlx::query("UPDATE attachments SET claimed_at = NULL WHERE id = ANY($1)")
+        .bind(vec![avatar["id"].as_str().expect("id").parse::<i64>().expect("id"), tile["id"].as_str().expect("id").parse::<i64>().expect("id")])
+        .execute(&app.state.db)
+        .await
+        .expect("unclaim");
+    let removed = vokko_server::media::cleanup_pending(&app.state, std::time::Duration::ZERO).await;
+    assert_eq!(removed, 0);
+    assert_eq!(claimed(&app, &avatar).await, Some(false));
+    assert_eq!(claimed(&app, &tile).await, Some(false));
+}
+
+#[tokio::test]
+async fn deleting_the_account_takes_the_widgets_and_their_images() {
+    let (app, owner, member, channel, _) = setup().await;
+    let image = upload(&app, &member, &channel, "tile.png", "image/png", &png()).await;
+    let (status, updated) =
+        app.patch("/users/@me", &member, json!({"widgets": {"games_i_like": [{"name": "Celeste", "image_attachment_id": image["id"]}]}})).await;
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(claimed(&app, &image).await, Some(true));
+    let (status, _) = app.post("/users/@me/delete", &member, json!({"password": "correct horse battery"})).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(claimed(&app, &image).await, None, "the upload went with the account");
+    let (_, gone) = app.get(&format!("/users/{}", user_id(&updated)), &owner).await;
+    assert!(is_null(&gone, "widgets"), "{gone}");
+}
+
+#[tokio::test]
+async fn sticker_images_are_not_profile_images() {
+    let (app, owner, _, channel, _) = setup().await;
+    let image = upload(&app, &owner, &channel, "sticker.png", "image/png", &png()).await;
+    let id: i64 = image["id"].as_str().expect("id").parse().expect("id");
+    sqlx::query("UPDATE attachments SET sticker_asset = TRUE, claimed_at = now() WHERE id = $1").bind(id).execute(&app.state.db).await.expect("mark");
+    for body in [
+        json!({"avatar_attachment_id": image["id"]}),
+        json!({"banner_attachment_id": image["id"]}),
+        json!({"widgets": {"games_i_like": [{"name": "Celeste", "image_attachment_id": image["id"]}]}}),
+    ] {
+        let (status, error) = app.patch("/users/@me", &owner, body.clone()).await;
+        assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "{body}: {error}");
+    }
+}
+
+#[tokio::test]
+async fn deleting_the_account_keeps_an_avatar_a_concurrent_request_just_made_a_guild_icon() {
+    let (app, _, member, channel, guild) = setup().await;
+    let avatar = upload(&app, &member, &channel, "avatar.png", "image/png", &png()).await;
+    let (status, updated) = app.patch("/users/@me", &member, json!({"avatar_attachment_id": avatar["id"]})).await;
+    assert_eq!(status, 200, "{updated}");
+    let avatar_id: i64 = avatar["id"].as_str().expect("id").parse().expect("id");
+    let guild_id: i64 = guild.parse().expect("guild id");
+    // what update_guild does for an icon: claim the row (locking it) and write the path in one transaction, here held open
+    let mut claim = app.state.db.begin().await.expect("begin");
+    sqlx::query("UPDATE attachments SET claimed_at = now() WHERE id = $1").bind(avatar_id).execute(&mut *claim).await.expect("claim");
+    sqlx::query("UPDATE guilds SET icon_path = (SELECT avatar_path FROM users WHERE avatar_path LIKE $1 || '/%') WHERE id = $2")
+        .bind(avatar_id.to_string())
+        .bind(guild_id)
+        .execute(&mut *claim)
+        .await
+        .expect("icon");
+    let router = app.router.clone();
+    let delete = tokio::spawn(async move {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/v1/users/@me/delete")
+            .header("authorization", member)
+            .header("content-type", "application/json")
+            .body(Body::from(json!({"password": "correct horse battery"}).to_string()))
+            .expect("request");
+        router.oneshot(request).await.expect("response").status()
+    });
+    // wait until the delete is blocked on the claimed row, then let the claim commit
+    let mut waited = 0;
+    loop {
+        let (blocked,): (i64,) = sqlx::query_as("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'")
+            .fetch_one(&app.state.db)
+            .await
+            .expect("activity");
+        if blocked > 0 {
+            break;
+        }
+        waited += 1;
+        assert!(waited < 200, "delete_account never blocked on the claimed upload");
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    claim.commit().await.expect("commit");
+    assert_eq!(delete.await.expect("join"), StatusCode::NO_CONTENT);
+    assert_eq!(claimed(&app, &avatar).await, Some(true), "the guild icon keeps its upload");
+}
+
+#[tokio::test]
+async fn a_widget_image_that_is_also_a_webhook_avatar_stays_claimed_when_the_widget_goes() {
+    let (app, owner, _, channel, _) = setup().await;
+    let image = upload(&app, &owner, &channel, "tile.png", "image/png", &png()).await;
+    let (status, updated) =
+        app.patch("/users/@me", &owner, json!({"widgets": {"games_i_like": [{"name": "Celeste", "image_attachment_id": image["id"]}]}})).await;
+    assert_eq!(status, 200, "{updated}");
+    let (status, hook) = app.post(&format!("/channels/{channel}/webhooks"), &owner, json!({"name": "Alerts", "avatar_attachment_id": image["id"]})).await;
+    assert_eq!(status, 200, "{hook}");
+    let (status, cleared) = app.patch("/users/@me", &owner, json!({"widgets": null})).await;
+    assert_eq!(status, 200, "{cleared}");
+    assert_eq!(claimed(&app, &image).await, Some(true), "the webhook still shows it");
+    assert_eq!(vokko_server::media::cleanup_pending(&app.state, std::time::Duration::ZERO).await, 0);
+    assert_eq!(claimed(&app, &image).await, Some(true));
+}
+
 #[tokio::test]
 async fn guild_banner_set_replace_clear_and_rules() {
     let (app, owner, member, channel, guild) = setup().await;

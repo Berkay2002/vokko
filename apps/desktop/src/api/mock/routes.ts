@@ -9,7 +9,7 @@ import { pendingAttachment, addChannel, addMessage, canAccess, channelAudience, 
 import { buildForward, purgeChannelRefs, purgeGuildStickers, purgeMessageRefs, resolveStickers } from "./media";
 import { parseOverwrites } from "./moderation";
 import { applyChannelFields, assertCanPost, assertThreadOpen, deleteThread, dropChannelExtras, editThread, initChannelFields } from "./threads";
-import { applyGuildPerks, applyUserPerks, dropTagOnLeave, memberProfileFields } from "./perks";
+import { applyGuildPerks, applyUserPerks, dropTagOnLeave, memberProfileFields, parseWidgets } from "./perks";
 import { ID, route, routes, str, withAuditReason } from "./router";
 import { change, checkAutomod, checkSend, recordAudit } from "./admin";
 import { emit } from "./socket";
@@ -53,6 +53,8 @@ route("GET", "/users/@me", ({ viewer }) => viewer.user);
 
 route("PATCH", "/users/@me", ({ viewer, body }) => {
   const user = viewer.user;
+  // Validated before anything changes, so a rejected board leaves the other fields of the request alone too.
+  const widgets = "widgets" in body ? parseWidgets(user, body.widgets) : undefined;
   if ("global_name" in body) {
     const value = str(body.global_name)?.trim() ?? "";
     if (value.length > 32) fail(400, 50035, "Invalid Form Body", { global_name: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 32 or fewer in length." } });
@@ -73,6 +75,7 @@ route("PATCH", "/users/@me", ({ viewer, body }) => {
     user.avatar = attachment ? attachment.url : null;
   }
   applyUserPerks(user, body, id => pendingAttachment(id, user.id));
+  if (widgets !== undefined) user.widgets = widgets;
   const audience = new Set<string>([user.id, ...viewer.relationships.keys()]);
   for (const guild of db.guilds.values()) if (guild.members.has(user.id)) for (const id of guild.members.keys()) audience.add(id);
   for (const channel of db.channels.values()) if (channel.participant_ids?.includes(user.id)) for (const id of channel.participant_ids) audience.add(id);

@@ -195,7 +195,7 @@ pub async fn delete_account(
     let mut tx = state.db.begin().await?;
     // claims lock the upload row in the transaction that writes the reference: wait for those in flight so the delete below sees
     // their references, and make later ones find the row gone. Taken before the users lock, in the order the claims take them.
-    sqlx::query("SELECT id FROM attachments WHERE uploader_id = $1 AND message_id IS NULL FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("SELECT id FROM attachments WHERE uploader_id = $1 AND message_id IS NULL ORDER BY id FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
     // the row lock keeps a guild from being created or transferred to the user halfway through
     sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
     let (owned,): (i64,) = sqlx::query_as("SELECT count(*) FROM guilds WHERE owner_id = $1").bind(user_id).fetch_one(&mut *tx).await?;
@@ -211,14 +211,15 @@ pub async fn delete_account(
     // profile media (avatar, banner, per-server ones) and unsent uploads go with the account; message attachments stay
     let paths: Vec<(Option<String>,)> = sqlx::query_as(
         "SELECT avatar_path FROM users WHERE id = $1 UNION ALL SELECT banner_path FROM users WHERE id = $1 \
-         UNION ALL SELECT avatar_path FROM guild_members WHERE user_id = $1 UNION ALL SELECT banner_path FROM guild_members WHERE user_id = $1",
+         UNION ALL SELECT avatar_path FROM guild_members WHERE user_id = $1 UNION ALL SELECT banner_path FROM guild_members WHERE user_id = $1 \
+         UNION ALL SELECT p #>> '{}' FROM users u, jsonb_path_query(u.widgets, '$.**.image_path') p WHERE u.id = $1",
     )
     .bind(user_id)
     .fetch_all(&mut *tx)
     .await?;
     let profile_ids: Vec<i64> = paths.into_iter().filter_map(|(path,)| path?.split('/').next()?.parse().ok()).collect();
     // their own pictures stop counting as "in use" first; an upload can also be a guild or group icon, a sticker or someone else's picture
-    sqlx::query("UPDATE users SET avatar_path = NULL, banner_path = NULL WHERE id = $1").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE users SET avatar_path = NULL, banner_path = NULL, widgets = NULL WHERE id = $1").bind(user_id).execute(&mut *tx).await?;
     sqlx::query("UPDATE guild_members SET avatar_path = NULL, banner_path = NULL WHERE user_id = $1").bind(user_id).execute(&mut *tx).await?;
     let media: Vec<(i64,)> = sqlx::query_as(&format!(
         "DELETE FROM attachments a WHERE uploader_id = $1 AND message_id IS NULL AND (id = ANY($2) OR claimed_at IS NULL) AND NOT {} RETURNING id",
@@ -241,7 +242,7 @@ pub async fn delete_account(
     sqlx::query(
         "UPDATE users SET username = $2, email = $3, global_name = 'Deleted User', avatar_path = NULL, banner_color = NULL, bio = NULL, \
          banner_path = NULL, pronouns = NULL, theme_primary = NULL, theme_accent = NULL, avatar_decoration = NULL, profile_effect = NULL, \
-         primary_guild_id = NULL, password_hash = NULL, mfa_secret = NULL, mfa_last_step = NULL, pending_email = NULL, email_verified = FALSE, date_of_birth = NULL, \
+         widgets = NULL, primary_guild_id = NULL, password_hash = NULL, mfa_secret = NULL, mfa_last_step = NULL, pending_email = NULL, email_verified = FALSE, date_of_birth = NULL, \
          disabled_at = NULL, deleted_at = now() WHERE id = $1",
     )
     .bind(user_id)

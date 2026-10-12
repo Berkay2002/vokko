@@ -3,7 +3,7 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::routing::get;
 use sqlx::{PgConnection, Postgres, QueryBuilder};
-use vokko_protocol::api::{GatewayEvent, MutualGuild, Snowflake, UpdateUserRequest, User, UserProfile};
+use vokko_protocol::api::{GatewayEvent, MutualGuild, ProfileWidgetsInput, Snowflake, UpdateUserRequest, User, UserProfile};
 
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
@@ -11,7 +11,7 @@ use crate::events;
 use crate::extract::{ApiJson, ApiQuery, parse_id};
 use crate::routes::auth::clean_text;
 use crate::state::AppState;
-use crate::store;
+use crate::store::{self, StoredFavorite, StoredGame, StoredWidgets};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -92,17 +92,10 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     };
     let decoration = body.avatar_decoration.map(|value| asset_id(value, "avatar_decoration")).transpose()?;
     let effect = body.profile_effect.map(|value| asset_id(value, "profile_effect")).transpose()?;
-    // the claims and the write share one transaction: an account delete waits for both or sees neither
-    let mut tx = state.db.begin().await?;
-    let avatar = match body.avatar_attachment_id {
+    let widgets = match body.widgets {
         None => None,
         Some(None) => Some(None),
-        Some(Some(id)) => Some(Some(image_path_on(&mut tx, id.db(), user_id, ImageKind::Avatar, "avatar_attachment_id", false).await?)),
-    };
-    let banner = match body.banner_attachment_id {
-        None => None,
-        Some(None) => Some(None),
-        Some(Some(id)) => Some(Some(image_path_on(&mut tx, id.db(), user_id, ImageKind::Banner, "banner_attachment_id", false).await?)),
+        Some(Some(input)) => Some(clean_widgets(input)?),
     };
     let primary_guild = match body.primary_guild_id {
         None => None,
@@ -118,6 +111,42 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
                 return Err(ApiErr::invalid("primary_guild_id", "Must be a server you are in that has a tag."));
             }
             Some(Some(guild.db()))
+        }
+    };
+
+    // Images (avatar, banner, widgets) are claimed in the same transaction as the write that shows them, and the widget images the new
+    // value no longer shows are released only once the row is updated, so a claim is never visible without its path.
+    // Outer `None` = unchanged, inner `None` = cleared.
+    // Upload rows are locked before the users row, in the order account delete takes them, so the two never deadlock: every image this
+    // can claim or release is one of the user's own unsent uploads.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT id FROM attachments WHERE uploader_id = $1 AND message_id IS NULL ORDER BY id FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
+    let avatar = match body.avatar_attachment_id {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(id)) => Some(Some(image_path_on(&mut tx, id.db(), user_id, ImageKind::Avatar, "avatar_attachment_id", false).await?)),
+    };
+    let banner = match body.banner_attachment_id {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(id)) => Some(Some(image_path_on(&mut tx, id.db(), user_id, ImageKind::Banner, "banner_attachment_id", false).await?)),
+    };
+    let mut released: Vec<i64> = Vec::new();
+    let widgets = match widgets {
+        None => None,
+        Some(board) => {
+            let (previous,): (Option<String>,) = sqlx::query_as("SELECT widgets::text FROM users WHERE id = $1").bind(user_id).fetch_one(&mut *tx).await?;
+            let stored = resolve_widgets(&mut tx, board, user_id).await?;
+            let kept = stored.as_ref().map(StoredWidgets::attachment_ids).unwrap_or_default();
+            released = previous
+                .and_then(|text| serde_json::from_str::<StoredWidgets>(&text).ok())
+                .map(|old| old.attachment_ids())
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|id| !kept.contains(id))
+                .collect();
+            Some(stored.map(|stored| serde_json::to_string(&stored)).transpose().map_err(|_| ApiErr::internal())?)
         }
     };
 
@@ -154,13 +183,145 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     if let Some(value) = primary_guild {
         sets.push("primary_guild_id = ").push_bind_unseparated(value);
     }
+    if let Some(value) = widgets {
+        sets.push("widgets = ").push_bind_unseparated(value).push_unseparated("::jsonb");
+    }
     // An empty request is a no-op that still returns the user.
     if update.sql().len() > "UPDATE users SET ".len() {
         update.push(" WHERE id = ").push_bind(user_id);
         update.build().execute(&mut *tx).await?;
     }
+    release_uploads(&mut tx, &released, user_id).await?;
     tx.commit().await?;
     Ok(Json(publish_user(&state, user_id).await?))
+}
+
+const MAX_WIDGET_NAME_CHARS: usize = 64;
+const MAX_WIDGET_REASON_CHARS: usize = 190;
+const MAX_WIDGET_TAGS: usize = 5;
+const MAX_WIDGET_TAG_CHARS: usize = 20;
+const MAX_LIKED_GAMES: usize = 20;
+
+/// A widget game with its text normalised; the image is still the caller's attachment id.
+struct CleanGame {
+    name: String,
+    image: Option<i64>,
+}
+
+struct CleanFavorite {
+    game: CleanGame,
+    reason: Option<String>,
+    tags: Vec<String>,
+}
+
+#[derive(Default)]
+struct CleanWidgets {
+    favorite_game: Option<CleanFavorite>,
+    games_i_like: Option<Vec<CleanGame>>,
+}
+
+fn clean_game_name(name: String, field: &str) -> ApiResult<String> {
+    let name = name.trim().to_owned();
+    if name.is_empty() || name.chars().count() > MAX_WIDGET_NAME_CHARS {
+        return Err(ApiErr::invalid(field, &format!("Must be between 1 and {MAX_WIDGET_NAME_CHARS} characters in length.")));
+    }
+    Ok(name)
+}
+
+/// Checks the text and the counts of a `widgets` value, so a rejected request never reaches the uploads. `None` = no widgets.
+fn clean_widgets(input: ProfileWidgetsInput) -> ApiResult<Option<CleanWidgets>> {
+    if !input.unknown.is_empty() {
+        return Err(ApiErr::invalid("widgets", "Only favorite_game and games_i_like are allowed."));
+    }
+    let mut board = CleanWidgets::default();
+    if let Some(Some(game)) = input.favorite_game {
+        let name = clean_game_name(game.name, "widgets.favorite_game.name")?;
+        let reason = clean_text(game.reason, MAX_WIDGET_REASON_CHARS, "widgets.favorite_game.reason")?;
+        let tags: Vec<String> = game.tags.unwrap_or_default().into_iter().map(|tag| tag.trim().to_owned()).collect();
+        if tags.len() > MAX_WIDGET_TAGS {
+            return Err(ApiErr::invalid("widgets.favorite_game.tags", &format!("Must be {MAX_WIDGET_TAGS} or fewer.")));
+        }
+        for (index, tag) in tags.iter().enumerate() {
+            if tag.is_empty() || tag.chars().count() > MAX_WIDGET_TAG_CHARS {
+                return Err(ApiErr::invalid(
+                    "widgets.favorite_game.tags",
+                    &format!("Each tag must be between 1 and {MAX_WIDGET_TAG_CHARS} characters in length."),
+                ));
+            }
+            if tags[..index].iter().any(|other| other.to_lowercase() == tag.to_lowercase()) {
+                return Err(ApiErr::invalid("widgets.favorite_game.tags", "Tags must be unique."));
+            }
+        }
+        board.favorite_game = Some(CleanFavorite { game: CleanGame { name, image: game.image_attachment_id.map(Snowflake::db) }, reason, tags });
+    }
+    if let Some(Some(games)) = input.games_i_like {
+        if games.len() > MAX_LIKED_GAMES {
+            return Err(ApiErr::invalid("widgets.games_i_like", &format!("Must be {MAX_LIKED_GAMES} or fewer.")));
+        }
+        let mut cleaned = Vec::with_capacity(games.len());
+        for (index, game) in games.into_iter().enumerate() {
+            let name = clean_game_name(game.name, &format!("widgets.games_i_like.{index}.name"))?;
+            cleaned.push(CleanGame { name, image: game.image_attachment_id.map(Snowflake::db) });
+        }
+        board.games_i_like = Some(cleaned);
+    }
+    Ok(if board.favorite_game.is_none() && board.games_i_like.is_none() { None } else { Some(board) })
+}
+
+/// Claims the images of a cleaned board (each must be an upload of `user_id`, which includes ones the profile already shows) and
+/// returns the value to store.
+async fn resolve_widgets(conn: &mut PgConnection, board: Option<CleanWidgets>, user_id: i64) -> ApiResult<Option<StoredWidgets>> {
+    let Some(board) = board else { return Ok(None) };
+    let mut stored = StoredWidgets::default();
+    if let Some(favorite) = board.favorite_game {
+        let image_path = match favorite.game.image {
+            Some(id) => Some(image_path_on(conn, id, user_id, ImageKind::Avatar, "widgets.favorite_game.image_attachment_id", false).await?),
+            None => None,
+        };
+        stored.favorite_game = Some(StoredFavorite { name: favorite.game.name, image_path, reason: favorite.reason, tags: favorite.tags });
+    }
+    if let Some(games) = board.games_i_like {
+        let mut liked = Vec::with_capacity(games.len());
+        for (index, game) in games.into_iter().enumerate() {
+            let image_path = match game.image {
+                Some(id) => {
+                    Some(image_path_on(conn, id, user_id, ImageKind::Avatar, &format!("widgets.games_i_like.{index}.image_attachment_id"), false).await?)
+                }
+                None => None,
+            };
+            liked.push(StoredGame { name: game.name, image_path });
+        }
+        stored.games_i_like = Some(liked);
+    }
+    Ok(Some(stored))
+}
+
+/// Lets go of uploads the profile stopped showing: when nothing else (an avatar, banner, server profile, guild or group icon, or another
+/// widget) uses an upload any more it is a pending upload again, and the periodic cleanup removes it. Avatars and banners keep their old
+/// uploads claimed; this only covers widget images.
+///
+/// The rows are locked first: a request that is claiming one of them for an avatar, icon or server profile holds that lock until it
+/// has written the path (claim and write share a transaction), so the `UPDATE` below, a new statement with a fresh snapshot, always
+/// sees whether the upload is in use. [`crate::media::IN_USE`] is the same condition the sweeps and deletes use.
+async fn release_uploads(conn: &mut PgConnection, ids: &[i64], user_id: i64) -> ApiResult<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    sqlx::query("SELECT id FROM attachments WHERE id = ANY($1) AND uploader_id = $2 ORDER BY id FOR UPDATE")
+        .bind(ids)
+        .bind(user_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query(&format!(
+        "UPDATE attachments a SET claimed_at = NULL WHERE a.id = ANY($1) AND a.uploader_id = $2 AND a.message_id IS NULL \
+         AND NOT a.sticker_asset AND NOT a.event_cover AND NOT {}",
+        crate::media::IN_USE
+    ))
+    .bind(ids)
+    .bind(user_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 /// Which limits an uploaded profile image has.

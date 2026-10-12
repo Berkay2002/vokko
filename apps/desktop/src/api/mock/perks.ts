@@ -3,7 +3,7 @@
 // against the open asset set the client ships (src/perks/catalog.ts).
 
 import { BADGES, BIO_MAX, PRONOUNS_MAX, TAG_RE, decorationById, effectById, isThemeColors } from "../../perks/catalog";
-import type { Attachment, GuildMember, GuildTag, GuildTheme, User } from "../types";
+import type { Attachment, GuildMember, GuildTag, GuildTheme, ProfileWidgets, User } from "../types";
 import { db } from "./db";
 import type { MockGuild } from "./db";
 import { fail } from "./ops";
@@ -28,6 +28,84 @@ const colors = (value: unknown, field: string): [number, number] | null => {
 };
 
 const attachmentId = (value: unknown): string | undefined => (typeof value === "string" ? value : undefined);
+
+export const WIDGET_NAME_MAX = 64;
+export const WIDGET_REASON_MAX = 190;
+export const WIDGET_TAGS_MAX = 5;
+export const WIDGET_TAG_MAX = 20;
+export const LIKED_GAMES_MAX = 20;
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/** Length in characters (code points), like the server counts them. */
+const chars = (value: string): number => [...value].length;
+
+/** An own upload by id, or the id of an image already on the profile (echoed back). */
+function widgetImage(user: User, value: unknown, field: string): { image: string | null; image_attachment_id: string | null } {
+  if (value === undefined || value === null) return { image: null, image_attachment_id: null };
+  if (typeof value !== "string") return invalid(field, "BASE_TYPE_STRING", "Not a string.");
+  const pending = db.pending.get(value);
+  if (pending) {
+    if (pending.owner !== user.id) return invalid(field, "ATTACHMENT_NOT_FOUND", "Unknown attachment.");
+    if (!IMAGE_TYPES.has(pending.attachment.content_type ?? "")) return invalid(field, "INVALID_IMAGE", "Must be a PNG, JPEG, GIF or WebP image.");
+    return { image: pending.attachment.url, image_attachment_id: value };
+  }
+  const shown = [user.widgets?.favorite_game, ...(user.widgets?.games_i_like ?? [])].find(game => game?.image_attachment_id === value);
+  if (shown?.image) return { image: shown.image, image_attachment_id: value };
+  return invalid(field, "ATTACHMENT_NOT_FOUND", "Unknown attachment.");
+}
+
+function widgetName(value: unknown, field: string): string {
+  if (typeof value !== "string") return invalid(field, "BASE_TYPE_STRING", "Not a string.");
+  const name = value.trim();
+  if (name === "" || chars(name) > WIDGET_NAME_MAX) invalid(field, "BASE_TYPE_BAD_LENGTH", `Must be between 1 and ${WIDGET_NAME_MAX} characters in length.`);
+  return name;
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * `widgets` of PATCH /users/@me: validates the whole board (same limits and error shape as the other profile fields) and returns the
+ * value to store; `null` clears. Nothing is mutated, so a rejected request changes nothing.
+ */
+export function parseWidgets(user: User, value: unknown): ProfileWidgets | null {
+  if (value === null) return null;
+  if (!isObject(value)) return invalid("widgets", "BASE_TYPE_OBJECT", "Not an object.");
+  if (Object.keys(value).some(key => key !== "favorite_game" && key !== "games_i_like")) invalid("widgets", "UNKNOWN_KEY", "Only favorite_game and games_i_like are allowed.");
+  const out: ProfileWidgets = {};
+  const favorite = value.favorite_game;
+  if (favorite !== undefined && favorite !== null) {
+    if (!isObject(favorite)) return invalid("widgets.favorite_game", "BASE_TYPE_OBJECT", "Not an object.");
+    const name = widgetName(favorite.name, "widgets.favorite_game.name");
+    const reasonField = "widgets.favorite_game.reason";
+    const reasonRaw = favorite.reason;
+    if (reasonRaw !== undefined && reasonRaw !== null && typeof reasonRaw !== "string") invalid(reasonField, "BASE_TYPE_STRING", "Not a string.");
+    const reason = typeof reasonRaw === "string" ? reasonRaw.trim() : "";
+    if (chars(reason) > WIDGET_REASON_MAX) invalid(reasonField, "BASE_TYPE_MAX_LENGTH", `Must be ${WIDGET_REASON_MAX} or fewer in length.`);
+    const tagsRaw = favorite.tags ?? [];
+    if (!Array.isArray(tagsRaw)) return invalid("widgets.favorite_game.tags", "BASE_TYPE_ARRAY", "Not a list.");
+    if (tagsRaw.length > WIDGET_TAGS_MAX) invalid("widgets.favorite_game.tags", "BASE_TYPE_MAX_LENGTH", `Must be ${WIDGET_TAGS_MAX} or fewer.`);
+    const tags: string[] = [];
+    for (const raw of tagsRaw) {
+      const tag = typeof raw === "string" ? raw.trim() : "";
+      if (tag === "" || chars(tag) > WIDGET_TAG_MAX) invalid("widgets.favorite_game.tags", "BASE_TYPE_BAD_LENGTH", `Each tag must be between 1 and ${WIDGET_TAG_MAX} characters in length.`);
+      if (tags.some(other => other.toLowerCase() === tag.toLowerCase())) invalid("widgets.favorite_game.tags", "DUPLICATE", "Tags must be unique.");
+      tags.push(tag);
+    }
+    const image = widgetImage(user, favorite.image_attachment_id, "widgets.favorite_game.image_attachment_id");
+    out.favorite_game = { name, ...image, reason: reason === "" ? null : reason, tags };
+  }
+  const liked = value.games_i_like;
+  if (liked !== undefined && liked !== null) {
+    if (!Array.isArray(liked)) return invalid("widgets.games_i_like", "BASE_TYPE_ARRAY", "Not a list.");
+    if (liked.length > LIKED_GAMES_MAX) invalid("widgets.games_i_like", "BASE_TYPE_MAX_LENGTH", `Must be ${LIKED_GAMES_MAX} or fewer.`);
+    out.games_i_like = liked.map((entry, index) => {
+      if (!isObject(entry)) return invalid(`widgets.games_i_like.${index}`, "BASE_TYPE_OBJECT", "Not an object.");
+      const name = widgetName(entry.name, `widgets.games_i_like.${index}.name`);
+      return { name, ...widgetImage(user, entry.image_attachment_id, `widgets.games_i_like.${index}.image_attachment_id`) };
+    });
+  }
+  return out.favorite_game || out.games_i_like ? out : null;
+}
 
 /** The member-profile columns as they appear on `GuildMember` (absent when not set). */
 export function memberProfileFields(record: Partial<GuildMember>): Partial<GuildMember> {

@@ -15,6 +15,7 @@ import { ReportModal } from "./ReportModal";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
 import { closeModal, useModals, type ModalSpec } from "./modalStore";
+import { ProfileEditor } from "../profile-editor";
 import { QuickSwitcher } from "./QuickSwitcher";
 import { ShortcutsModal } from "./ShortcutsModal";
 import { TopicModal } from "./TopicModal";
@@ -609,6 +610,8 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
       return <NotificationSettingsModal key={id} scopeId={spec.scopeId} title={spec.title} guild={spec.guild} />;
     case "userSettings":
       return <UserSettings key={id} section={spec.section} />;
+    case "profileEditor":
+      return <ProfileEditor key={id} />;
     case "voiceStatus":
       return <ChannelStatusModal key={id} channelId={spec.channelId} />;
     case "cameraPreview":

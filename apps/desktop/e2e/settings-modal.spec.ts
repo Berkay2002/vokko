@@ -88,8 +88,11 @@ test('scrim click closes the modal; search finds pages by keyword, shows an empt
 });
 
 test('unsaved changes on Profiles block Esc, the close button and page switches until reset', async ({ page }) => {
-  const dialog = await openSettings(page);
-  await dialog.getByRole('button', { name: 'Edit Profiles' }).click();
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.locator('.dm-row').first().waitFor();
+  await page.locator('.user-panel-account').click();
+  await page.getByRole('menuitem', { name: 'Edit Profile' }).click();
+  const dialog = page.getByRole('dialog', { name: 'User Settings' });
   await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('Profiles');
   const bar = dialog.locator('.cs-savebar');
   await expect(bar).toHaveCount(0);

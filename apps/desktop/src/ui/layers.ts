@@ -76,12 +76,17 @@ export function useOutsideClose(active: boolean, inside: () => (Element | null |
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/** Active focus traps, oldest first: with a modal stacked over another (the profile editor over settings) only the newest handles Tab. */
+const traps: object[] = [];
+
 /** Keep Tab focus inside `container`, focus the first control on mount and restore focus on unmount. */
 export function useFocusTrap(active: boolean, container: () => HTMLElement | null): void {
   const containerRef = useRef(container);
   containerRef.current = container;
   useEffect(() => {
     if (!active) return;
+    const token = {};
+    traps.push(token);
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const root = containerRef.current();
     // An input with `autoFocus` has already taken focus by the time this effect runs: keep it.
@@ -90,7 +95,7 @@ export function useFocusTrap(active: boolean, container: () => HTMLElement | nul
       (first ?? root).focus({ preventScroll: true });
     }
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Tab") return;
+      if (event.key !== "Tab" || traps[traps.length - 1] !== token) return;
       const el = containerRef.current();
       if (!el) return;
       const items = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(node => node.offsetParent !== null || node === document.activeElement);
@@ -114,6 +119,8 @@ export function useFocusTrap(active: boolean, container: () => HTMLElement | nul
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);
+      const index = traps.indexOf(token);
+      if (index >= 0) traps.splice(index, 1);
       if (previous?.isConnected) previous.focus({ preventScroll: true });
     };
   }, [active]);

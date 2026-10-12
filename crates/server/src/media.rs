@@ -26,9 +26,11 @@ pub fn asset_path(id: i64, key: &str, filename: &str) -> String {
 }
 
 /// SQL condition (the `attachments` row is aliased `a`): something still shows the upload, i.e. a user's or a server profile's avatar or
-/// banner, a guild icon or banner, a group icon, a sticker, an event cover, an application icon or a webhook avatar. It matches on the upload id (the first path segment)
-/// because legacy rows store `<id>/<filename>`. Use it as `AND NOT {IN_USE}` wherever an upload is released or swept.
+/// banner, a user's profile widget image, a guild icon or banner, a group icon, a sticker, an event cover, an application icon or a webhook
+/// avatar. It matches on the upload id (the first path segment) because legacy rows store `<id>/<filename>`. Use it as `AND NOT {IN_USE}`
+/// wherever an upload is released or swept, so a claim that was cleared by mistake can never get a picture that is still shown deleted.
 pub const IN_USE: &str = "(EXISTS (SELECT 1 FROM users u WHERE a.id::text IN (split_part(u.avatar_path, '/', 1), split_part(u.banner_path, '/', 1))) \
+     OR EXISTS (SELECT 1 FROM users u, jsonb_path_query(u.widgets, '$.**.image_path') p WHERE split_part(p #>> '{}', '/', 1) = a.id::text) \
      OR EXISTS (SELECT 1 FROM guild_members gm WHERE a.id::text IN (split_part(gm.avatar_path, '/', 1), split_part(gm.banner_path, '/', 1))) \
      OR EXISTS (SELECT 1 FROM guilds g WHERE a.id::text IN (split_part(g.icon_path, '/', 1), split_part(g.banner_path, '/', 1))) \
      OR EXISTS (SELECT 1 FROM channels c WHERE split_part(c.icon_path, '/', 1) = a.id::text) \
@@ -82,11 +84,13 @@ pub async fn remove_files(state: &AppState, attachment_ids: &[i64]) {
 
 /// Deletes pending uploads (`message_id IS NULL AND claimed_at IS NULL`) older than `max_age`, rows and files; returns how many.
 /// Avatars and icons are attachments with a NULL `message_id` too, but they have `claimed_at` set when they are
-/// assigned (`routes::users::owned_attachment_path`), so they are never matched here.
+/// assigned (`routes::users::image_path_on`), so they are never matched here; [`IN_USE`] keeps them even when a claim
+/// was cleared while they were being assigned.
 pub async fn cleanup_pending(state: &AppState, max_age: Duration) -> usize {
-    let deleted: Result<Vec<(i64,)>, _> = sqlx::query_as(
-        "DELETE FROM attachments WHERE message_id IS NULL AND claimed_at IS NULL AND created_at < now() - make_interval(secs => $1) RETURNING id",
-    )
+    let deleted: Result<Vec<(i64,)>, _> = sqlx::query_as(&format!(
+        "DELETE FROM attachments a WHERE message_id IS NULL AND claimed_at IS NULL AND created_at < now() - make_interval(secs => $1) \
+         AND NOT {IN_USE} RETURNING id"
+    ))
     .bind(max_age.as_secs_f64())
     .fetch_all(&state.db)
     .await;

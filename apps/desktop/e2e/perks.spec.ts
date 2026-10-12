@@ -5,9 +5,10 @@ import { expect, test } from '@playwright/test';
 async function openProfiles(page: import('@playwright/test').Page) {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.locator('.dm-row').first().waitFor();
-  await page.getByRole('button', { name: 'User Settings' }).click();
+  // the Profiles page is reached from the user panel popout; the settings header opens the profile editor instead
+  await page.locator('.user-panel-account').click();
+  await page.getByRole('menuitem', { name: 'Edit Profile' }).click();
   const dialog = page.getByRole('dialog', { name: 'User Settings' });
-  await dialog.locator('.sm-profile-edit').click();
   await expect(dialog.getByRole('heading', { name: 'Profiles', level: 1 })).toBeVisible();
   return dialog;
 }

@@ -286,7 +286,7 @@ export function UserSettings({ section }: { section?: string }) {
         <Avatar user={me} size={48} />
         <div className="sm-profile-names">
           <div className="sm-profile-name">{displayName(me)}</div>
-          <button type="button" className="sm-profile-edit" onClick={() => open("profiles")}>
+          <button type="button" className="sm-profile-edit" onClick={() => !blockedByUnsaved() && openModal({ type: "profileEditor" })}>
             Edit Profiles
             <Pencil size={14} />
           </button>

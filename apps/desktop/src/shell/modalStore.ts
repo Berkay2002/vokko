@@ -32,13 +32,14 @@ export type ModalSpec =
   | { type: "voiceStatus"; channelId: Snowflake }
   | { type: "cameraPreview" }
   | { type: "screenShare" }
-  | { type: "userSettings"; section?: string };
+  | { type: "userSettings"; section?: string }
+  | { type: "profileEditor" };
 
 /** Full-screen settings stay mounted underneath these small dialogs and come back when the dialog closes. */
 const SETTINGS_TYPES = new Set<ModalSpec["type"]>(["serverSettings", "channelSettings", "editChannel", "userSettings"]);
 /** Settings frames whose save bar is wired to the unsaved guard. */
 const GUARDED_TYPES = new Set<ModalSpec["type"]>(["userSettings", "channelSettings", "editChannel", "serverSettings"]);
-const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout", "removeFriend", "blockUser", "report", "channelTopic", "quickSwitcher", "shortcuts", "voiceStatus", "cameraPreview", "screenShare"]);
+const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout", "removeFriend", "blockUser", "report", "channelTopic", "quickSwitcher", "shortcuts", "voiceStatus", "cameraPreview", "screenShare", "profileEditor"]);
 
 interface ModalStore {
   modal: ModalSpec | null;
@@ -48,6 +49,8 @@ interface ModalStore {
   counter: number;
   /** A settings screen parked under an open dialog, with the serial it was opened with (keeps its React key stable). */
   base: { spec: ModalSpec; serial: number } | null;
+  /** The last modal asked for while the profile editor was open: it opens once the editor is closed. */
+  queued: ModalSpec | null;
   open(modal: ModalSpec): void;
   close(): void;
 }
@@ -57,8 +60,14 @@ export const useModals = create<ModalStore>()(set => ({
   serial: 0,
   counter: 0,
   base: null,
+  queued: null,
   open: modal => {
     const { modal: current, base } = useModals.getState();
+    // The profile editor has no way back to the settings parked under it once another modal replaces it: wait for it to close.
+    if (current?.type === "profileEditor") {
+      set({ queued: modal });
+      return;
+    }
     // Modal shortcuts (Ctrl+I, Ctrl+Shift+N) must not replace User, Channel or Server Settings while it has unsaved changes, also when it is
     // parked under a dialog; dialogs park it instead, and a dialog opened over a dialog keeps the parked settings.
     const settings = current && SETTINGS_TYPES.has(current.type) ? current : base?.spec;
@@ -71,7 +80,11 @@ export const useModals = create<ModalStore>()(set => ({
       return { modal, serial: counter, counter, base: park };
     });
   },
-  close: () => set(s => (s.base ? { modal: s.base.spec, serial: s.base.serial, base: null } : { modal: null })),
+  close: () => {
+    const { modal, queued } = useModals.getState();
+    set(s => (s.base ? { modal: s.base.spec, serial: s.base.serial, base: null, queued: null } : { modal: null, queued: null }));
+    if (modal?.type === "profileEditor" && queued) useModals.getState().open(queued);
+  },
 }));
 
 export const openModal = (modal: ModalSpec) => useModals.getState().open(modal);

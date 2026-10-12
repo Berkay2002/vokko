@@ -197,9 +197,11 @@ async fn delete_channel(
     let guild_id = access.channel.guild_id;
     let _eviction = crate::voice::state::channel_deleted(&state, id).await;
     // Uploads in use as an avatar, icon or event cover (claimed, not on a message) outlive the channel they came through.
-    let attachments: Vec<(i64,)> = sqlx::query_as(
-        "DELETE FROM attachments WHERE channel_id = $1 AND NOT sticker_asset AND NOT (message_id IS NULL AND claimed_at IS NOT NULL) RETURNING id",
-    )
+    let attachments: Vec<(i64,)> = sqlx::query_as(&format!(
+        "DELETE FROM attachments a WHERE channel_id = $1 AND NOT sticker_asset \
+         AND NOT (message_id IS NULL AND (claimed_at IS NOT NULL OR {})) RETURNING id",
+        crate::media::IN_USE
+    ))
     .bind(id)
     .fetch_all(&state.db)
     .await?;

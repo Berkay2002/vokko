@@ -389,6 +389,67 @@ pub struct User {
     /// Server tag shown next to the name.
     #[serde(default)]
     pub primary_guild: Option<UserPrimaryGuild>,
+    /// Profile board widgets; `null` when none are set.
+    #[serde(default)]
+    pub widgets: Option<ProfileWidgets>,
+}
+
+/// The profile board: at most these two widgets.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProfileWidgets {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favorite_game: Option<FavoriteGame>,
+    /// Up to 20 entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub games_i_like: Option<Vec<GameEntry>>,
+}
+
+/// A game on the profile board: `name` is 1-64 characters, the image one of the owner's uploads.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GameEntry {
+    pub name: String,
+    pub image: Option<String>,
+    pub image_attachment_id: Option<Snowflake>,
+}
+
+/// A `GameEntry` with why it is the favourite (up to 190 characters) and up to 5 tags of 1-20 characters.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FavoriteGame {
+    pub name: String,
+    pub image: Option<String>,
+    pub image_attachment_id: Option<Snowflake>,
+    pub reason: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// `PATCH /users/@me` `widgets`: replaces the whole value. Keys other than the two below are collected in `unknown` so the route can refuse them.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct ProfileWidgetsInput {
+    #[serde(default, deserialize_with = "double_option")]
+    pub favorite_game: Option<Option<FavoriteGameInput>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub games_i_like: Option<Option<Vec<GameEntryInput>>>,
+    #[serde(flatten)]
+    pub unknown: std::collections::BTreeMap<String, serde::de::IgnoredAny>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct GameEntryInput {
+    pub name: String,
+    /// An upload owned by the caller; echoing the id of an image already on the profile keeps it.
+    #[serde(default)]
+    pub image_attachment_id: Option<Snowflake>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct FavoriteGameInput {
+    pub name: String,
+    #[serde(default)]
+    pub image_attachment_id: Option<Snowflake>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1614,6 +1675,9 @@ pub struct UpdateUserRequest {
     /// Adopt that guild's tag (must be a member of a guild that has one); `null` clears.
     #[serde(default, deserialize_with = "double_option")]
     pub primary_guild_id: Option<Option<Snowflake>>,
+    /// Replaces the whole board; `null` clears, absent leaves it.
+    #[serde(default, deserialize_with = "double_option")]
+    pub widgets: Option<Option<ProfileWidgetsInput>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -3882,7 +3946,7 @@ mod tests {
     }
 
     fn user() -> Value {
-        json!({"id": "100", "username": "sam", "global_name": null, "avatar": null, "banner_color": "#5865f2", "bio": null, "bot": false, "banner": null, "pronouns": null, "theme_colors": null, "avatar_decoration": null, "profile_effect": null, "primary_guild": null})
+        json!({"id": "100", "username": "sam", "global_name": null, "avatar": null, "banner_color": "#5865f2", "bio": null, "bot": false, "banner": null, "pronouns": null, "theme_colors": null, "avatar_decoration": null, "profile_effect": null, "primary_guild": null, "widgets": null})
     }
 
     #[test]
@@ -3960,6 +4024,17 @@ mod tests {
         assert_eq!(edit.banner_attachment_id, Some(Some(Snowflake(7))));
         assert!(edit.bio.is_none() && edit.primary_guild_id.is_none());
         assert!(serde_json::from_value::<UpdateUserRequest>(json!({"theme_colors": [1, 2, 3]})).is_err());
+        let mut with_widgets = user();
+        with_widgets["widgets"] = json!({"favorite_game": {"name": "Hades", "image": "http://x/a.png", "image_attachment_id": "9", "reason": null, "tags": ["roguelike"]}, "games_i_like": []});
+        round_trip::<User>(with_widgets);
+        let edit: UpdateUserRequest =
+            serde_json::from_value(json!({"widgets": {"games_i_like": [{"name": "Celeste", "image_attachment_id": "4"}], "favorite_game": null, "extra": 1}}))
+                .expect("widgets");
+        let board = edit.widgets.expect("present").expect("object");
+        assert_eq!(board.favorite_game.map(|game| game.is_none()), Some(true));
+        assert_eq!(board.games_i_like.expect("key").expect("list")[0].image_attachment_id, Some(Snowflake(4)));
+        assert_eq!(board.unknown.keys().collect::<Vec<_>>(), ["extra"]);
+        assert_eq!(serde_json::from_value::<UpdateUserRequest>(json!({"widgets": null})).expect("null").widgets.map(|board| board.is_none()), Some(true));
         let own: EditOwnMemberRequest = serde_json::from_value(json!({"bio": null, "avatar_attachment_id": null})).expect("own");
         assert_eq!((own.bio, own.avatar_attachment_id), (Some(None), Some(None)));
         let guild: UpdateGuildRequest = serde_json::from_value(json!({"tag": null})).expect("guild");

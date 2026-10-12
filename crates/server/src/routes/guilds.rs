@@ -334,11 +334,14 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     // The FK clears their primary guild; their audience hears about it as USER_UPDATE once the guild is gone.
     let adopters: Vec<(i64,)> = sqlx::query_as("SELECT id FROM users WHERE primary_guild_id = $1").bind(id).fetch_all(&state.db).await?;
     crate::routes::scheduled_events::release_guild_covers(&state, id).await;
-    let attachments: Vec<(i64,)> =
-        sqlx::query_as("DELETE FROM attachments WHERE channel_id IN (SELECT id FROM channels WHERE guild_id = $1) AND NOT sticker_asset AND NOT (message_id IS NULL AND claimed_at IS NOT NULL) RETURNING id")
-            .bind(id)
-            .fetch_all(&state.db)
-            .await?;
+    let attachments: Vec<(i64,)> = sqlx::query_as(&format!(
+        "DELETE FROM attachments a WHERE channel_id IN (SELECT id FROM channels WHERE guild_id = $1) AND NOT sticker_asset \
+         AND NOT (message_id IS NULL AND (claimed_at IS NOT NULL OR {})) RETURNING id",
+        media::IN_USE
+    ))
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
     // emoji images are claimed uploads, so nothing else would ever sweep them once the guild's rows cascade away
     let emoji_attachments: Vec<(i64,)> = sqlx::query_as("SELECT attachment_id FROM emojis WHERE guild_id = $1").bind(id).fetch_all(&state.db).await?;
     let emoji_attachments: Vec<i64> = emoji_attachments.into_iter().map(|(attachment,)| attachment).collect();

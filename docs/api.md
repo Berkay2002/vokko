@@ -11,6 +11,7 @@ General rules:
 - `GET /healthz` (outside `/api/v1`, no auth, no rate limit): `200 {status: "ok", version, db: "ok"}`, or `503 {status: "unavailable", version, db: "error"}` when the database does not answer within 2 s.
 - With `VOKKO_REGISTRATION=closed`, `POST /auth/register` answers `403` with code `40002` ("Registration is closed on this server"); login and existing sessions are unaffected.
 - Profile images (avatar, banner, server icon, per-server avatar/banner) must be PNG, JPEG, GIF or WebP; the server stores them as uploaded (no resize): avatar/icon at most 8 MiB (animated GIF 2 MiB), banner at most 10 MiB (animated GIF 4 MiB), otherwise 400 / 50035 on the `*_attachment_id` field. `pronouns` ≤ 40 characters, `bio` ≤ 190, server tag 1-4 non-space characters, decoration / effect / badge / preset ids are 1-64 characters of `a-z 0-9 _ -`, colours are RGB ints (0..16777215).
+- Profile widgets (`User.widgets`, always sent, `null` when none): `{favorite_game?: {name, image, image_attachment_id, reason, tags}, games_i_like?: [{name, image, image_attachment_id}]}`. `PATCH /users/@me` takes `widgets: {favorite_game?, games_i_like?} | null`: the value replaces the whole board (a missing key means none), `null` (or an empty object) clears it, an absent `widgets` leaves it. Entries are `{name, image_attachment_id?}` (favourite also `reason?`, `tags?`); the image is one of the caller's own uploads (PNG, JPEG, GIF or WebP, limits of an avatar), and echoing the `image_attachment_id` of an image already on the board keeps it. Limits: unknown keys other than `favorite_game` / `games_i_like` are refused, `name` 1-64 characters (trimmed), `reason` ≤ 190 (empty clears), `tags` ≤ 5 each 1-20 characters and unique (case-insensitive), `games_i_like` ≤ 20 entries; failures are 400 / 50035 keyed by path (`widgets.favorite_game.reason`, `widgets.games_i_like.3.image_attachment_id`). An upload that the board stops showing goes back to being a pending upload (removed by the periodic cleanup) unless an avatar, banner, server profile, icon or another widget still uses it. Event covers and sticker images are refused as profile images.
 - A user's `primary_guild` is only reported while they are still in that guild and the guild still has a tag; leaving, being kicked or banned, or the tag being removed clears it and sends USER_UPDATE (editing a tag sends USER_UPDATE for everyone wearing it).
 
 ## REST
@@ -44,7 +45,7 @@ General rules:
 | POST | /auth/login | `AuthRequest` → `LoginResponse`: `AuthResponse`, or `MfaRequiredResponse` (`token: null, mfa: true, ticket`) when the account has two-factor on |
 | POST | /auth/logout | revokes token, 204 |
 | GET | /users/@me | `User` |
-| PATCH | /users/@me | `EditUserRequest` → `User` (profile perks included: banner, pronouns, theme colours, decoration, effect, server tag) |
+| PATCH | /users/@me | `EditUserRequest` → `User` (profile perks included: banner, pronouns, theme colours, decoration, effect, server tag, widgets) |
 | GET | /users/{id} | `User` |
 | GET | /users/@me/guilds | `Guild[]` |
 | GET | /users/@me/channels | DM + group DM `Channel[]` |

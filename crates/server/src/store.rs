@@ -5,9 +5,9 @@ use sqlx::FromRow;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use vokko_protocol::api::{
-    Attachment, Channel, ChannelType, ExplicitContentFilter, Guild, GuildMember, GuildTag, GuildTheme, Message, MessageCall, MessageMember, MessageReference,
-    MessageReferenceType, MessageSnapshot, MessageType, NsfwLevel, OverwriteType, PermissionOverwrite, Reaction, ReactionEmoji, Role, Snowflake, StickerFormat,
-    StickerItem, User, UserPrimaryGuild, VerificationLevel,
+    Attachment, Channel, ChannelType, ExplicitContentFilter, FavoriteGame, GameEntry, Guild, GuildMember, GuildTag, GuildTheme, Message, MessageCall,
+    MessageMember, MessageReference, MessageReferenceType, MessageSnapshot, MessageType, NsfwLevel, OverwriteType, PermissionOverwrite, ProfileWidgets,
+    Reaction, ReactionEmoji, Role, Snowflake, StickerFormat, StickerItem, User, UserPrimaryGuild, VerificationLevel,
 };
 
 use crate::error::ApiResult;
@@ -39,6 +39,8 @@ pub struct UserRow {
     pub theme_accent: Option<i32>,
     pub avatar_decoration: Option<String>,
     pub profile_effect: Option<String>,
+    /// `users.widgets` as JSON text (selected `::text`; see [`StoredWidgets`]).
+    pub widgets: Option<String>,
     /// The adopted server tag, present only while the user still belongs to a guild that has one.
     pub tag_guild_id: Option<i64>,
     pub tag_text: Option<String>,
@@ -49,8 +51,8 @@ pub struct UserRow {
 
 /// Columns of [`UserRow`]; select them `FROM {USER_FROM}` (aliases `u` and `pg`).
 pub const USER_COLS: &str = "u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, \
-     u.theme_accent, u.avatar_decoration, u.profile_effect, pg.id AS tag_guild_id, pg.tag AS tag_text, pg.tag_badge, pg.tag_color_primary, \
-     pg.tag_color_secondary";
+     u.theme_accent, u.avatar_decoration, u.profile_effect, u.widgets::text AS widgets, pg.id AS tag_guild_id, pg.tag AS tag_text, pg.tag_badge, \
+     pg.tag_color_primary, pg.tag_color_secondary";
 
 /// `users u` joined to the guild whose tag the user adopted, while they still belong to it and it still has a tag.
 pub const USER_FROM: &str = "users u LEFT JOIN guilds pg ON pg.id = u.primary_guild_id AND pg.tag IS NOT NULL \
@@ -58,6 +60,67 @@ pub const USER_FROM: &str = "users u LEFT JOIN guilds pg ON pg.id = u.primary_gu
 
 fn theme_colors(primary: Option<i32>, accent: Option<i32>) -> Option<[u32; 2]> {
     Some([primary?.max(0) as u32, accent?.max(0) as u32])
+}
+
+/// A widget game as stored in `users.widgets`; the image is an asset path (`<attachment id>/<key>/<filename>`).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct StoredGame {
+    pub name: String,
+    #[serde(default)]
+    pub image_path: Option<String>,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct StoredFavorite {
+    pub name: String,
+    #[serde(default)]
+    pub image_path: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// The JSON kept in `users.widgets`: validated and normalised by `PATCH /users/@me`.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct StoredWidgets {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub favorite_game: Option<StoredFavorite>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub games_i_like: Option<Vec<StoredGame>>,
+}
+
+/// The upload id at the start of an asset path.
+fn path_attachment_id(path: &str) -> Option<i64> {
+    path.split('/').next()?.parse().ok()
+}
+
+impl StoredWidgets {
+    /// Ids of the uploads the widgets show.
+    pub fn attachment_ids(&self) -> Vec<i64> {
+        let favorite = self.favorite_game.iter().filter_map(|game| game.image_path.as_deref());
+        let liked = self.games_i_like.iter().flatten().filter_map(|game| game.image_path.as_deref());
+        favorite.chain(liked).filter_map(path_attachment_id).collect()
+    }
+
+    fn into_api(self, state: &AppState) -> ProfileWidgets {
+        let image = |path: Option<String>| (path.as_deref().and_then(path_attachment_id).map(Snowflake::from), path.map(|path| state.asset_url(&path)));
+        ProfileWidgets {
+            favorite_game: self.favorite_game.map(|game| {
+                let (image_attachment_id, image) = image(game.image_path);
+                FavoriteGame { name: game.name, image, image_attachment_id, reason: game.reason, tags: game.tags }
+            }),
+            games_i_like: self.games_i_like.map(|games| {
+                games
+                    .into_iter()
+                    .map(|game| {
+                        let (image_attachment_id, image) = image(game.image_path);
+                        GameEntry { name: game.name, image, image_attachment_id }
+                    })
+                    .collect()
+            }),
+        }
+    }
 }
 
 impl UserRow {
@@ -86,6 +149,7 @@ impl UserRow {
             avatar_decoration: self.avatar_decoration,
             profile_effect: self.profile_effect,
             primary_guild,
+            widgets: self.widgets.and_then(|text| serde_json::from_str::<StoredWidgets>(&text).ok()).map(|stored| stored.into_api(state)),
         }
     }
 }

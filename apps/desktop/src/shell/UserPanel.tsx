@@ -43,6 +43,15 @@ export function UserPanel() {
     if (status !== "online" || text) setOwnStatus(status, text);
   }, [ready]);
 
+  // The status note can also be set from the profile editor: follow the presence the gateway reports for the user.
+  // Until the gateway has reported a presence (or echoed the note re-applied after identify) the stored note stays.
+  const known = !!presence;
+  const reported = presence?.custom_status ?? "";
+  useEffect(() => {
+    if (!known || (reported === "" && loadStoredStatus().custom !== "")) return;
+    setCustom(reported);
+  }, [known, reported]);
+
   if (!me) return null;
   const status = presence?.status ?? "online";
   const subtitle = presence?.custom_status || LABEL[status] || "Online";

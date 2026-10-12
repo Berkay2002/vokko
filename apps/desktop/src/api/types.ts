@@ -21,6 +21,34 @@ export interface User {
   avatar_decoration?: string | null; // id of a Vokko-owned decoration asset
   profile_effect?: string | null; // id of a Vokko-owned profile effect
   primary_guild?: UserPrimaryGuild | null; // server tag shown next to the name
+  widgets?: ProfileWidgets | null; // profile editor board widgets; absent/null = none
+}
+/** Profile board widgets (max two kinds). Images are the owner's uploads. */
+export interface ProfileWidgets {
+  favorite_game?: FavoriteGameWidget | null;
+  games_i_like?: GameEntry[] | null; // up to 20
+}
+export interface GameEntry {
+  name: string; // 1-64 chars
+  image: string | null; // attachment URL
+  image_attachment_id: Snowflake | null;
+}
+export interface FavoriteGameWidget extends GameEntry {
+  reason: string | null; // up to 190 chars
+  tags: string[]; // up to 5, each 1-20 chars
+}
+/** What a client sends: images by attachment id (an unchanged image is echoed back by its `image_attachment_id`). */
+export interface GameEntryInput {
+  name: string;
+  image_attachment_id?: Snowflake | null;
+}
+export interface FavoriteGameInput extends GameEntryInput {
+  reason?: string | null;
+  tags?: string[];
+}
+export interface ProfileWidgetsInput {
+  favorite_game?: FavoriteGameInput | null;
+  games_i_like?: GameEntryInput[] | null;
 }
 export interface UserPrimaryGuild {
   guild_id: Snowflake;
@@ -1084,6 +1112,7 @@ export interface EditUserRequest {
   avatar_decoration?: string | null;
   profile_effect?: string | null;
   primary_guild_id?: Snowflake | null; // adopt that guild's tag (must be a member and the guild must have a tag); null clears
+  widgets?: ProfileWidgetsInput | null; // replaces the whole value; null clears
 }
 export interface EditOwnMemberRequest {
   nick?: string | null;
