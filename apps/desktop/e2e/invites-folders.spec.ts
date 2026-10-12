@@ -103,6 +103,8 @@ test('the invite modal creates a limited invite and lists friends to send it to'
 
   // Server Settings > Invites lists it with its uses and can revoke it.
   await page.keyboard.press('Escape');
+  // A page taller than the viewport (the announcer sat 1px below the app) lets the right-click's focus scroll the document, which closes the menu.
+  expect(await page.evaluate(() => document.scrollingElement!.scrollHeight - window.innerHeight)).toBe(0);
   await rail(page).getByRole('link', { name: "Sam's server" }).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Server Settings' }).hover();
   await page.getByRole('menuitem', { name: 'Invites', exact: true }).click();

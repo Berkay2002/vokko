@@ -136,6 +136,8 @@ img {
   position: absolute;
   width: 1px;
   height: 1px;
+  /* The negative margin keeps the 1px box inside #root: at its static position (bottom of the app) it made the page 1px scrollable, and a focus scroll closed the context menu. */
+  margin: -1px;
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
