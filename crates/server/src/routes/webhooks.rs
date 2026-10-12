@@ -20,7 +20,7 @@ use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, ApiQuery, parse_id};
 use crate::routes::interactions::{self, InteractionRow};
 use crate::routes::messages::{Draft, Extras, insert_message_with};
-use crate::routes::users::{ImageKind, owned_image_path};
+use crate::routes::users::{ImageKind, image_path_on};
 use crate::state::AppState;
 use crate::store::{self, ChannelRow};
 
@@ -64,16 +64,17 @@ async fn create(
     access.require(MANAGE_WEBHOOKS)?;
     accepts_webhooks(&access.channel)?;
     let name = webhook_name(&body.name, "name")?;
-    let avatar = match body.avatar_attachment_id {
-        Some(attachment) => Some(owned_image_path(&state, attachment.db(), user_id, ImageKind::Avatar, "avatar_attachment_id").await?),
-        None => None,
-    };
     let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM webhooks WHERE channel_id = $1").bind(channel).fetch_one(&state.db).await?;
     if count >= MAX_WEBHOOKS_PER_CHANNEL {
         return Err(ApiErr::conflict(30007, "Maximum number of webhooks reached (15)"));
     }
-    let id = state.ids.next();
+    // the claim and the write share one transaction: an account delete waits for both or sees neither
     let mut tx = state.db.begin().await?;
+    let avatar = match body.avatar_attachment_id {
+        Some(attachment) => Some(image_path_on(&mut tx, attachment.db(), user_id, ImageKind::Avatar, "avatar_attachment_id", false).await?),
+        None => None,
+    };
+    let id = state.ids.next();
     // The hidden author of the webhook's messages: no password, a username registration can never produce.
     sqlx::query("INSERT INTO users (id, username, email, bot, password_hash) VALUES ($1, $2, $3, TRUE, NULL)")
         .bind(id)
@@ -137,11 +138,13 @@ async fn get_one(State(state): State<AppState>, AuthUser(user_id): AuthUser, Pat
 
 async fn apply_edit(state: &AppState, row: &WebhookRow, uploader: Option<i64>, body: &EditWebhookRequest, channel: Option<i64>) -> ApiResult<WebhookRow> {
     let name = body.name.as_deref().map(|name| webhook_name(name, "name")).transpose()?;
+    // the claim and the write share one transaction: an account delete waits for both or sees neither
+    let mut tx = state.db.begin().await?;
     let avatar = match (body.avatar_attachment_id, uploader) {
         (None, _) => None,
         (Some(None), _) => Some(None),
         (Some(Some(attachment)), Some(uploader)) => {
-            Some(Some(owned_image_path(state, attachment.db(), uploader, ImageKind::Avatar, "avatar_attachment_id").await?))
+            Some(Some(image_path_on(&mut tx, attachment.db(), uploader, ImageKind::Avatar, "avatar_attachment_id", false).await?))
         }
         // A token can only clear the avatar: uploads belong to users.
         (Some(Some(_)), None) => return Err(ApiErr::invalid("avatar_attachment_id", "Needs user authorization.")),
@@ -155,8 +158,9 @@ async fn apply_edit(state: &AppState, row: &WebhookRow, uploader: Option<i64>, b
     .bind(avatar.is_some())
     .bind(avatar.flatten())
     .bind(channel)
-    .fetch_one(&state.db)
+    .fetch_one(&mut *tx)
     .await?;
+    tx.commit().await?;
     Ok(updated)
 }
 

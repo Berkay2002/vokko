@@ -1,4 +1,4 @@
-/* Banners pinned above everything; while one is visible <html> gets .has-top-banner and #root is pushed down by its height. */
+/* Banners pinned above the app and its popouts, under modal scrims (as on Discord); while one is visible <html> gets .has-top-banner and #root is pushed down by its height. */
 :root {
   --notify-banner-height: 32px;
 }
@@ -13,7 +13,7 @@ html.has-top-banner #root {
   top: 0;
   left: 0;
   right: 0;
-  z-index: 10000;
+  z-index: calc(var(--z-modal) - 1);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -756,6 +756,144 @@ async fn delete_keeps_an_upload_a_guild_still_uses_as_its_icon() {
     assert_eq!(raw(&app, fetch()).await.0, StatusCode::OK, "the guild icon still serves");
 }
 
+#[tokio::test]
+async fn delete_keeps_an_upload_a_webhook_still_uses_as_its_avatar() {
+    let app = TestApp::new().await;
+    let (_, heir_user) = app.register("hookheir").await;
+    let (member, member_user) = app.register("hookmaker").await;
+    let (_, channel) = app.guild_with_channel(&member).await;
+    let boundary = "vokkoboundaryHook";
+    let mut body =
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"hook.png\"\r\nContent-Type: image/png\r\n\r\n").into_bytes();
+    body.extend_from_slice(&tiny_png());
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/channels/{channel}/attachments"))
+        .header("authorization", &member)
+        .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+        .body(axum::body::Body::from(body))
+        .expect("request");
+    let (status, upload) = raw(&app, request).await;
+    assert_eq!(status, StatusCode::OK, "{upload}");
+    // the same upload is the member's avatar and the avatar of a webhook that outlives the account
+    assert_eq!(app.patch("/users/@me", &member, json!({"avatar_attachment_id": upload["id"]})).await.0, StatusCode::OK);
+    let (status, hook) = app.post(&format!("/channels/{channel}/webhooks"), &member, json!({"name": "Hook", "avatar_attachment_id": upload["id"]})).await;
+    assert_eq!(status, StatusCode::OK, "{hook}");
+    sqlx::query("UPDATE guilds SET owner_id = $2 WHERE owner_id = $1")
+        .bind(id_of(&member_user))
+        .bind(id_of(&heir_user))
+        .execute(&app.state.db)
+        .await
+        .expect("transfer");
+    let url = hook["avatar"].as_str().expect("avatar").trim_start_matches("http://test.local").to_owned();
+    let fetch = || axum::http::Request::builder().uri(url.clone()).body(axum::body::Body::empty()).expect("request");
+    assert_eq!(raw(&app, fetch()).await.0, StatusCode::OK);
+
+    assert_eq!(app.post("/users/@me/delete", &member, json!({"password": "correct horse battery"})).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(raw(&app, fetch()).await.0, StatusCode::OK, "the webhook avatar still serves");
+}
+
 fn id_of(user: &Value) -> i64 {
     user["id"].as_str().expect("id").parse().expect("number")
+}
+
+// ---- follow-ups after the merge of #10 ----
+
+#[tokio::test]
+async fn attempts_recorded_by_later_requests_count_too() {
+    let app = TestApp::new().await;
+    let (token, user) = app.register("latecount").await;
+    app.verify_email("latecount@example.test").await;
+    let enable = json!({"password": "correct horse battery", "secret": SECRET, "code": totp(0)});
+    assert_eq!(app.post("/users/@me/mfa/totp/enable", &token, enable).await.0, StatusCode::OK);
+    // ten parallel requests got later ids than the next one and committed before it counts: counting only ids up to its own would miss them
+    sqlx::query("INSERT INTO mfa_failures (id, user_id) SELECT 1000000 + n, $1 FROM generate_series(1, 10) n")
+        .bind(id_of(&user))
+        .execute(&app.state.db)
+        .await
+        .expect("attempts");
+    assert_eq!(app.post("/users/@me/mfa/totp/disable", &token, json!({"code": "zzzzzzzz"})).await.0, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn a_second_verification_keeps_the_first_timestamp() {
+    let app = TestApp::new().await;
+    let (token, _) = app.register("twice").await;
+    app.verify_email("twice@example.test").await;
+    let verified_at = || async {
+        let (at,): (Option<String>,) =
+            sqlx::query_as("SELECT email_verified_at::text FROM users WHERE username = 'twice'").fetch_one(&app.state.db).await.expect("row");
+        at.expect("verified")
+    };
+    let first = verified_at().await;
+    assert_eq!(app.patch("/users/@me/account", &token, json!({"email": "twice2@example.test", "password": "correct horse battery"})).await.0, StatusCode::OK);
+    app.verify_email("twice2@example.test").await;
+    assert_eq!(verified_at().await, first);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delete_waits_for_a_claim_in_flight_and_keeps_what_it_references() {
+    let app = std::sync::Arc::new(TestApp::new().await);
+    let (_, heir_user) = app.register("heir2").await;
+    let (member, member_user) = app.register("avatared").await;
+    let (guild, channel) = app.guild_with_channel(&member).await;
+    let boundary = "vokkoboundaryRace";
+    let mut body =
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"me.png\"\r\nContent-Type: image/png\r\n\r\n").into_bytes();
+    body.extend_from_slice(&tiny_png());
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/channels/{channel}/attachments"))
+        .header("authorization", &member)
+        .header("content-type", format!("multipart/form-data; boundary={boundary}"))
+        .body(axum::body::Body::from(body))
+        .expect("request");
+    let (status, upload) = raw(&app, request).await;
+    assert_eq!(status, StatusCode::OK, "{upload}");
+    assert_eq!(app.patch("/users/@me", &member, json!({"avatar_attachment_id": upload["id"]})).await.0, StatusCode::OK);
+    // ownership moves on, so the account can be deleted
+    sqlx::query("UPDATE guilds SET owner_id = $2 WHERE owner_id = $1")
+        .bind(id_of(&member_user))
+        .bind(id_of(&heir_user))
+        .execute(&app.state.db)
+        .await
+        .expect("transfer");
+    let upload_id: i64 = upload["id"].as_str().expect("id").parse().expect("number");
+    let (avatar_path,): (String,) =
+        sqlx::query_as("SELECT avatar_path FROM users WHERE id = $1").bind(id_of(&member_user)).fetch_one(&app.state.db).await.expect("avatar");
+
+    // a claim of the avatar upload as a guild icon is in flight, as `image_path_on` and the icon write do it in one transaction
+    let mut claim = app.state.db.begin().await.expect("begin");
+    sqlx::query("UPDATE attachments SET claimed_at = COALESCE(claimed_at, now()) WHERE id = $1").bind(upload_id).execute(&mut *claim).await.expect("claim");
+    sqlx::query("UPDATE guilds SET icon_path = $2 WHERE id = $1")
+        .bind(guild.parse::<i64>().expect("guild id"))
+        .bind(&avatar_path)
+        .execute(&mut *claim)
+        .await
+        .expect("icon");
+    let deleting = {
+        let (app, member) = (app.clone(), member.clone());
+        tokio::spawn(async move { app.post("/users/@me/delete", &member, json!({"password": "correct horse battery"})).await.0 })
+    };
+    // the delete blocks on the claimed row ...
+    let mut waited = false;
+    for _ in 0..200 {
+        let (waiting,): (i64,) = sqlx::query_as("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'")
+            .fetch_one(&app.state.db)
+            .await
+            .expect("activity");
+        if waiting > 0 {
+            waited = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(waited, "the delete never waited for the claim");
+    claim.commit().await.expect("commit");
+    // ... and once the claim lands it sees the new icon and keeps the upload
+    assert_eq!(deleting.await.expect("task"), StatusCode::NO_CONTENT);
+    let (kept,): (i64,) = sqlx::query_as("SELECT count(*) FROM attachments WHERE id = $1").bind(upload_id).fetch_one(&app.state.db).await.expect("count");
+    assert_eq!(kept, 1, "the guild icon lost its upload");
 }

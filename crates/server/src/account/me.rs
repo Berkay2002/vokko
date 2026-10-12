@@ -193,6 +193,9 @@ pub async fn delete_account(
     // who knew the user before: they get the anonymised USER_UPDATE
     let audience = events::user_audience(&state, user_id).await?;
     let mut tx = state.db.begin().await?;
+    // claims lock the upload row in the transaction that writes the reference: wait for those in flight so the delete below sees
+    // their references, and make later ones find the row gone. Taken before the users lock, in the order the claims take them.
+    sqlx::query("SELECT id FROM attachments WHERE uploader_id = $1 AND message_id IS NULL FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
     // the row lock keeps a guild from being created or transferred to the user halfway through
     sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
     let (owned,): (i64,) = sqlx::query_as("SELECT count(*) FROM guilds WHERE owner_id = $1").bind(user_id).fetch_one(&mut *tx).await?;
@@ -222,6 +225,7 @@ pub async fn delete_account(
          AND NOT EXISTS (SELECT 1 FROM stickers s WHERE s.attachment_id = a.id) \
          AND NOT EXISTS (SELECT 1 FROM message_stickers m WHERE m.attachment_id = a.id) \
          AND NOT EXISTS (SELECT 1 FROM emojis e WHERE e.attachment_id = a.id) \
+         AND NOT EXISTS (SELECT 1 FROM webhooks w WHERE split_part(w.avatar_path, '/', 1) = a.id::text) \
          AND NOT EXISTS (SELECT 1 FROM users u WHERE u.id <> $1 AND a.id::text IN (split_part(u.avatar_path, '/', 1), split_part(u.banner_path, '/', 1))) \
          AND NOT EXISTS (SELECT 1 FROM guild_members gm WHERE gm.user_id <> $1 \
                          AND a.id::text IN (split_part(gm.avatar_path, '/', 1), split_part(gm.banner_path, '/', 1))) \

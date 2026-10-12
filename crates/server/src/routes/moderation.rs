@@ -451,15 +451,17 @@ async fn edit_own_member(
         Some(None) => Some(None),
         Some(Some(colors)) => Some(Some(users::theme_pair(colors, "theme_colors")?)),
     };
+    // the claims and the write share one transaction: an account delete waits for both or sees neither
+    let mut tx = state.db.begin().await?;
     let avatar = match body.avatar_attachment_id {
         None => None,
         Some(None) => Some(None),
-        Some(Some(id)) => Some(Some(users::owned_image_path(&state, id.db(), user_id, ImageKind::Avatar, "avatar_attachment_id").await?)),
+        Some(Some(id)) => Some(Some(users::image_path_on(&mut tx, id.db(), user_id, ImageKind::Avatar, "avatar_attachment_id", false).await?)),
     };
     let banner = match body.banner_attachment_id {
         None => None,
         Some(None) => Some(None),
-        Some(Some(id)) => Some(Some(users::owned_image_path(&state, id.db(), user_id, ImageKind::Banner, "banner_attachment_id").await?)),
+        Some(Some(id)) => Some(Some(users::image_path_on(&mut tx, id.db(), user_id, ImageKind::Banner, "banner_attachment_id", false).await?)),
     };
 
     let mut update = QueryBuilder::<Postgres>::new("UPDATE guild_members SET ");
@@ -492,8 +494,9 @@ async fn edit_own_member(
     }
     if any {
         update.push(" WHERE guild_id = ").push_bind(guild).push(" AND user_id = ").push_bind(user_id);
-        update.build().execute(&state.db).await?;
+        update.build().execute(&mut *tx).await?;
     }
+    tx.commit().await?;
     Ok(Json(publish_member(&state, guild, user_id).await?))
 }
 

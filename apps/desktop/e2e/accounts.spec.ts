@@ -189,7 +189,8 @@ test('password reset: forgot link from the login page, new password from the mai
   await goInApp(page, `${link.pathname}${link.hash}`);
   await page.getByLabel('New Password').fill('password');
   await page.getByRole('button', { name: 'Change Password' }).click();
-  await expect(page.getByText('Password is too weak or common to use.')).toBeVisible();
+  // the strength meter repeats the sentence: check the server's field error
+  await expect(page.locator('.field-label-error', { hasText: 'Password is too weak or common to use.' })).toBeVisible();
   await page.getByLabel('New Password').fill('a fresh new passphrase');
   await page.getByRole('button', { name: 'Change Password' }).click();
   await expect(page).toHaveURL(/\/channels\/@me/);

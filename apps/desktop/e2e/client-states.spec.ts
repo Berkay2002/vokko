@@ -24,6 +24,9 @@ const shot = async (page: Page, name: string, target?: Locator) => {
 };
 
 async function boot(page: Page) {
+  // Chrome stable reports Notification.permission 'default' (the headless shell does not), which queues the one-time permission
+  // banner behind the ones under test: answer it up front so the top slot empties when they clear
+  await page.addInitScript(() => localStorage.setItem('vokko.notify.promptDismissed', '1'));
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.waitForFunction(() => (window as unknown as Win).__vokko.appStore.getState().connection === 'ready');
 }

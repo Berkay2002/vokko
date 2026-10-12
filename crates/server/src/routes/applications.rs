@@ -24,7 +24,7 @@ use crate::events;
 use crate::extract::{ApiJson, ApiQuery, parse_id};
 use crate::presence;
 use crate::routes::moderation::{MAX_ROLES, remove_member};
-use crate::routes::users::{ImageKind, owned_image_path, publish_user};
+use crate::routes::users::{ImageKind, image_path_on, publish_user};
 use crate::state::AppState;
 use crate::store;
 
@@ -137,12 +137,13 @@ async fn edit_application(
     let name = body.name.as_deref().map(app_name).transpose()?;
     let description = body.description.as_deref().map(app_description).transpose()?;
     let permissions = body.install_params.as_ref().map(|params| parse_permissions(&params.permissions, "install_params.permissions")).transpose()?;
+    // the claim and the write share one transaction: an account delete waits for both or sees neither
+    let mut tx = state.db.begin().await?;
     let icon = match body.icon_attachment_id {
         None => None,
         Some(None) => Some(None),
-        Some(Some(attachment)) => Some(Some(owned_image_path(&state, attachment.db(), user_id, ImageKind::Avatar, "icon_attachment_id").await?)),
+        Some(Some(attachment)) => Some(Some(image_path_on(&mut tx, attachment.db(), user_id, ImageKind::Avatar, "icon_attachment_id", false).await?)),
     };
-    let mut tx = state.db.begin().await?;
     sqlx::query(
         "UPDATE applications SET name = COALESCE($2, name), description = COALESCE($3, description), bot_public = COALESCE($4, bot_public), \
          install_permissions = COALESCE($5, install_permissions), icon_path = CASE WHEN $6 THEN $7 ELSE icon_path END WHERE id = $1",

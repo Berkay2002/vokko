@@ -685,3 +685,32 @@ async fn changing_the_email_keeps_linked_providers() {
     assert_eq!(linked.as_array().map(Vec::len), Some(1), "{linked}");
     assert_eq!(app.get("/users/@me/account", &token).await.1["email"], "keeper2@example.test");
 }
+
+// ---- follow-ups after the merge of #10 ----
+
+#[tokio::test]
+async fn a_reset_keeps_providers_linked_after_the_address_was_proven() {
+    let oidc = start_oidc().await;
+    let github = start_github().await;
+    let app = app_with(&oidc, &github).await;
+    let (token, _) = app.register("resetter").await;
+    app.verify_email("resetter@example.test").await;
+    *github.script.lock().expect("script") = Script { subject: "4242".to_owned(), username: Some("resetter-gh".to_owned()), ..Script::default() };
+    let code = run_flow(
+        &app,
+        &github,
+        json!({"target": "web", "client_challenge": challenge(VERIFIER), "link": true, "password": "correct horse battery"}),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(complete_as(&app, &code, VERIFIER, Some(&token)).await.1["kind"], "linked");
+    // a reset changes the password only: like Discord, sign-in methods linked after the email was verified stay
+    assert_eq!(app.send(Method::POST, "/auth/forgot", None, Some(json!({"login": "resetter"}))).await.0, StatusCode::NO_CONTENT);
+    let reset = app.mailed_token_soon("resetter@example.test", "reset").await;
+    let (status, session) = app.send(Method::POST, "/auth/reset", None, Some(json!({"token": reset, "password": "a brand new passphrase"}))).await;
+    assert_eq!(status, StatusCode::OK, "{session}");
+    let (_, linked) = app.get("/users/@me/oauth", session["token"].as_str().expect("token")).await;
+    assert_eq!(linked.as_array().map(Vec::len), Some(1), "{linked}");
+    let code = run_flow(&app, &github, web(false), None).await;
+    assert_eq!(complete(&app, &code, VERIFIER).await.1["kind"], "login", "GitHub still signs in");
+}

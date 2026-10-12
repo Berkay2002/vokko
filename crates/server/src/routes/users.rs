@@ -88,15 +88,17 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     };
     let decoration = body.avatar_decoration.map(|value| asset_id(value, "avatar_decoration")).transpose()?;
     let effect = body.profile_effect.map(|value| asset_id(value, "profile_effect")).transpose()?;
+    // the claims and the write share one transaction: an account delete waits for both or sees neither
+    let mut tx = state.db.begin().await?;
     let avatar = match body.avatar_attachment_id {
         None => None,
         Some(None) => Some(None),
-        Some(Some(id)) => Some(Some(owned_image_path(&state, id.db(), user_id, ImageKind::Avatar, "avatar_attachment_id").await?)),
+        Some(Some(id)) => Some(Some(image_path_on(&mut tx, id.db(), user_id, ImageKind::Avatar, "avatar_attachment_id", false).await?)),
     };
     let banner = match body.banner_attachment_id {
         None => None,
         Some(None) => Some(None),
-        Some(Some(id)) => Some(Some(owned_image_path(&state, id.db(), user_id, ImageKind::Banner, "banner_attachment_id").await?)),
+        Some(Some(id)) => Some(Some(image_path_on(&mut tx, id.db(), user_id, ImageKind::Banner, "banner_attachment_id", false).await?)),
     };
     let primary_guild = match body.primary_guild_id {
         None => None,
@@ -151,8 +153,9 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     // An empty request is a no-op that still returns the user.
     if update.sql().len() > "UPDATE users SET ".len() {
         update.push(" WHERE id = ").push_bind(user_id);
-        update.build().execute(&state.db).await?;
+        update.build().execute(&mut *tx).await?;
     }
+    tx.commit().await?;
     Ok(Json(publish_user(&state, user_id).await?))
 }
 
@@ -176,13 +179,9 @@ impl ImageKind {
 
 /// Asset path (`<id>/<key>/<filename>`) of a PNG/JPEG/GIF/WebP attachment uploaded by `user_id` that is within the size limits of `kind`,
 /// used for avatars, banners and guild icons. Marks the row `claimed_at` so the pending-upload cleanup never deletes it while it is in use.
-pub async fn owned_image_path(state: &AppState, attachment_id: i64, user_id: i64, kind: ImageKind, field: &str) -> ApiResult<String> {
-    let mut conn = state.db.acquire().await?;
-    image_path_on(&mut conn, attachment_id, user_id, kind, field, false).await
-}
-
-/// `owned_image_path` on the caller's connection (a transaction, so a failed write leaves nothing claimed). `cover` claims the upload
-/// for a scheduled event: that needs it unclaimed, and from then on avatars and icons refuse it. Anything else refuses event covers.
+/// Run it in the transaction that writes the reference: a failed write leaves nothing claimed, and the row lock it takes makes an account
+/// delete wait until the reference is visible. `cover` claims the upload for a scheduled event: that needs it unclaimed, and from then on
+/// avatars and icons refuse it. Anything else refuses event covers.
 pub async fn image_path_on(conn: &mut PgConnection, attachment_id: i64, user_id: i64, kind: ImageKind, field: &str, cover: bool) -> ApiResult<String> {
     let row: Option<(String, String, Option<String>, i64)> = sqlx::query_as(
         "SELECT filename, key, content_type, size FROM attachments WHERE id = $1 AND uploader_id = $2 AND key IS NOT NULL AND message_id IS NULL \

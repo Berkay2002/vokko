@@ -21,7 +21,7 @@ use crate::routes::auth::clean_text;
 use crate::routes::forums;
 use crate::routes::moderation;
 use crate::routes::overwrites;
-use crate::routes::users::{self, ImageKind, owned_image_path};
+use crate::routes::users::{self, ImageKind, image_path_on};
 use crate::state::AppState;
 use crate::store;
 
@@ -63,8 +63,9 @@ pub fn channel_name(kind: ChannelType, value: &str) -> ApiResult<String> {
 
 async fn create_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiJson(body): ApiJson<CreateGuildRequest>) -> ApiResult<Json<Guild>> {
     let name = guild_name(&body.name)?;
+    let mut tx = state.db.begin().await?;
     let icon_path = match body.icon_attachment_id {
-        Some(id) => Some(owned_image_path(&state, id.db(), user_id, ImageKind::Avatar, "icon_attachment_id").await?),
+        Some(id) => Some(image_path_on(&mut tx, id.db(), user_id, ImageKind::Avatar, "icon_attachment_id", false).await?),
         None => None,
     };
     let guild_id = state.ids.next();
@@ -72,7 +73,6 @@ async fn create_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     let voice_category = state.ids.next();
     let general = state.ids.next();
     let voice = state.ids.next();
-    let mut tx = state.db.begin().await?;
     sqlx::query("INSERT INTO guilds (id, name, icon_path, owner_id, system_channel_id) VALUES ($1, $2, $3, $4, $5)")
         .bind(guild_id)
         .bind(&name)
@@ -139,8 +139,10 @@ async fn update_guild(
     let before = store::guild(&state, id).await?.ok_or_else(ApiErr::unknown_guild)?;
     // Validate every key first so a rejected request changes nothing.
     let name = body.name.as_deref().map(guild_name).transpose()?;
+    // the claim and the write share one transaction: an account delete waits for both or sees neither
+    let mut icon_tx = state.db.begin().await?;
     let icon_path = match body.icon_attachment_id {
-        Some(icon) => Some(owned_image_path(&state, icon.db(), user_id, ImageKind::Avatar, "icon_attachment_id").await?),
+        Some(icon) => Some(image_path_on(&mut icon_tx, icon.db(), user_id, ImageKind::Avatar, "icon_attachment_id", false).await?),
         None => None,
     };
     if let Some(channel) = body.system_channel_id {
@@ -168,8 +170,10 @@ async fn update_guild(
         sqlx::query("UPDATE guilds SET name = $2 WHERE id = $1").bind(id).bind(name).execute(&state.db).await?;
     }
     if let Some(path) = icon_path {
-        sqlx::query("UPDATE guilds SET icon_path = $2 WHERE id = $1").bind(id).bind(path).execute(&state.db).await?;
+        sqlx::query("UPDATE guilds SET icon_path = $2 WHERE id = $1").bind(id).bind(path).execute(&mut *icon_tx).await?;
     }
+    // committed before the writes below, which would wait on its row lock
+    icon_tx.commit().await?;
     if let Some(channel) = body.system_channel_id {
         sqlx::query("UPDATE guilds SET system_channel_id = $2 WHERE id = $1").bind(id).bind(channel.db()).execute(&state.db).await?;
     }
