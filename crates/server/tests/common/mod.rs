@@ -50,6 +50,11 @@ impl TestApp {
         Self::build(adjust, move |pool, config| AppState::with_room_service(pool, config, rooms)).await
     }
 
+    /// Like `with_config`, with an attachment backend of the test's choosing (upload tests pass one that fails or stalls).
+    pub async fn with_storage(adjust: impl FnOnce(&mut Config), storage: std::sync::Arc<dyn vokko_server::storage::Storage>) -> Self {
+        Self::build(adjust, move |pool, config| AppState::with_storage(pool, config, storage)).await
+    }
+
     async fn build(adjust: impl FnOnce(&mut Config), make: impl FnOnce(sqlx::PgPool, Config) -> AppState) -> Self {
         let admin_options = PgConnectOptions::from_str(&test_database_url()).expect("valid TEST_DATABASE_URL");
         // VOKKO_TEST_DB_PREFIX (e.g. `vokko_test_search`) lets parallel workers keep their databases apart.

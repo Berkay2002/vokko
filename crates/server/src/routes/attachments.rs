@@ -73,6 +73,60 @@ impl Drop for PendingFile {
     }
 }
 
+/// An attachments row that is deleted, with any bytes stored for it, unless `keep` is called. Armed just before the row is inserted,
+/// so an upload that fails or whose request future is dropped (client disconnect, shutdown) after the insert never leaves a row
+/// counting against the uploader's pending quota until the periodic cleanup. On drop the delete runs as a spawned task.
+struct PendingRow {
+    state: Option<AppState>,
+    id: i64,
+}
+
+impl PendingRow {
+    fn new(state: &AppState, id: i64) -> Self {
+        Self { state: Some(state.clone()), id }
+    }
+
+    fn keep(mut self) {
+        self.state = None;
+    }
+
+    /// Removes the row and its bytes before returning, so the error response already reflects the freed quota.
+    async fn discard(mut self) {
+        if let Some(state) = self.state.take() {
+            remove_row(&state, self.id).await;
+        }
+    }
+}
+
+/// Only while the row is still an unclaimed pending upload (as `media::cleanup_pending` matches them): once the id has been attached to
+/// a message or claimed as an avatar, icon, ..., the row and its bytes are left alone.
+async fn remove_row(state: &AppState, id: i64) {
+    let deleted: Result<Option<(i64,)>, _> = sqlx::query_as(&format!(
+        "DELETE FROM attachments a WHERE id = $1 AND message_id IS NULL AND claimed_at IS NULL AND NOT {} RETURNING id",
+        media::IN_USE
+    ))
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await;
+    match deleted {
+        Ok(Some(_)) => media::remove_files(state, &[id]).await,
+        Ok(None) => {}
+        Err(error) => tracing::warn!("cannot remove aborted upload {id}: {error}"),
+    }
+}
+
+impl Drop for PendingRow {
+    fn drop(&mut self) {
+        if let Some(state) = self.state.take() {
+            let id = self.id;
+            // Without a runtime (never the case for a request) the periodic pending-upload cleanup removes it instead.
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn(async move { remove_row(&state, id).await });
+            }
+        }
+    }
+}
+
 /// Writes one multipart field to `path`; returns its size and its first `SNIFF_BYTES`, or `None` once it grows past `max_bytes`.
 /// The size is what actually arrived, whatever the client declared.
 async fn receive_file(field: &mut Field<'_>, path: &std::path::Path, max_bytes: usize) -> ApiResult<Option<(usize, Vec<u8>)>> {
@@ -137,6 +191,9 @@ async fn upload(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
         if pending.saturating_add(size as i64) > quota {
             return Err(quota_error(quota));
         }
+        // Armed before the row can exist: until `keep`, dropping this (an error below, or the request future dropped by a client
+        // disconnect) removes the row and any stored bytes, so an aborted upload stops counting against the quota at once.
+        let row = PendingRow::new(&state, attachment_id);
         sqlx::query(
             "INSERT INTO attachments (id, channel_id, uploader_id, filename, content_type, size, width, height, key)              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
@@ -152,13 +209,12 @@ async fn upload(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
-        // The row exists before the bytes are stored: if this request dies now, the pending-upload cleanup removes the row and any
-        // partly stored file, so nothing is left untracked.
+        // The row exists before the bytes are stored, so concurrent uploads see this one's size in the quota while it streams out.
         if let Err(error) = state.storage.put_file(attachment_id, &path).await {
-            let _ = sqlx::query("DELETE FROM attachments WHERE id = $1").bind(attachment_id).execute(&state.db).await;
-            media::remove_files(&state, &[attachment_id]).await;
+            row.discard().await;
             return Err(error.into());
         }
+        row.keep();
         return Ok(Json(attachment_api(&state, attachment_id, &key, filename, Some(content_type), size as i64, width, height)));
     }
     Err(ApiErr::invalid("file", "Missing `file` part."))

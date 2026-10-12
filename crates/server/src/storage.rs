@@ -109,7 +109,9 @@ impl Storage for LocalStorage {
         })
     }
 
-    /// A rename when the staging file is on the same filesystem, else a copy.
+    /// A rename when the staging file is on the same filesystem, else a copy to a temporary name renamed into place. The copy runs
+    /// on a blocking thread that outlives a dropped request; a copy that lands after the upload was cleaned up then only leaves a
+    /// `.part` file, never a file under the attachment's id.
     fn put_file<'a>(&'a self, id: i64, path: &'a Path) -> BoxFuture<'a, io::Result<()>> {
         Box::pin(async move {
             tokio::fs::create_dir_all(&self.dir).await?;
@@ -117,7 +119,15 @@ impl Storage for LocalStorage {
             if tokio::fs::rename(path, &target).await.is_ok() {
                 return Ok(());
             }
-            tokio::fs::copy(path, &target).await.map(|_| ())
+            let partial = self.dir.join(format!("{id}.part"));
+            let copied = match tokio::fs::copy(path, &partial).await {
+                Ok(_) => tokio::fs::rename(&partial, &target).await,
+                Err(error) => Err(error),
+            };
+            if copied.is_err() {
+                let _ = tokio::fs::remove_file(&partial).await;
+            }
+            copied
         })
     }
 
@@ -147,6 +157,8 @@ impl Storage for LocalStorage {
 
     fn delete(&self, id: i64) -> BoxFuture<'_, io::Result<()>> {
         Box::pin(async move {
+            // what an interrupted `put_file` copy left behind, if it has finished by now
+            let _ = tokio::fs::remove_file(self.dir.join(format!("{id}.part"))).await;
             match tokio::fs::remove_file(self.path(id)).await {
                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
                 other => other,

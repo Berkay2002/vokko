@@ -53,12 +53,22 @@ impl AppState {
 
     /// Like `new`, with an explicit LiveKit RoomService (tests pass a fake).
     pub fn with_room_service(db: PgPool, config: Config, rooms: Arc<dyn RoomService>) -> Self {
+        let storage = storage::build(&config.storage, &config.data_dir);
+        Self::assemble(db, config, rooms, storage)
+    }
+
+    /// Like `new`, with an attachment backend of the caller's choosing (tests pass one that fails or stalls on demand).
+    pub fn with_storage(db: PgPool, config: Config, storage: Arc<dyn Storage>) -> Self {
+        let rooms = voice::room_service(&config);
+        Self::assemble(db, config, rooms, storage)
+    }
+
+    fn assemble(db: PgPool, config: Config, rooms: Arc<dyn RoomService>, storage: Arc<dyn Storage>) -> Self {
         let hub = Hub::new(config.replay_capacity, config.session_ttl, config.outgoing_queue);
         let unfurler = Unfurler::new(config.unfurl);
         let accounts = Accounts::new(&config.accounts);
         let gifs = GifProxy::new(config.gif.clone());
         let voice = Voice::new(rooms);
-        let storage = storage::build(&config.storage, &config.data_dir);
         Self(Arc::new(Inner {
             db,
             config,
