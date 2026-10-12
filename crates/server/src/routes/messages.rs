@@ -516,7 +516,7 @@ async fn list_messages(
 
 /// 403 50007 when `user_id` may not write in the 1:1 DM `id`: a block in either direction, or the recipient's DM privacy
 /// (a non-friend needs a shared guild the recipient has not restricted, guild_privacy::may_dm).
-async fn require_dm_open(state: &AppState, id: i64, user_id: i64) -> ApiResult<()> {
+pub async fn require_dm_open(state: &AppState, id: i64, user_id: i64) -> ApiResult<()> {
     let (blocked,): (bool,) = sqlx::query_as(
         "SELECT EXISTS (SELECT 1 FROM channel_recipients r JOIN relationships rel ON rel.kind = 2 \
          AND ((rel.user_id = $2 AND rel.other_id = r.user_id) OR (rel.other_id = $2 AND rel.user_id = r.user_id)) \
@@ -864,6 +864,10 @@ async fn pin_message(
     let access = channel_access(&state, user_id, id).await?;
     if !can_pin(&access) {
         return Err(ApiErr::missing_permissions());
+    }
+    // A pin posts a notice and reopens the DM for the other side, so it is a DM write (unpinning stays open).
+    if access.channel.channel_type() == vokko_protocol::api::ChannelType::Dm {
+        require_dm_open(&state, id, user_id).await?;
     }
     let row = message_in_channel(&state, id, mid).await?;
     if row.pinned {

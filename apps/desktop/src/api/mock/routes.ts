@@ -28,7 +28,7 @@ import { parsePoll, requirePollPerm } from "./polls";
 import { addPoll, isPoll } from "./pollData";
 import "./invites";
 import "./stage";
-import { assertAcceptsFriendRequest, assertCanOpenDm } from "./settings";
+import { assertAcceptsFriendRequest, assertCanOpenDm, assertDmOpen } from "./settings";
 import "./community";
 import "./status";
 import "./soundboard";
@@ -503,10 +503,7 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   if (content === "" && attachments.length === 0 && stickers.length === 0 && !forwarding && !poll) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
   const forward = forwarding ? buildForward(viewer.user.id, reference, channel) : undefined;
   if (reference?.message_id && !forwarding) requireMessage(channel.id, reference.message_id);
-  if (channel.type === ChannelType.DM) {
-    const other = channel.participant_ids?.find(id => id !== viewer.user.id);
-    if (other) assertCanOpenDm(viewer.user.id, other);
-  }
+  assertDmOpen(channel, viewer.user.id);
   checkSend(channel, viewer.user.id, content);
   for (const id of ids) db.pending.delete(id);
   // A poll is registered under the message's id first, so MESSAGE_CREATE already carries it.
@@ -577,6 +574,7 @@ route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, 
   const message = requireMessage(channel.id, params[1] ?? "");
   requireChannelPerm(channel, viewer.user.id, Perm.ADD_REACTIONS);
   assertThreadOpen(channel);
+  assertDmOpen(channel, viewer.user.id);
   const emoji = resolveReactionEmoji(channel, viewer.user.id, parseEmoji(params[2] ?? ""));
   let reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
   if (!reaction) message.reactions.push((reaction = { emoji, user_ids: [] }));
@@ -632,6 +630,7 @@ route("PUT", `/channels/${ID}/messages/pins/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   requirePinPerm(channel, viewer.user.id);
+  assertDmOpen(channel, viewer.user.id);
   if (message.pinned) return undefined;
   if (sortedMessages(channel.id).filter(m => m.pinned).length >= MAX_PINS) fail(400, 30003, `Maximum number of pins reached (${MAX_PINS})`);
   message.pinned = true;

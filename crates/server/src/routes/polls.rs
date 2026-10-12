@@ -96,6 +96,10 @@ async fn add_vote(
     Path((id, mid, answer)): Path<(String, String, String)>,
 ) -> ApiResult<StatusCode> {
     let (access, message_id, answer) = vote_target(&state, user_id, &id, &mid, &answer).await?;
+    // A vote reaches the other side of a 1:1 DM like a reaction (removing one stays open).
+    if access.channel.channel_type() == vokko_protocol::api::ChannelType::Dm {
+        crate::routes::messages::require_dm_open(&state, access.channel.id, user_id).await?;
+    }
     let mut tx = state.db.begin().await?;
     let multiselect = open_poll(&mut tx, message_id, user_id, answer).await?;
     // Single choice: voting for another answer moves the vote.

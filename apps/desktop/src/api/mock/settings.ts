@@ -157,6 +157,15 @@ export function assertCanOpenDm(sender: string, target: string): void {
   if (!open) fail(403, 50007, "Cannot send messages to this user");
 }
 
+/** 403 50007 when `userId` may not write (or react) in the 1:1 DM `channel`: a block either way, or the other side's DM privacy. */
+export function assertDmOpen(channel: { type: ChannelType; participant_ids?: string[] }, userId: string): void {
+  if (channel.type !== ChannelType.DM) return;
+  const other = channel.participant_ids?.find(id => id !== userId);
+  if (!other) return;
+  if (relationship(userId, other)?.type === RelationshipType.Blocked || relationship(other, userId)?.type === RelationshipType.Blocked) fail(403, 50007, "Cannot send messages to this user");
+  assertCanOpenDm(userId, other);
+}
+
 /** 403 80000 unless one of `target`'s friend request sources covers `sender`. */
 export function assertAcceptsFriendRequest(sender: string, target: string): void {
   if (privacyAllows(target, "friend_requests_everyone")) return;
@@ -218,6 +227,7 @@ route("GET", "/users/@me/export", ({ viewer }) => {
     }),
     messages: messages.slice(0, EXPORT_MAX_MESSAGES).map(m => ({ id: m.id, channel_id: m.channel_id, content: m.content, timestamp: m.timestamp, edited_timestamp: m.edited_timestamp, attachments: m.attachments.map(a => a.filename) })),
     messages_truncated: messages.length > EXPORT_MAX_MESSAGES,
+    dm_restricted_guild_ids: [...(restrictedGuilds.get(id) ?? [])].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1)),
   };
   return result;
 });

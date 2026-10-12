@@ -617,6 +617,7 @@ export interface UserDataExport {
   channels: ExportedChannel[]; // channels the user wrote in plus open DMs
   messages: ExportedMessage[]; // own messages, newest first, at most 20000
   messages_truncated: boolean;
+  dm_restricted_guild_ids: Snowflake[]; // guilds with Privacy Settings > Direct Messages off
 }
 
 export interface Message {

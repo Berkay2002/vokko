@@ -808,3 +808,28 @@ async fn moving_a_webhook_respects_the_target_channels_limit() {
     let (status, error) = app.patch(&format!("/webhooks/{}", id(&hook)), &owner, json!({"channel_id": full})).await;
     assert_eq!((status, error["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(30007)), "{error}");
 }
+
+#[tokio::test]
+async fn a_bot_dm_follows_the_members_guild_privacy() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("owner").await;
+    let (member, member_user) = app.register("member").await;
+    let (guild, channel) = app.guild_with_channel(&owner).await;
+    join(&app, &owner, &channel, &member).await;
+    let (app_id, bot) = create_app(&app, &owner, "Echo").await;
+    add_bot(&app, &owner, &app_id, &guild).await;
+    let privacy = format!("/users/@me/guilds/{guild}/privacy");
+    // The member turns off DMs from the only guild they share with the bot: it may not open a DM.
+    assert_eq!(app.patch(&privacy, &member, json!({"direct_messages": false})).await.0, StatusCode::OK);
+    let (status, error) = app.post("/users/@me/channels", &bot, json!({"recipient_id": id(&member_user)})).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50007)));
+    // Back on, the bot opens and writes; off again, its next message is refused.
+    assert_eq!(app.patch(&privacy, &member, json!({"direct_messages": true})).await.0, StatusCode::OK);
+    let (status, dm) = app.post("/users/@me/channels", &bot, json!({"recipient_id": id(&member_user)})).await;
+    assert_eq!(status, StatusCode::OK, "{dm}");
+    let messages = format!("/channels/{}/messages", id(&dm));
+    assert_eq!(app.post(&messages, &bot, json!({"content": "hi"})).await.0, StatusCode::OK);
+    assert_eq!(app.patch(&privacy, &member, json!({"direct_messages": false})).await.0, StatusCode::OK);
+    let (status, error) = app.post(&messages, &bot, json!({"content": "again"})).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50007)));
+}

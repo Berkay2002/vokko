@@ -174,3 +174,56 @@ async fn typing_follows_the_rule_while_group_dms_and_edits_are_untouched() {
     let path = format!("/channels/{dm}/messages/{}", sent["id"].as_str().expect("message id"));
     assert_eq!(app.patch(&path, &ben.token, json!({"content": "edited"})).await.0, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn reactions_in_a_dm_follow_blocks_and_the_rule() {
+    let app = TestApp::new().await;
+    let ann = person(&app, "ann").await;
+    let ben = person(&app, "ben").await;
+    let (guild, channel) = app.guild_with_channel(&ann.token).await;
+    join(&app, &ann, &channel, &ben).await;
+    let (_, dm) = open_dm(&app, &ben, &ann).await;
+    let dm = dm["id"].as_str().expect("dm id").to_owned();
+    let (_, sent) = send(&app, &ben, &dm).await;
+    let react = |emoji: &str| format!("/channels/{dm}/messages/{}/reactions/{emoji}/@me", sent["id"].as_str().expect("message id"));
+    assert_eq!(app.put(&react("👍"), &ben.token).await.0, StatusCode::NO_CONTENT);
+
+    // ann restricts the shared guild: ben's reactions reach her like messages, so they are refused; hers still go through.
+    set_dms(&app, &ann, &guild, false).await;
+    assert!(refused(app.put(&react("🎉"), &ben.token).await));
+    assert_eq!(app.put(&react("🎉"), &ann.token).await.0, StatusCode::NO_CONTENT);
+    // Removing an own reaction stays possible.
+    assert_eq!(app.delete(&react("👍"), &ben.token).await.0, StatusCode::NO_CONTENT);
+
+    // A block closes reactions both ways, even with the guild open again.
+    set_dms(&app, &ann, &guild, true).await;
+    assert_eq!(app.put_json(&format!("/users/@me/relationships/{}", ann.id), &ben.token, json!({"type": 2})).await.0, StatusCode::NO_CONTENT);
+    assert!(refused(app.put(&react("🔥"), &ben.token).await));
+    assert!(refused(app.put(&react("🔥"), &ann.token).await));
+    // Pinning posts a notice and reopens the DM, so it is refused too; a poll vote reaches the other side like a reaction.
+    let pin = format!("/channels/{dm}/messages/pins/{}", sent["id"].as_str().expect("message id"));
+    assert!(refused(app.put(&pin, &ben.token).await));
+    assert!(refused(app.put(&pin, &ann.token).await));
+}
+
+#[tokio::test]
+async fn poll_votes_in_a_dm_follow_the_rule() {
+    let app = TestApp::new().await;
+    let ann = person(&app, "ann").await;
+    let ben = person(&app, "ben").await;
+    let (guild, channel) = app.guild_with_channel(&ann.token).await;
+    join(&app, &ann, &channel, &ben).await;
+    let (_, dm) = open_dm(&app, &ann, &ben).await;
+    let dm = dm["id"].as_str().expect("dm id").to_owned();
+    let poll = json!({"poll": {"question": {"text": "Lunch?"}, "answers": [{"poll_media": {"text": "Yes"}}, {"poll_media": {"text": "No"}}], "duration": 1}});
+    let (status, sent) = app.post(&format!("/channels/{dm}/messages"), &ann.token, poll).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    let vote = format!("/channels/{dm}/polls/{}/answers/1/@me", sent["id"].as_str().expect("message id"));
+    set_dms(&app, &ann, &guild, false).await;
+    assert!(refused(app.put(&vote, &ben.token).await));
+    set_dms(&app, &ann, &guild, true).await;
+    assert_eq!(app.put(&vote, &ben.token).await.0, StatusCode::NO_CONTENT);
+    // Taking a vote back stays possible after the guild is restricted again.
+    set_dms(&app, &ann, &guild, false).await;
+    assert_eq!(app.delete(&vote, &ben.token).await.0, StatusCode::NO_CONTENT);
+}

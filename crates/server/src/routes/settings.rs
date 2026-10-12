@@ -203,6 +203,8 @@ async fn build_export(state: &AppState, user_id: i64) -> ApiResult<UserDataExpor
             .bind(user_id)
             .fetch_all(&state.db)
             .await?;
+    let restricted: Vec<(i64,)> =
+        sqlx::query_as("SELECT guild_id FROM guild_dm_restrictions WHERE user_id = $1 ORDER BY guild_id").bind(user_id).fetch_all(&state.db).await?;
     let body = UserDataExport {
         exported_at: store::iso(OffsetDateTime::now_utc()),
         user,
@@ -236,6 +238,7 @@ async fn build_export(state: &AppState, user_id: i64) -> ApiResult<UserDataExpor
             })
             .collect(),
         messages_truncated,
+        dm_restricted_guild_ids: restricted.into_iter().map(|(id,)| Snowflake::from(id)).collect(),
     };
     Ok(body)
 }

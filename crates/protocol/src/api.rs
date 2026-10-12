@@ -3101,6 +3101,8 @@ pub struct UserDataExport {
     /// The user's own messages, newest first, at most [`user_settings::EXPORT_MAX_MESSAGES`].
     pub messages: Vec<ExportedMessage>,
     pub messages_truncated: bool,
+    /// Guilds whose members (non-friends) may not DM the user: Privacy Settings with Direct Messages off, including guilds left since.
+    pub dm_restricted_guild_ids: Vec<Snowflake>,
 }
 
 /// The allow-list of synced settings. A key the server does not know is rejected, so a new synced pref needs one line here

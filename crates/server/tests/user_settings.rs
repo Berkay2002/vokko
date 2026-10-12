@@ -190,8 +190,9 @@ async fn export_returns_own_data_once_per_day() {
     let app = TestApp::new().await;
     let (token, me) = app.register("sam").await;
     let (other, _) = app.register("alice").await;
-    let (_, channel) = app.guild_with_channel(&token).await;
+    let (guild, channel) = app.guild_with_channel(&token).await;
     app.post(&format!("/channels/{channel}/messages"), &token, json!({"content": "mine"})).await;
+    app.patch(&format!("/users/@me/guilds/{guild}/privacy"), &token, json!({"direct_messages": false})).await;
     let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &token, json!({})).await;
     app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &other, json!({})).await;
     app.post(&format!("/channels/{channel}/messages"), &other, json!({"content": "not mine"})).await;
@@ -204,6 +205,7 @@ async fn export_returns_own_data_once_per_day() {
     let contents: Vec<&str> = export["messages"].as_array().expect("messages").iter().filter_map(|m| m["content"].as_str()).collect();
     assert_eq!(contents, vec!["mine"]);
     assert_eq!(export["messages_truncated"], json!(false));
+    assert_eq!(export["dm_restricted_guild_ids"], json!([guild]));
     assert_eq!(export["guilds"].as_array().map(Vec::len), Some(1));
     assert!(export["channels"].as_array().expect("channels").iter().any(|c| c["id"] == channel));
 

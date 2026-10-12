@@ -110,4 +110,26 @@ describe("mock per-guild privacy and DM enforcement", () => {
     setRelationship(me, other, RelationshipType.Friend, RelationshipType.Friend);
     expect(code(() => openDm(other, me))).toBeNull();
   });
+
+  it("reactions in a DM follow the rule and blocks, like messages", () => {
+    const dm = (openDm(other, me) as { id: string }).id;
+    const sent = as(other, "POST", `/channels/${dm}/messages`, { content: "hi" }) as { id: string };
+    const react = (who: string, emoji: string) => () => as(who, "PUT", `/channels/${dm}/messages/${sent.id}/reactions/${encodeURIComponent(emoji)}/@me`);
+    expect(code(react(other, "👍"))).toBeNull();
+    restrict(g1, true);
+    restrict(g2, true);
+    expect(code(react(other, "🎉"))).toBe(50007);
+    expect(code(react(me, "🎉"))).toBeNull(); // the other side's defaults still allow me
+    restrict(g1, false);
+    restrict(g2, false);
+    setRelationship(other, me, RelationshipType.Blocked, null);
+    expect(code(react(me, "🔥"))).toBe(50007);
+    expect(code(() => as(me, "POST", `/channels/${dm}/messages`, { content: "still there?" }))).toBe(50007);
+    expect(code(() => as(me, "PUT", `/channels/${dm}/messages/pins/${sent.id}`))).toBe(50007);
+  });
+
+  it("the data export lists the restricted guilds", () => {
+    as(other, "PATCH", `/users/@me/guilds/${g2}/privacy`, { direct_messages: false });
+    expect((as(other, "GET", "/users/@me/export") as { dm_restricted_guild_ids: string[] }).dm_restricted_guild_ids).toEqual([g2]);
+  });
 });

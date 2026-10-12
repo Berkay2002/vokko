@@ -65,6 +65,10 @@ async fn add_reaction(
     access.require(READ_MESSAGE_HISTORY)?;
     access.require(ADD_REACTIONS)?;
     access.require_unarchived()?;
+    // A reaction reaches the other side of a 1:1 DM like a message does: blocks and their DM privacy apply.
+    if access.channel.channel_type() == vokko_protocol::api::ChannelType::Dm {
+        crate::routes::messages::require_dm_open(&state, access.channel.id, user_id).await?;
+    }
     let emoji_id = emoji.id.map(Snowflake::db).unwrap_or(0);
     if emoji_id != 0 {
         let (name, animated, emoji_guild) = emojis::usable_by(&state, user_id, emoji_id).await?;
