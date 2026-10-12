@@ -665,11 +665,21 @@
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-md);
   overflow: hidden;
+}
+
+/* The speaking ring is an overlay above the video: an inset box-shadow paints under children, so it showed only as slivers
+   in the rounded corners of a tile with a picture. */
+.voice-tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
   box-shadow: inset 0 0 0 0 var(--status-speaking);
+  pointer-events: none;
   transition: box-shadow 0.1s ease;
 }
 
-.voice-tile.speaking {
+.voice-tile.speaking::after {
   box-shadow: inset 0 0 0 3px var(--status-speaking);
 }
 
@@ -756,12 +766,6 @@
   flex: none;
   height: 100%;
   width: auto;
-}
-
-.voice-tile.strip .voice-tile-live,
-.voice-tile.pip .voice-tile-live {
-  left: auto;
-  right: 8px;
 }
 
 .voice-tile.strip .voice-tile-labels,
@@ -1660,6 +1664,7 @@
 
 /* Same tile as the call page (voice spec 6): 16:9, radius 8, 8 px between tiles, speaking ring inside the edge. */
 .stage-speaker {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1669,11 +1674,19 @@
   aspect-ratio: 16 / 9;
   border-radius: var(--radius-sm);
   background: var(--background-surface-high);
+}
+
+.stage-speaker::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
   box-shadow: inset 0 0 0 0 var(--status-speaking);
+  pointer-events: none;
   transition: box-shadow 0.1s ease;
 }
 
-.stage-speaker.speaking {
+.stage-speaker.speaking::after {
   box-shadow: inset 0 0 0 3px var(--status-speaking);
 }
 

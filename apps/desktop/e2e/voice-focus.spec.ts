@@ -114,12 +114,12 @@ test('hide and show members in focus mode; focus resets when the focused person 
 
   await focused.hover();
   await show.click();
-  await expect(call(page).getByRole('group', { name: 'Members' }).locator('.voice-tile')).toHaveCount(3);
+  await expect(call(page).getByRole('group', { name: 'Members' }).locator('.voice-tile')).toHaveCount(4); // everyone but Alice, with Nova's user tile and stream tile
   await expect(call(page).locator('.voice-pip')).toHaveCount(0);
   await expect(call(page).getByRole('group', { name: 'Members' }).locator('.voice-tile-live')).toHaveCount(1);
 
   // Alice leaves: back to the grid.
   await page.evaluate(() => (window as unknown as { __vokkoMock: { voice(u: string, c: string | null): void } }).__vokkoMock.voice('alice', null));
   await expect(call(page).locator('.voice-tile.focused')).toHaveCount(0);
-  await expect(call(page).locator('.voice-grid > .voice-tile')).toHaveCount(3);
+  await expect(call(page).locator('.voice-grid > .voice-tile')).toHaveCount(4);
 });

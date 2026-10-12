@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, Gamepad2, HeadphoneOff, Lock, MicOff, UserPlus } from "lucide-react";
+import { ChevronRight, Gamepad2, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
 import { TagChip } from "../perks/TagChip";
@@ -183,6 +183,11 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
         </span>
       )}
       <span className="voice-user-icons">
+        {state.self_video && (
+          <StateIcon label="Camera On">
+            <Video size={14} />
+          </StateIcon>
+        )}
         {localMuted && (
           <StateIcon label="Locally Muted">
             <MicOff size={14} />

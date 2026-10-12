@@ -59,7 +59,7 @@ test('Go Live: every resolution and frame rate is offered, the choice goes live 
   await share.getByRole('button', { name: 'Go Live' }).click();
 
   // Our own tile shows LIVE (op 4 round trip through the mock) and the button turns into "Stop streaming".
-  const own = bar.locator('.voice-tile.own');
+  const own = bar.locator('.voice-tile.own.stream');
   await expect(own.locator('.voice-tile-live')).toBeVisible();
   await expect(own.locator('video[data-source="screen"]')).toBeVisible();
   await expect(bar.getByRole('button', { name: 'Stop streaming' })).toHaveAttribute('aria-pressed', 'true');
@@ -75,13 +75,34 @@ test('Go Live: every resolution and frame rate is offered, the choice goes live 
   await expect(dialog(page, 'Share your screen').getByRole('combobox', { name: 'Frame rate' })).toHaveText('60 fps');
 });
 
+test('camera and screen share at once: two tiles, the camera on the user tile and the screen on the stream tile', async ({ page }) => {
+  await openGuild(page);
+  await join(page);
+  const bar = call(page);
+  await bar.getByRole('button', { name: 'Turn on camera' }).click();
+  const camera = dialog(page, 'Ready to video chat?');
+  await expect(camera.locator('.cam-preview')).toHaveAttribute('data-status', 'live', { timeout: 15_000 });
+  await camera.getByRole('button', { name: 'Turn On Camera' }).click();
+  await expect(bar.locator('.voice-tile.own:not(.stream) video[data-source="camera"]')).toBeVisible();
+  await expect(card(page).getByRole('status')).toHaveText('Video Connected');
+
+  await bar.getByRole('button', { name: 'Share your screen' }).click();
+  await dialog(page, 'Share your screen').getByRole('button', { name: 'Go Live' }).click();
+  await expect(bar.locator('.voice-tile.own.stream video[data-source="screen"]')).toBeVisible();
+  // Starting the stream did not take the camera off its tile.
+  await expect(bar.locator('.voice-tile.own:not(.stream) video[data-source="camera"]')).toBeVisible();
+  await expect(bar.locator('.voice-tile.own')).toHaveCount(2);
+  await expect(bar.getByRole('button', { name: 'Turn off camera' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(bar.getByRole('button', { name: 'Stop streaming' })).toHaveAttribute('aria-pressed', 'true');
+});
+
 test('watching someone else\'s stream: Watch Stream, then the quality menu', async ({ page }) => {
   await openGuild(page);
   await join(page);
   const general = await page.evaluate(() => (window as unknown as MockWin).__vokkoMock.channelIdByName('General'));
   await page.evaluate(id => (window as unknown as MockWin).__vokkoMock.voice('alice', id, { selfStream: true }), general);
 
-  const alice = call(page).locator('.voice-tile', { hasText: 'Alice' });
+  const alice = call(page).locator('.voice-tile.stream', { hasText: 'Alice' });
   await expect(alice.locator('.voice-tile-live')).toBeVisible();
   // Nothing is received until the user asks for it.
   await expect(alice.locator('video')).toHaveCount(0);

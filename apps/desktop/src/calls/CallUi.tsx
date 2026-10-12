@@ -9,7 +9,7 @@ import { ChannelType, type Channel, type Snowflake, type User } from "../api/typ
 import { Avatar } from "../shell/Avatar";
 import { Tooltip } from "../ui";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
-import { BarButton, Tile } from "../voice/VoiceChannelPage";
+import { BarButton, Tile, useStageTiles } from "../voice/VoiceChannelPage";
 import { toggleSelfDeaf, toggleSelfMute } from "../voice/engine";
 import { useMedia } from "../voice/mediaStore";
 import { toggleCamera, toggleScreenShare } from "../voice/videoControls";
@@ -79,6 +79,7 @@ export function CallPanel({ channel }: { channel: Channel }) {
   const deafened = useVoice(s => s.selfDeaf);
   const cameraOn = useMedia(s => s.cameraOn);
   const screenOn = useMedia(s => s.screenOn);
+  const tiles = useStageTiles(states);
   const inside = useMemo(() => new Set(states.map(s => s.user_id)), [states]);
   const ringing = useUsers(ringingIds, channel);
   const absentIds = useMemo(
@@ -91,9 +92,9 @@ export function CallPanel({ channel }: { channel: Channel }) {
   return (
     <section className="dm-call" aria-label="Call">
       <div className="dm-call-stage">
-        {states.map(state => (
-          <div key={state.user_id} className="dm-call-tile">
-            <Tile state={state} guildId={null} variant="grid" />
+        {tiles.map(t => (
+          <div key={t.id} className="dm-call-tile">
+            <Tile state={t.state} guildId={null} variant="grid" stream={t.stream} />
           </div>
         ))}
         {here && ringing.map(user => <RingingTile key={user.id} user={user} outgoing channelId={channel.id} />)}

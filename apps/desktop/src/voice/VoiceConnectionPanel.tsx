@@ -201,7 +201,7 @@ export function VoiceConnectionPanel() {
 
   if (!channelId && !error) return null;
   const inCall = channelId !== null;
-  const label = inCall ? STATUS_LABEL[status] : STATUS_LABEL.disconnected;
+  const label = inCall ? (status === "connected" && cameraOn ? "Video Connected" : STATUS_LABEL[status]) : STATUS_LABEL.disconnected;
   const tone = !inCall ? "error" : status === "connected" ? `ok q-${quality}` : status === "reconnecting" ? "warn" : "pending";
   const details = inCall ? [`Connection: ${QUALITY_LABEL[quality]}`, ping !== null ? `Ping: ${ping} ms` : null].filter(Boolean).join(" · ") : "";
 

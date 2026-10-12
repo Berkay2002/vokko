@@ -25,7 +25,7 @@ let pendingWatch: (() => void) | null = null;
 
 /**
  * Watch `userId`'s stream in `channelId`: opens the voice channel page, joins it first when we are not in it, then starts
- * watching once the call in that channel is connected and requests focus for the streamer's tile: `requestStreamFocus`,
+ * watching once the call in that channel is connected and requests focus for the streamer's stream tile: `requestStreamFocus`,
  * which the stage turns into `useVoiceUi.focusedTile`.
  */
 export function watchStreamFrom(channelId: Snowflake, userId: Snowflake): void {

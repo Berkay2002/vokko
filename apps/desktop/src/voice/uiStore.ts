@@ -37,20 +37,20 @@ interface VoiceUiStore extends Persisted {
   bitrateCeiling: number;
   /** Ping measurements of the current call, newest last (connection details chart). */
   pingHistory: PingSample[];
-  /** User whose tile fills the call stage (focus mode); null = grid. Reset when the call ends or changes channel. */
-  focusedTile: Snowflake | null;
+  /** Tile id (`userId`, or `userId:stream` for a screen share, see `stageTileId`) that fills the call stage (focus mode); null = grid. Reset when the call ends or changes channel. */
+  focusedTile: string | null;
   /** Focus mode: the strip of the other tiles is hidden. */
   membersHidden: boolean;
   /**
    * One-shot request from "Watch Stream" in the channel list's stream card: the streamer whose tile should be focused.
-   * VoiceChannelPage turns it into `focusedTile` once that user is in the connected call, then clears it with
-   * `requestStreamFocus(null)`. (A request rather than setting `focusedTile` directly, because `focusedTile` resets when the
+   * VoiceChannelPage turns it into `focusedTile` (their stream tile) once that stream is on the connected call's stage, then
+   * clears it with `requestStreamFocus(null)`. (A request rather than setting `focusedTile` directly, because `focusedTile` resets when the
    * call changes channel, and the stage only knows when the streamer's tile exists.)
    */
   focusStream: Snowflake | null;
   setChatOpen(open: boolean): void;
   requestStreamFocus(userId: Snowflake | null): void;
-  setFocusedTile(userId: Snowflake | null): void;
+  setFocusedTile(tileId: string | null): void;
   setMembersHidden(hidden: boolean): void;
 }
 
@@ -76,8 +76,8 @@ export const useVoiceUi = create<VoiceUiStore>()(set => ({
   requestStreamFocus(userId) {
     set({ focusStream: userId });
   },
-  setFocusedTile(userId) {
-    set({ focusedTile: userId });
+  setFocusedTile(tileId) {
+    set({ focusedTile: tileId });
   },
   setMembersHidden(hidden) {
     set({ membersHidden: hidden });

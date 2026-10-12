@@ -183,7 +183,7 @@ export class FakeTransport implements VoiceTransport {
       if (live.screen && this.watching.has(user)) wanted.set(`${user}:screen`, { user, source: "screen" });
     }
     for (const [key, picture] of this.remoteVideo) {
-      if (wanted.has(key)) continue;
+      if (wanted.has(key) || key.startsWith("self:")) continue; // our own pictures follow setCamera / setScreenShare, not the voice states
       const [user, source] = key.split(":") as [Snowflake, VideoSource];
       picture.stop();
       this.remoteVideo.delete(key);

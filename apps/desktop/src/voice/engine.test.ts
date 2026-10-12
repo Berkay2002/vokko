@@ -306,3 +306,58 @@ describe("voice engine: channel status", () => {
     expect(store.getVoice().channelStatus).toEqual({});
   });
 });
+
+describe("voice engine: camera and screen share together", () => {
+  const choice = { resolution: "720p", fps: 30, audio: false } as const;
+
+  async function connectFake() {
+    const { FakeTransport } = await import("./fakeTransport");
+    let fake: InstanceType<typeof FakeTransport> | null = null;
+    engine.setTransportFactory((_kind, cb) => (fake = new FakeTransport(cb)));
+    store.getVoice().dispatch({ type: "join", guildId: GUILD, channelId: GENERAL });
+    serverUpdate("mock-token", "s1", "mock://sfu");
+    emit("VOICE_STATE_UPDATE", ownState("s1"));
+    await vi.advanceTimersByTimeAsync(500);
+    expect(store.getVoice().status).toBe("connected");
+    return { t: fake as unknown as InstanceType<typeof FakeTransport>, media: await import("./mediaStore") };
+  }
+
+  /** The server echoes our flags back as a voice state, which makes the transport re-sync every video. */
+  const echo = (self_video: boolean, self_stream: boolean) => emit("VOICE_STATE_UPDATE", { ...ownState("s1"), self_video, self_stream });
+
+  it("camera first, then a screen share: both stay on, published and attached; stopping one keeps the other", async () => {
+    const { t, media } = await connectFake();
+    expect(await engine.startCamera()).toBe(true);
+    expect(await engine.startScreenShare(choice)).toBe(true);
+    echo(true, true);
+    expect(media.getMedia()).toMatchObject({ cameraOn: true, screenOn: true });
+    expect(t.camera).not.toBeNull();
+    expect(t.screen).toEqual(choice);
+    expect(Object.keys(media.getMedia().videos).sort()).toEqual([`${ME}:camera`, `${ME}:screen`]);
+    expect(gw.sent.at(-1)).toMatchObject({ self_video: true, self_stream: true });
+
+    await engine.stopScreenShare();
+    expect(media.getMedia()).toMatchObject({ cameraOn: true, screenOn: false });
+    expect(Object.keys(media.getMedia().videos)).toEqual([`${ME}:camera`]);
+    expect(t.camera).not.toBeNull();
+    expect(gw.sent.at(-1)).toMatchObject({ self_video: true, self_stream: false });
+  });
+
+  it("screen share first, then the camera: both stay on, published and attached; stopping one keeps the other", async () => {
+    const { t, media } = await connectFake();
+    expect(await engine.startScreenShare(choice)).toBe(true);
+    expect(await engine.startCamera()).toBe(true);
+    echo(true, true);
+    expect(media.getMedia()).toMatchObject({ cameraOn: true, screenOn: true });
+    expect(t.camera).not.toBeNull();
+    expect(t.screen).toEqual(choice);
+    expect(Object.keys(media.getMedia().videos).sort()).toEqual([`${ME}:camera`, `${ME}:screen`]);
+    expect(gw.sent.at(-1)).toMatchObject({ self_video: true, self_stream: true });
+
+    await engine.stopCamera();
+    expect(media.getMedia()).toMatchObject({ cameraOn: false, screenOn: true });
+    expect(Object.keys(media.getMedia().videos)).toEqual([`${ME}:screen`]);
+    expect(t.screen).toEqual(choice);
+    expect(gw.sent.at(-1)).toMatchObject({ self_video: false, self_stream: true });
+  });
+});
