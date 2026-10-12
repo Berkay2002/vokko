@@ -7,9 +7,12 @@ import { join } from 'node:path';
 // channel header toolbar + topic dialog, mark-as-read. Mock backend, sam (administrator of the demo server).
 // Run from apps/desktop: npx playwright test -c e2e/guild-sidebar.config.ts
 
-const SHOTS = process.env.GUILD_SIDEBAR_SHOTS ?? '.private/artifacts/guild-sidebar';
-mkdirSync(SHOTS, { recursive: true });
-const shot = (page: Page, name: string) => page.screenshot({ path: join(SHOTS, `${name}.png`) });
+// Screenshots only when GUILD_SIDEBAR_SHOTS names a folder (a machine-specific default wrote into the tree elsewhere).
+const SHOTS = process.env.GUILD_SIDEBAR_SHOTS;
+if (SHOTS) mkdirSync(SHOTS, { recursive: true });
+const shot = async (page: Page, name: string) => {
+  if (SHOTS) await page.screenshot({ path: join(SHOTS, `${name}.png`) });
+};
 
 type Ch = { id: string; name?: string; guild_id: string | null; position: number; parent_id: string | null; type: number; topic: string | null; nsfw?: boolean };
 type G = { id: string; name: string; banner?: string | null };
