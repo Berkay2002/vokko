@@ -113,6 +113,8 @@ cd apps\desktop
 npx tauri build --config release.json
 ```
 
+`apps/desktop/release.production.json` is a tracked overlay for an unsigned Windows installer against https://vokko.example.com (no updater; its CSP also allows the production host and LiveKit Cloud): `$env:VITE_VOKKO_API="https://vokko.example.com"; cd apps\desktop; npx tauri build --config release.production.json`.
+
 (`npm run desktop:build` passes `--no-bundle`, so it produces no installer or signature.) The build writes the installer plus a `.sig`
 next to the updater artifact under `target\release\bundle`. Upload both and serve either the dynamic endpoint above or a static
 manifest:
