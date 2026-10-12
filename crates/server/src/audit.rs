@@ -123,6 +123,13 @@ pub fn change(key: &str, old: impl Serialize, new: impl Serialize) -> Option<Aud
 
 /// Stores the entry and sends GUILD_AUDIT_LOG_ENTRY_CREATE to members with VIEW_AUDIT_LOG.
 pub async fn record(state: &AppState, entry: Entry) -> ApiResult<AuditLogEntry> {
+    let api = insert(state, &state.db, entry).await?;
+    announce(state, &api).await?;
+    Ok(api)
+}
+
+/// Stores the entry with `db` (a transaction, to commit it with the change it records); `announce` it after the commit.
+pub async fn insert(state: &AppState, db: impl sqlx::PgExecutor<'_>, entry: Entry) -> ApiResult<AuditLogEntry> {
     let id = state.ids.next();
     let changes = (!entry.changes.is_empty()).then_some(entry.changes);
     let changes_json = changes.as_ref().map(serde_json::to_string).transpose().map_err(|_| ApiErr::internal())?;
@@ -139,9 +146,9 @@ pub async fn record(state: &AppState, entry: Entry) -> ApiResult<AuditLogEntry> 
     .bind(changes_json)
     .bind(options_json)
     .bind(&entry.reason)
-    .execute(&state.db)
+    .execute(db)
     .await?;
-    let api = AuditLogEntry {
+    Ok(AuditLogEntry {
         id: Snowflake::from(id),
         guild_id: Snowflake::from(entry.guild_id),
         user_id: entry.user_id.map(Snowflake::from),
@@ -150,10 +157,14 @@ pub async fn record(state: &AppState, entry: Entry) -> ApiResult<AuditLogEntry> 
         changes,
         options: entry.options,
         reason: entry.reason,
-    };
-    let audience = access::members_with_permission(state, entry.guild_id, VIEW_AUDIT_LOG).await?;
+    })
+}
+
+/// Sends GUILD_AUDIT_LOG_ENTRY_CREATE to members with VIEW_AUDIT_LOG.
+pub async fn announce(state: &AppState, api: &AuditLogEntry) -> ApiResult<()> {
+    let audience = access::members_with_permission(state, api.guild_id.db(), VIEW_AUDIT_LOG).await?;
     state.hub.send(&audience, &GatewayEvent::GuildAuditLogEntryCreate(api.clone()));
-    Ok(api)
+    Ok(())
 }
 
 /// Action types whose `target_id` is a user.

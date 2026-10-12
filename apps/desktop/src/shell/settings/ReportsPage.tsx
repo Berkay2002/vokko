@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { request } from "../../api/rest";
 import { displayName, useStore } from "../../api/store";
 import type { Guild, Report, ReportStatus, Snowflake } from "../../api/types";
@@ -31,21 +31,27 @@ export function ReportsPage({ guild }: { guild: Guild }) {
   const [busyId, setBusyId] = useState<Snowflake | null>(null);
   const [updateError, setUpdateError] = useState<{ id: Snowflake; text: string } | null>(null);
 
+  // Every request bumps this; a reply that is no longer the latest is dropped (filter switch, Load more racing another load).
+  const latest = useRef(0);
+
   const load = useCallback(
     async (before?: Snowflake) => {
+      const mine = ++latest.current;
       setLoading(true);
       try {
         const query = new URLSearchParams({ status: filter, limit: String(PAGE) });
         if (before) query.set("before", before);
         const page = await request<Report[]>("GET", `/guilds/${guild.id}/reports?${query}`);
+        if (mine !== latest.current) return;
         setReports(prev => (before ? [...(prev ?? []), ...page] : page));
         setHasMore(page.length === PAGE);
         setError(null);
       } catch (e) {
+        if (mine !== latest.current) return;
         setError(errorText(e));
         setReports(prev => prev ?? []);
       } finally {
-        setLoading(false);
+        if (mine === latest.current) setLoading(false);
       }
     },
     [guild.id, filter],
@@ -59,8 +65,8 @@ export function ReportsPage({ guild }: { guild: Guild }) {
     setBusyId(report.id);
     setUpdateError(null);
     try {
-      await request<Report>("PATCH", `/guilds/${guild.id}/reports/${report.id}`, { status });
-      await load();
+      const updated = await request<Report>("PATCH", `/guilds/${guild.id}/reports/${report.id}`, { status });
+      setReports(prev => prev && (filter === "all" || updated.status === filter ? prev.map(r => (r.id === updated.id ? updated : r)) : prev.filter(r => r.id !== updated.id)));
     } catch (e) {
       setUpdateError({ id: report.id, text: errorText(e) });
     } finally {
@@ -78,6 +84,7 @@ export function ReportsPage({ guild }: { guild: Guild }) {
             value={filter}
             options={FILTERS}
             onChange={next => {
+              latest.current++;
               setReports(null);
               setFilter(next);
             }}

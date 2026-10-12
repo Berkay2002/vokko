@@ -412,15 +412,17 @@ async fn update(
     let closing = body.status != ReportStatus::Open;
     // Reopening fails (400) when the reporter has opened a newer report of the same target meanwhile. The row lock makes
     // the returned old status the one this update replaced, also when two moderators act at once.
+    // `prev`, not `old`: Postgres 18 reserves OLD/NEW in RETURNING. The audit entry commits with the change it records.
+    let mut tx = state.db.begin().await?;
     let updated: Result<Option<(String,)>, _> = sqlx::query_as(
         "UPDATE reports r SET status = $2, closed_by = CASE WHEN $3 THEN $4 END, closed_at = CASE WHEN $3 THEN now() END \
-         FROM (SELECT id, status FROM reports WHERE id = $1 FOR UPDATE) old WHERE r.id = old.id RETURNING old.status",
+         FROM (SELECT id, status FROM reports WHERE id = $1 FOR UPDATE) prev WHERE r.id = prev.id RETURNING prev.status",
     )
     .bind(report)
     .bind(status_str(body.status))
     .bind(closing)
     .bind(user_id)
-    .fetch_optional(&state.db)
+    .fetch_optional(&mut *tx)
     .await;
     let old = match updated {
         Ok(Some((old,))) => old,
@@ -431,9 +433,16 @@ async fn update(
         Err(error) => return Err(error.into()),
     };
     let new = status_str(body.status);
-    if old != new {
-        // Only the report id and status: the reporter, target and reason stay with the moderators.
-        audit::record(&state, Entry::new(moderator.guild, user_id, AuditLogEvent::ReportUpdate, report).change("status", &old, new).reason(reason)).await?;
+    // Only the report id and status: the reporter, target and reason stay with the moderators.
+    let entry = if old != new {
+        let entry = Entry::new(moderator.guild, user_id, AuditLogEvent::ReportUpdate, report).change("status", &old, new).reason(reason);
+        Some(audit::insert(&state, &mut *tx, entry).await?)
+    } else {
+        None
+    };
+    tx.commit().await?;
+    if let Some(entry) = entry {
+        audit::announce(&state, &entry).await?;
     }
     Ok(Json(one(&state, report).await?))
 }
