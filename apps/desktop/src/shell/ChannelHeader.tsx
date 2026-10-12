@@ -93,7 +93,13 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             ) : (
               <Hash size={24} className="channel-header-icon" />
             )}
-            <h1 className="channel-header-name">{channel.name}</h1>
+            <div className="channel-header-name-wrap">
+              <h1 className="channel-header-name">{channel.name}</h1>
+              {/* Covers the name where the topic hides (responsive.css), so the topic dialog stays reachable without taking header width. */}
+              {channel.topic && !gated && (
+                <button type="button" className="channel-header-topic-entry" title={channel.topic} aria-haspopup="dialog" aria-label={`${channel.name}, channel topic`} onClick={() => openModal({ type: "channelTopic", channelId: channel.id })} />
+              )}
+            </div>
             {channel.topic && !gated && (
               <>
                 <span className="channel-header-divider" />

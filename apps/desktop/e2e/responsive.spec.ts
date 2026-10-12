@@ -118,7 +118,7 @@ test.describe('485px: user settings are fullscreen with a section list and a pag
   });
 });
 
-for (const [width, topicShown] of [[768, false], [1440, true]] as const) {
+for (const [width, topicShown] of [[390, false], [768, false], [1440, true]] as const) {
   test.describe(`${width}px: channel topic in the header`, () => {
     test.use({ viewport: { width, height: 844 } });
     test(topicShown ? 'the topic and its divider show next to the name' : 'no divider or topic sliver, the name stays', async ({ page }) => {
@@ -129,6 +129,43 @@ for (const [width, topicShown] of [[768, false], [1440, true]] as const) {
         if (topicShown) await expect(header.locator(part)).toBeVisible();
         else await expect(header.locator(part)).toBeHidden();
       }
+    });
+
+    test(topicShown ? 'no topic entry while the topic shows' : 'the topic entry opens the full topic by mouse and keyboard', async ({ page }) => {
+      await openStockTalk(page);
+      const header = page.locator('.channel-header');
+      const entry = header.getByRole('button', { name: 'stock-talk, channel topic', exact: true });
+      if (topicShown) return expect(entry).toBeHidden();
+      await expect(entry).toBeVisible();
+      await entry.click();
+      const dialog = page.getByRole('dialog');
+      await expect(dialog).toContainText('Charts, takes and bad ideas.');
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+      await header.locator('.channel-header-toolbar button').first().focus();
+      await page.keyboard.press('Shift+Tab');
+      await expect(entry).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('dialog')).toContainText('Charts, takes and bad ideas.');
+    });
+  });
+}
+
+for (const width of [390, 1100]) {
+  test.describe(`${width}px: a very long channel name`, () => {
+    test.use({ viewport: { width, height: 844 } });
+    test('truncates with an ellipsis and the toolbar stays inside the window', async ({ page }) => {
+      await openStockTalk(page);
+      const m = await page.evaluate(() => {
+        document.querySelector('.channel-header-name')!.textContent = 'a-very-long-channel-name-'.repeat(3);
+        const r = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+        const h1 = document.querySelector('.channel-header-name') as HTMLElement;
+        const bs = [...document.querySelectorAll('.channel-header-toolbar > *')].map(e => e.getBoundingClientRect().right);
+        return { clipped: h1.scrollWidth > h1.clientWidth, last: Math.max(...bs), search: r('.header-search').width, win: window.innerWidth };
+      });
+      expect(m.clipped).toBe(true);
+      expect(m.last).toBeLessThanOrEqual(m.win);
+      if (width === 1100) expect(Math.round(m.search)).toBe(244);
     });
   });
 }

@@ -105,6 +105,10 @@
   .channel-header-divider {
     display: none;
   }
+
+  .channel-header-topic-entry {
+    display: block;
+  }
 }
 
 @media (max-width: 780px) {

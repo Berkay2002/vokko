@@ -1245,6 +1245,22 @@
   text-overflow: ellipsis;
 }
 
+.channel-header-name-wrap {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.channel-header-topic-entry {
+  position: absolute;
+  inset: 0;
+  display: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
 .channel-header-divider {
   flex: none;
   width: 1px;
