@@ -4683,7 +4683,7 @@ mod tests {
             "guilds": [{"id": "300", "name": "g", "nick": null, "joined_at": "2026-10-11T10:00:00.000Z"}],
             "channels": [{"id": "201", "type": 1, "guild_id": null, "name": null, "recipient_ids": ["101"]}],
             "messages": [{"id": "11", "channel_id": "201", "content": "hi", "timestamp": "2026-10-11T10:00:00.000Z", "edited_timestamp": null, "attachments": ["a.png"]}],
-            "messages_truncated": false
+            "messages_truncated": false, "dm_restricted_guild_ids": ["300"]
         }));
         let event = GatewayEvent::UserSettingsUpdate(Box::new(UserSettings { version: 2, settings: serde_json::Map::new() }));
         assert_eq!((event.name(), event.data()), ("USER_SETTINGS_UPDATE", json!({"version": 2, "settings": {}})));
