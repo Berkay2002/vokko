@@ -24,6 +24,7 @@ import { SoundboardSettingsPage } from "../soundboard";
 import { usePermissions } from "./usePermissions";
 import { IntegrationsPage } from "../apps/IntegrationsPage";
 import { EmojiSettingsPage } from "../emoji/EmojiSettingsPage";
+import { StickerSettingsPage } from "../media/StickerSettingsPage";
 import { InviteList } from "../invites/InviteList";
 
 interface SectionDef {
@@ -319,6 +320,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         return <IntegrationsPage guild={guild} canManageGuild={canManage} canManageWebhooks={owner || perms.can(Perm.MANAGE_WEBHOOKS)} />;
       case "emoji":
         return <EmojiSettingsPage guildId={guildId} canEdit={owner || perms.can(Perm.MANAGE_GUILD_EXPRESSIONS)} channels={channels} />;
+      case "stickers":
+        return <StickerSettingsPage guildId={guildId} canEdit={owner || perms.can(Perm.MANAGE_GUILD_EXPRESSIONS)} channels={channels} />;
       case "audit":
         return (
           <Wide>

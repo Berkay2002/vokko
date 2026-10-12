@@ -1,4 +1,4 @@
-// Full-screen channel settings: Overview + Permissions + Integrations (webhooks, src/apps); Invites is a placeholder.
+// Full-screen channel settings: Overview + Permissions + Invites (channel invite list) + Integrations (webhooks, src/apps).
 import { useMemo, useState } from "react";
 import { Eye, Hash, Lock, Smile, Trash2, Volume2 } from "lucide-react";
 import { ApiRequestError } from "../api/errors";

@@ -1,0 +1,8 @@
+.sticker-form { display: grid; gap: 8px; max-width: 480px; margin-top: 12px; }
+.sticker-form .input { width: 100%; height: 32px; }
+.sticker-list li { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px; border-top: 1px solid var(--border-subtle, rgba(151, 151, 159, 0.2)); }
+.sticker-row-img { width: 48px; height: 48px; object-fit: contain; }
+.sticker-row-tags { color: var(--text-muted); font-size: 13px; overflow-wrap: anywhere; }
+.sticker-row-actions { display: flex; gap: 8px; }
+.sticker-row-delete { opacity: 1; }
+.sticker-row-error { grid-column: 1 / -1; margin: 0; }
