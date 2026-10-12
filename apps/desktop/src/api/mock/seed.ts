@@ -288,7 +288,9 @@ function seedMemberCrowd(ctx: { guildId: string; welcomeId: string; memberRole: 
     { name: "Artist", color: 0xc45bd0 },
     { name: "Developer", color: 0x3498db },
     { name: "Event Host", color: 0xe67e22 },
-  ].map(r => ({ id: nextId(), name: r.name, color: r.color, hoist: false, position: 1, permissions: "0", mentionable: false }));
+  ].map((r, i, all) => ({ id: nextId(), name: r.name, color: r.color, hoist: false, position: all.length - i, permissions: "0", mentionable: false }));
+  // Below Member, with unique positions like the server keeps them: the seeded roles above move up to make room.
+  for (const role of guild.guild.roles) if (role.id !== guildId) role.position += extra.length;
   guild.guild.roles.push(...extra);
   const [helper, artist, dev, host] = extra.map(r => r.id) as [string, string, string, string];
 
