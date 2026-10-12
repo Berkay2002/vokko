@@ -218,11 +218,13 @@ function ActiveBody({ activity, user }: { activity: Activity; user: User }) {
 
 const MAX_FACES = 6;
 
-/** Voice card extras: who is in the channel, and Join, which unfold on hover or keyboard focus (as on Discord). DM calls get no
- *  Join here: answering one goes through the call UI of the DM. */
+/** Voice card extras, unfolding on hover or keyboard focus (as on Discord): a button with the channel, server and who is in it that
+ *  opens the channel without joining, next to Join. DM calls have no server to open: plain faces, and no Join (answering one goes
+ *  through the call UI of the DM). */
 function VoiceDetails({ channel }: { channel: Channel }) {
   const states = useChannelVoiceStates(channel.id);
   const users = useStore(s => s.users);
+  const guild = useStore(s => (channel.guild_id ? s.guilds[channel.guild_id] : undefined));
   const inside = useVoice(s => s.channelId === channel.id);
   const people = states.map(state => users[state.user_id]).filter(user => user !== undefined);
   const guildId = channel.guild_id;
@@ -231,19 +233,35 @@ function VoiceDetails({ channel }: { channel: Channel }) {
     joinVoiceChannel(channel);
     go(guildPath(guildId, channel.id));
   };
+  const faces = (
+    <span className="active-card-faces">
+      {people.slice(0, MAX_FACES).map(user => (
+        <Tooltip key={user.id} content={displayName(user)}>
+          <span className="active-card-face" aria-hidden="true">
+            <Avatar user={user} size={24} />
+          </span>
+        </Tooltip>
+      ))}
+      {states.length > MAX_FACES && <span className="active-card-face-more">+{states.length - MAX_FACES} more</span>}
+    </span>
+  );
   return (
     <div className="active-card-more">
       <div className="active-card-more-inner">
-        <div className="active-card-faces" aria-label={`${states.length} in voice`} role="group">
-          {people.slice(0, MAX_FACES).map(user => (
-            <Tooltip key={user.id} content={displayName(user)}>
-              <span className="active-card-face">
-                <Avatar user={user} size={24} />
-              </span>
-            </Tooltip>
-          ))}
-          {states.length > MAX_FACES && <span className="active-card-face-more">+{states.length - MAX_FACES}</span>}
-        </div>
+        {guildId ? (
+          <button type="button" className="active-card-channel" onClick={() => go(guildPath(guildId, channel.id))}>
+            <span className="active-card-channel-name">
+              {channel.name ?? "voice"}
+              {guild ? ` · ${guild.name}` : ""}
+            </span>
+            {faces}
+            <span className="sr-only">{`, ${states.length} in voice`}</span>
+          </button>
+        ) : (
+          <div className="active-card-channel" role="group" aria-label={`${states.length} in voice`}>
+            {faces}
+          </div>
+        )}
         {guildId && (
           // aria-disabled, not disabled: a focused button that becomes disabled drops focus and folds the card
           <button type="button" className="btn btn-sm active-card-join" aria-disabled={inside} onClick={join}>

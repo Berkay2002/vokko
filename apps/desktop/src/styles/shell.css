@@ -2151,9 +2151,38 @@ button.channel-header-topic:hover {
   padding: 0 16px;
 }
 
+/* the inner clips while folded, so the unfolded padding holds the ring (3 px in high contrast, plus its 2 px offset) above the channel button */
 .active-card:hover .active-card-more-inner,
 .active-card:focus-within .active-card-more-inner {
+  padding-top: 5px;
   padding-bottom: 16px;
+}
+
+.active-card-channel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+button.active-card-channel:hover .active-card-channel-name {
+  color: var(--text-default);
+  text-decoration: underline;
+}
+
+.active-card-channel-name {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .active-card-faces {

@@ -137,7 +137,7 @@ test('a voice card in Active Now unfolds the channel members and Join on hover, 
   await card.hover();
   await expect(join).toBeVisible();
   await expect.poll(async () => (await card.boundingBox())!.height).toBeGreaterThan(folded!.height + 20);
-  await expect(card.getByRole('group', { name: /\d+ in voice/ }).locator('.avatar, img').first()).toBeVisible();
+  await expect(card.locator('.active-card-channel .avatar, .active-card-channel img').first()).toBeVisible();
   await join.click();
   await expect(page).toHaveURL(/\/channels\/\d+\/\d+$/);
   // back on Friends (client-side: a reload re-seeds the mock) the same card says Joined
@@ -153,10 +153,64 @@ test('the Join button of a voice card is reachable from the keyboard', async ({ 
   const card = page.getByRole('complementary', { name: 'Active Now' }).locator('.active-card', { hasText: /In .+ · / }).first();
   const folded = (await card.boundingBox())!.height;
   await card.locator('.active-card-main').focus();
+  // a game body may sit between the header and the channel row
+  for (let i = 0; i < 3 && !(await card.locator('button.active-card-channel').evaluate(el => el === document.activeElement)); i++) await page.keyboard.press('Tab');
+  await expect(card.locator('button.active-card-channel')).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(card.getByRole('button', { name: 'Join Voice' })).toBeFocused();
   // focus unfolds the card (toBeVisible alone passes for the clipped, folded row)
   await expect.poll(async () => (await card.boundingBox())!.height).toBeGreaterThan(folded + 20);
+});
+
+/** The voice card's channel button: opens the channel the sidebar way, without joining it. */
+async function voiceCard(page: Page) {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.locator('.dm-row').first().waitFor();
+  const card = page.getByRole('complementary', { name: 'Active Now' }).locator('.active-card', { hasText: /In .+ · / }).first();
+  const where = (await card.locator('.active-card-sub').first().textContent())!.replace(/^In /, '');
+  return { card, where, channel: card.locator('button.active-card-channel') };
+}
+
+async function expectOpenedNotJoined(page: Page, where: string) {
+  await expect(page).toHaveURL(/\/channels\/\d+\/\d+$/);
+  const [name] = where.split(' · ');
+  await expect(page.locator('.channel-row.selected', { hasText: name })).toBeVisible();
+  await expect(page.locator('.channel-row.voice.connected')).toHaveCount(0);
+  // back on Friends (client-side: a reload re-seeds the mock) the card still offers Join
+  await goInApp(page, '/channels/@me');
+  const card = page.getByRole('complementary', { name: 'Active Now' }).locator('.active-card', { hasText: where }).first();
+  await card.hover();
+  await expect(card.getByRole('button', { name: 'Join Voice' })).not.toHaveAttribute('aria-disabled', 'true');
+}
+
+test('the channel row of a voice card opens the channel on click without joining it', async ({ page }) => {
+  const { card, where, channel } = await voiceCard(page);
+  await card.hover();
+  // the visible text is part of the accessible name (WCAG 2.5.3)
+  await expect(channel).toContainText(where);
+  await expect(channel).toHaveAccessibleName(new RegExp(where.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  await channel.click();
+  await expectOpenedNotJoined(page, where);
+});
+
+test('the channel row of a voice card is a keyboard stop: Tab from the header, Enter opens the channel without joining', async ({ page }) => {
+  const { card, where, channel } = await voiceCard(page);
+  await page.evaluate(() => document.documentElement.classList.add('high-contrast'));
+  await card.locator('.active-card-main').focus();
+  for (let i = 0; i < 3 && !(await channel.evaluate(el => el === document.activeElement)); i++) await page.keyboard.press('Tab');
+  await expect(channel).toBeFocused();
+  await expect(channel).toHaveCSS('outline-style', 'solid');
+  // the ring (3 px in high contrast + 2 px offset) must not be clipped by an overflow-hidden ancestor of the card
+  await expect.poll(() => channel.evaluate(el => {
+    const r = el.getBoundingClientRect();
+    for (let p = el.parentElement; p && !p.classList.contains('active-card'); p = p.parentElement) {
+      const b = p.getBoundingClientRect();
+      if (getComputedStyle(p).overflow !== 'visible' && (r.top - 5 < b.top || r.bottom + 5 > b.bottom || r.left - 5 < b.left || r.right + 5 > b.right)) return true;
+    }
+    return false;
+  })).toBe(false);
+  await page.keyboard.press('Enter');
+  await expectOpenedNotJoined(page, where);
 });
 
 /** Befriends a user who is not in voice and gives everyone a game, so a game-only card shows; returns the card and the user's name. */
