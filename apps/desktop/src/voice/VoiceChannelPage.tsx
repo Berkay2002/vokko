@@ -112,7 +112,8 @@ export function Tile({ state, guildId, variant, stream = false, onActivate }: { 
       tabIndex={interactive ? 0 : undefined}
       aria-pressed={interactive ? focused : undefined}
       aria-label={interactive ? (focused ? `Return to grid (${label}${speakingText})` : `Focus ${label}${speakingText}`) : `${label}${speakingText}`}
-      style={{ background: stream ? "#000" : tileColor(user.id, user.banner_color) } as CSSProperties}
+      // A stream tile is black behind the picture; before it is watched (no picture) a surface colour keeps it visible on the stage.
+      style={{ background: stream ? (screen ? "#000" : "var(--background-surface-high)") : tileColor(user.id, user.banner_color) } as CSSProperties}
       onClick={onActivate}
       onKeyDown={e => {
         if (!onActivate || e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
