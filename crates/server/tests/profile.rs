@@ -323,3 +323,73 @@ async fn per_server_member_profile_round_trips() {
     assert_eq!(cleared["banner"], banner["url"]);
     assert_eq!(cleared["nick"], "Ali");
 }
+
+#[tokio::test]
+async fn guild_banner_set_replace_clear_and_rules() {
+    let (app, owner, member, channel, guild) = setup().await;
+    let (_, fresh) = app.get(&format!("/guilds/{guild}"), &owner).await;
+    assert!(is_null(&fresh, "banner"), "{fresh}");
+
+    let first = upload(&app, &owner, &channel, "one.png", "image/png", &png()).await;
+    let (status, set) = app.patch(&format!("/guilds/{guild}"), &owner, json!({"banner_attachment_id": first["id"]})).await;
+    assert_eq!(status, 200, "{set}");
+    assert_eq!(set["banner"], first["url"]);
+    assert_eq!(status_of(&app, set["banner"].as_str().expect("banner")).await, 200);
+    let (_, seen) = app.get(&format!("/guilds/{guild}"), &member).await;
+    assert_eq!(seen["banner"], first["url"]);
+    let (_, mine) = app.get("/users/@me/guilds", &member).await;
+    assert_eq!(mine[0]["banner"], first["url"]);
+
+    // replacing releases the old upload
+    let second = upload(&app, &owner, &channel, "two.png", "image/png", &png()).await;
+    let (status, replaced) = app.patch(&format!("/guilds/{guild}"), &owner, json!({"banner_attachment_id": second["id"]})).await;
+    assert_eq!(status, 200, "{replaced}");
+    assert_eq!(replaced["banner"], second["url"]);
+    assert_eq!(status_of(&app, first["url"].as_str().expect("url")).await, 404);
+    assert_eq!(status_of(&app, second["url"].as_str().expect("url")).await, 200);
+
+    // absent key leaves it alone; null clears and releases
+    let (_, renamed) = app.patch(&format!("/guilds/{guild}"), &owner, json!({"name": "Renamed"})).await;
+    assert_eq!(renamed["banner"], second["url"]);
+    let (status, cleared) = app.patch(&format!("/guilds/{guild}"), &owner, json!({"banner_attachment_id": null})).await;
+    assert_eq!(status, 200, "{cleared}");
+    assert!(is_null(&cleared, "banner"), "{cleared}");
+    assert_eq!(status_of(&app, second["url"].as_str().expect("url")).await, 404);
+
+    // sticker assets, non-images and oversized files are refused; a rejected edit changes nothing
+    let sticker = upload(&app, &owner, &channel, "s.png", "image/png", &png()).await;
+    let numeric: i64 = sticker["id"].as_str().expect("id").parse().expect("id");
+    sqlx::query("UPDATE attachments SET sticker_asset = TRUE, claimed_at = now() WHERE id = $1").bind(numeric).execute(&app.state.db).await.expect("mark");
+    let text = upload(&app, &owner, &channel, "notes.txt", "text/plain", b"not an image").await;
+    let huge = upload(&app, &owner, &channel, "huge.png", "image/png", &png()).await;
+    let huge_id: i64 = huge["id"].as_str().expect("id").parse().expect("id");
+    sqlx::query("UPDATE attachments SET size = $2 WHERE id = $1").bind(huge_id).bind(11_i64 * 1024 * 1024).execute(&app.state.db).await.expect("size");
+    for bad in [&sticker, &text, &huge] {
+        let (status, error) = app.patch(&format!("/guilds/{guild}"), &owner, json!({"banner_attachment_id": bad["id"]})).await;
+        assert_eq!((status, &error["code"]), (StatusCode::BAD_REQUEST, &json!(50035)), "{error}");
+    }
+    let (_, after) = app.get(&format!("/guilds/{guild}"), &owner).await;
+    assert!(is_null(&after, "banner"), "{after}");
+
+    // a rejected edit claims nothing: the upload stays pending and a later valid edit can still take it
+    let pending = upload(&app, &owner, &channel, "p.png", "image/png", &png()).await;
+    let pending_id: i64 = pending["id"].as_str().expect("id").parse().expect("id");
+    let (status, error) = app
+        .patch(
+            &format!("/guilds/{guild}"),
+            &owner,
+            json!({"banner_attachment_id": pending["id"], "icon_attachment_id": pending["id"], "system_channel_id": "999999"}),
+        )
+        .await;
+    assert_eq!((status, &error["code"]), (StatusCode::BAD_REQUEST, &json!(50035)), "{error}");
+    let (claimed,): (bool,) =
+        sqlx::query_as("SELECT claimed_at IS NOT NULL FROM attachments WHERE id = $1").bind(pending_id).fetch_one(&app.state.db).await.expect("row");
+    assert!(!claimed, "a rejected PATCH leaves the upload unclaimed");
+    let (status, _) = app.patch(&format!("/guilds/{guild}"), &owner, json!({"banner_attachment_id": pending["id"]})).await;
+    assert_eq!(status, 200);
+
+    // only managers may set it
+    let mine = upload(&app, &member, &channel, "m.png", "image/png", &png()).await;
+    let (status, error) = app.patch(&format!("/guilds/{guild}"), &member, json!({"banner_attachment_id": mine["id"]})).await;
+    assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50013)));
+}

@@ -124,6 +124,7 @@ export interface Channel {
   applied_tags?: Snowflake[]; // forum posts: ids from the forum's available_tags (max 5)
   newly_created?: boolean; // THREAD_CREATE and start-thread responses only
   flags?: number; // ChannelFlags
+  nsfw?: boolean; // age-restricted guild channel (text, announcement, forum, voice); absent = false
   // Forum channels (type 15), always present there
   available_tags?: ForumTag[]; // max 20
   default_reaction_emoji?: DefaultReaction; // absent = none
@@ -163,6 +164,7 @@ export interface Guild {
   system_channel_id: Snowflake | null;
   tag?: GuildTag | null; // server tag members can adopt (MANAGE_GUILD edits it)
   theme?: GuildTheme | null;
+  banner?: string | null; // banner image URL (MANAGE_GUILD sets it via banner_attachment_id); null/absent = none
   verification_level?: VerificationLevel; // safety setup (MANAGE_GUILD); always sent by the server
   explicit_content_filter?: ExplicitContentFilter;
 }

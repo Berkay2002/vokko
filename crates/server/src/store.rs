@@ -123,6 +123,7 @@ pub struct GuildRow {
     pub id: i64,
     pub name: String,
     pub icon_path: Option<String>,
+    pub banner_path: Option<String>,
     pub owner_id: i64,
     pub system_channel_id: Option<i64>,
     pub tag: Option<String>,
@@ -136,7 +137,7 @@ pub struct GuildRow {
     pub explicit_content_filter: i16,
 }
 
-pub const GUILD_COLS: &str = "id, name, icon_path, owner_id, system_channel_id, tag, tag_badge, tag_color_primary, tag_color_secondary, theme_preset, \
+pub const GUILD_COLS: &str = "id, name, icon_path, banner_path, owner_id, system_channel_id, tag, tag_badge, tag_color_primary, tag_color_secondary, theme_preset, \
      theme_primary, theme_accent, verification_level, explicit_content_filter";
 
 pub async fn guilds_from_rows(state: &AppState, rows: Vec<GuildRow>) -> ApiResult<Vec<Guild>> {
@@ -177,6 +178,7 @@ pub async fn guilds_from_rows(state: &AppState, rows: Vec<GuildRow>) -> ApiResul
                 id: flake(row.id),
                 name: row.name,
                 icon: row.icon_path.map(|path| state.asset_url(&path)),
+                banner: row.banner_path.map(|path| state.asset_url(&path)),
                 owner_id: flake(row.owner_id),
                 roles: by_guild.remove(&row.id).unwrap_or_default(),
                 system_channel_id: row.system_channel_id.map(flake),
@@ -199,7 +201,7 @@ pub async fn guild(state: &AppState, id: i64) -> ApiResult<Option<Guild>> {
 
 pub async fn guilds_of_user(state: &AppState, user_id: i64) -> ApiResult<Vec<Guild>> {
     let rows: Vec<GuildRow> = sqlx::query_as(
-        "SELECT g.id, g.name, g.icon_path, g.owner_id, g.system_channel_id, g.tag, g.tag_badge, g.tag_color_primary, g.tag_color_secondary, g.theme_preset, \
+        "SELECT g.id, g.name, g.icon_path, g.banner_path, g.owner_id, g.system_channel_id, g.tag, g.tag_badge, g.tag_color_primary, g.tag_color_secondary, g.theme_preset, \
          g.theme_primary, g.theme_accent, g.verification_level, g.explicit_content_filter FROM guilds g JOIN guild_members m ON m.guild_id = g.id WHERE m.user_id = $1 ORDER BY m.joined_at, g.id",
     )
     .bind(user_id)
@@ -356,11 +358,12 @@ pub struct ChannelRow {
     pub default_sort_order: i32,
     pub default_forum_layout: i32,
     pub created_at: OffsetDateTime,
+    pub nsfw: bool,
 }
 
 pub const CHANNEL_COLS: &str = "id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, \
      auto_archive_duration, default_auto_archive_duration, archive_timestamp, last_activity_at, flags, applied_tags, default_reaction_emoji_id, \
-     default_reaction_emoji_name, default_sort_order, default_forum_layout, created_at, bitrate, user_limit, voice_status";
+     default_reaction_emoji_name, default_sort_order, default_forum_layout, created_at, bitrate, user_limit, voice_status, nsfw";
 
 impl ChannelRow {
     pub fn channel_type(&self) -> ChannelType {
@@ -418,6 +421,7 @@ pub async fn channels_to_api(state: &AppState, rows: Vec<ChannelRow>, viewer: Op
                 topic: row.topic,
                 position: row.position,
                 parent_id: row.parent_id.map(flake),
+                nsfw: row.nsfw,
                 recipients: is_dm.then(|| recipients.remove(&row.id).unwrap_or_default()),
                 last_message_id: row.last_message_id.map(flake),
                 owner_id: (kind == ChannelType::GroupDm).then_some(row.owner_id.map(flake)),

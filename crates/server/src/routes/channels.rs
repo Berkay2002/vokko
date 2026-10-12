@@ -38,6 +38,9 @@ async fn update_channel(
     let id = channel_id(&id)?;
     let access = channel_access(&state, user_id, id).await?;
     let kind = access.channel.channel_type();
+    if body.nsfw.is_some() && !matches!(kind, ChannelType::GuildText | ChannelType::GuildAnnouncement | ChannelType::GuildForum | ChannelType::GuildVoice) {
+        return Err(ApiErr::invalid("nsfw", "Only text, announcement, forum and voice channels can be age-restricted."));
+    }
     if kind.is_thread() {
         return threads_routes::edit_thread(&state, user_id, access, body).await;
     }
@@ -89,6 +92,8 @@ async fn update_channel(
             if found.is_none() {
                 return Err(ApiErr::invalid("parent_id", "Must be a category of this guild."));
             }
+            // A category the caller cannot see is not theirs to put channels into (403 50001).
+            access::channel_access(&state, user_id, parent.db()).await?;
             Some(Some(parent.db()))
         }
         None => None,
@@ -100,6 +105,19 @@ async fn update_channel(
         None => None,
     };
     let mut tx = state.db.begin().await?;
+    // Lock the channel and its new category in id order before any write (`parent_id` has no foreign key, so a concurrent delete of the
+    // category would otherwise leave a dangling parent; the same order as the bulk route avoids deadlocks).
+    let mut lock_ids = vec![id];
+    lock_ids.extend(parent.flatten());
+    lock_ids.sort_unstable();
+    lock_ids.dedup();
+    let locked: Vec<(i64, Option<i64>, i16)> =
+        sqlx::query_as("SELECT id, guild_id, kind FROM channels WHERE id = ANY($1) ORDER BY id FOR UPDATE").bind(&lock_ids).fetch_all(&mut *tx).await?;
+    if let Some(Some(parent)) = parent
+        && !locked.iter().any(|(row_id, guild, kind)| *row_id == parent && *guild == access.channel.guild_id && *kind == 4)
+    {
+        return Err(ApiErr::invalid("parent_id", "Must be a category of this guild."));
+    }
     if let Some(name) = name {
         sqlx::query("UPDATE channels SET name = $2 WHERE id = $1").bind(id).bind((!name.is_empty()).then_some(name)).execute(&mut *tx).await?;
     }
@@ -114,6 +132,9 @@ async fn update_channel(
     }
     if let Some(position) = body.position {
         sqlx::query("UPDATE channels SET position = $2 WHERE id = $1").bind(id).bind(position).execute(&mut *tx).await?;
+    }
+    if let Some(nsfw) = body.nsfw {
+        sqlx::query("UPDATE channels SET nsfw = $2 WHERE id = $1").bind(id).bind(nsfw).execute(&mut *tx).await?;
     }
     if let Some(parent) = parent {
         sqlx::query("UPDATE channels SET parent_id = $2 WHERE id = $1").bind(id).bind(parent).execute(&mut *tx).await?;
@@ -182,14 +203,14 @@ async fn delete_channel(
     .bind(id)
     .fetch_all(&state.db)
     .await?;
-    // Children of a deleted category move to the top level.
-    sqlx::query("UPDATE channels SET parent_id = NULL WHERE parent_id = $1").bind(id).execute(&state.db).await?;
     sqlx::query("UPDATE guilds SET system_channel_id = NULL WHERE id = $1 AND system_channel_id = $2").bind(guild_id).bind(id).execute(&state.db).await?;
     crate::routes::scheduled_events::channel_removed(&state, id).await?;
     // Its invites lead nowhere now (no INVITE_DELETE: CHANNEL_DELETE already tells the same audience). One transaction with the
     // channel delete, so no invite outlives its channel.
     let mut tx = state.db.begin().await?;
     sqlx::query("DELETE FROM channels WHERE id = $1").bind(id).execute(&mut *tx).await?;
+    // Children of a deleted category move to the top level; after the delete (which waits for any move into it) so none is missed.
+    sqlx::query("UPDATE channels SET parent_id = NULL WHERE parent_id = $1").bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM invites WHERE channel_id = $1").bind(id).execute(&mut *tx).await?;
     tx.commit().await?;
     crate::media::remove_files(&state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;

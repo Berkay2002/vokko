@@ -1,0 +1,77 @@
+/* ---- guild sidebar: banner variant, drag-to-reorder (GLD-001, GLD-006) ---- */
+
+.guild-sidebar.with-banner {
+  position: relative;
+}
+
+/* Over a banner the header floats on the image; once the banner has scrolled away it takes the sidebar background back. */
+.guild-header.has-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  background: var(--background-gradient-low, var(--background-base-low));
+  transition: background-color 0.15s ease;
+}
+
+.guild-header.has-banner.over-banner {
+  border-bottom-color: transparent;
+  background: linear-gradient(to bottom, rgb(0 0 0 / 0.4), transparent);
+}
+
+.guild-header.over-banner .guild-header-name-button,
+.guild-header.over-banner .guild-header-invite {
+  color: var(--text-overlay-light);
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.6));
+}
+
+.guild-header.over-banner .guild-header-name-button:hover,
+.guild-header.over-banner.open .guild-header-name-button {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.guild-banner {
+  flex: none;
+  height: 138px;
+  margin-bottom: 8px;
+  background-position: center;
+  background-size: cover;
+  will-change: opacity;
+}
+
+/* Drag-to-reorder: a 2 px line above or below the target row, the target category highlighted when dropping into it. */
+.channel-list [data-drag-id] {
+  position: relative;
+}
+
+.channel-list .drop-before::before,
+.channel-list .drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--brand-500);
+  pointer-events: none;
+}
+
+.channel-list .drop-before::before {
+  top: -2px;
+}
+
+.channel-list .drop-after::after {
+  bottom: -2px;
+}
+
+.category-header.drop-into {
+  border-radius: var(--radius-xs);
+  outline: 2px solid var(--brand-500);
+  outline-offset: -2px;
+}
+
+.channel-list .dragging {
+  opacity: 0.5;
+}

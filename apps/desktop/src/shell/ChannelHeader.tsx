@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Bell, Hash, Lock, Megaphone, MessageCircle, MessagesSquare, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
+import { Bell, BellOff, Hash, Lock, Megaphone, MessageCircle, MessagesSquare, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
 import { useVoiceUi } from "../voice";
 import { useShortcut } from "../keyboard";
 import { dmName } from "../api/store";
@@ -13,6 +13,9 @@ import { NavToggle } from "./NavToggle";
 import { muteItem, notificationItem, UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
 import { channelSlots } from "./slots";
+import { useIsMuted } from "./localState";
+import { NsfwHash } from "../guild/icons";
+import "../guild/guild.css";
 
 function ToolbarButton({
   label,
@@ -51,6 +54,7 @@ export interface ChannelHeaderProps {
 export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOpen, onToggleProfile }: ChannelHeaderProps) {
   const [pinsAnchor, setPinsAnchor] = useState<HTMLElement | null>(null);
   const [pinsOpen, setPinsOpen] = useState(false);
+  const muted = useIsMuted(channel.id);
   const closePins = useCallback(() => setPinsOpen(false), []);
   const menu = useContextMenu();
   const guild = !!channel.guild_id;
@@ -82,6 +86,8 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
               <Megaphone size={24} className="channel-header-icon" />
             ) : forum ? (
               <MessagesSquare size={24} className="channel-header-icon" />
+            ) : channel.nsfw ? (
+              <NsfwHash size={24} className="channel-header-icon" />
             ) : (
               <Hash size={24} className="channel-header-icon" />
             )}
@@ -112,8 +118,8 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             ) : (
               <ThreadsToolbar channel={channel} />
             )}
-            <ToolbarButton label="Notification Settings" onClick={bell}>
-              <Bell size={24} />
+            <ToolbarButton label="Notification Settings" active={muted} onClick={bell}>
+              {muted ? <BellOff size={24} /> : <Bell size={24} />}
             </ToolbarButton>
           </>
         ) : (

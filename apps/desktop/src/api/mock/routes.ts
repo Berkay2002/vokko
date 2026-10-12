@@ -222,6 +222,7 @@ route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
     guild.guild.name = name;
   }
   if ("icon_attachment_id" in body) guild.guild.icon = pendingAttachment(str(body.icon_attachment_id), viewer.user.id)?.url ?? null;
+  if ("banner_attachment_id" in body) guild.guild.banner = pendingAttachment(str(body.banner_attachment_id), viewer.user.id)?.url ?? null;
   if ("system_channel_id" in body) guild.guild.system_channel_id = str(body.system_channel_id) ?? null;
   applyGuildPerks(guild, body);
   emit(guild.members.keys(), "GUILD_UPDATE", { ...guild.guild });
@@ -275,9 +276,53 @@ route("POST", `/guilds/${ID}/channels`, ({ viewer, params, body }) => {
   const explicit = body.permission_overwrites !== undefined && body.permission_overwrites !== null;
   const channel = addChannel(guildId, { name, type, parent_id: type === ChannelType.GuildCategory ? null : parent, topic: str(body.topic) ?? null, permission_overwrites: explicit ? permission_overwrites : undefined });
   initChannelFields(channel, body);
+  if (body.nsfw === true && type !== ChannelType.GuildCategory && type !== ChannelType.GuildStage) channel.nsfw = true;
   for (const id of channelAudience(channel)) emit([id], "CHANNEL_CREATE", channelFor(channel, id));
   recordAudit(guildId, viewer.user.id, AuditLogEvent.ChannelCreate, channel.id, { changes: channelChanges(null, channel) });
   return channelFor(channel, viewer.user.id);
+});
+
+// Modify Guild Channel Positions: validate every entry, then apply them all; CHANNEL_UPDATE per changed channel.
+route("PATCH", `/guilds/${ID}/channels`, ({ viewer, params, body }) => {
+  const guildId = params[0] ?? "";
+  requireGuildPerm(guildId, viewer.user.id, Perm.MANAGE_CHANNELS);
+  const entries = Array.isArray(body) ? (body as Record<string, unknown>[]) : [];
+  const invalid = (message: string) => fail(400, 50035, "Invalid Form Body", { _errors: { code: "INVALID", message } });
+  if (entries.length === 0) invalid("At least one channel is required.");
+  if (entries.length > 500) invalid("At most 500 channels per request.");
+  if (new Set(entries.map(e => str(e.id))).size !== entries.length) invalid("A channel is listed twice.");
+  const sameOverwrites = (a: MockChannel, b: MockChannel) => {
+    const key = (c: MockChannel) => JSON.stringify((c.permission_overwrites ?? []).map(o => `${o.id}:${o.type}:${o.allow}:${o.deny}`).sort());
+    return key(a) === key(b);
+  };
+  const plan = entries.map(entry => {
+    const channel = db.channels.get(str(entry.id) ?? "");
+    if (!channel || channel.guild_id !== guildId || isThreadType(channel.type)) return invalid("Unknown channel.");
+    // Like the server: the channel must be visible, MANAGE_CHANNELS is checked per channel (an overwrite can deny it), and a
+    // sync that changes the overwrites needs MANAGE_ROLES in the channel.
+    if (!canAccess(channel, viewer.user.id)) fail(403, 50001, "Missing Access");
+    requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
+    let parent: MockChannel | null | undefined;
+    if ("parent_id" in entry) {
+      const parentId = str(entry.parent_id) ?? null;
+      parent = parentId && parentId !== "0" ? db.channels.get(parentId) : null;
+      if (parent === undefined || (parent && (parent.guild_id !== guildId || parent.type !== ChannelType.GuildCategory))) return invalid("Unknown category.");
+      if (parent && channel.type === ChannelType.GuildCategory) return invalid("Categories cannot be nested.");
+      if (parent && !canAccess(parent, viewer.user.id)) fail(403, 50001, "Missing Access");
+      if (entry.lock_permissions === true && parent && !sameOverwrites(channel, parent)) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_ROLES);
+    }
+    return { channel, position: typeof entry.position === "number" ? entry.position : undefined, parent, lock: entry.lock_permissions === true };
+  });
+  const before = visibilityOf(guildId);
+  for (const { channel, position, parent, lock } of plan) {
+    if (position !== undefined) channel.position = position;
+    if (parent !== undefined) {
+      channel.parent_id = parent?.id ?? null;
+      if (lock && parent) channel.permission_overwrites = (parent.permission_overwrites ?? []).map(o => ({ ...o }));
+    }
+  }
+  emitVisibilityChanges(guildId, before, plan.map(p => p.channel.id));
+  return undefined;
 });
 
 route("GET", `/guilds/${ID}/members`, ({ viewer, params, query }) => {
@@ -299,6 +344,7 @@ function channelChanges(before: Channel | null, after: Channel | null) {
 
 route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  if (isThreadType(channel.type) && typeof body.nsfw === "boolean") fail(400, 50035, "Invalid Form Body", { nsfw: { code: "INVALID", message: "This channel type cannot be age-restricted." } });
   if (isThreadType(channel.type)) return editThread(channel, viewer.user.id, body);
   if (channel.guild_id) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_CHANNELS);
   const snapshot = { ...channel };
@@ -309,6 +355,10 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   }
   if ("topic" in body) channel.topic = str(body.topic)?.trim() || null;
   if (typeof body.position === "number") channel.position = body.position;
+  if (typeof body.nsfw === "boolean") {
+    if (!channel.guild_id || channel.type === ChannelType.GuildCategory || channel.type === ChannelType.GuildStage) fail(400, 50035, "Invalid Form Body", { nsfw: { code: "INVALID", message: "This channel type cannot be age-restricted." } });
+    channel.nsfw = body.nsfw;
+  }
   if (channel.type === ChannelType.GuildVoice) {
     if (typeof body.bitrate === "number") channel.bitrate = body.bitrate;
     if (typeof body.user_limit === "number") channel.user_limit = body.user_limit;
@@ -318,6 +368,7 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
     const parent = str(body.parent_id) ?? null;
     const category = parent ? db.channels.get(parent) : undefined;
     if (parent && (!category || category.guild_id !== channel.guild_id || category.type !== ChannelType.GuildCategory)) fail(400, 50035, "Invalid Form Body", { parent_id: { code: "INVALID", message: "Unknown category" } });
+    if (category && !canAccess(category, viewer.user.id)) fail(403, 50001, "Missing Access");
     channel.parent_id = parent;
     // lock_permissions: true copies the new parent's overwrites; false/absent keeps the channel's own.
     if (body.lock_permissions === true && category) channel.permission_overwrites = (category.permission_overwrites ?? []).map(o => ({ ...o }));

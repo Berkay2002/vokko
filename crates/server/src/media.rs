@@ -25,6 +25,21 @@ pub fn asset_path(id: i64, key: &str, filename: &str) -> String {
     format!("{id}/{key}/{}", encode_filename(filename))
 }
 
+/// SQL condition (the `attachments` row is aliased `a`): something still shows the upload, i.e. a user's or a server profile's avatar or
+/// banner, a guild icon or banner, a group icon, a sticker, an event cover, an application icon or a webhook avatar. It matches on the upload id (the first path segment)
+/// because legacy rows store `<id>/<filename>`. Use it as `AND NOT {IN_USE}` wherever an upload is released or swept.
+pub const IN_USE: &str = "(EXISTS (SELECT 1 FROM users u WHERE a.id::text IN (split_part(u.avatar_path, '/', 1), split_part(u.banner_path, '/', 1))) \
+     OR EXISTS (SELECT 1 FROM guild_members gm WHERE a.id::text IN (split_part(gm.avatar_path, '/', 1), split_part(gm.banner_path, '/', 1))) \
+     OR EXISTS (SELECT 1 FROM guilds g WHERE a.id::text IN (split_part(g.icon_path, '/', 1), split_part(g.banner_path, '/', 1))) \
+     OR EXISTS (SELECT 1 FROM channels c WHERE split_part(c.icon_path, '/', 1) = a.id::text) \
+     OR EXISTS (SELECT 1 FROM stickers s WHERE s.attachment_id = a.id) \
+     OR EXISTS (SELECT 1 FROM message_stickers m WHERE m.attachment_id = a.id) \
+     OR EXISTS (SELECT 1 FROM emojis em WHERE em.attachment_id = a.id) \
+     OR EXISTS (SELECT 1 FROM soundboard_sounds ss WHERE ss.attachment_id = a.id) \
+     OR EXISTS (SELECT 1 FROM scheduled_events e WHERE split_part(e.image_path, '/', 1) = a.id::text) \
+     OR EXISTS (SELECT 1 FROM applications ap WHERE split_part(ap.icon_path, '/', 1) = a.id::text) \
+     OR EXISTS (SELECT 1 FROM webhooks w WHERE split_part(w.avatar_path, '/', 1) = a.id::text))";
+
 /// Where the local backend keeps an attachment's bytes.
 pub fn file_path(state: &AppState, attachment_id: i64) -> PathBuf {
     state.attachments_dir().join(attachment_id.to_string())

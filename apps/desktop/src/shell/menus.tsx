@@ -17,6 +17,8 @@ import { openProfile } from "./ProfileCard";
 import { userAppsItems } from "../apps/menus";
 import { serverSettingsSections } from "./ServerSettings";
 import { voiceModerationItems, voiceUserMenuItems } from "../voice/voiceMenus";
+import { moveToCategory, stepChannel } from "../guild/moves";
+import { stepTarget } from "../guild/reorder";
 import { getVoice } from "../voice/store";
 import { useVoiceUi } from "../voice/uiStore";
 import { getPrefs } from "../ui/prefs";
@@ -168,14 +170,11 @@ function guildDropdownItemsPlain(guild: Guild): MenuItem[] {
           ]
         : []),
       ...(can(Perm.CREATE_EVENTS) || can(Perm.MANAGE_EVENTS) ? [{ id: "create-event", label: "Create Event", onSelect: () => openCreateEvent(guild.id) } satisfies MenuItem] : []),
-      unavailable("app-directory", "App Directory"),
-      unavailable("linked-roles", "Linked Roles"),
+      // Server Boost (always on in Vokko), App Directory (no bots yet) and Linked Roles are omitted rather than shown disabled.
     ],
-    [
-      { id: "notifications", label: "Notification Settings", onSelect: () => openModal({ type: "notificationSettings", scopeId: guild.id, title: guild.name, guild: true }) },
-      unavailable("privacy", "Privacy Settings"),
-    ],
-    [unavailable("per-server-profile", "Edit Per-server Profile"), hideMutedItem(guild)],
+    // Privacy Settings is omitted: Vokko has no per-server DM or message-request settings to back it.
+    [{ id: "notifications", label: "Notification Settings", onSelect: () => openModal({ type: "notificationSettings", scopeId: guild.id, title: guild.name, guild: true }) }],
+    [{ id: "per-server-profile", label: "Edit Per-server Profile", onSelect: () => openModal({ type: "userSettings", section: "profiles" }) }, hideMutedItem(guild)],
     owner ? [] : [{ id: "leave", label: "Leave Server", danger: true, onSelect: () => openModal({ type: "leaveServer", guildId: guild.id }) }],
     devOnly([{ id: "copy-id", label: "Copy Server ID", onSelect: copy(guild.id) }]),
   );
@@ -204,6 +203,7 @@ export function channelContextItems(channel: Channel, guild: Guild, options: Cha
   const manage: MenuItem[] = can(Perm.MANAGE_CHANNELS)
     ? [
         { id: "edit", label: `Edit ${label}`, onSelect: () => openModal({ type: "editChannel", channelId: channel.id }) },
+        ...moveItems(channel, guild),
         ...(category ? [] : [{ id: "duplicate", label: "Duplicate Channel", onSelect: () => void duplicateChannel(channel) } satisfies MenuItem]),
         ...(voice ? [] : [{ id: "create-text", label: category ? "Create Channel" : "Create Text Channel", onSelect: () => openModal({ type: "createChannel", guildId: guild.id, parentId: category ? channel.id : channel.parent_id }) } satisfies MenuItem]),
         ...(category ? [] : [{ id: "create-voice", label: "Create Voice Channel", onSelect: () => openModal({ type: "createChannel", guildId: guild.id, parentId: channel.parent_id, channelType: ChannelType.GuildVoice }) } satisfies MenuItem]),
@@ -242,6 +242,22 @@ export function channelContextItems(channel: Channel, guild: Guild, options: Cha
     manage,
     devOnly([{ id: "copy-id", label: `Copy ${label} ID`, onSelect: copy(channel.id) }]),
   );
+}
+
+/** Keyboard reordering (the drag's counterpart): Move Up / Move Down among siblings, Move to Category for channels. */
+function moveItems(channel: Channel, guild: Guild): MenuItem[] {
+  const all = Object.values(appStore.getState().channels).filter(c => c.guild_id === guild.id);
+  const step = (direction: "up" | "down"): MenuItem => ({
+    id: `move-${direction}`,
+    label: direction === "up" ? "Move Up" : "Move Down",
+    disabled: !stepTarget(all, channel.id, direction),
+    onSelect: () => void stepChannel(guild, channel, direction),
+  });
+  const items = [step("up"), step("down")];
+  if (channel.type === ChannelType.GuildCategory) return items;
+  const targets = all.filter(c => c.type === ChannelType.GuildCategory && c.id !== channel.parent_id).sort((a, b) => a.position - b.position);
+  if (targets.length > 0) items.push({ id: "move-to", label: "Move to Category", children: targets.map(c => ({ id: c.id, label: c.name ?? "Category", onSelect: () => void moveToCategory(guild, channel, c) })) });
+  return items;
 }
 
 async function duplicateChannel(channel: Channel): Promise<void> {

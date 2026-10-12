@@ -481,6 +481,9 @@ pub struct Channel {
     pub topic: Option<String>,
     pub position: i32,
     pub parent_id: Option<Snowflake>,
+    /// Age-restricted channel; always sent, `false` on everything but guild text, announcement, forum and voice channels.
+    #[serde(default)]
+    pub nsfw: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recipients: Option<Vec<User>>,
     pub last_message_id: Option<Snowflake>,
@@ -600,6 +603,9 @@ pub struct Guild {
     pub id: Snowflake,
     pub name: String,
     pub icon: Option<String>,
+    /// Server banner URL; always sent, `null` when unset.
+    #[serde(default)]
+    pub banner: Option<String>,
     pub owner_id: Snowflake,
     pub roles: Vec<Role>,
     pub system_channel_id: Option<Snowflake>,
@@ -1607,6 +1613,9 @@ pub struct UpdateGuildRequest {
     pub name: Option<String>,
     #[serde(default)]
     pub icon_attachment_id: Option<Snowflake>,
+    /// An uploaded PNG/JPEG/GIF/WebP (at most 10 MiB, animated GIF 4 MiB); `null` removes the banner.
+    #[serde(default, deserialize_with = "double_option")]
+    pub banner_attachment_id: Option<Option<Snowflake>>,
     #[serde(default)]
     pub system_channel_id: Option<Snowflake>,
     /// `null` removes the server tag.
@@ -1629,6 +1638,9 @@ pub struct CreateChannelRequest {
     pub parent_id: Option<Snowflake>,
     #[serde(default)]
     pub topic: Option<String>,
+    /// Text, announcement, forum and voice channels only (MANAGE_CHANNELS).
+    #[serde(default)]
+    pub nsfw: Option<bool>,
     /// Initial overwrites (a private channel is an @everyone deny of VIEW_CHANNEL); when absent a channel inside a category
     /// copies the category's overwrites.
     #[serde(default)]
@@ -1666,12 +1678,30 @@ pub struct ForumTagRequest {
     pub emoji_name: Option<String>,
 }
 
+/// One entry of `PATCH /guilds/{id}/channels` (Modify Guild Channel Positions); the body is an array of these.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ModifyChannelPosition {
+    pub id: Snowflake,
+    /// Absent or `null` leaves the position unchanged.
+    #[serde(default)]
+    pub position: Option<i32>,
+    /// Absent leaves the parent unchanged; `null` (or `"0"`) moves the channel out of its category.
+    #[serde(default, deserialize_with = "double_option")]
+    pub parent_id: Option<Option<Snowflake>>,
+    /// With a parent: `true` replaces the channel's overwrites with the parent's.
+    #[serde(default)]
+    pub lock_permissions: Option<bool>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct UpdateChannelRequest {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub topic: Option<String>,
+    /// Guild text, announcement, forum and voice channels only; other types → 400.
+    #[serde(default)]
+    pub nsfw: Option<bool>,
     #[serde(default)]
     pub position: Option<i32>,
     /// `Some(None)` is not expressible with plain `Option`; send `"0"` to move a channel out of its category.
@@ -3762,10 +3792,10 @@ mod tests {
     #[test]
     fn channel_keeps_optional_fields_optional() {
         round_trip::<Channel>(json!({
-            "id": "200", "type": 0, "guild_id": "300", "name": "general", "topic": null, "position": 0, "parent_id": "201", "last_message_id": null
+            "id": "200", "type": 0, "guild_id": "300", "name": "general", "topic": null, "position": 0, "parent_id": "201", "nsfw": false, "last_message_id": null
         }));
         round_trip::<Channel>(json!({
-            "id": "202", "type": 3, "guild_id": null, "name": null, "topic": null, "position": 0, "parent_id": null,
+            "id": "202", "type": 3, "guild_id": null, "name": null, "topic": null, "position": 0, "parent_id": null, "nsfw": false,
             "recipients": [user()], "last_message_id": "5", "owner_id": "100", "icon": null
         }));
     }
@@ -3775,10 +3805,10 @@ mod tests {
         let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false, "unicode_emoji": null});
         round_trip::<Role>(role.clone());
         round_trip::<Guild>(
-            json!({"id": "300", "name": "Sam's server", "icon": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0}),
+            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0}),
         );
         round_trip::<Guild>(json!({
-            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null,
+            "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null,
             "tag": {"tag": "VKO", "badge": "bolt", "color_primary": 5793266, "color_secondary": 3878800}, "theme": {"preset": null, "primary": 1, "accent": 2},
             "verification_level": 3, "explicit_content_filter": 2
         }));
@@ -3936,7 +3966,7 @@ mod tests {
 
     #[test]
     fn ready_and_flattened_guild_events() {
-        let guild = json!({"id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0});
+        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0});
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
@@ -3967,7 +3997,7 @@ mod tests {
         round_trip::<PermissionOverwrite>(overwrite.clone());
         round_trip::<PermissionOverwrite>(json!({"id": "100", "type": 1, "allow": "2048", "deny": "0"}));
         round_trip::<Channel>(json!({
-            "id": "200", "type": 0, "guild_id": "300", "name": "mods", "topic": null, "position": 1, "parent_id": null, "last_message_id": null,
+            "id": "200", "type": 0, "guild_id": "300", "name": "mods", "topic": null, "position": 1, "parent_id": null, "nsfw": false, "last_message_id": null,
             "permission_overwrites": [overwrite]
         }));
         round_trip::<Ban>(json!({"user": user(), "reason": null}));
@@ -4072,12 +4102,12 @@ mod tests {
         let tag = json!({"id": "900", "name": "bug", "moderated": false, "emoji_id": null, "emoji_name": "🐛"});
         round_trip::<ForumTag>(tag.clone());
         round_trip::<Channel>(json!({
-            "id": "210", "type": 15, "guild_id": "300", "name": "help", "topic": null, "position": 2, "parent_id": null, "last_message_id": null,
+            "id": "210", "type": 15, "guild_id": "300", "name": "help", "topic": null, "position": 2, "parent_id": null, "nsfw": false, "last_message_id": null,
             "permission_overwrites": [], "available_tags": [tag], "default_reaction_emoji": {"emoji_id": null, "emoji_name": "👍"},
             "default_sort_order": 1, "default_forum_layout": 2, "default_auto_archive_duration": 4320, "flags": 16
         }));
         let thread = json!({
-            "id": "11", "type": 11, "guild_id": "300", "name": "a thread", "topic": null, "position": 0, "parent_id": "200", "last_message_id": "12",
+            "id": "11", "type": 11, "guild_id": "300", "name": "a thread", "topic": null, "position": 0, "parent_id": "200", "nsfw": false, "last_message_id": "12",
             "owner_id": "100", "permission_overwrites": [], "message_count": 3, "member_count": 2, "newly_created": true, "applied_tags": ["900"],
             "member": {"id": "11", "user_id": "100", "join_timestamp": "2026-10-11T10:00:00.000Z", "flags": 0},
             "thread_metadata": {"archived": false, "auto_archive_duration": 1440, "archive_timestamp": "2026-10-11T10:00:00.000Z", "locked": false, "invitable": true, "create_timestamp": "2026-10-11T10:00:00.000Z"}
@@ -4158,8 +4188,7 @@ mod tests {
         round_trip::<ReactionEmoji>(json!({"id": "700", "name": "blob_wave", "animated": true}));
         round_trip::<ReactionEmoji>(json!({"id": null, "name": "👍"}));
         let guild = json!({
-            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null,
-            "verification_level": 0, "explicit_content_filter": 0,
+            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0,
             "channels": [], "members": [], "member_count": 0, "stickers": [], "emojis": [emoji.clone()], "voice_states": []
         });
         round_trip::<GuildWithState>(guild);
@@ -4338,7 +4367,7 @@ mod tests {
         left["channel_id"] = Value::Null;
         round_trip::<VoiceState>(left);
         round_trip::<Channel>(json!({
-            "id": "201", "type": 2, "guild_id": "300", "name": "General", "topic": null, "position": 0, "parent_id": null, "last_message_id": null,
+            "id": "201", "type": 2, "guild_id": "300", "name": "General", "topic": null, "position": 0, "parent_id": null, "nsfw": false, "last_message_id": null,
             "permission_overwrites": [], "bitrate": 64000, "user_limit": 0, "status": null
         }));
         let command: VoiceStateUpdateCommand = serde_json::from_value(json!({"guild_id": "300", "channel_id": null})).expect("op 4");

@@ -376,6 +376,11 @@ pub async fn visible_guild_channels(state: &AppState, user_id: i64, guild_id: i6
 /// Every non-thread channel of the guild with what `user_id` may do in it (0 when it is hidden), ordered by position.
 pub async fn guild_channels_with_permissions(state: &AppState, user_id: i64, guild_id: i64) -> ApiResult<Vec<(ChannelRow, u64)>> {
     let guild = guild_access(state, user_id, guild_id).await?;
+    guild_channels_resolved(state, user_id, guild_id, &guild).await
+}
+
+/// `guild_channels_with_permissions` for a caller whose `GuildAccess` is already loaded.
+pub async fn guild_channels_resolved(state: &AppState, user_id: i64, guild_id: i64, guild: &GuildAccess) -> ApiResult<Vec<(ChannelRow, u64)>> {
     let rows: Vec<ChannelRow> =
         sqlx::query_as(&format!("SELECT {} FROM channels WHERE guild_id = $1 AND kind NOT IN (10, 11, 12) ORDER BY position, id", store::CHANNEL_COLS))
             .bind(guild_id)

@@ -1,4 +1,5 @@
 import { memo, useMemo, useState, type CSSProperties } from "react";
+import { resolveUrl } from "../api/rest";
 import { intToHex } from "../perks/catalog";
 import { NavLink, useLocation } from "react-router";
 import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Megaphone, MessagesSquare, Plus, Radio, Settings, UserPlus } from "lucide-react";
@@ -17,8 +18,13 @@ import { isPrivateChannel } from "./channelPrivacy";
 import { guildPath } from "./nav";
 import { usePermissions } from "./usePermissions";
 import { openModal } from "./modalStore";
+import { NsfwHash } from "../guild/icons";
+import { useChannelDrag } from "../guild/useChannelDrag";
+import "../guild/guild.css";
 
 const COLLAPSED_KEY = "vokko.collapsedCategories";
+/** Height of the banner image at the top of the channel list (Discord: 138 px including the 49 px header it sits under). */
+const BANNER_HEIGHT = 138;
 
 function loadCollapsed(): Set<Snowflake> {
   try {
@@ -33,7 +39,10 @@ const ChannelRow = memo(function ChannelRow({ channel, guild, selected }: { chan
   const unread = useStore(s => isChannelUnread(s, channel.id));
   const mentions = useStore(s => channelMentionCount(s, channel.id));
   const { can } = usePermissions(guild.id, channel.id);
-  const muted = useIsMuted(channel.id) || useIsMuted(channel.parent_id);
+  // Both hooks run on every render (a short-circuit would change the hook count when the channel's own mute flips).
+  const selfMuted = useIsMuted(channel.id);
+  const parentMuted = useIsMuted(channel.parent_id);
+  const muted = selfMuted || parentMuted;
   const menu = useContextMenu();
   const className = `channel-row${selected ? " selected" : ""}${unread && !muted ? " unread" : ""}${muted ? " muted" : ""}`;
   const items = () => channelContextItems(channel, guild);
@@ -47,6 +56,8 @@ const ChannelRow = memo(function ChannelRow({ channel, guild, selected }: { chan
     <MessagesSquare size={20} className="channel-icon" />
   ) : channel.type === ChannelType.GuildStage ? (
     <Radio size={20} className="channel-icon" />
+  ) : channel.nsfw ? (
+    <NsfwHash size={20} className="channel-icon" />
   ) : (
     <Hash size={20} className="channel-icon" />
   );
@@ -85,7 +96,7 @@ const ChannelRow = memo(function ChannelRow({ channel, guild, selected }: { chan
 
 const MemoVoiceChannelRow = memo(VoiceChannelRow);
 
-function GuildHeader({ guild }: { guild: Guild }) {
+function GuildHeader({ guild, overBanner }: { guild: Guild; overBanner: boolean }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
   const canInvite = usePermissions(guild.id).can(Perm.CREATE_INSTANT_INVITE);
@@ -97,7 +108,7 @@ function GuildHeader({ guild }: { guild: Guild }) {
     <>
       <div
         ref={setAnchor}
-        className={`guild-header${open ? " open" : ""}${guild.theme ? " themed" : ""}`}
+        className={`guild-header${open ? " open" : ""}${guild.theme ? " themed" : ""}${guild.banner ? " has-banner" : ""}${overBanner ? " over-banner" : ""}`}
         style={guild.theme ? ({ "--guild-theme-gradient": `linear-gradient(135deg, ${intToHex(guild.theme.primary)}, ${intToHex(guild.theme.accent)})` } as CSSProperties) : undefined}
       >
         <button type="button" className="guild-header-name-button" onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}>
@@ -181,14 +192,30 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
       return persist(next);
     });
   const categoryIds = groups.flatMap(g => (g.category ? [g.category.id] : []));
+  const drag = useChannelDrag(guild, channels, canManageChannels);
+  // Banner variant: the image sits at the top of the scroller under a transparent header and fades out as the list scrolls.
+  const [scrollTop, setScrollTop] = useState(0);
+  const banner = guild.banner ? resolveUrl(guild.banner) : null;
+  const bannerFade = Math.min(1, scrollTop / (BANNER_HEIGHT - 49));
 
   return (
-    <div className="sidebar-list guild-sidebar">
-      <GuildHeader guild={guild} />
-      <EventsQuickLink guildId={guild.id} />
-      <MembersQuickLink guild={guild} />
-      <div className="sidebar-scroller channel-scroller">
-        <ul className="channel-list" aria-label="Channels">
+    <div className={`sidebar-list guild-sidebar${banner ? " with-banner" : ""}`}>
+      <GuildHeader guild={guild} overBanner={!!banner && bannerFade < 1} />
+      {!banner && (
+        <>
+          <EventsQuickLink guildId={guild.id} />
+          <MembersQuickLink guild={guild} />
+        </>
+      )}
+      <div className="sidebar-scroller channel-scroller" onScroll={banner ? e => setScrollTop(e.currentTarget.scrollTop) : undefined}>
+        {banner && (
+          <>
+            <div className="guild-banner" style={{ backgroundImage: `url("${banner}")`, opacity: 1 - bannerFade }} aria-hidden="true" />
+            <EventsQuickLink guildId={guild.id} />
+            <MembersQuickLink guild={guild} />
+          </>
+        )}
+        <ul className={`channel-list${drag.dragging ? " drag-active" : ""}`} aria-label="Channels" {...drag.handlers}>
           {groups.map(group => {
             const { category } = group;
             const isCollapsed = !!category && collapsed.has(category.id);
@@ -197,7 +224,9 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
               <li key={category?.id ?? "loose"} className="category">
                 {category && (
                   <div
-                    className={`category-header${isCollapsed ? " collapsed" : ""}${isMuted(category.id) ? " muted" : ""}`}
+                    className={`category-header${isCollapsed ? " collapsed" : ""}${isMuted(category.id) ? " muted" : ""}${drag.dropClass(category.id)}${drag.dragging === category.id ? " dragging" : ""}`}
+                    data-drag-id={category.id}
+                    draggable={canManageChannels || undefined}
                     onContextMenu={e =>
                       menu.open(
                         e,
@@ -223,7 +252,7 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
                     )}
                   </div>
                 )}
-                <ul className="category-channels">
+                <ul className="category-channels" ref={el => drag.markRows(el, visible)}>
                   {visible.map(c =>
                     c.type === ChannelType.GuildVoice ? (
                       <MemoVoiceChannelRow key={c.id} channel={c} guild={guild} />

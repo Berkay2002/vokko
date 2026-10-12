@@ -188,3 +188,234 @@ async fn accepting_again_does_not_consume_a_use() {
     let (uses,): (i32,) = sqlx::query_as("SELECT uses FROM invites WHERE code = $1").bind(&code).fetch_one(&app.state.db).await.expect("invite");
     assert_eq!(uses, 1);
 }
+
+/// Connects, identifies and returns the socket once READY has arrived.
+async fn gateway(address: &str, token: &str) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+    use futures_util::SinkExt;
+    let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{address}/gateway")).await.expect("websocket connects");
+    next_event(&mut ws, None).await;
+    ws.send(tokio_tungstenite::tungstenite::Message::Text(json!({"op": 2, "d": {"token": token}}).to_string().into())).await.expect("identify");
+    next_event(&mut ws, Some("READY")).await;
+    ws
+}
+
+/// The next dispatch (named `name` when given); panics after 5 seconds.
+async fn next_event(ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, name: Option<&str>) -> Value {
+    use futures_util::StreamExt;
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await {
+            Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
+                let frame: Value = serde_json::from_str(&text).expect("json frame");
+                if name.is_none() || (frame["op"] == 0 && frame["t"] == name.unwrap_or_default()) {
+                    return frame["d"].clone();
+                }
+            }
+            Ok(Some(Ok(_))) => continue,
+            other => panic!("gateway ended or timed out: {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn channel_nsfw_flag_is_created_toggled_and_broadcast() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("sam").await;
+    let (guild_id, general_id) = app.guild_with_channel(&owner).await;
+    let address = app.serve().await;
+    let mut ws = gateway(&address, &owner).await;
+    let path = format!("/guilds/{guild_id}/channels");
+
+    let (status, created) = app.post(&path, &owner, json!({"name": "spicy", "type": 0, "nsfw": true})).await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["nsfw"], json!(true));
+    let (_, listed) = app.get(&path, &owner).await;
+    let general = listed.as_array().expect("channels").iter().find(|channel| channel["id"] == general_id.as_str()).expect("general");
+    assert_eq!(general["nsfw"], json!(false), "always serialised");
+
+    let spicy = id_of(&created);
+    let (status, updated) = app.patch(&format!("/channels/{spicy}"), &owner, json!({"nsfw": false})).await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["nsfw"], json!(false));
+    loop {
+        let event = next_event(&mut ws, Some("CHANNEL_UPDATE")).await;
+        if event["id"] == spicy.as_str() {
+            assert_eq!(event["nsfw"], json!(false));
+            break;
+        }
+    }
+    let (_, listed) = app.get(&path, &owner).await;
+    assert!(listed.as_array().expect("channels").iter().all(|channel| channel["nsfw"] == json!(false)));
+    let (_, toggled) = app.patch(&format!("/channels/{spicy}"), &owner, json!({"nsfw": true})).await;
+    assert_eq!(toggled["nsfw"], json!(true));
+    let (_, voice) = app.post(&path, &owner, json!({"name": "Quiet", "type": 2, "nsfw": true})).await;
+    assert_eq!(voice["nsfw"], json!(true));
+
+    // categories take no flag, on create or on edit
+    let (status, error) = app.post(&path, &owner, json!({"name": "Cat", "type": 4, "nsfw": true})).await;
+    assert_eq!((status, &error["code"]), (StatusCode::BAD_REQUEST, &json!(50035)));
+    let (_, category) = app.post(&path, &owner, json!({"name": "Cat", "type": 4})).await;
+    assert_eq!(app.patch(&format!("/channels/{}", id_of(&category)), &owner, json!({"nsfw": true})).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(category["nsfw"], json!(false));
+}
+
+fn position_of(channels: &Value, id: &str) -> Value {
+    channels.as_array().expect("channels").iter().find(|channel| channel["id"] == id).expect("channel listed")["position"].clone()
+}
+
+#[tokio::test]
+async fn modify_channel_positions_reorders_and_reparents() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("sam").await;
+    let (_, guild) = app.post("/guilds", &owner, json!({"name": "Order"})).await;
+    let guild_id = id_of(&guild);
+    let path = format!("/guilds/{guild_id}/channels");
+    let (_, one) = app.post(&path, &owner, json!({"name": "one", "type": 0})).await;
+    let (_, two) = app.post(&path, &owner, json!({"name": "two", "type": 0})).await;
+    let (_, category) = app.post(&path, &owner, json!({"name": "Stuff", "type": 4})).await;
+    let (one_id, two_id, category_id) = (id_of(&one), id_of(&two), id_of(&category));
+
+    let (status, _) = app.patch(&path, &owner, json!([{"id": one_id, "position": 7}, {"id": two_id, "position": 3}])).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, channels) = app.get(&path, &owner).await;
+    assert_eq!(position_of(&channels, &one_id), json!(7));
+    assert_eq!(position_of(&channels, &two_id), json!(3));
+    let (status, log) = app.get(&format!("/guilds/{guild_id}/audit-logs?action_type=11"), &owner).await;
+    assert_eq!(status, StatusCode::OK, "{log}");
+    let entries = log["audit_log_entries"].as_array().expect("entries");
+    for target in [&one_id, &two_id] {
+        let entry = entries.iter().find(|entry| entry["target_id"] == target.as_str()).expect("reorder audited");
+        assert!(entry["changes"].as_array().expect("changes").iter().any(|change| change["key"] == "position"), "{entry}");
+    }
+
+    let (status, _) = app.patch(&path, &owner, json!([{"id": one_id, "parent_id": category_id, "position": 0}])).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, channels) = app.get(&path, &owner).await;
+    let moved = channels.as_array().expect("channels").iter().find(|channel| channel["id"] == one_id.as_str()).expect("one");
+    assert_eq!(moved["parent_id"], category["id"]);
+    assert_eq!(position_of(&channels, &two_id), json!(3), "untouched channel keeps its position");
+
+    let (status, _) = app.patch(&path, &owner, json!([{"id": one_id, "parent_id": null}])).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, channels) = app.get(&path, &owner).await;
+    let cleared = channels.as_array().expect("channels").iter().find(|channel| channel["id"] == one_id.as_str()).expect("one");
+    assert!(cleared["parent_id"].is_null());
+
+    // categories cannot be nested, non-categories cannot be parents, an empty body is rejected
+    assert_eq!(app.patch(&path, &owner, json!([{"id": category_id, "parent_id": category_id}])).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(app.patch(&path, &owner, json!([{"id": one_id, "parent_id": two_id}])).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(app.patch(&path, &owner, json!([])).await.0, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn modify_channel_positions_requires_manage_channels() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("sam").await;
+    let (member, _) = app.register("alice").await;
+    let (guild_id, general_id) = app.guild_with_channel(&owner).await;
+    let (_, invite) = app.post(&format!("/channels/{general_id}/invites"), &owner, json!({})).await;
+    let code = invite["code"].as_str().expect("code").to_owned();
+    assert_eq!(app.post(&format!("/invites/{code}"), &member, json!({})).await.0, StatusCode::OK);
+    let path = format!("/guilds/{guild_id}/channels");
+    let (status, error) = app.patch(&path, &member, json!([{"id": general_id, "position": 9}])).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(error["code"], 50013);
+    let (_, channels) = app.get(&path, &owner).await;
+    assert_ne!(position_of(&channels, &general_id), json!(9));
+}
+
+#[tokio::test]
+async fn modify_channel_positions_honours_a_channel_overwrite_denying_manage_channels() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("sam").await;
+    let (member, member_user) = app.register("alice").await;
+    let (guild_id, general_id) = app.guild_with_channel(&owner).await;
+    let (_, invite) = app.post(&format!("/channels/{general_id}/invites"), &owner, json!({})).await;
+    let code = invite["code"].as_str().expect("code").to_owned();
+    assert_eq!(app.post(&format!("/invites/{code}"), &member, json!({})).await.0, StatusCode::OK);
+    let path = format!("/guilds/{guild_id}/channels");
+    let manage_channels: u64 = 1 << 4;
+    let (_, role) = app.post(&format!("/guilds/{guild_id}/roles"), &owner, json!({"name": "movers", "permissions": manage_channels.to_string()})).await;
+    let member_id = id_of(&member_user);
+    let (status, _) = app.patch(&format!("/guilds/{guild_id}/members/{member_id}"), &owner, json!({"roles": [role["id"]]})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, category) = app.post(&path, &owner, json!({"name": "Stuff", "type": 4})).await;
+    let (_, locked) = app.post(&path, &owner, json!({"name": "mod-log", "type": 0})).await;
+    let (_, free) = app.post(&path, &owner, json!({"name": "free", "type": 0})).await;
+    let (locked_id, free_id, category_id) = (id_of(&locked), id_of(&free), id_of(&category));
+    // the role may manage channels guild-wide, but not this one
+    sqlx::query("INSERT INTO permission_overwrites (channel_id, target_id, target_type, allow, deny) VALUES ($1, $2, 0, 0, $3)")
+        .bind(locked_id.parse::<i64>().expect("id"))
+        .bind(role["id"].as_str().expect("role id").parse::<i64>().expect("id"))
+        .bind(manage_channels as i64)
+        .execute(&app.state.db)
+        .await
+        .expect("overwrite");
+    let (_, before) = app.get(&path, &owner).await;
+
+    for body in [
+        json!([{"id": free_id, "position": 20}, {"id": locked_id, "position": 30}]),
+        json!([{"id": free_id, "position": 20}, {"id": locked_id, "parent_id": category_id}]),
+    ] {
+        let (status, error) = app.patch(&path, &member, body).await;
+        assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50013)), "{error}");
+        let (_, after) = app.get(&path, &owner).await;
+        assert_eq!(before, after, "a rejected request changes nothing");
+    }
+    // the unrestricted channel alone is fine
+    assert_eq!(app.patch(&path, &member, json!([{"id": free_id, "position": 20}])).await.0, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn moving_into_a_category_the_caller_cannot_see_is_refused() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("sam").await;
+    let (member, member_user) = app.register("alice").await;
+    let (guild_id, general_id) = app.guild_with_channel(&owner).await;
+    let (_, invite) = app.post(&format!("/channels/{general_id}/invites"), &owner, json!({})).await;
+    let code = invite["code"].as_str().expect("code").to_owned();
+    assert_eq!(app.post(&format!("/invites/{code}"), &member, json!({})).await.0, StatusCode::OK);
+    let path = format!("/guilds/{guild_id}/channels");
+    let manage_channels: u64 = 1 << 4;
+    let (_, role) = app.post(&format!("/guilds/{guild_id}/roles"), &owner, json!({"name": "movers", "permissions": manage_channels.to_string()})).await;
+    let member_id = id_of(&member_user);
+    assert_eq!(app.patch(&format!("/guilds/{guild_id}/members/{member_id}"), &owner, json!({"roles": [role["id"]]})).await.0, StatusCode::OK);
+    let (_, secret) = app.post(&path, &owner, json!({"name": "Secret", "type": 4})).await;
+    let (_, free) = app.post(&path, &owner, json!({"name": "free", "type": 0})).await;
+    let (secret_id, free_id) = (id_of(&secret), id_of(&free));
+    sqlx::query("INSERT INTO permission_overwrites (channel_id, target_id, target_type, allow, deny) VALUES ($1, $2, 0, 0, $3)")
+        .bind(secret_id.parse::<i64>().expect("id"))
+        .bind(role["id"].as_str().expect("role id").parse::<i64>().expect("id"))
+        .bind(1_i64 << 10)
+        .execute(&app.state.db)
+        .await
+        .expect("overwrite");
+    let (_, before) = app.get(&path, &owner).await;
+
+    for lock in [false, true] {
+        let (status, error) = app.patch(&path, &member, json!([{"id": free_id, "parent_id": secret_id, "lock_permissions": lock}])).await;
+        assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50001)), "bulk, lock {lock}: {error}");
+        let (status, error) = app.patch(&format!("/channels/{free_id}"), &member, json!({"parent_id": secret_id, "lock_permissions": lock})).await;
+        assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50001)), "single, lock {lock}: {error}");
+    }
+    let (_, after) = app.get(&path, &owner).await;
+    assert_eq!(before, after, "nothing moved");
+    // the owner still can
+    assert_eq!(app.patch(&path, &owner, json!([{"id": free_id, "parent_id": secret_id}])).await.0, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn modify_channel_positions_rejects_foreign_channels_atomically() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("sam").await;
+    let (guild_id, general_id) = app.guild_with_channel(&owner).await;
+    let (_, other_channel) = app.guild_with_channel(&owner).await;
+    let path = format!("/guilds/{guild_id}/channels");
+    let (_, before) = app.get(&path, &owner).await;
+
+    let (status, error) = app.patch(&path, &owner, json!([{"id": general_id, "position": 42}, {"id": other_channel, "position": 1}])).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(error["code"], 50035);
+    assert_eq!(app.patch(&path, &owner, json!([{"id": general_id, "position": 42}, {"id": "999999999", "position": 1}])).await.0, StatusCode::BAD_REQUEST);
+    let (_, after) = app.get(&path, &owner).await;
+    assert_eq!(before, after, "a rejected request changes nothing");
+}

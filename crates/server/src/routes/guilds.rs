@@ -1,16 +1,18 @@
+use std::collections::{HashMap, HashSet};
+
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get};
 use serde::Deserialize;
-use vokko_protocol::api::permissions::{DEFAULT_EVERYONE, MANAGE_CHANNELS, MANAGE_GUILD, MANAGE_ROLES};
+use vokko_protocol::api::permissions::{DEFAULT_EVERYONE, MANAGE_CHANNELS, MANAGE_GUILD, MANAGE_ROLES, VIEW_CHANNEL};
 use vokko_protocol::api::{
-    AuditLogEvent, Channel, ChannelType, CreateChannelRequest, CreateGuildRequest, GatewayEvent, Guild, GuildMember, GuildTag, GuildTheme, IdOnly, Snowflake,
-    UpdateGuildRequest,
+    AuditLogEvent, Channel, ChannelType, CreateChannelRequest, CreateGuildRequest, GatewayEvent, Guild, GuildMember, GuildTag, GuildTheme, IdOnly,
+    ModifyChannelPosition, Snowflake, UpdateGuildRequest,
 };
 
-use crate::access::{self, guild_access};
+use crate::access::{self, ChannelAccess, guild_access};
 use crate::audit::{self, AuditReason, Entry};
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
@@ -23,13 +25,13 @@ use crate::routes::moderation;
 use crate::routes::overwrites;
 use crate::routes::users::{self, ImageKind, image_path_on};
 use crate::state::AppState;
-use crate::store;
+use crate::store::{self, ChannelRow};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/guilds", axum::routing::post(create_guild))
         .route("/guilds/{id}", get(get_guild).patch(update_guild).delete(delete_guild))
-        .route("/guilds/{id}/channels", get(list_channels).post(create_channel))
+        .route("/guilds/{id}/channels", get(list_channels).post(create_channel).patch(modify_channel_positions))
         .route("/guilds/{id}/members", get(list_members))
         .route("/users/@me/guilds", get(my_guilds))
         .route("/users/@me/guilds/{id}", delete(leave_guild))
@@ -139,12 +141,6 @@ async fn update_guild(
     let before = store::guild(&state, id).await?.ok_or_else(ApiErr::unknown_guild)?;
     // Validate every key first so a rejected request changes nothing.
     let name = body.name.as_deref().map(guild_name).transpose()?;
-    // the claim and the write share one transaction: an account delete waits for both or sees neither
-    let mut icon_tx = state.db.begin().await?;
-    let icon_path = match body.icon_attachment_id {
-        Some(icon) => Some(image_path_on(&mut icon_tx, icon.db(), user_id, ImageKind::Avatar, "icon_attachment_id", false).await?),
-        None => None,
-    };
     if let Some(channel) = body.system_channel_id {
         let found: Option<(i64,)> = sqlx::query_as("SELECT id FROM channels WHERE id = $1 AND guild_id = $2 AND kind = 0")
             .bind(channel.db())
@@ -166,22 +162,43 @@ async fn update_guild(
         Some(Some(theme)) => Some(Some(guild_theme(theme)?)),
     };
 
+    // Claims and writes share one transaction: a rejected upload (or any failed write) leaves nothing claimed and nothing changed.
+    let mut tx = state.db.begin().await?;
+    let icon_path = match body.icon_attachment_id {
+        Some(icon) => Some(image_path_on(&mut tx, icon.db(), user_id, ImageKind::Avatar, "icon_attachment_id", false).await?),
+        None => None,
+    };
+    let banner = match body.banner_attachment_id {
+        None => None,
+        Some(None) => Some(None),
+        Some(Some(banner)) => Some(Some(image_path_on(&mut tx, banner.db(), user_id, ImageKind::Banner, "banner_attachment_id", false).await?)),
+    };
+    let mut replaced_banner: Option<String> = None;
     if let Some(name) = name {
-        sqlx::query("UPDATE guilds SET name = $2 WHERE id = $1").bind(id).bind(name).execute(&state.db).await?;
+        sqlx::query("UPDATE guilds SET name = $2 WHERE id = $1").bind(id).bind(name).execute(&mut *tx).await?;
     }
     if let Some(path) = icon_path {
-        sqlx::query("UPDATE guilds SET icon_path = $2 WHERE id = $1").bind(id).bind(path).execute(&mut *icon_tx).await?;
+        sqlx::query("UPDATE guilds SET icon_path = $2 WHERE id = $1").bind(id).bind(path).execute(&mut *tx).await?;
     }
-    // committed before the writes below, which would wait on its row lock
-    icon_tx.commit().await?;
+    if let Some(banner) = banner {
+        // Swapped in one statement that hands back the banner it replaced, so concurrent edits each release what they actually replaced.
+        let (old,): (Option<String>,) = sqlx::query_as(
+            "UPDATE guilds g SET banner_path = $2 FROM (SELECT banner_path FROM guilds WHERE id = $1 FOR UPDATE) o WHERE g.id = $1 RETURNING o.banner_path",
+        )
+        .bind(id)
+        .bind(&banner)
+        .fetch_one(&mut *tx)
+        .await?;
+        replaced_banner = old.filter(|old| Some(old) != banner.as_ref());
+    }
     if let Some(channel) = body.system_channel_id {
-        sqlx::query("UPDATE guilds SET system_channel_id = $2 WHERE id = $1").bind(id).bind(channel.db()).execute(&state.db).await?;
+        sqlx::query("UPDATE guilds SET system_channel_id = $2 WHERE id = $1").bind(id).bind(channel.db()).execute(&mut *tx).await?;
     }
     if let Some(level) = body.verification_level {
-        sqlx::query("UPDATE guilds SET verification_level = $2 WHERE id = $1").bind(id).bind(level.as_u8() as i16).execute(&state.db).await?;
+        sqlx::query("UPDATE guilds SET verification_level = $2 WHERE id = $1").bind(id).bind(level.as_u8() as i16).execute(&mut *tx).await?;
     }
     if let Some(filter) = body.explicit_content_filter {
-        sqlx::query("UPDATE guilds SET explicit_content_filter = $2 WHERE id = $1").bind(id).bind(filter.as_u8() as i16).execute(&state.db).await?;
+        sqlx::query("UPDATE guilds SET explicit_content_filter = $2 WHERE id = $1").bind(id).bind(filter.as_u8() as i16).execute(&mut *tx).await?;
     }
     if let Some(theme) = theme {
         sqlx::query("UPDATE guilds SET theme_preset = $2, theme_primary = $3, theme_accent = $4 WHERE id = $1")
@@ -189,7 +206,7 @@ async fn update_guild(
             .bind(theme.as_ref().and_then(|theme| theme.0.clone()))
             .bind(theme.as_ref().map(|theme| theme.1))
             .bind(theme.as_ref().map(|theme| theme.2))
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
     }
     // Members who show this guild's tag carry it inside their user object, so a tag edit is a USER_UPDATE for each of them.
@@ -201,15 +218,19 @@ async fn update_guild(
             .bind(tag.as_ref().map(|tag| tag.1.clone()))
             .bind(tag.as_ref().map(|tag| tag.2))
             .bind(tag.as_ref().map(|tag| tag.3))
-            .execute(&state.db)
+            .execute(&mut *tx)
             .await?;
         let rows: Vec<(i64,)> = if tag.is_some() {
-            sqlx::query_as("SELECT id FROM users WHERE primary_guild_id = $1").bind(id).fetch_all(&state.db).await?
+            sqlx::query_as("SELECT id FROM users WHERE primary_guild_id = $1").bind(id).fetch_all(&mut *tx).await?
         } else {
             // Without a tag nobody can keep it as their primary guild.
-            sqlx::query_as("UPDATE users SET primary_guild_id = NULL WHERE primary_guild_id = $1 RETURNING id").bind(id).fetch_all(&state.db).await?
+            sqlx::query_as("UPDATE users SET primary_guild_id = NULL WHERE primary_guild_id = $1 RETURNING id").bind(id).fetch_all(&mut *tx).await?
         };
         adopters = rows.into_iter().map(|(user,)| user).collect();
+    }
+    tx.commit().await?;
+    if let Some(old) = replaced_banner {
+        release_upload(&state, &old).await;
     }
     let guild = store::guild(&state, id).await?.ok_or_else(ApiErr::unknown_guild)?;
     let members = access::guild_member_ids(&state, id).await?;
@@ -221,6 +242,7 @@ async fn update_guild(
         .reason(reason)
         .change("name", &before.name, &guild.name)
         .change("icon", &before.icon, &guild.icon)
+        .change("banner", &before.banner, &guild.banner)
         .change("system_channel_id", before.system_channel_id, guild.system_channel_id)
         .change("verification_level", before.verification_level.as_u8(), guild.verification_level.as_u8())
         .change("explicit_content_filter", before.explicit_content_filter.as_u8(), guild.explicit_content_filter.as_u8())
@@ -229,6 +251,32 @@ async fn update_guild(
         audit::record(&state, entry).await?;
     }
     Ok(Json(guild))
+}
+
+/// Deletes the upload behind a replaced or cleared guild banner (row and file) unless something else still shows it: another banner,
+/// an icon, an avatar, an event cover or a sticker.
+async fn release_upload(state: &AppState, path: &str) {
+    let Some(upload) = path.split('/').next().and_then(|id| id.parse::<i64>().ok()) else { return };
+    // Lock the row first: a claim racing with us either commits before the DELETE below (its fresh snapshot then sees the new
+    // reference) or waits for our delete and fails to claim.
+    let deleted: Result<Vec<(i64,)>, sqlx::Error> = async {
+        let mut tx = state.db.begin().await?;
+        sqlx::query("SELECT id FROM attachments WHERE id = $1 FOR UPDATE").bind(upload).execute(&mut *tx).await?;
+        let rows = sqlx::query_as(&format!(
+            "DELETE FROM attachments a WHERE a.id = $1 AND a.message_id IS NULL AND NOT a.sticker_asset AND NOT a.event_cover AND NOT {} RETURNING a.id",
+            media::IN_USE
+        ))
+        .bind(upload)
+        .fetch_all(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(rows)
+    }
+    .await;
+    match deleted {
+        Ok(rows) => media::remove_files(state, &rows.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await,
+        Err(error) => tracing::warn!("releasing a guild banner failed: {error}"),
+    }
 }
 
 /// (tag, badge, primary colour, secondary colour) as stored.
@@ -273,7 +321,10 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     let emoji_attachments: Vec<(i64,)> = sqlx::query_as("SELECT attachment_id FROM emojis WHERE guild_id = $1").bind(id).fetch_all(&state.db).await?;
     let emoji_attachments: Vec<i64> = emoji_attachments.into_iter().map(|(attachment,)| attachment).collect();
     let _eviction = crate::voice::state::guild_deleted(&state, id).await;
-    sqlx::query("DELETE FROM guilds WHERE id = $1").bind(id).execute(&state.db).await?;
+    let banner: Option<(Option<String>,)> = sqlx::query_as("DELETE FROM guilds WHERE id = $1 RETURNING banner_path").bind(id).fetch_optional(&state.db).await?;
+    if let Some(path) = banner.and_then(|(path,)| path) {
+        release_upload(&state, &path).await;
+    }
     let removed: Vec<(i64,)> = sqlx::query_as("DELETE FROM attachments WHERE id = ANY($1) RETURNING id").bind(&emoji_attachments).fetch_all(&state.db).await?;
     let mut files: Vec<i64> = attachments.into_iter().map(|(id,)| id).collect();
     files.extend(removed.into_iter().map(|(attachment,)| attachment));
@@ -291,6 +342,137 @@ async fn list_channels(State(state): State<AppState>, AuthUser(user_id): AuthUse
     let id = guild_id(&id)?;
     let rows = access::visible_guild_channels(&state, user_id, id).await?;
     Ok(Json(store::channels_to_api(&state, rows, Some(user_id)).await?))
+}
+
+/// Discord's "Modify Guild Channel Positions": validates every entry first, then applies all of them in one transaction.
+async fn modify_channel_positions(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(id): Path<String>,
+    AuditReason(reason): AuditReason,
+    ApiJson(body): ApiJson<Vec<ModifyChannelPosition>>,
+) -> ApiResult<StatusCode> {
+    let id = guild_id(&id)?;
+    let guild = guild_access(&state, user_id, id).await?;
+    guild.require(MANAGE_CHANNELS)?;
+    if body.is_empty() || body.len() > 500 {
+        return Err(ApiErr::invalid("channels", "Must contain between 1 and 500 channels."));
+    }
+    // One load of the guild's non-thread channels with what the caller may do in each (threads and other guilds' channels are not in it).
+    let known: HashMap<i64, (ChannelRow, u64)> =
+        access::guild_channels_resolved(&state, user_id, id, &guild).await?.into_iter().map(|(row, permissions)| (row.id, (row, permissions))).collect();
+    let mut seen = HashSet::new();
+    let mut parents = Vec::new();
+    let mut targets = Vec::with_capacity(body.len());
+    for entry in &body {
+        if !seen.insert(entry.id.db()) {
+            return Err(ApiErr::invalid("id", "Duplicate channel id."));
+        }
+        let (row, permissions) = known.get(&entry.id.db()).ok_or_else(|| ApiErr::invalid("id", "Must be a channel of this guild."))?;
+        let channel_access = ChannelAccess { channel: row.clone(), permissions: *permissions, parent: None };
+        if permissions & VIEW_CHANNEL == 0 {
+            return Err(ApiErr::missing_access());
+        }
+        channel_access.require(MANAGE_CHANNELS)?;
+        let parent = match entry.parent_id {
+            Some(Some(parent)) if parent.0 != 0 => {
+                if row.kind == ChannelType::GuildCategory.as_u8() as i16 {
+                    return Err(ApiErr::invalid("parent_id", "Categories cannot be nested."));
+                }
+                match known.get(&parent.db()) {
+                    Some((parent_row, _)) if parent_row.kind == ChannelType::GuildCategory.as_u8() as i16 => {}
+                    _ => return Err(ApiErr::invalid("parent_id", "Must be a category of this guild.")),
+                }
+                // A category the caller cannot see is not theirs to put channels into (or to copy overwrites from).
+                if known.get(&parent.db()).is_some_and(|(_, permissions)| permissions & VIEW_CHANNEL == 0) {
+                    return Err(ApiErr::missing_access());
+                }
+                parents.push(parent.db());
+                Some(Some(parent.db()))
+            }
+            Some(_) => Some(None),
+            None => None,
+        };
+        let lock_to = parent.flatten().filter(|_| entry.lock_permissions == Some(true));
+        let viewers_before = match lock_to {
+            Some(_) => Some(access::channel_viewers(&state, row).await?),
+            None => None,
+        };
+        let changed =
+            entry.position.is_some_and(|position| position != row.position) || parent.is_some_and(|parent| parent != row.parent_id) || lock_to.is_some();
+        targets.push(Target { access: channel_access, position: entry.position, parent, lock_to, viewers_before, changed });
+    }
+    // Ordered by id so concurrent reorders take their row locks in the same order.
+    targets.sort_by_key(|target| target.access.channel.id);
+    parents.sort_unstable();
+    parents.dedup();
+    let ids: Vec<i64> = targets.iter().map(|target| target.access.channel.id).collect();
+
+    let mut tx = state.db.begin().await?;
+    // The categories stay categories of this guild until commit (`parent_id` has no foreign key), the targets stay put while we write.
+    // One lock pass over parents and targets in id order, so concurrent edits and category deletes cannot deadlock.
+    let mut lock_ids = ids.clone();
+    lock_ids.extend(&parents);
+    lock_ids.sort_unstable();
+    lock_ids.dedup();
+    let locked: Vec<(i64, Option<i64>, i16)> =
+        sqlx::query_as("SELECT id, guild_id, kind FROM channels WHERE id = ANY($1) ORDER BY id FOR UPDATE").bind(&lock_ids).fetch_all(&mut *tx).await?;
+    let categories = locked.iter().filter(|(row_id, guild, kind)| parents.contains(row_id) && *guild == Some(id) && *kind == 4).count();
+    if categories != parents.len() || locked.len() != lock_ids.len() {
+        return Err(ApiErr::invalid("parent_id", "Must be a category of this guild."));
+    }
+    let positions: Vec<Option<i32>> = targets.iter().map(|target| target.position).collect();
+    let set_parent: Vec<bool> = targets.iter().map(|target| target.parent.is_some()).collect();
+    let new_parents: Vec<Option<i64>> = targets.iter().map(|target| target.parent.flatten()).collect();
+    sqlx::query(
+        "UPDATE channels c SET position = COALESCE(u.position, c.position), parent_id = CASE WHEN u.set_parent THEN u.parent_id ELSE c.parent_id END \
+         FROM UNNEST($1::bigint[], $2::int[], $3::bool[], $4::bigint[]) AS u(id, position, set_parent, parent_id) WHERE c.id = u.id",
+    )
+    .bind(&ids)
+    .bind(&positions)
+    .bind(&set_parent)
+    .bind(&new_parents)
+    .execute(&mut *tx)
+    .await?;
+    for target in &targets {
+        if let Some(parent) = target.lock_to {
+            overwrites::lock_to_parent(&mut tx, &target.access, parent).await?;
+        }
+    }
+    tx.commit().await?;
+    let changed: Vec<i64> = targets.iter().filter(|target| target.changed).map(|target| target.access.channel.id).collect();
+    let rows: Vec<ChannelRow> =
+        sqlx::query_as(&format!("SELECT {} FROM channels WHERE id = ANY($1) ORDER BY id", store::CHANNEL_COLS)).bind(&changed).fetch_all(&state.db).await?;
+    // One ChannelUpdate audit entry per channel whose position or parent actually changed.
+    let old_rows: Vec<ChannelRow> = targets.iter().filter(|target| target.changed).map(|target| target.access.channel.clone()).collect();
+    let old_api: HashMap<_, _> = store::channels_to_api(&state, old_rows, None).await?.into_iter().map(|channel| (channel.id.db(), channel)).collect();
+    for channel in store::channels_to_api(&state, rows.clone(), None).await? {
+        let Some(old) = old_api.get(&channel.id.db()) else { continue };
+        let entry =
+            audit::channel_changes(Entry::new(id, user_id, AuditLogEvent::ChannelUpdate, channel.id.db()).reason(reason.clone()), Some(old), Some(&channel));
+        if !entry.changes.is_empty() {
+            audit::record(&state, entry).await?;
+        }
+    }
+    let mut before: HashMap<i64, Option<Vec<i64>>> = targets.into_iter().map(|target| (target.access.channel.id, target.viewers_before)).collect();
+    for row in rows {
+        match before.remove(&row.id).flatten() {
+            Some(viewers) => overwrites::dispatch_visibility(&state, &row, &viewers).await?,
+            None => events::dispatch_channel(&state, &row, GatewayEvent::ChannelUpdate).await?,
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// One validated entry of `modify_channel_positions`.
+struct Target {
+    access: ChannelAccess,
+    position: Option<i32>,
+    /// `Some(None)` clears the category.
+    parent: Option<Option<i64>>,
+    lock_to: Option<i64>,
+    viewers_before: Option<Vec<i64>>,
+    changed: bool,
 }
 
 async fn create_channel(
@@ -313,6 +495,10 @@ async fn create_channel(
             | ChannelType::GuildForum
     ) {
         return Err(ApiErr::invalid("type", "Unsupported channel type."));
+    }
+    if body.nsfw.is_some() && !matches!(body.kind, ChannelType::GuildText | ChannelType::GuildAnnouncement | ChannelType::GuildForum | ChannelType::GuildVoice)
+    {
+        return Err(ApiErr::invalid("nsfw", "Only text, announcement, forum and voice channels can be age-restricted."));
     }
     let name = channel_name(body.kind, &body.name)?;
     crate::voice::validate_channel_settings(&state.config, body.kind == ChannelType::GuildVoice, body.bitrate, body.user_limit)?;
@@ -359,7 +545,7 @@ async fn create_channel(
             .await?;
     let channel_id = state.ids.next();
     let mut tx = state.db.begin().await?;
-    sqlx::query("INSERT INTO channels (id, kind, guild_id, name, topic, position, parent_id, bitrate, user_limit) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)")
+    sqlx::query("INSERT INTO channels (id, kind, guild_id, name, topic, position, parent_id, bitrate, user_limit, nsfw) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)")
         .bind(channel_id)
         .bind(body.kind.as_u8() as i16)
         .bind(id)
@@ -369,6 +555,7 @@ async fn create_channel(
         .bind(parent)
         .bind(body.bitrate.map(|value| value as i32))
         .bind(body.user_limit.map(|value| value as i32))
+        .bind(body.nsfw.unwrap_or(false))
         .execute(&mut *tx)
         .await?;
     match (&body.permission_overwrites, parent) {
