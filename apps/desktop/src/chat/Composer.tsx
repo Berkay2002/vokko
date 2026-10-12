@@ -143,10 +143,16 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     onEditLast();
   });
   // ---- slash commands (src/apps) ----
+  // The caret goes with the text, so the picker never parses the new text at the old caret. The editor's selection follows next frame,
+  // but only if nothing was typed meanwhile: a stale frame would move the caret back into the user's typing.
   const setTextAt = useCallback((next: string, pos: number) => {
     setDraftText(channelId, next);
-    setCaret(pos); // with the text, so the picker never parses the new text at the old caret
-    requestAnimationFrame(() => { area.current?.focus(); area.current?.setSelectionRange(pos, pos); setCaret(pos); });
+    setCaret(pos);
+    requestAnimationFrame(() => {
+      const el = area.current;
+      el?.focus();
+      if (el?.value === next) { el.setSelectionRange(pos, pos); setCaret(pos); }
+    });
   }, [channelId]);
   const commands = useCommandComposer({ channelId, text, caret, setText: setTextAt });
 
@@ -227,9 +233,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     const next = text.slice(0, trigger.start) + insert + text.slice(end);
     if (s.token) addDraftToken(channelId, s.token);
     if (s.emoji) pushRecentEmoji(s.emoji);
-    setDraftText(channelId, next);
-    const pos = trigger.start + insert.length;
-    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); setCaret(pos); });
+    setTextAt(next, trigger.start + insert.length);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trigger, caret, text, channelId]);
 
@@ -320,9 +324,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     const el = area.current;
     const start = el?.selectionStart ?? text.length, end = el?.selectionEnd ?? text.length;
     const next = text.slice(0, start) + ch + text.slice(end);
-    setDraftText(channelId, next);
-    const pos = start + ch.length;
-    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); setCaret(pos); });
+    setTextAt(next, start + ch.length);
   }
 
   /** A GIF (its URL is the message) or a sticker is sent at once, like Discord; the draft text stays. */
