@@ -147,7 +147,7 @@ export function guildContextItems(guild: Guild): MenuItem[] {
             } satisfies MenuItem,
           ]
         : []),
-      unavailable("privacy", "Privacy Settings"),
+      { id: "privacy", label: "Privacy Settings", onSelect: () => openModal({ type: "guildPrivacy", guildId: guild.id }) },
       unavailable("per-server-profile", "Edit Per-server Profile"),
     ],
     can(Perm.MANAGE_CHANNELS)
@@ -202,8 +202,10 @@ function guildDropdownItemsPlain(guild: Guild): MenuItem[] {
       ...(can(Perm.CREATE_EVENTS) || can(Perm.MANAGE_EVENTS) ? [{ id: "create-event", label: "Create Event", onSelect: () => openCreateEvent(guild.id) } satisfies MenuItem] : []),
       // Server Boost (always on in Vokko), App Directory (no bots yet) and Linked Roles are omitted rather than shown disabled.
     ],
-    // Privacy Settings is omitted: Vokko has no per-server DM or message-request settings to back it.
-    [{ id: "notifications", label: "Notification Settings", onSelect: () => openModal({ type: "notificationSettings", scopeId: guild.id, title: guild.name, guild: true }) }],
+    [
+      { id: "notifications", label: "Notification Settings", onSelect: () => openModal({ type: "notificationSettings", scopeId: guild.id, title: guild.name, guild: true }) },
+      { id: "privacy", label: "Privacy Settings", onSelect: () => openModal({ type: "guildPrivacy", guildId: guild.id }) },
+    ],
     [{ id: "per-server-profile", label: "Edit Per-server Profile", onSelect: () => openModal({ type: "userSettings", section: "profiles" }) }, hideMutedItem(guild)],
     owner ? [] : [{ id: "leave", label: "Leave Server", danger: true, onSelect: () => openModal({ type: "leaveServer", guildId: guild.id }) }],
     devOnly([{ id: "copy-id", label: "Copy Server ID", onSelect: copy(guild.id) }]),

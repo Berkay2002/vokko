@@ -1,5 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Forward, Pencil, Smile, SmilePlus, MoreHorizontal, Reply, Image as ImageIcon, CircleAlert, MessageSquareText, Megaphone } from 'lucide-react';
+import { CANNOT_DM_USER, DM_NOT_DELIVERED_TEXT } from '../api/errors';
 import { MessageFlags, MessageReferenceType, MessageType } from '../api/types';
 import type { Message } from '../api/types';
 import { Markdown } from './markdown';
@@ -218,7 +219,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
         {threadActions.published && <div className="chat-crosspost-tag published"><Megaphone size={14} aria-hidden="true" /> Published</div>}
       </>}
       {failed && <div className="chat-failed" role="alert">
-        <CircleAlert size={14} /> Your message could not be delivered.
+        <CircleAlert size={14} /> {pending.errorCode === CANNOT_DM_USER ? DM_NOT_DELIVERED_TEXT : 'Your message could not be delivered.'}
         <button type="button" onClick={() => messageStore.retry(message.channel_id, pending.nonce)}>Retry</button>
         <button type="button" onClick={() => messageStore.discardPending(message.channel_id, pending.nonce)}>Delete</button>
       </div>}

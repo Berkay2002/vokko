@@ -366,7 +366,9 @@ async fn admit_guild(state: &AppState, user_id: i64, row: &ChannelRow) -> Result
     }
 }
 
-/// DM call: recipients only; a block in either direction closes a 1:1 DM's call like its messages.
+/// DM call: recipients only; a block in either direction closes a 1:1 DM's call like its messages, and starting one (which posts
+/// a call message and rings) needs the other side's DM privacy to allow the caller (guild_privacy::may_dm). Joining a call the
+/// other side started stays open.
 async fn admit_dm(state: &AppState, user_id: i64, row: &ChannelRow) -> Result<(Option<i64>, u64), VoiceConnectFailure> {
     access::channel_access(state, user_id, row.id).await.map_err(|_| VoiceConnectFailure::MissingPermissions)?;
     if row.channel_type() == ChannelType::Dm {
@@ -375,6 +377,15 @@ async fn admit_dm(state: &AppState, user_id: i64, row: &ChannelRow) -> Result<(O
             Ok(blocked) if blocked.is_empty() => {}
             Ok(_) => return Err(VoiceConnectFailure::Blocked),
             Err(_) => return Err(VoiceConnectFailure::MissingPermissions),
+        }
+        if !state.voice.calls.ongoing(row.id) {
+            for other in &others {
+                match crate::routes::guild_privacy::may_dm(state, user_id, *other).await {
+                    Ok(true) => {}
+                    Ok(false) => return Err(VoiceConnectFailure::Blocked),
+                    Err(_) => return Err(VoiceConnectFailure::MissingPermissions),
+                }
+            }
         }
     }
     Ok((None, DM_CALL_PERMISSIONS))

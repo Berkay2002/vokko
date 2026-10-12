@@ -514,6 +514,34 @@ async fn list_messages(
     Ok(Json(messages))
 }
 
+/// 403 50007 when `user_id` may not write in the 1:1 DM `id`: a block in either direction, or the recipient's DM privacy
+/// (a non-friend needs a shared guild the recipient has not restricted, guild_privacy::may_dm).
+async fn require_dm_open(state: &AppState, id: i64, user_id: i64) -> ApiResult<()> {
+    let (blocked,): (bool,) = sqlx::query_as(
+        "SELECT EXISTS (SELECT 1 FROM channel_recipients r JOIN relationships rel ON rel.kind = 2 \
+         AND ((rel.user_id = $2 AND rel.other_id = r.user_id) OR (rel.other_id = $2 AND rel.user_id = r.user_id)) \
+         WHERE r.channel_id = $1 AND r.user_id <> $2)",
+    )
+    .bind(id)
+    .bind(user_id)
+    .fetch_one(&state.db)
+    .await?;
+    if blocked {
+        return Err(ApiErr::cannot_message_user());
+    }
+    let other: Option<(i64,)> = sqlx::query_as("SELECT user_id FROM channel_recipients WHERE channel_id = $1 AND user_id <> $2")
+        .bind(id)
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await?;
+    if let Some((other,)) = other
+        && !crate::routes::guild_privacy::may_dm(state, user_id, other).await?
+    {
+        return Err(ApiErr::cannot_message_user());
+    }
+    Ok(())
+}
+
 async fn create_message(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -528,19 +556,7 @@ async fn create_message(
     access.require(SEND_MESSAGES)?;
     threads::check_send(&access)?;
     if access.channel.channel_type() == vokko_protocol::api::ChannelType::Dm {
-        // A block in either direction closes the 1:1 DM for new messages.
-        let (blocked,): (bool,) = sqlx::query_as(
-            "SELECT EXISTS (SELECT 1 FROM channel_recipients r JOIN relationships rel ON rel.kind = 2 \
-             AND ((rel.user_id = $2 AND rel.other_id = r.user_id) OR (rel.other_id = $2 AND rel.user_id = r.user_id)) \
-             WHERE r.channel_id = $1 AND r.user_id <> $2)",
-        )
-        .bind(id)
-        .bind(user_id)
-        .fetch_one(&state.db)
-        .await?;
-        if blocked {
-            return Err(ApiErr::cannot_message_user());
-        }
+        require_dm_open(&state, id, user_id).await?;
     }
     // `attachments` (rename / alt text per id) wins over the plain `attachment_ids` list.
     let (attachments, attachments_field): (Vec<DraftAttachment>, &str) = match &body.attachments {
@@ -900,6 +916,9 @@ async fn typing(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
     let id = channel_id(&id)?;
     let access = channel_access(&state, user_id, id).await?;
     access.require(SEND_MESSAGES)?;
+    if access.channel.channel_type() == vokko_protocol::api::ChannelType::Dm {
+        require_dm_open(&state, id, user_id).await?;
+    }
     let viewers: Vec<i64> = access::channel_viewers(&state, &access.channel).await?.into_iter().filter(|viewer| *viewer != user_id).collect();
     let event = GatewayEvent::TypingStart(TypingStart { channel_id: Snowflake::from(id), user_id: Snowflake::from(user_id), timestamp: now_ms() / 1000 });
     state.hub.send(&viewers, &event);

@@ -536,6 +536,10 @@ export interface PatchUserSettingsRequest {
   version: number; // the version this change is based on; another one → 409 UserSettingsConflict
   settings: UserSettingsData; // keys to set; null removes a key (back to the default)
 }
+/** GET/PATCH /users/@me/guilds/{id}/privacy: `direct_messages` is false once the caller restricted DMs from this guild's members. */
+export interface GuildPrivacySettings {
+  direct_messages: boolean;
+}
 /** 409 body of PATCH /users/@me/settings: code 40090 plus the current blob. */
 export interface UserSettingsConflict extends ApiError, UserSettings {}
 export interface Keybind {

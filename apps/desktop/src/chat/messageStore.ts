@@ -1,6 +1,7 @@
 // Per-channel message store: fetches pages over REST, applies gateway events, owns optimistic sends. Lives outside React;
 // components subscribe with useChannelState().
 import { useSyncExternalStore } from 'react';
+import { ApiRequestError } from '../api/errors';
 import { MessageType } from '../api/types';
 import type { CreateMessageRequest, EditMessageRequest, Message, PendingAttachmentMeta, ReactionEmoji, Snowflake, StickerItem, User } from '../api/types';
 import { gateway, request, setLocalReadPointer } from './shell';
@@ -272,7 +273,7 @@ export const messageStore = {
   async dispatchPending(channelId: Snowflake, nonce: string): Promise<void> {
     const p = states.get(channelId)?.pending.find(x => x.nonce === nonce);
     if (!p) return;
-    update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'sending', error: undefined } : x)) }));
+    update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'sending', error: undefined, errorCode: undefined } : x)) }));
     try {
       const m = await request<Message>('POST', `/channels/${channelId}/messages`, p.request);
       if (cancelled.delete(nonce)) { // cancelled while in flight: the server has it already, so take it back
@@ -283,7 +284,8 @@ export const messageStore = {
       this.ack(channelId, m.id);
     } catch (e) {
       const error = e instanceof Error ? e.message : 'Failed to send';
-      update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'failed', error } : x)) }));
+      const errorCode = e instanceof ApiRequestError ? e.code : undefined;
+      update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'failed', error, errorCode } : x)) }));
     }
   },
 

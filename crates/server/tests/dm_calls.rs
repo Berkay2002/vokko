@@ -355,3 +355,32 @@ async fn a_call_holds_at_most_ten_people() {
     let call = list.as_array().expect("list").iter().find(|m| m["type"] == 3).expect("call message").clone();
     assert_eq!(call["call"]["participants"].as_array().map(Vec::len), Some(11), "everyone who joined is recorded");
 }
+
+#[tokio::test]
+async fn starting_a_dm_call_follows_the_dm_privacy_rule() {
+    let (app, address) = app_with(|_| {}).await;
+    let (alice, bob) = (user(&app, "alice").await, user(&app, "bob").await);
+    let (guild, channel) = app.guild_with_channel(&alice.token).await;
+    let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &alice.token, json!({})).await;
+    app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &bob.token, json!({})).await;
+    let one = dm(&app, &bob, &alice).await;
+    // Alice turns off DMs from their only shared guild: bob may not start a call, which would post a message and ring her.
+    let privacy = format!("/users/@me/guilds/{guild}/privacy");
+    assert_eq!(app.patch(&privacy, &alice.token, json!({"direct_messages": false})).await.0, StatusCode::OK);
+    let mut alice_ws = Client::identify(&address, &alice.token).await;
+    let mut bob_ws = Client::identify(&address, &bob.token).await;
+    bob_ws.voice(Some(&one)).await;
+    assert_eq!(bob_ws.voice_answer().await.1["reason"], "blocked");
+    assert!(!app.state.voice.calls.ongoing(one.parse().expect("id")));
+    assert_eq!(messages(&app, &one, &alice.token).await, json!([]));
+    // Alice may still call bob (his defaults allow it), and bob may join the call she started, but not ring her again.
+    alice_ws.voice(Some(&one)).await;
+    assert_eq!(alice_ws.voice_answer().await.0, "VOICE_SERVER_UPDATE");
+    bob_ws.wait_for("CALL_CREATE").await;
+    bob_ws.voice(Some(&one)).await;
+    assert_eq!(bob_ws.voice_answer().await.0, "VOICE_SERVER_UPDATE");
+    alice_ws.voice(None).await;
+    alice_ws.wait_until("VOICE_STATE_UPDATE", |state| state["user_id"] == alice.id.as_str() && state["channel_id"].is_null()).await;
+    let (status, body) = app.post(&format!("/channels/{one}/call/ring"), &bob.token, json!({})).await;
+    assert_eq!((status, body["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50007)));
+}

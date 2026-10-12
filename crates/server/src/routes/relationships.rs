@@ -13,7 +13,7 @@ use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
 use crate::extract::{ApiJson, parse_id};
-use crate::routes::settings::privacy_flag;
+use crate::routes::guild_privacy::may_dm;
 use crate::state::AppState;
 use crate::store::{self, CHANNEL_COLS, ChannelRow};
 
@@ -151,16 +151,8 @@ async fn one_to_one(state: &AppState, user_id: i64, other: i64) -> ApiResult<Jso
             id
         }
         None => {
-            // A new DM needs a shared guild or an accepted friendship.
-            let (reachable,): (bool,) = sqlx::query_as(
-                "SELECT EXISTS (SELECT 1 FROM guild_members a JOIN guild_members b ON a.guild_id = b.guild_id WHERE a.user_id = $1 AND b.user_id = $2) \
-                 OR EXISTS (SELECT 1 FROM relationships WHERE user_id = $1 AND other_id = $2 AND kind = 1)",
-            )
-            .bind(user_id)
-            .bind(other)
-            .fetch_one(&state.db)
-            .await?;
-            if !reachable || !(is_friend(state, user_id, other).await? || privacy_flag(state, other, "dms_from_server_members", true).await?) {
+            // A new DM needs an accepted friendship or a shared guild the other side lets DM them (guild_privacy::may_dm).
+            if !may_dm(state, user_id, other).await? {
                 return Err(ApiErr::cannot_message_user());
             }
             let id = state.ids.next();
@@ -182,15 +174,6 @@ async fn one_to_one(state: &AppState, user_id: i64, other: i64) -> ApiResult<Jso
         }
     };
     store::channel(state, channel_id, Some(user_id)).await?.map(Json).ok_or_else(ApiErr::internal)
-}
-
-async fn is_friend(state: &AppState, user_id: i64, other: i64) -> ApiResult<bool> {
-    let (friend,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM relationships WHERE user_id = $1 AND other_id = $2 AND kind = 1)")
-        .bind(user_id)
-        .bind(other)
-        .fetch_one(&state.db)
-        .await?;
-    Ok(friend)
 }
 
 /// Whether `target`'s friend request sources (Data & Privacy) let `sender` send them a request.

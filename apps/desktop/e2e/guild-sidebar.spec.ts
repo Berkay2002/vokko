@@ -62,12 +62,12 @@ test('1. server header: dropdown items, per-server profile, hide muted, banner v
   await header.getByRole('button', { name: "Sam's server" }).click();
   const menu = page.locator('.guild-menu');
   const labels = (await menu.getByRole('menuitem').allTextContents()).concat(await menu.getByRole('menuitemcheckbox').allTextContents());
-  for (const label of ['Invite to Server', 'Server Settings', 'Create Channel', 'Create Category', 'Create Event', 'Notification Settings', 'Edit Per-server Profile', 'Hide Muted Channels', 'Copy Server ID']) {
+  for (const label of ['Invite to Server', 'Server Settings', 'Create Channel', 'Create Category', 'Create Event', 'Notification Settings', 'Privacy Settings', 'Edit Per-server Profile', 'Hide Muted Channels', 'Copy Server ID']) {
     expect(labels).toContain(label);
   }
-  // Nothing Vokko can't back is shown disabled any more (App Directory, Linked Roles, Privacy Settings are omitted).
+  // Nothing Vokko can't back is shown disabled any more (App Directory and Linked Roles are omitted).
   await expect(menu.locator('[aria-disabled="true"]')).toHaveCount(0);
-  for (const omitted of ['App Directory', 'Linked Roles', 'Privacy Settings', 'Server Boost']) expect(labels).not.toContain(omitted);
+  for (const omitted of ['App Directory', 'Linked Roles', 'Server Boost']) expect(labels).not.toContain(omitted);
   await shot(page, '01-server-dropdown');
 
   await menu.getByRole('menuitem', { name: 'Edit Per-server Profile' }).click();
@@ -274,4 +274,24 @@ test('6. channel row states (GLD-006): rest, hover, selected, unread with badge 
   const memesId = await page.evaluate(() => (window as unknown as Win).__vokkoMock.channelIdByName('memes')!);
   await page.evaluate(id => (window as unknown as Win).__vokkoMock.say(id, 'alice', 'quiet'), memesId);
   expect(await style('memes')).toMatchObject({ opacity: '0.5', color: rest, pill: null, nameWeight: '400' });
+});
+
+test('guild Privacy Settings: Direct Messages switch persists per server (GLD-012)', async ({ page }) => {
+  await openChannel(page, 'general');
+  const open = async () => {
+    await page.locator('.guild-header').getByRole('button', { name: "Sam's server" }).click();
+    await page.locator('.guild-menu').getByRole('menuitem', { name: 'Privacy Settings' }).click();
+    return page.getByRole('dialog');
+  };
+  let dialog = await open();
+  await expect(dialog.getByText('Allow direct messages from other members in this server.')).toBeVisible();
+  await expect(dialog.getByText('This setting is applied to this server only. Friends can always message you.')).toBeVisible();
+  const toggle = dialog.getByRole('switch', { name: 'Direct Messages' });
+  await expect(toggle).toBeEnabled();
+  await expect(toggle).toBeChecked();
+  await toggle.click();
+  await expect(toggle).not.toBeChecked();
+  await page.keyboard.press('Escape');
+  dialog = await open();
+  await expect(dialog.getByRole('switch', { name: 'Direct Messages' })).not.toBeChecked();
 });

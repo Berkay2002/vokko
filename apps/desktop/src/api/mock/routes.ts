@@ -496,6 +496,10 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   if (content === "" && attachments.length === 0 && stickers.length === 0 && !forwarding && !poll) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
   const forward = forwarding ? buildForward(viewer.user.id, reference, channel) : undefined;
   if (reference?.message_id && !forwarding) requireMessage(channel.id, reference.message_id);
+  if (channel.type === ChannelType.DM) {
+    const other = channel.participant_ids?.find(id => id !== viewer.user.id);
+    if (other) assertCanOpenDm(viewer.user.id, other);
+  }
   checkSend(channel, viewer.user.id, content);
   for (const id of ids) db.pending.delete(id);
   // A poll is registered under the message's id first, so MESSAGE_CREATE already carries it.

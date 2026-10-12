@@ -11,6 +11,8 @@ import { createChannel, createGroupDM, createGuild, deleteGuild, joinGuildWithIn
 import { InviteModal } from "../invites/InviteModal";
 import { blockUser } from "./menus";
 import { FullProfileModal } from "./DmProfilePanel";
+import { GuildPrivacyModal } from "./GuildPrivacyModal";
+import { DmRefusedModal } from "./DmRefusedModal";
 import { ReportModal } from "./ReportModal";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
@@ -566,6 +568,10 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
       const name = user ? displayName(user, spec.guildId ? members[spec.guildId]?.[spec.userId] : null) : "this user";
       return <Confirm key={id} title={`Block ${name}`} body={<>Are you sure you want to block <b>{name}</b>? Blocking also removes them from your friends.</>} action="Block" danger onConfirm={() => blockUser(spec.userId)} />;
     }
+    case "guildPrivacy":
+      return <GuildPrivacyModal key={id} guildId={spec.guildId} />;
+    case "dmRefused":
+      return <DmRefusedModal key={id} />;
     case "report":
       return <ReportModal key={id} target={spec.target} />;
     case "logout":

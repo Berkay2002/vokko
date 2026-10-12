@@ -8,14 +8,14 @@ vi.mock("./socket", () => ({
 }));
 
 import { ApiRequestError } from "../errors";
-import { ChannelType, MessageType, OverwriteType, StickerFormat, type Attachment, type Bookmark, type Gif, type GifCategories, type GifPage, type Message, type MessageSearchResponse, type Reminder, type Sticker } from "../types";
+import { ChannelType, MessageType, RelationshipType, OverwriteType, StickerFormat, type Attachment, type Bookmark, type Gif, type GifCategories, type GifPage, type Message, type MessageSearchResponse, type Reminder, type Sticker } from "../types";
 import { Perm } from "../permissions";
 import { db, nextId } from "./db";
 import { gifEmbeds } from "./gifs";
 import { clearReminderTimers } from "./media";
 import { addChannel, addMessage, createAccount, createGuildRecord, openDM } from "./ops";
 import { handleRoute } from "./routes";
-import { guildPayload } from "./views";
+import { guildPayload, setRelationship } from "./views";
 
 const ids: Record<string, string> = {};
 let guildId = "";
@@ -172,6 +172,7 @@ describe("sending stickers", () => {
   it("allows external stickers in DMs for a member of the sticker's server", () => {
     const foreign = createSticker("owner", otherGuildId, "foreign");
     addMember(otherGuildId, "member");
+    setRelationship(ids.member!, ids.outsider!, RelationshipType.Friend, RelationshipType.Friend);
     const dm = openDM(ids.member!, ids.outsider!);
     expect(call("member", "POST", `/channels/${dm.id}/messages`, { sticker_ids: [foreign.id] })).toMatchObject({ sticker_items: [{ name: "foreign" }] });
   });
@@ -265,6 +266,7 @@ describe("forward", () => {
     const attachment: Attachment = { id: nextId(), filename: "a.png", content_type: "image/png", size: 10, url: "blob:a", width: 1, height: 1 };
     const channel = db.channels.get(general)!;
     const source = addMessage({ channel, author_id: ids.owner!, content: "see", attachments: [attachment] });
+    setRelationship(ids.member!, ids.outsider!, RelationshipType.Friend, RelationshipType.Friend);
     const dm = openDM(ids.member!, ids.outsider!);
     const forwarded = call("member", "POST", `/channels/${dm.id}/messages`, { message_reference: { type: 1, message_id: source.id, channel_id: general } }) as Message;
     const copy = forwarded.message_snapshots?.[0]?.message.attachments[0];

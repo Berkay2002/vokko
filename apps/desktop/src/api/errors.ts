@@ -27,3 +27,14 @@ export class RateLimitedError extends ApiRequestError {
     this.global = global;
   }
 }
+
+/** 403 code: the recipient does not accept DMs from you (opening a DM or sending in a 1:1 DM). */
+export const CANNOT_DM_USER = 50007;
+
+/** Why a DM was refused. */
+export const DM_REFUSED_REASON = "They only accept direct messages from friends or from people in a server they share with you.";
+
+/** Shown on a pending message whose send was refused with CANNOT_DM_USER. */
+export const DM_NOT_DELIVERED_TEXT = `Message not delivered. ${DM_REFUSED_REASON}`;
+
+export const isDmRefused = (e: unknown): e is ApiRequestError => e instanceof ApiRequestError && e.status === 403 && e.code === CANNOT_DM_USER;

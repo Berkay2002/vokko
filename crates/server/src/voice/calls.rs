@@ -396,6 +396,14 @@ async fn ring_call(
     if !blocked.is_empty() && (one_to_one || explicit.is_some()) {
         return Err(ApiErr::cannot_message_user());
     }
+    // A 1:1 ring is a DM too: the other side's DM privacy has to allow the caller.
+    if one_to_one {
+        for other in &candidates {
+            if !crate::routes::guild_privacy::may_dm(&state, user_id, *other).await? {
+                return Err(ApiErr::cannot_message_user());
+            }
+        }
+    }
     let users: Vec<i64> = candidates.into_iter().filter(|id| !blocked.contains(id) && !super::state::in_channel(&state, *id, channel.id)).collect();
     if users.is_empty() {
         return Ok(StatusCode::NO_CONTENT);

@@ -8,6 +8,8 @@ export interface PendingMessage {
   message: Message;
   state: 'sending' | 'failed';
   error?: string;
+  /** API error code of the failed send (e.g. 50007: the recipient does not accept DMs from you). */
+  errorCode?: number;
   request: CreateMessageRequest;
 }
 

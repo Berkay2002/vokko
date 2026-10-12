@@ -2593,6 +2593,13 @@ pub struct FriendSuggestionsResponse {
     pub suggestions: Vec<FriendSuggestion>,
 }
 
+/// Body and response of `GET` / `PATCH /users/@me/guilds/{id}/privacy`: whether members of that guild who are not friends may
+/// DM the caller (Discord's `restricted_guilds`, inverted).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildPrivacySettings {
+    pub direct_messages: bool,
+}
+
 /// Body and response of `PATCH /users/@me/friend-suggestion-settings`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FriendSuggestionSettings {

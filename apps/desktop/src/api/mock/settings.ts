@@ -4,7 +4,7 @@ import { ChannelType, RelationshipType, type ApiError, type UserDataExport, type
 import { ApiRequestError, RateLimitedError } from "../errors";
 import { db, userOf } from "./db";
 import { fail } from "./ops";
-import { route } from "./router";
+import { ID, route } from "./router";
 import { emit } from "./socket";
 import { relationship, relationshipsFor } from "./views";
 
@@ -143,9 +143,18 @@ export function privacyAllows(userId: string, key: "dms_from_server_members" | "
 const sharesGuild = (a: string, b: string): boolean => [...db.guilds.values()].some(g => g.members.has(a) && g.members.has(b));
 const isFriend = (a: string, b: string): boolean => relationship(a, b)?.type === RelationshipType.Friend;
 
-/** 403 50007 when `target` turned off DMs from server members and `sender` is not a friend. */
+/** Per-user guild ids whose members may not DM that user (GET/PATCH /users/@me/guilds/{id}/privacy). */
+const restrictedGuilds = new Map<string, Set<string>>();
+
+/**
+ * 403 50007 unless `sender` is a friend of `target`, or `target` accepts DMs from server members (global setting, default on)
+ * and they share a guild `target` has not restricted. Group DMs are not checked.
+ */
 export function assertCanOpenDm(sender: string, target: string): void {
-  if (!isFriend(sender, target) && !privacyAllows(target, "dms_from_server_members")) fail(403, 50007, "Cannot send messages to this user");
+  if (isFriend(sender, target)) return;
+  const restricted = restrictedGuilds.get(target);
+  const open = privacyAllows(target, "dms_from_server_members") && [...db.guilds.values()].some(g => g.members.has(sender) && g.members.has(target) && !restricted?.has(g.guild.id));
+  if (!open) fail(403, 50007, "Cannot send messages to this user");
 }
 
 /** 403 80000 unless one of `target`'s friend request sources covers `sender`. */
@@ -167,6 +176,26 @@ route("PATCH", "/users/@me/settings", ({ viewer, body }) => {
   const patch = body.settings && typeof body.settings === "object" && !Array.isArray(body.settings) ? (body.settings as UserSettingsData) : null;
   if (!patch) fail(400, 50035, "Invalid Form Body", { settings: { _errors: [{ code: "INVALID", message: "Expected an object." }] } });
   return patchSettings(viewer.user.id, version, patch);
+});
+
+function memberGuild(guildId: string, userId: string): string {
+  if (!db.guilds.get(guildId)?.members.has(userId)) fail(404, 10004, "Unknown Guild");
+  return guildId;
+}
+
+route("GET", `/users/@me/guilds/${ID}/privacy`, ({ viewer, params }) => {
+  const guildId = memberGuild(params[0] ?? "", viewer.user.id);
+  return { direct_messages: !restrictedGuilds.get(viewer.user.id)?.has(guildId) };
+});
+
+route("PATCH", `/users/@me/guilds/${ID}/privacy`, ({ viewer, params, body }) => {
+  if (typeof body.direct_messages !== "boolean") fail(400, 50035, "Invalid Form Body", { direct_messages: { _errors: [{ code: "BASE_TYPE_BOOLEAN", message: "Expected a boolean." }] } });
+  const guildId = memberGuild(params[0] ?? "", viewer.user.id);
+  const set = restrictedGuilds.get(viewer.user.id) ?? new Set<string>();
+  if (body.direct_messages) set.delete(guildId);
+  else set.add(guildId);
+  restrictedGuilds.set(viewer.user.id, set);
+  return { direct_messages: body.direct_messages };
 });
 
 route("GET", "/users/@me/export", ({ viewer }) => {

@@ -162,8 +162,13 @@ async fn blocking_ends_the_friendship_and_only_the_blocker_can_undo_it() {
     let (status, _) = app.post(&messages, &sam, json!({"content": "still blocked from alice's side"})).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // once nobody blocks, messages flow again
+    // once nobody blocks they are strangers: without a friendship or a shared guild that allows it, the DM stays closed
     assert_eq!(app.delete(&sam_path, &alice).await.0, StatusCode::NO_CONTENT);
+    let (status, error) = app.post(&messages, &sam, json!({"content": "hi again"})).await;
+    assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50007)));
+    // friends again, messages flow
+    app.post("/users/@me/relationships", &sam, json!({"username": "alice"})).await;
+    assert_eq!(app.put_json(&sam_path, &alice, json!({"type": 1})).await.0, StatusCode::NO_CONTENT);
     assert_eq!(app.post(&messages, &sam, json!({"content": "hi again"})).await.0, StatusCode::OK);
 }
 
@@ -340,9 +345,13 @@ async fn presence_is_only_shared_with_accepted_relationships() {
     assert!(!audience(sam_id).await.contains(&alice_id));
     assert!(!audience(alice_id).await.contains(&sam_id));
 
-    // the first message opens it on both sides
+    // the first message opens it on both sides (sent while they share a guild, since strangers may not DM)
+    let (guild, channel) = app.guild_with_channel(&alice).await;
+    let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &alice, json!({})).await;
+    app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &sam, json!({})).await;
     let (status, _) = app.post(&format!("/channels/{}/messages", dm["id"].as_str().expect("id")), &sam, json!({"content": "hi"})).await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(app.delete(&format!("/users/@me/guilds/{guild}"), &sam).await.0, StatusCode::NO_CONTENT);
     assert!(audience(sam_id).await.contains(&alice_id));
     assert!(audience(alice_id).await.contains(&sam_id));
 

@@ -2,11 +2,13 @@
 // the event (or fall back to the REST response) so navigation after "create" lands on a known entity.
 
 import { getOwnActivities } from "../activity/own";
+import { isDmRefused } from "../api/errors";
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
 import { appStore, isChannelUnread, type AppState } from "../api/store";
 import { isDesktop } from "../desktop";
 import { ChannelType, GatewayOp, type Activity, type Channel, type Guild, type PermissionOverwrite, type PresenceStatus, type Snowflake } from "../api/types";
+import { openModal } from "./modalStore";
 import { dmPath, go, guildPath } from "./nav";
 import { firstTextChannel } from "./channels";
 import type { ServerTemplate } from "./templates";
@@ -80,9 +82,14 @@ export async function deleteGuild(guildId: Snowflake): Promise<void> {
 
 /** Open (or create) the DM with `userId` and navigate to it. */
 export async function openDirectMessage(userId: Snowflake): Promise<void> {
-  const channel = await request<Channel>("POST", "/users/@me/channels", { recipient_id: userId });
-  appStore.getState().upsertChannel(channel);
-  go(dmPath(channel.id));
+  try {
+    const channel = await request<Channel>("POST", "/users/@me/channels", { recipient_id: userId });
+    appStore.getState().upsertChannel(channel);
+    go(dmPath(channel.id));
+  } catch (e) {
+    if (!isDmRefused(e)) throw e;
+    openModal({ type: "dmRefused" });
+  }
 }
 
 export async function createGroupDM(userIds: Snowflake[]): Promise<void> {
