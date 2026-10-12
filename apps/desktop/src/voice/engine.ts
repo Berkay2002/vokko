@@ -535,11 +535,13 @@ export function wireVoice(): void {
   });
   voiceStore.subscribe((next, prev) => sync(next, prev));
   useMedia.subscribe((next, prev) => {
-    // Our own camera / screen share started or ended: tell the server (op 4) and play the sound.
+    // Our own camera / screen share started or ended: play the sound. Only the mock backend (fake transport) learns it from
+    // op 4; the real server reads it from LiveKit's webhook, and to it an op 4 with unchanged mute/deafen means "reconnect
+    // me" (a fresh token), which tore the call down and dropped the camera / screen share it was announcing.
     if (next.cameraOn !== prev.cameraOn || next.screenOn !== prev.screenOn) {
       const { guildId, channelId } = getVoice();
       if (channelId) {
-        sendOp4(guildId, channelId);
+        if (transportKind === "fake") sendOp4(guildId, channelId);
         if (next.cameraOn !== prev.cameraOn) playSound(next.cameraOn ? "camera-on" : "camera-off");
         if (next.screenOn !== prev.screenOn) playSound(next.screenOn ? "stream-start" : "stream-stop");
       }
