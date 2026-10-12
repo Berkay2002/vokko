@@ -88,6 +88,7 @@ export const AUDIT_ACTIONS: { value: AuditLogEvent; label: string }[] = [
   { value: AuditLogEvent.AutoModerationRuleUpdate, label: "Update AutoMod Rule" },
   { value: AuditLogEvent.AutoModerationRuleDelete, label: "Delete AutoMod Rule" },
   { value: AuditLogEvent.AutoModerationBlockMessage, label: "AutoMod Blocked Message" },
+  { value: AuditLogEvent.ReportUpdate, label: "Update Report" },
 ];
 
 const userName = (lookup: AuditLookup, id: string | null | undefined): string => {
@@ -162,6 +163,10 @@ export function describeAuditEntry(entry: AuditLogEntry, lookup: AuditLookup): s
       return `${actor} deleted the AutoMod rule ${String(named(entry, "old") ?? "")}`.trim();
     case AuditLogEvent.AutoModerationBlockMessage:
       return `AutoMod blocked a message by ${userName(lookup, entry.user_id)} in ${channelName(lookup, entry.options?.channel_id)} (${entry.options?.auto_moderation_rule_name ?? "rule"})`;
+    case AuditLogEvent.ReportUpdate: {
+      const status = changed(entry, "status")?.new_value;
+      return status === "open" ? `${actor} reopened a report` : status === "dismissed" ? `${actor} dismissed a report` : `${actor} resolved a report`;
+    }
     default:
       return `${actor} performed action ${entry.action_type}`;
   }

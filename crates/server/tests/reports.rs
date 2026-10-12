@@ -253,3 +253,27 @@ async fn moderators_never_see_reports_about_themselves_or_deleted_channels_unles
     let other_path = format!("/guilds/{other_guild}/reports/{}", id(&gone));
     assert_eq!(w.app.patch(&other_path, &w.owner, json!({"status": "resolved"})).await.0, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn closing_and_reopening_a_report_is_audited_without_its_contents() {
+    let w = world().await;
+    let (alice, _) = w.join("alice").await;
+    let (bob, bob_id) = w.join("bob").await;
+    let message = w.say(&alice, &w.general, "rude").await;
+    let (_, report) = w.app.post(&w.message_path(&w.general, &message), &bob, json!({"reason": "harassment", "details": "private details"})).await;
+    let path = format!("/guilds/{}/reports/{}", w.guild, id(&report));
+    assert_eq!(w.app.patch(&path, &w.owner, json!({"status": "dismissed"})).await.0, StatusCode::OK);
+    assert_eq!(w.app.patch(&path, &w.owner, json!({"status": "dismissed"})).await.0, StatusCode::OK, "same status: no entry");
+    assert_eq!(w.app.patch(&path, &w.owner, json!({"status": "open"})).await.0, StatusCode::OK);
+
+    let (status, log) = w.app.get(&format!("/guilds/{}/audit-logs?action_type=250", w.guild), &w.owner).await;
+    assert_eq!(status, StatusCode::OK, "{log}");
+    let entries = log["audit_log_entries"].as_array().expect("entries");
+    let statuses: Vec<(Value, Value)> = entries.iter().map(|e| (e["changes"][0]["old_value"].clone(), e["changes"][0]["new_value"].clone())).collect();
+    assert_eq!(statuses, [(json!("dismissed"), json!("open")), (json!("open"), json!("dismissed"))], "newest first");
+    for entry in entries {
+        assert_eq!((entry["target_id"].as_str(), entry["changes"].as_array().map(Vec::len)), (Some(id(&report).as_str()), Some(1)));
+        assert!(entry.get("options").is_none());
+        assert!(!entry.to_string().contains("private details") && !entry.to_string().contains(&bob_id), "no report contents: {entry}");
+    }
+}

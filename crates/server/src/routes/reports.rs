@@ -9,9 +9,10 @@ use axum::routing::{get, patch, post};
 use serde::Deserialize;
 use time::OffsetDateTime;
 use vokko_protocol::api::permissions::{ADMINISTRATOR, MANAGE_MESSAGES, MODERATE_MEMBERS, READ_MESSAGE_HISTORY, VIEW_CHANNEL};
-use vokko_protocol::api::{CreateReportRequest, Report, ReportReason, ReportStatus, ReportTargetType, Snowflake, UpdateReportRequest};
+use vokko_protocol::api::{AuditLogEvent, CreateReportRequest, Report, ReportReason, ReportStatus, ReportTargetType, Snowflake, UpdateReportRequest};
 
 use crate::access::{channel_access, guild_access, guild_channels_with_permissions};
+use crate::audit::{self, AuditReason, Entry};
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, ApiQuery, parse_id};
@@ -394,6 +395,7 @@ async fn update(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path((guild, report)): Path<(String, String)>,
+    AuditReason(reason): AuditReason,
     ApiJson(body): ApiJson<UpdateReportRequest>,
 ) -> ApiResult<Json<Report>> {
     let moderator = require_moderator(&state, user_id, &guild).await?;
@@ -408,20 +410,30 @@ async fn update(
         .await?;
     found.ok_or_else(ApiErr::not_found)?;
     let closing = body.status != ReportStatus::Open;
-    // Reopening fails (400) when the reporter has opened a newer report of the same target meanwhile.
-    let updated = sqlx::query("UPDATE reports SET status = $2, closed_by = CASE WHEN $3 THEN $4 END, closed_at = CASE WHEN $3 THEN now() END WHERE id = $1")
-        .bind(report)
-        .bind(status_str(body.status))
-        .bind(closing)
-        .bind(user_id)
-        .execute(&state.db)
-        .await;
-    match updated {
-        Ok(_) => {}
+    // Reopening fails (400) when the reporter has opened a newer report of the same target meanwhile. The row lock makes
+    // the returned old status the one this update replaced, also when two moderators act at once.
+    let updated: Result<Option<(String,)>, _> = sqlx::query_as(
+        "UPDATE reports r SET status = $2, closed_by = CASE WHEN $3 THEN $4 END, closed_at = CASE WHEN $3 THEN now() END \
+         FROM (SELECT id, status FROM reports WHERE id = $1 FOR UPDATE) old WHERE r.id = old.id RETURNING old.status",
+    )
+    .bind(report)
+    .bind(status_str(body.status))
+    .bind(closing)
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await;
+    let old = match updated {
+        Ok(Some((old,))) => old,
+        Ok(None) => return Err(ApiErr::not_found()),
         Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
             return Err(ApiErr::invalid("status", "The reporter already has an open report of this target."));
         }
         Err(error) => return Err(error.into()),
+    };
+    let new = status_str(body.status);
+    if old != new {
+        // Only the report id and status: the reporter, target and reason stay with the moderators.
+        audit::record(&state, Entry::new(moderator.guild, user_id, AuditLogEvent::ReportUpdate, report).change("status", &old, new).reason(reason)).await?;
     }
     Ok(Json(one(&state, report).await?))
 }

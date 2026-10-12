@@ -2040,6 +2040,9 @@ numeric_enum!(
         OnboardingPromptDelete = 165,
         OnboardingCreate = 166,
         OnboardingUpdate = 167,
+        /// Vokko-only (Discord has no report queue): a moderator closed or reopened a report (MOD-009). `target_id` is the
+        /// report id, the one change is `status`.
+        ReportUpdate = 250,
     }
 );
 
@@ -4454,6 +4457,7 @@ mod tests {
         let created = GatewayEvent::GuildAuditLogEntryCreate(serde_json::from_value(entry).expect("entry"));
         assert_eq!((created.name(), created.data()["action_type"].as_u64()), ("GUILD_AUDIT_LOG_ENTRY_CREATE", Some(31)));
         assert_eq!(AuditLogEvent::from_u8(143), Some(AuditLogEvent::AutoModerationBlockMessage));
+        assert_eq!(AuditLogEvent::from_u8(250), Some(AuditLogEvent::ReportUpdate));
         let rule = json!({
             "id": "950", "guild_id": "300", "name": "No slurs", "creator_id": "100", "event_type": 1, "trigger_type": 1,
             "trigger_metadata": {"keyword_filter": ["bad*"], "allow_list": ["badge"]}, "actions": [{"type": 1, "metadata": {"custom_message": "Nope"}}],

@@ -1369,6 +1369,7 @@ export enum AuditLogEvent {
   OnboardingPromptDelete = 165,
   OnboardingCreate = 166,
   OnboardingUpdate = 167,
+  ReportUpdate = 250, // Vokko-only: a report closed or reopened; target_id is the report, the change is `status`
 }
 /** One changed key; a missing side means it was not set before (create) or after (delete). */
 export interface AuditLogChange {

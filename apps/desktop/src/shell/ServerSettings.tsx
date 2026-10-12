@@ -13,6 +13,7 @@ import { Category, Field, Page, Select, Unavailable } from "./settings/controls"
 import { FullScreenSettings, useFrameLayout, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { AuditLogPage } from "./settings/AuditLogPage";
 import { BansPage } from "./settings/BansPage";
+import { ReportsPage } from "./settings/ReportsPage";
 import { AutoModPage, SafetyPage } from "./settings/SafetyPage";
 import { SaveBar } from "./settings/SaveBar";
 import { blockedByUnsaved } from "./settings/unsaved";
@@ -69,6 +70,7 @@ const SECTIONS: SectionDef[] = [
   { id: "safety", label: "Safety Setup", group: "moderation" },
   { id: "audit", label: "Audit Log", group: "moderation", needs: [Perm.VIEW_AUDIT_LOG] },
   { id: "bans", label: "Bans", group: "moderation", needs: [Perm.BAN_MEMBERS] },
+  { id: "reports", label: "Reports", group: "moderation", needs: [Perm.MANAGE_MESSAGES, Perm.MODERATE_MEMBERS] },
   { id: "automod", label: "AutoMod", group: "moderation" },
   { id: "community", label: "Enable Community", group: "bottom", outline: ["Enable Community"] },
   { id: "template", label: "Server Template", group: "bottom", outline: ["Template Title", "Description"] },
@@ -316,6 +318,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         return <InvitesPage guildId={guildId} canCreate={canInvite} canList={canManage} channels={channels} />;
       case "bans":
         return <BansPage guild={guild} />;
+      case "reports":
+        return <ReportsPage guild={guild} />;
       case "integrations":
         return <IntegrationsPage guild={guild} canManageGuild={canManage} canManageWebhooks={owner || perms.can(Perm.MANAGE_WEBHOOKS)} />;
       case "emoji":
