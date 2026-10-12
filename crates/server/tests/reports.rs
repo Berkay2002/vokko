@@ -277,3 +277,60 @@ async fn closing_and_reopening_a_report_is_audited_without_its_contents() {
         assert!(!entry.to_string().contains("private details") && !entry.to_string().contains(&bob_id), "no report contents: {entry}");
     }
 }
+
+/// The report status audit entries of one report as (old, new), newest first.
+async fn status_changes(w: &World, report: &str) -> Vec<(Value, Value)> {
+    let (status, log) = w.app.get(&format!("/guilds/{}/audit-logs?action_type=250", w.guild), &w.owner).await;
+    assert_eq!(status, StatusCode::OK, "{log}");
+    let entries = log["audit_log_entries"].as_array().expect("entries");
+    entries
+        .iter()
+        .filter(|e| e["target_id"].as_str() == Some(report))
+        .map(|e| (e["changes"][0]["old_value"].clone(), e["changes"][0]["new_value"].clone()))
+        .collect()
+}
+
+/// Two moderators closing the same report at once. `update` locks the row (`SELECT ... FOR UPDATE` inside the UPDATE),
+/// so the second request waits and its RETURNING sees the first one's status: no audit entry records a stale old status.
+/// The last writer wins (there is no conflict error); each entry's old status is the previous entry's new status, and
+/// two identical closes record one entry. Without the lock both would read "open" and log open -> x twice.
+#[tokio::test]
+async fn concurrent_moderators_never_audit_a_stale_status() {
+    let w = world().await;
+    let (alice, _) = w.join("alice").await;
+    let (moderator, moderator_id) = w.join("mod").await;
+    w.grant(&moderator_id, MANAGE_MESSAGES).await;
+
+    for round in 0..5 {
+        // A reporter per round: reporting is rate limited per reporter.
+        let (bob, _) = w.join(&format!("bob{round}")).await;
+        let message = w.say(&alice, &w.general, &format!("rude {round}")).await;
+        let (_, report) = w.app.post(&w.message_path(&w.general, &message), &bob, json!({"reason": "harassment"})).await;
+        let report = id(&report);
+        let path = format!("/guilds/{}/reports/{report}", w.guild);
+
+        // Different statuses: both succeed and the entries chain open -> first -> second.
+        let ((status_a, body_a), (status_b, body_b)) =
+            tokio::join!(w.app.patch(&path, &w.owner, json!({"status": "resolved"})), w.app.patch(&path, &moderator, json!({"status": "dismissed"})));
+        assert_eq!((status_a, status_b), (StatusCode::OK, StatusCode::OK), "{body_a} / {body_b}");
+        let changes = status_changes(&w, &report).await;
+        assert_eq!(changes.len(), 2, "one entry per change: {changes:?}");
+        let (last, first) = (&changes[0], &changes[1]);
+        assert_eq!(first.0, json!("open"), "the first close replaced open: {changes:?}");
+        assert_eq!(last.0, first.1, "the second close replaced the first one's status, not a stale open: {changes:?}");
+        let (_, list) = w.reports(&w.owner, "?status=all").await;
+        let row = list.as_array().expect("report list").iter().find(|r| id(r) == report).expect("report listed").clone();
+        assert_eq!(row["status"], last.1, "the stored status is the last audited one");
+
+        // The same status at once, then a stale resolve after it: one entry, the later requests see it resolved already.
+        let message = w.say(&alice, &w.general, &format!("again {round}")).await;
+        let (_, report) = w.app.post(&w.message_path(&w.general, &message), &bob, json!({"reason": "spam"})).await;
+        let report = id(&report);
+        let path = format!("/guilds/{}/reports/{report}", w.guild);
+        let ((status_a, body_a), (status_b, body_b)) =
+            tokio::join!(w.app.patch(&path, &w.owner, json!({"status": "resolved"})), w.app.patch(&path, &moderator, json!({"status": "resolved"})));
+        assert_eq!((status_a, status_b), (StatusCode::OK, StatusCode::OK), "{body_a} / {body_b}");
+        assert_eq!(w.app.patch(&path, &moderator, json!({"status": "resolved"})).await.0, StatusCode::OK);
+        assert_eq!(status_changes(&w, &report).await, [(json!("open"), json!("resolved"))], "one entry for one change");
+    }
+}

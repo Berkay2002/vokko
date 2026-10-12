@@ -53,6 +53,8 @@ cargo run -p vokko-server -- seed    # idempotent demo data
 cargo test -p vokko-server           # integration tests against throwaway databases
 ```
 
+Renamed migration: `20261012220000_profile_widgets.sql` became `20261013110000_profile_widgets.sql` (same SQL, new version). A dev database that applied the old name no longer starts: sqlx refuses to migrate because version 20261012220000 is recorded as applied but has no file, and the new version would add `users.widgets` a second time. Drop and recreate that database (for example `dropdb vokko_dev` then `createdb vokko_dev`, with the same owner as before), then run `serve` and `seed` again. Test databases are unaffected, because every test creates a fresh one.
+
 `seed` creates the users `sam`, `carol`, `alice`, `bob` and `nova` (password `vokko-dev`), the guild "Sam's server" (categories, text and voice channels, a Moderator role, a hidden `#mods` channel, invite code `vokko-dev`), a DM between `sam` and `carol` with about 60 messages (replies, reactions, edits, a code block, a pin, an image attachment), a second unread DM, friendships, one pending friend request and pinned presences. Running it again changes nothing.
 
 Smoke test against the running server:
