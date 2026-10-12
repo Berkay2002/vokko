@@ -13,6 +13,7 @@ import { Category, Field, Page, Select, Unavailable } from "./settings/controls"
 import { FullScreenSettings, useFrameLayout, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { AuditLogPage } from "./settings/AuditLogPage";
 import { BansPage } from "./settings/BansPage";
+import { AccessPage } from "./settings/AccessPage";
 import { ReportsPage } from "./settings/ReportsPage";
 import { AutoModPage, SafetyPage } from "./settings/SafetyPage";
 import { SaveBar } from "./settings/SaveBar";
@@ -334,6 +335,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         );
       case "safety":
         return <SafetyPage guild={guild} canEdit={canManage} />;
+      case "access":
+        return <AccessPage guild={guild} canEdit={canManage} />;
       case "automod":
         return <AutoModPage guild={guild} canEdit={canManage} />;
       case "onboarding":

@@ -2955,3 +2955,6 @@ button.channel-header-topic:hover {
   color: var(--text-muted);
   font-size: 14px;
 }
+
+.age-gate { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
+.age-gate-actions { display: flex; gap: 8px; }

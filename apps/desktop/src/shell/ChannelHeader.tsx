@@ -48,10 +48,12 @@ export interface ChannelHeaderProps {
   /** DM user profile side panel (1:1 DMs only). */
   profileOpen: boolean;
   onToggleProfile(): void;
+  /** Age gate not confirmed yet: show only the name and icon. */
+  gated?: boolean;
 }
 
 /** 48 px header above the message area: channel/DM identity on the left, toolbar on the right. */
-export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOpen, onToggleProfile }: ChannelHeaderProps) {
+export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOpen, onToggleProfile, gated }: ChannelHeaderProps) {
   const [pinsAnchor, setPinsAnchor] = useState<HTMLElement | null>(null);
   const [pinsOpen, setPinsOpen] = useState(false);
   const muted = useIsMuted(channel.id);
@@ -64,7 +66,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
   const forum = channel.type === ChannelType.GuildForum;
   const first = channel.recipients?.[0];
   const group = channel.type === ChannelType.GroupDM;
-  useShortcut("pins", () => setPinsOpen(o => !o), !voice && !forum);
+  useShortcut("pins", () => setPinsOpen(o => !o), !voice && !forum && !gated);
   const oneToOne = !guild && !group && !!first;
 
   const bell = (event: React.MouseEvent<HTMLButtonElement>) => {
@@ -92,7 +94,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
               <Hash size={24} className="channel-header-icon" />
             )}
             <h1 className="channel-header-name">{channel.name}</h1>
-            {channel.topic && (
+            {channel.topic && !gated && (
               <>
                 <span className="channel-header-divider" />
                 <button type="button" className="channel-header-topic" title={channel.topic} aria-haspopup="dialog" aria-label={`Channel topic: ${channel.topic.length > 120 ? `${channel.topic.slice(0, 120)}...` : channel.topic}`} onClick={() => openModal({ type: "channelTopic", channelId: channel.id })}>
@@ -109,6 +111,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
         )}
       </div>
       <div className="channel-header-toolbar">
+        {gated ? null : <>
         {guild ? (
           <>
             {voice ? (
@@ -164,8 +167,9 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             <Search size={16} />
           </div>
         )}
+        </>}
       </div>
-      <Popout anchor={pinsAnchor} open={pinsOpen} onClose={() => setPinsOpen(false)} side="bottom" align="end" gap={8} className="pins-popout-host">
+      <Popout anchor={pinsAnchor} open={pinsOpen && !gated} onClose={() => setPinsOpen(false)} side="bottom" align="end" gap={8} className="pins-popout-host">
         <PinnedMessages channelId={channel.id} onNavigate={closePins} />
       </Popout>
     </header>

@@ -215,13 +215,23 @@ route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
   if (filter !== undefined && (typeof filter !== "number" || !Number.isInteger(filter) || filter < ExplicitContentFilter.Disabled || filter > ExplicitContentFilter.AllMembers)) {
     fail(400, 50035, "Invalid Form Body", { explicit_content_filter: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 1, 2)." } });
   }
+  const nsfwLevel = body.nsfw_level;
+  if (nsfwLevel !== undefined && nsfwLevel !== 0 && nsfwLevel !== 3) {
+    fail(400, 50035, "Invalid Form Body", { nsfw_level: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 3)." } });
+  }
+  if ("rules_channel_id" in body && body.rules_channel_id !== null) {
+    const rules = typeof body.rules_channel_id === "string" ? db.channels.get(body.rules_channel_id) : undefined;
+    if (!rules || rules.guild_id !== guild.guild.id || rules.type !== ChannelType.GuildText) {
+      fail(400, 50035, "Invalid Form Body", { rules_channel_id: { code: "CHANNEL_INVALID", message: "Must be a text channel of this server." } });
+    }
+  }
+  const name = typeof body.name === "string" ? body.name.trim() : undefined;
+  if (name !== undefined && (name.length < 2 || name.length > 100)) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 2 and 100 in length." } });
+  if (nsfwLevel !== undefined) guild.guild.nsfw_level = nsfwLevel;
+  if ("rules_channel_id" in body) guild.guild.rules_channel_id = body.rules_channel_id as string | null;
   if (typeof level === "number") guild.guild.verification_level = level;
   if (typeof filter === "number") guild.guild.explicit_content_filter = filter;
-  if (typeof body.name === "string") {
-    const name = body.name.trim();
-    if (name.length < 2 || name.length > 100) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 2 and 100 in length." } });
-    guild.guild.name = name;
-  }
+  if (name !== undefined) guild.guild.name = name;
   if ("icon_attachment_id" in body) guild.guild.icon = pendingAttachment(str(body.icon_attachment_id), viewer.user.id)?.url ?? null;
   if ("banner_attachment_id" in body) guild.guild.banner = pendingAttachment(str(body.banner_attachment_id), viewer.user.id)?.url ?? null;
   if ("system_channel_id" in body) guild.guild.system_channel_id = str(body.system_channel_id) ?? null;
@@ -409,6 +419,11 @@ route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
   purgeChannelRefs(channel.id);
   db.channels.delete(channel.id);
   db.messages.delete(channel.id);
+  const owner = db.guilds.get(channel.guild_id);
+  if (owner?.guild.rules_channel_id === channel.id) {
+    owner.guild.rules_channel_id = null;
+    emit(owner.members.keys(), "GUILD_UPDATE", { ...owner.guild });
+  }
   return payload;
 });
 

@@ -184,6 +184,15 @@ export interface Guild {
   banner?: string | null; // banner image URL (MANAGE_GUILD sets it via banner_attachment_id); null/absent = none
   verification_level?: VerificationLevel; // safety setup (MANAGE_GUILD); always sent by the server
   explicit_content_filter?: ExplicitContentFilter;
+  nsfw_level?: NsfwLevel; // Access (MANAGE_GUILD); always sent by the server. AgeRestricted gates every channel of the server
+  rules_channel_id?: Snowflake | null; // Access: the rules channel (a text channel of the guild); always sent, null when unset
+}
+/** Discord's guild NSFW level; only Default and AgeRestricted can be set. */
+export enum NsfwLevel {
+  Default = 0,
+  Explicit = 1,
+  Safe = 2,
+  AgeRestricted = 3,
 }
 /** Who may send messages; members with any role bypass it (Discord rule). */
 export enum VerificationLevel {

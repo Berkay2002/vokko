@@ -652,7 +652,25 @@ pub struct Guild {
     pub verification_level: VerificationLevel,
     #[serde(default)]
     pub explicit_content_filter: ExplicitContentFilter,
+    /// Access: `AgeRestricted` puts the age gate on every channel of the server (MANAGE_GUILD edits it).
+    #[serde(default)]
+    pub nsfw_level: NsfwLevel,
+    /// Access: the text channel shown as the server rules; always sent, `null` when unset.
+    #[serde(default)]
+    pub rules_channel_id: Option<Snowflake>,
 }
+
+numeric_enum!(
+    /// Discord's guild NSFW level. Only `Default` and `AgeRestricted` can be set (Discord's UI offers the same two).
+    #[derive(Default)]
+    NsfwLevel {
+        #[default]
+        Default = 0,
+        Explicit = 1,
+        Safe = 2,
+        AgeRestricted = 3,
+    }
+);
 
 numeric_enum!(
     /// Who may send messages in the guild's channels (members with any role bypass it, like Discord).
@@ -1660,6 +1678,12 @@ pub struct UpdateGuildRequest {
     pub verification_level: Option<VerificationLevel>,
     #[serde(default)]
     pub explicit_content_filter: Option<ExplicitContentFilter>,
+    /// `Default` or `AgeRestricted` (anything else is 400 50035).
+    #[serde(default)]
+    pub nsfw_level: Option<NsfwLevel>,
+    /// A text channel of this guild; `null` clears it.
+    #[serde(default, deserialize_with = "double_option")]
+    pub rules_channel_id: Option<Option<Snowflake>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3908,12 +3932,12 @@ mod tests {
         let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false, "unicode_emoji": null});
         round_trip::<Role>(role.clone());
         round_trip::<Guild>(
-            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0}),
+            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null}),
         );
         round_trip::<Guild>(json!({
             "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null,
             "tag": {"tag": "VKO", "badge": "bolt", "color_primary": 5793266, "color_secondary": 3878800}, "theme": {"preset": null, "primary": 1, "accent": 2},
-            "verification_level": 3, "explicit_content_filter": 2
+            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201"
         }));
         round_trip::<GuildMember>(
             json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}),
@@ -4069,7 +4093,7 @@ mod tests {
 
     #[test]
     fn ready_and_flattened_guild_events() {
-        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0});
+        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null});
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
@@ -4308,7 +4332,7 @@ mod tests {
         round_trip::<ReactionEmoji>(json!({"id": "700", "name": "blob_wave", "animated": true}));
         round_trip::<ReactionEmoji>(json!({"id": null, "name": "👍"}));
         let guild = json!({
-            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0,
+            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null,
             "channels": [], "members": [], "member_count": 0, "stickers": [], "emojis": [emoji.clone()], "voice_states": []
         });
         round_trip::<GuildWithState>(guild);
@@ -4437,6 +4461,9 @@ mod tests {
             (Some(VerificationLevel::Medium), Some(ExplicitContentFilter::MembersWithoutRoles))
         );
         assert!(serde_json::from_value::<UpdateGuildRequest>(json!({"verification_level": 5})).is_err());
+        let access: UpdateGuildRequest = serde_json::from_value(json!({"nsfw_level": 3, "rules_channel_id": null})).expect("access");
+        assert_eq!((access.nsfw_level, access.rules_channel_id), (Some(NsfwLevel::AgeRestricted), Some(None)));
+        assert_eq!(serde_json::from_value::<UpdateGuildRequest>(json!({})).expect("empty").rules_channel_id, None);
         let role: RoleRequest = serde_json::from_value(json!({"unicode_emoji": null})).expect("role icon");
         assert_eq!(role.unicode_emoji, Some(None));
         let prune: PruneRequest = serde_json::from_value(json!({"days": 7, "include_roles": ["301"], "compute_prune_count": false})).expect("prune");

@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! Server admin parity: role hierarchy, prune, ban with message history deletion, audit log and its visibility,
-//! the overwrite tri-state round trip, verification level and AutoMod keyword rules.
+//! the overwrite tri-state round trip, verification level, the Access page fields and AutoMod keyword rules.
 mod common;
 
 use std::time::Duration;
@@ -566,4 +566,54 @@ async fn verification_level_gates_new_members_without_roles() {
     let (status, _) = w.app.get(&w.path(""), &w.owner).await;
     assert_eq!(status, StatusCode::OK);
     let _ = w.owner_id;
+}
+
+#[tokio::test]
+async fn access_settings_age_restriction_and_rules_channel() {
+    let w = World::new().await;
+    let (member, _) = w.member("plain").await;
+    let (_, guild) = w.app.get(&w.path(""), &w.owner).await;
+    assert_eq!((guild["nsfw_level"].clone(), guild["rules_channel_id"].clone()), (json!(0), Value::Null));
+
+    let (_, rules) = w.app.post(&w.path("/channels"), &w.owner, json!({"name": "rules", "type": 0})).await;
+    let (_, voice) = w.app.post(&w.path("/channels"), &w.owner, json!({"name": "Lounge", "type": 2})).await;
+    let (_, other_guild) = w.app.post("/guilds", &w.owner, json!({"name": "Elsewhere"})).await;
+    let (_, foreign) = w.app.post(&format!("/guilds/{}/channels", other_guild["id"].as_str().expect("id")), &w.owner, json!({"name": "x", "type": 0})).await;
+
+    // Discord's staff ratings (1 explicit, 2 safe) are not settable, nor are other kinds of channel or another guild's channel.
+    for (body, field) in [
+        (json!({"name": "Not applied", "nsfw_level": 1}), "nsfw_level"),
+        (json!({"name": "Not applied", "nsfw_level": 2}), "nsfw_level"),
+        (json!({"name": "Not applied", "rules_channel_id": voice["id"]}), "rules_channel_id"),
+        (json!({"name": "Not applied", "rules_channel_id": foreign["id"]}), "rules_channel_id"),
+    ] {
+        let (status, error) = w.app.patch(&w.path(""), &w.owner, body.clone()).await;
+        assert_eq!((status, code(&error)), (StatusCode::BAD_REQUEST, 50035), "{body}: {error}");
+        assert!(error["errors"][field].is_object(), "{error}");
+    }
+    let (status, _) = w.app.patch(&w.path(""), &member, json!({"nsfw_level": 3})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "needs MANAGE_GUILD");
+    let (_, guild) = w.app.get(&w.path(""), &w.owner).await;
+    assert_eq!((guild["name"].clone(), guild["nsfw_level"].clone()), (json!("Test guild"), json!(0)), "a refused request changes nothing");
+
+    let (status, guild) = w.app.patch(&w.path(""), &w.owner, json!({"nsfw_level": 3, "rules_channel_id": rules["id"]})).await;
+    assert_eq!((status, guild["nsfw_level"].clone(), guild["rules_channel_id"].clone()), (StatusCode::OK, json!(3), rules["id"].clone()));
+    let (_, seen) = w.app.get(&w.path(""), &member).await;
+    assert_eq!((seen["nsfw_level"].clone(), seen["rules_channel_id"].clone()), (json!(3), rules["id"].clone()));
+    let changes = &w.audit("?action_type=1").await[0]["changes"];
+    assert_eq!(changes, &json!([{"key": "rules_channel_id", "new_value": rules["id"]}, {"key": "nsfw_level", "old_value": 0, "new_value": 3}]));
+
+    // A missing key leaves it alone; null clears the rules channel; deleting the channel clears it too.
+    let (_, guild) = w.app.patch(&w.path(""), &w.owner, json!({"name": "Still"})).await;
+    assert_eq!((guild["nsfw_level"].clone(), guild["rules_channel_id"].clone()), (json!(3), rules["id"].clone()));
+    let (_, guild) = w.app.patch(&w.path(""), &w.owner, json!({"rules_channel_id": null, "nsfw_level": 0})).await;
+    assert_eq!((guild["nsfw_level"].clone(), guild["rules_channel_id"].clone()), (json!(0), Value::Null));
+    w.app.patch(&w.path(""), &w.owner, json!({"rules_channel_id": rules["id"]})).await;
+    let address = w.app.serve().await;
+    let mut member_ws = Client::connect(&address, &member).await;
+    let (status, _) = w.app.delete(&format!("/channels/{}", rules["id"].as_str().expect("id")), &w.owner).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(member_ws.wait_for("GUILD_UPDATE").await["rules_channel_id"], Value::Null, "members learn it was cleared");
+    let (_, guild) = w.app.get(&w.path(""), &w.owner).await;
+    assert_eq!(guild["rules_channel_id"], Value::Null);
 }

@@ -9,7 +9,9 @@ import { ForumChannel } from "../forum/ForumChannel";
 import { ThreadHost } from "../threads/ThreadHost";
 import { ThreadPanelHost, useThreadPanelOpen } from "../threads/ThreadPanel";
 import { Measure } from "../perf/Measure";
+import { AgeGate } from "./AgeGate";
 import { ChannelHeader } from "./ChannelHeader";
+import { useAgeGated } from "./AgeGate";
 import { DmProfilePanel } from "./DmProfilePanel";
 import { DmSidebar } from "./DmSidebar";
 import { FriendsPage } from "./FriendsPage";
@@ -120,6 +122,7 @@ export function AppShell() {
   const guild = useStore(s => (guildId ? s.guilds[guildId] : undefined));
   const { bits } = usePermissions(guildId);
   const channel = useStore(s => (channelId ? s.channels[channelId] : undefined));
+  const gated = useAgeGated(channel);
   // Only /channels/<guild> (no channel) needs the guild's channels, to pick where to go. Selecting the id, not the channel list, keeps
   // the whole shell from re-rendering whenever any channel in the guild changes (every new message bumps last_message_id).
   const redirectTarget = useStore(s => {
@@ -263,23 +266,25 @@ export function AppShell() {
           )}
           {channel && (
             <>
-              <ChannelHeader channel={channel} membersOpen={membersVisible && !!guild} onToggleMembers={toggleMembers} profileOpen={profileVisible && !!dmRecipient} onToggleProfile={toggleProfile} />
+              <ChannelHeader channel={channel} gated={gated} membersOpen={membersVisible && !!guild} onToggleMembers={toggleMembers} profileOpen={profileVisible && !!dmRecipient} onToggleProfile={toggleProfile} />
               <div className={`channel-body${threadOpen && !threadSplitView ? " thread-full" : ""}`}>
                 <div className="channel-chat">
-                  {channel.type === ChannelType.GuildForum ? (
-                    <ForumChannel key={channel.id} channel={channel} />
-                  ) : channel.type === ChannelType.GuildStage ? (
-                    <StageView key={channel.id} channel={channel} />
-                  ) : text ? (
-                    <>
-                      {!channel.guild_id && channelSlots.ChannelTop && <channelSlots.ChannelTop channel={channel} />}
-                      <Messages key={channel.id} channelId={channel.id} />
-                    </>
-                  ) : (
-                    <VoiceChannelPage key={channel.id} channel={channel} />
-                  )}
+                  <AgeGate key={channel.id} channel={channel}>
+                    {channel.type === ChannelType.GuildForum ? (
+                      <ForumChannel key={channel.id} channel={channel} />
+                    ) : channel.type === ChannelType.GuildStage ? (
+                      <StageView key={channel.id} channel={channel} />
+                    ) : text ? (
+                      <>
+                        {!channel.guild_id && channelSlots.ChannelTop && <channelSlots.ChannelTop channel={channel} />}
+                        <Messages key={channel.id} channelId={channel.id} />
+                      </>
+                    ) : (
+                      <VoiceChannelPage key={channel.id} channel={channel} />
+                    )}
+                  </AgeGate>
                 </div>
-                {threadOpen ? (
+                {gated ? null : threadOpen ? (
                   <ThreadPanelHost channel={channel} />
                 ) : panelOpen && channelSlots.RightPanel ? (
                   <channelSlots.RightPanel channel={channel} />

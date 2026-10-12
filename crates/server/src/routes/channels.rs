@@ -203,7 +203,15 @@ async fn delete_channel(
     .bind(id)
     .fetch_all(&state.db)
     .await?;
-    sqlx::query("UPDATE guilds SET system_channel_id = NULL WHERE id = $1 AND system_channel_id = $2").bind(guild_id).bind(id).execute(&state.db).await?;
+    // Members learn of a cleared system or rules channel through GUILD_UPDATE, after the CHANNEL_DELETE below.
+    let cleared: Option<(i64,)> = sqlx::query_as(
+        "UPDATE guilds SET system_channel_id = NULLIF(system_channel_id, $2), rules_channel_id = NULLIF(rules_channel_id, $2) \
+         WHERE id = $1 AND (system_channel_id = $2 OR rules_channel_id = $2) RETURNING id",
+    )
+    .bind(guild_id)
+    .bind(id)
+    .fetch_optional(&state.db)
+    .await?;
     crate::routes::scheduled_events::channel_removed(&state, id).await?;
     // Its invites lead nowhere now (no INVITE_DELETE: CHANNEL_DELETE already tells the same audience). One transaction with the
     // channel delete, so no invite outlives its channel.
@@ -216,6 +224,11 @@ async fn delete_channel(
     crate::media::remove_files(&state, &attachments.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await;
     crate::stickers::sweep_assets(&state).await;
     state.hub.send(&viewers, &GatewayEvent::ChannelDelete(channel.clone()));
+    if let Some((guild,)) = cleared
+        && let Some(updated) = store::guild(&state, guild).await?
+    {
+        state.hub.send(&access::guild_member_ids(&state, guild).await?, &GatewayEvent::GuildUpdate(updated));
+    }
     if let Some(guild_id) = guild_id {
         audit::record(&state, audit::channel_changes(Entry::new(guild_id, user_id, AuditLogEvent::ChannelDelete, id).reason(reason), Some(&channel), None))
             .await?;
