@@ -9,6 +9,7 @@ import { timestampToSnowflake } from "../api/snowflake";
 import type { Guild, Snowflake } from "../api/types";
 import { Tooltip, useContextMenu, type MenuItem } from "../ui";
 import { GuildIcon } from "../shell/Avatar";
+import { unreadLabel } from "../shell/DmSidebar";
 import { markGuildRead } from "../shell/actions";
 import { isMutedAt, useLocalState } from "../shell/localState";
 import { FolderSettingsModal } from "./FolderSettingsModal";
@@ -67,15 +68,17 @@ function FolderTile({ folder, guilds, expanded, onToggle, onMenu }: { folder: Ra
   const name = folder.folder.name ?? guilds.map(g => g.name).join(", ");
   const color = folderColor(folder.folder.color);
   const state = selected ? "selected" : unread && !expanded ? "unread" : "idle";
+  const label = [`Folder ${name}`, expanded ? null : unreadLabel(mentions, unread)].filter(Boolean).join(", ");
   return (
-    <div className="rail-item" data-state={state}>
+    <div className="rail-item rail-folder-item" data-state={state}>
       <span className="rail-pill" />
       <Tooltip content={name} side="right">
         <button
           type="button"
           className={`rail-tile rail-folder-tile${expanded ? " expanded" : ""}`}
-          aria-label={`Folder ${name}`}
+          aria-label={label}
           aria-expanded={expanded}
+          data-colored={color ? "" : undefined}
           style={color ? ({ "--folder-color": color } as CSSProperties) : undefined}
           onClick={onToggle}
           onContextMenu={onMenu}
@@ -85,13 +88,13 @@ function FolderTile({ folder, guilds, expanded, onToggle, onMenu }: { folder: Ra
           ) : (
             <span className="rail-folder-grid" aria-hidden="true">
               {guilds.slice(0, 4).map(g => (
-                <GuildIcon key={g.id} guild={g} size={16} className="rail-folder-mini" />
+                <GuildIcon key={g.id} guild={g} size={20} className="rail-folder-mini" />
               ))}
             </span>
           )}
         </button>
       </Tooltip>
-      {!expanded && mentions > 0 && <span className="rail-badge">{mentions > 99 ? "99+" : mentions}</span>}
+      {!expanded && mentions > 0 && <span className="rail-badge rail-folder-badge" aria-hidden="true">{mentions > 99 ? "99+" : mentions}</span>}
     </div>
   );
 }
@@ -189,10 +192,12 @@ export function RailGuilds({ renderGuild }: { renderGuild: (guild: Guild) => Rea
 
   const folderMenu = (entry: RailEntry & { kind: "folder" }): MenuItem[] => {
     const ids = entry.folder.guild_ids;
+    const open = expanded.has(entry.folder.id);
     const unread = ids.some(id => guildUnread(appStore.getState(), id).unread);
     return [
       { id: "folder-read", label: "Mark Folder As Read", disabled: !unread, onSelect: () => void Promise.all(ids.map(markGuildRead)).catch(() => undefined) },
       { type: "separator" },
+      { id: "folder-toggle", label: open ? "Collapse Folder" : "Expand Folder", onSelect: () => toggle(entry.folder.id) },
       { id: "folder-settings", label: "Folder Settings", onSelect: () => setEditing(entry.folder.id) },
       { id: "folder-ungroup", label: "Remove Folder", danger: true, onSelect: () => save(ungroupFolder(entries, entry.folder.id)) },
     ];
@@ -213,6 +218,7 @@ export function RailGuilds({ renderGuild }: { renderGuild: (guild: Guild) => Rea
             key={`folder:${folderId}`}
             className={`rail-folder${open ? " open" : ""}`}
             data-folder-id={folderId}
+            data-colored={color ? "" : undefined}
             style={color ? ({ "--folder-color": color } as CSSProperties) : undefined}
           >
             <div className="rail-drag" {...dragProps({ kind: "folder", id: folderId })} {...dropProps(`folder:${folderId}`)}>

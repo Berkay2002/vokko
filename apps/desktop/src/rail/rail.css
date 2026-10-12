@@ -48,7 +48,6 @@
 }
 
 .rail-folder {
-  --folder-color: var(--brand-500);
   display: flex;
   flex: none;
   flex-direction: column;
@@ -67,37 +66,52 @@
   content: "";
   position: absolute;
   inset: 0 12px 0;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg, 16px);
   background: var(--background-mod-normal);
   pointer-events: none;
   z-index: -1;
 }
 
-.rail-folder-tile {
+/* Folder tiles are 48x48 (app-shell spec), so their row is 48 high and the badge sits 2 px past the tile's corner. */
+.rail-item.rail-folder-item {
+  height: 48px;
+}
+
+.rail-tile.rail-folder-tile {
+  width: 48px;
+  height: 48px;
+  background: var(--background-surface-high);
+}
+
+.rail-tile.rail-folder-tile[data-colored] {
   background: color-mix(in srgb, var(--folder-color) 40%, var(--background-surface-high));
 }
 
-.rail-folder-tile.expanded {
+.rail-folder[data-colored].open::after {
+  background: color-mix(in srgb, var(--folder-color) 20%, transparent);
+}
+
+.rail-tile.rail-folder-tile.expanded {
   background: transparent;
 }
 
 .rail-folder-glyph {
-  color: var(--folder-color);
+  color: var(--folder-color, var(--interactive-icon-default));
   fill: currentColor;
 }
 
 .rail-folder-grid {
   display: grid;
-  grid-template-columns: 16px 16px;
-  grid-auto-rows: 16px;
+  grid-template-columns: 20px 20px;
+  grid-auto-rows: 20px;
   gap: 2px;
 }
 
 .rail-folder-grid .rail-folder-mini {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
-  font-size: 7px !important;
+  font-size: 8px !important;
   background: var(--background-surface-higher);
   overflow: hidden;
 }
@@ -120,7 +134,7 @@
   height: 32px;
   border: none;
   border-radius: var(--radius-sm, 4px);
-  color: #fff;
+  color: var(--white);
   cursor: pointer;
 }
 
@@ -132,4 +146,17 @@
 .folder-swatch[aria-checked="true"] {
   outline: 2px solid var(--text-default);
   outline-offset: 2px;
+}
+
+.rail-badge.rail-folder-badge {
+  right: 10px;
+}
+
+/* Compact and cozy density set the row to 36 / 44; the 48 px folder tile keeps the same 4 px margin as the 40 px icons around it. */
+html.density-compact .rail-item.rail-folder-item {
+  height: 44px;
+}
+
+html.density-cozy .rail-item.rail-folder-item {
+  height: 52px;
 }
