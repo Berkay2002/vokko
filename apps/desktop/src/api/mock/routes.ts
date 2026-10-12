@@ -512,6 +512,8 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
     reference_id: forwarding ? null : reference?.message_id ?? null,
     nonce: str(body.nonce) ?? null,
     allowEveryone: hasBit(channelPermsOf(channel, viewer.user.id), Perm.MENTION_EVERYONE),
+    // Without SEND_TTS_MESSAGES the flag is dropped and the message is still sent (the server does the same).
+    tts: body.tts === true && hasBit(channelPermsOf(channel, viewer.user.id), Perm.SEND_TTS_MESSAGES),
   });
   return messageFor(message, viewer.user.id);
 });

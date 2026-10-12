@@ -15,6 +15,7 @@ import { decide, shouldBounce, withThreadMember, type NotifyInput } from "./deci
 import { flashTaskbar, notificationAdapter } from "./desktop";
 import { playSound, wireAudioUnlock } from "./sounds";
 import { notificationTitle, plainBody } from "./text";
+import { speakMessage } from "./tts";
 
 /**
  * Right after a (re)connect the server may replay what we missed. Replayed messages older than STALE_MS don't ping (they
@@ -108,6 +109,7 @@ function show(message: Message): void {
 }
 
 async function onMessage(message: Message): Promise<void> {
+  speakMessage(message, Date.now() < replayUntil);
   const input = buildInput(message);
   if (!input) return;
   const sent = Date.parse(message.timestamp);

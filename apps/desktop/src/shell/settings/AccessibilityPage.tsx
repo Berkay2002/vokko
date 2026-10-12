@@ -65,6 +65,7 @@ export function AccessibilityPage({ onOpenSection }: { onOpenSection?: (id: stri
   const playAnimatedEmoji = usePrefs(s => s.playAnimatedEmoji);
   const stickerAnimation = usePrefs(s => s.stickerAnimation);
   const ttsRate = usePrefs(s => s.ttsRate);
+  const ttsPlayback = usePrefs(s => s.ttsPlayback);
   const imageDescriptions = usePrefs(s => s.showImageDescriptions);
   const legacyChatInput = usePrefs(s => s.legacyChatInput);
 
@@ -172,6 +173,7 @@ export function AccessibilityPage({ onOpenSection }: { onOpenSection?: (id: stri
       </Category>
 
       <Category title="Audio & Screen Reader">
+        <SwitchRow label="Allow playback and usage of /tts command" note="Read aloud messages sent with /tts while their channel is open, and offer /tts when you type a slash command." checked={ttsPlayback} onChange={v => setPref("ttsPlayback", v)} />
         <Row label="Text-to-speech rate" note="How fast messages are read aloud.">
           {id => (
             <>

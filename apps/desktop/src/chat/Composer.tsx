@@ -244,6 +244,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     if (tooLong) return;
     const command = commands.submit(rawContent, uploads.length > 0); // app commands are not run with files attached
     const sendText = typeof command === 'object' ? command.content : rawContent; // a built-in command sends its text like a typed message, files included
+    const tts = typeof command === 'object' && command.tts === true; // /tts
     if (command === 'blocked') return;
     if (command === 'sent') { finishSend(); return; }
     if (anyUploading) {
@@ -253,6 +254,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
         uploads: uploads.filter(u => u.status !== 'error'),
         reply: replyTo,
         mention: mentionReply,
+        tts,
       });
       finishSend();
       return;
@@ -274,6 +276,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       })) : undefined,
       reply: replyTo,
       mention: mentionReply,
+      tts,
     });
     finishSend();
   }

@@ -22,8 +22,8 @@ describe("built-in commands", () => {
   });
   it("declares a message option on the text commands, required only for /me and /spoiler", () => {
     const text = BUILTIN_COMMANDS.filter(c => !isActionBuiltin(c.name));
-    expect(text.map(c => c.name)).toEqual(["me", "shrug", "spoiler", "tableflip", "unflip"]);
-    expect(text.filter(c => c.options?.[0]?.required).map(c => c.name)).toEqual(["me", "spoiler"]);
+    expect(text.map(c => c.name)).toEqual(["me", "shrug", "spoiler", "tableflip", "tts", "unflip"]);
+    expect(text.filter(c => c.options?.[0]?.required).map(c => c.name)).toEqual(["me", "spoiler", "tts"]);
     expect(text.every(c => isBuiltin(c) && c.options?.[0]?.name === "message")).toBe(true);
   });
   it("has the action commands with their options", () => {
@@ -36,13 +36,19 @@ describe("built-in commands", () => {
     expect(builtinContent("nick", "x")).toBeNull();
   });
   it("hides /nick in DMs or without CHANGE_NICKNAME and /thread without the right to create threads", () => {
-    const names = (c: { nick: boolean; threads: boolean }) => builtinsFor([], c).map(x => x.name);
+    const names = (c: { nick: boolean; threads: boolean; tts?: boolean }) => builtinsFor([], { tts: false, ...c }).map(x => x.name);
     expect(names({ nick: false, threads: false })).not.toContain("nick");
     expect(names({ nick: false, threads: false })).not.toContain("thread");
     expect(names({ nick: true, threads: false })).toContain("nick");
     expect(names({ nick: true, threads: false })).not.toContain("thread");
     expect(names({ nick: true, threads: true })).toContain("thread");
     expect(names({ nick: false, threads: false })).toEqual(expect.arrayContaining(["gif", "msg", "me"]));
+  });
+  it("offers /tts only with SEND_TTS_MESSAGES and playback on, and sends the text as typed", () => {
+    expect(builtinsFor([], { nick: true, threads: true, tts: false }).map(c => c.name)).not.toContain("tts");
+    expect(builtinsFor([], { nick: true, threads: true, tts: true }).map(c => c.name)).toContain("tts");
+    expect(builtinContent("tts", "hello  ")).toBe("hello");
+    expect(builtinContent("tts", " ")).toBeNull();
   });
   it("takes free text only with a single option", () => {
     const by = Object.fromEntries(BUILTIN_COMMANDS.map(c => [c.name, takesFreeText(c)]));

@@ -36,7 +36,7 @@ describe("buildSections", () => {
     expect(sections.map(s => s.id)).toEqual(["recent", "app:2", "app:1", "builtin"]);
     expect(sections[0]!.commands.map(c => c.name)).toEqual(["roll"]);
     expect(sections[2]!.commands.map(c => c.name)).toEqual(["echo", "roll"]); // also stays in its app
-    expect(sections[3]!.commands.map(c => c.name)).toEqual(["gif", "me", "msg", "nick", "shrug", "spoiler", "tableflip", "thread", "unflip"]);
+    expect(sections[3]!.commands.map(c => c.name)).toEqual(["gif", "me", "msg", "nick", "shrug", "spoiler", "tableflip", "thread", "tts", "unflip"]);
   });
   it("has no Frequently Used section when nothing was used", () => {
     expect(buildSections(commands, apps, "", {}).map(s => s.id)).not.toContain("recent");

@@ -209,6 +209,8 @@ export interface NewMessage {
   /** Channel of `reference_id` when it is not `channel`. */
   reference_channel_id?: string | null;
   flags?: number;
+  /** Already checked against SEND_TTS_MESSAGES by the caller. */
+  tts?: boolean;
   nonce?: string | null;
   timestamp?: number;
   /** Seed mode: don't emit events. */
@@ -256,6 +258,7 @@ export function addMessage(input: NewMessage): MockMessage {
     reference_id: referenced ? referenced.id : (input.reference_id ?? null),
     ...(input.reference_channel_id ? { reference_channel_id: input.reference_channel_id } : {}),
     ...(input.flags ? { flags: input.flags } : {}),
+    ...(input.tts ? { tts: true } : {}),
     nonce: input.nonce ?? null,
     ...(input.stickers?.length ? { stickers: input.stickers } : {}),
     ...(input.forward ? { forward: input.forward } : {}),

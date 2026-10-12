@@ -89,6 +89,8 @@ export interface Prefs {
   stickerAnimation: StickerAnimation;
   /** Text-to-speech rate multiplier (0.5..2). */
   ttsRate: number;
+  /** "Allow playback and usage of /tts command": speak received tts messages, and offer /tts. */
+  ttsPlayback: boolean;
   showImageDescriptions: boolean;
   /** Plain chat box: no autocomplete, emoticon conversion or live Markdown. */
   legacyChatInput: boolean;
@@ -206,6 +208,7 @@ export const DEFAULT_PREFS: Prefs = {
   playAnimatedEmoji: true,
   stickerAnimation: "always",
   ttsRate: 1,
+  ttsPlayback: true,
   showImageDescriptions: false,
   legacyChatInput: false,
   streamerMode: false,

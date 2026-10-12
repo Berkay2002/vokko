@@ -47,6 +47,8 @@ export interface MockMessage {
   attachments: Attachment[];
   reactions: MockReaction[];
   pinned: boolean;
+  /** Read aloud; absent = false. */
+  tts?: boolean;
   /** ISO time of the (latest) pin; null while unpinned. */
   pinned_at: string | null;
   reference_id: string | null;

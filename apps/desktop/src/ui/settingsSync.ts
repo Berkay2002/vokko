@@ -149,6 +149,7 @@ export const DEVICE_LOCAL: readonly PrefKey[] = [
   "playAnimatedEmoji",
   "stickerAnimation",
   "ttsRate",
+  "ttsPlayback",
   "showImageDescriptions",
   "legacyChatInput",
   // Voice & video: devices and levels

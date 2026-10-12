@@ -53,6 +53,7 @@ const message = (channelId: string, id: string, extra: Partial<Message> = {}): M
   embeds: [],
   reactions: [],
   pinned: false,
+  tts: false,
   message_reference: null,
   referenced_message: null,
   nonce: null,

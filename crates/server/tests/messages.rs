@@ -355,3 +355,59 @@ async fn timed_out_members_can_read_but_not_write() {
         .expect("expire");
     assert_eq!(s.app.post(&base, &s.member, json!({"content": "back"})).await.0, StatusCode::OK);
 }
+
+#[tokio::test]
+async fn tts_needs_send_tts_messages() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::{connect_async, tungstenite::Message as WsMessage};
+    let s = setup().await;
+    let base = format!("/channels/{}/messages", s.channel);
+    let address = s.app.serve().await;
+    let (mut ws, _) = connect_async(format!("ws://{address}/gateway")).await.expect("websocket connects");
+    ws.next().await.expect("hello").expect("frame");
+    ws.send(WsMessage::Text(json!({"op": 2, "d": {"token": s.member}}).to_string().into())).await.expect("identify");
+
+    // omitted = false, in the response and on the stored row
+    let (status, plain) = s.app.post(&base, &s.owner, json!({"content": "plain"})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(plain["tts"], false);
+
+    // the owner holds every permission
+    let (status, spoken) = s.app.post(&base, &s.owner, json!({"content": "hello", "tts": true})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(spoken["tts"], true);
+    let mut created = None;
+    while created.is_none() {
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await.expect("gateway frame").expect("open").expect("frame");
+        if let WsMessage::Text(text) = frame {
+            let frame: Value = serde_json::from_str(&text).expect("json");
+            if frame["t"] == "MESSAGE_CREATE" && frame["d"]["id"] == spoken["id"] {
+                created = Some(frame["d"].clone());
+            }
+        }
+    }
+    assert_eq!(created.expect("event")["tts"], true, "MESSAGE_CREATE carries tts");
+    let (_, listed) = s.app.get(&base, &s.member).await;
+    let by_id = |id: &Value| listed.as_array().expect("list").iter().find(|m| &m["id"] == id).cloned().expect("listed");
+    assert_eq!(by_id(&spoken["id"])["tts"], true);
+    assert_eq!(by_id(&plain["id"])["tts"], false);
+
+    // @everyone does not have SEND_TTS_MESSAGES: still sent, flag dropped
+    let (status, dropped) = s.app.post(&base, &s.member, json!({"content": "shout", "tts": true})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dropped["tts"], false);
+
+    // allowed through a channel overwrite
+    sqlx::query("INSERT INTO permission_overwrites (channel_id, target_id, target_type, allow, deny) VALUES ($1, $2, 0, $3, 0)")
+        .bind(s.channel.parse::<i64>().expect("id"))
+        .bind(s.guild.parse::<i64>().expect("id"))
+        .bind(1_i64 << 12)
+        .execute(&s.app.state.db)
+        .await
+        .expect("overwrite");
+    let (status, allowed) = s.app.post(&base, &s.member, json!({"content": "now allowed", "tts": true})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(allowed["tts"], true);
+    let (_, off) = s.app.post(&base, &s.member, json!({"content": "explicit off", "tts": false})).await;
+    assert_eq!(off["tts"], false);
+}

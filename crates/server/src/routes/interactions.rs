@@ -400,6 +400,7 @@ async fn post_message(state: &AppState, row: &InteractionRow, request: &WebhookM
             embeds,
             reactions: Vec::new(),
             pinned: false,
+            tts: false,
             message_reference: None,
             referenced_message: None,
             nonce: None,

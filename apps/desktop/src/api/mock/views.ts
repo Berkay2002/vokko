@@ -39,6 +39,7 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     embeds: [...(m.embeds ?? []).map(e => ({ ...e })), ...pollEmbedsFor(m.id)],
     reactions,
     pinned: m.pinned,
+    tts: m.tts === true,
     message_reference: m.forward
       ? { type: MessageReferenceType.Forward, message_id: m.forward.message_id, channel_id: m.forward.channel_id, guild_id: m.forward.guild_id }
       : m.reference_id ? { message_id: m.reference_id, channel_id: refChannelId, guild_id: db.channels.get(refChannelId)?.guild_id ?? m.guild_id } : null,

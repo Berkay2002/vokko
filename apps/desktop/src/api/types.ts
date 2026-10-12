@@ -593,6 +593,7 @@ export interface Message {
   embeds: Embed[]; // link unfurls (server-generated); [] when none
   reactions: Reaction[];
   pinned: boolean;
+  tts: boolean; // read aloud; always present (false unless the sender held SEND_TTS_MESSAGES)
   message_reference: MessageReference | null;
   referenced_message: Message | null; // for replies; null if deleted
   nonce: string | null; // echoed from the send request for optimistic UI
@@ -929,6 +930,7 @@ export interface CreateMessageRequest {
   nonce?: string;
   message_reference?: { message_id: Snowflake; channel_id?: Snowflake; type?: MessageReferenceType }; // type 1 (forward) needs channel_id, no content/attachments/stickers
   sticker_ids?: Snowflake[]; // max 3; content may then be empty
+  tts?: boolean; // needs SEND_TTS_MESSAGES; without it the message is sent with tts false
   attachment_ids?: Snowflake[]; // ids returned by POST /channels/{id}/attachments; max 10 per message
   attachments?: PendingAttachmentMeta[]; // same ids with optional rename / alt text; use instead of attachment_ids
   allowed_mentions?: AllowedMentions; // omitted = parse everything, replied_user true

@@ -13,8 +13,10 @@ export interface BuiltinContext {
   nick: boolean;
   /** The viewer may create a thread in this channel and post in it. */
   threads: boolean;
+  /** The viewer holds SEND_TTS_MESSAGES here and has "Allow playback and usage of /tts command" on. */
+  tts: boolean;
 }
-export const ANY_CONTEXT: BuiltinContext = { nick: true, threads: true };
+export const ANY_CONTEXT: BuiltinContext = { nick: true, threads: true, tts: true };
 
 interface BuiltinDef {
   name: string;
@@ -53,6 +55,7 @@ const DEFS: BuiltinDef[] = [
     ],
     available: c => c.threads,
   },
+  { name: "tts", description: "Sends a message that is read aloud to everyone viewing the channel.", options: messageOption(true), transform: m => m, available: c => c.tts },
   { name: "unflip", description: "Appends ┬─┬ノ( º _ ºノ) to your message.", options: messageOption(false), transform: append("┬─┬ノ( º _ ºノ)") },
 ];
 

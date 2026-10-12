@@ -678,6 +678,7 @@ function postMessage(interaction: MockInteraction, data: Record<string, unknown>
       embeds,
       reactions: [],
       pinned: false,
+      tts: false,
       message_reference: null,
       referenced_message: null,
       nonce: null,

@@ -553,6 +553,7 @@ pub struct MessageRow {
     pub content: String,
     pub kind: i16,
     pub pinned: bool,
+    pub tts: bool,
     pub reference_message_id: Option<i64>,
     pub mention_everyone: bool,
     pub created_at: OffsetDateTime,
@@ -577,7 +578,7 @@ pub struct MessageRow {
     pub interaction_metadata: Option<String>,
 }
 
-pub const MESSAGE_SELECT: &str = "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.reference_message_id, m.mention_everyone, \
+pub const MESSAGE_SELECT: &str = "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.tts, m.reference_message_id, m.mention_everyone, \
      m.created_at, m.edited_at, m.embeds::text AS embeds, m.flags, m.reference_channel_id, m.reference_guild_id, m.forward_channel_id, m.forward_message_id, \
      m.forward_guild_id, m.snapshot::text AS snapshot, m.webhook_id, m.application_id, m.webhook_name, m.webhook_avatar, \
      m.interaction_metadata::text AS interaction_metadata FROM messages m JOIN channels c ON c.id = m.channel_id";
@@ -764,6 +765,7 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
             embeds: serde_json::from_str(&row.embeds).unwrap_or_default(),
             reactions: reactions_api,
             pinned: row.pinned,
+            tts: row.tts,
             message_reference: match (row.forward_message_id, row.forward_channel_id) {
                 (Some(message_id), Some(channel_id)) => Some(MessageReference {
                     kind: Some(MessageReferenceType::Forward),

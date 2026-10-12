@@ -228,6 +228,8 @@ pub struct Extras {
     pub identity: Option<crate::apps::MessageIdentity>,
     /// Makes the message a poll (stored in the same transaction).
     pub poll: Option<polls::PollDraft>,
+    /// Stored as the message's `tts` flag; callers decide it from `SEND_TTS_MESSAGES`.
+    pub tts: bool,
 }
 
 /// Stores a message, updates read states / unread counters, reopens closed DMs and fans MESSAGE_CREATE out.
@@ -300,8 +302,8 @@ async fn insert_message_stored(
     };
     sqlx::query(
         "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds, \
-         forward_channel_id, forward_message_id, forward_guild_id, snapshot, webhook_id, application_id, webhook_name, webhook_avatar, interaction_metadata) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]')::jsonb, $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20::jsonb)",
+         forward_channel_id, forward_message_id, forward_guild_id, snapshot, webhook_id, application_id, webhook_name, webhook_avatar, interaction_metadata, tts) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]')::jsonb, $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20::jsonb, $21)",
     )
     .bind(message_id)
     .bind(channel.id)
@@ -323,6 +325,7 @@ async fn insert_message_stored(
     .bind(extras.identity.as_ref().and_then(|identity| identity.name.clone()))
     .bind(extras.identity.as_ref().and_then(|identity| identity.avatar.clone()))
     .bind(extras.identity.as_ref().and_then(|identity| identity.interaction_metadata.clone()))
+    .bind(extras.tts)
     .execute(&mut *tx)
     .await?;
     if let Some(poll) = &extras.poll {
@@ -607,7 +610,9 @@ async fn create_message(
     let draft = Draft { content, kind, reference, attachments, nonce: body.nonce, mentions, ping_replied, stickers, forward };
     // Everything is validated: a message into a thread reopens it if it is archived (the UPDATE's `AND archived` guards it, and
     // deciding inside the transaction closes the race with the auto-archive sweep) together with the insert.
-    let extras = Extras { reopen_thread: access.channel.is_thread(), poll, ..Extras::default() };
+    // Without SEND_TTS_MESSAGES the flag is dropped and the message is sent as usual (Discord does the same).
+    let tts = body.tts.unwrap_or(false) && access.permissions & vokko_protocol::api::permissions::SEND_TTS_MESSAGES != 0;
+    let extras = Extras { reopen_thread: access.channel.is_thread(), poll, tts, ..Extras::default() };
     let view = insert_message_with(&state, &access.channel, user_id, draft, extras).await?;
     if access.channel.is_thread() {
         // Talking in a thread joins it.

@@ -234,7 +234,7 @@ describe('message snippets', () => {
 describe('list transitions', () => {
   const message = (id: string, channel = 'c1'): Message => ({
     id, channel_id: channel, guild_id: null, author: user('1'), content: id, timestamp: 't', edited_timestamp: null, type: 0, mentions: [], mention_everyone: false, attachments: [], embeds: [],
-    reactions: [], pinned: false, message_reference: null, referenced_message: null, nonce: null,
+    reactions: [], pinned: false, tts: false, message_reference: null, referenced_message: null, nonce: null,
   });
   const bookmark = (id: string): Bookmark => ({ message: message(id), saved_at: '2026-01-01T00:00:00Z' });
   const reminder = (id: string, at: string, delivered: string | null = null, messageId = `m${id}`): Reminder => ({ id, channel_id: 'c1', message_id: messageId, guild_id: null, remind_at: at, created_at: at, delivered_at: delivered, message: null });

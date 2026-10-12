@@ -76,6 +76,16 @@ test('typing / opens the panel with the app rail and sections, and the rail scro
   await expect(picker.locator('.apps-picker-group')).toHaveCount(1);
 });
 
+test('built-in /tts posts the plain message', async ({ page }) => {
+  await openGeneral(page);
+  const box = composer(page);
+  await box.click();
+  await box.pressSequentially('/tts hello there');
+  await box.press('Enter');
+  await expect(box).toHaveText('');
+  await expect(row(page, 'hello there')).toBeVisible();
+});
+
 test('built-in /shrug posts the message with the face, and Echo shows under Frequently Used after a run', async ({ page }) => {
   await openGeneral(page);
   const box = composer(page);

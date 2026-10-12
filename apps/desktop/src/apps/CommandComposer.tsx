@@ -21,6 +21,7 @@ import { Perm } from "../api/permissions";
 import { usePermissions } from "../shell/usePermissions";
 import { hasThreadsType } from "../threads/util";
 import { BUILTIN_APP_ID, BUILTIN_APP_NAME, builtinContent, builtinsFor, isActionBuiltin, isBuiltin, takesFreeText, withBuiltins } from "./builtins";
+import { usePrefs } from "../ui/prefs";
 import { NICK_MAX, latestOnly, runMsg, runNick, runThread, searchGifs, type ActionValues } from "./builtinActions";
 import { bumpRecent, buildSections, loadRecents, saveRecents, type PanelSection, type Recents } from "./panel";
 import { dismissRun, loadIndex, requestAutocomplete, runCommand, useAppsStore } from "./store";
@@ -86,7 +87,7 @@ export interface CommandComposer {
   onKeyDown(event: KeyboardEvent<HTMLElement>): boolean;
   /** Enter on the composer: "sent" ran the command, "blocked" kept the text (an error is shown), "none" = not a command,
    *  a message = the text of a built-in command, for the composer to send like a typed message. */
-  submit(rawText: string, hasUploads?: boolean): "sent" | "blocked" | "none" | { kind: "message"; content: string };
+  submit(rawText: string, hasUploads?: boolean): "sent" | "blocked" | "none" | { kind: "message"; content: string; tts?: boolean };
   panel: ReactNode;
 }
 
@@ -136,7 +137,9 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
   const appCommands = index?.application_commands;
   const canThread = !!guildId && hasThreadsType(channel) && can(Perm.CREATE_PUBLIC_THREADS) && can(Perm.READ_MESSAGE_HISTORY) && can(Perm.SEND_MESSAGES_IN_THREADS);
   const canNick = !!guildId && can(Perm.CHANGE_NICKNAME);
-  const commands = useMemo(() => withBuiltins(appCommands ?? [], { nick: canNick, threads: canThread }), [appCommands, canNick, canThread]);
+  const ttsPlayback = usePrefs(s => s.ttsPlayback);
+  const canTts = ttsPlayback && !!guildId && can(Perm.SEND_TTS_MESSAGES);
+  const commands = useMemo(() => withBuiltins(appCommands ?? [], { nick: canNick, threads: canThread, tts: canTts }), [appCommands, canNick, canThread, canTts]);
   const parsed: ParsedInput = useMemo(() => parseInput(text, caret, commands), [text, caret, commands]);
   const command = parsed.command;
   // /gif: the search text (typed as `query:` or as free text) drives a debounced GIF search shown as choices.
@@ -311,7 +314,7 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
     setRecents(next);
   }
 
-  function submit(rawText: string, hasUploads = false): "sent" | "blocked" | "none" | { kind: "message"; content: string } {
+  function submit(rawText: string, hasUploads = false): "sent" | "blocked" | "none" | { kind: "message"; content: string; tts?: boolean } {
     if (!rawText.startsWith("/")) return "none";
     const raw = parseInput(rawText, rawText.length, commands);
     const target = raw.command ?? (raw.nameDone ? null : commands.find(c => c.type === 1 && c.name === raw.name.toLowerCase()) ?? null);
@@ -387,7 +390,7 @@ export function useCommandComposer({ channelId, text, caret, setText }: CommandC
         return "blocked";
       }
       noteUsed(target);
-      return { kind: "message", content };
+      return target.name === "tts" ? { kind: "message", content, tts: true } : { kind: "message", content };
     }
     runCommand(channelId, target, built.options);
     noteUsed(target); // counted when sent: the store has no cheap success hook (a failed run still counts)

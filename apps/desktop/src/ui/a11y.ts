@@ -87,6 +87,7 @@ export function sanitizeA11y<T extends Record<string, unknown>>(prefs: T): T {
   snap("minNotificationDuration");
   num("ttsRate", TTS_RATES[0], TTS_RATES[TTS_RATES.length - 1]!, 1);
   snap("ttsRate");
+  if (typeof out.ttsPlayback !== "boolean") out.ttsPlayback = true;
   if (out.stickerAnimation !== "always" && out.stickerAnimation !== "interaction" && out.stickerAnimation !== "never") out.stickerAnimation = "always";
   return out as T;
 }
