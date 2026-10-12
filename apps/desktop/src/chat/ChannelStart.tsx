@@ -108,14 +108,14 @@ export function ChannelStart() {
     return <div className="chat-start"><h1>{names}</h1><p>Welcome to the beginning of the group.</p></div>;
   }
   if (ch && isThreadType(ch.type)) return <ThreadStart thread={ch} />;
-  // Text-in-voice: a speech bubble, the bare channel name (no hash) and a shortcut to the channel settings.
+  // Text-in-voice: a speech bubble and the bare channel name (no hash).
   const voice = ch?.type === ChannelType.GuildVoice;
   const label = voice ? ch?.name : `#${ch?.name}`;
   return <div className="chat-start">
     <div className="chat-start-icon">{voice ? <MessageCircle size={42} /> : <Hash size={42} />}</div>
     <h1>Welcome to {label}!</h1>
     <p>This is the start of the {label} channel.{ch?.topic ? ` ${ch.topic}` : ''}</p>
-    {voice && ch && <VoiceStartActions channel={ch} />}
+    {ch?.guild_id && <EditChannelButton channel={ch} />}
     {ch && chat.guildId && <ServerChecklist guildId={chat.guildId} channelId={ch.id} />}
   </div>;
 }
@@ -132,11 +132,12 @@ function ThreadStart({ thread }: { thread: Channel }) {
   </div>;
 }
 
-function VoiceStartActions({ channel }: { channel: Channel }) {
+/** Discord's "Edit Channel" under the welcome text: only with Manage Channels on this channel, opens its settings. */
+function EditChannelButton({ channel }: { channel: Channel }) {
   const { can } = usePermissions(channel.guild_id, channel.id);
   if (!can(Perm.MANAGE_CHANNELS)) return null;
-  return <button type="button" className="chat-start-btn" style={{ marginTop: 12 }} onClick={() => openModal({ type: 'editChannel', channelId: channel.id })}>
-    <Pencil size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />Edit Channel
+  return <button type="button" className="chat-start-edit" onClick={() => openModal({ type: 'editChannel', channelId: channel.id })}>
+    <Pencil size={16} aria-hidden="true" />Edit Channel
   </button>;
 }
 

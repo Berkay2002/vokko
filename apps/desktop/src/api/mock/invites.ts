@@ -2,11 +2,11 @@
 // (GET/PATCH /users/@me/guild-layout, GUILD_LAYOUT_UPDATE), following docs/api.md "Invites and server folders".
 
 import { Perm, hasBit } from "../permissions";
-import { AuditLogEvent, ChannelType, JoinSourceType, isThreadType, type GuildFolder, type Invite, type InviteMetadata, type GuildLayout } from "../types";
+import { AuditLogEvent, ChannelType, JoinSourceType, MessageType, isThreadType, type GuildFolder, type Invite, type InviteMetadata, type GuildLayout } from "../types";
 import { channelPermsOf, guildPermsOf } from "./access";
 import { change, recordAudit } from "./admin";
 import { db, userOf, type MockAccount, type MockInvite } from "./db";
-import { fail, guildAudience, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm } from "./ops";
+import { addMessage, fail, guildAudience, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm } from "./ops";
 import { onboardingStartedFor } from "./community";
 import { flagsField } from "./memberFlags";
 import { ID, route } from "./router";
@@ -145,6 +145,9 @@ route("POST", `/invites/${CODE}`, ({ viewer, params }) => {
     onboardingStartedFor(guild.guild.id, viewer.user.id);
     emit([viewer.user.id], "GUILD_CREATE", guildPayload(guild.guild.id, viewer.user.id));
     emit([...guild.members.keys()].filter(id => id !== viewer.user.id), "GUILD_MEMBER_ADD", { guild_id: guild.guild.id, user: viewer.user, ...member, ...flagsField(guild.guild.id, viewer.user.id) });
+    // The real server posts a UserJoin row from the joiner in the system channel (routes/invites.rs post_join_message).
+    const system = guild.guild.system_channel_id ? db.channels.get(guild.guild.system_channel_id) : undefined;
+    if (system?.guild_id === guild.guild.id) addMessage({ channel: system, author_id: viewer.user.id, content: "", type: MessageType.UserJoin });
   } else if (!invite.temporary) {
     guild.temporary?.delete(viewer.user.id);
   }

@@ -1,11 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Forward, Pencil, Pin, Smile, SmilePlus, MoreHorizontal, Reply, UserPlus, UserMinus, PenLine, Image as ImageIcon, CircleAlert, ArrowRightFromLine, MessageSquareText, Megaphone } from 'lucide-react';
+import { Forward, Pencil, Smile, SmilePlus, MoreHorizontal, Reply, Image as ImageIcon, CircleAlert, MessageSquareText, Megaphone } from 'lucide-react';
 import { MessageFlags, MessageReferenceType, MessageType } from '../api/types';
 import type { Message } from '../api/types';
 import { Markdown } from './markdown';
 import { Tooltip } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
+import { SystemBody } from './SystemMessage';
 import { ServerTag } from './ServerTag';
 import { Attachments, PendingUpload } from './Attachments';
 import { Embeds } from './Embeds';
@@ -15,11 +16,8 @@ import { MessageMenu } from './MessageMenu';
 import { ForwardedBlock, GifMessage, StickerItems, gifMessageMedia } from '../media/MessageParts';
 import { openForward } from '../media/store';
 import { ThreadChip } from '../threads/ThreadChip';
-import { ThreadCreatedNotice } from '../threads/ThreadNotice';
-import { CallNotice } from '../calls/CallNotice';
 import { ThreadStarter } from '../threads/ThreadStarter';
 import { PollView } from '../polls/PollView';
-import { PollResultNotice } from '../polls/PollResultNotice';
 import { useMessageThreadActions } from '../threads/useMessageActions';
 import { AppTag, EphemeralFooter, InteractionHeader, ThinkingBody, isEphemeral } from '../apps/InteractionMessage';
 import { quickReactions } from './emojiData';
@@ -35,32 +33,6 @@ export interface MessageItemProps {
   editing: boolean;
   highlighted: boolean;
   onStopEditing(): void;
-}
-
-function SystemBody({ message, name }: { message: Message; name: string }) {
-  const chat = useChat();
-  const first = message.mentions[0];
-  const other = first ? chat.nameOf(first) : 'someone';
-  switch (message.type) {
-    case MessageType.ChannelPinnedMessage:
-      return <><Pin size={18} className="chat-system-icon pin" /><span className="chat-system-text"><b>{name}</b> pinned <button type="button" className="chat-system-link" onClick={() => message.message_reference && chat.actions.jumpTo(message.message_reference.message_id)}>a message</button> to this channel. See all <span className="chat-system-link-static">pinned messages</span>.</span></>;
-    case MessageType.UserJoin:
-      return <><ArrowRightFromLine size={18} className="chat-system-icon join" /><span className="chat-system-text"><b>{name}</b> joined the party.</span></>;
-    case MessageType.RecipientAdd:
-      return <><UserPlus size={18} className="chat-system-icon join" /><span className="chat-system-text"><b>{name}</b> added <b>{other}</b> to the group.</span></>;
-    case MessageType.RecipientRemove:
-      return <><UserMinus size={18} className="chat-system-icon leave" /><span className="chat-system-text"><b>{name}</b> removed <b>{other}</b> from the group.</span></>;
-    case MessageType.ChannelNameChange:
-      return <><PenLine size={18} className="chat-system-icon" /><span className="chat-system-text"><b>{name}</b> changed the channel name: <b>{message.content}</b></span></>;
-    case MessageType.ThreadCreated:
-      return <ThreadCreatedNotice message={message} name={name} />;
-    case MessageType.Call:
-      return <CallNotice message={message} name={name} />;
-    case MessageType.PollResult:
-      return <PollResultNotice message={message} name={name} />;
-    default:
-      return <span className="chat-system-text">{message.content}</span>;
-  }
 }
 
 /**

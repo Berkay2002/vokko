@@ -14,22 +14,22 @@ How to read the statuses: `-` not started, `partial` some of it exists, `done` i
 
 Counts are rows by their **works the same** column, plus a last column with the rows whose **looks the same** column is `done`. They are counts, not a parity percentage.
 
-Status as of main at 11ae952
+Status as of main at 2905540
 
 | area | rows | done | partial | not started | n/a | looks done |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| SHELL | 15 | 5 | 10 | 0 | 0 | 3 |
-| FRIEND | 7 | 4 | 2 | 1 | 0 | 0 |
-| DM | 10 | 8 | 1 | 1 | 0 | 2 |
-| MSG | 33 | 20 | 8 | 4 | 1 | 17 |
-| CMP | 14 | 6 | 4 | 4 | 0 | 4 |
-| GLD | 18 | 4 | 11 | 3 | 0 | 1 |
-| POP | 6 | 2 | 4 | 0 | 0 | 0 |
-| MOD | 11 | 6 | 4 | 1 | 0 | 1 |
-| SET | 7 | 2 | 5 | 0 | 0 | 0 |
+| SHELL | 15 | 7 | 8 | 0 | 0 | 10 |
+| FRIEND | 7 | 4 | 2 | 1 | 0 | 2 |
+| DM | 10 | 8 | 1 | 1 | 0 | 5 |
+| MSG | 33 | 22 | 9 | 1 | 1 | 18 |
+| CMP | 14 | 7 | 6 | 1 | 0 | 4 |
+| GLD | 19 | 6 | 10 | 3 | 0 | 2 |
+| POP | 6 | 2 | 4 | 0 | 0 | 1 |
+| MOD | 11 | 9 | 2 | 0 | 0 | 3 |
+| SET | 7 | 2 | 5 | 0 | 0 | 2 |
 | REST | 6 | 2 | 3 | 1 | 0 | 0 |
 | DESK | 9 | 6 | 1 | 0 | 2 | 0 |
-| **Total** | **136** | **65** | **53** | **15** | **3** | **28** |
+| **Total** | **137** | **75** | **51** | **8** | **3** | **47** |
 
 ## SHELL: app shell, rail, DM sidebar, title bar
 
@@ -95,7 +95,7 @@ Status as of main at 11ae952
 | MSG-011 | Delete confirmation modal with message preview | done | done | ChatView.tsx DeleteModal: preview card with server tag, grey Cancel, red Delete, PROTIP about holding shift; DELETE message; shift-click on the toolbar trash deletes without the modal. Compared with messages-states/16 |
 | MSG-012 | Reactions: pills, own highlighted, + button on hover, reactor tooltip | partial | done | Reactions.tsx; PUT/DELETE/GET reactions in routes/reactions.rs; unicode emoji only (custom emoji do not render) |
 | MSG-013 | Reaction picker from the hover bar with search | partial | done | EmojiPicker.tsx popout from the toolbar, search; unicode emoji set only |
-| MSG-014 | Pin from the menu: confirm modal, then system row with pin icon | done | done | Pin Message and Unpin Message open PinConfirmDialog.tsx ("Pin this message?" / "Unpin Message", message preview, Enter confirms, Esc cancels); Shift+click skips it; PUT pin emits a type 6 system row (MessageItem.tsx SystemBody); 250 cap handled; e2e/pin-confirm.spec.ts |
+| MSG-014 | Pin from the menu: confirm modal, then system row with pin icon | done | done | Pin Message and Unpin Message open PinConfirmDialog.tsx ("Pin this message?" / "Unpin Message", message preview, Enter confirms, Esc cancels); Shift+click skips it; PUT pin emits a type 6 system row (SystemMessage.tsx SystemBody); 250 cap handled; e2e/pin-confirm.spec.ts |
 | MSG-015 | Forward modal | partial | partial | Forward modal (up to 5 destinations, comment, preview) from the hover bar, context menu and lightbox; server copies a snapshot with its files. Mock e2e only, not compared with a reference |
 | MSG-016 | Bookmark and reminder submenu | partial | partial | Bookmark toggle, reminder presets (1 h, 3 h, tomorrow, custom), inbox Bookmarks/Reminders tabs and REMINDER_DUE notice; server delivers due reminders once. Mock e2e only |
 | MSG-017 | Markdown rendering: emphasis, code, headings, lists, quotes, links, spoilers, timestamps, shortcodes | partial | done | chat/markdown/ (parse.ts, render.tsx, highlight.ts, unit tests) covers the listed syntax; shortcodes use JoyPixels names first (emojiData.ts); styling not compared |
@@ -105,7 +105,7 @@ Status as of main at 11ae952
 | MSG-021 | Message selection and long-press mobile gestures | n/a | n/a | Out of scope (desktop web) |
 | MSG-022 | Mention chips and mention-highlighted row with 2 px bar | done | partial | markdown render.tsx chips (user, role, channel, everyone), chat.css .mentioned 2 px bar; the row highlight also fires for a role mention when I hold the role, read from the raw <@&id> in the content (messageState.ts mentionsRole) because the wire has no mention_roles; it does not check whether the role was mentionable or the sender had the right to ping it. Clicks (one handler in ChatContext.tsx, rules in mentions.ts, same on messages, pins, search results, the topic dialog and threads): a known user opens the profile card anchored at the chip (the card sits above dialogs); a channel of the same guild navigates (a voice channel opens its page and does not join: a message must not switch the microphone on) and closes the topic dialog or the pins popout; unknown users and channels, roles and categories stay plain non-clickable, non-focusable pills (one decision, ctx.mentionActionable built on mentions.ts; the app has no role popout, where Discord lists the role's members); @everyone and @here are no longer hover-styled. Mentions of a channel of another guild, a thread, or any channel from a DM show as #unknown-channel by design, and a deleted or hidden user as @unknown-user (no capture of Discord's wording for those). A card opened from a mention inside a dialog gets the `above-modal` class (z-index over the modal layer), role dialog, focus and its own Tab trap (Popout trapFocus); any modal opened later closes an open card. Known gap A11Y-04 stays for cards opened outside dialogs: they still do not take focus. e2e mentions.spec.ts |
 | MSG-023 | Slash-command output and application messages: bot badge, ephemeral | partial | - | BOT tag renders in MessageItem.tsx; no commands, apps or ephemeral messages |
-| MSG-024 | System messages with icon and muted style | partial | partial | MessageItem.tsx SystemBody handles pin, join, leave, rename; server posts pin and join rows; no call messages |
+| MSG-024 | System messages with icon and muted style | partial | partial | SystemMessage.tsx SystemBody renders pin, join (10 lines rotate by timestamp, copy unverified against Discord), call (CallNotice.tsx: ongoing, ended, missed), thread created, poll result (PollResultNotice.tsx), group add/remove and rename; the server posts all of these except group add/remove and rename, which are client-only; join not captured in the reference (e2e/system-messages.spec.ts, SystemMessage.test.tsx) |
 | MSG-025 | Message length limit 2000 with counter and block | partial | done | Composer.tsx counter and send block; server rejects over 2000 (routes/messages.rs) |
 | MSG-026 | Server tag chip next to the name and in reply line, member list, DM list, lightbox; click opens a tag popout | partial | partial | ServerTag.tsx: 15 px chip, radius 4, 14 px badge, 12/16 w600, no hover tooltip (the reference has none), in message header, reply line, lightbox and member list (MemberList.tsx via TagChip); click opens a tag card with online and member counts, created month and a Go to Server button that navigates (online is counted among the loaded members only, so it is a lower bound in big servers; the member total uses the READY count); DM rows still have no chip (DmSidebar.tsx belongs to the shell visuals, see SHELL-011); primary_guild exists in the mock API only (crates/protocol User has no such field); the Server Tag settings page is a device setting |
 | MSG-027 | Timestamp formats: today, older, gutter on hover, full-date tooltip | done | done | util.ts formatMessageTimestamp, formatTime, formatFullDate via Intl and chatLocale(): Swedish gives bare time today and YYYY-MM-DD HH:mm older, other languages get Today/Yesterday words; util.test.ts; client only |
@@ -147,7 +147,7 @@ Status as of main at 11ae952
 | GLD-006 | Channel states: unread, mention badge, muted, locked icon | partial | partial | GuildSidebar.tsx: unread and mention badge from server read states, lock icon from overwrites; mute is stored locally only; VoiceChannelRow calls both mute hooks on every render (a muted voice channel no longer crashes the sidebar; vitest VoiceChannelRow.test.tsx, e2e shell-polish.spec.ts); the text ChannelRow in GuildSidebar.tsx still has the same `a \|\| b` hook pair, left to the guild-sidebar branch |
 | GLD-007 | Voice channel with connected users listed; join on click | partial | - | api/voice.ts is a client-only store (mock seeded); click does nothing; no voice in crates/server |
 | GLD-008 | Channel header with name, topic, toolbar (threads, notifications, pins, members), search | partial | partial | ChannelHeader.tsx: name, topic, pins, member toggle work; threads disabled; notification menu is local; search 144/240 px and inert; a click on the topic opens a dialog (TopicModal.tsx) that renders the full topic with the chat Markdown renderer (links ask first through the chat's Leaving Vokko dialog, channel mentions, emoji); mentions in the dialog work like in messages (user opens the profile card above the dialog, a channel mention closes the dialog and navigates; see MSG-022); the one-line header text is still plain and cut to one line, never the channel name |
-| GLD-009 | Start-of-channel header: tile, welcome text, edit-channel button | partial | partial | ChannelStart.tsx: 68 px tile and welcome text; no edit-channel button |
+| GLD-009 | Start-of-channel header: tile, welcome text, edit-channel button | done | done | ChannelStart.tsx: 68 px tile and welcome text; Edit Channel button (pencil, 14/16 w500, min-height 31, radius 8) under the text for text and voice channels with MANAGE_CHANNELS on the channel, opens the channel settings (e2e/channel-start.spec.ts) |
 | GLD-010 | New-server welcome checklist | - | - | Not built |
 | GLD-011 | Member list: role groups, online/offline, presence dots, activity line, role colours | done | done | MemberList.tsx, tokens.css (264 px, rows 248x42); GET /guilds/{id}/members, presence via gateway |
 | GLD-012 | Channel, category and server-icon right-click menus | partial | partial | menus.tsx channelContextItems and guildContextItems work (edit, duplicate, delete, invite, ID); privacy and profile entries disabled; mute is local |

@@ -545,6 +545,8 @@ span.md-emoji { width: auto; height: auto; line-height: inherit; }
 .chat-view .chat-start-btn { padding: 4px 8px; border-radius: 4px; background: var(--background-mod-subtle); color: var(--chat-text); font-size: 12px; line-height: 16px; font-weight: 500; }
 .chat-view .chat-start-btn:hover:not(:disabled) { background: var(--background-mod-normal); }
 .chat-view .chat-start-btn:disabled { opacity: 0.6; cursor: default; }
+.chat-view .chat-start-edit { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; min-height: 31px; padding: 7px 12px; border-radius: 8px; background: var(--background-mod-subtle); color: var(--chat-text); font-size: 14px; line-height: 16px; font-weight: 500; }
+.chat-view .chat-start-edit:hover { background: var(--background-mod-normal); }
 .chat-start-error { color: var(--chat-danger); }
 
 .chat-gif-glyph { display: inline-grid; place-items: center; height: 18px; padding: 0 3px; border-radius: 4px; border: 2px solid currentColor; font-size: 10px; font-weight: 800; line-height: 1; letter-spacing: 0.02em; box-sizing: border-box; }
