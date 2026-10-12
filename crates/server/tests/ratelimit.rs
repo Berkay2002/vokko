@@ -127,3 +127,37 @@ async fn signed_out_invite_previews_have_a_small_bucket_per_address() {
         assert_eq!(app.get(&path, &token).await.0, StatusCode::OK);
     }
 }
+
+#[tokio::test]
+async fn ipv6_clients_are_limited_per_64_and_per_48() {
+    let app = TestApp::with_config(|config| {
+        config.trust_proxy = true;
+        config.rate_limit = Some(RateLimit { auth_burst: 1.0, auth_per_second: 0.01, ..lenient_global(30.0) });
+    })
+    .await;
+    let login = |from: String| {
+        let app = &app;
+        async move {
+            let body = json!({"login": "nobody", "password": "whatever you like"}).to_string();
+            let request = Request::builder()
+                .method(Method::POST)
+                .uri("/api/v1/auth/login")
+                .header("content-type", "application/json")
+                .header("x-forwarded-for", from)
+                .body(Body::from(body))
+                .expect("request");
+            app.router.clone().oneshot(request).await.expect("response").status()
+        }
+    };
+    assert_eq!(login("2001:db8:1:1::1".to_owned()).await, StatusCode::BAD_REQUEST);
+    assert_eq!(login("2001:db8:1:1:ffff::2".to_owned()).await, StatusCode::TOO_MANY_REQUESTS, "same /64");
+    // IPv4 and its IPv4-mapped IPv6 form are one client
+    assert_eq!(login("203.0.113.9".to_owned()).await, StatusCode::BAD_REQUEST);
+    assert_eq!(login("::ffff:203.0.113.9".to_owned()).await, StatusCode::TOO_MANY_REQUESTS);
+    // other /64s of the same /48 get their own bucket, up to 16 times the budget for the whole /48
+    for net in 2..17 {
+        assert_eq!(login(format!("2001:db8:1:{net:x}::1")).await, StatusCode::BAD_REQUEST, "/64 number {net}");
+    }
+    assert_eq!(login("2001:db8:1:99::1".to_owned()).await, StatusCode::TOO_MANY_REQUESTS, "the /48 is used up");
+    assert_eq!(login("2001:db8:2::1".to_owned()).await, StatusCode::BAD_REQUEST, "another /48");
+}

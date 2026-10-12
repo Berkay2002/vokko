@@ -3,15 +3,16 @@
 //! Callers are keyed on what the server knows, never on what the client sends: `/auth/*` and requests without a valid
 //! token on the client address, everything else on the resolved user id. A bucket that has refilled completely is
 //! indistinguishable from a new one, so a periodic sweep drops those without changing any outcome.
+//! IPv6 clients are keyed on their /64 (one subscriber's allocation), and the map is capped (`MAX_BUCKETS`).
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::extract::{MatchedPath, Request, State};
 use axum::http::header::RETRY_AFTER;
-use axum::http::{HeaderValue, StatusCode};
+use axum::http::{HeaderValue, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use vokko_protocol::api::RateLimitError;
@@ -29,6 +30,41 @@ const ADDRESS_FLOOR_FACTOR: f64 = 10.0;
 const GIF_ROUTE: &str = "GET /gifs";
 const GIF_BURST: f64 = 10.0;
 const GIF_PER_SECOND: f64 = 2.0;
+/// At most this many buckets are kept (about 100 bytes each: route keys are bounded, see `method_key`). A new bucket past
+/// the cap first drops the refilled ones, then the fullest (the oldest among equals) until half the cap is free, so a flood
+/// of fresh callers costs bounded memory and amortised O(1), and a drained bucket is the last to go.
+const MAX_BUCKETS: usize = 100_000;
+/// Signed-out `/auth/*` calls and invite previews from IPv6 also share one bucket per /48 (a typical site allocation of
+/// 65,536 /64s), this many times the per-/64 budget.
+const WIDE_FACTOR: f64 = 16.0;
+const PREFIX_64: u128 = !((1 << 64) - 1);
+const PREFIX_48: u128 = !((1 << 80) - 1);
+/// Route keys use the method only when it is a standard one: hyper accepts extension methods of any length.
+const STANDARD_METHODS: [Method; 7] = [Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE, Method::HEAD, Method::OPTIONS];
+
+/// The address a client is limited on: IPv4 as is, IPv6 by its /64 (an IPv4-mapped IPv6 address counts as the IPv4
+/// address). A single host usually controls a whole /64, so keying on the full address would hand it 2^64 fresh buckets.
+pub fn address_key(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V4(_) => ip,
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => IpAddr::V4(v4),
+            None => IpAddr::V6(Ipv6Addr::from(v6.to_bits() & PREFIX_64)),
+        },
+    }
+}
+
+/// The IPv6 /48 an address belongs to (`None` for IPv4 and IPv4-mapped addresses).
+fn wide_key(ip: IpAddr) -> Option<IpAddr> {
+    match address_key(ip) {
+        IpAddr::V6(v6) => Some(IpAddr::V6(Ipv6Addr::from(v6.to_bits() & PREFIX_48))),
+        IpAddr::V4(_) => None,
+    }
+}
+
+fn method_key(method: &Method) -> &str {
+    if STANDARD_METHODS.contains(method) { method.as_str() } else { "OTHER" }
+}
 /// Anonymous invite previews (`GET /invites/{code}` without a token) are keyed on the client address and kept slow, so the
 /// open route cannot be used to enumerate invite codes: 10 at once, then one every 5 seconds.
 const ANON_INVITE_ROUTE: &str = "/invites/{code}";
@@ -57,11 +93,36 @@ impl Bucket {
     fn is_full_at(&self, now: Instant) -> bool {
         self.tokens + now.saturating_duration_since(self.updated).as_secs_f64() * self.per_second >= self.burst
     }
+
+    fn fill_at(&self, now: Instant) -> f64 {
+        ((self.tokens + now.saturating_duration_since(self.updated).as_secs_f64() * self.per_second) / self.burst).min(1.0)
+    }
 }
 
 struct Buckets {
     map: HashMap<(Caller, String), Bucket>,
     swept: Instant,
+    cap: usize,
+}
+
+impl Buckets {
+    /// Drops the refilled buckets, then (if that was not enough) the fullest down to half the cap, the oldest among equals.
+    /// Evicting a nearly full bucket barely changes an outcome; a drained one (an attacker's, or anyone's) is the last to go.
+    fn make_room(&mut self, now: Instant) {
+        self.map.retain(|_, bucket| !bucket.is_full_at(now));
+        self.swept = now;
+        let keep = self.cap / 2;
+        if self.map.len() <= keep {
+            return;
+        }
+        let mut ranked: Vec<(f64, Instant, (Caller, String))> =
+            self.map.iter().map(|(key, bucket)| (bucket.fill_at(now), bucket.updated, key.clone())).collect();
+        let evict = ranked.len() - keep;
+        ranked.select_nth_unstable_by(evict - 1, |a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        for (_, _, key) in ranked.into_iter().take(evict) {
+            self.map.remove(&key);
+        }
+    }
 }
 
 pub struct RateLimiter {
@@ -70,7 +131,7 @@ pub struct RateLimiter {
 
 impl Default for RateLimiter {
     fn default() -> Self {
-        Self { buckets: Mutex::new(Buckets { map: HashMap::new(), swept: Instant::now() }) }
+        Self::with_cap(MAX_BUCKETS)
     }
 }
 
@@ -82,6 +143,9 @@ pub struct Limited {
 }
 
 fn take(buckets: &mut Buckets, key: (Caller, String), burst: f64, per_second: f64, now: Instant) -> Result<(), f64> {
+    if buckets.map.len() >= buckets.cap && !buckets.map.contains_key(&key) {
+        buckets.make_room(now);
+    }
     let bucket = buckets.map.entry(key).or_insert(Bucket { tokens: burst, updated: now, burst, per_second });
     let elapsed = now.saturating_duration_since(bucket.updated).as_secs_f64();
     bucket.tokens = (bucket.tokens + elapsed * per_second).min(burst);
@@ -97,6 +161,10 @@ fn take(buckets: &mut Buckets, key: (Caller, String), burst: f64, per_second: f6
 }
 
 impl RateLimiter {
+    fn with_cap(cap: usize) -> Self {
+        Self { buckets: Mutex::new(Buckets { map: HashMap::new(), swept: Instant::now(), cap }) }
+    }
+
     /// Counts one request of `caller` against the caller-wide bucket and the bucket of `route`.
     /// `auth` routes use the stricter `auth_*` route bucket.
     pub fn check(&self, caller: Caller, route: &str, limit: &RateLimit, auth: bool) -> Result<(), Limited> {
@@ -153,12 +221,19 @@ impl RateLimiter {
         let mut buckets = self.buckets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         take(
             &mut buckets,
-            (Caller::Ip(ip), "address".to_owned()),
+            (Caller::Ip(address_key(ip)), "address".to_owned()),
             limit.global_burst * ADDRESS_FLOOR_FACTOR,
             limit.global_per_second * ADDRESS_FLOOR_FACTOR,
             now,
         )
         .map_err(|retry_after| Limited { retry_after, global: true })
+    }
+
+    /// The shared /48 bucket of signed-out IPv6 callers on the strict routes (`WIDE_FACTOR` times the per-/64 bucket).
+    fn check_wide(&self, wide: IpAddr, route: &str, burst: f64, per_second: f64, now: Instant) -> Result<(), Limited> {
+        let mut buckets = self.buckets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        take(&mut buckets, (Caller::Ip(wide), format!("/48 {route}")), burst * WIDE_FACTOR, per_second * WIDE_FACTOR, now)
+            .map_err(|retry_after| Limited { retry_after, global: false })
     }
 
     #[cfg(test)]
@@ -186,7 +261,7 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
     }
     let ip = client_ip(request.extensions(), request.headers(), state.config.trust_proxy);
     let auth = route.contains("/auth/");
-    let mut caller = Caller::Ip(ip);
+    let mut caller = Caller::Ip(address_key(ip));
     if !auth && let Some(token) = bearer_header(request.headers()).map(str::to_owned) {
         if let Err(limited) = state.limiter.check_address(ip, &limit, Instant::now()) {
             return limited_response(limited);
@@ -198,7 +273,7 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
     }
     let is_gif = request.method() == axum::http::Method::GET && route.contains("/gifs/");
     let anon_invite = request.method() == axum::http::Method::GET && matches!(caller, Caller::Ip(_)) && route.ends_with(ANON_INVITE_ROUTE);
-    let route = if is_gif { GIF_ROUTE.to_owned() } else { format!("{} {route}", request.method()) };
+    let route = if is_gif { GIF_ROUTE.to_owned() } else { format!("{} {route}", method_key(request.method())) };
     // The limits are never raised above the configured route bucket (tests and operators may set it lower).
     let is_ring = request.method() == axum::http::Method::POST && route.ends_with("/call/ring");
     let bucket = if is_gif {
@@ -210,10 +285,19 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
     } else {
         None
     };
-    match state.limiter.check_with(caller, &route, &limit, auth, bucket) {
-        Ok(()) => next.run(request).await,
-        Err(limited) => limited_response(limited),
+    if let Err(limited) = state.limiter.check_with(caller, &route, &limit, auth, bucket) {
+        return limited_response(limited);
     }
+    if matches!(caller, Caller::Ip(_))
+        && (auth || anon_invite)
+        && let Some(wide) = wide_key(ip)
+    {
+        let (burst, per_second) = bucket.unwrap_or((limit.auth_burst, limit.auth_per_second));
+        if let Err(limited) = state.limiter.check_wide(wide, &route, burst, per_second, Instant::now()) {
+            return limited_response(limited);
+        }
+    }
+    next.run(request).await
 }
 
 #[cfg(test)]
@@ -285,5 +369,62 @@ mod tests {
             assert!(limiter.check_at(Caller::User(2), "GET /x", &limit, false, later).is_ok());
         }
         assert!(limiter.check_at(Caller::User(2), "GET /x", &limit, false, later).is_err());
+    }
+
+    #[test]
+    fn ipv6_clients_share_a_bucket_per_64() {
+        let key = |text: &str| address_key(text.parse().expect("ip"));
+        assert_eq!(key("2001:db8:1:2:aaaa::1"), key("2001:db8:1:2:ffff:ffff:ffff:ffff"));
+        assert_eq!(key("2001:db8:1:2:aaaa::1"), key("2001:db8:1:2::"));
+        assert_ne!(key("2001:db8:1:2::1"), key("2001:db8:1:3::1"));
+        assert_eq!(key("203.0.113.9"), key("::ffff:203.0.113.9"));
+        assert_ne!(key("203.0.113.9"), key("203.0.113.10"));
+    }
+
+    #[test]
+    fn standard_methods_key_routes_and_the_rest_share_one() {
+        assert_eq!(method_key(&Method::PATCH), "PATCH");
+        assert_eq!(method_key(&Method::from_bytes(b"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX").expect("method")), "OTHER");
+        assert_eq!(method_key(&Method::CONNECT), "OTHER");
+    }
+
+    #[test]
+    fn a_flood_of_fresh_addresses_evicts_its_own_buckets_before_a_drained_one() {
+        let limiter = RateLimiter::with_cap(8);
+        let limit = limit(3.0);
+        let start = Instant::now();
+        let user = Caller::User(1);
+        for _ in 0..3 {
+            limiter.check_at(user, "GET /x", &limit, false, start).expect("allowed");
+        }
+        // each address leaves a half-full auth bucket that does not refill during the test
+        for index in 0..20u8 {
+            let at = start + Duration::from_millis(u64::from(index) * 10);
+            limiter.check_at(Caller::Ip(IpAddr::from([10, 0, 0, index])), "POST /auth/login", &limit, true, at).expect("allowed");
+            assert!(limiter.len() <= 8, "{} buckets after {index}", limiter.len());
+        }
+        let now = start + Duration::from_millis(200);
+        assert!(limiter.check_at(user, "GET /x", &limit, false, now).is_err(), "the drained bucket was not evicted");
+    }
+
+    #[test]
+    fn the_map_is_capped_and_evicts_the_oldest_among_equally_full() {
+        let limiter = RateLimiter::with_cap(8);
+        let limit = limit(3.0);
+        let start = Instant::now();
+        let drain = |caller: Caller, at: Instant| {
+            for _ in 0..2 {
+                limiter.check_at(caller, "POST /auth/login", &limit, true, at).expect("allowed");
+            }
+        };
+        let address = |index: u8| Caller::Ip(IpAddr::from([10, 0, 0, index]));
+        // Drained auth buckets (0.01/s) never refill in this test, so only the cap can drop them.
+        for index in 0..20u8 {
+            drain(address(index), start + Duration::from_millis(u64::from(index) * 50));
+            assert!(limiter.len() <= 8, "{} buckets after {index}", limiter.len());
+        }
+        let now = start + Duration::from_secs(1);
+        assert!(limiter.check_at(address(19), "POST /auth/login", &limit, true, now).is_err(), "the newest drained bucket is kept");
+        assert!(limiter.check_at(address(0), "POST /auth/login", &limit, true, now).is_ok(), "the oldest was evicted");
     }
 }

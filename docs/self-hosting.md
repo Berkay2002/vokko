@@ -63,7 +63,7 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_GIF_API_KEY` | empty | Provider API key; required when `VOKKO_GIF_PROVIDER` is not `none`. |
 | `VOKKO_GIF_BASE_URL` | provider default | Override of the provider's API origin (mirrors, tests). |
 | `VOKKO_REMINDER_POLL_SECS` | `15` | How often due message reminders are delivered. |
-| `VOKKO_TRUST_PROXY` | off | `on`/`1`/`true`/`yes`: take the client address from the last `X-Forwarded-For` entry. Only behind a proxy that sets it (the bundled Caddy does), otherwise clients can spoof their address and dodge rate limits. |
+| `VOKKO_TRUST_PROXY` | off | `on`/`1`/`true`/`yes`: take the client address from the last `X-Forwarded-For` entry. Only behind a proxy that sets it (the bundled Caddy does), otherwise clients can spoof their address and dodge rate limits. Uses the last `X-Forwarded-For` line, so exactly one proxy hop. |
 | `VOKKO_CORS_ORIGINS` | unset (localhost on any port) | Comma-separated exact origins allowed to call the API from a browser, e.g. `https://chat.example.com,https://web.example.com`. Scheme and host (and port if not default), no path, no `*`. When set it replaces the localhost defaults; the Tauri origins stay allowed. Bad entries stop the server at start. |
 | `VOKKO_REGISTRATION` | `open` | `closed`: `POST /api/v1/auth/register` answers 403 (code 40002). Existing accounts, login and `seed` are unaffected, so create the accounts you need first, then close it. Anything else than `open`/`closed` stops the server at start. |
 | `VOKKO_MIN_AGE` | `13` | Minimum age in years, checked against the date of birth at sign-up. |
@@ -257,6 +257,7 @@ Serve the web client from the same origin as the API where you can: same-origin 
 
 - The bundled container healthcheck still only proves the port accepts connections; `GET /healthz` (see above) is the real check, but `deploy/` does not use it yet.
 - Voice V1 has no server mute/deafen, moves or DM calls yet; camera and screen share are not available (later milestones in `docs/design/voice.md`).
+- Per-address limits treat an IPv6 /64 as one client (a single host usually holds a whole /64). Devices on one IPv6 LAN, or clients behind a NAT64 gateway (`64:ff9b::/96`), therefore share the login limit and the 16 unidentified gateway sockets, as devices behind one IPv4 NAT do.
 - Single instance only: the gateway hub, replay buffers, presence and rate limiters live in process memory. No horizontal scaling; a restart drops every websocket (clients resume or reconnect).
 - There is no built-in backup, retention or admin tooling (uploads can live in an S3-compatible bucket, `VOKKO_STORAGE=s3`).
 - Registration is open by default; set `VOKKO_REGISTRATION=closed` once your accounts exist. There is no invite-only mode or captcha.

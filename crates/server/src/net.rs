@@ -4,12 +4,15 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use axum::extract::ConnectInfo;
 use axum::http::{Extensions, HeaderMap};
 
-/// The peer address (`ConnectInfo`), or with `trust_proxy` the last `X-Forwarded-For` entry, which is the one the nearest
-/// proxy appended. Without connection info (in-process requests) every caller shares the loopback address.
+/// The peer address (`ConnectInfo`), or with `trust_proxy` the last entry of the last `X-Forwarded-For` header, which is the
+/// one the nearest proxy appended (whether it appends to the client's header or adds its own line). Exactly one trusted
+/// proxy hop is supported. Without connection info (in-process requests) every caller shares the loopback address.
 pub fn client_ip(extensions: &Extensions, headers: &HeaderMap, trust_proxy: bool) -> IpAddr {
     if trust_proxy
         && let Some(ip) = headers
-            .get("x-forwarded-for")
+            .get_all("x-forwarded-for")
+            .iter()
+            .next_back()
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.rsplit(',').next())
             .and_then(|entry| entry.trim().parse().ok())
@@ -32,5 +35,8 @@ mod tests {
         assert_eq!(client_ip(&extensions, &headers, false), IpAddr::from([10, 1, 1, 1]));
         assert_eq!(client_ip(&extensions, &headers, true), IpAddr::from([203, 0, 113, 9]));
         assert_eq!(client_ip(&Extensions::new(), &HeaderMap::new(), true), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        // a proxy that adds its own header line after the client's forged one
+        headers.append("x-forwarded-for", "198.51.100.4".parse().expect("header"));
+        assert_eq!(client_ip(&extensions, &headers, true), IpAddr::from([198, 51, 100, 4]));
     }
 }

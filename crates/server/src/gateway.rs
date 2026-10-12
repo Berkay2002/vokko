@@ -62,7 +62,7 @@ impl Drop for PreauthSlot {
 }
 
 pub async fn upgrade(State(state): State<AppState>, ws: WebSocketUpgrade, request: Request) -> Response {
-    let ip = client_ip(request.extensions(), request.headers(), state.config.trust_proxy);
+    let ip = crate::ratelimit::address_key(client_ip(request.extensions(), request.headers(), state.config.trust_proxy));
     if state.hub.preauth_acquire(ip, state.config.max_preauth_per_ip).is_none() {
         return (StatusCode::TOO_MANY_REQUESTS, "Too many gateway connections.").into_response();
     }
