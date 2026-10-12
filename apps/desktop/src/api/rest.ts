@@ -22,6 +22,7 @@ import type {
   ThreadSearchQuery,
   ThreadSearchResponse,
   UpdateThreadMemberRequest,
+  User,
 } from "./types";
 
 export { ApiRequestError, RateLimitedError };
@@ -172,6 +173,9 @@ function queryString(params: Record<string, string | number | boolean | readonly
   const text = q.toString();
   return text ? `?${text}` : "";
 }
+
+/** Friends the caller and `userId` share (GET /users/{id}/relationships). */
+export const getMutualFriends = (userId: Snowflake): Promise<User[]> => request("GET", `/users/${userId}/relationships`);
 
 export const startThreadFromMessage = (channelId: Snowflake, messageId: Snowflake, body: StartThreadFromMessageRequest): Promise<Channel> => request("POST", `/channels/${channelId}/messages/${messageId}/threads`, body);
 export const startThread = (channelId: Snowflake, body: StartThreadRequest): Promise<Channel> => request("POST", `/channels/${channelId}/threads`, body);

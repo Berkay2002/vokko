@@ -55,6 +55,7 @@ General rules:
 | GET | /users/@me/export | `UserDataExport` ("Request my data"), at most once per 24 h per user (429 `RateLimitError` with `retry_after` in seconds) |
 | PUT | /users/@me/relationships/{user_id} | body `{}` or `{type: 1}` = send/accept friend request; `{type: 2}` = block (removes any friendship/request, emits RELATIONSHIP_ADD type 2 to the blocker only; the blocked user gets RELATIONSHIP_REMOVE if they had a relationship). 204 |
 | GET | /users/{id}/profile | `UserProfile`: user, mutual guilds, mutual friend count, guild member info when `?guild_id=` |
+| GET | /users/{id}/relationships | `User[]`: the caller's mutual friends with the user, by id. `[]` for yourself, when either has blocked the other, and when the two share no context (no relationship other than a block, so a pending request either way counts, as on Discord; no guild; no DM or group DM with at least one message, since opening a DM alone leaves it closed on the other side); friends the caller blocks or who block the caller are left out. Unknown user 404 10013. `mutual_friends_count` in the profile is the length of this list |
 | POST | /users/@me/relationships | `{username}` → send friend request by username (204) |
 | DELETE | /users/@me/relationships/{user_id} | remove friend / cancel / decline / unblock (204) |
 | POST | /guilds | `{name, icon_attachment_id?}` → `Guild` (creates @everyone role, "Text Channels"/"Voice Channels" categories, #general, General voice) |

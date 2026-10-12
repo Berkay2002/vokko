@@ -215,6 +215,101 @@ async fn profile_shows_mutual_guilds_friends_and_the_guild_member() {
     assert_eq!(app.get("/users/1/profile", &sam).await.1["code"], 10013);
 }
 
+async fn mutuals(app: &TestApp, viewer: &str, target: &str) -> (StatusCode, Value) {
+    app.get(&format!("/users/{target}/relationships"), viewer).await
+}
+
+#[tokio::test]
+async fn mutual_friends_are_only_shared_friends_with_a_shared_context_and_no_blocks() {
+    let app = TestApp::new().await;
+    let mut people = Vec::new();
+    for name in ["sam", "alice", "bob", "dave", "carl", "eve"] {
+        people.push(app.register(name).await);
+    }
+    let [sam, alice, bob, dave, carl, eve] = [0, 1, 2, 3, 4, 5].map(|i| (people[i].0.as_str(), &people[i].1));
+    let uid = |who: (&str, &Value)| who.1["id"].as_str().expect("id").to_owned();
+    let names = |list: &Value| list.as_array().expect("user list").iter().map(|u| u["username"].as_str().expect("name").to_owned()).collect::<Vec<_>>();
+
+    // sam and alice share a guild; bob and dave are friends of both, carl only of alice, eve only of bob and alice.
+    let (guild, channel) = app.guild_with_channel(sam.0).await;
+    let (_, invite) = app.post(&format!("/channels/{channel}/invites"), sam.0, json!({})).await;
+    let code = invite["code"].as_str().expect("code").to_owned();
+    assert_eq!(app.post(&format!("/invites/{code}"), alice.0, json!({})).await.0, StatusCode::OK);
+    for (a, b) in [(sam, bob), (alice, bob), (sam, dave), (alice, dave), (alice, carl), (eve, bob), (eve, alice)] {
+        befriend(&app, a, b).await;
+    }
+
+    let (status, list) = mutuals(&app, sam.0, &uid(alice)).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(names(&list), ["bob", "dave"], "only shared friends, by id; never carl");
+    assert_eq!(app.get(&format!("/users/{}/profile?guild_id={guild}", uid(alice)), sam.0).await.1["mutual_friends_count"], 2);
+
+    // Yourself: nothing (not your whole friend list).
+    assert_eq!(mutuals(&app, sam.0, &uid(sam)).await.1, json!([]));
+    assert_eq!(app.get(&format!("/users/{}/profile", uid(sam)), sam.0).await.1["mutual_friends_count"], 0);
+    // No shared context: eve and sam share bob, but no guild, DM or relationship.
+    assert_eq!(mutuals(&app, eve.0, &uid(sam)).await.1, json!([]));
+    assert_eq!(app.get(&format!("/users/{}/profile", uid(sam)), eve.0).await.1["mutual_friends_count"], 0);
+    // A pending friend request is shared context (so are a guild, as above, and a DM).
+    assert_eq!(app.post("/users/@me/relationships", eve.0, json!({"username": "sam"})).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(names(&mutuals(&app, eve.0, &uid(sam)).await.1), ["bob"]);
+    assert_eq!(names(&mutuals(&app, sam.0, &uid(eve)).await.1), ["bob"]);
+
+    // A block between the caller and the user hides everything, either way round, until it is lifted.
+    let sam_path = format!("/users/@me/relationships/{}", uid(sam));
+    assert_eq!(app.put_json(&sam_path, alice.0, json!({"type": 2})).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(mutuals(&app, sam.0, &uid(alice)).await.1, json!([]));
+    assert_eq!(mutuals(&app, alice.0, &uid(sam)).await.1, json!([]));
+    assert_eq!(app.get(&format!("/users/{}/profile", uid(alice)), sam.0).await.1["mutual_friends_count"], 0);
+    assert_eq!(app.delete(&sam_path, alice.0).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(names(&mutuals(&app, sam.0, &uid(alice)).await.1), ["bob", "dave"]);
+
+    // A friend the caller blocks drops out; so does a friend who blocks the caller.
+    assert_eq!(app.put_json(&format!("/users/@me/relationships/{}", uid(dave)), sam.0, json!({"type": 2})).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(names(&mutuals(&app, sam.0, &uid(alice)).await.1), ["bob"]);
+    assert_eq!(app.put_json(&sam_path, bob.0, json!({"type": 2})).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(mutuals(&app, sam.0, &uid(alice)).await.1, json!([]));
+
+    assert_eq!(mutuals(&app, sam.0, "1").await.1["code"], 10013);
+}
+
+#[tokio::test]
+async fn mutual_friends_need_a_guild_or_a_dm_with_messages() {
+    let app = TestApp::new().await;
+    let mut people = Vec::new();
+    for name in ["sam", "alice", "bob", "carl"] {
+        people.push(app.register(name).await);
+    }
+    let [sam, alice, bob, carl] = [0, 1, 2, 3].map(|i| (people[i].0.as_str(), &people[i].1));
+    let uid = |who: (&str, &Value)| who.1["id"].as_str().expect("id").to_owned();
+    let names = |list: &Value| list.as_array().expect("user list").iter().map(|u| u["username"].as_str().expect("name").to_owned()).collect::<Vec<_>>();
+
+    // alice and carl join sam's guild; bob is a friend of all three.
+    let (guild, channel) = app.guild_with_channel(sam.0).await;
+    let (_, invite) = app.post(&format!("/channels/{channel}/invites"), sam.0, json!({})).await;
+    let code = invite["code"].as_str().expect("code").to_owned();
+    for who in [alice, carl] {
+        assert_eq!(app.post(&format!("/invites/{code}"), who.0, json!({})).await.0, StatusCode::OK);
+        befriend(&app, who, bob).await;
+    }
+    befriend(&app, sam, bob).await;
+    assert_eq!(names(&mutuals(&app, sam.0, &uid(alice)).await.1), ["bob"]);
+
+    // A DM with a message keeps the context after leaving the guild; a DM only opened does not.
+    let (status, dm) = app.post("/users/@me/channels", sam.0, json!({"recipient_id": uid(alice)})).await;
+    assert_eq!(status, StatusCode::OK, "{dm}");
+    let dm = dm["id"].as_str().expect("dm id").to_owned();
+    assert_eq!(app.post(&format!("/channels/{dm}/messages"), sam.0, json!({"content": "hi"})).await.0, StatusCode::OK);
+    assert_eq!(app.post("/users/@me/channels", sam.0, json!({"recipient_id": uid(carl)})).await.0, StatusCode::OK);
+    for who in [alice, carl] {
+        assert_eq!(app.delete(&format!("/users/@me/guilds/{guild}"), who.0).await.0, StatusCode::NO_CONTENT);
+    }
+    assert_eq!(names(&mutuals(&app, sam.0, &uid(alice)).await.1), ["bob"]);
+    assert_eq!(names(&mutuals(&app, alice.0, &uid(sam)).await.1), ["bob"]);
+    assert_eq!(mutuals(&app, sam.0, &uid(carl)).await.1, json!([]));
+    assert_eq!(mutuals(&app, carl.0, &uid(sam)).await.1, json!([]));
+}
+
 #[tokio::test]
 async fn presence_is_only_shared_with_accepted_relationships() {
     let app = TestApp::new().await;

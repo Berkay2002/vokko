@@ -123,3 +123,52 @@ describe("per-server profiles", () => {
     expect(errorOf(() => call("outsider", "PATCH", `/guilds/${guildId}/members/@me`, { pronouns: "x" })).status).toBe(403);
   });
 });
+
+describe("mutual friends", () => {
+  const befriend = (a: string, b: string) => {
+    call(a, "PUT", `/users/@me/relationships/${ids[b]}`, {});
+    call(b, "PUT", `/users/@me/relationships/${ids[a]}`, {});
+  };
+  const block = (a: string, b: string) => call(a, "PUT", `/users/@me/relationships/${ids[b]}`, { type: 2 });
+  const mutuals = (who: string, other: string) => (call(who, "GET", `/users/${ids[other]}/relationships`) as User[]).map(u => u.id);
+  const countOf = (who: string, other: string) => (call(who, "GET", `/users/${ids[other]}/profile`) as UserProfile).mutual_friends_count;
+
+  beforeEach(() => {
+    ids.pal = createAccount({ username: "pal" }).user.id;
+    befriend("owner", "pal");
+    befriend("member", "pal");
+  });
+
+  it("lists shared friends and matches the profile count", () => {
+    expect(mutuals("owner", "member")).toEqual([ids.pal]);
+    expect(countOf("owner", "member")).toBe(1);
+  });
+
+  it("is empty for yourself", () => {
+    expect(mutuals("owner", "owner")).toEqual([]);
+    expect(countOf("owner", "owner")).toBe(0);
+  });
+
+  it("is empty when either side blocked the other", () => {
+    block("owner", "member");
+    expect(mutuals("owner", "member")).toEqual([]);
+    expect(mutuals("member", "owner")).toEqual([]);
+    expect(countOf("member", "owner")).toBe(0);
+  });
+
+  it("is empty without a shared context", () => {
+    befriend("outsider", "pal");
+    expect(mutuals("owner", "outsider")).toEqual([]);
+    expect(countOf("owner", "outsider")).toBe(0);
+  });
+
+  it("leaves out mutual friends that are blocked", () => {
+    block("owner", "pal");
+    expect(mutuals("owner", "member")).toEqual([]);
+    expect(countOf("owner", "member")).toBe(0);
+  });
+
+  it("404s for an unknown user", () => {
+    expect(errorOf(() => call("owner", "GET", "/users/999999999/relationships"))).toEqual({ status: 404, code: 10013 });
+  });
+});

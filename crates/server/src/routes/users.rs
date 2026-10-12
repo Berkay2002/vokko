@@ -14,7 +14,11 @@ use crate::state::AppState;
 use crate::store;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/users/@me", get(me).patch(update_me)).route("/users/{id}", get(get_user)).route("/users/{id}/profile", get(get_profile))
+    Router::new()
+        .route("/users/@me", get(me).patch(update_me))
+        .route("/users/{id}", get(get_user))
+        .route("/users/{id}/profile", get(get_profile))
+        .route("/users/{id}/relationships", get(mutual_friends))
 }
 
 const MIB: i64 = 1024 * 1024;
@@ -229,6 +233,41 @@ struct ProfileQuery {
     guild_id: Option<Snowflake>,
 }
 
+/// The friends the caller ($1) and `id` ($2) share, by id. Empty for the caller themselves, when either has blocked the other,
+/// and when they share no context: no relationship other than a block (a pending request counts, as on Discord), no guild, no
+/// DM or group DM that has a message (opening a DM alone stores it closed on the other side, who never saw it). Friends that
+/// the caller blocks or that block the caller are left out. Never more of `id`'s friends than the caller's own.
+async fn mutual_friend_ids(state: &AppState, viewer: i64, id: i64) -> ApiResult<Vec<i64>> {
+    if viewer == id {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<(i64,)> = sqlx::query_as(
+        "SELECT a.other_id FROM relationships a JOIN relationships b ON b.other_id = a.other_id AND b.user_id = $2 AND b.kind = 1 \
+         WHERE a.user_id = $1 AND a.kind = 1 AND a.other_id NOT IN ($1, $2) \
+         AND NOT EXISTS (SELECT 1 FROM relationships x WHERE x.kind = 2 AND ((x.user_id = $1 AND x.other_id = a.other_id) OR (x.user_id = a.other_id AND x.other_id = $1))) \
+         AND NOT EXISTS (SELECT 1 FROM relationships x WHERE x.kind = 2 AND ((x.user_id = $1 AND x.other_id = $2) OR (x.user_id = $2 AND x.other_id = $1))) \
+         AND (EXISTS (SELECT 1 FROM relationships x WHERE x.user_id = $1 AND x.other_id = $2 AND x.kind <> 2) \
+              OR EXISTS (SELECT 1 FROM guild_members g JOIN guild_members h ON h.guild_id = g.guild_id AND h.user_id = $2 WHERE g.user_id = $1) \
+              OR EXISTS (SELECT 1 FROM channel_recipients c JOIN channel_recipients d ON d.channel_id = c.channel_id AND d.user_id = $2 \
+                        JOIN channels ch ON ch.id = c.channel_id AND ch.last_message_id IS NOT NULL WHERE c.user_id = $1)) \
+         ORDER BY a.other_id",
+    )
+    .bind(viewer)
+    .bind(id)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(rows.into_iter().map(|(friend,)| friend).collect())
+}
+
+/// `GET /users/{id}/relationships`: the friends the caller and the user share (Discord's mutual friends), by id.
+async fn mutual_friends(State(state): State<AppState>, AuthUser(viewer): AuthUser, Path(id): Path<String>) -> ApiResult<Json<Vec<User>>> {
+    let id = parse_id(&id).ok_or_else(ApiErr::unknown_user)?;
+    store::user(&state, id).await?.ok_or_else(ApiErr::unknown_user)?;
+    let ids = mutual_friend_ids(&state, viewer, id).await?;
+    let mut users = store::users(&state, &ids).await?;
+    Ok(Json(ids.iter().filter_map(|friend| users.remove(friend)).collect()))
+}
+
 /// `GET /users/{id}/profile`: the user plus what the caller shares with them.
 async fn get_profile(
     State(state): State<AppState>,
@@ -246,14 +285,7 @@ async fn get_profile(
     .bind(id)
     .fetch_all(&state.db)
     .await?;
-    let (friends,): (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM relationships a JOIN relationships b ON b.other_id = a.other_id AND b.user_id = $2 AND b.kind = 1 \
-         WHERE a.user_id = $1 AND a.kind = 1 AND a.other_id NOT IN ($1, $2)",
-    )
-    .bind(viewer)
-    .bind(id)
-    .fetch_one(&state.db)
-    .await?;
+    let friends = mutual_friend_ids(&state, viewer, id).await?.len();
     // Only for guilds the caller is in themselves.
     let guild_member = match query.guild_id.map(Snowflake::db) {
         Some(guild_id) if guilds.iter().any(|(shared, _)| *shared == guild_id) => store::member(&state, guild_id, id).await?,
@@ -262,7 +294,7 @@ async fn get_profile(
     Ok(Json(UserProfile {
         user,
         mutual_guilds: guilds.into_iter().map(|(guild_id, nick)| MutualGuild { id: Snowflake::from(guild_id), nick }).collect(),
-        mutual_friends_count: friends.max(0) as u32,
+        mutual_friends_count: u32::try_from(friends).unwrap_or(u32::MAX),
         guild_member,
     }))
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { request } from "../api/rest";
+import { getMutualFriends, request } from "../api/rest";
 import { snowflakeToTimestamp } from "../api/snowflake";
 import { displayName, useStore } from "../api/store";
 import type { Snowflake, User, UserProfile } from "../api/types";
@@ -82,6 +82,19 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
   const member = useStore(s => (guildId ? s.members[guildId]?.[userId] : undefined));
   const [tab, setTab] = useState<"about" | "servers" | "friends">("about");
   const { profile, mutual, memberSince } = useProfileData(userId, guildId);
+  const [friends, setFriends] = useState<User[] | null>(null);
+  const [friendsError, setFriendsError] = useState(false);
+  useEffect(() => {
+    if (tab !== "friends" || friends) return;
+    let live = true;
+    setFriendsError(false);
+    getMutualFriends(userId)
+      .then(list => live && setFriends(list))
+      .catch(() => live && setFriendsError(true));
+    return () => {
+      live = false;
+    };
+  }, [tab, userId, friends]);
   const tagGuildName = useStore(s => (user?.primary_guild ? s.guilds[user.primary_guild.guild_id]?.name : undefined));
   if (!user) return null;
   const look = resolveProfile(user, member);
@@ -143,7 +156,20 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
             ))}
           </ul>
         )}
-        {tab === "friends" && <p className="settings-todo">{profile ? `${profile.mutual_friends_count} mutual friends. The list is not available yet.` : "Mutual friends are not available yet."}</p>}
+        {tab === "friends" && (
+          <ul className="full-profile-list">
+            {friendsError && <li className="settings-todo">Could not load mutual friends.</li>}
+            {!friendsError && !friends && <li className="settings-todo">Loading…</li>}
+            {friends?.length === 0 && <li className="settings-todo">No mutual friends.</li>}
+            {friends?.map(f => (
+              <li key={f.id} className="full-profile-row">
+                <Avatar user={f} size={32} />
+                <span>{displayName(f)}</span>
+                <span className="dm-profile-username">{f.username}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </Modal>
   );
