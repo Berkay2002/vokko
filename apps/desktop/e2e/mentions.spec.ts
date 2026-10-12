@@ -99,7 +99,7 @@ test('message: unknown users and channels are plain pills, a role chip is not a 
 test('pins: user mention opens the card over the popout, channel mention navigates and closes the popout, links ask first', async ({ page }) => {
   const ids = await setup(page);
   const pins = () => page.getByRole('dialog', { name: 'Pinned Messages' });
-  await page.getByRole('button', { name: 'Pinned Messages' }).click();
+  await page.getByRole('button', { name: 'Pinned Messages', exact: true }).click();
   await expect(pins().locator('.chat-pin', { hasText: 'mentionprobe' })).toBeVisible();
 
   await chip(pins(), '@Alice').click();

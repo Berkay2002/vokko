@@ -43,7 +43,7 @@ test('tooltips are 14/18 w500, the rail variant 16/20 w600', async ({ page }) =>
   await home(page);
   await page.getByRole('link', { name: 'Alice' }).first().click();
   await page.locator('.chat-textarea').waitFor();
-  await page.getByRole('button', { name: 'Pinned Messages' }).hover();
+  await page.getByRole('button', { name: 'Pinned Messages', exact: true }).hover();
   await expect(page.locator('.tooltip')).toBeVisible();
   expect(await font(page, '.tooltip')).toBe('14px/18px/500');
   await page.getByRole('button', { name: 'Add a Server' }).hover();
@@ -115,7 +115,7 @@ test('empty pins popout is 420x371 with a tip footer; DM profile banner is 105 p
   await home(page);
   await page.getByRole('link', { name: 'Alice' }).first().click();
   await page.locator('.chat-textarea').waitFor();
-  await page.getByRole('button', { name: 'Pinned Messages' }).click();
+  await page.getByRole('button', { name: 'Pinned Messages', exact: true }).click();
   const pins = page.locator('.chat-pins.empty');
   await expect(pins).toBeVisible();
   const size = await box(page, '.chat-pins.empty');

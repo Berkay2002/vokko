@@ -143,6 +143,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   // ---- slash commands (src/apps) ----
   const setTextAt = useCallback((next: string, pos: number) => {
     setDraftText(channelId, next);
+    setCaret(pos); // with the text, so the picker never parses the new text at the old caret
     requestAnimationFrame(() => { area.current?.focus(); area.current?.setSelectionRange(pos, pos); setCaret(pos); });
   }, [channelId]);
   const commands = useCommandComposer({ channelId, text, caret, setText: setTextAt });

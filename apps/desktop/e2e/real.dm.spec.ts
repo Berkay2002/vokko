@@ -76,7 +76,7 @@ test('pin shows up on the other side and unpin removes it', async () => {
   await m.click({ button: 'right', position: { x: 160, y: 10 } });
   await sam.page.getByRole('menuitem', { name: 'Pin Message' }).click();
   await sam.page.getByRole('dialog', { name: 'Pin this message?' }).getByRole('button', { name: 'Pin it' }).click();
-  await carol.page.getByRole('button', { name: 'Pinned Messages' }).click();
+  await carol.page.getByRole('button', { name: 'Pinned Messages', exact: true }).click();
   await expect(carol.page.locator('.chat-pins')).toContainText(`replying ${RUN}`);
   await shot(carol.page, 'r07-pins');
   await carol.page.keyboard.press('Escape');

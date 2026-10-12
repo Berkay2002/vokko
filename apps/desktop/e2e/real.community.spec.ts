@@ -57,8 +57,8 @@ test('the owner builds a server with onboarding through the API', async ({ brows
 
 test('the owner creates an event with the wizard', async () => {
   const page = owner.page;
-  await expect(page.locator('.cm-quicklink')).toHaveText('Events');
-  await page.locator('.cm-quicklink').click();
+  await expect(page.locator('button.cm-quicklink')).toHaveText('Events');
+  await page.locator('button.cm-quicklink').click();
   await page.getByRole('dialog', { name: 'Events' }).getByRole('button', { name: 'Create Event' }).click();
   const wizard = page.getByRole('dialog', { name: 'Create Event' });
   await wizard.getByRole('radio', { name: /Somewhere Else/ }).click();
@@ -78,7 +78,7 @@ test('the owner creates an event with the wizard', async () => {
   expect(events).toHaveLength(1);
   expect(events[0]).toMatchObject({ name: `Movie night ${RUN}`, entity_metadata: { location: 'The lounge' } });
   await page.keyboard.press('Escape');
-  await expect(page.locator('.cm-quicklink')).toHaveText('1 Event');
+  await expect(page.locator('button.cm-quicklink')).toHaveText('1 Event');
 });
 
 test('a new member goes through onboarding and lands in the default channel with the role', async () => {
@@ -109,15 +109,15 @@ test('a new member goes through onboarding and lands in the default channel with
 
 test('the member sees the event, marks interest, and the owner hears about it live', async () => {
   const page = member.page;
-  await expect(page.locator('.cm-quicklink')).toHaveText('1 Event');
-  await page.locator('.cm-quicklink').click();
+  await expect(page.locator('button.cm-quicklink')).toHaveText('1 Event');
+  await page.locator('button.cm-quicklink').click();
   const card = page.getByRole('dialog', { name: 'Events' }).getByRole('listitem').filter({ hasText: `Movie night ${RUN}` });
   await card.getByRole('button', { name: 'Interested' }).click();
   await expect(card.getByRole('button', { name: 'Interested' })).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(async () => (await api<ScheduledEvent[]>(owner.token, 'GET', `/guilds/${guildId}/scheduled-events`))[0]!.user_count).toBe(1);
 
   // the owner's open client got GUILD_SCHEDULED_EVENT_USER_ADD: the list shows it without a refetch of the page
-  await owner.page.locator('.cm-quicklink').click();
+  await owner.page.locator('button.cm-quicklink').click();
   await expect(owner.page.getByRole('dialog', { name: 'Events' }).getByRole('listitem').filter({ hasText: `Movie night ${RUN}` })).toContainText('1 interested');
 });
 

@@ -28,7 +28,7 @@ async function goTo(page: Page, path: string): Promise<void> {
 
 test('create an event with the wizard, see it in the list and mark yourself interested', async ({ page }) => {
   await openStockTalk(page);
-  const quickLink = page.locator('.cm-quicklink');
+  const quickLink = page.locator('button.cm-quicklink');
   await expect(quickLink).toHaveText('Events');
 
   await quickLink.click();
@@ -90,8 +90,8 @@ test('an event can be started, ended and deleted by its creator, and others are 
     [guildId, start, end] as const,
   );
   // the gateway CREATE event updated the quick link without a reload
-  await expect(page.locator('.cm-quicklink')).toHaveText('1 Event');
-  await page.locator('.cm-quicklink').click();
+  await expect(page.locator('button.cm-quicklink')).toHaveText('1 Event');
+  await page.locator('button.cm-quicklink').click();
   await page.getByRole('dialog', { name: 'Events' }).getByRole('button', { name: /Standup/ }).click();
   const detail = page.getByRole('dialog', { name: 'Standup' });
   await detail.getByRole('button', { name: 'Start Event' }).click();
@@ -99,7 +99,7 @@ test('an event can be started, ended and deleted by its creator, and others are 
   await expect(page.locator('.cm-live-dot')).toHaveCount(1);
   await detail.getByRole('button', { name: 'End Event' }).click();
   await expect(detail.getByText(/Ended/)).toBeVisible();
-  await expect(page.locator('.cm-quicklink')).toHaveText('Events');
+  await expect(page.locator('button.cm-quicklink')).toHaveText('Events');
   await detail.getByRole('button', { name: 'Delete Event' }).click();
   await detail.getByRole('alertdialog').getByRole('button', { name: 'Delete Event' }).click();
   await expect(page.getByRole('dialog', { name: 'Standup' })).toHaveCount(0);
@@ -122,7 +122,7 @@ test('an open event detail follows the event when somebody else cancels or delet
     );
   const first = await make('Cancelled soon');
   const second = await make('Deleted soon');
-  await page.locator('.cm-quicklink').click();
+  await page.locator('button.cm-quicklink').click();
   await page.getByRole('dialog', { name: 'Events' }).getByRole('button', { name: /Cancelled soon/ }).click();
   const detail = page.getByRole('dialog', { name: 'Cancelled soon' });
   await expect(detail.getByRole('button', { name: 'Start Event' })).toBeVisible();
@@ -152,7 +152,7 @@ test('an event whose voice channel was deleted can still be renamed without pick
     return channel.id;
   }, guildId);
   expect(voice).toBeTruthy();
-  await page.locator('.cm-quicklink').click();
+  await page.locator('button.cm-quicklink').click();
   await page.getByRole('dialog', { name: 'Events' }).getByRole('button', { name: /Game night/ }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Edit Event' }).click();
   const wizard = page.getByRole('dialog', { name: 'Edit Event' });
@@ -374,7 +374,7 @@ test('the events dialogs, the onboarding flow and the checklist pass axe', async
     id => (window as unknown as Win).__vokko.request('POST', `/guilds/${id}/scheduled-events`, { name: 'Standup', description: 'Daily sync', entity_type: 3, entity_metadata: { location: 'Room 4' }, scheduled_start_time: new Date(Date.now() + 3_600_000).toISOString(), scheduled_end_time: new Date(Date.now() + 7_200_000).toISOString() }),
     guildId,
   );
-  await page.locator('.cm-quicklink').click();
+  await page.locator('button.cm-quicklink').click();
   await expectClean(page, '.cm-modal');
   await page.getByRole('dialog', { name: 'Events' }).getByRole('button', { name: /Standup/ }).click();
   await expectClean(page, '.cm-modal');
