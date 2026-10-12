@@ -1786,7 +1786,9 @@ button.channel-header-topic:hover {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  margin-left: 8px;
+  /* the 4 px padding (offset by the margins, so the tabs stay where they were) keeps the focus ring inside the scroll clip */
+  margin: -4px 0 -4px 4px;
+  padding: 4px;
   /* six tabs are wider than the header left of the Active Now column below ~1300 px: scroll instead of spilling over it */
   overflow-x: auto;
   scrollbar-width: none;
