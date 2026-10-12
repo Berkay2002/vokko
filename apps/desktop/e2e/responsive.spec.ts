@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { composer, openStockTalk } from './helpers';
+import { openChannel } from './threadHelpers';
 
 // Narrow-window layouts (styles/responsive.css): <=1000 side panels start hidden, <=767 rail+sidebar drawer, <=485 fullscreen settings.
 
@@ -146,3 +147,26 @@ test.describe('1050px: the topic follows the header width, not the window', () =
     await wide.close();
   });
 });
+
+for (const [width, wraps] of [[390, true], [1100, true], [1440, false]] as const) {
+  test.describe(`${width}px: forum toolbar`, () => {
+    test.use({ viewport: { width, height: 844 } });
+    test(wraps ? 'search keeps its own row, sort and New Post stay inside the window' : 'one row, search at its full width', async ({ page }) => {
+      await openChannel(page, 'support'); // a forum channel
+      const box = async (sel: string) => (await page.locator(sel).boundingBox())!;
+      const search = await page.getByLabel('Search posts').boundingBox().then(b => b!);
+      const sort = await box('.forum-sort');
+      const add = await box('.forum-new-button');
+      await expect(page.locator('.forum-new-button')).toBeVisible();
+      for (const b of [search, sort, add]) expect(b.x + b.width).toBeLessThanOrEqual(width);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+      if (wraps) {
+        expect(search.width).toBeGreaterThanOrEqual(200);
+        expect(sort.y).toBeGreaterThan(search.y); // second row
+      } else {
+        expect(search.width).toBeGreaterThan(280); // 320 minus the label's padding and icon
+        expect(Math.abs(sort.y + sort.height / 2 - (search.y + search.height / 2))).toBeLessThan(4); // same row
+      }
+    });
+  });
+}

@@ -16,6 +16,7 @@
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thin-thumb) transparent;
+  container-type: inline-size; /* the toolbar wraps by the page's own width (sidebars included), not the window's */
 }
 
 .forum-guidelines {
@@ -49,6 +50,23 @@
 .forum-search {
   max-width: 320px;
   height: 32px;
+}
+
+/* content width of 570px or less: search (about 200px with New Post shown) + sort (180px) + layouts + New Post no longer fit one row; search takes the first row, the rest the second */
+@container (max-width: 570px) {
+  .forum-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .forum-search {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .forum-sort {
+    flex: 1 1 120px; /* takes what the layout toggle and New Post leave, so all three stay on one row */
+    min-width: 0;
+  }
 }
 
 .forum-sort {
