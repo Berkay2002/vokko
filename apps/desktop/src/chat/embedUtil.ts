@@ -4,7 +4,7 @@ const MAX_INVITES = 3;
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Vokko's own invite links: `vokko.gg/<code>` (what the shell's invite modal shows) and `<app host>/invite/<code>`.
+// Vokko's own invite links: `<app host>/invite/<code>` (what the invite modal shows) and the legacy `vokko.gg/<code>`.
 // Other services' invite links (discord.gg, ...) are never ours, so they are left as plain links.
 function inviteRe(hosts: readonly string[]): RegExp {
   const origins = ['vokko\\.gg', ...hosts.filter(Boolean).map(h => `${escapeRe(h)}\\/invite`)];

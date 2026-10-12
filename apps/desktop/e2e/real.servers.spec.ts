@@ -49,7 +49,7 @@ test('the invite modal produces a link, a second user joins with it', async () =
 
   await member.page.getByRole('button', { name: 'Add a Server' }).click();
   await member.page.getByRole('button', { name: 'Join a Server' }).click();
-  await member.page.getByLabel(/Invite link/).fill(`vokko.gg/${code}`);
+  await member.page.getByLabel(/Invite link/).fill(code);
   await member.page.getByRole('button', { name: 'Join Server' }).click();
   await expect(member.page.getByRole('navigation', { name: 'Servers sidebar' }).getByRole('link', { name: serverName })).toBeVisible({ timeout: 10_000 });
 });
@@ -74,8 +74,8 @@ test('owner and member exchange messages live in the new server', async () => {
 });
 
 test('an invite link in chat renders a card the guest can join from', async () => {
-  await send(owner.page, `join us: vokko.gg/${code}`);
-  const card = msg(owner.page, `join us: vokko.gg/${code}`).locator('.chat-invite');
+  await send(owner.page, `join us: ${owner.page.url().split('/').slice(0, 3).join('/')}/invite/${code}`);
+  const card = msg(owner.page, `join us: ${owner.page.url().split('/').slice(0, 3).join('/')}/invite/${code}`).locator('.chat-invite');
   await expect(card).toContainText(serverName);
   await expect(card.locator('.chat-invite-join')).toHaveText('Joined');
   await shot(owner.page, 'r19-invite-card');

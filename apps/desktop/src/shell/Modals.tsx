@@ -326,7 +326,7 @@ function CreateServer() {
       <label className="field-label" htmlFor="invite-code">
         Invite link <span className="required">*</span>
       </label>
-      <input id="invite-code" className="input" value={code} placeholder="hTKzmak or vokko.gg/hTKzmak" autoFocus onChange={e => setCode(e.target.value)} onKeyDown={e => e.key === "Enter" && code.trim() && run(() => joinOrApply(code))} />
+      <input id="invite-code" className="input" value={code} placeholder="hTKzmak or https://vokko.example.com/invite/hTKzmak" autoFocus onChange={e => setCode(e.target.value)} onKeyDown={e => e.key === "Enter" && code.trim() && run(() => joinOrApply(code))} />
       {error && <p className="field-error">{error}</p>}
     </Modal>
   );

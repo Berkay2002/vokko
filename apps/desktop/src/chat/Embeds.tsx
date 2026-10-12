@@ -6,6 +6,14 @@ import { useChat } from './ChatContext';
 import { Markdown } from './markdown';
 import { embedColor, findInviteCodes, isVideoUrl, safeHttpUrl } from './embedUtil';
 import { formatFullDate } from './util';
+import { API_ORIGIN } from '../api/config';
+
+/** Hosts whose `/invite/<code>` links are ours: the page's own and, in the desktop app, the API origin's. */
+function inviteHosts(): string[] {
+  const hosts = [window.location.host];
+  try { if (API_ORIGIN) hosts.push(new URL(API_ORIGIN).host); } catch { /* bad VITE_VOKKO_API */ }
+  return hosts;
+}
 
 // ---- invites (rendered client-side from GET /invites/{code}) ----
 
@@ -153,7 +161,7 @@ export function Embeds({ message }: { message: Message }) {
   const chat = useChat();
   const { showEmbeds, hideInvites } = chat.display;
   const embeds = showEmbeds ? message.embeds ?? [] : [];
-  const found = useMemo(() => findInviteCodes(message.content, [window.location.host]), [message.content]);
+  const found = useMemo(() => findInviteCodes(message.content, inviteHosts()), [message.content]);
   // "Show embeds" hides link previews only; invite cards stay unless streamer mode hides invites.
   const codes = hideInvites ? [] : found;
   if (embeds.length === 0 && codes.length === 0) return null;

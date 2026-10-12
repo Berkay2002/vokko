@@ -38,7 +38,7 @@ start-minimized are decided before the webview loads.
 - Links that arrive before the webview loads (cold start, second-instance argv) queue in Rust and are handed over by
   `desktop_take_pending_links`, which the JS adapter calls once after subscribing.
 - Test without an installer: `vokko-desktop.exe "vokko://invite/abc123"` (starts the app with the link, or forwards it to the running one).
-- The SPA has no `/invite/:code` route yet; until it exists the router's catch-all sends the user to `/channels/@me`.
+- The SPA routes `/invite/:code` to the invite page.
 
 ### Global shortcuts
 

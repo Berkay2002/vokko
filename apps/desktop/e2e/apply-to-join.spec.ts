@@ -126,7 +126,7 @@ test('Join a Server with an apply-mode invite keeps the apply form open', async 
   const { code } = await prepare(page, ['bob'], true);
   await page.getByRole('button', { name: 'Add a Server' }).click();
   await page.getByRole('button', { name: 'Join a Server' }).click();
-  await page.getByLabel(/Invite link/).fill(`vokko.gg/${code}`);
+  await page.getByLabel(/Invite link/).fill(code);
   await page.getByRole('button', { name: 'Join Server' }).click();
   const dialog = page.getByRole('dialog', { name: /Apply to join/ });
   await expect(dialog.getByRole('button', { name: 'Submit' })).toBeVisible();

@@ -9,6 +9,11 @@ describe('findInviteCodes', () => {
     expect(findInviteCodes('http://127.0.0.1:1422/invite/xyz789', hosts)).toEqual(['xyz789']);
     expect(findInviteCodes('http://127.0.0.1:1422/invite/xyz789')).toEqual([]);
   });
+  it('finds the deploy origin invite links', () => {
+    const deploy = ['vokko.example.com'];
+    expect(findInviteCodes('join https://vokko.example.com/invite/abc123 now', deploy)).toEqual(['abc123']);
+    expect(findInviteCodes('https://other.example/invite/abc123', deploy)).toEqual([]);
+  });
   it('leaves other services and other hosts alone', () => {
     expect(findInviteCodes('https://discord.gg/MXuWj96Fr discord.com/invite/efgh', hosts)).toEqual([]);
     expect(findInviteCodes('https://vokko.example/invite/abc123 https://evilvokko.gg/abc123', hosts)).toEqual([]);

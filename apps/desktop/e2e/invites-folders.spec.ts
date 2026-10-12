@@ -83,7 +83,7 @@ test('the invite modal creates a limited invite and lists friends to send it to'
 
   const main = page.getByRole('dialog', { name: /Invite friends to/ });
   await expect(main).toContainText('Your invite link expires in 30 minutes or after 5 uses.');
-  const code = (await main.locator('#invite-link').inputValue()).replace('vokko.gg/', '');
+  const code = (await main.locator('#invite-link').inputValue()).replace(/^.*\/invite\//, '');
   const invite = (await page.evaluate(c => (window as unknown as Win).__vokko.request('GET', `/invites/${c}`), code)) as { code: string; expires_at: string };
   expect(invite.code).toBe(code);
   expect(Date.parse(invite.expires_at) - Date.now()).toBeLessThanOrEqual(30 * 60_000);
@@ -99,7 +99,7 @@ test('the invite modal creates a limited invite and lists friends to send it to'
   const dms = (await page.evaluate(() => (window as unknown as Win).__vokko.request('GET', '/users/@me/channels'))) as { id: string; recipients?: { username: string }[] }[];
   const dm = dms.find(c => c.recipients?.length === 1 && c.recipients[0]?.username === 'alice');
   const latest = (await page.evaluate(c => (window as unknown as Win).__vokko.request('GET', `/channels/${c}/messages?limit=1`), dm?.id)) as { content: string }[];
-  expect(latest[0]?.content).toContain(`vokko.gg/${code}`);
+  expect(latest[0]?.content).toContain(`/invite/${code}`);
 
   // Server Settings > Invites lists it with its uses and can revoke it.
   await page.keyboard.press('Escape');

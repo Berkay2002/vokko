@@ -1,6 +1,8 @@
 // Invite REST calls and the option lists the invite UI offers (docs/api.md "Invites and user settings").
 
+import { API_ORIGIN } from "../api/config";
 import { request } from "../api/rest";
+import { isDesktop } from "../desktop/tauri";
 import type { Channel, CreateInviteRequest, InviteMaxAge, InviteMaxUses, InviteMetadata, Message, Snowflake } from "../api/types";
 
 export const MAX_AGE_OPTIONS: { value: InviteMaxAge; label: string }[] = [
@@ -31,7 +33,23 @@ export interface InviteSettings {
 
 export const DEFAULT_INVITE_SETTINGS: InviteSettings = { maxAge: 604_800, maxUses: 0, temporary: false };
 
-export const inviteLink = (code: string): string => `vokko.gg/${code}`;
+/**
+ * Origin that invite links point at: the configured API origin inside the desktop app (its own origin is a tauri:// one),
+ * otherwise the origin the web app was served from (also what the mock-mode dev server shows).
+ */
+export function inviteOrigin(
+  desktop: boolean = isDesktop(),
+  apiOrigin: string = API_ORIGIN,
+  pageOrigin: string = typeof window === "undefined" ? "" : window.location.origin,
+): string {
+  if (desktop && apiOrigin) {
+    try { return new URL(apiOrigin).origin; } catch { /* fall through to the page origin */ }
+  }
+  return pageOrigin;
+}
+
+/** Full shareable invite URL, e.g. `https://vokko.example.com/invite/abc123`; the SPA's `/invite/:code` route opens the join flow. */
+export const inviteLink = (code: string, origin: string = inviteOrigin()): string => `${origin}/invite/${code}`;
 
 export function createInvite(channelId: Snowflake, settings: InviteSettings, unique = false): Promise<InviteMetadata> {
   const body: CreateInviteRequest = { max_age: settings.maxAge, max_uses: settings.maxUses, temporary: settings.temporary, unique };
@@ -45,7 +63,7 @@ export const revokeInvite = (code: string): Promise<InviteMetadata> => request("
 /** Sends the invite link to a friend as a DM (opening the DM if needed, without navigating). */
 export async function sendInviteToFriend(userId: Snowflake, code: string): Promise<Message> {
   const channel = await request<Channel>("POST", "/users/@me/channels", { recipient_id: userId });
-  return request<Message>("POST", `/channels/${channel.id}/messages`, { content: `https://${inviteLink(code)}` });
+  return request<Message>("POST", `/channels/${channel.id}/messages`, { content: inviteLink(code) });
 }
 
 /** "Your invite link expires in 7 days." style text for the modal footer. */
