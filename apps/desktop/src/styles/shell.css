@@ -347,6 +347,28 @@
   color: var(--interactive-icon-default);
 }
 
+.download-apps-links {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  gap: 8px;
+}
+
+.download-apps-link {
+  display: block;
+  padding: 10px 16px;
+  border-radius: 4px;
+  background: var(--brand-500, #5865f2);
+  color: #fff;
+  font-weight: 500;
+  text-align: center;
+  text-decoration: none;
+}
+
+.download-apps-link:hover {
+  filter: brightness(0.92);
+}
+
 .download-apps-note {
   color: var(--text-muted);
 }

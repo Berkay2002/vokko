@@ -22,6 +22,9 @@ test('Download Desktop App tile opens an info dialog and closes on Escape', asyn
   await home(page);
   await page.getByRole('button', { name: 'Download Desktop App' }).click();
   await expect(page.getByRole('dialog', { name: 'Download Desktop App' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Download for Windows' })).toHaveAttribute('href', '/downloads/Vokko-windows-setup.exe');
+  await expect(page.getByRole('link', { name: 'Download for macOS' })).toHaveAttribute('href', '/downloads/Vokko-mac.dmg');
+  await expect(page.getByText('right-click the app and choose Open')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog', { name: 'Download Desktop App' })).toHaveCount(0);
 });

@@ -9,7 +9,7 @@ import { avatarUrl, channelMentionCount, dmName, guildUnread, isChannelUnread, u
 import { ChannelType, RelationshipType, type Channel, type Guild, type Snowflake } from "../api/types";
 import { Tooltip, useContextMenu } from "../ui";
 import { GuildIcon } from "./Avatar";
-import { DownloadAppsModal } from "./DownloadApps";
+import { canOfferDownloads, DownloadAppsModal } from "./DownloadApps";
 import { firstTextChannel } from "./channels";
 import { isMutedAt, useIsMuted, useLocalState } from "./localState";
 import { effectiveLevel } from "../notify/decide";
@@ -163,12 +163,16 @@ export function ServerRail() {
           <Compass size={20} />
         </button>
       </RailItem>
-      <RailItem state="idle" tooltip="Download Desktop App">
-        <button type="button" className="rail-tile rail-action rail-download" aria-label="Download Desktop App" onClick={() => setDownloadOpen(true)}>
-          <Download size={20} />
-        </button>
-      </RailItem>
-      <DownloadAppsModal open={downloadOpen} onClose={() => setDownloadOpen(false)} />
+      {canOfferDownloads() && (
+        <>
+          <RailItem state="idle" tooltip="Download Desktop App">
+            <button type="button" className="rail-tile rail-action rail-download" aria-label="Download Desktop App" onClick={() => setDownloadOpen(true)}>
+              <Download size={20} />
+            </button>
+          </RailItem>
+          <DownloadAppsModal open={downloadOpen} onClose={() => setDownloadOpen(false)} />
+        </>
+      )}
     </nav>
   );
 }
