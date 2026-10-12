@@ -1787,6 +1787,9 @@ button.channel-header-topic:hover {
   gap: 8px;
   min-width: 0;
   margin-left: 8px;
+  /* six tabs are wider than the header left of the Active Now column below ~1300 px: scroll instead of spilling over it */
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .friends-tab {

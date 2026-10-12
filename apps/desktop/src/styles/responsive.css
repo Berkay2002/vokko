@@ -363,12 +363,6 @@
     display: none;
   }
 
-  /* six tabs do not fit: the strip scrolls sideways so Add Friend stays reachable */
-  .friends-tabs {
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-
   .friends-tab {
     flex: none;
   }
