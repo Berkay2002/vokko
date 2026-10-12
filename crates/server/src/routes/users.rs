@@ -134,11 +134,44 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     // Images (avatar, banner, widgets) are claimed in the same transaction as the write that shows them, and the widget images the new
     // value no longer shows are released only once the row is updated, so a claim is never visible without its path.
     // Outer `None` = unchanged, inner `None` = cleared.
-    // Upload rows are locked before the users row, in the order account delete takes them, so the two never deadlock: every image this
-    // can claim or release is one of the user's own unsent uploads.
-    let mut tx = state.db.begin().await?;
-    sqlx::query("SELECT id FROM attachments WHERE uploader_id = $1 AND message_id IS NULL ORDER BY id FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
-    sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
+    // Only the uploads this request can claim or release are locked, all in one statement by ascending id and before the users row
+    // (the order account delete takes them), so this never deadlocks with message sends, guild edits or an account delete, and a
+    // request that touches no image locks no upload at all. Releasing needs the widget images the profile shows now: they are read
+    // first without a lock, and if a concurrent edit changed them before the users row was ours, the request starts over locking all of
+    // the user's unsent uploads (a superset of anything it can claim or release, still one ordered statement).
+    let mut wanted: Vec<i64> = [body.avatar_attachment_id, body.banner_attachment_id].into_iter().flatten().flatten().map(|id| id.db()).collect();
+    if let Some(Some(board)) = &widgets {
+        wanted.extend(board.favorite_game.iter().filter_map(|favorite| favorite.game.image));
+        wanted.extend(board.games_i_like.iter().flatten().filter_map(|game| game.image));
+    }
+    let mut broad = false;
+    let (mut tx, previous_widgets) = loop {
+        let mut tx = state.db.begin().await?;
+        let mut locked = wanted.clone();
+        if broad {
+            sqlx::query("SELECT id FROM attachments WHERE uploader_id = $1 AND message_id IS NULL ORDER BY id FOR UPDATE")
+                .bind(user_id)
+                .execute(&mut *tx)
+                .await?;
+        } else {
+            if widgets.is_some() {
+                locked.extend(shown_widget_images(&mut tx, user_id).await?.1);
+            }
+            locked.sort_unstable();
+            locked.dedup();
+            crate::media::lock_uploads(&mut tx, &locked).await?;
+        }
+        sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
+        if widgets.is_none() {
+            break (tx, None);
+        }
+        let (previous, shown) = shown_widget_images(&mut tx, user_id).await?;
+        if broad || shown.iter().all(|id| locked.contains(id)) {
+            break (tx, Some(previous));
+        }
+        tx.rollback().await?;
+        broad = true;
+    };
     let avatar = match body.avatar_attachment_id {
         None => None,
         Some(None) => Some(None),
@@ -153,7 +186,7 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     let widgets = match widgets {
         None => None,
         Some(board) => {
-            let (previous,): (Option<String>,) = sqlx::query_as("SELECT widgets::text FROM users WHERE id = $1").bind(user_id).fetch_one(&mut *tx).await?;
+            let previous = previous_widgets.flatten();
             let stored = resolve_widgets(&mut tx, board, user_id).await?;
             let kept = stored.as_ref().map(StoredWidgets::attachment_ids).unwrap_or_default();
             released = previous
@@ -223,6 +256,13 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     release_uploads(&mut tx, &released, user_id).await?;
     tx.commit().await?;
     Ok(Json(publish_user(&state, user_id).await?))
+}
+
+/// The user's stored widgets (as text) and the ids of the uploads they show.
+async fn shown_widget_images(conn: &mut PgConnection, user_id: i64) -> ApiResult<(Option<String>, Vec<i64>)> {
+    let (text,): (Option<String>,) = sqlx::query_as("SELECT widgets::text FROM users WHERE id = $1").bind(user_id).fetch_one(&mut *conn).await?;
+    let ids = text.as_deref().and_then(|text| serde_json::from_str::<StoredWidgets>(text).ok()).map(|old| old.attachment_ids()).unwrap_or_default();
+    Ok((text, ids))
 }
 
 const MAX_WIDGET_NAME_CHARS: usize = 64;

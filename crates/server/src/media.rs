@@ -82,6 +82,17 @@ pub const IN_USE: &str = "(EXISTS (SELECT 1 FROM users u WHERE a.id::text IN (sp
      OR EXISTS (SELECT 1 FROM applications ap WHERE split_part(ap.icon_path, '/', 1) = a.id::text) \
      OR EXISTS (SELECT 1 FROM webhooks w WHERE split_part(w.avatar_path, '/', 1) = a.id::text))";
 
+/// Row-locks the given uploads in one statement, by ascending id. Every transaction that locks more than one `attachments` row takes
+/// them this way (or with another single `ORDER BY id FOR UPDATE` over a superset, as account delete does) before it claims, attaches
+/// or releases any of them, so two transactions can never hold each other's uploads. Nothing happens for an empty list.
+pub async fn lock_uploads(conn: &mut sqlx::PgConnection, ids: &[i64]) -> Result<(), sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    sqlx::query("SELECT id FROM attachments WHERE id = ANY($1) ORDER BY id FOR UPDATE").bind(ids).execute(conn).await?;
+    Ok(())
+}
+
 /// Where the local backend keeps an attachment's bytes.
 pub fn file_path(state: &AppState, attachment_id: i64) -> PathBuf {
     state.attachments_dir().join(attachment_id.to_string())

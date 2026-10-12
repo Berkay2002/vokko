@@ -178,6 +178,11 @@ async fn update_guild(
 
     // Claims and writes share one transaction: a rejected upload (or any failed write) leaves nothing claimed and nothing changed.
     let mut tx = state.db.begin().await?;
+    // Both uploads are locked up front in one statement by ascending id (not icon then banner), so this never deadlocks with another
+    // transaction locking the same uploads.
+    let mut uploads: Vec<i64> = body.icon_attachment_id.into_iter().chain(body.banner_attachment_id.flatten()).map(|upload| upload.db()).collect();
+    uploads.sort_unstable();
+    media::lock_uploads(&mut tx, &uploads).await?;
     let icon_path = match body.icon_attachment_id {
         Some(icon) => Some(image_path_on(&mut tx, icon.db(), user_id, ImageKind::Avatar, "icon_attachment_id", false).await?),
         None => None,

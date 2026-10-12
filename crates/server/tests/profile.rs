@@ -790,3 +790,26 @@ async fn guild_banner_set_replace_clear_and_rules() {
     let (status, error) = app.patch(&format!("/guilds/{guild}"), &member, json!({"banner_attachment_id": mine["id"]})).await;
     assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50013)));
 }
+
+/// A profile edit locks only the uploads it names: one that names none doesn't wait on an unsent upload another transaction holds
+/// (a message send, guild edit or claim in flight), so the two can never deadlock over it.
+#[tokio::test]
+async fn profile_edit_without_images_does_not_wait_on_a_locked_upload() {
+    let (app, owner, _, channel, _) = setup().await;
+    let pending = upload(&app, &owner, &channel, "pending.png", "image/png", &png()).await;
+    let pending_id: i64 = pending["id"].as_str().expect("id").parse().expect("id");
+    let mut holder = app.state.db.begin().await.expect("begin");
+    sqlx::query("SELECT id FROM attachments WHERE id = $1 FOR UPDATE").bind(pending_id).execute(&mut *holder).await.expect("lock");
+
+    let edit = app.patch("/users/@me", &owner, json!({"bio": "not blocked", "pronouns": "they/them"}));
+    let (status, me) = tokio::time::timeout(std::time::Duration::from_secs(5), edit).await.expect("the edit waited on a locked upload it never named");
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["bio"], "not blocked");
+
+    // naming the held upload does wait for it (the claim and the write share a transaction), so the check above can tell the two apart
+    let claim = app.patch("/users/@me", &owner, json!({"avatar_attachment_id": pending["id"]}));
+    assert!(tokio::time::timeout(std::time::Duration::from_millis(500), claim).await.is_err(), "claiming a locked upload did not wait for it");
+    holder.rollback().await.expect("rollback");
+    let (status, me) = app.patch("/users/@me", &owner, json!({"avatar_attachment_id": pending["id"]})).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+}

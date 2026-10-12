@@ -312,7 +312,11 @@ pub async fn create_post(state: &AppState, user_id: i64, access: &ChannelAccess,
     let id = state.ids.next();
     insert_thread(state, id, ChannelType::PublicThread, forum, user_id, &name, duration, true, &tags).await?;
     if !attachments.is_empty() {
-        sqlx::query("UPDATE attachments SET channel_id = $2 WHERE id = ANY($1)").bind(&attachments).bind(id).execute(&state.db).await?;
+        // locked first in one statement by ascending id, like every multi-upload lock, rather than in the UPDATE's own scan order
+        let mut tx = state.db.begin().await?;
+        crate::media::lock_uploads(&mut tx, &attachments).await?;
+        sqlx::query("UPDATE attachments SET channel_id = $2 WHERE id = ANY($1)").bind(&attachments).bind(id).execute(&mut *tx).await?;
+        tx.commit().await?;
     }
     let row = store::channel_row(state, id).await?.ok_or_else(ApiErr::internal)?;
     threads::dispatch(state, &row, "THREAD_CREATE", true).await?;

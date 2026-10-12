@@ -386,6 +386,8 @@ async fn insert_message_stored(
         let ids: Vec<i64> = draft.attachments.iter().map(|attachment| attachment.id).collect();
         let filenames: Vec<Option<String>> = draft.attachments.iter().map(|attachment| attachment.filename.clone()).collect();
         let descriptions: Vec<Option<String>> = draft.attachments.iter().map(|attachment| attachment.description.clone()).collect();
+        // locked first in one statement by ascending id: the UPDATE below would lock them in whatever order its join visits them
+        crate::media::lock_uploads(&mut tx, &ids).await?;
         let claimed = sqlx::query(
             "UPDATE attachments a SET message_id = $1, filename = COALESCE(m.filename, a.filename), description = m.description              FROM UNNEST($2::bigint[], $3::text[], $4::text[]) AS m(id, filename, description)              WHERE a.id = m.id AND a.channel_id = $5 AND a.uploader_id = $6 AND a.message_id IS NULL AND a.claimed_at IS NULL",
         )
