@@ -14,6 +14,13 @@ const STRIP = { banner: null, bannerColor: "#2b2d31", themeColors: null } as con
 const DEFAULT_COLOR = hexToInt("#8d96f7");
 const COLOR_PRESETS = ["#8d96f7", "#57d28f", "#4fb0f5", "#c13cf5", "#e0245e", "#ff4d2d", "#d6a817"].map(hexToInt);
 
+/** Catalog items grouped by `section` in catalog order; the unsectioned originals come last. */
+function bySection<T extends { section?: string }>(items: T[]): [string | undefined, T[]][] {
+  const groups = new Map<string | undefined, T[]>();
+  for (const item of items) groups.set(item.section, [...(groups.get(item.section) ?? []), item]);
+  return [...groups].sort(([a], [b]) => Number(a === undefined) - Number(b === undefined));
+}
+
 interface Common {
   user: User;
   look: ProfileLook;
@@ -41,9 +48,11 @@ export function EffectPicker({ user, look, name, value, onApply, onClose }: Comm
           <PickerSection title="Your effects" label="Profile effect">
             <NoneTile selected={sel === null} onClick={() => setSel(null)} />
           </PickerSection>
-          <PickerSection title="Effects" label="Profile effects">
-            {PROFILE_EFFECTS.map(e => strip(e.id, e.name))}
-          </PickerSection>
+          {bySection(PROFILE_EFFECTS).map(([section, items]) => (
+            <PickerSection key={section ?? ""} title={section ?? "Particles"} label={section ?? "Profile effects"}>
+              {items.map(e => strip(e.id, e.name))}
+            </PickerSection>
+          ))}
         </>
       }
       preview={<PreviewCard user={user} look={{ ...look, effect: sel }} name={name} />}
@@ -67,13 +76,15 @@ export function DecorationPicker({ user, look, value, onApply, onClose }: Omit<C
           <PickerSection title="Your decorations" label="Avatar decoration">
             <NoneTile selected={sel === null} onClick={() => setSel(null)} />
           </PickerSection>
-          <PickerSection title="Decorations" label="Avatar decorations">
-            {AVATAR_DECORATIONS.map(d => (
-              <PickerTile key={d.id} selected={sel === d.id} label={d.name} onClick={() => setSel(d.id)}>
-                <Avatar user={base} size={56} decoration={d.id} />
-              </PickerTile>
-            ))}
-          </PickerSection>
+          {bySection(AVATAR_DECORATIONS).map(([section, items]) => (
+            <PickerSection key={section ?? ""} title={section ?? "Rings"} label={section ?? "Avatar decorations"}>
+              {items.map(d => (
+                <PickerTile key={d.id} selected={sel === d.id} label={d.name} onClick={() => setSel(d.id)}>
+                  <Avatar user={base} size={56} decoration={d.id} />
+                </PickerTile>
+              ))}
+            </PickerSection>
+          ))}
         </>
       }
       preview={
@@ -89,7 +100,7 @@ export function DecorationPicker({ user, look, value, onApply, onClose }: Omit<C
           </div>
         </div>
       }
-      info={{ name: def?.name ?? "None", description: def ? "A ring that shows around your avatar wherever it appears." : "Your avatar shows without a decoration." }}
+      info={{ name: def?.name ?? "None", description: def ? `${def.art ? "An illustrated decoration" : "A ring"} that shows around your avatar wherever it appears.` : "Your avatar shows without a decoration." }}
     />
   );
 }
@@ -115,17 +126,19 @@ export function NameplatePicker({ user, look, name, value, onApply, onClose }: C
           <PickerSection title="Your nameplates" label="Nameplate" layout="rows">
             <NoneTile selected={sel === null} onClick={() => setSel(null)} className="row" />
           </PickerSection>
-          <PickerSection title="Nameplates" label="Nameplates" layout="rows">
-            {NAMEPLATES.map(n => (
-              <PickerTile key={n.id} selected={sel === n.id} label={n.name} onClick={() => setSel(n.id)} className="row">
-                <span className="pf-nameplate-row has-nameplate">
-                  <Nameplate id={n.id} />
-                  <Avatar user={base} size={24} decoration={false} />
-                  <span className="pe-pk-skel-bar" />
-                </span>
-              </PickerTile>
-            ))}
-          </PickerSection>
+          {bySection(NAMEPLATES).map(([section, items]) => (
+            <PickerSection key={section ?? ""} title={section ?? "Gradients"} label={section ?? "Nameplates"} layout="rows">
+              {items.map(n => (
+                <PickerTile key={n.id} selected={sel === n.id} label={n.name} onClick={() => setSel(n.id)} className="row">
+                  <span className="pf-nameplate-row has-nameplate">
+                    <Nameplate id={n.id} />
+                    <Avatar user={base} size={24} decoration={false} />
+                    <span className="pe-pk-skel-bar" />
+                  </span>
+                </PickerTile>
+              ))}
+            </PickerSection>
+          ))}
         </>
       }
       preview={

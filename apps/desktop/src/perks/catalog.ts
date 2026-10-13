@@ -17,9 +17,11 @@ export const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
 // ---- avatar decorations ----
 
-export interface DecorationDef {
+export interface RingDecorationDef {
   id: string;
   name: string;
+  art?: undefined;
+  section?: undefined;
   /** Ring gradient stops, drawn clockwise from the top. */
   colors: string[];
   /** Ring stroke width in a 100 unit box (the avatar is the inner 80). */
@@ -34,6 +36,18 @@ export interface DecorationDef {
   ornaments?: { shape: "star" | "dot" | "diamond"; count: number; color: string };
 }
 
+/** An illustrated decoration drawn by perks/art/decorations.tsx; `section` groups it in the picker. */
+export interface ArtDecorationDef {
+  id: string;
+  name: string;
+  art: true;
+  section: string;
+}
+
+export type DecorationDef = RingDecorationDef | ArtDecorationDef;
+
+const art = (section: string, items: [string, string][]) => items.map(([id, name]) => ({ id, name, section, art: true as const }));
+
 export const AVATAR_DECORATIONS: DecorationDef[] = [
   { id: "halo", name: "Halo", colors: ["#ffd166", "#fff3b0", "#ffd166"], width: 3, glow: true },
   { id: "aurora", name: "Aurora", colors: ["#57d28f", "#74b7f5", "#b79bf0", "#57d28f"], width: 4, spin: 9 },
@@ -44,6 +58,33 @@ export const AVATAR_DECORATIONS: DecorationDef[] = [
   { id: "petals", name: "Petals", colors: ["#f8a8d8", "#e47fd2"], width: 2, ornaments: { shape: "dot", count: 10, color: "#ffd9ef" }, spin: 24 },
   { id: "pixel", name: "Pixel Frame", colors: ["#5865f2", "#3ba55d"], width: 5, dash: "6 6" },
   { id: "crystal", name: "Crystal", colors: ["#74e8ff", "#a78bfa"], width: 3, ornaments: { shape: "diamond", count: 4, color: "#e0f7ff" }, glow: true },
+  ...art("Animals", [
+    ["cat-ears", "Cat Ears"],
+    ["bunny-ears", "Bunny Ears"],
+    ["frog-friend", "Frog Friend"],
+  ]),
+  ...art("Nature", [
+    ["flower-crown", "Flower Crown"],
+    ["autumn-leaves", "Autumn Leaves"],
+    ["sakura-branch", "Sakura Branch"],
+    ["mushrooms", "Toadstools"],
+    ["sprout", "Sprout"],
+  ]),
+  ...art("Fantasy", [
+    ["royal-crown", "Royal Crown"],
+    ["angel-wings", "Angel"],
+    ["devil-horns", "Little Devil"],
+    ["star-halo", "Star Halo"],
+  ]),
+  ...art("Seasonal", [
+    ["witch-hat", "Witch Hat"],
+    ["pumpkins", "Pumpkin Patch"],
+    ["holly", "Holly"],
+  ]),
+  ...art("Accessories", [
+    ["headphones", "Headphones"],
+    ["winter-beanie", "Winter Beanie"],
+  ]),
 ];
 
 export const decorationById = (id: string | null | undefined): DecorationDef | undefined => AVATAR_DECORATIONS.find(d => d.id === id);
@@ -56,13 +97,16 @@ export interface EffectDef {
   /** Particle colours, cycled over the particles. */
   colors: string[];
   count: number;
-  shape: "dot" | "flake" | "spark" | "streak" | "ring";
-  /** Motion: rise, fall, drift sideways or twinkle in place. */
-  motion: "rise" | "fall" | "drift" | "twinkle";
+  /** CSS shapes, or a drawing from perks/art/effects.tsx. */
+  shape: "dot" | "flake" | "spark" | "streak" | "ring" | "leaf" | "heart" | "shooting-star" | "blossom" | "butterfly" | "bubble";
+  /** Motion: rise, fall, drift sideways, twinkle in place; flutter down, float up, shoot across or flit about. */
+  motion: "rise" | "fall" | "drift" | "twinkle" | "flutter" | "float" | "shoot" | "flit";
   /** Particle size range in px. */
   size: [number, number];
   /** Animation duration range in seconds. */
   duration: [number, number];
+  /** Picker group of the drawn effects. */
+  section?: string;
 }
 
 export const PROFILE_EFFECTS: EffectDef[] = [
@@ -74,6 +118,12 @@ export const PROFILE_EFFECTS: EffectDef[] = [
   { id: "fireflies", name: "Fireflies", colors: ["#d7ff7a", "#fff3b0"], count: 14, shape: "dot", motion: "drift", size: [4, 7], duration: [4, 8] },
   { id: "confetti", name: "Confetti", colors: ["#ff4fd8", "#4fe0ff", "#ffd166", "#57d28f", "#b79bf0"], count: 26, shape: "streak", motion: "fall", size: [6, 11], duration: [3, 5.5] },
   { id: "petals", name: "Petal Drift", colors: ["#f8a8d8", "#ffd9ef", "#e47fd2"], count: 16, shape: "flake", motion: "drift", size: [6, 11], duration: [5, 9] },
+  { id: "falling-leaves", name: "Falling Leaves", section: "Nature", colors: ["#e8452c", "#f39a2b", "#f7c948", "#c0502a"], count: 14, shape: "leaf", motion: "flutter", size: [14, 21], duration: [5, 8] },
+  { id: "cherry-blossoms", name: "Cherry Blossoms", section: "Nature", colors: ["#ffc2d6", "#ffe0ea", "#f59bbb"], count: 16, shape: "blossom", motion: "flutter", size: [10, 15], duration: [6, 9] },
+  { id: "butterflies", name: "Butterflies", section: "Nature", colors: ["#7ec8ff", "#ffb347", "#c79bff", "#ff8ac8"], count: 7, shape: "butterfly", motion: "flit", size: [15, 21], duration: [3, 5] },
+  { id: "hearts", name: "Floating Hearts", section: "Whimsy", colors: ["#ff5c8a", "#ff8fb1", "#e0245e", "#ffb3c8"], count: 14, shape: "heart", motion: "float", size: [10, 16], duration: [4, 7] },
+  { id: "shooting-stars", name: "Shooting Stars", section: "Whimsy", colors: ["#ffe08a", "#fff3b0", "#a9d4ff"], count: 9, shape: "shooting-star", motion: "shoot", size: [9, 13], duration: [3, 5] },
+  { id: "soap-bubbles", name: "Soap Bubbles", section: "Whimsy", colors: ["#a9e8ff", "#ffc2f0", "#c9b8ff", "#b8ffe0"], count: 12, shape: "bubble", motion: "float", size: [12, 22], duration: [5, 9] },
 ];
 
 export const effectById = (id: string | null | undefined): EffectDef | undefined => PROFILE_EFFECTS.find(e => e.id === id);
@@ -184,7 +234,13 @@ export interface NameplateDef {
   sheen?: boolean;
   /** Repeating pattern drawn over the gradient. */
   pattern?: "dots" | "stripes" | "grid" | "waves";
+  /** Illustrated: a scene from perks/art/nameplates.tsx on the right, over `colors` as the background. */
+  art?: true;
+  section?: string;
 }
+
+const plates = (section: string, items: [string, string, string, string][]): NameplateDef[] =>
+  items.map(([id, name, from, to]) => ({ id, name, colors: [from, to], art: true, section }));
 
 export const NAMEPLATES: NameplateDef[] = [
   { id: "aurora", name: "Aurora", colors: ["#1f6b55", "#3a4f9a", "#6b3f9a"], sheen: true },
@@ -195,6 +251,30 @@ export const NAMEPLATES: NameplateDef[] = [
   { id: "circuit", name: "Circuit", colors: ["#0e2a2f", "#14505a"], pattern: "grid", sheen: true },
   { id: "candy", name: "Candy", colors: ["#8a2f6b", "#4f5fc4"], pattern: "stripes" },
   { id: "starfield", name: "Starfield", colors: ["#0b0f2e", "#2a2160"], pattern: "dots", sheen: true },
+  ...plates("Animals", [
+    ["robin", "Robin", "#24382f", "#4c7a62"],
+    ["berry-mouse", "Berry Mouse", "#2e1f30", "#4a3048"],
+    ["koi-pond", "Koi Pond", "#0e2a36", "#143e4e"],
+    ["sleepy-fox", "Sleepy Fox", "#2a1e2a", "#3e2a3a"],
+    ["night-owl", "Night Owl", "#0f1430", "#161d42"],
+  ]),
+  ...plates("Nature", [
+    ["mushroom-grove", "Toadstool Grove", "#15231a", "#1e3226"],
+    ["starry-night", "Starry Night", "#121234", "#1e1c4c"],
+    ["cherry-blossom", "Cherry Blossom", "#341e34", "#50304c"],
+    ["sunflowers", "Sunflowers", "#3a2a12", "#5e4219"],
+    ["snowy-pines", "Snowy Pines", "#17263f", "#22385a"],
+    ["ocean-sunset", "Ocean Sunset", "#2e1a40", "#4a2560"],
+  ]),
+  ...plates("Wild Prints", [
+    ["tiger-sparkle", "Tiger Sparkle", "#5a2a0e", "#8a3e12"],
+    ["leopard-sparkle", "Leopard Sparkle", "#4e3214", "#74481a"],
+  ]),
+  ...plates("Fantasy", [
+    ["crystal-cave", "Crystal Cave", "#170f2a", "#21183c"],
+    ["cosmos", "Cosmos", "#0e0a24", "#150f32"],
+    ["lanterns", "Sky Lanterns", "#1a1432", "#241c42"],
+  ]),
 ];
 
 export const nameplateById = (id: string | null | undefined): NameplateDef | undefined => NAMEPLATES.find(n => n.id === id);

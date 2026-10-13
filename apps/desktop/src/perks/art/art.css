@@ -1,0 +1,253 @@
+/* Animations of the illustrated perks (perks/art). Each `pk` element animates transform or opacity only, around its own box. */
+
+.pk {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation-duration: 3s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.pk-twinkle {
+  animation-name: pk-twinkle;
+  animation-duration: 2.6s;
+}
+
+.pk-sway {
+  animation-name: pk-sway;
+  animation-duration: 3.6s;
+  transform-origin: 50% 100%;
+}
+
+.pk-bob {
+  animation-name: pk-bob;
+  animation-duration: 2.8s;
+}
+
+.pk-pulse {
+  animation-name: pk-pulse;
+  animation-duration: 2.4s;
+}
+
+.pk-flicker {
+  animation-name: pk-flicker;
+  animation-duration: 1.9s;
+}
+
+.pk-twitch {
+  animation-name: pk-twitch;
+  animation-duration: 5s;
+}
+
+.pk-blink {
+  animation-name: pk-blink;
+  animation-duration: 4.5s;
+  transform-origin: 50% 0;
+  /* eyelids stay open when motion is reduced */
+  transform: scaleY(0);
+}
+
+.pk-swim {
+  animation-name: pk-swim;
+  animation-duration: 4s;
+  animation-direction: alternate;
+}
+
+.pk-float {
+  animation-name: pk-float;
+  animation-duration: 4.2s;
+}
+
+.pk-rise {
+  animation-name: pk-rise;
+  animation-duration: 3.2s;
+  animation-timing-function: ease-out;
+}
+
+.pk-fall {
+  animation-name: pk-fall;
+  animation-duration: 4.5s;
+  animation-timing-function: linear;
+}
+
+.pk-shoot {
+  animation-name: pk-shoot;
+  animation-duration: 5s;
+  animation-timing-function: ease-in;
+}
+
+.pk-flap {
+  animation-name: pk-flap;
+  animation-duration: 0.45s;
+  animation-direction: alternate;
+}
+
+@keyframes pk-twinkle {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.25;
+    transform: scale(0.55);
+  }
+}
+
+@keyframes pk-sway {
+  0%,
+  100% {
+    transform: rotate(-4deg);
+  }
+  50% {
+    transform: rotate(4deg);
+  }
+}
+
+@keyframes pk-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1.6px);
+  }
+}
+
+@keyframes pk-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes pk-flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  20% {
+    opacity: 0.75;
+  }
+  35% {
+    opacity: 0.95;
+  }
+  60% {
+    opacity: 0.7;
+  }
+  80% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes pk-twitch {
+  0%,
+  86%,
+  100% {
+    transform: rotate(0);
+  }
+  90% {
+    transform: rotate(-9deg);
+  }
+  94% {
+    transform: rotate(3deg);
+  }
+}
+
+@keyframes pk-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(0);
+  }
+  95% {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes pk-swim {
+  from {
+    transform: translateX(-3px) rotate(-3deg);
+  }
+  to {
+    transform: translateX(3px) rotate(3deg);
+  }
+}
+
+@keyframes pk-float {
+  0%,
+  100% {
+    transform: translateY(1.5px);
+  }
+  50% {
+    transform: translateY(-1.5px);
+  }
+}
+
+@keyframes pk-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 2px) scale(0.7);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(3px, -8px) scale(1);
+  }
+}
+
+@keyframes pk-fall {
+  0% {
+    opacity: 0;
+    transform: translate(0, -6px) rotate(0);
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-5px, 22px) rotate(160deg);
+  }
+}
+
+@keyframes pk-shoot {
+  0% {
+    opacity: 0;
+    transform: translate(-10px, -4px);
+  }
+  6% {
+    opacity: 1;
+  }
+  22%,
+  100% {
+    opacity: 0;
+    transform: translate(18px, 7px);
+  }
+}
+
+@keyframes pk-flap {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0.35);
+  }
+}
+
+.reduce-motion .pk {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.full-motion) .pk {
+    animation: none !important;
+  }
+}
