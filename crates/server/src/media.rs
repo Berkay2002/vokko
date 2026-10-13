@@ -66,7 +66,7 @@ pub fn asset_path(id: i64, key: &str, filename: &str) -> String {
 }
 
 /// SQL condition (the `attachments` row is aliased `a`): something still shows the upload, i.e. a user's or a server profile's avatar or
-/// banner, a user's profile widget image, a guild icon or banner, a group icon, a sticker, an event cover, an application icon or a webhook
+/// banner, a user's recent avatar (`user_avatar_history`), a user's profile widget image, a guild icon or banner, a group icon, a sticker, an event cover, an application icon or a webhook
 /// avatar. It matches on the upload id (the first path segment) because legacy rows store `<id>/<filename>`. Use it as `AND NOT {IN_USE}`
 /// wherever an upload is released or swept, so a claim that was cleared by mistake can never get a picture that is still shown deleted.
 pub const IN_USE: &str = "(EXISTS (SELECT 1 FROM users u WHERE a.id::text IN (split_part(u.avatar_path, '/', 1), split_part(u.banner_path, '/', 1))) \
@@ -80,7 +80,7 @@ pub const IN_USE: &str = "(EXISTS (SELECT 1 FROM users u WHERE a.id::text IN (sp
      OR EXISTS (SELECT 1 FROM soundboard_sounds ss WHERE ss.attachment_id = a.id) \
      OR EXISTS (SELECT 1 FROM scheduled_events e WHERE split_part(e.image_path, '/', 1) = a.id::text) \
      OR EXISTS (SELECT 1 FROM applications ap WHERE split_part(ap.icon_path, '/', 1) = a.id::text) \
-     OR EXISTS (SELECT 1 FROM webhooks w WHERE split_part(w.avatar_path, '/', 1) = a.id::text))";
+     OR EXISTS (SELECT 1 FROM webhooks w WHERE split_part(w.avatar_path, '/', 1) = a.id::text)      OR EXISTS (SELECT 1 FROM user_avatar_history h WHERE h.attachment_id = a.id))";
 
 /// Row-locks those of the given uploads that `uploader_id` uploaded, in one statement by ascending id; ids of anyone else's uploads lock
 /// nothing (the caller's ownership check rejects them), so a client can't hold another user's upload. Nothing happens for an empty list.

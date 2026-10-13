@@ -2953,6 +2953,22 @@ pub struct GifCategories {
     pub categories: Vec<GifCategory>,
 }
 
+/// One of the caller's last avatars (`GET /users/@me/avatars`): an upload they can set again with `avatar_attachment_id`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RecentAvatar {
+    /// The attachment id.
+    pub id: Snowflake,
+    pub url: String,
+}
+
+/// `POST /users/@me/avatars/gif`: the server downloads a picked GIF and stores it as a pending upload in `channel_id`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AvatarGifRequest {
+    pub channel_id: Snowflake,
+    /// `Gif.url` from the GIF picker (a media URL of the configured provider).
+    pub url: String,
+}
+
 /// A saved message, as the owner sees it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Bookmark {

@@ -47,6 +47,8 @@ General rules:
 | GET | /users/@me | `User` |
 | PATCH | /users/@me | `EditUserRequest` → `User` (profile perks included: banner, pronouns, theme colours, decoration, effect, nameplate, display name style, server tag, widgets) |
 | GET | /users/{id} | `User` |
+| GET | /users/@me/avatars | `RecentAvatar[]` (`{id, url}`): the last 6 avatars the caller set (an upload saved with `avatar_attachment_id`), newest first; setting one again moves it to the top. `id` is the attachment id, so choosing one is `PATCH /users/@me {avatar_attachment_id: id}`. Their files are kept while they are listed |
+| POST | /users/@me/avatars/gif | `{channel_id, url}` → `Attachment` (a pending upload, `avatar.gif`): the "Choose GIF" avatar. `url` is a `Gif.url` from `/gifs/*`; the server downloads it itself (the app's CSP and the providers' CORS would stop the client) and the caller then claims the upload with `PATCH /users/@me`. Only `https` URLs on the configured provider's media domains are fetched (`giphy.com`, `tenor.com`, `klipy.com` and their subdomains; with `VOKKO_GIF_BASE_URL` set, that origin too), the DNS answers must be public addresses, redirects are followed up to 3 hops and every hop must pass the same check, the file may be at most the avatar limit (10 MiB) and must be a PNG, JPEG, GIF or WebP image (400 50035 `url` otherwise, 502 when the provider does not answer). The caller needs `ATTACH_FILES` in `channel_id`; the upload counts against the pending-upload quota like any other |
 | GET | /users/@me/guilds | `Guild[]` |
 | GET | /users/@me/channels | DM + group DM `Channel[]` |
 | POST | /users/@me/channels | `{recipient_id}` → existing or new DM `Channel`; `{recipient_ids: []}` → group DM |

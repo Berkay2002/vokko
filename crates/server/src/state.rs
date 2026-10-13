@@ -72,7 +72,7 @@ impl AppState {
         let hub = Hub::new(config.replay_capacity, config.session_ttl, config.outgoing_queue);
         let unfurler = Unfurler::new(config.unfurl);
         let accounts = Accounts::new(&config.accounts);
-        let gifs = GifProxy::new(config.gif.clone());
+        let gifs = GifProxy::new(config.gif.clone(), config.unfurl.allow_private);
         let voice = Voice::new(rooms, &config);
         Self(Arc::new(Inner {
             db,

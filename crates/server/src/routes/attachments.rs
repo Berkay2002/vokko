@@ -147,6 +147,46 @@ async fn receive_file(field: &mut Field<'_>, path: &std::path::Path, max_bytes: 
     Ok(Some((size, head)))
 }
 
+/// Stores image bytes the server fetched itself (a GIF picked for an avatar) as the caller's pending upload in `channel_id`, with the same
+/// checks, quota and cleanup as [`upload`]. The bytes must be a PNG, JPEG, GIF or WebP image.
+pub async fn store_fetched_image(state: &AppState, user_id: i64, channel_id: i64, bytes: Vec<u8>) -> ApiResult<Attachment> {
+    let image = sniff_image(&bytes[..bytes.len().min(SNIFF_BYTES)]).ok_or_else(|| ApiErr::invalid("url", "Must be a PNG, JPEG, GIF or WebP image."))?;
+    let extension = image.content_type.trim_start_matches("image/");
+    let filename = format!("avatar.{extension}");
+    let (content_type, size) = (image.content_type.to_owned(), bytes.len() as i64);
+    let (width, height) = (Some(image.width as i32), Some(image.height as i32));
+    let (attachment_id, key) = (state.ids.next(), media::new_key());
+    let quota = pending_quota(state.config.max_upload_bytes);
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)").bind(UPLOAD_LOCK_SPACE).bind((user_id ^ (user_id >> 32)) as i32).execute(&mut *tx).await?;
+    let (pending,): (i64,) = sqlx::query_as(PENDING_BYTES).bind(user_id).fetch_one(&mut *tx).await?;
+    if pending.saturating_add(size) > quota {
+        return Err(quota_error(quota));
+    }
+    let row = PendingRow::new(state, attachment_id);
+    sqlx::query(
+        "INSERT INTO attachments (id, channel_id, uploader_id, filename, content_type, size, width, height, key) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+    )
+    .bind(attachment_id)
+    .bind(channel_id)
+    .bind(user_id)
+    .bind(&filename)
+    .bind(&content_type)
+    .bind(size)
+    .bind(width)
+    .bind(height)
+    .bind(&key)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    if let Err(error) = state.storage.put(attachment_id, axum::body::Bytes::from(bytes)).await {
+        row.discard().await;
+        return Err(error.into());
+    }
+    row.keep();
+    Ok(attachment_api(state, attachment_id, &key, filename, Some(content_type), size, width, height))
+}
+
 async fn upload(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>, mut multipart: Multipart) -> ApiResult<Json<Attachment>> {
     let channel_id = parse_id(&id).ok_or_else(ApiErr::unknown_channel)?;
     let access = channel_access(&state, user_id, channel_id).await?;

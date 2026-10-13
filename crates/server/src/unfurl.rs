@@ -186,7 +186,7 @@ fn is_public_v6(ip: Ipv6Addr) -> bool {
         || (first == 0x0100 && s[1] == 0 && s[2] == 0 && s[3] == 0)) // discard-only
 }
 
-fn host_allowed(url: &Url, allow_private: bool) -> bool {
+pub(crate) fn host_allowed(url: &Url, allow_private: bool) -> bool {
     if allow_private {
         return true;
     }
@@ -200,8 +200,8 @@ fn host_allowed(url: &Url, allow_private: bool) -> bool {
 }
 
 /// Resolves through the system resolver and drops every non-public answer, so each redirect hop is checked again.
-struct GuardedResolver {
-    allow_private: bool,
+pub(crate) struct GuardedResolver {
+    pub(crate) allow_private: bool,
 }
 
 impl Resolve for GuardedResolver {

@@ -3,18 +3,37 @@
 use std::time::Duration;
 
 use reqwest::Url;
+use reqwest::header::LOCATION;
 use serde_json::Value;
 use vokko_protocol::api::{Gif, GifCategories, GifCategory, GifPage, GifProvider};
 
 use crate::config::GifConfig;
 use crate::error::{ApiErr, ApiResult};
+use crate::unfurl::GuardedResolver;
 
 const TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+/// A whole GIF download (connect, redirects and body together).
+const MEDIA_TIMEOUT: Duration = Duration::from_secs(15);
+const MEDIA_REDIRECTS: usize = 3;
+const MAX_MEDIA_URL_LEN: usize = 2048;
 
 pub struct GifProxy {
     client: Option<reqwest::Client>,
+    /// Downloads of the provider's media files: its DNS answers must be public addresses (the SSRF guard of link previews).
+    media: Option<reqwest::Client>,
     config: GifConfig,
+    allow_private: bool,
+}
+
+/// The registrable domains the configured provider serves its media from; a host matches when it is one of them or a subdomain.
+fn media_domains(provider: GifProvider) -> &'static [&'static str] {
+    match provider {
+        GifProvider::Giphy => &["giphy.com"],
+        GifProvider::Tenor => &["tenor.com"],
+        GifProvider::Klipy => &["klipy.com"],
+        GifProvider::None => &[],
+    }
 }
 
 fn bad_gateway() -> ApiErr {
@@ -31,12 +50,83 @@ fn loggable(error: reqwest::Error) -> String {
 }
 
 impl GifProxy {
-    pub fn new(config: GifConfig) -> Self {
+    /// `allow_private` lets media downloads reach loopback / private addresses (the test seam of link previews).
+    pub fn new(config: GifConfig, allow_private: bool) -> Self {
         // reqwest is built without a bundled provider; installing twice is harmless.
         let _ = rustls::crypto::ring::default_provider().install_default();
         // No redirects: the key is part of the request URL and must not follow a redirect to another host.
         let client = reqwest::Client::builder().no_proxy().redirect(reqwest::redirect::Policy::none()).timeout(TIMEOUT).user_agent("vokko-server").build().ok();
-        Self { client, config }
+        let media = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .dns_resolver(GuardedResolver { allow_private })
+            .no_proxy()
+            .connect_timeout(Duration::from_secs(3))
+            .timeout(MEDIA_TIMEOUT)
+            .user_agent("vokko-server")
+            .build()
+            .ok();
+        Self { client, media, config, allow_private }
+    }
+
+    /// Whether `url` is a media file of the configured provider: https on the default port from one of its domains (no credentials),
+    /// or, when the operator set `VOKKO_GIF_BASE_URL`, anything on that origin.
+    fn is_media_url(&self, url: &Url) -> bool {
+        if !url.username().is_empty() || url.password().is_some() {
+            return false;
+        }
+        if let Some(base) = self.config.base_url.as_deref().and_then(|base| Url::parse(base).ok())
+            && base.origin() == url.origin()
+        {
+            return true;
+        }
+        let Some(host) = url.host_str() else { return false };
+        let host = host.trim_end_matches('.').to_ascii_lowercase();
+        url.scheme() == "https"
+            && url.port().is_none()
+            && media_domains(self.config.provider).iter().any(|domain| host == *domain || host.strip_suffix(domain).is_some_and(|rest| rest.ends_with('.')))
+    }
+
+    /// The bytes of a GIF the user picked, fetched from the provider's media host. Every hop (redirects included) must pass
+    /// [`Self::is_media_url`], addresses must be public, and the body may not pass `max_bytes`. Not an image is the caller's check.
+    pub async fn download(&self, raw: &str, max_bytes: usize) -> ApiResult<Vec<u8>> {
+        let refused = || ApiErr::invalid("url", "Must be a media URL of the GIF provider this server uses.");
+        if raw.len() > MAX_MEDIA_URL_LEN {
+            return Err(refused());
+        }
+        let mut url = Url::parse(raw).map_err(|_| refused())?;
+        let client = self.media.as_ref().ok_or_else(bad_gateway)?;
+        for _ in 0..=MEDIA_REDIRECTS {
+            if !self.is_media_url(&url) || !crate::unfurl::host_allowed(&url, self.allow_private) {
+                return Err(refused());
+            }
+            let mut response = client.get(url.clone()).send().await.map_err(|error| {
+                tracing::warn!("gif download failed: {}", loggable(error));
+                bad_gateway()
+            })?;
+            let status = response.status();
+            if status.is_redirection() {
+                let location = response.headers().get(LOCATION).and_then(|value| value.to_str().ok()).ok_or_else(bad_gateway)?;
+                url = url.join(location).map_err(|_| bad_gateway())?;
+                continue;
+            }
+            if !status.is_success() {
+                tracing::warn!("gif download answered {status}");
+                return Err(bad_gateway());
+            }
+            let too_large = || ApiErr::invalid("url", &format!("The image is too large ({} MiB at most).", max_bytes / (1024 * 1024)));
+            if response.content_length().is_some_and(|length| length > max_bytes as u64) {
+                return Err(too_large());
+            }
+            let mut bytes: Vec<u8> = Vec::new();
+            while let Some(chunk) = response.chunk().await.map_err(|_| bad_gateway())? {
+                if bytes.len() + chunk.len() > max_bytes {
+                    return Err(too_large());
+                }
+                bytes.extend_from_slice(&chunk);
+            }
+            return Ok(bytes);
+        }
+        Err(bad_gateway())
     }
 
     pub fn provider(&self) -> GifProvider {
@@ -321,6 +411,38 @@ mod tests {
             assert!(error.to_string().contains("SECRETKEY123"), "the unstripped error does leak the URL, which is why loggable() exists");
             assert!(!loggable(error).contains("SECRETKEY123"));
         }
+    }
+
+    fn proxy(provider: GifProvider, base_url: Option<&str>) -> GifProxy {
+        GifProxy::new(GifConfig { provider, api_key: "k".to_owned(), base_url: base_url.map(str::to_owned) }, false)
+    }
+
+    #[test]
+    fn media_urls_are_limited_to_the_providers_https_hosts() {
+        let giphy = proxy(GifProvider::Giphy, None);
+        let ok = |proxy: &GifProxy, url: &str| proxy.is_media_url(&Url::parse(url).expect("url"));
+        assert!(ok(&giphy, "https://media0.giphy.com/media/x/giphy.gif"));
+        assert!(ok(&giphy, "https://GIPHY.com./a.gif"));
+        for bad in [
+            "http://media0.giphy.com/a.gif",
+            "https://media0.giphy.com:8443/a.gif",
+            "https://giphy.com.evil.example/a.gif",
+            "https://evilgiphy.com/a.gif",
+            "https://media.giphy.com@evil.example/a.gif",
+            "https://user:pw@media0.giphy.com/a.gif",
+            "https://media.tenor.com/a.gif",
+            "https://127.0.0.1/a.gif",
+            "https://[::1]/a.gif",
+            "file:///etc/passwd",
+        ] {
+            assert!(!ok(&giphy, bad), "{bad} must be refused");
+        }
+        assert!(ok(&proxy(GifProvider::Tenor, None), "https://media.tenor.com/a.gif"));
+        assert!(ok(&proxy(GifProvider::Klipy, None), "https://static.klipy.com/a.gif"));
+        assert!(!ok(&proxy(GifProvider::None, None), "https://media.giphy.com/a.gif"), "no provider, no downloads");
+        let overridden = proxy(GifProvider::Giphy, Some("http://127.0.0.1:9000"));
+        assert!(ok(&overridden, "http://127.0.0.1:9000/x.gif"));
+        assert!(!ok(&overridden, "http://127.0.0.1:9001/x.gif"));
     }
 
     #[test]

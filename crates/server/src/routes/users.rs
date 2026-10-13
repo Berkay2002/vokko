@@ -1,9 +1,15 @@
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
-use axum::routing::get;
+use axum::routing::{get, post};
 use sqlx::{PgConnection, Postgres, QueryBuilder};
-use vokko_protocol::api::{DisplayNameStyles, GatewayEvent, MutualGuild, ProfileWidgetsInput, Snowflake, UpdateUserRequest, User, UserProfile};
+use vokko_protocol::api::permissions::ATTACH_FILES;
+use vokko_protocol::api::{
+    Attachment, AvatarGifRequest, DisplayNameStyles, GatewayEvent, MutualGuild, ProfileWidgetsInput, RecentAvatar, Snowflake, UpdateUserRequest, User,
+    UserProfile,
+};
+
+use crate::access::channel_access;
 
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
@@ -16,6 +22,8 @@ use crate::store::{self, StoredFavorite, StoredGame, StoredWidgets};
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/users/@me", get(me).patch(update_me))
+        .route("/users/@me/avatars", get(recent_avatars))
+        .route("/users/@me/avatars/gif", post(import_avatar_gif))
         .route("/users/{id}", get(get_user))
         .route("/users/{id}/profile", get(get_profile))
         .route("/users/{id}/relationships", get(mutual_friends))
@@ -254,8 +262,64 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
         update.build().execute(&mut *tx).await?;
     }
     release_uploads(&mut tx, &released, user_id).await?;
+    if let Some(Some(id)) = body.avatar_attachment_id {
+        remember_avatar(&mut tx, user_id, id.db()).await?;
+    }
     tx.commit().await?;
     Ok(Json(publish_user(&state, user_id).await?))
+}
+
+/// How many past avatars `GET /users/@me/avatars` lists (Discord's "Recent avatars").
+const RECENT_AVATARS: i64 = 6;
+
+/// Puts the avatar the user just set at the top of their recent avatars and drops all but the newest [`RECENT_AVATARS`]. A listed upload is
+/// in use ([`crate::media::IN_USE`]), so it stays until it falls off the list.
+async fn remember_avatar(conn: &mut PgConnection, user_id: i64, attachment_id: i64) -> ApiResult<()> {
+    sqlx::query("INSERT INTO user_avatar_history (user_id, attachment_id) VALUES ($1, $2) ON CONFLICT (user_id, attachment_id) DO UPDATE SET used_at = now()")
+        .bind(user_id)
+        .bind(attachment_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query(
+        "DELETE FROM user_avatar_history WHERE user_id = $1 AND attachment_id NOT IN          (SELECT attachment_id FROM user_avatar_history WHERE user_id = $1 ORDER BY used_at DESC, attachment_id DESC LIMIT $2)",
+    )
+    .bind(user_id)
+    .bind(RECENT_AVATARS)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// `GET /users/@me/avatars`: the caller's last avatars, newest first. Setting one again is `avatar_attachment_id` with its id.
+async fn recent_avatars(State(state): State<AppState>, AuthUser(user_id): AuthUser) -> ApiResult<Json<Vec<RecentAvatar>>> {
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT a.id, a.key, a.filename FROM user_avatar_history h JOIN attachments a ON a.id = h.attachment_id          WHERE h.user_id = $1 AND a.key IS NOT NULL ORDER BY h.used_at DESC, h.attachment_id DESC LIMIT $2",
+    )
+    .bind(user_id)
+    .bind(RECENT_AVATARS)
+    .fetch_all(&state.db)
+    .await?;
+    Ok(Json(
+        rows.into_iter()
+            .map(|(id, key, filename)| RecentAvatar { id: Snowflake::from(id), url: state.asset_url(&crate::media::asset_path(id, &key, &filename)) })
+            .collect(),
+    ))
+}
+
+/// `POST /users/@me/avatars/gif`: the server downloads a GIF picked in the GIF picker (only from the configured provider's media hosts, at
+/// most as big as an avatar) and answers with the pending upload, which `PATCH /users/@me` then claims like any uploaded avatar. The
+/// client does not download it itself: the desktop app's content security policy and the providers' CORS rules would stop it.
+async fn import_avatar_gif(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    ApiJson(body): ApiJson<AvatarGifRequest>,
+) -> ApiResult<Json<Attachment>> {
+    let channel_id = body.channel_id.db();
+    channel_access(&state, user_id, channel_id).await?.require(ATTACH_FILES)?;
+    let _slot = state.uploads.acquire(user_id).ok_or_else(|| ApiErr::rate_limited(1.0))?;
+    let max = usize::try_from(ImageKind::Avatar.limit()).unwrap_or(usize::MAX).min(state.config.max_upload_bytes);
+    let bytes = state.gifs.download(&body.url, max).await?;
+    Ok(Json(super::attachments::store_fetched_image(&state, user_id, channel_id, bytes).await?))
 }
 
 /// The user's stored widgets (as text) and the ids of the uploads they show.
@@ -403,7 +467,7 @@ pub enum ImageKind {
 
 impl ImageKind {
     /// Largest file in bytes, static or animated: every Vokko user gets the top (Nitro) limit. Nothing is re-encoded.
-    fn limit(self) -> i64 {
+    pub fn limit(self) -> i64 {
         match self {
             Self::Avatar | Self::Banner => 10 * MIB,
         }
