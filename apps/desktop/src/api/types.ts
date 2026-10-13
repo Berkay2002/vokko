@@ -555,6 +555,18 @@ export interface GifCategories {
   categories: GifCategory[];
 }
 
+// ---- Recent avatars ----
+/** GET /users/@me/avatars: the last 6 avatars the caller set, newest first. Set one again with PATCH /users/@me `avatar_attachment_id: id`. */
+export interface RecentAvatar {
+  id: Snowflake; // the attachment id
+  url: string;
+}
+/** POST /users/@me/avatars/gif: the server downloads a picked GIF (`Gif.url`, a media URL of the configured provider) and answers with the pending upload. */
+export interface AvatarGifRequest {
+  channel_id: Snowflake; // a channel the caller may upload to
+  url: string;
+}
+
 // ---- Bookmarks (saved messages) and reminders ----
 export interface Bookmark {
   message: Message;

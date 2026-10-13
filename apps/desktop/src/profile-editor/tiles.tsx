@@ -3,7 +3,8 @@ import { ImagePlus, Plus } from "lucide-react";
 import { HEX_COLOR_RE, PROFILE_THEMES, hexToInt, intToHex, themeGradient } from "../perks/catalog";
 import { ProfileBanner } from "../perks/ProfileBanner";
 import { Avatar } from "../shell/Avatar";
-import { AvatarPicker, DecorationPicker, EffectPicker } from "./pickers";
+import { AvatarPicker } from "./AvatarPicker";
+import { DecorationPicker, EffectPicker } from "./pickers";
 import { previewName } from "./previewName";
 import { registerBuiltinTile, type ProfileEditorTile, type ProfileEditorTileProps } from "./registry";
 import { useImageUpload } from "./upload";
@@ -65,6 +66,7 @@ export const ComingSoonTile = (label: string): ProfileEditorTile =>
 function AvatarImageTile({ label, look, user, locked, uploadChannel, setDraft }: ProfileEditorTileProps & { label: string }) {
   const upload = useImageUpload(uploadChannel);
   const [picking, setPicking] = useState(false);
+  const setDraftAvatar = (avatar: { id: string; url: string }) => setDraft({ avatar });
   return (
     <>
       <Tile
@@ -74,7 +76,7 @@ function AvatarImageTile({ label, look, user, locked, uploadChannel, setDraft }:
         locked={locked}
         disabled={upload.busy || !uploadChannel}
         className="pe-tile-avatar"
-        modal={<AvatarPicker onUpload={upload.choose} onClose={() => setPicking(false)} />}
+        modal={<AvatarPicker channel={uploadChannel} onUpload={upload.choose} onChoose={setDraftAvatar} onClose={() => setPicking(false)} />}
       >
         <Avatar user={{ id: user.id, avatar: look.avatar }} size={56} decoration={false} />
         {upload.busy && <span className="pe-tile-busy">Uploading…</span>}

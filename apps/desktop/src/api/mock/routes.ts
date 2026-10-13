@@ -18,6 +18,7 @@ import { flagsField } from "./memberFlags";
 import { setMockVoice, setVoiceChannelStatus, voiceStates } from "./voice";
 import { callRecipientRemoved } from "./calls";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
+import { rememberAvatar } from "./avatars";
 import "./search";
 import "./membersSearch";
 import { dismissEphemeral, mergeEphemerals } from "./apps";
@@ -93,6 +94,7 @@ route("PATCH", "/users/@me", ({ viewer, body }) => {
   if ("avatar_attachment_id" in body) {
     const attachment = pendingAttachment(str(body.avatar_attachment_id), user.id);
     user.avatar = attachment ? attachment.url : null;
+    if (attachment) rememberAvatar(user.id, attachment.id);
   }
   applyUserPerks(user, body, id => pendingAttachment(id, user.id));
   if (widgets !== undefined) user.widgets = widgets;

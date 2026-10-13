@@ -64,7 +64,7 @@ interface Parsed {
   height: number;
 }
 
-function parseMockGifUrl(url: string): Parsed | null {
+export function parseMockGifUrl(url: string): Parsed | null {
   const m = new RegExp(`^https://${MOCK_GIF_HOST.replace(/\./g, "\\.")}/gifs/(\\d{1,3})/(\\d{2,4})x(\\d{2,4})/([a-z0-9-]+)\\.gif$`).exec(url);
   if (!m) return null;
   return { hue: Number(m[1]), width: Number(m[2]), height: Number(m[3]), label: (m[4] ?? "").replace(/-/g, " ") };

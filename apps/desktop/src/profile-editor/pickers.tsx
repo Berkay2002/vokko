@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ImagePlus, Pencil } from "lucide-react";
+import { Pencil } from "lucide-react";
 import type { DisplayNameStyles, User } from "../api/types";
 import { AVATAR_DECORATIONS, NAME_EFFECTS, NAME_FONTS, NAMEPLATES, PROFILE_EFFECTS, decorationById, effectById, hexToInt, intToHex, nameEffectById, nameplateById } from "../perks/catalog";
 import { Nameplate, StyledName } from "../perks/NameStyles";
@@ -7,7 +7,6 @@ import { sameNameStyle } from "../perks/NameStylePickers";
 import { ProfileBanner } from "../perks/ProfileBanner";
 import type { ProfileLook } from "../perks/profile";
 import { Avatar } from "../shell/Avatar";
-import { Modal } from "../ui";
 import { NoneTile, PickerModal, PickerSection, PickerTile, PreviewCard } from "./PickerModal";
 
 const STRIP = { banner: null, bannerColor: "#2b2d31", themeColors: null } as const;
@@ -260,24 +259,5 @@ export function NameStylePicker({ user, look, name, nameplate, value, onApply, o
         </div>
       }
     />
-  );
-}
-
-/** "Choose an image": Vokko has no GIF picker or avatar history, so this is the upload tile alone. */
-export function AvatarPicker({ onUpload, onClose }: { onUpload(): void; onClose(): void }) {
-  return (
-    <Modal open onClose={onClose} title="Choose an image" className="pe-picker pe-picker-narrow">
-      <button
-        type="button"
-        className="pe-pk-upload"
-        onClick={() => {
-          onUpload();
-          onClose();
-        }}
-      >
-        <ImagePlus size={32} aria-hidden="true" />
-        Upload image
-      </button>
-    </Modal>
   );
 }

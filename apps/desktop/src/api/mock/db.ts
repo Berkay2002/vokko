@@ -136,6 +136,8 @@ export interface Db {
   soundboard: Map<string, SoundboardSound[]>;
   /** user id -> favourite GIFs, newest first */
   gifFavorites: Map<string, Gif[]>;
+  /** user id -> attachment ids of their last avatars (keys of `pending`), newest first (mock/avatars.ts) */
+  recentAvatars: Map<string, string[]>;
   /** user id -> "channel:message" -> saved_at ISO */
   bookmarks: Map<string, Map<string, string>>;
   /** reminder id -> reminder */
@@ -157,6 +159,7 @@ export const db: Db = {
   stickers: new Map(),
   soundboard: new Map(),
   gifFavorites: new Map(),
+  recentAvatars: new Map(),
   bookmarks: new Map(),
   reminders: new Map(),
   gifProvider: "klipy",

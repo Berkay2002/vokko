@@ -75,7 +75,7 @@ function columns(gifs: Gif[]): Gif[][] {
   return cols;
 }
 
-function GifGrid({ gifs, favorites, onPick }: { gifs: Gif[]; favorites: Gif[] | null; onPick(gif: Gif): void }) {
+function GifGrid({ gifs, favorites, onPick, pickLabel }: { gifs: Gif[]; favorites: Gif[] | null; onPick(gif: Gif): void; pickLabel: string }) {
   const cols = useMemo(() => columns(gifs), [gifs]);
   return <div className="media-gif-grid">
     {cols.map((col, ci) => <div key={ci} className="media-gif-col">
@@ -83,7 +83,7 @@ function GifGrid({ gifs, favorites, onPick }: { gifs: Gif[]; favorites: Gif[] | 
         const fav = isFavorite(favorites, gif.id);
         const preview = safeMediaUrl(gif.preview_url);
         return <div key={gif.id} className="media-gif-tile" style={{ aspectRatio: gif.width > 0 && gif.height > 0 ? `${gif.width} / ${gif.height}` : '4 / 3' }}>
-          <button type="button" className="media-gif-pick" aria-label={`Send GIF: ${gif.title || 'untitled'}`} onClick={() => onPick(gif)}>
+          <button type="button" className="media-gif-pick" aria-label={`${pickLabel}: ${gif.title || 'untitled'}`} onClick={() => onPick(gif)}>
             {preview && <img src={resolveUrl(preview)} alt={gif.title} loading="lazy" draggable={false} />}
           </button>
           <button type="button" className={`media-gif-star${fav ? ' on' : ''}`} aria-label={fav ? 'Remove from favorites' : 'Add to favorites'} aria-pressed={fav} onClick={() => void toggleFavorite(gif)}>
@@ -112,7 +112,7 @@ function Message({ title, body, action }: { title: string; body: string; action?
 }
 
 /** GIF tab of the expression picker: categories and trending, search, favourites. With provider "none" only favourites are offered. */
-export function GifPicker({ onPick }: { onPick(gif: Gif): void }) {
+export function GifPicker({ onPick, pickLabel = 'Send GIF' }: { onPick(gif: Gif): void; /** What choosing a GIF does, for screen readers ("Send GIF: title"). */ pickLabel?: string }) {
   const [query, setQuery] = useState('');
   const [term, setTerm] = useState('');
   const [view, setView] = useState<View>({ kind: 'home' });
@@ -160,19 +160,19 @@ export function GifPicker({ onPick }: { onPick(gif: Gif): void }) {
   let body: React.ReactNode;
   if (none) {
     body = filteredFavorites.length > 0
-      ? <GifGrid gifs={filteredFavorites} favorites={favorites} onPick={onPick} />
+      ? <GifGrid gifs={filteredFavorites} favorites={favorites} onPick={onPick} pickLabel={pickLabel} />
       : query.trim() ? <Message title="No matching favorites" body="GIF search isn’t set up on this server, so only your favorite GIFs can be searched." />
       : <Message title="No favorite GIFs yet" body="GIF search isn’t set up on this server, so only favorites are available. Favorite a GIF with its star to find it here." />;
   } else if (source) {
     body = <>
-      {listing.gifs.length > 0 && <GifGrid gifs={listing.gifs} favorites={favorites} onPick={onPick} />}
+      {listing.gifs.length > 0 && <GifGrid gifs={listing.gifs} favorites={favorites} onPick={onPick} pickLabel={pickLabel} />}
       {listing.error && <Message title={listing.error} body="Check your connection and try again." action={<button type="button" className="btn btn-secondary btn-sm" onClick={retry}>Try again</button>} />}
       {!listing.error && !listing.loading && listing.gifs.length === 0 && <Message title="No GIFs found" body={source.kind === 'search' ? `Nothing matched “${source.q}”. Try another search.` : 'Nothing is trending right now.'} />}
       {listing.loading && <div className="media-loading" role="status">Loading GIFs…</div>}
       {!listing.loading && listing.next && <button type="button" className="btn btn-secondary btn-sm media-load-more" onClick={more}>Load more</button>}
     </>;
   } else if (view.kind === 'favorites') {
-    body = filteredFavorites.length > 0 ? <GifGrid gifs={filteredFavorites} favorites={favorites} onPick={onPick} /> : <Message title="No favorite GIFs yet" body="Click the star on a GIF to keep it here." />;
+    body = filteredFavorites.length > 0 ? <GifGrid gifs={filteredFavorites} favorites={favorites} onPick={onPick} pickLabel={pickLabel} /> : <Message title="No favorite GIFs yet" body="Click the star on a GIF to keep it here." />;
   } else {
     const first = favorites?.[0];
     body = <div className="media-gif-categories">

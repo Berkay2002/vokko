@@ -1430,10 +1430,16 @@ textarea.pe-inline-input {
   width: min(440px, calc(100vw - 32px));
 }
 
+.pe-pk-sources {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
 .pe-pk-upload {
   display: flex;
   width: 100%;
-  height: 200px;
+  height: 140px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -1450,4 +1456,78 @@ textarea.pe-inline-input {
 .pe-pk-upload:hover {
   background: var(--background-surface-higher);
   border-color: var(--border-strong);
+}
+
+.pe-pk-upload:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pe-pk-gifmark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 2px solid currentColor;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.pe-pk-sources + .pe-pk-section {
+  margin-top: 24px;
+}
+
+.pe-pk-sub {
+  margin: 2px 0 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.pe-pk-recents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.pe-pk-recent {
+  display: block;
+  width: 72px;
+  height: 72px;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--background-surface-high);
+  cursor: pointer;
+}
+
+.pe-pk-recent img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pe-pk-recent:hover,
+.pe-pk-recent:focus-visible {
+  border-color: var(--border-strong);
+}
+
+.pe-pk-gifs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pe-pk-gifs .pe-pk-back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pe-pk-gifs .media-panel {
+  height: 420px;
 }
