@@ -18,7 +18,8 @@ export const isSceneEffect = (id: string | null | undefined): boolean => !!effec
 /** A full-card scene: its intro plays on mount (keyed by id, so switching scenes replays it), then it idles. */
 function ProfileScene({ id }: { id: string }) {
   const u = `fx${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
-  const art = SCENES[id];
+  // Own keys only: ids come from other users' profiles, and "constructor" or "__proto__" would reach Object.prototype.
+  const art = Object.hasOwn(SCENES, id) ? SCENES[id] : undefined;
   if (!art) return null;
   return (
     <div className="profile-effect pfx" aria-hidden="true" data-effect={id}>
@@ -30,7 +31,7 @@ function ProfileScene({ id }: { id: string }) {
 /** A profile frame: a drawn border over the edges and corners of the whole card (perks/art/frames.tsx). */
 export function ProfileFrame({ id }: { id: string | null | undefined }) {
   const u = `fr${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
-  const art = id ? FRAME_ART[id] : undefined;
+  const art = id && Object.hasOwn(FRAME_ART, id) ? FRAME_ART[id] : undefined;
   if (!art || !id) return null;
   return (
     <div className="profile-frame" aria-hidden="true" data-frame={id}>
