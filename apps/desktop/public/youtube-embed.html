@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="strict-origin-when-cross-origin" />
+<title>Vokko Watch Together player</title>
+<style>
+  html, body, #player { margin: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+</style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+/*
+ * Watch Together player. The Vokko app embeds this page in an iframe and drives it over postMessage; the YouTube player
+ * lives in here, on a normal https origin. Inside the Tauri webview (tauri://localhost, http://tauri.localhost) YouTube's
+ * own embed refuses to play (error 153: no usable Referer / origin), so the app never embeds YouTube directly.
+ *
+ * Parent -> here (JSON objects):  {type:"init"}  {type:"load", videoId, startSeconds, autoplay}  {type:"play"}  {type:"pause"}
+ *                                 {type:"seek", seconds}  {type:"volume", volume: 0..100}
+ * Here -> parent:                 {source:"vokko-embed", event:"ready"}  {event:"state", state:"playing|paused|buffering|ended|cued|unstarted"}
+ *                                 {event:"time", seconds, duration}  {event:"meta", title}  {event:"error", code}
+ *
+ * Only these parent origins are listened to (and answered): the Tauri app, the web client, and, when this page itself is served
+ * from localhost / 127.0.0.1 (the dev server), that same origin.
+ */
+(function () {
+  "use strict";
+  var ALLOWED = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "https://vokko.example.com"];
+  var LOCAL = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  if (LOCAL) ALLOWED.push(location.origin);
+
+  var parentOrigin = null; // set by the first accepted message; replies go only there
+  var player = null;
+  var apiReady = false;
+  var playerReady = false;
+  var wantedInit = false;
+  var pending = []; // commands that arrived before the player was ready
+  var lastState = "";
+  var lastTitle = "";
+
+  function post(message) {
+    if (!parentOrigin) return;
+    message.source = "vokko-embed";
+    window.parent.postMessage(message, parentOrigin);
+  }
+
+  var STATES = { "-1": "unstarted", 0: "ended", 1: "playing", 2: "paused", 3: "buffering", 5: "cued" };
+
+  function createPlayer() {
+    if (player || !apiReady) return;
+    player = new YT.Player("player", {
+      host: "https://www.youtube-nocookie.com",
+      width: "100%",
+      height: "100%",
+      playerVars: { controls: 0, disablekb: 1, fs: 0, rel: 0, playsinline: 1, modestbranding: 1, iv_load_policy: 3, enablejsapi: 1, origin: location.origin },
+      events: {
+        onReady: function () {
+          playerReady = true;
+          post({ event: "ready" });
+          pending.splice(0).forEach(handle);
+          setInterval(tick, 500);
+        },
+        onStateChange: function (e) {
+          var state = STATES[e.data] || "unstarted";
+          if (state !== lastState) {
+            lastState = state;
+            post({ event: "state", state: state });
+          }
+          meta();
+        },
+        onError: function (e) {
+          post({ event: "error", code: e.data });
+        },
+      },
+    });
+  }
+
+  function meta() {
+    try {
+      var title = player.getVideoData().title || "";
+      if (title && title !== lastTitle) {
+        lastTitle = title;
+        post({ event: "meta", title: title });
+      }
+    } catch (_) {}
+  }
+
+  function tick() {
+    try {
+      post({ event: "time", seconds: player.getCurrentTime() || 0, duration: player.getDuration() || 0 });
+    } catch (_) {}
+  }
+
+  function handle(message) {
+    if (!playerReady) {
+      pending.push(message);
+      return;
+    }
+    switch (message.type) {
+      case "load":
+        lastState = "";
+        lastTitle = "";
+        if (message.autoplay === false) player.cueVideoById({ videoId: message.videoId, startSeconds: message.startSeconds || 0 });
+        else player.loadVideoById({ videoId: message.videoId, startSeconds: message.startSeconds || 0 });
+        break;
+      case "play":
+        player.playVideo();
+        break;
+      case "pause":
+        player.pauseVideo();
+        break;
+      case "seek":
+        player.seekTo(Math.max(0, Number(message.seconds) || 0), true);
+        break;
+      case "volume":
+        player.setVolume(Math.max(0, Math.min(100, Number(message.volume) || 0)));
+        break;
+    }
+  }
+
+  window.addEventListener("message", function (event) {
+    if (event.source !== window.parent || ALLOWED.indexOf(event.origin) === -1) return;
+    var message = event.data;
+    if (!message || typeof message !== "object" || typeof message.type !== "string") return;
+    parentOrigin = event.origin;
+    if (message.type === "init") {
+      wantedInit = true;
+      if (playerReady) post({ event: "ready" });
+      else createPlayer();
+      return;
+    }
+    handle(message);
+  });
+
+  window.onYouTubeIframeAPIReady = function () {
+    apiReady = true;
+    if (wantedInit) createPlayer();
+  };
+  var script = document.createElement("script");
+  script.src = "https://www.youtube.com/iframe_api";
+  document.head.appendChild(script);
+})();
+</script>
+</body>
+</html>

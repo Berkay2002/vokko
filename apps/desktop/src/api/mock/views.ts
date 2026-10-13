@@ -9,6 +9,7 @@ import { memberProfileFields } from "./perks";
 import { guildEmojis } from "./emojis";
 import { pollEmbedsFor, pollFor } from "./pollData";
 import { stageInstancesFor, voiceStatesFor } from "./voice";
+import { watchFor } from "./watch";
 
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
   const guild = m.guild_id ? db.guilds.get(m.guild_id) : undefined;
@@ -139,7 +140,8 @@ export function guildPayload(guildId: string, viewerId: string): GatewayEvents["
   const stickers = (db.stickers.get(guildId) ?? []).map(s => ({ ...s }));
   const emojis = guildEmojis(guildId);
   const soundboard_sounds = (db.soundboard.get(guildId) ?? []).map(s => ({ ...s }));
-  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, soundboard_sounds, voice_states: voiceStatesFor(guildId, viewerId), stage_instances: stageInstancesFor(guildId, viewerId) };
+  const watch = watchFor(guildId, viewerId);
+  return { ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, soundboard_sounds, voice_states: voiceStatesFor(guildId, viewerId), stage_instances: stageInstancesFor(guildId, viewerId), ...(watch.length > 0 ? { watch_together: watch } : {}) };
 }
 
 export function guildIdsFor(viewerId: string): string[] {

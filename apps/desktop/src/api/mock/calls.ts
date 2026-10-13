@@ -10,6 +10,7 @@ import { ID, route } from "./router";
 import { emit, emitToSession } from "./socket";
 import { messageFor, relationship } from "./views";
 import { voiceStates } from "./voice";
+import { watchOf } from "./watch";
 
 interface MockCall {
   message_id: string;
@@ -46,7 +47,15 @@ function sortedRinging(call: MockCall): string[] {
 }
 
 function callObject(channelId: string, call: MockCall): Call {
-  return { channel_id: channelId, message_id: call.message_id, region: call.region, ringing: sortedRinging(call), voice_states: statesIn(channelId).map(s => ({ ...s })) };
+  const watching = watchOf(channelId);
+  return {
+    channel_id: channelId,
+    message_id: call.message_id,
+    region: call.region,
+    ringing: sortedRinging(call),
+    voice_states: statesIn(channelId).map(s => ({ ...s })),
+    ...(watching ? { watch_together: { ...watching, queue: [...watching.queue] } } : {}),
+  };
 }
 
 function announceUpdate(channel: MockChannel, call: MockCall): void {

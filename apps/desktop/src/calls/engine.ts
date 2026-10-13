@@ -107,6 +107,7 @@ export function wireCalls(): void {
   gateway.on("CALL_CREATE", call => {
     // The call's voice states (READY carries no DM voice states): into the voice store like VOICE_STATE_UPDATE.
     for (const state of call.voice_states) voiceStore.getState().dispatch({ type: "voiceStateUpdate", state });
+    if (call.watch_together) voiceStore.getState().dispatch({ type: "watchTogether", channelId: call.channel_id, state: call.watch_together });
     dispatch({ type: "create", call });
   });
   gateway.on("CALL_UPDATE", call => dispatch({ type: "update", call }));

@@ -3,13 +3,15 @@
 
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { BellRing, Headphones, HeadphoneOff, Mic, MicOff, MonitorUp, Phone, PhoneOff, Users, Video, VideoOff, X } from "lucide-react";
+import { BellRing, Headphones, HeadphoneOff, Mic, MicOff, MonitorPlay, MonitorUp, Phone, PhoneOff, Users, Video, VideoOff, X } from "lucide-react";
 import { dmName, useStore } from "../api/store";
 import { ChannelType, type Channel, type Snowflake, type User } from "../api/types";
 import { Avatar } from "../shell/Avatar";
 import { Tooltip } from "../ui";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
 import { BarButton, Tile, useStageTiles } from "../voice/VoiceChannelPage";
+import { openModal } from "../shell/modalStore";
+import { WatchTile } from "../watch";
 import { toggleSelfDeaf, toggleSelfMute } from "../voice/engine";
 import { useMedia } from "../voice/mediaStore";
 import { toggleCamera, toggleScreenShare } from "../voice/videoControls";
@@ -79,7 +81,8 @@ export function CallPanel({ channel }: { channel: Channel }) {
   const deafened = useVoice(s => s.selfDeaf);
   const cameraOn = useMedia(s => s.cameraOn);
   const screenOn = useMedia(s => s.screenOn);
-  const tiles = useStageTiles(states);
+  const watching = useVoice(s => !!s.watch[channel.id]);
+  const tiles = useStageTiles(states, channel.id);
   const inside = useMemo(() => new Set(states.map(s => s.user_id)), [states]);
   const ringing = useUsers(ringingIds, channel);
   const absentIds = useMemo(
@@ -93,8 +96,8 @@ export function CallPanel({ channel }: { channel: Channel }) {
     <section className="dm-call" aria-label="Call">
       <div className="dm-call-stage">
         {tiles.map(t => (
-          <div key={t.id} className="dm-call-tile">
-            <Tile state={t.state} guildId={null} variant="grid" stream={t.stream} />
+          <div key={t.id} className={`dm-call-tile${t.watch ? " watch" : ""}`}>
+            {t.watch ? <WatchTile channelId={channel.id} variant="focused" /> : <Tile state={t.state} guildId={null} variant="grid" stream={t.stream} />}
           </div>
         ))}
         {here && ringing.map(user => <RingingTile key={user.id} user={user} outgoing channelId={channel.id} />)}
@@ -117,6 +120,9 @@ export function CallPanel({ channel }: { channel: Channel }) {
             </BarButton>
             <BarButton label={screenOn ? "Stop streaming" : "Share your screen"} tooltip={screenOn ? "Stop Streaming" : "Share Your Screen"} active={screenOn} onClick={toggleScreenShare}>
               <MonitorUp size={20} />
+            </BarButton>
+            <BarButton label="Watch Together" tooltip="Watch YouTube Together" active={watching} onClick={() => (watching ? undefined : openModal({ type: "watchTogether", channelId: channel.id }))}>
+              <MonitorPlay size={20} />
             </BarButton>
             {channel.type === ChannelType.GroupDM && (
               <BarButton label="Ring Everyone" onClick={() => void ringCall(channel.id)}>

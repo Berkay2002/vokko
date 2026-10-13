@@ -4,7 +4,7 @@
 // Like Discord, a participant who is streaming has two tiles: their user tile (camera or avatar) and a stream tile (the screen).
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { ChevronDown, ChevronUp, Ellipsis, LayoutGrid, Maximize2, Mic, MicOff, Minimize2, Monitor, MonitorUp, Music, PhoneOff, SquareArrowOutUpRight, UserPlus, Users, Video, VideoOff, Volume2, HeadphoneOff, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Ellipsis, LayoutGrid, Maximize2, Mic, MicOff, Minimize2, Monitor, MonitorPlay, MonitorUp, Music, PhoneOff, SquareArrowOutUpRight, UserPlus, Users, Video, VideoOff, Volume2, HeadphoneOff, X } from "lucide-react";
 import { Perm } from "../api/permissions";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
@@ -22,6 +22,7 @@ import { SoundEffectBadge, useSoundFlashClass } from "../soundboard";
 import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
 import { useVoiceUi } from "./uiStore";
 import { VoiceChatPanel } from "./VoiceChatPanel";
+import { WatchTile } from "../watch";
 import { openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
 import { VIEWER_QUALITIES, VIEWER_QUALITY_LABEL, type ViewerQuality } from "./video/options";
 import "./video/video.css";
@@ -57,20 +58,35 @@ export interface StageTile {
   id: string;
   state: VoiceState;
   stream: boolean;
+  /** The Watch Together tile (`id` "watch"): shown while the channel has a session and we are in the call; `state` is just the first participant's. */
+  watch?: boolean;
 }
+
+export const WATCH_TILE_ID = "watch";
 
 export const stageTileId = (userId: Snowflake, stream: boolean): string => (stream ? `${userId}:stream` : userId);
 
 /** The tiles for `states`, in order: each user tile preceded by their stream tile when `streaming` says they stream. */
-export function stageTiles(states: VoiceState[], streaming: (state: VoiceState) => boolean): StageTile[] {
-  return states.flatMap(state => {
+export function stageTiles(states: VoiceState[], streaming: (state: VoiceState) => boolean, watching = false): StageTile[] {
+  const tiles = states.flatMap(state => {
     const user = { id: stageTileId(state.user_id, false), state, stream: false };
     return streaming(state) ? [{ id: stageTileId(state.user_id, true), state, stream: true }, user] : [user];
   });
+  const first = states[0];
+  return watching && first ? [{ id: WATCH_TILE_ID, state: first, stream: false, watch: true }, ...tiles] : tiles;
 }
 
-export function useStageTiles(states: VoiceState[]): StageTile[] {
-  return stageTiles(states, useStreamingCheck());
+/** `channelId`: the channel these states belong to, so a Watch Together session we are in on it adds its tile. */
+export function useStageTiles(states: VoiceState[], channelId?: Snowflake): StageTile[] {
+  const streaming = useStreamingCheck();
+  const watching = useVoice(s => !!channelId && s.channelId === channelId && !!s.watch[channelId]);
+  return stageTiles(states, streaming, watching);
+}
+
+/** One tile of the stage as `variant`: the shared player, or a participant (their camera / stream). */
+function StageTileView({ tile, channelId, guildId, variant, onActivate }: { tile: StageTile; channelId: Snowflake; guildId: Snowflake | null; variant: TileVariant; onActivate?: () => void }) {
+  if (tile.watch) return <WatchTile channelId={channelId} variant={variant} onActivate={onActivate} />;
+  return <Tile state={tile.state} guildId={guildId} variant={variant} stream={tile.stream} onActivate={onActivate} />;
 }
 
 /**
@@ -205,6 +221,7 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
   const deafened = useVoice(s => s.selfDeaf);
   const cameraOn = useMedia(s => s.cameraOn);
   const screenOn = useMedia(s => s.screenOn);
+  const watching = useVoice(s => !!s.watch[channel.id]);
   const menu = useContextMenu();
   const { micItems } = useDeviceMenus();
   const chatOpen = useVoiceUi(s => s.chatOpen);
@@ -241,6 +258,14 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
       <div className="voice-bar-group">
         <BarButton label={screenOn ? "Stop streaming" : "Share your screen"} tooltip={screenOn ? "Stop Streaming" : "Share Your Screen"} active={screenOn} onClick={toggleScreenShare}>
           <MonitorUp size={20} />
+        </BarButton>
+        <BarButton
+          label="Watch Together"
+          tooltip={watching ? "Show Watch Together" : "Watch YouTube Together"}
+          active={watching}
+          onClick={() => (watching ? useVoiceUi.getState().setFocusedTile(WATCH_TILE_ID) : openModal({ type: "watchTogether", channelId: channel.id }))}
+        >
+          <MonitorPlay size={20} />
         </BarButton>
         <BarButton label="Start an activity" tooltip="Activities aren't available yet" disabled>
           <LayoutGrid size={20} />
@@ -336,7 +361,7 @@ function useBoxSize(ref: React.RefObject<HTMLElement | null>): { width: number; 
 }
 
 /** Grid view: the column count that gives the largest 16:9 tiles, last row centred. */
-function TileGrid({ tiles, guildId, onFocus }: { tiles: StageTile[]; guildId: Snowflake | null; onFocus: (tileId: string) => void }) {
+function TileGrid({ tiles, channelId, guildId, onFocus }: { tiles: StageTile[]; channelId: Snowflake; guildId: Snowflake | null; onFocus: (tileId: string) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const { width, height } = useBoxSize(box);
   const layout = gridLayout(tiles.length, width, height, GRID_GAP);
@@ -345,7 +370,7 @@ function TileGrid({ tiles, guildId, onFocus }: { tiles: StageTile[]; guildId: Sn
     <div ref={box} className="voice-tiles grid">
       <div className="voice-grid" style={style} data-cols={layout.cols || undefined}>
         {tiles.map(t => (
-          <Tile key={t.id} state={t.state} guildId={guildId} variant="grid" stream={t.stream} onActivate={() => onFocus(t.id)} />
+          <StageTileView key={t.id} tile={t} channelId={channelId} guildId={guildId} variant="grid" onActivate={() => onFocus(t.id)} />
         ))}
       </div>
     </div>
@@ -367,7 +392,7 @@ function MembersToggle({ hidden }: { hidden: boolean }) {
 }
 
 /** Focus view: the focused tile fills the stage over a strip of the others (hideable); a hidden live stream shows as a PiP. */
-function FocusView({ tiles, focused, guildId }: { tiles: StageTile[]; focused: StageTile; guildId: Snowflake | null }) {
+function FocusView({ tiles, focused, channelId, guildId }: { tiles: StageTile[]; focused: StageTile; channelId: Snowflake; guildId: Snowflake | null }) {
   const hidden = useVoiceUi(s => s.membersHidden);
   const setFocusedTile = useVoiceUi(s => s.setFocusedTile);
   const others = tiles.filter(t => t.id !== focused.id);
@@ -376,7 +401,7 @@ function FocusView({ tiles, focused, guildId }: { tiles: StageTile[]; focused: S
     <div className={`voice-focus${hidden ? " members-hidden" : ""}`}>
       <div className="voice-focus-main">
         <div className="voice-focus-frame">
-          <Tile key={focused.id} state={focused.state} guildId={guildId} variant="focused" stream={focused.stream} onActivate={() => setFocusedTile(null)} />
+          <StageTileView key={focused.id} tile={focused} channelId={channelId} guildId={guildId} variant="focused" onActivate={() => setFocusedTile(null)} />
           {hidden && <MembersToggle hidden />}
         </div>
         {pip && (
@@ -390,7 +415,7 @@ function FocusView({ tiles, focused, guildId }: { tiles: StageTile[]; focused: S
           <MembersToggle hidden={false} />
           <div className="voice-strip" role="group" aria-label="Members">
             {others.map(t => (
-              <Tile key={t.id} state={t.state} guildId={guildId} variant="strip" stream={t.stream} onActivate={() => setFocusedTile(t.id)} />
+              <StageTileView key={t.id} tile={t} channelId={channelId} guildId={guildId} variant="strip" onActivate={() => setFocusedTile(t.id)} />
             ))}
           </div>
         </div>
@@ -409,7 +434,7 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
   const connected = useVoice(s => s.channelId === channel.id);
   const elsewhere = useVoice(s => s.channelId !== null && s.channelId !== channel.id);
   const chatOpen = useVoiceUi(s => s.chatOpen);
-  const tiles = useStageTiles(states);
+  const tiles = useStageTiles(states, channel.id);
   // Count tiles, not people: someone alone in the call who streams still has two (their camera and their screen).
   const multiple = tiles.length > 1;
   const empty = !connected && states.length === 0;
@@ -427,8 +452,10 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
   }, [requested?.id]);
 
   // The focused tile is gone (the participant left or stopped streaming, or the call shrank to one tile): back to the grid.
+  // Not for the Watch Together tile: asking for it (the dialog's Start) can land before the session's event does, and it simply
+  // is not on the stage again until a session exists.
   useEffect(() => {
-    if (focusedId && !focused) useVoiceUi.getState().setFocusedTile(null);
+    if (focusedId && focusedId !== WATCH_TILE_ID && !focused) useVoiceUi.getState().setFocusedTile(null);
   }, [focusedId, focused]);
 
   // Escape leaves focus mode. Capture phase, so it runs before the shell's Escape (mark as read), which skips prevented events.
@@ -460,13 +487,13 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
       ) : (
         <div className="voice-stage">
           {focused ? (
-            <FocusView tiles={tiles} focused={focused} guildId={channel.guild_id} />
+            <FocusView tiles={tiles} focused={focused} channelId={channel.id} guildId={channel.guild_id} />
           ) : multiple ? (
-            <TileGrid tiles={tiles} guildId={channel.guild_id} onFocus={id => useVoiceUi.getState().setFocusedTile(id)} />
+            <TileGrid tiles={tiles} channelId={channel.id} guildId={channel.guild_id} onFocus={id => useVoiceUi.getState().setFocusedTile(id)} />
           ) : (
             <div className="voice-tiles single">
               {tiles.map(t => (
-                <Tile key={t.id} state={t.state} guildId={channel.guild_id} variant="solo" stream={t.stream} />
+                <StageTileView key={t.id} tile={t} channelId={channel.id} guildId={channel.guild_id} variant="solo" />
               ))}
             </div>
           )}

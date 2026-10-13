@@ -421,6 +421,23 @@ describe("voice reducer: server-side move and stages", () => {
     expect(voiceReducer(m, { type: "guildDelete", guildId: GUILD }).stages).toEqual({});
   });
 
+  it("tracks Watch Together sessions from READY, GUILD_CREATE, WATCH_TOGETHER_UPDATE and channel / guild deletes", () => {
+    const session = { video_id: "dQw4w9WgXcQ", playing: true, position_ms: 0, updated_at_ms: 1000, started_by: ALICE, queue: [] as string[] };
+    let m = apply({ type: "ready", meId: ME, voiceEnabled: true, guilds: [{ id: GUILD, voice_states: [], watch_together: [{ channel_id: GENERAL, state: session }] }] });
+    expect(m.watch[GENERAL]?.video_id).toBe("dQw4w9WgXcQ");
+    m = voiceReducer(m, { type: "watchTogether", channelId: GENERAL, state: { ...session, playing: false, position_ms: 5000 } });
+    expect(m.watch[GENERAL]).toMatchObject({ playing: false, position_ms: 5000 });
+    m = voiceReducer(m, { type: "watchTogether", channelId: "99", state: { ...session, queue: ["aaaaaaaaaaa"] } });
+    expect(Object.keys(m.watch).sort()).toEqual([GENERAL, "99"]);
+    expect(voiceReducer(m, { type: "channelDelete", channelId: "99" }).watch[GENERAL]).toBeDefined();
+    expect(voiceReducer(m, { type: "channelDelete", channelId: GENERAL }).watch[GENERAL]).toBeUndefined();
+    const ended = voiceReducer(m, { type: "watchTogether", channelId: GENERAL, state: null });
+    expect(ended.watch[GENERAL]).toBeUndefined();
+    expect(voiceReducer(ended, { type: "watchTogether", channelId: GENERAL, state: null })).toBe(ended);
+    // A later READY (reconnect) replaces the whole set.
+    expect(voiceReducer(m, { type: "ready", meId: ME, voiceEnabled: true, guilds: [{ id: GUILD, voice_states: [] }] }).watch).toEqual({});
+  });
+
   it("stageRoster splits speakers from the audience, raised hands first in raise order", () => {
     const m = apply(
       ready([

@@ -823,12 +823,43 @@ export interface Call {
   region: string | null; // preferred media region, null = automatic (stored and echoed only: one media server)
   ringing: Snowflake[]; // users being rung right now
   voice_states: VoiceState[]; // who is in the call (guild_id null)
+  watch_together?: WatchTogetherState; // the call's Watch Together session, omitted when none
 }
 export interface CallRingRequest {
   recipients?: Snowflake[] | null; // POST /call/ring: absent = every recipient not in the call; POST /call/stop-ringing: absent = yourself
 }
 export interface EditCallRequest {
   region: string | null; // PATCH /channels/{id}/call
+}
+
+// ---- Watch Together (docs/api.md "Voice (V1)": a YouTube video everyone in a voice channel or DM call watches in sync) ----
+
+export const WATCH_TOGETHER_QUEUE_MAX = 20;
+export const WATCH_TOGETHER_POSITION_MAX_MS = 24 * 60 * 60 * 1000;
+export interface WatchTogetherState {
+  video_id: string; // 11 characters of A-Za-z0-9_-
+  title?: string;
+  playing: boolean;
+  position_ms: number; // true at updated_at_ms; while playing the position now is position_ms + (now - updated_at_ms)
+  updated_at_ms: number; // server unix milliseconds
+  started_by: Snowflake;
+  queue: string[]; // video ids up next
+}
+export interface WatchTogetherUpdate {
+  channel_id: Snowflake;
+  state: WatchTogetherState | null; // null = no session
+}
+export interface WatchTogetherStartRequest {
+  video_id: string;
+  title?: string;
+}
+export interface WatchTogetherPatchRequest {
+  playing?: boolean;
+  position_ms?: number;
+  title?: string;
+  queue_add?: string;
+  skip?: boolean;
+  video_id?: string; // with skip: does nothing unless this video is still current
 }
 
 // ---- Stage channels (type 13) ----
@@ -1708,7 +1739,7 @@ export interface ReadyEvent {
   user: User;
   session_id: string;
   // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels); emojis absent = none
-  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[] })[]; // stage_instances: live stages the user can see, omitted when none
+  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[]; watch_together?: WatchTogetherUpdate[] })[]; // stage_instances: live stages the user can see, omitted when none; watch_together: Watch Together sessions in voice channels the user can see, omitted when none
   private_channels: Channel[]; // DMs and group DMs
   presences: Presence[];
   read_states: ReadState[];
@@ -1780,6 +1811,7 @@ export interface GatewayEvents {
   VOICE_SERVER_UPDATE: { guild_id: Snowflake | null; channel_id: Snowflake; endpoint: string; token: string; session_id: string }; // requesting session only; session_id = the VoiceState.session_id this token is for
   VOICE_CONNECT_FAILED: { guild_id: Snowflake | null; channel_id: Snowflake; reason: VoiceConnectFailure }; // Vokko-only, requesting session only
   VOICE_CHANNEL_STATUS_UPDATE: { id: Snowflake; guild_id: Snowflake; status: string | null }; // to viewers of the channel; cleared (null) when the channel empties
+  WATCH_TOGETHER_UPDATE: WatchTogetherUpdate; // to viewers of the channel on every change; state null = ended (also when the last person leaves voice); a joiner gets the running session after VOICE_SERVER_UPDATE
   STAGE_INSTANCE_CREATE: StageInstance; // to viewers of the stage channel
   STAGE_INSTANCE_UPDATE: StageInstance;
   STAGE_INSTANCE_DELETE: StageInstance; // End Stage, or the last stage moderator left

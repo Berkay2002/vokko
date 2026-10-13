@@ -5,7 +5,7 @@ import { ChannelType, type Channel, type User, type VoiceState } from '../api/ty
 
 // zustand hooks read their initial state during server rendering, so the stores the stage reads are replaced by plain objects.
 const fake = vi.hoisted(() => ({
-  voice: { meId: '1' as string | null, channelId: 'c1' as string | null, states: [] as unknown[] },
+  voice: { meId: '1' as string | null, channelId: 'c1' as string | null, states: [] as unknown[], watch: {} as Record<string, unknown> },
   media: { videos: {} as Record<string, unknown>, watching: {} as Record<string, true>, quality: {}, liveScreens: {} as Record<string, true>, cameraOn: false, screenOn: false, error: null },
   ui: { focusedTile: null as string | null, membersHidden: false, chatOpen: false, focusStream: null as string | null },
 }));
@@ -70,6 +70,7 @@ beforeEach(() => {
   fake.voice.meId = '1';
   fake.voice.channelId = 'c1';
   fake.voice.states = [];
+  fake.voice.watch = {};
   fake.media.videos = {};
   fake.media.watching = {};
   fake.media.liveScreens = {};
@@ -87,6 +88,29 @@ describe('stageTiles', () => {
       ['2:stream', true],
       ['2', false],
     ]);
+  });
+});
+
+describe('Watch Together tile', () => {
+  const session = { video_id: 'dQw4w9WgXcQ', playing: true, position_ms: 0, updated_at_ms: 1, started_by: '2', queue: [] as string[] };
+
+  it('is the first tile, only while the session is on a channel we are connected to', () => {
+    const states = [voiceState('1'), voiceState('2')];
+    expect(stageTiles(states, () => false, true).map(t => t.id)).toEqual(['watch', '1', '2']);
+    expect(stageTiles(states, () => false).map(t => t.id)).toEqual(['1', '2']);
+    expect(stageTiles([], () => false, true)).toEqual([]);
+
+    fake.voice.states = states;
+    fake.voice.watch = { c1: session };
+    const [watch, ...users] = tiles(render());
+    expect(watch.attrs).toContain('watch');
+    expect(watch.attrs).toContain('data-video-id="dQw4w9WgXcQ"');
+    expect(watch.body).toContain('<iframe');
+    expect(watch.body).toContain('Started by alice');
+    expect(users).toHaveLength(2);
+
+    fake.voice.channelId = null; // watching the channel's page without being in the call: no player
+    expect(tiles(render())).toHaveLength(2);
   });
 });
 

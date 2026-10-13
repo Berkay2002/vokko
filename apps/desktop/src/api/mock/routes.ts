@@ -25,6 +25,7 @@ import { dismissEphemeral, mergeEphemerals } from "./apps";
 import { mutualFriendsOf } from "./mutualFriends";
 import { resolveReactionEmoji, sameReactionEmoji } from "./emojis";
 import "./calls";
+import "./watch";
 import { parsePoll, requirePollPerm } from "./polls";
 import { addPoll, isPoll } from "./pollData";
 import "./invites";

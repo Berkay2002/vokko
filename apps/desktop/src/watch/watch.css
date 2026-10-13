@@ -1,0 +1,211 @@
+/* Watch Together: the player tile (an iframe, never interactive itself), its control bar, and the "Up next" panel. */
+
+.voice-tile.watch {
+  display: block;
+  container-type: inline-size;
+  background: #000;
+}
+
+.watch-player {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #000;
+  pointer-events: none;
+}
+
+.watch-head {
+  position: absolute;
+  inset: 0 0 auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px 24px;
+  color: #fff;
+  background: linear-gradient(rgb(0 0 0 / 0.7), transparent);
+  pointer-events: none;
+}
+
+.watch-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-by {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.watch-bar {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 24px 10px 6px;
+  color: #fff;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.75));
+}
+
+.watch-seek {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--brand-500);
+}
+
+.watch-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.watch-spacer {
+  flex: 1 1 auto;
+}
+
+.watch-time {
+  padding: 0 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.watch-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.watch-button:hover,
+.watch-button.active {
+  background: rgb(255 255 255 / 0.18);
+}
+
+.watch-button:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--brand-500));
+}
+
+.watch-volume {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.watch-volume input {
+  width: 80px;
+  accent-color: var(--brand-500);
+}
+
+@container (max-width: 420px) {
+  .watch-volume input,
+  .watch-by {
+    display: none;
+  }
+}
+
+.watch-queue {
+  position: absolute;
+  inset: 0 0 64px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(300px, 70%);
+  padding: 12px;
+  overflow-y: auto;
+  color: var(--text-default, #fff);
+  background: var(--background-surface-high, rgb(20 20 24 / 0.95));
+  border-radius: var(--radius-md);
+}
+
+.watch-queue-title {
+  margin: 0;
+  font-size: 14px;
+}
+
+.watch-queue-empty {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.watch-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+}
+
+.watch-queue-form {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.watch-queue-form .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.watch-notice {
+  position: absolute;
+  inset: 50% 16px auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transform: translateY(-50%);
+  padding: 8px 12px;
+  color: #fff;
+  background: rgb(0 0 0 / 0.75);
+  border-radius: var(--radius-md);
+}
+
+.watch-cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 0;
+  color: #fff;
+  background: rgb(0 0 0 / 0.55);
+  cursor: pointer;
+}
+
+.voice-tile.watch.pip .watch-cover-text,
+.voice-tile.watch.strip .watch-cover-text {
+  display: none;
+}
+
+/* The channel list line of a voice channel with a session, for people who are not in the call. */
+.voice-watch-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 2px 36px;
+  color: var(--text-muted, inherit);
+  font-size: 12px;
+}
+
+.dm-call-tile.watch {
+  flex: 1 1 100%;
+  max-width: 640px;
+}
+
+.watch-modal .input {
+  width: 100%;
+}
