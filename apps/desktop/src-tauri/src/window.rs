@@ -15,6 +15,29 @@ pub fn show_main<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// Asks WebView2 to trim its memory while the window is hidden (`low`) and restores it when shown. The page keeps running,
+/// so voice and the gateway socket are unaffected. Older runtimes without the API are ignored.
+// WebView2 COM calls are unsafe bindings; the workspace denies unsafe code, so this is the one allowed spot.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn set_memory_low<R: Runtime>(window: &tauri::WebviewWindow<R>, low: bool) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL, ICoreWebView2_19,
+    };
+    use windows_core::Interface as _;
+    let _ = window.with_webview(move |webview| {
+        // SAFETY: runs on the main thread with a live controller owned by the webview.
+        unsafe {
+            if let Ok(core) = webview.controller().CoreWebView2()
+                && let Ok(core) = core.cast::<ICoreWebView2_19>()
+            {
+                let level = if low { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW } else { COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL };
+                let _ = core.SetMemoryUsageTargetLevel(level);
+            }
+        }
+    });
+}
+
 /// Whether the page draws the minimize / maximize / close buttons itself. macOS keeps its native traffic lights; elsewhere the
 /// OS frame is removed at startup and the title bar in the page takes over (with `data-tauri-drag-region` for dragging).
 pub const fn custom_controls() -> bool {

@@ -6073,6 +6073,8 @@ dependencies = [
  "vokko-engine",
  "vokko-platform",
  "vokko-protocol",
+ "webview2-com",
+ "windows-core",
 ]
 
 [[package]]

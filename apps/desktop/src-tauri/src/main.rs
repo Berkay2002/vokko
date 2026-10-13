@@ -184,16 +184,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .manage(updates::UpdateState::new(updater_configured))
         .manage(shortcuts::ShortcutRegistry::default())
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event
-                && window.label() == window::MAIN_WINDOW
-            {
-                let app = window.app_handle();
-                if app.state::<PrefsStore>().get().close_to_tray && app.state::<tray::TrayState>().present() {
-                    api.prevent_close();
-                    if let Err(error) = window.hide() {
-                        log::warn!("cannot hide the window: {error}");
+            if window.label() != window::MAIN_WINDOW {
+                return;
+            }
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    let app = window.app_handle();
+                    if app.state::<PrefsStore>().get().close_to_tray && app.state::<tray::TrayState>().present() {
+                        api.prevent_close();
+                        if let Err(error) = window.hide() {
+                            log::warn!("cannot hide the window: {error}");
+                        }
+                        #[cfg(windows)]
+                        if let Some(webview) = window.app_handle().get_webview_window(window::MAIN_WINDOW) {
+                            window::set_memory_low(&webview, true);
+                        }
                     }
                 }
+                #[cfg(windows)]
+                WindowEvent::Resized(_) | WindowEvent::Focused(true) => {
+                    if let Some(webview) = window.app_handle().get_webview_window(window::MAIN_WINDOW) {
+                        window::set_memory_low(&webview, webview.is_minimized().unwrap_or(false));
+                    }
+                }
+                _ => {}
             }
         })
         .setup(setup)
