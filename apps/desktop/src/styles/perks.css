@@ -37,6 +37,15 @@
   overflow: hidden;
 }
 
+/* an animated banner: an image (or its first-frame canvas) filling the strip, under the effect */
+.pv-banner-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .profile-effect {
   position: absolute;
   inset: 0;

@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from "react";
 import { ImagePlus, Plus } from "lucide-react";
 import { HEX_COLOR_RE, PROFILE_THEMES, hexToInt, intToHex, themeGradient } from "../perks/catalog";
-import { ProfileBanner } from "../perks/ProfileBanner";
+import { BannerGif, ProfileBanner, isGifUrl } from "../perks/ProfileBanner";
 import { Avatar } from "../shell/Avatar";
-import { AvatarPicker } from "./AvatarPicker";
+import { ImagePicker } from "./ImagePicker";
 import { DecorationPicker, EffectPicker } from "./pickers";
 import { previewName } from "./previewName";
 import { registerBuiltinTile, type ProfileEditorTile, type ProfileEditorTileProps } from "./registry";
@@ -76,7 +76,7 @@ function AvatarImageTile({ label, look, user, locked, uploadChannel, setDraft }:
         locked={locked}
         disabled={upload.busy || !uploadChannel}
         className="pe-tile-avatar"
-        modal={<AvatarPicker channel={uploadChannel} onUpload={upload.choose} onChoose={setDraftAvatar} onClose={() => setPicking(false)} />}
+        modal={<ImagePicker kind="avatar" channel={uploadChannel} onUpload={upload.choose} onChoose={setDraftAvatar} onClose={() => setPicking(false)} />}
       >
         <Avatar user={{ id: user.id, avatar: look.avatar }} size={56} decoration={false} />
         {upload.busy && <span className="pe-tile-busy">Uploading…</span>}
@@ -217,11 +217,22 @@ const ThemeTile: ProfileEditorTile = ({ draft, setDraft, locked, open, setOpen }
 
 const BannerImageTile: ProfileEditorTile = ({ look, locked, uploadChannel, setDraft }) => {
   const upload = useImageUpload(uploadChannel);
+  const [picking, setPicking] = useState(false);
   const has = !!look.banner;
   return (
     <>
-      <Tile label="Profile banner" locked={locked} disabled={upload.busy || !uploadChannel} className="pe-tile-wide pe-tile-banner" onClick={upload.choose}>
-        {has ? (
+      <Tile
+        label="Profile banner"
+        open={picking}
+        onToggle={() => setPicking(true)}
+        locked={locked}
+        disabled={upload.busy || !uploadChannel}
+        className="pe-tile-wide pe-tile-banner"
+        modal={<ImagePicker kind="banner" channel={uploadChannel} onUpload={upload.choose} onChoose={banner => setDraft({ banner })} onClose={() => setPicking(false)} />}
+      >
+        {look.banner && isGifUrl(look.banner) ? (
+          <BannerGif src={look.banner} />
+        ) : look.banner ? (
           <span className="pe-banner-fill" style={{ backgroundImage: `url("${look.banner}")` }} />
         ) : (
           <span className="pe-tile-empty">

@@ -11,7 +11,7 @@ import { loadStoredStatus, setOwnStatus } from "../shell/actions";
 import { Avatar } from "../shell/Avatar";
 import { useContextMenu, type MenuItem } from "../ui";
 import type { ProfileDraft, Scope } from "./draft";
-import { AvatarPicker } from "./AvatarPicker";
+import { ImagePicker } from "./ImagePicker";
 import { useImageUpload } from "./upload";
 import { clip } from "./widgets";
 
@@ -80,6 +80,7 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
   const guilds = useStore(s => s.guilds);
   const guildOrder = useStore(s => s.guildOrder);
   const [pickingAvatar, setPickingAvatar] = useState(false);
+  const [pickingBanner, setPickingBanner] = useState(false);
   const [statusEditing, setStatusEditing] = useState(false);
   const [statusText, setStatusText] = useState("");
   const avatarButton = useRef<HTMLButtonElement>(null);
@@ -107,7 +108,7 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
     const rect = bannerButton.current?.getBoundingClientRect();
     if (!rect) return;
     const items: MenuItem[] = [
-      { id: "banner-change", label: "Change banner", onSelect: bannerUpload.choose },
+      { id: "banner-change", label: "Change banner", onSelect: () => setPickingBanner(true) },
       { id: "banner-color", label: "Change banner colour", disabled: guild, tooltip: guild ? "Part of your main profile" : undefined, onSelect: () => onOpenTile("banner-color") },
       ...(look.banner ? [{ id: "banner-remove", label: "Remove banner", danger: true, onSelect: () => setDraft({ banner: null }) }] : []),
     ];
@@ -186,7 +187,8 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
           </button>
         )}
       </div>
-      {pickingAvatar && <AvatarPicker channel={uploadChannel} onUpload={upload.choose} onChoose={avatar => setDraft({ avatar })} onClose={() => setPickingAvatar(false)} />}
+      {pickingAvatar && <ImagePicker kind="avatar" channel={uploadChannel} onUpload={upload.choose} onChoose={avatar => setDraft({ avatar })} onClose={() => setPickingAvatar(false)} />}
+      {pickingBanner && <ImagePicker kind="banner" channel={uploadChannel} onUpload={bannerUpload.choose} onChoose={banner => setDraft({ banner })} onClose={() => setPickingBanner(false)} />}
       {(upload.error || bannerUpload.error) && <p className="pe-field-error pe-card-error">{upload.error ?? bannerUpload.error}</p>}
       <div className="pe-card-body">
         <div className="pe-name">

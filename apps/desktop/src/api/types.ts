@@ -555,14 +555,14 @@ export interface GifCategories {
   categories: GifCategory[];
 }
 
-// ---- Recent avatars ----
-/** GET /users/@me/avatars: the last 6 avatars the caller set, newest first. Set one again with PATCH /users/@me `avatar_attachment_id: id`. */
-export interface RecentAvatar {
+// ---- Recent avatars and banners ----
+/** GET /users/@me/avatars, /users/@me/banners: the last 6 the caller set, newest first. Set one again with PATCH /users/@me `avatar_attachment_id` / `banner_attachment_id: id`. */
+export interface RecentImage {
   id: Snowflake; // the attachment id
   url: string;
 }
-/** POST /users/@me/avatars/gif: the server downloads a picked GIF (`Gif.url`, a media URL of the configured provider) and answers with the pending upload. */
-export interface AvatarGifRequest {
+/** POST /users/@me/avatars/gif, /users/@me/banners/gif: the server downloads a picked GIF (`Gif.url`, a media URL of the configured provider) and answers with the pending upload. */
+export interface ImageGifRequest {
   channel_id: Snowflake; // a channel the caller may upload to
   url: string;
 }

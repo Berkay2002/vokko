@@ -18,7 +18,7 @@ import { flagsField } from "./memberFlags";
 import { setMockVoice, setVoiceChannelStatus, voiceStates } from "./voice";
 import { callRecipientRemoved } from "./calls";
 import { channelFor, guildPayload, membersOf, messageFor, privateChannelsFor, relationship, relationshipsFor, setRelationship } from "./views";
-import { rememberAvatar } from "./avatars";
+import { rememberImage } from "./avatars";
 import "./search";
 import "./membersSearch";
 import { dismissEphemeral, mergeEphemerals } from "./apps";
@@ -94,9 +94,13 @@ route("PATCH", "/users/@me", ({ viewer, body }) => {
   if ("avatar_attachment_id" in body) {
     const attachment = pendingAttachment(str(body.avatar_attachment_id), user.id);
     user.avatar = attachment ? attachment.url : null;
-    if (attachment) rememberAvatar(user.id, attachment.id);
+    if (attachment) rememberImage("avatar", user.id, attachment.id);
   }
   applyUserPerks(user, body, id => pendingAttachment(id, user.id));
+  if ("banner_attachment_id" in body) {
+    const attachment = pendingAttachment(str(body.banner_attachment_id), user.id);
+    if (attachment) rememberImage("banner", user.id, attachment.id);
+  }
   if (widgets !== undefined) user.widgets = widgets;
   const audience = new Set<string>([user.id, ...viewer.relationships.keys()]);
   for (const guild of db.guilds.values()) if (guild.members.has(user.id)) for (const id of guild.members.keys()) audience.add(id);

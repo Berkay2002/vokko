@@ -1507,6 +1507,13 @@ textarea.pe-inline-input {
   cursor: pointer;
 }
 
+.pe-pk-recent.banner {
+  width: calc(50% - 6px);
+  height: auto;
+  aspect-ratio: 17 / 6;
+  border-radius: 8px;
+}
+
 .pe-pk-recent img {
   display: block;
   width: 100%;

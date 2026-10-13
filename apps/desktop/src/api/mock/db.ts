@@ -138,6 +138,8 @@ export interface Db {
   gifFavorites: Map<string, Gif[]>;
   /** user id -> attachment ids of their last avatars (keys of `pending`), newest first (mock/avatars.ts) */
   recentAvatars: Map<string, string[]>;
+  /** the same for banners (mock/avatars.ts) */
+  recentBanners: Map<string, string[]>;
   /** user id -> "channel:message" -> saved_at ISO */
   bookmarks: Map<string, Map<string, string>>;
   /** reminder id -> reminder */
@@ -160,6 +162,7 @@ export const db: Db = {
   soundboard: new Map(),
   gifFavorites: new Map(),
   recentAvatars: new Map(),
+  recentBanners: new Map(),
   bookmarks: new Map(),
   reminders: new Map(),
   gifProvider: "klipy",
