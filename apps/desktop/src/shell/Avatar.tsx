@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { avatarUrl, guildIconUrl, guildInitials, useStore } from "../api/store";
 import type { Guild, GuildMember, PresenceStatus, Snowflake, User } from "../api/types";
 import { AvatarDecoration } from "../perks/AvatarDecoration";
+import { AnimatedImage } from "../ui/AnimatedMedia";
 
 /** 10 px status badge (online dot, idle crescent, dnd bar, offline ring). Sits on a ring of the row background. */
 export function StatusBadge({ status, size = 10 }: { status: PresenceStatus; size?: number }) {
@@ -36,6 +37,12 @@ export interface AvatarProps {
   className?: string;
 }
 
+/** An avatar picture. A GIF avatar follows the "Play GIFs" and reduced-motion settings: a still first frame that plays on hover or focus when GIFs may not autoplay. */
+export function AvatarImage({ src, size, className }: { src: string; size: number; className?: string }) {
+  if (/\.gif(?:[?#]|$)/i.test(src)) return <AnimatedImage kind="gif" className={className} src={src} alt="" width={size} height={size} draggable={false} />;
+  return <img className={className} src={src} alt="" width={size} height={size} draggable={false} />;
+}
+
 export function Avatar({ user, member, guildId, decoration, size = 32, status, dim, className }: AvatarProps) {
   const presence = useStore(s => (status ? s.presences[user.id]?.status ?? "offline" : undefined));
   const guildMember = useStore(s => (member === undefined && guildId ? s.members[guildId]?.[user.id] : undefined));
@@ -43,7 +50,7 @@ export function Avatar({ user, member, guildId, decoration, size = 32, status, d
   const decorationId = decoration === false || size < 32 ? null : decoration ?? user.avatar_decoration ?? null;
   return (
     <span className={`avatar ${className ?? ""}`} style={style}>
-      <img className={`avatar-img${dim ? " dim" : ""}`} src={avatarUrl({ id: user.id, avatar: (member ?? guildMember)?.avatar || user.avatar })} alt="" width={size} height={size} draggable={false} />
+      <AvatarImage className={`avatar-img${dim ? " dim" : ""}`} src={avatarUrl({ id: user.id, avatar: (member ?? guildMember)?.avatar || user.avatar })} size={size} />
       {decorationId && <AvatarDecoration id={decorationId} />}
       {presence && (
         <span className="avatar-status">

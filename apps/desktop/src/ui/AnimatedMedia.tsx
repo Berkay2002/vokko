@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ImgHTMLAttributes, VideoHTMLAttributes } from "react";
-import { usePrefs } from "./prefs";
+import { reducedMotionActive, usePrefs } from "./prefs";
 
 /**
  * Animated media that obeys the Accessibility settings: "Play GIFs when Vokko is focused", "Play animated emoji" and
- * "Sticker animations". An image that may not play right now shows its first frame (drawn on a canvas, which works for
+ * "Sticker animations" (GIFs also stay still under reduced motion). An image that may not play right now shows its first frame (drawn on a canvas, which works for
  * cross-origin images too) and animates while the pointer or keyboard focus is on it. A video GIF is paused the same way.
  */
 
@@ -16,7 +16,8 @@ export function useAnimationPolicy(kind: AnimationKind): AnimationPolicy {
   const gifs = usePrefs(s => s.playGifs);
   const emoji = usePrefs(s => s.playAnimatedEmoji);
   const stickers = usePrefs(s => s.stickerAnimation);
-  if (kind === "gif") return gifs ? "always" : "interaction";
+  const reduced = usePrefs(reducedMotionActive);
+  if (kind === "gif") return gifs && !reduced ? "always" : "interaction";
   if (kind === "emoji") return emoji ? "always" : "interaction";
   return stickers;
 }
