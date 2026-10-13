@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::put;
 use axum::{Json, Router};
 use vokko_protocol::api::{
-    GatewayEvent, Snowflake, WATCH_TOGETHER_POSITION_MAX_MS, WATCH_TOGETHER_QUEUE_MAX, WATCH_TOGETHER_TITLE_MAX_CHARS, WatchTogetherPatchRequest,
+    ChannelType, GatewayEvent, Snowflake, WATCH_TOGETHER_POSITION_MAX_MS, WATCH_TOGETHER_QUEUE_MAX, WATCH_TOGETHER_TITLE_MAX_CHARS, WatchTogetherPatchRequest,
     WatchTogetherStartRequest, WatchTogetherState, WatchTogetherUpdate,
 };
 
@@ -36,18 +36,59 @@ fn check_video_id(field: &str, id: &str) -> ApiResult<()> {
     if valid_video_id(id) { Ok(()) } else { Err(ApiErr::invalid(field, "Must be a YouTube video id (11 characters of A-Z a-z 0-9 _ -).")) }
 }
 
+/// Characters a broadcast title may not carry: controls (newlines too), zero-width and joiner marks, bidi marks, embeddings and
+/// isolates (spoofing), the soft hyphen, word joiners and invisible operators, variation selectors, tags and the blank "filler"
+/// letters.
+fn hidden_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{115F}'
+                | '\u{1160}'
+                | '\u{17B4}'
+                | '\u{17B5}'
+                | '\u{180B}'..='\u{180F}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{2800}'
+                | '\u{3164}'
+                | '\u{FE00}'..='\u{FE0F}'
+                | '\u{FEFF}'
+                | '\u{FFA0}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{E0000}'..='\u{E0FFF}'
+        )
+}
+
 fn clean_title(title: Option<&str>) -> ApiResult<Option<String>> {
     let title = title.map(str::trim).filter(|text| !text.is_empty());
     if title.is_some_and(|text| text.chars().count() > WATCH_TOGETHER_TITLE_MAX_CHARS) {
         return Err(ApiErr::invalid("title", &format!("Must be {WATCH_TOGETHER_TITLE_MAX_CHARS} or fewer in length.")));
     }
+    if title.is_some_and(|text| text.chars().any(hidden_char)) {
+        return Err(ApiErr::invalid("title", "Must not contain control or invisible characters."));
+    }
     Ok(title.map(str::to_owned))
 }
 
-/// The channel id, if the caller is connected to its voice right now (else 403, like a missing permission).
-fn require_in_voice(state: &AppState, user_id: i64, raw: &str) -> ApiResult<i64> {
+/// The channel id, if the caller is connected to its voice right now and would still be admitted to it: the voice join path's
+/// checks run again (VIEW_CHANNEL + CONNECT and not timed out in a guild; still a recipient and not blocked in a DM call), so
+/// someone who lost access while connected cannot keep steering the video. Else 403, like a missing permission.
+async fn require_in_voice(state: &AppState, user_id: i64, raw: &str) -> ApiResult<i64> {
     let id = parse_id(raw).ok_or_else(ApiErr::unknown_channel)?;
-    if super::state::in_channel(state, user_id, id) { Ok(id) } else { Err(ApiErr::missing_permissions()) }
+    if !super::state::in_channel(state, user_id, id) {
+        return Err(ApiErr::missing_permissions());
+    }
+    let row = store::channel_row(state, id).await?.ok_or_else(ApiErr::missing_permissions)?;
+    if row.channel_type() == ChannelType::GuildStage {
+        return Err(ApiErr::wrong_channel_type());
+    }
+    let admitted = if row.is_dm() { super::state::admit_dm(state, user_id, &row).await } else { super::state::admit_guild(state, user_id, &row).await };
+    admitted.map(|_| id).map_err(|_| ApiErr::missing_permissions())
 }
 
 fn limited(state: &AppState, user_id: i64) -> Option<Response> {
@@ -62,7 +103,7 @@ async fn start(
     Path(id): Path<String>,
     ApiJson(body): ApiJson<WatchTogetherStartRequest>,
 ) -> ApiResult<Response> {
-    let channel_id = require_in_voice(&state, user_id, &id)?;
+    let channel_id = require_in_voice(&state, user_id, &id).await?;
     check_video_id("video_id", &body.video_id)?;
     let title = clean_title(body.title.as_deref())?;
     if let Some(response) = limited(&state, user_id) {
@@ -83,7 +124,7 @@ async fn control(
     Path(id): Path<String>,
     ApiJson(body): ApiJson<WatchTogetherPatchRequest>,
 ) -> ApiResult<Response> {
-    let channel_id = require_in_voice(&state, user_id, &id)?;
+    let channel_id = require_in_voice(&state, user_id, &id).await?;
     if body.position_ms.is_some_and(|position| position > WATCH_TOGETHER_POSITION_MAX_MS) {
         return Err(ApiErr::invalid("position_ms", "Must be between 0 and 86400000."));
     }
@@ -137,7 +178,7 @@ async fn control(
 }
 
 async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Response> {
-    let channel_id = require_in_voice(&state, user_id, &id)?;
+    let channel_id = require_in_voice(&state, user_id, &id).await?;
     if let Some(response) = limited(&state, user_id) {
         return Ok(response);
     }
@@ -157,4 +198,21 @@ async fn announce(state: &AppState, channel_id: i64, session: Option<WatchTogeth
     let Ok(Some(row)) = store::channel_row(state, channel_id).await else { return };
     let Ok(viewers) = access::channel_viewers(state, &row).await else { return };
     state.hub.send(&viewers, &GatewayEvent::WatchTogetherUpdate(WatchTogetherUpdate { channel_id: Snowflake::from(channel_id), state: session }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn video_ids_and_titles() {
+        assert!(valid_video_id("dQw4w9WgXcQ") && valid_video_id("a_b-c_d-e_1"));
+        assert!(!valid_video_id("dQw4w9WgXc") && !valid_video_id("dQw4w9WgXc!") && !valid_video_id("dQw4w9WgXcQQ") && !valid_video_id("dQw4w9WgXcé"));
+        assert_eq!(clean_title(Some("  Rick  ")).expect("ok").as_deref(), Some("Rick"));
+        assert!(clean_title(Some("   ")).expect("ok").is_none());
+        for bad in ["a\nb", "a\u{200B}b", "a\u{202E}b", "a\u{00AD}b", "a\u{3164}b", "a\u{2066}b", "a\u{FEFF}b", "a\u{0007}b"] {
+            assert!(clean_title(Some(bad)).is_err(), "{bad:?}");
+        }
+        assert!(clean_title(Some("日本語 ünïcode 🎵")).is_ok());
+    }
 }

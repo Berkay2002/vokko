@@ -718,6 +718,38 @@ async fn watch_together_syncs_the_people_in_the_channel_and_ends_when_it_empties
     assert_eq!(w.app.patch(&path, &w.owner, json!({"playing": false})).await.0, StatusCode::FORBIDDEN, "no longer in voice");
 }
 
+/// Losing access ends the voice state, and a request-time check backs that up (the DM block case, where the call stays, is in
+/// dm_calls.rs): neither a deny overwrite nor a timeout leaves anyone steering the video.
+#[tokio::test]
+async fn watch_together_needs_access_that_is_still_valid() {
+    let w = world().await;
+    let path = format!("/channels/{}/watch-together", w.voice);
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    alice.voice(Some(&w.voice), false).await;
+    alice.voice_answer().await;
+    assert_eq!(w.app.put_json(&path, &w.alice, json!({"video_id": "dQw4w9WgXcQ"})).await.0, StatusCode::OK);
+    assert_eq!(w.app.put_json(&path, &w.alice, json!({"video_id": "dQw4w9WgXcQ", "title": "zero\u{200B}width"})).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"title": "a\u{202E}b"})).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"title": "a\nb"})).await.0, StatusCode::BAD_REQUEST);
+
+    // A deny overwrite for VIEW_CHANNEL + CONNECT while the voice state stays.
+    w.overwrite(&w.alice_id, 1, VIEW_CHANNEL | CONNECT).await;
+    assert_eq!(w.app.put_json(&path, &w.alice, json!({"video_id": "aaaaaaaaaaa"})).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"playing": false})).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(w.app.delete(&path, &w.alice).await.0, StatusCode::FORBIDDEN);
+    w.clear_overwrite(&w.alice_id).await;
+    // (The overwrite also ended her voice state, so she joins again.)
+    alice.voice(Some(&w.voice), false).await;
+    alice.voice_answer().await;
+    assert_eq!(w.app.put_json(&path, &w.alice, json!({"video_id": "dQw4w9WgXcQ"})).await.0, StatusCode::OK);
+
+    // A timed-out member is refused like on join.
+    let until = vokko_server::store::iso(time::OffsetDateTime::now_utc() + time::Duration::days(1));
+    let (status, body) = w.app.patch(&format!("/guilds/{}/members/{}", w.guild, w.alice_id), &w.owner, json!({"communication_disabled_until": until})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"playing": true})).await.0, StatusCode::FORBIDDEN, "timed out");
+}
+
 #[tokio::test]
 async fn watch_together_controls_are_rate_limited_per_user() {
     let w = world_with(

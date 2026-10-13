@@ -418,7 +418,7 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
 }
 
 /// Guild voice: the channel's permissions need VIEW_CHANNEL + CONNECT, and a timed-out member stays out.
-async fn admit_guild(state: &AppState, user_id: i64, row: &ChannelRow) -> Result<(Option<i64>, u64), VoiceConnectFailure> {
+pub(crate) async fn admit_guild(state: &AppState, user_id: i64, row: &ChannelRow) -> Result<(Option<i64>, u64), VoiceConnectFailure> {
     let guild_id = row.guild_id.ok_or(VoiceConnectFailure::MissingPermissions)?;
     let guild = access::guild_access(state, user_id, guild_id).await.map_err(|_| VoiceConnectFailure::MissingPermissions)?;
     if guild.timed_out && guild.owner_id != user_id && guild.permissions & ADMINISTRATOR == 0 {
@@ -433,7 +433,7 @@ async fn admit_guild(state: &AppState, user_id: i64, row: &ChannelRow) -> Result
 /// DM call: recipients only; a block in either direction closes a 1:1 DM's call like its messages, and starting one (which posts
 /// a call message and rings) needs the other side's DM privacy to allow the caller (guild_privacy::may_dm). Joining a call the
 /// other side started stays open.
-async fn admit_dm(state: &AppState, user_id: i64, row: &ChannelRow) -> Result<(Option<i64>, u64), VoiceConnectFailure> {
+pub(crate) async fn admit_dm(state: &AppState, user_id: i64, row: &ChannelRow) -> Result<(Option<i64>, u64), VoiceConnectFailure> {
     access::channel_access(state, user_id, row.id).await.map_err(|_| VoiceConnectFailure::MissingPermissions)?;
     if row.channel_type() == ChannelType::Dm {
         let others: Vec<i64> = access::channel_viewers(state, row).await.unwrap_or_default().into_iter().filter(|id| *id != user_id).collect();

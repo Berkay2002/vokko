@@ -389,3 +389,31 @@ async fn starting_a_dm_call_follows_the_dm_privacy_rule() {
     let (status, body) = app.post(&format!("/channels/{one}/call/ring"), &bob.token, json!({})).await;
     assert_eq!((status, body["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50007)));
 }
+
+/// Watch Together in a DM call: only people in the call, and a block that lands mid-call stops the blocked side steering it.
+#[tokio::test]
+async fn watch_together_in_a_dm_call_follows_the_call_rules() {
+    let (app, address) = app_with(|_| {}).await;
+    let (alice, bob, carl) = (user(&app, "alice").await, user(&app, "bob").await, user(&app, "carl").await);
+    befriend(&app, &alice, &bob).await;
+    let one = dm(&app, &alice, &bob).await;
+    let path = format!("/channels/{one}/watch-together");
+    let mut alice_ws = Client::identify(&address, &alice.token).await;
+    let mut bob_ws = Client::identify(&address, &bob.token).await;
+    assert_eq!(app.put_json(&path, &alice.token, json!({"video_id": "dQw4w9WgXcQ"})).await.0, StatusCode::FORBIDDEN, "not in the call yet");
+    alice_ws.voice(Some(&one)).await;
+    assert_eq!(alice_ws.voice_answer().await.0, "VOICE_SERVER_UPDATE");
+    assert_eq!(app.put_json(&path, &carl.token, json!({"video_id": "dQw4w9WgXcQ"})).await.0, StatusCode::FORBIDDEN, "not a recipient");
+    assert_eq!(app.put_json(&path, &alice.token, json!({"video_id": "dQw4w9WgXcQ"})).await.0, StatusCode::OK);
+    assert_eq!(bob_ws.wait_for("WATCH_TOGETHER_UPDATE").await["state"]["video_id"], "dQw4w9WgXcQ");
+    // A late joiner gets the session on joining.
+    bob_ws.voice(Some(&one)).await;
+    assert_eq!(bob_ws.wait_for("WATCH_TOGETHER_UPDATE").await["channel_id"], one.as_str());
+    assert_eq!(app.patch(&path, &bob.token, json!({"playing": false})).await.0, StatusCode::OK);
+
+    // Bob blocks alice while both are in the call: a block closes the call both ways, so neither may steer the video.
+    assert_eq!(app.put_json(&format!("/users/@me/relationships/{}", alice.id), &bob.token, json!({"type": 2})).await.0, StatusCode::NO_CONTENT);
+    assert!(app.state.voice.get(alice.id.parse().expect("id")).is_some(), "a block does not end the call by itself");
+    assert_eq!(app.patch(&path, &alice.token, json!({"playing": true})).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(app.patch(&path, &bob.token, json!({"playing": true})).await.0, StatusCode::FORBIDDEN);
+}
