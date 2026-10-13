@@ -1172,6 +1172,69 @@ textarea.pe-inline-input {
   min-height: 0;
 }
 
+/* A stand-in profile card for the scene effect and frame tiles: drawn at a card-like size, then zoomed into the tile. */
+.pe-mini-wrap {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.pe-mini {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 200px;
+  height: 290px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--background-base-lower);
+  zoom: 0.36;
+}
+
+.pe-mini-banner {
+  height: 76px;
+  background: linear-gradient(135deg, var(--brand-500), color-mix(in srgb, var(--brand-500) 45%, #000));
+}
+
+.pe-mini-avatar {
+  width: 64px;
+  height: 64px;
+  margin: -34px 0 14px 16px;
+  border: 6px solid var(--background-base-lower);
+  border-radius: 50%;
+  background: var(--background-surface-higher);
+}
+
+.pe-mini-line {
+  width: 70%;
+  height: 14px;
+  margin: 0 0 12px 18px;
+  border-radius: 7px;
+  background: var(--background-mod-strong);
+}
+
+.pe-mini-line.short {
+  width: 45%;
+}
+
+/* The frame tile: the chosen frame drawn around the tile itself. */
+.pe-frame-strip {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 40px;
+}
+
+.pe-frame-strip-inner {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
 .pe-pk-none {
   display: flex;
   flex-direction: column;

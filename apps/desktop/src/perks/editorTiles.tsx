@@ -1,11 +1,13 @@
-// The nameplate and display name style pickers as profile editor tiles. They stage `nameplate` / `display_name_styles` in the draft's
+// The nameplate, display name style and profile frame pickers as profile editor tiles. They stage `nameplate` / `display_name_styles` /
+// `profile_frame` in the draft's
 // `extra` fields (profile-editor/draft.ts EXTRA_FIELDS), which Save sends to PATCH /users/@me.
 import type { DisplayNameStyles } from "../api/types";
-import { NameStylePicker, NameplatePicker } from "../profile-editor/pickers";
+import { FramePicker, NameStylePicker, NameplatePicker } from "../profile-editor/pickers";
 import { previewName } from "../profile-editor/previewName";
 import { registerProfileEditorTile, type ProfileEditorTile } from "../profile-editor/registry";
 import { Tile } from "../profile-editor/tiles";
 import { Nameplate, StyledName } from "./NameStyles";
+import { ProfileFrame } from "./ProfileEffect";
 
 const NameplateTile: ProfileEditorTile = props => {
   const { user, look, draft, setExtra, locked, open, setOpen } = props;
@@ -65,5 +67,28 @@ const DisplayNameStyleTile: ProfileEditorTile = props => {
   );
 };
 
+const FrameTile: ProfileEditorTile = props => {
+  const { user, look, draft, setExtra, locked, open, setOpen } = props;
+  const value = typeof draft.extra.profile_frame === "string" ? draft.extra.profile_frame : null;
+  return (
+    <Tile
+      label="Profile frame"
+      open={open}
+      onToggle={() => setOpen(!open)}
+      locked={locked}
+      empty={!value}
+      className="pe-tile-effect pe-tile-frame"
+      modal={<FramePicker user={user} look={look} name={previewName(props)} value={value} onApply={next => setExtra("profile_frame", next)} onClose={() => setOpen(false)} />}
+    >
+      <span className={`pe-frame-strip${value ? "" : " pe-ph"}`}>
+        <span className="pe-frame-strip-inner">
+          <ProfileFrame id={value ?? "gold-filigree"} />
+        </span>
+      </span>
+    </Tile>
+  );
+};
+
 registerProfileEditorTile("nameplate", NameplateTile);
+registerProfileEditorTile("profile-frame", FrameTile);
 registerProfileEditorTile("display-name-style", DisplayNameStyleTile);

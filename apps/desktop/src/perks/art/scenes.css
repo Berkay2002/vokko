@@ -1,0 +1,322 @@
+/*
+ * Full-card profile effect scenes (perks/art/scenes.tsx) and profile frames (perks/art/frames.tsx). Transform and opacity only.
+ * A scene is a size container: actors are placed in % of the card and sized in cqw, so one drawing fits the popout, the editor
+ * preview and the picker tiles. Classes and their CSS variables:
+ *   fx-in      intro, once: from translate(--x0, --y0) rotate(--r0) scale(--s0) at opacity --o0 to the actor's resting pose
+ *   fx-once    passes through once, from (--x0, --y0, --r0) to (--x1, --y1, --r1), fading out at the end
+ *   fx-travel  loop across the card by (--dx, --dy) turning --rot, wobbling by (--wx, --wy) (--tt duration, --td delay)
+ *   fx-bob / fx-sway / fx-rock / fx-spin / fx-twinkle / fx-tumble / fx-flap / fx-flash / fx-burst / fx-slide / fx-puff: idle loops (--it, --id)
+ * Reduced motion: every animation stops at the resting pose, travelling loops freeze where they are (a still frame).
+ */
+
+.profile-effect.pfx,
+.profile-frame {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.profile-effect.pfx {
+  container-type: size;
+}
+
+.profile-frame {
+  z-index: 6;
+}
+
+.profile-frame > svg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.fx-a {
+  position: absolute;
+  display: block;
+  height: auto;
+  overflow: visible;
+}
+
+.fx-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.fx-in {
+  animation: fx-in var(--in, 1.8s) var(--ease, cubic-bezier(0.2, 0.75, 0.25, 1.06)) var(--d, 0s) both;
+}
+
+.fx-once {
+  animation: fx-once var(--in, 2.4s) var(--ease, cubic-bezier(0.45, 0.05, 0.6, 0.95)) var(--d, 0s) both;
+}
+
+.fx-travel {
+  animation: fx-travel var(--tt, 8s) linear var(--td, 0s) infinite;
+}
+
+.fx-bob,
+.fx-sway,
+.fx-rock,
+.fx-spin,
+.fx-twinkle,
+.fx-tumble,
+.fx-flash,
+.fx-burst,
+.fx-slide,
+.fx-flap,
+.fx-puff {
+  transform-box: fill-box;
+  transform-origin: var(--o, center);
+  animation-duration: var(--it, 3s);
+  animation-delay: var(--id, 0s);
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.fx-bob {
+  animation-name: fx-bob;
+  animation-direction: alternate;
+}
+
+.fx-sway {
+  animation-name: fx-sway;
+  animation-direction: alternate;
+}
+
+.fx-rock {
+  animation-name: fx-rock;
+  animation-direction: alternate;
+}
+
+.fx-spin {
+  animation-name: fx-spin;
+  animation-timing-function: linear;
+}
+
+.fx-twinkle {
+  animation-name: fx-twinkle;
+}
+
+.fx-tumble {
+  animation-name: fx-tumble;
+  animation-direction: alternate;
+}
+
+.fx-flash {
+  animation-name: fx-flash;
+  animation-timing-function: linear;
+  animation-fill-mode: backwards;
+}
+
+.fx-flap {
+  animation-name: fx-flap;
+  animation-direction: alternate;
+}
+
+.fx-burst {
+  animation-name: fx-burst;
+  animation-timing-function: cubic-bezier(0.15, 0.7, 0.3, 1);
+  animation-fill-mode: backwards;
+}
+
+.fx-slide {
+  transform-box: border-box;
+  animation-name: fx-slide;
+  animation-timing-function: linear;
+}
+
+.fx-puff {
+  animation-name: fx-puff;
+  animation-timing-function: ease-out;
+  animation-iteration-count: 1;
+  animation-fill-mode: both;
+}
+
+@keyframes fx-in {
+  from {
+    transform: translate(var(--x0, 0), var(--y0, 0)) rotate(var(--r0, 0deg)) scale(var(--s0, 1));
+    opacity: var(--o0, 1);
+  }
+}
+
+@keyframes fx-once {
+  0% {
+    transform: translate(var(--x0, 0), var(--y0, 0)) rotate(var(--r0, 0deg));
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--x1, 0), var(--y1, 0)) rotate(var(--r1, 0deg));
+    opacity: 0;
+  }
+}
+
+@keyframes fx-travel {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 0;
+  }
+  8% {
+    opacity: var(--op, 1);
+  }
+  25% {
+    transform: translate(calc(var(--dx, 0px) * 0.25 + var(--wx, 0px)), calc(var(--dy, 0px) * 0.25 + var(--wy, 0px))) rotate(calc(var(--rot, 0deg) * 0.25));
+  }
+  50% {
+    transform: translate(calc(var(--dx, 0px) * 0.5), calc(var(--dy, 0px) * 0.5)) rotate(calc(var(--rot, 0deg) * 0.5));
+  }
+  75% {
+    transform: translate(calc(var(--dx, 0px) * 0.75 - var(--wx, 0px)), calc(var(--dy, 0px) * 0.75 - var(--wy, 0px))) rotate(calc(var(--rot, 0deg) * 0.75));
+  }
+  92% {
+    opacity: var(--op, 1);
+  }
+  100% {
+    transform: translate(var(--dx, 0px), var(--dy, 0px)) rotate(var(--rot, 0deg));
+    opacity: 0;
+  }
+}
+
+@keyframes fx-bob {
+  from {
+    transform: translateY(calc(var(--amp, 3px) * -1));
+  }
+  to {
+    transform: translateY(var(--amp, 3px));
+  }
+}
+
+@keyframes fx-sway {
+  from {
+    transform: rotate(calc(var(--sw, 4deg) * -1));
+  }
+  to {
+    transform: rotate(var(--sw, 4deg));
+  }
+}
+
+@keyframes fx-rock {
+  from {
+    transform: translateY(calc(var(--amp, 2px) * -1)) rotate(calc(var(--sw, 5deg) * -1));
+  }
+  to {
+    transform: translateY(var(--amp, 2px)) rotate(var(--sw, 5deg));
+  }
+}
+
+@keyframes fx-spin {
+  to {
+    transform: rotate(var(--turn, 360deg));
+  }
+}
+
+@keyframes fx-twinkle {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.2;
+    transform: scale(0.5);
+  }
+}
+
+@keyframes fx-tumble {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0.25);
+  }
+}
+
+@keyframes fx-flap {
+  from {
+    transform: scaleY(1);
+  }
+  to {
+    transform: scaleY(-0.5);
+  }
+}
+
+@keyframes fx-flash {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  2% {
+    opacity: 1;
+  }
+  4% {
+    opacity: 0.25;
+  }
+  7% {
+    opacity: 1;
+  }
+  13% {
+    opacity: 0;
+  }
+}
+
+@keyframes fx-burst {
+  0% {
+    opacity: 0;
+    transform: scale(0.08);
+  }
+  6% {
+    opacity: 1;
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  75%,
+  100% {
+    opacity: 0;
+    transform: scale(1.12) translateY(4px);
+  }
+}
+
+@keyframes fx-slide {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes fx-puff {
+  from {
+    opacity: 0.95;
+    transform: scale(0.3);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.7) translateY(-6px);
+  }
+}
+
+/* still frame: resting poses, travelling actors frozen mid-way */
+.reduce-motion .pfx :not(.fx-travel),
+.reduce-motion .profile-frame * {
+  animation: none !important;
+}
+
+.reduce-motion .pfx .fx-travel {
+  animation-play-state: paused !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:not(.full-motion) .pfx :not(.fx-travel),
+  html:not(.full-motion) .profile-frame * {
+    animation: none !important;
+  }
+
+  html:not(.full-motion) .pfx .fx-travel {
+    animation-play-state: paused !important;
+  }
+}

@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Pencil } from "lucide-react";
 import type { DisplayNameStyles, User } from "../api/types";
-import { AVATAR_DECORATIONS, NAME_EFFECTS, NAME_FONTS, NAMEPLATES, PROFILE_EFFECTS, decorationById, effectById, hexToInt, intToHex, nameEffectById, nameplateById } from "../perks/catalog";
+import { AVATAR_DECORATIONS, NAME_EFFECTS, NAME_FONTS, NAMEPLATES, PROFILE_EFFECTS, PROFILE_FRAMES, decorationById, effectById, frameById, hexToInt, intToHex, nameEffectById, nameplateById } from "../perks/catalog";
 import { Nameplate, StyledName } from "../perks/NameStyles";
 import { sameNameStyle } from "../perks/NameStylePickers";
 import { ProfileBanner } from "../perks/ProfileBanner";
 import type { ProfileLook } from "../perks/profile";
 import { Avatar } from "../shell/Avatar";
-import { NoneTile, PickerModal, PickerSection, PickerTile, PreviewCard } from "./PickerModal";
+import { MiniCard, NoneTile, PickerModal, PickerSection, PickerTile, PreviewCard } from "./PickerModal";
 
 const STRIP = { banner: null, bannerColor: "#2b2d31", themeColors: null } as const;
 const DEFAULT_COLOR = hexToInt("#8d96f7");
@@ -31,9 +31,9 @@ interface Common {
 export function EffectPicker({ user, look, name, value, onApply, onClose }: Common & { value: string | null; onApply(next: string | null): void }) {
   const [sel, setSel] = useState(value);
   const def = effectById(sel);
-  const strip = (id: string | null, label: string) => (
-    <PickerTile key={id ?? "none"} selected={sel === id} label={label} onClick={() => setSel(id)}>
-      <ProfileBanner look={{ ...STRIP, effect: id }} className="pe-effect-strip" />
+  const strip = (id: string, label: string, scene: boolean) => (
+    <PickerTile key={id} selected={sel === id} label={label} onClick={() => setSel(id)}>
+      {scene ? <MiniCard effect={id} /> : <ProfileBanner look={{ ...STRIP, effect: id }} className="pe-effect-strip" />}
     </PickerTile>
   );
   return (
@@ -47,15 +47,52 @@ export function EffectPicker({ user, look, name, value, onApply, onClose }: Comm
           <PickerSection title="Your effects" label="Profile effect">
             <NoneTile selected={sel === null} onClick={() => setSel(null)} />
           </PickerSection>
-          {bySection(PROFILE_EFFECTS).map(([section, items]) => (
-            <PickerSection key={section ?? ""} title={section ?? "Particles"} label={section ?? "Profile effects"}>
-              {items.map(e => strip(e.id, e.name))}
+          {bySection(PROFILE_EFFECTS.filter(e => e.scene)).map(([section, items]) => (
+            <PickerSection key={section ?? ""} title={section ?? "Scenes"} label={section ?? "Scenes"}>
+              {items.map(e => strip(e.id, e.name, true))}
+            </PickerSection>
+          ))}
+          <PickerSection title="Particles" label="Particles">
+            {PROFILE_EFFECTS.filter(e => !e.scene).map(e => strip(e.id, e.name, false))}
+          </PickerSection>
+        </>
+      }
+      preview={<PreviewCard user={user} look={{ ...look, effect: sel }} name={name} />}
+      info={{
+        name: def?.name ?? "None",
+        description: !def ? "No effect plays over your profile." : def.scene ? "An animated scene that plays over your whole profile card when it opens, then keeps moving." : `Animated ${def.name.toLowerCase()} that play over your profile banner.`,
+      }}
+    />
+  );
+}
+
+export function FramePicker({ user, look, name, value, onApply, onClose }: Common & { value: string | null; onApply(next: string | null): void }) {
+  const [sel, setSel] = useState(value);
+  const def = frameById(sel);
+  return (
+    <PickerModal
+      title="Change profile frame"
+      onClose={onClose}
+      onApply={() => onApply(sel)}
+      canApply={sel !== value}
+      grid={
+        <>
+          <PickerSection title="Your frames" label="Profile frame">
+            <NoneTile selected={sel === null} onClick={() => setSel(null)} />
+          </PickerSection>
+          {bySection(PROFILE_FRAMES).map(([section, items]) => (
+            <PickerSection key={section ?? ""} title={section ?? "Frames"} label={section ?? "Profile frames"}>
+              {items.map(f => (
+                <PickerTile key={f.id} selected={sel === f.id} label={f.name} onClick={() => setSel(f.id)}>
+                  <MiniCard frame={f.id} />
+                </PickerTile>
+              ))}
             </PickerSection>
           ))}
         </>
       }
-      preview={<PreviewCard user={user} look={{ ...look, effect: sel }} name={name} />}
-      info={{ name: def?.name ?? "None", description: def ? `Animated ${def.name.toLowerCase()} that play over your profile card.` : "No effect plays over your profile." }}
+      preview={<PreviewCard user={user} look={{ ...look, frame: sel }} name={name} />}
+      info={{ name: def?.name ?? "None", description: def ? "A drawn border around your whole profile card, wherever others open it." : "Your profile card shows without a frame." }}
     />
   );
 }

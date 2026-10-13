@@ -5,6 +5,7 @@ import { appStore, displayName, useStore } from "../../api/store";
 import type { DisplayNameStyles, Guild, GuildMember, GuildTag, User } from "../../api/types";
 import { AVATAR_DECORATIONS, BIO_MAX, HEX_COLOR_RE, PRONOUNS_MAX, PROFILE_EFFECTS, PROFILE_THEMES, hexToInt, intToHex, themeGradient } from "../../perks/catalog";
 import { ProfileBanner } from "../../perks/ProfileBanner";
+import { ProfileCardLayers } from "../../perks/ProfileEffect";
 import { resolveProfile, themeVars, type ProfileLook } from "../../perks/profile";
 import { TagChip } from "../../perks/TagChip";
 import { Nameplate, StyledName } from "../../perks/NameStyles";
@@ -147,6 +148,7 @@ function PreviewCard({ user, look, tag, guildName, nameStyle, nameplate }: { use
       <div className="field-label">Preview</div>
       <div className={`profile-card static${look.themeColors ? " pv-themed" : ""}`} style={themeVars(look.themeColors)}>
         <ProfileBanner look={look} className="profile-banner" />
+        <ProfileCardLayers look={look} />
         <div className="profile-avatar">
           <Avatar user={previewUser} size={80} decoration={look.decoration} status />
         </div>
@@ -211,7 +213,7 @@ function EffectGrid({ value, onChange }: { value: string | null; onChange(next: 
         </button>
         {PROFILE_EFFECTS.map(e => (
           <button key={e.id} type="button" role="radio" aria-checked={value === e.id} className={`pf-tile${value === e.id ? " selected" : ""}`} onClick={() => onChange(e.id)}>
-            <ProfileBanner look={{ ...STRIP, effect: e.id }} className="pf-effect-strip" />
+            <ProfileBanner look={{ ...STRIP, effect: e.id }} className="pf-effect-strip" scene />
             <span className="pf-tile-name">{e.name}</span>
           </button>
         ))}
@@ -298,6 +300,7 @@ function UserProfileTab({ me }: { me: User }) {
     themeColors: draft.theme,
     decoration: draft.decoration,
     effect: draft.effect,
+    frame: me.profile_frame ?? null,
   };
   const tagGuild = draft.tagGuild ? guilds[draft.tagGuild] : undefined;
 

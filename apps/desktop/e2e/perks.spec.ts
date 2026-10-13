@@ -115,7 +115,7 @@ test('reduced motion: no particles on a super reaction', async ({ page }) => {
   await expect(target.getByTestId('burst-particles')).toHaveCount(0);
 });
 
-test('decoration, effect, nameplate and name style show in the popout and the member list', async ({ page }) => {
+test('decoration, effect, frame, nameplate and name style show in the popout and the member list', async ({ page }) => {
   await openStockTalk(page);
   await page.getByRole('button', { name: 'User Settings' }).click();
   const settings = page.getByRole('dialog', { name: 'User Settings' });
@@ -130,7 +130,8 @@ test('decoration, effect, nameplate and name style show in the popout and the me
     await modal.getByRole('button', { name: 'Apply' }).click();
   };
   await pick('Avatar decoration', 'Change avatar decoration', ['Avatar decorations', 'Halo']);
-  await pick('Profile effect', 'Change profile effect', ['Profile effects', 'Snowfall']);
+  await pick('Profile effect', 'Change profile effect', ['Particles', 'Snowfall']);
+  await pick('Profile frame', 'Change profile frame', ['Fancy', 'Neon Glow']);
   await pick('Nameplate', 'Change nameplate', ['Nameplates', 'Aurora']);
   await pick('Display name style', 'Change display name style', ['Display name font', 'Serif'], ['Display name effect', 'Gradient']);
   await expect(editor.getByRole('button', { name: 'Nameplate', exact: true }).locator('.nameplate')).toHaveCount(1);
@@ -141,6 +142,7 @@ test('decoration, effect, nameplate and name style show in the popout and the me
 
   const me = await page.evaluate(() => (window as unknown as { __vokko: { appStore: { getState(): { me: Record<string, unknown> } } } }).__vokko.appStore.getState().me);
   expect(me.nameplate).toBe('aurora');
+  expect(me.profile_frame).toBe('neon-glow');
   expect(me.display_name_styles).toMatchObject({ font_id: 'serif', effect_id: 'gradient' });
   expect((me.display_name_styles as { colors: number[] }).colors).toHaveLength(2);
 
@@ -157,6 +159,7 @@ test('decoration, effect, nameplate and name style show in the popout and the me
   const card = page.locator('.profile-card').last();
   await expect(card.locator('.avatar-deco[data-decoration="halo"]')).toHaveCount(1);
   await expect(card.locator('.profile-effect[data-effect="snowfall"]')).toHaveCount(1);
+  await expect(card.locator('.profile-frame[data-frame="neon-glow"]')).toHaveCount(1);
   await expect(card.locator('.styled-name.dn-gradient')).toHaveCount(1);
   // the bio is Markdown, rendered as elements (not HTML from the text)
   await expect(card.locator('.pv-bio strong')).toHaveText('bold');

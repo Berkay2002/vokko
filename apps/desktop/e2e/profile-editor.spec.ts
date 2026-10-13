@@ -145,7 +145,7 @@ test('avatar menu: decoration opens its panel, previews live and saves; Remove a
   expect((await me(page)).avatar_decoration).toBeTruthy();
 });
 
-test('tiles: theme, banner colour and effect preview on the card; nameplate and display name style tiles are live', async ({ page }) => {
+test('tiles: theme, banner colour, effect and frame preview on the card; nameplate and display name style tiles are live', async ({ page }) => {
   const { editor } = await openEditor(page);
   await editor.getByRole('button', { name: 'Profile theme' }).click();
   await editor.getByRole('radio', { name: 'Forest' }).click();
@@ -157,17 +157,37 @@ test('tiles: theme, banner colour and effect preview on the card; nameplate and 
 
   await editor.getByRole('button', { name: 'Profile effect', exact: true }).click();
   const effects = page.getByRole('dialog', { name: 'Change profile effect' });
-  await effects.getByRole('radiogroup', { name: 'Profile effects' }).getByRole('radio').first().click();
+  // the drawn scenes come first, in sections; the particle effects follow under Particles
+  await expect(effects.getByRole('radiogroup').nth(1)).toHaveAccessibleName('Seasons');
+  await expect(effects.getByRole('radiogroup', { name: 'Particles' }).getByRole('radio', { name: 'Snowfall' })).toBeVisible();
+  await effects.getByRole('radiogroup', { name: 'Seasons' }).getByRole('radio').first().click();
   await effects.getByRole('button', { name: 'Apply' }).click();
-  await expect(editor.getByTestId('pe-card').locator('.profile-effect')).toHaveCount(1);
+  await expect(editor.getByTestId('pe-card').locator('.profile-effect.pfx')).toHaveCount(1);
 
   // the perks pickers are registered, so these tiles are live (perks.spec.ts drives them)
   await expect(editor.getByRole('button', { name: 'Nameplate' })).toBeEnabled();
   await expect(editor.getByRole('button', { name: 'Display name style' })).toBeEnabled();
-  // the frame picker is still unregistered: its tile says so and stays inert
-  const soon = editor.getByRole('button', { name: 'Profile frame' });
-  await expect(soon).toBeDisabled();
-  await expect(soon).toContainText('Coming soon');
+
+  // the frame tile opens its picker; Apply previews the frame on the card and Save stores it
+  await editor.getByRole('button', { name: 'Profile frame' }).click();
+  const frames = page.getByRole('dialog', { name: 'Change profile frame' });
+  await frames.getByRole('radio', { name: 'Gold Filigree' }).click();
+  await expect(frames.locator('.profile-frame[data-frame="gold-filigree"]').first()).toBeVisible();
+  await frames.getByRole('button', { name: 'Apply' }).click();
+  await expect(frames).toHaveCount(0);
+  await expect(editor.getByTestId('pe-card').locator('.profile-frame[data-frame="gold-filigree"]')).toHaveCount(1);
+  await editor.locator('.cs-savebar').getByRole('button', { name: 'Save Changes' }).click();
+  await expect(editor.locator('.cs-savebar')).toHaveCount(0);
+  expect((await me(page)).profile_frame).toBe('gold-filigree');
+
+  // None removes it again
+  await editor.getByRole('button', { name: 'Profile frame' }).click();
+  await frames.getByRole('radio', { name: 'None' }).click();
+  await frames.getByRole('button', { name: 'Apply' }).click();
+  await expect(editor.getByTestId('pe-card').locator('.profile-frame')).toHaveCount(0);
+  await editor.locator('.cs-savebar').getByRole('button', { name: 'Save Changes' }).click();
+  await expect(editor.locator('.cs-savebar')).toHaveCount(0);
+  expect((await me(page)).profile_frame ?? null).toBeNull();
 });
 
 test('the profile switcher lists the servers; a server profile edits its own pronouns and locks shared tiles', async ({ page }) => {

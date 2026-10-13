@@ -1,5 +1,5 @@
-// Vokko's own open perk asset set: avatar decorations, profile effects, profile theme presets and server-tag badges.
-// The wire fields (`User.avatar_decoration`, `User.profile_effect`, `GuildTag.badge`) are ids into this set; nothing here
+// Vokko's own open perk asset set: avatar decorations, profile effects and frames, profile theme presets and server-tag badges.
+// The wire fields (`User.avatar_decoration`, `User.profile_effect`, `User.profile_frame`, `GuildTag.badge`) are ids into this set; nothing here
 // comes from Discord. Rendering lives in `./AvatarDecoration.tsx` and `./ProfileEffect.tsx`; the mock backend validates ids
 // against these lists (the real server will carry the same ids).
 
@@ -91,9 +91,11 @@ export const decorationById = (id: string | null | undefined): DecorationDef | u
 
 // ---- profile effects ----
 
-export interface EffectDef {
+/** A particle effect: many small shapes drifting over the banner. */
+export interface ParticleEffectDef {
   id: string;
   name: string;
+  scene?: undefined;
   /** Particle colours, cycled over the particles. */
   colors: string[];
   count: number;
@@ -109,7 +111,39 @@ export interface EffectDef {
   section?: string;
 }
 
+/** A full-card scene drawn by perks/art/scenes.tsx: an intro plays when the card opens, then a calmer idle loops. */
+export interface SceneEffectDef {
+  id: string;
+  name: string;
+  scene: true;
+  section: string;
+}
+
+export type EffectDef = ParticleEffectDef | SceneEffectDef;
+
+const scenes = (section: string, items: [string, string][]): SceneEffectDef[] => items.map(([id, name]) => ({ id, name, section, scene: true }));
+
 export const PROFILE_EFFECTS: EffectDef[] = [
+  ...scenes("Seasons", [
+    ["sakura-breeze", "Sakura Breeze"],
+    ["autumn-canopy", "Autumn Canopy"],
+    ["winter-wonderland", "Winter Wonderland"],
+    ["spooky-night", "Spooky Night"],
+  ]),
+  ...scenes("Fantasy & Space", [
+    ["jade-dragon", "Jade Dragon"],
+    ["galaxy-swirl", "Galaxy Swirl"],
+    ["rocket-launch", "Rocket Launch"],
+  ]),
+  ...scenes("Elements", [
+    ["thunderstorm", "Thunderstorm"],
+    ["ocean-waves", "Ocean Waves"],
+  ]),
+  ...scenes("Party & Pals", [
+    ["balloon-party", "Balloon Party"],
+    ["fireworks", "Fireworks"],
+    ["peekaboo-cat", "Peekaboo Cat"],
+  ]),
   { id: "sparkles", name: "Sparkles", colors: ["#fff3b0", "#ffffff", "#ffd166"], count: 18, shape: "spark", motion: "twinkle", size: [6, 12], duration: [1.6, 3.2] },
   { id: "snowfall", name: "Snowfall", colors: ["#ffffff", "#d6f1ff"], count: 24, shape: "flake", motion: "fall", size: [4, 9], duration: [5, 9] },
   { id: "embers", name: "Embers", colors: ["#ff7a45", "#ffcb6e", "#ff4d4d"], count: 22, shape: "dot", motion: "rise", size: [3, 6], duration: [3.5, 6.5] },
@@ -127,6 +161,39 @@ export const PROFILE_EFFECTS: EffectDef[] = [
 ];
 
 export const effectById = (id: string | null | undefined): EffectDef | undefined => PROFILE_EFFECTS.find(e => e.id === id);
+
+// ---- profile frames: a drawn border around the whole profile card (perks/art/frames.tsx) ----
+
+export interface FrameDef {
+  id: string;
+  name: string;
+  section: string;
+}
+
+const frames = (section: string, items: [string, string][]): FrameDef[] => items.map(([id, name]) => ({ id, name, section }));
+
+export const PROFILE_FRAMES: FrameDef[] = [
+  ...frames("Nature", [
+    ["garden-vines", "Garden Vines"],
+    ["sakura-corners", "Sakura Corners"],
+    ["autumn-twigs", "Autumn Twigs"],
+    ["rustic-wood", "Rustic Wood"],
+    ["sea-foam", "Sea Foam"],
+  ]),
+  ...frames("Elements", [
+    ["ice-crystals", "Ice Crystals"],
+    ["flame-border", "Flame Border"],
+    ["cosmic-stars", "Cosmic Stars"],
+  ]),
+  ...frames("Fancy", [
+    ["gold-filigree", "Gold Filigree"],
+    ["neon-glow", "Neon Glow"],
+    ["pixel-border", "Pixel Border"],
+    ["candy-cane", "Candy Cane"],
+  ]),
+];
+
+export const frameById = (id: string | null | undefined): FrameDef | undefined => PROFILE_FRAMES.find(f => f.id === id);
 
 // ---- profile theme colours (two RGB ints: primary, accent) ----
 

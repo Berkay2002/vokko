@@ -5,6 +5,7 @@ import { displayName, useStore } from "../api/store";
 import type { GuildMember, GuildTag, User } from "../api/types";
 import { BIO_MAX, PRONOUNS_MAX } from "../perks/catalog";
 import { ProfileBanner } from "../perks/ProfileBanner";
+import { ProfileCardLayers } from "../perks/ProfileEffect";
 import { themeVars, type ProfileLook } from "../perks/profile";
 import { TagChip } from "../perks/TagChip";
 import { loadStoredStatus, setOwnStatus } from "../shell/actions";
@@ -136,6 +137,7 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
           <Pencil size={18} />
         </button>
       </ProfileBanner>
+      <ProfileCardLayers look={look} />
       <input
         ref={bannerUpload.inputRef}
         type="file"

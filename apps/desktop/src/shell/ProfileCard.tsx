@@ -3,6 +3,7 @@ import { appStore, displayName, roleColor, useStore } from "../api/store";
 import { request } from "../api/rest";
 import { RelationshipType, type Snowflake } from "../api/types";
 import { ProfileBanner } from "../perks/ProfileBanner";
+import { ProfileCardLayers } from "../perks/ProfileEffect";
 import { resolveProfile, themeVars } from "../perks/profile";
 import { TagChip } from "../perks/TagChip";
 import { StyledName } from "../perks/NameStyles";
@@ -55,6 +56,7 @@ export function ProfileCardHost() {
       {user && look && (
         <>
           <ProfileBanner look={look} className="profile-banner" />
+          <ProfileCardLayers look={look} />
           <div className="profile-avatar">
             <Avatar user={user} member={member} size={80} status />
           </div>

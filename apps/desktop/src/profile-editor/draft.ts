@@ -13,7 +13,7 @@ export type Staged = undefined | null | { id: string; url: string };
 export type ThemeColors = [number, number] | null;
 
 /** User fields owned by pickers that plug in through the tile registry; the draft carries them untouched until a picker sets them. */
-export const EXTRA_FIELDS = ["nameplate", "display_name_styles"] as const;
+export const EXTRA_FIELDS = ["nameplate", "display_name_styles", "profile_frame"] as const;
 
 export interface ProfileDraft {
   /** Display name (main profile: global_name; server profile: the nickname). */
@@ -132,5 +132,6 @@ export function lookOf(user: User, member: GuildMember | null | undefined, draft
     themeColors: draft.theme ?? (guild ? user.theme_colors ?? null : null),
     decoration: draft.decoration,
     effect: draft.effect,
+    frame: typeof draft.extra.profile_frame === "string" ? draft.extra.profile_frame : null,
   };
 }

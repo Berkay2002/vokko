@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { AnimatedImage } from "../ui/AnimatedMedia";
-import { ProfileEffect } from "./ProfileEffect";
+import { ProfileEffect, isSceneEffect } from "./ProfileEffect";
 import { bannerStyle, type ProfileLook } from "./profile";
 
 export const isGifUrl = (url: string): boolean => /\.gif(?:[?#]|$)/i.test(url);
@@ -12,14 +12,20 @@ export function BannerGif({ src }: { src: string }) {
 
 /**
  * The banner strip of a profile surface: banner image, else banner colour, else the theme's primary colour, with the profile effect
- * playing over it. `className` carries the surface's own size and radius (`profile-banner`, `dm-profile-banner`, ...).
+ * playing over it. `className` carries the surface's own size and radius (`profile-banner`, `dm-profile-banner`, ...). A full-card scene
+ * effect plays over the card instead (ProfileCardLayers), unless `scene` asks for it here (the effect strips of the pickers).
  */
-export function ProfileBanner({ look, className, children }: { look: Pick<ProfileLook, "banner" | "bannerColor" | "themeColors" | "effect">; className: string; children?: ReactNode }) {
+export function ProfileBanner({ look, className, children, scene }: {
+  look: Pick<ProfileLook, "banner" | "bannerColor" | "themeColors" | "effect">;
+  className: string;
+  children?: ReactNode;
+  scene?: boolean;
+}) {
   const gif = look.banner && isGifUrl(look.banner) ? look.banner : null;
   return (
     <div className={`${className} pv-banner`} style={bannerStyle(gif ? { ...look, banner: null } : look)}>
       {gif && <BannerGif src={gif} />}
-      <ProfileEffect id={look.effect} />
+      <ProfileEffect id={scene || !isSceneEffect(look.effect) ? look.effect : null} />
       {children}
     </div>
   );

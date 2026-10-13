@@ -1,6 +1,7 @@
 import { ArrowLeftRight, ChevronRight, Copy, Pencil } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import { ProfileBanner } from "../perks/ProfileBanner";
+import { ProfileCardLayers } from "../perks/ProfileEffect";
 import { resolveProfile, themeVars } from "../perks/profile";
 import { TagChip } from "../perks/TagChip";
 import { Popout, useContextMenu, type MenuItem } from "../ui";
@@ -63,6 +64,7 @@ export function UserPanelPopout({ anchor, open, onClose, status, onStatus, custo
   return (
     <Popout anchor={anchor} open={open} onClose={onClose} side="top" align="start" gap={18} role="dialog" label="User profile" className={`profile-card user-popout${look.themeColors ? " pv-themed" : ""}`} style={themeVars(look.themeColors)} sheet="User profile">
       <ProfileBanner look={look} className="profile-banner" />
+      <ProfileCardLayers look={look} />
       <div className="profile-avatar">
         <Avatar user={me} size={80} status />
       </div>

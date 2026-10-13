@@ -1,7 +1,10 @@
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import type { CSSProperties } from "react";
 import { effectById } from "./catalog";
+import type { ProfileLook } from "./profile";
 import { EFFECT_SHAPES } from "./art/effects";
+import { FRAME_ART, FrameSvg } from "./art/frames";
+import { SCENES } from "./art/scenes";
 
 /** Deterministic pseudo-random in [0, 1): the same effect always lays its particles out the same way. */
 const rand = (i: number, salt: number): number => {
@@ -9,14 +12,54 @@ const rand = (i: number, salt: number): number => {
   return x - Math.floor(x);
 };
 
+/** The effect is a full-card scene (perks/art/scenes.tsx), which plays over the whole card rather than the banner. */
+export const isSceneEffect = (id: string | null | undefined): boolean => !!effectById(id)?.scene;
+
+/** A full-card scene: its intro plays on mount (keyed by id, so switching scenes replays it), then it idles. */
+function ProfileScene({ id }: { id: string }) {
+  const u = `fx${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  const art = SCENES[id];
+  if (!art) return null;
+  return (
+    <div className="profile-effect pfx" aria-hidden="true" data-effect={id}>
+      {art(u)}
+    </div>
+  );
+}
+
+/** A profile frame: a drawn border over the edges and corners of the whole card (perks/art/frames.tsx). */
+export function ProfileFrame({ id }: { id: string | null | undefined }) {
+  const u = `fr${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  const art = id ? FRAME_ART[id] : undefined;
+  if (!art || !id) return null;
+  return (
+    <div className="profile-frame" aria-hidden="true" data-frame={id}>
+      <FrameSvg parts={art(u)} u={u} />
+    </div>
+  );
+}
+
 /**
- * A profile effect: a layer of small animated particles over the banner and header of a profile. Absolutely positioned and
- * clipped by its parent; honours reduced motion (the particles then sit still, see src/styles/perks.css).
+ * What plays over a whole profile card: a scene effect and the frame. The card must be positioned; particle effects stay in the
+ * banner (ProfileBanner draws them).
+ */
+export function ProfileCardLayers({ look }: { look: Pick<ProfileLook, "effect" | "frame"> }) {
+  return (
+    <>
+      {look.effect && isSceneEffect(look.effect) && <ProfileScene key={look.effect} id={look.effect} />}
+      <ProfileFrame id={look.frame} />
+    </>
+  );
+}
+
+/**
+ * A profile effect: a layer of small animated particles over the banner and header of a profile, or a full-card scene. Absolutely
+ * positioned and clipped by its parent; honours reduced motion (particles sit still, scenes show a still frame).
  */
 export function ProfileEffect({ id }: { id: string | null | undefined }) {
   const def = effectById(id);
   const particles = useMemo(() => {
-    if (!def) return [];
+    if (!def || def.scene) return [];
     return Array.from({ length: def.count }, (_, i) => {
       const size = def.size[0] + rand(i, 1) * (def.size[1] - def.size[0]);
       const duration = def.duration[0] + rand(i, 2) * (def.duration[1] - def.duration[0]);
@@ -37,6 +80,7 @@ export function ProfileEffect({ id }: { id: string | null | undefined }) {
     });
   }, [def]);
   if (!def) return null;
+  if (def.scene) return <ProfileScene key={def.id} id={def.id} />;
   const drawing = EFFECT_SHAPES[def.shape];
   return (
     <div className={`profile-effect pe-${def.motion}`} aria-hidden="true" data-effect={def.id}>

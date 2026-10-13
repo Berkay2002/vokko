@@ -6,6 +6,7 @@ import { snowflakeToTimestamp } from "../api/snowflake";
 import { displayName, useStore } from "../api/store";
 import { RelationshipType, type Snowflake, type User, type UserProfile } from "../api/types";
 import { ProfileBanner } from "../perks/ProfileBanner";
+import { ProfileCardLayers } from "../perks/ProfileEffect";
 import { resolveProfile, themeVars } from "../perks/profile";
 import { TagChip } from "../perks/TagChip";
 import { StyledName } from "../perks/NameStyles";
@@ -48,6 +49,7 @@ export function DmProfilePanel({ user }: { user: User }) {
     <aside className="dm-profile" aria-label="User Profile">
       <div className={`dm-profile-card${look.themeColors ? " pv-themed" : ""}`} style={themeVars(look.themeColors)}>
         <ProfileBanner look={look} className="dm-profile-banner" />
+        <ProfileCardLayers look={look} />
         <div className="dm-profile-avatar">
           <Avatar user={user} size={80} status />
         </div>
@@ -137,6 +139,7 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
       <div className="full-profile">
         <div className={`full-profile-card${look.themeColors ? " pv-themed" : ""}`} style={themeVars(look.themeColors)}>
           <ProfileBanner look={look} className="full-profile-banner" />
+          <ProfileCardLayers look={look} />
           <div className="full-profile-avatar">
             <Avatar user={user} member={member} size={120} status />
           </div>

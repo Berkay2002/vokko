@@ -12,6 +12,8 @@ export interface ProfileLook {
   themeColors: [number, number] | null;
   decoration: string | null;
   effect: string | null;
+  /** Profile frame id (main profile only). */
+  frame: string | null;
 }
 
 type MemberProfile = Pick<GuildMember, "avatar" | "banner" | "bio" | "pronouns" | "theme_colors">;
@@ -26,6 +28,7 @@ export function resolveProfile(user: User, member?: Partial<MemberProfile> | nul
     themeColors: member?.theme_colors || user.theme_colors || null,
     decoration: user.avatar_decoration ?? null,
     effect: user.profile_effect ?? null,
+    frame: user.profile_frame ?? null,
   };
 }
 

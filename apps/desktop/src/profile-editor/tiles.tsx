@@ -127,7 +127,7 @@ const EffectTile: ProfileEditorTile = props => {
       className="pe-tile-effect"
       modal={<EffectPicker user={user} look={look} name={previewName(props)} value={draft.effect} onApply={effect => setDraft({ effect })} onClose={() => setOpen(false)} />}
     >
-      <ProfileBanner look={{ ...STRIP, effect: draft.effect }} className="pe-effect-strip" />
+      <ProfileBanner look={{ ...STRIP, effect: draft.effect }} className="pe-effect-strip" scene />
     </Tile>
   );
 };

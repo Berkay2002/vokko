@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Ban } from "lucide-react";
 import type { User } from "../api/types";
 import { ProfileBanner } from "../perks/ProfileBanner";
-import { ProfileEffect } from "../perks/ProfileEffect";
+import { ProfileEffect, ProfileFrame } from "../perks/ProfileEffect";
 import { themeVars, type ProfileLook } from "../perks/profile";
 import { Avatar } from "../shell/Avatar";
 import { Modal } from "../ui";
@@ -97,6 +97,23 @@ export function NoneTile({ selected, onClick, className }: { selected: boolean; 
   );
 }
 
+/** A small stand-in profile card (banner, avatar, two lines) wearing a scene effect or a frame: the effect and frame choices. */
+export function MiniCard({ effect, frame }: { effect?: string | null; frame?: string | null }) {
+  return (
+    <span className="pe-mini-wrap">
+      <span className="pe-mini">
+        <span className="pe-mini-banner" />
+        <span className="pe-mini-avatar" />
+        <span className="pe-mini-line" />
+        <span className="pe-mini-line short" />
+        <span className="pe-mini-line" />
+        <ProfileEffect id={effect} />
+        <ProfileFrame id={frame} />
+      </span>
+    </span>
+  );
+}
+
 /** A miniature profile card (banner, avatar, name, a button) for the pickers that change how the card looks. */
 export function PreviewCard({ user, look, name, nameNode }: { user: Pick<User, "id" | "username">; look: ProfileLook; name: string; nameNode?: ReactNode }) {
   return (
@@ -113,6 +130,7 @@ export function PreviewCard({ user, look, name, nameNode }: { user: Pick<User, "
         </span>
       </div>
       <ProfileEffect id={look.effect} />
+      <ProfileFrame id={look.frame} />
     </div>
   );
 }
