@@ -39,6 +39,15 @@ async function save(editor: ReturnType<Page['getByRole']>) {
   await expect(bar).toHaveCount(0);
 }
 
+test('the card preview avatar menu opens the same picker', async ({ page }) => {
+  const editor = await openEditor(page);
+  await editor.getByRole('button', { name: 'Edit avatar' }).click();
+  await page.getByRole('menuitem', { name: 'Change avatar', exact: true }).click();
+  const picker = page.getByRole('dialog', { name: 'Choose an image' });
+  await expect(picker.getByRole('button', { name: 'Choose GIF' })).toBeEnabled();
+  await expect(picker.getByRole('heading', { name: 'Recent avatars' })).toBeVisible();
+});
+
 test('the picker offers Upload image, Choose GIF and recent avatars, and nothing paid', async ({ page }) => {
   const editor = await openEditor(page);
   await editor.getByRole('button', { name: 'Avatar', exact: true }).click();

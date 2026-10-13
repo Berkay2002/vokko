@@ -39,7 +39,7 @@ export interface AvatarProps {
 
 /** An avatar picture. A GIF avatar follows the "Play GIFs" and reduced-motion settings: a still first frame that plays on hover or focus when GIFs may not autoplay. */
 export function AvatarImage({ src, size, className }: { src: string; size: number; className?: string }) {
-  if (/\.gif(?:[?#]|$)/i.test(src)) return <AnimatedImage kind="gif" className={className} src={src} alt="" width={size} height={size} draggable={false} />;
+  if (/\.gif(?:[?#]|$)/i.test(src)) return <AnimatedImage kind="gif" stillWhenReduced className={className} src={src} alt="" width={size} height={size} draggable={false} />;
   return <img className={className} src={src} alt="" width={size} height={size} draggable={false} />;
 }
 

@@ -84,7 +84,7 @@ export function AvatarPicker({ channel, onUpload, onChoose, onClose }: { channel
               <div className="pe-pk-recents">
                 {recent.map((avatar, index) => (
                   <button key={avatar.id} type="button" className="pe-pk-recent" aria-label={`Use recent avatar ${index + 1}`} onClick={() => choose(avatar)}>
-                    <img src={avatar.url} alt="" width={72} height={72} draggable={false} />
+                    <img src={avatar.url} alt="" width={80} height={80} draggable={false} />
                   </button>
                 ))}
               </div>

@@ -1479,8 +1479,12 @@ textarea.pe-inline-input {
   margin-top: 24px;
 }
 
+.pe-pk-section .pe-pk-heading {
+  margin-bottom: 2px;
+}
+
 .pe-pk-sub {
-  margin: 2px 0 12px;
+  margin: 2px 0 16px;
   color: var(--text-muted);
   font-size: 13px;
 }
@@ -1493,8 +1497,8 @@ textarea.pe-inline-input {
 
 .pe-pk-recent {
   display: block;
-  width: 72px;
-  height: 72px;
+  width: 80px;
+  height: 80px;
   padding: 0;
   overflow: hidden;
   border: 2px solid transparent;

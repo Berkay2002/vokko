@@ -4,7 +4,7 @@ import { reducedMotionActive, usePrefs } from "./prefs";
 
 /**
  * Animated media that obeys the Accessibility settings: "Play GIFs when Vokko is focused", "Play animated emoji" and
- * "Sticker animations" (GIFs also stay still under reduced motion). An image that may not play right now shows its first frame (drawn on a canvas, which works for
+ * "Sticker animations". An image that may not play right now shows its first frame (drawn on a canvas, which works for
  * cross-origin images too) and animates while the pointer or keyboard focus is on it. A video GIF is paused the same way.
  */
 
@@ -16,8 +16,7 @@ export function useAnimationPolicy(kind: AnimationKind): AnimationPolicy {
   const gifs = usePrefs(s => s.playGifs);
   const emoji = usePrefs(s => s.playAnimatedEmoji);
   const stickers = usePrefs(s => s.stickerAnimation);
-  const reduced = usePrefs(reducedMotionActive);
-  if (kind === "gif") return gifs && !reduced ? "always" : "interaction";
+  if (kind === "gif") return gifs ? "always" : "interaction";
   if (kind === "emoji") return emoji ? "always" : "interaction";
   return stickers;
 }
@@ -43,8 +42,10 @@ export function isPlaying(policy: AnimationPolicy, kind: AnimationKind, interact
   return kind === "gif" ? windowFocused || interacting : true;
 }
 
-function usePlaying(kind: AnimationKind) {
-  const policy = useAnimationPolicy(kind);
+function usePlaying(kind: AnimationKind, stillWhenReduced = false) {
+  const reduced = usePrefs(reducedMotionActive);
+  const base = useAnimationPolicy(kind);
+  const policy = stillWhenReduced && reduced && kind === "gif" ? "interaction" : base;
   const focused = useWindowFocused();
   const [interacting, setInteracting] = useState(false);
   const playing = isPlaying(policy, kind, interacting, focused);
@@ -79,10 +80,16 @@ function useReleaseWhenPointerLeaves(active: boolean, element: () => Element | n
   }, [active]);
 }
 
-type ImgProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt"> & { src: string; alt: string; kind: AnimationKind };
+type ImgProps = Omit<ImgHTMLAttributes<HTMLImageElement>, "src" | "alt"> & {
+  src: string;
+  alt: string;
+  kind: AnimationKind;
+  /** A GIF also stays on its first frame under reduced motion (avatars do; chat GIFs only follow "Play GIFs"). */
+  stillWhenReduced?: boolean;
+};
 
-export function AnimatedImage({ kind, src, alt, className, style, width, height, tabIndex, ...rest }: ImgProps) {
-  const { policy, playing, interacting, setInteracting, handlers } = usePlaying(kind);
+export function AnimatedImage({ kind, stillWhenReduced, src, alt, className, style, width, height, tabIndex, ...rest }: ImgProps) {
+  const { policy, playing, interacting, setInteracting, handlers } = usePlaying(kind, stillWhenReduced);
   const [drawn, setDrawn] = useState<string | null>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const image = useRef<HTMLImageElement>(null);

@@ -11,6 +11,7 @@ import { loadStoredStatus, setOwnStatus } from "../shell/actions";
 import { Avatar } from "../shell/Avatar";
 import { useContextMenu, type MenuItem } from "../ui";
 import type { ProfileDraft, Scope } from "./draft";
+import { AvatarPicker } from "./AvatarPicker";
 import { useImageUpload } from "./upload";
 import { clip } from "./widgets";
 
@@ -78,6 +79,7 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
   const presence = useStore(s => s.presences[user.id]);
   const guilds = useStore(s => s.guilds);
   const guildOrder = useStore(s => s.guildOrder);
+  const [pickingAvatar, setPickingAvatar] = useState(false);
   const [statusEditing, setStatusEditing] = useState(false);
   const [statusText, setStatusText] = useState("");
   const avatarButton = useRef<HTMLButtonElement>(null);
@@ -94,7 +96,7 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
     const rect = avatarButton.current?.getBoundingClientRect();
     if (!rect) return;
     const items: MenuItem[] = [
-      { id: "avatar-change", label: "Change avatar", onSelect: upload.choose },
+      { id: "avatar-change", label: "Change avatar", onSelect: () => setPickingAvatar(true) },
       { id: "avatar-decoration", label: "Change avatar decoration", disabled: guild, tooltip: guild ? "Part of your main profile" : undefined, onSelect: () => onOpenTile("avatar-decoration") },
       { id: "avatar-remove", label: "Remove avatar", danger: true, onSelect: () => setDraft({ avatar: null }) },
     ];
@@ -184,6 +186,7 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
           </button>
         )}
       </div>
+      {pickingAvatar && <AvatarPicker channel={uploadChannel} onUpload={upload.choose} onChoose={avatar => setDraft({ avatar })} onClose={() => setPickingAvatar(false)} />}
       {(upload.error || bannerUpload.error) && <p className="pe-field-error pe-card-error">{upload.error ?? bannerUpload.error}</p>}
       <div className="pe-card-body">
         <div className="pe-name">

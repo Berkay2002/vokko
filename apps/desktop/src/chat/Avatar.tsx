@@ -7,5 +7,5 @@ export function Avatar({ user, size = 40, className, guildId }: { user: Pick<Use
   const src = avatarUrl({ id: user.id, avatar: memberAvatar || user.avatar });
   const props = { className: `chat-avatar${className ? ` ${className}` : ''}`, width: size, height: size, style: { width: size, height: size }, src, alt: '', draggable: false };
   // A GIF avatar follows the "Play GIFs" and reduced-motion settings (a still frame until hovered when GIFs may not autoplay).
-  return /\.gif(?:[?#]|$)/i.test(src) ? <AnimatedImage kind="gif" {...props} /> : <img {...props} />;
+  return /\.gif(?:[?#]|$)/i.test(src) ? <AnimatedImage kind="gif" stillWhenReduced {...props} /> : <img {...props} />;
 }
