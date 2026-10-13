@@ -317,7 +317,14 @@ async fn import_avatar_gif(
     let channel_id = body.channel_id.db();
     channel_access(&state, user_id, channel_id).await?.require(ATTACH_FILES)?;
     let _slot = state.uploads.acquire(user_id).ok_or_else(|| ApiErr::rate_limited(1.0))?;
-    let max = usize::try_from(ImageKind::Avatar.limit()).unwrap_or(usize::MAX).min(state.config.max_upload_bytes);
+    // Same pending-upload quota as a normal upload, checked before anything is downloaded.
+    let quota = super::attachments::pending_quota(state.config.max_upload_bytes);
+    let (pending,): (i64,) = sqlx::query_as(super::attachments::PENDING_BYTES).bind(user_id).fetch_one(&state.db).await?;
+    if pending >= quota {
+        return Err(super::attachments::quota_error(quota));
+    }
+    let left = usize::try_from(quota - pending).unwrap_or(usize::MAX);
+    let max = usize::try_from(ImageKind::Avatar.limit()).unwrap_or(usize::MAX).min(state.config.max_upload_bytes).min(left);
     let bytes = state.gifs.download(&body.url, max).await?;
     Ok(Json(super::attachments::store_fetched_image(&state, user_id, channel_id, bytes).await?))
 }

@@ -24,7 +24,11 @@ pub struct GifProxy {
     media: Option<reqwest::Client>,
     config: GifConfig,
     allow_private: bool,
+    /// Server-wide cap on media downloads in flight (each holds up to an avatar's size in memory).
+    downloads: tokio::sync::Semaphore,
 }
+
+const MAX_MEDIA_DOWNLOADS: usize = 16;
 
 /// The registrable domains the configured provider serves its media from; a host matches when it is one of them or a subdomain.
 fn media_domains(provider: GifProvider) -> &'static [&'static str] {
@@ -65,7 +69,7 @@ impl GifProxy {
             .user_agent("vokko-server")
             .build()
             .ok();
-        Self { client, media, config, allow_private }
+        Self { client, media, config, allow_private, downloads: tokio::sync::Semaphore::new(MAX_MEDIA_DOWNLOADS) }
     }
 
     /// Whether `url` is a media file of the configured provider: https on the default port from one of its domains (no credentials),
@@ -93,8 +97,15 @@ impl GifProxy {
         if raw.len() > MAX_MEDIA_URL_LEN {
             return Err(refused());
         }
-        let mut url = Url::parse(raw).map_err(|_| refused())?;
+        let url = Url::parse(raw).map_err(|_| refused())?;
         let client = self.media.as_ref().ok_or_else(bad_gateway)?;
+        let _slot = self.downloads.try_acquire().map_err(|_| ApiErr::rate_limited(1.0))?;
+        // MEDIA_TIMEOUT bounds the whole download, redirects included, not each hop.
+        tokio::time::timeout(MEDIA_TIMEOUT, self.download_hops(client, url, max_bytes)).await.map_err(|_| bad_gateway())?
+    }
+
+    async fn download_hops(&self, client: &reqwest::Client, mut url: Url, max_bytes: usize) -> ApiResult<Vec<u8>> {
+        let refused = || ApiErr::invalid("url", "Must be a media URL of the GIF provider this server uses.");
         for _ in 0..=MEDIA_REDIRECTS {
             if !self.is_media_url(&url) || !crate::unfurl::host_allowed(&url, self.allow_private) {
                 return Err(refused());

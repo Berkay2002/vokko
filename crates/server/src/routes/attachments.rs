@@ -40,18 +40,19 @@ const MIB: i64 = 1024 * 1024;
 const SNIFF_BYTES: usize = 4 * 1024 * 1024;
 
 /// A user's pending-upload quota: 100 MiB, or one file of the largest size when the per-file limit is above that.
-fn pending_quota(max_upload_bytes: usize) -> i64 {
+pub(super) fn pending_quota(max_upload_bytes: usize) -> i64 {
     MAX_PENDING_BYTES_PER_USER.max(i64::try_from(max_upload_bytes).unwrap_or(i64::MAX))
 }
 
-fn quota_error(quota: i64) -> ApiErr {
+pub(super) fn quota_error(quota: i64) -> ApiErr {
     let mut error = ApiErr::payload_too_large();
     error.body.message = format!("Too many pending uploads: send a message with them first ({} MiB limit).", quota / MIB);
     error
 }
 
 /// Bytes of `user_id`'s pending uploads (not attached, not claimed by a profile, icon, ...), as counted against the quota.
-const PENDING_BYTES: &str = "SELECT COALESCE(SUM(size), 0)::BIGINT FROM attachments WHERE uploader_id = $1 AND message_id IS NULL AND claimed_at IS NULL";
+pub(super) const PENDING_BYTES: &str =
+    "SELECT COALESCE(SUM(size), 0)::BIGINT FROM attachments WHERE uploader_id = $1 AND message_id IS NULL AND claimed_at IS NULL";
 
 /// A staging file that is removed when this is dropped: on every error path, and when the request future is dropped mid-upload
 /// (client disconnect, shutdown, panic), so an aborted upload never leaves an untracked file behind.

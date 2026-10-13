@@ -71,6 +71,8 @@ const ANON_INVITE_ROUTE: &str = "/invites/{code}";
 const ANON_INVITE_BURST: f64 = 10.0;
 const ANON_INVITE_PER_SECOND: f64 = 0.2;
 /// `POST /channels/{id}/call/ring` re-rings the other people of a DM: a few rings, then one every 5 s.
+const GIF_IMPORT_BURST: f64 = 3.0;
+const GIF_IMPORT_PER_SECOND: f64 = 0.2;
 const CALL_RING_BURST: f64 = 5.0;
 const CALL_RING_PER_SECOND: f64 = 0.2;
 
@@ -276,10 +278,14 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
     let route = if is_gif { GIF_ROUTE.to_owned() } else { format!("{} {route}", method_key(request.method())) };
     // The limits are never raised above the configured route bucket (tests and operators may set it lower).
     let is_ring = request.method() == axum::http::Method::POST && route.ends_with("/call/ring");
+    // Each call makes the server download up to an avatar's size from the GIF provider.
+    let is_gif_import = request.method() == axum::http::Method::POST && route.ends_with("/avatars/gif");
     let bucket = if is_gif {
         Some((GIF_BURST.min(limit.route_burst), GIF_PER_SECOND.min(limit.route_per_second)))
     } else if anon_invite {
         Some((ANON_INVITE_BURST.min(limit.route_burst), ANON_INVITE_PER_SECOND.min(limit.route_per_second)))
+    } else if is_gif_import {
+        Some((GIF_IMPORT_BURST.min(limit.route_burst), GIF_IMPORT_PER_SECOND.min(limit.route_per_second)))
     } else if is_ring {
         Some((CALL_RING_BURST.min(limit.route_burst), CALL_RING_PER_SECOND.min(limit.route_per_second)))
     } else {
