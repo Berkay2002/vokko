@@ -7,7 +7,7 @@ import { setPref, usePrefs } from "../../ui";
 import { Avatar, GuildIcon } from "../Avatar";
 import { Category, Field, Page, RadioGroup, SwitchRow, Unavailable } from "./controls";
 import { isDesktop } from "../../desktop";
-import { ShareActivitySwitch } from "./RegisteredGamesPage";
+import { ShareActivitySwitch, SpotifyStatusSwitch } from "./RegisteredGamesPage";
 import { InfoBanner, RelatedSetting, SubHeading } from "./smControls";
 
 /**
@@ -189,13 +189,16 @@ export function ActivityPrivacyPage() {
   return (
     <Page title="Activity Privacy">
       {isDesktop() ? (
-        <InfoBanner>Games are detected by the desktop app. Only “Share my activity” can be changed so far; the rest is laid out for later.</InfoBanner>
+        <InfoBanner>Games are detected by the desktop app. Only “Share my activity” and “Display Spotify as your status” can be changed so far; the rest is laid out for later.</InfoBanner>
       ) : (
         <InfoBanner>Game and activity status comes from the desktop app. These settings are laid out for it, and cannot be changed in the browser.</InfoBanner>
       )}
       <Category title="What Activity I Share">
         {isDesktop() ? (
-          <ShareActivitySwitch />
+          <>
+            <ShareActivitySwitch />
+            <SpotifyStatusSwitch />
+          </>
         ) : (
           <SwitchRow label="Share my activity" note="Share information about the games you play and the apps you use." checked={false} disabled onChange={noop} />
         )}
@@ -251,7 +254,6 @@ const PROVIDERS: { name: string; icon: typeof Cloud }[] = [
   { name: "Steam", icon: Gamepad2 },
   { name: "Twitch", icon: Tv },
   { name: "YouTube", icon: Video },
-  { name: "Spotify", icon: Music },
   { name: "GitHub", icon: Code },
   { name: "Reddit", icon: MessageCircle },
   { name: "Bluesky", icon: Cloud },
@@ -271,7 +273,20 @@ export function ConnectedAppsPage() {
             </button>
           ))}
         </div>
-        <p className="sm-empty">No connections yet.</p>
+        <div className="sm-list-item" data-testid="spotify-connection">
+          <span className="sm-spotify-tile" aria-hidden="true">
+            <Music size={20} />
+          </span>
+          <span className="sm-list-text">
+            <span className="sm-list-name">Spotify</span>
+            <span className="sm-list-sub">Shows what you&apos;re playing in the Spotify app on this computer</span>
+          </span>
+        </div>
+        {isDesktop() ? (
+          <SpotifyStatusSwitch />
+        ) : (
+          <SwitchRow label="Display Spotify as your status" note="Available in the desktop app, which reads the Spotify app on your computer." checked={false} disabled onChange={noop} />
+        )}
       </Category>
       <Category title="Authorized Apps">
         <p className="sm-empty">You have not authorized any apps.</p>

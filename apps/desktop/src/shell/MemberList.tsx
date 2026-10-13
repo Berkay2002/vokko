@@ -5,7 +5,7 @@ import { displayName, roleColor, useStore } from "../api/store";
 import type { GuildMember, Role, Snowflake } from "../api/types";
 import { useContextMenu } from "../ui";
 import { useCustomColor } from "../ui/useCustomColor";
-import { ActivityLine, usePlaying } from "./ActivityLine";
+import { ActivityLine, useShownActivity } from "./ActivityLine";
 import { Avatar } from "./Avatar";
 import { userContextItems } from "./menus";
 import { openProfile, TimeoutBadge } from "./ProfileCard";
@@ -21,7 +21,7 @@ const MemberRow = memo(function MemberRow({ member, guildId, offline }: { member
   const menu = useContextMenu();
   const color = useCustomColor(useStore(() => roleColor(guildId, member)));
   const custom = useStore(s => s.presences[member.user.id]?.custom_status);
-  const playing = usePlaying(member.user.id);
+  const playing = useShownActivity(member.user.id);
   return (
     <button
       type="button"

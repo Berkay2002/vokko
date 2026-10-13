@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Gamepad2 } from "lucide-react";
-import { formatClock, formatPlaytime, playingActivity } from "../activity/format";
+import { activityLabel, formatClock, formatPlaytime, playingActivity, shownActivity } from "../activity/format";
 import { useStore } from "../api/store";
 import type { Activity, Snowflake } from "../api/types";
 
@@ -20,9 +20,21 @@ export function usePlaying(userId: Snowflake | null | undefined): Activity | nul
   return useStore(s => (userId ? playingActivity(s.presences[userId]) : null));
 }
 
-/** One line for lists: "Playing Factorio · 12m". Truncates with an ellipsis through the `className` the caller styles. */
+/** What lists show for a user: the game they play, else the song on Spotify. */
+export function useShownActivity(userId: Snowflake | null | undefined): Activity | null {
+  return useStore(s => (userId ? shownActivity(s.presences[userId]) : null));
+}
+
+/** One line for lists: "Playing Factorio · 12m" or "Listening to Spotify". Truncates with an ellipsis through the `className` the caller styles. */
 export function ActivityLine({ activity, className }: { activity: Activity; className?: string }) {
   const now = useNow(30_000);
+  if (activity.type === 2) {
+    return (
+      <span className={className ?? "activity-line"} data-testid="activity-line" title={activity.details ? `${activityLabel(activity)}: ${activity.details}` : activityLabel(activity)}>
+        Listening to <strong>Spotify</strong>
+      </span>
+    );
+  }
   const elapsed = formatPlaytime(activity.timestamps?.start, now);
   return (
     <span className={className ?? "activity-line"} data-testid="activity-line" title={elapsed ? `Playing ${activity.name} for ${elapsed}` : `Playing ${activity.name}`}>

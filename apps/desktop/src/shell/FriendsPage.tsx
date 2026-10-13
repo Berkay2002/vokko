@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { NavToggle } from "./NavToggle";
-import { Check, Gamepad2, MessageCircle, MoreVertical, Search, Users, Volume2, X } from "lucide-react";
+import { Check, Gamepad2, MessageCircle, MoreVertical, Music, Search, Users, Volume2, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
@@ -8,6 +8,7 @@ import { RelationshipType, type Activity, type Channel, type Relationship, type 
 import { joinVoiceChannel } from "../voice";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
 import { ActivityLine, useNow } from "./ActivityLine";
+import { SpotifyArt } from "./SpotifyCard";
 import { formatClock } from "../activity/format";
 import { activeFriends, type ActiveEntry } from "./activeNow";
 import { Tooltip, useContextMenu } from "../ui";
@@ -189,7 +190,7 @@ function ActiveCard({ entry }: { entry: ActiveEntry }) {
         </span>
         {(entry.voice || entry.activity) && (
           <span className={`active-card-icon ${entry.voice ? "active-card-voice" : "active-card-game"}`} aria-hidden="true">
-            {entry.voice ? <Volume2 size={16} /> : <Gamepad2 size={16} />}
+            {entry.voice ? <Volume2 size={16} /> : entry.activity?.type === 2 ? <Music size={16} /> : <Gamepad2 size={16} />}
           </span>
         )}
       </button>
@@ -203,14 +204,23 @@ function ActiveCard({ entry }: { entry: ActiveEntry }) {
 function ActiveBody({ activity, user }: { activity: Activity; user: User }) {
   const now = useNow(1000);
   const start = activity.timestamps?.start;
+  const spotify = activity.type === 2;
   return (
     <button type="button" className="active-card-body" aria-label={`${activity.name}, ${displayName(user)}'s profile`} onClick={e => openProfile(e.currentTarget, user.id, null)}>
-      <span className="active-card-art" aria-hidden="true">
-        <Gamepad2 size={20} />
-      </span>
+      {spotify ? (
+        <SpotifyArt activity={activity} className="active-card-art" />
+      ) : (
+        <span className="active-card-art" aria-hidden="true">
+          <Gamepad2 size={20} />
+        </span>
+      )}
       <span className="active-card-body-text">
-        <span className="active-card-title">{activity.name}</span>
-        {start ? <span className="active-card-body-sub">{formatClock(start, now)} elapsed</span> : null}
+        <span className="active-card-title">{spotify ? (activity.details ?? "Spotify") : activity.name}</span>
+        {spotify ? (
+          activity.state && <span className="active-card-body-sub">by {activity.state}</span>
+        ) : start ? (
+          <span className="active-card-body-sub">{formatClock(start, now)} elapsed</span>
+        ) : null}
       </span>
     </button>
   );

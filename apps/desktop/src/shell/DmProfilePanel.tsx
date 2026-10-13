@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Gamepad2, MessageCircle, MoreHorizontal, UserCheck, UserPlus } from "lucide-react";
-import { formatPlaytime, playingActivity } from "../activity/format";
+import { formatPlaytime, listeningActivity, playingActivity } from "../activity/format";
 import { getMutualFriends, request } from "../api/rest";
 import { snowflakeToTimestamp } from "../api/snowflake";
 import { displayName, useStore } from "../api/store";
@@ -17,6 +17,7 @@ import { openDirectMessage } from "./actions";
 import { userContextItems } from "./menus";
 import { closeModal, openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
+import { SpotifyCard } from "./SpotifyCard";
 
 const dateText = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
@@ -45,6 +46,7 @@ export function DmProfilePanel({ user }: { user: User }) {
   const count = mutual.length;
   const look = resolveProfile(user);
   const tagGuildName = useStore(s => (user.primary_guild ? s.guilds[user.primary_guild.guild_id]?.name : undefined));
+  const listening = useStore(s => listeningActivity(s.presences[user.id]));
   return (
     <aside className="dm-profile" aria-label="User Profile">
       <div className={`dm-profile-card${look.themeColors ? " pv-themed" : ""}`} style={themeVars(look.themeColors)}>
@@ -61,6 +63,7 @@ export function DmProfilePanel({ user }: { user: User }) {
           </div>
           {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
           {look.bio && <ProfileBio text={look.bio} className="dm-profile-bio" />}
+          {listening && <SpotifyCard activity={listening} />}
           <div className="dm-profile-mutual">
             {count} Mutual Server{count === 1 ? "" : "s"}
           </div>
@@ -114,6 +117,7 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
   const look = resolveProfile(user, member);
   const name = displayName(user, member);
   const activity = playingActivity(presence);
+  const listening = listeningActivity(presence);
   const friendCount = friends?.length ?? profile?.mutual_friends_count ?? 0;
   const tabs = [
     { id: "activity" as const, label: "Activity" },
@@ -192,7 +196,7 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
             ))}
           </div>
           <ul className="full-profile-list">
-            {tab === "activity" && !activity && <li className="settings-todo">No activity to show.</li>}
+            {tab === "activity" && !activity && !listening && <li className="settings-todo">No activity to show.</li>}
             {tab === "activity" && activity && (
               <li className="full-profile-row">
                 <span className="full-profile-tile"><Gamepad2 size={28} /></span>
@@ -200,6 +204,11 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
                   <span className="full-profile-row-title">{activity.name}</span>
                   <span className="full-profile-row-sub">Playing{activity.timestamps?.start ? ` · ${formatPlaytime(activity.timestamps.start, Date.now())}` : ""}</span>
                 </span>
+              </li>
+            )}
+            {tab === "activity" && listening && (
+              <li>
+                <SpotifyCard activity={listening} />
               </li>
             )}
             {tab === "servers" && mutual.length === 0 && <li className="settings-todo">No mutual servers.</li>}

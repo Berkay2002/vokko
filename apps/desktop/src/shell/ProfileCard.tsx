@@ -11,7 +11,9 @@ import { ProfileBio } from "../perks/ProfileBio";
 import { useCustomColor } from "../ui/useCustomColor";
 import { Popout } from "../ui";
 import { InVoiceCard } from "../voice";
+import { listeningActivity } from "../activity/format";
 import { ActivityCard, usePlaying } from "./ActivityLine";
+import { SpotifyCard } from "./SpotifyCard";
 import { Avatar } from "./Avatar";
 import { openDirectMessage } from "./actions";
 import { openModal } from "./modalStore";
@@ -39,6 +41,7 @@ export function ProfileCardHost() {
   const guild = useStore(s => (guildId ? s.guilds[guildId] : undefined));
   const presence = useStore(s => (userId ? s.presences[userId] : undefined));
   const playing = usePlaying(userId);
+  const listening = listeningActivity(presence);
   const isMe = useStore(s => s.me?.id === userId);
   const relationship = useStore(s => (userId ? s.relationships[userId] : undefined));
   const open = !!anchor && !!user;
@@ -74,6 +77,7 @@ export function ProfileCardHost() {
             </div>
             {presence?.custom_status && <div className="profile-status">{presence.custom_status}</div>}
             {playing && <ActivityCard activity={playing} />}
+            {listening && <SpotifyCard activity={listening} />}
             <InVoiceCard userId={user.id} onOpen={close} />
             <div className="profile-actions">
               {isMe ? (

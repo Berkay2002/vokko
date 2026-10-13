@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Gamepad2 } from "lucide-react";
-import { addRegisteredGame, refreshProcesses, removeRegisteredGame, setShareActivity, useActivity } from "../../activity";
+import { addRegisteredGame, refreshProcesses, removeRegisteredGame, setShareActivity, setShowSpotify, useActivity } from "../../activity";
 import { unregisteredProcesses, type RunningProcess } from "../../desktop/games";
 import { Category, Page, SwitchRow } from "./controls";
 import { InfoBanner } from "./smControls";
@@ -13,6 +13,20 @@ export function ShareActivitySwitch() {
   const share = useActivity(s => s.share);
   return (
     <SwitchRow label="Share my activity" note="Show the game you are playing as your status. Friends and server members see “Playing …” with how long you have been playing." checked={share} onChange={setShareActivity} />
+  );
+}
+
+/** "Display Spotify as your status": the song playing in the Spotify app on this computer (needs Share my activity as well). */
+export function SpotifyStatusSwitch({ disabled }: { disabled?: boolean }) {
+  const spotify = useActivity(s => s.spotify);
+  return (
+    <SwitchRow
+      label="Display Spotify as your status"
+      note="Show “Listening to Spotify” with the song you are playing in the Spotify app on this computer. Needs Share my activity."
+      checked={spotify}
+      onChange={setShowSpotify}
+      disabled={disabled}
+    />
   );
 }
 

@@ -9,7 +9,7 @@ import { Nameplate, nameplateRowClass } from "../perks/NameStyles";
 import { Avatar } from "./Avatar";
 import { closeDirectMessage } from "./actions";
 import { useIsMuted } from "./localState";
-import { ActivityLine, usePlaying } from "./ActivityLine";
+import { ActivityLine, useShownActivity } from "./ActivityLine";
 import { dmContextItems } from "./menus";
 import { openModal } from "./modalStore";
 import { channelSlots } from "./slots";
@@ -32,7 +32,7 @@ function DmRow({ channel }: { channel: Channel }) {
   const recipients = channel.recipients ?? [];
   const group = channel.type === ChannelType.GroupDM;
   const first = recipients[0];
-  const playing = usePlaying(group ? null : first?.id);
+  const playing = useShownActivity(group ? null : first?.id);
   // Subtitle under a 1:1 DM's name: "Playing X" (the main activity), else "In voice" while they sit in a voice channel we can see, else their custom status.
   const inVoice = useVoice(s => !group && !!first && !!s.states[first.id]?.channel_id);
   const status = useStore(s => (!group && first ? (s.presences[first.id]?.status ?? "offline") : null));
@@ -43,7 +43,7 @@ function DmRow({ channel }: { channel: Channel }) {
     name,
     unreadLabel(muted ? 0 : mentions, unread && !muted),
     status && STATUS_LABEL[status],
-    playing ? `playing ${playing.name}` : inVoice ? "in voice" : custom,
+    playing ? (playing.type === 2 ? "listening to Spotify" : `playing ${playing.name}`) : inVoice ? "in voice" : custom,
     group ? `${recipients.length + 1} members` : null,
   ]
     .filter(Boolean)

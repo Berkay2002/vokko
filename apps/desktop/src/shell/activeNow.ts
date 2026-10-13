@@ -1,4 +1,4 @@
-import { playingActivity } from "../activity/format";
+import { shownActivity } from "../activity/format";
 import type { Activity, Channel, Guild, Presence, Relationship, Snowflake, VoiceState } from "../api/types";
 import { RelationshipType } from "../api/types";
 
@@ -7,7 +7,7 @@ export interface ActiveEntry {
   /** Subtitle: where the friend is talking, else their custom status; empty on a game card, which shows `activity`. */
   text: string;
   voice: boolean;
-  /** The game they are playing, shown on its own card and under the voice channel. */
+  /** The game they are playing (else the song on Spotify), shown on its own card and under the voice channel. */
   activity: Activity | null;
   /** The voice channel they are in (voice cards only): its members and the Join button. */
   channel: Channel | null;
@@ -29,7 +29,7 @@ export function activeFriends(
     const presence = presences[relationship.id];
     // the server already hides both while offline or invisible; the mock does not
     const shown = presence && presence.status !== "offline" && presence.status !== "invisible" ? presence : undefined;
-    const activity = playingActivity(shown);
+    const activity = shownActivity(shown);
     const state = voice[relationship.id];
     const channel = state?.channel_id ? channels[state.channel_id] : undefined;
     if (channel) {
