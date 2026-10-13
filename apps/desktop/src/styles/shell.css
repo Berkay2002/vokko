@@ -122,6 +122,24 @@
   color: var(--interactive-icon-hover);
 }
 
+.title-bar-button:disabled {
+  color: var(--interactive-icon-default);
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* back / forward, pinned top left over the server rail */
+.title-bar-history {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
 /* ---- window controls (desktop app off macOS: the OS frame is removed and the page draws these) ---- */
 .window-controls {
   position: relative;

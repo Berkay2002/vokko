@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { CircleHelp, Hash, Inbox, Users, Volume2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CircleHelp, Hash, Inbox, Users, Volume2 } from "lucide-react";
+import { useLocation, useNavigate, useNavigationType } from "react-router";
+import { useWindowChrome } from "../desktop/windowControls";
 import { dmName, useStore } from "../api/store";
 import { ChannelType } from "../api/types";
 import { Tooltip } from "../ui";
@@ -24,6 +26,7 @@ export function TitleBar() {
   });
   return (
     <header className="title-bar" data-tauri-drag-region="deep">
+      <HistoryArrows />
       <div className="title-bar-title">
         {title.icon === "friends" && <Users size={18} />}
         {title.icon === "hash" && <Hash size={18} />}
@@ -45,5 +48,31 @@ export function TitleBar() {
       <WindowControls />
       <InboxPopout anchor={inboxButton} open={inboxOpen && !narrow} />
     </header>
+  );
+}
+
+// The furthest history entry reached, so Forward knows whether there is anything ahead (the History API does not say).
+let furthest = 0;
+
+/** Back and forward through the app's history, top left like Discord's desktop app. Only where the page draws the window chrome
+ * (Windows, Linux): a browser has its own buttons, and on macOS the traffic lights sit there. */
+function HistoryArrows() {
+  const chrome = useWindowChrome();
+  const navigate = useNavigate();
+  const type = useNavigationType();
+  useLocation(); // re-render on every navigation
+  // BrowserRouter stores the entry's position in history.state.idx
+  const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+  if (type === "PUSH" || idx > furthest) furthest = idx;
+  if (chrome?.customControls !== true) return null;
+  return (
+    <div className="title-bar-history">
+      <button type="button" className="title-bar-button" aria-label="Back" disabled={idx <= 0} onClick={() => void navigate(-1)}>
+        <ArrowLeft size={18} />
+      </button>
+      <button type="button" className="title-bar-button" aria-label="Forward" disabled={idx >= furthest} onClick={() => void navigate(1)}>
+        <ArrowRight size={18} />
+      </button>
+    </div>
   );
 }
