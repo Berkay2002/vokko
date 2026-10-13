@@ -21,6 +21,52 @@ export function formatPlaytime(start: number | undefined, now: number): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
+/** The server counts Unicode code points (not UTF-16 units) and closes the connection (4002) on control or invisible characters. */
+const MAX_TEXT = 128;
+const UNSHOWN_CHARS = /[\p{Cc}­͏؜ᅟᅠ᠎​-‏‪-‮⁠-⁩ㅤ﻿ﾠ]/gu;
+
+/** A name or title the server accepts: no control or zero-width/bidi characters, at most 128 code points (never splitting a surrogate pair). */
+export function cleanName(name: string): string {
+  return Array.from(name.replace(UNSHOWN_CHARS, "").trim()).slice(0, MAX_TEXT).join("").trim();
+}
+
+/** The "Listening to Spotify" activity (type 2) of a presence. */
+export function listeningActivity(presence: Pick<Presence, "activities"> | undefined | null): Activity | null {
+  return presence?.activities?.find(activity => activity.type === 2) ?? null;
+}
+
+/** What lists show for a presence: the game, else Spotify. */
+export function shownActivity(presence: Pick<Presence, "activities"> | undefined | null): Activity | null {
+  return playingActivity(presence) ?? listeningActivity(presence);
+}
+
+/** "Playing Factorio" or "Listening to Spotify". */
+export function activityLabel(activity: Activity): string {
+  return activity.type === 2 ? "Listening to Spotify" : playingLabel(activity);
+}
+
+const IMAGE_ID = /^spotify:([0-9a-f]{40})$/;
+const TRACK_ID = /^[A-Za-z0-9]{22}$/;
+
+/** The album art URL, built from the validated image id only (never a URL taken from the activity); null without art. */
+export function spotifyImageUrl(activity: Activity): string | null {
+  const id = IMAGE_ID.exec(activity.assets?.large_image ?? "")?.[1];
+  return id ? `https://i.scdn.co/image/${id}` : null;
+}
+
+/** Where "Play on Spotify" goes: the track when its id is known, else a Spotify search for title and artists. */
+export function spotifyOpenUrl(activity: Activity): string {
+  const id = activity.sync_id;
+  if (id && TRACK_ID.test(id)) return `https://open.spotify.com/track/${id}`;
+  return `https://open.spotify.com/search/${encodeURIComponent([activity.details, activity.state].filter(Boolean).join(" "))}`;
+}
+
+/** "3:05" for a track position or length in ms. */
+export function formatTrackTime(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
 /** "12:03" or "1:02:03" for a live elapsed timer. */
 export function formatClock(start: number, now: number): string {
   const total = Math.max(0, Math.floor((now - start) / 1000));

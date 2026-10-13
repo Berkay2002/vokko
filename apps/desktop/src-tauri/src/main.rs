@@ -7,6 +7,7 @@ mod links;
 mod macos;
 mod prefs;
 mod shortcuts;
+mod spotify;
 mod streamer;
 mod tray;
 mod updates;
@@ -234,6 +235,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             streamer::desktop_streaming_software_running,
             streamer::desktop_set_capture_hidden,
             streamer::desktop_restart,
+            spotify::spotify_now_playing,
         ])
         .build(context)?
         .run(run_event);

@@ -13,8 +13,11 @@ import {
   type GameEntry,
   type RunningProcess,
 } from "../desktop/games";
+import { readNowPlaying } from "../desktop/spotify";
 import { resendOwnStatus } from "../shell/actions";
+import { cleanName } from "./format";
 import { setOwnActivities } from "./own";
+import { sameSpotifyMoment, spotifyActivity } from "./spotify";
 
 // Game detection and the user's own activity. The desktop shell lists running executables; this store matches them against
 // the shipped list and the games the user added, and keeps the signed-in user's presence activities in step.
@@ -23,18 +26,14 @@ const SHARE_KEY = "vokko.activity.share";
 export const POLL_MS = 15_000;
 /** Op 3 is limited to 5 per minute per session; presence updates from this module are spaced at least this far apart. */
 const MIN_SEND_GAP_MS = 12_000;
-/** The server counts Unicode code points (not UTF-16 units) and closes the connection (4002) on control or invisible characters. */
-const MAX_GAME_NAME = 128;
-const UNSHOWN_CHARS = /[\p{Cc}­͏؜ᅟᅠ᠎​-‏‪-‮⁠-⁩ㅤ﻿ﾠ]/gu;
+export { cleanName };
+const SPOTIFY_KEY = "vokko.activity.spotify";
+/** The local Spotify app is cheap to ask, so this polls faster than the process list. */
+export const SPOTIFY_POLL_MS = 5_000;
 
-/** A name the server accepts: no control or zero-width/bidi characters, at most 128 code points (never splitting a surrogate pair). */
-export function cleanName(name: string): string {
-  return Array.from(name.replace(UNSHOWN_CHARS, "").trim()).slice(0, MAX_GAME_NAME).join("").trim();
-}
-
-function loadShare(): boolean {
+function loadFlag(key: string): boolean {
   try {
-    return localStorage.getItem(SHARE_KEY) !== "0";
+    return localStorage.getItem(key) !== "0";
   } catch {
     return true;
   }
@@ -43,30 +42,70 @@ function loadShare(): boolean {
 interface ActivityState {
   /** "Share my activity": whether the detected game goes out as presence. */
   share: boolean;
+  /** "Display Spotify as your status": whether the song playing in the Spotify app goes out too (also needs `share`). */
+  spotify: boolean;
   registered: GameEntry[];
   /** The last process list, null until the first listing finished. */
   running: RunningProcess[] | null;
   detected: DetectedGame | null;
+  /** The track playing in the Spotify app now, null when none. */
+  listening: Activity | null;
 }
 
-export const useActivity = create<ActivityState>(() => ({ share: loadShare(), registered: loadRegisteredGames(), running: null, detected: null }));
+export const useActivity = create<ActivityState>(() => ({
+  share: loadFlag(SHARE_KEY),
+  spotify: loadFlag(SPOTIFY_KEY),
+  registered: loadRegisteredGames(),
+  running: null,
+  detected: null,
+  listening: null,
+}));
 
-/** The activities that go out with the user's presence for a given state. */
-export function activitiesFor(state: Pick<ActivityState, "share" | "detected">): Activity[] {
-  const game = state.share ? state.detected : null;
-  if (!game) return [];
-  const name = cleanName(game.name);
-  if (!name) return [];
-  return [{ name, type: 0, ...(game.startedAt > 0 ? { timestamps: { start: game.startedAt } } : {}) }];
+/** The activities that go out with the user's presence for a given state: the game and Spotify, one of each at most. */
+export function activitiesFor(state: Pick<ActivityState, "share" | "detected"> & Partial<Pick<ActivityState, "spotify" | "listening">>): Activity[] {
+  if (!state.share) return [];
+  const list: Activity[] = [];
+  const name = state.detected ? cleanName(state.detected.name) : "";
+  if (state.detected && name) list.push({ name, type: 0, ...(state.detected.startedAt > 0 ? { timestamps: { start: state.detected.startedAt } } : {}) });
+  if (state.spotify && state.listening) list.push(state.listening);
+  return list;
 }
 
-export function setShareActivity(on: boolean): void {
+function saveFlag(key: string, on: boolean): void {
   try {
-    localStorage.setItem(SHARE_KEY, on ? "1" : "0");
+    localStorage.setItem(key, on ? "1" : "0");
   } catch {
     /* kept for this session only */
   }
+}
+
+export function setShareActivity(on: boolean): void {
+  saveFlag(SHARE_KEY, on);
   useActivity.setState({ share: on });
+}
+
+export function setShowSpotify(on: boolean): void {
+  saveFlag(SPOTIFY_KEY, on);
+  useActivity.setState({ spotify: on });
+}
+
+let spotifyBusy = false;
+
+/** Asks the local Spotify app what it plays and keeps `listening` stable while the same track plays (no resend per poll). */
+export async function refreshSpotify(): Promise<void> {
+  const { spotify, share, listening } = useActivity.getState();
+  if (!isDesktop() || spotifyBusy) return;
+  if (!spotify || !share) {
+    if (listening) useActivity.setState({ listening: null });
+    return;
+  }
+  spotifyBusy = true;
+  try {
+    const next = spotifyActivity(await readNowPlaying(), Date.now());
+    if (!sameSpotifyMoment(useActivity.getState().listening, next)) useActivity.setState({ listening: next });
+  } finally {
+    spotifyBusy = false;
+  }
 }
 
 function publishRunning(running: RunningProcess[]): void {
@@ -135,7 +174,9 @@ export function startGameDetection(): () => void {
   };
 
   const stopActivity = useActivity.subscribe((state, prev) => {
-    if (state.detected !== prev.detected || state.share !== prev.share) apply(false);
+    if (state.detected !== prev.detected || state.share !== prev.share || state.listening !== prev.listening || state.spotify !== prev.spotify) apply(false);
+    // turning Spotify (or sharing) on looks right away instead of at the next poll; turning it off withdraws it
+    if (state.spotify !== prev.spotify || state.share !== prev.share) void refreshSpotify();
   });
   let wasConnected = connected();
   const stopConnection = appStore.subscribe(() => {
@@ -152,9 +193,13 @@ export function startGameDetection(): () => void {
 
   const poll = setInterval(() => void refreshProcesses(), POLL_MS);
   void refreshProcesses();
+  const spotifyPoll = setInterval(() => void refreshSpotify(), SPOTIFY_POLL_MS);
+  void refreshSpotify();
 
   return () => {
     clearInterval(poll);
+    clearInterval(spotifyPoll);
+    useActivity.setState({ listening: null });
     if (timer) clearTimeout(timer);
     stopActivity();
     stopConnection();
