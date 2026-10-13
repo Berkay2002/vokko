@@ -451,6 +451,31 @@ async fn invalid_activities_are_a_decode_error() {
 }
 
 #[tokio::test]
+async fn invalid_spotify_activities_are_a_decode_error() {
+    let w = world().await;
+    let spotify = json!({"name": "Spotify", "type": 2, "details": "Song", "state": "Artist", "sync_id": "4uLU6hMCjMI75M1A2tKUQC",
+        "assets": {"large_image": format!("spotify:{}", "ab".repeat(20))}, "timestamps": {"start": 1000, "end": 2000}});
+    let with = |key: &str, value: Value| {
+        let mut changed = spotify.clone();
+        changed[key] = value;
+        json!([changed])
+    };
+    let two_games_of_a_kind = json!([spotify, spotify]);
+    let not_spotify = json!([{"name": "Apple Music", "type": 2}]);
+    let blank_title = with("details", json!(" "));
+    let bad_image = with("assets", json!({"large_image": "https://i.scdn.co/image/ab"}));
+    let bad_track = with("sync_id", json!("short"));
+    let end_before_start = with("timestamps", json!({"start": 2000, "end": 1000}));
+    let game_with_title = json!([{"name": "A", "type": 0, "details": "x"}]);
+    for activities in [two_games_of_a_kind, not_spotify, blank_title, bad_image, bad_track, end_before_start, game_with_title] {
+        let mut client = Client::connect(&w.address).await;
+        client.identify(&w.member).await;
+        client.send(json!({"op": 3, "d": {"status": "online", "activities": activities}})).await;
+        assert_eq!(closed_with(&mut client).await, Some(4002), "{activities}");
+    }
+}
+
+#[tokio::test]
 async fn presence_updates_are_bounded_in_size_and_rate() {
     let w = world().await;
     let mut client = Client::connect(&w.address).await;

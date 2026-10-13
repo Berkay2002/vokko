@@ -67,11 +67,16 @@ export interface UserPrimaryGuild {
   color_secondary: number;
 }
 
-/** What a user is doing. Only type 0 ("Playing") exists; `timestamps.start` is unix ms. At most one per presence. */
+/** What a user is doing: type 0 "Playing" (a game) or type 2 "Listening" (name exactly "Spotify"). Timestamps are unix ms. At most one of each type per presence. */
 export interface Activity {
   name: string; // 1-128 chars
-  type: 0;
-  timestamps?: { start?: number };
+  type: 0 | 2;
+  timestamps?: { start?: number; end?: number }; // end: type 2 only
+  // type 2 only (a game must not carry them):
+  details?: string; // track title, 1-128 chars
+  state?: string; // artists joined with "; ", 1-128 chars
+  assets?: { large_image?: string }; // "spotify:" + 40 lowercase hex (Spotify's image id)
+  sync_id?: string; // Spotify track id, 22 letters/digits
 }
 
 export interface Presence {

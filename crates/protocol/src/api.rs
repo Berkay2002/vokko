@@ -487,12 +487,12 @@ pub struct Presence {
     pub user_id: Snowflake,
     pub status: PresenceStatus,
     pub custom_status: Option<String>,
-    /// What the user is doing (a detected game on the desktop app); at most one for now. Omitted when empty.
+    /// What the user is doing (a detected game and Spotify on the desktop app); at most one of each kind. Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub activities: Vec<Activity>,
 }
 
-/// An activity shown next to a user's presence. Only type 0 ("Playing") exists so far.
+/// An activity shown next to a user's presence: type 0 "Playing" (a detected game) or type 2 "Listening" (Spotify only).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Activity {
     pub name: String,
@@ -500,6 +500,18 @@ pub struct Activity {
     pub kind: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timestamps: Option<ActivityTimestamps>,
+    /// Listening only: the track title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<String>,
+    /// Listening only: the artists, joined with "; ".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// Listening only: the album art as `spotify:<40 hex>` (Spotify's image id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assets: Option<ActivityAssets>,
+    /// Listening only: the Spotify track id (22 letters or digits).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -507,29 +519,60 @@ pub struct ActivityTimestamps {
     /// Unix time in milliseconds when the activity began.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start: Option<i64>,
+    /// Listening only: unix time in milliseconds when the track ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActivityAssets {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub large_image: Option<String>,
 }
 
 impl Activity {
     /// "Playing".
     pub const PLAYING: u8 = 0;
+    /// "Listening to Spotify".
+    pub const LISTENING: u8 = 2;
+    pub const SPOTIFY: &'static str = "Spotify";
     pub const MAX_NAME_CHARS: usize = 128;
-    /// Most activities a user can have at once.
-    pub const MAX_PER_PRESENCE: usize = 1;
+    /// Most activities a user can have at once: a game and Spotify, at most one of each kind.
+    pub const MAX_PER_PRESENCE: usize = 2;
 
-    /// Whether a client-supplied activity list is acceptable: at most one entry, type 0, a name of 1 to 128 characters (code
-    /// points) that shows something and holds no control, zero-width or bidirectional-override characters, and a start time
-    /// that is not negative.
+    /// Whether a client-supplied activity list is acceptable: at most two entries of different kinds; type 0 (a name of 1 to
+    /// 128 characters (code points) that shows something and holds no control, zero-width or bidirectional-override
+    /// characters, a start time that is not negative, none of the Spotify-only fields) or type 2 (the name "Spotify",
+    /// optional `details` and `state` under the same text rules, `assets.large_image` as `spotify:<40 hex>`, `sync_id` as 22
+    /// letters or digits, `timestamps.end` not negative and not before `start`).
     pub fn list_is_valid(list: &[Activity]) -> bool {
-        list.len() <= Self::MAX_PER_PRESENCE
-            && list.iter().all(|activity| {
-                activity.kind == Self::PLAYING
-                    && Self::name_is_valid(&activity.name)
-                    && activity.timestamps.as_ref().and_then(|timestamps| timestamps.start).is_none_or(|start| start >= 0)
-            })
+        list.len() <= Self::MAX_PER_PRESENCE && list.iter().enumerate().all(|(i, activity)| list[..i].iter().all(|other| other.kind != activity.kind) && activity.is_valid())
     }
 
-    fn name_is_valid(name: &str) -> bool {
-        name.chars().count() <= Self::MAX_NAME_CHARS && !name.chars().any(|c| c.is_control() || is_invisible(c)) && name.chars().any(|c| !c.is_whitespace())
+    fn is_valid(&self) -> bool {
+        let start = self.timestamps.as_ref().and_then(|timestamps| timestamps.start);
+        let end = self.timestamps.as_ref().and_then(|timestamps| timestamps.end);
+        if !start.is_none_or(|start| start >= 0) || !Self::text_is_valid(&self.name) {
+            return false;
+        }
+        match self.kind {
+            Self::PLAYING => end.is_none() && self.details.is_none() && self.state.is_none() && self.assets.is_none() && self.sync_id.is_none(),
+            Self::LISTENING => {
+                self.name == Self::SPOTIFY
+                    && self.details.as_deref().is_none_or(Self::text_is_valid)
+                    && self.state.as_deref().is_none_or(Self::text_is_valid)
+                    && self.assets.as_ref().and_then(|assets| assets.large_image.as_deref()).is_none_or(|image| {
+                        image.strip_prefix("spotify:").is_some_and(|id| id.len() == 40 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+                    })
+                    && self.sync_id.as_deref().is_none_or(|id| id.len() == 22 && id.bytes().all(|b| b.is_ascii_alphanumeric()))
+                    && end.is_none_or(|end| end >= 0 && start.is_none_or(|start| end >= start))
+            }
+            _ => false,
+        }
+    }
+
+    fn text_is_valid(text: &str) -> bool {
+        text.chars().count() <= Self::MAX_NAME_CHARS && !text.chars().any(|c| c.is_control() || is_invisible(c)) && text.chars().any(|c| !c.is_whitespace())
     }
 }
 
@@ -4953,13 +4996,63 @@ mod tests {
 
     #[test]
     fn activity_names_must_show_something_and_hold_no_invisible_characters() {
-        let playing = |name: &str| Activity { name: name.to_owned(), kind: Activity::PLAYING, timestamps: None };
+        let playing = |name: &str| Activity { name: name.to_owned(), kind: Activity::PLAYING, timestamps: None, details: None, state: None, assets: None, sync_id: None };
         assert!(Activity::list_is_valid(&[playing("Elden Ring")]));
         assert!(Activity::list_is_valid(&[playing("Pokémon 🎮")]));
         assert!(Activity::list_is_valid(&[playing(&"é".repeat(128))]));
         assert!(!Activity::list_is_valid(&[playing(&"é".repeat(129))]));
         for bad in ["", "   ", "\n", "A\nB", "\u{200B}", "A\u{200B}B", "A\u{202E}B", "\u{2066}x", "\u{FEFF}", "\u{3164}", "tab\there"] {
             assert!(!Activity::list_is_valid(&[playing(bad)]), "{bad:?} must be rejected");
+        }
+    }
+
+    #[test]
+    fn spotify_activities_follow_the_listening_rules() {
+        let spotify = || Activity {
+            name: "Spotify".into(),
+            kind: Activity::LISTENING,
+            timestamps: Some(ActivityTimestamps { start: Some(1_000), end: Some(2_000) }),
+            details: Some("Song".into()),
+            state: Some("A; B".into()),
+            assets: Some(ActivityAssets { large_image: Some(format!("spotify:{}", "ab01".repeat(10))) }),
+            sync_id: Some("4uLU6hMCjMI75M1A2tKUQC".into()),
+        };
+        let game = Activity { name: "Factorio".into(), kind: Activity::PLAYING, timestamps: None, details: None, state: None, assets: None, sync_id: None };
+        assert!(Activity::list_is_valid(&[spotify()]));
+        assert!(Activity::list_is_valid(&[game.clone(), spotify()]), "a game and Spotify together");
+        assert!(!Activity::list_is_valid(&[spotify(), spotify()]), "one of each kind");
+        assert!(!Activity::list_is_valid(&[game.clone(), game.clone()]));
+        type Change = fn(&mut Activity);
+        let broken: [(&str, Change); 12] = [
+            ("name", |a| a.name = "Apple Music".into()),
+            ("type", |a| a.kind = 1),
+            ("blank details", |a| a.details = Some("  ".into())),
+            ("long state", |a| a.state = Some("x".repeat(129))),
+            ("invisible details", |a| a.details = Some("a\u{200B}b".into())),
+            ("image host", |a| a.assets = Some(ActivityAssets { large_image: Some("https://i.scdn.co/x".into()) })),
+            ("image case", |a| a.assets = Some(ActivityAssets { large_image: Some(format!("spotify:{}", "AB01".repeat(10))) })),
+            ("image length", |a| a.assets = Some(ActivityAssets { large_image: Some("spotify:ab01".into()) })),
+            ("sync_id length", |a| a.sync_id = Some("4uLU6hMCjMI75M1A2tKUQ".into())),
+            ("sync_id chars", |a| a.sync_id = Some("4uLU6hMCjMI75M1A2tKU/C".into())),
+            ("end before start", |a| a.timestamps = Some(ActivityTimestamps { start: Some(5), end: Some(4) })),
+            ("negative end", |a| a.timestamps = Some(ActivityTimestamps { start: None, end: Some(-1) })),
+        ];
+        for (what, change) in broken {
+            let mut activity = spotify();
+            change(&mut activity);
+            assert!(!Activity::list_is_valid(&[activity]), "{what} must be rejected");
+        }
+        let spotify_only: [(&str, Change); 5] = [
+            ("details", |a| a.details = Some("x".into())),
+            ("state", |a| a.state = Some("x".into())),
+            ("sync_id", |a| a.sync_id = Some("4uLU6hMCjMI75M1A2tKUQC".into())),
+            ("assets", |a| a.assets = Some(ActivityAssets { large_image: None })),
+            ("end", |a| a.timestamps = Some(ActivityTimestamps { start: Some(1), end: Some(2) })),
+        ];
+        for (what, change) in spotify_only {
+            let mut activity = game.clone();
+            change(&mut activity);
+            assert!(!Activity::list_is_valid(&[activity]), "a game must not carry {what}");
         }
     }
 

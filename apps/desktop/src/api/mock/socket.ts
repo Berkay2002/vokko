@@ -1,6 +1,7 @@
 // Mock gateway: speaks the same Hello / Identify / READY / heartbeat / Resume protocol as the real server so the
 // client gateway code (and everything above it) cannot tell the difference.
 
+import { activityListIsValid } from "./activities";
 import { GatewayOp, type Activity, type GatewayEvents, type GatewayPayload, type PresenceStatus, type VoiceStateUpdateCommand } from "../types";
 import { db } from "./db";
 import { tokenUserId } from "./sessions";
@@ -195,7 +196,7 @@ export class MockSocket {
     const account = db.accounts.get(this.session.userId);
     if (!account) return;
     // Like the server: absent activities keep the current ones, [] clears, and an invalid list ends the connection (4002).
-    if (d.activities && (d.activities.length > 1 || d.activities.some(a => a.type !== 0 || !a.name?.trim() || a.name.length > 128))) {
+    if (d.activities && !activityListIsValid(d.activities)) {
       this.close(4002);
       return;
     }

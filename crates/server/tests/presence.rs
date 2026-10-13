@@ -179,6 +179,22 @@ async fn wait_activities(client: &mut Client, user_id: &str, status: &str, want:
 }
 
 #[tokio::test]
+async fn a_game_and_spotify_are_shown_together_and_keep_their_fields() {
+    let w = world().await;
+    let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;
+    let (mut alice, _) = Client::connect(&w.address, &w.alice.0).await;
+    owner.wait_presence(&w.alice.1, "online").await;
+
+    let both = json!([
+        {"name": "Factorio", "type": 0, "timestamps": {"start": 1_760_000_000_000_i64}},
+        {"name": "Spotify", "type": 2, "details": "Song", "state": "A; B", "sync_id": "4uLU6hMCjMI75M1A2tKUQC",
+         "assets": {"large_image": format!("spotify:{}", "0f".repeat(20))}, "timestamps": {"start": 1_760_000_000_000_i64, "end": 1_760_000_200_000_i64}}
+    ]);
+    alice.send(json!({"op": 3, "d": {"status": "online", "activities": both}})).await;
+    wait_activities(&mut owner, &w.alice.1, "online", |a| a == &both).await;
+}
+
+#[tokio::test]
 async fn activity_belongs_to_the_session_that_reported_it() {
     let w = world().await;
     let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;
