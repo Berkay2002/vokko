@@ -4,7 +4,7 @@ members = ["crates/*", "apps/desktop/src-tauri", "apps/cli", "tools/*", "xtask"]
 default-members = ["crates/*", "apps/cli", "xtask"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.95"
 
