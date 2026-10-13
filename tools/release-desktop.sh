@@ -16,13 +16,15 @@ cd "$ROOT"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "working tree not clean"; exit 1; }
 git pull -q --ff-only
 
-# The updater only installs a strictly newer version, so all four places move together.
-sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" Cargo.toml
-sed -i "0,/\"version\": \".*\"/s//\"version\": \"$VERSION\"/" package.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json
-cargo update -q -w
-npm install -q --package-lock-only --no-audit --no-fund
-git commit -qam "Desktop: release $VERSION"
-git push -q origin main
+# The updater only installs a strictly newer version, so all four places move together. A rerun after a failed build skips this.
+if ! grep -q "\"version\": \"$VERSION\"" apps/desktop/src-tauri/tauri.conf.json; then
+  sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" Cargo.toml
+  sed -i "0,/\"version\": \".*\"/s//\"version\": \"$VERSION\"/" package.json apps/desktop/package.json apps/desktop/src-tauri/tauri.conf.json
+  cargo update -q -w
+  npm install -q --package-lock-only --no-audit --no-fund
+  git commit -qam "Desktop: release $VERSION"
+  git push -q origin main
+fi
 
 export TAURI_SIGNING_PRIVATE_KEY="$HOME/.vokko/updater.key"
 TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(cat "$HOME/.vokko/updater.key.password")
