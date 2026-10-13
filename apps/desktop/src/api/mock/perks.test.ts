@@ -151,6 +151,15 @@ describe("nameplate and display name styles", () => {
   });
 });
 
+describe("profile frame", () => {
+  it("stores a well-formed id, rejects malformed ones without changing anything, and clears", () => {
+    expect((call("owner", "PATCH", "/users/@me", { profile_frame: "gold-filigree" }) as User).profile_frame).toBe("gold-filigree");
+    for (const bad of ["Bad Id", "f".repeat(65), "frame!"]) expect(errorOf(() => call("owner", "PATCH", "/users/@me", { profile_frame: bad })).code).toBe(50035);
+    expect((call("owner", "PATCH", "/users/@me", { bio: "hi" }) as User).profile_frame).toBe("gold-filigree");
+    expect((call("owner", "PATCH", "/users/@me", { profile_frame: null }) as User).profile_frame).toBeNull();
+  });
+});
+
 describe("super reactions", () => {
   const channelOf = () => [...db.channels.values()].find(c => c.guild_id === guildId && c.name === "general")!.id;
 

@@ -398,6 +398,9 @@ pub struct User {
     pub nameplate: Option<String>,
     #[serde(default)]
     pub display_name_styles: Option<DisplayNameStyles>,
+    /// Id of a profile frame (a decorative border around the whole profile card) in the client's open set.
+    #[serde(default)]
+    pub profile_frame: Option<String>,
     /// Profile board widgets; `null` when none are set.
     #[serde(default)]
     pub widgets: Option<ProfileWidgets>,
@@ -1730,6 +1733,8 @@ pub struct UpdateUserRequest {
     pub nameplate: Option<Option<String>>,
     #[serde(default, deserialize_with = "double_option")]
     pub display_name_styles: Option<Option<DisplayNameStyles>>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub profile_frame: Option<Option<String>>,
     /// Replaces the whole board; `null` clears, absent leaves it.
     #[serde(default, deserialize_with = "double_option")]
     pub widgets: Option<Option<ProfileWidgetsInput>>,
@@ -4156,7 +4161,7 @@ mod tests {
     }
 
     fn user() -> Value {
-        json!({"id": "100", "username": "sam", "global_name": null, "avatar": null, "banner_color": "#5865f2", "bio": null, "bot": false, "banner": null, "pronouns": null, "theme_colors": null, "avatar_decoration": null, "profile_effect": null, "primary_guild": null, "nameplate": null, "display_name_styles": null, "widgets": null})
+        json!({"id": "100", "username": "sam", "global_name": null, "avatar": null, "banner_color": "#5865f2", "bio": null, "bot": false, "banner": null, "pronouns": null, "theme_colors": null, "avatar_decoration": null, "profile_effect": null, "primary_guild": null, "nameplate": null, "display_name_styles": null, "profile_frame": null, "widgets": null})
     }
 
     #[test]
@@ -4229,6 +4234,7 @@ mod tests {
         perks["primary_guild"] = json!({"guild_id": "300", "tag": "VKO", "badge": "bolt", "color_primary": 1, "color_secondary": 2});
         perks["nameplate"] = json!("aurora");
         perks["display_name_styles"] = json!({"font_id": "serif", "effect_id": "gradient", "colors": [1, 2]});
+        perks["profile_frame"] = json!("vines");
         round_trip::<User>(perks);
         let styled: UpdateUserRequest =
             serde_json::from_value(json!({"nameplate": null, "display_name_styles": {"font_id": "mono", "effect_id": "solid", "colors": [3]}}))

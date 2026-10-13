@@ -157,6 +157,7 @@ export function applyUserPerks(user: User, body: Record<string, unknown>, resolv
   }
   if ("profile_effect" in body) user.profile_effect = assetId(body.profile_effect, "profile_effect");
   if ("nameplate" in body) user.nameplate = assetId(body.nameplate, "nameplate");
+  if ("profile_frame" in body) user.profile_frame = assetId(body.profile_frame, "profile_frame");
   if ("display_name_styles" in body) user.display_name_styles = parseNameStyle(body.display_name_styles);
   if ("primary_guild_id" in body) {
     const id = body.primary_guild_id;

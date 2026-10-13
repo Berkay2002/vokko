@@ -412,7 +412,7 @@ route("POST", "/users/@me/delete", ({ viewer, body }) => {
     emit([otherId], "RELATIONSHIP_REMOVE", { id });
   }
   account.relationships.clear();
-  Object.assign(account.user, { username: `deleted_user_${nextId().slice(-12)}`, global_name: "Deleted User", avatar: null, bio: null, banner_color: null, banner: null, pronouns: null, theme_colors: null, avatar_decoration: null, profile_effect: null, primary_guild: null, widgets: null });
+  Object.assign(account.user, { username: `deleted_user_${nextId().slice(-12)}`, global_name: "Deleted User", avatar: null, bio: null, banner_color: null, banner: null, pronouns: null, theme_colors: null, avatar_decoration: null, profile_effect: null, primary_guild: null, profile_frame: null, widgets: null });
   account.email = `deleted-${id}@deleted.invalid`;
   Object.assign(accountState(id), { deleted: true, has_password: false, pending_email: null, mfa_secret: null, backup_codes: [] });
   for (const [key, entry] of [...identities]) if (entry.userId === id) identities.delete(key);

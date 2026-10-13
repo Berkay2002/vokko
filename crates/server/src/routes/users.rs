@@ -114,6 +114,7 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     let decoration = body.avatar_decoration.map(|value| asset_id(value, "avatar_decoration")).transpose()?;
     let effect = body.profile_effect.map(|value| asset_id(value, "profile_effect")).transpose()?;
     let nameplate = body.nameplate.map(|value| asset_id(value, "nameplate")).transpose()?;
+    let frame = body.profile_frame.map(|value| asset_id(value, "profile_frame")).transpose()?;
     let name_style = match body.display_name_styles {
         None => None,
         Some(None) => Some(None),
@@ -245,6 +246,9 @@ async fn update_me(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     }
     if let Some(value) = nameplate {
         sets.push("nameplate = ").push_bind_unseparated(value);
+    }
+    if let Some(value) = frame {
+        sets.push("profile_frame = ").push_bind_unseparated(value);
     }
     if let Some(value) = name_style {
         let (font, effect, colors) = match value {

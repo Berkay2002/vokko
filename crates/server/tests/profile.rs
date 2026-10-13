@@ -364,6 +364,36 @@ async fn nameplate_and_display_name_styles_round_trip_and_validate() {
 }
 
 #[tokio::test]
+async fn profile_frame_round_trips_validates_and_clears() {
+    let (app, owner, member, _, _) = setup().await;
+    let (_, me) = app.get("/users/@me", &owner).await;
+    assert!(is_null(&me, "profile_frame"), "a fresh user sends an explicit null: {me}");
+
+    let (status, updated) = app.patch("/users/@me", &owner, json!({"profile_frame": "gold-filigree"})).await;
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(updated["profile_frame"], "gold-filigree");
+    let (_, seen) = app.get(&format!("/users/{}", user_id(&updated)), &member).await;
+    assert_eq!(seen["profile_frame"], "gold-filigree");
+
+    for value in [json!("Bad Id"), json!("f".repeat(65)), json!("frame!")] {
+        let (status, error) = app.patch("/users/@me", &owner, json!({"profile_frame": value, "global_name": "Changed"})).await;
+        assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "{value}: {error}");
+    }
+    let (_, me) = app.get("/users/@me", &owner).await;
+    assert_eq!(me["profile_frame"], "gold-filigree", "rejected requests change nothing");
+    assert!(is_null(&me, "global_name"), "{me}");
+
+    // other keys leave it alone; null and "" clear it
+    let (_, kept) = app.patch("/users/@me", &owner, json!({"bio": "hi"})).await;
+    assert_eq!(kept["profile_frame"], "gold-filigree");
+    let (_, cleared) = app.patch("/users/@me", &owner, json!({"profile_frame": null})).await;
+    assert!(is_null(&cleared, "profile_frame"), "{cleared}");
+    app.patch("/users/@me", &owner, json!({"profile_frame": "f".repeat(64)})).await;
+    let (_, emptied) = app.patch("/users/@me", &owner, json!({"profile_frame": ""})).await;
+    assert!(is_null(&emptied, "profile_frame"), "{emptied}");
+}
+
+#[tokio::test]
 async fn profile_images_take_ten_mib_animated_or_not() {
     let (app, owner, _, channel, _) = setup().await;
     let mut gif = b"GIF89a".to_vec();
@@ -607,6 +637,7 @@ async fn deleting_the_account_takes_the_widgets_and_their_images() {
                 "widgets": {"games_i_like": [{"name": "Celeste", "image_attachment_id": image["id"]}]},
                 "nameplate": "aurora",
                 "display_name_styles": style,
+                "profile_frame": "vines",
             }),
         )
         .await;
@@ -622,7 +653,7 @@ async fn deleting_the_account_takes_the_widgets_and_their_images() {
     assert_eq!(claimed(&app, &image).await, None, "the upload went with the account");
     let (_, gone) = app.get(&format!("/users/{}", user_id(&updated)), &owner).await;
     assert!(is_null(&gone, "widgets"), "{gone}");
-    assert!(is_null(&gone, "nameplate") && is_null(&gone, "display_name_styles"), "{gone}");
+    assert!(is_null(&gone, "nameplate") && is_null(&gone, "display_name_styles") && is_null(&gone, "profile_frame"), "{gone}");
     let member_id: i64 = user_id(&updated).parse().expect("member id");
     let row: (Option<String>, Option<String>, Option<String>, Option<Vec<i32>>) =
         sqlx::query_as("SELECT nameplate, name_font, name_effect, name_colors FROM users WHERE id = $1")

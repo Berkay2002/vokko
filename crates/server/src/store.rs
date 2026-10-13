@@ -51,11 +51,12 @@ pub struct UserRow {
     pub name_font: Option<String>,
     pub name_effect: Option<String>,
     pub name_colors: Option<Vec<i32>>,
+    pub profile_frame: Option<String>,
 }
 
 /// Columns of [`UserRow`]; select them `FROM {USER_FROM}` (aliases `u` and `pg`).
 pub const USER_COLS: &str = "u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, \
-     u.theme_accent, u.avatar_decoration, u.profile_effect, u.widgets::text AS widgets, pg.id AS tag_guild_id, pg.tag AS tag_text, pg.tag_badge,      pg.tag_color_primary, pg.tag_color_secondary, u.nameplate, u.name_font, u.name_effect, u.name_colors";
+     u.theme_accent, u.avatar_decoration, u.profile_effect, u.widgets::text AS widgets, pg.id AS tag_guild_id, pg.tag AS tag_text, pg.tag_badge,      pg.tag_color_primary, pg.tag_color_secondary, u.nameplate, u.name_font, u.name_effect, u.name_colors, u.profile_frame";
 
 /// `users u` joined to the guild whose tag the user adopted, while they still belong to it and it still has a tag.
 pub const USER_FROM: &str = "users u LEFT JOIN guilds pg ON pg.id = u.primary_guild_id AND pg.tag IS NOT NULL \
@@ -160,6 +161,7 @@ impl UserRow {
             primary_guild,
             nameplate: self.nameplate,
             display_name_styles,
+            profile_frame: self.profile_frame,
             widgets: self.widgets.and_then(|text| serde_json::from_str::<StoredWidgets>(&text).ok()).map(|stored| stored.into_api(state)),
         }
     }

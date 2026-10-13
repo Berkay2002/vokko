@@ -23,6 +23,7 @@ export interface User {
   primary_guild?: UserPrimaryGuild | null; // server tag shown next to the name
   nameplate?: string | null; // id of a Vokko-owned nameplate (background of the user's member/DM list row)
   display_name_styles?: DisplayNameStyles | null;
+  profile_frame?: string | null; // id of a Vokko-owned profile frame (decorative border around the whole profile card)
   widgets?: ProfileWidgets | null; // profile editor board widgets; absent/null = none
 }
 /** Display name style: font and effect ids from Vokko's own set, one or two RGB colours. */
@@ -1197,6 +1198,7 @@ export interface EditUserRequest {
   primary_guild_id?: Snowflake | null; // adopt that guild's tag (must be a member and the guild must have a tag); null clears
   nameplate?: string | null;
   display_name_styles?: DisplayNameStyles | null;
+  profile_frame?: string | null;
   widgets?: ProfileWidgetsInput | null; // replaces the whole value; null clears
 }
 export interface EditOwnMemberRequest {
