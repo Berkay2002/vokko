@@ -17,6 +17,29 @@
   pointer-events: none;
 }
 
+/* illustrated: an opaque plate with the scene pinned to the right, fading in from the left; a soft shade keeps the name readable */
+.nameplate.np-art {
+  mask-image: none;
+}
+
+.np-scene {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: auto;
+  height: 100%;
+  aspect-ratio: 3;
+  max-width: 75%;
+  mask-image: linear-gradient(90deg, transparent 0, #000 45%);
+}
+
+.nameplate.np-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgb(0 0 0 / 0.3), rgb(0 0 0 / 0.12) 45%, transparent 70%);
+}
+
 .nameplate.np-dots::after,
 .nameplate.np-stripes::after,
 .nameplate.np-grid::after,
