@@ -179,48 +179,164 @@
   padding: 0 16px 16px;
 }
 
-/* ---- full profile modal ---- */
+/* ---- full profile modal: profile card left, activity / mutual friends / mutual servers right ---- */
+.modal.modal-profile {
+  width: min(1200px, calc(100vw - 32px));
+  height: min(1000px, calc(100vh - 64px));
+  height: min(1000px, calc(100dvh - 64px));
+  background: var(--background-base-low);
+}
+
+/* the title is only the dialog's accessible name; the close button floats top-right */
+.modal-profile .modal-header {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 3;
+  padding: 0;
+}
+
+.modal-profile .modal-title {
+  display: none;
+}
+
+.modal-profile .modal-close {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--background-surface-high);
+}
+
+.modal-profile .modal-content {
+  overflow: hidden;
+  padding: 0;
+}
+
 .full-profile {
   display: flex;
-  flex-direction: column;
-  margin: -16px;
+  height: 100%;
+  gap: 40px;
+  padding: 56px 40px 0;
 }
 
-.full-profile .dm-profile-banner {
-  height: 100px;
+.full-profile-card {
+  position: relative;
+  flex: 0 1 500px;
+  align-self: flex-start;
+  max-height: 100%;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--background-surface-high);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thin-thumb) transparent;
 }
 
-.full-profile-head {
-  display: flex;
-  align-items: flex-end;
-  gap: 16px;
-  padding: 0 16px;
-  margin-top: -40px;
+.full-profile-banner {
+  height: 200px;
 }
 
-.full-profile-head > :first-child {
-  border: 6px solid var(--background-surface-high);
+.full-profile-avatar {
+  position: relative;
+  z-index: 1;
+  width: 136px;
+  height: 136px;
+  margin: -76px 0 0 20px;
+  padding: 8px;
   border-radius: 50%;
-  box-sizing: content-box;
+  background: var(--background-surface-high);
+  --status-ring: var(--background-surface-high);
 }
 
-.full-profile-head .dm-profile-name {
-  padding-bottom: 4px;
+.full-profile-avatar .avatar-status {
+  right: 8px;
+  bottom: 8px;
+}
+
+.full-profile-body {
+  padding: 8px 20px 24px;
+}
+
+.full-profile-name {
+  color: var(--text-strong);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 34px;
+  overflow-wrap: anywhere;
+}
+
+.full-profile-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.full-profile-message {
+  height: 36px;
+}
+
+/* beats .btn's 96px minimum width whatever the stylesheet order */
+.full-profile-actions .full-profile-icon {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+.full-profile-card.pv-themed .full-profile-actions .btn {
+  background: var(--background-scrim);
+  color: var(--text-strong);
+}
+
+.full-profile-section {
+  margin-top: 20px;
+}
+
+.full-profile-section h3 {
+  margin: 0 0 4px;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.full-profile-section p {
+  margin: 0;
+  color: var(--text-default);
+  font-size: 14px;
+}
+
+.full-profile-section .dm-profile-bio {
+  margin: 0;
+}
+
+.full-profile-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
 .full-profile-tabs {
   display: flex;
-  gap: 16px;
-  margin: 16px 16px 0;
+  flex: none;
+  gap: 24px;
+  margin-right: 44px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
 .full-profile-tab {
-  padding: 8px 0;
+  padding: 8px 0 12px;
   border-bottom: 2px solid transparent;
   color: var(--interactive-text-default);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .full-profile-tab:hover,
@@ -232,21 +348,106 @@
   border-bottom-color: var(--brand-500);
 }
 
-.full-profile-body,
 .full-profile-list {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: 16px;
-  min-height: 160px;
-  padding: 16px;
+  gap: 10px;
+  min-height: 0;
+  padding: 20px 4px 24px 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thin-thumb) transparent;
 }
 
+/* activity-card style rows */
 .full-profile-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--background-surface-high);
   color: var(--text-default);
+  text-align: left;
+}
+
+button.full-profile-row:hover {
+  background: var(--background-surface-highest, var(--background-base-lowest));
+}
+
+.full-profile-row .avatar,
+.full-profile-row .guild-icon {
+  border-radius: 8px;
+}
+
+.full-profile-row .avatar-img {
+  border-radius: 8px;
+}
+
+.full-profile-tile {
+  display: grid;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--background-base-lowest);
+  color: var(--text-muted);
+}
+
+.full-profile-row-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.full-profile-row-title {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 16px;
   font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.full-profile-row-sub {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+  .modal.modal-profile {
+    height: calc(100dvh - 32px);
+  }
+
+  .modal-profile .modal-content {
+    overflow-y: auto;
+  }
+
+  .full-profile {
+    flex-direction: column;
+    height: auto;
+    gap: 24px;
+    padding: 56px 16px 24px;
+  }
+
+  .full-profile-card {
+    flex: none;
+    align-self: stretch;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .full-profile-tabs {
+    margin-right: 0;
+    overflow-x: auto;
+  }
+
+  .full-profile-list {
+    overflow: visible;
+  }
 }
 
 /* ---- inbox popout ---- */
