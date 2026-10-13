@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { CSSProperties } from "react";
 import { effectById } from "./catalog";
+import { EFFECT_SHAPES } from "./art/effects";
 
 /** Deterministic pseudo-random in [0, 1): the same effect always lays its particles out the same way. */
 const rand = (i: number, salt: number): number => {
@@ -24,7 +25,7 @@ export function ProfileEffect({ id }: { id: string | null | undefined }) {
         style: {
           left: `${(rand(i, 3) * 100).toFixed(1)}%`,
           top: `${(rand(i, 4) * 100).toFixed(1)}%`,
-          width: `${size.toFixed(1)}px`,
+          width: `${(def.shape === "shooting-star" ? size * 3 : size).toFixed(1)}px`,
           height: `${(def.shape === "streak" ? size * 2.2 : size).toFixed(1)}px`,
           animationDuration: `${duration.toFixed(2)}s`,
           animationDelay: `${(-rand(i, 5) * duration).toFixed(2)}s`,
@@ -36,10 +37,13 @@ export function ProfileEffect({ id }: { id: string | null | undefined }) {
     });
   }, [def]);
   if (!def) return null;
+  const drawing = EFFECT_SHAPES[def.shape];
   return (
     <div className={`profile-effect pe-${def.motion}`} aria-hidden="true" data-effect={def.id}>
       {particles.map(p => (
-        <span key={p.key} className={`pe-particle pe-${def.shape}`} style={p.style} />
+        <span key={p.key} className={`pe-particle pe-${def.shape}${drawing ? " pe-art" : ""}`} style={p.style}>
+          {drawing}
+        </span>
       ))}
     </div>
   );

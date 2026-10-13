@@ -144,6 +144,103 @@
   }
 }
 
+/* drawn particles (perks/art/effects.tsx): the svg fills the box and takes the particle colour */
+.pe-art {
+  background: none;
+  color: var(--pe-color);
+  opacity: 0.95;
+}
+
+.pe-art > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.pe-flutter .pe-particle {
+  animation-name: pe-flutter;
+}
+
+.pe-float .pe-particle {
+  animation-name: pe-float;
+}
+
+.pe-shoot .pe-particle {
+  animation-name: pe-shoot;
+  animation-timing-function: ease-in;
+}
+
+.pe-flit .pe-particle {
+  animation-name: pe-flit;
+  animation-timing-function: ease-in-out;
+  animation-direction: alternate;
+}
+
+@keyframes pe-flutter {
+  0% {
+    transform: translate(0, -50px) rotate(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.95;
+  }
+  25% {
+    transform: translate(var(--pe-sway), -12px) rotate(calc(var(--pe-rot) * 0.25));
+  }
+  50% {
+    transform: translate(calc(var(--pe-sway) * -0.6), 30px) rotate(calc(var(--pe-rot) * 0.5));
+  }
+  75% {
+    transform: translate(var(--pe-sway), 75px) rotate(calc(var(--pe-rot) * 0.75));
+  }
+  100% {
+    transform: translate(0, 120px) rotate(var(--pe-rot));
+    opacity: 0;
+  }
+}
+
+@keyframes pe-float {
+  0% {
+    transform: translate(0, 40px) scale(0.6);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.95;
+  }
+  50% {
+    transform: translate(var(--pe-sway), -20px) scale(1);
+  }
+  100% {
+    transform: translate(calc(var(--pe-sway) * -0.5), -90px) scale(1.05);
+    opacity: 0;
+  }
+}
+
+@keyframes pe-shoot {
+  0% {
+    transform: translate(-90px, -45px) rotate(27deg);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  55%,
+  100% {
+    transform: translate(90px, 45px) rotate(27deg);
+    opacity: 0;
+  }
+}
+
+@keyframes pe-flit {
+  from {
+    transform: translate(calc(var(--pe-sway) * -1), 8px) rotate(-10deg);
+  }
+  to {
+    transform: translate(var(--pe-sway), -16px) rotate(10deg);
+  }
+}
+
 .reduce-motion .pe-particle,
 .reduce-motion .avatar-deco,
 .reduce-motion .avatar-deco-spin {
