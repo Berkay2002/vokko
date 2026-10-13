@@ -43,6 +43,10 @@ afterEach(() => {
 const tick = (ms: number) => vi.advanceTimersByTimeAsync(ms + 50);
 
 describe("activitiesFor", () => {
+  it("never sends Spotify until the user turns it on", () => {
+    expect(useActivity.getState().spotify).toBe(false);
+  });
+
   it("is a single Playing activity with the start time", () => {
     expect(activitiesFor({ share: true, detected: { name: "Factorio", exe: "factorio.exe", startedAt: 1234 } })).toEqual([{ name: "Factorio", type: 0, timestamps: { start: 1234 } }]);
   });

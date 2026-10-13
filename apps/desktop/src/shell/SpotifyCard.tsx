@@ -22,7 +22,8 @@ export function SpotifyCard({ activity }: { activity: Activity }) {
   const start = activity.timestamps?.start;
   const end = activity.timestamps?.end;
   const now = useNow(1000);
-  const total = start !== undefined && end !== undefined && end > start ? end - start : 0;
+  // no bar for a length that is not a song (another user can send any end); a day covers the longest tracks
+  const total = start !== undefined && end !== undefined && end > start && end - start <= 86_400_000 ? end - start : 0;
   const elapsed = total > 0 ? Math.min(Math.max(0, now - (start ?? now)), total) : 0;
   return (
     <div className="activity-card spotify-card" data-testid="spotify-card">

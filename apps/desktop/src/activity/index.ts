@@ -31,18 +31,20 @@ const SPOTIFY_KEY = "vokko.activity.spotify";
 /** The local Spotify app is cheap to ask, so this polls faster than the process list. */
 export const SPOTIFY_POLL_MS = 5_000;
 
-function loadFlag(key: string): boolean {
+/** A stored switch: "1" on, "0" off, anything else (never set, storage blocked) `fallback`. */
+function loadFlag(key: string, fallback: boolean): boolean {
   try {
-    return localStorage.getItem(key) !== "0";
+    const value = localStorage.getItem(key);
+    return value === null ? fallback : value !== "0";
   } catch {
-    return true;
+    return fallback;
   }
 }
 
 interface ActivityState {
   /** "Share my activity": whether the detected game goes out as presence. */
   share: boolean;
-  /** "Display Spotify as your status": whether the song playing in the Spotify app goes out too (also needs `share`). */
+  /** "Show Spotify as my status" (off until turned on): whether the song playing in the Spotify app goes out too (also needs `share`). */
   spotify: boolean;
   registered: GameEntry[];
   /** The last process list, null until the first listing finished. */
@@ -53,8 +55,9 @@ interface ActivityState {
 }
 
 export const useActivity = create<ActivityState>(() => ({
-  share: loadFlag(SHARE_KEY),
-  spotify: loadFlag(SPOTIFY_KEY),
+  share: loadFlag(SHARE_KEY, true),
+  // opt-in: what someone listens to never goes out until they turn it on
+  spotify: loadFlag(SPOTIFY_KEY, false),
   registered: loadRegisteredGames(),
   running: null,
   detected: null,

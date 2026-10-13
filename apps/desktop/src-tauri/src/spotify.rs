@@ -32,7 +32,9 @@ fn read() -> Option<NowPlaying> {
         return None;
     }
     // ponytail: no timeout around osascript (a hung Spotify blocks one poll thread); the frontend never overlaps polls.
-    let script = r#"tell application "Spotify"
+    // `is running` again inside the script: Spotify may quit after pgrep, and a bare `tell` would launch it again.
+    let script = r#"if application "Spotify" is not running then return ""
+tell application "Spotify"
   if player state is not playing then return ""
   set t to current track
   set d to ASCII character 31
@@ -58,7 +60,9 @@ fn read() -> Option<NowPlaying> {
         let duration_ms = ms(timeline.EndTime().ok()?.Duration - timeline.StartTime().ok()?.Duration);
         let now_ticks = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos() as i64 / 100 + 116_444_736_000_000_000;
         let since_update_ms = ms(now_ticks - timeline.LastUpdatedTime().ok()?.UniversalTime).max(0);
-        let position_ms = (ms(timeline.Position().ok()?.Duration) + since_update_ms).min(duration_ms);
+        let position_ms = ms(timeline.Position().ok()?.Duration) + since_update_ms;
+        // an unknown length (0) must not pin the position to 0: the start would move every poll and resend every time
+        let position_ms = if duration_ms > 0 { position_ms.min(duration_ms) } else { position_ms };
         let artist = media.Artist().ok()?.to_string();
         return Some(NowPlaying {
             title: media.Title().ok()?.to_string(),

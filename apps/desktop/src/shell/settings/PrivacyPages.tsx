@@ -189,7 +189,7 @@ export function ActivityPrivacyPage() {
   return (
     <Page title="Activity Privacy">
       {isDesktop() ? (
-        <InfoBanner>Games are detected by the desktop app. Only “Share my activity” and “Display Spotify as your status” can be changed so far; the rest is laid out for later.</InfoBanner>
+        <InfoBanner>Games are detected by the desktop app. Only “Share my activity” and “Show Spotify as my status” can be changed so far; the rest is laid out for later.</InfoBanner>
       ) : (
         <InfoBanner>Game and activity status comes from the desktop app. These settings are laid out for it, and cannot be changed in the browser.</InfoBanner>
       )}
@@ -285,7 +285,7 @@ export function ConnectedAppsPage() {
         {isDesktop() ? (
           <SpotifyStatusSwitch />
         ) : (
-          <SwitchRow label="Display Spotify as your status" note="Available in the desktop app, which reads the Spotify app on your computer." checked={false} disabled onChange={noop} />
+          <SwitchRow label="Show Spotify as my status" note="Available in the desktop app, which reads the Spotify app on your computer." checked={false} disabled onChange={noop} />
         )}
       </Category>
       <Category title="Authorized Apps">

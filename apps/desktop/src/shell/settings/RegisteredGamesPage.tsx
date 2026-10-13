@@ -16,12 +16,12 @@ export function ShareActivitySwitch() {
   );
 }
 
-/** "Display Spotify as your status": the song playing in the Spotify app on this computer (needs Share my activity as well). */
+/** "Show Spotify as my status" (off until the user turns it on): the song playing in the Spotify app on this computer (needs Share my activity as well). */
 export function SpotifyStatusSwitch({ disabled }: { disabled?: boolean }) {
   const spotify = useActivity(s => s.spotify);
   return (
     <SwitchRow
-      label="Display Spotify as your status"
+      label="Show Spotify as my status"
       note="Show “Listening to Spotify” with the song you are playing in the Spotify app on this computer. Needs Share my activity."
       checked={spotify}
       onChange={setShowSpotify}
