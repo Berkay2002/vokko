@@ -17,7 +17,8 @@ use vokko_protocol::api::permissions::{
     ADMINISTRATOR, CONNECT, MANAGE_CHANNELS, MOVE_MEMBERS, MUTE_MEMBERS, PRIORITY_SPEAKER, SPEAK, STREAM, USE_VAD, VIEW_CHANNEL,
 };
 use vokko_protocol::api::{
-    CALL_PARTICIPANT_MAX, ChannelType, GatewayEvent, Snowflake, VoiceConnectFailed, VoiceConnectFailure, VoiceServerUpdate, VoiceState, VoiceStateUpdateCommand,
+    CALL_PARTICIPANT_MAX, ChannelType, GatewayEvent, Snowflake, VoiceConnectFailed, VoiceConnectFailure, VoiceServerUpdate, VoiceState,
+    VoiceStateUpdateCommand, WatchTogetherState, WatchTogetherUpdate,
 };
 
 use super::backends::Backends;
@@ -27,6 +28,7 @@ use super::{room_channel, room_name, unix_now};
 use crate::access;
 use crate::auth::random_hex;
 use crate::config::{Config, LiveKitConfig};
+use crate::error::ApiErr;
 use crate::hub::Session;
 use crate::state::AppState;
 use crate::store::{self, ChannelRow, iso};
@@ -123,6 +125,8 @@ pub struct Voice {
     admission: tokio::sync::RwLock<()>,
     /// DM and group DM calls riding on these states.
     pub calls: super::calls::Calls,
+    /// Watch Together sessions by channel id (in memory; a session ends when the channel's last voice state goes).
+    watch: Mutex<HashMap<i64, WatchTogetherState>>,
 }
 
 /// A user's serial lock; dropping it forgets the per-user mutex once nobody else holds or waits for it.
@@ -156,7 +160,41 @@ impl Voice {
             users: Mutex::new(HashMap::new()),
             admission: tokio::sync::RwLock::new(()),
             calls: Default::default(),
+            watch: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// The channel's Watch Together session.
+    pub fn watch_get(&self, channel_id: i64) -> Option<WatchTogetherState> {
+        lock(&self.watch).get(&channel_id).cloned()
+    }
+
+    /// Replaces the channel's session with what `change` makes of it (`Ok(None)` ends it); returns `(before, after)`. The read
+    /// and the write share one lock, so concurrent controls never lose each other's change.
+    pub fn watch_update(
+        &self,
+        channel_id: i64,
+        change: impl FnOnce(Option<&WatchTogetherState>) -> Result<Option<WatchTogetherState>, ApiErr>,
+    ) -> Result<(Option<WatchTogetherState>, Option<WatchTogetherState>), ApiErr> {
+        let mut sessions = lock(&self.watch);
+        let before = sessions.get(&channel_id).cloned();
+        let after = change(before.as_ref())?;
+        match &after {
+            Some(session) => sessions.insert(channel_id, session.clone()),
+            None => sessions.remove(&channel_id),
+        };
+        Ok((before, after))
+    }
+
+    /// Watch Together sessions of the given channels (READY / GUILD_CREATE), by channel id.
+    pub fn watch_in(&self, channel_ids: &HashSet<i64>) -> Vec<WatchTogetherUpdate> {
+        let mut sessions: Vec<WatchTogetherUpdate> = lock(&self.watch)
+            .iter()
+            .filter(|(id, _)| channel_ids.contains(id))
+            .map(|(id, session)| WatchTogetherUpdate { channel_id: Snowflake::from(*id), state: Some(session.clone()) })
+            .collect();
+        sessions.sort_by_key(|update| update.channel_id.db());
+        sessions
     }
 
     /// Every backend was restored from since start. Until one is, reconciliation removes none of its LiveKit participants (it
@@ -358,6 +396,11 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
     // Joining or moving into the channel (not another device re-binding in place) plays the entrance sound.
     let entered = previous.as_ref().is_none_or(|previous| previous.channel_id != channel_id);
     send_server_update(session, guild_id, target, &livekit.url, livekit_token, &session_id);
+    // A late joiner syncs to the session that is already running (a DM call also carries it on CALL_CREATE).
+    if let Some(watching) = state.voice.watch_get(channel_id) {
+        let event = GatewayEvent::WatchTogetherUpdate(WatchTogetherUpdate { channel_id: target, state: Some(watching) });
+        session.dispatch(event.name(), event.data());
+    }
     if row.is_dm() {
         // Starts the call (CALL_CREATE, ringing) or adds us to it.
         super::calls::joined(state, &row, user_id).await;
@@ -608,6 +651,7 @@ async fn release_channel(state: &AppState, channel_id: i64) {
         return;
     }
     super::calls::release(state, channel_id).await;
+    super::watch::end(state, channel_id).await;
     let cleared: Result<Option<(Option<i64>,)>, _> =
         sqlx::query_as("UPDATE channels SET voice_status = NULL WHERE id = $1 AND voice_status IS NOT NULL RETURNING guild_id")
             .bind(channel_id)

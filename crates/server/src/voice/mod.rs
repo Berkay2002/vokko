@@ -8,6 +8,7 @@ pub mod stage;
 pub mod state;
 pub mod status;
 pub mod token;
+pub mod watch;
 pub mod webhook;
 
 use std::sync::Arc;
@@ -23,6 +24,10 @@ pub use state::{Voice, handle_command, reconcile, restore, restore_with_retry, s
 
 pub fn unix_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|elapsed| elapsed.as_secs() as i64).unwrap_or(0)
+}
+
+pub fn unix_millis() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|elapsed| elapsed.as_millis() as i64).unwrap_or(0)
 }
 
 /// LiveKit room of a channel.

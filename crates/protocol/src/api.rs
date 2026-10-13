@@ -1393,6 +1393,65 @@ pub struct VoiceChannelStatusUpdate {
     pub status: Option<String>,
 }
 
+/// Longest a Watch Together queue gets.
+pub const WATCH_TOGETHER_QUEUE_MAX: usize = 20;
+/// Furthest position a Watch Together seek may name (24 hours).
+pub const WATCH_TOGETHER_POSITION_MAX_MS: u64 = 24 * 60 * 60 * 1000;
+/// Longest title a Watch Together session carries.
+pub const WATCH_TOGETHER_TITLE_MAX_CHARS: usize = 200;
+
+/// The YouTube video everyone in a voice channel or DM call watches together (Vokko-only, in memory per channel). While
+/// `playing`, the expected position now is `position_ms + (now - updated_at_ms)`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WatchTogetherState {
+    /// 11 characters of `A-Za-z0-9_-`.
+    pub video_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub playing: bool,
+    pub position_ms: u64,
+    /// Unix milliseconds of the server when `position_ms` was true.
+    pub updated_at_ms: i64,
+    pub started_by: Snowflake,
+    /// Video ids up next, at most `WATCH_TOGETHER_QUEUE_MAX`.
+    #[serde(default)]
+    pub queue: Vec<String>,
+}
+
+/// `PUT /channels/{id}/watch-together`: start a session or change its video.
+#[derive(Clone, Debug, Deserialize)]
+pub struct WatchTogetherStartRequest {
+    pub video_id: String,
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// `PATCH /channels/{id}/watch-together`: play / pause / seek, set the title, add to the queue, or skip. With `skip`, a
+/// `video_id` makes it a no-op unless that video is still the current one (every client reports "ended" at once).
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct WatchTogetherPatchRequest {
+    #[serde(default)]
+    pub playing: Option<bool>,
+    #[serde(default)]
+    pub position_ms: Option<u64>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub queue_add: Option<String>,
+    #[serde(default)]
+    pub skip: Option<bool>,
+    #[serde(default)]
+    pub video_id: Option<String>,
+}
+
+/// WATCH_TOGETHER_UPDATE, to everyone who can see the channel; `state: null` = no session (also on the READY / GUILD_CREATE
+/// list `watch_together`, which only names channels that have one).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WatchTogetherUpdate {
+    pub channel_id: Snowflake,
+    pub state: Option<WatchTogetherState>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VoiceConnectFailure {
@@ -1430,6 +1489,9 @@ pub struct Call {
     /// Users being rung right now.
     pub ringing: Vec<Snowflake>,
     pub voice_states: Vec<VoiceState>,
+    /// The Watch Together session of the call, if one is running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watch_together: Option<WatchTogetherState>,
 }
 
 /// CALL_UPDATE: a `Call` without its voice states (those travel as VOICE_STATE_UPDATE).
@@ -3410,6 +3472,9 @@ pub struct GuildWithState {
     /// Live stages in stage channels the receiver can see; omitted when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stage_instances: Vec<StageInstance>,
+    /// Watch Together sessions in the voice channels the receiver can see; omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub watch_together: Vec<WatchTogetherUpdate>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -4002,6 +4067,7 @@ pub enum GatewayEvent {
     VoiceServerUpdate(VoiceServerUpdate),
     VoiceConnectFailed(VoiceConnectFailed),
     VoiceChannelStatusUpdate(VoiceChannelStatusUpdate),
+    WatchTogetherUpdate(WatchTogetherUpdate),
     StageInstanceCreate(StageInstance),
     StageInstanceUpdate(StageInstance),
     StageInstanceDelete(StageInstance),
@@ -4087,6 +4153,7 @@ impl GatewayEvent {
             Self::VoiceServerUpdate(_) => "VOICE_SERVER_UPDATE",
             Self::VoiceConnectFailed(_) => "VOICE_CONNECT_FAILED",
             Self::VoiceChannelStatusUpdate(_) => "VOICE_CHANNEL_STATUS_UPDATE",
+            Self::WatchTogetherUpdate(_) => "WATCH_TOGETHER_UPDATE",
             Self::StageInstanceCreate(_) => "STAGE_INSTANCE_CREATE",
             Self::StageInstanceUpdate(_) => "STAGE_INSTANCE_UPDATE",
             Self::StageInstanceDelete(_) => "STAGE_INSTANCE_DELETE",
@@ -4160,6 +4227,7 @@ impl GatewayEvent {
             Self::VoiceServerUpdate(value) => serde_json::to_value(value),
             Self::VoiceConnectFailed(value) => serde_json::to_value(value),
             Self::VoiceChannelStatusUpdate(value) => serde_json::to_value(value),
+            Self::WatchTogetherUpdate(value) => serde_json::to_value(value),
             Self::StageInstanceCreate(value) | Self::StageInstanceUpdate(value) | Self::StageInstanceDelete(value) => serde_json::to_value(value),
             Self::ThreadCreate(value) | Self::ThreadUpdate(value) => serde_json::to_value(value),
             Self::ThreadDelete(value) => serde_json::to_value(value),
@@ -4913,6 +4981,11 @@ mod tests {
         );
         let status = GatewayEvent::VoiceChannelStatusUpdate(VoiceChannelStatusUpdate { id: Snowflake(201), guild_id: Snowflake(300), status: None });
         assert_eq!((status.name(), status.data()), ("VOICE_CHANNEL_STATUS_UPDATE", json!({"id": "201", "guild_id": "300", "status": null})));
+        let watch = json!({"video_id": "dQw4w9WgXcQ", "playing": true, "position_ms": 5, "updated_at_ms": 9, "started_by": "7", "queue": ["aaaaaaaaaaa"]});
+        round_trip::<WatchTogetherState>(watch.clone());
+        let update = GatewayEvent::WatchTogetherUpdate(WatchTogetherUpdate { channel_id: Snowflake(201), state: None });
+        assert_eq!((update.name(), update.data()), ("WATCH_TOGETHER_UPDATE", json!({"channel_id": "201", "state": null})));
+        round_trip::<WatchTogetherUpdate>(json!({"channel_id": "201", "state": watch}));
         let failed =
             GatewayEvent::VoiceConnectFailed(VoiceConnectFailed { guild_id: None, channel_id: Snowflake(5), reason: VoiceConnectFailure::ChannelFull });
         assert_eq!((failed.name(), failed.data()), ("VOICE_CONNECT_FAILED", json!({"guild_id": null, "channel_id": "5", "reason": "channel_full"})));

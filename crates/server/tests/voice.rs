@@ -638,6 +638,109 @@ async fn reconciliation_removes_orphaned_livekit_participants() {
 }
 
 #[tokio::test]
+async fn watch_together_syncs_the_people_in_the_channel_and_ends_when_it_empties() {
+    let w = world().await;
+    w.overwrite(&w.carl_id, 1, VIEW_CHANNEL).await;
+    let path = format!("/channels/{}/watch-together", w.voice);
+    let (mut owner, _) = Client::identify(&w.address, &w.owner).await;
+    let (mut carl, _) = Client::identify(&w.address, &w.carl).await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+
+    assert_eq!(w.app.put_json(&path, &w.alice, json!({"video_id": "dQw4w9WgXcQ"})).await.0, StatusCode::FORBIDDEN, "not in the voice channel");
+    alice.voice(Some(&w.voice), false).await;
+    alice.voice_answer().await;
+    for bad in ["short", "dQw4w9WgXc!", "dQw4w9WgXcQQ", ""] {
+        assert_eq!(w.app.put_json(&path, &w.alice, json!({"video_id": bad})).await.0, StatusCode::BAD_REQUEST, "{bad:?}");
+    }
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"playing": false})).await.0, StatusCode::BAD_REQUEST, "nothing is playing yet");
+
+    let (status, state) = w.app.put_json(&path, &w.alice, json!({"video_id": "dQw4w9WgXcQ", "title": " Never "})).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!((state["video_id"].as_str(), state["title"].as_str(), state["playing"].as_bool()), (Some("dQw4w9WgXcQ"), Some("Never"), Some(true)));
+    assert_eq!(
+        (state["position_ms"].as_u64(), state["started_by"].as_str(), state["queue"].as_array().map(Vec::len)),
+        (Some(0), Some(w.alice_id.as_str()), Some(0))
+    );
+    assert!(state["updated_at_ms"].as_i64().is_some_and(|ms| ms > 0));
+    let update = owner.wait_for("WATCH_TOGETHER_UPDATE").await;
+    assert_eq!((update["channel_id"].as_str(), update["state"]["video_id"].as_str()), (Some(w.voice.as_str()), Some("dQw4w9WgXcQ")));
+    assert!(carl.silent_for("WATCH_TOGETHER_UPDATE", Duration::from_millis(300)).await, "carl cannot see the channel");
+
+    // Pause at 42 s, bad requests, queue and skip.
+    let (_, paused) = w.app.patch(&path, &w.alice, json!({"playing": false, "position_ms": 42_000})).await;
+    assert_eq!((paused["playing"].as_bool(), paused["position_ms"].as_u64()), (Some(false), Some(42_000)));
+    assert_eq!(owner.wait_for("WATCH_TOGETHER_UPDATE").await["state"]["playing"], false);
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"position_ms": 86_400_001_u64})).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"queue_add": "nope"})).await.0, StatusCode::BAD_REQUEST);
+    let (_, resumed) = w.app.patch(&path, &w.alice, json!({"playing": true})).await;
+    assert_eq!(resumed["position_ms"], 42_000, "playing again resumes where it paused");
+    w.app.patch(&path, &w.alice, json!({"queue_add": "aaaaaaaaaaa"})).await;
+    let (_, queued) = w.app.patch(&path, &w.alice, json!({"queue_add": "bbbbbbbbbbb"})).await;
+    assert_eq!(queued["queue"], json!(["aaaaaaaaaaa", "bbbbbbbbbbb"]));
+    let (_, stale) = w.app.patch(&path, &w.alice, json!({"skip": true, "video_id": "ccccccccccc"})).await;
+    assert_eq!(stale["video_id"], "dQw4w9WgXcQ", "a skip for a video that is no longer current does nothing");
+    let (_, skipped) = w.app.patch(&path, &w.alice, json!({"skip": true, "video_id": "dQw4w9WgXcQ"})).await;
+    assert_eq!(
+        (skipped["video_id"].as_str(), skipped["position_ms"].as_u64(), skipped["queue"].as_array().map(Vec::len)),
+        (Some("aaaaaaaaaaa"), Some(0), Some(1))
+    );
+    for n in 0..19 {
+        let (status, _) = w.app.patch(&path, &w.alice, json!({"queue_add": format!("q{n:010}")})).await;
+        assert_eq!(status, StatusCode::OK, "{n}");
+    }
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"queue_add": "zzzzzzzzzzz"})).await.0, StatusCode::BAD_REQUEST, "the queue holds 20");
+
+    // Changing the video keeps the queue; a late joiner gets the running session right after the voice server update.
+    let (_, changed) = w.app.put_json(&path, &w.alice, json!({"video_id": "eeeeeeeeeee"})).await;
+    assert_eq!((changed["queue"].as_array().map(Vec::len), changed["started_by"].as_str()), (Some(20), Some(w.alice_id.as_str())));
+    owner.voice(Some(&w.voice), false).await;
+    owner.voice_answer().await;
+    let late = loop {
+        let update = owner.wait_for("WATCH_TOGETHER_UPDATE").await;
+        if update["state"]["video_id"] == "eeeeeeeeeee" && update["state"]["playing"] == true {
+            break update;
+        }
+    };
+    assert_eq!(late["channel_id"], w.voice.as_str());
+    let channels = std::collections::HashSet::from([w.voice.parse::<i64>().expect("id")]);
+    assert_eq!(w.app.state.voice.watch_in(&channels).len(), 1, "READY and GUILD_CREATE carry it for viewers");
+
+    // Stopping by hand ends it; so does the last person leaving.
+    assert_eq!(w.app.delete(&path, &w.owner).await.0, StatusCode::NO_CONTENT);
+    assert!(owner.wait_for("WATCH_TOGETHER_UPDATE").await["state"].is_null());
+    w.app.put_json(&path, &w.owner, json!({"video_id": "dQw4w9WgXcQ"})).await;
+    owner.wait_for("WATCH_TOGETHER_UPDATE").await;
+    alice.voice(None, false).await;
+    assert!(owner.silent_for("WATCH_TOGETHER_UPDATE", Duration::from_millis(300)).await, "owner is still inside");
+    owner.voice(None, false).await;
+    assert!(owner.wait_for("WATCH_TOGETHER_UPDATE").await["state"].is_null());
+    assert!(w.app.state.voice.watch_get(w.voice.parse().expect("id")).is_none());
+    assert_eq!(w.app.patch(&path, &w.owner, json!({"playing": false})).await.0, StatusCode::FORBIDDEN, "no longer in voice");
+}
+
+#[tokio::test]
+async fn watch_together_controls_are_rate_limited_per_user() {
+    let w = world_with(
+        |config| {
+            livekit(config);
+            config.rate_limit = Some(Default::default());
+        },
+        FakeRoomService::new(),
+    )
+    .await;
+    let path = format!("/channels/{}/watch-together", w.voice);
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    alice.voice(Some(&w.voice), false).await;
+    alice.voice_answer().await;
+    let mut codes = Vec::new();
+    for _ in 0..14 {
+        codes.push(w.app.put_json(&path, &w.alice, json!({"video_id": "dQw4w9WgXcQ"})).await.0);
+    }
+    assert_eq!(codes[0], StatusCode::OK);
+    assert!(codes.contains(&StatusCode::TOO_MANY_REQUESTS), "a burst past 10 is limited: {codes:?}");
+}
+
+#[tokio::test]
 async fn voice_channel_status_is_shared_and_cleared_when_the_channel_empties() {
     use vokko_protocol::api::permissions::SET_VOICE_CHANNEL_STATUS;
     let w = world().await;
