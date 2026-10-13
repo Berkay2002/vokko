@@ -130,9 +130,14 @@ test('avatar menu: decoration opens its panel, previews live and saves; Remove a
   await expect(page.getByRole('menuitem', { name: 'Remove avatar' })).toHaveClass(/danger/);
   await page.getByRole('menuitem', { name: 'Change avatar decoration' }).click();
 
-  const grid = editor.getByRole('radiogroup', { name: 'Avatar decoration' });
-  await expect(grid).toBeVisible();
-  await grid.getByRole('radio').nth(1).click();
+  // the decoration tile's picker modal: pick one, Apply stages it
+  const picker = page.getByRole('dialog', { name: 'Change avatar decoration' });
+  await expect(picker).toBeVisible();
+  const apply = picker.getByRole('button', { name: 'Apply' });
+  await expect(apply).toBeDisabled();
+  await picker.getByRole('radiogroup', { name: 'Avatar decorations' }).getByRole('radio').first().click();
+  await apply.click();
+  await expect(picker).toHaveCount(0);
   await expect(editor.getByTestId('pe-card').locator('.avatar-deco')).toHaveCount(1);
 
   await editor.locator('.cs-savebar').getByRole('button', { name: 'Save Changes' }).click();
@@ -151,7 +156,9 @@ test('tiles: theme, banner colour and effect preview on the card; nameplate and 
   await expect(editor.getByTestId('pe-card').locator('.pe-card-banner')).toHaveCSS('background-color', 'rgb(220, 66, 71)');
 
   await editor.getByRole('button', { name: 'Profile effect', exact: true }).click();
-  await editor.getByRole('radiogroup', { name: 'Profile effect' }).getByRole('radio').nth(1).click();
+  const effects = page.getByRole('dialog', { name: 'Change profile effect' });
+  await effects.getByRole('radiogroup', { name: 'Profile effects' }).getByRole('radio').first().click();
+  await effects.getByRole('button', { name: 'Apply' }).click();
   await expect(editor.getByTestId('pe-card').locator('.profile-effect')).toHaveCount(1);
 
   // the perks pickers are registered, so these tiles are live (perks.spec.ts drives them)

@@ -139,9 +139,10 @@
 .pe-left-body {
   flex: 1;
   min-height: 0;
-  /* room under the last tile so the floating save bar never covers it */
-  padding: 16px 20px 96px;
+  /* room under the last tile so the floating save bar never covers it; the stable gutter keeps the scrollbar off the tiles */
+  padding: 16px 8px 96px 20px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .pe-section-block + .pe-section-block {
@@ -150,9 +151,9 @@
 
 .pe-label {
   margin: 0 0 8px;
-  color: var(--text-strong);
+  color: var(--text-default);
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 20px;
 }
 
@@ -173,6 +174,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* One tile: a real preview of the current value (or a faded placeholder with a "+" while empty), one fixed height per row kind. */
 .pe-tile {
   position: relative;
   display: flex;
@@ -180,10 +182,26 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  padding: 0 12px;
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
   background: var(--background-surface-high);
   color: var(--text-default);
+  cursor: pointer;
+}
+
+/* the two-up rows (avatar, decoration; effect, frame) and the animated avatar are taller than the full-width ones */
+.pe-tiles.pair .pe-tile,
+.pe-tile-avatar {
+  height: 96px;
+}
+
+.pe-tile-theme {
+  height: 120px;
+}
+
+.pe-tile-banner {
+  height: 88px;
 }
 
 .pe-tile:hover:not(:disabled),
@@ -197,12 +215,7 @@
   cursor: not-allowed;
 }
 
-.pe-tile-avatar {
-  height: 84px;
-}
-
 .pe-tile-effect {
-  height: 84px;
   padding: 0;
 }
 
@@ -210,11 +223,24 @@
   position: absolute;
   inset: 0;
   margin: auto;
-  padding: 3px;
+  padding: 6px;
   border-radius: 50%;
   background: var(--background-base-lowest);
   color: var(--text-strong);
   box-sizing: content-box;
+}
+
+/* faded stand-ins shown under the "+" of an empty tile */
+.pe-ph {
+  opacity: 0.35;
+}
+
+.pe-ph-bar {
+  width: 70%;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--background-mod-strong);
+  opacity: 0.6;
 }
 
 .pe-tile-busy {
@@ -241,6 +267,16 @@
   font-size: 12px;
 }
 
+.pe-tile-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .pe-color-fill,
 .pe-theme-fill,
 .pe-banner-fill {
@@ -250,38 +286,26 @@
   background-size: cover;
 }
 
+/* the theme's two colours: rounded squares top and bottom centre of the gradient */
 .pe-theme-fill {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 0;
+  padding: 12px 0;
 }
 
-.pe-dot {
-  width: 20px;
-  height: 20px;
+.pe-theme-swatch {
+  width: 24px;
+  height: 24px;
   border: 2px solid var(--text-strong);
-  border-radius: 50%;
-}
-
-.pe-tile-wide {
-  height: 64px;
-}
-
-.pe-tile-theme {
-  height: 112px;
-}
-
-.pe-tile-banner {
-  height: 88px;
+  border-radius: 6px;
 }
 
 .pe-effect-strip {
   width: 100%;
   height: 100%;
   min-height: 40px;
-  border-radius: 6px;
 }
 
 .pe-remove {
@@ -396,7 +420,7 @@
   display: flex;
   flex: 1 1 0;
   min-width: 0;
-  padding: 56px 40px 88px;
+  padding: 56px 40px;
   overflow-y: auto;
   justify-content: center;
 }
@@ -407,6 +431,8 @@
   max-width: 500px;
   height: max-content;
   min-height: 0;
+  /* top-aligned like Discord's editor, centred horizontally */
+  margin: 0 auto;
   border: 1px solid var(--border-subtle);
   border-radius: 12px;
   background: var(--background-surface-high);
@@ -415,6 +441,26 @@
 .pe-card-banner {
   height: 120px;
   border-radius: 11px 11px 0 0;
+}
+
+.pe-card-banner-edit {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--background-scrim);
+  color: var(--text-strong);
+  opacity: 0;
+}
+
+.pe-card-banner:hover .pe-card-banner-edit,
+.pe-card-banner-edit:focus-visible {
+  opacity: 1;
 }
 
 .pe-card-head {
@@ -460,15 +506,15 @@
 .pe-status-bubble,
 .pe-status-input {
   display: inline-flex;
-  max-width: 300px;
+  max-width: 260px;
   min-width: 0;
-  height: 36px;
+  min-height: 36px;
   align-items: center;
   gap: 6px;
   margin-bottom: 4px;
-  padding: 0 12px;
+  padding: 8px 12px;
   border: 1px solid var(--border-subtle);
-  border-radius: 18px;
+  border-radius: 16px;
   background: var(--background-base-lowest);
   color: var(--text-muted);
   font-size: 14px;
@@ -480,11 +526,37 @@
   font-style: normal;
 }
 
+.pe-status-bubble {
+  position: relative;
+  text-align: left;
+}
+
+/* thought bubble: two dots trail up and left towards the avatar */
+.pe-status-bubble::before,
+.pe-status-bubble::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  background: var(--background-base-lowest);
+}
+
+.pe-status-bubble::before {
+  top: -14px;
+  left: 8px;
+  width: 14px;
+  height: 14px;
+}
+
+.pe-status-bubble::after {
+  top: -26px;
+  left: -8px;
+  width: 9px;
+  height: 9px;
+}
+
 .pe-status-bubble span {
-  padding-right: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .pe-status-input {
@@ -526,8 +598,11 @@
   border: 2px solid transparent;
 }
 
-.pe-inline-display:hover {
-  background: var(--background-mod-subtle);
+/* hover and keyboard focus draw the same outline box, so every inline field reads as editable */
+.pe-inline-display:hover,
+.pe-inline-display:focus-visible {
+  border-color: var(--border-strong);
+  outline: none;
 }
 
 .pe-inline-display em {
@@ -587,10 +662,29 @@
   height: 36px;
 }
 
-.pe-icon-button {
+/* beats .btn's 96px minimum width whatever the stylesheet order */
+.pe-actions .pe-icon-button {
   width: 36px;
+  min-width: 36px;
   height: 36px;
   padding: 0;
+}
+
+/* the actions are a disabled preview: keep them at full strength so they read on any theme gradient */
+.pe-actions .btn:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.pe-card.pv-themed .pe-actions .btn {
+  background: var(--background-scrim);
+  color: var(--text-strong);
+}
+
+/* placeholders and separators are muted greys, which vanish on a light theme gradient */
+.pe-card.pv-themed .pe-inline-display em,
+.pe-card.pv-themed .pe-dot-sep {
+  color: var(--text-strong);
 }
 
 .pe-section {
@@ -960,4 +1054,400 @@ textarea.pe-inline-input {
   .pe-left {
     display: none;
   }
+}
+
+/* ---- picker modals (PickerModal.tsx): choice grid left, live preview and info box right ---- */
+.modal.pe-picker {
+  width: min(880px, calc(100vw - 32px));
+}
+
+.pe-picker .modal-header {
+  justify-content: flex-start;
+  padding: 24px 56px 16px 24px;
+  text-align: left;
+}
+
+.pe-picker .modal-title {
+  font-size: 22px;
+}
+
+.pe-picker .modal-content {
+  overflow: hidden;
+}
+
+.pe-picker .modal-footer {
+  padding: 16px 24px;
+}
+
+.pe-pk-body {
+  display: grid;
+  grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+  gap: 24px;
+  height: min(520px, calc(100vh - 220px));
+}
+
+.pe-picker-name .pe-pk-body {
+  grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
+}
+
+.pe-pk-choices,
+.pe-pk-side {
+  min-height: 0;
+  padding-right: 4px;
+  overflow-y: auto;
+}
+
+.pe-pk-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pe-pk-section + .pe-pk-section {
+  margin-top: 20px;
+}
+
+.pe-pk-heading {
+  margin: 0 0 8px;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.pe-pk-section .pe-pk-heading:not(:first-child) {
+  margin-top: 16px;
+}
+
+.pe-pk-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pe-pk-grid.rows {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.pe-pk-grid.samples {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pe-pk-tile {
+  position: relative;
+  display: flex;
+  aspect-ratio: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: var(--background-surface-high);
+  color: var(--text-default);
+  cursor: pointer;
+}
+
+.pe-pk-tile.row {
+  aspect-ratio: auto;
+  height: 52px;
+}
+
+.pe-pk-tile.sample {
+  aspect-ratio: auto;
+  height: 56px;
+}
+
+.pe-pk-tile:hover {
+  background: var(--background-surface-higher);
+  border-color: var(--border-strong);
+}
+
+.pe-pk-tile.selected {
+  border-color: var(--brand-500);
+}
+
+.pe-pk-tile .pe-effect-strip {
+  min-height: 0;
+}
+
+.pe-pk-none {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.pe-pk-tile.row .pe-pk-none,
+.pe-pk-tile.sample .pe-pk-none {
+  flex-direction: row;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.pe-pk-tile.sample .pe-pk-none {
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.pe-pk-tile.sample .pe-pk-none svg {
+  width: 20px;
+  height: 20px;
+}
+
+.pe-pk-tile .pf-nameplate-row {
+  height: 100%;
+  border-radius: 0;
+}
+
+.pe-pk-gg {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.pe-pk-effect-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pe-pk-styled {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pe-pk-skel-bar {
+  display: inline-block;
+  width: 96px;
+  max-width: 60%;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--background-mod-strong);
+}
+
+.pe-pk-skel-dot {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--background-mod-strong);
+}
+
+.pe-pk-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pe-pk-swatch {
+  position: relative;
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  color: var(--text-strong);
+  cursor: pointer;
+}
+
+.pe-pk-swatch.custom {
+  background: var(--background-base-lowest);
+  border-color: var(--border-strong);
+}
+
+.pe-pk-swatch.custom input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.pe-pk-swatch.selected {
+  box-shadow: 0 0 0 2px var(--background-base-lowest), 0 0 0 4px var(--brand-500);
+}
+
+/* previews */
+.pe-pk-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: var(--background-surface-high);
+}
+
+.pe-pk-card-banner {
+  height: 84px;
+}
+
+.pe-pk-card-avatar {
+  position: relative;
+  width: max-content;
+  margin: -40px 0 0 16px;
+  padding: 4px;
+  border-radius: 50%;
+  background: var(--background-surface-high);
+  --status-ring: var(--background-surface-high);
+}
+
+.pe-pk-card.pv-themed .pe-pk-card-avatar {
+  background: transparent;
+}
+
+.pe-pk-card-body {
+  padding: 4px 16px 16px;
+}
+
+.pe-pk-card-name {
+  color: var(--text-strong);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 26px;
+}
+
+.pe-pk-card-user {
+  margin-bottom: 12px;
+  color: var(--text-default);
+  font-size: 14px;
+}
+
+.pe-pk-card-btn {
+  width: 100%;
+  height: 32px;
+  cursor: default;
+}
+
+.pe-pk-info {
+  padding: 12px 16px;
+  border: 2px solid var(--brand-500);
+  border-radius: 8px;
+  background: var(--background-base-lowest);
+}
+
+.pe-pk-info strong {
+  color: var(--text-strong);
+  font-size: 15px;
+}
+
+.pe-pk-info p {
+  margin: 4px 0 0;
+  color: var(--text-default);
+  font-size: 14px;
+}
+
+.pe-pk-avatars {
+  display: flex;
+  gap: 12px;
+}
+
+.pe-pk-stage {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  height: 240px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--background-base-lowest);
+}
+
+.pe-pk-sizes {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-around;
+  width: 80px;
+  padding: 8px 0;
+  border-radius: 8px;
+  background: var(--background-base-lowest);
+}
+
+.pe-pk-members {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 12px;
+  border-radius: 8px;
+  background: var(--background-base-lowest);
+}
+
+.pe-pk-member {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pe-pk-members .pf-nameplate-row {
+  height: 48px;
+}
+
+.pe-pk-members .pf-nameplate-name {
+  font-size: 15px;
+}
+
+.pe-pk-name-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pe-pk-message {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: var(--background-base-lowest);
+}
+
+.pe-pk-message-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.pe-pk-time {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.pe-pk-message-text {
+  color: var(--text-default);
+  font-size: 15px;
+}
+
+.pe-pk-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* "Choose an image" */
+.modal.pe-picker-narrow {
+  width: min(440px, calc(100vw - 32px));
+}
+
+.pe-pk-upload {
+  display: flex;
+  width: 100%;
+  height: 200px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: var(--background-surface-high);
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pe-pk-upload:hover {
+  background: var(--background-surface-higher);
+  border-color: var(--border-strong);
 }

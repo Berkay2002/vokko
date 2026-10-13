@@ -65,21 +65,23 @@ export interface CardPreviewProps {
   look: ProfileLook;
   setDraft(patch: Partial<ProfileDraft>): void;
   uploadChannel: string | null;
-  /** "Change avatar decoration": scroll the left column to the decoration tile and open it. */
-  onChangeDecoration(): void;
+  /** "Change avatar decoration", "Change banner colour": scroll the left column to that tile and open it. */
+  onOpenTile(id: string): void;
 }
 
 /** The profile as others see it, editable in place. */
-export function CardPreview({ user, member, guildName, scope, draft, look, setDraft, uploadChannel, onChangeDecoration }: CardPreviewProps) {
+export function CardPreview({ user, member, guildName, scope, draft, look, setDraft, uploadChannel, onOpenTile }: CardPreviewProps) {
   const guild = scope.kind === "guild";
   const menu = useContextMenu();
   const upload = useImageUpload(uploadChannel);
+  const bannerUpload = useImageUpload(uploadChannel);
   const presence = useStore(s => s.presences[user.id]);
   const guilds = useStore(s => s.guilds);
   const guildOrder = useStore(s => s.guildOrder);
   const [statusEditing, setStatusEditing] = useState(false);
   const [statusText, setStatusText] = useState("");
   const avatarButton = useRef<HTMLButtonElement>(null);
+  const bannerButton = useRef<HTMLButtonElement>(null);
 
   const tagGuilds = guildOrder.map(id => guilds[id]).filter((g): g is NonNullable<typeof g> & { tag: GuildTag } => !!g && !!g.tag);
   const tagGuild = draft.tagGuild ? guilds[draft.tagGuild] : undefined;
@@ -93,10 +95,21 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
     if (!rect) return;
     const items: MenuItem[] = [
       { id: "avatar-change", label: "Change avatar", onSelect: upload.choose },
-      { id: "avatar-decoration", label: "Change avatar decoration", disabled: guild, tooltip: guild ? "Part of your main profile" : undefined, onSelect: onChangeDecoration },
+      { id: "avatar-decoration", label: "Change avatar decoration", disabled: guild, tooltip: guild ? "Part of your main profile" : undefined, onSelect: () => onOpenTile("avatar-decoration") },
       { id: "avatar-remove", label: "Remove avatar", danger: true, onSelect: () => setDraft({ avatar: null }) },
     ];
     menu.open({ clientX: rect.right - 24, clientY: rect.top + rect.height / 2 }, items);
+  };
+
+  const openBannerMenu = () => {
+    const rect = bannerButton.current?.getBoundingClientRect();
+    if (!rect) return;
+    const items: MenuItem[] = [
+      { id: "banner-change", label: "Change banner", onSelect: bannerUpload.choose },
+      { id: "banner-color", label: "Change banner colour", disabled: guild, tooltip: guild ? "Part of your main profile" : undefined, onSelect: () => onOpenTile("banner-color") },
+      ...(look.banner ? [{ id: "banner-remove", label: "Remove banner", danger: true, onSelect: () => setDraft({ banner: null }) }] : []),
+    ];
+    menu.open({ clientX: rect.right, clientY: rect.bottom + 4 }, items);
   };
 
   const openTagMenu = (event: React.MouseEvent<HTMLElement>) => {
@@ -115,7 +128,19 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
 
   return (
     <div className={`pe-card${look.themeColors ? " pv-themed" : ""}`} style={themeVars(look.themeColors)} data-testid="pe-card">
-      <ProfileBanner look={look} className="pe-card-banner" />
+      <ProfileBanner look={look} className="pe-card-banner">
+        <button ref={bannerButton} type="button" className="pe-card-banner-edit" aria-label="Edit banner" aria-haspopup="menu" disabled={bannerUpload.busy} onClick={openBannerMenu}>
+          <Pencil size={18} />
+        </button>
+      </ProfileBanner>
+      <input
+        ref={bannerUpload.inputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        data-testid="pe-file-card-banner"
+        onChange={e => void bannerUpload.pick(e.target.files?.[0]).then(file => file && setDraft({ banner: file }))}
+      />
       <div className="pe-card-head">
         <button ref={avatarButton} type="button" className="pe-card-avatar" aria-label="Edit avatar" aria-haspopup="menu" disabled={upload.busy} onClick={openAvatarMenu}>
           <Avatar user={{ id: user.id, avatar: look.avatar }} size={120} decoration={look.decoration ?? false} status />
@@ -159,7 +184,7 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
           </button>
         )}
       </div>
-      {upload.error && <p className="pe-field-error pe-card-error">{upload.error}</p>}
+      {(upload.error || bannerUpload.error) && <p className="pe-field-error pe-card-error">{upload.error ?? bannerUpload.error}</p>}
       <div className="pe-card-body">
         <div className="pe-name">
           <InlineEdit

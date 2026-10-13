@@ -96,9 +96,9 @@ function EditorBody({ me, scope, onScope }: { me: User; scope: Scope; onScope(ne
     }
   };
 
-  const openDecoration = () => {
+  const openTileFromCard = (id: string) => {
     setCollapsed(false);
-    setOpenTile("avatar-decoration");
+    setOpenTile(id);
   };
 
   return createPortal(
@@ -130,7 +130,7 @@ function EditorBody({ me, scope, onScope }: { me: User; scope: Scope; onScope(ne
           />
         )}
         <main className="pe-middle">
-          <CardPreview user={me} member={member} guildName={guildName} scope={scope} draft={draft} look={look} setDraft={setDraft} uploadChannel={uploadChannel} onChangeDecoration={openDecoration} />
+          <CardPreview user={me} member={member} guildName={guildName} scope={scope} draft={draft} look={look} setDraft={setDraft} uploadChannel={uploadChannel} onOpenTile={openTileFromCard} />
         </main>
         <RightColumn user={me} scope={scope} draft={draft} setDraft={setDraft} uploadChannel={uploadChannel} />
         <button type="button" className="pe-close" aria-label="Close" onClick={requestClose}>

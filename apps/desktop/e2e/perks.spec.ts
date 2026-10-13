@@ -123,14 +123,16 @@ test('decoration, effect, nameplate and name style show in the popout and the me
   // the profile editor is its own dialog over settings; each tile opens one inline panel at a time
   const editor = page.getByRole('dialog', { name: 'Edit Profile' });
   await expect(editor).toBeVisible();
-  const pick = async (tile: string, ...options: [group: string, option: string][]) => {
+  const pick = async (tile: string, title: string, ...options: [group: string, option: string][]) => {
     await editor.getByRole('button', { name: tile, exact: true }).click();
-    for (const [group, option] of options) await editor.getByRole('radiogroup', { name: group }).getByRole('radio', { name: option }).click();
+    const modal = page.getByRole('dialog', { name: title });
+    for (const [group, option] of options) await modal.getByRole('radiogroup', { name: group }).getByRole('radio', { name: option }).click();
+    await modal.getByRole('button', { name: 'Apply' }).click();
   };
-  await pick('Avatar decoration', ['Avatar decoration', 'Halo']);
-  await pick('Profile effect', ['Profile effect', 'Snowfall']);
-  await pick('Nameplate', ['Nameplate', 'Aurora']);
-  await pick('Display name style', ['Display name font', 'Serif'], ['Display name effect', 'Gradient']);
+  await pick('Avatar decoration', 'Change avatar decoration', ['Avatar decorations', 'Halo']);
+  await pick('Profile effect', 'Change profile effect', ['Profile effects', 'Snowfall']);
+  await pick('Nameplate', 'Change nameplate', ['Nameplates', 'Aurora']);
+  await pick('Display name style', 'Change display name style', ['Display name font', 'Serif'], ['Display name effect', 'Gradient']);
   await expect(editor.getByRole('button', { name: 'Nameplate', exact: true }).locator('.nameplate')).toHaveCount(1);
   await editor.getByRole('button', { name: 'Edit Bio' }).click();
   await editor.getByRole('textbox', { name: 'Bio' }).fill('I like **bold** things');

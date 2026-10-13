@@ -1,8 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { Plus } from "lucide-react";
-import { AVATAR_DECORATIONS, HEX_COLOR_RE, PROFILE_EFFECTS, PROFILE_THEMES, hexToInt, intToHex, themeGradient } from "../perks/catalog";
+import { ImagePlus, Plus } from "lucide-react";
+import { HEX_COLOR_RE, PROFILE_THEMES, hexToInt, intToHex, themeGradient } from "../perks/catalog";
 import { ProfileBanner } from "../perks/ProfileBanner";
 import { Avatar } from "../shell/Avatar";
+import { AvatarPicker, DecorationPicker, EffectPicker } from "./pickers";
+import { previewName } from "./previewName";
 import { registerBuiltinTile, type ProfileEditorTile, type ProfileEditorTileProps } from "./registry";
 import { useImageUpload } from "./upload";
 
@@ -12,15 +14,19 @@ const LOCKED_NOTE = "Part of your main profile";
 const STRIP = { banner: null, bannerColor: "#2b2d31", themeColors: null } as const;
 
 /** A tile and (when open) its inline panel, which spans the whole row of the tile grid. Pickers registered from outside use it too. */
-export function Tile({ label, open, onToggle, locked, disabled, className, children, panel, onClick }: {
+export function Tile({ label, open, onToggle, locked, disabled, empty, className, children, panel, modal, onClick }: {
   label: string;
   open?: boolean;
   onToggle?(): void;
   locked?: boolean;
   disabled?: boolean;
+  /** Nothing chosen yet: a "+" in a dark circle sits centred over the tile's faded placeholder. */
+  empty?: boolean;
   className?: string;
   children: ReactNode;
   panel?: ReactNode;
+  /** A picker modal, shown while `open`; the tile toggles `open` like a panel tile does. */
+  modal?: ReactNode;
   /** Replaces the toggle: tiles that act directly (file pickers). */
   onClick?(): void;
 }) {
@@ -31,18 +37,19 @@ export function Tile({ label, open, onToggle, locked, disabled, className, child
         className={`pe-tile${open ? " open" : ""}${className ? ` ${className}` : ""}`}
         aria-label={label}
         aria-expanded={panel && !onClick ? !!open : undefined}
+        aria-haspopup={modal ? "dialog" : undefined}
         disabled={locked || disabled}
         title={locked ? LOCKED_NOTE : label}
         onClick={onClick ?? onToggle}
       >
         {children}
+        {empty && !locked && <Plus size={16} className="pe-tile-plus" aria-hidden="true" />}
       </button>
       {open && panel && !locked && <div className="pe-panel">{panel}</div>}
+      {open && modal && !locked && modal}
     </>
   );
 }
-
-const Plus16 = () => <Plus size={16} className="pe-tile-plus" aria-hidden="true" />;
 
 /** Neutral tile for a picker that is not installed yet (nameplates, display name styles, frames): the slot registry replaces it. */
 export const ComingSoonTile = (label: string): ProfileEditorTile =>
@@ -57,9 +64,18 @@ export const ComingSoonTile = (label: string): ProfileEditorTile =>
 
 function AvatarImageTile({ label, look, user, locked, uploadChannel, setDraft }: ProfileEditorTileProps & { label: string }) {
   const upload = useImageUpload(uploadChannel);
+  const [picking, setPicking] = useState(false);
   return (
     <>
-      <Tile label={label} locked={locked} disabled={upload.busy || !uploadChannel} className="pe-tile-avatar" onClick={upload.choose}>
+      <Tile
+        label={label}
+        open={picking}
+        onToggle={() => setPicking(true)}
+        locked={locked}
+        disabled={upload.busy || !uploadChannel}
+        className="pe-tile-avatar"
+        modal={<AvatarPicker onUpload={upload.choose} onClose={() => setPicking(false)} />}
+      >
         <Avatar user={{ id: user.id, avatar: look.avatar }} size={56} decoration={false} />
         {upload.busy && <span className="pe-tile-busy">Uploading…</span>}
       </Tile>
@@ -79,7 +95,8 @@ function AvatarImageTile({ label, look, user, locked, uploadChannel, setDraft }:
 const AvatarTile: ProfileEditorTile = props => <AvatarImageTile {...props} label="Avatar" />;
 const AnimatedAvatarTile: ProfileEditorTile = props => <AvatarImageTile {...props} label="Animated avatar" />;
 
-const DecorationTile: ProfileEditorTile = ({ user, look, draft, setDraft, locked, open, setOpen }) => {
+const DecorationTile: ProfileEditorTile = props => {
+  const { user, look, draft, setDraft, locked, open, setOpen } = props;
   const base = { id: user.id, avatar: look.avatar };
   return (
     <Tile
@@ -87,54 +104,31 @@ const DecorationTile: ProfileEditorTile = ({ user, look, draft, setDraft, locked
       open={open}
       onToggle={() => setOpen(!open)}
       locked={locked}
+      empty={!draft.decoration}
       className="pe-tile-avatar"
-      panel={
-        <div className="pe-grid" role="radiogroup" aria-label="Avatar decoration">
-          <button type="button" role="radio" aria-checked={draft.decoration === null} className={`pe-choice${draft.decoration === null ? " selected" : ""}`} onClick={() => setDraft({ decoration: null })}>
-            <Avatar user={base} size={48} decoration={false} />
-            <span>None</span>
-          </button>
-          {AVATAR_DECORATIONS.map(d => (
-            <button key={d.id} type="button" role="radio" aria-checked={draft.decoration === d.id} className={`pe-choice${draft.decoration === d.id ? " selected" : ""}`} onClick={() => setDraft({ decoration: d.id })}>
-              <Avatar user={base} size={48} decoration={d.id} />
-              <span>{d.name}</span>
-            </button>
-          ))}
-        </div>
-      }
+      modal={<DecorationPicker user={user} look={look} value={draft.decoration} onApply={decoration => setDraft({ decoration })} onClose={() => setOpen(false)} />}
     >
-      <Avatar user={base} size={56} decoration={draft.decoration ?? false} />
-      {!draft.decoration && <Plus16 />}
+      {draft.decoration ? <Avatar user={base} size={56} decoration={draft.decoration} /> : <span className="pe-ph"><Avatar user={base} size={56} decoration="pixel" /></span>}
     </Tile>
   );
 };
 
-const EffectTile: ProfileEditorTile = ({ draft, setDraft, locked, open, setOpen }) => (
-  <Tile
-    label="Profile effect"
-    open={open}
-    onToggle={() => setOpen(!open)}
-    locked={locked}
-    className="pe-tile-effect"
-    panel={
-      <div className="pe-grid" role="radiogroup" aria-label="Profile effect">
-        <button type="button" role="radio" aria-checked={draft.effect === null} className={`pe-choice${draft.effect === null ? " selected" : ""}`} onClick={() => setDraft({ effect: null })}>
-          <ProfileBanner look={{ ...STRIP, effect: null }} className="pe-effect-strip" />
-          <span>None</span>
-        </button>
-        {PROFILE_EFFECTS.map(e => (
-          <button key={e.id} type="button" role="radio" aria-checked={draft.effect === e.id} className={`pe-choice${draft.effect === e.id ? " selected" : ""}`} onClick={() => setDraft({ effect: e.id })}>
-            <ProfileBanner look={{ ...STRIP, effect: e.id }} className="pe-effect-strip" />
-            <span>{e.name}</span>
-          </button>
-        ))}
-      </div>
-    }
-  >
-    <ProfileBanner look={{ ...STRIP, effect: draft.effect }} className="pe-effect-strip" />
-    {!draft.effect && <Plus16 />}
-  </Tile>
-);
+const EffectTile: ProfileEditorTile = props => {
+  const { user, look, draft, setDraft, locked, open, setOpen } = props;
+  return (
+    <Tile
+      label="Profile effect"
+      open={open}
+      onToggle={() => setOpen(!open)}
+      locked={locked}
+      empty={!draft.effect}
+      className="pe-tile-effect"
+      modal={<EffectPicker user={user} look={look} name={previewName(props)} value={draft.effect} onApply={effect => setDraft({ effect })} onClose={() => setOpen(false)} />}
+    >
+      <ProfileBanner look={{ ...STRIP, effect: draft.effect }} className="pe-effect-strip" />
+    </Tile>
+  );
+};
 
 const BannerColorTile: ProfileEditorTile = ({ draft, setDraft, locked, open, setOpen }) => {
   const [text, setText] = useState(draft.bannerColor ?? "");
@@ -212,8 +206,8 @@ const ThemeTile: ProfileEditorTile = ({ draft, setDraft, locked, open, setOpen }
       }
     >
       <span className="pe-theme-fill" style={{ background: themeGradient(draft.theme ?? DEFAULT_THEME) }}>
-        <span className="pe-dot" style={{ background: intToHex(primary) }} />
-        <span className="pe-dot" style={{ background: intToHex(accent) }} />
+        <span className="pe-theme-swatch" style={{ background: intToHex(primary) }} />
+        <span className="pe-theme-swatch" style={{ background: intToHex(accent) }} />
       </span>
     </Tile>
   );
@@ -225,7 +219,14 @@ const BannerImageTile: ProfileEditorTile = ({ look, locked, uploadChannel, setDr
   return (
     <>
       <Tile label="Profile banner" locked={locked} disabled={upload.busy || !uploadChannel} className="pe-tile-wide pe-tile-banner" onClick={upload.choose}>
-        {has ? <span className="pe-banner-fill" style={{ backgroundImage: `url("${look.banner}")` }} /> : <Plus16 />}
+        {has ? (
+          <span className="pe-banner-fill" style={{ backgroundImage: `url("${look.banner}")` }} />
+        ) : (
+          <span className="pe-tile-empty">
+            <ImagePlus size={20} aria-hidden="true" />
+            Upload banner
+          </span>
+        )}
         {upload.busy && <span className="pe-tile-busy">Uploading…</span>}
       </Tile>
       <input
