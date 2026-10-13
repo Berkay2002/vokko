@@ -57,7 +57,7 @@ export function Avatar({ user, member, guildId, decoration, size = 32, status, d
 /** Server icon: image or the name's initials on a dark tile. */
 export function GuildIcon({ guild, size = 40, className }: { guild: Pick<Guild, "name" | "icon">; size?: number; className?: string }) {
   const url = guildIconUrl(guild);
-  if (url) return <img className={`guild-icon ${className ?? ""}`} src={url} alt="" width={size} height={size} draggable={false} />;
+  if (url) return <img className={`guild-icon ${className ?? ""}`} src={url} alt="" width={size} height={size} style={{ width: size, height: size }} draggable={false} />;
   const initials = guildInitials(guild.name);
   return (
     <span className={`guild-icon guild-icon-text ${className ?? ""}`} style={{ width: size, height: size, fontSize: initials.length > 2 ? 12 : 14 }} aria-hidden="true">

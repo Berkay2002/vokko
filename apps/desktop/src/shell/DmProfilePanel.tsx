@@ -55,14 +55,7 @@ export function DmProfilePanel({ user }: { user: User }) {
           {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
           {look.bio && <ProfileBio text={look.bio} className="dm-profile-bio" />}
           <div className="dm-profile-mutual">
-            <span className="dm-profile-mutual-icons">
-              {mutual.slice(0, 3).map(g => (
-                <GuildIcon key={g.id} guild={g} size={16} />
-              ))}
-            </span>
-            <span>
-              {count} Mutual Server{count === 1 ? "" : "s"}
-            </span>
+            {count} Mutual Server{count === 1 ? "" : "s"}
           </div>
           <div className="dm-profile-divider" />
           <div className="dm-profile-label">Member Since</div>

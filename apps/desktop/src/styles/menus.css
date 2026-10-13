@@ -150,21 +150,9 @@
 }
 
 .dm-profile-mutual {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   margin-top: 12px;
-  color: var(--text-default);
+  color: var(--text-muted);
   font-size: 12px;
-  font-weight: 600;
-}
-
-.dm-profile-mutual-icons {
-  display: flex;
-}
-
-.dm-profile-mutual-icons > * + * {
-  margin-left: -4px;
 }
 
 .dm-profile-divider {
