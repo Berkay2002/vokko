@@ -28,6 +28,8 @@ const SWEEP_EVERY: Duration = Duration::from_secs(30);
 const ADDRESS_FLOOR_FACTOR: f64 = 10.0;
 /// `/gifs/*` is proxied to a provider with a quota: search, trending and categories share one bucket per user.
 const GIF_ROUTE: &str = "GET /gifs";
+/// Importing a picked GIF as an avatar or banner shares one bucket per user.
+const GIF_IMPORT_ROUTE: &str = "POST /users/@me/gif-import";
 const GIF_BURST: f64 = 10.0;
 const GIF_PER_SECOND: f64 = 2.0;
 /// At most this many buckets are kept (about 100 bytes each: route keys are bounded, see `method_key`). A new bucket past
@@ -70,9 +72,10 @@ fn method_key(method: &Method) -> &str {
 const ANON_INVITE_ROUTE: &str = "/invites/{code}";
 const ANON_INVITE_BURST: f64 = 10.0;
 const ANON_INVITE_PER_SECOND: f64 = 0.2;
-/// `POST /channels/{id}/call/ring` re-rings the other people of a DM: a few rings, then one every 5 s.
+/// Importing a GIF as an avatar or banner: 3 at once, then one every 5 s.
 const GIF_IMPORT_BURST: f64 = 3.0;
 const GIF_IMPORT_PER_SECOND: f64 = 0.2;
+/// `POST /channels/{id}/call/ring` re-rings the other people of a DM: a few rings, then one every 5 s.
 const CALL_RING_BURST: f64 = 5.0;
 const CALL_RING_PER_SECOND: f64 = 0.2;
 
@@ -275,11 +278,17 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
     }
     let is_gif = request.method() == axum::http::Method::GET && route.contains("/gifs/");
     let anon_invite = request.method() == axum::http::Method::GET && matches!(caller, Caller::Ip(_)) && route.ends_with(ANON_INVITE_ROUTE);
-    let route = if is_gif { GIF_ROUTE.to_owned() } else { format!("{} {route}", method_key(request.method())) };
+    // Each call makes the server download up to an avatar's or banner's size from the GIF provider; both routes draw on one bucket.
+    let is_gif_import = request.method() == axum::http::Method::POST && (route.ends_with("/avatars/gif") || route.ends_with("/banners/gif"));
+    let route = if is_gif {
+        GIF_ROUTE.to_owned()
+    } else if is_gif_import {
+        GIF_IMPORT_ROUTE.to_owned()
+    } else {
+        format!("{} {route}", method_key(request.method()))
+    };
     // The limits are never raised above the configured route bucket (tests and operators may set it lower).
     let is_ring = request.method() == axum::http::Method::POST && route.ends_with("/call/ring");
-    // Each call makes the server download up to an avatar's size from the GIF provider.
-    let is_gif_import = request.method() == axum::http::Method::POST && route.ends_with("/avatars/gif");
     let bucket = if is_gif {
         Some((GIF_BURST.min(limit.route_burst), GIF_PER_SECOND.min(limit.route_per_second)))
     } else if anon_invite {

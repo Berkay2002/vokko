@@ -1,5 +1,5 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! Recent avatars (`GET /users/@me/avatars`) and importing a picked GIF as an avatar (`POST /users/@me/avatars/gif`).
+//! Recent avatars and banners (`GET /users/@me/avatars`, `/banners`) and importing a picked GIF as an avatar or banner (`POST /users/@me/avatars/gif`, `/banners/gif`).
 mod common;
 
 use std::time::Duration;
@@ -195,4 +195,82 @@ async fn a_picked_gif_is_fetched_by_the_server_only_from_the_providers_media_hos
     let (plain, plain_token, plain_channel) = setup(|_| {}).await;
     let (status, error) = plain.post("/users/@me/avatars/gif", &plain_token, json!({"channel_id": plain_channel, "url": format!("{base}/media/a.gif")})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
+}
+
+#[tokio::test]
+async fn recent_banners_are_their_own_list_of_six_and_their_files_are_kept() {
+    let (app, token, channel) = setup(|_| {}).await;
+    assert_eq!(app.get("/users/@me/banners", &token).await.1, json!([]));
+    assert_eq!(app.send(axum::http::Method::GET, "/users/@me/banners", None, None).await.0, StatusCode::UNAUTHORIZED);
+
+    let mut uploads = Vec::new();
+    for n in 0..8 {
+        let attachment = upload(&app, &token, &channel, &format!("b{n}.png"), "image/png", &png(100 + n)).await;
+        let (status, user) = app.patch("/users/@me", &token, json!({"banner_attachment_id": attachment["id"]})).await;
+        assert_eq!(status, StatusCode::OK, "{user}");
+        assert_eq!(user["banner"], attachment["url"]);
+        uploads.push(attachment);
+    }
+    let (status, recent) = app.get("/users/@me/banners", &token).await;
+    assert_eq!(status, StatusCode::OK, "{recent}");
+    let expected: Vec<String> = (2..8).rev().map(|n| uploads[n]["id"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(ids(&recent), expected, "the last six, newest first");
+    assert_eq!(recent[0]["url"], uploads[7]["url"]);
+    assert_eq!(app.get("/users/@me/avatars", &token).await.1, json!([]), "banners are not avatars");
+
+    // an avatar does not enter the banner list, and the same upload can be in both lists
+    let (status, _) = app.patch("/users/@me", &token, json!({"avatar_attachment_id": uploads[7]["id"]})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(ids(&app.get("/users/@me/avatars", &token).await.1), vec![uploads[7]["id"].as_str().unwrap().to_owned()]);
+    assert_eq!(app.get("/users/@me/banners", &token).await.1.as_array().unwrap().len(), 6);
+
+    // setting an older banner again moves it to the top; clearing keeps the list; another user has their own
+    app.patch("/users/@me", &token, json!({"banner_attachment_id": uploads[3]["id"]})).await;
+    assert_eq!(ids(&app.get("/users/@me/banners", &token).await.1)[0], uploads[3]["id"].as_str().unwrap());
+    app.patch("/users/@me", &token, json!({"banner_attachment_id": null})).await;
+    assert_eq!(app.get("/users/@me/banners", &token).await.1.as_array().unwrap().len(), 6);
+    let (other, _) = app.register("alice").await;
+    assert_eq!(app.get("/users/@me/banners", &other).await.1, json!([]));
+
+    // a listed banner is in use: the pending-upload cleanup keeps it, and removes one that fell off the list
+    for upload in [&uploads[5], &uploads[0]] {
+        sqlx::query("UPDATE attachments SET claimed_at = NULL WHERE id = $1").bind(id_of(upload)).execute(&app.state.db).await.unwrap();
+    }
+    let removed = vokko_server::media::cleanup_pending(&app.state, Duration::ZERO).await;
+    assert!(removed >= 1, "the banner that fell off the list is a pending upload again");
+    assert_eq!(status_of(&app, uploads[5]["url"].as_str().unwrap()).await, StatusCode::OK);
+    assert_eq!(status_of(&app, uploads[0]["url"].as_str().unwrap()).await, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_picked_gif_can_be_imported_as_a_banner_up_to_the_banner_size() {
+    let base = media_host().await;
+    let configured = base.clone();
+    let (app, token, channel) = setup(move |config| {
+        config.gif = GifConfig { provider: GifProvider::Giphy, api_key: "k".to_owned(), base_url: Some(configured) };
+        config.unfurl.allow_private = true; // the fake host is on loopback
+    })
+    .await;
+    let import = |url: String| app.post("/users/@me/banners/gif", &token, json!({"channel_id": channel, "url": url}));
+
+    let (status, attachment) = import(format!("{base}/media/a.gif")).await;
+    assert_eq!(status, StatusCode::OK, "{attachment}");
+    assert_eq!((attachment["content_type"].as_str(), attachment["filename"].as_str()), (Some("image/gif"), Some("banner.gif")));
+    let (status, user) = app.patch("/users/@me", &token, json!({"banner_attachment_id": attachment["id"]})).await;
+    assert_eq!(status, StatusCode::OK, "{user}");
+    assert!(user["banner"].as_str().unwrap().ends_with("/banner.gif"), "{user}");
+    assert_eq!(status_of(&app, user["banner"].as_str().unwrap()).await, StatusCode::OK);
+    assert_eq!(ids(&app.get("/users/@me/banners", &token).await.1), vec![attachment["id"].as_str().unwrap().to_owned()]);
+    assert_eq!(app.get("/users/@me/avatars", &token).await.1, json!([]));
+
+    // the same checks as for avatars: other hosts, non-images and files over the limit are refused; nobody imports into a foreign channel
+    for url in
+        ["https://evil.example/a.gif".to_owned(), format!("{base}/media/text.gif"), format!("{base}/media/huge.gif"), format!("{base}/media/elsewhere.gif")]
+    {
+        let (status, error) = import(url.clone()).await;
+        assert!(status == StatusCode::BAD_REQUEST || status == StatusCode::BAD_GATEWAY, "{url}: {status} {error}");
+    }
+    let (stranger, _) = app.register("mallory").await;
+    let (status, _) = app.post("/users/@me/banners/gif", &stranger, json!({"channel_id": channel, "url": format!("{base}/media/a.gif")})).await;
+    assert_ne!(status, StatusCode::OK);
 }

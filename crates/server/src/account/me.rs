@@ -212,14 +212,14 @@ pub async fn delete_account(
     let paths: Vec<(Option<String>,)> = sqlx::query_as(
         "SELECT avatar_path FROM users WHERE id = $1 UNION ALL SELECT banner_path FROM users WHERE id = $1 \
          UNION ALL SELECT avatar_path FROM guild_members WHERE user_id = $1 UNION ALL SELECT banner_path FROM guild_members WHERE user_id = $1 \
-         UNION ALL SELECT p #>> '{}' FROM users u, jsonb_path_query(u.widgets, '$.**.image_path') p WHERE u.id = $1          UNION ALL SELECT attachment_id::text FROM user_avatar_history WHERE user_id = $1",
+         UNION ALL SELECT p #>> '{}' FROM users u, jsonb_path_query(u.widgets, '$.**.image_path') p WHERE u.id = $1          UNION ALL SELECT attachment_id::text FROM user_image_history WHERE user_id = $1",
     )
     .bind(user_id)
     .fetch_all(&mut *tx)
     .await?;
     let profile_ids: Vec<i64> = paths.into_iter().filter_map(|(path,)| path?.split('/').next()?.parse().ok()).collect();
     // their own pictures stop counting as "in use" first; an upload can also be a guild or group icon, a sticker or someone else's picture
-    sqlx::query("DELETE FROM user_avatar_history WHERE user_id = $1").bind(user_id).execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM user_image_history WHERE user_id = $1").bind(user_id).execute(&mut *tx).await?;
     sqlx::query("UPDATE users SET avatar_path = NULL, banner_path = NULL, widgets = NULL WHERE id = $1").bind(user_id).execute(&mut *tx).await?;
     sqlx::query("UPDATE guild_members SET avatar_path = NULL, banner_path = NULL WHERE user_id = $1").bind(user_id).execute(&mut *tx).await?;
     let media: Vec<(i64,)> = sqlx::query_as(&format!(

@@ -161,3 +161,23 @@ async fn ipv6_clients_are_limited_per_64_and_per_48() {
     assert_eq!(login("2001:db8:1:99::1".to_owned()).await, StatusCode::TOO_MANY_REQUESTS, "the /48 is used up");
     assert_eq!(login("2001:db8:2::1".to_owned()).await, StatusCode::BAD_REQUEST, "another /48");
 }
+
+#[tokio::test]
+async fn avatar_and_banner_gif_imports_share_one_small_bucket_per_user() {
+    // default limits: 30 per route; importing a GIF as an avatar or banner gets 3, then one every 5 seconds, across both routes
+    let app = TestApp::with_config(|config| config.rate_limit = Some(RateLimit::default())).await;
+    let (token, _) = app.register("sam").await;
+    let (other, _) = app.register("alice").await;
+    let body = json!({"channel_id": "1", "url": "https://evil.example/a.gif"});
+    let mut limited_at = None;
+    for request in 0..8 {
+        let path = if request % 2 == 0 { "/users/@me/avatars/gif" } else { "/users/@me/banners/gif" };
+        if app.post(path, &token, body.clone()).await.0 == 429 {
+            limited_at = Some(request);
+            break;
+        }
+    }
+    let limited_at = limited_at.expect("the shared import bucket ran dry");
+    assert!((3..=4).contains(&limited_at), "burst of 3 plus a little refill, got {limited_at}");
+    assert_ne!(app.post("/users/@me/banners/gif", &other, body).await.0, 429, "another user has their own bucket");
+}
