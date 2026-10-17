@@ -350,6 +350,22 @@ Desktop installers placed in `deploy/downloads/` are served at `/downloads/<file
 
 Every user gets Discord Nitro's upload limit for free: one file may be up to 500 MiB, or `VOKKO_MAX_UPLOAD_MB` when you set it lower, whichever is lower (values above 500 are lowered to 500). Uploads are streamed to disk and from there to the storage backend (S3 included), so a large file does not sit in memory. A message holds up to 10 files, a user streams at most 3 uploads at once, and each user may have 100 MiB of not-yet-sent uploads, or one file's worth when the per-file limit is larger (those are deleted after an hour). Budget disk accordingly: at 500 MiB that is up to 500 MiB of pending uploads per active user. Change the limit in `deploy/.env` and `docker compose up -d`. A reverse proxy in front must allow at least that much (nginx: `client_max_body_size 501m`; Caddy has no limit by default). The bundled client checks the 500 MiB limit in the composer; a file under that but over a lower server limit is refused by the server (413) and the client says so.
 
+## Problem reports
+
+"Report a Problem" in the client stores the user's description, app version, OS and a scrubbed tail of the client log in the
+`bug_reports` table (docs/api.md "Problem reports"). There is no admin UI; read them with psql:
+
+```sql
+SELECT r.id, r.created_at, u.username, r.app_version, r.os, r.description
+FROM bug_reports r JOIN users u ON u.id = r.user_id
+ORDER BY r.created_at DESC LIMIT 20;
+
+SELECT logs FROM bug_reports WHERE id = <id>;  -- the reference the user was shown
+```
+
+Rows are deleted 30 days after they were sent. Treat the logs as private: the client removes tokens and message text, but
+log lines can still name channels, servers and users.
+
 ## Not production-ready yet
 
 - The bundled container healthcheck still only proves the port accepts connections; `GET /healthz` (see above) is the real check, but `deploy/` does not use it yet.

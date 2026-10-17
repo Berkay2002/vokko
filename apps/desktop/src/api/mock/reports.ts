@@ -4,7 +4,7 @@
 
 import { RateLimitedError } from "../errors";
 import { Perm, hasBit } from "../permissions";
-import { AuditLogEvent, MessageType, REPORT_DETAILS_MAX, type CreateReportRequest, type Report, type ReportReason, type ReportStatus } from "../types";
+import { AuditLogEvent, BUG_REPORT_DESCRIPTION_MAX, MessageType, REPORT_DETAILS_MAX, type CreateReportRequest, type Report, type ReportReason, type ReportStatus } from "../types";
 import { channelPermsOf, guildPermsOf } from "./access";
 import { recordAudit } from "./admin";
 import { db, nextId, userOf } from "./db";
@@ -126,4 +126,12 @@ route("PATCH", `/guilds/${ID}/reports/${ID}`, ({ viewer, params, body }) => {
   report.closed_at = status === "open" ? null : new Date().toISOString();
   if (old !== status) recordAudit(guildId, viewer.user.id, AuditLogEvent.ReportUpdate, report.id, { changes: [{ key: "status", old_value: old, new_value: status }] });
   return structuredClone(report);
+});
+
+// "Report a problem" (POST /bug-reports): the server keeps it for the operator; the mock only validates and hands back an id.
+route("POST", "/bug-reports", ({ body }) => {
+  const description = (str(body.description) ?? "").trim();
+  if (description === "") invalid("description", "BASE_TYPE_REQUIRED", "Describe the problem.");
+  if (Array.from(description).length > BUG_REPORT_DESCRIPTION_MAX) invalid("description", "BASE_TYPE_MAX_LENGTH", `Must be at most ${BUG_REPORT_DESCRIPTION_MAX} characters.`);
+  return { id: nextId() };
 });

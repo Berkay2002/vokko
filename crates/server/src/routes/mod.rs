@@ -6,6 +6,7 @@ mod app_icons;
 mod applications;
 mod attachments;
 pub mod auth;
+pub mod bug_reports;
 mod channels;
 mod embed_media;
 mod emojis;
@@ -62,6 +63,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(onboarding::routes())
         .merge(suggestions::routes())
         .merge(reports::routes())
+        .merge(bug_reports::routes())
         .merge(saved::routes())
         .merge(settings::routes())
         .merge(gifs::routes())

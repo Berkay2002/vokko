@@ -1,21 +1,22 @@
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, CircleHelp, Hash, Inbox, Users, Volume2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bug, CircleHelp, Hash, Inbox, Keyboard, Users, Volume2 } from "lucide-react";
 import { useLocation, useNavigate, useNavigationType } from "react-router";
 import { useWindowChrome } from "../desktop/windowControls";
 import { dmName, useStore } from "../api/store";
 import { ChannelType } from "../api/types";
-import { Tooltip } from "../ui";
+import { Tooltip, useContextMenu } from "../ui";
 import { InboxPopout } from "./Inbox";
 import { closeModal, openModal, useModals } from "./modalStore";
 import { NARROW_QUERY } from "./navDrawer";
 import { useMediaQuery } from "./useMediaQuery";
 import { useRegisterTitleBar, WindowControls } from "./WindowControls";
 
-/** The 32 px title bar: current page title centred, Inbox and Help on the right, and in the desktop app (off macOS) the window buttons after them and a drag region over the whole bar. Help opens the keybinds page, the only shortcut list we have. */
+/** The 32 px title bar: current page title centred, Inbox and Help on the right, and in the desktop app (off macOS) the window buttons after them and a drag region over the whole bar. Help opens a menu: the keybinds page (the only shortcut list we have) and Report a Problem. */
 export function TitleBar() {
   const [inboxButton, setInboxButton] = useState<HTMLElement | null>(null);
   useRegisterTitleBar();
   const inboxOpen = useModals(s => s.modal?.type === "inbox");
+  const menu = useContextMenu();
   // the phone has no title bar: the user card on the list page opens the Inbox
   const narrow = useMediaQuery(NARROW_QUERY);
   const title = useStore(s => {
@@ -40,7 +41,13 @@ export function TitleBar() {
           </button>
         </Tooltip>
         <Tooltip content="Help" side="bottom">
-          <button type="button" className="title-bar-button" aria-label="Help" onClick={() => openModal({ type: "userSettings", section: "keybinds" })}>
+          <button type="button" className="title-bar-button" aria-label="Help" onClick={event => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [
+                { id: "keybinds", label: "Keybinds", icon: <Keyboard size={18} />, onSelect: () => openModal({ type: "userSettings", section: "keybinds" }) },
+                { id: "report-problem", label: "Report a Problem", icon: <Bug size={18} />, onSelect: () => openModal({ type: "reportProblem" }) },
+              ]);
+            }}>
             <CircleHelp size={18} />
           </button>
         </Tooltip>

@@ -3944,6 +3944,25 @@ pub struct CreateReportRequest {
     pub details: Option<String>,
 }
 
+/// `POST /bug-reports` ("Report a problem"): kept for the instance operator, deleted after 30 days.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CreateBugReportRequest {
+    /// What went wrong, 1-2000 characters (trimmed).
+    pub description: String,
+    /// Client version, at most 64 characters.
+    pub app_version: String,
+    /// Operating system and browser, at most 256 characters.
+    pub os: String,
+    /// Recent client log lines (warnings, errors, voice events) with secrets scrubbed by the client; the whole body is capped at 256 KiB.
+    #[serde(default)]
+    pub logs: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BugReportCreated {
+    pub id: Snowflake,
+}
+
 /// `PATCH /guilds/{id}/reports/{report_id}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpdateReportRequest {

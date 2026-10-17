@@ -14,12 +14,19 @@ const ID_QUICK_SWITCHER: &str = "mac-quick-switcher";
 const ID_INBOX: &str = "mac-inbox";
 const ID_HELP: &str = "mac-help";
 const ID_SHORTCUTS: &str = "mac-shortcuts";
+const ID_REPORT_PROBLEM: &str = "mac-report-problem";
 #[cfg(debug_assertions)]
 const ID_RELOAD: &str = "mac-reload";
 
 /// Menu item id -> the action name the webview receives. Ids are prefixed so they can never match the tray's.
-const ACTIONS: [(&str, &str); 5] =
-    [(ID_SETTINGS, "settings"), (ID_QUICK_SWITCHER, "quick-switcher"), (ID_INBOX, "inbox"), (ID_HELP, "help"), (ID_SHORTCUTS, "shortcuts")];
+const ACTIONS: [(&str, &str); 6] = [
+    (ID_SETTINGS, "settings"),
+    (ID_QUICK_SWITCHER, "quick-switcher"),
+    (ID_INBOX, "inbox"),
+    (ID_HELP, "help"),
+    (ID_SHORTCUTS, "shortcuts"),
+    (ID_REPORT_PROBLEM, "report-problem"),
+];
 
 fn action_for(id: &str) -> Option<&'static str> {
     ACTIONS.iter().find(|(item, _)| *item == id).map(|(_, action)| *action)
@@ -102,6 +109,8 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<(Menu<R>, Submenu
         &[
             &MenuItem::with_id(app, ID_HELP, format!("{name} Help"), true, None::<&str>)?,
             &MenuItem::with_id(app, ID_SHORTCUTS, "Keyboard Shortcuts", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, ID_REPORT_PROBLEM, "Report a Problem…", true, None::<&str>)?,
         ],
     )?;
 

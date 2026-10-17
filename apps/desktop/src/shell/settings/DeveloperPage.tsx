@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { getDesktopPrefs, isDesktop, restartApp, setDesktopPrefs } from "../../desktop";
 import { Modal, setPref, usePrefs } from "../../ui";
 import { DeveloperApps } from "../../apps/DeveloperApps";
+import { openModal } from "../modalStore";
 import { Category, Page, SwitchRow } from "./controls";
 
 /** Discord's "Advanced" page: developer mode (synced), hardware acceleration (this device; desktop app, needs a restart) and
- * application test mode (no application platform yet, so it stays disabled). */
+ * application test mode (no application platform yet, so it stays disabled). Vokko adds Report a Problem under Support. */
 export function DeveloperPage() {
   const developerMode = usePrefs(s => s.developerMode);
   const app = isDesktop();
@@ -48,6 +49,12 @@ export function DeveloperPage() {
           onChange={v => setPending(v)}
         />
         {error && <p className="field-error">{error}</p>}
+      </Category>
+      <Category title="Support">
+        <p className="settings-field-note">Sends a description of the problem with the app version, your OS and recent warnings, errors and voice events (tokens removed, no messages) to whoever runs this server.</p>
+        <button type="button" className="btn btn-secondary" onClick={() => openModal({ type: "reportProblem" })}>
+          Report a Problem
+        </button>
       </Category>
       <Modal
         open={pending !== null}

@@ -125,11 +125,12 @@ function ConnectionPopout({ anchor, open, onClose }: { anchor: HTMLElement | nul
             <Bug size={16} aria-hidden="true" /> Troubleshoot
           </button>
         </Tooltip>
-        <Tooltip content="Not available yet" side="top">
-          <button type="button" className="voice-quality-button" aria-disabled="true">
-            <Upload size={16} aria-hidden="true" /> Upload Logs
-          </button>
-        </Tooltip>
+        <button type="button" className="voice-quality-button" onClick={() => {
+          onClose();
+          openModal({ type: "reportProblem" });
+        }}>
+          <Upload size={16} aria-hidden="true" /> Upload Logs
+        </button>
       </div>
       {secure && (
         <div className="voice-quality-secure">

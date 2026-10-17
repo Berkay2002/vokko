@@ -415,6 +415,17 @@ Discord sends reports to its own Trust & Safety team through an undocumented API
 - Closing or reopening records audit entry 250 (`ReportUpdate`, Vokko-only): `target_id` is the report id, the one change is `status` (old to new), `reason` comes from `X-Audit-Log-Reason`. The reporter, the target and the reason for the report are left out, since VIEW_AUDIT_LOG members need not be moderators. Setting the status a report already has records nothing.
 - No gateway event yet: moderators load the list.
 
+## Problem reports (Report a Problem)
+
+Vokko-only: Help menu (title bar and the macOS Help menu), Settings > Advanced > Support and the voice connection popout's Upload Logs send one. Reports are for the instance operator; there is no in-app reader (see self-hosting.md "Problem reports").
+
+| Method | Path | Body → Response |
+|---|---|---|
+| POST | /bug-reports | `CreateBugReportRequest` `{description, app_version, os, logs}` → `BugReportCreated` `{id}`. Signed in (401 without a token). `description` trimmed, 1-2000 characters; `app_version` at most 64, `os` at most 256 (400 50035 on the field). The whole body is capped at 256 KiB (413 40005). Rate limit per user: 3 reports, then one every 10 minutes (429 `RateLimitError`) |
+
+- `logs`: the client's last 500 console warning/error, uncaught error and voice/LiveKit event lines, each at most 1000 characters. The client scrubs them before storing (`apps/desktop/src/report/logBuffer.ts`: JWTs, `Bearer`/`Bot` headers, any `token`/`secret`/`password`/`signature`/`sig`/`auth*`/`api_key`/`cookie`/`session`/`credential`/`ticket` key's value, OAuth `code`/`state`, and long strings mixing letters and digits) and drops `content` fields of logged objects. The server also replaces the caller's own token wherever it appears.
+- Stored with the user id and time; deleted 30 days after creation (hourly sweep). Deleting the account deletes its reports.
+
 ## Apply to Join (join requests, Server Settings > Access)
 
 Discord's member verification form and guild join requests. A guild's `join_mode` (also on `Invite.guild`) is `0` Invite Only (default) or `1` Apply to Join; MANAGE_GUILD switches it through PATCH /guilds/{id} `{join_mode}` (other values → 400 50035), audit key `join_mode`.

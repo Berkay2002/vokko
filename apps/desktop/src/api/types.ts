@@ -2396,6 +2396,18 @@ export interface GuildIntegration {
   role_id: Snowflake | null; // the bot's role
 }
 
+// ---- Report a problem (docs/api.md "Problem reports") ----
+export const BUG_REPORT_DESCRIPTION_MAX = 2000;
+export interface CreateBugReportRequest {
+  description: string; // trimmed, 1-BUG_REPORT_DESCRIPTION_MAX
+  app_version: string; // at most 64
+  os: string; // at most 256
+  logs: string; // scrubbed client log tail; the whole body is capped at 256 KiB
+}
+export interface BugReportCreated {
+  id: Snowflake;
+}
+
 // ---- Reports (MOD-009) ----
 export type ReportReason = "spam" | "harassment" | "hate" | "sexual" | "violence" | "self_harm" | "impersonation" | "other";
 export type ReportStatus = "open" | "resolved" | "dismissed";

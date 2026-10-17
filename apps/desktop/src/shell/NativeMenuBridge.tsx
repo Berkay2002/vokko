@@ -19,6 +19,8 @@ export function menuModal(id: NativeMenuId): ModalSpec {
       return { type: "userSettings", section: "keybinds" };
     case "shortcuts":
       return { type: "shortcuts" };
+    case "report-problem":
+      return { type: "reportProblem" };
   }
 }
 
