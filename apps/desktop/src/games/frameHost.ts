@@ -24,7 +24,7 @@ export type HostToGame =
 
 export type GameErrorCode = "rate_limited" | "too_large" | "invalid" | "not_running";
 
-export type GameToHost = { type: "ready" } | { type: "send"; data: unknown; to?: string } | { type: "close" };
+export type GameToHost = { type: "ready" } | { type: "send"; data: unknown; to?: string } | { type: "close" } | { type: "escape" };
 
 /** The origins a third-party game must not share (it would get allow-same-origin there). */
 export function appOrigins(): string[] {
@@ -92,6 +92,8 @@ export function parsePortMessage(raw: unknown): GameToHost | null {
       return { type: "ready" };
     case "close":
       return { type: "close" };
+    case "escape":
+      return { type: "escape" };
     case "send":
       if (!("data" in data) || (data.to !== undefined && typeof data.to !== "string")) return null;
       return data.to === undefined ? { type: "send", data: data.data } : { type: "send", data: data.data, to: data.to as string };

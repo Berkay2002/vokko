@@ -9,6 +9,7 @@ import { ApiRequestError } from "../api/rest";
 import { GUILD_GAMES_MAX, type GameAspect, type GameManifest, type GameManifestRequest, type Snowflake } from "../api/types";
 import { Category, Page, Select, Unavailable } from "../shell/settings/controls";
 import { addGuildGame, editGuildGame, listGuildGames, removeGuildGame } from "./api";
+import { Modal } from "../ui";
 import { GameIcon } from "./GameIcon";
 import "./games.css";
 
@@ -84,6 +85,7 @@ export function GamesSettings({ guildId, canEdit }: { guildId: Snowflake; canEdi
   const [games, setGames] = useState<GameManifest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<GameManifest | "new" | null>(null);
+  const [removing, setRemoving] = useState<GameManifest | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -141,7 +143,7 @@ export function GamesSettings({ guildId, canEdit }: { guildId: Snowflake; canEdi
                     <button type="button" className="btn btn-link btn-sm" aria-label={`Edit ${game.name}`} onClick={() => setEditing(game)}>
                       <Pencil size={16} />
                     </button>
-                    <button type="button" className="btn btn-link btn-sm" aria-label={`Remove ${game.name}`} onClick={() => remove(game)}>
+                    <button type="button" className="btn btn-link btn-sm" aria-label={`Remove ${game.name}`} onClick={() => setRemoving(game)}>
                       <Trash2 size={16} />
                     </button>
                   </>
@@ -160,6 +162,32 @@ export function GamesSettings({ guildId, canEdit }: { guildId: Snowflake; canEdi
             void listGuildGames(guildId).then(setGames, () => undefined);
           }}
         />
+      )}
+      {removing && (
+        <Modal
+          open
+          onClose={() => setRemoving(null)}
+          title="Remove Game"
+          footer={
+            <>
+              <button type="button" className="btn btn-link" onClick={() => setRemoving(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  remove(removing);
+                  setRemoving(null);
+                }}
+              >
+                Remove Game
+              </button>
+            </>
+          }
+        >
+          <p>Remove {removing.name}? Calls playing it now will end the game.</p>
+        </Modal>
       )}
     </Page>
   );

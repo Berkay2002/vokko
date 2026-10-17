@@ -135,4 +135,18 @@ describe('VokkoSession', () => {
       { type: 'close' },
     ]);
   });
+
+  it('reports an Escape the game did not handle', async () => {
+    const { host } = await connected();
+    const received: unknown[] = [];
+    host.onmessage = (e) => received.push(e.data);
+    const key = (prevented: boolean) => {
+      const event = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape' });
+      if (prevented) event.preventDefault();
+      win.dispatchEvent(event);
+    };
+    key(true);
+    key(false);
+    await vi.waitFor(() => expect(received).toEqual([{ type: 'escape' }]));
+  });
 });
