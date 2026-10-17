@@ -3,7 +3,7 @@ import { ArrowLeft, Search, Star, TrendingUp, X } from 'lucide-react';
 import type { Gif, GifCategories, GifCategory, GifPage, GifProvider } from '../api/types';
 import { isFavorite } from './lists';
 import { safeMediaUrl } from './helpers';
-import { request, resolveUrl, ApiRequestError } from './shell';
+import { AnimatedImage, request, resolveUrl, ApiRequestError } from './shell';
 import { loadFavorites, toggleFavorite, useMedia } from './store';
 
 type Source = { kind: 'search'; q: string } | { kind: 'trending' };
@@ -84,7 +84,7 @@ function GifGrid({ gifs, favorites, onPick, pickLabel }: { gifs: Gif[]; favorite
         const preview = safeMediaUrl(gif.preview_url);
         return <div key={gif.id} className="media-gif-tile" style={{ aspectRatio: gif.width > 0 && gif.height > 0 ? `${gif.width} / ${gif.height}` : '4 / 3' }}>
           <button type="button" className="media-gif-pick" aria-label={`${pickLabel}: ${gif.title || 'untitled'}`} onClick={() => onPick(gif)}>
-            {preview && <img src={resolveUrl(preview)} alt={gif.title} loading="lazy" draggable={false} />}
+            {preview && <AnimatedImage kind="gif" src={resolveUrl(preview)} alt={gif.title} loading="lazy" draggable={false} />}
           </button>
           <button type="button" className={`media-gif-star${fav ? ' on' : ''}`} aria-label={fav ? 'Remove from favorites' : 'Add to favorites'} aria-pressed={fav} onClick={() => void toggleFavorite(gif)}>
             <Star size={16} fill={fav ? 'currentColor' : 'none'} />
