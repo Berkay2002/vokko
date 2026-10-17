@@ -99,11 +99,37 @@ wsl --import vokko-linux E:\WSL\vokko-linux E:\WSL\jammy.rootfs.tar.gz --version
 ```
 
 Then as root in the distro: `apt-get install build-essential curl wget file git xdg-utils pkg-config libssl-dev libxdo-dev
-libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev xz-utils`, `useradd -m -s /bin/bash vokko` and
+libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev xz-utils patchelf gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good` (patchelf and the plugins are for `bundleMediaFramework`, below), `useradd -m -s /bin/bash vokko` and
 `[user] default=vokko` in `/etc/wsl.conf`; as `vokko`: rustup (stable, clippy) and Node 22 unpacked to `~/node` (the script puts
 `~/node/bin` and `~/.cargo/bin` on PATH). Built on Ubuntu 22.04, the binary needs glibc 2.34 or newer (Debian 12, Ubuntu 22.04,
 Fedora 35 and later).
 Remove it all with `wsl --unregister vokko-linux` and deleting `E:\WSL`.
+
+The AppImage carries its own GStreamer plugins (`bundle.linux.appimage.bundleMediaFramework` in `tauri.conf.json`, about +12 MB).
+Without them the bundled `libgstreamer` looks for plugins only inside the AppImage, finds none and WebKit logs `GStreamer element
+appsink not found` (no audio or video in the page). The .deb needs nothing extra: `libwebkit2gtk-4.1-0` depends on the plugins.
+
+### Linux smoke test
+
+Headless, on any Ubuntu 22.04+ box with the setup packages above plus `xvfb imagemagick xdotool dbus`. Build unsigned and
+against the in-app mock backend (no `VITE_VOKKO_API`), with the updater pointed at a port nothing listens on (it must be https,
+or the updater plugin refuses the config and the app exits at startup):
+
+```sh
+echo '{"bundle":{"createUpdaterArtifacts":false},"plugins":{"updater":{"endpoints":["https://127.0.0.1:9/latest.json"]}}}' > /tmp/smoke.json
+npm ci && cd apps/desktop && NO_STRIP=1 npx tauri build --config release.production.json --config /tmp/smoke.json --bundles appimage,deb
+Xvfb :97 -screen 0 1440x900x24 -nolisten tcp & export DISPLAY=:97
+dbus-run-session -- ../../target/release/bundle/appimage/Vokko_0.1.8_amd64.AppImage &   # wait ~15 s
+import -window root login.png; xdotool mousemove 720 527 click 1; sleep 8; import -window root shell.png
+```
+
+Results (0.1.8 + media framework, Ubuntu 26.04, Xvfb): the window renders at 1440x900 with the login page and, after Log In, the
+app shell; WebKitGTK needs no `WEBKIT_DISABLE_COMPOSITING_MODE` (software GL; the `libEGL ... /dev/dri` warnings are harmless).
+No tray host: only a libayatana deprecation warning, no crash. A second start exits 0 and leaves one window (single instance).
+The first update check (30 s after start) logs `failed to check for updates` and the app carries on.
+Run it under `dbus-run-session`: over SSH the user's session bus can hold a stuck `xdg-desktop-portal`, and GTK then waits on
+its D-Bus call for ~25 s before the window appears. Desktop sessions have a working portal, so real users don't see this.
 
 ## Updater
 
