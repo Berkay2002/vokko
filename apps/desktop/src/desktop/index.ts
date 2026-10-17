@@ -12,7 +12,7 @@ export { getAppVersion, hideShareBar, syncWindowTheme } from "./window";
 export { requestAttention } from "./attention";
 export { onNativeMenu, type NativeMenuId } from "./menu";
 export { initDeepLinks, invitePath, onDeepLink, routeDeepLink, type DeepLink, type DeepLinkHandler } from "./deeplinks";
-export { checkForUpdate, downloadUpdate, initUpdater, restartToUpdate, useDesktopUpdate, type UpdateStatus } from "./updater";
+export { checkForUpdate, downloadUpdate, initUpdater, isNewerVersion, noticeLatestVersion, restartToUpdate, useDesktopUpdate, type UpdateStatus } from "./updater";
 export { initStreamerMode, restartApp, setCaptureHidden, streamingSoftwareRunning } from "./streamer";
 export { minimizeWindow, toggleMaximizeWindow, closeWindow, getWindowChrome, useWindowChrome, type WindowChrome } from "./windowControls";
 export { DETECTABLE_GAMES, listProcesses, matchGame, type DetectedGame, type GameEntry, type RunningProcess } from "./games";
