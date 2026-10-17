@@ -30,4 +30,7 @@ export const GAME_CREDITS: Record<string, GameCredit[]> = {
   "builtin:telephone": [
     { work: "drawphone (game rules and turn order)", author: "Tanner Krewson", url: "https://github.com/tannerkrewson/drawphone", license: "MIT", file: "/games/telephone/LICENSE-drawphone.txt" },
   ],
+  "builtin:trivia": [
+    { work: "Open Trivia Database (questions)", author: "PIXELTAIL GAMES LLC and contributors", url: "https://opentdb.com", license: "CC-BY-SA-4.0", file: "/games/trivia/LICENSE-opentdb.txt" },
+  ],
 };

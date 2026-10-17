@@ -1,0 +1,18 @@
+.chip { background: var(--panel-2); border-radius: 10px; padding: 1px 8px; font-size: 12px; }
+.answers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.answer { display: flex; gap: 10px; align-items: center; text-align: left; padding: 12px; min-height: 52px; }
+.answer .letter { flex: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: var(--bg); font-weight: 700; font-size: 12px; }
+.answer:disabled { opacity: 1; }
+.answer.picked { border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); }
+.answer.right { background: var(--good); border-color: var(--good); color: #fff; }
+.answer.wrong { background: var(--bad); border-color: var(--bad); color: #fff; }
+.ranking { margin: 0 0 12px; padding-left: 22px; font-size: 16px; }
+.ranking li:first-child { font-weight: 700; }
+@media (max-width: 560px) {
+  .answer { padding: 4px; min-height: 0; gap: 4px; }
+  .answer .letter { width: 16px; height: 16px; font-size: 10px; }
+  .answers { gap: 4px; }
+}
+@media (orientation: portrait) {
+  .answers { grid-template-columns: 1fr; }
+}

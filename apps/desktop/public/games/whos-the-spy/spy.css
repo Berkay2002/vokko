@@ -1,0 +1,20 @@
+#stage { display: flex; flex-direction: column; gap: 12px; }
+.secret { border-left: 4px solid var(--accent); }
+.secret p { margin: 0 0 4px; }
+.secret .role { font-size: 17px; }
+.secret.spy { border-left-color: var(--bad); }
+.vote { border-left: 4px solid var(--warn); }
+.result.town { border-left: 4px solid var(--good); }
+.result.spy { border-left: 4px solid var(--bad); }
+#places-card[hidden] { display: none; }
+#places { display: flex; flex-wrap: wrap; gap: 6px; }
+.place { padding: 4px 10px; font-size: 13px; }
+.place.crossed { text-decoration: line-through; opacity: 0.45; }
+.place.picked { background: var(--accent); border-color: var(--accent); color: #fff; }
+.confirm { width: 100%; margin-top: 6px; }
+@media (max-width: 560px) {
+  #stage { gap: 6px; }
+  .secret .role { font-size: 13px; }
+  .place { padding: 1px 4px; font-size: 10px; }
+  #places { gap: 3px; }
+}
