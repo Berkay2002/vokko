@@ -7,10 +7,12 @@ import type { GameManifest } from "../api/types";
 export const BUILTIN_PREFIX = "builtin:";
 
 const SKETCH: GameManifest = { id: "builtin:sketch", name: "Sketch", url: "/games/sketch/index.html", icon: "✏️", min_players: 2, max_players: 12, aspect: "16:9" };
+const CRAZY_EIGHTS: GameManifest = { id: "builtin:crazy-eights", name: "Crazy Eights", url: "/games/crazy-eights/index.html", icon: "🃏", min_players: 2, max_players: 10, aspect: "16:9" };
+const WEREWOLF: GameManifest = { id: "builtin:werewolf", name: "Werewolf", url: "/games/werewolf/index.html", icon: "🐺", min_players: 5, max_players: 16, aspect: "16:9" };
 /** The e2e game (public/games/mock/): only in the mock build, so it never shows up against a real server. */
 const MOCK_GAME: GameManifest = { id: "builtin:mock", name: "Mock Game", url: "/games/mock/index.html", icon: "🧪", min_players: 1, max_players: 16, aspect: "16:9" };
 
-export const BUILTIN_GAMES: readonly GameManifest[] = MOCK ? [SKETCH, MOCK_GAME] : [SKETCH];
+export const BUILTIN_GAMES: readonly GameManifest[] = MOCK ? [SKETCH, CRAZY_EIGHTS, WEREWOLF, MOCK_GAME] : [SKETCH, CRAZY_EIGHTS, WEREWOLF];
 
 export const isBuiltin = (game: Pick<GameManifest, "id">): boolean => game.id.startsWith(BUILTIN_PREFIX);
 

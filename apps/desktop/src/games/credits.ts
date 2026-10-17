@@ -11,4 +11,11 @@ export interface GameCredit {
   file?: string;
 }
 
-export const GAME_CREDITS: Record<string, GameCredit[]> = {};
+export const GAME_CREDITS: Record<string, GameCredit[]> = {
+  "builtin:crazy-eights": [
+    { work: "uno-game (rule flow reference)", author: "Guilherme Bromonschenkel", url: "https://github.com/guilhermebkel/uno-game", license: "MIT", file: "/games/crazy-eights/LICENSE-uno-game.txt" },
+  ],
+  "builtin:werewolf": [
+    { work: "OpenWerewolf (rules)", author: "James Craster", url: "https://github.com/JamesCraster/OpenWerewolf", license: "Apache-2.0", file: "/games/werewolf/LICENSE-OpenWerewolf.txt" },
+  ],
+};

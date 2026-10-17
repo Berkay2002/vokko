@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Crazy Eights</title>
+<link rel="stylesheet" href="./eights.css" />
+</head>
+<body>
+<main id="app">
+  <header>
+    <strong>Crazy Eights</strong>
+    <span id="status" aria-live="polite">Connecting...</span>
+    <span id="note"></span>
+  </header>
+  <section id="lobby" hidden>
+    <h2>Players <span id="seat-count"></span></h2>
+    <ul id="seats"></ul>
+    <div class="row">
+      <button type="button" id="join">Join</button>
+      <button type="button" id="start" class="primary">Deal</button>
+    </div>
+    <p class="hint">2 to 10 players. Match the suit or the value, or play a wild. Down to one card? Call "Last card" before someone catches you.</p>
+  </section>
+  <section id="table" hidden>
+    <ul id="others" aria-label="Players"></ul>
+    <div id="middle">
+      <button type="button" id="pile" class="card back" aria-label="Draw a card"><span class="count" id="pile-count"></span></button>
+      <div id="top"></div>
+      <div id="suit-info">
+        <span id="suit"></span>
+        <span id="dir"></span>
+      </div>
+    </div>
+    <ol id="log" aria-label="What happened"></ol>
+    <div id="mine">
+      <div class="row" id="actions">
+        <button type="button" id="last">Last card!</button>
+        <button type="button" id="pass" hidden>Keep it and pass</button>
+        <button type="button" id="again" class="primary" hidden>Play again</button>
+      </div>
+      <div id="hand" aria-label="Your hand"></div>
+    </div>
+    <div id="suit-picker" role="dialog" aria-label="Choose a suit" hidden></div>
+  </section>
+</main>
+<script src="../vokko-games.js"></script>
+<script src="../table-host.js"></script>
+<script src="./eights-core.js"></script>
+<script src="./eights.js"></script>
+</body>
+</html>
