@@ -183,6 +183,9 @@ impl Live {
                 _ = position_tick.tick() => {
                     if self.pipeline.is_some() {
                         self.mgr.reporter.send(&self.channel_id, Kind::Position, self.current_ms(), self.duration_ms(), None);
+                        if let Some(out) = &self.out {
+                            out.log_stats().await;
+                        }
                     }
                 }
                 _ = keepalive_tick.tick() => {

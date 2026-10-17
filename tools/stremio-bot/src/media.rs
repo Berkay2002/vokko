@@ -12,6 +12,7 @@ use livekit::webrtc::audio_frame::AudioFrame;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::rtp_sender::VideoEncoderBackend;
+use livekit::webrtc::stats::RtcStats;
 use livekit::webrtc::video_frame::{I420Buffer, VideoFrame, VideoRotation};
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
@@ -55,12 +56,14 @@ pub struct Published {
     audio: NativeAudioSource,
     /// The last frame, re-sent while paused so a late joiner gets a picture (libwebrtc needs a frame to cut a keyframe).
     last: Arc<Mutex<Option<I420Buffer>>>,
+    video_track: LocalVideoTrack,
     video_sid: TrackSid,
     audio_sid: TrackSid,
 }
 
 pub async fn publish(room: &Room, geo: &Geometry, d: &Desired, cfg: &Config) -> Result<Published, String> {
-    let video = NativeVideoSource::new(VideoResolution { width: geo.width, height: geo.height }, true);
+    // Not a screencast: libwebrtc keeps resolution and drops frames for screen content, which made films choppy.
+    let video = NativeVideoSource::new(VideoResolution { width: geo.width, height: geo.height }, false);
     let audio = NativeAudioSource::new(
         AudioSourceOptions { echo_cancellation: false, noise_suppression: false, auto_gain_control: false },
         plan::AUDIO_RATE as u32,
@@ -71,7 +74,7 @@ pub async fn publish(room: &Room, geo: &Geometry, d: &Desired, cfg: &Config) -> 
     let video_track = LocalVideoTrack::create_video_track("Stremio", RtcVideoSource::Native(video.clone()));
     let video_pub = local
         .publish_track(
-            LocalTrack::Video(video_track),
+            LocalTrack::Video(video_track.clone()),
             TrackPublishOptions {
                 source: TrackSource::Screenshare,
                 video_codec: match cfg.codec {
@@ -104,7 +107,7 @@ pub async fn publish(room: &Room, geo: &Geometry, d: &Desired, cfg: &Config) -> 
         )
         .await
         .map_err(|e| format!("publish audio: {e}"))?;
-    Ok(Published { video, audio, last: Arc::default(), video_sid: video_pub.sid(), audio_sid: audio_pub.sid() })
+    Ok(Published { video, audio, last: Arc::default(), video_track, video_sid: video_pub.sid(), audio_sid: audio_pub.sid() })
 }
 
 impl Published {
@@ -120,6 +123,26 @@ impl Published {
             && let Some(buffer) = last.as_ref()
         {
             self.video.capture_frame(&VideoFrame::new(VideoRotation::VideoRotation0, buffer));
+        }
+    }
+
+    /// One line per encoded layer, so choppy playback can be traced to the encoder (cpu) or the network (bandwidth).
+    pub async fn log_stats(&self) {
+        let Ok(stats) = self.video_track.get_stats().await else { return };
+        for s in stats {
+            if let RtcStats::OutboundRtp(o) = s {
+                let o = o.outbound;
+                tracing::info!(
+                    rid = o.rid,
+                    width = o.frame_width,
+                    height = o.frame_height,
+                    fps = o.frames_per_second,
+                    target_kbps = (o.target_bitrate / 1000.0) as u64,
+                    limit = ?o.quality_limitation_reason,
+                    encoder = o.encoder_implementation,
+                    "video send"
+                );
+            }
         }
     }
 
