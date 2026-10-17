@@ -205,11 +205,13 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
   const showLogOut = !needle || "log out".includes(needle);
   const active = sections.find(s => s.id === current) ?? sections[0]!;
 
-  const open = (id: string) => {
+  const open = (id: string, anchorName?: string) => {
     if (id !== current && blockedByUnsaved()) return;
     setCurrent(id);
     setAnchor(0);
     scroller.current?.scrollTo({ top: 0, behavior: "instant" });
+    // once the new page has rendered
+    if (anchorName) requestAnimationFrame(() => scroller.current?.querySelector(`[data-anchor="${anchorName}"]`)?.scrollIntoView({ block: "start" }));
   };
 
   const scrollToAnchor = (index: number) => {
@@ -270,7 +272,7 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
       case "games":
         return <RegisteredGamesPage />;
       case "connections":
-        return <ConnectedAppsPage />;
+        return <ConnectedAppsPage onOpen={open} />;
       default:
         return null;
     }

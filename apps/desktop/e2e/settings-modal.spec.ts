@@ -175,3 +175,13 @@ test('new pages render: Data & Privacy, Content & Social, Activity Privacy, Conn
   }
   await expect(dialog.getByRole('heading', { name: 'Default Keybinds', level: 2 })).toBeVisible();
 });
+
+test('Connected Apps offers only the linkable providers and sends them to My Account > Sign-in Methods', async ({ page }) => {
+  const dialog = await openSettings(page);
+  await dialog.getByRole('button', { name: 'Connected Apps', exact: true }).click();
+  await expect(dialog.locator('.sm-provider')).toHaveCount(2);
+  await expect(dialog.getByRole('button', { name: 'Connect Steam' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Connect GitHub' }).click();
+  await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('My Account');
+  await expect(dialog.getByRole('heading', { name: 'Sign-in Methods', level: 2 })).toBeInViewport();
+});
