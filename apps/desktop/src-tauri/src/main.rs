@@ -7,6 +7,8 @@ mod games;
 mod links;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(target_os = "linux")]
+mod native_voice;
 mod notifications;
 mod overlay;
 mod popups;
@@ -192,6 +194,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     }
 
+    #[cfg(target_os = "linux")]
+    {
+        builder = builder.manage(native_voice::NativeVoice::default());
+    }
+
     builder
         .manage(Mutex::new(Session::demo()?))
         .manage(PrefsStore::load(config_dir.map(|dir| dir.join("desktop.json"))))
@@ -242,6 +249,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             appicon::desktop_set_app_icon,
             #[cfg(target_os = "macos")]
             macos::desktop_request_attention,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_connect,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_disconnect,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_mute,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_deaf,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_ptt,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_set_user_volume,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_apply_settings,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_devices,
             links::desktop_take_pending_links,
             updates::desktop_update_status,
             updates::desktop_update_check,

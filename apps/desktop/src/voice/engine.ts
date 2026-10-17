@@ -5,6 +5,7 @@
 // connect, so op 4 is only re-sent once the transport has reported the connection closed, never while a token is in use.
 
 import { MOCK } from "../api/config";
+import { isDesktop } from "../desktop";
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
 import { appStore, displayName } from "../api/store";
@@ -40,10 +41,17 @@ type TransportFactory = (kind: TransportKind, callbacks: TransportCallbacks) => 
 
 const defaultFactory: TransportFactory = async (kind, cb) => {
   if (kind === "fake") return new FakeTransport(cb);
+  if (nativeVoice()) {
+    const { NativeTransport } = await import("./nativeTransport");
+    return new NativeTransport(cb);
+  }
   const { LiveKitTransport } = await import("./livekitTransport");
   return new LiveKitTransport(cb);
 };
 let factory: TransportFactory = defaultFactory;
+
+/** The Linux app: WebKitGTK has no WebRTC, so the room runs in the Rust shell (voice/nativeTransport.ts). */
+const nativeVoice = (): boolean => typeof RTCPeerConnection === "undefined" && isDesktop();
 
 /** Tests: build transports with `make` instead of FakeTransport / LiveKitTransport (null restores the default). */
 export function setTransportFactory(make: TransportFactory | null): void {
@@ -70,8 +78,8 @@ let boundPtt: string | null = null;
 export function joinRefusal(channel: Channel): VoiceErrorReason | null {
   const model = getVoice();
   if (!model.enabled) return "media_unavailable";
-  // WebKitGTK (the Linux app) is built without WebRTC, so LiveKit can never connect there; the mock uses no WebRTC.
-  if (!MOCK && typeof RTCPeerConnection === "undefined") return "webrtc_unsupported";
+  // A browser without WebRTC can never connect; the Linux app (WebKitGTK, no WebRTC) uses native voice; the mock uses none.
+  if (!MOCK && typeof RTCPeerConnection === "undefined" && !isDesktop()) return "webrtc_unsupported";
   // DM calls (src/calls): every recipient may join; the server checks blocks and the 10-person cap.
   if (channel.type === ChannelType.DM || channel.type === ChannelType.GroupDM) return null;
   if ((channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStage) || !channel.guild_id) return "missing_permissions";
