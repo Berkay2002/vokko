@@ -185,3 +185,10 @@ test('Connected Apps offers only the linkable providers and sends them to My Acc
   await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('My Account');
   await expect(dialog.getByRole('heading', { name: 'Sign-in Methods', level: 2 })).toBeInViewport();
 });
+
+test('Appearance > Advanced links to the Advanced page', async ({ page }) => {
+  const dialog = await openSettings(page);
+  await dialog.getByRole('button', { name: 'Appearance', exact: true }).click();
+  await dialog.getByRole('button', { name: /Developer mode and hardware acceleration/ }).click();
+  await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('Advanced');
+});

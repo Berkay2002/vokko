@@ -250,7 +250,7 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
       case "voice":
         return <VoiceVideoPage />;
       case "appearance":
-        return <AppearancePage />;
+        return <AppearancePage onOpen={open} />;
       case "accessibility":
         return <AccessibilityPage onOpenSection={open} />;
       case "keybinds":
