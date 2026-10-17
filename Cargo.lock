@@ -6995,6 +6995,7 @@ dependencies = [
  "chacha20poly1305",
  "chrono",
  "futures-util",
+ "hkdf",
  "hmac",
  "http",
  "image",
@@ -7018,6 +7019,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "unicode-segmentation",
  "vokko-protocol",
 ]
 
