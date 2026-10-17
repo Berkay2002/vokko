@@ -89,7 +89,8 @@ fn check_players(min: u8, max: u8) -> ApiResult<()> {
 }
 
 /// An absolute `https:` URL (with `VOKKO_DEV=1` also `http://127.0.0.1` / `http://localhost`), at most 512 bytes, without
-/// userinfo or fragment, on another origin than this server and its web app (a game there would share their origin).
+/// userinfo or fragment, on another host than this server and its web app, whatever the port (a game there would share their
+/// origin or their cookies). A trailing `.` does not make a host another one. In dev a loopback game only needs another port.
 pub fn check_url(config: &Config, raw: &str) -> ApiResult<String> {
     let raw = raw.trim();
     let bad = |message: &str| ApiErr::invalid("url", message);
@@ -97,7 +98,8 @@ pub fn check_url(config: &Config, raw: &str) -> ApiResult<String> {
         return Err(bad(&format!("Must be {GAME_URL_MAX_BYTES} or fewer in length.")));
     }
     let url = Url::parse(raw).map_err(|_| bad("Not a well formed URL."))?;
-    let local = matches!(url.host_str(), Some("127.0.0.1" | "localhost"));
+    let host = |url: &Url| url.host_str().map(|host| host.trim_end_matches('.').to_owned());
+    let local = matches!(host(&url).as_deref(), Some("127.0.0.1" | "localhost"));
     if !(url.scheme() == "https" || (config.dev && url.scheme() == "http" && local)) || url.host_str().is_none_or(str::is_empty) {
         return Err(bad("Must be an https URL."));
     }
@@ -105,7 +107,8 @@ pub fn check_url(config: &Config, raw: &str) -> ApiResult<String> {
         return Err(bad("Must not contain a user name, password or fragment."));
     }
     let own = [config.public_url.as_str(), config.accounts.web_url.as_str()];
-    if own.iter().filter_map(|own| Url::parse(own).ok()).any(|own| own.origin() == url.origin()) {
+    let dev_local = config.dev && local;
+    if own.iter().filter_map(|own| Url::parse(own).ok()).any(|own| if dev_local { own.origin() == url.origin() } else { host(&own) == host(&url) }) {
         return Err(bad("Must not be this server's own address."));
     }
     if url.as_str().len() > GAME_URL_MAX_BYTES {
@@ -187,11 +190,14 @@ async fn create(
         aspect: body.aspect.unwrap_or_default(),
     };
     check_players(min_players, max_players)?;
-    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM guild_games WHERE guild_id = $1").bind(guild_id).fetch_one(&state.db).await?;
+    let game_id: i64 = game.id.parse().map_err(|_| ApiErr::internal())?;
+    // The guild row lock serializes concurrent adds, so the count and the insert see the same catalog.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT id FROM guilds WHERE id = $1 FOR UPDATE").bind(guild_id).execute(&mut *tx).await?;
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM guild_games WHERE guild_id = $1").bind(guild_id).fetch_one(&mut *tx).await?;
     if count as usize >= GUILD_GAMES_MAX {
         return Err(ApiErr::conflict(30058, &format!("Maximum number of games reached ({GUILD_GAMES_MAX})")));
     }
-    let game_id: i64 = game.id.parse().map_err(|_| ApiErr::internal())?;
     sqlx::query(
         "INSERT INTO guild_games (id, guild_id, name, url, icon, min_players, max_players, aspect, creator_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
@@ -204,8 +210,9 @@ async fn create(
     .bind(i16::from(game.max_players))
     .bind(aspect_text(game.aspect))
     .bind(user_id)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
     broadcast(&state, guild_id).await?;
     audit::record(&state, changes(Entry::new(guild_id, user_id, AuditLogEvent::GameAdd, game_id).reason(reason), None, Some(&game))).await?;
     Ok((StatusCode::CREATED, Json(game)))
@@ -238,7 +245,7 @@ async fn edit(
     if next == old {
         return Ok(Json(next));
     }
-    // Games already running keep the manifest they started with.
+    // Games already running keep the manifest they started with, unless the URL changed: then they end (the app ids change too).
     sqlx::query("UPDATE guild_games SET name = $3, url = $4, icon = $5, min_players = $6, max_players = $7, aspect = $8 WHERE guild_id = $1 AND id = $2")
         .bind(guild_id)
         .bind(game_id)
@@ -250,6 +257,9 @@ async fn edit(
         .bind(aspect_text(next.aspect))
         .execute(&state.db)
         .await?;
+    if next.url != old.url {
+        crate::voice::games::end_game(&state, &old.id).await;
+    }
     broadcast(&state, guild_id).await?;
     audit::record(&state, changes(Entry::new(guild_id, user_id, AuditLogEvent::GameUpdate, game_id).reason(reason), Some(&old), Some(&next))).await?;
     Ok(Json(next))
@@ -298,7 +308,9 @@ mod tests {
         }
         assert!(check_url(&config, &format!("https://a.example/{}", "x".repeat(512 - 18))).is_ok());
         assert!(check_url(&config, &format!("https://a.example/{}", "x".repeat(513 - 18))).is_err(), "513 bytes");
-        assert!(check_url(&config, "https://chat.example.com:8443/").is_ok(), "another port is another origin");
+        for own in ["https://chat.example.com:8443/", "https://chat.example.com./", "https://CHAT.example.com.:443/x", "http://chat.example.com/"] {
+            assert!(check_url(&config, own).is_err(), "same host, any port or a trailing dot: {own}");
+        }
         config.dev = true;
         assert!(check_url(&config, "http://localhost:5173/").is_ok() && check_url(&config, "http://127.0.0.1:1454/mock/").is_ok());
         assert!(check_url(&config, "http://play.example.com/").is_err(), "dev only opens up the loopback hosts");
