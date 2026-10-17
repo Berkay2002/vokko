@@ -313,3 +313,20 @@ test('Hide Muted Channels brings a channel back when its timed mute lapses, with
   await page.clock.fastForward('16:00');
   await expect(row(page, 'memes')).toHaveCount(1);
 });
+
+test('channel topic toolbar wraps the selection in markdown and a second click unwraps it', async ({ page }) => {
+  await openChannel(page, 'general');
+  await row(page, 'random').hover();
+  await row(page, 'random').getByRole('button', { name: 'Edit Channel' }).click();
+  const topic = page.getByRole('textbox', { name: 'Channel topic' });
+  await topic.fill('read the rules');
+  await topic.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(9, 14));
+  const toolbar = page.getByRole('toolbar', { name: 'Topic formatting' });
+  await toolbar.getByRole('button', { name: 'Bold' }).click();
+  await expect(topic).toHaveValue('read the **rules**');
+  await toolbar.getByRole('button', { name: 'Spoiler' }).click();
+  await expect(topic).toHaveValue('read the **||rules||**');
+  await toolbar.getByRole('button', { name: 'Spoiler' }).click();
+  await toolbar.getByRole('button', { name: 'Bold' }).click();
+  await expect(topic).toHaveValue('read the rules');
+});

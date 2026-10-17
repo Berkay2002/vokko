@@ -1,6 +1,7 @@
 // Full-screen channel settings: Overview + Permissions + Invites (channel invite list) + Integrations (webhooks, src/apps).
-import { useMemo, useState } from "react";
-import { Eye, Hash, Lock, Smile, Trash2, Volume2 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Eye, Hash, Lock, Trash2, Volume2 } from "lucide-react";
+import { toggleWrap } from "../chat/composer/edit";
 import { ApiRequestError } from "../api/errors";
 import { Perm } from "../api/permissions";
 import { request } from "../api/rest";
@@ -34,6 +35,13 @@ function errorText(error: unknown): string {
 }
 
 const TOPIC_MAX = 1024;
+const TOPIC_FORMATS: { label: string; marker: string; className: string; text?: string }[] = [
+  { label: "Bold", marker: "**", className: "cs-rich-bold", text: "B" },
+  { label: "Italic", marker: "*", className: "cs-rich-italic", text: "I" },
+  { label: "Underline", marker: "__", className: "cs-rich-underline", text: "U" },
+  { label: "Strikethrough", marker: "~~", className: "cs-rich-strike", text: "S" },
+  { label: "Spoiler", marker: "||", className: "" },
+];
 
 /** Disabled select used for settings that have no backend yet. */
 function LockedSelect({ label, value }: { label: string; value: string }) {
@@ -45,6 +53,7 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const voice = channel.type === ChannelType.GuildVoice;
   const [name, setName] = useState(channel.name ?? "");
   const [topic, setTopic] = useState(channel.topic ?? "");
+  const topicRef = useRef<HTMLTextAreaElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -58,6 +67,19 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const [userLimit, setUserLimit] = useState(savedLimit);
   const voiceDirty = voice && (bitrateKbps !== savedBitrate || userLimit !== savedLimit);
   const dirty = slug !== (channel.name ?? "") || (!category && nextTopic !== (channel.topic ?? null)) || voiceDirty;
+
+  const formatTopic = (marker: string) => {
+    const box = topicRef.current;
+    if (!box) return;
+    const next = toggleWrap(topic, { start: box.selectionStart, end: box.selectionEnd }, marker);
+    if (next.value.length > TOPIC_MAX) return;
+    setSaved(false);
+    setTopic(next.value);
+    requestAnimationFrame(() => {
+      box.focus();
+      box.setSelectionRange(next.start, next.end);
+    });
+  };
 
   const reset = () => {
     setName(channel.name ?? "");
@@ -108,20 +130,25 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
       {!category && (
         <Field label="Channel Topic">
           <div className="cs-rich">
-            <div className="cs-rich-toolbar" aria-hidden="true">
-              <span className="cs-rich-btn cs-rich-bold">B</span>
-              <span className="cs-rich-btn cs-rich-italic">I</span>
-              <span className="cs-rich-btn cs-rich-underline">U</span>
-              <span className="cs-rich-btn cs-rich-strike">S</span>
-              <span className="cs-rich-btn">
-                <Eye size={16} />
-              </span>
-              <span className="cs-rich-spacer" />
-              <span className="cs-rich-btn">
-                <Smile size={16} />
-              </span>
+            <div className="cs-rich-toolbar" role="toolbar" aria-label="Topic formatting">
+              {TOPIC_FORMATS.map(({ label, marker, className, text }) => (
+                <button
+                  key={marker}
+                  type="button"
+                  className={`cs-rich-btn ${className}`}
+                  aria-label={label}
+                  title={label}
+                  disabled={!editable}
+                  // keep the textarea's selection
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => formatTopic(marker)}
+                >
+                  {text ?? <Eye size={16} aria-hidden="true" />}
+                </button>
+              ))}
             </div>
             <textarea
+              ref={topicRef}
               className="cs-rich-input"
               aria-label="Channel topic"
               rows={4}

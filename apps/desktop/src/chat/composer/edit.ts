@@ -164,3 +164,12 @@ export function applyInput(value: string, sel: Selection, inputType: string, dat
   if (span.start === span.end) return null;
   return replace(value, span.start, span.end, '', 'delete');
 }
+
+/** Wrap the selection in a markdown `marker` (`**`, `||`, ...), or unwrap it when the marker already surrounds it. The selection stays on the same text. */
+export function toggleWrap(value: string, sel: Selection, marker: string): Selection & { value: string } {
+  const m = marker.length;
+  if (sel.start >= m && value.slice(sel.start - m, sel.start) === marker && value.slice(sel.end, sel.end + m) === marker) {
+    return { value: value.slice(0, sel.start - m) + value.slice(sel.start, sel.end) + value.slice(sel.end + m), start: sel.start - m, end: sel.end - m };
+  }
+  return { value: value.slice(0, sel.start) + marker + value.slice(sel.start, sel.end) + marker + value.slice(sel.end), start: sel.start + m, end: sel.end + m };
+}

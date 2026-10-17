@@ -56,6 +56,12 @@
   height: 24px;
   color: var(--interactive-icon-default);
   font-size: 14px;
+  border-radius: 4px;
+}
+
+.cs-rich-btn:hover:not(:disabled) {
+  color: var(--interactive-icon-hover);
+  background: var(--background-mod-subtle);
 }
 
 .cs-rich-bold {
@@ -72,10 +78,6 @@
 
 .cs-rich-strike {
   text-decoration: line-through;
-}
-
-.cs-rich-spacer {
-  flex: 1;
 }
 
 .cs-rich-input {

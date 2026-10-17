@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyInput, expandToAtoms, nextBoundary, prevBoundary } from './edit';
+import { applyInput, expandToAtoms, nextBoundary, prevBoundary, toggleWrap } from './edit';
 
 const at = (n: number) => ({ start: n, end: n });
 
@@ -94,5 +94,17 @@ describe('boundaries', () => {
     expect(nextBoundary('😀a', 0)).toBe(2);
     expect(prevBoundary('abc', 0)).toBe(0);
     expect(nextBoundary('abc', 3)).toBe(3);
+  });
+});
+
+describe('toggleWrap', () => {
+  it('wraps the selection and keeps it on the same text, and a second toggle unwraps it', () => {
+    const wrapped = toggleWrap('say hi now', { start: 4, end: 6 }, '**');
+    expect(wrapped).toEqual({ value: 'say **hi** now', start: 6, end: 8 });
+    expect(toggleWrap(wrapped.value, wrapped, '**')).toEqual({ value: 'say hi now', start: 4, end: 6 });
+  });
+
+  it('an empty selection gets an empty pair with the caret between', () => {
+    expect(toggleWrap('ab', { start: 1, end: 1 }, '||')).toEqual({ value: 'a||||b', start: 3, end: 3 });
   });
 });
