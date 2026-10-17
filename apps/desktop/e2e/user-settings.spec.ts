@@ -65,6 +65,21 @@ test('a change is pushed to the account and another device\'s change applies liv
   expect(Object.keys((await blob(page)).settings)).not.toContain('output_volume');
 });
 
+test('a hidden spoiler is a visible block on the chat background in every base theme', async ({ page }) => {
+  await openDm(page);
+  await send(page, 'plot twist ||the butler||');
+  const spoiler = message(page, 'plot twist').locator('.md-spoiler');
+  await expect(spoiler).toHaveAttribute('role', 'button');
+  for (const theme of ['onyx', 'dark', 'ash', 'light']) {
+    const [hidden, chat] = await spoiler.evaluate((el, t) => {
+      const html = document.documentElement;
+      html.className = html.className.replace(/\btheme-\w+/g, '') + ` theme-${t}`;
+      return [getComputedStyle(el).backgroundColor, getComputedStyle(el.closest('.chat-view')!).backgroundColor];
+    }, theme);
+    expect(hidden, theme).not.toBe(chat);
+  }
+});
+
 test('Chat: spoilers, link media and thread split view follow the switches', async ({ page }) => {
   await openDm(page);
   await send(page, 'plot twist ||the butler||');
