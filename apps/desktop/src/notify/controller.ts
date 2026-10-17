@@ -11,7 +11,7 @@ import { getPrefs, usePrefs } from "../ui/prefs";
 import { applyUnread, pageLabel, summarizeUnread } from "./badge";
 import { requestAttention } from "../desktop/attention";
 import { IS_MAC } from "../desktop/tauri";
-import { decide, decideReaction, shouldBounce, withThreadMember, type NotifyInput, type ReactionNotifyInput } from "./decide";
+import { decide, decideReaction, guildDefaultLevel, shouldBounce, withThreadMember, type NotifyInput, type ReactionNotifyInput } from "./decide";
 import { flashTaskbar, notificationAdapter } from "./desktop";
 import { playSound, wireAudioUnlock } from "./sounds";
 import { notificationTitle, plainBody } from "./text";
@@ -53,6 +53,7 @@ function channelContext(channelId: Snowflake, guildHint: Snowflake | null | unde
     guildId: guildId ?? null,
     dm,
     scopes,
+    guildDefault: guildDefaultLevel(guildId ? state.guilds[guildId]?.default_message_notifications : undefined),
     local,
     prefs: getPrefs(),
     status: state.presences[meId]?.status,

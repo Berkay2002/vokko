@@ -230,6 +230,12 @@ export interface Guild {
   nsfw_level?: NsfwLevel; // Access (MANAGE_GUILD); always sent by the server. AgeRestricted gates every channel of the server
   rules_channel_id?: Snowflake | null; // Access: the rules channel (a text channel of the guild); always sent, null when unset
   join_mode?: JoinMode; // Access: how people get in (MANAGE_GUILD); absent = InviteOnly
+  default_message_notifications?: DefaultMessageNotifications; // Engagement: level for members with no per-server setting (MANAGE_GUILD); always sent, absent = AllMessages
+}
+/** Guild `default_message_notifications` (Discord's values). */
+export enum DefaultMessageNotifications {
+  AllMessages = 0,
+  OnlyMentions = 1,
 }
 /** docs/api.md "Apply to Join": with ApplyToJoin nobody becomes a member (invite accept included) without an approved request. */
 export enum JoinMode {

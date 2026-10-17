@@ -1,7 +1,7 @@
 // The pure "should this message notify me" decision. No store, DOM or timers in here: the controller gathers the inputs
 // (local mute/level state, prefs, focus, route) and acts on the result, so every rule is unit-testable.
 
-import { MessageType, ThreadMemberFlags, type Message, type MessageReactionEvent, type PresenceStatus, type Snowflake, type ThreadMember } from "../api/types";
+import { DefaultMessageNotifications, MessageType, ThreadMemberFlags, type Message, type MessageReactionEvent, type PresenceStatus, type Snowflake, type ThreadMember } from "../api/types";
 
 export type NotifyLevel = "default" | "all" | "unreads-mentions" | "mentions" | "none";
 export type NotifyKind = "mention" | "message";
@@ -37,6 +37,8 @@ export interface NotifyInput {
   friend?: boolean;
   /** Settings scopes nearest first: [channel, category?, guild?]. */
   scopes: readonly Snowflake[];
+  /** The guild's default level, used when no scope sets one (absent: "all"). */
+  guildDefault?: "all" | "mentions";
   local: NotifyLocalState;
   prefs: NotifyPrefs;
   /** My own presence status: do-not-disturb silences everything. */
@@ -67,13 +69,18 @@ export function isMutedAt(local: Pick<NotifyLocalState, "mutedUntil">, id: Snowf
   return until === -1 || (until !== undefined && until > now);
 }
 
-/** First explicit level on the way channel → category → guild, "all" when nothing is set (the shell shows the same default). */
-export function effectiveLevel(local: Pick<NotifyLocalState, "notify">, scopes: readonly Snowflake[]): Exclude<NotifyLevel, "default"> {
+/** The server's Default Notification Settings (Server Settings > Engagement): the level of members who set none. */
+export function guildDefaultLevel(value: DefaultMessageNotifications | undefined): "all" | "mentions" {
+  return value === DefaultMessageNotifications.OnlyMentions ? "mentions" : "all";
+}
+
+/** First explicit level on the way channel → category → guild, else the server's default ("all" when there is none). */
+export function effectiveLevel(local: Pick<NotifyLocalState, "notify">, scopes: readonly Snowflake[], fallback: Exclude<NotifyLevel, "default"> = "all"): Exclude<NotifyLevel, "default"> {
   for (const id of scopes) {
     const level = local.notify[id];
     if (level && level !== "default") return level;
   }
-  return "all";
+  return fallback;
 }
 
 /**
@@ -108,7 +115,7 @@ export function decide(input: NotifyInput): NotifyDecision {
   if (input.scopes.some(id => isMutedAt(local, id, input.now))) return NONE("muted");
   if (input.dm === "dm" && prefs.messageRequests && input.friend === false) return NONE("message-request");
 
-  const level = effectiveLevel(local, input.scopes);
+  const level = effectiveLevel(local, input.scopes, input.guildDefault);
   if (level === "none") return NONE("level-none");
 
   const direct = message.mentions.some(user => user.id === meId);

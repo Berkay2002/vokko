@@ -48,6 +48,29 @@ async fn guild_creation_has_defaults() {
     assert_eq!(members[0]["user"]["username"], "sam");
 }
 
+#[tokio::test]
+async fn default_message_notifications_need_manage_guild() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("sam").await;
+    let (member, _) = app.register("alice").await;
+    let (guild_id, channel) = app.guild_with_channel(&owner).await;
+    let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &owner, json!({})).await;
+    app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &member, json!({})).await;
+    let path = format!("/guilds/{guild_id}");
+
+    let (_, guild) = app.get(&path, &owner).await;
+    assert_eq!(guild["default_message_notifications"], 0, "all messages by default");
+    assert_eq!(app.patch(&path, &member, json!({"default_message_notifications": 1})).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(app.patch(&path, &owner, json!({"default_message_notifications": 2})).await.0, StatusCode::BAD_REQUEST);
+    let (status, guild) = app.patch(&path, &owner, json!({"default_message_notifications": 1})).await;
+    assert_eq!(status, StatusCode::OK, "{guild}");
+    assert_eq!(guild["default_message_notifications"], 1);
+    let (_, seen) = app.get(&path, &member).await;
+    assert_eq!(seen["default_message_notifications"], 1, "members read it");
+    let (_, guild) = app.patch(&path, &owner, json!({"default_message_notifications": 0})).await;
+    assert_eq!(guild["default_message_notifications"], 0);
+}
+
 /// Migration 20261017130000_control_media run on rows from before it: @everyone gains bit 60 and no other bit changes anywhere.
 #[tokio::test]
 async fn the_control_media_migration_sets_bit_60_on_everyone_only() {

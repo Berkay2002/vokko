@@ -820,7 +820,20 @@ pub struct Guild {
     /// Access: how people get in (MANAGE_GUILD edits it).
     #[serde(default)]
     pub join_mode: JoinMode,
+    /// Engagement: the notification level of members who set none for the server (MANAGE_GUILD edits it); always sent.
+    #[serde(default)]
+    pub default_message_notifications: DefaultMessageNotifications,
 }
+
+numeric_enum!(
+    /// Discord's guild `default_message_notifications`.
+    #[derive(Default)]
+    DefaultMessageNotifications {
+        #[default]
+        AllMessages = 0,
+        OnlyMentions = 1,
+    }
+);
 
 numeric_enum!(
     /// `Invite`: an invite link is enough. `Apply`: nobody joins without an approved join request.
@@ -2743,6 +2756,9 @@ pub struct UpdateGuildRequest {
     /// `Invite` or `Apply` (anything else is 400 50035).
     #[serde(default)]
     pub join_mode: Option<JoinMode>,
+    /// 0 all messages, 1 only mentions (anything else is 400 50035).
+    #[serde(default)]
+    pub default_message_notifications: Option<DefaultMessageNotifications>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -5211,12 +5227,12 @@ mod tests {
         let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false, "unicode_emoji": null});
         round_trip::<Role>(role.clone());
         round_trip::<Guild>(
-            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0}),
+            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0}),
         );
         round_trip::<Guild>(json!({
             "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null,
             "tag": {"tag": "VKO", "badge": "bolt", "color_primary": 5793266, "color_secondary": 3878800}, "theme": {"preset": null, "primary": 1, "accent": 2},
-            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201", "join_mode": 1
+            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201", "join_mode": 1, "default_message_notifications": 1
         }));
         round_trip::<GuildMember>(
             json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}),
@@ -5402,7 +5418,7 @@ mod tests {
 
     #[test]
     fn ready_and_flattened_guild_events() {
-        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0});
+        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0});
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
@@ -5647,7 +5663,7 @@ mod tests {
         round_trip::<ReactionEmoji>(json!({"id": "700", "name": "blob_wave", "animated": true}));
         round_trip::<ReactionEmoji>(json!({"id": null, "name": "👍"}));
         let guild = json!({
-            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0,
+            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0,
             "channels": [], "members": [], "member_count": 0, "stickers": [], "emojis": [emoji.clone()], "voice_states": []
         });
         round_trip::<GuildWithState>(guild);
@@ -5848,6 +5864,13 @@ mod tests {
         let guild: UpdateGuildRequest = serde_json::from_value(json!({"join_mode": 1})).expect("join mode");
         assert_eq!(guild.join_mode, Some(JoinMode::Apply));
         assert!(serde_json::from_value::<UpdateGuildRequest>(json!({"join_mode": 2})).is_err());
+        let guild: UpdateGuildRequest = serde_json::from_value(json!({"default_message_notifications": 1})).expect("notifications");
+        assert_eq!(guild.default_message_notifications, Some(DefaultMessageNotifications::OnlyMentions));
+        assert!(serde_json::from_value::<UpdateGuildRequest>(json!({"default_message_notifications": 2})).is_err());
+        round_trip::<Guild>(json!({
+            "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null,
+            "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 1
+        }));
     }
 
     #[test]

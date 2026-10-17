@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MessageType, type User } from "../api/types";
-import { decide, decideReaction, effectiveLevel, isMutedAt, mentionsMyRole, shouldBounce, type NotifyInput, type NotifyLocalState, type ReactionNotifyInput } from "./decide";
+import { DefaultMessageNotifications, MessageType, type User } from "../api/types";
+import { decide, decideReaction, effectiveLevel, guildDefaultLevel, isMutedAt, mentionsMyRole, shouldBounce, type NotifyInput, type NotifyLocalState, type ReactionNotifyInput } from "./decide";
 
 const ME = "100";
 const user = (id: string): User => ({ id, username: `u${id}`, global_name: null, avatar: null }) as unknown as User;
@@ -61,6 +61,15 @@ describe("decide", () => {
     expect(effectiveLevel(local, ["c1", "cat1", "g1"])).toBe("mentions");
     expect(effectiveLevel({ notify: { c1: "all", g1: "none" } }, ["c1", "cat1", "g1"])).toBe("all");
     expect(effectiveLevel({ notify: {} }, ["c1", "g1"])).toBe("all");
+  });
+
+  it("falls back to the server's default notification level when nothing is set", () => {
+    expect(guildDefaultLevel(DefaultMessageNotifications.OnlyMentions)).toBe("mentions");
+    expect(guildDefaultLevel(undefined)).toBe("all");
+    expect(decide(input({ guildDefault: "mentions" })).reason).toBe("level-mentions");
+    expect(decide(input({ guildDefault: "mentions", message: { mentions: [user(ME)] } })).kind).toBe("mention");
+    // An explicit level on any scope still wins over the server default.
+    expect(decide(input({ guildDefault: "mentions", local: { ...emptyLocal(), notify: { c1: "all" } } })).kind).toBe("message");
   });
 
   it("'Nothing' silences even mentions", () => {
