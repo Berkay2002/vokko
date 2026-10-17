@@ -824,6 +824,7 @@ export interface Call {
   ringing: Snowflake[]; // users being rung right now
   voice_states: VoiceState[]; // who is in the call (guild_id null)
   watch_together?: WatchTogetherState; // the call's Watch Together session, omitted when none
+  stremio?: StremioUpdate[]; // the call's Stremio session (at most one entry), omitted when none
 }
 export interface CallRingRequest {
   recipients?: Snowflake[] | null; // POST /call/ring: absent = every recipient not in the call; POST /call/stop-ringing: absent = yourself
@@ -860,6 +861,102 @@ export interface WatchTogetherPatchRequest {
   queue_add?: string;
   skip?: boolean;
   video_id?: string; // with skip: does nothing unless this video is still current
+}
+
+// ---- Stremio in calls (docs/design/stremio-bot.md section 3 and 12): a movie or episode a bot plays into the call's media room ----
+
+export const STREMIO_QUEUE_MAX = 10;
+export const STREMIO_POSITION_MAX_MS = 24 * 60 * 60 * 1000;
+/** Poster hosts the server lets through; the CSP's img-src lists the same three. */
+export const STREMIO_IMAGE_HOSTS = ["images.metahub.space", "episodes.metahub.space", "m.media-amazon.com"];
+export type StremioStatus = "starting" | "playing" | "paused" | "buffering" | "error";
+export interface StremioItem {
+  title: string;
+  subtitle?: string; // "S1E2 Cat's in the Bag"
+  poster?: string;
+  label: string; // the chosen stream's quality label, never a URL
+}
+export interface StremioQueued extends StremioItem {
+  added_by: Snowflake;
+}
+export interface StremioState {
+  item: StremioItem;
+  status: StremioStatus;
+  error?: string;
+  playing: boolean;
+  position_ms: number; // true at updated_at_ms; while playing the position now is position_ms + (now - updated_at_ms)
+  updated_at_ms: number; // server unix milliseconds
+  duration_ms?: number;
+  started_by: Snowflake;
+  bot_identity: string; // "bot:stremio:<channel_id>", the participant in the media room
+  queue: StremioQueued[];
+}
+export interface StremioUpdate {
+  channel_id: Snowflake;
+  state: StremioState | null; // null = no session
+}
+export type StremioType = "movie" | "series";
+export interface StremioAccountStatus {
+  linked: boolean;
+  linked_at?: string;
+}
+export interface StremioLinkStart {
+  code: string;
+  link: string;
+  expires_at: string;
+}
+export interface StremioSearchItem {
+  id: string; // tt1234567
+  type: StremioType;
+  name: string;
+  poster?: string;
+  year?: string;
+}
+export interface StremioVideo {
+  id: string; // tt0903747:1:2
+  season: number;
+  episode: number;
+  name?: string;
+  released?: string;
+  thumbnail?: string;
+}
+export interface StremioMeta {
+  id: string;
+  type: StremioType;
+  name: string;
+  poster?: string;
+  background?: string;
+  description?: string;
+  year?: string;
+  runtime?: string;
+  videos: StremioVideo[];
+}
+export type StremioUnsupported = "torrent" | "external" | "youtube";
+export interface StremioStream {
+  sid: string; // opaque, bound to the user who listed it
+  addon: string;
+  label: string;
+  details: string;
+  size_bytes?: number;
+  resolution?: number;
+  flags: string[]; // hdr, dv, remux, ...
+  playable: boolean;
+  unsupported?: StremioUnsupported;
+}
+export interface StremioStreams {
+  streams: StremioStream[];
+  addon_errors: string[]; // addons that failed or timed out
+}
+export interface StremioPatchRequest {
+  playing?: boolean;
+  position_ms?: number;
+  queue_add?: string; // sid
+  queue_remove?: number; // index
+  skip?: boolean;
+}
+export interface StremioViewerToken {
+  url: string; // wss:// signalling URL of the media LiveKit
+  token: string;
 }
 
 // ---- Stage channels (type 13) ----
@@ -1739,7 +1836,7 @@ export interface ReadyEvent {
   user: User;
   session_id: string;
   // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels); emojis absent = none
-  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[]; watch_together?: WatchTogetherUpdate[] })[]; // stage_instances: live stages the user can see, omitted when none; watch_together: Watch Together sessions in voice channels the user can see, omitted when none
+  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[]; watch_together?: WatchTogetherUpdate[]; stremio?: StremioUpdate[] })[]; // stage_instances: live stages the user can see, omitted when none; watch_together: Watch Together sessions in voice channels the user can see, omitted when none
   private_channels: Channel[]; // DMs and group DMs
   presences: Presence[];
   read_states: ReadState[];
@@ -1812,6 +1909,7 @@ export interface GatewayEvents {
   VOICE_CONNECT_FAILED: { guild_id: Snowflake | null; channel_id: Snowflake; reason: VoiceConnectFailure }; // Vokko-only, requesting session only
   VOICE_CHANNEL_STATUS_UPDATE: { id: Snowflake; guild_id: Snowflake; status: string | null }; // to viewers of the channel; cleared (null) when the channel empties
   WATCH_TOGETHER_UPDATE: WatchTogetherUpdate; // to viewers of the channel on every change; state null = ended (also when the last person leaves voice); a joiner gets the running session after VOICE_SERVER_UPDATE
+  STREMIO_UPDATE: StremioUpdate; // to viewers of the channel on every change; state null = ended; a joiner gets the running session after VOICE_SERVER_UPDATE
   STAGE_INSTANCE_CREATE: StageInstance; // to viewers of the stage channel
   STAGE_INSTANCE_UPDATE: StageInstance;
   STAGE_INSTANCE_DELETE: StageInstance; // End Stage, or the last stage moderator left

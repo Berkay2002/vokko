@@ -2,6 +2,7 @@
 
 import { useLocation } from "react-router";
 import { Lock, MessageCircle, MonitorPlay, Pencil, Settings, UserPlus, Volume2 } from "lucide-react";
+import { StremioIcon } from "../stremio";
 import { Perm } from "../api/permissions";
 import { channelMentionCount, isChannelUnread, useStore } from "../api/store";
 import type { Channel, Guild } from "../api/types";
@@ -40,6 +41,7 @@ export function VoiceChannelRow({ channel, guild }: { channel: Channel; guild: G
   const inVoice = useVoice(s => s.channelId === channel.id || (s.meId !== null && s.states[s.meId]?.channel_id === channel.id));
   const statusText = useVoice(s => s.channelStatus[channel.id]);
   const watching = useVoice(s => !!s.watch[channel.id]);
+  const stremioTitle = useVoice(s => s.stremio[channel.id]?.item.title);
   // Messages in the channel's text-in-voice chat.
   const unread = useStore(s => isChannelUnread(s, channel.id));
   const mentions = useStore(s => channelMentionCount(s, channel.id));
@@ -113,6 +115,14 @@ export function VoiceChannelRow({ channel, guild }: { channel: Channel; guild: G
         <div className="voice-watch-line" role="status">
           <MonitorPlay size={12} aria-hidden="true" />
           <span>Watching YouTube Together</span>
+        </div>
+      )}
+      {stremioTitle && (
+        <div className="voice-stremio-line" role="status">
+          <StremioIcon size={12} />
+          <span>
+            Watching <em>{stremioTitle}</em> on Stremio
+          </span>
         </div>
       )}
       <VoiceChannelUsers channel={channel} guildId={guild.id} canInvite={canInvite} />

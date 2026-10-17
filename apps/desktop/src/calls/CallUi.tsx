@@ -3,15 +3,16 @@
 
 import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { BellRing, Headphones, HeadphoneOff, Mic, MicOff, MonitorPlay, MonitorUp, Phone, PhoneOff, Users, Video, VideoOff, X } from "lucide-react";
+import { BellRing, Headphones, HeadphoneOff, LayoutGrid, Mic, MicOff, MonitorPlay, MonitorUp, Phone, PhoneOff, Users, Video, VideoOff, X } from "lucide-react";
 import { dmName, useStore } from "../api/store";
 import { ChannelType, type Channel, type Snowflake, type User } from "../api/types";
 import { Avatar } from "../shell/Avatar";
-import { Tooltip } from "../ui";
+import { Tooltip, useContextMenu } from "../ui";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
 import { BarButton, Tile, useStageTiles } from "../voice/VoiceChannelPage";
 import { openModal } from "../shell/modalStore";
 import { WatchTile } from "../watch";
+import { openStremioPanel, StremioIcon, StremioPanel, StremioTile, useStremioPanel } from "../stremio";
 import { toggleSelfDeaf, toggleSelfMute } from "../voice/engine";
 import { useMedia } from "../voice/mediaStore";
 import { toggleCamera, toggleScreenShare } from "../voice/videoControls";
@@ -82,6 +83,8 @@ export function CallPanel({ channel }: { channel: Channel }) {
   const cameraOn = useMedia(s => s.cameraOn);
   const screenOn = useMedia(s => s.screenOn);
   const watching = useVoice(s => !!s.watch[channel.id]);
+  const stremioOpen = useStremioPanel(s => s.open);
+  const menu = useContextMenu();
   const tiles = useStageTiles(states, channel.id);
   const inside = useMemo(() => new Set(states.map(s => s.user_id)), [states]);
   const ringing = useUsers(ringingIds, channel);
@@ -96,13 +99,14 @@ export function CallPanel({ channel }: { channel: Channel }) {
     <section className="dm-call" aria-label="Call">
       <div className="dm-call-stage">
         {tiles.map(t => (
-          <div key={t.id} className={`dm-call-tile${t.watch ? " watch" : ""}`}>
-            {t.watch ? <WatchTile channelId={channel.id} variant="focused" /> : <Tile state={t.state} guildId={null} variant="grid" stream={t.stream} />}
+          <div key={t.id} className={`dm-call-tile${t.watch ? " watch" : ""}${t.stremio ? " stremio" : ""}`}>
+            {t.watch ? <WatchTile channelId={channel.id} variant="focused" /> : t.stremio ? <StremioTile channelId={channel.id} variant="focused" /> : <Tile state={t.state} guildId={null} variant="grid" stream={t.stream} />}
           </div>
         ))}
         {here && ringing.map(user => <RingingTile key={user.id} user={user} outgoing channelId={channel.id} />)}
         {here && channel.type === ChannelType.DM && absent.map(user => <RingingTile key={user.id} user={user} outgoing={false} channelId={channel.id} />)}
       </div>
+      {here && stremioOpen && <StremioPanel channelId={channel.id} />}
       <p className="dm-call-status" role="status" aria-live="polite">
         {connecting ? "Connecting…" : here && ringing.length > 0 && states.length <= 1 ? "Ringing…" : here ? "" : `${states.length} in the call`}
       </p>
@@ -123,6 +127,19 @@ export function CallPanel({ channel }: { channel: Channel }) {
             </BarButton>
             <BarButton label="Watch Together" tooltip="Watch YouTube Together" active={watching} onClick={() => (watching ? undefined : openModal({ type: "watchTogether", channelId: channel.id }))}>
               <MonitorPlay size={20} />
+            </BarButton>
+            <BarButton
+              label="Activities"
+              active={stremioOpen}
+              onClick={e => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                menu.open({ clientX: rect.left, clientY: rect.top - 4 }, [
+                  { id: "watch-together", label: "Watch Together (YouTube)", icon: <MonitorPlay size={18} />, iconStart: true, sub: "Watch a YouTube video in sync", onSelect: () => (watching ? undefined : openModal({ type: "watchTogether", channelId: channel.id })) },
+                  { id: "stremio", label: "Stremio", icon: <StremioIcon size={18} />, iconStart: true, sub: "Play a movie or episode from your Stremio", onSelect: openStremioPanel },
+                ]);
+              }}
+            >
+              <LayoutGrid size={20} />
             </BarButton>
             {channel.type === ChannelType.GroupDM && (
               <BarButton label="Ring Everyone" onClick={() => void ringCall(channel.id)}>

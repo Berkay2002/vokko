@@ -438,6 +438,22 @@ describe("voice reducer: server-side move and stages", () => {
     expect(voiceReducer(m, { type: "ready", meId: ME, voiceEnabled: true, guilds: [{ id: GUILD, voice_states: [] }] }).watch).toEqual({});
   });
 
+  it("tracks Stremio sessions from READY, GUILD_CREATE, STREMIO_UPDATE and channel deletes", () => {
+    const session = { item: { title: "Heat", label: "1080p" }, status: "starting" as const, playing: false, position_ms: 0, updated_at_ms: 1000, started_by: ALICE, bot_identity: `bot:stremio:${GENERAL}`, queue: [] };
+    let m = apply({ type: "ready", meId: ME, voiceEnabled: true, guilds: [{ id: GUILD, voice_states: [], stremio: [{ channel_id: GENERAL, state: session }] }] });
+    expect(m.stremio[GENERAL]?.item.title).toBe("Heat");
+    m = voiceReducer(m, { type: "stremio", channelId: GENERAL, state: { ...session, status: "playing", playing: true } });
+    expect(m.stremio[GENERAL]).toMatchObject({ status: "playing", playing: true });
+    m = voiceReducer(m, { type: "stremio", channelId: "99", state: session });
+    expect(Object.keys(m.stremio).sort()).toEqual([GENERAL, "99"]);
+    expect(voiceReducer(m, { type: "channelDelete", channelId: GENERAL }).stremio[GENERAL]).toBeUndefined();
+    const ended = voiceReducer(m, { type: "stremio", channelId: GENERAL, state: null });
+    expect(ended.stremio[GENERAL]).toBeUndefined();
+    expect(voiceReducer(ended, { type: "stremio", channelId: GENERAL, state: null })).toBe(ended);
+    expect(voiceReducer(m, { type: "guildCreate", guild: { id: GUILD, voice_states: [], stremio: [{ channel_id: GENERAL, state: session }] } }).stremio[GENERAL]?.status).toBe("starting");
+    expect(voiceReducer(m, { type: "ready", meId: ME, voiceEnabled: true, guilds: [{ id: GUILD, voice_states: [] }] }).stremio).toEqual({});
+  });
+
   it("stageRoster splits speakers from the audience, raised hands first in raise order", () => {
     const m = apply(
       ready([

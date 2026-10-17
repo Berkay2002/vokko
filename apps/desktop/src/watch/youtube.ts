@@ -37,7 +37,7 @@ export function parseYouTubeLink(input: string): string | null {
 }
 
 /** Where the video should be at `nowMs` (the viewer's clock): the server's position plus the time since, while playing. */
-export function expectedPositionMs(state: Pick<WatchTogetherState, "playing" | "position_ms" | "updated_at_ms">, nowMs: number): number {
+export function expectedPositionMs(state: { playing: boolean; position_ms: number; updated_at_ms: number }, nowMs: number): number {
   return state.playing ? state.position_ms + Math.max(0, nowMs - state.updated_at_ms) : state.position_ms;
 }
 

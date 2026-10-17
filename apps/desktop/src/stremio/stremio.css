@@ -1,0 +1,804 @@
+/* Stremio in calls: the tile (the bot's picture, its control bar and Up next), the side panel, and the channel list line. Tokens only. */
+
+.voice-tile.stremio {
+  display: block;
+  container-type: inline-size;
+  background: #000;
+}
+
+.stremio-video,
+.stremio-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  pointer-events: none;
+}
+
+.stremio-poster {
+  opacity: 0.55;
+}
+
+.stremio-status {
+  position: absolute;
+  inset: 50% 16px auto;
+  transform: translateY(-50%);
+  text-align: center;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.8);
+  pointer-events: none;
+}
+
+.stremio-head {
+  position: absolute;
+  inset: 0 0 auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px 24px;
+  color: #fff;
+  background: linear-gradient(rgb(0 0 0 / 0.7), transparent);
+  pointer-events: none;
+}
+
+.stremio-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stremio-by {
+  overflow: hidden;
+  font-size: 12px;
+  opacity: 0.8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stremio-bar {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 24px 10px 6px;
+  color: #fff;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.75));
+}
+
+.stremio-seek {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--brand-500);
+}
+
+.stremio-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.stremio-spacer {
+  flex: 1 1 auto;
+}
+
+.stremio-time {
+  padding: 0 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.stremio-button,
+.stremio-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-sm, 6px);
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.stremio-button:hover:not(:disabled),
+.stremio-button.active,
+.stremio-icon-button:hover {
+  background: rgb(255 255 255 / 0.18);
+}
+
+.stremio-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.stremio-button:focus-visible,
+.stremio-icon-button:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--brand-500));
+}
+
+.stremio-volume {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stremio-volume input {
+  width: 80px;
+  accent-color: var(--brand-500);
+}
+
+@container (max-width: 420px) {
+  .stremio-volume input,
+  .stremio-by {
+    display: none;
+  }
+}
+
+.stremio-queue {
+  position: absolute;
+  inset: 0 0 64px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(300px, 70%);
+  padding: 12px;
+  overflow-y: auto;
+  color: var(--text-default, #fff);
+  background: var(--background-surface-high, rgb(20 20 24 / 0.95));
+  border-radius: var(--radius-md);
+}
+
+.stremio-queue-title {
+  margin: 0;
+  font-size: 14px;
+}
+
+.stremio-queue-empty {
+  margin: 0;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.stremio-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.stremio-queue-item {
+  align-items: center;
+}
+
+.stremio-queue-item::marker {
+  color: var(--text-muted);
+}
+
+.stremio-queue-item {
+  display: flex;
+  gap: 10px;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--background-surface-high, rgb(255 255 255 / 0.06));
+}
+
+.stremio-queue-item:hover {
+  background: var(--background-surface-higher, rgb(255 255 255 / 0.1));
+}
+
+.stremio-queue-item > * {
+  vertical-align: middle;
+}
+
+.stremio-queue-art {
+  display: inline-block;
+  flex: none;
+  width: 32px;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--background-surface-higher);
+}
+
+.stremio-queue-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.stremio-queue-text {
+  display: inline-flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.stremio-queue-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stremio-queue-sub {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stremio-queue-add {
+  margin-top: auto;
+}
+
+.stremio-notice {
+  position: absolute;
+  inset: 50% 16px auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transform: translateY(-50%);
+  padding: 8px 12px;
+  color: #fff;
+  background: rgb(0 0 0 / 0.75);
+  border-radius: var(--radius-md);
+}
+
+.stremio-cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  color: #fff;
+  background: rgb(0 0 0 / 0.55);
+  cursor: pointer;
+}
+
+.voice-tile.stremio.pip .stremio-cover-text,
+.voice-tile.stremio.strip .stremio-cover-text {
+  display: none;
+}
+
+.dm-call-tile.stremio {
+  flex: 1 1 100%;
+  max-width: 640px;
+}
+
+/* The channel list line of a voice channel with a session, for people who are not in the call. */
+.voice-stremio-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 2px 36px;
+  color: var(--text-muted, inherit);
+  font-size: 12px;
+}
+
+.voice-stremio-line span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The bot among the call's people: no profile, no menu. */
+.voice-bot-badge {
+  flex: none;
+  padding: 0 4px;
+  border-radius: 3px;
+  color: var(--text-strong, #fff);
+  background: var(--brand-500);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 15px;
+  text-transform: uppercase;
+}
+
+.voice-bot-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px 2px 36px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.voice-bot-avatar {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--background-surface-higher);
+}
+
+/* ---- the side panel ---- */
+.stremio-panel {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 400px;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--chat-background, var(--background-base-low));
+  color: var(--text-default);
+}
+
+/* phone: a 400px column would push the call off the screen, so the panel covers the call page (Close brings it back) */
+@media (max-width: 767px) {
+  .voice-page:has(> .stremio-panel) {
+    position: relative;
+  }
+
+  .voice-page > .stremio-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    width: auto;
+    border-left: 0;
+  }
+}
+
+.dm-call .stremio-panel {
+  width: 100%;
+  max-width: 960px;
+  max-height: 50vh;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.stremio-panel-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.stremio-panel-title {
+  flex: 1;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stremio-panel-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.stremio-muted {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.stremio-quiet {
+  font-size: 12px;
+}
+
+.stremio-note {
+  margin: 0;
+  color: var(--text-positive, var(--text-default));
+  font-size: 13px;
+}
+
+.stremio-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--background-surface-high);
+}
+
+.stremio-card-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 16px;
+}
+
+.stremio-open {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+
+.stremio-qr {
+  width: 160px;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.stremio-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.stremio-code {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+}
+
+.stremio-linkish {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  color: var(--text-link, var(--brand-500));
+  background: none;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.stremio-panel-header .stremio-linkish {
+  align-self: center;
+}
+
+.stremio-linkish:hover {
+  text-decoration: underline;
+}
+
+.stremio-search {
+  position: relative;
+  display: block;
+  color: var(--text-muted);
+}
+
+.stremio-search svg {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.stremio-search .input {
+  width: 100%;
+  min-width: 0;
+  height: 40px;
+  padding-left: 36px;
+}
+
+.stremio-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stremio-row-title {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 14px;
+}
+
+.stremio-row-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 16px 12px;
+}
+
+.stremio-poster-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.stremio-poster-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  background: var(--background-surface-higher);
+}
+
+.stremio-poster-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.stremio-poster-card:hover .stremio-poster-frame,
+.stremio-poster-card:focus-visible .stremio-poster-frame {
+  outline: 2px solid var(--brand-500);
+}
+
+.stremio-poster-card:hover .stremio-poster-name,
+.stremio-poster-card:focus-visible .stremio-poster-name {
+  color: var(--text-strong);
+}
+
+.stremio-poster-name {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.3;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.stremio-poster-year {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.stremio-hero {
+  border-radius: var(--radius-md);
+  background: var(--background-surface-higher) center / cover no-repeat;
+}
+
+.stremio-hero-body {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 40px 12px 12px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.75));
+  color: #fff;
+}
+
+.stremio-hero-body .stremio-muted {
+  color: rgb(255 255 255 / 0.8);
+}
+
+.stremio-hero-poster {
+  width: 72px;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.18), 0 4px 12px rgb(0 0 0 / 0.5);
+}
+
+.stremio-hero-title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.stremio-description {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.stremio-seasons {
+  display: flex;
+  gap: 6px;
+  padding-bottom: 6px;
+  overflow-x: auto;
+}
+
+.stremio-season {
+  flex: none;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-default);
+  background: var(--background-surface-higher);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.stremio-season.selected {
+  color: #fff;
+  background: var(--brand-500);
+}
+
+.stremio-episode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stremio-episode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  background: var(--background-surface-high);
+  text-align: left;
+  cursor: pointer;
+}
+
+.stremio-episode:hover {
+  background: var(--background-surface-higher);
+}
+
+.stremio-episode-thumb {
+  position: relative;
+  flex: none;
+  width: 112px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--background-surface-higher);
+}
+
+.stremio-episode-thumb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 0.45) center / 24px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23fff'%3E%3Cpath d='M8 5.5v13l11-6.5z'/%3E%3C/svg%3E");
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.stremio-episode:hover .stremio-episode-thumb::after,
+.stremio-episode:focus-visible .stremio-episode-thumb::after {
+  opacity: 1;
+}
+
+.stremio-episode-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.stremio-episode-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.stremio-streams {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stremio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stremio-group-title {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.stremio-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 2px solid transparent;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  background: var(--background-surface-high);
+  text-align: left;
+  cursor: pointer;
+}
+
+.stremio-stream:hover:not(.disabled):not(.selected) {
+  background: var(--background-surface-higher);
+}
+
+.stremio-stream.selected {
+  border-color: var(--brand-500);
+}
+
+.stremio-stream-check {
+  margin-left: auto;
+  color: var(--brand-500);
+}
+
+.stremio-unreached {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stremio-play {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.stremio-stream.disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.stremio-stream-head {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.stremio-chip {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--background-surface-higher);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.stremio-chip.quality {
+  color: #fff;
+  background: var(--brand-500);
+}
+
+.stremio-chip.heavy {
+  color: var(--text-warning, #f0b232);
+}
+
+.stremio-stream-details {
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stremio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  position: sticky;
+  bottom: 0;
+  padding-top: 8px;
+}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, Gamepad2, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
+import { StremioIcon } from "../stremio";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
 import { TagChip } from "../perks/TagChip";
@@ -230,12 +231,22 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
 export function VoiceChannelUsers({ channel, guildId, canInvite }: { channel: Pick<Channel, "id" | "name">; guildId: Snowflake; canInvite?: boolean }) {
   const states = useChannelVoiceStates(channel.id);
   const inside = useVoice(s => s.channelId === channel.id || (s.meId !== null && s.states[s.meId]?.channel_id === channel.id));
+  const bot = useVoice(s => s.stremio[channel.id]?.bot_identity);
   if (states.length === 0) return null;
   return (
     <ul className="voice-occupants voice-users" aria-label={`Users in ${channel.name ?? "voice channel"}`}>
       {states.map(state => (
         <VoiceUserRow key={state.user_id} state={state} guildId={guildId} />
       ))}
+      {bot && (
+        <li className="voice-bot-user" data-bot-identity={bot}>
+          <span className="voice-bot-avatar" aria-hidden="true">
+            <StremioIcon size={14} />
+          </span>
+          <span>Stremio</span>
+          <span className="voice-bot-badge">Bot</span>
+        </li>
+      )}
       {inside && canInvite && (
         <li className="voice-invite-item">
           <button type="button" className="voice-invite-row" onClick={() => openModal({ type: "invite", channelId: channel.id })}>

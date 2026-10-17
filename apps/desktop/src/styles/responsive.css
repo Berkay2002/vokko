@@ -394,8 +394,8 @@
     background: var(--icon-voice-connected);
   }
 
-  /* call view: one rounded control bar of evenly spaced 48px buttons ending in the red hang-up; the device chevrons, the
-     disabled activities button, pop out and fullscreen make no sense on a phone (devices live in Voice & Video settings) */
+  /* call view: one rounded control bar of evenly spaced 48px buttons ending in the red hang-up; the device chevrons, pop out
+     and fullscreen make no sense on a phone (devices live in Voice & Video settings) */
   .voice-bar {
     flex-wrap: nowrap;
     gap: 4px;
@@ -418,7 +418,6 @@
 
   .voice-bar-button[aria-label="Input options"],
   .voice-bar-button[aria-label="Camera options"],
-  .voice-bar-button[aria-label="Start an activity"],
   .voice-bar-side {
     display: none;
   }
