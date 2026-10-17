@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use livekit::options::{AudioEncoding, DegradationPreference, TrackPublishOptions, VideoCodec, VideoEncoding, VideoPreset};
-use livekit::prelude::{LocalAudioTrack, LocalTrack, LocalVideoTrack, Room, TrackSid, TrackSource};
+use livekit::prelude::{DataPacket, LocalAudioTrack, LocalParticipant, LocalTrack, LocalVideoTrack, Room, TrackSid, TrackSource};
 use livekit::webrtc::audio_frame::AudioFrame;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
 use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
@@ -19,18 +19,23 @@ use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
+use vokko_protocol::api::{StremioCue, StremioSubtitleKind};
 
 use crate::config::{Codec, Config, Encoder};
-use crate::plan::{self, Desired, FfmpegPlan, Geometry, Probe};
+use crate::plan::{self, Choice, Desired, FfmpegPlan, Geometry, Probe};
 use crate::report::{Kind, Reporter};
+use crate::subs::{Budget, VttReader};
 
 const CONNECT_WAIT: Duration = Duration::from_secs(45);
 /// 10 ms of 48 kHz stereo s16le.
 const AUDIO_CHUNK_BYTES: usize = 480 * 2 * 2;
 
 pub async fn probe(cfg: &Config, d: &Desired) -> Result<Probe, String> {
-    crate::guard::resolves_public(&d.media_url).await?;
+    if !plan::local_media() {
+        crate::guard::resolves_public(&d.media_url).await?;
+    }
     let out = tokio::time::timeout(
         Duration::from_secs(30),
         Command::new(&cfg.ffprobe).args(plan::probe_args(&d.media_url, &d.headers)).stdin(Stdio::null()).kill_on_drop(true).output(),
@@ -57,6 +62,8 @@ pub struct Published {
     /// The last frame, re-sent while paused so a late joiner gets a picture (libwebrtc needs a frame to cut a keyframe).
     last: Arc<Mutex<Option<I420Buffer>>>,
     video_track: LocalVideoTrack,
+    /// Where text subtitle cues are published as data.
+    data: LocalParticipant,
     video_sid: TrackSid,
     audio_sid: TrackSid,
 }
@@ -110,7 +117,7 @@ pub async fn publish(room: &Room, geo: &Geometry, d: &Desired, cfg: &Config) -> 
         )
         .await
         .map_err(|e| format!("publish audio: {e}"))?;
-    Ok(Published { video, audio, last: Arc::default(), video_track, video_sid: video_pub.sid(), audio_sid: audio_pub.sid() })
+    Ok(Published { video, audio, last: Arc::default(), video_track, data: local.clone(), video_sid: video_pub.sid(), audio_sid: audio_pub.sid() })
 }
 
 impl Published {
@@ -180,10 +187,28 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub async fn spawn(cfg: &Config, d: &Desired, probe: &Probe, geo: &Geometry, start_ms: u64, out: &Published, notify: Notify) -> Result<Self, String> {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn(
+        cfg: &Config,
+        d: &Desired,
+        probe: &Probe,
+        geo: &Geometry,
+        choice: Choice,
+        with_text: bool,
+        start_ms: u64,
+        out: &Published,
+        notify: Notify,
+    ) -> Result<Self, String> {
         let video_listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
         let audio_listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
         let port = |l: &TcpListener| l.local_addr().map(|a| a.port()).map_err(|e| e.to_string());
+        // One loopback listener per text subtitle stream; ffmpeg writes each as WebVTT.
+        let mut text_listeners = Vec::new();
+        for track in probe.subtitle_tracks.iter().filter(|t| with_text && t.kind == StremioSubtitleKind::Text) {
+            let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
+            text_listeners.push((track.id, listener));
+        }
+        let text_ports = text_listeners.iter().map(|(index, l)| port(l).map(|p| (*index, p))).collect::<Result<Vec<_>, _>>()?;
         let args = plan::ffmpeg_args(&FfmpegPlan {
             media_url: &d.media_url,
             headers: &d.headers,
@@ -191,8 +216,11 @@ impl Pipeline {
             geo,
             hdr: probe.hdr,
             has_audio: probe.has_audio,
+            choice,
+            source_size: (probe.width, probe.height),
             video_port: port(&video_listener)?,
             audio_port: port(&audio_listener)?,
+            text_subs: &text_ports,
         });
         let mut child = Command::new(&cfg.ffmpeg)
             .args(args)
@@ -221,6 +249,14 @@ impl Pipeline {
         tasks.push(tokio::spawn(video_loop(video_listener, geo.clone(), out.video.clone(), out.last.clone(), counters.clone(), notify, start_ms, began)));
         if probe.has_audio {
             tasks.push(tokio::spawn(audio_loop(audio_listener, out.audio.clone(), counters.clone())));
+        }
+        if !text_listeners.is_empty() {
+            // try_send from the readers: a slow data channel drops cues instead of stalling ffmpeg.
+            let (tx, rx) = mpsc::channel(64);
+            tasks.push(tokio::spawn(publish_cues(out.data.clone(), rx)));
+            for (index, listener) in text_listeners {
+                tasks.push(tokio::spawn(subtitle_loop(listener, index, start_ms, tx.clone())));
+            }
         }
         Ok(Self { child, tasks, counters, start_ms, has_audio: probe.has_audio, fps: geo.fps, stderr })
     }
@@ -323,6 +359,41 @@ async fn audio_loop(listener: TcpListener, source: NativeAudioSource, counters: 
             return;
         }
         counters.audio_samples.fetch_add(480, Ordering::Relaxed);
+    }
+}
+
+/// ffmpeg writes a cue in one flush; this long without another line and the cue is complete.
+const CUE_SETTLE: Duration = Duration::from_millis(150);
+
+/// Reads the WebVTT ffmpeg writes for one text subtitle stream and queues its cues. The text is cleaned and capped in `VttReader`.
+async fn subtitle_loop(listener: TcpListener, index: u32, start_ms: u64, queue: mpsc::Sender<(u32, StremioCue)>) {
+    let Some(stream) = accept(listener).await else { return };
+    let mut lines = BufReader::new(stream).lines();
+    let (mut reader, mut budget) = (VttReader::new(start_ms), Budget::new(Instant::now()));
+    loop {
+        // ffmpeg closes a cue with the blank line it writes before the next one, so a block that has stopped growing is a cue.
+        let next = if reader.pending() { tokio::time::timeout(CUE_SETTLE, lines.next_line()).await.ok() } else { Some(lines.next_line().await) };
+        let cue = match next {
+            Some(Ok(Some(line))) => reader.push_line(&line),
+            Some(_) => break,
+            None => reader.flush(),
+        };
+        if let Some(cue) = cue
+            && budget.allow(Instant::now())
+        {
+            let _ = queue.try_send((index, cue));
+        }
+    }
+}
+
+/// Publishes queued cues as reliable data on topic `subs:<stream index>` in the media room.
+async fn publish_cues(local: LocalParticipant, mut queue: mpsc::Receiver<(u32, StremioCue)>) {
+    while let Some((index, cue)) = queue.recv().await {
+        let Ok(payload) = serde_json::to_vec(&cue) else { continue };
+        let packet = DataPacket { payload, topic: Some(format!("subs:{index}")), reliable: true, destination_identities: Vec::new() };
+        if let Err(e) = local.publish_data(packet).await {
+            tracing::debug!(error = %e, "subtitle cue not published");
+        }
     }
 }
 

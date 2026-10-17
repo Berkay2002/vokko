@@ -63,7 +63,7 @@ async fn logout(State(mock): State<Arc<Mock>>) -> Json<Value> {
 }
 
 async fn addon_collection(State(mock): State<Arc<Mock>>) -> Json<Value> {
-    let manifest = |name: &str| json!({"name": name, "resources": ["stream"], "types": ["movie", "series"], "idPrefixes": ["tt"]});
+    let manifest = |name: &str| json!({"name": name, "resources": ["stream", "subtitles"], "types": ["movie", "series"], "idPrefixes": ["tt"]});
     ok(json!({"addons": [
         {"transportUrl": format!("{}/addon-a/SECRETCFG/manifest.json", mock.base), "manifest": manifest("Addon A")},
         {"transportUrl": format!("{}/addon-b/SECRETCFG2/manifest.json", mock.base), "manifest": manifest("Broken")},
@@ -82,6 +82,30 @@ async fn addon_a_streams(State(mock): State<Arc<Mock>>) -> Json<Value> {
         {"name": "Playlist 1080p", "url": format!("{base}/media/live.m3u8?token=1")},
         {"name": "Disguised 1080p", "url": format!("{base}/media/disguised")},
     ]}))
+}
+
+async fn addon_a_subtitles(State(mock): State<Arc<Mock>>) -> Json<Value> {
+    let base = &mock.base;
+    Json(json!({"subtitles": [
+        {"id": "1", "url": format!("{base}/subs/en.srt"), "lang": "eng"},
+        {"id": "2", "url": format!("{base}/subs/big.srt"), "lang": "sv_SE"},
+        {"id": "3", "url": "http://10.0.0.5/x.srt", "lang": "eng"},
+        {"id": "4", "url": "https://user:pw@evil.example/x.srt", "lang": "eng"},
+        {"id": "5", "url": "https://evil.example:8443/x.srt", "lang": "eng"},
+        {"id": "6", "url": "http://evil.example/x.srt", "lang": "eng"},
+        {"id": "7", "url": "ftp://evil.example/x.srt", "lang": "eng"},
+    ]}))
+}
+
+async fn subtitle_file(Path(file): Path<String>) -> Response {
+    let body = match file.as_str() {
+        "en.srt" => {
+            "1\r\n00:00:01,000 --> 00:00:02,000\r\n<i>Hello</i> {\\an8}there\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\n<script>alert(1)</script>Bye\r\n"
+                .to_owned()
+        }
+        _ => "x".repeat(2 * 1024 * 1024 + 10),
+    };
+    (StatusCode::OK, [(header::CONTENT_TYPE, "application/x-subrip")], body).into_response()
 }
 
 async fn addon_b_streams() -> StatusCode {
@@ -149,6 +173,9 @@ async fn start_mock() -> Arc<Mock> {
         .route("/api/addonCollectionGet", post(addon_collection))
         .route("/addon-a/SECRETCFG/stream/{kind}/{file}", get(addon_a_streams))
         .route("/addon-b/SECRETCFG2/stream/{kind}/{file}", get(addon_b_streams))
+        .route("/addon-a/SECRETCFG/subtitles/{kind}/{file}", get(addon_a_subtitles))
+        .route("/addon-b/SECRETCFG2/subtitles/{kind}/{file}", get(addon_b_streams))
+        .route("/subs/{file}", get(subtitle_file))
         .route("/media/redirect", get(media_redirect))
         .route("/media/disguised", get(media_playlist))
         .route("/media/final.mkv", get(media_file))
@@ -513,6 +540,8 @@ async fn every_route_is_404_without_the_feature() {
         ("PATCH", "/channels/1/stremio"),
         ("DELETE", "/channels/1/stremio"),
         ("POST", "/channels/1/stremio/viewer-token"),
+        ("GET", "/channels/1/stremio/subtitles"),
+        ("GET", "/channels/1/stremio/subtitles/x"),
     ] {
         let body = (method != "GET" && method != "DELETE").then(|| json!({"sid": "x", "email": "a@b.test", "password": "pw"}));
         let (status, reply) = app.send(method.parse().expect("method"), path, Some(&token), body).await;
@@ -704,7 +733,7 @@ async fn playing_follows_the_bot_contract_and_shows_no_urls() {
     assert_eq!((claims.iss.as_str(), claims.sub.as_str()), (MEDIA_KEY, format!("bot:stremio:{ch}").as_str()));
     let room = grant.room.clone().expect("room");
     assert!(room.starts_with(&format!("stremio-{ch}-")) && room.len() > format!("stremio-{ch}-").len() + 8, "{room}");
-    assert!(grant.room_join && grant.can_publish && !grant.can_subscribe && !grant.can_publish_data && !grant.hidden);
+    assert!(grant.room_join && grant.can_publish && !grant.can_subscribe && grant.can_publish_data && !grant.hidden);
     assert_eq!(grant.can_publish_sources, ["screen_share", "screen_share_audio"]);
 
     // What clients see.
@@ -1117,4 +1146,145 @@ async fn a_viewer_who_leaves_the_call_is_removed_from_the_media_room() {
     let before = w.media.calls().iter().filter(|call| call.starts_with("RemoveParticipant")).count();
     vokko_server::voice::stremio::spawn_tasks(w.app.state.clone());
     until("the sweep removes the returning viewer", || w.media.calls().iter().filter(|call| call.starts_with("RemoveParticipant")).count() > before).await;
+}
+
+/// What the bot reports after it probed the file: two audio tracks, a text and a bitmap subtitle, plus junk that must not get through.
+fn tracks_event(generation: &Value) -> Value {
+    json!({
+        "generation": generation,
+        "audio": 2,
+        "burned_subtitle": 5,
+        "audio_tracks": [
+            {"id": 1, "language": "ENG", "codec": "eac3", "default": false},
+            {"id": 2, "language": "swe", "title": "Svenska <b>5.1</b>", "codec": "aac", "default": true},
+            {"id": 2, "language": "fre", "codec": "aac", "default": false},
+            {"id": 7, "language": "not a tag!", "title": "see https://evil.example/x", "codec": "ac3"},
+            {"id": 8, "title": "www.spam.example", "codec": "ac3"},
+        ],
+        "subtitle_tracks": [
+            {"id": 4, "kind": "text", "language": "eng", "codec": "subrip", "forced": false, "default": false},
+            {"id": 5, "kind": "bitmap", "language": "eng", "title": "Forced", "codec": "hdmv_pgs_subtitle", "forced": true, "default": false},
+        ],
+    })
+}
+
+#[tokio::test]
+async fn tracks_are_reported_and_chosen_without_urls_and_a_new_choice_restarts_the_bot() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let state = w.playing(&mut alice, "A 1080p").await;
+    assert!(state.get("audio_tracks").is_none() && state.get("audio").is_none(), "nothing before the bot has looked: {state}");
+    let first = w.bot.puts(&w.voice).remove(0);
+    let generation = first["generation"].clone();
+    assert!(generation.is_u64() && first["audio"].is_null() && first["burned_subtitle"].is_null(), "{first}");
+    assert_eq!(first["tracks_known"], false, "the bot may use the file's defaults until the server has the tracks");
+
+    // A report for another item is ignored; the right one sets the lists and the bot's defaults.
+    assert_eq!(w.event("tracks", tracks_event(&json!(generation.as_u64().unwrap() + 1000))).await, StatusCode::NO_CONTENT);
+    assert!(w.app.patch(&w.path(), &w.alice, json!({})).await.1.get("audio_tracks").is_none(), "a stale report is dropped");
+    assert_eq!(w.event("tracks", tracks_event(&generation)).await, StatusCode::NO_CONTENT);
+    let (status, state) = w.app.patch(&w.path(), &w.alice, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_no_urls(&state);
+    assert_no_secrets("the track lists", &state);
+    let audio = state["audio_tracks"].as_array().expect("audio tracks");
+    assert_eq!(audio.iter().map(|track| track["id"].as_u64().unwrap()).collect::<Vec<_>>(), [1, 2, 7, 8], "a repeated id is dropped");
+    assert_eq!(audio[0]["language"], "eng", "language tags are lower-cased");
+    assert_eq!(audio[1]["title"], "Svenska 5.1", "markup is stripped from titles");
+    assert!(audio[2]["language"].is_null() && audio[2]["title"].is_null(), "a bad tag and a title with a link are dropped: {audio:?}");
+    assert!(audio[3]["title"].is_null(), "www. titles are dropped");
+    assert_eq!((state["audio"].as_u64(), state["burned_subtitle"].as_u64()), (Some(2), Some(5)));
+    assert_eq!(state["subtitle_tracks"].as_array().map(Vec::len), Some(2));
+    let (_, off) = w.app.patch(&w.path(), &w.alice, json!({"burned_subtitle": null})).await;
+    assert!(off.get("burned_subtitle").is_none(), "{off}");
+    let known = w.bot.puts(&w.voice).pop().expect("put");
+    assert_eq!(
+        (known["tracks_known"].clone(), known["burned_subtitle"].is_null()),
+        (json!(true), true),
+        "off after the tracks are known: a restarted bot keeps it off"
+    );
+    w.app.patch(&w.path(), &w.alice, json!({"burned_subtitle": 5})).await;
+
+    // Choosing validates against the reported tracks, needs the call, and restarts the bot at the current position with the new choice.
+    let puts_before = w.bot.puts(&w.voice).len();
+    for bad in [json!({"audio": 99}), json!({"burned_subtitle": 4}), json!({"burned_subtitle": 99})] {
+        assert_eq!(w.app.patch(&w.path(), &w.alice, bad.clone()).await.0, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"audio": 1})).await.0, StatusCode::FORBIDDEN, "carl is not in the call");
+    assert_eq!(w.bot.puts(&w.voice).len(), puts_before, "refused choices send nothing");
+    let (status, state) = w.app.patch(&w.path(), &w.alice, json!({"audio": 1})).await;
+    assert_eq!((status, state["audio"].as_u64()), (StatusCode::OK, Some(1)), "{state}");
+    let puts = w.bot.puts(&w.voice);
+    assert_eq!(puts.len(), puts_before + 1);
+    assert_eq!(
+        (puts[puts_before]["audio"].as_u64(), puts[puts_before]["burned_subtitle"].as_u64(), puts[puts_before]["generation"].clone()),
+        (Some(1), Some(5), generation.clone())
+    );
+    let (_, state) = w.app.patch(&w.path(), &w.alice, json!({"burned_subtitle": null})).await;
+    assert!(state.get("burned_subtitle").is_none(), "{state}");
+    let last = w.bot.puts(&w.voice).pop().expect("put");
+    assert_eq!((last["audio"].as_u64(), last["burned_subtitle"].is_null()), (Some(1), true));
+    // Choosing what is already chosen is not a restart.
+    let count = w.bot.puts(&w.voice).len();
+    assert_eq!(w.app.patch(&w.path(), &w.alice, json!({"audio": 1, "burned_subtitle": null})).await.0, StatusCode::OK);
+    assert_eq!(w.bot.puts(&w.voice).len(), count);
+
+    // A later report for the same item (after a re-resolve) keeps what people chose.
+    assert_eq!(w.event("tracks", tracks_event(&generation)).await, StatusCode::NO_CONTENT);
+    let (_, state) = w.app.patch(&w.path(), &w.alice, json!({})).await;
+    assert_eq!(state["audio"].as_u64(), Some(1));
+
+    // A new item starts without the old lists.
+    let sid = World::sid(&w.streams(&w.alice).await, "A 720p");
+    let (_, state) = w.app.put_json(&w.path(), &w.alice, json!({"sid": sid})).await;
+    assert!(state.get("audio_tracks").is_none() && state.get("audio").is_none() && state.get("burned_subtitle").is_none(), "{state}");
+}
+
+#[tokio::test]
+async fn addon_subtitles_follow_the_host_rules_and_their_urls_stay_on_the_server() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.carl).await;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.join(&mut carl).await;
+    let list_path = format!("{}/subtitles", w.path());
+    assert_eq!(w.app.get(&list_path, &w.alice).await.0, StatusCode::FORBIDDEN, "alice is not in the call yet");
+    w.playing(&mut alice, "A 1080p").await;
+
+    let (status, listing) = w.app.get(&list_path, &w.alice).await;
+    assert_eq!(status, StatusCode::OK, "{listing}");
+    assert_no_secrets("the subtitle list", &listing);
+    assert!(!listing.to_string().contains("://"), "{listing}");
+    assert_eq!(listing["addon_errors"], json!(["Broken"]));
+    let subtitles = listing["subtitles"].as_array().expect("subtitles");
+    assert_eq!(
+        subtitles.iter().map(|sub| (sub["label"].as_str().unwrap(), sub["language"].as_str())).collect::<Vec<_>>(),
+        [("Addon A 1", Some("eng")), ("Addon A 2", Some("sv-se"))],
+        "private, http, userinfo, port and scheme rules drop the others"
+    );
+    for sub in subtitles {
+        assert_eq!(
+            sub.as_object().unwrap().keys().cloned().collect::<std::collections::BTreeSet<_>>(),
+            ["addon", "label", "language", "sid"].map(String::from).into()
+        );
+    }
+
+    // The file is fetched by the server, cleaned; a 2 MiB cap applies.
+    let (first, big) = (subtitles[0]["sid"].as_str().unwrap(), subtitles[1]["sid"].as_str().unwrap());
+    let (status, cues) = w.app.get(&format!("{list_path}/{first}"), &w.alice).await;
+    assert_eq!(status, StatusCode::OK, "{cues}");
+    assert_eq!(cues, json!({"cues": [{"start_ms": 1000, "end_ms": 2000, "text": "Hello there"}, {"start_ms": 3000, "end_ms": 4000, "text": "alert(1)Bye"}]}));
+    assert_eq!(w.app.get(&format!("{list_path}/{big}"), &w.alice).await.0, StatusCode::BAD_REQUEST, "over the size cap");
+    assert_eq!(w.app.get(&format!("{list_path}/nope"), &w.alice).await.0, StatusCode::BAD_REQUEST);
+
+    // Ids belong to the person who listed them, and carl has no listing of his own until he is linked and in the call.
+    assert_eq!(w.app.get(&format!("{list_path}/{first}"), &w.carl).await.0, StatusCode::BAD_REQUEST, "carl cannot read alice's id");
+    assert_eq!(w.app.get(&list_path, &w.owner).await.0, StatusCode::FORBIDDEN, "the owner is not in the call");
+    let unlinked = w.app.register("dave").await.0;
+    assert_eq!(w.app.get(&format!("/channels/{}/stremio/subtitles", w.voice), &unlinked).await.0, StatusCode::FORBIDDEN);
+
+    // A new item invalidates the old ids.
+    let sid = World::sid(&w.streams(&w.alice).await, "A 720p");
+    assert_eq!(w.app.put_json(&w.path(), &w.alice, json!({"sid": sid})).await.0, StatusCode::OK);
+    assert_eq!(w.app.get(&format!("{list_path}/{first}"), &w.alice).await.0, StatusCode::BAD_REQUEST);
 }

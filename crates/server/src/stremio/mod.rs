@@ -70,6 +70,18 @@ pub struct TitleInfo {
     pub title: String,
     pub subtitle: Option<String>,
     pub poster: Option<String>,
+    /// `(type, video id)` as the addons know it, for asking them about subtitles.
+    pub video: Option<(String, String)>,
+}
+
+/// A subtitle file an addon offered to `user_id` for the item `generation` of `channel_id`; its URL never leaves the server.
+#[derive(Clone)]
+pub(crate) struct ListedSub {
+    pub user_id: i64,
+    pub channel_id: i64,
+    pub generation: u64,
+    pub url: Secret,
+    created: Instant,
 }
 
 /// A cached value and when it was fetched.
@@ -92,6 +104,7 @@ pub struct Stremio {
     pending: Mutex<HashMap<i64, Pending>>,
     addons: Mutex<HashMap<i64, Cached<Vec<Addon>>>>,
     metas: Mutex<HashMap<String, Cached<StremioMeta>>>,
+    subs: Mutex<HashMap<String, ListedSub>>,
     pub(crate) sessions: Mutex<HashMap<i64, crate::voice::stremio::Session>>,
     /// The media LiveKit's RoomService (rooms are closed and viewers removed through it); a fake in tests.
     media_rooms: Mutex<Arc<dyn RoomService>>,
@@ -125,6 +138,7 @@ impl Stremio {
             pending: Mutex::default(),
             addons: Mutex::default(),
             metas: Mutex::default(),
+            subs: Mutex::default(),
             sessions: Mutex::default(),
             generation: AtomicU64::new(1),
         }
@@ -171,10 +185,40 @@ impl Stremio {
         lock(&self.listed).get(sid).filter(|entry| entry.user_id == user_id && entry.created.elapsed() < SID_TTL).cloned()
     }
 
+    /// Remembers the subtitle files `user_id` was just offered for item `generation` of `channel_id`; returns their `sid`s in order.
+    pub(crate) fn remember_subs(&self, user_id: i64, channel_id: i64, generation: u64, urls: Vec<Secret>) -> Vec<String> {
+        let now = Instant::now();
+        let mut subs = lock(&self.subs);
+        subs.retain(|_, entry| now.duration_since(entry.created) < SID_TTL);
+        let mut mine: Vec<(Instant, String)> =
+            subs.iter().filter(|(_, entry)| entry.user_id == user_id).map(|(sid, entry)| (entry.created, sid.clone())).collect();
+        mine.sort();
+        let excess = (mine.len() + urls.len()).saturating_sub(SIDS_PER_USER);
+        for (_, sid) in mine.into_iter().take(excess) {
+            subs.remove(&sid);
+        }
+        urls.into_iter()
+            .map(|url| {
+                let mut bytes = [0_u8; 16];
+                rand::fill(&mut bytes);
+                let sid = URL_SAFE_NO_PAD.encode(bytes);
+                subs.insert(sid.clone(), ListedSub { user_id, channel_id, generation, url, created: now });
+                sid
+            })
+            .collect()
+    }
+
+    /// The subtitle file behind `sid`, only for the user it was offered to, in the channel and for the item it was offered for.
+    pub(crate) fn listed_sub(&self, sid: &str, user_id: i64, channel_id: i64, generation: u64) -> Option<ListedSub> {
+        let entry = lock(&self.subs).get(sid).cloned()?;
+        (entry.user_id == user_id && entry.channel_id == channel_id && entry.generation == generation && entry.created.elapsed() < SID_TTL).then_some(entry)
+    }
+
     /// A user unlinked or relinked: their cached addons and listed streams go.
     fn forget(&self, user_id: i64) {
         lock(&self.addons).remove(&user_id);
         lock(&self.listed).retain(|_, entry| entry.user_id != user_id);
+        lock(&self.subs).retain(|_, entry| entry.user_id != user_id);
         lock(&self.pending).remove(&user_id);
     }
 }
@@ -405,13 +449,14 @@ async fn meta(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((
 }
 
 /// The title and, for an episode, `S1E2 · Name`, as shown on the tile.
-fn title_info(video_id: &str, meta: Option<&StremioMeta>) -> TitleInfo {
-    let Some(meta) = meta else { return TitleInfo { title: video_id.to_owned(), subtitle: None, poster: None } };
+fn title_info(kind: &str, video_id: &str, meta: Option<&StremioMeta>) -> TitleInfo {
+    let video = Some((kind.to_owned(), video_id.to_owned()));
+    let Some(meta) = meta else { return TitleInfo { title: video_id.to_owned(), subtitle: None, poster: None, video } };
     let subtitle = meta.videos.iter().find(|video| video.id == video_id).map(|video| format!("S{}E{} · {}", video.season, video.episode, video.name));
-    TitleInfo { title: meta.name.clone(), subtitle, poster: meta.poster.clone() }
+    TitleInfo { title: meta.name.clone(), subtitle, poster: meta.poster.clone(), video }
 }
 
-async fn user_addons(state: &AppState, active: &Active<'_>, user_id: i64) -> ApiResult<Arc<Vec<Addon>>> {
+pub(crate) async fn user_addons(state: &AppState, active: &Active<'_>, user_id: i64) -> ApiResult<Arc<Vec<Addon>>> {
     if let Some((at, addons)) = lock(&state.stremio.addons).get(&user_id)
         && at.elapsed() < ADDONS_TTL
     {
@@ -449,7 +494,7 @@ async fn streams(
     let ((mut found, failed), meta) =
         tokio::join!(addons::fetch_streams(&active.clients.fetcher, &addons, &kind, &video_id), cached_meta(&state, &active, &kind, title_id));
     rank::rank(&mut found, active.cfg.max_height, kind == "series");
-    let info = title_info(&video_id, meta.ok().as_deref());
+    let info = title_info(&kind, &video_id, meta.ok().as_deref());
     let sids = state.stremio.remember(user_id, found.iter().map(|candidate| (candidate.clone(), info.clone())).collect());
     let streams = found
         .into_iter()

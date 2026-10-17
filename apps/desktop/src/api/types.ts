@@ -870,6 +870,45 @@ export const STREMIO_QUEUE_MAX = 10;
 export const STREMIO_POSITION_MAX_MS = 24 * 60 * 60 * 1000;
 /** Poster hosts the server lets through; the CSP's img-src lists the same three. */
 export const STREMIO_IMAGE_HOSTS = ["images.metahub.space", "episodes.metahub.space", "m.media-amazon.com"];
+/** An audio stream of the playing file; `id` is the container's stream index. Everyone hears the one that is playing. */
+export interface StremioAudioTrack {
+  id: number;
+  language?: string; // ISO 639 code, lower case ("eng", "swe")
+  title?: string;
+  codec: string;
+  default: boolean;
+}
+export type StremioSubtitleKind = "text" | "bitmap";
+/** A subtitle stream inside the file. Text tracks arrive as cues in the media room (each viewer picks their own); bitmap tracks are burned into the picture for everyone. */
+export interface StremioSubtitleTrack {
+  id: number;
+  kind: StremioSubtitleKind;
+  language?: string;
+  title?: string;
+  codec: string;
+  forced: boolean;
+  default: boolean;
+}
+/** One subtitle line: shown from start_ms to end_ms of the media. Plain text. */
+export interface StremioCue {
+  start_ms: number;
+  end_ms: number;
+  text: string;
+}
+/** A subtitle one of the user's own Stremio addons offers for the playing title (label only, the URL stays on the server). */
+export interface StremioAddonSubtitle {
+  sid: string;
+  addon: string;
+  language?: string;
+  label: string;
+}
+export interface StremioAddonSubtitles {
+  subtitles: StremioAddonSubtitle[];
+  addon_errors: string[];
+}
+export interface StremioCues {
+  cues: StremioCue[];
+}
 export type StremioStatus = "starting" | "playing" | "paused" | "buffering" | "error";
 export interface StremioItem {
   title: string;
@@ -891,6 +930,10 @@ export interface StremioState {
   started_by: Snowflake;
   bot_identity: string; // "bot:stremio:<channel_id>", the participant in the media room
   queue: StremioQueued[];
+  audio_tracks?: StremioAudioTrack[]; // once the bot has looked at the file
+  audio?: number; // id of the audio track in use
+  subtitle_tracks?: StremioSubtitleTrack[];
+  burned_subtitle?: number; // id of the picture subtitle burned in for everyone
 }
 export interface StremioUpdate {
   channel_id: Snowflake;
@@ -954,6 +997,8 @@ export interface StremioPatchRequest {
   queue_add?: string; // sid
   queue_remove?: number; // index
   skip?: boolean;
+  audio?: number; // an audio track id
+  burned_subtitle?: number | null; // a bitmap subtitle track id, or null to turn burn-in off
 }
 export interface StremioViewerToken {
   url: string; // wss:// signalling URL of the media LiveKit

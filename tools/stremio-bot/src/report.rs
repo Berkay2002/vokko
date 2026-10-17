@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
+use vokko_protocol::api::{StremioAudioTrack, StremioSubtitleTrack};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -11,6 +12,7 @@ pub enum Kind {
     Position,
     Ended,
     Error,
+    Tracks,
 }
 
 impl Kind {
@@ -20,6 +22,7 @@ impl Kind {
             Kind::Position => "position",
             Kind::Ended => "ended",
             Kind::Error => "error",
+            Kind::Tracks => "tracks",
         }
     }
 }
@@ -33,6 +36,20 @@ pub struct Event<'a> {
     pub duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<&'a str>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<&'a Tracks>,
+}
+
+/// What the file holds and what the bot plays by default; sent once per probe (the server keeps the first report of an item).
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Tracks {
+    pub generation: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub burned_subtitle: Option<u32>,
+    pub audio_tracks: Vec<StremioAudioTrack>,
+    pub subtitle_tracks: Vec<StremioSubtitleTrack>,
 }
 
 #[derive(Clone)]
@@ -51,10 +68,18 @@ impl Reporter {
     /// Fire and forget. Everything but `position` is retried a few times, because the server only learns of the end
     /// of a movie from here.
     pub fn send(&self, channel_id: &str, kind: Kind, position_ms: u64, duration_ms: Option<u64>, message: Option<String>) {
+        self.dispatch(channel_id, kind, position_ms, duration_ms, message, None);
+    }
+
+    pub fn send_tracks(&self, channel_id: &str, position_ms: u64, tracks: Tracks) {
+        self.dispatch(channel_id, Kind::Tracks, position_ms, None, None, Some(tracks));
+    }
+
+    fn dispatch(&self, channel_id: &str, kind: Kind, position_ms: u64, duration_ms: Option<u64>, message: Option<String>, tracks: Option<Tracks>) {
         let this = self.clone();
         let channel_id = channel_id.to_owned();
         tokio::spawn(async move {
-            let body = Event { channel_id: &channel_id, event: kind.name(), position_ms, duration_ms, message: message.as_deref() };
+            let body = Event { channel_id: &channel_id, event: kind.name(), position_ms, duration_ms, message: message.as_deref(), tracks: tracks.as_ref() };
             let attempts = if kind == Kind::Position { 1 } else { 4 };
             for attempt in 1..=attempts {
                 match this.client.post(this.url.as_ref()).bearer_auth(this.secret.as_ref()).json(&body).send().await {
@@ -76,9 +101,15 @@ mod tests {
 
     #[test]
     fn event_json_shape() {
-        let e = Event { channel_id: "42", event: Kind::Position.name(), position_ms: 5000, duration_ms: None, message: None };
+        let e = Event { channel_id: "42", event: Kind::Position.name(), position_ms: 5000, duration_ms: None, message: None, tracks: None };
         assert_eq!(serde_json::to_string(&e).expect("json"), r#"{"channel_id":"42","event":"position","position_ms":5000}"#);
-        let e = Event { channel_id: "42", event: Kind::Error.name(), position_ms: 1, duration_ms: Some(9), message: Some("boom") };
+        let e = Event { channel_id: "42", event: Kind::Error.name(), position_ms: 1, duration_ms: Some(9), message: Some("boom"), tracks: None };
         assert_eq!(serde_json::to_string(&e).expect("json"), r#"{"channel_id":"42","event":"error","position_ms":1,"duration_ms":9,"message":"boom"}"#);
+        let tracks = Tracks { generation: 7, audio: Some(1), burned_subtitle: None, audio_tracks: Vec::new(), subtitle_tracks: Vec::new() };
+        let e = Event { channel_id: "42", event: Kind::Tracks.name(), position_ms: 0, duration_ms: None, message: None, tracks: Some(&tracks) };
+        assert_eq!(
+            serde_json::to_string(&e).expect("json"),
+            r#"{"channel_id":"42","event":"tracks","position_ms":0,"generation":7,"audio":1,"audio_tracks":[],"subtitle_tracks":[]}"#
+        );
     }
 }
