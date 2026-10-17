@@ -4,7 +4,7 @@ import { CANNOT_DM_USER, DM_NOT_DELIVERED_TEXT } from '../api/errors';
 import { MessageFlags, MessageReferenceType, MessageType } from '../api/types';
 import type { Message } from '../api/types';
 import { Markdown } from './markdown';
-import { Tooltip } from './shell';
+import { Tooltip, roleIcon } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
 import { SystemBody } from './SystemMessage';
@@ -143,6 +143,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const name = chat.nameOf(message.author, message.member);
   const color = chat.colorOf(message);
   const dot = chat.roleDotOf(message);
+  const icon = roleIcon(chat.guildId, chat.members[message.author.id] ?? message.member ?? null);
   const compact = chat.compact;
   const myRoles = chat.members[chat.me.id]?.roles;
   const mentionsMe = !isMine && (message.mentions.some(u => u.id === chat.me.id) || message.mention_everyone || (!!myRoles && mentionsRole(message.content, myRoles)));
@@ -218,6 +219,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
         {dot && <span className="chat-role-dot" style={{ background: dot }} aria-hidden="true" />}
         {compact && chat.display.showCompactAvatars && <Avatar user={message.author} size={16} className="chat-compact-avatar" guildId={chat.guildId} />}
         <span className="chat-author" style={color ? { color } : undefined}>{name}</span>
+        {icon && <span className="role-icon" role="img" aria-label={icon.name} title={icon.name}>{icon.unicode_emoji}</span>}
         <ServerTag user={chat.userById(message.author.id) ?? message.author} />
         <AppTag message={message} />
         {!compact && <Tooltip content={formatFullDate(date)}><time className="chat-timestamp" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>}

@@ -131,6 +131,7 @@
 .chat-msg-body { min-width: 0; }
 .chat-msg-header { margin: 0; display: block; font-size: var(--chat-font-size); font-weight: 500; line-height: var(--chat-line-height); min-height: var(--chat-line-height); }
 .chat-author { color: var(--chat-text-strong); font-weight: 500; cursor: pointer; }
+.role-icon { margin-left: 4px; font-size: 16px; line-height: 1; user-select: none; } /* role icon emoji after the name, chat and member list */
 .chat-author:hover { text-decoration: underline; }
 .chat-timestamp { display: inline-block; height: 1.25rem; margin-left: 0.25rem; font-size: 0.75rem; font-weight: 500; line-height: 1.375rem; color: var(--chat-text-muted); cursor: default; vertical-align: baseline; }
 .chat-timestamp.inline { margin-left: 8px; }
