@@ -25,7 +25,7 @@ const MAX_REDIRECTS: usize = 3;
 const MAX_URL_LEN: usize = 2048;
 const MAX_TITLE: usize = 256;
 const MAX_DESCRIPTION: usize = 350;
-const USER_AGENT: &str = "Mozilla/5.0 (compatible; VokkoBot/0.1; link preview)";
+pub(crate) const USER_AGENT: &str = "Mozilla/5.0 (compatible; VokkoBot/0.1; link preview)";
 const ACCEPT_VALUE: &str = "text/html,application/xhtml+xml;q=0.9,image/*;q=0.8";
 
 #[derive(Clone, Copy, Debug)]
