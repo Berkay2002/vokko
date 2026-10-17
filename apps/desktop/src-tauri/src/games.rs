@@ -59,6 +59,18 @@ fn collect() -> Vec<RunningProcess> {
     found.into_values().collect()
 }
 
+/// Where the running executable called `name` lives (case-insensitive). The path stays in Rust: `appinfo` reads the display name and
+/// icon from it and hands only those to the webview.
+pub fn running_exe_path(name: &str) -> Option<std::path::PathBuf> {
+    let mut system = System::new();
+    system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet));
+    system
+        .processes()
+        .values()
+        .find(|process| process.name().to_string_lossy().eq_ignore_ascii_case(name.trim()))
+        .and_then(|process| process.exe().map(std::path::Path::to_path_buf))
+}
+
 /// Lists the running executables (de-duplicated by name). The refresh walks every process, so it runs off the main thread.
 #[tauri::command]
 pub async fn desktop_list_processes() -> Result<Vec<RunningProcess>, String> {

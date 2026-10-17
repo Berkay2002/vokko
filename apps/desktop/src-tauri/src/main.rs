@@ -1,6 +1,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod appicon;
+mod appinfo;
 mod games;
 mod links;
 #[cfg(target_os = "macos")]
@@ -221,6 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             desktop_set_unread,
             window::desktop_window_chrome,
             games::desktop_list_processes,
+            appinfo::desktop_app_info,
             appicon::desktop_set_app_icon,
             #[cfg(target_os = "macos")]
             macos::desktop_request_attention,
