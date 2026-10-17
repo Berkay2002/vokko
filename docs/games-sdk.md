@@ -30,7 +30,8 @@ Host to game, on the port:
 | `{type: "close"}` | the tile is about to unload; stop sounds |
 
 Game to host: `{type: "ready"}` (first frame drawn), `{type: "send", data, to?}`, `{type: "close"}` (closes the
-tile for this user; the session keeps running for the others).
+tile for this user; the session keeps running for the others), `{type: "escape"}` (the SDK sends it for an Escape
+keydown the game did not `preventDefault()`; focus goes back to the tile's controls).
 
 A player is `{app_id, name, avatar}`. `app_id` is a 22-character id that is stable for one user in one game and
 different in every other game; it is not the Vokko user id. `avatar` is a 128 px PNG `Blob` or `null`. `leader` is

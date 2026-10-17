@@ -126,6 +126,8 @@ function GameFrame({ channelId, guildId, session, onClose }: { channelId: Snowfl
       onMessage: message => {
         if (message.type === "ready") setReady(true);
         else if (message.type === "close") latest.current.onClose();
+        // The frame keeps key events, so the SDK reports an unhandled Escape and focus goes back to the tile's own controls.
+        else if (message.type === "escape") el.closest("[data-game-tile]")?.querySelector<HTMLElement>(".game-head button")?.focus();
         else send(message);
       },
     });

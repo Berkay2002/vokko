@@ -65,6 +65,7 @@ describe("parsePortMessage", () => {
   it("parses the three game messages", () => {
     expect(parsePortMessage({ type: "ready" })).toEqual({ type: "ready" });
     expect(parsePortMessage({ type: "close", extra: 1 })).toEqual({ type: "close" });
+    expect(parsePortMessage({ type: "escape" })).toEqual({ type: "escape" });
     expect(parsePortMessage({ type: "send", data: { a: 1 } })).toEqual({ type: "send", data: { a: 1 } });
     expect(parsePortMessage({ type: "send", data: null, to: "abc" })).toEqual({ type: "send", data: null, to: "abc" });
   });

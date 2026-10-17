@@ -8,7 +8,8 @@ import { dirname } from 'node:path';
 // through __vokkoMock.requestAs.
 // Run from apps/desktop: npx playwright test -c e2e/watch.config.ts
 
-const SHOT = process.env.WATCH_SHOT ?? '~/.claude/jobs/4fa3f0ba/tmp/youtube/call.png';
+// Default under the test's own output dir (test-results/); call only inside a test.
+const shotPath = () => process.env.WATCH_SHOT ?? test.info().outputPath('call.png');
 const ID = 'dQw4w9WgXcQ';
 const NEXT = 'aaaaaaaaaaa';
 
@@ -85,8 +86,9 @@ test('start from a link in a call, pause, queue and skip from others, stop', asy
 
   // The picture of the call with the tile.
   await page.waitForTimeout(600);
-  mkdirSync(dirname(SHOT), { recursive: true });
-  await page.screenshot({ path: SHOT });
+  const shot = shotPath();
+  mkdirSync(dirname(shot), { recursive: true });
+  await page.screenshot({ path: shot });
 
   // Alice (another person in the call) pauses: the tile and the player follow.
   await as(page, 'alice', 'PATCH', path, { playing: false, position_ms: 42_000 });

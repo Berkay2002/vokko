@@ -122,5 +122,10 @@ test('Server Settings > Activities adds and removes a game',async ({ page }) => 
   await page.screenshot({ path: shot('settings-allowlist.png') });
 
   await list.getByRole('button', { name: 'Remove Codenames' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Remove Game' });
+  await confirm.getByRole('button', { name: 'Cancel' }).click();
+  await expect(list.locator('li')).toContainText('Codenames');
+  await list.getByRole('button', { name: 'Remove Codenames' }).click();
+  await confirm.getByRole('button', { name: 'Remove Game' }).click();
   await expect(page.getByText('No games added yet.')).toBeVisible();
 });
