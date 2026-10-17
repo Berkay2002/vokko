@@ -2,7 +2,7 @@
 // accepts it only from that frame's window and its expected origin, then hands over one MessagePort. Everything after that
 // flows on the port and is parsed here; anything else is dropped. Nothing on the port carries tokens or Vokko ids.
 
-import { API_ORIGIN } from "../api/config";
+import { API_ORIGIN, MOCK } from "../api/config";
 import { GAME_RELAY_MAX_BYTES, type GameManifest, type GamePlayer } from "../api/types";
 import { builtinGame, isBuiltin } from "./builtin";
 
@@ -48,11 +48,14 @@ export function frameOrigin(game: GameManifest): string {
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
 
+const bareHost = (host: string) => host.replace(/\.$/, "");
+
 /**
- * The sandbox for `game`, or null when it must not be framed: a third-party URL that is not https (local http for dev
- * servers only), or whose origin is the app's or the API's (allow-same-origin there would hand it the app).
+ * The sandbox for `game`, or null when it must not be framed: a third-party URL that is not https (local http only for
+ * dev and mock builds), or whose host is the app's or the API's on any port, trailing dot ignored (allow-same-origin
+ * there would hand it the app; mirrors the server's own-origin rule).
  */
-export function sandboxFor(game: GameManifest, app: string[] = appOrigins()): string | null {
+export function sandboxFor(game: GameManifest, app: string[] = appOrigins(), allowLoopback: boolean = import.meta.env.DEV || MOCK): string | null {
   if (isBuiltin(game)) return SANDBOX_BUILTIN;
   let url: URL;
   try {
@@ -60,9 +63,17 @@ export function sandboxFor(game: GameManifest, app: string[] = appOrigins()): st
   } catch {
     return null;
   }
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname))) return null;
+  const host = bareHost(url.hostname);
+  if (url.protocol !== "https:" && !(allowLoopback && url.protocol === "http:" && LOCAL_HOSTS.has(host))) return null;
   if (url.username || url.password) return null;
-  return app.includes(url.origin) ? null : SANDBOX_THIRD_PARTY;
+  const appHosts = app.flatMap(o => {
+    try {
+      return [bareHost(new URL(o).hostname)];
+    } catch {
+      return [];
+    }
+  });
+  return appHosts.includes(host) ? null : SANDBOX_THIRD_PARTY;
 }
 
 /** The game's hello: from `frame`'s window, from `origin`, the exact shape. Anything else is not one. */

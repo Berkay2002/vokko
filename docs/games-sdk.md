@@ -36,7 +36,8 @@ A player is `{app_id, name, avatar}`. `app_id` is a 22-character id that is stab
 different in every other game; it is not the Vokko user id. `avatar` is a 128 px PNG `Blob` or `null`. `leader` is
 the starter's app id while they are in the call, else the smallest app id present; every client computes the same
 one, so use it when the game needs one authority. `players` is everyone in the call, not only those who have the
-game open.
+game open. `game_id` is an opaque id for the running session (it changes when the game is started again), not the
+game's catalog id.
 
 ## SDK
 
@@ -46,7 +47,7 @@ dependencies.
 
 ```js
 const vokko = await VokkoGames.connect(); // rejects after 5 s without a host: show "Open this inside Vokko"
-vokko.me; vokko.players; vokko.leader; vokko.gameId;
+vokko.me; vokko.players; vokko.leader; vokko.gameId; // gameId: an opaque id for this game session
 const off = vokko.on("message", (data, from) => {}); // also "players" (players, leader), "error" (code), "close" ()
 vokko.send(data);        // everyone else in the call
 vokko.send(data, appId); // one player
@@ -62,6 +63,8 @@ vokko.close();
 - The sender does not receive its own messages. Apply your own moves locally.
 - Relayed data comes from other players and is untrusted. Check its shape, and render text with `textContent`,
   never `innerHTML`.
+- The SDK accepts `init` from any parent window, so a page that frames your game can pretend to be Vokko. Do not
+  rely on running inside Vokko for anything security-relevant.
 - The server keeps no game state. If your game needs some, keep it in the clients (see below).
 
 ## Late join: `sync?` and a snapshot

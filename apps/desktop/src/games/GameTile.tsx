@@ -121,7 +121,7 @@ function GameFrame({ channelId, guildId, session, onClose }: { channelId: Snowfl
         const raw = now?.raw ?? [];
         const list = now?.list ?? [];
         const mine = raw.findIndex(p => p.user_id === me);
-        return { type: "init", game_id: game.id, me: list[mine] ?? { app_id: "", name: "", avatar: null }, players: list, leader: leaderOf(raw, session.started_by) };
+        return { type: "init", game_id: session.session_id.slice(0, 8), me: list[mine] ?? { app_id: "", name: "", avatar: null }, players: list, leader: leaderOf(raw, session.started_by) };
       },
       onMessage: message => {
         if (message.type === "ready") setReady(true);
@@ -135,7 +135,7 @@ function GameFrame({ channelId, guildId, session, onClose }: { channelId: Snowfl
       off();
       host.current = null;
     };
-  }, [showFrame, channelId, game, session.started_by]);
+  }, [showFrame, channelId, game, session.started_by, session.session_id]);
 
   useEffect(() => {
     if (players && host.current?.connected) host.current.post({ type: "players", players: players.list, leader: leaderOf(players.raw, session.started_by) });

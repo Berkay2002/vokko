@@ -34,7 +34,7 @@ var VokkoGames = (() => {
     /** @param {MessagePort} port @param {any} init */
     constructor(port, init) {
       this.port = port;
-      /** @type {string} */ this.gameId = String(init.game_id);
+      /** @type {string} */ this.gameId = String(init.game_id); // opaque per game session, not the catalog id
       /** @type {VokkoPlayer} */ this.me = init.me;
       /** @type {VokkoPlayer[]} */ this.players = init.players;
       /** @type {string} */ this.leader = init.leader;

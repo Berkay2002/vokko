@@ -30,8 +30,13 @@ describe("sandbox choice", () => {
     expect(sandboxFor(third("https://user:pw@play.example/"), [APP, API])).toBeNull();
     expect(sandboxFor(third("javascript:alert(1)"), [APP, API])).toBeNull();
     expect(sandboxFor(third("not a url"), [APP, API])).toBeNull();
-    // A local dev game server on another port is a different origin.
-    expect(sandboxFor(third("http://localhost:5000/"), [APP, API])).toBe(SANDBOX_THIRD_PARTY);
+    // The app's or the API's host on another port or with a trailing dot is still theirs.
+    expect(sandboxFor(third("https://vokko.example.:8443/x/"), [APP, API])).toBeNull();
+    expect(sandboxFor(third("https://vokko.example:444/x/"), [APP, API])).toBeNull();
+    expect(sandboxFor(third("http://127.0.0.1:5000/"), [APP, API])).toBeNull();
+    // A local dev game server on another host is fine in dev and mock builds only.
+    expect(sandboxFor(third("http://localhost:5000/"), [APP, API], true)).toBe(SANDBOX_THIRD_PARTY);
+    expect(sandboxFor(third("http://localhost:5000/"), [APP, API], false)).toBeNull();
   });
 
   it("never adds the flags the design forbids", () => {
