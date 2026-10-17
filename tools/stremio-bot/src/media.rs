@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use livekit::options::{AudioEncoding, TrackPublishOptions, VideoCodec, VideoEncoding};
+use livekit::options::{AudioEncoding, DegradationPreference, TrackPublishOptions, VideoCodec, VideoEncoding, VideoPreset};
 use livekit::prelude::{LocalAudioTrack, LocalTrack, LocalVideoTrack, Room, TrackSid, TrackSource};
 use livekit::webrtc::audio_frame::AudioFrame;
 use livekit::webrtc::audio_source::native::NativeAudioSource;
@@ -83,6 +83,9 @@ pub async fn publish(room: &Room, geo: &Geometry, d: &Desired, cfg: &Config) -> 
                 },
                 video_encoding: Some(VideoEncoding { max_bitrate: u64::from(d.bitrate) * 1000, max_framerate: geo.fps }),
                 simulcast: cfg.simulcast,
+                // The SDK's screenshare defaults are a 3 fps low layer and dropping frames under load; a film wants full motion.
+                simulcast_layers: Some(vec![VideoPreset::new(geo.width / 4 * 2, geo.height / 4 * 2, u64::from(d.bitrate) * 1000 / 4, geo.fps)]),
+                degradation_preference: Some(DegradationPreference::MaintainFramerate),
                 video_encoder: match cfg.encoder {
                     Encoder::Auto => VideoEncoderBackend::Auto,
                     Encoder::Software => VideoEncoderBackend::Software,
