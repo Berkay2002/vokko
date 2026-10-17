@@ -192,6 +192,8 @@ Game → host:
   `allow-top-navigation*`, `allow-popups*`, `allow-modals`, `allow-forms` (games post over the SDK),
   `allow-downloads`, `allow-storage-access-by-user-activation`. `allow=""` delegates no camera, mic, geolocation, clipboard,
   fullscreen or autoplay.
+- Below 767 px a focused game tile fills the stage and ignores `aspect`, so games must lay out for a tall frame too
+  (Sketch switches to a portrait layout).
 - A Vokko-drawn header strip above the frame always shows the game name, its origin (built-ins: "Vokko"), and Close / Stop.
   The frame never covers the call bar or other app chrome; it is clipped to its tile.
 - **CSP:** dev and release `frame-src` gain `'self' https:` (`'self'` for built-ins, `https:` because admin-added origins are not
