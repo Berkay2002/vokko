@@ -7,6 +7,7 @@ pub mod moderation;
 pub mod stage;
 pub mod state;
 pub mod status;
+pub mod stremio;
 pub mod token;
 pub mod watch;
 pub mod webhook;

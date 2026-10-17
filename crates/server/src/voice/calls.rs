@@ -80,6 +80,7 @@ fn call_object(state: &AppState, channel_id: i64, entry: &CallEntry) -> Call {
         ringing: sorted_ringing(entry),
         voice_states: state.voice.states_in(&HashSet::from([channel_id])),
         watch_together: state.voice.watch_get(channel_id),
+        stremio: crate::voice::stremio::states_in(state, &HashSet::from([channel_id])),
     }
 }
 

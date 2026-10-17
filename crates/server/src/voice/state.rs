@@ -17,7 +17,7 @@ use vokko_protocol::api::permissions::{
     ADMINISTRATOR, CONNECT, MANAGE_CHANNELS, MOVE_MEMBERS, MUTE_MEMBERS, PRIORITY_SPEAKER, SPEAK, STREAM, USE_VAD, VIEW_CHANNEL,
 };
 use vokko_protocol::api::{
-    CALL_PARTICIPANT_MAX, ChannelType, GatewayEvent, Snowflake, VoiceConnectFailed, VoiceConnectFailure, VoiceServerUpdate, VoiceState,
+    CALL_PARTICIPANT_MAX, ChannelType, GatewayEvent, Snowflake, StremioUpdate, VoiceConnectFailed, VoiceConnectFailure, VoiceServerUpdate, VoiceState,
     VoiceStateUpdateCommand, WatchTogetherState, WatchTogetherUpdate,
 };
 
@@ -401,6 +401,10 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         let event = GatewayEvent::WatchTogetherUpdate(WatchTogetherUpdate { channel_id: target, state: Some(watching) });
         session.dispatch(event.name(), event.data());
     }
+    if let Some(playing) = super::stremio::state_of(state, channel_id) {
+        let event = GatewayEvent::StremioUpdate(StremioUpdate { channel_id: target, state: Some(playing) });
+        session.dispatch(event.name(), event.data());
+    }
     if row.is_dm() {
         // Starts the call (CALL_CREATE, ringing) or adds us to it.
         super::calls::joined(state, &row, user_id).await;
@@ -652,6 +656,7 @@ async fn release_channel(state: &AppState, channel_id: i64) {
     }
     super::calls::release(state, channel_id).await;
     super::watch::end(state, channel_id).await;
+    super::stremio::end(state, channel_id).await;
     let cleared: Result<Option<(Option<i64>,)>, _> =
         sqlx::query_as("UPDATE channels SET voice_status = NULL WHERE id = $1 AND voice_status IS NOT NULL RETURNING guild_id")
             .bind(channel_id)

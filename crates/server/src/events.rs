@@ -15,6 +15,7 @@ pub async fn guild_with_state(state: &AppState, guild_id: i64, viewer: i64) -> A
     let voice_states = state.voice.states_in(&visible);
     let stage_instances = crate::voice::stage::instances_in(state, guild_id, &visible).await?;
     let watch_together = state.voice.watch_in(&visible);
+    let stremio = crate::voice::stremio::states_in(state, &visible);
     let channels = store::channels_to_api(state, rows, Some(viewer)).await?;
     let members = store::members(state, guild_id, 10_000, None).await?;
     let member_count = store::member_count(state, guild_id).await?;
@@ -36,6 +37,7 @@ pub async fn guild_with_state(state: &AppState, guild_id: i64, viewer: i64) -> A
         voice_states,
         stage_instances,
         watch_together,
+        stremio,
     })
 }
 
