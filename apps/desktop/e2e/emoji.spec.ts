@@ -128,14 +128,24 @@ test('an emoji from a server you are not in still renders, and its popout says i
   await expect(pop.locator('img')).toBeVisible();
 });
 
-test('Enter in the emoji search picks the top result', async ({ page }) => {
+test('Enter in the emoji search picks the top result; it joins a 👍 pill spelled without U+FE0F', async ({ page }) => {
   await openChannel(page, 'random');
   const sent = page.locator('.chat-msg').last();
+  // Alice reacts with 👍 as typed text spells it; the picker's (emojibase) spelling is 👍️.
+  await page.evaluate(() => {
+    const w = window as unknown as { __vokkoMock: { channelIdByName(n: string): string; requestAs(u: string, m: string, p: string): unknown }; __vokko: { request(m: string, p: string): Promise<{ id: string }[]> } };
+    const cid = w.__vokkoMock.channelIdByName('random');
+    return w.__vokko.request('GET', `/channels/${cid}/messages?limit=1`).then(([m]) => w.__vokkoMock.requestAs('alice', 'PUT', `/channels/${cid}/messages/${m!.id}/reactions/${encodeURIComponent('👍')}/@me`));
+  });
+  const pills = sent.locator('.chat-reaction:not(.chat-reaction-add)');
+  await expect(pills).toHaveText('👍1');
   await sent.hover();
-  await sent.getByRole('button', { name: 'Add Reaction' }).click();
+  await sent.getByRole('toolbar', { name: 'Message actions' }).getByRole('button', { name: 'Add Reaction' }).click();
   const picker = page.getByRole('dialog', { name: 'Emoji picker' });
   await picker.getByLabel('Search emoji').fill('thumbsup');
   await picker.getByLabel('Search emoji').press('Enter');
   await expect(picker).toHaveCount(0);
-  await expect(sent.locator('.chat-reaction.me')).toContainText('👍');
+  await expect(pills).toHaveCount(1);
+  await expect(pills).toHaveClass(/ me( |$)/);
+  await expect(pills).toHaveText('👍2');
 });

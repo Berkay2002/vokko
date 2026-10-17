@@ -121,22 +121,28 @@ export function getRecentEmoji(): string[] {
     return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').slice(0, 36) : [];
   } catch { return []; }
 }
+/** The same unicode emoji, with or without variation selectors (emojibase spells 👍 as "👍️", typed or pasted text often without). */
+export function sameUnicodeEmoji(a: string, b: string): boolean {
+  return a.replace(/️/g, '') === b.replace(/️/g, '');
+}
 export function pushRecentEmoji(emoji: string): void {
   try {
-    const next = [emoji, ...getRecentEmoji().filter(e => e !== emoji)].slice(0, 36);
+    const next = [emoji, ...getRecentEmoji().filter(e => !sameUnicodeEmoji(e, emoji))].slice(0, 36);
     localStorage.setItem(RECENT_KEY, JSON.stringify(next));
   } catch { /* storage unavailable */ }
 }
 export function quickReactions(): string[] {
   const recent = getRecentEmoji();
-  return [...recent, ...DEFAULT_QUICK.filter(e => !recent.includes(e))].slice(0, 4);
+  const out: string[] = [];
+  for (const e of [...recent, ...DEFAULT_QUICK]) if (!out.some(x => sameUnicodeEmoji(x, e))) out.push(e);
+  return out.slice(0, 4);
 }
 const FILLER_QUICK = ['😀', '😢', '😮', '🔥', '👀', '🙏', '😍', '😡', '👏', '💯', '😊', '🤔', '😭', '👋', '🙌', '✅'];
 /** Up to `limit` unicode emoji for the "Add Reaction" submenu: recents first, then the defaults. */
 export function frequentEmoji(limit = 12): string[] {
   const out: string[] = [];
   for (const e of [...getRecentEmoji(), ...DEFAULT_QUICK, ...FILLER_QUICK]) {
-    if (!out.includes(e)) out.push(e);
+    if (!out.some(x => sameUnicodeEmoji(x, e))) out.push(e);
     if (out.length >= limit) break;
   }
   return out;
