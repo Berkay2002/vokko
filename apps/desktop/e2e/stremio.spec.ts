@@ -211,11 +211,14 @@ test('someone else starts it: the line shows outside the call, the tile when we 
   await page.evaluate(() => {
     const seen: string[] = [];
     (window as unknown as { __rooms: string[] }).__rooms = seen;
-    new MutationObserver(list => list.forEach(m => seen.push((m.target as Element).getAttribute('data-room') ?? ''))).observe(document.body, {
-      attributes: true,
-      attributeFilter: ['data-room'],
-      subtree: true,
-    });
+    const note = (el: Element) => el.querySelectorAll('[data-room]').forEach(e => seen.push(e.getAttribute('data-room') ?? ''));
+    new MutationObserver(list =>
+      list.forEach(m => {
+        if (m.type === 'attributes') seen.push((m.target as Element).getAttribute('data-room') ?? '');
+        // A tile that mounts fresh (and would open its own Room) arrives with its data-room already set.
+        m.addedNodes.forEach(n => n instanceof Element && (n.hasAttribute('data-room') && seen.push(n.getAttribute('data-room') ?? ''), note(n)));
+      }),
+    ).observe(document.body, { attributes: true, attributeFilter: ['data-room'], childList: true, subtree: true });
   });
   await tile.getByRole('button', { name: 'Focus Stremio' }).click();
   await expect(tile).toHaveClass(/focused/);

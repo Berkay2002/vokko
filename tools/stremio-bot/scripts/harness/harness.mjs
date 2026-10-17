@@ -220,6 +220,7 @@ async function main() {
     bot_cpu_pct: round(((cpu1.bot - cpu0.bot) / wall) * 100, 0),
     ffmpeg_cpu_pct: round(((cpu1.ffmpeg.reduce((s, x) => s + (x ?? 0), 0) - cpu0.ffmpeg.reduce((s, x) => s + (x ?? 0), 0)) / wall) * 100, 0),
     send_lines: sends.length,
+    send_rids: [...new Set(bot.lines.filter(l => l.line.includes("video send")).map(l => field(l.line, "rid")))],
     send_sample: (high.at(-1) ?? sends.at(-1))?.line.replace(/^\S+\s+/, ""),
   };
 
