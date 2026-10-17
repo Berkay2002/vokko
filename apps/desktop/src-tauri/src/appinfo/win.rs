@@ -52,8 +52,8 @@ fn version_strings(wide_path: &[u16]) -> (Option<String>, Option<String>) {
         let mut pairs_len = 0u32;
         if VerQueryValueW(data.as_ptr().cast(), w!("\\VarFileInfo\\Translation"), &mut pairs, &mut pairs_len).as_bool() && !pairs.is_null() {
             // an array of (language, code page) u16 pairs
-            let first = std::ptr::read_unaligned(pairs.cast::<[u16; 2]>());
             if pairs_len >= 4 {
+                let first = std::ptr::read_unaligned(pairs.cast::<[u16; 2]>());
                 languages.insert(0, format!("{:04x}{:04x}", first[0], first[1]));
             }
         }

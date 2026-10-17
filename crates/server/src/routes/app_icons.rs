@@ -59,10 +59,11 @@ async fn image(State(state): State<AppState>, Path(hash): Path<String>) -> ApiRe
     }
     let row: Option<(Vec<u8>,)> = sqlx::query_as("SELECT png FROM app_icons WHERE hash = $1").bind(&hash).fetch_optional(&state.db).await?;
     let Some((png,)) = row else { return Err(ApiErr::not_found()) };
-    let mut response = (StatusCode::OK, png.clone()).into_response();
+    let len = png.len();
+    let mut response = (StatusCode::OK, png).into_response();
     let headers = response.headers_mut();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("image/png"));
-    headers.insert(CONTENT_LENGTH, HeaderValue::from(png.len()));
+    headers.insert(CONTENT_LENGTH, HeaderValue::from(len));
     headers.insert(CACHE_CONTROL, HeaderValue::from_static("public, max-age=31536000, immutable"));
     headers.insert(HeaderName::from_static("x-content-type-options"), HeaderValue::from_static("nosniff"));
     Ok(response)
