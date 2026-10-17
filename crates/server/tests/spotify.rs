@@ -735,7 +735,7 @@ async fn a_member_plays_and_everyone_in_the_call_controls() {
     assert_eq!(w.patch(&w.carl, json!({"playing": true})).await.1["status"], "playing");
 
     // Exactly one operation, well formed.
-    for body in [json!({}), json!({"playing": true, "skip": true}), json!({"skip": false}), json!({"loop": "forever"}), json!({"position_ms": 999_999_999})] {
+    for body in [json!({}), json!({"playing": true, "skip": true}), json!({"loop": "forever"}), json!({"position_ms": 999_999_999})] {
         assert_eq!(w.patch(&w.alice, body.clone()).await.0, StatusCode::BAD_REQUEST, "{body}");
     }
     let (status, sought) = w.patch(&w.alice, json!({"position_ms": 90_000})).await;
@@ -1317,4 +1317,71 @@ async fn nothing_about_the_house_account_reaches_a_client() {
     }
     // And the server asked Spotify for nothing but the catalog, with its own app token.
     assert!(w.mock.paths().iter().all(|path| path == "/api/token" || allowed_path(path)), "{:?}", w.mock.paths());
+}
+
+/// docs/design/bot-control.md: with CONTROL_MEDIA denied to @everyone in the channel, carl (in the call, not the host) only
+/// appends within his quota of 10, removes his own entries, votes and skips what he added; previous restores who added a track.
+#[tokio::test]
+async fn without_control_media_others_vote_skip_their_own_and_queue_ten() {
+    use vokko_protocol::api::permissions::CONTROL_MEDIA;
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    let mut owner = Client::identify(&w.address, &w.owner).await.0;
+    w.playing(&mut alice, 1).await;
+    w.join(&mut carl).await;
+    w.join(&mut owner).await;
+    let deny = json!({"type": 0, "allow": "0", "deny": CONTROL_MEDIA.to_string()});
+    assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{}", w.voice, w.guild), &w.owner, deny).await.0, StatusCode::NO_CONTENT);
+    let (_, state) = w.patch(&w.alice, json!({"queue_add": {"uri": track_uri(20), "next": false}})).await;
+    let hers = state["queue"][0]["qid"].as_str().expect("qid").to_owned();
+
+    for body in [
+        json!({"playing": false}),
+        json!({"position_ms": 5}),
+        json!({"previous": true}),
+        json!({"loop": "queue"}),
+        json!({"shuffle": true}),
+        json!({"queue_add": {"uri": track_uri(21), "next": true}}),
+        json!({"queue_move": {"qid": hers, "to": 0}}),
+        json!({"queue_clear": true}),
+        json!({"queue_remove": hers}),
+    ] {
+        assert_eq!(w.patch(&w.carl, body.clone()).await.0, StatusCode::FORBIDDEN, "{body}");
+    }
+    assert_eq!(w.play(&w.carl, &track_uri(2)).await.0, StatusCode::FORBIDDEN, "replace");
+    assert_eq!(w.app.delete(&w.path(), &w.carl).await.0, StatusCode::FORBIDDEN, "stop");
+
+    // A playlist from carl queues 10; then he is full until he removes one of his own.
+    let (_, state) = w.patch(&w.carl, json!({"queue_add": {"uri": playlist_uri(1), "next": false}})).await;
+    let by_carl = state["queue"].as_array().expect("queue").iter().filter(|entry| entry["added_by"] == w.carl_id.as_str()).count();
+    assert_eq!(by_carl, 10);
+    assert!(state["left_out"].as_u64().is_some_and(|left| left > 0), "{}", state["left_out"]);
+    let (status, body) = w.patch(&w.carl, json!({"queue_add": {"uri": track_uri(22), "next": false}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let his = state["queue"][10]["qid"].as_str().expect("qid").to_owned();
+    assert_eq!(w.patch(&w.carl, json!({"queue_remove": his})).await.0, StatusCode::OK);
+
+    // Three listeners need two votes; a withdrawn vote goes; a controller skips at once.
+    let (_, voted) = w.patch(&w.carl, json!({"skip": true})).await;
+    assert_eq!(
+        (voted["track"]["uri"].as_str(), voted["skip_votes"].clone(), voted["skip_needed"].as_u64()),
+        (Some(track_uri(1).as_str()), json!([w.carl_id]), Some(2))
+    );
+    assert_eq!(w.patch(&w.carl, json!({"skip": false})).await.1["skip_votes"], json!([]));
+    let (_, skipped) = w.patch(&w.alice, json!({"skip": true})).await;
+    assert_eq!((skipped["track"]["uri"].as_str(), skipped["added_by"].as_str()), (Some(track_uri(20).as_str()), Some(w.alice_id.as_str())));
+    let (_, skipped) = w.patch(&w.owner, json!({"skip": true})).await;
+    assert_eq!(skipped["added_by"], w.carl_id.as_str());
+
+    // Previous brings back alice's track with alice as its adder, so carl's skip there is only a vote.
+    let (_, back) = w.patch(&w.alice, json!({"previous": true})).await;
+    assert_eq!((back["track"]["uri"].as_str(), back["added_by"].as_str()), (Some(track_uri(20).as_str()), Some(w.alice_id.as_str())));
+    assert_eq!(w.patch(&w.carl, json!({"skip": true})).await.1["track"]["uri"], track_uri(20));
+    let (_, his_turn) = w.patch(&w.alice, json!({"skip": true})).await;
+    let first = his_turn["track"]["uri"].clone();
+    assert_eq!(his_turn["added_by"], w.carl_id.as_str());
+    let (_, own) = w.patch(&w.carl, json!({"skip": true})).await;
+    assert_ne!(own["track"]["uri"], first, "the adder skips without a vote");
+    assert_eq!(own["added_by"], w.carl_id.as_str());
 }

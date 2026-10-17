@@ -12,15 +12,15 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use vokko_protocol::api::{
-    GatewayEvent, STREMIO_POSITION_MAX_MS, STREMIO_QUEUE_MAX, STREMIO_TRACKS_MAX, Snowflake, StremioAddonSubtitle, StremioAddonSubtitles, StremioAudioTrack,
-    StremioCues, StremioItem, StremioPatchRequest, StremioQueueItem, StremioStartRequest, StremioState, StremioStatus, StremioSubtitleKind,
-    StremioSubtitleTrack, StremioUpdate, StremioViewerToken,
+    GatewayEvent, MediaControl, STREMIO_POSITION_MAX_MS, STREMIO_QUEUE_MAX, STREMIO_QUEUE_PER_USER, STREMIO_TRACKS_MAX, Snowflake, StremioAddonSubtitle,
+    StremioAddonSubtitles, StremioAudioTrack, StremioCues, StremioItem, StremioPatchRequest, StremioQueueItem, StremioStartRequest, StremioState,
+    StremioStatus, StremioSubtitleKind, StremioSubtitleTrack, StremioUpdate, StremioViewerToken,
 };
 use vokko_protocol::cues;
 
 use super::token::{self, Claims, VideoGrant};
 use super::watch::{CONTROL_BURST, CONTROL_PER_SECOND, require_in_voice};
-use super::{unix_millis, unix_now};
+use super::{control, unix_millis, unix_now};
 use crate::access;
 use crate::auth::{AuthUser, random_hex};
 use crate::crypto::Secret;
@@ -72,6 +72,8 @@ pub struct Session {
     updated_at_ms: i64,
     duration_ms: Option<u64>,
     started_by: i64,
+    /// Host, who added the current item, and the skip vote.
+    control: MediaControl,
     queue: Vec<Queued>,
     /// The stream being played: the candidate (for a re-resolve) and what the bot was given.
     candidate: Candidate,
@@ -136,7 +138,7 @@ impl Session {
             duration_ms: self.duration_ms,
             started_by: Snowflake::from(self.started_by),
             bot_identity: bot_identity(channel_id),
-            control: vokko_protocol::api::MediaControl { host_id: Snowflake::from(self.started_by), skip_needed: 1, ..Default::default() },
+            control: self.control.clone(),
             audio_tracks: self.audio_tracks.clone(),
             audio: self.audio,
             subtitle_tracks: self.subtitle_tracks.clone(),
@@ -158,6 +160,7 @@ impl Session {
     /// Notes who started the current item (call right after `begin`) and, for a resume, where it starts.
     fn track(&mut self, info: &TitleInfo, owner: i64, began_ms: u64) {
         self.tracked = Some(Tracked { owner, info: info.clone(), began_ms, foreign_seek: false, started_ms: unix_millis(), owner_left_at: None });
+        control::new_item(&mut self.control, Some(owner));
         self.position_ms = began_ms;
     }
 
@@ -361,10 +364,16 @@ async fn start(
     ApiJson(body): ApiJson<StremioStartRequest>,
 ) -> ApiResult<Response> {
     let active = active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
     if crate::voice::spotify::playing_in(&state, channel_id) {
         return Err(crate::voice::spotify::blocks_stremio());
     }
+    // Anyone starts a session; replacing a running item is a controller's (checked again under the lock below).
+    if let Some(session) = lock(&state.stremio.sessions).get(&channel_id) {
+        control::require_control(&ctx, &session.control)?;
+    }
+    let room = control::room(&state, channel_id);
     if body.position_ms.is_some_and(|position| position > STREMIO_POSITION_MAX_MS) {
         return Err(ApiErr::invalid("position_ms", "Must be between 0 and 86400000."));
     }
@@ -379,7 +388,10 @@ async fn start(
             return Err(crate::voice::spotify::blocks_stremio());
         }
         let had_one = sessions.contains_key(&channel_id);
-        // Changing the item keeps the queue and who started the session.
+        if let Some(session) = sessions.get(&channel_id) {
+            control::require_control(&ctx, &session.control)?;
+        }
+        // Changing the item keeps the queue, the host and who started the session.
         let session = sessions.entry(channel_id).or_insert_with(|| Session {
             room: new_room(channel_id),
             item: StremioItem { title: String::new(), subtitle: None, poster: None, label: String::new() },
@@ -390,6 +402,7 @@ async fn start(
             updated_at_ms: unix_millis(),
             duration_ms: None,
             started_by: user_id,
+            control: control::new_session(user_id, &room),
             queue: Vec::new(),
             candidate: listed.candidate.clone(),
             media: media.clone(),
@@ -448,10 +461,12 @@ async fn control(
     ApiJson(body): ApiJson<StremioPatchRequest>,
 ) -> ApiResult<Response> {
     let active = active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
     if body.position_ms.is_some_and(|position| position > STREMIO_POSITION_MAX_MS) {
         return Err(ApiErr::invalid("position_ms", "Must be between 0 and 86400000."));
     }
+    let room = control::room(&state, channel_id);
     let queued = match &body.queue_add {
         Some(sid) => {
             let listed = playable(&state, "queue_add", sid, user_id)?;
@@ -464,10 +479,23 @@ async fn control(
     let steer = !skip && (body.playing.is_some() || body.position_ms.is_some());
     let picks = !skip && (body.audio.is_some() || body.burned_subtitle.is_some());
     let now = unix_millis();
-    let (before, after, desired) = {
+    let (before, after, desired, skip_now) = {
         let mut sessions = lock(&state.stremio.sessions);
         let session = sessions.get_mut(&channel_id).ok_or_else(|| ApiErr::conflict(40033, "Nothing is playing in this channel."))?;
         let before = session.view(channel_id);
+        let controller = control::controls(&ctx, session.control.host_id);
+        // Steering and the tracks are for everyone, so controllers only; anyone removes their own queue entry.
+        // Checked on the fields, not on `steer`/`picks`: a `skip` alongside must not carry an unchecked track pick through.
+        let steers = body.playing.is_some() || body.position_ms.is_some() || body.audio.is_some() || body.burned_subtitle.is_some();
+        if steers && !controller {
+            return Err(ApiErr::missing_permissions());
+        }
+        if body.queue_remove.and_then(|index| session.queue.get(index)).is_some_and(|queued| queued.added_by != user_id && !controller) {
+            return Err(ApiErr::missing_permissions());
+        }
+        if queued.is_some() {
+            control::quota(&ctx, &session.control, session.queue.iter().filter(|queued| queued.added_by == user_id).count(), STREMIO_QUEUE_PER_USER)?;
+        }
         if let Some(position) = body.position_ms.filter(|position| steer && session.duration_ms.is_some_and(|duration| *position > duration)) {
             return Err(ApiErr::invalid("position_ms", &format!("Must be between 0 and {} for this video.", session.duration_ms.unwrap_or(position))));
         }
@@ -511,7 +539,9 @@ async fn control(
             }
             session.steer(body.playing, body.position_ms, now);
         }
-        (before, session.view(channel_id), steer.then(|| session.desired(&state, now)).flatten())
+        // shortcut: a vote that races an item change counts for the new item; add an expected-item key like Watch's video_id if that bites.
+        let skip_now = body.skip.is_some_and(|skip| control::skip_request(&mut session.control, &ctx, skip, &room));
+        (before, session.view(channel_id), steer.then(|| session.desired(&state, now)).flatten(), skip_now)
     };
     if let Some(desired) = desired {
         if active.clients.bot.put(channel_id, &desired).await.is_ok() {
@@ -524,7 +554,7 @@ async fn control(
             touch(&state, channel_id, |session| session.dirty = true);
         }
     }
-    if skip {
+    if skip_now {
         advance(&state, &active, channel_id, None).await;
         return Ok(Json(state_of(&state, channel_id)).into_response());
     }
@@ -536,7 +566,11 @@ async fn control(
 
 async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Response> {
     active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
+    if let Some(session) = lock(&state.stremio.sessions).get(&channel_id) {
+        control::require_control(&ctx, &session.control)?;
+    }
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
     end(&state, channel_id).await;
     Ok(StatusCode::NO_CONTENT.into_response())
@@ -684,6 +718,23 @@ pub(crate) fn user_left(state: &AppState, channel_id: i64) {
     }
     let state = state.clone();
     tokio::spawn(async move { remove_strangers(&state, channel_id).await });
+}
+
+/// Who is in the call changed (`control::refresh`): host, votes and the count follow, and enough votes skip.
+pub(crate) async fn refresh(state: &AppState, channel_id: i64, room: &control::Room) {
+    let Ok(active) = active(state) else { return };
+    let (changed, skip) = {
+        let mut sessions = lock(&state.stremio.sessions);
+        let Some(session) = sessions.get_mut(&channel_id) else { return };
+        let before = session.control.clone();
+        let skip = control::sync(&mut session.control, room);
+        ((session.control != before).then(|| session.view(channel_id)), skip)
+    };
+    if skip {
+        advance(state, &active, channel_id, None).await;
+    } else if let Some(view) = changed {
+        announce(state, channel_id, Some(view)).await;
+    }
 }
 
 /// The current item is over (or skipped): plays the next queued one, else ends the session. Items that cannot be opened are passed
