@@ -75,6 +75,9 @@ const ANON_INVITE_PER_SECOND: f64 = 0.2;
 /// Importing a GIF as an avatar or banner: 3 at once, then one every 5 s.
 const GIF_IMPORT_BURST: f64 = 3.0;
 const GIF_IMPORT_PER_SECOND: f64 = 0.2;
+/// `POST /app-icons` decodes and re-encodes an image: 10 at once (every app a user has added, uploaded once per session), then one every 2 s.
+const APP_ICON_BURST: f64 = 10.0;
+const APP_ICON_PER_SECOND: f64 = 0.5;
 /// `POST /channels/{id}/call/ring` re-rings the other people of a DM: a few rings, then one every 5 s.
 const CALL_RING_BURST: f64 = 5.0;
 const CALL_RING_PER_SECOND: f64 = 0.2;
@@ -260,6 +263,10 @@ pub fn limited_response(limited: Limited) -> Response {
 pub async fn middleware(State(state): State<AppState>, mut request: Request, next: Next) -> Response {
     let Some(limit) = state.config.rate_limit else { return next.run(request).await };
     let route = request.extensions().get::<MatchedPath>().map(|path| path.as_str().to_owned()).unwrap_or_else(|| request.uri().path().to_owned());
+    // App icons are <img> loads addressed by the hash of their content: every client behind one address would share one bucket.
+    if request.method() == axum::http::Method::GET && route.ends_with("/app-icons/{hash}") {
+        return next.run(request).await;
+    }
     // Attachment downloads are <img> loads addressed by an unguessable key: every client would share one bucket.
     if request.method() == axum::http::Method::GET && route.contains("/attachments/") && route.ends_with("/{filename}") {
         return next.run(request).await;
@@ -288,6 +295,7 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
         format!("{} {route}", method_key(request.method()))
     };
     // The limits are never raised above the configured route bucket (tests and operators may set it lower).
+    let is_app_icon = request.method() == axum::http::Method::POST && route.ends_with("/app-icons");
     let is_ring = request.method() == axum::http::Method::POST && route.ends_with("/call/ring");
     let bucket = if is_gif {
         Some((GIF_BURST.min(limit.route_burst), GIF_PER_SECOND.min(limit.route_per_second)))
@@ -295,6 +303,8 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
         Some((ANON_INVITE_BURST.min(limit.route_burst), ANON_INVITE_PER_SECOND.min(limit.route_per_second)))
     } else if is_gif_import {
         Some((GIF_IMPORT_BURST.min(limit.route_burst), GIF_IMPORT_PER_SECOND.min(limit.route_per_second)))
+    } else if is_app_icon {
+        Some((APP_ICON_BURST.min(limit.route_burst), APP_ICON_PER_SECOND.min(limit.route_per_second)))
     } else if is_ring {
         Some((CALL_RING_BURST.min(limit.route_burst), CALL_RING_PER_SECOND.min(limit.route_per_second)))
     } else {

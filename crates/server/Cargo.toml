@@ -38,6 +38,8 @@ rustls.workspace = true
 oauth2 = { version = "5", default-features = false }
 openidconnect = { version = "4", default-features = false }
 http = "1"
+# PNG only: decodes and re-encodes app icons (the version already in the lock via the desktop app).
+image = { version = "0.25", default-features = false, features = ["png"] }
 sha1 = "0.10"
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "hostname", "tokio1-rustls-tls"] }
 

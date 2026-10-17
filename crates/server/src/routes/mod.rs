@@ -2,6 +2,7 @@ use axum::Router;
 
 use crate::state::AppState;
 
+mod app_icons;
 mod applications;
 mod attachments;
 pub mod auth;
@@ -72,6 +73,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(threads::routes())
         .merge(forums::routes())
         .merge(follows::routes())
+        .merge(app_icons::routes())
         .merge(applications::routes())
         .merge(interactions::routes())
         .merge(webhooks::routes())

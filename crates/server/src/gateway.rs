@@ -19,6 +19,7 @@ use vokko_protocol::api::{
     VoiceStateUpdateCommand,
 };
 
+use crate::app_icons;
 use crate::auth::{hash_token, random_hex, user_for_token};
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
@@ -256,7 +257,7 @@ async fn run(state: &AppState, session: &Arc<Session>, writer: &mut Writer, stre
                             }
                         }
                         GatewayOp::PresenceUpdate => {
-                            let Ok(update) = serde_json::from_value::<PresenceUpdateRequest>(payload.d) else { continue };
+                            let Ok(mut update) = serde_json::from_value::<PresenceUpdateRequest>(payload.d) else { continue };
                             if update.custom_status.as_ref().is_some_and(|text| text.chars().count() > MAX_CUSTOM_STATUS_CHARS) {
                                 writer.close(CLOSE_DECODE_ERROR).await;
                                 break;
@@ -268,6 +269,9 @@ async fn run(state: &AppState, session: &Arc<Session>, writer: &mut Writer, stre
                             if !presence_updates.allow(Instant::now()) {
                                 writer.close(CLOSE_RATE_LIMITED).await;
                                 break;
+                            }
+                            if let Some(list) = update.activities.as_mut() {
+                                app_icons::drop_unknown(state, list).await;
                             }
                             // Activities are kept per session: this session's list replaces its own, never another session's.
                             let activities = update.activities.map(|list| state.hub.set_session_activities(session.user_id, &session.id, list));

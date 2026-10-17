@@ -195,6 +195,46 @@ async fn a_game_and_spotify_are_shown_together_and_keep_their_fields() {
 }
 
 #[tokio::test]
+async fn app_icons_on_activities_must_exist_on_the_server() {
+    use image::codecs::png::PngEncoder;
+    use image::{ExtendedColorType, ImageEncoder};
+    let w = world().await;
+    let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;
+    let (mut alice, _) = Client::connect(&w.address, &w.alice.0).await;
+    owner.wait_presence(&w.alice.1, "online").await;
+
+    let mut icon = Vec::new();
+    PngEncoder::new(&mut icon).write_image(&[255; 4 * 8 * 8], 8, 8, ExtendedColorType::Rgba8).unwrap();
+    let (_, uploaded) = w.app.post_bytes("/app-icons", Some(&w.alice.0), "image/png", icon).await;
+    let asset = uploaded["asset"].as_str().expect("asset").to_owned();
+
+    // an icon the server has stays on the activity
+    let known = json!([{"name": "Google Chrome", "type": 0, "assets": {"large_image": asset}}]);
+    alice.send(json!({"op": 3, "d": {"status": "online", "activities": known}})).await;
+    wait_activities(&mut owner, &w.alice.1, "online", |a| a == &known).await;
+
+    // one it does not have is dropped, the activity stays
+    let unknown = json!([{"name": "Claude", "type": 0, "assets": {"large_image": format!("app:{}", "ab".repeat(32))}}]);
+    alice.send(json!({"op": 3, "d": {"status": "online", "activities": unknown}})).await;
+    wait_activities(&mut owner, &w.alice.1, "online", |a| a == &json!([{"name": "Claude", "type": 0}])).await;
+
+    // a malformed one closes the connection like any other invalid activity (4002)
+    alice.send(json!({"op": 3, "d": {"status": "online", "activities": [{"name": "X", "type": 0, "assets": {"large_image": "app:nothex"}}]}})).await;
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match alice.ws.next().await {
+                Some(Ok(Message::Close(frame))) => return frame.map(|f| u16::from(f.code)),
+                Some(Ok(_)) => continue,
+                _ => return None,
+            }
+        }
+    })
+    .await
+    .expect("closed in time");
+    assert_eq!(closed, Some(4002));
+}
+
+#[tokio::test]
 async fn activity_belongs_to_the_session_that_reported_it() {
     let w = world().await;
     let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;
