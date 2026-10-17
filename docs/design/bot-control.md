@@ -1,7 +1,8 @@
 # Who controls media in a call (design)
 
-Status: proposal, 2026-10-17, owner answers in §7 (owner confirmed). Nothing here is built. It covers Watch Together, the Stremio bot and the Spotify bot
-(docs/design/spotify-bot.md, not built yet). Build it after the Stremio and Spotify branches merge (§9).
+Status: built (server), 2026-10-17, branch `worktree-botctl-server` (commits 28720c4, c60dc87, 5bc5719); owner answers in §7. The
+desktop half (§4) is built separately. It covers Watch Together, the Stremio bot and the Spotify bot. §1 is the state before
+the build; §2 and §3 describe what was built. Open follow-up in §8.
 
 Goal: in a big call, one person can no longer pause, seek, skip, stop or replace what everyone is watching or hearing. Small
 groups keep today's "anyone in the call controls" with no setup.
@@ -28,7 +29,7 @@ groups keep today's "anyone in the call controls" with no setup.
   `video_id` guard makes all but the first a no-op (`watch.rs:145-149`). Clients also fill in the title, only while it is
   unset (`WatchTile.tsx:116`). Stremio's and Spotify's bots report the end themselves (`stremio.rs` `bot_event`/`advance`).
 - **Starter leaving changes nothing**; the session ends when the last person leaves (`voice/state.rs` `release_channel`,
-  which runs on every leave and calls `stremio::user_left`). `VoiceEntry` has no join time (`state.rs:40`).
+  which runs on every leave and calls `stremio::user_left`). `VoiceEntry.connected_at` is set on join, not on token refresh.
 - **Permissions** are Discord's bit values, 0..53 minus 47 (`api.rs:223-280`, `ALL`, `NAMED`, `DEFAULT_EVERYONE` with a
   27-bit test at `api.rs:4668`). Role writes reject bits outside `ALL` (`routes/moderation.rs:742-748`), app permissions
   mask with `ALL` (`apps.rs:362`). The @everyone role's id is the guild id (`routes/guilds.rs:86`). The desktop mirrors
@@ -61,8 +62,8 @@ A **controller** of a session is someone in the call (the `require_in_voice` rul
 3. the session's **host**.
 
 The host is a new field: `host_id`. It starts as `started_by` (who started the session) and moves when the host leaves the
-call: to the person in the call (`VoiceEntry` of that channel) with the earliest `joined_at`, a new `Instant` on
-`VoiceEntry` set when the user joins that channel (not on token refresh). If nobody is left, the session ends as today.
+call: to the person in the call (`VoiceEntry` of that channel) with the earliest `connected_at` (the existing field, set on
+join and not on token refresh; ties go to the lower user id). If nobody is left, the session ends as today.
 `started_by` keeps its meaning ("Started by X"). Changing the item (PUT) keeps the host.
 
 **Starting** is open to everyone in the call when nothing is playing (they become host). **Replacing** a running item
@@ -75,12 +76,13 @@ call: to the person in the call (`VoiceEntry` of that channel) with the earliest
 | Start a session when none runs | yes | yes (becomes host) |
 | Replace the current item (PUT) | yes | 403 50013 |
 | Play / pause / seek, previous, loop, shuffle (Spotify) | yes | 403 50013 |
+| Stremio audio track / burned subtitle | yes | 403 50013 (they change it for everyone) |
 | Skip | skips now | skips now if they added the current item (owner confirmed), else counts as a vote (§2.4) |
 | Stop (DELETE) | yes | 403 50013 (a vote that skips the last item ends it) |
 | Add to the end of the queue | up to the queue max | up to the per-user quota (§2.5) |
 | Play next / move / clear / shuffle the queue (Spotify) | yes | 403 50013 |
 | Remove a queue entry | any | only their own |
-| Set the Watch title | always | only while it is unset (the clients' auto-fill) |
+| Set the Watch title | always | only while it is unset (the clients' auto-fill); over a set title it is a silent no-op (200, unchanged), so auto-fill never errors |
 | Viewer / listener token, local volume | yes | yes |
 
 No vote-to-stop: skipping the last item already ends the session, so "vote to skip" covers it.
@@ -88,7 +90,8 @@ No vote-to-stop: skipping the last item already ends the session, so "vote to sk
 ### 2.4 Vote to skip
 
 - Whoever added the current item skips it at once, without a vote (owner confirmed). For a fresh PUT that is the person who
-  sent it; for an item taken from the queue it is that entry's adder.
+  sent it; for an item taken from the queue it is that entry's adder; for a Spotify track brought back by previous it is whoever
+  added it the first time (the history keeps the adder).
 - `PATCH {skip: true}` from any other non-controller adds their vote for the current item; `{skip: false}` withdraws it. A
   controller's `skip: true` skips at once (today's behaviour). Watch keeps its `video_id` guard: a vote naming a video that is
   no longer current is a no-op (200, current state).
@@ -98,8 +101,8 @@ No vote-to-stop: skipping the last item already ends the session, so "vote to sk
   what common music bots use; a controller can always skip.
 - **Expiry:** votes belong to the current item. They are cleared whenever the item changes (skip, end, PUT, previous, loop
   replay). No timer: an item ends anyway, and a timer would need a sweep for little gain.
-- **Recount** on every vote and on every leave from the channel (`release_channel`). `shortcut: a deafen does not recount
-  until the next vote or leave; add a hook in the self/server deafen path if anyone notices.` When votes ≥ needed, the item is
+- **Recount** on every vote and whenever the people in the call change: a join, a leave and a self or server deafen or
+  undeafen all run `control::refresh` (spawned from `broadcast` and `release_channel`). When votes ≥ needed, the item is
   skipped as a controller skip would (Watch: next video or end; Stremio and Spotify: `advance`).
 - **Watch auto-advance keeps working without a controller:** when a video ends or cannot play, every client sends
   `skip + video_id`; from non-controllers those are votes, so it advances once half the listeners' players report it. A
@@ -113,7 +116,8 @@ No vote-to-stop: skipping the last item already ends the session, so "vote to sk
 Non-controllers may have at most this many entries of their own in the queue at once; controllers are bound only by the
 queue max. Watch 3 (of 20), Stremio 2 (of 10), Spotify 10 (of 200). New constants `WATCH_TOGETHER_QUEUE_PER_USER`,
 `STREMIO_QUEUE_PER_USER`, `SPOTIFY_QUEUE_PER_USER` in `crates/protocol/src/api.rs`. A Spotify album or playlist added by a
-non-controller adds what fits in their quota, and the response's "left out" count (spotify-bot.md §4.2) says the rest. Watch
+non-controller adds what fits in their quota, and the response's "left out" count (spotify-bot.md §4.2) says the rest; the same
+cap applies to the rest of an album or playlist a non-controller starts on an idle session. Watch
 gains a parallel `queue_added_by` list (§3.2) so the server can count and the UI can show "added by".
 
 ### 2.6 What happens when people leave
@@ -130,23 +134,29 @@ All three keep their routes. Errors reuse existing codes: 403 50013 (not a contr
 
 ### 3.1 Shared server helper `crates/server/src/voice/control.rs`
 
-- `require_in_voice` returns `(channel_id, is_dm, permissions)` instead of `channel_id` (it already has them; 9 call sites).
-- `fn controls(ctx: &InVoice, user_id, host_id) -> bool` = `is_dm || permissions & CONTROL_MEDIA != 0 || user_id == host_id`.
-- `fn listeners(state, channel_id) -> Vec<i64>` (not deafened), `fn skip_needed(n) -> u32`, `fn next_host(state,
-  channel_id) -> Option<i64>` (earliest `joined_at`).
-- `pub(crate) async fn user_left(state, channel_id, user_id)` called from `release_channel` (it needs the leaving user id,
-  passed down from `broadcast`): for each of the three sessions in that channel, drop the vote, move the host, recount, and
-  announce if anything changed. It replaces the direct `stremio::user_left` call (which moves into it).
+- `in_voice(state, user_id, channel) -> InVoice {channel_id, user_id, is_dm, permissions}` holds the old `require_in_voice`
+  body; `require_in_voice` stays as a wrapper returning the channel id, for its other callers (games and the rest).
+- `controls(ctx, host_id) -> bool` = `is_dm || permissions & CONTROL_MEDIA != 0 || user_id == host_id`, and
+  `require_control(ctx, &MediaControl)` turns a no into 403 50013.
+- `Room` (the channel's voice entries, by `connected_at`), `new_session`, `new_item` (clears votes, sets `added_by`),
+  `sync` (moves the host if absent, drops votes from non-listeners, recomputes `skip_needed`, says whether the vote passes),
+  `skip_request` (controller or adder: skip; else toggle the vote and sync), `quota` (entries left, 400 50035 at zero).
+  `skip_needed(n)` lives in `crates/protocol/src/api.rs`.
+- `refresh(state, channel_id)` runs `sync` on each of the three sessions in that channel and announces or skips; it is spawned
+  from `broadcast` (join, deafen) and from `release_channel` (leave). The existing `stremio::user_left` and
+  `spotify::user_left` calls stay as they were.
 
 ### 3.2 State objects (additive fields; old clients ignore them)
 
-Each of `WatchTogetherState`, `StremioState` and `SpotifyState` gains:
+Each of `WatchTogetherState`, `StremioState` and `SpotifyState` gains these fields, as one `MediaControl` struct flattened
+into the state (`#[serde(flatten)]`, so the wire has them at the top level):
 
 ```
 host_id: Snowflake          // who controls besides CONTROL_MEDIA holders; starts as started_by
 skip_votes: [Snowflake]     // voters for the current item, in vote order
 skip_needed: u32            // max(1, ceil(listeners / 2)) when the state was sent
-added_by: Snowflake         // who added the current item (PUT caller, or the queue entry's adder); may skip it
+added_by?: Snowflake        // who added the current item (PUT caller, or the queue entry's adder); may skip it.
+                            // Omitted when there is no current item (an idle Spotify session)
 ```
 
 `WatchTogetherState` also gains `queue_added_by: [Snowflake]` (same length and order as `queue`; `#[serde(default)]`).
@@ -155,13 +165,13 @@ No `can_control` field: events go to everyone, so each client works it out (§4)
 ### 3.3 Requests
 
 - `WatchTogetherPatchRequest.skip`, `StremioPatchRequest.skip`, Spotify `{skip}`: `true` = skip (controller) or vote,
-  `false` = withdraw vote (no-op for a controller).
+  `false` = withdraw vote (no-op for a controller). Spotify's `{skip: false}` was a 400 before and is now valid.
 - `WatchTogetherPatchRequest.queue_remove: Option<usize>` is **not** added (nobody asked; Stremio and Spotify have removal).
 
 ### 3.4 Events
 
 `WATCH_TOGETHER_UPDATE`, `STREMIO_UPDATE`, `SPOTIFY_UPDATE` carry the new fields and are also sent when votes, `skip_needed`
-(on a leave) or the host change. Same audience and READY/GUILD_CREATE/`Call` lists as today. No new event.
+(on a join, leave or deafen) or the host change. Same audience and READY/GUILD_CREATE/`Call` lists as today. No new event.
 
 ### 3.5 Permission and migration
 
@@ -222,7 +232,7 @@ Freeze §3 first (protocol types + docs/api.md in the server worker's first comm
 
 1. **Server** (`sonnet@high`): `crates/protocol/src/api.rs` (bit, constants, fields), migration,
    `crates/server/src/voice/control.rs` (new), `voice/watch.rs`, `voice/stremio.rs`, `voice/spotify.rs`,
-   `voice/state.rs` (`joined_at`, leave hook), `routes/moderation.rs` (nothing beyond `ALL`, verify), server tests,
+   `voice/state.rs` (refresh hooks), `routes/moderation.rs` (nothing beyond `ALL`, verify), server tests,
    `docs/api.md`. About 400 lines.
 2. **Desktop** (`sonnet@high`, starts once the protocol commit lands): `src/api/types.ts`, `api/permissions.ts`,
    `shell/settings/permissions.ts`, `voice/useCanControlMedia.ts` (new), `watch/WatchTile.tsx`, `watch/WatchModal.tsx`,
@@ -239,3 +249,11 @@ through `controls()` or the vote/quota path, none is missed.
 3. No host hand-off and no per-session "everyone controls" toggle for now.
 4. Vote threshold: half the listeners, rounded up.
 5. Quotas per non-controller: Watch 3, Stremio 2, Spotify 10.
+
+## 8. Open follow-ups
+
+- Watch Together has no `queue_remove`, so a non-controller can't take back their own entry (it counts toward their quota of 3
+  until it plays or a controller clears the queue). Add `WatchTogetherPatchRequest.queue_remove` (own entries for everyone,
+  any for controllers, like Stremio) if people ask.
+- The migration (`20261017130000_control_media.sql`) has no test of its own; the default @everyone bit and the role-write
+  check (bit 60 accepted, 61 refused) are tested in `tests/guilds.rs`.
