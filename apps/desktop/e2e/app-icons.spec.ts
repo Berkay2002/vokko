@@ -133,5 +133,10 @@ test('the profile popout shows the app icon', async ({ page }) => {
   const card = page.getByTestId('activity-card').first();
   await expect(card).toBeVisible();
   await expect(card.getByTestId('activity-app-icon')).toBeVisible();
-  if (SHOTS) await card.screenshot({ path: `${SHOTS}/profile-activity-card.png` });
+  if (SHOTS) {
+    await card.screenshot({ path: `${SHOTS}/profile-activity-card.png` });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: `${SHOTS}/profile-popout-mobile.png` });
+  }
 });
