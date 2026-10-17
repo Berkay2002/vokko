@@ -97,3 +97,15 @@ async fn one_user_can_add_a_limited_number_of_icons() {
     let (status, body) = app.post_bytes("/app-icons", Some(&token), "image/png", png(64, 64, 0)).await;
     assert_eq!((status, body["asset"].as_str()), (StatusCode::OK, Some(first.as_str())), "an icon that exists costs nothing");
 }
+
+#[tokio::test]
+async fn concurrent_uploads_cannot_pass_the_cap() {
+    let app = TestApp::new().await;
+    let (token, _) = app.register("alice").await;
+    let results = futures_util::future::join_all((0..80_u8).map(|shade| {
+        let (app, token) = (&app, token.clone());
+        async move { app.post_bytes("/app-icons", Some(&token), "image/png", png(64, 64, shade)).await.0 }
+    }))
+    .await;
+    assert_eq!(results.iter().filter(|status| **status == StatusCode::OK).count(), 64, "exactly the cap got in");
+}

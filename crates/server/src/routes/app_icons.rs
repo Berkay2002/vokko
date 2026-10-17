@@ -29,7 +29,10 @@ async fn upload(State(state): State<AppState>, AuthUser(user_id): AuthUser, head
     let stored = tokio::task::spawn_blocking(move || app_icons::normalize(&body)).await.map_err(|_| ApiErr::internal())?;
     let Some(png) = stored else { return Err(ApiErr::invalid("body", "Must be a PNG image of at most 512x512 pixels.")) };
     let hash = app_icons::hash_of(&png);
-    // Past the per-user cap only new icons are refused: an icon the server already has costs nothing.
+    // Past the per-user cap only new icons are refused: an icon the server already has costs nothing. The user's row is locked so
+    // concurrent uploads of one user count one after the other and the cap holds.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
     let inserted = sqlx::query(
         "INSERT INTO app_icons (hash, png, uploader_id) SELECT $1, $2, $3 WHERE (SELECT count(*) FROM app_icons WHERE uploader_id = $3) < $4 ON CONFLICT (hash) DO NOTHING",
     )
@@ -37,14 +40,15 @@ async fn upload(State(state): State<AppState>, AuthUser(user_id): AuthUser, head
     .bind(&png)
     .bind(user_id)
     .bind(MAX_PER_USER)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await?;
     if inserted.rows_affected() == 0 {
-        let known: Option<(i32,)> = sqlx::query_as("SELECT 1 FROM app_icons WHERE hash = $1").bind(&hash).fetch_optional(&state.db).await?;
+        let known: Option<(i32,)> = sqlx::query_as("SELECT 1 FROM app_icons WHERE hash = $1").bind(&hash).fetch_optional(&mut *tx).await?;
         if known.is_none() {
             return Err(ApiErr::conflict(30008, "Maximum number of app icons reached (64)"));
         }
     }
+    tx.commit().await?;
     Ok(Json(json!({ "asset": format!("app:{hash}") })))
 }
 
