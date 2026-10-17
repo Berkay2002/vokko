@@ -24,10 +24,7 @@ pub async fn run() -> Result<(), String> {
         .with_custom_message("Signed in. You can close this tab.")
         .build()
         .map_err(|e| e.to_string())?;
-    let token = tokio::task::spawn_blocking(move || client.get_access_token())
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+    let token = tokio::task::spawn_blocking(move || client.get_access_token()).await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
 
     let cache = Cache::new(Some(&dir), None, None, None).map_err(|e| e.to_string())?;
     let session = Session::new(SessionConfig::default(), Some(cache));

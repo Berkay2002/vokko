@@ -28,7 +28,7 @@ fn layers() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
         let name = package.get("name").and_then(Value::as_str).ok_or("missing package name")?;
-        if matches!(name, "vokko-desktop" | "vokko-cli" | "stremio-bot" | "xtask") {
+        if matches!(name, "vokko-desktop" | "vokko-cli" | "stremio-bot" | "spotify-bot" | "xtask") {
             continue;
         }
         let level =
