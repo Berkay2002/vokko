@@ -35,18 +35,46 @@ afterEach(() => vi.useRealTimers());
 async function leaderDrawing(players = ['a', 'b', 'c']) {
   const a = copy('a', players, 'a');
   a.game.start();
-  await vi.advanceTimersByTimeAsync(3 * 2000 + 1);
+  await vi.advanceTimersByTimeAsync(2000 + 1);
   expect(a.st.syncing).toBe(false);
   expect(a.st).toMatchObject({ n: 1, drawer: 'a', word: 'apple', len: 5, over: false });
   return a;
 }
 
 describe('SketchCore late join', () => {
-  it('retries sync? three times, then starts fresh', async () => {
+  it('the leader tries sync? once, other copies three times, then they start fresh', async () => {
     const a = await leaderDrawing();
-    const syncs = a.sent.filter((m) => m.data.t === 'sync?').map((m) => m.data.a);
-    expect(syncs).toEqual([1, 2, 3]);
+    expect(a.sent.filter((m) => m.data.t === 'sync?').map((m) => m.data.a)).toEqual([1]);
     expect(a.sent.some((m) => m.data.t === 'round' && m.data.drawer === 'a')).toBe(true);
+    const b = copy('b', ['b'], 'a');
+    b.game.start();
+    await vi.advanceTimersByTimeAsync(3 * 2000 + 1);
+    expect(b.sent.filter((m) => m.data.t === 'sync?').map((m) => m.data.a)).toEqual([1, 2, 3]);
+    expect(b.st.syncing).toBe(false);
+  });
+
+  it('when everyone opens at once, round 1 starts on every copy after about 2 s', async () => {
+    const ids = ['a', 'b', 'c'];
+    const copies = ids.map((id) => copy(id, ids, 'a'));
+    const seen = copies.map(() => 0);
+    const pump = () => {
+      for (let progress = true; progress; ) {
+        progress = false;
+        copies.forEach((from, i) => {
+          const fresh = from.sent.slice(seen[i]);
+          seen[i] = from.sent.length;
+          for (const m of fresh) {
+            progress = true;
+            copies.forEach((to, j) => j !== i && (!m.to || m.to === ids[j]) && to.game.receive(m.data, ids[i]));
+          }
+        });
+      }
+    };
+    copies.forEach((c) => c.game.start());
+    pump();
+    await vi.advanceTimersByTimeAsync(2001);
+    pump();
+    for (const c of copies) expect(c.st).toMatchObject({ syncing: false, n: 1, drawer: 'a', len: 5, over: false });
   });
 
   it('applies the snapshot, then the buffered live strokes, without duplicates or gaps', async () => {

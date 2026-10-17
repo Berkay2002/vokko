@@ -9,10 +9,12 @@
  * Late join (the server keeps no game state): a copy that opens sends {t:"sync?", a} (a = attempt 1..3, every 2 s) and
  * buffers live messages. The leader answers every attempt, everyone else from attempt 2 (the leader's copy may be
  * closed), with a snapshot in chunks under 4 KB. The joiner takes the first answerer's chunks, then applies its buffer,
- * skipping stroke seqs it already has. No answer after 3 attempts: it starts fresh.
+ * skipping stroke seqs it already has. No answer after 3 attempts: it starts fresh. The leader's own copy gives up after
+ * one attempt (about 2 s), so a call where everyone opens at once starts quickly; a waiting copy that gets the
+ * leader's round start adopts it at once.
  *
  * Messages (all {t, n: round, ...}); relay data is untrusted and shape-checked here:
- *   leader -> all:    {t:"round", n, drawer, secs}        {t:"end", n, by:null, word:null} (timeout)
+ *   leader -> all:    {t:"round", n, drawer, secs, scores} {t:"end", n, by:null, word:null} (timeout)
  *   drawer -> all:    {t:"len", n, len}   {t:"s", n, seq, id, c, w, p:[x,y,...]}   {t:"clear", n, seq}
  *                     {t:"end", n, by, word} (by: the guesser's app_id, or null on timeout)
  *   guesser -> all:   {t:"g", n, text}
@@ -124,7 +126,8 @@ var SketchCore = (() => {
     function trySync() {
       tries += 1;
       send({ t: "sync?", a: tries });
-      syncTimer = setTimeout(() => (tries < C.SYNC_TRIES ? trySync() : finishSync()), C.SYNC_RETRY_MS);
+      const max = me === leader ? 1 : C.SYNC_TRIES;
+      syncTimer = setTimeout(() => (tries < max ? trySync() : finishSync()), C.SYNC_RETRY_MS);
     }
 
     function finishSync() {
@@ -214,6 +217,7 @@ var SketchCore = (() => {
         return;
       } else if (m.t === "round" && fromLeader && isInt(m.n, 1e9) && m.n > st.n && typeof m.drawer === "string" && isInt(m.secs, C.ROUND_SECS)) {
         Object.assign(st, { n: m.n, drawer: m.drawer, len: 0, strokes: [], top: 0, cleared: 0, over: false, word: "" });
+        if (m.scores) st.scores = validScores(m.scores);
         st.deadline = Date.now() + m.secs * 1000;
         onClear();
         if (st.drawer === me) {
@@ -274,7 +278,7 @@ var SketchCore = (() => {
       const ids = players.slice().sort();
       if (ids.length < 2) return;
       const next = ids.find((id) => id > st.drawer) ?? ids[0]; // rotation in app_id order, fixed at round start
-      publish({ t: "round", n: st.n + 1, drawer: next, secs: C.ROUND_SECS });
+      publish({ t: "round", n: st.n + 1, drawer: next, secs: C.ROUND_SECS, scores: st.scores });
     }
 
     return {
@@ -288,7 +292,10 @@ var SketchCore = (() => {
         const m = /** @type {any} */ (data);
         if (!st.syncing) return apply(m, from);
         if (m && m.t === "snap") takeSnapshotPart(m, from);
-        else if (m && m.t !== "sync?" && buffer.length < 1000) buffer.push({ data: m, from });
+        else if (m && m.t === "round" && from === leader) {
+          buffer.push({ data: m, from }); // a fresh round needs no snapshot: adopt it now
+          finishSync();
+        } else if (m && m.t !== "sync?" && buffer.length < 1000) buffer.push({ data: m, from });
       },
       /** @param {string[]} list @param {string} newLeader */
       setPlayers(list, newLeader) {
