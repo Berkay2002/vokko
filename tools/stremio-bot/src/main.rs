@@ -3,6 +3,7 @@
 
 mod api;
 mod config;
+mod guard;
 mod media;
 mod plan;
 mod report;

@@ -62,31 +62,6 @@ pub fn host_of(url: &str) -> String {
     reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_else(|| "?".into())
 }
 
-/// Not an address on this machine or its network (the server checked the name when it resolved the link; this is the second wall).
-fn public_host(url: &reqwest::Url) -> bool {
-    use std::net::IpAddr;
-    let Some(host) = url.host_str() else { return false };
-    let host = host.trim_start_matches('[').trim_end_matches(']');
-    let Ok(ip) = host.parse::<IpAddr>() else {
-        let name = host.trim_end_matches('.').to_ascii_lowercase();
-        return name != "localhost" && !name.ends_with(".localhost") && !name.ends_with(".local") && !name.ends_with(".internal");
-    };
-    let v4_ok = |v4: std::net::Ipv4Addr| {
-        !(v4.is_private()
-            || v4.is_loopback()
-            || v4.is_link_local()
-            || v4.is_unspecified()
-            || v4.is_broadcast()
-            || v4.octets()[0] == 100 && v4.octets()[1] & 0xc0 == 64)
-    };
-    match ip {
-        IpAddr::V4(v4) => v4_ok(v4),
-        IpAddr::V6(v6) => v6
-            .to_ipv4_mapped()
-            .map_or(!(v6.is_loopback() || v6.is_unspecified() || v6.segments()[0] & 0xfe00 == 0xfc00 || v6.segments()[0] & 0xffc0 == 0xfe80), v4_ok),
-    }
-}
-
 impl Desired {
     /// Checks and normalises a request. The media URL must be https (ffmpeg's protocol whitelist is the second wall),
     /// only `User-Agent` and `Referer` pass through and clamps keep a bad value from reaching ffmpeg or libwebrtc.
@@ -99,7 +74,7 @@ impl Desired {
         if media.scheme() != "https" || media.host_str().is_none() {
             return Err("media_url must be https".into());
         }
-        if !public_host(&media) {
+        if !crate::guard::host_ok(&media) {
             return Err("media_url must be a public host".into());
         }
         if self.token.is_empty() || self.token.len() > 4096 {
