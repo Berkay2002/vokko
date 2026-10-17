@@ -165,11 +165,13 @@
 .chat-reply:hover .chat-reply-spine { border-color: var(--chat-icon); }
 .chat-reply-avatar { width: 16px; height: 16px; flex: none; margin-right: 0; }
 .chat-reply-name { flex: none; font-weight: 500; max-width: 200px; overflow: hidden; text-overflow: ellipsis; opacity: 0.64; color: var(--chat-text-strong); }
-.chat-reply-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: clip; text-align: left; color: var(--chat-text); display: inline-flex; align-items: center; gap: 4px; }
+/* block, not flex: text-overflow only applies to a block box, and a narrow row must end in an ellipsis, not half a glyph */
+.chat-reply-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; color: var(--chat-text); }
+.chat-reply-text > svg { vertical-align: middle; margin: 0 4px; }
 .chat-reply:hover .chat-reply-text, .chat-reply:focus-visible .chat-reply-text { color: var(--chat-text-strong); }
 .chat-reply.missing { cursor: default; font-style: italic; }
 .chat-reply.missing .chat-reply-text { color: var(--chat-text); }
-.chat-reply .chat-server-tag { margin: 0 0 0 0; }
+.chat-reply .chat-server-tag { margin: 0; flex: none; }
 
 
 /* server tag pill (ServerTag.tsx): neutral chip, badge glyph + tag */
