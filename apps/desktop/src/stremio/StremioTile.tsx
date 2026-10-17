@@ -1,14 +1,17 @@
 // The Stremio tile: the bot's picture from the viewer Room (see ./viewer.ts), with the server's session state on top of it:
 // poster and status before the picture arrives, a seek bar, play / pause, +-10 s, skip, stop, local volume and Up next.
 // The server holds the truth ({status, playing, position_ms, updated_at_ms}); every button is a PATCH that comes back to everyone
-// (this client included) as STREMIO_UPDATE. Volume is local and plays the movie's audio from the viewer Room.
+// (this client included) as STREMIO_UPDATE. Volume is local and plays the movie's audio from the viewer Room. Someone without
+// control (useCanControlMedia) sees no play / pause, seek, +-10 s or stop, votes to skip, and removes only their own Up next entries.
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import { ListVideo, Maximize2, Minimize2, Pause, Play, Plus, RotateCcw, RotateCw, SkipForward, Square, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
-import type { Snowflake, StremioState } from "../api/types";
+import { STREMIO_QUEUE_PER_USER, type Snowflake, type StremioState } from "../api/types";
 import { Tooltip } from "../ui";
+import { MediaVotes, useHostLabel } from "../voice/MediaVotes";
 import { useVoice } from "../voice/store";
+import { queueQuota, skipAction, useCanControlMedia, useMeId } from "../voice/useCanControlMedia";
 import { formatClock } from "../watch/youtube";
 import { controlStremio, stopStremio } from "./api";
 import { reason, safeImage, shownPositionMs, statusText } from "./format";
@@ -35,9 +38,9 @@ function useNow(everyMs: number): number {
 }
 
 
-function ControlButton({ label, active, disabled, onClick, children }: { label: string; active?: boolean; disabled?: boolean; onClick(): void; children: React.ReactNode }) {
+function ControlButton({ label, tip, active, disabled, onClick, children }: { label: string; tip?: string; active?: boolean; disabled?: boolean; onClick(): void; children: React.ReactNode }) {
   return (
-    <Tooltip content={label} side="top">
+    <Tooltip content={tip ?? label} side="top">
       <button type="button" className={`stremio-button${active ? " active" : ""}`} aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick}>
         {children}
       </button>
@@ -57,8 +60,9 @@ function RoomVideo({ handle }: { handle: VideoHandle }) {
   return <video ref={element} className="stremio-video" autoPlay muted playsInline data-source="stremio" />;
 }
 
-function QueuePanel({ channelId, queue, onAdd }: { channelId: Snowflake; queue: StremioState["queue"]; onAdd(): void }) {
+function QueuePanel({ channelId, queue, onAdd, controller, meId }: { channelId: Snowflake; queue: StremioState["queue"]; onAdd(): void; controller: boolean; meId: Snowflake | undefined }) {
   const users = useStore(s => s.users);
+  const quota = queueQuota(queue.map(q => q.added_by), meId, controller, STREMIO_QUEUE_PER_USER);
   const [error, setError] = useState<string | null>(null);
   const remove = (index: number) => {
     setError(null);
@@ -80,17 +84,24 @@ function QueuePanel({ channelId, queue, onAdd }: { channelId: Snowflake; queue: 
                   <span className="stremio-queue-name">{item.title}</span>
                   <span className="stremio-queue-sub">{[item.subtitle, by ? `added by ${displayName(by)}` : null].filter(Boolean).join(" · ")}</span>
                 </span>
-                <button type="button" className="stremio-button" aria-label={`Remove ${item.title} from Up next`} onClick={() => remove(i)}>
-                  <X size={14} />
-                </button>
+                {(controller || item.added_by === meId) && (
+                  <button type="button" className="stremio-button" aria-label={`Remove ${item.title} from Up next`} onClick={() => remove(i)}>
+                    <X size={14} />
+                  </button>
+                )}
               </li>
             );
           })}
         </ol>
       )}
-      <button type="button" className="btn btn-secondary stremio-queue-add" onClick={onAdd}>
+      <button type="button" className="btn btn-secondary stremio-queue-add" disabled={quota?.full} onClick={onAdd}>
         <Plus size={14} aria-hidden="true" /> Add to Up next
       </button>
+      {quota && (
+        <p className="media-quota" data-queue-quota={quota.mine}>
+          {quota.hint}
+        </p>
+      )}
       {error && (
         <p className="field-error" role="alert">
           {error}
@@ -108,6 +119,10 @@ export function StremioTile(props: { channelId: Snowflake; variant: StremioVaria
 
 function StremioTileBody({ channelId, variant, onActivate, state }: { channelId: Snowflake; variant: StremioVariant; onActivate?: () => void; state: StremioState }) {
   const starter = useStore(s => s.users[state.started_by]);
+  const hostLabel = useHostLabel(state, state.started_by);
+  const meId = useMeId();
+  const controller = useCanControlMedia(channelId, state.host_id);
+  const skip = skipAction(state, meId, controller, state.queue.length > 0 ? "Skip to next" : "Skip and stop");
   const deaf = useVoice(s => s.selfDeaf);
   const volume = useViewerStore(s => s.volume);
   const [queueOpen, setQueueOpen] = useState(false);
@@ -175,8 +190,9 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
               {state.item.title} <span className="voice-bot-badge">Bot</span>
             </span>
             <span className="stremio-by">
-              {[state.item.subtitle, state.item.label, starter ? `Started by ${displayName(starter)}` : null].filter(Boolean).join(" · ")}
+              {[state.item.subtitle, state.item.label, starter ? `Started by ${displayName(starter)}` : null, hostLabel].filter(Boolean).join(" · ")}
             </span>
+            <MediaVotes control={state} />
           </div>
           {(failure || viewer.blocked) && (
             <div className="stremio-notice" role="alert">
@@ -188,34 +204,41 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
               )}
             </div>
           )}
-          {queueOpen && <QueuePanel channelId={channelId} queue={state.queue} onAdd={openStremioPanel} />}
+          {queueOpen && <QueuePanel channelId={channelId} queue={state.queue} onAdd={openStremioPanel} controller={controller} meId={meId} />}
           <div className="stremio-bar">
-            <input
-              className="stremio-seek"
-              type="range"
-              aria-label="Seek"
-              min={0}
-              max={Math.max(duration, 1)}
-              step={1000}
-              value={drag ?? position}
-              disabled={duration === 0 || state.status === "error"}
-              onChange={e => setDrag(Number(e.target.value))}
-              onPointerUp={commitSeek}
-              onKeyUp={commitSeek}
-              onBlur={commitSeek}
-            />
+            {controller && (
+              <input
+                className="stremio-seek"
+                type="range"
+                aria-label="Seek"
+                min={0}
+                max={Math.max(duration, 1)}
+                step={1000}
+                value={drag ?? position}
+                disabled={duration === 0 || state.status === "error"}
+                onChange={e => setDrag(Number(e.target.value))}
+                onPointerUp={commitSeek}
+                onKeyUp={commitSeek}
+                onBlur={commitSeek}
+              />
+            )}
             <div className="stremio-controls">
-              <ControlButton label={state.playing ? "Pause" : "Play"} disabled={state.status === "error"} onClick={() => run(controlStremio(channelId, { playing: !state.playing }))}>
-                {state.playing ? <Pause size={18} /> : <Play size={18} />}
-              </ControlButton>
-              <ControlButton label="Back 10 seconds" disabled={duration === 0} onClick={() => jump(-JUMP_MS)}>
-                <RotateCcw size={18} />
-              </ControlButton>
-              <ControlButton label="Forward 10 seconds" disabled={duration === 0} onClick={() => jump(JUMP_MS)}>
-                <RotateCw size={18} />
-              </ControlButton>
-              <ControlButton label={state.queue.length > 0 ? "Skip to next" : "Skip and stop"} onClick={() => run(controlStremio(channelId, { skip: true }))}>
+              {controller && (
+                <>
+                  <ControlButton label={state.playing ? "Pause" : "Play"} disabled={state.status === "error"} onClick={() => run(controlStremio(channelId, { playing: !state.playing }))}>
+                    {state.playing ? <Pause size={18} /> : <Play size={18} />}
+                  </ControlButton>
+                  <ControlButton label="Back 10 seconds" disabled={duration === 0} onClick={() => jump(-JUMP_MS)}>
+                    <RotateCcw size={18} />
+                  </ControlButton>
+                  <ControlButton label="Forward 10 seconds" disabled={duration === 0} onClick={() => jump(JUMP_MS)}>
+                    <RotateCw size={18} />
+                  </ControlButton>
+                </>
+              )}
+              <ControlButton label={skip.label} tip={skip.vote ? `${skip.label}: skips when half the listeners vote` : undefined} active={skip.vote ? skip.voted : undefined} onClick={() => run(controlStremio(channelId, { skip: skip.skip, item_seq: state.item_seq }))}>
                 <SkipForward size={18} />
+                {skip.vote && <span className="media-vote-count">{state.skip_votes.length}/{state.skip_needed}</span>}
               </ControlButton>
               <span className="stremio-time" aria-label="Position">
                 {formatClock(drag ?? position)}
@@ -226,7 +249,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
                 {volume === 0 || deaf ? <VolumeX size={16} aria-hidden="true" /> : <Volume2 size={16} aria-hidden="true" />}
                 <input type="range" aria-label="Stremio volume" min={0} max={100} value={volume} onChange={e => setViewerVolume(Number(e.target.value))} />
               </label>
-              <LanguagesMenu channelId={channelId} state={state} positionMs={position} />
+              <LanguagesMenu channelId={channelId} state={state} positionMs={position} controller={controller} />
               <ControlButton label={`Up next (${state.queue.length})`} active={queueOpen} onClick={() => setQueueOpen(o => !o)}>
                 <ListVideo size={18} />
               </ControlButton>
@@ -235,9 +258,11 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
                   {variant === "focused" ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
                 </ControlButton>
               )}
-              <ControlButton label="Stop Stremio" onClick={() => run(stopStremio(channelId))}>
-                <Square size={18} />
-              </ControlButton>
+              {controller && (
+                <ControlButton label="Stop Stremio" onClick={() => run(stopStremio(channelId))}>
+                  <Square size={18} />
+                </ControlButton>
+              )}
             </div>
           </div>
         </>

@@ -25,9 +25,9 @@ import {
   type TextPick,
 } from "./subtitles";
 
-function Row({ label, hint, checked, onClick }: { label: string; hint?: string; checked: boolean; onClick(): void }) {
+function Row({ label, hint, checked, disabled, onClick }: { label: string; hint?: string; checked: boolean; disabled?: boolean; onClick(): void }) {
   return (
-    <button type="button" role="menuitemradio" aria-checked={checked} className="stremio-language-row" onClick={onClick}>
+    <button type="button" role="menuitemradio" aria-checked={checked} disabled={disabled} className="stremio-language-row" onClick={onClick}>
       <span className="stremio-language-check">{checked && <Check size={14} aria-hidden="true" />}</span>
       <span className="stremio-language-name">{label}</span>
       {hint && <span className="stremio-language-hint">{hint}</span>}
@@ -36,7 +36,8 @@ function Row({ label, hint, checked, onClick }: { label: string; hint?: string; 
 }
 
 /** The Languages button with its menu, and the subtitle line. Mount inside the tile's control row. */
-export function LanguagesMenu({ channelId, state, positionMs }: { channelId: Snowflake; state: StremioState; positionMs: number }) {
+/** `controller`: may change the audio and the burned-in subtitle, which are everyone's (docs/api.md "Who controls media in a call"). */
+export function LanguagesMenu({ channelId, state, positionMs, controller }: { channelId: Snowflake; state: StremioState; positionMs: number; controller: boolean }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addons, setAddons] = useState<StremioAddonSubtitles | null>(null);
@@ -101,7 +102,7 @@ export function LanguagesMenu({ channelId, state, positionMs }: { channelId: Sno
   };
   const off = () => {
     chooseText(null);
-    if (state.burned_subtitle !== undefined) run(controlStremio(channelId, { burned_subtitle: null }));
+    if (state.burned_subtitle !== undefined && controller) run(controlStremio(channelId, { burned_subtitle: null }));
   };
   const burn = (id: number) => {
     chooseText(null);
@@ -128,10 +129,10 @@ export function LanguagesMenu({ channelId, state, positionMs }: { channelId: Sno
         <div className="stremio-languages" role="menu" aria-label={label} onKeyDown={e => e.key === "Escape" && setOpen(false)}>
           <section aria-label="Audio">
             <h3 className="stremio-languages-title">Audio</h3>
-            <p className="stremio-languages-note">Everyone hears the same audio.</p>
+            <p className="stremio-languages-note">{controller ? "Everyone hears the same audio." : "Everyone hears the same audio. Only people who control media here can change it."}</p>
             {audio.length === 0 && <p className="stremio-languages-note">Not known yet.</p>}
             {audio.map(t => (
-              <Row key={t.id} label={trackName(t)} hint={t.codec} checked={t.id === state.audio} onClick={() => chooseAudio(t.id)} />
+              <Row key={t.id} label={trackName(t)} hint={t.codec} checked={t.id === state.audio} disabled={!controller} onClick={() => chooseAudio(t.id)} />
             ))}
           </section>
           <section aria-label="Subtitles">
@@ -141,7 +142,7 @@ export function LanguagesMenu({ channelId, state, positionMs }: { channelId: Sno
               <Row key={t.id} label={trackName(t)} hint={t.forced ? "forced" : undefined} checked={pick?.kind === "text" && pick.id === t.id} onClick={() => chooseText({ kind: "text", id: t.id, lang: t.language })} />
             ))}
             {bitmaps.map(t => (
-              <Row key={t.id} label={trackName(t)} hint="shown to everyone" checked={state.burned_subtitle === t.id} onClick={() => burn(t.id)} />
+              <Row key={t.id} label={trackName(t)} hint="shown to everyone" checked={state.burned_subtitle === t.id} disabled={!controller} onClick={() => burn(t.id)} />
             ))}
             {addons && addons.subtitles.length > 0 && <h4 className="stremio-languages-sub">From your addons</h4>}
             {addons?.subtitles.map(s => (

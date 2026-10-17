@@ -15,6 +15,7 @@ export interface PermissionGroup {
 export const ADMINISTRATOR_BIT = 3;
 
 const DESCRIPTIONS: Record<number, string> = {
+  60: "Members can pause, seek, skip, stop and reorder Watch Together, Stremio and Spotify in calls they are in.",
   10: "See channels (unless a channel is private) and read along.",
   4: "Create, edit and delete channels.",
   28: "Create roles below their highest role and edit or assign them.",
@@ -124,6 +125,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ["Deafen Members", 23],
     ["Move Members", 24],
     ["Set Voice Channel Status", 48],
+    ["Control Media", 60],
   ]),
   group("Apps Permissions", [
     ["Use Application Commands", 31],

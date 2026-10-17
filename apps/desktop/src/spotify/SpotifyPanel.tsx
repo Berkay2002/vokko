@@ -6,6 +6,7 @@ import { useEffect, useReducer, useState } from "react";
 import { AlertTriangle, ArrowLeft, ListEnd, ListStart, Music, Play, Search, X } from "lucide-react";
 import type { Snowflake, SpotifyAlbumSummary, SpotifyArtistSummary, SpotifyPlaylistSummary, SpotifySearchType, SpotifyTrack } from "../api/types";
 import { useVoice } from "../voice/store";
+import { useCanControlMedia } from "../voice/useCanControlMedia";
 import { formatClock } from "../watch/youtube";
 import { reason } from "../stremio/format";
 import { controlSpotify, getAlbum, getArtist, getPlaylist, playSpotify, search } from "./api";
@@ -55,9 +56,13 @@ export function Art({ art, className, round }: { art: string | undefined; classN
   );
 }
 
-/** Play now / Play next / Add to queue for one URI (a track, album or playlist). Only Play while nothing plays here. */
+/** Play now / Play next / Add to queue for one URI (a track, album or playlist). Only Play while nothing plays here; someone
+ * without control only adds to the end of the queue while a track plays (docs/api.md "Who controls media in a call"). */
 function PlayActions({ channelId, uri, name, report, compact }: { channelId: Snowflake; uri: string; name: string; report: Report; compact?: boolean }) {
-  const playing = useVoice(s => !!s.spotify[channelId]);
+  const session = useVoice(s => s.spotify[channelId]);
+  const playing = !!session;
+  const controller = useCanControlMedia(channelId, session?.host_id);
+  const replaces = !!session?.track && !controller;
   const [busy, setBusy] = useState(false);
   const run = async (kind: "play" | "next" | "queue") => {
     setBusy(true);
@@ -73,15 +78,19 @@ function PlayActions({ channelId, uri, name, report, compact }: { channelId: Sno
   };
   return (
     <span className={`spotify-actions${compact ? " compact" : ""}`}>
-      <button type="button" className="btn btn-primary spotify-play" disabled={busy} onClick={() => void run("play")}>
-        <Play size={14} aria-hidden="true" /> {playing ? "Play now" : "Play"}
-      </button>
+      {!replaces && (
+        <button type="button" className="btn btn-primary spotify-play" disabled={busy} onClick={() => void run("play")}>
+          <Play size={14} aria-hidden="true" /> {playing ? "Play now" : "Play"}
+        </button>
+      )}
       {playing && (
         <>
-          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void run("next")}>
-            <ListStart size={14} aria-hidden="true" /> Play next
-          </button>
-          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void run("queue")}>
+          {controller && (
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void run("next")}>
+              <ListStart size={14} aria-hidden="true" /> Play next
+            </button>
+          )}
+          <button type="button" className={`btn ${replaces ? "btn-primary" : "btn-secondary"}`} disabled={busy} onClick={() => void run("queue")}>
             <ListEnd size={14} aria-hidden="true" /> Add to queue
           </button>
         </>

@@ -45,7 +45,7 @@ export function WatchModal({ channelId }: { channelId: Snowflake }) {
         </>
       }
     >
-      <p className="modal-subtle">Everyone in the call watches the same YouTube video, in sync. Anyone in the call can pause, skip or queue the next one.</p>
+      <p className="modal-subtle">Everyone in the call watches the same YouTube video, in sync. Anyone in the call can queue videos. People with Control Media, and whoever started it, can pause and skip; everyone else can vote to skip.</p>
       <label className="field-label" htmlFor="watch-link">
         YouTube link
       </label>

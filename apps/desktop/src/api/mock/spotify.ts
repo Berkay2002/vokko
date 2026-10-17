@@ -7,6 +7,7 @@ import {
   ChannelType,
   SPOTIFY_EVENT_QUEUE_MAX,
   SPOTIFY_QUEUE_MAX,
+  SPOTIFY_QUEUE_PER_USER,
   type SpotifyAlbum,
   type SpotifyAlbumSummary,
   type SpotifyArtist,
@@ -24,6 +25,7 @@ import {
 } from "../types";
 import { canView } from "./access";
 import { db, type MockChannel } from "./db";
+import { controls, freshControl, nextItem, recount, requireControl, skipOrVote } from "./mediaControl";
 import { fail, MISSING_PERMISSIONS, requireChannel } from "./ops";
 import { ID, route } from "./router";
 import { emit } from "./socket";
@@ -164,6 +166,7 @@ const copy = (state: SpotifyState, full = false): SpotifyState => ({
   ...state,
   track: state.track && { ...state.track, artists: [...state.track.artists] },
   queue: (full ? state.queue : state.queue.slice(0, SPOTIFY_EVENT_QUEUE_MAX)).map(q => ({ ...q, artists: [...q.artists] })),
+  skip_votes: [...state.skip_votes],
 });
 
 export const spotifyOf = (channelId: string): SpotifyState | undefined => (session?.channelId === channelId ? copy(session.state) : undefined);
@@ -212,20 +215,21 @@ function botFollows(channel: MockChannel): void {
   }
 }
 
-/** Plays `next` (or nothing) now; the current track goes to the history. */
-function playNow(s: Session, next: SpotifyTrack | null, now: number): SpotifyState {
+/** Plays `next` (added by `addedBy`, who may skip it) or nothing now; the current track goes to the history and its votes go. */
+function playNow(s: Session, next: SpotifyTrack | null, now: number, addedBy: string | undefined): SpotifyState {
   if (s.state.track) s.history = [...s.history, s.state.track].slice(-20);
-  return { ...s.state, track: next, status: next ? "loading" : "paused", playing: !!next, position_ms: 0, updated_at_ms: now, can_previous: true };
+  const control = nextItem(s.channelId, s.state, next ? addedBy : undefined);
+  return { ...s.state, ...control, track: next, status: next ? "loading" : "paused", playing: !!next, position_ms: 0, updated_at_ms: now, can_previous: true };
 }
 
 /** The track ended (`natural`) or was skipped: the loop mode decides what follows. */
 function advance(s: Session, now: number, natural: boolean): SpotifyState {
   const state = s.state;
-  if (natural && state.loop === "track" && state.track) return { ...state, position_ms: 0, updated_at_ms: now };
+  if (natural && state.loop === "track" && state.track) return { ...state, ...nextItem(s.channelId, state, state.added_by), position_ms: 0, updated_at_ms: now };
   const queue = [...state.queue];
-  if (state.loop === "queue" && state.track) queue.push(entry(state.track, state.started_by));
+  if (state.loop === "queue" && state.track) queue.push(entry(state.track, state.added_by ?? state.started_by));
   const [first, ...rest] = queue;
-  const next = playNow(s, first ? strip(first) : null, now);
+  const next = playNow(s, first ? strip(first) : null, now, first?.added_by);
   return withQueue(next, rest);
 }
 
@@ -270,12 +274,31 @@ route("PUT", `/channels/${ID}/spotify`, ({ viewer, params, body }): SpotifyReply
     session = {
       channelId: channel.id,
       history: [],
-      state: { status: "starting", track: null, playing: true, position_ms: 0, updated_at_ms: now, loop: "off", queue: [], queue_len: 0, can_previous: false, started_by: viewer.user.id, bot_identity: `bot:spotify:${channel.id}` },
+      state: {
+        status: "starting",
+        track: null,
+        playing: true,
+        position_ms: 0,
+        updated_at_ms: now,
+        loop: "off",
+        queue: [],
+        queue_len: 0,
+        can_previous: false,
+        started_by: viewer.user.id,
+        bot_identity: `bot:spotify:${channel.id}`,
+        ...freshControl(channel.id, viewer.user.id, undefined),
+      },
     };
+  } else if (session.state.track) {
+    // Replacing what plays is a controller's.
+    requireControl(channel, viewer.user.id, session.state.host_id);
+  } else {
+    // The idle session (its queue ran out) starts again: whoever starts it hosts it.
+    session.state = { ...session.state, host_id: viewer.user.id };
   }
-  const room = SPOTIFY_QUEUE_MAX - session.state.queue.length;
+  const room = Math.min(SPOTIFY_QUEUE_MAX - session.state.queue.length, quotaRoom(channel, viewer.user.id, session.state));
   const front = rest.slice(0, Math.max(0, room)).map(t => entry(t, viewer.user.id));
-  const next = withQueue(playNow(session, first, now), [...front, ...session.state.queue]);
+  const next = withQueue(playNow(session, first, now, viewer.user.id), [...front, ...session.state.queue]);
   if (fresh) {
     next.status = "starting";
     next.can_previous = false;
@@ -287,6 +310,14 @@ route("PUT", `/channels/${ID}/spotify`, ({ viewer, params, body }): SpotifyReply
   return { ...copy(next), ...(leftOut > 0 ? { left_out: leftOut } : {}) };
 });
 
+/** How many more entries `userId` may add: unlimited for a controller, else what is left of SPOTIFY_QUEUE_PER_USER. */
+function quotaRoom(channel: MockChannel, userId: string, state: SpotifyState): number {
+  if (controls(channel, userId, state.host_id)) return SPOTIFY_QUEUE_MAX;
+  return SPOTIFY_QUEUE_PER_USER - state.queue.filter(q => q.added_by === userId).length;
+}
+
+/** PATCH keys only a controller may send (skip and queue_remove have their own rules, queue_add with `next` is checked below). */
+const CONTROLLER_KEYS = ["playing", "position_ms", "previous", "loop", "shuffle", "queue_move", "queue_clear"];
 const PATCH_KEYS = ["playing", "position_ms", "skip", "previous", "loop", "shuffle", "queue_add", "queue_remove", "queue_move", "queue_clear"];
 
 route("PATCH", `/channels/${ID}/spotify`, ({ viewer, params, body }): SpotifyReply => {
@@ -298,6 +329,9 @@ route("PATCH", `/channels/${ID}/spotify`, ({ viewer, params, body }): SpotifyRep
   const now = Date.now();
   let state = s.state;
   let leftOut = 0;
+  const controller = controls(channel, viewer.user.id, state.host_id);
+  const next = (body.queue_add as { next?: unknown } | undefined)?.next === true;
+  if (!controller && (CONTROLLER_KEYS.includes(keys[0] ?? "") || (keys[0] === "queue_add" && next))) fail(403, 50013, MISSING_PERMISSIONS);
   const findQid = (qid: unknown) => {
     const index = state.queue.findIndex(q => q.qid === qid);
     if (index < 0) invalid("qid", "No such entry in the queue.");
@@ -315,9 +349,12 @@ route("PATCH", `/channels/${ID}/spotify`, ({ viewer, params, body }): SpotifyRep
       state = { ...state, position_ms: ms as number, updated_at_ms: now };
       break;
     }
-    case "skip":
-      state = advance(s, now, false);
+    case "skip": {
+      if (!state.track) break;
+      const outcome = skipOrVote(channel, viewer.user.id, state, body.skip === true, body.item_seq);
+      state = outcome.skip ? advance(s, now, false) : { ...state, ...outcome.control };
       break;
+    }
     case "previous": {
       if (state.track && here(state, now) > 3000) {
         state = { ...state, position_ms: 0, updated_at_ms: now };
@@ -328,8 +365,9 @@ route("PATCH", `/channels/${ID}/spotify`, ({ viewer, params, body }): SpotifyRep
         state = { ...state, position_ms: 0, updated_at_ms: now };
         break;
       }
-      const queue = state.track ? [entry(state.track, viewer.user.id), ...state.queue] : state.queue;
-      state = withQueue({ ...state, track: last, status: "loading", playing: true, position_ms: 0, updated_at_ms: now, can_previous: s.history.length > 0 }, queue);
+      const queue = state.track ? [entry(state.track, state.added_by ?? viewer.user.id), ...state.queue] : state.queue;
+      const control = nextItem(s.channelId, state, viewer.user.id);
+      state = withQueue({ ...state, ...control, track: last, status: "loading", playing: true, position_ms: 0, updated_at_ms: now, can_previous: s.history.length > 0 }, queue);
       break;
     }
     case "loop": {
@@ -350,18 +388,21 @@ route("PATCH", `/channels/${ID}/spotify`, ({ viewer, params, body }): SpotifyRep
     case "queue_add": {
       const add = body.queue_add as { uri?: unknown; next?: unknown } | undefined;
       const tracks = tracksOf(add?.uri, "queue_add");
-      const room = SPOTIFY_QUEUE_MAX - state.queue.length;
-      if (room <= 0) invalid("queue_add", `The queue holds at most ${SPOTIFY_QUEUE_MAX} tracks.`);
+      if (SPOTIFY_QUEUE_MAX - state.queue.length <= 0) invalid("queue_add", `The queue holds at most ${SPOTIFY_QUEUE_MAX} tracks.`);
+      const room = Math.min(SPOTIFY_QUEUE_MAX - state.queue.length, quotaRoom(channel, viewer.user.id, state));
+      if (room <= 0) invalid("queue_add", `You can have at most ${SPOTIFY_QUEUE_PER_USER} entries in the queue at once.`);
       const added = tracks.slice(0, room).map(t => entry(t, viewer.user.id));
       leftOut = tracks.length - added.length;
-      const queue = add?.next === true ? [...added, ...state.queue] : [...state.queue, ...added];
+      const queue = next ? [...added, ...state.queue] : [...state.queue, ...added];
       // Nothing was playing (the queue ran out): the new tracks start at once.
       state = state.track ? withQueue(state, queue) : advance({ ...s, state: withQueue(state, queue) }, now, false);
       break;
     }
     case "queue_remove": {
       const queue = [...state.queue];
-      queue.splice(findQid(body.queue_remove), 1);
+      const index = findQid(body.queue_remove);
+      if (!controller && queue[index]?.added_by !== viewer.user.id) fail(403, 50013, MISSING_PERMISSIONS);
+      queue.splice(index, 1);
       state = withQueue(state, queue);
       break;
     }
@@ -393,9 +434,23 @@ route("GET", `/channels/${ID}/spotify`, ({ viewer, params }) => {
 
 route("DELETE", `/channels/${ID}/spotify`, ({ viewer, params }) => {
   const channel = connectedChannel(viewer.user.id, params[0] ?? "");
+  if (session?.channelId === channel.id) requireControl(channel, viewer.user.id, session.state.host_id);
   endSpotify(channel.id);
   return undefined;
 });
+
+/** Someone joined, left or (un)deafened in `channelId`: votes, the threshold and the host follow, and a vote that now passes skips. */
+export function recountSpotify(channelId: string): void {
+  const channel = db.channels.get(channelId);
+  if (session?.channelId !== channelId || !channel) return;
+  const before = session.state;
+  const counted = recount(channelId, before);
+  session.state = { ...before, ...counted.control };
+  if (counted.passed && before.track) session.state = advance(session, Date.now(), false);
+  if (JSON.stringify(session.state) === JSON.stringify(before)) return;
+  announce(channel, session.state);
+  botFollows(channel);
+}
 
 route("POST", `/channels/${ID}/spotify/listener-token`, ({ viewer, params }): SpotifyListenerToken => {
   const channel = connectedChannel(viewer.user.id, params[0] ?? "");
