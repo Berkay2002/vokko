@@ -97,6 +97,8 @@ pub struct Stremio {
     addons: Mutex<HashMap<i64, Cached<Vec<Addon>>>>,
     metas: Mutex<HashMap<String, Cached<StremioMeta>>>,
     pub(crate) sessions: Mutex<HashMap<i64, crate::voice::stremio::Session>>,
+    /// Library write-backs by owner (`library::save`).
+    pub(crate) library_writes: Mutex<HashMap<i64, library::Writes>>,
     /// The media LiveKit's RoomService (rooms are closed and viewers removed through it); a fake in tests.
     media_rooms: Mutex<Arc<dyn RoomService>>,
     generation: AtomicU64,
@@ -130,6 +132,7 @@ impl Stremio {
             addons: Mutex::default(),
             metas: Mutex::default(),
             sessions: Mutex::default(),
+            library_writes: Mutex::default(),
             generation: AtomicU64::new(1),
         }
     }

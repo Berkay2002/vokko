@@ -12,6 +12,8 @@
 //!
 //! Items are handled as raw JSON, never through a typed struct: a write changes only the fields below and keeps every other field
 //! (a typed round trip would drop what this server does not know). An item that does not have the expected shape is not written.
+use std::collections::VecDeque;
+
 use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -24,7 +26,7 @@ use crate::auth::AuthUser;
 use crate::error::ApiResult;
 use crate::state::AppState;
 use crate::store::iso;
-use crate::stremio::{account_error, active, cached_meta, drop_key, limit, load_key};
+use crate::stremio::{account_error, active, cached_meta, drop_key, limit, load_key, lock};
 use axum::Json;
 use axum::extract::State;
 
@@ -112,6 +114,8 @@ pub struct Finished {
     pub duration_ms: u64,
     /// Where the item started (a resume starts past 0); only what was played after it counts as time watched.
     pub began_ms: u64,
+    /// When the item started (unix ms): a library entry modified or an account linked after this is not what the item began with.
+    pub started_ms: i64,
 }
 
 impl Finished {
@@ -124,29 +128,88 @@ impl Finished {
         self.duration_ms > 0 && self.position_ms >= MIN_SAVE_MS
     }
 
+    /// Played past the credits. Something has to have been played: starting at 95% and leaving at once finishes nothing.
     fn credits(&self) -> bool {
-        self.position_ms as f64 > self.duration_ms as f64 * CREDITS_COEF
+        self.position_ms > self.began_ms && self.position_ms as f64 > self.duration_ms as f64 * CREDITS_COEF
     }
 }
 
-/// Saves `done` to its owner's library in the background; failures are only logged without any content.
+/// Where an item the bot reported as ended stands: at its end when it got past the credits, else where the bot said it was. An end
+/// before the credits (a CDN link that dropped, a truncated file) is not a watched video.
+pub fn ended_position(reported: u64, duration_ms: u64) -> u64 {
+    if reported as f64 >= duration_ms as f64 * CREDITS_COEF { duration_ms } else { reported.min(duration_ms) }
+}
+
+/// What is waiting to be written to one owner's library, and the `_mtime` of the last item this server wrote there.
+#[derive(Default)]
+pub struct Writes {
+    queue: VecDeque<Finished>,
+    running: bool,
+    last_mtime: Option<String>,
+}
+
+/// Saves `done` to its owner's library in the background; failures are only logged without any content. One owner's items are
+/// written one at a time in the order they finished, so a slow earlier write cannot land on top of a later one from a stale read.
 pub fn save(state: &AppState, done: Finished) {
     if !done.worth_saving() {
         return;
     }
-    let state = state.clone();
-    tokio::spawn(async move {
-        if write(&state, done).await.is_none() {
-            tracing::info!("stremio: the library was not updated");
-        }
-    });
+    let owner = done.owner;
+    let start = {
+        let mut writes = lock(&state.stremio.library_writes);
+        let writes = writes.entry(owner).or_default();
+        writes.queue.push_back(done);
+        !std::mem::replace(&mut writes.running, true)
+    };
+    if start {
+        let state = state.clone();
+        tokio::spawn(async move { drain(state, owner).await });
+    }
 }
 
-/// Get, merge, put. `None` when nothing was written. A failed read never leads to a create: only an answer that says the item is
-/// missing does.
-async fn write(state: &AppState, done: Finished) -> Option<()> {
+/// Writes what is queued for `owner`, then stops (`save` starts it again).
+async fn drain(state: AppState, owner: i64) {
+    loop {
+        let (done, last_mtime) = {
+            let mut writes = lock(&state.stremio.library_writes);
+            let Some(writes) = writes.get_mut(&owner) else { return };
+            let Some(done) = writes.queue.pop_front() else {
+                writes.running = false;
+                return;
+            };
+            (done, writes.last_mtime.clone())
+        };
+        match write(&state, &done, last_mtime.as_deref()).await {
+            Some(mtime) => {
+                if let Some(writes) = lock(&state.stremio.library_writes).get_mut(&owner) {
+                    writes.last_mtime = Some(mtime);
+                }
+            }
+            None => tracing::info!("stremio: the library was not updated"),
+        }
+    }
+}
+
+fn from_unix_millis(ms: i64) -> OffsetDateTime {
+    OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000).unwrap_or(OffsetDateTime::UNIX_EPOCH)
+}
+
+/// Whether `item` was modified after the item being saved started, by something other than this server's own previous write
+/// (`last_mtime`): another Stremio device moved it meanwhile, and a position from before that must not overwrite it.
+fn modified_since(item: &Value, started_ms: i64, last_mtime: Option<&str>) -> bool {
+    let Some(mtime) = item["_mtime"].as_str().filter(|mtime| Some(*mtime) != last_mtime) else { return false };
+    OffsetDateTime::parse(mtime, &Rfc3339).is_ok_and(|at| at > from_unix_millis(started_ms))
+}
+
+/// Get, merge, put; the `_mtime` that was written, or `None` when nothing was. A failed read never leads to a create: only an
+/// answer that says the item is missing does. Nothing is written for an account linked after the item started, or for an item
+/// that was modified after it started.
+async fn write(state: &AppState, done: &Finished, last_mtime: Option<&str>) -> Option<String> {
     let active = active(state).ok()?;
-    let (key, _) = load_key(state, &active, done.owner).await.ok()??;
+    let (key, linked_at) = load_key(state, &active, done.owner).await.ok()??;
+    if linked_at > from_unix_millis(done.started_ms) {
+        return None;
+    }
     let account = &active.clients.account;
     let existing = match account.library_item(&key, done.title_id()).await {
         Ok(existing) => existing,
@@ -156,14 +219,19 @@ async fn write(state: &AppState, done: Finished) -> Option<()> {
         }
         Err(_) => return None,
     };
+    if existing.as_ref().is_some_and(|item| modified_since(item, done.started_ms, last_mtime)) {
+        return None;
+    }
     let now = OffsetDateTime::now_utc();
     let next = if done.kind == "series" && done.credits() {
         cached_meta(state, &active, &done.kind, done.title_id()).await.ok().and_then(|meta| next_video(&meta, &done.video_id, now))
     } else {
         None
     };
-    let item = merge(existing.as_ref(), &done, next.as_deref(), now)?;
-    account.library_put(&key, item).await.ok()
+    let item = merge(existing.as_ref(), done, next.as_deref(), now)?;
+    let mtime = item["_mtime"].as_str()?.to_owned();
+    account.library_put(&key, item).await.ok()?;
+    Some(mtime)
 }
 
 /// stremio-core `MetaItem::next_video`: the video after `current`, unless it is not released yet or crosses back out of season 0.
@@ -336,6 +404,7 @@ mod tests {
             position_ms,
             duration_ms: 1_000_000,
             began_ms,
+            started_ms: 0,
         }
     }
 
@@ -398,6 +467,34 @@ mod tests {
         assert_eq!(merged["state"]["timeOffset"], json!(0));
         assert_eq!((merged["state"]["flaggedWatched"].clone(), merged["state"]["timesWatched"].clone()), (json!(1), json!(3)));
         assert!(continue_row(&[merged]).is_empty());
+    }
+
+    #[test]
+    fn an_early_end_is_where_the_bot_was_and_only_the_credits_make_it_the_end() {
+        assert_eq!(ended_position(500_000, 1_000_000), 500_000, "a dropped link");
+        assert_eq!(ended_position(899_000, 1_000_000), 899_000);
+        assert_eq!((ended_position(900_000, 1_000_000), ended_position(1_200_000, 1_000_000)), (1_000_000, 1_000_000));
+    }
+
+    #[test]
+    fn starting_past_the_credits_and_leaving_at_once_watches_nothing() {
+        let existing = stored("tt0113277", json!("tt0113277"));
+        let merged = merge(Some(&existing), &done("tt0113277", 950_000, 950_000), None, NOW).expect("merged");
+        assert_eq!((merged["state"]["flaggedWatched"].clone(), merged["state"]["timesWatched"].clone()), (json!(0), json!(2)));
+        assert_eq!(merged["state"]["timeOffset"], json!(950_000), "still there to continue");
+        let played = merge(Some(&existing), &done("tt0113277", 960_000, 950_000), None, NOW).expect("merged");
+        assert_eq!((played["state"]["flaggedWatched"].clone(), played["state"]["timeOffset"].clone()), (json!(1), json!(0)));
+    }
+
+    #[test]
+    fn an_item_modified_since_the_start_is_left_alone_unless_the_change_is_ours() {
+        let started = NOW.unix_timestamp() * 1000;
+        let item = |mtime: &str| json!({"_mtime": mtime});
+        assert!(!modified_since(&item("2026-10-17T11:00:00.000Z"), started, None), "older than the start");
+        assert!(modified_since(&item("2026-10-17T12:30:00.000Z"), started, None), "another device moved it");
+        assert!(!modified_since(&item("2026-10-17T12:30:00.000Z"), started, Some("2026-10-17T12:30:00.000Z")), "our own previous write");
+        assert!(modified_since(&item("2026-10-17T12:30:00.000Z"), started, Some("2026-10-17T12:10:00.000Z")));
+        assert!(!modified_since(&json!({"_mtime": "not a time"}), started, None));
     }
 
     #[test]

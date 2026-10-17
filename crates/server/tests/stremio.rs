@@ -45,6 +45,8 @@ struct Mock {
     library: Mutex<HashMap<String, Vec<Value>>>,
     stored: Mutex<Vec<(String, Value)>>,
     library_down: AtomicBool,
+    /// The next `datastoreGet` answers late (a slow Stremio): the write-back of an earlier item must not land after a later one.
+    slow_get: AtomicBool,
 }
 
 impl Mock {
@@ -65,8 +67,14 @@ async fn datastore_get(State(mock): State<Arc<Mock>>, Json(body): Json<Value>) -
     assert_eq!(body["collection"], "libraryItem");
     let ids: Vec<&str> = body["ids"].as_array().map(|ids| ids.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
     let all = body["all"].as_bool() == Some(true);
-    let library = mock.library.lock().unwrap();
-    let items = library.get(body["authKey"].as_str().unwrap_or("")).cloned().unwrap_or_default();
+    // The answer is what the library holds now, however late it arrives.
+    let items: Vec<Value> = {
+        let library = mock.library.lock().unwrap();
+        library.get(body["authKey"].as_str().unwrap_or("")).cloned().unwrap_or_default()
+    };
+    if mock.slow_get.swap(false, Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
     ok(Value::Array(items.into_iter().filter(|item| all || ids.contains(&item["_id"].as_str().unwrap_or(""))).collect())).into_response()
 }
 
@@ -191,6 +199,7 @@ async fn start_mock() -> Arc<Mock> {
         library: Mutex::default(),
         stored: Mutex::default(),
         library_down: AtomicBool::new(false),
+        slow_get: AtomicBool::new(false),
     });
     let router = Router::new()
         .route("/api/login", post(login))
@@ -1414,4 +1423,84 @@ async fn a_finished_movie_is_watched_and_a_finished_episode_moves_on_to_the_next
         (Some("tt0903747:1:3"), Some(1), Some(3), Some(0))
     );
     assert_eq!(row.as_array().map(Vec::len), Some(1), "the finished movie is gone from the row");
+}
+
+#[tokio::test]
+async fn an_end_before_the_credits_is_saved_where_the_bot_was() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 0, Some("tt0111161"))]);
+    // The link dropped or the file was cut: "ended" at 3,000,000 of 7,200,000 is not a watched movie.
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    settle().await;
+    assert_eq!(w.event("ended", json!({"position_ms": 3_000_000})).await, StatusCode::NO_CONTENT);
+    until("the library", || !w.mock.puts("AUTHKEY-1").is_empty()).await;
+    let saved = w.mock.puts("AUTHKEY-1").remove(0);
+    assert_eq!(
+        (saved["state"]["timeOffset"].as_u64(), saved["state"]["flaggedWatched"].as_u64(), saved["state"]["timesWatched"].as_u64()),
+        (Some(3_000_000), Some(0), Some(1))
+    );
+}
+
+#[tokio::test]
+async fn what_is_watched_after_the_starter_left_the_call_is_not_saved_to_their_library() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    w.join(&mut carl).await;
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 0, Some("tt0111161"))]);
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    // alice leaves at 10 minutes; carl keeps watching to the end.
+    alice.voice(None).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"playing": true})).await.0, StatusCode::OK);
+    settle().await;
+    assert_eq!(w.event("ended", json!({"position_ms": 7_200_000})).await, StatusCode::NO_CONTENT);
+    until("the library", || !w.mock.puts("AUTHKEY-1").is_empty()).await;
+    let saved = w.mock.puts("AUTHKEY-1").remove(0);
+    assert_eq!((saved["state"]["timeOffset"].as_u64(), saved["state"]["flaggedWatched"].as_u64()), (Some(600_000), Some(0)), "where alice left, not the end");
+    assert!(w.mock.puts(CARL_KEY).is_empty());
+}
+
+#[tokio::test]
+async fn one_owners_writes_land_in_the_order_the_items_finished() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0903747", "series", "Breaking", "2020-02-01T00:00:00Z", 300_000, Some("tt0903747:1:2"))]);
+    w.play_to(&w.alice, "series", "tt0903747:1:2", "A 1080p", 3_000_000, 600_000).await;
+    // The first item's read is slow; the second item finishes (and is queued) while it waits.
+    w.mock.slow_get.store(true, Ordering::SeqCst);
+    w.play_to(&w.alice, "series", "tt0903747:1:3", "A 1080p", 3_000_000, 900_000).await;
+    w.stop_and_settle(&w.alice).await;
+    until("both items", || w.mock.puts("AUTHKEY-1").len() == 2).await;
+    let puts = w.mock.puts("AUTHKEY-1");
+    assert_eq!((puts[0]["state"]["video_id"].as_str(), puts[0]["state"]["timeOffset"].as_u64()), (Some("tt0903747:1:2"), Some(600_000)));
+    assert_eq!((puts[1]["state"]["video_id"].as_str(), puts[1]["state"]["timeOffset"].as_u64()), (Some("tt0903747:1:3"), Some(900_000)));
+    assert_eq!(puts[1]["state"]["overallTimeWatched"].as_u64(), Some(2_101_100), "the second write started from the first one's result");
+}
+
+#[tokio::test]
+async fn an_item_changed_elsewhere_meanwhile_or_an_account_linked_meanwhile_is_not_overwritten() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    // Stremio on the TV moved the movie after this session's item began (an _mtime from the future stands for that).
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2099-01-01T00:00:00Z", 1_000_000, Some("tt0111161"))]);
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    w.stop_and_settle(&w.alice).await;
+    assert!(w.mock.puts("AUTHKEY-1").is_empty(), "the TV's position stays");
+
+    // The account was linked again while the item played: it began under the old link.
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 0, Some("tt0111161"))]);
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    w.link(&w.alice).await;
+    w.stop_and_settle(&w.alice).await;
+    assert!(w.mock.puts("AUTHKEY-1").is_empty(), "relinked mid-item: nothing written");
 }
