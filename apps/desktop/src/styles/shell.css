@@ -387,6 +387,11 @@
   filter: brightness(0.92);
 }
 
+.download-apps-alt {
+  color: var(--text-link);
+  font-size: 12px;
+}
+
 .download-apps-note {
   color: var(--text-muted);
 }
