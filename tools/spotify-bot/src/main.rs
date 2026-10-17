@@ -1,6 +1,9 @@
-//! Spotify bot. Phase 0 spike: `login` stores the house account's librespot credentials.
+//! Spotify bot. Phase 0 spike: `login` stores the house account's librespot credentials; `tone`, `play` and `meta` answer design questions.
 
 mod login;
+mod pump;
+mod resample;
+mod spike;
 
 use std::process::ExitCode;
 
@@ -11,9 +14,13 @@ async fn main() -> ExitCode {
     let filter = tracing_subscriber::EnvFilter::try_from_env("SPOTIFY_BOT_LOG").unwrap_or_else(|_| "warn,spotify_bot=info".into());
     tracing_subscriber::fmt().with_env_filter(filter).init();
 
-    let result = match std::env::args().nth(1).as_deref() {
+    let mut args = std::env::args().skip(1);
+    let result = match args.next().as_deref() {
         Some("login") => login::run().await,
-        _ => Err("usage: spotify-bot login".into()),
+        Some("tone") => spike::tone(args.next()).await,
+        Some("play") => spike::play(args.next(), args.next(), args.next()).await,
+        Some("meta") => spike::meta(args.next(), args.next()).await,
+        _ => Err("usage: spotify-bot login | tone direct|resample | play <track id> direct|resample [seconds] | meta playlist|artist|track <id>".into()),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
