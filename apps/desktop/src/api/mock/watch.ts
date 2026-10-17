@@ -100,7 +100,7 @@ route("PATCH", `/channels/${ID}/watch-together`, ({ viewer, params, body }) => {
   const next = copy(before);
   const here = next.playing ? next.position_ms + Math.max(0, now - next.updated_at_ms) : next.position_ms;
   const controller = controls(channel, viewer.user.id, before.host_id);
-  if (!controller && (patch.playing !== undefined || patch.position_ms !== undefined || (newTitle && before.title))) fail(403, 50013, MISSING_PERMISSIONS);
+  if (!controller && (patch.playing !== undefined || patch.position_ms !== undefined)) fail(403, 50013, MISSING_PERMISSIONS);
   if (patch.skip !== undefined) {
     if (expected !== undefined && expected !== next.video_id) return copy(before);
     const outcome = skipOrVote(channel, viewer.user.id, before, patch.skip === true);
@@ -111,10 +111,11 @@ route("PATCH", `/channels/${ID}/watch-together`, ({ viewer, params, body }) => {
     next.playing = patch.playing ?? next.playing;
     next.updated_at_ms = now;
   }
-  if (newTitle) next.title = newTitle;
+  // Anyone fills in a missing title (the clients' auto-fill); replacing one is a controller's, else a silent no-op as on the server.
+  if (newTitle && (controller || !before.title)) next.title = newTitle;
   if (added !== undefined) {
     if (next.queue.length >= WATCH_TOGETHER_QUEUE_MAX) invalid("queue_add", `The queue holds at most ${WATCH_TOGETHER_QUEUE_MAX} videos.`);
-    requireQuota(channel, viewer.user.id, before.host_id, next.queue_added_by, WATCH_TOGETHER_QUEUE_PER_USER, "videos");
+    requireQuota(channel, viewer.user.id, before.host_id, next.queue_added_by, WATCH_TOGETHER_QUEUE_PER_USER);
     next.queue.push(added);
     next.queue_added_by.push(viewer.user.id);
   }

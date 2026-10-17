@@ -390,7 +390,7 @@ route("PATCH", `/channels/${ID}/spotify`, ({ viewer, params, body }): SpotifyRep
       const tracks = tracksOf(add?.uri, "queue_add");
       if (SPOTIFY_QUEUE_MAX - state.queue.length <= 0) invalid("queue_add", `The queue holds at most ${SPOTIFY_QUEUE_MAX} tracks.`);
       const room = Math.min(SPOTIFY_QUEUE_MAX - state.queue.length, quotaRoom(channel, viewer.user.id, state));
-      if (room <= 0) invalid("queue_add", `You can have ${SPOTIFY_QUEUE_PER_USER} tracks of your own in the queue at once.`);
+      if (room <= 0) invalid("queue_add", `You can have at most ${SPOTIFY_QUEUE_PER_USER} entries in the queue at once.`);
       const added = tracks.slice(0, room).map(t => entry(t, viewer.user.id));
       leftOut = tracks.length - added.length;
       const queue = next ? [...added, ...state.queue] : [...state.queue, ...added];

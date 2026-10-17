@@ -5,6 +5,7 @@ import { Perm, hasBit } from "../permissions";
 import type { MediaControl } from "../types";
 import { channelPermsOf } from "./access";
 import type { MockChannel } from "./db";
+import { invalid } from "./accounts";
 import { fail, MISSING_PERMISSIONS } from "./ops";
 import { voiceStates } from "./voice";
 
@@ -58,10 +59,10 @@ export function skipOrVote(channel: MockChannel, userId: string, control: MediaC
 }
 
 /** 400 50035 `queue_add` when a non-controller already holds `perUser` entries. */
-export function requireQuota(channel: MockChannel, userId: string, hostId: string, addedBy: string[], perUser: number, noun: string): void {
+export function requireQuota(channel: MockChannel, userId: string, hostId: string, addedBy: string[], perUser: number): void {
   if (controls(channel, userId, hostId)) return;
   if (addedBy.filter(id => id === userId).length >= perUser) {
-    fail(400, 50035, "Invalid Form Body", { queue_add: { code: "QUEUE_QUOTA", message: `You can have ${perUser} ${noun} of your own in the queue at once.` } });
+    invalid("queue_add", `You can have at most ${perUser} entries in the queue at once.`);
   }
 }
 

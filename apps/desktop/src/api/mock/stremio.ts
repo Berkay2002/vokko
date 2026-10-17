@@ -382,7 +382,7 @@ route("PATCH", `/channels/${ID}/stremio`, ({ viewer, params, body }) => {
   if (patch.queue_remove !== undefined) next.queue.splice(patch.queue_remove, 1);
   if (added) {
     if (next.queue.length >= STREMIO_QUEUE_MAX) invalid("queue_add", `The queue holds at most ${STREMIO_QUEUE_MAX} titles.`);
-    requireQuota(channel, viewer.user.id, before.host_id, next.queue.map(q => q.added_by), STREMIO_QUEUE_PER_USER, "titles");
+    requireQuota(channel, viewer.user.id, before.host_id, next.queue.map(q => q.added_by), STREMIO_QUEUE_PER_USER);
     next.queue.push({ ...added.item, added_by: viewer.user.id });
   }
   sessions.set(channel.id, next);

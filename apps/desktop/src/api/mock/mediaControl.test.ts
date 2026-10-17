@@ -91,7 +91,8 @@ describe("mock Watch Together control", () => {
     expect(errorOf(() => call("c", "PUT", watch(), { video_id: A }))).toEqual({ status: 403, code: 50013 });
     expect(errorOf(() => call("c", "DELETE", watch()))).toEqual({ status: 403, code: 50013 });
     call("c", "PATCH", watch(), { title: "First" }); // the auto-fill while unset
-    expect(errorOf(() => call("c", "PATCH", watch(), { title: "Second" }))).toEqual({ status: 403, code: 50013 });
+    call("c", "PATCH", watch(), { title: "Second" }); // replacing it is a silent no-op
+    expect(watchOf(voiceId)?.title).toBe("First");
     call("b", "PATCH", watch(), { playing: false }); // the host
 
     for (const id of [A, B, C]) call("c", "PATCH", watch(), { queue_add: id });
