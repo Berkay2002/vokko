@@ -17,6 +17,7 @@ describe("cues from the media room", () => {
     expect(cue?.text.length).toBe(300);
     expect(cue?.text.startsWith("abcx")).toBe(true);
     expect(parseCue(bytes({ start_ms: 0, end_ms: 1000, text: "two\nlines" }))?.text).toBe("two\nlines");
+    expect(parseCue(bytes({ start_ms: 0, end_ms: 1000, text: "a\u2060b\u2064c\u2028d\u2029e" }))?.text).toBe("abcde");
   });
 
   it("hands only subs: topics from the right bot to the listener", () => {
