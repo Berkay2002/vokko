@@ -132,9 +132,22 @@ describe("mock Stremio sessions", () => {
     expect(stremioOf(voiceId)?.queue.map(q => q.title)).toEqual(["Inception"]);
     call("plain", "PATCH", path(), { skip: true });
     expect(stremioOf(voiceId)).toMatchObject({ item: { title: "Inception" }, status: "starting", position_ms: 0, queue: [] });
-    call("other", "PATCH", path(), { skip: true });
+    expect(call("other", "PATCH", path(), { skip: true })).toBeNull();
     expect(stremioOf(voiceId)).toBeUndefined();
     expect(updates().at(-1)?.d).toMatchObject({ channel_id: voiceId, state: null });
+  });
+
+  it("takes what a user queued out of the running session when they unlink, and keeps what is playing", () => {
+    link("plain");
+    link("other");
+    op4("plain", voiceId);
+    op4("other", voiceId);
+    call("plain", "PUT", path(), { sid: playable("plain")[0]!.sid });
+    call("other", "PATCH", path(), { queue_add: playable("other", "tt1375666")[0]!.sid });
+    call("plain", "PATCH", path(), { queue_add: playable("plain", "tt0133093")[0]!.sid });
+    call("other", "DELETE", "/users/@me/stremio");
+    expect(stremioOf(voiceId)).toMatchObject({ item: { title: "Heat" }, queue: [{ title: "The Matrix", added_by: ids.plain }] });
+    expect(updates().at(-1)?.d).toMatchObject({ channel_id: voiceId, state: { queue: [{ title: "The Matrix" }] } });
   });
 
   it("holds ten in the queue", () => {

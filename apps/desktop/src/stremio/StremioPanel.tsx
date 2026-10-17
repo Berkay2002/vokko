@@ -2,9 +2,10 @@
 // a title page with a season / episode picker, and a ranked stream list with Play in call / Add to Up next. The server does all the
 // talking to Stremio; this panel only ever sees titles, posters, labels and opaque stream ids.
 
-import { useEffect, useReducer, useState } from "react";
+import { createContext, useContext, useEffect, useReducer, useState } from "react";
 import { ArrowLeft, ExternalLink, Film, Link2, Search, X } from "lucide-react";
 import { QrCode } from "../account/QrCode";
+import { ApiRequestError } from "../api/rest";
 import type { Snowflake, StremioMeta, StremioSearchItem, StremioStream, StremioStreams, StremioType } from "../api/types";
 import { useVoice } from "../voice/store";
 import { useVoiceUi } from "../voice/uiStore";
@@ -150,14 +151,22 @@ function LinkCard({ state, dispatch }: { state: PanelState; dispatch: Dispatch }
 
 // ---- browsing ----
 
+/** Called when the server says the link is gone (403 50013: Stremio no longer accepts the key and it was deleted), so the panel asks for a new one. */
+const LinkLost = createContext<() => void>(() => undefined);
+
 function useAsync<T>(load: () => Promise<T>, deps: unknown[]): { data: T | null; error: string | null; loading: boolean } {
+  const linkLost = useContext(LinkLost);
   const [result, setResult] = useState<{ data: T | null; error: string | null; loading: boolean }>({ data: null, error: null, loading: true });
   useEffect(() => {
     let current = true;
     setResult({ data: null, error: null, loading: true });
     load().then(
       data => current && setResult({ data, error: null, loading: false }),
-      e => current && setResult({ data: null, error: reason(e), loading: false }),
+      e => {
+        if (!current) return;
+        if (e instanceof ApiRequestError && e.status === 403 && e.code === 50013) linkLost();
+        setResult({ data: null, error: reason(e), loading: false });
+      },
     );
     return () => {
       current = false;
@@ -432,12 +441,14 @@ export function StremioPanel({ channelId }: { channelId: Snowflake }) {
         </button>
       </header>
       <div className="stremio-panel-body">
-        {state.account === "loading" && <p className="stremio-muted">Loading…</p>}
-        {state.account === "unavailable" && <p className="stremio-muted">Stremio isn't set up on this server.</p>}
-        {(state.account === "unlinked" || state.account === "linking" || state.account === "email") && <LinkCard state={state} dispatch={dispatch} />}
-        {state.account === "linked" && view.name === "home" && <Home query={state.query} dispatch={dispatch} />}
-        {state.account === "linked" && view.name === "title" && <TitlePage channelId={channelId} item={view.item} dispatch={dispatch} />}
-        {state.account === "linked" && view.name === "streams" && <StreamList channelId={channelId} type={view.item.type} videoId={view.videoId} label={view.label} />}
+        <LinkLost.Provider value={() => dispatch({ type: "unlinked" })}>
+          {state.account === "loading" && <p className="stremio-muted">Loading…</p>}
+          {state.account === "unavailable" && <p className="stremio-muted">Stremio isn't set up on this server.</p>}
+          {(state.account === "unlinked" || state.account === "linking" || state.account === "email") && <LinkCard state={state} dispatch={dispatch} />}
+          {state.account === "linked" && view.name === "home" && <Home query={state.query} dispatch={dispatch} />}
+          {state.account === "linked" && view.name === "title" && <TitlePage channelId={channelId} item={view.item} dispatch={dispatch} />}
+          {state.account === "linked" && view.name === "streams" && <StreamList channelId={channelId} type={view.item.type} videoId={view.videoId} label={view.label} />}
+        </LinkLost.Provider>
       </div>
     </aside>
   );

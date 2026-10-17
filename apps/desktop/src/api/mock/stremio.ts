@@ -115,6 +115,15 @@ route("POST", "/users/@me/stremio/login", ({ viewer, body }) => {
 route("DELETE", "/users/@me/stremio", ({ viewer }) => {
   linked.delete(viewer.user.id);
   pending.delete(viewer.user.id);
+  // What this user queued goes with the account; what is playing continues.
+  for (const [channelId, state] of sessions) {
+    const queue = state.queue.filter(q => q.added_by !== viewer.user.id);
+    if (queue.length === state.queue.length) continue;
+    const next = { ...state, queue };
+    sessions.set(channelId, next);
+    const channel = db.channels.get(channelId);
+    if (channel) announce(channel, next);
+  }
   return undefined;
 });
 
@@ -313,7 +322,8 @@ export function endStremio(channelId: string): void {
 if (typeof window !== "undefined") {
   (window as unknown as { __vokkoMockStremio: unknown }).__vokkoMockStremio = {
     approve: () => pending.forEach(open => (open.approved = true)),
-    fail: (channelId: string, message: string) => {
+    // The server only ever sends this generic text for an error.
+    fail: (channelId: string, message = "Playback failed.") => {
       const state = sessions.get(channelId);
       const channel = db.channels.get(channelId);
       if (!state || !channel) return;

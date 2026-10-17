@@ -169,7 +169,14 @@ test('link, search, pick a stream, play in call, control it from others, stop', 
   // A sid nobody listed is refused.
   await expect(as(page, 'alice', 'PATCH', path, { queue_add: 'not-a-sid' })).rejects.toBeTruthy();
 
-  // Stop ends it for everyone and the tile, the viewer Room and the sidebar line go.
+  // Skip with nothing queued ends the session (the server answers null): the tile and the line go.
+  await tile.getByRole('button', { name: 'Skip and stop' }).click();
+  await expect(call(page).locator('.voice-tile.stremio')).toHaveCount(0);
+  await expect(page.locator('.voice-stremio-line')).toHaveCount(0);
+
+  // Alice starts another one; Stop ends it for everyone and the tile, the viewer Room and the sidebar line go.
+  await as(page, 'alice', 'PUT', path, { sid: await sidFor(page, 'alice', '/stremio/streams/movie/tt1375666') });
+  await expect(tile.locator('.stremio-title')).toContainText('Inception');
   await tile.getByRole('button', { name: 'Stop Stremio' }).click();
   await expect(call(page).locator('.voice-tile.stremio')).toHaveCount(0);
   await expect(page.locator('.voice-stremio-line')).toHaveCount(0);
