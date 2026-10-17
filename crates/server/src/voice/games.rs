@@ -122,6 +122,13 @@ async fn start(
         Some(_) => Err(ApiErr::new(StatusCode::CONFLICT, 40090, "A game is already running")),
         None => Ok(Some(session.clone())),
     })?;
+    // An edit or removal that ran between `resolve` and the insert missed this session: check again and take it back.
+    if resolve(&state, &channel, &body.game_id).await.ok().is_none_or(|now| now.url != session.game.url) {
+        let _ = state.voice.game_update(channel_id, |current| {
+            Ok(if current.is_some_and(|current| current.session_id == session.session_id) { None } else { current.cloned() })
+        });
+        return Err(unknown_game());
+    }
     announce(&state, channel_id, Some(session.clone())).await;
     Ok(Json(session))
 }
