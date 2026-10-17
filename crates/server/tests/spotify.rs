@@ -1387,3 +1387,45 @@ async fn without_control_media_others_vote_skip_their_own_and_queue_ten() {
     assert_ne!(own["track"]["uri"], first, "the adder skips without a vote");
     assert_eq!(own["added_by"], w.carl_id.as_str());
 }
+
+/// docs/design/bot-control.md §2.5: the quota gates adding only. With loop `queue`, carl's own track that played comes back with
+/// carl as its adder even when that puts him above 10; he cannot add until he is under the quota again.
+#[tokio::test]
+async fn a_looping_queue_puts_back_tracks_above_the_quota_and_only_adding_is_refused() {
+    use vokko_protocol::api::permissions::CONTROL_MEDIA;
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.playing(&mut alice, 1).await;
+    w.join(&mut carl).await;
+    let deny = json!({"type": 0, "allow": "0", "deny": CONTROL_MEDIA.to_string()});
+    assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{}", w.voice, w.guild), &w.owner, deny).await.0, StatusCode::NO_CONTENT);
+    let carls = |state: &Value| state["queue"].as_array().expect("queue").iter().filter(|entry| entry["added_by"] == w.carl_id.as_str()).count();
+
+    assert_eq!(carls(&w.patch(&w.carl, json!({"queue_add": {"uri": playlist_uri(1), "next": false}})).await.1), 10);
+    assert_eq!(w.patch(&w.alice, json!({"loop": "queue"})).await.1["loop"], "queue");
+    let (_, state) = w.patch(&w.alice, json!({"skip": true})).await;
+    assert_eq!(state["added_by"], w.carl_id.as_str());
+    let looped = state["track"]["uri"].clone();
+    assert_eq!(carls(&w.patch(&w.carl, json!({"queue_add": {"uri": track_uri(21), "next": false}})).await.1), 10, "one more fits");
+    let (_, state) = w.patch(&w.alice, json!({"queue_add": {"uri": track_uri(20), "next": true}})).await;
+    assert_eq!(state["queue"][0]["uri"], track_uri(20));
+
+    // carl's track ends: it goes back to the end as his, alice's plays, and carl holds 11.
+    assert_eq!(w.event("started", json!({"position_ms": 0})).await, StatusCode::NO_CONTENT);
+    assert_eq!(w.event("ended", json!({})).await, StatusCode::NO_CONTENT);
+    until("alice's track plays", || w.bot.last_put()["track"] == track_uri(20)).await;
+    let state = w.state(&w.carl).await;
+    let queue = state["queue"].as_array().expect("queue");
+    let last = queue.last().expect("an entry");
+    assert_eq!((&last["uri"], last["added_by"].as_str()), (&looped, Some(w.carl_id.as_str())));
+    assert_eq!(carls(&state), 11);
+
+    // Above the quota carl only cannot add; under it he can again.
+    assert_eq!(w.patch(&w.carl, json!({"queue_add": {"uri": track_uri(22), "next": false}})).await.0, StatusCode::BAD_REQUEST);
+    for entry in &queue[..2] {
+        assert_eq!(w.patch(&w.carl, json!({"queue_remove": entry["qid"]})).await.0, StatusCode::OK);
+    }
+    let (status, state) = w.patch(&w.carl, json!({"queue_add": {"uri": track_uri(22), "next": false}})).await;
+    assert_eq!((status, carls(&state)), (StatusCode::OK, 10));
+}

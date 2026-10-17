@@ -5,7 +5,7 @@ import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
 import type { User } from "../api/types";
-import { isDesktop } from "../desktop";
+import { isDesktop, useWindowChrome } from "../desktop";
 import { Avatar } from "./Avatar";
 import { closeModal, openModal } from "./modalStore";
 import { AccessibilityPage } from "./settings/AccessibilityPage";
@@ -22,7 +22,7 @@ import { SettingsBlock, SettingsModal, SettingsNavGroup, SettingsNavItem, Settin
 import { settingsSlots } from "./settings/slots";
 import { blockedByUnsaved } from "./settings/unsaved";
 import { VoiceVideoPage } from "./settings/VoiceVideoPage";
-import { WindowsPage } from "./settings/WindowsPage";
+import { WindowsPage, desktopSettingsTitle } from "./settings/WindowsPage";
 import { RegisteredGamesPage } from "./settings/RegisteredGamesPage";
 
 type NavIcon = typeof UserIcon;
@@ -193,6 +193,7 @@ export function UserSettings({ section }: { section?: string }) {
   const [anchor, setAnchor] = useState(0);
   const [query, setQuery] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
+  const platform = useWindowChrome()?.platform;
 
   // the sub-items are the headings of the page that is open
   useLayoutEffect(() => {
@@ -204,10 +205,11 @@ export function UserSettings({ section }: { section?: string }) {
 
   const needle = query.trim().toLowerCase();
   const matches = (s: SectionDef) => !needle || [s.label, ...(s.outline ?? []), ...(s.keywords ?? [])].some(t => t.toLowerCase().includes(needle));
-  const visible = SECTIONS.filter(s => !s.hidden && matches(s));
+  const sections = SECTIONS.map(s => (s.id === "windows" ? { ...s, label: desktopSettingsTitle(platform) } : s));
+  const visible = sections.filter(s => !s.hidden && matches(s));
   const groups = [...new Set(visible.map(s => s.group))];
   const showLogOut = !needle || "log out".includes(needle);
-  const active = SECTIONS.find(s => s.id === current) ?? SECTIONS[0]!;
+  const active = sections.find(s => s.id === current) ?? sections[0]!;
 
   const open = (id: string) => {
     if (id !== current && blockedByUnsaved()) return;
