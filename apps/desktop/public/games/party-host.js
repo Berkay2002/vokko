@@ -178,8 +178,18 @@ var PartyHost = (() => {
           // A public copy from a non-host answering our sync?: the host's copy was closed, or this copy is the host.
           view.st = unwire(m.st);
           view.v = m.v;
-          if (isHost()) finishSync();
-          else onChange();
+          if (isHost()) {
+            // A peer's copy becomes authoritative here: keep only the fields a fresh state has, with the same JSON types.
+            const base = game.init(ctx);
+            const peer = /** @type {Record<string, unknown>} */ (view.st);
+            for (const k of Object.keys(base)) {
+              const v = peer[k];
+              if (typeof v === typeof base[k] && Array.isArray(v) === Array.isArray(base[k]) && (v === null) === (base[k] === null)) base[k] = v;
+            }
+            base.deadline = view.st.deadline;
+            view.st = base;
+            finishSync();
+          } else onChange();
         }
       } else if (m.t === "p" && from === ctx.leader && !isHost()) {
         view.mine = m.p ?? null;

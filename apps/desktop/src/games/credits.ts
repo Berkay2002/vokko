@@ -11,4 +11,8 @@ export interface GameCredit {
   file?: string;
 }
 
-export const GAME_CREDITS: Record<string, GameCredit[]> = {};
+export const GAME_CREDITS: Record<string, GameCredit[]> = {
+  "builtin:trivia": [
+    { work: "Open Trivia Database (questions)", author: "PIXELTAIL GAMES LLC and contributors", url: "https://opentdb.com", license: "CC-BY-SA-4.0", file: "/games/trivia/LICENSE-opentdb.txt" },
+  ],
+};
