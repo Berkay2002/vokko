@@ -12,6 +12,7 @@ import { useChannelVoiceStates, useVoice } from "../voice/store";
 import { BarButton, Tile, useStageTiles } from "../voice/VoiceChannelPage";
 import { openModal } from "../shell/modalStore";
 import { WatchTile } from "../watch";
+import { GameTile, useGameMenuItems } from "../games";
 import { openStremioPanel, StremioIcon, StremioPanel, StremioTile, useStremioPanel } from "../stremio";
 import { toggleSelfDeaf, toggleSelfMute } from "../voice/engine";
 import { useMedia } from "../voice/mediaStore";
@@ -84,6 +85,7 @@ export function CallPanel({ channel }: { channel: Channel }) {
   const screenOn = useMedia(s => s.screenOn);
   const watching = useVoice(s => !!s.watch[channel.id]);
   const stremioOpen = useStremioPanel(s => s.open);
+  const gameItems = useGameMenuItems(channel);
   const menu = useContextMenu();
   const tiles = useStageTiles(states, channel.id);
   const inside = useMemo(() => new Set(states.map(s => s.user_id)), [states]);
@@ -100,7 +102,7 @@ export function CallPanel({ channel }: { channel: Channel }) {
       <div className="dm-call-stage">
         {tiles.map(t => (
           <div key={t.id} className={`dm-call-tile${t.watch ? " watch" : ""}${t.stremio ? " stremio" : ""}`}>
-            {t.watch ? <WatchTile channelId={channel.id} variant="focused" /> : t.stremio ? <StremioTile channelId={channel.id} variant="focused" /> : <Tile state={t.state} guildId={null} variant="grid" stream={t.stream} />}
+            {t.game ? <GameTile channelId={channel.id} variant="focused" /> : t.watch ? <WatchTile channelId={channel.id} variant="focused" /> : t.stremio ? <StremioTile channelId={channel.id} variant="focused" /> : <Tile state={t.state} guildId={null} variant="grid" stream={t.stream} />}
           </div>
         ))}
         {here && ringing.map(user => <RingingTile key={user.id} user={user} outgoing channelId={channel.id} />)}
@@ -136,6 +138,8 @@ export function CallPanel({ channel }: { channel: Channel }) {
                 menu.open({ clientX: rect.left, clientY: rect.top - 4 }, [
                   { id: "watch-together", label: "Watch Together (YouTube)", icon: <MonitorPlay size={18} />, iconStart: true, sub: "Watch a YouTube video in sync", onSelect: () => (watching ? undefined : openModal({ type: "watchTogether", channelId: channel.id })) },
                   { id: "stremio", label: "Stremio", icon: <StremioIcon size={18} />, iconStart: true, sub: "Play a movie or episode from your Stremio", onSelect: openStremioPanel },
+                  { type: "separator" },
+                  ...gameItems,
                 ]);
               }}
             >

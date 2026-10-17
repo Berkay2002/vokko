@@ -23,6 +23,7 @@ import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromT
 import { setMockVoice, voiceStates } from "./voice";
 import { noteAudioUpload, seedGuildSounds } from "./soundboard";
 import { ringTimeout } from "./calls";
+import { setRelayTap } from "./games";
 import { ChannelType } from "../types";
 import { patchSettings, settingsOf } from "./settings";
 
@@ -167,6 +168,8 @@ interface MockHooks {
   entranceSound(username: string, soundId: string | null, sourceGuildId?: string): void;
   /** Calls a REST route as another user (their gateway events still reach their sockets); the result is a JSON copy. */
   requestAs(username: string, method: string, path: string, body?: unknown): unknown;
+  /** Called with every game relay send in this page's mock (sender's username, data, `to` app id); null removes it. */
+  gameRelay(fn: ((from: string, data: unknown, to: string | null) => void) | null): void;
   reset(): void;
 }
 
@@ -259,6 +262,7 @@ const hooks: MockHooks = {
     const result = handleRoute(method, path, body ?? null, userByName(username));
     return result === undefined ? undefined : JSON.parse(JSON.stringify(result));
   },
+  gameRelay: fn => setRelayTap(fn),
   reset: () => {
     window.localStorage.removeItem("vokko.token");
     window.location.reload();

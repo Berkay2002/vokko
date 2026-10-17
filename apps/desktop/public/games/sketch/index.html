@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sketch</title>
+<link rel="stylesheet" href="./sketch.css" />
+</head>
+<body>
+<main id="app">
+  <header>
+    <span id="status" aria-live="polite">Connecting...</span>
+    <strong id="word"></strong>
+    <span id="timer"></span>
+  </header>
+  <section id="board">
+    <div id="canvas-wrap">
+      <canvas id="canvas" width="800" height="600" aria-label="Drawing board"></canvas>
+      <div id="joining" hidden>Joining round...</div>
+    </div>
+    <div id="tools" hidden>
+      <span id="colors"></span>
+      <span id="widths"></span>
+      <button type="button" id="clear">Clear</button>
+    </div>
+  </section>
+  <aside>
+    <h2>Scores</h2>
+    <ul id="scores"></ul>
+    <h2>Guesses</h2>
+    <ul id="guesses"></ul>
+    <div id="guess-row">
+      <input id="guess" type="text" maxlength="40" autocomplete="off" placeholder="Type your guess" aria-label="Your guess" />
+      <button type="button" id="send">Guess</button>
+    </div>
+  </aside>
+</main>
+<script src="../vokko-games.js"></script>
+<script src="./sketch-core.js"></script>
+<script src="./sketch.js"></script>
+</body>
+</html>

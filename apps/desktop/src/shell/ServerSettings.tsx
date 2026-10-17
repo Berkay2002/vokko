@@ -29,6 +29,7 @@ import { IntegrationsPage } from "../apps/IntegrationsPage";
 import { EmojiSettingsPage } from "../emoji/EmojiSettingsPage";
 import { StickerSettingsPage } from "../media/StickerSettingsPage";
 import { InviteList } from "../invites/InviteList";
+import { GamesSettings } from "../games";
 
 interface SectionDef {
   id: string;
@@ -70,6 +71,7 @@ const SECTIONS: SectionDef[] = [
   { id: "onboarding", label: "Onboarding", group: "people" },
   { id: "access", label: "Access", group: "people", outline: ["Access Options", "Age-Restricted Server", "Server Rules"] },
   { id: "integrations", label: "Integrations", group: "apps", needs: [Perm.MANAGE_GUILD, Perm.MANAGE_WEBHOOKS] },
+  { id: "activities", label: "Activities", group: "apps" },
   { id: "safety", label: "Safety Setup", group: "moderation" },
   { id: "audit", label: "Audit Log", group: "moderation", needs: [Perm.VIEW_AUDIT_LOG] },
   { id: "bans", label: "Bans", group: "moderation", needs: [Perm.BAN_MEMBERS] },
@@ -347,6 +349,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         return <OnboardingSettings guildId={guildId} />;
       case "soundboard":
         return <SoundboardSettingsPage guildId={guildId} />;
+      case "activities":
+        return <GamesSettings guildId={guildId} canEdit={canManage} />;
       default:
         return <NotYet section={active} />;
     }

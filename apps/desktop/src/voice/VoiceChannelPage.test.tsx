@@ -5,7 +5,7 @@ import { ChannelType, type Channel, type User, type VoiceState } from '../api/ty
 
 // zustand hooks read their initial state during server rendering, so the stores the stage reads are replaced by plain objects.
 const fake = vi.hoisted(() => ({
-  voice: { meId: '1' as string | null, channelId: 'c1' as string | null, states: [] as unknown[], watch: {} as Record<string, unknown>, stremio: {} as Record<string, unknown> },
+  voice: { meId: '1' as string | null, channelId: 'c1' as string | null, states: [] as unknown[], watch: {} as Record<string, unknown>, stremio: {} as Record<string, unknown>, games: {} as Record<string, unknown> },
   media: { videos: {} as Record<string, unknown>, watching: {} as Record<string, true>, quality: {}, liveScreens: {} as Record<string, true>, cameraOn: false, screenOn: false, error: null },
   ui: { focusedTile: null as string | null, membersHidden: false, chatOpen: false, focusStream: null as string | null },
 }));

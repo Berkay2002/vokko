@@ -50,6 +50,34 @@ impl SecretsKey {
         Self(bytes)
     }
 
+    /// A fresh random key (dev and tests without `VOKKO_SECRETS_KEY`).
+    pub fn random() -> Self {
+        let mut bytes = [0_u8; 32];
+        rand::fill(&mut bytes);
+        Self(bytes)
+    }
+
+    /// A subkey for one purpose (HKDF-SHA256, `label` as the info), so no two uses share key material.
+    pub fn derive(&self, label: &str) -> Self {
+        let mut bytes = [0_u8; 32];
+        // 32 bytes is far below HKDF-SHA256's 8160-byte output limit, so expand cannot fail.
+        let _ = hkdf::Hkdf::<sha2::Sha256>::new(None, &self.0).expand(label.as_bytes(), &mut bytes);
+        Self(bytes)
+    }
+
+    /// HMAC-SHA256 of `message` under this key.
+    pub fn mac(&self, message: &[u8]) -> [u8; 32] {
+        use hmac::Mac;
+        // HMAC accepts keys of any length, so `new_from_slice` cannot fail here.
+        match <hmac::Hmac<sha2::Sha256> as Mac>::new_from_slice(&self.0) {
+            Ok(mut mac) => {
+                mac.update(message);
+                mac.finalize().into_bytes().into()
+            }
+            Err(_) => [0; 32],
+        }
+    }
+
     pub fn seal(&self, aad: &[u8], plaintext: &[u8]) -> Option<Vec<u8>> {
         let mut nonce = [0_u8; NONCE_LEN];
         rand::fill(&mut nonce);

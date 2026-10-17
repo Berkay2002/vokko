@@ -1,7 +1,7 @@
 // A voice channel in the channel list: speaker, name, status line, elapsed timer, hover actions and the users underneath.
 
 import { useLocation } from "react-router";
-import { Lock, MessageCircle, MonitorPlay, Pencil, Settings, UserPlus, Volume2 } from "lucide-react";
+import { Gamepad2, Lock, MessageCircle, MonitorPlay, Pencil, Settings, UserPlus, Volume2 } from "lucide-react";
 import { StremioIcon } from "../stremio";
 import { Perm } from "../api/permissions";
 import { channelMentionCount, isChannelUnread, useStore } from "../api/store";
@@ -42,6 +42,7 @@ export function VoiceChannelRow({ channel, guild }: { channel: Channel; guild: G
   const statusText = useVoice(s => s.channelStatus[channel.id]);
   const watching = useVoice(s => !!s.watch[channel.id]);
   const stremioTitle = useVoice(s => s.stremio[channel.id]?.item.title);
+  const gameName = useVoice(s => s.games[channel.id]?.game.name);
   // Messages in the channel's text-in-voice chat.
   const unread = useStore(s => isChannelUnread(s, channel.id));
   const mentions = useStore(s => channelMentionCount(s, channel.id));
@@ -115,6 +116,12 @@ export function VoiceChannelRow({ channel, guild }: { channel: Channel; guild: G
         <div className="voice-watch-line" role="status">
           <MonitorPlay size={12} aria-hidden="true" />
           <span>Watching YouTube Together</span>
+        </div>
+      )}
+      {gameName && (
+        <div className="voice-game-line" role="status">
+          <Gamepad2 size={12} aria-hidden="true" />
+          <span>Game: {gameName}</span>
         </div>
       )}
       {stremioTitle && (
