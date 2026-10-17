@@ -48,15 +48,29 @@ pub fn routes() -> Router<AppState> {
 
 /// The games every call may start (the desktop app ships them under `/games/<name>/`).
 pub fn builtins() -> Vec<GameManifest> {
-    vec![GameManifest {
-        id: "builtin:sketch".to_owned(),
-        name: "Sketch".to_owned(),
-        url: "/games/sketch/index.html".to_owned(),
-        icon: Some("✏️".to_owned()),
-        min_players: 2,
-        max_players: 12,
+    [
+        ("sketch", "Sketch", "✏️", 2, 12),
+        ("chess", "Chess", "♟️", 2, 16),
+        ("four-in-a-row", "Four in a Row", "🟡", 2, 16),
+        ("codewords", "Codewords", "🗝️", 4, 16),
+        ("telephone", "Telephone", "☎️", 3, 12),
+        ("trivia", "Trivia", "❓", 1, 16),
+        ("whos-the-spy", "Who's the Spy", "🕵️", 3, 16),
+        ("same-wave", "Same Wave", "📡", 2, 16),
+        ("crazy-eights", "Crazy Eights", "🃏", 2, 10),
+        ("werewolf", "Werewolf", "🐺", 5, 16),
+    ]
+    .into_iter()
+    .map(|(slug, name, icon, min_players, max_players)| GameManifest {
+        id: format!("builtin:{slug}"),
+        name: name.to_owned(),
+        url: format!("/games/{slug}/index.html"),
+        icon: Some(icon.to_owned()),
+        min_players,
+        max_players,
         aspect: GameAspect::Wide,
-    }]
+    })
+    .collect()
 }
 
 /// `base64url(HMAC-SHA256(k, game_id ":" origin ":" user_id))[..22]`: stable per game, origin and user, different across games and
@@ -224,4 +238,31 @@ async fn announce(state: &AppState, channel_id: i64, session: Option<GameSession
     let Ok(Some(row)) = store::channel_row(state, channel_id).await else { return };
     let Ok(viewers) = access::channel_viewers(state, &row).await else { return };
     state.hub.send(&viewers, &GatewayEvent::GameUpdate(GameUpdate { channel_id: Snowflake::from(channel_id), state: session }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The desktop app's list (apps/desktop/src/games/builtin.ts) and this one must match game for game, field for field.
+    #[test]
+    fn builtins_match_the_desktop_list() {
+        let ts = include_str!("../../../../apps/desktop/src/games/builtin.ts");
+        let client: Vec<&str> = ts.lines().filter(|line| line.contains(": GameManifest = {") && !line.contains("\"builtin:mock\"")).collect();
+        let server = builtins();
+        assert_eq!(client.len(), server.len(), "{client:#?}");
+        for game in server {
+            let aspect = serde_json::to_value(game.aspect).expect("aspect");
+            let fields = format!(
+                "{{ id: \"{}\", name: \"{}\", url: \"{}\", icon: \"{}\", min_players: {}, max_players: {}, aspect: {aspect} }}",
+                game.id,
+                game.name,
+                game.url,
+                game.icon.as_deref().unwrap_or_default(),
+                game.min_players,
+                game.max_players
+            );
+            assert!(client.iter().any(|line| line.ends_with(&format!("{fields};"))), "{fields} is not in builtin.ts");
+        }
+    }
 }

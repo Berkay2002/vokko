@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Who's the Spy</title>
+<link rel="stylesheet" href="../party.css" />
+<link rel="stylesheet" href="./spy.css" />
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Who's the Spy</h1>
+    <span id="status" aria-live="polite">Connecting...</span>
+    <span id="timer"></span>
+  </header>
+  <main>
+    <div id="note" role="status"></div>
+    <div id="stage"></div>
+    <section id="places-card" class="card" hidden>
+      <h2 id="places-title">Possible locations</h2>
+      <div id="places"></div>
+    </section>
+  </main>
+  <aside>
+    <h2>Players</h2>
+    <ul id="players"></ul>
+  </aside>
+</div>
+<script src="../vokko-games.js"></script>
+<script src="../party-host.js"></script>
+<script src="../party-ui.js"></script>
+<script src="./spy-core.js"></script>
+<script src="./spy.js"></script>
+</body>
+</html>

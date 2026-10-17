@@ -1,0 +1,60 @@
+:root {
+  --bg: #1e1f22;
+  --panel: #2b2d31;
+  --line: #3f4147;
+  --text: #e3e5e8;
+  --muted: #a0a4ab;
+  --accent: #5865f2;
+  --ok: #57f287;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px system-ui, sans-serif; }
+#app { display: flex; flex-direction: column; gap: 10px; height: 100%; padding: 10px 14px; overflow-y: auto; }
+header { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+#status { color: var(--muted); }
+#timer { margin-left: auto; font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; }
+section { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+section[hidden], [hidden] { display: none !important; }
+h2 { font-size: 12px; text-transform: uppercase; color: var(--muted); margin: 4px 0 0; }
+p { margin: 0; }
+.how { max-width: 60ch; line-height: 1.4; }
+.muted { color: var(--muted); }
+#note { background: var(--panel); border-left: 3px solid #f29d38; padding: 6px 10px; border-radius: 4px; }
+button, select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; min-height: 36px; }
+button:disabled { opacity: 0.5; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+#host { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+label { display: flex; gap: 6px; align-items: center; }
+.names { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.names li { display: flex; align-items: center; gap: 6px; background: var(--panel); border-radius: 14px; padding: 4px 10px; }
+.names li button { min-height: 24px; padding: 0 8px; font-size: 12px; }
+#waiting li.done::before { content: "✓"; color: var(--ok); }
+#waiting li.pending::before { content: "…"; color: var(--muted); }
+#instruction { font-size: 16px; }
+#prompt { font-size: 22px; font-weight: 700; }
+#pad { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+#canvas { display: block; width: min(100%, calc((100vh - 230px) * 4 / 3)); aspect-ratio: 4 / 3; height: auto; background: #fff; border-radius: 8px; touch-action: none; cursor: crosshair; }
+#tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; }
+#tools span { display: flex; gap: 4px; flex-wrap: wrap; }
+.swatch { width: 32px; height: 32px; min-height: 32px; padding: 0; border-radius: 50%; }
+.size { width: 36px; padding: 0; display: grid; place-items: center; }
+.size i { display: block; background: var(--text); border-radius: 50%; }
+#incoming-wrap { display: flex; justify-content: center; }
+#incoming { width: min(100%, calc((100vh - 230px) * 4 / 3)); aspect-ratio: 4 / 3; background: #fff; border-radius: 8px; }
+#text-row { display: flex; gap: 6px; max-width: 640px; width: 100%; }
+#text { flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+#chain-title { font-size: 16px; text-transform: none; color: var(--text); }
+#links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+#links li { display: flex; flex-direction: column; gap: 4px; background: var(--panel); border-radius: 8px; padding: 8px 12px; max-width: 100%; }
+#links .who { color: var(--muted); font-size: 12px; }
+#links q { font-size: 18px; font-weight: 600; }
+#links img { width: min(360px, 100%); aspect-ratio: 4 / 3; background: #fff; border-radius: 6px; }
+#reveal-host { display: flex; gap: 8px; flex-wrap: wrap; }
+/* The focused tile on a phone: everything in one column, a full-width pad, big tool buttons for a finger. */
+@media (max-width: 560px) {
+  #app { padding: 8px; gap: 8px; }
+  #canvas, #incoming { width: 100%; }
+  #tools { gap: 6px; }
+  #prompt { font-size: 18px; }
+}

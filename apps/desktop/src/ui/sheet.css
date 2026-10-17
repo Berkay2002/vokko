@@ -263,23 +263,3 @@ html.sheet-docked .app-frame {
   color: var(--text-muted);
   font-size: 14px;
 }
-
-/* the call's text chat: full height, the chat fills the sheet and keeps its own scrolling and composer */
-.sheet.voice-chat-sheet {
-  height: calc(100vh - 48px);
-  height: calc(100dvh - 48px);
-  max-height: none;
-}
-
-.voice-chat-sheet .sheet-body {
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  overflow: hidden;
-}
-
-.voice-chat-sheet .sheet-title {
-  flex: none;
-  padding: 0 16px 8px;
-  text-align: center;
-}

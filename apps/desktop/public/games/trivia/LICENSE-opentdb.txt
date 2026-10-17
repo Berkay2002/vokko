@@ -1,0 +1,6 @@
+Trivia questions: Open Trivia Database (https://opentdb.com), by PIXELTAIL GAMES LLC and its contributors.
+Licensed under the Creative Commons Attribution-ShareAlike 4.0 International License (CC BY-SA 4.0):
+https://creativecommons.org/licenses/by-sa/4.0/
+
+questions.js holds a subset of the database. Changes: text decoded from URL encoding, entries regrouped into one file.
+That file (the question data only) is shared under CC BY-SA 4.0 as well.

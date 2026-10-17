@@ -1,0 +1,62 @@
+/* Shared look for the party games (Trivia, Who's the Spy, Same Wave). Each game adds its own small stylesheet. */
+:root {
+  --bg: #1e1f22;
+  --panel: #2b2d31;
+  --panel-2: #383a40;
+  --line: #3f4147;
+  --text: #e3e5e8;
+  --muted: #a0a4ab;
+  --accent: #5865f2;
+  --good: #3ba55d;
+  --bad: #da373c;
+  --warn: #f0b232;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+#app { display: grid; grid-template-columns: minmax(0, 1fr) 240px; grid-template-rows: auto minmax(0, 1fr); gap: 10px; height: 100%; padding: 10px; }
+header { grid-column: 1 / -1; display: flex; gap: 12px; align-items: baseline; min-height: 24px; }
+header h1 { font-size: 16px; margin: 0; }
+#status { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#timer { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; }
+main { min-height: 0; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+aside { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-radius: 8px; padding: 10px; overflow-y: auto; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 0 0 6px; }
+#players { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#players li { display: flex; gap: 6px; align-items: center; padding: 4px 6px; border-radius: 4px; background: var(--panel-2); }
+#players .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#players .mark { color: var(--good); font-weight: 700; }
+#players .score { font-variant-numeric: tabular-nums; font-weight: 600; }
+#note { color: var(--warn); min-height: 0; }
+#note:empty { display: none; }
+.card { background: var(--panel); border-radius: 8px; padding: 14px; }
+.big { font-size: 20px; font-weight: 600; }
+.muted { color: var(--muted); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.credit { color: var(--muted); font-size: 12px; }
+button, select, input { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; }
+button { cursor: pointer; }
+button:hover:not(:disabled) { border-color: #6d6f78; }
+button:disabled { opacity: 0.55; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.good { background: var(--good); border-color: var(--good); color: #fff; }
+button.bad { background: var(--bad); border-color: var(--bad); color: #fff; }
+input { min-width: 0; }
+input:focus, select:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* A small grid tile (about 300x170): tighter, the player list narrower. */
+@media (max-width: 560px) {
+  html, body { font-size: 12px; }
+  #app { grid-template-columns: minmax(0, 1fr) 34%; gap: 4px; padding: 4px; }
+  main { gap: 6px; }
+  aside { padding: 4px; }
+  .card { padding: 6px; }
+  .big { font-size: 14px; }
+  button, select, input { padding: 2px 6px; }
+}
+/* A portrait frame (the focused tile on a phone): the game on top, the player list below. */
+@media (orientation: portrait) {
+  #app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+  aside { max-height: 30vh; }
+  html, body { font-size: 15px; }
+  .big { font-size: 19px; }
+  button, select, input { padding: 8px 12px; }
+}
