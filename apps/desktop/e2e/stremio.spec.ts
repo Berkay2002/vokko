@@ -248,6 +248,75 @@ test('someone else starts it: the line shows outside the call, the tile when we 
   await expect(page.locator('.voice-tile.stremio')).toHaveCount(0);
 });
 
+test('continue watching: the row, an episode resumed at its offset, a film, and the next episode after a finished one', async ({ page }) => {
+  await openGuild(page);
+  await page.getByRole('button', { name: 'General voice channel' }).click();
+  if (MOBILE) await page.getByRole('button', { name: 'Join Voice', exact: true }).click();
+  await openStremio(page);
+  // Nothing of the library shows before the account is linked.
+  await expect(panel(page).getByRole('region', { name: 'Continue watching' })).toHaveCount(0);
+  await panel(page).getByRole('button', { name: 'Link with Stremio' }).click();
+  await expect(panel(page).getByLabel('Link code')).not.toBeEmpty();
+  await page.evaluate(() => (window as unknown as MockWin).__vokkoMockStremio.approve());
+
+  // The row: newest first, with the episode, the percentage watched, and no row while searching.
+  const row = panel(page).getByRole('region', { name: 'Continue watching' });
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  expect(await row.locator('[data-continue-id]').evaluateAll(cards => cards.map(c => c.getAttribute('aria-label')))).toEqual([
+    'Breaking Bad, S1E2, 50% watched',
+    'Heat, 50% watched',
+    'Game of Thrones, S1E1, 95% watched',
+  ]);
+  await expect(row.locator('.stremio-progress-done')).toHaveCount(3);
+  await shot(page, MOBILE ? 'm-continue-row.png' : '10-continue-row.png');
+  const search = panel(page).getByRole('searchbox', { name: 'Search movies and series' });
+  await search.fill('heat');
+  await expect(panel(page).getByRole('region', { name: 'Movies' })).toBeVisible();
+  await expect(row).toHaveCount(0);
+  await search.fill('');
+  await expect(row).toBeVisible();
+
+  // An episode: its season is open, the episode is marked, and Play in call starts at the saved offset (25:00 of 50:00).
+  await row.locator('[data-continue-id="tt0903747"]').click();
+  const resume = panel(page).getByRole('region', { name: 'Continue watching' });
+  await expect(resume).toContainText('S1E2 Cat\'s in the Bag...');
+  await expect(panel(page).getByRole('tab', { name: 'Season 1' })).toHaveAttribute('aria-selected', 'true');
+  await expect(panel(page).locator('.stremio-episode[aria-current="true"]')).toHaveAttribute('data-video-id', 'tt0903747:1:2');
+  await expect(resume.getByText('Starts at 25:00')).toBeVisible();
+  await shot(page, MOBILE ? 'm-continue-title.png' : '11-continue-title.png');
+  await resume.getByRole('button', { name: 'Play in call' }).click();
+  const tile = call(page).locator('.voice-tile.stremio');
+  await expect(tile).toHaveAttribute('data-status', 'playing', { timeout: 10_000 });
+  await expect(tile.locator('.stremio-by')).toContainText('S1E2');
+  await expect(tile.getByLabel('Position')).toContainText('25:0');
+
+  // Another episode picked from the list still starts from 0.
+  await openStremio(page);
+  await panel(page).getByRole('region', { name: 'Continue watching' }).locator('[data-continue-id="tt0903747"]').click();
+  await panel(page).locator('[data-video-id="tt0903747:1:3"]').click();
+  await expect(panel(page).getByRole('radio').first()).toBeVisible();
+  await expect(panel(page).getByText(/starts at/i)).toHaveCount(0);
+  await panel(page).getByRole('button', { name: 'Close Stremio' }).click();
+
+  // A film resumes where it was left too.
+  await openStremio(page);
+  await panel(page).locator('[data-continue-id="tt0113277"]').click();
+  await expect(panel(page).getByText(/starts at 1:00:00/i)).toBeVisible();
+  await panel(page).getByRole('button', { name: 'Close Stremio' }).click();
+
+  // Past 90% of the episode: the next one is offered, from the start.
+  await openStremio(page);
+  await panel(page).locator('[data-continue-id="tt0944947"]').click();
+  const next = panel(page).getByRole('region', { name: 'Next episode' });
+  await expect(next).toContainText('S1E2 The Kingsroad');
+  await expect(next).toContainText('You finished S1E1.');
+  await expect(next.getByText(/starts at/i)).toHaveCount(0);
+  await expect(panel(page).locator('.stremio-episode[aria-current="true"]')).toHaveAttribute('data-video-id', 'tt0944947:1:2');
+  await shot(page, MOBILE ? 'm-continue-next-episode.png' : '12-continue-next-episode.png');
+  await next.getByRole('button', { name: 'Add to Up next' }).click();
+  await expect(next.getByRole('status').filter({ hasText: 'Added to Up next.' })).toBeVisible();
+});
+
 test('phone width: panel, tile with the controls and the queue fit the screen', async ({ page }) => {
   test.skip(!MOBILE, 'run with STREMIO_MOBILE=1');
   await openGuild(page);
