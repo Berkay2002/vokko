@@ -25,7 +25,7 @@ import { TopicModal } from "./TopicModal";
 import { RadioGroup, SwitchRow, Toggle } from "./settings/controls";
 import { SERVER_TEMPLATES, type ServerTemplate } from "./templates";
 import { CameraPreviewModal, ChannelStatusModal, ScreenSharePickerModal } from "../voice";
-import { WatchModal } from "../watch";
+import { WatchModal } from "../watch/WatchModal";
 
 // The settings screens and the profile editor are split out of the startup bundle; `preloadSettings()` fetches them at idle so opening one does not wait.
 // A failed fetch (dev server restart, stale chunk after a redeploy) is retried once; if that fails too, ChunkBoundary offers a retry.
