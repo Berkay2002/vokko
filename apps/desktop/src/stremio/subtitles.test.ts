@@ -12,7 +12,7 @@ describe("cues from the media room", () => {
   });
 
   it("caps the text and the time, and drops control and direction characters", () => {
-    const cue = parseCue(bytes({ start_ms: 0, end_ms: 600_000, text: `a\u0000b‮c${"x".repeat(1000)}` }));
+    const cue = parseCue(bytes({ start_ms: 0, end_ms: 600_000, text: `a\u0000b\u202ec${"x".repeat(1000)}` }));
     expect(cue?.end_ms).toBe(30_000);
     expect(cue?.text.length).toBe(300);
     expect(cue?.text.startsWith("abcx")).toBe(true);

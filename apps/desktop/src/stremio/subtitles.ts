@@ -26,7 +26,7 @@ export function parseCue(payload: Uint8Array): StremioCue | null {
   const { start_ms: start, end_ms: end, text } = (value ?? {}) as Record<string, unknown>;
   if (typeof text !== "string" || typeof start !== "number" || typeof end !== "number") return null;
   if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > MAX_MEDIA_MS || end <= start) return null;
-  const clean = text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩﻿]/g, "").slice(0, MAX_CUE_CHARS);
+  const clean = text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "").slice(0, MAX_CUE_CHARS);
   return clean.trim() ? { start_ms: start, end_ms: Math.min(end, start + MAX_CUE_MS), text: clean } : null;
 }
 
