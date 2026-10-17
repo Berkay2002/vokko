@@ -161,7 +161,8 @@ for the sidebar line ("Watching *Title* on Stremio").
 
 **Internal (server ↔ bot, never through Caddy):** the bot listens on `botnet:8720`, and both directions use
 `Authorization: Bearer $VOKKO_STREMIO_BOT_SECRET` (constant-time compare).
-- `PUT /sessions/{channel_id}` sets the desired state `{livekit_url, token, media_url, headers:{}, position_ms, playing, max_height, bitrate}`.
+- `PUT /sessions/{channel_id}` sets the desired state `{livekit_url, token, media_url, headers:{}, position_ms, playing, max_height, bitrate, generation, audio?, burned_subtitle?}`
+  (`generation` changes with every item; `audio` and `burned_subtitle` are stream indexes in the file, see §12 "Audio and subtitles").
   It is idempotent and re-sent every 60 s as a **lease**. The bot drops any session not renewed for 150 s.
 - `DELETE /sessions/{channel_id}`. `DELETE /sessions` drops all sessions; the server sends it at startup.
 - The bot sends `POST /internal/stremio/bot` with `{channel_id, event: started|position|ended|error, position_ms, duration_ms?, message?}`
@@ -197,7 +198,7 @@ cached **in memory** per user for 5 minutes. Sessions, the `sid` map and pending
 - `crates/server/src/config.rs`: `VOKKO_STREMIO` (on/off), `VOKKO_SECRETS_KEY`, `VOKKO_STREMIO_BOT_URL`, `VOKKO_STREMIO_BOT_SECRET`,
   `VOKKO_STREMIO_MAX_HEIGHT` (720), `VOKKO_STREMIO_BITRATE_KBPS` (2000), `VOKKO_STREMIO_PAUSE_TIMEOUT_MIN` (15), `VOKKO_STREMIO_FETCH_ALLOW` (CIDR list, empty).
 - Bot token: `token::sign` with `grant(room, …)` for identity `bot:stremio:<channel_id>`, name `Stremio`, metadata
-  `{"bot":"stremio","channel_id":"…"}`, `canPublish` limited to `screen_share` + `screen_share_audio`, `canSubscribe:false`, `canPublishData:false`.
+  `{"bot":"stremio","channel_id":"…"}`, `canPublish` limited to `screen_share` + `screen_share_audio`, `canSubscribe:false`, `canPublishData:true` (the text subtitle cues, §12 "Audio and subtitles").
   The existing reconciliation already skips non-numeric identities (`Participant::user_id()` returns `None`, so `state.rs`'s
   sweeps `continue`), so the bot is never kicked as a stray. Add a test that pins this.
 
@@ -381,3 +382,26 @@ The owner chose a split, which replaces the Cloud-only parts above (§2 bot join
   channel. The server deletes the room when the session ends, removes `viewer:<user_id>:*` from the room when that user leaves the call or loses
   access, and sweeps the room on every tick (a token can reconnect until its 6 h expiry). The 6 h TTL stays. The server uses the media LiveKit's
   RoomService API at `VOKKO_MEDIA_LIVEKIT_URL` (`wss` to `https`), through the same tunnel hostname.
+
+### Audio and subtitles (2026-10-17)
+
+"There is no way to change the language": anyone who can control playback can pick the audio language and subtitles of the shared stream.
+Decided with the owner (no libass or other change to the host's ffmpeg, no URL ever reaches a client):
+
+- **Probe.** ffprobe also returns the audio and subtitle streams (index, codec, `language` and `title` tags, default and forced dispositions). The bot
+  reports them in a `tracks` event with its defaults (default-flagged audio, else the first; the forced picture subtitle). The server keeps the lists in
+  the session state (`audio_tracks`, `audio`, `subtitle_tracks`, `burned_subtitle`), cut to 32 entries with titles cleaned, and takes the bot's
+  defaults from the first report of the current `generation` only.
+- **Audio** is the session's: `PATCH {audio}` is validated against the list, lands in the next `PUT /sessions/{channel_id}`, and the bot restarts ffmpeg at the
+  current position, like a seek (`-map 0:<index>`).
+- **Picture subtitles** (`hdmv_pgs_subtitle`, `dvd_subtitle`, `dvb_subtitle`, `xsub`) cannot be text. They are burned in with ffmpeg's `overlay` filter
+  (needs `-canvas_size` and `eof_action=pass`, no libass) and therefore are the session's too; the menu says "shown to everyone". `PATCH {burned_subtitle}`.
+- **Text subtitles** are each viewer's own. For each embedded text stream (at most 8) the bot has ffmpeg write WebVTT to a loopback TCP port, parses it
+  (`vokko-protocol::cues`: linear-time markup stripping, 300 characters, 4 lines, 30 s, a raw block cap) and publishes each cue as reliable LiveKit data
+  on topic `subs:<stream index>` in the media room. `-ss` resets output timestamps, so the bot adds the seek offset. The bot's token has `canPublishData`;
+  viewers' tokens do not. Addon subtitles come from the requester's own addons: the server fetches (same host rules, 2 MiB, `srt` or `vtt`), parses and
+  returns cues by an opaque id, with no cache. The client keeps the choice locally and renders the cue as plain text above the picture, timed against the
+  shown position; the data listener is on the viewer Room the tile already has.
+- **Known limits.** Cues are sent once, so a late joiner or a backwards seek has no earlier cues until playback passes them; sync follows ffmpeg's
+  read-ahead; the default burn-in is adopted from the first `tracks` report, so a viewer's PATCH racing it is overwritten once at most. Bitmap burn-in was not
+  run against a real file in testing (no sample, no libass locally); the ffmpeg arguments are unit-tested.
