@@ -23,6 +23,7 @@ import { callJoined, callReleased, dmRefusal } from "./calls";
 import { endWatch, watchOf } from "./watch";
 import { endStremio, stremioOf } from "./stremio";
 import { endSpotify, spotifyOf } from "./spotify";
+import { endGame } from "./games";
 
 export const MOCK_VOICE_ENDPOINT = "mock://voice";
 
@@ -133,6 +134,7 @@ function releaseChannel(emit: Emit, channelId: string | null): void {
     endWatch(channelId);
     endStremio(channelId);
     endSpotify(channelId);
+    endGame(channelId);
   }
   const channel = db.channels.get(channelId);
   if (channel && stageInstances.has(channelId) && ![...voiceStates.values()].some(s => s.channel_id === channelId && isStageModerator(channel, s.user_id))) {

@@ -2,7 +2,7 @@
 // wraps this reducer and the engine (./engine.ts) turns model changes into op 4 frames and transport calls.
 // Wire contract: docs/api.md "Voice (V1)"; client plan: docs/design/voice.md §3.
 
-import type { Channel, Snowflake, StageInstance, VoiceConnectFailure, SpotifyState, SpotifyUpdate, StremioState, StremioUpdate, VoiceState, WatchTogetherState, WatchTogetherUpdate } from "../api/types";
+import type { Channel, GameSession, GameUpdate, Snowflake, StageInstance, VoiceConnectFailure, SpotifyState, SpotifyUpdate, StremioState, StremioUpdate, VoiceState, WatchTogetherState, WatchTogetherUpdate } from "../api/types";
 
 export type VoiceStatus = "idle" | "connecting" | "rtc_connecting" | "connected" | "reconnecting" | "disconnected";
 export type InputMode = "vad" | "ptt";
@@ -106,6 +106,8 @@ export interface VoiceModel {
   stremio: Record<Snowflake, StremioState>;
   /** The Spotify session by voice channel or DM call id (at most one on the server; READY / GUILD_CREATE `spotify`, CALL_CREATE, SPOTIFY_UPDATE). */
   spotify: Record<Snowflake, SpotifyState>;
+  /** Game sessions by voice channel or DM call id (READY / GUILD_CREATE `games`, CALL_CREATE `game`, GAME_UPDATE). */
+  games: Record<Snowflake, GameSession>;
 }
 
 export const initialVoiceModel: VoiceModel = {
@@ -135,6 +137,7 @@ export const initialVoiceModel: VoiceModel = {
   watch: {},
   stremio: {},
   spotify: {},
+  games: {},
 };
 
 interface GuildVoiceEntry {
@@ -145,6 +148,7 @@ interface GuildVoiceEntry {
   watch_together?: WatchTogetherUpdate[];
   stremio?: StremioUpdate[];
   spotify?: SpotifyUpdate[];
+  games?: GameUpdate[];
 }
 
 export type VoiceAction =
@@ -185,7 +189,9 @@ export type VoiceAction =
   /** STREMIO_UPDATE (`state: null` = ended). */
   | { type: "stremio"; channelId: Snowflake; state: StremioState | null }
   /** SPOTIFY_UPDATE (`state: null` = ended). */
-  | { type: "spotify"; channelId: Snowflake; state: SpotifyState | null };
+  | { type: "spotify"; channelId: Snowflake; state: SpotifyState | null }
+  /** GAME_UPDATE (`state: null` = ended). */
+  | { type: "game"; channelId: Snowflake; state: GameSession | null };
 
 const isOwn = (model: VoiceModel, state: VoiceState) => model.meId !== null && state.user_id === model.meId;
 
@@ -279,6 +285,12 @@ function setStremio(sessions: Record<Snowflake, StremioState>, channelId: Snowfl
   return { ...sessions, [channelId]: state };
 }
 
+function seedGames(games: Record<Snowflake, GameSession>, list: GameUpdate[] | undefined): Record<Snowflake, GameSession> {
+  let next = games;
+  for (const update of list ?? []) next = update.state ? { ...next, [update.channel_id]: update.state } : without(next, update.channel_id);
+  return next;
+}
+
 function onOwnState(model: VoiceModel, state: VoiceState): VoiceModel {
   if (state.channel_id === null) {
     const states = without(model.states, state.user_id);
@@ -325,7 +337,9 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
       for (const guild of action.guilds) stremio = seedStremio(stremio, guild.stremio);
       let spotify: Record<Snowflake, SpotifyState> = {};
       for (const guild of action.guilds) spotify = seedSessions(spotify, guild.spotify);
-      return pruneSpeaking({ ...own, meId: action.meId, enabled: action.voiceEnabled, states, channelStatus, stages, watch, stremio, spotify });
+      let games: Record<Snowflake, GameSession> = {};
+      for (const guild of action.guilds) games = seedGames(games, guild.games);
+      return pruneSpeaking({ ...own, meId: action.meId, enabled: action.voiceEnabled, states, channelStatus, stages, watch, stremio, spotify, games });
     }
     case "guildCreate": {
       const next = {
@@ -336,6 +350,7 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
         watch: seedWatch(model.watch, action.guild.watch_together),
         stremio: seedStremio(model.stremio, action.guild.stremio),
         spotify: seedSessions(model.spotify, action.guild.spotify),
+        games: seedGames(model.games, action.guild.games),
       };
       return pruneSpeaking(next);
     }
@@ -470,9 +485,10 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
       const watch = without(model.watch, action.channelId);
       const stremio = without(model.stremio, action.channelId);
       const spotify = without(model.spotify, action.channelId);
-      return channelStatus === model.channelStatus && stages === model.stages && watch === model.watch && stremio === model.stremio && spotify === model.spotify
+      const games = without(model.games, action.channelId);
+      return channelStatus === model.channelStatus && stages === model.stages && watch === model.watch && stremio === model.stremio && spotify === model.spotify && games === model.games
         ? model
-        : { ...model, channelStatus, stages, watch, stremio, spotify };
+        : { ...model, channelStatus, stages, watch, stremio, spotify, games };
     }
     case "stageInstance": {
       const id = action.instance.channel_id;
@@ -490,6 +506,10 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
     case "spotify": {
       if (!action.state && !(action.channelId in model.spotify)) return model;
       return { ...model, spotify: seedSessions(model.spotify, [{ channel_id: action.channelId, state: action.state }]) };
+    }
+    case "game": {
+      if (!action.state && !(action.channelId in model.games)) return model;
+      return { ...model, games: seedGames(model.games, [{ channel_id: action.channelId, state: action.state }]) };
     }
     case "channelStatus": {
       const channelStatus = setStatus(model.channelStatus, action.channelId, action.status);

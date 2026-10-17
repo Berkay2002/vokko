@@ -28,6 +28,7 @@ import "./calls";
 import "./watch";
 import "./stremio";
 import "./spotify";
+import "./games";
 import { parsePoll, requirePollPerm } from "./polls";
 import { addPoll, isPoll } from "./pollData";
 import "./invites";

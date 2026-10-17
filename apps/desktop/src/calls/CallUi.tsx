@@ -12,6 +12,7 @@ import { useChannelVoiceStates, useVoice } from "../voice/store";
 import { BarButton, Tile, useStageTiles } from "../voice/VoiceChannelPage";
 import { openModal } from "../shell/modalStore";
 import { WatchTile } from "../watch";
+import { GameTile, useGameMenuItems } from "../games";
 import { openStremioPanel, StremioIcon, StremioPanel, StremioTile, useStremioPanel } from "../stremio";
 import { openSpotifyPanel, SpotifyIcon, SpotifyPanel, SpotifyTile, useSpotifyPanel } from "../spotify";
 import { toggleSelfDeaf, toggleSelfMute } from "../voice/engine";
@@ -86,6 +87,7 @@ export function CallPanel({ channel }: { channel: Channel }) {
   const watching = useVoice(s => !!s.watch[channel.id]);
   const stremioOpen = useStremioPanel(s => s.open);
   const spotifyOpen = useSpotifyPanel(s => s.open);
+  const gameItems = useGameMenuItems(channel);
   const menu = useContextMenu();
   const tiles = useStageTiles(states, channel.id);
   const inside = useMemo(() => new Set(states.map(s => s.user_id)), [states]);
@@ -102,7 +104,9 @@ export function CallPanel({ channel }: { channel: Channel }) {
       <div className="dm-call-stage">
         {tiles.map(t => (
           <div key={t.id} className={`dm-call-tile${t.watch ? " watch" : ""}${t.stremio ? " stremio" : ""}${t.spotify ? " spotify" : ""}`}>
-            {t.watch ? (
+            {t.game ? (
+              <GameTile channelId={channel.id} variant="focused" />
+            ) : t.watch ? (
               <WatchTile channelId={channel.id} variant="focused" />
             ) : t.stremio ? (
               <StremioTile channelId={channel.id} variant="focused" />
@@ -148,6 +152,8 @@ export function CallPanel({ channel }: { channel: Channel }) {
                   { id: "watch-together", label: "Watch Together (YouTube)", icon: <MonitorPlay size={18} />, iconStart: true, sub: "Watch a YouTube video in sync", onSelect: () => (watching ? undefined : openModal({ type: "watchTogether", channelId: channel.id })) },
                   { id: "stremio", label: "Stremio", icon: <StremioIcon size={18} />, iconStart: true, sub: "Play a movie or episode from your Stremio", onSelect: openStremioPanel },
                   { id: "spotify", label: "Spotify", icon: <SpotifyIcon size={18} />, iconStart: true, sub: "Play music for everyone in the call", onSelect: openSpotifyPanel },
+                  { type: "separator" },
+                  ...gameItems,
                 ]);
               }}
             >

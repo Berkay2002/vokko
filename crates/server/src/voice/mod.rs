@@ -2,6 +2,7 @@
 //! LiveKit webhooks and reconciliation. Media never passes through vokko-server.
 pub mod backends;
 pub mod calls;
+pub mod games;
 pub mod livekit;
 pub mod moderation;
 pub mod stage;

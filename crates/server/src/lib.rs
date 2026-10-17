@@ -13,6 +13,7 @@ pub mod error;
 pub mod events;
 pub mod extract;
 pub mod forward;
+pub mod games;
 pub mod gateway;
 pub mod gifs;
 pub mod hub;

@@ -8,6 +8,7 @@
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
+    "allowJs": true,
     "allowSyntheticDefaultImports": true,
     "noEmit": true
   },
