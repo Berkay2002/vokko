@@ -6,7 +6,7 @@ import type { Snowflake } from "../api/types";
 import type { VideoHandle } from "../voice/mediaStore";
 import { listenerToken } from "../spotify/api";
 import { viewerToken } from "./api";
-import { createViewer, type Viewer } from "./viewer";
+import type { Viewer } from "./viewer";
 import type { VideoStats } from "./viewerStats";
 
 export type RoomState = "connecting" | "connected" | "closed" | "failed";
@@ -70,6 +70,8 @@ export class ViewerConnection {
     let current: Viewer | null = null;
     try {
       const { url, token } = await (this.kind === "spotify" ? listenerToken : viewerToken)(this.channelId);
+      // Lazy: viewer.ts pulls in livekit-client, which the first screen must not download.
+      const { createViewer } = await import("./viewer");
       if (this.closed) return;
       const old = this.viewer;
       this.viewer = null;

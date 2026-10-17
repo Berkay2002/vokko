@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, test, type CDPSession, type Page } from '@playwright/test';
+import { expect, test, type Browser, type CDPSession, type Page } from '@playwright/test';
 
 // Perf harness: `npx playwright test -c e2e/perf.config.ts` (see docs/perf.md). Records into perf-results/<PERF_LABEL>.json:
 // scroll FPS in a 20,000-message channel, channel switch time, member list open time, heap after scrolling 5,000 messages,
@@ -202,6 +202,60 @@ test('perf harness: big server', async ({ page }) => {
       messagesInDom: await page.locator('.chat-msg').count(),
     };
   });
+});
+
+/** One cold page load into a guild (fresh context, empty HTTP cache): ms from navigation start until its first channel's messages are painted. */
+async function coldStart(browser: Browser, url: string, throttle: boolean): Promise<{ firstMessagesMs: number; fcpMs: number; jsKB: number }> {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
+  const page = await context.newPage();
+  if (throttle) {
+    // A mid-range laptop on a good home connection: 4x slower CPU, 20 Mbit/s down, 40 ms round trip.
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+    await cdp.send('Network.enable');
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: 2_500_000, uploadThroughput: 1_250_000 });
+  }
+  // Mock ids are minted per page load, so the guild can't be in the URL: open the first guild as soon as its rail icon exists.
+  await page.addInitScript(() => {
+    const w = window as unknown as { __firstMessages?: number };
+    let clicked = false;
+    const check = () => {
+      if (document.querySelector('.chat-msg')) return requestAnimationFrame(() => requestAnimationFrame(() => (w.__firstMessages = performance.now())));
+      const guild = document.querySelector<HTMLAnchorElement>('nav[aria-label="Servers sidebar"] a[href^="/channels/"]:not([href^="/channels/@me"])');
+      if (guild && !clicked) {
+        clicked = true;
+        guild.click();
+      }
+      requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  });
+  await page.goto(url);
+  await page.waitForFunction(() => (window as unknown as { __firstMessages?: number }).__firstMessages !== undefined, null, { timeout: 60_000 });
+  const out = await page.evaluate(() => {
+    const at = (window as unknown as { __firstMessages: number }).__firstMessages;
+    const js = performance.getEntriesByType('resource').filter(r => r.name.endsWith('.js') && r.startTime < at) as PerformanceResourceTiming[];
+    return {
+      firstMessagesMs: at,
+      fcpMs: performance.getEntriesByName('first-contentful-paint')[0]?.startTime ?? 0,
+      jsKB: js.reduce((a, r) => a + r.decodedBodySize, 0) / 1024,
+    };
+  });
+  await context.close();
+  return out;
+}
+
+test('perf harness: cold start', async ({ browser }) => {
+  const runs = async (throttle: boolean) => {
+    const xs = [];
+    for (let i = 0; i < 5; i++) xs.push(await coldStart(browser, '/channels/@me?as=sam', throttle));
+    return {
+      firstMessagesMedianMs: round(median(xs.map(x => x.firstMessagesMs))),
+      fcpMedianMs: round(median(xs.map(x => x.fcpMs))),
+      jsLoadedKB: round(median(xs.map(x => x.jsKB))),
+    };
+  };
+  results.coldStart = { fast: await runs(false), throttled: await runs(true) };
 });
 
 test('perf harness: initial bundle', async () => {

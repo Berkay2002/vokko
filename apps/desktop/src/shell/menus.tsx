@@ -15,7 +15,7 @@ import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
 import { openProfile } from "./ProfileCard";
 import { userAppsItems } from "../apps/menus";
-import { serverSettingsSections } from "./ServerSettings";
+import { serverSettingsSections } from "./settings/serverSections";
 import { voiceModerationItems, voiceUserMenuItems } from "../voice/voiceMenus";
 import { moveToCategory, stepChannel } from "../guild/moves";
 import { stepTarget } from "../guild/reorder";

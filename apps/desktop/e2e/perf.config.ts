@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 // Perf harness (docs/perf.md). Serves a production build with React's profiling renderer (`vite build --mode perf`) from
 // `vite preview` on port 1445, mock backend with `?seed=big`. Run from apps/desktop:
 //   npx playwright test -c e2e/perf.config.ts            (PERF_LABEL=after writes perf-results/after.json)
-const PORT = 1445;
+const PORT = Number(process.env.VOKKO_PERF_PORT ?? 1445);
 const OUT = 'node_modules/.perf-dist';
 
 export default defineConfig({

@@ -5,7 +5,7 @@ import { Perm } from "../api/permissions";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore, useStore } from "../api/store";
 import { ChannelType, type Channel, type Guild } from "../api/types";
-import { OnboardingSettings } from "../community";
+import { OnboardingSettings } from "../community/OnboardingSettings";
 import { GuildIcon } from "./Avatar";
 import { firstTextChannel } from "./channels";
 import { closeModal, openModal } from "./modalStore";
@@ -23,27 +23,14 @@ import { RolesPage } from "./settings/RolesPage";
 import { TagPage } from "./settings/TagPage";
 import { ThemePage } from "./settings/ThemePage";
 import { MembersPage } from "./settings/server-people";
-import { SoundboardSettingsPage } from "../soundboard";
+import { SoundboardSettingsPage } from "../soundboard/SoundboardSettingsPage";
 import { usePermissions } from "./usePermissions";
+import { MANAGE, SECTIONS, type SectionDef } from "./settings/serverSections";
 import { IntegrationsPage } from "../apps/IntegrationsPage";
 import { EmojiSettingsPage } from "../emoji/EmojiSettingsPage";
 import { StickerSettingsPage } from "../media/StickerSettingsPage";
 import { InviteList } from "../invites/InviteList";
-import { GamesSettings } from "../games";
-
-interface SectionDef {
-  id: string;
-  label: string;
-  /** Sidebar block; headings come from GROUP_TITLES, "" renders without one. */
-  group: "top" | "expression" | "people" | "apps" | "moderation" | "bottom";
-  /** Category headings shown on pages that are not implemented. */
-  outline?: string[];
-  /** Any of these permission bits makes the section visible (Q4.6). Empty: MANAGE_GUILD. */
-  needs?: bigint[];
-}
-
-const MANAGE = [Perm.MANAGE_GUILD];
-const EXPRESSIONS = [Perm.MANAGE_GUILD, Perm.MANAGE_GUILD_EXPRESSIONS];
+import { GamesSettings } from "../games/GamesSettings";
 
 const GROUP_TITLES: Record<SectionDef["group"], string> = {
   top: "",
@@ -55,31 +42,6 @@ const GROUP_TITLES: Record<SectionDef["group"], string> = {
 };
 
 const GROUP_ORDER: SectionDef["group"][] = ["top", "expression", "people", "apps", "moderation", "bottom"];
-
-const SECTIONS: SectionDef[] = [
-  { id: "profile", label: "Server Profile", group: "top" },
-  { id: "tag", label: "Server Tag", group: "top" },
-  { id: "theme", label: "Server Theme", group: "top" },
-  { id: "engagement", label: "Engagement", group: "top" },
-  { id: "emoji", label: "Emoji", group: "expression", needs: EXPRESSIONS },
-  { id: "stickers", label: "Stickers", group: "expression", needs: EXPRESSIONS, outline: ["Upload Sticker", "Stickers"] },
-  { id: "soundboard", label: "Soundboard", group: "expression", needs: [...EXPRESSIONS, Perm.CREATE_GUILD_EXPRESSIONS] },
-  { id: "members", label: "Members", group: "people", needs: [Perm.MANAGE_GUILD, Perm.KICK_MEMBERS, Perm.BAN_MEMBERS, Perm.MODERATE_MEMBERS, Perm.MANAGE_NICKNAMES, Perm.MANAGE_ROLES] },
-  { id: "requests", label: "Join Requests", group: "people", needs: [Perm.KICK_MEMBERS, Perm.MANAGE_GUILD] },
-  { id: "roles", label: "Roles", group: "people", needs: [Perm.MANAGE_ROLES] },
-  { id: "invites", label: "Invites", group: "people", needs: [Perm.CREATE_INSTANT_INVITE, Perm.MANAGE_GUILD] },
-  { id: "onboarding", label: "Onboarding", group: "people" },
-  { id: "access", label: "Access", group: "people", outline: ["Access Options", "Age-Restricted Server", "Server Rules"] },
-  { id: "integrations", label: "Integrations", group: "apps", needs: [Perm.MANAGE_GUILD, Perm.MANAGE_WEBHOOKS] },
-  { id: "activities", label: "Activities", group: "apps" },
-  { id: "safety", label: "Safety Setup", group: "moderation" },
-  { id: "audit", label: "Audit Log", group: "moderation", needs: [Perm.VIEW_AUDIT_LOG] },
-  { id: "bans", label: "Bans", group: "moderation", needs: [Perm.BAN_MEMBERS] },
-  { id: "reports", label: "Reports", group: "moderation", needs: [Perm.MANAGE_MESSAGES, Perm.MODERATE_MEMBERS] },
-  { id: "automod", label: "AutoMod", group: "moderation" },
-  { id: "community", label: "Enable Community", group: "bottom", outline: ["Enable Community"] },
-  { id: "template", label: "Server Template", group: "bottom", outline: ["Template Title", "Description"] },
-];
 
 const ENGAGEMENT_OUTLINE = ["Channel Summaries", "Activity Feed Settings", "Default Notification Settings", "Inactive", "Server Widget"];
 
@@ -277,11 +239,6 @@ function InvitesPage({ guildId, canCreate, canList, channels }: { guildId: strin
       <InviteList guildId={guildId} canManage={canList} />
     </Page>
   );
-}
-
-/** Sections the viewer may open (rail context menu "Server Settings" submenu). */
-export function serverSettingsSections(can: (bit: bigint) => boolean): { id: string; label: string }[] {
-  return SECTIONS.filter(s => (s.needs ?? MANAGE).some(bit => can(bit))).map(s => ({ id: s.id, label: s.label }));
 }
 
 export function ServerSettings({ guildId, section }: { guildId: string; section?: string }) {
