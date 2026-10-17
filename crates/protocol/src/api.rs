@@ -1412,6 +1412,10 @@ pub struct VoiceServerUpdate {
     pub token: String,
     /// The voice session this token belongs to (matches `VoiceState.session_id`).
     pub session_id: String,
+    /// Guild voice and stage channels: the channel's bitrate in bps (within the server's limits), the microphone's max
+    /// publish bitrate. Absent for DM calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bitrate: Option<u32>,
 }
 
 /// Max length of a voice channel status.
@@ -5865,10 +5869,14 @@ mod tests {
             endpoint: "wss://lk.example.org".to_owned(),
             token: "t".to_owned(),
             session_id: "abc".to_owned(),
+            bitrate: Some(96_000),
         });
         assert_eq!(
             (server.name(), server.data()),
-            ("VOICE_SERVER_UPDATE", json!({"guild_id": "300", "channel_id": "201", "endpoint": "wss://lk.example.org", "token": "t", "session_id": "abc"}))
+            (
+                "VOICE_SERVER_UPDATE",
+                json!({"guild_id": "300", "channel_id": "201", "endpoint": "wss://lk.example.org", "token": "t", "session_id": "abc", "bitrate": 96000})
+            )
         );
         let status = GatewayEvent::VoiceChannelStatusUpdate(VoiceChannelStatusUpdate { id: Snowflake(201), guild_id: Snowflake(300), status: None });
         assert_eq!((status.name(), status.data()), ("VOICE_CHANNEL_STATUS_UPDATE", json!({"id": "201", "guild_id": "300", "status": null})));

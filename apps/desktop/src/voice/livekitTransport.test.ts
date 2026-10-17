@@ -56,6 +56,8 @@ const lk = vi.hoisted(() => {
     broken: new Set<string>(),
     /** Every publishTrack with the track's mute state at that moment. */
     published: [] as { deviceId: string; muted: boolean }[],
+    /** The options of every publishTrack, same order. */
+    publishOptions: [] as unknown[],
     switches: [] as { kind: string; deviceId: string; mutedAfter: boolean | null }[],
     /** Remote participants already in the room when a new Room connects. */
     remotes: [] as { identity: string }[],
@@ -73,8 +75,9 @@ const lk = vi.hoisted(() => {
       if (state.broken.has(id)) throw Object.assign(new Error("over"), { name: "OverconstrainedError" });
       return [new FakeLocalAudioTrack(id)];
     }
-    async publishTrack(track: FakeLocalAudioTrack) {
+    async publishTrack(track: FakeLocalAudioTrack, opts?: unknown) {
       state.published.push({ deviceId: track.deviceId, muted: track.isMuted });
+      state.publishOptions.push(opts);
       this.publication = new FakePublication(track);
       return this.publication;
     }
@@ -184,6 +187,7 @@ beforeEach(() => {
   lk.state.rooms.length = 0;
   lk.state.remotes.length = 0;
   lk.state.published.length = 0;
+  lk.state.publishOptions.length = 0;
   lk.state.switches.length = 0;
   lk.state.broken.clear();
   lk.state.devices.audioinput = [
@@ -249,6 +253,19 @@ describe("LiveKitTransport: never live on join", () => {
     await settle();
     expect(pub.audioTrack.restarts).toHaveLength(1);
     expect(pub.isMuted).toBe(true);
+    await t.dispose();
+  });
+});
+
+describe("LiveKitTransport: channel bitrate", () => {
+  it("publishes the microphone with the voice channel's bitrate as its max; a DM call keeps the default preset", async () => {
+    const t = new LiveKitTransport(callbacks());
+    await t.connect("wss://sfu", "tok", { ...options(false), audioBitrate: 96_000 });
+    await settle();
+    expect(lk.state.publishOptions.at(-1)).toEqual({ source: "microphone", audioPreset: { maxBitrate: 96_000 } });
+    await t.connect("wss://sfu", "tok2", options(false));
+    await settle();
+    expect(lk.state.publishOptions.at(-1)).toEqual({ source: "microphone" });
     await t.dispose();
   });
 });

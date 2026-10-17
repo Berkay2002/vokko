@@ -2133,7 +2133,7 @@ export interface GatewayEvents {
   REMINDER_DELETE: { id: Snowflake };
   USER_SETTINGS_UPDATE: UserSettings; // the full blob after a change, to every session of that user (the one that saved it included)
   VOICE_STATE_UPDATE: VoiceState; // to everyone who can see the channel
-  VOICE_SERVER_UPDATE: { guild_id: Snowflake | null; channel_id: Snowflake; endpoint: string; token: string; session_id: string }; // requesting session only; session_id = the VoiceState.session_id this token is for
+  VOICE_SERVER_UPDATE: { guild_id: Snowflake | null; channel_id: Snowflake; endpoint: string; token: string; session_id: string; bitrate?: number }; // requesting session only; session_id = the VoiceState.session_id this token is for; bitrate = guild voice/stage channel's max mic bitrate (bps), absent in DM calls
   VOICE_CONNECT_FAILED: { guild_id: Snowflake | null; channel_id: Snowflake; reason: VoiceConnectFailure }; // Vokko-only, requesting session only
   VOICE_CHANNEL_STATUS_UPDATE: { id: Snowflake; guild_id: Snowflake; status: string | null }; // to viewers of the channel; cleared (null) when the channel empties
   WATCH_TOGETHER_UPDATE: WatchTogetherUpdate; // to viewers of the channel on every change; state null = ended (also when the last person leaves voice); a joiner gets the running session after VOICE_SERVER_UPDATE

@@ -317,6 +317,7 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         _ => return fail(session, &command, target, VoiceConnectFailure::MissingPermissions),
     };
     let stage = row.channel_type() == ChannelType::GuildStage;
+    let bitrate = super::publish_bitrate(&state.config, row.bitrate, row.is_dm());
     let admitted = if row.is_dm() { admit_dm(state, user_id, &row).await } else { admit_guild(state, user_id, &row).await };
     let (guild_id, permissions) = match admitted {
         Ok(admitted) => admitted,
@@ -367,7 +368,7 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
             matches
         });
         if reissued.is_some() {
-            send_server_update(session, guild_id, target, &livekit.url, token, &entry.session_id);
+            send_server_update(session, guild_id, target, &livekit.url, token, &entry.session_id, bitrate);
             spawn_connect_timeout(state.clone(), user_id, entry.session_id.clone(), nonce, issued);
         }
         return;
@@ -464,7 +465,7 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
 
     // Joining or moving into the channel (not another device re-binding in place) plays the entrance sound.
     let entered = previous.as_ref().is_none_or(|previous| previous.channel_id != channel_id);
-    send_server_update(session, guild_id, target, &livekit.url, livekit_token, &session_id);
+    send_server_update(session, guild_id, target, &livekit.url, livekit_token, &session_id, bitrate);
     // A late joiner syncs to the session that is already running (a DM call also carries it on CALL_CREATE).
     if let Some(watching) = state.voice.watch_get(channel_id) {
         let event = GatewayEvent::WatchTogetherUpdate(WatchTogetherUpdate { channel_id: target, state: Some(watching) });
@@ -593,13 +594,14 @@ fn sign_token(livekit: &LiveKitConfig, entry: &VoiceEntry, nonce: &str, display_
     token::sign(&livekit.api_secret, &claims)
 }
 
-fn send_server_update(session: &Session, guild_id: Option<i64>, channel_id: Snowflake, endpoint: &str, token: String, session_id: &str) {
+fn send_server_update(session: &Session, guild_id: Option<i64>, channel_id: Snowflake, endpoint: &str, token: String, session_id: &str, bitrate: Option<u32>) {
     let event = GatewayEvent::VoiceServerUpdate(VoiceServerUpdate {
         guild_id: guild_id.map(Snowflake::from),
         channel_id,
         endpoint: endpoint.to_owned(),
         token,
         session_id: session_id.to_owned(),
+        bitrate,
     });
     session.dispatch(event.name(), event.data());
 }
@@ -1144,6 +1146,7 @@ pub async fn move_member(state: &AppState, guild_id: i64, user_id: i64, channel_
     let nonce = random_hex(8);
     let issued = Instant::now();
     let name = display_name(state, user_id).await;
+    let bitrate = store::channel_row(state, channel_id).await.ok().flatten().and_then(|row| super::publish_bitrate(&state.config, row.bitrate, row.is_dm()));
     let mut entry = previous.clone();
     entry.channel_id = channel_id;
     entry.token_nonce = nonce.clone();
@@ -1165,7 +1168,7 @@ pub async fn move_member(state: &AppState, guild_id: i64, user_id: i64, channel_
     if let (Some(livekit), Some(owner)) = (state.config.livekit.get(entry.backend), owner)
         && let Some(token) = sign_token(livekit, &entry, &nonce, &name)
     {
-        send_server_update(&owner, Some(guild_id), Snowflake::from(channel_id), &livekit.url, token, &entry.session_id);
+        send_server_update(&owner, Some(guild_id), Snowflake::from(channel_id), &livekit.url, token, &entry.session_id, bitrate);
     }
     let viewers = broadcast(state, &entry, false).await;
     moved_away(state, &previous, viewers).await;
