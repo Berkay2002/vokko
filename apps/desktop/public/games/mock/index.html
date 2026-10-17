@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mock game</title>
+<style>
+  body { margin: 0; padding: 12px; font: 14px system-ui, sans-serif; background: #1e1f22; color: #e3e5e8; }
+  button { font: inherit; }
+</style>
+</head>
+<body>
+<!-- WIP stand-in for builder C's e2e game (builtin:mock): speaks the SDK protocol inline. Replace with C's files. -->
+<p id="status">Connecting...</p>
+<p data-testid="game-players" id="players">players: 0</p>
+<button type="button" id="ping" disabled>Send ping</button>
+<ul id="messages"></ul>
+<script>
+  (function () {
+    var status = document.getElementById("status"), players = document.getElementById("players"), button = document.getElementById("ping"), list = document.getElementById("messages");
+    var port = null, n = 0;
+    function log(text) { var li = document.createElement("li"); li.dataset.testid = "game-message"; li.textContent = text; list.append(li); }
+    addEventListener("message", function (e) {
+      if (port || e.source !== parent || !e.data || e.data.vokko !== "init" || !e.ports[0]) return;
+      port = e.ports[0];
+      port.onmessage = function (m) {
+        var d = m.data;
+        if (d.type === "init") { status.textContent = "Connected as " + d.me.name; players.textContent = "players: " + d.players.length; button.disabled = false; port.postMessage({ type: "ready" }); }
+        else if (d.type === "players") players.textContent = "players: " + d.players.length;
+        else if (d.type === "message") { log(JSON.stringify(d.data)); if (d.data && typeof d.data.ping === "number") port.postMessage({ type: "send", data: { pong: d.data.ping }, to: d.from }); }
+        else if (d.type === "error") log("error: " + d.code);
+      };
+    });
+    button.addEventListener("click", function () { port.postMessage({ type: "send", data: { ping: ++n } }); });
+    parent.postMessage({ vokko: "hello", v: 1 }, "*");
+  })();
+</script>
+</body>
+</html>
