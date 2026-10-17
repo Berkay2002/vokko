@@ -14,6 +14,7 @@ import { controlStremio, stopStremio } from "./api";
 import { reason, safeImage, shownPositionMs, statusText } from "./format";
 import { StremioIcon } from "./StremioIcon";
 import { openStremioPanel } from "./panelStore";
+import { PosterImage } from "./PosterImage";
 import { SeekCoalescer } from "./seek";
 import { setViewerVolume, startViewerAudio, useViewerSlot, useViewerStore } from "./viewerStore";
 import type { VideoHandle } from "../voice/mediaStore";
@@ -73,7 +74,7 @@ function QueuePanel({ channelId, queue, onAdd }: { channelId: Snowflake; queue: 
             const by = users[item.added_by];
             return (
               <li key={`${item.title}-${i}`} className="stremio-queue-item" data-title={item.title}>
-                <span className="stremio-queue-art">{safeImage(item.poster) && <img src={safeImage(item.poster)} alt="" />}</span>
+                <span className="stremio-queue-art"><PosterImage src={safeImage(item.poster)} /></span>
                 <span className="stremio-queue-text">
                   <span className="stremio-queue-name">{item.title}</span>
                   <span className="stremio-queue-sub">{[item.subtitle, by ? `added by ${displayName(by)}` : null].filter(Boolean).join(" · ")}</span>
@@ -155,7 +156,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
       aria-label={`Stremio: ${title}`}
     >
       {viewer.video && <RoomVideo handle={viewer.video} />}
-      {!showPicture && poster && <img className="stremio-poster" src={poster} alt="" />}
+      {!showPicture && <PosterImage className="stremio-poster" src={poster} />}
       {status && (
         <div className="stremio-status" role="status">
           {status}
