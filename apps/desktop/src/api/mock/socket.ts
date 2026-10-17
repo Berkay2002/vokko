@@ -1,7 +1,7 @@
 // Mock gateway: speaks the same Hello / Identify / READY / heartbeat / Resume protocol as the real server so the
 // client gateway code (and everything above it) cannot tell the difference.
 
-import { activityListIsValid } from "./activities";
+import { activityListIsValid, withKnownIcon } from "./activities";
 import { GatewayOp, type Activity, type GatewayEvents, type GatewayPayload, type PresenceStatus, type VoiceStateUpdateCommand } from "../types";
 import { db } from "./db";
 import { tokenUserId } from "./sessions";
@@ -200,7 +200,8 @@ export class MockSocket {
       this.close(4002);
       return;
     }
-    const activities = d.activities ?? account.presence.activities ?? [];
+    // An `app:` icon the backend does not hold is dropped, the activity stays (like the server).
+    const activities = d.activities?.map(withKnownIcon) ?? account.presence.activities ?? [];
     account.presence = { user_id: account.user.id, status: d.status, custom_status: d.custom_status ?? null, ...(activities.length > 0 ? { activities } : {}) };
     emitToAll("PRESENCE_UPDATE", { ...account.presence });
   }

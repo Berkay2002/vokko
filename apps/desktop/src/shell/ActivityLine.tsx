@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Gamepad2, Music } from "lucide-react";
+import { Music } from "lucide-react";
 import { activityLabel, formatClock, formatPlaytime, playingActivity, shownActivity } from "../activity/format";
 import { useStore } from "../api/store";
 import type { Activity, Snowflake } from "../api/types";
+import { ActivityIcon } from "./ActivityIcon";
 
 /** Re-renders every `intervalMs` while mounted; the value is Date.now(). */
 export function useNow(intervalMs: number): number {
@@ -63,7 +64,7 @@ export function ActivityCard({ activity }: { activity: Activity }) {
       <div className="activity-card-heading">Playing a game</div>
       <div className="activity-card-body">
         <span className="activity-card-icon" aria-hidden="true">
-          <Gamepad2 size={24} />
+          <ActivityIcon activity={activity} size={24} fill />
         </span>
         <span className="activity-card-text">
           <span className="activity-card-name">{activity.name}</span>

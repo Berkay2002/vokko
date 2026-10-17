@@ -12,6 +12,7 @@ import { addMessage, createAccount } from "./ops";
 import { handleRoute } from "./routes";
 import { apps, executeWebhook, installEchoBot, setInternalRouter } from "./apps";
 import "./accounts";
+import "./appIcons";
 import { setCurrentToken } from "./sessions";
 import { seed } from "./seed";
 import { seedBig } from "./seedBig";

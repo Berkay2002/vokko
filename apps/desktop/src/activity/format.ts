@@ -1,3 +1,4 @@
+import { appIconSrc } from "../api/appIcons";
 import type { Activity, Presence } from "../api/types";
 
 /** The activity to show for a presence: the first "Playing" one. */
@@ -43,6 +44,14 @@ export function shownActivity(presence: Pick<Presence, "activities"> | undefined
 /** "Playing Factorio" or "Listening to Spotify". */
 export function activityLabel(activity: Activity): string {
   return activity.type === 2 ? "Listening to Spotify" : playingLabel(activity);
+}
+
+const APP_IMAGE = /^app:([0-9a-f]{64})$/;
+
+/** The icon of a Playing activity's app, built from the validated hash only (never a URL taken from the activity); null without one. */
+export function appIconUrl(activity: Activity): string | null {
+  const hash = activity.type === 0 ? APP_IMAGE.exec(activity.assets?.large_image ?? "")?.[1] : undefined;
+  return hash ? appIconSrc(hash) : null;
 }
 
 const IMAGE_ID = /^spotify:([0-9a-f]{40})$/;

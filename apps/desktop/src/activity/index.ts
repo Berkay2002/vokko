@@ -2,13 +2,17 @@ import { create } from "zustand";
 import { appStore } from "../api/store";
 import type { Activity } from "../api/types";
 import { isDesktop } from "../desktop";
+import { uploadAppIcon } from "../api/appIcons";
 import {
   guessDisplayName,
+  isIconData,
   listProcesses,
   loadRegisteredGames,
   matchGame,
   normalizeExe,
+  readAppInfo,
   saveRegisteredGames,
+  type AppInfo,
   type DetectedGame,
   type GameEntry,
   type RunningProcess,
@@ -52,6 +56,10 @@ interface ActivityState {
   detected: DetectedGame | null;
   /** The track playing in the Spotify app now, null when none. */
   listening: Activity | null;
+  /** Icons read from running apps this session (base64 PNG by normalized executable name), for apps that are not registered. */
+  icons: Record<string, string>;
+  /** `app:<hash>` assets the server accepted this session, by normalized executable name. Set only while the app is detected and shared. */
+  assets: Record<string, string>;
 }
 
 export const useActivity = create<ActivityState>(() => ({
@@ -62,14 +70,24 @@ export const useActivity = create<ActivityState>(() => ({
   running: null,
   detected: null,
   listening: null,
+  icons: {},
+  assets: {},
 }));
 
 /** The activities that go out with the user's presence for a given state: the game and Spotify, one of each at most. */
-export function activitiesFor(state: Pick<ActivityState, "share" | "detected"> & Partial<Pick<ActivityState, "spotify" | "listening">>): Activity[] {
+export function activitiesFor(state: Pick<ActivityState, "share" | "detected"> & Partial<Pick<ActivityState, "spotify" | "listening" | "assets">>): Activity[] {
   if (!state.share) return [];
   const list: Activity[] = [];
   const name = state.detected ? cleanName(state.detected.name) : "";
-  if (state.detected && name) list.push({ name, type: 0, ...(state.detected.startedAt > 0 ? { timestamps: { start: state.detected.startedAt } } : {}) });
+  const asset = state.detected ? state.assets?.[normalizeExe(state.detected.exe)] : undefined;
+  if (state.detected && name) {
+    list.push({
+      name,
+      type: 0,
+      ...(state.detected.startedAt > 0 ? { timestamps: { start: state.detected.startedAt } } : {}),
+      ...(asset ? { assets: { large_image: asset } } : {}),
+    });
+  }
   if (state.spotify && state.listening) list.push(state.listening);
   return list;
 }
@@ -114,6 +132,80 @@ export async function refreshSpotify(): Promise<void> {
 function publishRunning(running: RunningProcess[]): void {
   const { registered } = useActivity.getState();
   useActivity.setState({ running, detected: matchGame(running, registered) });
+  // Name and icon are read only for the app that matched and for registered apps that are running and still lack them, never for the whole list.
+  const wanted = new Map<string, string>();
+  const { detected } = useActivity.getState();
+  if (detected) wanted.set(normalizeExe(detected.exe), detected.exe);
+  for (const entry of registered) {
+    if (entry.icon) continue;
+    const process = running.find(candidate => entry.exe.some(exe => normalizeExe(exe) === normalizeExe(candidate.name)));
+    if (process) wanted.set(normalizeExe(process.name), process.name);
+  }
+  for (const exe of wanted.values()) void learnApp(exe);
+}
+
+/** Per session and executable: the answer of the shell (null when it had none), so the 15 s poll never asks twice. */
+const appInfo = new Map<string, Promise<AppInfo | null>>();
+
+/** Applies what the shell knows about a running executable: the display name (while the entry still carries the guessed one) and the icon. */
+async function learnApp(exe: string): Promise<void> {
+  const key = normalizeExe(exe);
+  let pending = appInfo.get(key);
+  if (!pending) {
+    pending = readAppInfo(exe).catch(() => null);
+    appInfo.set(key, pending);
+  }
+  const info = await pending;
+  if (!info) return;
+  const icon = isIconData(info.icon) ? info.icon : undefined;
+  const nice = cleanName(info.name);
+  const { registered, running } = useActivity.getState();
+  let changed = false;
+  const next = registered.map(entry => {
+    if (!entry.exe.some(known => normalizeExe(known) === key)) return entry;
+    const guessed = entry.name === (cleanName(guessDisplayName(entry.exe[0] ?? "")) || entry.name);
+    const name = guessed && nice ? nice : entry.name;
+    const merged = { ...entry, name, ...(icon && !entry.icon ? { icon } : {}) };
+    if (merged.name !== entry.name || merged.icon !== entry.icon) changed = true;
+    return merged;
+  });
+  if (changed) saveRegisteredGames(next);
+  useActivity.setState(state => ({
+    ...(changed ? { registered: next, detected: matchGame(running ?? [], next) } : {}),
+    icons: icon && state.icons[key] !== icon ? { ...state.icons, [key]: icon } : state.icons,
+  }));
+  void shareAppIcon();
+}
+
+/** The icon known for an executable: read this session, else the one stored with the registered entry. */
+export function iconOf(exe: string, state: Pick<ActivityState, "icons" | "registered"> = useActivity.getState()): string | undefined {
+  const key = normalizeExe(exe);
+  return state.icons[key] ?? state.registered.find(entry => entry.exe.some(known => normalizeExe(known) === key))?.icon;
+}
+
+/** Wait this long before offering an icon the server refused (or could not be reached for) again. */
+const UPLOAD_RETRY_MS = 5 * 60_000;
+const uploads = new Map<string, number>();
+
+/**
+ * Uploads the icon of the detected app once per session, and only while sharing is on: until then nothing about the app leaves this
+ * computer. The activity carries the asset only after the upload succeeded, so the server never sees an `app:` hash ahead of its icon.
+ */
+export async function shareAppIcon(): Promise<void> {
+  const { share, detected, assets } = useActivity.getState();
+  if (!isDesktop() || !share || !detected) return;
+  const key = normalizeExe(detected.exe);
+  const icon = iconOf(detected.exe);
+  const last = uploads.get(key);
+  if (!icon || assets[key] || (last !== undefined && Date.now() - last < UPLOAD_RETRY_MS)) return;
+  uploads.set(key, Date.now());
+  try {
+    const asset = await uploadAppIcon(icon);
+    useActivity.setState(state => ({ assets: { ...state.assets, [key]: asset } }));
+    uploads.set(key, Number.POSITIVE_INFINITY);
+  } catch {
+    /* the activity goes out without an icon; tried again after UPLOAD_RETRY_MS */
+  }
 }
 
 /** Lists the running executables now and re-matches. A no-op outside the desktop app. */
@@ -122,7 +214,7 @@ export async function refreshProcesses(): Promise<void> {
   publishRunning(await listProcesses());
 }
 
-/** "Add it!": registers a running executable as a game, named after its file until the user renames it. */
+/** "Add it!": registers a running executable as an app, named after its file until the shell has read its real name. */
 export function addRegisteredGame(process: RunningProcess, name = guessDisplayName(process.name)): void {
   const { registered, running } = useActivity.getState();
   const exe = process.name;
@@ -130,6 +222,7 @@ export function addRegisteredGame(process: RunningProcess, name = guessDisplayNa
   const next = [...registered, { name: cleanName(name) || cleanName(exe) || "Game", exe: [exe] }];
   saveRegisteredGames(next);
   useActivity.setState({ registered: next, detected: matchGame(running ?? [], next) });
+  void learnApp(exe);
 }
 
 export function removeRegisteredGame(exe: string): void {
@@ -177,7 +270,8 @@ export function startGameDetection(): () => void {
   };
 
   const stopActivity = useActivity.subscribe((state, prev) => {
-    if (state.detected !== prev.detected || state.share !== prev.share || state.listening !== prev.listening || state.spotify !== prev.spotify) apply(false);
+    if (state.detected !== prev.detected || state.share !== prev.share || state.listening !== prev.listening || state.spotify !== prev.spotify || state.assets !== prev.assets) apply(false);
+    if (state.detected !== prev.detected || state.share !== prev.share) void shareAppIcon();
     // turning Spotify (or sharing) on looks right away instead of at the next poll; turning it off withdraws it
     if (state.spotify !== prev.spotify || state.share !== prev.share) void refreshSpotify();
   });
@@ -209,4 +303,10 @@ export function startGameDetection(): () => void {
     setOwnActivities([]);
     started = false;
   };
+}
+
+/** Forgets this session's lookups and uploads (tests). */
+export function resetAppIconCache(): void {
+  appInfo.clear();
+  uploads.clear();
 }

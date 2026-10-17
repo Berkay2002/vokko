@@ -2,13 +2,14 @@ import { useMemo, useState } from "react";
 import { NavToggle } from "./NavToggle";
 import { siSpotify } from "simple-icons";
 import { BrandIcon } from "../ui/BrandIcon";
-import { Check, Gamepad2, MessageCircle, MoreVertical, Search, Users, Volume2, X } from "lucide-react";
+import { Check, MessageCircle, MoreVertical, Search, Users, Volume2, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
 import { RelationshipType, type Activity, type Channel, type Guild, type Relationship, type User } from "../api/types";
 import { joinVoiceChannel } from "../voice";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
+import { ActivityIcon } from "./ActivityIcon";
 import { ActivityLine, useNow } from "./ActivityLine";
 import { SpotifyArt } from "./SpotifyCard";
 import { formatClock } from "../activity/format";
@@ -192,7 +193,7 @@ function ActiveCard({ entry }: { entry: ActiveEntry }) {
         </span>
         {(entry.voice || entry.activity) && (
           <span className={`active-card-icon ${entry.activity ? "active-card-game" : "active-card-voice"}`} aria-hidden="true">
-            {entry.activity ? entry.activity.type === 2 ? <BrandIcon icon={siSpotify} size={16} /> : <Gamepad2 size={16} /> : <Volume2 size={16} />}
+            {entry.activity ? entry.activity.type === 2 ? <BrandIcon icon={siSpotify} size={16} /> : <ActivityIcon activity={entry.activity} size={16} fill /> : <Volume2 size={16} />}
           </span>
         )}
       </button>
@@ -214,7 +215,7 @@ function ActiveBody({ activity, user }: { activity: Activity; user: User }) {
         <SpotifyArt activity={activity} className="active-card-art" />
       ) : (
         <span className="active-card-art" aria-hidden="true">
-          <Gamepad2 size={20} />
+          <ActivityIcon activity={activity} size={20} fill />
         </span>
       )}
       <span className="active-card-body-text">

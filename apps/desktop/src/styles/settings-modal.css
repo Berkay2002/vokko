@@ -1053,3 +1053,17 @@
   background: var(--background-mod-strong);
   color: var(--interactive-icon-default);
 }
+
+/* Registered Games: the icon of an added app, left of its name. */
+.registered-app-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 12px;
+  border-radius: 6px;
+  background: var(--background-mod-strong);
+  color: var(--interactive-icon-default);
+}

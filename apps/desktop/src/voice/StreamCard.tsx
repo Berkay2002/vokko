@@ -7,6 +7,7 @@ import { Gamepad2, Monitor } from "lucide-react";
 import { formatClock } from "../activity/format";
 import { appStore } from "../api/store";
 import type { Snowflake } from "../api/types";
+import { ActivityIcon } from "../shell/ActivityIcon";
 import { usePlaying } from "../shell/ActivityLine";
 import { SpotifyCard } from "../shell/SpotifyCard";
 import type { Activity } from "../api/types";
@@ -190,7 +191,7 @@ export function StreamCard({ anchor, open, focusTick, onDismiss, userId, channel
       {playing && (
         <div className="stream-card-activity" data-testid="stream-card-activity">
           <span className="stream-card-game-icon" aria-hidden="true">
-            <Gamepad2 size={24} />
+            <ActivityIcon activity={playing} size={24} fill />
           </span>
           <span className="stream-card-activity-text">
             <span className="stream-card-game">{playing.name}</span>

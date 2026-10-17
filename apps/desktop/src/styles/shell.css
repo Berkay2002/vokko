@@ -3244,3 +3244,11 @@ img.active-card-art {
 
 .age-gate { margin: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center; }
 .age-gate-actions { display: flex; gap: 8px; }
+
+/* The app icon of a Playing activity: it fills the tile it sits in (or has the size the caller gave it) and follows the tile's corners. */
+.activity-app-icon {
+  display: block;
+  flex: none;
+  border-radius: inherit;
+  object-fit: contain;
+}

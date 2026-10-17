@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, Gamepad2, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
+import { ChevronRight, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
 import { TagChip } from "../perks/TagChip";
 import { useContextMenu } from "../ui";
 import { listeningActivity } from "../activity/format";
+import { ActivityIcon } from "../shell/ActivityIcon";
 import { usePlaying } from "../shell/ActivityLine";
 import { Avatar } from "../shell/Avatar";
 import { userContextItems } from "../shell/menus";
@@ -182,7 +183,7 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
       {streaming && <LivePill className="voice-user-live" />}
       {playing && (
         <span className="voice-user-game" role="img" aria-label={`Playing ${playing.name}`} title={`Playing ${playing.name}`}>
-          <Gamepad2 size={14} />
+          <ActivityIcon activity={playing} size={14} />
         </span>
       )}
       <span className="voice-user-icons">

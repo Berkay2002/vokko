@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Gamepad2, MessageCircle, MoreHorizontal, UserCheck, UserPlus } from "lucide-react";
+import { MessageCircle, MoreHorizontal, UserCheck, UserPlus } from "lucide-react";
 import { formatPlaytime, listeningActivity, playingActivity } from "../activity/format";
 import { getMutualFriends, request } from "../api/rest";
 import { snowflakeToTimestamp } from "../api/snowflake";
@@ -17,6 +17,7 @@ import { openDirectMessage } from "./actions";
 import { userContextItems } from "./menus";
 import { closeModal, openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
+import { ActivityIcon } from "./ActivityIcon";
 import { SpotifyCard } from "./SpotifyCard";
 
 const dateText = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
@@ -199,7 +200,7 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
             {tab === "activity" && !activity && !listening && <li className="settings-todo">No activity to show.</li>}
             {tab === "activity" && activity && (
               <li className="full-profile-row">
-                <span className="full-profile-tile"><Gamepad2 size={28} /></span>
+                <span className="full-profile-tile"><ActivityIcon activity={activity} size={28} fill /></span>
                 <span className="full-profile-row-text">
                   <span className="full-profile-row-title">{activity.name}</span>
                   <span className="full-profile-row-sub">Playing{activity.timestamps?.start ? ` · ${formatPlaytime(activity.timestamps.start, Date.now())}` : ""}</span>
