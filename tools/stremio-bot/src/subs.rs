@@ -32,6 +32,17 @@ impl VttReader {
             }
             return None;
         }
+        self.flush()
+    }
+
+    /// Lines of a block have arrived and the blank line after them has not.
+    pub fn pending(&self) -> bool {
+        !self.block.is_empty()
+    }
+
+    /// Ends the block as it is. ffmpeg's WebVTT muxer writes the blank line that closes a cue just before the next cue (measured with
+    /// ffmpeg 9), so on a film with long gaps between lines waiting for it would show a cue after it is over.
+    pub fn flush(&mut self) -> Option<StremioCue> {
         let mut cue = parse_block(&std::mem::take(&mut self.block))?;
         cue.start_ms += self.offset_ms;
         cue.end_ms += self.offset_ms;
@@ -72,6 +83,17 @@ mod tests {
         let mut reader = VttReader::new(60_000);
         let cues = feed(&mut reader, "WEBVTT\n\n00:01.000 --> 00:02.500\n<i>Hi</i>\nthere\n\n3\n00:03.000 --> 00:04.000 line:90%\n{\\an8}Bye\n\n");
         assert_eq!(cues.iter().map(|c| (c.start_ms, c.end_ms, c.text.as_str())).collect::<Vec<_>>(), [(61_000, 62_500, "Hi\nthere"), (63_000, 64_000, "Bye")]);
+    }
+
+    #[test]
+    fn a_block_can_be_ended_before_its_blank_line() {
+        let mut reader = VttReader::new(0);
+        assert!(feed(&mut reader, "WEBVTT\n\n00:02.000 --> 00:06.000\nHello\n").is_empty());
+        assert!(reader.pending());
+        let cue = reader.flush().expect("the cue so far");
+        assert_eq!((cue.start_ms, cue.end_ms, cue.text.as_str()), (2000, 6000, "Hello"));
+        assert!(!reader.pending() && reader.flush().is_none());
+        assert!(reader.push_line("").is_none(), "the blank line that follows later adds nothing");
     }
 
     #[test]

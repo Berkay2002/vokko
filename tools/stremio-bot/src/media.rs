@@ -362,13 +362,23 @@ async fn audio_loop(listener: TcpListener, source: NativeAudioSource, counters: 
     }
 }
 
+/// ffmpeg writes a cue in one flush; this long without another line and the cue is complete.
+const CUE_SETTLE: Duration = Duration::from_millis(150);
+
 /// Reads the WebVTT ffmpeg writes for one text subtitle stream and queues its cues. The text is cleaned and capped in `VttReader`.
 async fn subtitle_loop(listener: TcpListener, index: u32, start_ms: u64, queue: mpsc::Sender<(u32, StremioCue)>) {
     let Some(stream) = accept(listener).await else { return };
     let mut lines = BufReader::new(stream).lines();
     let (mut reader, mut budget) = (VttReader::new(start_ms), Budget::new(Instant::now()));
-    while let Ok(Some(line)) = lines.next_line().await {
-        if let Some(cue) = reader.push_line(&line)
+    loop {
+        // ffmpeg closes a cue with the blank line it writes before the next one, so a block that has stopped growing is a cue.
+        let next = if reader.pending() { tokio::time::timeout(CUE_SETTLE, lines.next_line()).await.ok() } else { Some(lines.next_line().await) };
+        let cue = match next {
+            Some(Ok(Some(line))) => reader.push_line(&line),
+            Some(_) => break,
+            None => reader.flush(),
+        };
+        if let Some(cue) = cue
             && budget.allow(Instant::now())
         {
             let _ = queue.try_send((index, cue));
