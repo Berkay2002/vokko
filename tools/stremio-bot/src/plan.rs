@@ -77,6 +77,11 @@ impl Desired {
         if !crate::guard::host_ok(&media) {
             return Err("media_url must be a public host".into());
         }
+        if !media.username().is_empty() || media.password().is_some() {
+            return Err("media_url must not carry credentials".into());
+        }
+        // ffmpeg gets the exact string that was checked, so a parser difference cannot point it at another host
+        self.media_url = media.into();
         if self.token.is_empty() || self.token.len() > 4096 {
             return Err("token missing or too long".into());
         }
@@ -328,6 +333,8 @@ mod tests {
         assert!(bad(|d| d.media_url = "http://cdn.example/v.mp4".into()));
         assert!(bad(|d| d.media_url = "file:///etc/passwd".into()));
         assert!(bad(|d| d.media_url = "not a url".into()));
+        assert!(bad(|d| d.media_url = "https://user:pw@cdn.example/v.mp4".into()));
+        assert!(bad(|d| d.media_url = "https://8.8.8.8@127.0.0.1/v.mp4".into()));
         for private in [
             "https://localhost/v",
             "https://127.0.0.1/v",
