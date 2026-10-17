@@ -127,6 +127,8 @@ export class LiveKitVideo {
       return;
     }
     this.screenStarting = true;
+    // Armed before the picker opens, so WebView2's own sharing bar is hidden as it appears rather than after the publish.
+    void hideShareBar();
     try {
       // An SFU too old for VP9 / AV1 simulcast would get one layer: VP8 / H.264 simulcast instead, as on WebKit.
       const support = detectCodecSupport();
@@ -149,7 +151,6 @@ export class LiveKitVideo {
         return;
       }
       this.screen = { publication, room };
-      void hideShareBar();
       // The system picker decides whether audio comes along (Windows: a whole screen with "Share system audio" ticked).
       if (choice.audio && !room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)) this.cb.screenAudioMissing?.();
       publication.track?.once(TrackEvent.Ended, () => {

@@ -29,7 +29,7 @@ export async function getAppVersion(): Promise<string | null> {
   }
 }
 
-/** Hides WebView2's own "is sharing your screen" bar (Windows; a no-op elsewhere). Call once a screen share is live. */
+/** Hides WebView2's own "is sharing your screen" bar (Windows; a no-op elsewhere). Call just before opening the screen picker. */
 export async function hideShareBar(): Promise<void> {
   await call<void>("desktop_hide_share_bar", undefined, undefined);
 }
