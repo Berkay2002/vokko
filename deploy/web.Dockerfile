@@ -7,6 +7,8 @@ COPY package.json package-lock.json ./
 COPY apps/desktop/package.json apps/desktop/
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY apps/desktop apps/desktop
+# The logo is imported from the repo-level brand folder.
+COPY assets/brand assets/brand
 # Without this the bundle runs on the in-memory mock backend.
 ARG VITE_VOKKO_API
 RUN test -n "$VITE_VOKKO_API" || (echo "VITE_VOKKO_API is required" && exit 1)
