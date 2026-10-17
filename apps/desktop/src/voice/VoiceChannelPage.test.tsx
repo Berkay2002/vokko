@@ -5,7 +5,7 @@ import { ChannelType, type Channel, type User, type VoiceState } from '../api/ty
 
 // zustand hooks read their initial state during server rendering, so the stores the stage reads are replaced by plain objects.
 const fake = vi.hoisted(() => ({
-  voice: { meId: '1' as string | null, channelId: 'c1' as string | null, states: [] as unknown[], watch: {} as Record<string, unknown>, stremio: {} as Record<string, unknown> },
+  voice: { meId: '1' as string | null, channelId: 'c1' as string | null, states: [] as unknown[], watch: {} as Record<string, unknown>, stremio: {} as Record<string, unknown>, spotify: {} as Record<string, unknown> },
   media: { videos: {} as Record<string, unknown>, watching: {} as Record<string, true>, quality: {}, liveScreens: {} as Record<string, true>, cameraOn: false, screenOn: false, error: null },
   ui: { focusedTile: null as string | null, membersHidden: false, chatOpen: false, focusStream: null as string | null },
 }));
@@ -72,6 +72,7 @@ beforeEach(() => {
   fake.voice.states = [];
   fake.voice.watch = {};
   fake.voice.stremio = {};
+  fake.voice.spotify = {};
   fake.media.videos = {};
   fake.media.watching = {};
   fake.media.liveScreens = {};
@@ -130,6 +131,27 @@ describe('Stremio tile', () => {
     expect(stremio.attrs).toContain('stremio');
     expect(stremio.attrs).toContain('data-status="starting"');
     expect(stremio.body).toContain('Heat');
+    expect(users).toHaveLength(2);
+
+    fake.voice.channelId = null;
+    expect(tiles(render())).toHaveLength(2);
+  });
+});
+
+describe('Spotify tile', () => {
+  const track = { uri: 'spotify:track:4uLU6hMCjMI75M1A2tKUQC', title: 'One More Time', artists: ['Daft Punk'], duration_ms: 320_000, explicit: false };
+  const session = { status: 'playing', track, playing: true, position_ms: 0, updated_at_ms: 1, loop: 'off', queue: [] as unknown[], queue_len: 0, can_previous: false, started_by: '2', bot_identity: 'bot:spotify:c1' };
+
+  it('comes before the people, only in the call we are in', () => {
+    const states = [voiceState('1'), voiceState('2')];
+    expect(stageTiles(states, () => false, false, false, true).map(t => t.id)).toEqual(['spotify', '1', '2']);
+
+    fake.voice.states = states;
+    fake.voice.spotify = { c1: session };
+    const [spotify, ...users] = tiles(render());
+    expect(spotify.attrs).toContain('spotify');
+    expect(spotify.attrs).toContain('data-status="playing"');
+    expect(spotify.body).toContain('One More Time');
     expect(users).toHaveLength(2);
 
     fake.voice.channelId = null;
