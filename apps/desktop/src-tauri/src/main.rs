@@ -85,6 +85,13 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Links that started this process (cold start), then links forwarded later (second instance, macOS open-url).
     let deep_link = app.deep_link();
+    // The .deb's .desktop file registers vokko://; an AppImage has no installer, so it registers itself (~/.local/share/applications).
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("APPIMAGE").is_some()
+        && let Err(error) = deep_link.register_all()
+    {
+        log::warn!("vokko:// scheme not registered: {error}");
+    }
     if let Ok(Some(urls)) = deep_link.get_current() {
         for url in urls {
             links::handle_url(&handle, url.as_str());

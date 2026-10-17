@@ -76,6 +76,11 @@ pub struct Config {
     pub stremio: Option<StremioConfig>,
     /// Spotify in voice calls; `None` (every `/spotify` route answers 404) unless it is fully configured.
     pub spotify: Option<SpotifyConfig>,
+    /// Key of the per-game app ids (docs/design/games-host.md section 5): derived from `VOKKO_SECRETS_KEY`, else random per process
+    /// (app ids then change on every restart).
+    pub games_app_key: crate::crypto::SecretsKey,
+    /// `VOKKO_DEV=1`: game manifests may also point at `http://127.0.0.1` / `http://localhost`.
+    pub dev: bool,
 }
 
 /// Stremio in voice calls (docs/design/stremio-bot.md): `VOKKO_SECRETS_KEY`, the media LiveKit (`VOKKO_MEDIA_LIVEKIT_URL`,
@@ -595,6 +600,12 @@ impl Config {
         config.livekit = parse_livekit(&env)?;
         config.stremio = parse_stremio(&env)?;
         config.spotify = parse_spotify(&env)?;
+        if let Some(key) = env.get("VOKKO_SECRETS_KEY").filter(|key| !key.trim().is_empty()) {
+            config.games_app_key = crate::crypto::SecretsKey::parse(&key)?.derive(crate::voice::games::APP_ID_LABEL);
+        } else {
+            tracing::warn!("VOKKO_SECRETS_KEY is not set: game app ids change on every restart");
+        }
+        config.dev = env.get("VOKKO_DEV").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "on" | "true" | "yes"));
         if let Some(value) = env.get("VOKKO_VOICE_BITRATE_MAX") {
             let bitrate: u32 = value.trim().parse().map_err(|_| format!("VOKKO_VOICE_BITRATE_MAX must be bps, got {value}"))?;
             if !(VOICE_BITRATE_MIN..=VOICE_BITRATE_CEILING_MAX).contains(&bitrate) {
@@ -636,6 +647,8 @@ impl Config {
             reminder_poll: Duration::from_secs(15),
             stremio: None,
             spotify: None,
+            games_app_key: crate::crypto::SecretsKey::random(),
+            dev: false,
             cors_origins: None,
             registration_open: true,
             livekit: Vec::new(),

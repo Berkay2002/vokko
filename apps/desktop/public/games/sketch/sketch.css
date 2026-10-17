@@ -1,0 +1,57 @@
+:root {
+  --bg: #1e1f22;
+  --panel: #2b2d31;
+  --text: #e3e5e8;
+  --muted: #a0a4ab;
+  --accent: #5865f2;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px system-ui, sans-serif; }
+#app { display: grid; grid-template-columns: 1fr 220px; grid-template-rows: auto 1fr; gap: 8px; height: 100%; padding: 8px; }
+header { grid-column: 1 / -1; display: flex; gap: 16px; align-items: baseline; min-height: 24px; }
+#status { color: var(--muted); }
+#word { letter-spacing: 0.2em; font-size: 18px; }
+#timer { margin-left: auto; font-variant-numeric: tabular-nums; }
+#board { display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; }
+#canvas-wrap { position: relative; min-height: 0; }
+#joining { position: absolute; inset: 0; display: grid; place-items: center; background: rgb(0 0 0 / 0.55); color: #fff; font-size: 18px; border-radius: 6px; }
+#joining[hidden] { display: none; }
+#canvas { display: block; width: min(100%, calc((100vh - 100px) * 4 / 3)); height: auto; margin-inline: auto; object-fit: contain; background: #fff; border-radius: 6px; touch-action: none; cursor: crosshair; }
+#tools { display: flex; gap: 12px; align-items: center; }
+#tools[hidden] { display: none; }
+#tools span { display: flex; gap: 4px; }
+button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid #3f4147; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+button[aria-pressed="true"] { outline: 2px solid var(--accent); }
+.swatch { width: 24px; height: 24px; padding: 0; }
+aside { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-radius: 6px; padding: 8px; }
+h2 { font-size: 12px; text-transform: uppercase; color: var(--muted); margin: 4px 0; }
+ul { list-style: none; margin: 0 0 8px; padding: 0; }
+#guesses { flex: 1; overflow-y: auto; word-break: break-word; }
+#guesses .hit { color: #57f287; font-weight: 600; }
+#guess-row { display: flex; gap: 4px; }
+#guess { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg); border: 1px solid #3f4147; border-radius: 4px; padding: 4px 6px; }
+/* Small frames (about 300x170), so keep the side panel beside a smaller board and let the canvas size itself (4:3, no letterbox). */
+@media (max-width: 560px) {
+  html, body { font-size: 12px; }
+  #app { grid-template-columns: 1fr 40%; gap: 4px; padding: 4px; }
+  header { gap: 8px; min-height: 0; }
+  #word { font-size: 13px; letter-spacing: 0.1em; }
+  #board { gap: 4px; }
+  #canvas-wrap { flex: 1 1 0; }
+  #canvas { width: auto; height: auto; max-width: 100%; max-height: 100%; }
+  #tools { flex-wrap: wrap; gap: 4px; }
+  .swatch { width: 16px; height: 16px; }
+  button { padding: 1px 4px; font-size: 11px; }
+  aside { padding: 4px; overflow: hidden; }
+  h2 { font-size: 10px; margin: 0 0 2px; }
+  ul { margin-bottom: 4px; }
+  #guess { padding: 2px 4px; }
+}
+/* A portrait frame (the focused tile on a phone): the board on top at full width, scores and guesses below it. */
+@media (orientation: portrait) {
+  #app { grid-template-columns: 1fr; grid-template-rows: auto auto minmax(0, 1fr); }
+  #canvas-wrap { flex: none; }
+  #canvas { width: 100%; max-height: none; }
+  .swatch { width: 24px; height: 24px; }
+  button { padding: 4px 8px; font-size: 12px; }
+}

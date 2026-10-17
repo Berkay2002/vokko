@@ -82,6 +82,7 @@ fn call_object(state: &AppState, channel_id: i64, entry: &CallEntry) -> Call {
         watch_together: state.voice.watch_get(channel_id),
         stremio: crate::voice::stremio::states_in(state, &HashSet::from([channel_id])),
         spotify: crate::voice::spotify::states_in(state, &HashSet::from([channel_id])),
+        game: state.voice.game_get(channel_id),
     }
 }
 

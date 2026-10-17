@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Desktop release: bumps the version, builds signed Windows (here) and macOS (on buildhost) bundles, uploads them to
+# Desktop release: bumps the version, builds signed Windows (here), Linux (WSL distro vokko-linux, tools/release-linux.sh) and
+# macOS (on buildhost) bundles, uploads them to
 # https://vokko.example.com/downloads/ and publishes latest.json last, which is what installed apps poll (docs/desktop-release.md).
 # Run from Git Bash on the Windows PC, on a clean main:  tools/release-desktop.sh 0.1.2 "What changed"
 # Needs ~/.vokko/updater.key(.password) on both machines and `ssh buildhost` without a password.
@@ -45,23 +46,31 @@ npm ci --no-audit --no-fund --loglevel=error
 WIN=$CARGO_TARGET_DIR/release/bundle/nsis/Vokko_${VERSION}_x64-setup.exe
 test -f "$WIN.sig"
 
+echo "== Linux build (WSL)"
+LINUX=$CARGO_TARGET_DIR/linux
+tools/release-linux.sh "$VERSION" "$LINUX"
+APPIMAGE=Vokko_${VERSION}_amd64.AppImage DEB=Vokko_${VERSION}_amd64.deb
+
 wait $MAC_PID || { ssh buildhost 'tail -20 /tmp/vokko-macbuild.log'; exit 1; }
 MAC_SIG=$(ssh -o BatchMode=yes buildhost "cat $MAC_REPO/target/release/bundle/macos/Vokko.app.tar.gz.sig")
 
 echo "== upload"
-scp -q -o BatchMode=yes "$WIN" buildhost:$DOWNLOADS/
+scp -q -o BatchMode=yes "$WIN" "$LINUX/$APPIMAGE" "$LINUX/$DEB" buildhost:$DOWNLOADS/
 ssh -o BatchMode=yes buildhost "set -e; cd $DOWNLOADS
   cp $MAC_REPO/target/release/bundle/macos/Vokko.app.tar.gz Vokko_${VERSION}_aarch64.app.tar.gz
   cp $MAC_REPO/target/release/bundle/dmg/Vokko_${VERSION}_aarch64.dmg .Vokko-mac.dmg.new && mv -f .Vokko-mac.dmg.new Vokko-mac.dmg
-  cp Vokko_${VERSION}_x64-setup.exe .Vokko-windows-setup.exe.new && mv -f .Vokko-windows-setup.exe.new Vokko-windows-setup.exe"
+  cp Vokko_${VERSION}_x64-setup.exe .Vokko-windows-setup.exe.new && mv -f .Vokko-windows-setup.exe.new Vokko-windows-setup.exe
+  cp $APPIMAGE .Vokko-linux.AppImage.new && mv -f .Vokko-linux.AppImage.new Vokko-linux.AppImage
+  cp $DEB .Vokko-linux.deb.new && mv -f .Vokko-linux.deb.new Vokko-linux.deb"
 mkdir -p artifacts && cp "$WIN" artifacts/Vokko-windows-setup.exe
 
 # Published last: an app that sees the new version can always download it.
 node -e '
-const [version, notes, winSig, macSig, base] = process.argv.slice(1);
+const [version, notes, winSig, macSig, linuxSig, base] = process.argv.slice(1);
 process.stdout.write(JSON.stringify({ version, notes, pub_date: new Date().toISOString(), platforms: {
   "windows-x86_64": { signature: winSig, url: `${base}/Vokko_${version}_x64-setup.exe` },
   "darwin-aarch64": { signature: macSig, url: `${base}/Vokko_${version}_aarch64.app.tar.gz` },
-} }, null, 2));' "$VERSION" "$NOTES" "$(cat "$WIN.sig")" "$MAC_SIG" "$API/downloads" |
+  "linux-x86_64": { signature: linuxSig, url: `${base}/Vokko_${version}_amd64.AppImage` },
+} }, null, 2));' "$VERSION" "$NOTES" "$(cat "$WIN.sig")" "$MAC_SIG" "$(cat "$LINUX/$APPIMAGE.sig")" "$API/downloads" |
   ssh -o BatchMode=yes buildhost "cat > $DOWNLOADS/.latest.json.new && mv -f $DOWNLOADS/.latest.json.new $DOWNLOADS/latest.json"
 curl -fsS "$API/downloads/latest.json" | grep -q "\"version\": \"$VERSION\"" && echo "released $VERSION"

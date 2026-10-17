@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mock game</title>
+<style>
+  body { margin: 0; padding: 12px; font: 14px system-ui, sans-serif; background: #1e1f22; color: #e3e5e8; }
+  button { font: inherit; }
+</style>
+</head>
+<body>
+<!-- e2e-only game (builtin:mock, MOCK builds). Shows players, sends pings, answers pings with pongs. -->
+<p id="status">Connecting...</p>
+<p data-testid="game-players" id="players">players: 0</p>
+<button type="button" id="ping" disabled>Send ping</button>
+<ul id="messages"></ul>
+<script src="../vokko-games.js"></script>
+<script src="./mock.js"></script>
+</body>
+</html>

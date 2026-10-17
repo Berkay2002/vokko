@@ -1635,6 +1635,133 @@ pub struct StremioUpdate {
     pub state: Option<StremioState>,
 }
 
+/// Largest relayed game message, serialized (`POST /channels/{id}/game/messages`).
+pub const GAME_RELAY_MAX_BYTES: usize = 4096;
+/// Most games in one guild's catalog.
+pub const GUILD_GAMES_MAX: usize = 25;
+/// Longest game name.
+pub const GAME_NAME_MAX_CHARS: usize = 32;
+/// Most players a game manifest may name.
+pub const GAME_PLAYERS_MAX: u8 = 16;
+
+/// How the game frame is shaped in its tile.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GameAspect {
+    #[default]
+    #[serde(rename = "16:9")]
+    Wide,
+    #[serde(rename = "4:3")]
+    Standard,
+    #[serde(rename = "1:1")]
+    Square,
+    #[serde(rename = "fill")]
+    Fill,
+}
+
+/// A game that can run in a call (docs/design/games-host.md section 4): a built-in (`id` = `builtin:<name>`) or an entry of a
+/// guild's catalog (`id` = snowflake string).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GameManifest {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    /// One emoji, or none.
+    #[serde(default)]
+    pub icon: Option<String>,
+    pub min_players: u8,
+    pub max_players: u8,
+    #[serde(default)]
+    pub aspect: GameAspect,
+}
+
+/// `POST /guilds/{id}/games`; players default to 1-16, `aspect` to 16:9.
+#[derive(Clone, Debug, Deserialize)]
+pub struct CreateGameRequest {
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub min_players: Option<u8>,
+    #[serde(default)]
+    pub max_players: Option<u8>,
+    #[serde(default)]
+    pub aspect: Option<GameAspect>,
+}
+
+/// `PATCH /guilds/{id}/games/{game_id}`; `icon: null` clears the icon.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct EditGameRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(default, deserialize_with = "double_option")]
+    pub icon: Option<Option<String>>,
+    #[serde(default)]
+    pub min_players: Option<u8>,
+    #[serde(default)]
+    pub max_players: Option<u8>,
+    #[serde(default)]
+    pub aspect: Option<GameAspect>,
+}
+
+/// The game running in a voice channel or DM call (Vokko-only, in memory per channel).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GameSession {
+    /// 16 hex characters, new for every start.
+    pub session_id: String,
+    pub game: GameManifest,
+    pub started_by: Snowflake,
+    pub started_at_ms: i64,
+}
+
+/// GAME_UPDATE, to everyone who can see the channel (`state: null` = the game ended), and the entries of the `games` list on
+/// READY guilds and GUILD_CREATE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GameUpdate {
+    pub channel_id: Snowflake,
+    pub state: Option<GameSession>,
+}
+
+/// `PUT /channels/{id}/game`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct GameStartRequest {
+    pub game_id: String,
+}
+
+/// `GET /channels/{id}/game/players`: someone in the call and their id inside this game.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GamePlayer {
+    pub user_id: Snowflake,
+    /// 22 characters of base64url, stable per game and user, never the user id.
+    pub app_id: String,
+}
+
+/// `POST /channels/{id}/game/messages`: relay `data` to the call, or to the one player whose app id is `to`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct GameRelayRequest {
+    pub data: Value,
+    #[serde(default)]
+    pub to: Option<String>,
+}
+
+/// GAME_MESSAGE: relayed game data, only to people in the call (never back to the sender).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GameMessage {
+    pub channel_id: Snowflake,
+    pub session_id: String,
+    /// The sender's app id.
+    pub from: String,
+    pub data: Value,
+}
+
+/// GUILD_GAMES_UPDATE: the guild's game catalog changed; refetch `GET /guilds/{id}/games`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildGamesUpdate {
+    pub guild_id: Snowflake,
+}
+
 /// `PUT /channels/{id}/stremio`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct StremioStartRequest {
@@ -2086,6 +2213,9 @@ pub struct Call {
     /// The Spotify session of the call, if one is running (at most one entry).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spotify: Vec<SpotifyUpdate>,
+    /// The game running in the call, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<GameSession>,
 }
 
 /// CALL_UPDATE: a `Call` without its voice states (those travel as VOICE_STATE_UPDATE).
@@ -2893,6 +3023,10 @@ numeric_enum!(
         /// Vokko-only (Discord has no report queue): a moderator closed or reopened a report (MOD-009). `target_id` is the
         /// report id, the one change is `status`.
         ReportUpdate = 250,
+        /// Vokko-only: a game was added to, changed in or removed from the guild's catalog (`target_id` = the game id).
+        GameAdd = 251,
+        GameUpdate = 252,
+        GameRemove = 253,
     }
 );
 
@@ -4075,6 +4209,9 @@ pub struct GuildWithState {
     /// The Spotify session in the voice channels the receiver can see (at most one on the whole server); omitted when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub spotify: Vec<SpotifyUpdate>,
+    /// Games running in the voice channels the receiver can see; omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub games: Vec<GameUpdate>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -4670,6 +4807,9 @@ pub enum GatewayEvent {
     WatchTogetherUpdate(WatchTogetherUpdate),
     StremioUpdate(StremioUpdate),
     SpotifyUpdate(SpotifyUpdate),
+    GameUpdate(GameUpdate),
+    GameMessage(GameMessage),
+    GuildGamesUpdate(GuildGamesUpdate),
     StageInstanceCreate(StageInstance),
     StageInstanceUpdate(StageInstance),
     StageInstanceDelete(StageInstance),
@@ -4758,6 +4898,9 @@ impl GatewayEvent {
             Self::WatchTogetherUpdate(_) => "WATCH_TOGETHER_UPDATE",
             Self::StremioUpdate(_) => "STREMIO_UPDATE",
             Self::SpotifyUpdate(_) => "SPOTIFY_UPDATE",
+            Self::GameUpdate(_) => "GAME_UPDATE",
+            Self::GameMessage(_) => "GAME_MESSAGE",
+            Self::GuildGamesUpdate(_) => "GUILD_GAMES_UPDATE",
             Self::StageInstanceCreate(_) => "STAGE_INSTANCE_CREATE",
             Self::StageInstanceUpdate(_) => "STAGE_INSTANCE_UPDATE",
             Self::StageInstanceDelete(_) => "STAGE_INSTANCE_DELETE",
@@ -4834,6 +4977,9 @@ impl GatewayEvent {
             Self::WatchTogetherUpdate(value) => serde_json::to_value(value),
             Self::StremioUpdate(value) => serde_json::to_value(value),
             Self::SpotifyUpdate(value) => serde_json::to_value(value),
+            Self::GameUpdate(value) => serde_json::to_value(value),
+            Self::GameMessage(value) => serde_json::to_value(value),
+            Self::GuildGamesUpdate(value) => serde_json::to_value(value),
             Self::StageInstanceCreate(value) | Self::StageInstanceUpdate(value) | Self::StageInstanceDelete(value) => serde_json::to_value(value),
             Self::ThreadCreate(value) | Self::ThreadUpdate(value) => serde_json::to_value(value),
             Self::ThreadDelete(value) => serde_json::to_value(value),
@@ -5631,6 +5777,16 @@ mod tests {
         let update = GatewayEvent::SpotifyUpdate(SpotifyUpdate { channel_id: Snowflake(201), state: None });
         assert_eq!((update.name(), update.data()), ("SPOTIFY_UPDATE", json!({"channel_id": "201", "state": null})));
         round_trip::<SpotifyUpdate>(json!({"channel_id": "201", "state": spotify}));
+        let game = json!({
+            "session_id": "0123456789abcdef", "started_by": "7", "started_at_ms": 9,
+            "game": {"id": "builtin:sketch", "name": "Sketch", "url": "https://x.test/", "icon": "🎨", "min_players": 2, "max_players": 16, "aspect": "4:3"}
+        });
+        round_trip::<GameSession>(game.clone());
+        round_trip::<GameUpdate>(json!({"channel_id": "201", "state": game}));
+        let ended = GatewayEvent::GameUpdate(GameUpdate { channel_id: Snowflake(201), state: None });
+        assert_eq!((ended.name(), ended.data()), ("GAME_UPDATE", json!({"channel_id": "201", "state": null})));
+        let relayed = GatewayEvent::GameMessage(GameMessage { channel_id: Snowflake(201), session_id: "s".into(), from: "a".into(), data: json!({"x": 1}) });
+        assert_eq!((relayed.name(), relayed.data()), ("GAME_MESSAGE", json!({"channel_id": "201", "session_id": "s", "from": "a", "data": {"x": 1}})));
         let failed =
             GatewayEvent::VoiceConnectFailed(VoiceConnectFailed { guild_id: None, channel_id: Snowflake(5), reason: VoiceConnectFailure::ChannelFull });
         assert_eq!((failed.name(), failed.data()), ("VOICE_CONNECT_FAILED", json!({"guild_id": null, "channel_id": "5", "reason": "channel_full"})));

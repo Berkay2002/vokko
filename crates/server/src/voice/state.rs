@@ -17,8 +17,8 @@ use vokko_protocol::api::permissions::{
     ADMINISTRATOR, CONNECT, MANAGE_CHANNELS, MOVE_MEMBERS, MUTE_MEMBERS, PRIORITY_SPEAKER, SPEAK, STREAM, USE_VAD, VIEW_CHANNEL,
 };
 use vokko_protocol::api::{
-    CALL_PARTICIPANT_MAX, ChannelType, GatewayEvent, Snowflake, SpotifyUpdate, StremioUpdate, VoiceConnectFailed, VoiceConnectFailure, VoiceServerUpdate,
-    VoiceState, VoiceStateUpdateCommand, WatchTogetherState, WatchTogetherUpdate,
+    CALL_PARTICIPANT_MAX, ChannelType, GameSession, GameUpdate, GatewayEvent, Snowflake, SpotifyUpdate, StremioUpdate, VoiceConnectFailed, VoiceConnectFailure,
+    VoiceServerUpdate, VoiceState, VoiceStateUpdateCommand, WatchTogetherState, WatchTogetherUpdate,
 };
 
 use super::backends::Backends;
@@ -127,6 +127,8 @@ pub struct Voice {
     pub calls: super::calls::Calls,
     /// Watch Together sessions by channel id (in memory; a session ends when the channel's last voice state goes).
     watch: Mutex<HashMap<i64, WatchTogetherState>>,
+    /// Running games by channel id (in memory; a game ends when the channel's last voice state goes).
+    games: Mutex<HashMap<i64, GameSession>>,
 }
 
 /// A user's serial lock; dropping it forgets the per-user mutex once nobody else holds or waits for it.
@@ -161,6 +163,7 @@ impl Voice {
             admission: tokio::sync::RwLock::new(()),
             calls: Default::default(),
             watch: Mutex::new(HashMap::new()),
+            games: Mutex::new(HashMap::new()),
         }
     }
 
@@ -195,6 +198,43 @@ impl Voice {
             .collect();
         sessions.sort_by_key(|update| update.channel_id.db());
         sessions
+    }
+
+    /// The channel's running game.
+    pub fn game_get(&self, channel_id: i64) -> Option<GameSession> {
+        lock(&self.games).get(&channel_id).cloned()
+    }
+
+    /// Replaces the channel's game with what `change` makes of it (`Ok(None)` ends it) under one lock; returns `(before, after)`.
+    pub fn game_update(
+        &self,
+        channel_id: i64,
+        change: impl FnOnce(Option<&GameSession>) -> Result<Option<GameSession>, ApiErr>,
+    ) -> Result<(Option<GameSession>, Option<GameSession>), ApiErr> {
+        let mut sessions = lock(&self.games);
+        let before = sessions.get(&channel_id).cloned();
+        let after = change(before.as_ref())?;
+        match &after {
+            Some(session) => sessions.insert(channel_id, session.clone()),
+            None => sessions.remove(&channel_id),
+        };
+        Ok((before, after))
+    }
+
+    /// Games running in the given channels (READY / GUILD_CREATE), by channel id.
+    pub fn games_in(&self, channel_ids: &HashSet<i64>) -> Vec<GameUpdate> {
+        let mut sessions: Vec<GameUpdate> = lock(&self.games)
+            .iter()
+            .filter(|(id, _)| channel_ids.contains(id))
+            .map(|(id, session)| GameUpdate { channel_id: Snowflake::from(*id), state: Some(session.clone()) })
+            .collect();
+        sessions.sort_by_key(|update| update.channel_id.db());
+        sessions
+    }
+
+    /// Channels running the game `game_id`.
+    pub fn game_channels(&self, game_id: &str) -> Vec<i64> {
+        lock(&self.games).iter().filter(|(_, session)| session.game.id == game_id).map(|(id, _)| *id).collect()
     }
 
     /// Every backend was restored from since start. Until one is, reconciliation removes none of its LiveKit participants (it
@@ -399,6 +439,10 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
     // A late joiner syncs to the session that is already running (a DM call also carries it on CALL_CREATE).
     if let Some(watching) = state.voice.watch_get(channel_id) {
         let event = GatewayEvent::WatchTogetherUpdate(WatchTogetherUpdate { channel_id: target, state: Some(watching) });
+        session.dispatch(event.name(), event.data());
+    }
+    if let Some(game) = state.voice.game_get(channel_id) {
+        let event = GatewayEvent::GameUpdate(GameUpdate { channel_id: target, state: Some(game) });
         session.dispatch(event.name(), event.data());
     }
     if let Some(playing) = super::stremio::state_of(state, channel_id) {
@@ -662,6 +706,7 @@ async fn release_channel(state: &AppState, channel_id: i64) {
     }
     super::calls::release(state, channel_id).await;
     super::watch::end(state, channel_id).await;
+    super::games::end(state, channel_id).await;
     super::stremio::end(state, channel_id).await;
     super::spotify::end(state, channel_id).await;
     let cleared: Result<Option<(Option<i64>,)>, _> =
