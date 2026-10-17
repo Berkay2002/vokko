@@ -5,6 +5,7 @@ pub mod addons;
 pub mod bot;
 pub mod client;
 pub mod fetch;
+pub mod library;
 pub mod rank;
 
 use std::collections::HashMap;
@@ -70,6 +71,9 @@ pub struct TitleInfo {
     pub title: String,
     pub subtitle: Option<String>,
     pub poster: Option<String>,
+    /// `movie` or `series`, and the id the title was listed under (`tt…` or `tt…:season:episode`): what the library write-back needs.
+    pub kind: String,
+    pub video_id: String,
 }
 
 /// A cached value and when it was fetched.
@@ -209,6 +213,7 @@ pub fn routes() -> Router<AppState> {
         .route("/stremio/catalog", get(browse))
         .route("/stremio/meta/{kind}/{id}", get(meta))
         .route("/stremio/streams/{kind}/{video_id}", get(streams))
+        .route("/stremio/continue", get(library::continue_watching))
 }
 
 // ---- the linked account ----
@@ -217,7 +222,7 @@ fn aad(user_id: i64) -> Vec<u8> {
     format!("stremio:{user_id}").into_bytes()
 }
 
-async fn load_key(state: &AppState, active: &Active<'_>, user_id: i64) -> ApiResult<Option<(Secret, OffsetDateTime)>> {
+pub(crate) async fn load_key(state: &AppState, active: &Active<'_>, user_id: i64) -> ApiResult<Option<(Secret, OffsetDateTime)>> {
     let row: Option<(Vec<u8>, OffsetDateTime)> =
         sqlx::query_as("SELECT auth_key_enc, linked_at FROM stremio_accounts WHERE user_id = $1").bind(user_id).fetch_optional(&state.db).await?;
     let Some((sealed, linked_at)) = row else { return Ok(None) };
@@ -243,12 +248,12 @@ async fn store_key(state: &AppState, active: &Active<'_>, user_id: i64, key: &Se
 }
 
 /// Stremio says the key is dead: forget it, so the UI asks for a new link.
-async fn drop_key(state: &AppState, user_id: i64) {
+pub(crate) async fn drop_key(state: &AppState, user_id: i64) {
     let _ = sqlx::query("DELETE FROM stremio_accounts WHERE user_id = $1").bind(user_id).execute(&state.db).await;
     state.stremio.forget(user_id);
 }
 
-fn account_error(error: AccountError) -> ApiErr {
+pub(crate) fn account_error(error: AccountError) -> ApiErr {
     match error {
         AccountError::Rejected => ApiErr::invalid("account", "Stremio did not accept that."),
         AccountError::SessionGone => ApiErr::missing_permissions(),
@@ -374,7 +379,7 @@ async fn browse(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQ
 }
 
 /// Cinemeta's meta of a title, cached for ten minutes (the title page and the stream list both need it).
-async fn cached_meta(state: &AppState, active: &Active<'_>, kind: &str, id: &str) -> Result<Arc<StremioMeta>, FetchError> {
+pub(crate) async fn cached_meta(state: &AppState, active: &Active<'_>, kind: &str, id: &str) -> Result<Arc<StremioMeta>, FetchError> {
     let key = format!("{kind}/{id}");
     if let Some((at, meta)) = lock(&state.stremio.metas).get(&key)
         && at.elapsed() < META_TTL
@@ -405,10 +410,12 @@ async fn meta(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((
 }
 
 /// The title and, for an episode, `S1E2 · Name`, as shown on the tile.
-fn title_info(video_id: &str, meta: Option<&StremioMeta>) -> TitleInfo {
-    let Some(meta) = meta else { return TitleInfo { title: video_id.to_owned(), subtitle: None, poster: None } };
+fn title_info(kind: &str, video_id: &str, meta: Option<&StremioMeta>) -> TitleInfo {
+    let kind = kind.to_owned();
+    let video_id_owned = video_id.to_owned();
+    let Some(meta) = meta else { return TitleInfo { title: video_id.to_owned(), subtitle: None, poster: None, kind, video_id: video_id_owned } };
     let subtitle = meta.videos.iter().find(|video| video.id == video_id).map(|video| format!("S{}E{} · {}", video.season, video.episode, video.name));
-    TitleInfo { title: meta.name.clone(), subtitle, poster: meta.poster.clone() }
+    TitleInfo { title: meta.name.clone(), subtitle, poster: meta.poster.clone(), kind, video_id: video_id_owned }
 }
 
 async fn user_addons(state: &AppState, active: &Active<'_>, user_id: i64) -> ApiResult<Arc<Vec<Addon>>> {
@@ -449,7 +456,7 @@ async fn streams(
     let ((mut found, failed), meta) =
         tokio::join!(addons::fetch_streams(&active.clients.fetcher, &addons, &kind, &video_id), cached_meta(&state, &active, &kind, title_id));
     rank::rank(&mut found, active.cfg.max_height, kind == "series");
-    let info = title_info(&video_id, meta.ok().as_deref());
+    let info = title_info(&kind, &video_id, meta.ok().as_deref());
     let sids = state.stremio.remember(user_id, found.iter().map(|candidate| (candidate.clone(), info.clone())).collect());
     let streams = found
         .into_iter()

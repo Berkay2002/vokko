@@ -27,6 +27,7 @@ use crate::extract::ApiJson;
 use crate::state::AppState;
 use crate::store;
 use crate::stremio::bot::{BotError, Desired, secrets_match};
+use crate::stremio::library::{self, Finished};
 use crate::stremio::rank::{Candidate, Source};
 use crate::stremio::{Active, Listed, TitleInfo, active, limit, lock};
 
@@ -78,6 +79,16 @@ pub struct Session {
     dirty: bool,
     last_put: Instant,
     bot_down_since: Option<Instant>,
+    /// Who started the current item and where it began, for the write-back to their Stremio library (`stremio::library`).
+    tracked: Option<Tracked>,
+}
+
+/// The item being played as the library write-back needs it.
+struct Tracked {
+    /// The user who started this item (the PUT caller, or whoever queued it), not the session's `started_by`.
+    owner: i64,
+    info: TitleInfo,
+    began_ms: u64,
 }
 
 impl Session {
@@ -104,6 +115,29 @@ impl Session {
                 })
                 .collect(),
         }
+    }
+
+    /// Notes who started the current item (call right after `begin`) and, for a resume, where it starts.
+    fn track(&mut self, info: &TitleInfo, owner: i64, began_ms: u64) {
+        self.tracked = Some(Tracked { owner, info: info.clone(), began_ms });
+        self.position_ms = began_ms;
+    }
+
+    /// The current item as it stands now (or at its end, with `ended`), for the starter's library; each item is taken once.
+    /// `None` when the bot never reported a duration (it never played).
+    fn take_finished(&mut self, ended: bool, now_ms: i64) -> Option<Finished> {
+        let duration_ms = self.duration_ms?;
+        let tracked = self.tracked.take()?;
+        Some(Finished {
+            owner: tracked.owner,
+            kind: tracked.info.kind,
+            video_id: tracked.info.video_id,
+            name: tracked.info.title,
+            poster: tracked.info.poster,
+            position_ms: if ended { duration_ms } else { self.here(now_ms) },
+            duration_ms,
+            began_ms: tracked.began_ms,
+        })
     }
 
     /// Where the video is right now.
@@ -270,11 +304,14 @@ async fn start(
 ) -> ApiResult<Response> {
     let active = active(&state)?;
     let channel_id = require_in_voice(&state, user_id, &id).await?;
+    if body.position_ms.is_some_and(|position| position > STREMIO_POSITION_MAX_MS) {
+        return Err(ApiErr::invalid("position_ms", "Must be between 0 and 86400000."));
+    }
     limit(&state, "stremio-play", user_id, 3.0, 3.0 / 60.0)?;
     let listed = playable(&state, "sid", &body.sid, user_id)?;
     let (media, headers) = prepare(&active, &listed.candidate).await?;
     let generation = state.stremio.next_generation();
-    let (view, desired, had_one) = {
+    let (view, desired, had_one, replaced) = {
         let mut sessions = lock(&state.stremio.sessions);
         let had_one = sessions.contains_key(&channel_id);
         // Changing the item keeps the queue and who started the session.
@@ -301,12 +338,18 @@ async fn start(
             dirty: false,
             last_put: Instant::now(),
             bot_down_since: None,
+            tracked: None,
         });
         let token = bot_token(&state, channel_id, &session.room).ok_or_else(ApiErr::internal)?;
+        let replaced = session.take_finished(false, unix_millis());
         session.begin(&listed.info, listed.candidate.clone(), media, headers, generation, token);
+        session.track(&listed.info, user_id, body.position_ms.unwrap_or(0));
         let desired = session.desired(&state, unix_millis()).ok_or_else(ApiErr::internal)?;
-        (session.view(channel_id), desired, had_one)
+        (session.view(channel_id), desired, had_one, replaced)
     };
+    if let Some(replaced) = replaced {
+        library::save(&state, replaced);
+    }
     if let Err(error) = active.clients.bot.put(channel_id, &desired).await {
         let removed = {
             let mut sessions = lock(&state.stremio.sessions);
@@ -443,7 +486,10 @@ fn touch(state: &AppState, channel_id: i64, change: impl FnOnce(&mut Session)) {
 
 /// Ends the channel's session, if any: the bot drops it and everyone who can see the channel hears.
 pub(crate) async fn end(state: &AppState, channel_id: i64) {
-    let Some(session) = lock(&state.stremio.sessions).remove(&channel_id) else { return };
+    let Some(mut session) = lock(&state.stremio.sessions).remove(&channel_id) else { return };
+    if let Some(finished) = session.take_finished(false, unix_millis()) {
+        library::save(state, finished);
+    }
     if let Some(clients) = &state.stremio.clients {
         let bot = clients.bot.clone();
         let rooms = state.stremio.media_rooms();
@@ -482,6 +528,18 @@ pub(crate) fn user_left(state: &AppState, channel_id: i64) {
 /// The current item is over (or skipped): plays the next queued one, else ends the session. Items that cannot be opened are passed
 /// over. With `expected` set, nothing happens if the session has moved on to another item meanwhile.
 async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, expected: Option<u64>) {
+    // The item that is over goes to its starter's library once, before anything replaces it (with `expected` it ended by itself).
+    let finished = {
+        let mut sessions = lock(&state.stremio.sessions);
+        let Some(session) = sessions.get_mut(&channel_id) else { return };
+        if expected.is_some_and(|generation| generation != session.generation) {
+            return;
+        }
+        session.take_finished(expected.is_some(), unix_millis())
+    };
+    if let Some(finished) = finished {
+        library::save(state, finished);
+    }
     loop {
         let next = {
             let mut sessions = lock(&state.stremio.sessions);
@@ -507,6 +565,7 @@ async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, expecte
                 return;
             }
             session.begin(&next.info, next.candidate, media, headers, generation, token);
+            session.track(&next.info, next.added_by, 0);
             let Some(desired) = session.desired(state, unix_millis()) else { return };
             (session.view(channel_id), desired)
         };
