@@ -209,7 +209,7 @@ async fn app_icons_on_activities_must_exist_on_the_server() {
     let asset = uploaded["asset"].as_str().expect("asset").to_owned();
 
     // an icon the server has stays on the activity
-    let known = json!([{"name": "Google Chrome", "type": 0, "assets": {"large_image": asset}}]);
+    let known = json!([{"name": "Google Chrome", "type": 0, "assets": {"large_image": asset}, "app": true}]);
     alice.send(json!({"op": 3, "d": {"status": "online", "activities": known}})).await;
     wait_activities(&mut owner, &w.alice.1, "online", |a| a == &known).await;
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { MessageCircle, MoreHorizontal, UserCheck, UserPlus } from "lucide-react";
-import { formatPlaytime, listeningActivity, playingActivity } from "../activity/format";
+import { formatPlaytime, listeningActivity, playingActivity, playingVerb } from "../activity/format";
 import { getMutualFriends, request } from "../api/rest";
 import { snowflakeToTimestamp } from "../api/snowflake";
 import { displayName, useStore } from "../api/store";
@@ -203,7 +203,7 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
                 <span className="full-profile-tile"><ActivityIcon activity={activity} size={28} fill /></span>
                 <span className="full-profile-row-text">
                   <span className="full-profile-row-title">{activity.name}</span>
-                  <span className="full-profile-row-sub">Playing{activity.timestamps?.start ? ` · ${formatPlaytime(activity.timestamps.start, Date.now())}` : ""}</span>
+                  <span className="full-profile-row-sub">{playingVerb(activity)}{activity.timestamps?.start ? ` · ${formatPlaytime(activity.timestamps.start, Date.now())}` : ""}</span>
                 </span>
               </li>
             )}

@@ -59,7 +59,7 @@ const ALL_SECTIONS: SectionDef[] = [
   { id: "streamer", label: "Streamer Mode", icon: Radio, group: "Experience", keywords: ["streaming", "obs", "hide", "personal information", "invite links", "screen capture"] },
   { id: "windows", label: "Windows Settings", icon: Monitor, group: "Experience", desktopOnly: true, keywords: ["startup", "tray", "minimize", "close", "autostart", "login", "open on startup"] },
   { id: "activity", label: "Activity Privacy", icon: Gamepad2, group: "Games & Apps", outline: ["What Activity I Share", "Where I Share Activity"], keywords: ["status", "games", "share", "join"] },
-  { id: "games", label: "Registered Games", icon: Joystick, group: "Games & Apps", desktopOnly: true, keywords: ["game", "app", "detection", "detected", "add", "playing", "activity", "running"] },
+  { id: "games", label: "Registered Apps", icon: Joystick, group: "Games & Apps", desktopOnly: true, keywords: ["game", "app", "detection", "detected", "add", "playing", "activity", "running"] },
   { id: "connections", label: "Connected Apps", icon: Plug, group: "Games & Apps", outline: ["Connections", "Authorized Apps"], keywords: ["connections", "accounts", "authorized", "integrations"] },
   { id: "developer", label: "Advanced", icon: Code, group: "Other", keywords: ["developer", "developer mode", "application test mode", "ids", "api", "copy id", "hardware acceleration", "gpu"] },
   { id: "profiles", label: "Profiles", icon: UserIcon, group: "", hidden: true },

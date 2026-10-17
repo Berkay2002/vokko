@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { appIconUrl } from "../activity/format";
 import { registerMockAppIcon } from "../api/appIcons";
 import type { Activity } from "../api/types";
+import { ActivityCard, ActivityLine } from "./ActivityLine";
 import { ActivityIcon } from "./ActivityIcon";
 
 const HASH = "cd".repeat(32);
@@ -35,5 +36,15 @@ describe("ActivityIcon", () => {
 
   it("shows a local data: icon", () => {
     expect(renderToStaticMarkup(<ActivityIcon src={DATA} size={20} fill />)).toContain(`src="${DATA}"`);
+  });
+});
+
+describe("Using or Playing", () => {
+  it("says Using for an app and Playing for a game and for an activity without the flag", () => {
+    const app = { ...game(), app: true };
+    expect(renderToStaticMarkup(<ActivityLine activity={app} />)).toContain("Using <strong>Google Chrome</strong>");
+    expect(renderToStaticMarkup(<ActivityLine activity={game()} />)).toContain("Playing <strong>Google Chrome</strong>");
+    expect(renderToStaticMarkup(<ActivityCard activity={app} />)).toContain("Using an app");
+    expect(renderToStaticMarkup(<ActivityCard activity={game()} />)).toContain("Playing a game");
   });
 });

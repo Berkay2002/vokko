@@ -8,11 +8,11 @@ import { InfoBanner } from "./smControls";
 /** How often the process list is refreshed while the page is open. */
 const REFRESH_MS = 5000;
 
-/** The share switch used by Registered Games and Activity Privacy. */
+/** The share switch used by Registered Apps and Activity Privacy. */
 export function ShareActivitySwitch() {
   const share = useActivity(s => s.share);
   return (
-    <SwitchRow label="Share my activity" note="Show the game or app you are using as your status. Friends and server members see “Playing …” with its name and icon and how long it has been open." checked={share} onChange={setShareActivity} />
+    <SwitchRow label="Share my activity" note="Show the game or app you are using as your status. Friends and server members see “Playing …” for a game or “Using …” for an app, with its name and icon and how long it has been open." checked={share} onChange={setShareActivity} />
   );
 }
 
@@ -56,7 +56,7 @@ export function RegisteredGamesPage() {
   }, [running, registered, query]);
 
   return (
-    <Page title="Registered Games">
+    <Page title="Registered Apps">
       <Category title="App Detection">
         <div className="registered-detected" data-testid="detected-game">
           <span className="registered-detected-icon" aria-hidden="true">

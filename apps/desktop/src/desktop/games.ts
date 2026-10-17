@@ -41,6 +41,8 @@ export interface DetectedGame {
   /** The executable that matched, as the OS reported it. */
   exe: string;
   startedAt: number;
+  /** A program, not a game: an app the user added or a shipped `kind: "app"` entry. Sent as `app: true`, so viewers read "Using X". */
+  app?: boolean;
 }
 
 export const DETECTABLE_GAMES: readonly GameEntry[] = detectable;
@@ -58,6 +60,7 @@ export function normalizeExe(name: string): string {
  */
 export function matchGame(processes: readonly RunningProcess[], userGames: readonly GameEntry[] = [], shipped: readonly GameEntry[] = DETECTABLE_GAMES): DetectedGame | null {
   const index = new Map<string, GameEntry>();
+  const userEntries = new Set(userGames);
   for (const list of [shipped, userGames]) {
     for (const game of list) for (const exe of game.exe) index.set(normalizeExe(exe), game);
   }
@@ -67,8 +70,9 @@ export function matchGame(processes: readonly RunningProcess[], userGames: reado
     if (process.system) continue;
     const entry = index.get(normalizeExe(process.name));
     if (!entry) continue;
-    const found: DetectedGame = { name: entry.name, exe: process.name, startedAt: process.startedAt };
     const isApp = entry.kind === "app";
+    // Ranking keeps the user's own entries on a par with games (they were added on purpose); only the label says "Using".
+    const found: DetectedGame = { name: entry.name, exe: process.name, startedAt: process.startedAt, ...(isApp || userEntries.has(entry) ? { app: true } : {}) };
     const earlier = found.startedAt > 0 && (!best || best.startedAt === 0 || found.startedAt < best.startedAt);
     if (!best || (bestIsApp && !isApp) || (bestIsApp === isApp && earlier)) {
       best = found;

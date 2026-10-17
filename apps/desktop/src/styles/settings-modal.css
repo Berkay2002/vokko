@@ -1031,7 +1031,7 @@
   mask-image: repeating-linear-gradient(90deg, black 0 3px, transparent 3px 6px);
 }
 
-/* Registered Games: the game Vokko detects right now. */
+/* Registered Apps: the app Vokko detects right now. */
 .registered-detected {
   display: flex;
   align-items: center;
@@ -1054,7 +1054,7 @@
   color: var(--interactive-icon-default);
 }
 
-/* Registered Games: the icon of an added app, left of its name. */
+/* Registered Apps: the icon of an added app, left of its name. */
 .registered-app-icon {
   display: flex;
   flex: none;

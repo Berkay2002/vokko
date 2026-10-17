@@ -513,6 +513,10 @@ pub struct Activity {
     /// Listening only: the Spotify track id (22 letters or digits).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_id: Option<String>,
+    /// Playing only: the sender marks a program it did not take from its list of games (an app the user added), so viewers say
+    /// "Using X" instead of "Playing X". Absent or false is a game, which is what clients that predate the flag send.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub app: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -545,7 +549,7 @@ impl Activity {
 
     /// Whether a client-supplied activity list is acceptable: at most two entries of different kinds; type 0 (a name of 1 to
     /// 128 characters (code points) that shows something and holds no control, zero-width or bidirectional-override
-    /// characters, a start time that is not negative, optionally `assets.large_image` as `app:<64 hex>`, none of the other
+    /// characters, a start time that is not negative, optionally `assets.large_image` as `app:<64 hex>`, optionally `app: true`, none of the other
     /// Spotify-only fields) or type 2 (the name "Spotify",
     /// optional `details` and `state` under the same text rules, `assets.large_image` as `spotify:<40 hex>`, `sync_id` as 22
     /// letters or digits, `timestamps.end` not negative and not before `start`).
@@ -573,6 +577,7 @@ impl Activity {
             }
             Self::LISTENING => {
                 self.name == Self::SPOTIFY
+                    && !self.app
                     && self.details.as_deref().is_none_or(Self::text_is_valid)
                     && self.state.as_deref().is_none_or(Self::text_is_valid)
                     && self.assets.as_ref().and_then(|assets| assets.large_image.as_deref()).is_none_or(|image| Self::hash_id(image, "spotify:", 40))
@@ -5092,8 +5097,16 @@ mod tests {
 
     #[test]
     fn activity_names_must_show_something_and_hold_no_invisible_characters() {
-        let playing =
-            |name: &str| Activity { name: name.to_owned(), kind: Activity::PLAYING, timestamps: None, details: None, state: None, assets: None, sync_id: None };
+        let playing = |name: &str| Activity {
+            name: name.to_owned(),
+            kind: Activity::PLAYING,
+            timestamps: None,
+            details: None,
+            state: None,
+            assets: None,
+            sync_id: None,
+            app: false,
+        };
         assert!(Activity::list_is_valid(&[playing("Elden Ring")]));
         assert!(Activity::list_is_valid(&[playing("Pokémon 🎮")]));
         assert!(Activity::list_is_valid(&[playing(&"é".repeat(128))]));
@@ -5113,8 +5126,18 @@ mod tests {
             state: Some("A; B".into()),
             assets: Some(ActivityAssets { large_image: Some(format!("spotify:{}", "ab01".repeat(10))) }),
             sync_id: Some("4uLU6hMCjMI75M1A2tKUQC".into()),
+            app: false,
         };
-        let game = Activity { name: "Factorio".into(), kind: Activity::PLAYING, timestamps: None, details: None, state: None, assets: None, sync_id: None };
+        let game = Activity {
+            name: "Factorio".into(),
+            kind: Activity::PLAYING,
+            timestamps: None,
+            details: None,
+            state: None,
+            assets: None,
+            sync_id: None,
+            app: false,
+        };
         assert!(Activity::list_is_valid(&[spotify()]));
         assert!(Activity::list_is_valid(&[game.clone(), spotify()]), "a game and Spotify together");
         assert!(!Activity::list_is_valid(&[spotify(), spotify()]), "one of each kind");
@@ -5151,6 +5174,12 @@ mod tests {
             change(&mut activity);
             assert!(!Activity::list_is_valid(&[activity]), "a game must not carry {what}");
         }
+        assert!(Activity::list_is_valid(&[Activity { app: true, ..game.clone() }]), "a program the user added is marked app");
+        let json = serde_json::to_value(Activity { app: true, ..game.clone() }).unwrap();
+        assert_eq!(json["app"], true);
+        assert!(serde_json::to_value(&game).unwrap().get("app").is_none(), "a game omits the flag");
+        assert!(!serde_json::from_str::<Activity>(r#"{"name":"Factorio","type":0}"#).unwrap().app, "a missing flag is a game");
+        assert!(!Activity::list_is_valid(&[Activity { app: true, ..spotify() }]), "Spotify is never an app");
         let with_image = |image: &str| Activity { assets: Some(ActivityAssets { large_image: Some(image.into()) }), ..game.clone() };
         let hash = "ab01".repeat(16);
         assert!(Activity::list_is_valid(&[with_image(&format!("app:{hash}"))]), "a game may carry an app icon");

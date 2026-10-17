@@ -17,9 +17,9 @@ function activityOk(a: Activity): boolean {
   if (!textOk(a.name) || (start !== undefined && !(start >= 0))) return false;
   if (a.type === 0) {
     const image = a.assets?.large_image;
-    return end === undefined && a.details === undefined && a.state === undefined && a.sync_id === undefined && (image === undefined || APP_IMAGE.test(image));
+    return (a.app === undefined || typeof a.app === "boolean") && end === undefined && a.details === undefined && a.state === undefined && a.sync_id === undefined && (image === undefined || APP_IMAGE.test(image));
   }
-  if (a.type !== 2 || a.name !== "Spotify") return false;
+  if (a.type !== 2 || a.name !== "Spotify" || a.app !== undefined) return false;
   const image = a.assets?.large_image;
   return (
     (a.details === undefined || textOk(a.details)) &&

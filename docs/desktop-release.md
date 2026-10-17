@@ -158,10 +158,10 @@ Tauri drag regions; macOS keeps its native traffic lights, and the web build is 
 `desktop_list_processes` returns running program names and start times (no paths, window titles or command lines leave the Rust side).
 The frontend matches them against `src/desktop/detectableGames.json` (an editable list of about 50 games and apps; add entries as
 `{ "name", "exe": [...] }`; add `"kind": "app"` for programs that stay open all day, such as editors and OBS: a running game
-always wins over them) and the games the user added under Settings > Registered Games, and sends the match as a `Playing`
+always wins over them) and the games the user added under Settings > Registered Apps, and sends the match as a `Playing`
 activity (`activities` on gateway op 3, see docs/api.md). Among games the one that started first wins. Only the desktop app
 sends `activities`, again after every reconnect; a browser session of the same account leaves the field out. Sharing can be
-switched off in Registered Games and Activity Privacy.
+switched off in Registered Apps and Activity Privacy.
 
 ## Debug helpers
 

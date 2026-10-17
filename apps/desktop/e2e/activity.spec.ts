@@ -232,13 +232,13 @@ test('presence update with activities is kept when absent and cleared by an empt
   await expect.poll(own).toEqual([]);
 });
 
-test('the browser build has no window controls and no Registered Games', async ({ page }) => {
+test('the browser build has no window controls and no Registered Apps', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.locator('.dm-row').first().waitFor();
   await expect(page.getByTestId('window-controls')).toHaveCount(0);
   await page.getByRole('button', { name: 'User Settings' }).click();
   const dialog = page.getByRole('dialog', { name: 'User Settings' });
-  await expect(dialog.getByRole('button', { name: 'Registered Games' })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Registered Apps' })).toHaveCount(0);
   // Activity Privacy still exists, and its switch is not the live desktop one
   await dialog.getByRole('button', { name: 'Activity Privacy' }).click();
   await expect(dialog.getByRole('heading', { name: 'Activity Privacy' })).toBeVisible();

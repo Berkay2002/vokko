@@ -4,7 +4,7 @@ import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
 import { TagChip } from "../perks/TagChip";
 import { useContextMenu } from "../ui";
-import { listeningActivity } from "../activity/format";
+import { listeningActivity, playingLabel } from "../activity/format";
 import { ActivityIcon } from "../shell/ActivityIcon";
 import { usePlaying } from "../shell/ActivityLine";
 import { Avatar } from "../shell/Avatar";
@@ -182,7 +182,7 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
       <TagChip tag={user.primary_guild} guildName={tagGuildName} />
       {streaming && <LivePill className="voice-user-live" />}
       {playing && (
-        <span className="voice-user-game" role="img" aria-label={`Playing ${playing.name}`} title={`Playing ${playing.name}`}>
+        <span className="voice-user-game" role="img" aria-label={playingLabel(playing)} title={playingLabel(playing)}>
           <ActivityIcon activity={playing} size={14} />
         </span>
       )}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Music } from "lucide-react";
-import { activityLabel, formatClock, formatPlaytime, playingActivity, shownActivity } from "../activity/format";
+import { activityLabel, formatClock, formatPlaytime, playingActivity, playingLabel, playingVerb, shownActivity } from "../activity/format";
 import { useStore } from "../api/store";
 import type { Activity, Snowflake } from "../api/types";
 import { ActivityIcon } from "./ActivityIcon";
@@ -16,7 +16,7 @@ export function useNow(intervalMs: number): number {
   return now;
 }
 
-/** The "Playing X" the user is shown with: the first Playing activity of their presence, null when there is none. */
+/** The "Playing X" (or "Using X") the user is shown with: the first Playing activity of their presence, null when there is none. */
 export function usePlaying(userId: Snowflake | null | undefined): Activity | null {
   return useStore(s => (userId ? playingActivity(s.presences[userId]) : null));
 }
@@ -48,20 +48,20 @@ export function ActivityLine({ activity, className, variant, more }: { activity:
   }
   const elapsed = formatPlaytime(activity.timestamps?.start, now);
   return (
-    <span className={className ?? "activity-line"} data-testid="activity-line" title={elapsed ? `Playing ${activity.name} for ${elapsed}` : `Playing ${activity.name}`}>
-      Playing <strong>{activity.name}</strong>
+    <span className={className ?? "activity-line"} data-testid="activity-line" title={elapsed ? `${playingLabel(activity)} for ${elapsed}` : playingLabel(activity)}>
+      {playingVerb(activity)} <strong>{activity.name}</strong>
       {elapsed && <span className="activity-elapsed"> · {elapsed}</span>}
     </span>
   );
 }
 
-/** The profile popout's activity block: "Playing a game", the name and a live elapsed clock. */
+/** The profile popout's activity block: "Playing a game" ("Using an app"), the name and a live elapsed clock. */
 export function ActivityCard({ activity }: { activity: Activity }) {
   const start = activity.timestamps?.start;
   const now = useNow(1000);
   return (
     <div className="activity-card" data-testid="activity-card">
-      <div className="activity-card-heading">Playing a game</div>
+      <div className="activity-card-heading">{activity.app === true ? "Using an app" : "Playing a game"}</div>
       <div className="activity-card-body">
         <span className="activity-card-icon" aria-hidden="true">
           <ActivityIcon activity={activity} size={24} fill />

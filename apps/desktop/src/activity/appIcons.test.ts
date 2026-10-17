@@ -56,7 +56,7 @@ describe("app names and icons", () => {
     expect(mocks.upload).toHaveBeenCalledTimes(1);
     expect(mocks.upload).toHaveBeenCalledWith(ICON);
     const { detected, assets } = useActivity.getState();
-    expect(activitiesFor({ share: true, detected, assets })).toEqual([{ name: "Google Chrome", type: 0, timestamps: { start: 1000 }, assets: { large_image: ASSET } }]);
+    expect(activitiesFor({ share: true, detected, assets })).toEqual([{ name: "Google Chrome", type: 0, timestamps: { start: 1000 }, assets: { large_image: ASSET }, app: true }]);
     await shareAppIcon();
     expect(mocks.upload).toHaveBeenCalledTimes(1);
   });

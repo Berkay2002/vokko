@@ -84,6 +84,7 @@ export function activitiesFor(state: Pick<ActivityState, "share" | "detected"> &
     list.push({
       name,
       type: 0,
+      ...(state.detected.app ? { app: true } : {}),
       ...(state.detected.startedAt > 0 ? { timestamps: { start: state.detected.startedAt } } : {}),
       ...(asset ? { assets: { large_image: asset } } : {}),
     });
