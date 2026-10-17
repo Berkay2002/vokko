@@ -202,6 +202,20 @@ async fn permissions_gate_creating_voting_and_ending() {
     // outsiders can't see the channel at all
     assert_eq!(w.vote(&w.bob, &mid, 1).await.0, StatusCode::FORBIDDEN);
 
+    // a timed-out member can't vote (or take a vote back), like they can't send
+    assert_eq!(w.vote(&w.carol, &mid, 1).await.0, StatusCode::NO_CONTENT);
+    let until = (time::OffsetDateTime::now_utc() + time::Duration::days(1)).format(&time::format_description::well_known::Rfc3339).expect("fmt");
+    let (status, member) =
+        w.app.patch(&format!("/guilds/{}/members/{}", w.guild, w.carol.id), &w.owner.token, json!({"communication_disabled_until": until})).await;
+    assert_eq!(status, StatusCode::OK, "timeout: {member}");
+    for (status, error) in [w.vote(&w.carol, &mid, 2).await, w.unvote(&w.carol, &mid, 1).await] {
+        assert_eq!((status, code(&error)), (StatusCode::FORBIDDEN, Some(50013)));
+    }
+    assert_eq!(w.app.post(&format!("/channels/{}/messages", w.general), &w.carol.token, json!({"content": "hi"})).await.0, StatusCode::FORBIDDEN);
+    let (status, _) = w.app.patch(&format!("/guilds/{}/members/{}", w.guild, w.carol.id), &w.owner.token, json!({"communication_disabled_until": null})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(w.unvote(&w.carol, &mid, 1).await.0, StatusCode::NO_CONTENT, "the timeout is over");
+
     // polls can't be edited, and only the author ends one
     let (status, error) = w.app.patch(&format!("/channels/{}/messages/{mid}", w.general), &w.owner.token, json!({"content": "edited"})).await;
     assert_eq!((status, code(&error)), (StatusCode::BAD_REQUEST, Some(520003)));
