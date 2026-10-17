@@ -13,6 +13,7 @@ name = "stremio-bot"
 path = "src/main.rs"
 
 [dependencies]
+vokko-protocol.workspace = true
 livekit = { version = "0.9.5", features = ["rustls-tls-webpki-roots"] }
 serde.workspace = true
 serde_json.workspace = true

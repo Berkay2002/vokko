@@ -11,8 +11,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::Config;
 use crate::media::{self, Notify, Pipeline, Published};
-use crate::plan::{self, Action, Desired, Geometry, Lease, Probe};
-use crate::report::{Kind, Reporter};
+use crate::plan::{self, Action, Choice, Desired, Geometry, Lease, Probe};
+use crate::report::{Kind, Reporter, Tracks};
 
 pub enum PutError {
     /// `VOKKO_STREMIO_MAX_SESSIONS` reached; the API turns this into 503.
@@ -133,11 +133,27 @@ struct Live {
     hold_ms: u64,
     ended: bool,
     retries: u8,
+    /// The tracks ffmpeg runs with, and the item (`Desired::generation`) they were chosen for.
+    choice: Choice,
+    item: Option<u64>,
 }
 
 impl Live {
     fn new(mgr: Arc<Manager>, channel_id: String) -> Self {
-        Self { mgr, channel_id, desired: None, room: None, out: None, source: None, pipeline: None, hold_ms: 0, ended: false, retries: 1 }
+        Self {
+            mgr,
+            channel_id,
+            desired: None,
+            room: None,
+            out: None,
+            source: None,
+            pipeline: None,
+            hold_ms: 0,
+            ended: false,
+            retries: 1,
+            choice: Choice::default(),
+            item: None,
+        }
     }
 
     fn current_ms(&self) -> u64 {
@@ -210,7 +226,27 @@ impl Live {
     async fn load(&mut self, d: &Desired) -> Result<(), String> {
         let probe = media::probe(&self.mgr.cfg, d).await.map_err(|e| redact(&e, d))?;
         let geo = plan::geometry(&probe, d.max_height);
-        tracing::info!(channel_id = self.channel_id, width = geo.width, height = geo.height, fps = geo.fps, hdr = probe.hdr, audio = probe.has_audio, "probed");
+        tracing::info!(
+            channel_id = self.channel_id,
+            width = geo.width,
+            height = geo.height,
+            fps = geo.fps,
+            hdr = probe.hdr,
+            audio = probe.audio_tracks.len(),
+            subtitles = probe.subtitle_tracks.len(),
+            "probed"
+        );
+        let defaults = plan::defaults(&probe);
+        let tracks = Tracks {
+            generation: d.generation,
+            audio: defaults.audio,
+            burned_subtitle: defaults.burned,
+            audio_tracks: probe.audio_tracks.clone(),
+            subtitle_tracks: probe.subtitle_tracks.clone(),
+        };
+        self.mgr.reporter.send_tracks(&self.channel_id, d.position_ms, tracks);
+        self.choice = plan::choose(&probe, d, self.item != Some(d.generation));
+        self.item = Some(d.generation);
         self.source = Some(Source { probe, geo });
         Ok(())
     }
@@ -243,7 +279,7 @@ impl Live {
         self.stop_pipeline().await;
         let (Some(d), Some(source), Some(out)) = (&self.desired, &self.source, &self.out) else { return Err("not ready".into()) };
         let notify = Notify { reporter: self.mgr.reporter.clone(), channel_id: self.channel_id.clone(), duration_ms: source.probe.duration_ms };
-        let pipeline = Pipeline::spawn(&self.mgr.cfg, d, &source.probe, &source.geo, at_ms, out, notify).await.map_err(|e| redact(&e, d))?;
+        let pipeline = Pipeline::spawn(&self.mgr.cfg, d, &source.probe, &source.geo, self.choice, at_ms, out, notify).await.map_err(|e| redact(&e, d))?;
         self.pipeline = Some(pipeline);
         self.hold_ms = at_ms;
         self.ended = false;
@@ -264,7 +300,9 @@ impl Live {
     async fn apply(&mut self, next: Desired) -> Result<Option<mpsc::UnboundedReceiver<RoomEvent>>, String> {
         let Some(prev) = self.desired.clone() else { return Ok(None) };
         let playing_now = self.pipeline.is_some() || self.ended;
-        let mut action = plan::reconcile(&prev, &next, self.current_ms(), playing_now);
+        let wanted = self.source.as_ref().map_or(self.choice, |s| plan::choose(&s.probe, &next, false));
+        let mut action = plan::reconcile(&prev, &next, self.current_ms(), playing_now, wanted != self.choice);
+        self.choice = wanted;
         // After the end the server's position sits at the end, which can be a few seconds from where audio stopped.
         if let (true, Action::Seek(pos)) = (self.ended, action)
             && pos + 10_000 >= self.hold_ms
@@ -281,6 +319,11 @@ impl Live {
                 self.ended = false;
             }
             Action::Resume(pos) | Action::Seek(pos) => self.start(pos).await?,
+            Action::Retrack => {
+                if self.pipeline.is_some() {
+                    self.start(self.current_ms()).await?;
+                }
+            }
             Action::Restart => {
                 self.stop_pipeline().await;
                 self.load(&next).await?;
