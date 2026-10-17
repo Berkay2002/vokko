@@ -50,21 +50,23 @@ export const PermBit = {
   SET_VOICE_CHANNEL_STATUS: 48,
   SEND_POLLS: 49,
   PIN_MESSAGES: 51,
+  /** Vokko-only: pause, seek, skip, stop and reorder Watch Together, Stremio and Spotify in a call (docs/design/bot-control.md). */
+  CONTROL_MEDIA: 60,
 } as const;
 
 export const bit = (n: number): bigint => 1n << BigInt(n);
 
 export const Perm = Object.fromEntries(Object.entries(PermBit).map(([name, n]) => [name, bit(n)])) as { [K in keyof typeof PermBit]: bigint };
 
-/** Every bit Vokko knows (0..53 except the unassigned 47). */
+/** Every bit Vokko knows (0..53 except the unassigned 47, plus Vokko's CONTROL_MEDIA 60). */
 export const ALL_PERMISSIONS: bigint = (() => {
-  let all = 0n;
+  let all = bit(PermBit.CONTROL_MEDIA);
   for (let i = 0; i <= 53; i += 1) if (i !== 47) all |= bit(i);
   return all;
 })();
 
-/** Q4.4 fallback @everyone set, used when a guild has no @everyone role. */
-export const DEFAULT_EVERYONE: bigint = [0, 26, 10, 11, 14, 15, 16, 17, 18, 37, 6, 20, 21, 25, 9, 42, 43, 44, 45, 35, 36, 38, 49, 32].reduce((acc, n) => acc | bit(n), 0n);
+/** Q4.4 fallback @everyone set, used when a guild has no @everyone role (plus Vokko's CONTROL_MEDIA). */
+export const DEFAULT_EVERYONE: bigint = [0, 26, 10, 11, 14, 15, 16, 17, 18, 37, 6, 20, 21, 25, 9, 42, 43, 44, 45, 35, 36, 38, 49, 32, 60].reduce((acc, n) => acc | bit(n), 0n);
 
 export function parseBits(value: string | bigint | undefined | null): bigint {
   if (typeof value === "bigint") return value;

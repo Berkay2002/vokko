@@ -881,9 +881,20 @@ export interface GameMessage {
 
 // ---- Watch Together (docs/api.md "Voice (V1)": a YouTube video everyone in a voice channel or DM call watches in sync) ----
 
+// ---- Who controls media in a call (docs/api.md "Who controls media in a call"), flattened into the Watch, Stremio and Spotify states ----
+
+/** A controller is in a DM call, holds CONTROL_MEDIA in the channel, or is `host_id`; everyone else votes to skip and has a queue quota. */
+export interface MediaControl {
+  host_id: Snowflake; // starts as started_by; moves to whoever has been in the call longest when the host leaves
+  added_by?: Snowflake; // who put the current item in play; may skip it without a vote (Spotify omits it while idle)
+  skip_votes: Snowflake[]; // votes to skip the current item, in vote order
+  skip_needed: number; // max(1, ceil(listeners / 2))
+}
+
 export const WATCH_TOGETHER_QUEUE_MAX = 20;
+export const WATCH_TOGETHER_QUEUE_PER_USER = 3; // queue entries one non-controller may hold at once
 export const WATCH_TOGETHER_POSITION_MAX_MS = 24 * 60 * 60 * 1000;
-export interface WatchTogetherState {
+export interface WatchTogetherState extends MediaControl {
   video_id: string; // 11 characters of A-Za-z0-9_-
   title?: string;
   playing: boolean;
@@ -891,6 +902,7 @@ export interface WatchTogetherState {
   updated_at_ms: number; // server unix milliseconds
   started_by: Snowflake;
   queue: string[]; // video ids up next
+  queue_added_by: Snowflake[]; // who added each queue entry (same length and order)
 }
 export interface WatchTogetherUpdate {
   channel_id: Snowflake;
@@ -912,6 +924,7 @@ export interface WatchTogetherPatchRequest {
 // ---- Stremio in calls (docs/design/stremio-bot.md section 3 and 12): a movie or episode a bot plays into the call's media room ----
 
 export const STREMIO_QUEUE_MAX = 10;
+export const STREMIO_QUEUE_PER_USER = 2;
 export const STREMIO_POSITION_MAX_MS = 24 * 60 * 60 * 1000;
 /** Poster hosts the server lets through; the CSP's img-src lists the same three. */
 export const STREMIO_IMAGE_HOSTS = ["images.metahub.space", "episodes.metahub.space", "m.media-amazon.com"];
@@ -964,7 +977,7 @@ export interface StremioItem {
 export interface StremioQueued extends StremioItem {
   added_by: Snowflake;
 }
-export interface StremioState {
+export interface StremioState extends MediaControl {
   item: StremioItem;
   status: StremioStatus;
   error?: string;
@@ -1069,6 +1082,7 @@ export interface StremioViewerToken {
 // ---- Spotify in calls (docs/design/spotify-bot.md, docs/api.md "Spotify in calls"): one house account plays into one call's media room ----
 
 export const SPOTIFY_QUEUE_MAX = 200;
+export const SPOTIFY_QUEUE_PER_USER = 10;
 export const SPOTIFY_EVENT_QUEUE_MAX = 50; // queue entries an event, READY or Call carries; GET has all of them
 /** Art is a 40-hex image id; the client only ever loads it from this host. */
 export const SPOTIFY_ART_URL = "https://i.scdn.co/image/";
@@ -1123,7 +1137,7 @@ export interface SpotifyQueueEntry extends SpotifyTrack {
   qid: string;
   added_by: Snowflake;
 }
-export interface SpotifyState {
+export interface SpotifyState extends MediaControl {
   status: SpotifyStatus;
   error?: string; // a fixed text; the session ends 30 s later
   notice?: string; // passing note ("Skipped an unavailable track"), clears itself after 5 s
@@ -1149,7 +1163,7 @@ export interface SpotifyUpdate {
 export type SpotifyPatchRequest =
   | { playing: boolean }
   | { position_ms: number }
-  | { skip: true }
+  | { skip: boolean } // true: skip (controller, or the current item's adder) or vote; false: withdraw the vote
   | { previous: true }
   | { loop: SpotifyLoop }
   | { shuffle: true }
