@@ -114,7 +114,6 @@ async fn start(
     if let Some(response) = limited(&state, user_id) {
         return Ok(response);
     }
-    let room = control::room(&state, channel_id);
     // Anyone starts a session (and hosts it); changing the video of a running one is a controller's, and keeps the queue, the host
     // and who started it.
     let (_, next) = state.voice.watch_update(channel_id, |current| {
@@ -134,7 +133,7 @@ async fn start(
                 started_by: Snowflake::from(user_id),
                 queue: Vec::new(),
                 queue_added_by: Vec::new(),
-                control: control::new_session(user_id, &room),
+                control: control::new_session(user_id, &control::room(&state, channel_id)),
             },
         };
         Ok(Some(WatchTogetherState { video_id: body.video_id.clone(), title, playing: true, position_ms: 0, updated_at_ms: unix_millis(), ..next }))
@@ -163,7 +162,6 @@ async fn control(
     if let Some(response) = limited(&state, user_id) {
         return Ok(response);
     }
-    let room = control::room(&state, channel_id);
     let now = unix_millis();
     let (previous, next) = state.voice.watch_update(channel_id, |current| {
         let mut next = current.ok_or_else(|| ApiErr::conflict(40033, "Nothing is playing in this channel."))?.clone();
@@ -175,7 +173,7 @@ async fn control(
             if body.video_id.as_ref().is_some_and(|expected| *expected != next.video_id) {
                 return Ok(Some(next));
             }
-            if control::skip_request(&mut next.control, &ctx, skip, &room) {
+            if control::skip_request(&mut next.control, &ctx, skip, None, &control::room(&state, channel_id)) {
                 let Some(after) = skipped(next, now) else { return Ok(None) };
                 next = after;
             }
@@ -208,22 +206,32 @@ async fn control(
 
 async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Response> {
     let ctx = control::in_voice(&state, user_id, &id).await?;
-    if let Some(current) = state.voice.watch_get(ctx.channel_id) {
-        control::require_control(&ctx, &current.control)?;
-    }
     if let Some(response) = limited(&state, user_id) {
         return Ok(response);
     }
-    end(&state, ctx.channel_id).await;
+    // The check and the end are one step: a session started meanwhile is not ended by someone who does not control it.
+    let (before, _) = state.voice.watch_update(ctx.channel_id, |current| {
+        if let Some(current) = current {
+            control::require_control(&ctx, &current.control)?;
+        }
+        Ok(None)
+    })?;
+    if before.is_some() {
+        announce(&state, ctx.channel_id, None).await;
+    }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 /// Who is in the call changed (`control::refresh`): host, votes and the count follow, and enough votes skip.
-pub(crate) async fn refresh(state: &AppState, channel_id: i64, room: &control::Room) {
+pub(crate) async fn refresh(state: &AppState, channel_id: i64) {
     let now = unix_millis();
     let Ok((previous, next)) = state.voice.watch_update(channel_id, |current| {
         let Some(mut next) = current.cloned() else { return Ok(None) };
-        if control::sync(&mut next.control, room) {
+        let room = control::room(state, channel_id);
+        if room.is_empty() {
+            return Ok(Some(next));
+        }
+        if control::sync(&mut next.control, &room) {
             return Ok(skipped(next, now));
         }
         Ok(Some(next))

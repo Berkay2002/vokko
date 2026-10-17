@@ -1369,6 +1369,8 @@ async fn without_control_media_others_vote_skip_their_own_and_queue_ten() {
         (Some(track_uri(1).as_str()), json!([w.carl_id]), Some(2))
     );
     assert_eq!(w.patch(&w.carl, json!({"skip": false})).await.1["skip_votes"], json!([]));
+    let stale = voted["item_seq"].as_u64().expect("item_seq") + 1;
+    assert_eq!(w.patch(&w.carl, json!({"skip": true, "item_seq": stale})).await.1["skip_votes"], json!([]), "a vote for another item");
     let (_, skipped) = w.patch(&w.alice, json!({"skip": true})).await;
     assert_eq!((skipped["track"]["uri"].as_str(), skipped["added_by"].as_str()), (Some(track_uri(20).as_str()), Some(w.alice_id.as_str())));
     let (_, skipped) = w.patch(&w.owner, json!({"skip": true})).await;
