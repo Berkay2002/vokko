@@ -2,7 +2,7 @@
 // The gateway, REST and sounds are faked; transports come from setTransportFactory.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { GatewayEvents, VoiceState, VoiceStateUpdateCommand } from "../api/types";
+import { ChannelType, type Channel, type GatewayEvents, type VoiceState, type VoiceStateUpdateCommand } from "../api/types";
 import type { TransportCallbacks, TransportOptions, VoiceTransport } from "./transport";
 
 const gw = vi.hoisted(() => ({
@@ -411,5 +411,22 @@ describe("voice engine: camera and screen share together", () => {
     expect(Object.keys(media.getMedia().videos)).toEqual([`${ME}:screen`]);
     expect(t.screen).toEqual(choice);
     expect(gw.sent.at(-1)).toMatchObject({ self_video: false, self_stream: true });
+  });
+});
+
+describe("voice engine: no WebRTC (the Linux app's WebKitGTK)", () => {
+  it("refuses a join with webrtc_unsupported against a real server, and allows it once RTCPeerConnection exists", async () => {
+    vi.resetModules();
+    vi.doMock("../api/config", async orig => ({ ...(await orig<typeof import("../api/config")>()), MOCK: false }));
+    gw.handlers.clear();
+    const real = await import("./engine");
+    real.wireVoice();
+    emit("READY", { v: 1, user: { id: ME }, session_id: "gw-1", guilds: [], private_channels: [], media: { voice_enabled: true } } as unknown as GatewayEvents["READY"]);
+    const dm = { id: "30", type: ChannelType.DM } as Channel;
+    expect(real.joinRefusal(dm)).toBe("webrtc_unsupported");
+    vi.stubGlobal("RTCPeerConnection", class {});
+    expect(real.joinRefusal(dm)).toBeNull();
+    vi.unstubAllGlobals();
+    vi.doUnmock("../api/config");
   });
 });

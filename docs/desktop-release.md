@@ -131,6 +131,16 @@ The first update check (30 s after start) logs `failed to check for updates` and
 Run it under `dbus-run-session`: over SSH the user's session bus can hold a stuck `xdg-desktop-portal`, and GTK then waits on
 its D-Bus call for ~25 s before the window appears. Desktop sessions have a working portal, so real users don't see this.
 
+**No voice, video or screen share on Linux.** WebKitGTK builds WebRTC only as an experimental feature (`ENABLE_WEB_RTC`
+defaults to `ENABLE_EXPERIMENTAL_FEATURES` in `OptionsGTK.cmake`, off in release tarballs) and Ubuntu, Debian, Fedora and Arch
+don't turn it on. Checked on WebKitGTK 2.52.6 (Ubuntu 26.04) with `enable-webrtc` and `enable-media-stream` set: `getUserMedia`
+and `getDisplayMedia` exist, `RTCPeerConnection` is undefined. No GStreamer plugin fixes that, so the AppImage and the .deb
+can't join LiveKit (calls, screen share, Watch Together streams). `joinRefusal` (voice/engine.ts) answers
+`webrtc_unsupported` when `RTCPeerConnection` is missing against a real server, and the voice panel says to use the browser;
+the mock backend (FakeTransport) still joins. Making it work needs our own WebKitGTK built with `-DENABLE_WEB_RTC=ON
+-DUSE_GSTREAMER_WEBRTC=ON` bundled in the AppImage (plus gstreamer1.0-plugins-bad and gstreamer1.0-nice), or native LiveKit in
+the Rust backend.
+
 ## Updater
 
 Inactive by default: the updater plugin refuses to start without `pubkey`, so it is only registered when the Tauri config contains a

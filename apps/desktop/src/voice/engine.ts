@@ -4,6 +4,7 @@
 // Media reconnect (docs/design/voice.md §3.6): an unchanged op 4 makes the server reissue the token, which restarts the
 // connect, so op 4 is only re-sent once the transport has reported the connection closed, never while a token is in use.
 
+import { MOCK } from "../api/config";
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
 import { appStore } from "../api/store";
@@ -68,6 +69,8 @@ let boundPtt: string | null = null;
 export function joinRefusal(channel: Channel): VoiceErrorReason | null {
   const model = getVoice();
   if (!model.enabled) return "media_unavailable";
+  // WebKitGTK (the Linux app) is built without WebRTC, so LiveKit can never connect there; the mock uses no WebRTC.
+  if (!MOCK && typeof RTCPeerConnection === "undefined") return "webrtc_unsupported";
   // DM calls (src/calls): every recipient may join; the server checks blocks and the 10-person cap.
   if (channel.type === ChannelType.DM || channel.type === ChannelType.GroupDM) return null;
   if ((channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStage) || !channel.guild_id) return "missing_permissions";
