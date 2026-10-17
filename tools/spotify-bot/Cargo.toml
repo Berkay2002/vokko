@@ -1,0 +1,23 @@
+[package]
+name = "spotify-bot"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Spotify bot: plays Spotify (librespot) into a LiveKit room (internal HTTP API for vokko-server)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "spotify-bot"
+path = "src/main.rs"
+
+[dependencies]
+# The fork Spotifast pins (Berkay2002/librespot); one rev for every crate so one copy exists.
+librespot-core = { git = "https://github.com/Berkay2002/librespot", rev = "44c8444b6b6a39b8d2f1367be0aaeb7913f00c24", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-oauth = { git = "https://github.com/Berkay2002/librespot", rev = "44c8444b6b6a39b8d2f1367be0aaeb7913f00c24", default-features = false, features = ["rustls-tls-webpki-roots"] }
+librespot-playback = { git = "https://github.com/Berkay2002/librespot", rev = "44c8444b6b6a39b8d2f1367be0aaeb7913f00c24", default-features = false, features = ["rustls-tls-webpki-roots"] }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rustls.workspace = true
