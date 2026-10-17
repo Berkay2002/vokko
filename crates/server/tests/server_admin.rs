@@ -496,9 +496,16 @@ async fn automod_blocks_keywords_except_for_exempt_roles() {
     assert_eq!(status, StatusCode::OK, "owner");
     let (status, body) = w.app.patch(&format!("{messages}/{}", ok["id"].as_str().expect("id")), &member, json!({"content": "bad badge"})).await;
     assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 200000), "edits are checked too");
+    let poll = |question: &str, answer: &str| json!({"poll": {"question": {"text": question}, "answers": [{"poll_media": {"text": answer}}]}});
+    let (status, body) = w.app.post(&messages, &member, poll("Who is bad?", "nobody")).await;
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 200000), "poll questions are checked: {body}");
+    let (status, body) = w.app.post(&messages, &member, poll("Lunch?", "free money")).await;
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 200000), "poll answers are checked: {body}");
+    let (status, body) = w.app.post(&messages, &member, poll("Lunch?", "pizza")).await;
+    assert_eq!(status, StatusCode::OK, "a clean poll: {body}");
 
     let blocks = w.audit("?action_type=143").await;
-    assert_eq!(blocks.len(), 3);
+    assert_eq!(blocks.len(), 5);
     assert_eq!(blocks[0]["options"]["auto_moderation_rule_name"], "No bad words");
     assert_eq!(blocks[0]["options"]["channel_id"], w.channel.as_str());
 

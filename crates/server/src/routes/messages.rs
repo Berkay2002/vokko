@@ -592,7 +592,19 @@ async fn create_message(
         None => None,
     };
     let content = validate_content(body.content.as_deref().unwrap_or(""), !attachments.is_empty() || !sticker_ids.is_empty() || forwarding || poll.is_some())?;
-    crate::safety::check_send(&state, &access, user_id, &content).await?;
+    // AutoMod reads a poll's question and answers along with the content.
+    let screened = match &poll {
+        Some(poll) => std::iter::once(content.as_str())
+            .chain([poll.question.as_str()])
+            .chain(poll.answers.iter().map(|answer| answer.text.as_str()))
+            .collect::<Vec<_>>()
+            .join(
+                "
+",
+            ),
+        None => content.clone(),
+    };
+    crate::safety::check_send(&state, &access, user_id, &screened).await?;
     let stickers = stickers::resolve_for_message(&state, user_id, &access.channel, access.permissions, &sticker_ids).await?;
     let mut forward_source: Option<(i64, i64)> = None;
     let reference = match body.message_reference {
