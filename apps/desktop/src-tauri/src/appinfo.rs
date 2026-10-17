@@ -2,6 +2,7 @@
 //! path is looked up here from the process list and never leaves this module: only the name and a PNG of the icon go back.
 //! Windows reads the exe's version info and embedded icon, macOS the enclosing `.app` bundle, Linux gives the name only.
 
+#[cfg(any(windows, target_os = "macos"))]
 use base64::Engine as _;
 use serde::Serialize;
 use std::path::Path;
@@ -21,6 +22,7 @@ pub struct AppInfo {
 
 /// First non-blank of the primary and secondary name (Windows: `FileDescription`, `ProductName`; macOS: `CFBundleDisplayName`,
 /// `CFBundleName`), else `stem`.
+#[cfg(any(windows, target_os = "macos", test))]
 fn display_name(primary: Option<String>, secondary: Option<String>, stem: &str) -> String {
     [primary, secondary].into_iter().flatten().map(|name| name.trim().to_owned()).find(|name| !name.is_empty()).unwrap_or_else(|| stem.to_owned())
 }

@@ -11,6 +11,7 @@ import { pollEmbedsFor, pollFor } from "./pollData";
 import { stageInstancesFor, voiceStatesFor } from "./voice";
 import { watchFor } from "./watch";
 import { stremioFor } from "./stremio";
+import { spotifyFor } from "./spotify";
 import { gamesFor } from "./games";
 
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
@@ -144,8 +145,9 @@ export function guildPayload(guildId: string, viewerId: string): GatewayEvents["
   const soundboard_sounds = (db.soundboard.get(guildId) ?? []).map(s => ({ ...s }));
   const watch = watchFor(guildId, viewerId);
   const stremio = stremioFor(guildId, viewerId);
+  const spotify = spotifyFor(guildId, viewerId);
   const games = gamesFor(guildId, viewerId);
-  return { ...(games.length > 0 ? { games } : {}), ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, soundboard_sounds, voice_states: voiceStatesFor(guildId, viewerId), stage_instances: stageInstancesFor(guildId, viewerId), ...(watch.length > 0 ? { watch_together: watch } : {}), ...(stremio.length > 0 ? { stremio } : {}) };
+  return { ...(games.length > 0 ? { games } : {}), ...g.guild, roles: g.guild.roles.map(r => ({ ...r })), channels, threads, members, member_count: members.length, ...(emojis.length > 0 ? { emojis } : {}), presences, stickers, soundboard_sounds, voice_states: voiceStatesFor(guildId, viewerId), stage_instances: stageInstancesFor(guildId, viewerId), ...(watch.length > 0 ? { watch_together: watch } : {}), ...(stremio.length > 0 ? { stremio } : {}), ...(spotify.length > 0 ? { spotify } : {}) };
 }
 
 export function guildIdsFor(viewerId: string): string[] {

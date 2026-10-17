@@ -11,4 +11,32 @@ export interface GameCredit {
   file?: string;
 }
 
-export const GAME_CREDITS: Record<string, GameCredit[]> = {};
+const BOARDGAME_IO = (game: string): GameCredit => ({
+  work: "boardgame.io (with immer, redux, rfc6902, nanoid, svelte, lodash.isplainobject, setimmediate)",
+  author: "The boardgame.io Authors",
+  url: "https://github.com/boardgameio/boardgame.io",
+  license: "MIT",
+  file: `/games/${game}/LICENSE-boardgame.io.txt`,
+});
+
+export const GAME_CREDITS: Record<string, GameCredit[]> = {
+  "builtin:chess": [
+    BOARDGAME_IO("chess"),
+    { work: "chess.js", author: "Jeff Hlywa", url: "https://github.com/jhlywa/chess.js", license: "BSD-2-Clause", file: "/games/chess/LICENSE-chess.js.txt" },
+    { work: "react-chessboard (board and pieces, with dnd-kit)", author: "Ryan Gregory", url: "https://github.com/Clariity/react-chessboard", license: "MIT", file: "/games/chess/LICENSE-react-chessboard.txt" },
+  ],
+  "builtin:four-in-a-row": [BOARDGAME_IO("four-in-a-row")],
+  "builtin:codewords": [BOARDGAME_IO("codewords")],
+  "builtin:telephone": [
+    { work: "drawphone (game rules and turn order)", author: "Tanner Krewson", url: "https://github.com/tannerkrewson/drawphone", license: "MIT", file: "/games/telephone/LICENSE-drawphone.txt" },
+  ],
+  "builtin:trivia": [
+    { work: "Open Trivia Database (questions)", author: "PIXELTAIL GAMES LLC and contributors", url: "https://opentdb.com", license: "CC-BY-SA-4.0", file: "/games/trivia/LICENSE-opentdb.txt" },
+  ],
+  "builtin:crazy-eights": [
+    { work: "uno-game (rule flow reference)", author: "Guilherme Bromonschenkel", url: "https://github.com/guilhermebkel/uno-game", license: "MIT", file: "/games/crazy-eights/LICENSE-uno-game.txt" },
+  ],
+  "builtin:werewolf": [
+    { work: "OpenWerewolf (rules)", author: "James Craster", url: "https://github.com/JamesCraster/OpenWerewolf", license: "Apache-2.0", file: "/games/werewolf/LICENSE-OpenWerewolf.txt" },
+  ],
+};

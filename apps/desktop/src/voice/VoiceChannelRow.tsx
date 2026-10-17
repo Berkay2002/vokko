@@ -3,6 +3,7 @@
 import { useLocation } from "react-router";
 import { Gamepad2, Lock, MessageCircle, MonitorPlay, Pencil, Settings, UserPlus, Volume2 } from "lucide-react";
 import { StremioIcon } from "../stremio";
+import { SpotifyIcon } from "../spotify/SpotifyIcon";
 import { Perm } from "../api/permissions";
 import { channelMentionCount, isChannelUnread, useStore } from "../api/store";
 import type { Channel, Guild } from "../api/types";
@@ -42,6 +43,7 @@ export function VoiceChannelRow({ channel, guild }: { channel: Channel; guild: G
   const statusText = useVoice(s => s.channelStatus[channel.id]);
   const watching = useVoice(s => !!s.watch[channel.id]);
   const stremioTitle = useVoice(s => s.stremio[channel.id]?.item.title);
+  const spotifyTitle = useVoice(s => s.spotify[channel.id]?.track?.title);
   const gameName = useVoice(s => s.games[channel.id]?.game.name);
   // Messages in the channel's text-in-voice chat.
   const unread = useStore(s => isChannelUnread(s, channel.id));
@@ -129,6 +131,14 @@ export function VoiceChannelRow({ channel, guild }: { channel: Channel; guild: G
           <StremioIcon size={12} />
           <span>
             Watching <em>{stremioTitle}</em> on Stremio
+          </span>
+        </div>
+      )}
+      {spotifyTitle && (
+        <div className="voice-stremio-line voice-spotify-line" role="status">
+          <SpotifyIcon size={12} />
+          <span>
+            Listening to <em>{spotifyTitle}</em> on Spotify
           </span>
         </div>
       )}

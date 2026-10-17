@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Werewolf</title>
+<link rel="stylesheet" href="./werewolf.css" />
+</head>
+<body>
+<main id="app">
+  <header>
+    <strong id="phase">Werewolf</strong>
+    <span id="status" aria-live="polite">Connecting...</span>
+    <span id="timer"></span>
+  </header>
+  <section id="lobby" hidden>
+    <h2>Villagers <span id="seat-count"></span></h2>
+    <ul id="seats"></ul>
+    <label class="row"><input type="checkbox" id="hunter" /> Add a hunter</label>
+    <label class="row">Day discussion
+      <select id="day-len">
+        <option value="60">1 minute</option>
+        <option value="120">2 minutes</option>
+        <option value="180">3 minutes</option>
+      </select>
+    </label>
+    <div class="row">
+      <button type="button" id="join">Join</button>
+      <button type="button" id="start" class="primary">Start</button>
+    </div>
+    <p class="hint">5 to 16 players. Each night the werewolves pick a victim, the seer checks one player and the doctor protects one. By day the village talks in voice and votes someone out: a majority of the living decides.</p>
+  </section>
+  <section id="game" hidden>
+    <aside id="me">
+      <div id="role-card"><span id="role-icon" aria-hidden="true"></span><strong id="role"></strong><span id="role-text"></span></div>
+      <p id="dead-note" hidden>You are dead: you can see everything now. Stay quiet in voice.</p>
+      <p id="prompt"></p>
+      <div class="row" id="actions">
+        <button type="button" id="ready">Ready to vote</button>
+        <button type="button" id="nobody">Vote for nobody</button>
+        <button type="button" id="again" class="primary">Play again</button>
+      </div>
+      <h2>News</h2>
+      <ul id="news"></ul>
+      <ul id="seer-log" aria-label="What you have seen"></ul>
+    </aside>
+    <ul id="players" aria-label="Players"></ul>
+  </section>
+</main>
+<script src="../vokko-games.js"></script>
+<script src="../table-host.js"></script>
+<script src="./werewolf-core.js"></script>
+<script src="./werewolf.js"></script>
+</body>
+</html>

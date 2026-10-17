@@ -26,6 +26,7 @@ pub struct Inner {
     pub gifs: GifProxy,
     pub voice: Voice,
     pub stremio: crate::stremio::Stremio,
+    pub spotify: crate::spotify::Spotify,
     /// Soundboard plays, for the per-channel play limit.
     pub soundboard: Plays,
     /// Entrance sound plays, for their own per-user and channel limit.
@@ -76,6 +77,7 @@ impl AppState {
         let gifs = GifProxy::new(config.gif.clone(), config.unfurl.allow_private);
         let voice = Voice::new(rooms, &config);
         let stremio = crate::stremio::Stremio::new(&config.stremio);
+        let spotify = crate::spotify::Spotify::new(&config.spotify);
         Self(Arc::new(Inner {
             db,
             config,
@@ -87,6 +89,7 @@ impl AppState {
             gifs,
             voice,
             stremio,
+            spotify,
             storage,
             soundboard: Plays::default(),
             entrances: Plays::default(),

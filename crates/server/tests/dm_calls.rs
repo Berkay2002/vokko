@@ -410,6 +410,7 @@ async fn watch_together_in_a_dm_call_follows_the_call_rules() {
     bob_ws.voice(Some(&one)).await;
     assert_eq!(bob_ws.wait_for("WATCH_TOGETHER_UPDATE").await["channel_id"], one.as_str());
     assert_eq!(app.patch(&path, &bob.token, json!({"playing": false})).await.0, StatusCode::OK);
+    assert_eq!(app.put_json(&path, &bob.token, json!({"video_id": "eeeeeeeeeee"})).await.0, StatusCode::OK, "in a DM everyone controls");
 
     // Bob blocks alice while both are in the call: a block closes the call both ways, so neither may steer the video.
     assert_eq!(app.put_json(&format!("/users/@me/relationships/{}", alice.id), &bob.token, json!({"type": 2})).await.0, StatusCode::NO_CONTENT);

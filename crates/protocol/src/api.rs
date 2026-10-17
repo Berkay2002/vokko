@@ -275,11 +275,14 @@ pub mod permissions {
     pub const PIN_MESSAGES: u64 = 1 << 51;
     pub const BYPASS_SLOWMODE: u64 = 1 << 52;
     pub const MANAGE_OFFICIAL_MESSAGES: u64 = 1 << 53;
+    /// Vokko-only (docs/design/bot-control.md): pause, seek, skip, stop and reorder Watch Together, Stremio and Spotify in a call.
+    /// High on purpose, so Discord's future bits never collide.
+    pub const CONTROL_MEDIA: u64 = 1 << 60;
 
     /// Every defined permission bit (what the owner and administrators resolve to).
-    pub const ALL: u64 = (1 << 54) - 1 - (1 << 47);
+    pub const ALL: u64 = ((1 << 54) - 1 - (1 << 47)) | CONTROL_MEDIA;
     /// Every permission name with its bit, in bit order.
-    pub const NAMED: [(&str, u64); 53] = [
+    pub const NAMED: [(&str, u64); 54] = [
         ("CREATE_INSTANT_INVITE", CREATE_INSTANT_INVITE),
         ("KICK_MEMBERS", KICK_MEMBERS),
         ("BAN_MEMBERS", BAN_MEMBERS),
@@ -333,8 +336,9 @@ pub mod permissions {
         ("PIN_MESSAGES", PIN_MESSAGES),
         ("BYPASS_SLOWMODE", BYPASS_SLOWMODE),
         ("MANAGE_OFFICIAL_MESSAGES", MANAGE_OFFICIAL_MESSAGES),
+        ("CONTROL_MEDIA", CONTROL_MEDIA),
     ];
-    /// What the @everyone role of a new guild grants: the 27-bit default set of the Discord client.
+    /// What the @everyone role of a new guild grants: the 27-bit default set of the Discord client, plus Vokko's CONTROL_MEDIA.
     pub const DEFAULT_EVERYONE: u64 = CREATE_INSTANT_INVITE
         | CHANGE_NICKNAME
         | VIEW_CHANNEL
@@ -361,7 +365,8 @@ pub mod permissions {
         | USE_APPLICATION_COMMANDS
         | CREATE_GUILD_EXPRESSIONS
         | CREATE_EVENTS
-        | USE_EXTERNAL_APPS;
+        | USE_EXTERNAL_APPS
+        | CONTROL_MEDIA;
     /// A timed-out member keeps only these.
     pub const TIMEOUT_ALLOWED: u64 = VIEW_CHANNEL | READ_MESSAGE_HISTORY;
 }
@@ -1423,6 +1428,8 @@ pub struct VoiceChannelStatusUpdate {
 
 /// Longest a Watch Together queue gets.
 pub const WATCH_TOGETHER_QUEUE_MAX: usize = 20;
+/// Queue entries one person without control may have in a Watch Together queue at once (docs/design/bot-control.md §2.5).
+pub const WATCH_TOGETHER_QUEUE_PER_USER: usize = 3;
 /// Furthest position a Watch Together seek may name (24 hours).
 pub const WATCH_TOGETHER_POSITION_MAX_MS: u64 = 24 * 60 * 60 * 1000;
 /// Longest title a Watch Together session carries.
@@ -1444,6 +1451,11 @@ pub struct WatchTogetherState {
     /// Video ids up next, at most `WATCH_TOGETHER_QUEUE_MAX`.
     #[serde(default)]
     pub queue: Vec<String>,
+    /// Who added each `queue` entry (same length and order).
+    #[serde(default)]
+    pub queue_added_by: Vec<Snowflake>,
+    #[serde(flatten)]
+    pub control: MediaControl,
 }
 
 /// `PUT /channels/{id}/watch-together`: start a session or change its video.
@@ -1454,7 +1466,7 @@ pub struct WatchTogetherStartRequest {
     pub title: Option<String>,
 }
 
-/// `PATCH /channels/{id}/watch-together`: play / pause / seek, set the title, add to the queue, or skip. With `skip`, a
+/// `PATCH /channels/{id}/watch-together`: play / pause / seek, set the title, add to or remove from the queue, or skip. With `skip`, a
 /// `video_id` makes it a no-op unless that video is still the current one (every client reports "ended" at once).
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct WatchTogetherPatchRequest {
@@ -1467,9 +1479,45 @@ pub struct WatchTogetherPatchRequest {
     #[serde(default)]
     pub queue_add: Option<String>,
     #[serde(default)]
+    pub queue_remove: Option<WatchTogetherQueueRemove>,
+    #[serde(default)]
     pub skip: Option<bool>,
     #[serde(default)]
     pub video_id: Option<String>,
+}
+
+/// One queue entry to remove: a no-op unless `queue[index]` is still `video_id` (the queue moved since the client saw it).
+#[derive(Clone, Debug, Deserialize)]
+pub struct WatchTogetherQueueRemove {
+    pub index: usize,
+    pub video_id: String,
+}
+
+/// Who controls a Watch Together, Stremio or Spotify session and the skip vote on its current item (docs/design/bot-control.md
+/// sections 2 and 3), flattened into each state. A controller is someone in the call who is in a DM call, holds CONTROL_MEDIA in
+/// the channel, or is `host_id`. Everyone else in the call may vote to skip (`skip: true`; `skip: false` withdraws), skip the
+/// item they added (`added_by`) at once, add to the end of the queue up to the per-user quota and remove their own entries.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MediaControl {
+    /// Starts as `started_by`; when the host leaves the call it moves to whoever has been in the call longest.
+    pub host_id: Snowflake,
+    /// Who added the current item (the `PUT` caller, or the queue entry's adder): they may skip it without a vote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_by: Option<Snowflake>,
+    /// Votes to skip the current item, in vote order; cleared whenever the item changes.
+    #[serde(default)]
+    pub skip_votes: Vec<Snowflake>,
+    /// Votes that skip it: half the listeners (in the call and not deafened), rounded up, at least 1.
+    pub skip_needed: u32,
+    /// Changes with every item change (and when a skip passes). A Stremio or Spotify `skip` may name it as `item_seq`: a vote
+    /// or skip for an item that is no longer current is ignored.
+    #[serde(default)]
+    pub item_seq: u64,
+}
+
+/// `max(1, ceil(listeners / 2))`: 0 or 1 or 2 listeners -> 1, 3 -> 2, 4 -> 2, 5 -> 3.
+pub fn skip_needed(listeners: usize) -> u32 {
+    listeners.div_ceil(2).max(1) as u32
 }
 
 /// WATCH_TOGETHER_UPDATE, to everyone who can see the channel; `state: null` = no session (also on the READY / GUILD_CREATE
@@ -1482,6 +1530,8 @@ pub struct WatchTogetherUpdate {
 
 /// Longest Up next queue of a Stremio session.
 pub const STREMIO_QUEUE_MAX: usize = 10;
+/// Queue entries one person without control may have in a Stremio queue at once.
+pub const STREMIO_QUEUE_PER_USER: usize = 2;
 /// Furthest position a Stremio seek may name before the duration is known (24 hours).
 pub const STREMIO_POSITION_MAX_MS: u64 = 24 * 60 * 60 * 1000;
 
@@ -1625,6 +1675,8 @@ pub struct StremioState {
     /// The `id` of the bitmap subtitle burned into the picture for everyone, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burned_subtitle: Option<u32>,
+    #[serde(flatten)]
+    pub control: MediaControl,
 }
 
 /// STREMIO_UPDATE, to everyone who can see the channel (`state: null` = ended), and the entries of the `stremio` lists on READY
@@ -1809,6 +1861,9 @@ pub struct StremioPatchRequest {
     pub queue_remove: Option<usize>,
     #[serde(default)]
     pub skip: Option<bool>,
+    /// With `skip`: the state's `item_seq` the skip or vote is for; ignored (200, current state) when the item has changed.
+    #[serde(default)]
+    pub item_seq: Option<u64>,
     /// An audio track `id` from the state.
     #[serde(default)]
     pub audio: Option<u32>,
@@ -1959,6 +2014,247 @@ pub struct StremioStreamList {
     pub addon_errors: Vec<String>,
 }
 
+// ---- Spotify in calls (docs/design/spotify-bot.md) ----
+
+/// Longest Spotify queue.
+pub const SPOTIFY_QUEUE_MAX: usize = 200;
+/// Queue entries one person without control may have in the Spotify queue at once; an album or playlist adds what fits.
+pub const SPOTIFY_QUEUE_PER_USER: usize = 10;
+/// Queue entries a SPOTIFY_UPDATE (and READY / `Call`) carries; `GET /channels/{id}/spotify` has all of them.
+pub const SPOTIFY_EVENT_QUEUE_MAX: usize = 50;
+
+/// A playable track. `art` is a 40-hex image id (`https://i.scdn.co/image/<id>`); no other URL ever appears.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyTrack {
+    /// `spotify:track:<22 characters>`.
+    pub uri: String,
+    pub title: String,
+    pub artists: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub album: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub art: Option<String>,
+    pub duration_ms: u64,
+    pub explicit: bool,
+}
+
+/// An album in a search result or on an artist page (`artists` is empty only if Spotify sent none).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyAlbumSummary {
+    pub id: String,
+    pub name: String,
+    pub artists: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub art: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyArtistSummary {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub art: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyPlaylistSummary {
+    pub id: String,
+    pub name: String,
+    pub owner_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub art: Option<String>,
+}
+
+/// `GET /spotify/search`; a list is empty when its type was not asked for.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpotifySearchResults {
+    #[serde(default)]
+    pub tracks: Vec<SpotifyTrack>,
+    #[serde(default)]
+    pub albums: Vec<SpotifyAlbumSummary>,
+    #[serde(default)]
+    pub artists: Vec<SpotifyArtistSummary>,
+    #[serde(default)]
+    pub playlists: Vec<SpotifyPlaylistSummary>,
+}
+
+/// `GET /spotify/albums/{id}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyAlbum {
+    pub id: String,
+    pub name: String,
+    pub artists: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub art: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<String>,
+    pub tracks: Vec<SpotifyTrack>,
+}
+
+/// `GET /spotify/playlists/{id}`: one page of 100 tracks.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyPlaylist {
+    pub id: String,
+    pub name: String,
+    pub owner_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub art: Option<String>,
+    /// Tracks in the whole playlist (the page holds fewer, and skips what cannot be played).
+    pub total: u32,
+    pub tracks: Vec<SpotifyTrack>,
+}
+
+/// `GET /spotify/artists/{id}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyArtist {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub art: Option<String>,
+    pub top_tracks: Vec<SpotifyTrack>,
+    pub albums: Vec<SpotifyAlbumSummary>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpotifyStatus {
+    /// The session was just created and the bot has not started the first track.
+    Starting,
+    Playing,
+    /// Paused, or nothing left to play (`track` is `null`).
+    Paused,
+    /// A new track was sent to the bot and has not started yet.
+    Loading,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpotifyLoop {
+    #[default]
+    Off,
+    Track,
+    Queue,
+}
+
+/// A queue entry: the track's fields plus `qid` (random per entry, so a remove or move never hits another row) and who added it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyQueueEntry {
+    pub qid: String,
+    #[serde(flatten)]
+    pub track: SpotifyTrack,
+    pub added_by: Snowflake,
+}
+
+/// The Spotify session of a voice channel or DM call (Vokko-only, in memory, at most one on the whole server). While `playing`,
+/// the expected position now is `position_ms + (now - updated_at_ms)`. The sound comes from the media LiveKit room (`bot_identity`).
+/// Nothing about the Spotify account that plays appears here.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyState {
+    pub status: SpotifyStatus,
+    /// Why the session is in `error` (a fixed text, never the bot's own message).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// A passing note, for example "Skipped an unavailable track"; it goes away by itself after 5 s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+    /// `null` when the queue ran out and nothing plays.
+    pub track: Option<SpotifyTrack>,
+    pub playing: bool,
+    pub position_ms: u64,
+    /// Unix milliseconds of the server when `position_ms` was true.
+    pub updated_at_ms: i64,
+    #[serde(rename = "loop")]
+    pub loop_mode: SpotifyLoop,
+    /// The whole queue from `GET`; at most `SPOTIFY_EVENT_QUEUE_MAX` entries in events, READY and `Call` (see `queue_len`).
+    #[serde(default)]
+    pub queue: Vec<SpotifyQueueEntry>,
+    pub queue_len: u32,
+    pub can_previous: bool,
+    pub started_by: Snowflake,
+    /// `bot:spotify:<channel_id>`.
+    pub bot_identity: String,
+    /// `added_by` is who put `track` in play; absent while nothing plays.
+    #[serde(flatten)]
+    pub control: MediaControl,
+}
+
+/// What `PUT` and `PATCH` answer: the state, plus `left_out` when an album or playlist did not fit in the queue.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyReply {
+    #[serde(flatten)]
+    pub state: SpotifyState,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub left_out: u32,
+}
+
+/// SPOTIFY_UPDATE, to everyone who can see the channel (`state: null` = ended), and the entries of the `spotify` lists on READY
+/// guilds, GUILD_CREATE and `Call`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyUpdate {
+    pub channel_id: Snowflake,
+    pub state: Option<SpotifyState>,
+}
+
+/// `PUT /channels/{id}/spotify`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct SpotifyStartRequest {
+    pub uri: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SpotifyQueueAdd {
+    pub uri: String,
+    /// Put it at the front of the queue instead of the end.
+    #[serde(default)]
+    pub next: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct SpotifyQueueMove {
+    pub qid: String,
+    /// New index in the queue (0-based; clamped to the end).
+    pub to: usize,
+}
+
+/// `PATCH /channels/{id}/spotify`: exactly one field per request.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct SpotifyPatchRequest {
+    #[serde(default)]
+    pub playing: Option<bool>,
+    #[serde(default)]
+    pub position_ms: Option<u64>,
+    #[serde(default)]
+    pub skip: Option<bool>,
+    /// With `skip`: the state's `item_seq` the skip or vote is for; ignored (200, current state) when the item has changed.
+    #[serde(default)]
+    pub item_seq: Option<u64>,
+    #[serde(default)]
+    pub previous: Option<bool>,
+    #[serde(default, rename = "loop")]
+    pub loop_mode: Option<SpotifyLoop>,
+    #[serde(default)]
+    pub shuffle: Option<bool>,
+    #[serde(default)]
+    pub queue_add: Option<SpotifyQueueAdd>,
+    #[serde(default)]
+    pub queue_remove: Option<String>,
+    #[serde(default)]
+    pub queue_move: Option<SpotifyQueueMove>,
+    #[serde(default)]
+    pub queue_clear: Option<bool>,
+}
+
+/// `POST /channels/{id}/spotify/listener-token`: a subscribe-only token for the session's media LiveKit room.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpotifyListenerToken {
+    /// `VOKKO_MEDIA_LIVEKIT_URL`.
+    pub url: String,
+    pub token: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VoiceConnectFailure {
@@ -2002,6 +2298,9 @@ pub struct Call {
     /// The Stremio session of the call, if one is running (at most one entry).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stremio: Vec<StremioUpdate>,
+    /// The Spotify session of the call, if one is running (at most one entry).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spotify: Vec<SpotifyUpdate>,
     /// The game running in the call, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game: Option<GameSession>,
@@ -3995,6 +4294,9 @@ pub struct GuildWithState {
     /// Stremio sessions in the voice channels the receiver can see; omitted when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stremio: Vec<StremioUpdate>,
+    /// The Spotify session in the voice channels the receiver can see (at most one on the whole server); omitted when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spotify: Vec<SpotifyUpdate>,
     /// Games running in the voice channels the receiver can see; omitted when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub games: Vec<GameUpdate>,
@@ -4592,6 +4894,7 @@ pub enum GatewayEvent {
     VoiceChannelStatusUpdate(VoiceChannelStatusUpdate),
     WatchTogetherUpdate(WatchTogetherUpdate),
     StremioUpdate(StremioUpdate),
+    SpotifyUpdate(SpotifyUpdate),
     GameUpdate(GameUpdate),
     GameMessage(GameMessage),
     GuildGamesUpdate(GuildGamesUpdate),
@@ -4682,6 +4985,7 @@ impl GatewayEvent {
             Self::VoiceChannelStatusUpdate(_) => "VOICE_CHANNEL_STATUS_UPDATE",
             Self::WatchTogetherUpdate(_) => "WATCH_TOGETHER_UPDATE",
             Self::StremioUpdate(_) => "STREMIO_UPDATE",
+            Self::SpotifyUpdate(_) => "SPOTIFY_UPDATE",
             Self::GameUpdate(_) => "GAME_UPDATE",
             Self::GameMessage(_) => "GAME_MESSAGE",
             Self::GuildGamesUpdate(_) => "GUILD_GAMES_UPDATE",
@@ -4760,6 +5064,7 @@ impl GatewayEvent {
             Self::VoiceChannelStatusUpdate(value) => serde_json::to_value(value),
             Self::WatchTogetherUpdate(value) => serde_json::to_value(value),
             Self::StremioUpdate(value) => serde_json::to_value(value),
+            Self::SpotifyUpdate(value) => serde_json::to_value(value),
             Self::GameUpdate(value) => serde_json::to_value(value),
             Self::GameMessage(value) => serde_json::to_value(value),
             Self::GuildGamesUpdate(value) => serde_json::to_value(value),
@@ -4943,6 +5248,13 @@ mod tests {
     }
 
     #[test]
+    fn skip_needed_is_half_the_listeners_rounded_up() {
+        let table: Vec<u32> = (0..=5).map(skip_needed).collect();
+        assert_eq!(table, [1, 1, 1, 2, 2, 3]);
+        assert_eq!(skip_needed(10), 5);
+    }
+
+    #[test]
     fn permission_table_is_complete() {
         use super::permissions::*;
         let mut seen = 0_u64;
@@ -4951,11 +5263,13 @@ mod tests {
             assert_eq!(seen & bit, 0, "{name} is unique");
             seen |= bit;
         }
-        assert_eq!(NAMED.len(), 53);
+        assert_eq!(NAMED.len(), 54);
         assert_eq!(seen, ALL);
         assert_eq!(ALL & (1 << 47), 0, "bit 47 is unassigned");
-        assert_eq!(NAMED.last().map(|(_, bit)| bit.trailing_zeros()), Some(53));
-        assert_eq!(DEFAULT_EVERYONE.count_ones(), 27);
+        assert_eq!(NAMED.last().map(|(_, bit)| bit.trailing_zeros()), Some(60));
+        // Discord's 27 plus Vokko's CONTROL_MEDIA.
+        assert_eq!(DEFAULT_EVERYONE.count_ones(), 28);
+        assert_ne!(DEFAULT_EVERYONE & CONTROL_MEDIA, 0);
         assert_eq!(DEFAULT_EVERYONE & !ALL, 0);
         assert_eq!(DEFAULT_EVERYONE & ADMINISTRATOR, 0);
         assert_ne!(DEFAULT_EVERYONE & VIEW_CHANNEL, 0);
@@ -5516,19 +5830,23 @@ mod tests {
         );
         let status = GatewayEvent::VoiceChannelStatusUpdate(VoiceChannelStatusUpdate { id: Snowflake(201), guild_id: Snowflake(300), status: None });
         assert_eq!((status.name(), status.data()), ("VOICE_CHANNEL_STATUS_UPDATE", json!({"id": "201", "guild_id": "300", "status": null})));
-        let watch = json!({"video_id": "dQw4w9WgXcQ", "playing": true, "position_ms": 5, "updated_at_ms": 9, "started_by": "7", "queue": ["aaaaaaaaaaa"]});
+        let watch = json!({
+            "video_id": "dQw4w9WgXcQ", "playing": true, "position_ms": 5, "updated_at_ms": 9, "started_by": "7", "queue": ["aaaaaaaaaaa"],
+            "queue_added_by": ["8"], "host_id": "7", "added_by": "7", "skip_votes": ["8"], "skip_needed": 2, "item_seq": 3
+        });
         round_trip::<WatchTogetherState>(watch.clone());
         let update = GatewayEvent::WatchTogetherUpdate(WatchTogetherUpdate { channel_id: Snowflake(201), state: None });
         assert_eq!((update.name(), update.data()), ("WATCH_TOGETHER_UPDATE", json!({"channel_id": "201", "state": null})));
         round_trip::<WatchTogetherUpdate>(json!({"channel_id": "201", "state": watch}));
         let stremio = json!({
             "item": {"title": "Heat", "label": "1080p"}, "status": "paused", "playing": false, "position_ms": 5, "updated_at_ms": 9,
-            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [{"title": "Alien", "label": "720p", "added_by": "8"}]
+            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [{"title": "Alien", "label": "720p", "added_by": "8"}],
+            "host_id": "7", "added_by": "7", "skip_votes": [], "skip_needed": 1, "item_seq": 3
         });
         round_trip::<StremioState>(stremio.clone());
         let tracks = json!({
             "item": {"title": "Heat", "label": "1080p"}, "status": "playing", "playing": true, "position_ms": 5, "updated_at_ms": 9,
-            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [],
+            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [], "host_id": "8", "added_by": "7", "skip_votes": ["9"], "skip_needed": 2, "item_seq": 3,
             "audio_tracks": [{"id": 1, "language": "eng", "codec": "eac3", "default": true}, {"id": 2, "language": "swe", "title": "Commentary", "codec": "aac", "default": false}],
             "audio": 1,
             "subtitle_tracks": [{"id": 3, "kind": "text", "language": "eng", "codec": "subrip", "forced": false, "default": false},
@@ -5545,6 +5863,21 @@ mod tests {
         let update = GatewayEvent::StremioUpdate(StremioUpdate { channel_id: Snowflake(201), state: None });
         assert_eq!((update.name(), update.data()), ("STREMIO_UPDATE", json!({"channel_id": "201", "state": null})));
         round_trip::<StremioUpdate>(json!({"channel_id": "201", "state": stremio}));
+        let track = json!({"uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC", "title": "Song", "artists": ["A"], "duration_ms": 1000, "explicit": false});
+        let spotify = json!({
+            "status": "playing", "track": track, "playing": true, "position_ms": 5, "updated_at_ms": 9, "loop": "queue", "queue_len": 1,
+            "can_previous": false, "started_by": "7", "bot_identity": "bot:spotify:201", "host_id": "7", "added_by": "8", "skip_votes": [], "skip_needed": 1, "item_seq": 3,
+            "queue": [{"qid": "q1", "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC", "title": "Song", "artists": ["A"], "duration_ms": 1000, "explicit": true, "added_by": "8"}]
+        });
+        round_trip::<SpotifyState>(spotify.clone());
+        let mut with_left_out = spotify.clone();
+        with_left_out["left_out"] = json!(3);
+        let reply: SpotifyReply = serde_json::from_value(with_left_out).expect("reply");
+        assert_eq!((reply.left_out, reply.state.queue.len()), (3, 1));
+        assert!(serde_json::to_value(SpotifyReply { left_out: 0, ..reply }).expect("reply").get("left_out").is_none());
+        let update = GatewayEvent::SpotifyUpdate(SpotifyUpdate { channel_id: Snowflake(201), state: None });
+        assert_eq!((update.name(), update.data()), ("SPOTIFY_UPDATE", json!({"channel_id": "201", "state": null})));
+        round_trip::<SpotifyUpdate>(json!({"channel_id": "201", "state": spotify}));
         let game = json!({
             "session_id": "0123456789abcdef", "started_by": "7", "started_at_ms": 9,
             "game": {"id": "builtin:sketch", "name": "Sketch", "url": "https://x.test/", "icon": "🎨", "min_players": 2, "max_players": 16, "aspect": "4:3"}

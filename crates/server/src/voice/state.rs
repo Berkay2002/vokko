@@ -17,7 +17,7 @@ use vokko_protocol::api::permissions::{
     ADMINISTRATOR, CONNECT, MANAGE_CHANNELS, MOVE_MEMBERS, MUTE_MEMBERS, PRIORITY_SPEAKER, SPEAK, STREAM, USE_VAD, VIEW_CHANNEL,
 };
 use vokko_protocol::api::{
-    CALL_PARTICIPANT_MAX, ChannelType, GameSession, GameUpdate, GatewayEvent, Snowflake, StremioUpdate, VoiceConnectFailed, VoiceConnectFailure,
+    CALL_PARTICIPANT_MAX, ChannelType, GameSession, GameUpdate, GatewayEvent, Snowflake, SpotifyUpdate, StremioUpdate, VoiceConnectFailed, VoiceConnectFailure,
     VoiceServerUpdate, VoiceState, VoiceStateUpdateCommand, WatchTogetherState, WatchTogetherUpdate,
 };
 
@@ -449,6 +449,10 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         let event = GatewayEvent::StremioUpdate(StremioUpdate { channel_id: target, state: Some(playing) });
         session.dispatch(event.name(), event.data());
     }
+    if let Some(playing) = super::spotify::state_of(state, channel_id) {
+        let event = GatewayEvent::SpotifyUpdate(SpotifyUpdate { channel_id: target, state: Some(playing) });
+        session.dispatch(event.name(), event.data());
+    }
     if row.is_dm() {
         // Starts the call (CALL_CREATE, ringing) or adds us to it.
         super::calls::joined(state, &row, user_id).await;
@@ -682,6 +686,9 @@ pub(crate) fn broadcast<'a>(state: &'a AppState, entry: &'a VoiceEntry, left: bo
         state.hub.send(&viewers, &GatewayEvent::VoiceStateUpdate(Box::new(payload)));
         if left {
             release_channel(state, entry.channel_id).await;
+        } else {
+            // A join or a (un)deafen changes who counts for media skip votes.
+            super::control::refresh(state, entry.channel_id);
         }
         viewers
     })
@@ -690,6 +697,8 @@ pub(crate) fn broadcast<'a>(state: &'a AppState, entry: &'a VoiceEntry, left: bo
 /// The last person left `channel_id`: its voice status goes (VOICE_CHANNEL_STATUS_UPDATE with `null`), a DM call ends.
 async fn release_channel(state: &AppState, channel_id: i64) {
     super::stremio::user_left(state, channel_id);
+    super::spotify::user_left(state, channel_id);
+    super::control::refresh(state, channel_id);
     let inside: Vec<VoiceEntry> = state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id).collect();
     if !inside.iter().any(VoiceEntry::moderator) {
         // The last stage moderator left: the stage (if one is live) ends. Spawned, so no user lock is held while it demotes others.
@@ -703,6 +712,7 @@ async fn release_channel(state: &AppState, channel_id: i64) {
     super::watch::end(state, channel_id).await;
     super::games::end(state, channel_id).await;
     super::stremio::end(state, channel_id).await;
+    super::spotify::end(state, channel_id).await;
     let cleared: Result<Option<(Option<i64>,)>, _> =
         sqlx::query_as("UPDATE channels SET voice_status = NULL WHERE id = $1 AND voice_status IS NOT NULL RETURNING guild_id")
             .bind(channel_id)

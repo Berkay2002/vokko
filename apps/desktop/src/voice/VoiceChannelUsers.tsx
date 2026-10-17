@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
 import { StremioIcon } from "../stremio";
+import { SpotifyIcon } from "../spotify/SpotifyIcon";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
 import { TagChip } from "../perks/TagChip";
@@ -232,26 +233,33 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
   );
 }
 
+/** A media bot in the call (Stremio, Spotify): laid out like a user row, but no profile and no menu. */
+function BotRow({ identity, name, icon }: { identity: string; name: string; icon: ReactNode }) {
+  return (
+    <li className="voice-occupant voice-user voice-bot-user" data-bot-identity={identity}>
+      <span className="voice-user-avatar voice-bot-avatar" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="voice-occupant-name">{name}</span>
+      <span className="voice-bot-badge">Bot</span>
+    </li>
+  );
+}
+
 /** Connected users under a voice channel in the channel list (speaking rings only inside your own call). */
 export function VoiceChannelUsers({ channel, guildId, canInvite }: { channel: Pick<Channel, "id" | "name">; guildId: Snowflake; canInvite?: boolean }) {
   const states = useChannelVoiceStates(channel.id);
   const inside = useVoice(s => s.channelId === channel.id || (s.meId !== null && s.states[s.meId]?.channel_id === channel.id));
-  const bot = useVoice(s => s.stremio[channel.id]?.bot_identity);
+  const stremioBot = useVoice(s => s.stremio[channel.id]?.bot_identity);
+  const spotifyBot = useVoice(s => s.spotify[channel.id]?.bot_identity);
   if (states.length === 0) return null;
   return (
     <ul className="voice-occupants voice-users" aria-label={`Users in ${channel.name ?? "voice channel"}`}>
       {states.map(state => (
         <VoiceUserRow key={state.user_id} state={state} guildId={guildId} />
       ))}
-      {bot && (
-        <li className="voice-occupant voice-user voice-bot-user" data-bot-identity={bot}>
-          <span className="voice-user-avatar voice-bot-avatar" aria-hidden="true">
-            <StremioIcon size={14} />
-          </span>
-          <span className="voice-occupant-name">Stremio</span>
-          <span className="voice-bot-badge">Bot</span>
-        </li>
-      )}
+      {stremioBot && <BotRow identity={stremioBot} name="Stremio" icon={<StremioIcon size={14} />} />}
+      {spotifyBot && <BotRow identity={spotifyBot} name="Spotify" icon={<SpotifyIcon size={14} />} />}
       {inside && canInvite && (
         <li className="voice-invite-item">
           <button type="button" className="voice-invite-row" onClick={() => openModal({ type: "invite", channelId: channel.id })}>

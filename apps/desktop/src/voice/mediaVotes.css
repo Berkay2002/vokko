@@ -1,0 +1,36 @@
+/* The skip vote line on the media tiles (voice/MediaVotes.tsx). */
+
+.media-votes {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  color: rgb(255 255 255 / 0.85);
+}
+
+.media-votes-avatars {
+  display: inline-flex;
+}
+
+.media-votes-avatars .chat-avatar {
+  width: 16px;
+  height: 16px;
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.6);
+}
+
+.media-votes-avatars .chat-avatar + .chat-avatar {
+  margin-left: -4px;
+}
+
+/* The count on a Vote to skip button. */
+.media-vote-count {
+  margin-left: 2px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.media-quota {
+  font-size: 12px;
+  color: var(--text-muted, #949ba4);
+}

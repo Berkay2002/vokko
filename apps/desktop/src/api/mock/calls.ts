@@ -12,6 +12,7 @@ import { messageFor, relationship } from "./views";
 import { voiceStates } from "./voice";
 import { watchOf } from "./watch";
 import { stremioOf } from "./stremio";
+import { spotifyOf } from "./spotify";
 import { gameOf } from "./games";
 
 interface MockCall {
@@ -51,6 +52,7 @@ function sortedRinging(call: MockCall): string[] {
 function callObject(channelId: string, call: MockCall): Call {
   const watching = watchOf(channelId);
   const stremio = stremioOf(channelId);
+  const spotify = spotifyOf(channelId);
   const game = gameOf(channelId);
   return {
     ...(game ? { game } : {}),
@@ -61,6 +63,7 @@ function callObject(channelId: string, call: MockCall): Call {
     voice_states: statesIn(channelId).map(s => ({ ...s })),
     ...(watching ? { watch_together: { ...watching, queue: [...watching.queue] } } : {}),
     ...(stremio ? { stremio: [{ channel_id: channelId, state: { ...stremio, queue: stremio.queue.map(q => ({ ...q })) } }] } : {}),
+    ...(spotify ? { spotify: [{ channel_id: channelId, state: spotify }] } : {}),
   };
 }
 

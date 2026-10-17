@@ -74,6 +74,8 @@ pub struct Config {
     pub reminder_poll: Duration,
     /// Stremio in voice calls; `None` (every `/stremio` route answers 404) unless it is fully configured.
     pub stremio: Option<StremioConfig>,
+    /// Spotify in voice calls; `None` (every `/spotify` route answers 404) unless it is fully configured.
+    pub spotify: Option<SpotifyConfig>,
     /// Key of the per-game app ids (docs/design/games-host.md section 5): derived from `VOKKO_SECRETS_KEY`, else random per process
     /// (app ids then change on every restart).
     pub games_app_key: crate::crypto::SecretsKey,
@@ -116,6 +118,123 @@ pub struct StremioConfig {
     pub error_hold: Duration,
     /// Bot events this soon after an item started or was changed are stale (they describe the previous item or position).
     pub event_grace: Duration,
+}
+
+/// Spotify in voice calls (docs/design/spotify-bot.md): the catalog app (`VOKKO_SPOTIFY_CLIENT_ID`, `_CLIENT_SECRET`), the bot
+/// (`VOKKO_SPOTIFY_BOT_URL`, `_BOT_SECRET`) and the media LiveKit (`VOKKO_MEDIA_LIVEKIT_*`, the same one Stremio uses, but this
+/// feature does not need Stremio's `VOKKO_SECRETS_KEY`). Off unless all of those are set.
+#[derive(Clone, Debug)]
+pub struct SpotifyConfig {
+    pub client_id: String,
+    pub client_secret: crate::crypto::Secret,
+    pub bot_url: String,
+    pub bot_secret: crate::crypto::Secret,
+    /// Public signalling URL of the media LiveKit, handed to listeners.
+    pub media_url: String,
+    pub media_api_key: String,
+    pub media_api_secret: crate::crypto::Secret,
+    /// Signalling URL the native bot connects to (`VOKKO_MEDIA_LIVEKIT_BOT_URL`); defaults to `media_url`.
+    pub bot_media_url: String,
+    /// The house account's country (`VOKKO_SPOTIFY_MARKET`), so catalog results are playable for it.
+    pub market: String,
+    /// A session paused this long stops (`VOKKO_SPOTIFY_IDLE_MIN`).
+    pub pause_timeout: Duration,
+    /// Spotify's Web API and token endpoints (tests point them at a mock).
+    pub api_url: String,
+    pub accounts_url: String,
+    /// The bot drops a session not renewed for 150 s, so the server re-sends its `PUT` this often.
+    pub lease_interval: Duration,
+    /// How often the session is checked for lease, pause timeout, error hold and notice expiry.
+    pub tick: Duration,
+    /// How long an `error` stays on the tile before the session stops, and how long an unreachable bot is waited for.
+    pub error_hold: Duration,
+    /// A session with nothing left to play stops after this long.
+    pub empty_timeout: Duration,
+    /// How long a `notice` stays in the state.
+    pub notice_ttl: Duration,
+}
+
+impl SpotifyConfig {
+    pub fn new(
+        client_id: String,
+        client_secret: String,
+        bot_url: String,
+        bot_secret: String,
+        media_url: String,
+        media_api_key: String,
+        media_api_secret: String,
+    ) -> Self {
+        Self {
+            client_id,
+            client_secret: crate::crypto::Secret::new(client_secret),
+            bot_url,
+            bot_secret: crate::crypto::Secret::new(bot_secret),
+            bot_media_url: media_url.clone(),
+            media_url,
+            media_api_key,
+            media_api_secret: crate::crypto::Secret::new(media_api_secret),
+            market: "SE".to_owned(),
+            pause_timeout: Duration::from_secs(15 * 60),
+            api_url: "https://api.spotify.com".to_owned(),
+            accounts_url: "https://accounts.spotify.com".to_owned(),
+            lease_interval: Duration::from_secs(60),
+            tick: Duration::from_secs(1),
+            error_hold: Duration::from_secs(30),
+            empty_timeout: Duration::from_secs(5 * 60),
+            notice_ttl: Duration::from_secs(5),
+        }
+    }
+}
+
+/// `Ok(None)` when Spotify is not (fully) configured; an error for values that are set but wrong.
+pub fn parse_spotify(env: &DotEnv) -> Result<Option<SpotifyConfig>, String> {
+    let [client_id, client_secret, bot_url, bot_secret, media_url, media_api_key, media_api_secret] = [
+        "VOKKO_SPOTIFY_CLIENT_ID",
+        "VOKKO_SPOTIFY_CLIENT_SECRET",
+        "VOKKO_SPOTIFY_BOT_URL",
+        "VOKKO_SPOTIFY_BOT_SECRET",
+        "VOKKO_MEDIA_LIVEKIT_URL",
+        "VOKKO_MEDIA_LIVEKIT_API_KEY",
+        "VOKKO_MEDIA_LIVEKIT_API_SECRET",
+    ]
+    .map(|name| env.get(name).filter(|value| !value.trim().is_empty()));
+    let (Some(client_id), Some(client_secret), Some(bot_url), Some(bot_secret), Some(media_url), Some(media_api_key), Some(media_api_secret)) =
+        (client_id, client_secret, bot_url, bot_secret, media_url, media_api_key, media_api_secret)
+    else {
+        return Ok(None);
+    };
+    if bot_secret.len() < 16 {
+        return Err("VOKKO_SPOTIFY_BOT_SECRET must be at least 16 characters".to_owned());
+    }
+    let mut config = SpotifyConfig::new(
+        client_id.trim().to_owned(),
+        client_secret.trim().to_owned(),
+        bot_url.trim().trim_end_matches('/').to_owned(),
+        bot_secret,
+        media_url.trim().trim_end_matches('/').to_owned(),
+        media_api_key,
+        media_api_secret,
+    );
+    if let Some(url) = env.get("VOKKO_MEDIA_LIVEKIT_BOT_URL").filter(|url| !url.trim().is_empty()) {
+        config.bot_media_url = url.trim().trim_end_matches('/').to_owned();
+    }
+    if let Some(market) = env.get("VOKKO_SPOTIFY_MARKET").filter(|value| !value.trim().is_empty()) {
+        let market = market.trim().to_ascii_uppercase();
+        if market.len() != 2 || !market.bytes().all(|byte| byte.is_ascii_uppercase()) {
+            return Err(format!("VOKKO_SPOTIFY_MARKET must be a two-letter country code, got {market}"));
+        }
+        config.market = market;
+    }
+    if let Some(value) = env.get("VOKKO_SPOTIFY_IDLE_MIN").filter(|value| !value.trim().is_empty()) {
+        let minutes: u64 = value
+            .trim()
+            .parse()
+            .ok()
+            .filter(|minutes| (1..=1440).contains(minutes))
+            .ok_or_else(|| format!("VOKKO_SPOTIFY_IDLE_MIN must be a whole number from 1 to 1440, got {value}"))?;
+        config.pause_timeout = Duration::from_secs(minutes * 60);
+    }
+    Ok(Some(config))
 }
 
 /// An IP range (`10.0.0.0/8`, `fd00::/8`, or a bare address).
@@ -480,6 +599,7 @@ impl Config {
         config.accounts = AccountsConfig::from_env(&env, &config.public_url)?;
         config.livekit = parse_livekit(&env)?;
         config.stremio = parse_stremio(&env)?;
+        config.spotify = parse_spotify(&env)?;
         if let Some(key) = env.get("VOKKO_SECRETS_KEY").filter(|key| !key.trim().is_empty()) {
             config.games_app_key = crate::crypto::SecretsKey::parse(&key)?.derive(crate::voice::games::APP_ID_LABEL);
         } else {
@@ -526,6 +646,7 @@ impl Config {
             gif: GifConfig { provider: vokko_protocol::api::GifProvider::None, api_key: String::new(), base_url: None },
             reminder_poll: Duration::from_secs(15),
             stremio: None,
+            spotify: None,
             games_app_key: crate::crypto::SecretsKey::random(),
             dev: false,
             cors_origins: None,
@@ -668,6 +789,39 @@ mod tests {
         short[5] = ("VOKKO_STREMIO_BOT_SECRET", "short");
         assert!(parse(&short).is_err());
         assert!(!format!("{config:?}").contains("0123456789abcdef"), "secrets stay out of Debug");
+    }
+
+    #[test]
+    fn spotify_needs_every_key() {
+        let all = [
+            ("VOKKO_SPOTIFY_CLIENT_ID", "cid"),
+            ("VOKKO_SPOTIFY_CLIENT_SECRET", "csecret"),
+            ("VOKKO_SPOTIFY_BOT_URL", "http://host.internal:8721/"),
+            ("VOKKO_SPOTIFY_BOT_SECRET", "0123456789abcdef"),
+            ("VOKKO_MEDIA_LIVEKIT_URL", "wss://vokko-live.example/"),
+            ("VOKKO_MEDIA_LIVEKIT_API_KEY", "mk"),
+            ("VOKKO_MEDIA_LIVEKIT_API_SECRET", "ms"),
+        ];
+        let parse = |pairs: &[(&str, &str)]| super::parse_spotify(&DotEnv::from_pairs(pairs));
+        let config = parse(&all).expect("valid").expect("on");
+        assert_eq!(
+            (config.media_url.as_str(), config.bot_url.as_str(), config.market.as_str()),
+            ("wss://vokko-live.example", "http://host.internal:8721", "SE")
+        );
+        for skip in 0..all.len() {
+            let partial: Vec<_> = all.iter().enumerate().filter(|(index, _)| *index != skip).map(|(_, pair)| *pair).collect();
+            assert!(parse(&partial).expect("valid").is_none(), "without {}", all[skip].0);
+        }
+        let with = |extra: (&'static str, &'static str)| parse(&[all.as_slice(), &[extra]].concat());
+        assert_eq!(with(("VOKKO_SPOTIFY_MARKET", "de")).expect("valid").expect("on").market, "DE");
+        assert!(with(("VOKKO_SPOTIFY_MARKET", "SWE")).is_err());
+        assert!(with(("VOKKO_SPOTIFY_IDLE_MIN", "0")).is_err());
+        assert_eq!(with(("VOKKO_SPOTIFY_IDLE_MIN", "3")).expect("valid").expect("on").pause_timeout, std::time::Duration::from_secs(180));
+        let mut short = all.to_vec();
+        short[3] = ("VOKKO_SPOTIFY_BOT_SECRET", "short");
+        assert!(parse(&short).is_err());
+        let debug = format!("{config:?}");
+        assert!(!debug.contains("0123456789abcdef") && !debug.contains("csecret") && !debug.contains("\"ms\""), "secrets stay out of Debug");
     }
 
     #[test]

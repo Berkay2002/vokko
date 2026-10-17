@@ -78,6 +78,12 @@ services:
       VOKKO_STREMIO_BITRATE_KBPS: ${VOKKO_STREMIO_BITRATE_KBPS:-}
       VOKKO_STREMIO_PAUSE_TIMEOUT_MIN: ${VOKKO_STREMIO_PAUSE_TIMEOUT_MIN:-}
       VOKKO_STREMIO_FETCH_ALLOW: ${VOKKO_STREMIO_FETCH_ALLOW:-}
+      VOKKO_SPOTIFY_CLIENT_ID: ${VOKKO_SPOTIFY_CLIENT_ID:-}
+      VOKKO_SPOTIFY_CLIENT_SECRET: ${VOKKO_SPOTIFY_CLIENT_SECRET:-}
+      VOKKO_SPOTIFY_BOT_URL: ${VOKKO_SPOTIFY_BOT_URL:-}
+      VOKKO_SPOTIFY_BOT_SECRET: ${VOKKO_SPOTIFY_BOT_SECRET:-}
+      VOKKO_SPOTIFY_MARKET: ${VOKKO_SPOTIFY_MARKET:-}
+      VOKKO_SPOTIFY_IDLE_MIN: ${VOKKO_SPOTIFY_IDLE_MIN:-}
       VOKKO_REGISTRATION: ${VOKKO_REGISTRATION:-open}
       # `on` only when every request arrives through a reverse proxy that appends the client address (the bundled Caddy does).
       VOKKO_TRUST_PROXY: ${VOKKO_TRUST_PROXY:-off}
@@ -111,7 +117,7 @@ services:
       - "${VOKKO_WEB_HTTP_PORT:-80}:80"
       - "${VOKKO_WEB_HTTPS_PORT:-443}:443"
     volumes:
-      # Desktop installers served at /downloads/ (Vokko-mac.dmg, Vokko-windows-setup.exe). Empty directory = 404s.
+      # Desktop installers served at /downloads/ (Vokko-mac.dmg, Vokko-windows-setup.exe, Vokko-linux.AppImage/.deb). Empty directory = 404s.
       - ${VOKKO_DOWNLOADS_DIR:-./downloads}:/downloads:ro
       - caddy-data:/data
       - caddy-config:/config

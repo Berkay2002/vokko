@@ -422,7 +422,7 @@ describe("voice reducer: server-side move and stages", () => {
   });
 
   it("tracks Watch Together sessions from READY, GUILD_CREATE, WATCH_TOGETHER_UPDATE and channel / guild deletes", () => {
-    const session = { video_id: "dQw4w9WgXcQ", playing: true, position_ms: 0, updated_at_ms: 1000, started_by: ALICE, queue: [] as string[] };
+    const session = { video_id: "dQw4w9WgXcQ", playing: true, position_ms: 0, updated_at_ms: 1000, started_by: ALICE, queue: [] as string[], queue_added_by: [] as string[], host_id: ALICE, skip_votes: [] as string[], skip_needed: 1, item_seq: 0 };
     let m = apply({ type: "ready", meId: ME, voiceEnabled: true, guilds: [{ id: GUILD, voice_states: [], watch_together: [{ channel_id: GENERAL, state: session }] }] });
     expect(m.watch[GENERAL]?.video_id).toBe("dQw4w9WgXcQ");
     m = voiceReducer(m, { type: "watchTogether", channelId: GENERAL, state: { ...session, playing: false, position_ms: 5000 } });
@@ -439,7 +439,7 @@ describe("voice reducer: server-side move and stages", () => {
   });
 
   it("tracks Stremio sessions from READY, GUILD_CREATE, STREMIO_UPDATE and channel deletes", () => {
-    const session = { item: { title: "Heat", label: "1080p" }, status: "starting" as const, playing: false, position_ms: 0, updated_at_ms: 1000, started_by: ALICE, bot_identity: `bot:stremio:${GENERAL}`, queue: [] };
+    const session = { item: { title: "Heat", label: "1080p" }, status: "starting" as const, playing: false, position_ms: 0, updated_at_ms: 1000, started_by: ALICE, bot_identity: `bot:stremio:${GENERAL}`, queue: [], host_id: ALICE, skip_votes: [] as string[], skip_needed: 1, item_seq: 0 };
     let m = apply({ type: "ready", meId: ME, voiceEnabled: true, guilds: [{ id: GUILD, voice_states: [], stremio: [{ channel_id: GENERAL, state: session }] }] });
     expect(m.stremio[GENERAL]?.item.title).toBe("Heat");
     m = voiceReducer(m, { type: "stremio", channelId: GENERAL, state: { ...session, status: "playing", playing: true } });

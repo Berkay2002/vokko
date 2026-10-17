@@ -12,15 +12,15 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use vokko_protocol::api::{
-    GatewayEvent, STREMIO_POSITION_MAX_MS, STREMIO_QUEUE_MAX, STREMIO_TRACKS_MAX, Snowflake, StremioAddonSubtitle, StremioAddonSubtitles, StremioAudioTrack,
-    StremioCues, StremioItem, StremioPatchRequest, StremioQueueItem, StremioStartRequest, StremioState, StremioStatus, StremioSubtitleKind,
-    StremioSubtitleTrack, StremioUpdate, StremioViewerToken,
+    GatewayEvent, MediaControl, STREMIO_POSITION_MAX_MS, STREMIO_QUEUE_MAX, STREMIO_QUEUE_PER_USER, STREMIO_TRACKS_MAX, Snowflake, StremioAddonSubtitle,
+    StremioAddonSubtitles, StremioAudioTrack, StremioCues, StremioItem, StremioPatchRequest, StremioQueueItem, StremioStartRequest, StremioState,
+    StremioStatus, StremioSubtitleKind, StremioSubtitleTrack, StremioUpdate, StremioViewerToken,
 };
 use vokko_protocol::cues;
 
 use super::token::{self, Claims, VideoGrant};
 use super::watch::{CONTROL_BURST, CONTROL_PER_SECOND, require_in_voice};
-use super::{unix_millis, unix_now};
+use super::{control, unix_millis, unix_now};
 use crate::access;
 use crate::auth::{AuthUser, random_hex};
 use crate::crypto::Secret;
@@ -72,6 +72,8 @@ pub struct Session {
     updated_at_ms: i64,
     duration_ms: Option<u64>,
     started_by: i64,
+    /// Host, who added the current item, and the skip vote.
+    control: MediaControl,
     queue: Vec<Queued>,
     /// The stream being played: the candidate (for a re-resolve) and what the bot was given.
     candidate: Candidate,
@@ -80,6 +82,8 @@ pub struct Session {
     token: String,
     /// Changes with every new item; events and slow resolves that belong to an older one are dropped.
     generation: u64,
+    /// The `generation` an `advance` has claimed: one advance per item, however many skips, votes and `ended` events race it.
+    advancing: Option<u64>,
     /// `(type, video id)` of the playing item, for asking addons about subtitles.
     video: Option<(String, String)>,
     /// What the bot found in the file (empty until it reports, and for every new item).
@@ -125,6 +129,16 @@ fn extrapolate(position_ms: u64, updated_at_ms: i64, playing: bool, now_ms: i64,
 }
 
 impl Session {
+    /// A skip of the current item passed: its votes and adder go at once (so a burst of skips or votes passes once), and the
+    /// `generation` to advance from comes back, unless an advance of it already runs.
+    fn skip_passed(&mut self) -> Option<u64> {
+        if self.advancing == Some(self.generation) {
+            return None;
+        }
+        control::new_item(&mut self.control, None);
+        Some(self.generation)
+    }
+
     fn view(&self, channel_id: i64) -> StremioState {
         StremioState {
             item: self.item.clone(),
@@ -136,6 +150,7 @@ impl Session {
             duration_ms: self.duration_ms,
             started_by: Snowflake::from(self.started_by),
             bot_identity: bot_identity(channel_id),
+            control: self.control.clone(),
             audio_tracks: self.audio_tracks.clone(),
             audio: self.audio,
             subtitle_tracks: self.subtitle_tracks.clone(),
@@ -157,6 +172,7 @@ impl Session {
     /// Notes who started the current item (call right after `begin`) and, for a resume, where it starts.
     fn track(&mut self, info: &TitleInfo, owner: i64, began_ms: u64) {
         self.tracked = Some(Tracked { owner, info: info.clone(), began_ms, foreign_seek: false, started_ms: unix_millis(), owner_left_at: None });
+        control::new_item(&mut self.control, Some(owner));
         self.position_ms = began_ms;
     }
 
@@ -360,7 +376,15 @@ async fn start(
     ApiJson(body): ApiJson<StremioStartRequest>,
 ) -> ApiResult<Response> {
     let active = active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
+    if crate::voice::spotify::playing_in(&state, channel_id) {
+        return Err(crate::voice::spotify::blocks_stremio());
+    }
+    // Anyone starts a session; replacing a running item is a controller's (checked again under the lock below).
+    if let Some(session) = lock(&state.stremio.sessions).get(&channel_id) {
+        control::require_control(&ctx, &session.control)?;
+    }
     if body.position_ms.is_some_and(|position| position > STREMIO_POSITION_MAX_MS) {
         return Err(ApiErr::invalid("position_ms", "Must be between 0 and 86400000."));
     }
@@ -370,8 +394,15 @@ async fn start(
     let generation = state.stremio.next_generation();
     let (view, desired, had_one, replaced) = {
         let mut sessions = lock(&state.stremio.sessions);
+        // Lock order is Stremio's sessions, then Spotify's slot (the same in Spotify's start): the check and the insert below are one step.
+        if crate::voice::spotify::playing_in(&state, channel_id) {
+            return Err(crate::voice::spotify::blocks_stremio());
+        }
         let had_one = sessions.contains_key(&channel_id);
-        // Changing the item keeps the queue and who started the session.
+        if let Some(session) = sessions.get(&channel_id) {
+            control::require_control(&ctx, &session.control)?;
+        }
+        // Changing the item keeps the queue, the host and who started the session.
         let session = sessions.entry(channel_id).or_insert_with(|| Session {
             room: new_room(channel_id),
             item: StremioItem { title: String::new(), subtitle: None, poster: None, label: String::new() },
@@ -382,12 +413,14 @@ async fn start(
             updated_at_ms: unix_millis(),
             duration_ms: None,
             started_by: user_id,
+            control: control::new_session(user_id, &control::room(&state, channel_id)),
             queue: Vec::new(),
             candidate: listed.candidate.clone(),
             media: media.clone(),
             headers: BTreeMap::new(),
             token: String::new(),
             generation,
+            advancing: None,
             video: None,
             audio_tracks: Vec::new(),
             subtitle_tracks: Vec::new(),
@@ -440,7 +473,8 @@ async fn control(
     ApiJson(body): ApiJson<StremioPatchRequest>,
 ) -> ApiResult<Response> {
     let active = active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
     if body.position_ms.is_some_and(|position| position > STREMIO_POSITION_MAX_MS) {
         return Err(ApiErr::invalid("position_ms", "Must be between 0 and 86400000."));
     }
@@ -456,10 +490,23 @@ async fn control(
     let steer = !skip && (body.playing.is_some() || body.position_ms.is_some());
     let picks = !skip && (body.audio.is_some() || body.burned_subtitle.is_some());
     let now = unix_millis();
-    let (before, after, desired) = {
+    let (before, after, desired, skip_now) = {
         let mut sessions = lock(&state.stremio.sessions);
         let session = sessions.get_mut(&channel_id).ok_or_else(|| ApiErr::conflict(40033, "Nothing is playing in this channel."))?;
         let before = session.view(channel_id);
+        let controller = control::controls(&ctx, session.control.host_id);
+        // Steering and the tracks are for everyone, so controllers only; anyone removes their own queue entry.
+        // Checked on the fields, not on `steer`/`picks`: a `skip` alongside must not carry an unchecked track pick through.
+        let steers = body.playing.is_some() || body.position_ms.is_some() || body.audio.is_some() || body.burned_subtitle.is_some();
+        if steers && !controller {
+            return Err(ApiErr::missing_permissions());
+        }
+        if body.queue_remove.and_then(|index| session.queue.get(index)).is_some_and(|queued| queued.added_by != user_id && !controller) {
+            return Err(ApiErr::missing_permissions());
+        }
+        if queued.is_some() {
+            control::quota(&ctx, &session.control, session.queue.iter().filter(|queued| queued.added_by == user_id).count(), STREMIO_QUEUE_PER_USER)?;
+        }
         if let Some(position) = body.position_ms.filter(|position| steer && session.duration_ms.is_some_and(|duration| *position > duration)) {
             return Err(ApiErr::invalid("position_ms", &format!("Must be between 0 and {} for this video.", session.duration_ms.unwrap_or(position))));
         }
@@ -503,7 +550,9 @@ async fn control(
             }
             session.steer(body.playing, body.position_ms, now);
         }
-        (before, session.view(channel_id), steer.then(|| session.desired(&state, now)).flatten())
+        let passed = body.skip.is_some_and(|skip| control::skip_request(&mut session.control, &ctx, skip, body.item_seq, &control::room(&state, channel_id)));
+        let skip_now = if passed { session.skip_passed() } else { None };
+        (before, session.view(channel_id), steer.then(|| session.desired(&state, now)).flatten(), skip_now)
     };
     if let Some(desired) = desired {
         if active.clients.bot.put(channel_id, &desired).await.is_ok() {
@@ -516,8 +565,8 @@ async fn control(
             touch(&state, channel_id, |session| session.dirty = true);
         }
     }
-    if skip {
-        advance(&state, &active, channel_id, None).await;
+    if let Some(generation) = skip_now {
+        advance(&state, &active, channel_id, generation, None).await;
         return Ok(Json(state_of(&state, channel_id)).into_response());
     }
     if after != before {
@@ -528,9 +577,20 @@ async fn control(
 
 async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Response> {
     active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
-    end(&state, channel_id).await;
+    // The check and the removal share the lock: a session started meanwhile is not ended by someone who does not control it.
+    let session = {
+        let mut sessions = lock(&state.stremio.sessions);
+        if let Some(session) = sessions.get(&channel_id) {
+            control::require_control(&ctx, &session.control)?;
+        }
+        sessions.remove(&channel_id)
+    };
+    if let Some(session) = session {
+        ended(&state, channel_id, session).await;
+    }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -542,16 +602,23 @@ async fn viewer_token(State(state): State<AppState>, AuthUser(user_id): AuthUser
     let Some(room) = lock(&state.stremio.sessions).get(&channel_id).map(|session| session.room.clone()) else {
         return Err(ApiErr::conflict(40033, "Nothing is playing in this channel."));
     };
+    let token = media_viewer_token(&active.cfg.media_api_key, active.cfg.media_api_secret.expose(), &room, user_id, VIEWER_TOKEN_TTL_SECS)
+        .ok_or_else(ApiErr::internal)?;
+    Ok(Json(StremioViewerToken { url: active.cfg.media_url.clone(), token }))
+}
+
+/// A subscribe-only token for a media room (shared with Spotify). A fresh identity per token: two devices of one account must not
+/// kick each other out of the room.
+pub(crate) fn media_viewer_token(api_key: &str, api_secret: &str, room: &str, user_id: i64, ttl_secs: i64) -> Option<String> {
     let now = unix_now();
-    // A fresh identity per token: two devices of one account must not kick each other out of the room.
     let claims = Claims {
-        iss: active.cfg.media_api_key.clone(),
+        iss: api_key.to_owned(),
         sub: format!("viewer:{user_id}:{}", random_hex(4)),
         nbf: now - 10,
-        exp: now + VIEWER_TOKEN_TTL_SECS,
+        exp: now + ttl_secs,
         name: "Viewer".to_owned(),
         video: Some(VideoGrant {
-            room: Some(room),
+            room: Some(room.to_owned()),
             room_join: true,
             can_subscribe: true,
             can_publish: false,
@@ -560,8 +627,7 @@ async fn viewer_token(State(state): State<AppState>, AuthUser(user_id): AuthUser
         }),
         ..Claims::default()
     };
-    let token = token::sign(active.cfg.media_api_secret.expose(), &claims).ok_or_else(ApiErr::internal)?;
-    Ok(Json(StremioViewerToken { url: active.cfg.media_url.clone(), token }))
+    token::sign(api_secret, &claims)
 }
 
 /// Subtitle files the requester's own addons offer for the playing title. Only labels reach the client; the URLs stay here.
@@ -625,7 +691,12 @@ fn touch(state: &AppState, channel_id: i64, change: impl FnOnce(&mut Session)) {
 
 /// Ends the channel's session, if any: the bot drops it and everyone who can see the channel hears.
 pub(crate) async fn end(state: &AppState, channel_id: i64) {
-    let Some(mut session) = lock(&state.stremio.sessions).remove(&channel_id) else { return };
+    let Some(session) = lock(&state.stremio.sessions).remove(&channel_id) else { return };
+    ended(state, channel_id, session).await;
+}
+
+/// What follows a session's removal: its library entry, the bot, the room and the announcement.
+async fn ended(state: &AppState, channel_id: i64, mut session: Session) {
     if let Some(finished) = session.take_finished(None, unix_millis()) {
         library::save(state, finished);
     }
@@ -672,19 +743,40 @@ pub(crate) fn user_left(state: &AppState, channel_id: i64) {
     tokio::spawn(async move { remove_strangers(&state, channel_id).await });
 }
 
-/// The current item is over (or skipped): plays the next queued one, else ends the session. Items that cannot be opened are passed
-/// over. With `ended` set (the generation of the item that ended by itself and the position the bot reported), nothing happens if
-/// the session has moved on to another item meanwhile.
-async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, ended: Option<(u64, u64)>) {
-    let expected = ended.map(|(generation, _)| generation);
+/// Who is in the call changed (`control::refresh`): host, votes and the count follow, and enough votes skip.
+pub(crate) async fn refresh(state: &AppState, channel_id: i64) {
+    let Ok(active) = active(state) else { return };
+    let (changed, skip) = {
+        let mut sessions = lock(&state.stremio.sessions);
+        let Some(session) = sessions.get_mut(&channel_id) else { return };
+        let room = control::room(state, channel_id);
+        if room.is_empty() {
+            return;
+        }
+        let before = session.control.clone();
+        let skip = if control::sync(&mut session.control, &room) { session.skip_passed() } else { None };
+        ((session.control != before).then(|| session.view(channel_id)), skip)
+    };
+    if let Some(generation) = skip {
+        advance(state, &active, channel_id, generation, None).await;
+    } else if let Some(view) = changed {
+        announce(state, channel_id, Some(view)).await;
+    }
+}
+
+/// The item `generation` is over (or skipped): plays the next queued one, else ends the session. Items that cannot be opened are
+/// passed over. `ended_at` is the position the bot reported when it ended by itself. Nothing happens if the session has moved on
+/// to another item meanwhile, or another advance of this item runs.
+async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, generation: u64, ended_at: Option<u64>) {
     // The item that is over goes to its starter's library once, before anything replaces it.
     let finished = {
         let mut sessions = lock(&state.stremio.sessions);
         let Some(session) = sessions.get_mut(&channel_id) else { return };
-        if expected.is_some_and(|generation| generation != session.generation) {
+        if session.generation != generation || session.advancing == Some(generation) {
             return;
         }
-        session.take_finished(ended.map(|(_, position_ms)| position_ms), unix_millis())
+        session.advancing = Some(generation);
+        session.take_finished(ended_at, unix_millis())
     };
     if let Some(finished) = finished {
         library::save(state, finished);
@@ -693,7 +785,7 @@ async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, ended: 
         let next = {
             let mut sessions = lock(&state.stremio.sessions);
             let Some(session) = sessions.get_mut(&channel_id) else { return };
-            if expected.is_some_and(|generation| generation != session.generation) {
+            if session.generation != generation {
                 return;
             }
             (!session.queue.is_empty()).then(|| session.queue.remove(0))
@@ -704,16 +796,24 @@ async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, ended: 
         };
         let Ok((media, headers)) = prepare(active, &next.candidate).await else { continue };
         let Some(room) = lock(&state.stremio.sessions).get(&channel_id).map(|session| session.room.clone()) else { return };
-        let Some(token) = bot_token(state, channel_id, &room) else { return };
-        let generation = state.stremio.next_generation();
+        let Some(token) = bot_token(state, channel_id, &room) else {
+            // The only way out after the claim that leaves this item current: a later skip or `ended` must be able to advance it.
+            touch(state, channel_id, |session| {
+                if session.generation == generation {
+                    session.advancing = None;
+                }
+            });
+            return;
+        };
+        let next_generation = state.stremio.next_generation();
         let (view, desired) = {
             let mut sessions = lock(&state.stremio.sessions);
             let Some(session) = sessions.get_mut(&channel_id) else { return };
-            if expected.is_some_and(|expected| expected != session.generation) {
+            if session.generation != generation {
                 session.queue.insert(0, next);
                 return;
             }
-            session.begin(&next.info, next.candidate, media, headers, generation, token);
+            session.begin(&next.info, next.candidate, media, headers, next_generation, token);
             session.track(&next.info, next.added_by, 0);
             let Some(desired) = session.desired(state, unix_millis()) else { return };
             (session.view(channel_id), desired)
@@ -880,7 +980,7 @@ pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(e
     match next {
         Next::Nothing => {}
         Next::Announce(view) => announce(&state, channel_id, Some(view)).await,
-        Next::Advance(generation, position_ms) => advance(&state, &active, channel_id, Some((generation, position_ms))).await,
+        Next::Advance(generation, position_ms) => advance(&state, &active, channel_id, generation, Some(position_ms)).await,
         Next::Retry(generation, candidate, position_ms) => retry(&state, &active, channel_id, generation, candidate, position_ms).await,
     }
     StatusCode::NO_CONTENT

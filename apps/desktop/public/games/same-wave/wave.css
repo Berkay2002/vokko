@@ -1,0 +1,24 @@
+.round { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.round p { margin: 0; }
+.ends { display: flex; justify-content: space-between; gap: 12px; font-weight: 700; font-size: 16px; }
+.end.left { color: #7aa7ff; }
+.end.right { color: #ff9b6a; text-align: right; }
+.dial { display: block; width: 100%; max-width: 560px; max-height: 46vh; margin: 0 auto; touch-action: none; user-select: none; }
+.dial.movable { cursor: grab; }
+.dial .face { fill: #e9e4d8; stroke: #c8c1b0; stroke-width: 2; }
+.dial .b2 { fill: #f2c14e; }
+.dial .b3 { fill: #f08a4b; }
+.dial .b4 { fill: #3b8ea5; }
+.dial .band-label { font: 700 10px system-ui, sans-serif; fill: #fff; text-anchor: middle; dominant-baseline: middle; }
+.dial .needle { stroke: #da373c; stroke-width: 5; stroke-linecap: round; }
+.dial .hub { fill: #da373c; }
+.clue { text-align: center; }
+.clue-row input { flex: 1; }
+#team-score { font-size: 13px; color: var(--text); }
+#players .mark { color: var(--accent); font-size: 12px; }
+#players .score { display: none; }
+@media (max-width: 560px) {
+  .ends { font-size: 11px; }
+  .dial { max-height: 40vh; }
+}
+.round > button { align-self: center; min-width: 200px; }

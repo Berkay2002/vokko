@@ -51,25 +51,51 @@ pub fn routes() -> Router<AppState> {
 /// The games every call may start: SDK games the desktop app ships under `/games/<name>/`, and website games that run on their
 /// own servers (the desktop app keeps the same list in `src/games/builtin.ts`).
 pub fn builtins() -> Vec<GameManifest> {
-    let game = |id: &str, name: &str, url: &str, icon: &str, players: (u8, u8), aspect: GameAspect, kind: GameKind| GameManifest {
-        id: format!("builtin:{id}"),
-        name: name.to_owned(),
-        url: url.to_owned(),
-        icon: Some(icon.to_owned()),
-        min_players: players.0,
-        max_players: players.1,
-        aspect,
-        kind,
-    };
-    vec![
-        game("sketch", "Sketch", "/games/sketch/index.html", "✏️", (2, 12), GameAspect::Wide, GameKind::Sdk),
-        game("betrayal", "Betrayal", "https://betrayal.io/", "🔪", (4, 12), GameAspect::Wide, GameKind::Web),
-        game("shellshockers", "Shell Shockers", "https://shellshock.io/", "🥚", (2, 16), GameAspect::Wide, GameKind::Web),
-        game("smashkarts", "Smash Karts", "https://smashkarts.io/", "🏎️", (2, 8), GameAspect::Wide, GameKind::Web),
-        game("skribbl", "skribbl.io", "https://skribbl.io/", "🖍️", (2, 16), GameAspect::Fill, GameKind::Web),
-        game("codenames", "Codenames", "https://codenames.game/", "🕵️", (4, 16), GameAspect::Fill, GameKind::Web),
-        game("krunker", "Krunker", "https://krunker.io/", "🎯", (2, 16), GameAspect::Wide, GameKind::Web),
+    [
+        ("sketch", "Sketch", "✏️", 2, 12),
+        ("chess", "Chess", "♟️", 2, 16),
+        ("four-in-a-row", "Four in a Row", "🟡", 2, 16),
+        ("codewords", "Codewords", "🗝️", 4, 16),
+        ("telephone", "Telephone", "☎️", 3, 12),
+        ("trivia", "Trivia", "❓", 1, 16),
+        ("whos-the-spy", "Who's the Spy", "🕵️", 3, 16),
+        ("same-wave", "Same Wave", "📡", 2, 16),
+        ("crazy-eights", "Crazy Eights", "🃏", 2, 10),
+        ("werewolf", "Werewolf", "🐺", 5, 16),
     ]
+    .into_iter()
+    .map(|(slug, name, icon, min_players, max_players)| GameManifest {
+        id: format!("builtin:{slug}"),
+        name: name.to_owned(),
+        url: format!("/games/{slug}/index.html"),
+        icon: Some(icon.to_owned()),
+        min_players,
+        max_players,
+        aspect: GameAspect::Wide,
+        kind: GameKind::Sdk,
+    })
+    .chain(
+        [
+        ("betrayal", "Betrayal", "https://betrayal.io/", "🔪", 4, 12, GameAspect::Wide),
+        ("shellshockers", "Shell Shockers", "https://shellshock.io/", "🥚", 2, 16, GameAspect::Wide),
+        ("smashkarts", "Smash Karts", "https://smashkarts.io/", "🏎️", 2, 8, GameAspect::Wide),
+        ("skribbl", "skribbl.io", "https://skribbl.io/", "🖍️", 2, 16, GameAspect::Fill),
+        ("codenames", "Codenames", "https://codenames.game/", "🕵️", 4, 16, GameAspect::Fill),
+        ("krunker", "Krunker", "https://krunker.io/", "🎯", 2, 16, GameAspect::Wide),
+        ]
+        .into_iter()
+        .map(|(slug, name, url, icon, min_players, max_players, aspect)| GameManifest {
+            id: format!("builtin:{slug}"),
+            name: name.to_owned(),
+            url: url.to_owned(),
+            icon: Some(icon.to_owned()),
+            min_players,
+            max_players,
+            aspect,
+            kind: GameKind::Web,
+        }),
+    )
+    .collect()
 }
 
 /// A room link for the web game at `game_url`: `https`, at most 512 bytes, no user info, on the game's host or a subdomain of it
@@ -313,5 +339,27 @@ mod tests {
         assert!(check_room_url(game, &format!("https://krunker.io/?{}", "x".repeat(512 - 20))).is_ok(), "512 bytes");
         assert!(check_room_url(game, &format!("https://krunker.io/?{}", "x".repeat(513 - 20))).is_err(), "513 bytes");
         assert!(check_room_url("/games/sketch/index.html", "https://krunker.io/").is_err(), "no host to match");
+    }
+
+    /// The desktop app's list (apps/desktop/src/games/builtin.ts) and this one must match game for game, field for field.
+    #[test]
+    fn builtins_match_the_desktop_list() {
+        let ts = include_str!("../../../../apps/desktop/src/games/builtin.ts");
+        let client: Vec<&str> = ts.lines().filter(|line| line.contains(": GameManifest = {") && !line.contains("\"builtin:mock\"")).collect();
+        let server = builtins();
+        assert_eq!(client.len(), server.len(), "{client:#?}");
+        for game in server {
+            let aspect = serde_json::to_value(game.aspect).expect("aspect");
+            let fields = format!(
+                "{{ id: \"{}\", name: \"{}\", url: \"{}\", icon: \"{}\", min_players: {}, max_players: {}, aspect: {aspect}",
+                game.id,
+                game.name,
+                game.url,
+                game.icon.as_deref().unwrap_or_default(),
+                game.min_players,
+                game.max_players
+            ) + if game.kind == GameKind::Web { ", kind: \"web\"" } else { "" };
+            assert!(client.iter().any(|line| line.ends_with(&format!("{fields} }};"))), "{fields} is not in builtin.ts");
+        }
     }
 }

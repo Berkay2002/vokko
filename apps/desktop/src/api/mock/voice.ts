@@ -20,8 +20,9 @@ import { db, nextId, type MockChannel } from "./db";
 import { emit as emitAll, emitToSession as emitToSessionAll } from "./socket";
 import { membersOf } from "./views";
 import { callJoined, callReleased, dmRefusal } from "./calls";
-import { endWatch, watchOf } from "./watch";
-import { endStremio, stremioOf } from "./stremio";
+import { endWatch, recountWatch, watchOf } from "./watch";
+import { endStremio, recountStremio, stremioOf } from "./stremio";
+import { endSpotify, recountSpotify, spotifyOf } from "./spotify";
 import { endGame } from "./games";
 
 export const MOCK_VOICE_ENDPOINT = "mock://voice";
@@ -115,6 +116,14 @@ function refusal(channel: MockChannel | undefined, userId: string): VoiceConnect
 function broadcast(emit: Emit, state: VoiceState, channel: MockChannel): void {
   const member = channel.guild_id ? memberOf(channel.guild_id, state.user_id) : undefined;
   emit(audience(channel), "VOICE_STATE_UPDATE", member ? { ...state, member } : { ...state });
+  recountMedia(channel.id);
+}
+
+/** A join, leave or deafen change in `channelId`: skip votes, their threshold and the media hosts follow (mediaControl.ts). */
+function recountMedia(channelId: string): void {
+  recountWatch(channelId);
+  recountStremio(channelId);
+  recountSpotify(channelId);
 }
 
 export const VOICE_STATUS_MAX = 500;
@@ -132,8 +141,10 @@ function releaseChannel(emit: Emit, channelId: string | null): void {
   if (![...voiceStates.values()].some(s => s.channel_id === channelId)) {
     endWatch(channelId);
     endStremio(channelId);
+    endSpotify(channelId);
     endGame(channelId);
   }
+  recountMedia(channelId);
   const channel = db.channels.get(channelId);
   if (channel && stageInstances.has(channelId) && ![...voiceStates.values()].some(s => s.channel_id === channelId && isStageModerator(channel, s.user_id))) {
     endStage(channelId, emit);
@@ -214,6 +225,8 @@ export function handleVoiceStateUpdate(sessionId: string, userId: string, cmd: V
   if (watching) emitToSession(sessionId, "WATCH_TOGETHER_UPDATE", { channel_id: channel.id, state: { ...watching, queue: [...watching.queue] } });
   const stremio = stremioOf(channel.id);
   if (stremio) emitToSession(sessionId, "STREMIO_UPDATE", { channel_id: channel.id, state: { ...stremio, queue: stremio.queue.map(q => ({ ...q })) } });
+  const spotify = spotifyOf(channel.id);
+  if (spotify) emitToSession(sessionId, "SPOTIFY_UPDATE", { channel_id: channel.id, state: spotify });
   if (!channel.guild_id) callJoined(channel, userId);
   if (current && current.channel_id && current.channel_id !== channel.id) {
     // Those who could see the old channel but not the new one see the user leave.

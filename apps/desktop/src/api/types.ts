@@ -826,6 +826,7 @@ export interface Call {
   voice_states: VoiceState[]; // who is in the call (guild_id null)
   watch_together?: WatchTogetherState; // the call's Watch Together session, omitted when none
   stremio?: StremioUpdate[]; // the call's Stremio session (at most one entry), omitted when none
+  spotify?: SpotifyUpdate[]; // the call's Spotify session (at most one entry), omitted when none
   game?: GameSession; // the call's game session, omitted when none
 }
 export interface CallRingRequest {
@@ -886,9 +887,21 @@ export interface GameMessage {
 
 // ---- Watch Together (docs/api.md "Voice (V1)": a YouTube video everyone in a voice channel or DM call watches in sync) ----
 
+// ---- Who controls media in a call (docs/api.md "Who controls media in a call"), flattened into the Watch, Stremio and Spotify states ----
+
+/** A controller is in a DM call, holds CONTROL_MEDIA in the channel, or is `host_id`; everyone else votes to skip and has a queue quota. */
+export interface MediaControl {
+  host_id: Snowflake; // starts as started_by; moves to whoever has been in the call longest when the host leaves
+  added_by?: Snowflake; // who put the current item in play; may skip it without a vote (Spotify omits it while idle)
+  skip_votes: Snowflake[]; // votes to skip the current item, in vote order
+  skip_needed: number; // max(1, ceil(listeners / 2))
+  item_seq: number; // changes with every item change and when a skip passes; Stremio and Spotify skips name it
+}
+
 export const WATCH_TOGETHER_QUEUE_MAX = 20;
+export const WATCH_TOGETHER_QUEUE_PER_USER = 3; // queue entries one non-controller may hold at once
 export const WATCH_TOGETHER_POSITION_MAX_MS = 24 * 60 * 60 * 1000;
-export interface WatchTogetherState {
+export interface WatchTogetherState extends MediaControl {
   video_id: string; // 11 characters of A-Za-z0-9_-
   title?: string;
   playing: boolean;
@@ -896,6 +909,7 @@ export interface WatchTogetherState {
   updated_at_ms: number; // server unix milliseconds
   started_by: Snowflake;
   queue: string[]; // video ids up next
+  queue_added_by: Snowflake[]; // who added each queue entry (same length and order)
 }
 export interface WatchTogetherUpdate {
   channel_id: Snowflake;
@@ -910,6 +924,7 @@ export interface WatchTogetherPatchRequest {
   position_ms?: number;
   title?: string;
   queue_add?: string;
+  queue_remove?: { index: number; video_id: string }; // a no-op unless queue[index] is still video_id; your own entries, or any as a controller
   skip?: boolean;
   video_id?: string; // with skip: does nothing unless this video is still current
 }
@@ -917,6 +932,7 @@ export interface WatchTogetherPatchRequest {
 // ---- Stremio in calls (docs/design/stremio-bot.md section 3 and 12): a movie or episode a bot plays into the call's media room ----
 
 export const STREMIO_QUEUE_MAX = 10;
+export const STREMIO_QUEUE_PER_USER = 2;
 export const STREMIO_POSITION_MAX_MS = 24 * 60 * 60 * 1000;
 /** Poster hosts the server lets through; the CSP's img-src lists the same three. */
 export const STREMIO_IMAGE_HOSTS = ["images.metahub.space", "episodes.metahub.space", "m.media-amazon.com"];
@@ -969,7 +985,7 @@ export interface StremioItem {
 export interface StremioQueued extends StremioItem {
   added_by: Snowflake;
 }
-export interface StremioState {
+export interface StremioState extends MediaControl {
   item: StremioItem;
   status: StremioStatus;
   error?: string;
@@ -1047,6 +1063,7 @@ export interface StremioPatchRequest {
   queue_add?: string; // sid
   queue_remove?: number; // index
   skip?: boolean;
+  item_seq?: number; // with skip: does nothing unless this item is still current
   audio?: number; // an audio track id
   burned_subtitle?: number | null; // a bitmap subtitle track id, or null to turn burn-in off
 }
@@ -1068,6 +1085,103 @@ export interface StremioContinueItem {
 }
 export interface StremioViewerToken {
   url: string; // wss:// signalling URL of the media LiveKit
+  token: string;
+}
+
+// ---- Spotify in calls (docs/design/spotify-bot.md, docs/api.md "Spotify in calls"): one house account plays into one call's media room ----
+
+export const SPOTIFY_QUEUE_MAX = 200;
+export const SPOTIFY_QUEUE_PER_USER = 10;
+export const SPOTIFY_EVENT_QUEUE_MAX = 50; // queue entries an event, READY or Call carries; GET has all of them
+/** Art is a 40-hex image id; the client only ever loads it from this host. */
+export const SPOTIFY_ART_URL = "https://i.scdn.co/image/";
+export interface SpotifyTrack {
+  uri: string; // spotify:track:<22 characters>
+  title: string;
+  artists: string[];
+  album?: string;
+  art?: string; // 40-hex image id
+  duration_ms: number;
+  explicit: boolean;
+}
+export interface SpotifyAlbumSummary {
+  id: string;
+  name: string;
+  artists: string[];
+  art?: string;
+  year?: string;
+}
+export interface SpotifyArtistSummary {
+  id: string;
+  name: string;
+  art?: string;
+}
+export interface SpotifyPlaylistSummary {
+  id: string;
+  name: string;
+  owner_name: string;
+  art?: string;
+}
+export interface SpotifySearchResults {
+  tracks: SpotifyTrack[];
+  albums: SpotifyAlbumSummary[];
+  artists: SpotifyArtistSummary[];
+  playlists: SpotifyPlaylistSummary[];
+}
+export type SpotifySearchType = "track" | "album" | "artist" | "playlist";
+export interface SpotifyAlbum extends SpotifyAlbumSummary {
+  tracks: SpotifyTrack[];
+}
+export interface SpotifyPlaylist extends SpotifyPlaylistSummary {
+  total: number; // tracks in the whole playlist; a page of 100 holds fewer
+  tracks: SpotifyTrack[];
+}
+export interface SpotifyArtist extends SpotifyArtistSummary {
+  top_tracks: SpotifyTrack[];
+  albums: SpotifyAlbumSummary[];
+}
+export type SpotifyStatus = "starting" | "playing" | "paused" | "loading" | "error";
+export type SpotifyLoop = "off" | "track" | "queue";
+export interface SpotifyQueueEntry extends SpotifyTrack {
+  qid: string;
+  added_by: Snowflake;
+}
+export interface SpotifyState extends MediaControl {
+  status: SpotifyStatus;
+  error?: string; // a fixed text; the session ends 30 s later
+  notice?: string; // passing note ("Skipped an unavailable track"), clears itself after 5 s
+  track: SpotifyTrack | null; // null when the queue ran out
+  playing: boolean;
+  position_ms: number; // true at updated_at_ms; while playing the position now is position_ms + (now - updated_at_ms)
+  updated_at_ms: number;
+  loop: SpotifyLoop;
+  queue: SpotifyQueueEntry[]; // at most SPOTIFY_EVENT_QUEUE_MAX in events, READY and Call; all of it from GET
+  queue_len: number;
+  can_previous: boolean;
+  started_by: Snowflake;
+  bot_identity: string; // "bot:spotify:<channel_id>"
+}
+export interface SpotifyReply extends SpotifyState {
+  left_out?: number; // album or playlist tracks that did not fit in the queue
+}
+export interface SpotifyUpdate {
+  channel_id: Snowflake;
+  state: SpotifyState | null; // null = ended
+}
+/** PATCH /channels/{id}/spotify: exactly one field per request. */
+export type SpotifyPatchRequest =
+  | { playing: boolean }
+  | { position_ms: number }
+  | { skip: boolean; item_seq?: number } // item_seq: does nothing unless that item is still current; true: skip (controller, or the current item's adder) or vote; false: withdraw the vote
+  | { previous: true }
+  | { loop: SpotifyLoop }
+  | { shuffle: true }
+  | { queue_add: { uri: string; next?: boolean } }
+  | { queue_remove: string }
+  | { queue_move: { qid: string; to: number } }
+  | { queue_clear: true };
+export interface SpotifyListenerToken {
+  url: string;
   token: string;
 }
 
@@ -1948,7 +2062,7 @@ export interface ReadyEvent {
   user: User;
   session_id: string;
   // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels); emojis absent = none
-  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[]; watch_together?: WatchTogetherUpdate[]; stremio?: StremioUpdate[]; games?: GameUpdate[] })[]; // stage_instances: live stages the user can see, omitted when none; watch_together: Watch Together sessions in voice channels the user can see, omitted when none
+  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[]; watch_together?: WatchTogetherUpdate[]; stremio?: StremioUpdate[]; spotify?: SpotifyUpdate[]; games?: GameUpdate[] })[]; // stage_instances: live stages the user can see, omitted when none; watch_together: Watch Together sessions in voice channels the user can see, omitted when none
   private_channels: Channel[]; // DMs and group DMs
   presences: Presence[];
   read_states: ReadState[];
@@ -2025,6 +2139,7 @@ export interface GatewayEvents {
   GAME_MESSAGE: GameMessage; // relayed game data, to the people in that call only (sender excluded unless `to` names them)
   GUILD_GAMES_UPDATE: { guild_id: Snowflake }; // the guild's game list changed: refetch GET /guilds/{id}/games
   STREMIO_UPDATE: StremioUpdate; // to viewers of the channel on every change; state null = ended; a joiner gets the running session after VOICE_SERVER_UPDATE
+  SPOTIFY_UPDATE: SpotifyUpdate; // like STREMIO_UPDATE; state null = ended
   STAGE_INSTANCE_CREATE: StageInstance; // to viewers of the stage channel
   STAGE_INSTANCE_UPDATE: StageInstance;
   STAGE_INSTANCE_DELETE: StageInstance; // End Stage, or the last stage moderator left

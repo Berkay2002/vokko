@@ -8,9 +8,11 @@ import {
   STREMIO_IMAGE_HOSTS,
   STREMIO_POSITION_MAX_MS,
   STREMIO_QUEUE_MAX,
+  STREMIO_QUEUE_PER_USER,
   type StremioAddonSubtitles,
   type StremioContinueItem,
   type StremioCues,
+  type MediaControl,
   type StremioItem,
   type StremioMeta,
   type StremioPatchRequest,
@@ -23,9 +25,11 @@ import {
 import { receiveCue, subtitleTopic } from "../../stremio/subtitles";
 import { canView } from "./access";
 import { db, type MockChannel } from "./db";
+import { controls, freshControl, nextItem, recount, requireControl, requireQuota, skipOrVote } from "./mediaControl";
 import { fail, MISSING_PERMISSIONS, requireChannel } from "./ops";
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
+import { spotifyOf } from "./spotify";
 import { voiceAudience, voiceStates } from "./voice";
 
 export const MOCK_STREMIO_ENDPOINT = "mock://stremio";
@@ -224,7 +228,7 @@ const sessions = new Map<string, StremioState>();
 const durations = new Map<string, number>();
 const botTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-const copy = (state: StremioState): StremioState => ({ ...state, item: { ...state.item }, queue: state.queue.map(q => ({ ...q })) });
+const copy = (state: StremioState): StremioState => ({ ...state, item: { ...state.item }, queue: state.queue.map(q => ({ ...q })), skip_votes: [...state.skip_votes] });
 
 export const stremioOf = (channelId: string): StremioState | undefined => sessions.get(channelId);
 
@@ -311,9 +315,9 @@ function candidate(userId: string, field: string, value: unknown): Candidate {
   return found;
 }
 
-function begin(channel: MockChannel, item: StremioItem, duration: number, queue: StremioState["queue"], startedBy: string, now = Date.now(), position = 0): StremioState {
+function begin(channel: MockChannel, item: StremioItem, duration: number, queue: StremioState["queue"], startedBy: string, control: MediaControl, now = Date.now(), position = 0): StremioState {
   durations.set(channel.id, duration);
-  const state: StremioState = { item, status: "starting", playing: true, position_ms: position, updated_at_ms: now, started_by: startedBy, bot_identity: `bot:stremio:${channel.id}`, queue };
+  const state: StremioState = { item, status: "starting", playing: true, position_ms: position, updated_at_ms: now, started_by: startedBy, bot_identity: `bot:stremio:${channel.id}`, queue, ...control };
   sessions.set(channel.id, state);
   botStarts(channel);
   return state;
@@ -323,10 +327,14 @@ route("PUT", `/channels/${ID}/stremio`, ({ viewer, params, body }) => {
   const channel = connectedChannel(viewer.user.id, params[0] ?? "");
   requireLinked(viewer.user.id);
   const picked = candidate(viewer.user.id, "sid", body.sid);
+  if (spotifyOf(channel.id)) fail(409, 40034, "Another media activity is running in this channel. Stop the music first.");
   const at = body.position_ms;
   if (at !== undefined && (typeof at !== "number" || !Number.isInteger(at) || at < 0 || at > STREMIO_POSITION_MAX_MS)) invalid("position_ms", `Must be between 0 and ${STREMIO_POSITION_MAX_MS}.`);
   const current = sessions.get(channel.id);
-  const next = begin(channel, { ...picked.item }, picked.duration_ms, current?.queue ?? [], current?.started_by ?? viewer.user.id, Date.now(), typeof at === "number" ? at : 0);
+  // Starting is open to everyone in the call; replacing what plays is a controller's.
+  if (current) requireControl(channel, viewer.user.id, current.host_id);
+  const control = freshControl(channel.id, current?.host_id ?? viewer.user.id, viewer.user.id, current ? current.item_seq + 1 : 0);
+  const next = begin(channel, { ...picked.item }, picked.duration_ms, current?.queue ?? [], current?.started_by ?? viewer.user.id, control, Date.now(), typeof at === "number" ? at : 0);
   announce(channel, next);
   return copy(next);
 });
@@ -340,19 +348,21 @@ route("PATCH", `/channels/${ID}/stremio`, ({ viewer, params, body }) => {
   if (patch.position_ms !== undefined && (!Number.isInteger(patch.position_ms) || patch.position_ms < 0 || patch.position_ms > limit)) invalid("position_ms", `Must be between 0 and ${limit}.`);
   const added = patch.queue_add === undefined ? undefined : candidate(viewer.user.id, "queue_add", patch.queue_add);
   if (patch.queue_remove !== undefined && (!Number.isInteger(patch.queue_remove) || patch.queue_remove < 0 || patch.queue_remove >= before.queue.length)) invalid("queue_remove", "No such place in the queue.");
+  const controller = controls(channel, viewer.user.id, before.host_id);
+  const othersEntry = patch.queue_remove !== undefined && before.queue[patch.queue_remove]?.added_by !== viewer.user.id;
+  if (!controller && (patch.playing !== undefined || patch.position_ms !== undefined || patch.audio !== undefined || patch.burned_subtitle !== undefined || othersEntry)) {
+    fail(403, 50013, MISSING_PERMISSIONS);
+  }
   const now = Date.now();
   const next = copy(before);
   const here = next.playing ? next.position_ms + Math.max(0, now - next.updated_at_ms) : next.position_ms;
-  if (patch.skip === true) {
-    const upNext = next.queue.shift();
-    if (!upNext) {
-      endStremio(channel.id);
-      return null;
+  if (patch.skip !== undefined) {
+    const outcome = skipOrVote(channel, viewer.user.id, before, patch.skip === true, patch.item_seq);
+    if (outcome.skip) {
+      const started = advance(channel, next, now);
+      return started && copy(started);
     }
-    const item: StremioItem = { title: upNext.title, label: upNext.label, ...(upNext.subtitle ? { subtitle: upNext.subtitle } : {}), ...(upNext.poster ? { poster: upNext.poster } : {}) };
-    const started = begin(channel, item, durations.get(channel.id) ?? 7_200_000, next.queue, next.started_by, now);
-    announce(channel, started);
-    return copy(started);
+    Object.assign(next, outcome.control);
   }
   if (patch.playing !== undefined || patch.position_ms !== undefined) {
     next.position_ms = patch.position_ms ?? here;
@@ -372,6 +382,7 @@ route("PATCH", `/channels/${ID}/stremio`, ({ viewer, params, body }) => {
   if (patch.queue_remove !== undefined) next.queue.splice(patch.queue_remove, 1);
   if (added) {
     if (next.queue.length >= STREMIO_QUEUE_MAX) invalid("queue_add", `The queue holds at most ${STREMIO_QUEUE_MAX} titles.`);
+    requireQuota(channel, viewer.user.id, before.host_id, next.queue.map(q => q.added_by), STREMIO_QUEUE_PER_USER);
     next.queue.push({ ...added.item, added_by: viewer.user.id });
   }
   sessions.set(channel.id, next);
@@ -379,11 +390,39 @@ route("PATCH", `/channels/${ID}/stremio`, ({ viewer, params, body }) => {
   return copy(next);
 });
 
+/** The first queued title starts (its adder may skip it), or the session ends when nothing is queued (null). */
+function advance(channel: MockChannel, state: StremioState, now: number): StremioState | null {
+  const [upNext, ...rest] = state.queue;
+  if (!upNext) {
+    endStremio(channel.id);
+    return null;
+  }
+  const item: StremioItem = { title: upNext.title, label: upNext.label, ...(upNext.subtitle ? { subtitle: upNext.subtitle } : {}), ...(upNext.poster ? { poster: upNext.poster } : {}) };
+  const started = begin(channel, item, durations.get(channel.id) ?? 7_200_000, rest, state.started_by, nextItem(channel.id, state, upNext.added_by), now);
+  announce(channel, started);
+  return started;
+}
+
 route("DELETE", `/channels/${ID}/stremio`, ({ viewer, params }) => {
   const channel = connectedChannel(viewer.user.id, params[0] ?? "");
+  const current = sessions.get(channel.id);
+  if (current) requireControl(channel, viewer.user.id, current.host_id);
   endStremio(channel.id);
   return undefined;
 });
+
+/** Someone joined, left or (un)deafened in `channelId`: votes, the threshold and the host follow, and a vote that now passes skips. */
+export function recountStremio(channelId: string): void {
+  const before = sessions.get(channelId);
+  const channel = db.channels.get(channelId);
+  if (!before || !channel) return;
+  const counted = recount(channelId, before);
+  const next = { ...copy(before), ...counted.control };
+  if (counted.passed) return void advance(channel, next, Date.now());
+  if (JSON.stringify(next) === JSON.stringify(before)) return;
+  sessions.set(channelId, next);
+  announce(channel, next);
+}
 
 route("POST", `/channels/${ID}/stremio/viewer-token`, ({ viewer, params }): StremioViewerToken => {
   const channel = connectedChannel(viewer.user.id, params[0] ?? "");

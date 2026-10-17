@@ -41,6 +41,10 @@ var VokkoGames = (() => {
       /** @type {{ [K in keyof VokkoEvents]: Set<VokkoEvents[K]> }} */
       this.handlers = { players: new Set(), message: new Set(), error: new Set(), close: new Set() };
       port.onmessage = (event) => this.#receive(event.data);
+      // An Escape the game did not handle hands focus back to Vokko (the host cannot see keys inside the frame).
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !event.defaultPrevented) port.postMessage({ type: "escape" });
+      });
     }
 
     /**

@@ -1124,6 +1124,29 @@
   color: var(--interactive-icon-hover);
 }
 
+/* phone: a 480px column would squeeze the call off the screen, so the chat covers the call page like the Stremio panel (Close brings it back) */
+@media (max-width: 767px) {
+  .voice-page:has(> .voice-chat) {
+    position: relative;
+  }
+
+  .voice-page > .voice-chat {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    width: auto;
+    border-left: 0;
+  }
+
+  .voice-chat-close {
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    margin-right: -8px;
+  }
+}
+
 
 /* ---- in-voice card (profile popouts) ---- */
 .in-voice-card {
