@@ -187,10 +187,11 @@ async fn the_catalog_is_managed_with_manage_guild_and_validated() {
         assert!(entry["changes"].as_array().expect("changes").iter().any(|change| change["key"] == changed), "{action}: {entry}");
     }
 
-    // At most 25 games per guild (two are left).
-    for n in 0..23 {
-        assert_eq!(w.app.post(&path, &w.owner, game(&format!("G{n}"))).await.0, StatusCode::CREATED, "{n}");
-    }
+    // At most 25 games per guild (two are left), also when the adds race.
+    let adds = futures_util::future::join_all((0..30).map(|n| w.app.post(&path, &w.owner, game(&format!("G{n}"))))).await;
+    let statuses: Vec<StatusCode> = adds.iter().map(|(status, _)| *status).collect();
+    assert_eq!(statuses.iter().filter(|status| **status == StatusCode::CREATED).count(), 23, "{statuses:?}");
+    assert!(statuses.iter().all(|status| matches!(*status, StatusCode::CREATED | StatusCode::BAD_REQUEST)), "{statuses:?}");
     assert_eq!(w.app.post(&path, &w.owner, game("One too many")).await.0, StatusCode::BAD_REQUEST);
 }
 
@@ -256,6 +257,8 @@ async fn a_game_runs_in_the_call_and_relays_only_to_the_people_in_it() {
     assert_eq!(w.app.post(&messages, &w.alice, json!({"data": "x".repeat(4094)})).await.0, StatusCode::NO_CONTENT, "4096 bytes");
     let (status, error) = w.app.post(&messages, &w.alice, json!({"data": "x".repeat(4095)})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "4097 bytes: {error}");
+    let (status, error) = w.app.post(&messages, &w.alice, json!({"data": "x".repeat(6000)})).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE, "the body limit: {error}");
     assert_eq!(w.app.post(&messages, &w.owner, json!({"data": 1})).await.0, StatusCode::FORBIDDEN, "not in the call");
 
     // Stopping: not carl (not the starter), but carl with MANAGE_CHANNELS.
@@ -268,6 +271,12 @@ async fn a_game_runs_in_the_call_and_relays_only_to_the_people_in_it() {
     let (status, error) = w.app.post(&messages, &w.alice, json!({"data": 1})).await;
     assert_eq!((status, error["code"].as_u64()), (StatusCode::NOT_FOUND, Some(10091)));
 
+    // The owner (MANAGE_CHANNELS) stops a game from outside the call.
+    w.app.put_json(&path, &w.alice, sketch.clone()).await;
+    owner_ws.wait_for("GAME_UPDATE").await;
+    assert_eq!(w.app.delete(&path, &w.owner).await.0, StatusCode::NO_CONTENT, "not in the call");
+    assert!(owner_ws.wait_for("GAME_UPDATE").await["state"].is_null());
+
     // App ids differ across games; a late joiner gets the running game; removing the game from the catalog ends it.
     let (_, sketch_session) = w.app.put_json(&path, &w.carl, sketch.clone()).await;
     owner_ws.wait_for("GAME_UPDATE").await;
@@ -277,8 +286,18 @@ async fn a_game_runs_in_the_call_and_relays_only_to_the_people_in_it() {
     assert_eq!(owner_ws.wait_for("GAME_UPDATE").await["state"], sketch_session);
     assert_eq!(w.app.delete(&path, &w.owner).await.0, StatusCode::NO_CONTENT, "the owner may stop it");
     owner_ws.wait_for("GAME_UPDATE").await;
+    // Editing a game's URL ends its sessions and gives new app ids; other edits leave it running.
+    let item = format!("/guilds/{}/games/{guild_game}", w.guild);
     w.app.put_json(&path, &w.alice, json!({"game_id": guild_game})).await;
     owner_ws.wait_for("GAME_UPDATE").await;
+    assert_eq!(w.app.patch(&item, &w.owner, json!({"name": "Spies"})).await.0, StatusCode::OK);
+    assert!(owner_ws.silent_for("GAME_UPDATE", Duration::from_millis(300)).await, "a rename keeps it running");
+    assert_eq!(w.app.patch(&item, &w.owner, json!({"url": "https://moved.example.com/"})).await.0, StatusCode::OK);
+    assert!(owner_ws.wait_for("GAME_UPDATE").await["state"].is_null(), "a new URL ends it");
+    w.app.put_json(&path, &w.alice, json!({"game_id": guild_game})).await;
+    owner_ws.wait_for("GAME_UPDATE").await;
+    let (_, moved_players) = w.app.get(&format!("{path}/players"), &w.alice).await;
+    assert!(!moved_players.to_string().contains(&alice_app), "another origin, other app ids: {moved_players}");
     assert_eq!(w.app.delete(&format!("/guilds/{}/games/{guild_game}", w.guild), &w.owner).await.0, StatusCode::NO_CONTENT);
     assert!(owner_ws.wait_for("GAME_UPDATE").await["state"].is_null(), "a removed game ends");
 
@@ -294,6 +313,13 @@ async fn a_game_runs_in_the_call_and_relays_only_to_the_people_in_it() {
     assert!(w.app.state.voice.game_get(w.voice.parse().expect("id")).is_none());
 }
 
+/// 50 relay sends from alice at once, so the 20/s refill cannot hide the burst limit on a loaded machine.
+async fn burst(w: &World, path: &str, body: Value) -> Vec<StatusCode> {
+    let messages = format!("{path}/messages");
+    let sends = futures_util::future::join_all((0..50).map(|_| w.app.post(&messages, &w.alice, body.clone()))).await;
+    sends.into_iter().map(|(status, _)| status).collect()
+}
+
 #[tokio::test]
 async fn the_relay_is_rate_limited() {
     let w = world_with(|config| config.rate_limit = Some(Default::default())).await;
@@ -303,12 +329,19 @@ async fn the_relay_is_rate_limited() {
     alice_ws.voice(Some(&w.voice)).await;
     carl_ws.voice(Some(&w.voice)).await;
     assert_eq!(w.app.put_json(&path, &w.alice, json!({"game_id": "builtin:sketch"})).await.0, StatusCode::OK);
-    let mut codes = Vec::new();
-    for _ in 0..50 {
-        codes.push(w.app.post(&format!("{path}/messages"), &w.alice, json!({"data": 1})).await.0);
-    }
-    assert_eq!(codes[0], StatusCode::NO_CONTENT);
+    let codes = burst(&w, &path, json!({"data": 1})).await;
+    assert!(codes.contains(&StatusCode::NO_CONTENT), "{codes:?}");
     assert!(codes.contains(&StatusCode::TOO_MANY_REQUESTS), "a burst past 40 is limited: {codes:?}");
+
+    // Oversized sends count against the limit too: it runs before the size check.
+    let w = world_with(|config| config.rate_limit = Some(Default::default())).await;
+    let path = format!("/channels/{}/game", w.voice);
+    let (mut alice_ws, _) = Client::identify(&w.address, &w.alice).await;
+    alice_ws.voice(Some(&w.voice)).await;
+    assert_eq!(w.app.put_json(&path, &w.alice, json!({"game_id": "builtin:sketch"})).await.0, StatusCode::OK);
+    let codes = burst(&w, &path, json!({"data": "x".repeat(4095)})).await;
+    assert!(codes.contains(&StatusCode::BAD_REQUEST), "{codes:?}");
+    assert!(codes.contains(&StatusCode::TOO_MANY_REQUESTS), "oversized sends are limited: {codes:?}");
 }
 
 #[tokio::test]

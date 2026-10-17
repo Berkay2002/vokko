@@ -482,6 +482,8 @@ impl Config {
         config.stremio = parse_stremio(&env)?;
         if let Some(key) = env.get("VOKKO_SECRETS_KEY").filter(|key| !key.trim().is_empty()) {
             config.games_app_key = crate::crypto::SecretsKey::parse(&key)?.derive(crate::voice::games::APP_ID_LABEL);
+        } else {
+            tracing::warn!("VOKKO_SECRETS_KEY is not set: game app ids change on every restart");
         }
         config.dev = env.get("VOKKO_DEV").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "on" | "true" | "yes"));
         if let Some(value) = env.get("VOKKO_VOICE_BITRATE_MAX") {

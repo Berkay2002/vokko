@@ -121,8 +121,10 @@ Routes (`voice/games.rs`), all behind `require_in_voice`:
 | `POST /channels/{id}/game/messages` `GameRelayRequest` | 204; `GAME_MESSAGE` to the call (sender excluded) or to one player | 404 `10091`; 400 `data` too large (> 4096 bytes serialized) / `to` unknown; 429 |
 | `DELETE /channels/{id}/game` | 204 if `can_stop`; `GAME_UPDATE state:null` | 403 not the starter or an admin |
 
-- **App id** = `base64url(HMAC-SHA256(k, game.id || ":" || user_id))[..22]`, `k` derived from `VOKKO_SECRETS_KEY`. Stable per
-  game and user, different across games, so two games cannot join their data, and it never reveals the Vokko user id.
+- **App id** = `base64url(HMAC-SHA256(k, game.id || ":" || origin || ":" || user_id))[..22]`, `k` derived from
+  `VOKKO_SECRETS_KEY`, `origin` the manifest URL's origin ("builtin" for built-ins). Stable per game, origin and user, different
+  across games and after a game's URL moves to another origin (editing a game's `url` ends its running sessions), so two games
+  cannot join their data, and it never reveals the Vokko user id.
 - **Recipients** = users with a voice state in that channel now (`voice/state.rs:233`), not every channel viewer.
 - **Limits:** per user `check_key("game-relay")` burst 40, 20/s; per channel `check_resource(channel, "game-relay")` burst 60,
   30/s; start/stop share `check_key("game-control")` burst 5, 1/s. The per-channel cap bounds what a call adds to each member's

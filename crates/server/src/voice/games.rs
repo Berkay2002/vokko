@@ -5,7 +5,7 @@
 //! GAME_MESSAGE.
 use std::collections::HashSet;
 
-use axum::extract::{Path, State};
+use axum::extract::{DefaultBodyLimit, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
@@ -43,7 +43,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/channels/{id}/game", put(start).delete(stop))
         .route("/channels/{id}/game/players", get(players))
-        .route("/channels/{id}/game/messages", post(relay))
+        .route("/channels/{id}/game/messages", post(relay).layer(DefaultBodyLimit::max(GAME_RELAY_MAX_BYTES + 1024)))
 }
 
 /// The games every call may start (the desktop app ships them under `/games/<name>/`).
@@ -59,10 +59,11 @@ pub fn builtins() -> Vec<GameManifest> {
     }]
 }
 
-/// `base64url(HMAC-SHA256(k, game_id ":" user_id))[..22]`: stable per game and user, different across games, and it says nothing
-/// about the Vokko user id.
-pub fn app_id(state: &AppState, game_id: &str, user_id: i64) -> String {
-    let mac = state.config.games_app_key.mac(format!("{game_id}:{user_id}").as_bytes());
+/// `base64url(HMAC-SHA256(k, game_id ":" origin ":" user_id))[..22]`: stable per game, origin and user, different across games and
+/// once a game moves to another origin, and it says nothing about the Vokko user id. Built-ins (relative URLs) use "builtin".
+pub fn app_id(state: &AppState, game: &GameManifest, user_id: i64) -> String {
+    let origin = reqwest::Url::parse(&game.url).map_or_else(|_| "builtin".to_owned(), |url| url.origin().ascii_serialization());
+    let mac = state.config.games_app_key.mac(format!("{}:{origin}:{user_id}", game.id).as_bytes());
     let mut encoded = URL_SAFE_NO_PAD.encode(mac);
     encoded.truncate(22);
     encoded
@@ -112,10 +113,10 @@ async fn start(
     Path(id): Path<String>,
     ApiJson(body): ApiJson<GameStartRequest>,
 ) -> ApiResult<Json<GameSession>> {
+    limited_key(&state, user_id, "game-control", CONTROL_BURST, CONTROL_PER_SECOND)?;
     let channel_id = require_in_voice(&state, user_id, &id).await?;
     let channel = store::channel_row(&state, channel_id).await?.ok_or_else(ApiErr::missing_permissions)?;
     let game = resolve(&state, &channel, &body.game_id).await?;
-    limited_key(&state, user_id, "game-control", CONTROL_BURST, CONTROL_PER_SECOND)?;
     let session = GameSession { session_id: random_hex(8), game, started_by: Snowflake::from(user_id), started_at_ms: unix_millis() };
     state.voice.game_update(channel_id, |current| match current {
         Some(_) => Err(ApiErr::new(StatusCode::CONFLICT, 40090, "A game is already running")),
@@ -130,7 +131,7 @@ async fn players(State(state): State<AppState>, AuthUser(user_id): AuthUser, Pat
     let session = state.voice.game_get(channel_id).ok_or_else(no_game)?;
     let players = in_call(&state, channel_id)
         .into_iter()
-        .map(|user| GamePlayer { user_id: Snowflake::from(user), app_id: app_id(&state, &session.game.id, user) })
+        .map(|user| GamePlayer { user_id: Snowflake::from(user), app_id: app_id(&state, &session.game, user) })
         .collect();
     Ok(Json(players))
 }
@@ -142,43 +143,51 @@ async fn relay(
     ApiJson(body): ApiJson<GameRelayRequest>,
 ) -> ApiResult<Response> {
     let channel_id = require_in_voice(&state, user_id, &id).await?;
+    limited_key(&state, user_id, "game-relay", RELAY_BURST, RELAY_PER_SECOND)?;
+    if state.config.rate_limit.is_some() {
+        let limited = state.limiter.check_resource(channel_id, "game-relay", CHANNEL_RELAY_BURST, CHANNEL_RELAY_PER_SECOND);
+        limited.map_err(|limited| ApiErr::rate_limited(limited.retry_after))?;
+    }
     let session = state.voice.game_get(channel_id).ok_or_else(no_game)?;
     if serde_json::to_vec(&body.data).map_or(true, |bytes| bytes.len() > GAME_RELAY_MAX_BYTES) {
         return Err(ApiErr::invalid("data", &format!("Must be {GAME_RELAY_MAX_BYTES} bytes or fewer as JSON.")));
     }
     let mut recipients: Vec<(i64, String)> =
-        in_call(&state, channel_id).into_iter().filter(|user| *user != user_id).map(|user| (user, app_id(&state, &session.game.id, user))).collect();
+        in_call(&state, channel_id).into_iter().filter(|user| *user != user_id).map(|user| (user, app_id(&state, &session.game, user))).collect();
     if let Some(to) = &body.to {
         recipients.retain(|(_, app)| app == to);
         if recipients.is_empty() {
             return Err(ApiErr::invalid("to", "Not another player in this call."));
         }
     }
-    limited_key(&state, user_id, "game-relay", RELAY_BURST, RELAY_PER_SECOND)?;
-    if state.config.rate_limit.is_some() {
-        let limited = state.limiter.check_resource(channel_id, "game-relay", CHANNEL_RELAY_BURST, CHANNEL_RELAY_PER_SECOND);
-        limited.map_err(|limited| ApiErr::rate_limited(limited.retry_after))?;
-    }
     // shortcut: relay frames use the replayed hub path; add a volatile (unreplayed) send when relay traffic shows up in resume gaps.
     let users: Vec<i64> = recipients.into_iter().map(|(user, _)| user).collect();
-    let message = GameMessage {
-        channel_id: Snowflake::from(channel_id),
-        session_id: session.session_id,
-        from: app_id(&state, &session.game.id, user_id),
-        data: body.data,
-    };
+    let message =
+        GameMessage { channel_id: Snowflake::from(channel_id), session_id: session.session_id, from: app_id(&state, &session.game, user_id), data: body.data };
     state.hub.send(&users, &GatewayEvent::GameMessage(message));
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Response> {
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
-    let Some(session) = state.voice.game_get(channel_id) else { return Ok(StatusCode::NO_CONTENT.into_response()) };
-    let channel = store::channel_row(&state, channel_id).await?.ok_or_else(ApiErr::missing_permissions)?;
-    if !can_stop(&state, user_id, &channel, &session).await? {
-        return Err(ApiErr::missing_permissions());
-    }
     limited_key(&state, user_id, "game-control", CONTROL_BURST, CONTROL_PER_SECOND)?;
+    // A guild member with MANAGE_CHANNELS on the channel may stop it from outside the call; everyone else must be in it.
+    let channel_id = parse_id(&id).ok_or_else(ApiErr::unknown_channel)?;
+    let moderator = match store::channel_row(&state, channel_id).await? {
+        Some(row) if !row.is_dm() => {
+            access::channel_access(&state, user_id, channel_id).await.is_ok_and(|access| access.permissions & MANAGE_CHANNELS == MANAGE_CHANNELS)
+        }
+        _ => false,
+    };
+    if !moderator {
+        require_in_voice(&state, user_id, &id).await?;
+    }
+    let Some(session) = state.voice.game_get(channel_id) else { return Ok(StatusCode::NO_CONTENT.into_response()) };
+    if !moderator {
+        let channel = store::channel_row(&state, channel_id).await?.ok_or_else(ApiErr::missing_permissions)?;
+        if !can_stop(&state, user_id, &channel, &session).await? {
+            return Err(ApiErr::missing_permissions());
+        }
+    }
     // Only the session that was checked ends: one started in between by someone else stays.
     if let Ok((Some(_), None)) = state
         .voice
@@ -196,7 +205,7 @@ pub(crate) async fn end(state: &AppState, channel_id: i64) {
     }
 }
 
-/// Ends every running session of the game `game_id` (it was removed from its guild's catalog).
+/// Ends every running session of the game `game_id` (it was removed from its guild's catalog, or its URL changed).
 pub(crate) async fn end_game(state: &AppState, game_id: &str) {
     for channel_id in state.voice.game_channels(game_id) {
         end(state, channel_id).await;
