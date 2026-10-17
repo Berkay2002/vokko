@@ -826,6 +826,7 @@ export interface Call {
   voice_states: VoiceState[]; // who is in the call (guild_id null)
   watch_together?: WatchTogetherState; // the call's Watch Together session, omitted when none
   stremio?: StremioUpdate[]; // the call's Stremio session (at most one entry), omitted when none
+  spotify?: SpotifyUpdate[]; // the call's Spotify session (at most one entry), omitted when none
 }
 export interface CallRingRequest {
   recipients?: Snowflake[] | null; // POST /call/ring: absent = every recipient not in the call; POST /call/stop-ringing: absent = yourself
@@ -957,6 +958,102 @@ export interface StremioPatchRequest {
 }
 export interface StremioViewerToken {
   url: string; // wss:// signalling URL of the media LiveKit
+  token: string;
+}
+
+// ---- Spotify in calls (docs/design/spotify-bot.md, docs/api.md "Spotify in calls"): one house account plays into one call's media room ----
+
+export const SPOTIFY_QUEUE_MAX = 200;
+export const SPOTIFY_EVENT_QUEUE_MAX = 50; // queue entries an event, READY or Call carries; GET has all of them
+/** Art is a 40-hex image id; the client only ever loads it from this host. */
+export const SPOTIFY_ART_URL = "https://i.scdn.co/image/";
+export interface SpotifyTrack {
+  uri: string; // spotify:track:<22 characters>
+  title: string;
+  artists: string[];
+  album?: string;
+  art?: string; // 40-hex image id
+  duration_ms: number;
+  explicit: boolean;
+}
+export interface SpotifyAlbumSummary {
+  id: string;
+  name: string;
+  artists: string[];
+  art?: string;
+  year?: string;
+}
+export interface SpotifyArtistSummary {
+  id: string;
+  name: string;
+  art?: string;
+}
+export interface SpotifyPlaylistSummary {
+  id: string;
+  name: string;
+  owner_name: string;
+  art?: string;
+}
+export interface SpotifySearchResults {
+  tracks: SpotifyTrack[];
+  albums: SpotifyAlbumSummary[];
+  artists: SpotifyArtistSummary[];
+  playlists: SpotifyPlaylistSummary[];
+}
+export type SpotifySearchType = "track" | "album" | "artist" | "playlist";
+export interface SpotifyAlbum extends SpotifyAlbumSummary {
+  tracks: SpotifyTrack[];
+}
+export interface SpotifyPlaylist extends SpotifyPlaylistSummary {
+  total: number; // tracks in the whole playlist; a page of 100 holds fewer
+  tracks: SpotifyTrack[];
+}
+export interface SpotifyArtist extends SpotifyArtistSummary {
+  top_tracks: SpotifyTrack[];
+  albums: SpotifyAlbumSummary[];
+}
+export type SpotifyStatus = "starting" | "playing" | "paused" | "loading" | "error";
+export type SpotifyLoop = "off" | "track" | "queue";
+export interface SpotifyQueueEntry extends SpotifyTrack {
+  qid: string;
+  added_by: Snowflake;
+}
+export interface SpotifyState {
+  status: SpotifyStatus;
+  error?: string; // a fixed text; the session ends 30 s later
+  notice?: string; // passing note ("Skipped an unavailable track"), clears itself after 5 s
+  track: SpotifyTrack | null; // null when the queue ran out
+  playing: boolean;
+  position_ms: number; // true at updated_at_ms; while playing the position now is position_ms + (now - updated_at_ms)
+  updated_at_ms: number;
+  loop: SpotifyLoop;
+  queue: SpotifyQueueEntry[]; // at most SPOTIFY_EVENT_QUEUE_MAX in events, READY and Call; all of it from GET
+  queue_len: number;
+  can_previous: boolean;
+  started_by: Snowflake;
+  bot_identity: string; // "bot:spotify:<channel_id>"
+}
+export interface SpotifyReply extends SpotifyState {
+  left_out?: number; // album or playlist tracks that did not fit in the queue
+}
+export interface SpotifyUpdate {
+  channel_id: Snowflake;
+  state: SpotifyState | null; // null = ended
+}
+/** PATCH /channels/{id}/spotify: exactly one field per request. */
+export type SpotifyPatchRequest =
+  | { playing: boolean }
+  | { position_ms: number }
+  | { skip: true }
+  | { previous: true }
+  | { loop: SpotifyLoop }
+  | { shuffle: true }
+  | { queue_add: { uri: string; next?: boolean } }
+  | { queue_remove: string }
+  | { queue_move: { qid: string; to: number } }
+  | { queue_clear: true };
+export interface SpotifyListenerToken {
+  url: string;
   token: string;
 }
 
@@ -1837,7 +1934,7 @@ export interface ReadyEvent {
   user: User;
   session_id: string;
   // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels); emojis absent = none
-  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[]; watch_together?: WatchTogetherUpdate[]; stremio?: StremioUpdate[] })[]; // stage_instances: live stages the user can see, omitted when none; watch_together: Watch Together sessions in voice channels the user can see, omitted when none
+  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[]; watch_together?: WatchTogetherUpdate[]; stremio?: StremioUpdate[]; spotify?: SpotifyUpdate[] })[]; // stage_instances: live stages the user can see, omitted when none; watch_together: Watch Together sessions in voice channels the user can see, omitted when none
   private_channels: Channel[]; // DMs and group DMs
   presences: Presence[];
   read_states: ReadState[];
@@ -1911,6 +2008,7 @@ export interface GatewayEvents {
   VOICE_CHANNEL_STATUS_UPDATE: { id: Snowflake; guild_id: Snowflake; status: string | null }; // to viewers of the channel; cleared (null) when the channel empties
   WATCH_TOGETHER_UPDATE: WatchTogetherUpdate; // to viewers of the channel on every change; state null = ended (also when the last person leaves voice); a joiner gets the running session after VOICE_SERVER_UPDATE
   STREMIO_UPDATE: StremioUpdate; // to viewers of the channel on every change; state null = ended; a joiner gets the running session after VOICE_SERVER_UPDATE
+  SPOTIFY_UPDATE: SpotifyUpdate; // like STREMIO_UPDATE; state null = ended
   STAGE_INSTANCE_CREATE: StageInstance; // to viewers of the stage channel
   STAGE_INSTANCE_UPDATE: StageInstance;
   STAGE_INSTANCE_DELETE: StageInstance; // End Stage, or the last stage moderator left

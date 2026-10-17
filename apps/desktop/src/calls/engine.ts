@@ -108,6 +108,7 @@ export function wireCalls(): void {
     // The call's voice states (READY carries no DM voice states): into the voice store like VOICE_STATE_UPDATE.
     for (const state of call.voice_states) voiceStore.getState().dispatch({ type: "voiceStateUpdate", state });
     for (const update of call.stremio ?? []) voiceStore.getState().dispatch({ type: "stremio", channelId: update.channel_id, state: update.state });
+    for (const update of call.spotify ?? []) voiceStore.getState().dispatch({ type: "spotify", channelId: update.channel_id, state: update.state });
     if (call.watch_together) voiceStore.getState().dispatch({ type: "watchTogether", channelId: call.channel_id, state: call.watch_together });
     dispatch({ type: "create", call });
   });

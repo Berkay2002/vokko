@@ -1,16 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const token = vi.hoisted(() => vi.fn(async () => ({ url: "mock://stremio", token: "t" })));
+const listener = vi.hoisted(() => vi.fn(async () => ({ url: "mock://spotify", token: "t" })));
 vi.mock("./api", () => ({ viewerToken: token }));
+vi.mock("../spotify/api", () => ({ listenerToken: listener }));
 
 const { IDLE_SLOT, syncViewer, useViewerStore } = await import("./viewerStore");
 
 const slot = () => useViewerStore.getState().slot;
-const target = { channelId: "c1", bot: "bot:stremio:c1" };
+const target = { channelId: "c1", bot: "bot:stremio:c1", kind: "stremio" as const };
 
 beforeEach(() => {
   vi.useFakeTimers();
   token.mockClear();
+  listener.mockClear();
 });
 afterEach(() => {
   syncViewer(null);
@@ -50,6 +53,19 @@ describe("the call's viewer Room", () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(token).toHaveBeenCalledTimes(2);
     expect(slot().room).toBe("connected");
+  });
+
+  it("asks Spotify's listener-token route for a Spotify session, through the same single Room", async () => {
+    syncViewer({ channelId: "c1", bot: "bot:spotify:c1", kind: "spotify" });
+    await vi.advanceTimersByTimeAsync(200);
+    expect(slot().room).toBe("connected");
+    expect(listener).toHaveBeenCalledWith("c1");
+    expect(token).not.toHaveBeenCalled();
+    // The movie replaces the music in the same channel: the Spotify Room closes and the Stremio one opens.
+    syncViewer(target);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(token).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });
 

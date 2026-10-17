@@ -580,6 +580,7 @@ export function wireVoice(): void {
   gateway.on("CHANNEL_DELETE", channel => dispatch({ type: "channelDelete", channelId: channel.id }));
   gateway.on("WATCH_TOGETHER_UPDATE", d => dispatch({ type: "watchTogether", channelId: d.channel_id, state: d.state }));
   gateway.on("STREMIO_UPDATE", d => dispatch({ type: "stremio", channelId: d.channel_id, state: d.state }));
+  gateway.on("SPOTIFY_UPDATE", d => dispatch({ type: "spotify", channelId: d.channel_id, state: d.state }));
   gateway.on("STAGE_INSTANCE_CREATE", instance => dispatch({ type: "stageInstance", instance, ended: false }));
   gateway.on("STAGE_INSTANCE_UPDATE", instance => dispatch({ type: "stageInstance", instance, ended: false }));
   gateway.on("STAGE_INSTANCE_DELETE", instance => dispatch({ type: "stageInstance", instance, ended: true }));
