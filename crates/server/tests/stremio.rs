@@ -995,7 +995,9 @@ async fn the_session_ends_when_the_last_person_leaves() {
     let mut carl = Client::identify(&w.address, &w.carl).await.0;
     w.join(&mut carl).await;
     alice.voice(None).await;
-    assert!(owner.silent_for("STREMIO_UPDATE", Duration::from_millis(300)).await, "carl is still inside");
+    // Carl is still inside: the session goes on and he hosts it now.
+    let moved = owner.stremio().await;
+    assert_eq!((moved["state"]["host_id"].as_str(), moved["state"]["started_by"].as_str()), (Some(w.carl_id.as_str()), Some(w.alice_id.as_str())));
     assert_eq!(w.bot.deletes(&format!("/sessions/{}", w.voice)), 0);
     carl.voice(None).await;
     assert!(owner.stremio().await["state"].is_null());

@@ -1,5 +1,5 @@
 //! Watch Together: one YouTube video the people in a voice channel or DM call watch in sync (Vokko-only). The session lives in
-//! memory per channel, anyone connected to the channel's voice may control it, and it ends when the last person leaves voice.
+//! memory per channel, the people in the call control it (`control`: CONTROL_MEDIA holders and the host steer, everyone votes to skip), and it ends when the last person leaves voice.
 //! `PUT|PATCH|DELETE /channels/{id}/watch-together` and WATCH_TOGETHER_UPDATE.
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -7,15 +7,15 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::put;
 use axum::{Json, Router};
 use vokko_protocol::api::{
-    ChannelType, GatewayEvent, MediaControl, Snowflake, WATCH_TOGETHER_POSITION_MAX_MS, WATCH_TOGETHER_QUEUE_MAX, WATCH_TOGETHER_TITLE_MAX_CHARS,
+    GatewayEvent, Snowflake, WATCH_TOGETHER_POSITION_MAX_MS, WATCH_TOGETHER_QUEUE_MAX, WATCH_TOGETHER_QUEUE_PER_USER, WATCH_TOGETHER_TITLE_MAX_CHARS,
     WatchTogetherPatchRequest, WatchTogetherStartRequest, WatchTogetherState, WatchTogetherUpdate,
 };
 
-use super::unix_millis;
+use super::{control, unix_millis};
 use crate::access;
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
-use crate::extract::{ApiJson, parse_id};
+use crate::extract::ApiJson;
 use crate::state::AppState;
 use crate::store;
 
@@ -75,20 +75,9 @@ fn clean_title(title: Option<&str>) -> ApiResult<Option<String>> {
     Ok(title.map(str::to_owned))
 }
 
-/// The channel id, if the caller is connected to its voice right now and would still be admitted to it: the voice join path's
-/// checks run again (VIEW_CHANNEL + CONNECT and not timed out in a guild; still a recipient and not blocked in a DM call), so
-/// someone who lost access while connected cannot keep steering the video. Else 403, like a missing permission.
+/// The channel id, if the caller is in its call right now (`control::in_voice`). Else 403, like a missing permission.
 pub(crate) async fn require_in_voice(state: &AppState, user_id: i64, raw: &str) -> ApiResult<i64> {
-    let id = parse_id(raw).ok_or_else(ApiErr::unknown_channel)?;
-    if !super::state::in_channel(state, user_id, id) {
-        return Err(ApiErr::missing_permissions());
-    }
-    let row = store::channel_row(state, id).await?.ok_or_else(ApiErr::missing_permissions)?;
-    if row.channel_type() == ChannelType::GuildStage {
-        return Err(ApiErr::wrong_channel_type());
-    }
-    let admitted = if row.is_dm() { super::state::admit_dm(state, user_id, &row).await } else { super::state::admit_guild(state, user_id, &row).await };
-    admitted.map(|_| id).map_err(|_| ApiErr::missing_permissions())
+    control::in_voice(state, user_id, raw).await.map(|ctx| ctx.channel_id)
 }
 
 fn limited(state: &AppState, user_id: i64) -> Option<Response> {
@@ -97,34 +86,58 @@ fn limited(state: &AppState, user_id: i64) -> Option<Response> {
     result.err().map(|retry_after| crate::ratelimit::limited_response(crate::ratelimit::Limited { retry_after, global: false }))
 }
 
+/// The next queued video becomes current, or `None` when the queue is empty (the session ends).
+fn skipped(mut next: WatchTogetherState, now: i64) -> Option<WatchTogetherState> {
+    if next.queue.is_empty() {
+        return None;
+    }
+    next.video_id = next.queue.remove(0);
+    let added_by = (!next.queue_added_by.is_empty()).then(|| next.queue_added_by.remove(0).db());
+    control::new_item(&mut next.control, added_by);
+    next.title = None;
+    next.playing = true;
+    next.position_ms = 0;
+    next.updated_at_ms = now;
+    Some(next)
+}
+
 async fn start(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(id): Path<String>,
     ApiJson(body): ApiJson<WatchTogetherStartRequest>,
 ) -> ApiResult<Response> {
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
     check_video_id("video_id", &body.video_id)?;
     let title = clean_title(body.title.as_deref())?;
     if let Some(response) = limited(&state, user_id) {
         return Ok(response);
     }
-    // Changing the video keeps the queue and who started the session; a new session starts with an empty queue.
+    let room = control::room(&state, channel_id);
+    // Anyone starts a session (and hosts it); changing the video of a running one is a controller's, and keeps the queue, the host
+    // and who started it.
     let (_, next) = state.voice.watch_update(channel_id, |current| {
-        let (started_by, queue, queue_added_by) = current
-            .map_or((Snowflake::from(user_id), Vec::new(), Vec::new()), |current| (current.started_by, current.queue.clone(), current.queue_added_by.clone()));
-        let control = MediaControl { host_id: started_by, added_by: Some(Snowflake::from(user_id)), skip_votes: Vec::new(), skip_needed: 1 };
-        Ok(Some(WatchTogetherState {
-            video_id: body.video_id.clone(),
-            title,
-            playing: true,
-            position_ms: 0,
-            updated_at_ms: unix_millis(),
-            started_by,
-            queue,
-            queue_added_by,
-            control,
-        }))
+        let next = match current {
+            Some(current) => {
+                control::require_control(&ctx, &current.control)?;
+                let mut next = current.clone();
+                control::new_item(&mut next.control, Some(user_id));
+                next
+            }
+            None => WatchTogetherState {
+                video_id: String::new(),
+                title: None,
+                playing: true,
+                position_ms: 0,
+                updated_at_ms: 0,
+                started_by: Snowflake::from(user_id),
+                queue: Vec::new(),
+                queue_added_by: Vec::new(),
+                control: control::new_session(user_id, &room),
+            },
+        };
+        Ok(Some(WatchTogetherState { video_id: body.video_id.clone(), title, playing: true, position_ms: 0, updated_at_ms: unix_millis(), ..next }))
     })?;
     announce(&state, channel_id, next.clone()).await;
     Ok(Json(next).into_response())
@@ -136,7 +149,8 @@ async fn control(
     Path(id): Path<String>,
     ApiJson(body): ApiJson<WatchTogetherPatchRequest>,
 ) -> ApiResult<Response> {
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
     if body.position_ms.is_some_and(|position| position > WATCH_TOGETHER_POSITION_MAX_MS) {
         return Err(ApiErr::invalid("position_ms", "Must be between 0 and 86400000."));
     }
@@ -149,34 +163,35 @@ async fn control(
     if let Some(response) = limited(&state, user_id) {
         return Ok(response);
     }
+    let room = control::room(&state, channel_id);
     let now = unix_millis();
     let (previous, next) = state.voice.watch_update(channel_id, |current| {
         let mut next = current.ok_or_else(|| ApiErr::conflict(40033, "Nothing is playing in this channel."))?.clone();
+        let controller = control::controls(&ctx, next.control.host_id);
         // Where the video is right now, before play / pause / seek apply: pausing keeps the position.
         let here = if next.playing { next.position_ms + (now - next.updated_at_ms).max(0) as u64 } else { next.position_ms };
-        if body.skip == Some(true) {
-            // Every client reports "ended" at once: only the first one's skip finds its video still current.
+        if let Some(skip) = body.skip {
+            // Every client reports "ended" at once: only the first one's skip (or vote) finds its video still current.
             if body.video_id.as_ref().is_some_and(|expected| *expected != next.video_id) {
                 return Ok(Some(next));
             }
-            if next.queue.is_empty() {
-                return Ok(None);
+            if control::skip_request(&mut next.control, &ctx, skip, &room) {
+                let Some(after) = skipped(next, now) else { return Ok(None) };
+                next = after;
             }
-            next.video_id = next.queue.remove(0);
-            next.control.added_by = (!next.queue_added_by.is_empty()).then(|| next.queue_added_by.remove(0));
-            next.title = None;
-            next.playing = true;
-            next.position_ms = 0;
-            next.updated_at_ms = now;
         } else if body.playing.is_some() || body.position_ms.is_some() {
+            control::require_control(&ctx, &next.control)?;
             next.position_ms = body.position_ms.unwrap_or(here);
             next.playing = body.playing.unwrap_or(next.playing);
             next.updated_at_ms = now;
         }
-        if title.is_some() {
+        // Anyone fills in a missing title (the clients' auto-fill); replacing one is a controller's. A second auto-fill is a no-op.
+        if title.is_some() && (controller || next.title.is_none()) {
             next.title = title.clone();
         }
         if let Some(added) = &body.queue_add {
+            let mine = next.queue_added_by.iter().filter(|adder| adder.db() == user_id).count();
+            control::quota(&ctx, &next.control, mine, WATCH_TOGETHER_QUEUE_PER_USER)?;
             if next.queue.len() >= WATCH_TOGETHER_QUEUE_MAX {
                 return Err(ApiErr::invalid("queue_add", &format!("The queue holds at most {WATCH_TOGETHER_QUEUE_MAX} videos.")));
             }
@@ -192,12 +207,32 @@ async fn control(
 }
 
 async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Response> {
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    if let Some(current) = state.voice.watch_get(ctx.channel_id) {
+        control::require_control(&ctx, &current.control)?;
+    }
     if let Some(response) = limited(&state, user_id) {
         return Ok(response);
     }
-    end(&state, channel_id).await;
+    end(&state, ctx.channel_id).await;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// Who is in the call changed (`control::refresh`): host, votes and the count follow, and enough votes skip.
+pub(crate) async fn refresh(state: &AppState, channel_id: i64, room: &control::Room) {
+    let now = unix_millis();
+    let Ok((previous, next)) = state.voice.watch_update(channel_id, |current| {
+        let Some(mut next) = current.cloned() else { return Ok(None) };
+        if control::sync(&mut next.control, room) {
+            return Ok(skipped(next, now));
+        }
+        Ok(Some(next))
+    }) else {
+        return;
+    };
+    if previous.is_some() && next != previous {
+        announce(state, channel_id, next).await;
+    }
 }
 
 /// Ends the channel's session, if any, and tells everyone who can see the channel.

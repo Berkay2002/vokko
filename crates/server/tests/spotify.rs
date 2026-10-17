@@ -735,7 +735,7 @@ async fn a_member_plays_and_everyone_in_the_call_controls() {
     assert_eq!(w.patch(&w.carl, json!({"playing": true})).await.1["status"], "playing");
 
     // Exactly one operation, well formed.
-    for body in [json!({}), json!({"playing": true, "skip": true}), json!({"skip": false}), json!({"loop": "forever"}), json!({"position_ms": 999_999_999})] {
+    for body in [json!({}), json!({"playing": true, "skip": true}), json!({"loop": "forever"}), json!({"position_ms": 999_999_999})] {
         assert_eq!(w.patch(&w.alice, body.clone()).await.0, StatusCode::BAD_REQUEST, "{body}");
     }
     let (status, sought) = w.patch(&w.alice, json!({"position_ms": 90_000})).await;

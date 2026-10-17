@@ -52,6 +52,10 @@ pub struct Queue {
 }
 
 impl Queue {
+    pub fn current_by(&self) -> i64 {
+        self.current_by
+    }
+
     pub fn can_previous(&self) -> bool {
         !self.history.is_empty()
     }
