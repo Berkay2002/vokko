@@ -311,6 +311,16 @@ describe("LiveKitTransport: remote screen shares", () => {
     expect(reports.slice(2)).toEqual([["300", true], ["200", false], ["200", true], ["300", false], ["200", false]]);
   });
 
+  it("a reconnect clears every video handle of the old room (no black tiles from dead tracks)", async () => {
+    const videos: [string, string, boolean][] = [];
+    const t = new LiveKitTransport({ ...callbacks(), video: (id, source, handle) => void videos.push([id, source, !!handle]) });
+    lk.state.remotes.push(remote("200", [screen()]));
+    await t.connect("wss://x", "t1", options(true));
+    videos.length = 0;
+    await t.connect("wss://x", "t2", options(true));
+    expect(videos).toEqual([["200", "camera", false], ["200", "screen", false]]);
+  });
+
   it("ignores events for participants that are not in the room (the local participant)", async () => {
     const reports: [string, boolean][] = [];
     const t = new LiveKitTransport({ ...callbacks(), screenLive: (id, live) => void reports.push([id, live]) });

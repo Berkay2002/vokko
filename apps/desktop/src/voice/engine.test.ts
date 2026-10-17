@@ -185,6 +185,26 @@ describe("voice engine: media reconnect", () => {
     expect(gw.sent.at(-1)).toMatchObject({ channel_id: null });
   });
 
+  it("a new token (re-identify after a server restart) hands the watched streams and their quality back to the transport", async () => {
+    await startCall();
+    slow!.connected();
+    const watches: [string, boolean][] = [];
+    const qualities: string[] = [];
+    Object.assign(slow!, {
+      watchStream: (id: string, on: boolean) => void watches.push([id, on]),
+      setViewerQuality: (id: string, source: string, q: string) => void qualities.push(`${id}:${source}:${q}`),
+    });
+    engine.watchStream("200", true);
+    engine.setViewerQuality("200", "screen", "720p");
+    watches.length = 0;
+    qualities.length = 0;
+    serverUpdate("t2", "s1");
+    await flush();
+    expect(slow?.connects.map(c => c.token)).toEqual(["t1", "t2"]);
+    expect(watches).toEqual([["200", true]]);
+    expect(qualities).toEqual(["200:screen:720p"]);
+  });
+
   it("an unanswered op 4 is re-sent only after the token wait", async () => {
     await startCall();
     slow!.connected();
