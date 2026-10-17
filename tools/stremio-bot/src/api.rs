@@ -3,14 +3,14 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Request, State};
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, put};
 use axum::{Json, Router};
 use serde_json::json;
 
-use crate::plan::{host_of, Desired};
+use crate::plan::{Desired, host_of};
 use crate::session::{Manager, PutError};
 
 #[derive(Clone)]
@@ -36,11 +36,7 @@ pub fn secrets_match(given: &[u8], expected: &[u8]) -> bool {
 
 async fn auth(State(app): State<App>, request: Request, next: Next) -> Response {
     let given = request.headers().get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
-    if given.is_some_and(|g| secrets_match(g.as_bytes(), app.secret.as_bytes())) {
-        next.run(request).await
-    } else {
-        StatusCode::UNAUTHORIZED.into_response()
-    }
+    if given.is_some_and(|g| secrets_match(g.as_bytes(), app.secret.as_bytes())) { next.run(request).await } else { StatusCode::UNAUTHORIZED.into_response() }
 }
 
 fn bad(status: StatusCode, message: &str) -> Response {

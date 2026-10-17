@@ -116,7 +116,14 @@ pub async fn fetch_streams(fetcher: &Fetcher, addons: &[Addon], kind: &str, vide
         match answer {
             Ok(body) => {
                 let streams = body["streams"].as_array().map(Vec::as_slice).unwrap_or_default();
-                candidates.extend(streams.iter().take(MAX_STREAMS_PER_ADDON).filter_map(|stream| rank::parse_stream(&addon.name, stream)));
+                candidates.extend(streams.iter().take(MAX_STREAMS_PER_ADDON).filter_map(|stream| rank::parse_stream(&addon.name, stream)).map(|mut candidate| {
+                    // A link the fetcher would refuse (http, a private host) is listed but cannot be played.
+                    let blocked = matches!(&candidate.source, rank::Source::Url { url, .. } if !Url::parse(url.expose()).is_ok_and(|url| fetcher.check_url(&url).is_ok()));
+                    if blocked {
+                        candidate.source = rank::Source::Unsupported("external");
+                    }
+                    candidate
+                }));
             }
             Err(error) => {
                 // The addon's name only; its URL path carries the user's configuration.

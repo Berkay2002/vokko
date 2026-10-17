@@ -15,9 +15,7 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,libwebrtc=warn,livekit=warn")))
-        .init();
+    tracing_subscriber::fmt().with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,libwebrtc=warn,livekit=warn"))).init();
     let _ = rustls::crypto::ring::default_provider().install_default();
     let cfg = match config::Config::from_env() {
         Ok(cfg) => Arc::new(cfg),

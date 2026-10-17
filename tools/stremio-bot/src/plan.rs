@@ -62,6 +62,31 @@ pub fn host_of(url: &str) -> String {
     reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_else(|| "?".into())
 }
 
+/// Not an address on this machine or its network (the server checked the name when it resolved the link; this is the second wall).
+fn public_host(url: &reqwest::Url) -> bool {
+    use std::net::IpAddr;
+    let Some(host) = url.host_str() else { return false };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    let Ok(ip) = host.parse::<IpAddr>() else {
+        let name = host.trim_end_matches('.').to_ascii_lowercase();
+        return name != "localhost" && !name.ends_with(".localhost") && !name.ends_with(".local") && !name.ends_with(".internal");
+    };
+    let v4_ok = |v4: std::net::Ipv4Addr| {
+        !(v4.is_private()
+            || v4.is_loopback()
+            || v4.is_link_local()
+            || v4.is_unspecified()
+            || v4.is_broadcast()
+            || v4.octets()[0] == 100 && v4.octets()[1] & 0xc0 == 64)
+    };
+    match ip {
+        IpAddr::V4(v4) => v4_ok(v4),
+        IpAddr::V6(v6) => v6
+            .to_ipv4_mapped()
+            .map_or(!(v6.is_loopback() || v6.is_unspecified() || v6.segments()[0] & 0xfe00 == 0xfc00 || v6.segments()[0] & 0xffc0 == 0xfe80), v4_ok),
+    }
+}
+
 impl Desired {
     /// Checks and normalises a request. The media URL must be https (ffmpeg's protocol whitelist is the second wall),
     /// only `User-Agent` and `Referer` pass through and clamps keep a bad value from reaching ffmpeg or libwebrtc.
@@ -73,6 +98,9 @@ impl Desired {
         let media = reqwest::Url::parse(&self.media_url).map_err(|_| "media_url is not a URL")?;
         if media.scheme() != "https" || media.host_str().is_none() {
             return Err("media_url must be https".into());
+        }
+        if !public_host(&media) {
+            return Err("media_url must be a public host".into());
         }
         if self.token.is_empty() || self.token.len() > 4096 {
             return Err("token missing or too long".into());
@@ -112,10 +140,7 @@ pub struct Probe {
 pub fn parse_probe(json: &str) -> Result<Probe, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("ffprobe output: {e}"))?;
     let streams = v["streams"].as_array().map(Vec::as_slice).unwrap_or_default();
-    let video = streams
-        .iter()
-        .find(|s| s["codec_type"] == "video" && s["width"].as_u64().unwrap_or(0) > 0)
-        .ok_or("the file has no video stream")?;
+    let video = streams.iter().find(|s| s["codec_type"] == "video" && s["width"].as_u64().unwrap_or(0) > 0).ok_or("the file has no video stream")?;
     let dim = |key: &str| video[key].as_u64().and_then(|n| u32::try_from(n).ok()).filter(|n| *n > 0);
     let (width, height) = dim("width").zip(dim("height")).ok_or("bad video size")?;
     let rate = |key: &str| {
@@ -128,11 +153,7 @@ pub fn parse_probe(json: &str) -> Result<Probe, String> {
         width,
         height,
         fps: rate("avg_frame_rate").or_else(|| rate("r_frame_rate")),
-        duration_ms: v["format"]["duration"]
-            .as_str()
-            .and_then(|d| d.parse::<f64>().ok())
-            .filter(|d| d.is_finite() && *d > 0.0)
-            .map(|d| (d * 1000.0) as u64),
+        duration_ms: v["format"]["duration"].as_str().and_then(|d| d.parse::<f64>().ok()).filter(|d| d.is_finite() && *d > 0.0).map(|d| (d * 1000.0) as u64),
         hdr: matches!(transfer, "smpte2084" | "arib-std-b67"),
         has_audio: streams.iter().any(|s| s["codec_type"] == "audio"),
     })
@@ -161,14 +182,9 @@ pub fn geometry(probe: &Probe, max_height: u32) -> Geometry {
 }
 
 pub fn probe_args(media_url: &str, headers: &BTreeMap<String, String>) -> Vec<String> {
-    let mut a = strings(&["-v", "error", "-protocol_whitelist", "https,tls,tcp", "-rw_timeout", "15000000"]);
+    let mut a = strings(&["-v", "error", "-protocol_whitelist", "https,tls,tcp", "-max_redirects", "0", "-rw_timeout", "15000000"]);
     push_headers(&mut a, headers);
-    a.extend(strings(&[
-        "-show_entries",
-        "stream=codec_type,width,height,avg_frame_rate,r_frame_rate,color_transfer:format=duration",
-        "-of",
-        "json",
-    ]));
+    a.extend(strings(&["-show_entries", "stream=codec_type,width,height,avg_frame_rate,r_frame_rate,color_transfer:format=duration", "-of", "json"]));
     a.push(media_url.to_owned());
     a
 }
@@ -197,6 +213,9 @@ pub fn ffmpeg_args(p: &FfmpegPlan<'_>) -> Vec<String> {
         "error",
         "-protocol_whitelist",
         "https,tls,tcp",
+        // The server already followed the redirects to this file; one that appears now (say, only for ffmpeg's user agent) is not followed.
+        "-max_redirects",
+        "0",
         "-reconnect",
         "1",
         "-reconnect_on_network_error",
@@ -318,6 +337,12 @@ mod tests {
         assert_eq!(d.headers.get("User-Agent").map(String::as_str), Some("Mozilla"));
     }
 
+    fn bad_url(url: &str) -> bool {
+        let mut d = desired();
+        d.media_url = url.into();
+        d.validate().is_err()
+    }
+
     #[test]
     fn validate_rejects_bad_input() {
         let bad = |edit: fn(&mut Desired)| {
@@ -328,6 +353,21 @@ mod tests {
         assert!(bad(|d| d.media_url = "http://cdn.example/v.mp4".into()));
         assert!(bad(|d| d.media_url = "file:///etc/passwd".into()));
         assert!(bad(|d| d.media_url = "not a url".into()));
+        for private in [
+            "https://localhost/v",
+            "https://127.0.0.1/v",
+            "https://192.168.0.1/v",
+            "https://10.1.2.3/v",
+            "https://169.254.169.254/v",
+            "https://[::1]/v",
+            "https://[fd00::1]/v",
+            "https://[::ffff:10.0.0.1]/v",
+            "https://nas.local/v",
+            "https://x.internal/v",
+        ] {
+            assert!(bad_url(private), "{private}");
+        }
+        assert!(!bad_url("https://8.8.8.8/v") && !bad_url("https://[2606:4700::1]/v"));
         assert!(bad(|d| d.livekit_url = "ftp://x".into()));
         assert!(bad(|d| d.token.clear()));
         assert!(bad(|d| {
@@ -453,9 +493,17 @@ mod tests {
         assert_eq!(reconcile(&a, &with(|d| d.position_ms = 1001 + DRIFT_MS), 1000, true), Action::Seek(4001));
         let still = with(|d| d.playing = false);
         assert_eq!(reconcile(&paused, &still, 1000, false), Action::Keep);
-        assert_eq!(reconcile(&paused, &with(|d| {
-            d.playing = false;
-            d.position_ms = 9000;
-        }), 1000, false), Action::Hold(9000));
+        assert_eq!(
+            reconcile(
+                &paused,
+                &with(|d| {
+                    d.playing = false;
+                    d.position_ms = 9000;
+                }),
+                1000,
+                false
+            ),
+            Action::Hold(9000)
+        );
     }
 }

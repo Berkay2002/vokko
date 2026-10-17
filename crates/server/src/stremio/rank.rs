@@ -115,7 +115,8 @@ pub fn parse_stream(addon: &str, stream: &Value) -> Option<Candidate> {
     let description = stream["description"].as_str().or_else(|| stream["title"].as_str()).unwrap_or("");
     let filename = hints["filename"].as_str().unwrap_or("");
     let source = if let Some(url) = stream["url"].as_str() {
-        if url.starts_with("https://") && url.len() <= super::fetch::MAX_URL_LEN {
+        // The scheme and host are judged by the fetcher (`addons::fetch_streams`), which knows the allow-list.
+        if (url.starts_with("https://") || url.starts_with("http://")) && url.len() <= super::fetch::MAX_URL_LEN {
             Source::Url { url: Secret::new(url), headers: proxy_headers(hints) }
         } else {
             Source::Unsupported("external")
@@ -222,7 +223,7 @@ mod tests {
         assert_eq!(kind(json!({"ytId": "dQw4w9WgXcQ"})), Some("youtube"));
         assert_eq!(kind(json!({"externalUrl": "https://x.example"})), Some("external"));
         assert_eq!(kind(json!({"nzbUrl": "https://x.example/a.nzb"})), Some("external"));
-        assert_eq!(kind(json!({"url": "http://insecure.example/a.mp4"})), Some("external"));
+        assert_eq!(kind(json!({"url": "ftp://insecure.example/a.mp4"})), Some("external"));
         assert_eq!(kind(json!({"url": "https://a.example/a.mp4"})), Some("url"));
         assert_eq!(kind(json!({"name": "no source"})), None);
     }

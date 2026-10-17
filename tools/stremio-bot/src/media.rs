@@ -31,11 +31,7 @@ const AUDIO_CHUNK_BYTES: usize = 480 * 2 * 2;
 pub async fn probe(cfg: &Config, d: &Desired) -> Result<Probe, String> {
     let out = tokio::time::timeout(
         Duration::from_secs(30),
-        Command::new(&cfg.ffprobe)
-            .args(plan::probe_args(&d.media_url, &d.headers))
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output(),
+        Command::new(&cfg.ffprobe).args(plan::probe_args(&d.media_url, &d.headers)).stdin(Stdio::null()).kill_on_drop(true).output(),
     )
     .await
     .map_err(|_| "ffprobe timed out")?
@@ -107,13 +103,7 @@ pub async fn publish(room: &Room, geo: &Geometry, d: &Desired, cfg: &Config) -> 
         )
         .await
         .map_err(|e| format!("publish audio: {e}"))?;
-    Ok(Published {
-        video,
-        audio,
-        last: Arc::default(),
-        video_sid: video_pub.sid(),
-        audio_sid: audio_pub.sid(),
-    })
+    Ok(Published { video, audio, last: Arc::default(), video_sid: video_pub.sid(), audio_sid: audio_pub.sid() })
 }
 
 impl Published {
@@ -163,15 +153,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub async fn spawn(
-        cfg: &Config,
-        d: &Desired,
-        probe: &Probe,
-        geo: &Geometry,
-        start_ms: u64,
-        out: &Published,
-        notify: Notify,
-    ) -> Result<Self, String> {
+    pub async fn spawn(cfg: &Config, d: &Desired, probe: &Probe, geo: &Geometry, start_ms: u64, out: &Published, notify: Notify) -> Result<Self, String> {
         let video_listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
         let audio_listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
         let port = |l: &TcpListener| l.local_addr().map(|a| a.port()).map_err(|e| e.to_string());
@@ -209,16 +191,7 @@ impl Pipeline {
             }));
         }
         let began = Instant::now();
-        tasks.push(tokio::spawn(video_loop(
-            video_listener,
-            geo.clone(),
-            out.video.clone(),
-            out.last.clone(),
-            counters.clone(),
-            notify,
-            start_ms,
-            began,
-        )));
+        tasks.push(tokio::spawn(video_loop(video_listener, geo.clone(), out.video.clone(), out.last.clone(), counters.clone(), notify, start_ms, began)));
         if probe.has_audio {
             tasks.push(tokio::spawn(audio_loop(audio_listener, out.audio.clone(), counters.clone())));
         }

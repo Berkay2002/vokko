@@ -79,9 +79,6 @@ mod tests {
         let e = Event { channel_id: "42", event: Kind::Position.name(), position_ms: 5000, duration_ms: None, message: None };
         assert_eq!(serde_json::to_string(&e).expect("json"), r#"{"channel_id":"42","event":"position","position_ms":5000}"#);
         let e = Event { channel_id: "42", event: Kind::Error.name(), position_ms: 1, duration_ms: Some(9), message: Some("boom") };
-        assert_eq!(
-            serde_json::to_string(&e).expect("json"),
-            r#"{"channel_id":"42","event":"error","position_ms":1,"duration_ms":9,"message":"boom"}"#
-        );
+        assert_eq!(serde_json::to_string(&e).expect("json"), r#"{"channel_id":"42","event":"error","position_ms":1,"duration_ms":9,"message":"boom"}"#);
     }
 }
