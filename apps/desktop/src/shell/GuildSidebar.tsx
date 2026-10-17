@@ -2,7 +2,7 @@ import { memo, useMemo, useState, type CSSProperties } from "react";
 import { resolveUrl } from "../api/rest";
 import { intToHex } from "../perks/catalog";
 import { NavLink, useLocation } from "react-router";
-import { Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Megaphone, MessagesSquare, Plus, Radio, Settings, UserPlus } from "lucide-react";
+import { BookCheck, Check, ChevronDown, ChevronRight, ChevronUp, Hash, Lock, Megaphone, MessagesSquare, Plus, Radio, Settings, UserPlus } from "lucide-react";
 import { channelMentionCount, isChannelUnread, useStore } from "../api/store";
 import { StageLivePill, VoiceChannelRow, VoiceChannelUsers } from "../voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
@@ -56,6 +56,9 @@ const ChannelRow = memo(function ChannelRow({ channel, guild, selected }: { chan
     <MessagesSquare size={20} className="channel-icon" />
   ) : channel.type === ChannelType.GuildStage ? (
     <Radio size={20} className="channel-icon" />
+  ) : channel.id === guild.rules_channel_id ? (
+    // Server Settings > Access > Rules channel, flagged like Discord's rules channel
+    <BookCheck size={20} className="channel-icon" aria-label="Rules channel" role="img" />
   ) : channel.nsfw ? (
     <NsfwHash size={20} className="channel-icon" />
   ) : (

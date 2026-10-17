@@ -330,3 +330,14 @@ test('channel topic toolbar wraps the selection in markdown and a second click u
   await toolbar.getByRole('button', { name: 'Bold' }).click();
   await expect(topic).toHaveValue('read the rules');
 });
+
+test('the rules channel (Server Settings > Access) gets the rules icon in the channel list', async ({ page }) => {
+  await openChannel(page, 'general');
+  await expect(list(page).getByRole('img', { name: 'Rules channel' })).toHaveCount(0);
+  await page.evaluate(() => {
+    const store = (window as unknown as Win).__vokko.appStore;
+    const random = Object.values(store.getState().channels).find(c => c.name === 'random' && c.guild_id)!;
+    store.setState(s => ({ guilds: { ...s.guilds, [random.guild_id!]: { ...s.guilds[random.guild_id!]!, rules_channel_id: random.id } } }));
+  });
+  await expect(row(page, 'random').getByRole('img', { name: 'Rules channel' })).toBeVisible();
+});
