@@ -796,7 +796,15 @@ async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, generat
         };
         let Ok((media, headers)) = prepare(active, &next.candidate).await else { continue };
         let Some(room) = lock(&state.stremio.sessions).get(&channel_id).map(|session| session.room.clone()) else { return };
-        let Some(token) = bot_token(state, channel_id, &room) else { return };
+        let Some(token) = bot_token(state, channel_id, &room) else {
+            // The only way out after the claim that leaves this item current: a later skip or `ended` must be able to advance it.
+            touch(state, channel_id, |session| {
+                if session.generation == generation {
+                    session.advancing = None;
+                }
+            });
+            return;
+        };
         let next_generation = state.stremio.next_generation();
         let (view, desired) = {
             let mut sessions = lock(&state.stremio.sessions);
