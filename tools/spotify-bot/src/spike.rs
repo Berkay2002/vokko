@@ -184,11 +184,23 @@ pub async fn meta(kind: Option<String>, id: Option<String>) -> Result<(), String
         "playlist" => {
             let uri = SpotifyUri::Playlist { id: base62, user: None };
             let playlist = Playlist::get(&session, &uri).await.map_err(|e| e.to_string())?;
-            let tracks: Vec<_> = playlist.tracks().collect();
-            println!("playlist: {} tracks (length field {}), name {:?}", tracks.len(), playlist.length, playlist.name());
-            for t in tracks.iter().take(3) {
-                let track = Track::get(&session, t).await.map_err(|e| e.to_string())?;
-                println!("  {} - {}", track.name, track.artists.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", "));
+            let tracks: Vec<SpotifyUri> = playlist.tracks().take(100).cloned().collect();
+            println!("playlist: {} tracks (length field {}), name {:?}", playlist.tracks().len(), playlist.length, playlist.name());
+            // Time a full page of metadata: this is what a playlist page would cost the bot.
+            let began = Instant::now();
+            let mut set = tokio::task::JoinSet::new();
+            for uri in tracks {
+                let session = session.clone();
+                set.spawn(async move { Track::get(&session, &uri).await });
+            }
+            let mut loaded = Vec::new();
+            while let Some(done) = set.join_next().await {
+                loaded.extend(done.map_err(|e| e.to_string())?.ok());
+            }
+            println!("  {} tracks' metadata in {} ms", loaded.len(), began.elapsed().as_millis());
+            if let Some(track) = loaded.first() {
+                let cover = track.album.covers.first().map(|c| c.id.to_base16());
+                println!("  first: {} - {} ({} ms), cover id {:?}", track.name, track.artists.first().map_or("", |a| a.name.as_str()), track.duration, cover);
             }
         }
         "artist" => {
