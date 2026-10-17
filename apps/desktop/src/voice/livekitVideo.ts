@@ -8,7 +8,7 @@ import { hideShareBar } from "../desktop/window";
 import type { VideoHandle, VideoSource } from "./mediaStore";
 import type { CameraStart, TransportCallbacks } from "./transport";
 import { openCamera, type CameraSession } from "./video/cameraSession";
-import { buildCamera, buildScreenShare, viewerRequest, type EncodingPlan, type LayerQuality, type PlainPreset, type ScreenShareChoice, type StreamLayer, type ViewerQuality } from "./video/options";
+import { buildCamera, buildScreenShare, detectCodecSupport, serverTakesSvcSimulcast, viewerRequest, type EncodingPlan, type LayerQuality, type PlainPreset, type ScreenShareChoice, type StreamLayer, type ViewerQuality } from "./video/options";
 
 const toPresets = (layers: PlainPreset[]): VideoPreset[] => layers.map(l => new VideoPreset({ width: l.width, height: l.height, maxBitrate: l.maxBitrate, maxFramerate: l.maxFramerate }));
 
@@ -128,7 +128,9 @@ export class LiveKitVideo {
     }
     this.screenStarting = true;
     try {
-      const request = buildScreenShare(choice);
+      // An SFU too old for VP9 / AV1 simulcast would get one layer: VP8 / H.264 simulcast instead, as on WebKit.
+      const support = detectCodecSupport();
+      const request = buildScreenShare(choice, { ...support, svcSimulcast: support.svcSimulcast !== false && serverTakesSvcSimulcast(room.serverInfo?.version) });
       const publication = await room.localParticipant.setScreenShareEnabled(
         true,
         {

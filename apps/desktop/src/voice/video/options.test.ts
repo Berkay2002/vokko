@@ -15,6 +15,8 @@ import {
   isViewerQuality,
   isWebKit,
   missingAudioNote,
+  nearestChoice,
+  serverTakesSvcSimulcast,
   pickCodec,
   screenLayers,
   viewerChoices,
@@ -270,6 +272,37 @@ describe("viewerChoices", () => {
   });
   it("labels", () => {
     expect(viewerChoices(undefined).map(viewerQualityLabel)).toEqual(["Auto", "Source", "720p", "480p"]);
+  });
+});
+
+describe("serverTakesSvcSimulcast", () => {
+  it("is true only for servers newer than 1.13.6", () => {
+    expect(serverTakesSvcSimulcast("1.13.9")).toBe(true);
+    expect(serverTakesSvcSimulcast("1.13.7")).toBe(true);
+    expect(serverTakesSvcSimulcast("1.14.0")).toBe(true);
+    expect(serverTakesSvcSimulcast("2.0.0")).toBe(true);
+    expect(serverTakesSvcSimulcast("1.13.6")).toBe(false);
+    expect(serverTakesSvcSimulcast("1.12.10")).toBe(false);
+    expect(serverTakesSvcSimulcast("0.15.0")).toBe(false);
+    expect(serverTakesSvcSimulcast(undefined)).toBe(false);
+    expect(serverTakesSvcSimulcast("")).toBe(false);
+    expect(serverTakesSvcSimulcast("dev")).toBe(false);
+  });
+});
+
+describe("nearestChoice", () => {
+  const layered = ["auto", "source", "720p", "360p"] as const;
+  it("keeps an offered entry", () => {
+    expect(nearestChoice("auto", layered)).toBe("auto");
+    expect(nearestChoice("720p", layered)).toBe("720p");
+  });
+  it("maps a settings default to the tallest offered height not above it, else the smallest", () => {
+    expect(nearestChoice("480p", layered)).toBe("360p");
+    expect(nearestChoice("1080p", layered)).toBe("720p");
+    expect(nearestChoice("240p", layered)).toBe("360p");
+  });
+  it("is Source when the stream has no lower layer", () => {
+    expect(nearestChoice("480p", ["auto", "source"])).toBe("source");
   });
 });
 

@@ -162,6 +162,17 @@ export function detectCodecSupport(): CodecSupport {
   }
 }
 
+/**
+ * Whether the SFU takes VP9 / AV1 as rid simulcast: livekit-client only sends it to servers newer than 1.13.6
+ * (isSVCSimulcastSupportedByServer) and otherwise silently publishes one SVC layer. Unknown counts as too old.
+ */
+export function serverTakesSvcSimulcast(version: string | undefined): boolean {
+  const parts = (version ?? "").split(".").map(p => Number.parseInt(p, 10));
+  if (parts.length < 3 || parts.some(Number.isNaN)) return false;
+  const [major, minor, patch] = parts;
+  return major !== 1 ? major > 1 : minor !== 13 ? minor > 13 : patch > 6;
+}
+
 /** Safari and WKWebView (the macOS app): no getDisplayMedia audio and only legacy SVC encodings. */
 export function isWebKit(userAgent: string): boolean {
   return /AppleWebKit/.test(userAgent) && !/Chrome|Chromium|Edg\//.test(userAgent);
@@ -280,6 +291,17 @@ export function viewerChoices(layers?: readonly StreamLayer[]): ViewerQuality[] 
   if (!layers?.length) return [...VIEWER_QUALITIES];
   const heights = [...new Set(layers.map(l => l.height))].sort((a, b) => b - a);
   return ["auto", "source", ...heights.slice(1).map(h => `${h}p` as const)];
+}
+
+/**
+ * The menu entry a quality stands for: itself when offered, else the tallest offered height not above it (the
+ * smallest offered height, or Source when the stream has no lower layer).
+ */
+export function nearestChoice(choice: ViewerQuality, choices: readonly ViewerQuality[]): ViewerQuality {
+  if (choices.includes(choice)) return choice;
+  const height = Number.parseInt(choice, 10);
+  const offered = choices.filter(c => c !== "auto" && c !== "source").sort((a, b) => Number.parseInt(b, 10) - Number.parseInt(a, 10));
+  return offered.find(c => Number.parseInt(c, 10) <= height) ?? offered[offered.length - 1] ?? "source";
 }
 
 export function viewerQualityLabel(choice: ViewerQuality): string {
