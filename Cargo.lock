@@ -5703,6 +5703,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "vokko-protocol",
 ]
 
 [[package]]
