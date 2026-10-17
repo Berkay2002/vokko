@@ -10,7 +10,7 @@ import { ApiRequestError } from "../api/rest";
 import { screenChoiceFromPrefs, setVoiceChannelStatus, startCamera, startScreenShare } from "./engine";
 import { useMedia } from "./mediaStore";
 import { useVoice } from "./store";
-import { CAMERA_RESOLUTIONS, RESOLUTION_LABEL, SCREEN_FPS, SCREEN_RESOLUTIONS, describeScreenShare, isCameraResolution, isScreenFps, isScreenResolution, type CameraResolution, type ScreenFps, type ScreenResolution, type StreamContent } from "./video/options";
+import { CAMERA_RESOLUTIONS, RESOLUTION_LABEL, SCREEN_FPS, SCREEN_RESOLUTIONS, describeScreenShare, isCameraResolution, isScreenFps, isScreenResolution, isWebKit, type CameraResolution, type ScreenFps, type ScreenResolution, type StreamContent } from "./video/options";
 import { useCameraPreview } from "./video/useCameraPreview";
 import { VideoBackgroundPicker } from "./video/VideoBackgroundPicker";
 
@@ -161,12 +161,16 @@ const CONTENT_OPTIONS: { value: StreamContent; title: string; note: string }[] =
   { value: "detail", title: "Screen sharing", note: "Clearer text; frame rate drops first on a weak connection" },
 ];
 
+const SHARE_AUDIO_NOTE = isWebKit(typeof navigator === "undefined" ? "" : navigator.userAgent)
+  ? "The system's picker decides what is shared. This system can't share a screen's sound."
+  : 'The system\'s picker decides what is shared. Sound comes along from a whole screen with "Share system audio" turned on, not from a single window.';
+
 export function ScreenSharePickerModal() {
   const defaults = screenChoiceFromPrefs();
   const [resolution, setResolution] = useState<ScreenResolution>(defaults.resolution);
   const [fps, setFps] = useState<ScreenFps>(defaults.fps);
   const [audio, setAudio] = useState(defaults.audio);
-  const [content, setContent] = useState<StreamContent>(defaults.fps >= 60 ? "motion" : "detail");
+  const [content, setContent] = useState<StreamContent>(defaults.content ?? (defaults.fps >= 60 ? "motion" : "detail"));
   const connected = useVoice(s => s.channelId !== null && s.status === "connected");
   const error = useMedia(s => s.error);
   const [busy, setBusy] = useState(false);
@@ -178,6 +182,7 @@ export function ScreenSharePickerModal() {
     setPref("streamResolution", resolution);
     setPref("streamFps", fps);
     setPref("streamAudio", audio);
+    setPref("streamContent", content);
     closeModal();
     await startScreenShare({ resolution, fps, audio, content });
   };
@@ -226,7 +231,7 @@ export function ScreenSharePickerModal() {
       <p className="golive-summary" aria-live="polite">
         {describeScreenShare({ resolution, fps, audio, content })} · {content === "motion" ? "Gaming" : "Screen sharing"} · {audio ? "with audio" : "no audio"}
       </p>
-      <p className="golive-note">The system's picker decides what is shared and whether its audio is available; some platforms only share audio from a browser tab.</p>
+      <p className="golive-note">{SHARE_AUDIO_NOTE}</p>
       {error && (
         <p className="field-error" role="alert">
           {error}

@@ -4,6 +4,7 @@ const core = vi.hoisted(() => ({ invoke: vi.fn(), isTauri: vi.fn(() => false) })
 const events = vi.hoisted(() => ({ listen: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => core);
 vi.mock("@tauri-apps/api/event", () => events);
+vi.mock("@tauri-apps/api/app", () => ({ getVersion: async () => "0.1.8" }));
 
 import { getAutostart, setAutostart } from "./autostart";
 import { initDeepLinks, onDeepLink, resetDeepLinks, routeDeepLink, type DeepLink } from "./deeplinks";
@@ -11,7 +12,7 @@ import { DEFAULT_DESKTOP_PREFS, getDesktopPrefs, setDesktopPrefs } from "./prefs
 import { onNativeMenu } from "./menu";
 import { listShortcuts, onShortcut, registerShortcut } from "./shortcuts";
 import { resetTrayUnread, setTrayUnread } from "./tray";
-import { checkForUpdate, initUpdater, restartToUpdate, useDesktopUpdate } from "./updater";
+import { checkForUpdate, initUpdater, isNewerVersion, noticeLatestVersion, restartToUpdate, useDesktopUpdate } from "./updater";
 
 beforeEach(() => {
   core.invoke.mockReset();
@@ -171,6 +172,33 @@ describe("inside Tauri", () => {
     await checkForUpdate();
     expect(core.invoke).toHaveBeenCalledWith("desktop_update_check", { download: true });
     expect(useDesktopUpdate.getState().status).toEqual({ state: "ready", version: "0.2.0" });
+  });
+
+  it("checks right away when the server announces a newer release", async () => {
+    core.invoke.mockResolvedValue({ state: "downloading", version: "0.1.9", downloaded: 0, total: null });
+    useDesktopUpdate.setState({ status: { state: "upToDate" } });
+    await noticeLatestVersion("0.1.8");
+    expect(core.invoke).not.toHaveBeenCalled();
+    await noticeLatestVersion("0.1.9");
+    expect(core.invoke).toHaveBeenCalledWith("desktop_update_check", { download: true });
+    await noticeLatestVersion("0.2.0"); // a download is already running
+    expect(core.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores announcements in a build without updater", async () => {
+    await noticeLatestVersion("9.0.0");
+    expect(core.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("isNewerVersion", () => {
+  it("compares release numbers", () => {
+    expect(isNewerVersion("0.1.10", "0.1.9")).toBe(true);
+    expect(isNewerVersion("v0.2.0", "0.1.9")).toBe(true);
+    expect(isNewerVersion("1.0", "0.9.9")).toBe(true);
+    expect(isNewerVersion("0.1.9", "0.1.9")).toBe(false);
+    expect(isNewerVersion("0.1.9-beta.1", "0.1.9")).toBe(false);
+    expect(isNewerVersion("0.1.8", "0.1.9")).toBe(false);
   });
 });
 

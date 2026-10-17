@@ -62,6 +62,9 @@ bootstrap();
 startNotify();
 startThreadMuteMigration(); // old per-device thread mutes move onto the server thread member, once
 void initDesktop(); // deep links + updater + tray unread dot; no-op outside the Tauri webview
+// A release the server announces is checked for right away (the updater ignores it in the browser or without updater config).
+gateway.on("READY", ready => void (ready.desktop_version && desktop.noticeLatestVersion(ready.desktop_version)));
+gateway.on("DESKTOP_VERSION", ({ version }) => void desktop.noticeLatestVersion(version));
 startGameDetection(); // desktop only: detected game goes out as presence
 
 const root = document.getElementById("root");

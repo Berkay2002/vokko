@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { call, callStrict, isDesktop, onDesktopEvent } from "./tauri";
+import { getAppVersion } from "./window";
 
 /** Mirrors `updates::UpdateStatus` in src-tauri. `disabled` means this build has no updater config (or this is the browser). */
 export type UpdateStatus =
@@ -39,6 +40,27 @@ export async function downloadUpdate(): Promise<UpdateStatus> {
 /** Installs the downloaded update and restarts Vokko (the installer takes over on Windows). Rejects if nothing is ready. */
 export async function restartToUpdate(): Promise<void> {
   await callStrict<void>("desktop_update_install", undefined, undefined);
+}
+
+/** True when release `a` is newer than `b` (`0.1.10` > `0.1.9`; a leading `v` and any `-pre`/`+build` suffix are ignored). */
+export function isNewerVersion(a: string, b: string): boolean {
+  const parts = (v: string) => v.trim().replace(/^v/, "").split(/[-+]/)[0].split(".").map(n => Number.parseInt(n, 10) || 0);
+  const [x, y] = [parts(a), parts(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+  }
+  return false;
+}
+
+/**
+ * The server announced its latest desktop release (READY `desktop_version`, DESKTOP_VERSION): checks now, instead of on the 4 h
+ * timer, when it is newer than this build. Skipped while a check or download runs or an update waits for its restart.
+ */
+export async function noticeLatestVersion(latest: string): Promise<void> {
+  const { state } = useDesktopUpdate.getState().status;
+  if (state !== "idle" && state !== "upToDate" && state !== "error") return;
+  const current = await getAppVersion();
+  if (current && isNewerVersion(latest, current)) await checkForUpdate();
 }
 
 let started = false;

@@ -27,7 +27,7 @@ import { openStremioPanel, StremioIcon, StremioPanel, StremioTile, STREMIO_TILE_
 import { openSpotifyPanel, SpotifyIcon, SpotifyPanel, SpotifyTile, SPOTIFY_TILE_ID, useSpotifyPanel } from "../spotify";
 import { GAME_TILE_ID, GameTile, useGameMenuItems } from "../games";
 import { openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
-import { VIEWER_QUALITIES, VIEWER_QUALITY_LABEL, type ViewerQuality } from "./video/options";
+import { isViewerQuality, nearestChoice, viewerChoices, viewerQualityLabel, type ViewerQuality } from "./video/options";
 import "./video/video.css";
 
 /** Stable tile colour for people without a profile colour. */
@@ -127,7 +127,11 @@ export function Tile({ state, guildId, variant, stream = false, onActivate }: { 
   const camera = useVideo(state.user_id, "camera");
   const screen = useVideo(state.user_id, "screen");
   const watching = useMedia(s => !!s.watching[state.user_id]);
-  const quality = useMedia(s => s.quality[`${state.user_id}:screen`]);
+  const chosenQuality = useMedia(s => s.quality[`${state.user_id}:screen`]);
+  const defaultQuality = usePrefs(s => s.viewerQuality);
+  const qualityChoices = viewerChoices(screen?.layers);
+  // What applies: the choice made on this stream, else the settings default (engine.ts viewerQualityOf), as a menu entry.
+  const quality = nearestChoice(chosenQuality ?? (isViewerQuality(defaultQuality) ? defaultQuality : "auto"), qualityChoices);
   if (!user) return null;
   const name = displayName(user, member);
   const muted = state.mute || state.self_mute || state.suppress;
@@ -195,13 +199,13 @@ export function Tile({ state, guildId, variant, stream = false, onActivate }: { 
               e.stopPropagation();
               const rect = e.currentTarget.getBoundingClientRect();
               menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [
-                ...VIEWER_QUALITIES.map((q: ViewerQuality) => ({ id: `quality-${q}`, label: VIEWER_QUALITY_LABEL[q], checked: (quality ?? "auto") === q, onSelect: () => setViewerQuality(state.user_id, "screen", q) })),
+                ...qualityChoices.map((q: ViewerQuality) => ({ id: `quality-${q}`, label: viewerQualityLabel(q), checked: quality === q, onSelect: () => setViewerQuality(state.user_id, "screen", q) })),
                 { type: "separator" as const },
                 { id: "stop-watching", label: "Stop Watching", onSelect: () => watchStream(state.user_id, false) },
               ]);
             }}
           >
-            {VIEWER_QUALITY_LABEL[quality ?? "auto"]} <ChevronDown size={14} aria-hidden="true" />
+            {viewerQualityLabel(quality)} <ChevronDown size={14} aria-hidden="true" />
           </button>
         </div>
       )}

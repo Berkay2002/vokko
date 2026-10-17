@@ -416,6 +416,15 @@ impl Hub {
         self.send_with(users, event.name(), |_| data.clone());
     }
 
+    /// Same payload for every session on the server.
+    pub fn send_all(&self, event: &GatewayEvent) {
+        let data = event.data();
+        let sessions: Vec<Arc<Session>> = lock(&self.sessions).values().cloned().collect();
+        for session in sessions {
+            session.dispatch(event.name(), data.clone());
+        }
+    }
+
     /// Payload may depend on the receiving user (reaction `me`, DM recipients).
     pub fn send_with(&self, users: &[i64], name: &str, data: impl Fn(i64) -> Value) {
         let wanted: HashSet<i64> = users.iter().copied().collect();

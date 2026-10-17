@@ -63,6 +63,7 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_GIF_API_KEY` | empty | Provider API key; required when `VOKKO_GIF_PROVIDER` is not `none`. |
 | `VOKKO_GIF_BASE_URL` | provider default | Override of the provider's API origin (mirrors, tests). |
 | `VOKKO_REMINDER_POLL_SECS` | `15` | How often due message reminders are delivered. |
+| `VOKKO_DESKTOP_LATEST_JSON` | unset (compose: `/downloads/latest.json`) | Path of the desktop updater's `latest.json`. The server reads it every 60 s and sends a new `version` to every connected client (READY `desktop_version`, DESKTOP_VERSION), so installed apps look for the update within a minute. A missing or unreadable file changes nothing. |
 | `VOKKO_TRUST_PROXY` | off | `on`/`1`/`true`/`yes`: take the client address from the last `X-Forwarded-For` entry. Only behind a proxy that sets it (the bundled Caddy does), otherwise clients can spoof their address and dodge rate limits. Uses the last `X-Forwarded-For` line, so exactly one proxy hop. |
 | `VOKKO_CORS_ORIGINS` | unset (localhost on any port) | Comma-separated exact origins allowed to call the API from a browser, e.g. `https://chat.example.com,https://web.example.com`. Scheme and host (and port if not default), no path, no `*`. When set it replaces the localhost defaults; the Tauri origins stay allowed. Bad entries stop the server at start. |
 | `VOKKO_REGISTRATION` | `open` | `closed`: `POST /api/v1/auth/register` answers 403 (code 40002). Existing accounts, login and `seed` are unaffected, so create the accounts you need first, then close it. Anything else than `open`/`closed` stops the server at start. |
@@ -339,7 +340,7 @@ cloudflared tunnel ingress rule https://chat.example.com
 
 and restart `cloudflared`. The `/gateway` websocket works through the tunnel without extra settings. `VOKKO_TRUSTED_PROXIES=private_ranges` lets Caddy take the client from the rightmost untrusted `X-Forwarded-For` entry (the one Cloudflare appends) and forward it to the server, so rate limits see each visitor's address rather than the tunnel's. Keep the web port on loopback: the setting trusts any private peer, and with Docker Desktop or OrbStack every peer looks private. LiveKit Cloud reaches `/internal/livekit/webhook` through the same hostname (see docs/self-hosting-free.md).
 
-Desktop installers placed in `deploy/downloads/` are served at `/downloads/<file>` with `Content-Disposition: attachment` and no directory listing; the web client's Download Apps dialog links `Vokko-windows-setup.exe` and `Vokko-mac.dmg`.
+Desktop installers placed in `deploy/downloads/` are served at `/downloads/<file>` with `Content-Disposition: attachment` and no directory listing; the web client's Download Apps dialog links `Vokko-windows-setup.exe` and `Vokko-mac.dmg`. The server container mounts the same directory read-only to watch `latest.json` (`VOKKO_DESKTOP_LATEST_JSON`).
 
 ## Health check
 
