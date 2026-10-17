@@ -27,4 +27,7 @@ export const GAME_CREDITS: Record<string, GameCredit[]> = {
   ],
   "builtin:four-in-a-row": [BOARDGAME_IO("four-in-a-row")],
   "builtin:codewords": [BOARDGAME_IO("codewords")],
+  "builtin:telephone": [
+    { work: "drawphone (game rules and turn order)", author: "Tanner Krewson", url: "https://github.com/tannerkrewson/drawphone", license: "MIT", file: "/games/telephone/LICENSE-drawphone.txt" },
+  ],
 };

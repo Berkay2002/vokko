@@ -10,10 +10,11 @@ const SKETCH: GameManifest = { id: "builtin:sketch", name: "Sketch", url: "/game
 const CHESS: GameManifest = { id: "builtin:chess", name: "Chess", url: "/games/chess/index.html", icon: "♟️", min_players: 2, max_players: 16, aspect: "16:9" };
 const FOUR_IN_A_ROW: GameManifest = { id: "builtin:four-in-a-row", name: "Four in a Row", url: "/games/four-in-a-row/index.html", icon: "🟡", min_players: 2, max_players: 16, aspect: "16:9" };
 const CODEWORDS: GameManifest = { id: "builtin:codewords", name: "Codewords", url: "/games/codewords/index.html", icon: "🗝️", min_players: 4, max_players: 16, aspect: "16:9" };
+const TELEPHONE: GameManifest = { id: "builtin:telephone", name: "Telephone", url: "/games/telephone/index.html", icon: "☎️", min_players: 3, max_players: 12, aspect: "16:9" };
 /** The e2e game (public/games/mock/): only in the mock build, so it never shows up against a real server. */
 const MOCK_GAME: GameManifest = { id: "builtin:mock", name: "Mock Game", url: "/games/mock/index.html", icon: "🧪", min_players: 1, max_players: 16, aspect: "16:9" };
 
-const PUBLIC_GAMES = [SKETCH, CHESS, FOUR_IN_A_ROW, CODEWORDS];
+const PUBLIC_GAMES = [SKETCH, CHESS, FOUR_IN_A_ROW, CODEWORDS, TELEPHONE];
 
 export const BUILTIN_GAMES: readonly GameManifest[] = MOCK ? [...PUBLIC_GAMES, MOCK_GAME] : PUBLIC_GAMES;
 
