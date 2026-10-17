@@ -121,6 +121,10 @@ test('link, search, pick a stream, play in call, control it from others, stop', 
   await expect(tile).toHaveAttribute('data-playing', 'false');
   await tile.getByRole('button', { name: 'Forward 10 seconds' }).click();
   await expect(tile.getByLabel('Position')).toContainText('1:50');
+  await tile.getByRole('button', { name: 'Back 10 seconds' }).click();
+  await expect(tile.getByLabel('Position')).toContainText('1:40');
+  await tile.getByRole('button', { name: 'Forward 10 seconds' }).click();
+  await expect(tile.getByLabel('Position')).toContainText('1:50');
   await tile.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(tile).toHaveAttribute('data-playing', 'true');
   // Local volume stays local.
