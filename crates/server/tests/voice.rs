@@ -1339,3 +1339,102 @@ async fn reconciliation_skips_the_rooms_of_a_backend_that_is_out_of_quota() {
     let calls = first.calls();
     assert_eq!(&calls[before..], ["ListRooms"], "the listing failed, so no ListParticipants per room: {calls:?}");
 }
+
+/// The next WATCH_TOGETHER_UPDATE whose state passes `done`.
+async fn watch_until(client: &mut Client, done: impl Fn(&Value) -> bool) -> Value {
+    loop {
+        let update = client.wait_for("WATCH_TOGETHER_UPDATE").await;
+        if done(&update["state"]) {
+            return update["state"].clone();
+        }
+    }
+}
+
+/// docs/design/bot-control.md: by default everyone in the call steers; with CONTROL_MEDIA denied to @everyone in the channel only
+/// the host, administrators and holders do, and everyone else votes, skips what they added and queues up to 3.
+#[tokio::test]
+async fn watch_together_without_control_media_votes_skips_and_queues_within_a_quota() {
+    use vokko_protocol::api::permissions::CONTROL_MEDIA;
+    let w = world().await;
+    let path = format!("/channels/{}/watch-together", w.voice);
+    let (mut owner, _) = Client::identify(&w.address, &w.owner).await;
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    let (mut carl, _) = Client::identify(&w.address, &w.carl).await;
+    for client in [&mut owner, &mut alice, &mut carl] {
+        client.voice(Some(&w.voice), false).await;
+        client.voice_answer().await;
+    }
+    let (status, state) = w.app.put_json(&path, &w.owner, json!({"video_id": "dQw4w9WgXcQ"})).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    let owner_id = state["started_by"].as_str().expect("owner id").to_owned();
+    assert_eq!(
+        (state["host_id"].as_str(), state["added_by"].as_str(), state["skip_votes"].clone(), state["skip_needed"].as_u64()),
+        (Some(owner_id.as_str()), Some(owner_id.as_str()), json!([]), Some(2))
+    );
+    assert_eq!(w.app.patch(&path, &w.carl, json!({"playing": false})).await.0, StatusCode::OK, "the default: everyone controls");
+
+    // DJ mode in this channel.
+    w.overwrite(&w.guild, 0, CONTROL_MEDIA).await;
+    for (body, what) in [(json!({"playing": true}), "play"), (json!({"position_ms": 5}), "seek")] {
+        assert_eq!(w.app.patch(&path, &w.carl, body).await.0, StatusCode::FORBIDDEN, "{what}");
+    }
+    assert_eq!(w.app.put_json(&path, &w.carl, json!({"video_id": "eeeeeeeeeee"})).await.0, StatusCode::FORBIDDEN, "replace");
+    assert_eq!(w.app.delete(&path, &w.carl).await.0, StatusCode::FORBIDDEN, "stop");
+    assert_eq!(w.app.patch(&path, &w.owner, json!({"playing": true})).await.0, StatusCode::OK, "an administrator");
+    // A member overwrite granting the bit makes carl a controller.
+    let grant = json!({"type": 1, "allow": CONTROL_MEDIA.to_string(), "deny": "0"});
+    assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{}", w.voice, w.carl_id), &w.owner, grant).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.app.patch(&path, &w.carl, json!({"playing": true})).await.0, StatusCode::OK, "granted");
+    w.clear_overwrite(&w.carl_id).await;
+    assert_eq!(w.app.patch(&path, &w.carl, json!({"playing": true})).await.0, StatusCode::FORBIDDEN, "revoked");
+
+    // Anyone fills in a missing title; replacing it is a controller's (a second auto-fill changes nothing).
+    assert_eq!(w.app.patch(&path, &w.carl, json!({"title": "Auto"})).await.1["title"], "Auto");
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"title": "Other"})).await.1["title"], "Auto");
+
+    // Three entries each for non-controllers; controllers only meet the queue max.
+    for video in ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"] {
+        assert_eq!(w.app.patch(&path, &w.carl, json!({"queue_add": video})).await.0, StatusCode::OK, "{video}");
+    }
+    let (status, body) = w.app.patch(&path, &w.carl, json!({"queue_add": "fffffffffff"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert!(body.to_string().contains("queue_add"), "{body}");
+    let (_, queued) = w.app.patch(&path, &w.alice, json!({"queue_add": "ddddddddddd"})).await;
+    assert_eq!(queued["queue_added_by"], json!([w.carl_id, w.carl_id, w.carl_id, w.alice_id]));
+
+    // Votes: 3 listeners need 2; a withdrawn vote goes; the second vote skips and clears the votes.
+    let (_, voted) = w.app.patch(&path, &w.carl, json!({"skip": true})).await;
+    assert_eq!((voted["video_id"].as_str(), voted["skip_votes"].clone(), voted["skip_needed"].as_u64()), (Some("dQw4w9WgXcQ"), json!([w.carl_id]), Some(2)));
+    assert_eq!(w.app.patch(&path, &w.carl, json!({"skip": false})).await.1["skip_votes"], json!([]));
+    w.app.patch(&path, &w.carl, json!({"skip": true})).await;
+    let (_, skipped) = w.app.patch(&path, &w.alice, json!({"skip": true, "video_id": "dQw4w9WgXcQ"})).await;
+    assert_eq!(
+        (skipped["video_id"].as_str(), skipped["added_by"].as_str(), skipped["skip_votes"].clone()),
+        (Some("aaaaaaaaaaa"), Some(w.carl_id.as_str()), json!([]))
+    );
+
+    // Whoever added the current video skips it at once; a vote naming an old video does nothing.
+    assert_eq!(w.app.patch(&path, &w.carl, json!({"skip": true})).await.1["video_id"], "bbbbbbbbbbb");
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"skip": true, "video_id": "aaaaaaaaaaa"})).await.1["skip_votes"], json!([]));
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"skip": true, "video_id": "bbbbbbbbbbb"})).await.1["skip_votes"], json!([w.alice_id]));
+
+    // Carl deafens: 2 listeners need 1, so alice's vote is enough.
+    carl.send(json!({"op": 4, "d": {"guild_id": null, "channel_id": w.voice, "self_mute": true, "self_deaf": true, "self_video": false}})).await;
+    let after = watch_until(&mut owner, |state| state["video_id"] == "ccccccccccc").await;
+    assert_eq!((after["skip_votes"].clone(), after["skip_needed"].as_u64()), (json!([]), Some(1)));
+    carl.voice(Some(&w.voice), false).await;
+    watch_until(&mut owner, |state| state["skip_needed"] == 2).await;
+
+    // The host leaves: alice (in the call longest) hosts, and 2 listeners make her standing vote enough.
+    w.app.patch(&path, &w.alice, json!({"skip": true})).await;
+    owner.voice(None, false).await;
+    let moved = watch_until(&mut alice, |state| state["video_id"] == "ddddddddddd").await;
+    assert_eq!((moved["host_id"].as_str(), moved["started_by"].as_str()), (Some(w.alice_id.as_str()), Some(owner_id.as_str())));
+    assert_eq!(w.app.patch(&path, &w.alice, json!({"playing": false})).await.0, StatusCode::OK, "the host controls");
+    assert_eq!(w.app.patch(&path, &w.carl, json!({"playing": true})).await.0, StatusCode::FORBIDDEN);
+
+    // A vote that skips the last video ends the session.
+    let (status, ended) = w.app.patch(&path, &w.carl, json!({"skip": true})).await;
+    assert_eq!((status, ended), (StatusCode::OK, Value::Null));
+    watch_until(&mut alice, Value::is_null).await;
+}

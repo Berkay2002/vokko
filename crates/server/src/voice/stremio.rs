@@ -485,7 +485,9 @@ async fn control(
         let before = session.view(channel_id);
         let controller = control::controls(&ctx, session.control.host_id);
         // Steering and the tracks are for everyone, so controllers only; anyone removes their own queue entry.
-        if (steer || picks) && !controller {
+        // Checked on the fields, not on `steer`/`picks`: a `skip` alongside must not carry an unchecked track pick through.
+        let steers = body.playing.is_some() || body.position_ms.is_some() || body.audio.is_some() || body.burned_subtitle.is_some();
+        if steers && !controller {
             return Err(ApiErr::missing_permissions());
         }
         if body.queue_remove.and_then(|index| session.queue.get(index)).is_some_and(|queued| queued.added_by != user_id && !controller) {

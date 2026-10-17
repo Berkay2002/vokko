@@ -1676,3 +1676,50 @@ async fn addon_subtitles_follow_the_host_rules_and_their_urls_stay_on_the_server
     assert_eq!(w.app.put_json(&w.path(), &w.alice, json!({"sid": sid})).await.0, StatusCode::OK);
     assert_eq!(w.app.get(&format!("{list_path}/{first}"), &w.alice).await.0, StatusCode::BAD_REQUEST);
 }
+
+/// docs/design/bot-control.md: with CONTROL_MEDIA denied to @everyone in the channel, carl (in the call, not the host) cannot
+/// steer, pick tracks, replace or stop; he queues 2, removes only his own entries, votes, and skips what he added.
+#[tokio::test]
+async fn without_control_media_others_vote_skip_their_own_and_queue_two() {
+    use vokko_protocol::api::permissions::CONTROL_MEDIA;
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.playing(&mut alice, "A 1080p").await;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.link(&w.carl).await;
+    w.join(&mut carl).await;
+    let (_, guilds) = w.app.get("/users/@me/guilds", &w.owner).await;
+    // @everyone's role id is the guild id.
+    w.overwrite(guilds[0]["id"].as_str().expect("guild"), 0, CONTROL_MEDIA).await;
+    let mine = World::sid(&w.streams(&w.carl).await, "A 720p");
+    let hers = World::sid(&w.streams(&w.alice).await, "A 720p");
+
+    for body in [json!({"playing": false}), json!({"position_ms": 5}), json!({"audio": 1}), json!({"skip": true, "audio": 1}), json!({"burned_subtitle": null})]
+    {
+        assert_eq!(w.app.patch(&w.path(), &w.carl, body.clone()).await.0, StatusCode::FORBIDDEN, "{body}");
+    }
+    assert_eq!(w.app.put_json(&w.path(), &w.carl, json!({"sid": mine})).await.0, StatusCode::FORBIDDEN, "replace");
+    assert_eq!(w.app.delete(&w.path(), &w.carl).await.0, StatusCode::FORBIDDEN, "stop");
+    assert_eq!(w.app.patch(&w.path(), &w.alice, json!({"playing": false})).await.0, StatusCode::OK, "the host steers");
+
+    // Two entries for carl; the host is bound only by the queue max.
+    for _ in 0..2 {
+        assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"queue_add": mine})).await.0, StatusCode::OK);
+    }
+    let (status, body) = w.app.patch(&w.path(), &w.carl, json!({"queue_add": mine})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (_, queued) = w.app.patch(&w.path(), &w.alice, json!({"queue_add": hers})).await;
+    let adders: Vec<&str> = queued["queue"].as_array().expect("queue").iter().filter_map(|item| item["added_by"].as_str()).collect();
+    assert_eq!(adders, [w.carl_id.as_str(), w.carl_id.as_str(), w.alice_id.as_str()]);
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"queue_remove": 2})).await.0, StatusCode::FORBIDDEN, "alice's entry");
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"queue_remove": 1})).await.1["queue"].as_array().map(Vec::len), Some(2));
+
+    // Two listeners need one vote: carl's skips alice's item, and his own item he skips without a vote.
+    let (_, skipped) = w.app.patch(&w.path(), &w.carl, json!({"skip": true})).await;
+    assert_eq!(
+        (skipped["added_by"].as_str(), skipped["host_id"].as_str(), skipped["skip_votes"].clone(), skipped["skip_needed"].as_u64()),
+        (Some(w.carl_id.as_str()), Some(w.alice_id.as_str()), json!([]), Some(1))
+    );
+    let (_, own) = w.app.patch(&w.path(), &w.carl, json!({"skip": true})).await;
+    assert_eq!((own["added_by"].as_str(), own["queue"].as_array().map(Vec::len)), (Some(w.alice_id.as_str()), Some(0)));
+}

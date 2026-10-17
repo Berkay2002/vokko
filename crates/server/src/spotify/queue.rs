@@ -47,7 +47,8 @@ pub struct Queue {
     /// Who put the current track in play (it keeps its adder when a looping queue appends it again).
     current_by: i64,
     pub entries: Vec<Entry>,
-    history: Vec<SpotifyTrack>,
+    /// Played tracks with who had put them in play.
+    history: Vec<(SpotifyTrack, i64)>,
     pub loop_mode: SpotifyLoop,
 }
 
@@ -70,7 +71,7 @@ impl Queue {
     }
 
     fn remember(&mut self, track: SpotifyTrack) {
-        self.history.push(track);
+        self.history.push((track, self.current_by));
         if self.history.len() > HISTORY_MAX {
             self.history.remove(0);
         }
@@ -143,11 +144,12 @@ impl Queue {
         if (position_ms > RESTART_AFTER_MS && self.current.is_some()) || self.history.is_empty() {
             return Back::Restart;
         }
-        let Some(earlier) = self.history.pop() else { return Back::Restart };
+        let Some((earlier, earlier_by)) = self.history.pop() else { return Back::Restart };
         if let Some(current) = self.current.replace(earlier) {
             self.entries.insert(0, Entry::new(current, self.current_by));
             self.entries.truncate(SPOTIFY_QUEUE_MAX);
         }
+        self.current_by = earlier_by;
         Back::Played
     }
 
@@ -284,6 +286,6 @@ mod tests {
             queue.advance(Leave::Skipped);
         }
         assert_eq!(queue.history.len(), HISTORY_MAX);
-        assert_eq!(queue.history.first().map(|t| t.uri.clone()), Some(uri(10)));
+        assert_eq!(queue.history.first().map(|(t, _)| t.uri.clone()), Some(uri(10)));
     }
 }
