@@ -175,6 +175,7 @@ export interface Channel {
   permission_overwrites?: PermissionOverwrite[]; // guild channels only
   bitrate?: number; // guild voice only: bps, 8000..guild max (default 64000)
   user_limit?: number; // guild voice only: 0 = unlimited, max 99
+  rate_limit_per_user?: number; // slowmode seconds between a member's messages (0 = off, max 21600); guild text and voice only, always sent there
   status?: string | null; // guild voice only: shared channel status (max 500 chars), null when none
   // Threads (types 10-12; parent_id = the text/announcement/forum channel; owner_id = creator; id == starter message id when started from a message or forum post)
   thread_metadata?: ThreadMetadata;
@@ -1464,6 +1465,7 @@ export interface RateLimitError {
   message: string;
   retry_after: number; // seconds (float); also sent as the Retry-After header
   global: boolean;
+  code?: number; // 20016 = the channel's slowmode
 }
 export interface PendingAttachmentMeta {
   id: Snowflake; // pending attachment id from POST /channels/{id}/attachments
@@ -1966,6 +1968,7 @@ export interface EditChannelRequest {
   default_sort_order?: ForumSortOrder;
   default_forum_layout?: ForumLayout;
   default_auto_archive_duration?: ThreadAutoArchiveDuration;
+  rate_limit_per_user?: number; // slowmode seconds 0..21600; guild text and voice only (MANAGE_CHANNELS)
   // ---- voice channels (MANAGE_CHANNELS) ----
   bitrate?: number; // 8000..guild max (else 400 50035)
   user_limit?: number; // 0..99

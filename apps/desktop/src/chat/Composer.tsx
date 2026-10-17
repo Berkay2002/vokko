@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
-import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Lock, Pencil, Plus, Smile, Sticker, Trash2, X } from 'lucide-react';
+import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Lock, Pencil, Plus, Smile, Sticker, Timer, Trash2, X } from 'lucide-react';
 import { Perm, channelPermissions, hasBit, memberLike } from '../api/permissions';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
@@ -24,6 +24,7 @@ import { CreatePollModal } from '../polls/CreatePollModal';
 import { ComposerInput, type ComposerField } from './composer/ComposerInput';
 import { useShortcut } from '../keyboard';
 import { useKeyToken, useKeyedState } from './keyedState';
+import { formatCooldown, slowmodeLong, startCooldown, useCooldown } from './slowmode';
 
 const MAX_LEN = 2000;
 // Discord client timings: POST at most every 8 s; the first one waits 1.5 s unless the previous was 16+ s ago;
@@ -112,6 +113,17 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     if (!pollGuild || !chat.channel || !member) return true;
     return hasBit(channelPermissions(pollGuild, memberLike(member), chat.channel), Perm.SEND_POLLS);
   }, [pollGuild, pollMembers, chat.channel, chat.me.id]);
+  // Slowmode: the server limits members to one message per rate_limit_per_user seconds; moderators are immune (like the server's check).
+  const slowmode = chat.channel?.rate_limit_per_user ?? 0;
+  const slowmodeImmune = useMemo(() => {
+    const member = pollMembers[chat.me.id];
+    if (!pollGuild || !chat.channel || !member) return false;
+    const bits = channelPermissions(pollGuild, memberLike(member), chat.channel);
+    return hasBit(bits, Perm.BYPASS_SLOWMODE) || hasBit(bits, Perm.MANAGE_MESSAGES) || hasBit(bits, Perm.MANAGE_CHANNELS);
+  }, [pollGuild, pollMembers, chat.channel, chat.me.id]);
+  const cooldown = useCooldown(channelId);
+  const coolingDown = slowmode > 0 && !slowmodeImmune && cooldown > 0;
+  const armSlowmode = () => { if (slowmode > 0 && !slowmodeImmune) startCooldown(channelId, slowmode * 1000); };
   const [expr, setExpr] = useState<ExpressionTab | null>(null);
   const [appsOpen, setAppsOpen] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -245,7 +257,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const canSend = !tooLong && !anyUploading && (rawContent.length > 0 || readyUploads.length > 0);
 
   function send() {
-    if (tooLong) return;
+    if (tooLong || coolingDown) return; // the draft stays until the slowmode countdown runs out
     const command = commands.submit(rawContent, uploads.length > 0); // app commands are not run with files attached
     const sendText = typeof command === 'object' ? command.content : rawContent; // a built-in command sends its text like a typed message, files included
     const tts = typeof command === 'object' && command.tts === true; // /tts
@@ -260,6 +272,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
         mention: mentionReply,
         tts,
       });
+      armSlowmode();
       finishSend();
       return;
     }
@@ -282,6 +295,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       mention: mentionReply,
       tts,
     });
+    armSlowmode();
     finishSend();
   }
 
@@ -330,6 +344,8 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   /** A GIF (its URL is the message) or a sticker is sent at once, like Discord; the draft text stays. */
   function sendMedia(input: { content: string; stickers?: StickerData[] }) {
     setExpr(null);
+    if (coolingDown) return;
+    armSlowmode();
     messageStore.send(channelId, chat.me, {
       content: input.content,
       stickers: input.stickers?.map(s => ({ id: s.id, name: s.name, format_type: s.format_type, url: s.url })),
@@ -354,7 +370,15 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
 
   return <div className="chat-composer" ref={root}>
     <TypingIndicator channelId={channelId} />
-    {replyTo && <div className="chat-reply-bar">
+    {slowmode > 0 && <div className="chat-slowmode-wrap"><Tooltip side="top"
+      content={slowmodeImmune ? 'Slowmode is enabled, but you are immune.' : `Slowmode is enabled. Members can send one message every ${slowmodeLong(slowmode)}.`}>
+      <span className="chat-slowmode" role="status" tabIndex={0}>
+        <Timer size={14} aria-hidden="true" />
+        {coolingDown && <span className="chat-slowmode-time">{formatCooldown(cooldown)}</span>}
+        <span>Slowmode is enabled</span>
+      </span>
+    </Tooltip></div>}
+    {replyTo &&<div className="chat-reply-bar">
       <span className="chat-reply-bar-text">Replying to <b>{replyName}</b></span>
       {!chat.isDm && <button type="button" className={`chat-reply-mention${mentionReply ? ' on' : ''}`} aria-pressed={mentionReply} onClick={onToggleMention}><AtSign size={14} /> {mentionReply ? 'ON' : 'OFF'}</button>}
       <button type="button" className="chat-reply-close" aria-label="Cancel reply" onClick={onCancelReply}><X size={16} /></button>

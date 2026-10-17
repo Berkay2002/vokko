@@ -205,6 +205,13 @@ impl ApiErr {
         error
     }
 
+    /// 429 / 20016: the channel's slowmode; `retry_after` is what is left of the author's wait.
+    pub fn slowmode(retry_after: f64) -> Self {
+        let mut error = Self::new(StatusCode::TOO_MANY_REQUESTS, 20016, "This action cannot be performed due to slowmode rate limit");
+        error.retry_after = Some(retry_after);
+        error
+    }
+
     /// 403 / 50009: the guild's verification level is above what the member meets.
     pub fn verification_level() -> Self {
         Self::new(StatusCode::FORBIDDEN, 50009, "Channel verification level is too high for you to gain access")
@@ -247,7 +254,7 @@ impl ApiErr {
 impl IntoResponse for ApiErr {
     fn into_response(self) -> Response {
         if let Some(retry_after) = self.retry_after {
-            let body = RateLimitError { message: self.body.message, retry_after, global: false };
+            let body = RateLimitError { message: self.body.message, retry_after, global: false, code: (self.body.code != 0).then_some(self.body.code) };
             let mut response = (self.status, Json(body)).into_response();
             if let Ok(value) = HeaderValue::from_str(&(retry_after.ceil().max(1.0) as u64).to_string()) {
                 response.headers_mut().insert(RETRY_AFTER, value);

@@ -20,13 +20,16 @@ export class RateLimitedError extends ApiRequestError {
   /** Seconds to wait (float). */
   readonly retryAfter: number;
   readonly global: boolean;
-  constructor(retryAfter: number, global: boolean, message = "You are being rate limited.") {
-    super(429, { code: 0, message });
+  constructor(retryAfter: number, global: boolean, message = "You are being rate limited.", code = 0) {
+    super(429, { code, message });
     this.name = "RateLimitedError";
     this.retryAfter = retryAfter;
     this.global = global;
   }
 }
+
+/** 429 code: the wait is the channel's slowmode (`retryAfter` is what is left of it). */
+export const SLOWMODE_CODE = 20016;
 
 /** 403 code: the recipient does not accept DMs from you (opening a DM or sending in a 1:1 DM). */
 export const CANNOT_DM_USER = 50007;

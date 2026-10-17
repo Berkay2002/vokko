@@ -91,6 +91,7 @@ export function channelFor(ch: MockChannel, viewerId: string): Channel {
   void thread_member_settings;
   const last = sortedMessages(ch.id).at(-1);
   const out: Channel = { ...rest, last_message_id: last?.id ?? null };
+  if (ch.type === ChannelType.GuildText || ch.type === ChannelType.GuildVoice) out.rate_limit_per_user = ch.rate_limit_per_user ?? 0;
   if (rest.permission_overwrites) out.permission_overwrites = rest.permission_overwrites.map(o => ({ ...o }));
   if (rest.thread_metadata) out.thread_metadata = { ...rest.thread_metadata };
   if (rest.available_tags) out.available_tags = rest.available_tags.map(t => ({ ...t }));

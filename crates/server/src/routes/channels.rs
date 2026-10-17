@@ -24,6 +24,9 @@ pub fn routes() -> Router<AppState> {
     Router::new().route("/channels/{id}", patch(update_channel).delete(delete_channel))
 }
 
+/// Discord's slowmode ceiling: 6 hours.
+const MAX_SLOWMODE_SECONDS: u32 = 21600;
+
 fn channel_id(raw: &str) -> ApiResult<i64> {
     parse_id(raw).ok_or_else(ApiErr::unknown_channel)
 }
@@ -51,6 +54,7 @@ async fn update_channel(
             || body.parent_id.is_some()
             || body.bitrate.is_some()
             || body.user_limit.is_some()
+            || body.rate_limit_per_user.is_some()
         {
             return Err(ApiErr::missing_permissions());
         }
@@ -76,6 +80,14 @@ async fn update_channel(
         None => None,
     };
     crate::voice::validate_channel_settings(&state.config, kind == ChannelType::GuildVoice, body.bitrate, body.user_limit)?;
+    if let Some(seconds) = body.rate_limit_per_user {
+        if !matches!(kind, ChannelType::GuildText | ChannelType::GuildVoice) {
+            return Err(ApiErr::invalid("rate_limit_per_user", "Slowmode is only available in text and voice channels."));
+        }
+        if seconds > MAX_SLOWMODE_SECONDS {
+            return Err(ApiErr::invalid("rate_limit_per_user", "Must be between 0 and 21600."));
+        }
+    }
     let parent_fields = forums::ParentFields::from_update(kind, &body)?;
     let topic = if body.topic.is_some() { Some(clean_text(body.topic, 1024, "topic")?) } else { None };
     let parent = match body.parent_id {
@@ -129,6 +141,9 @@ async fn update_channel(
     }
     if let Some(user_limit) = body.user_limit {
         sqlx::query("UPDATE channels SET user_limit = $2 WHERE id = $1").bind(id).bind(user_limit as i32).execute(&mut *tx).await?;
+    }
+    if let Some(seconds) = body.rate_limit_per_user {
+        sqlx::query("UPDATE channels SET rate_limit_per_user = $2 WHERE id = $1").bind(id).bind(seconds as i32).execute(&mut *tx).await?;
     }
     if let Some(position) = body.position {
         sqlx::query("UPDATE channels SET position = $2 WHERE id = $1").bind(id).bind(position).execute(&mut *tx).await?;

@@ -660,6 +660,9 @@ pub struct Channel {
     /// Guild voice only: 0 = unlimited, max 99.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_limit: Option<u32>,
+    /// Slowmode: seconds a member waits between messages (0 = off, max 21600). Guild text and voice channels only (always sent there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_per_user: Option<u32>,
     /// Guild voice only: the shared channel status (max 500 chars), `null` when none.
     #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
     pub status: Option<Option<String>>,
@@ -2629,6 +2632,9 @@ pub struct RateLimitError {
     /// Seconds (float); also sent as the `Retry-After` header.
     pub retry_after: f64,
     pub global: bool,
+    /// 20016 when the wait is a channel's slowmode; absent for ordinary rate limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2847,6 +2853,9 @@ pub struct UpdateChannelRequest {
     pub bitrate: Option<u32>,
     #[serde(default)]
     pub user_limit: Option<u32>,
+    /// Slowmode seconds (0..=21600); guild text and voice channels only (MANAGE_CHANNELS).
+    #[serde(default)]
+    pub rate_limit_per_user: Option<u32>,
     // ---- threads ----
     #[serde(default)]
     pub archived: Option<bool>,

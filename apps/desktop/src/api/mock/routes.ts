@@ -4,6 +4,7 @@ import { AuditLogEvent, ChannelType, ExplicitContentFilter, JoinSourceType, Mess
 import { compareIds } from "../snowflake";
 import { Perm, hasBit } from "../permissions";
 import { channelPermsOf } from "./access";
+import { RateLimitedError, SLOWMODE_CODE } from "../errors";
 import { db, nextId, sortedMessages, userOf, type MockAccount, type MockChannel } from "./db";
 import { pendingAttachment, addChannel, addMessage, canAccess, channelAudience, createAccount, createGuildRecord, fail, openDM, openGroupDM, requireChannel, requireChannelPerm, requireGuildMember, requireGuildPerm, requireMessage, emitVisibilityChanges, visibilityOf } from "./ops";
 import { buildForward, purgeChannelRefs, purgeGuildStickers, purgeMessageRefs, resolveStickers } from "./media";
@@ -419,6 +420,11 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
     if (typeof body.bitrate === "number") channel.bitrate = body.bitrate;
     if (typeof body.user_limit === "number") channel.user_limit = body.user_limit;
   }
+  if (typeof body.rate_limit_per_user === "number") {
+    if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildVoice) fail(400, 50035, "Invalid Form Body", { rate_limit_per_user: { code: "INVALID", message: "Slowmode is only available in text and voice channels." } });
+    if (body.rate_limit_per_user < 0 || body.rate_limit_per_user > 21600) fail(400, 50035, "Invalid Form Body", { rate_limit_per_user: { code: "INVALID", message: "Must be between 0 and 21600." } });
+    channel.rate_limit_per_user = body.rate_limit_per_user;
+  }
   const before = channel.guild_id ? visibilityOf(channel.guild_id) : null;
   if ("parent_id" in body) {
     const parent = str(body.parent_id) ?? null;
@@ -498,6 +504,22 @@ route("GET", `/channels/${ID}/messages`, ({ viewer, params, query }) => {
   return mergeEphemerals(channel.id, viewer.user.id, slice.map(m => messageFor(m, viewer.user.id)).reverse(), limit, slice.length >= limit);
 });
 
+/** `${channel}:${user}` → when they last sent in a slowmode channel (ms). */
+const slowmodeSends = new Map<string, number>();
+
+/** Like the server: one message per rate_limit_per_user seconds unless BYPASS_SLOWMODE, MANAGE_MESSAGES or MANAGE_CHANNELS (429 / 20016). */
+function checkSlowmode(channel: MockChannel, userId: string): void {
+  const seconds = channel.rate_limit_per_user ?? 0;
+  if (seconds <= 0) return;
+  const perms = channelPermsOf(channel, userId);
+  if (hasBit(perms, Perm.BYPASS_SLOWMODE) || hasBit(perms, Perm.MANAGE_MESSAGES) || hasBit(perms, Perm.MANAGE_CHANNELS)) return;
+  const key = `${channel.id}:${userId}`;
+  const now = Date.now();
+  const left = (slowmodeSends.get(key) ?? 0) + seconds * 1000 - now;
+  if (left > 0) throw new RateLimitedError(left / 1000, false, "This action cannot be performed due to slowmode rate limit", SLOWMODE_CODE);
+  slowmodeSends.set(key, now);
+}
+
 route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   assertCanPost(channel, viewer.user.id);
@@ -521,6 +543,7 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
     return { ...found, ...(filename !== undefined ? { filename } : {}), ...(description !== undefined ? { description: description === "" ? null : description } : {}) };
   }).filter((a): a is Attachment => a !== null);
   if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });
+  checkSlowmode(channel, viewer.user.id);
   if (body.poll !== undefined) {
     requirePollPerm(channel, viewer.user.id);
     if (ids.length > 0) fail(400, 50035, "Invalid Form Body", { attachments: { code: "BASE_TYPE_BAD_LENGTH", message: "A poll message cannot have attachments." } });

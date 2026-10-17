@@ -1,7 +1,8 @@
 // Per-channel message store: fetches pages over REST, applies gateway events, owns optimistic sends. Lives outside React;
 // components subscribe with useChannelState().
 import { useSyncExternalStore } from 'react';
-import { ApiRequestError } from '../api/errors';
+import { ApiRequestError, RateLimitedError, SLOWMODE_CODE } from '../api/errors';
+import { startCooldown } from './slowmode';
 import { MessageType } from '../api/types';
 import { ReactionType } from '../api/types';
 import { announceBurst } from '../perks/SuperReactions';
@@ -290,6 +291,7 @@ export const messageStore = {
     } catch (e) {
       const error = e instanceof Error ? e.message : 'Failed to send';
       const errorCode = e instanceof ApiRequestError ? e.code : undefined;
+      if (e instanceof RateLimitedError && e.code === SLOWMODE_CODE) startCooldown(channelId, e.retryAfter * 1000);
       update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'failed', error, errorCode } : x)) }));
     }
   },
