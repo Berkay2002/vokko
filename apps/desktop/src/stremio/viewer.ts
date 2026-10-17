@@ -5,6 +5,7 @@
 import { ConnectionState, RemoteAudioTrack, Room, RoomEvent, Track, type RemoteTrack, type RemoteTrackPublication, type RemoteParticipant } from "livekit-client";
 import type { VideoHandle } from "../voice/mediaStore";
 import { isMockEndpoint } from "../voice/transport";
+import { receiveCue } from "./subtitles";
 import { parseVideoStats, type VideoStats } from "./viewerStats";
 
 export type ViewerStatus = "connecting" | "connected" | "closed";
@@ -63,6 +64,9 @@ class LiveKitViewer implements Viewer {
         } else if (track === this.audio) {
           this.dropAudio();
         }
+      })
+      .on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant, _kind?: unknown, topic?: string) => {
+        if (participant && mine(participant)) receiveCue(botIdentity, topic, payload);
       })
       .on(RoomEvent.AudioPlaybackStatusChanged, () => this.cb.audioBlocked(!this.room.canPlaybackAudio))
       .on(RoomEvent.Disconnected, () => this.cb.status("closed"));
