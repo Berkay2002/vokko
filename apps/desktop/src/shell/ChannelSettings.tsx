@@ -182,7 +182,7 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
               }}
             />
           </Field>
-          <Field label="Video Quality" note="Camera in calls arrives in a later update.">
+          <Field label="Video Quality" note="Not available yet: each camera sends the resolution its owner picked in Voice &amp; Video settings.">
             <RadioGroup<string>
               name="Video quality"
               value="auto"
