@@ -67,7 +67,7 @@ test('a website game: frame on load, share a room link, others and a late joiner
     await expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-pointer-lock allow-forms allow-popups allow-popups-to-escape-sandbox');
     await expect(frame).toHaveAttribute('allow', 'fullscreen; clipboard-write; autoplay; gamepad');
     await expect(frame).toHaveAttribute('allowfullscreen', '');
-    await expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer');
+    await expect(frame).toHaveAttribute('referrerpolicy', 'strict-origin');
     await expect(where(s.page)).toHaveText(SITE);
     await expect(tile(s.page).locator('.game-loading')).toHaveCount(0);
     await expect(tile(s.page).locator('.game-origin')).toHaveText('krunker.io');

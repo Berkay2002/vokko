@@ -19,6 +19,7 @@ import { gamePlayers, relayGame, shareGameRoom, stopGame } from "./api";
 import { isWebGame } from "./builtin";
 import {
   checkRoomUrl,
+  roomFrameUrl,
   checkSend,
   frameAllow,
   FrameHost,
@@ -97,9 +98,9 @@ const sharedHere = new Map<string, string>();
 /** A website game: no SDK and no port. The frame shows on load and follows the call's shared room link. */
 function WebGameFrame({ session, sandbox }: { session: GameSession; sandbox: string }) {
   const game = session.game;
-  const [src, setSrc] = useState(() => session.room_url ?? frameUrl(game));
+  const room = session.room_url ? roomFrameUrl(game, session.room_url) : null;
+  const [src, setSrc] = useState(() => room ?? frameUrl(game));
   const [ready, setReady] = useState(false);
-  const room = session.room_url ?? null;
   useEffect(() => {
     if (room && room !== sharedHere.get(session.session_id)) {
       setSrc(room);
@@ -119,7 +120,8 @@ function WebGameFrame({ session, sandbox }: { session: GameSession; sandbox: str
           sandbox={sandbox}
           allow={frameAllow(game)}
           allowFullScreen
-          referrerPolicy="no-referrer"
+          // Only the app's origin, never a path: Shell Shockers throws on `new URL(document.referrer)` with no referrer.
+          referrerPolicy="strict-origin"
           data-room={room && src === room ? "joined" : undefined}
           onLoad={() => setReady(true)}
           {...{ credentialless: "" }}

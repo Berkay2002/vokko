@@ -4,6 +4,7 @@ import { voiceReducer, initialVoiceModel } from "../voice/reducer";
 import {
   ALLOW_WEB,
   checkRoomUrl,
+  roomFrameUrl,
   checkSend,
   frameAllow,
   FrameHost,
@@ -96,6 +97,16 @@ describe("website games", () => {
     }
     expect(checkRoomUrl("https://krunker.io/", `https://krunker.io/?${"x".repeat(512 - 20)}`)).not.toBeNull();
     expect(checkRoomUrl("https://krunker.io/", `https://krunker.io/?${"x".repeat(513 - 20)}`)).toBeNull();
+  });
+
+  it("loads a room link only on the client's game host and never on the app's hosts", () => {
+    const krunker: GameManifest = { id: "builtin:krunker", name: "Krunker", url: "https://krunker.io/", min_players: 2, max_players: 16, aspect: "16:9", kind: "web" };
+    expect(roomFrameUrl(krunker, "https://krunker.io/?game=FRA:abc12", [APP, API])).toBe("https://krunker.io/?game=FRA:abc12");
+    expect(roomFrameUrl({ ...krunker, url: "https://evil.example/" }, "https://evil.example/", [APP, API])).toBeNull();
+    const parent: GameManifest = { ...third("https://example.com/"), kind: "web" };
+    expect(roomFrameUrl(parent, "https://play.example.com/r", ["https://app.example.com"])).toBe("https://play.example.com/r");
+    expect(roomFrameUrl(parent, "https://app.example.com/", ["https://app.example.com"])).toBeNull();
+    expect(roomFrameUrl(parent, "https://example.com/", ["https://app.example.com"])).toBeNull();
   });
 });
 

@@ -13,6 +13,24 @@ The frame gets `sandbox="allow-scripts allow-same-origin allow-pointer-lock"`, `
 means no popups, no top navigation, no form submission (send data with the SDK; `<form>` submit events never fire),
 no modals, and no camera, microphone, clipboard, fullscreen or autoplay. Audio needs a click inside the frame.
 
+### Website games (`kind: "web"`)
+
+A game that doesn't use the SDK and has its own lobby (an `.io` game, for example) is added with "Website game with its
+own lobby" checked (`kind: "web"` in the manifest). Its frame gets `sandbox="allow-scripts allow-same-origin
+allow-pointer-lock allow-forms allow-popups allow-popups-to-escape-sandbox"`, `allow="fullscreen; clipboard-write;
+autoplay; gamepad"`, `allowfullscreen`, `referrerpolicy="strict-origin"` (the app's origin only, since some sites read `document.referrer`) and `credentialless`. It never gets top navigation, modals or
+downloads. Popups open in a new browser tab; in the desktop app they open in the system browser (http and https only,
+at most one a second). The tile shows the frame as soon as it loads and offers no SDK port.
+
+Anyone in the call can paste the game's room or invite link with "Share room to call"
+(`PUT /channels/{id}/game/room`). The link must be `https`, at most 512 bytes, without a user name or password, and on
+the game's host or a subdomain of it; a `#fragment` is fine. Every other tile then loads that link, and people who
+join later get it too. "Clear" removes it without reloading anyone.
+
+A site that sends `X-Frame-Options` or a `frame-ancestors` CSP that leaves Vokko out can't load in the tile. A site
+that needs cross-origin isolation (`Cross-Origin-Embedder-Policy: require-corp`, for SharedArrayBuffer) can't get it
+in the frame, because the app itself isn't cross-origin isolated.
+
 ## Protocol (v1)
 
 1. The game posts `{vokko: "hello", v: 1}` to `window.parent` (target `"*"`).

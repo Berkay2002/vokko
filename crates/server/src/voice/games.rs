@@ -76,12 +76,12 @@ pub fn builtins() -> Vec<GameManifest> {
     })
     .chain(
         [
-        ("betrayal", "Betrayal", "https://betrayal.io/", "🔪", 4, 12, GameAspect::Wide),
-        ("shellshockers", "Shell Shockers", "https://shellshock.io/", "🥚", 2, 16, GameAspect::Wide),
-        ("smashkarts", "Smash Karts", "https://smashkarts.io/", "🏎️", 2, 8, GameAspect::Wide),
-        ("skribbl", "skribbl.io", "https://skribbl.io/", "🖍️", 2, 16, GameAspect::Fill),
-        ("codenames", "Codenames", "https://codenames.game/", "🕵️", 4, 16, GameAspect::Fill),
-        ("krunker", "Krunker", "https://krunker.io/", "🎯", 2, 16, GameAspect::Wide),
+            ("betrayal", "Betrayal", "https://betrayal.io/", "🔪", 4, 12, GameAspect::Wide),
+            ("shellshockers", "Shell Shockers", "https://shellshock.io/", "🥚", 2, 16, GameAspect::Wide),
+            ("smashkarts", "Smash Karts", "https://smashkarts.io/", "🏎️", 2, 8, GameAspect::Wide),
+            ("skribbl", "skribbl.io", "https://skribbl.io/", "🖍️", 2, 16, GameAspect::Fill),
+            ("codenames", "Codenames", "https://codenames.game/", "🕵️", 4, 16, GameAspect::Fill),
+            ("krunker", "Krunker", "https://krunker.io/", "🎯", 2, 16, GameAspect::Wide),
         ]
         .into_iter()
         .map(|(slug, name, url, icon, min_players, max_players, aspect)| GameManifest {

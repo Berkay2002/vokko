@@ -87,16 +87,18 @@ export function sandboxFor(game: GameManifest, app: string[] = appOrigins(), all
   const host = bareHost(url.hostname);
   if (url.protocol !== "https:" && !(allowLoopback && url.protocol === "http:" && LOCAL_HOSTS.has(host))) return null;
   if (url.username || url.password) return null;
-  const appHosts = app.flatMap(o => {
+  if (hostsOf(app).includes(host)) return null;
+  return isWebGame(trusted) ? SANDBOX_WEB : SANDBOX_THIRD_PARTY;
+}
+
+const hostsOf = (origins: string[]): string[] =>
+  origins.flatMap(o => {
     try {
       return [bareHost(new URL(o).hostname)];
     } catch {
       return [];
     }
   });
-  if (appHosts.includes(host)) return null;
-  return isWebGame(trusted) ? SANDBOX_WEB : SANDBOX_THIRD_PARTY;
-}
 
 /** The `allow` attribute for the game's frame: nothing for SDK games, ALLOW_WEB for website games. */
 export const frameAllow = (game: GameManifest): string => (isWebGame(trustedManifest(game)) ? ALLOW_WEB : "");
@@ -121,6 +123,17 @@ export function checkRoomUrl(gameUrl: string, raw: string): string | null {
   if (!roomHost || !gameHost || (roomHost !== gameHost && !roomHost.endsWith(`.${gameHost}`))) return null;
   const href = room.href;
   return new TextEncoder().encode(raw.trim()).length > ROOM_URL_MAX_BYTES || new TextEncoder().encode(href).length > ROOM_URL_MAX_BYTES ? null : href;
+}
+
+/**
+ * The room link a website game's tile may load: the server's link checked again against the client's own manifest URL, and never
+ * on one of the app's hosts or a parent or subdomain of one (a framed page on the app's origin could lift its own sandbox).
+ */
+export function roomFrameUrl(game: GameManifest, raw: string, app: string[] = appOrigins()): string | null {
+  const url = checkRoomUrl(frameUrl(game), raw);
+  if (url === null) return null;
+  const host = bareHost(new URL(url).hostname);
+  return hostsOf(app).some(a => a === host || a.endsWith(`.${host}`) || host.endsWith(`.${a}`)) ? null : url;
 }
 
 /** The game's hello: from `frame`'s window, from `origin`, the exact shape. Anything else is not one. */

@@ -95,6 +95,9 @@
   z-index: var(--z-context);
   min-width: 221px;
   max-width: 320px;
+  /* Long menus (the Activities list) scroll instead of running off the window. Submenus are siblings, so nothing is clipped. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 4px 0;
   background: var(--background-surface-high);
   border: 0.67px solid var(--border-normal);
