@@ -12,6 +12,7 @@ import { useVoice } from "../voice/store";
 import { formatClock } from "../watch/youtube";
 import { controlStremio, stopStremio } from "./api";
 import { reason, safeImage, shownPositionMs, statusText } from "./format";
+import { LanguagesMenu } from "./Languages";
 import { StremioIcon } from "./StremioIcon";
 import { openStremioPanel } from "./panelStore";
 import { useViewer } from "./useViewer";
@@ -231,6 +232,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
                 {volume === 0 || deaf ? <VolumeX size={16} aria-hidden="true" /> : <Volume2 size={16} aria-hidden="true" />}
                 <input type="range" aria-label="Stremio volume" min={0} max={100} value={volume} onChange={e => changeVolume(Number(e.target.value))} />
               </label>
+              <LanguagesMenu channelId={channelId} state={state} positionMs={position} />
               <ControlButton label={`Up next (${state.queue.length})`} active={queueOpen} onClick={() => setQueueOpen(o => !o)}>
                 <ListVideo size={18} />
               </ControlButton>
