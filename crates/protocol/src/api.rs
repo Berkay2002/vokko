@@ -550,7 +550,8 @@ impl Activity {
     /// optional `details` and `state` under the same text rules, `assets.large_image` as `spotify:<40 hex>`, `sync_id` as 22
     /// letters or digits, `timestamps.end` not negative and not before `start`).
     pub fn list_is_valid(list: &[Activity]) -> bool {
-        list.len() <= Self::MAX_PER_PRESENCE && list.iter().enumerate().all(|(i, activity)| list[..i].iter().all(|other| other.kind != activity.kind) && activity.is_valid())
+        list.len() <= Self::MAX_PER_PRESENCE
+            && list.iter().enumerate().all(|(i, activity)| list[..i].iter().all(|other| other.kind != activity.kind) && activity.is_valid())
     }
 
     fn is_valid(&self) -> bool {
@@ -565,7 +566,10 @@ impl Activity {
                     && self.details.is_none()
                     && self.state.is_none()
                     && self.sync_id.is_none()
-                    && self.assets.as_ref().is_none_or(|assets| assets.large_image.as_deref().is_none_or(|image| Self::hash_id(image, Self::APP_IMAGE_PREFIX, 64)))
+                    && self
+                        .assets
+                        .as_ref()
+                        .is_none_or(|assets| assets.large_image.as_deref().is_none_or(|image| Self::hash_id(image, Self::APP_IMAGE_PREFIX, 64)))
             }
             Self::LISTENING => {
                 self.name == Self::SPOTIFY
@@ -5088,7 +5092,8 @@ mod tests {
 
     #[test]
     fn activity_names_must_show_something_and_hold_no_invisible_characters() {
-        let playing = |name: &str| Activity { name: name.to_owned(), kind: Activity::PLAYING, timestamps: None, details: None, state: None, assets: None, sync_id: None };
+        let playing =
+            |name: &str| Activity { name: name.to_owned(), kind: Activity::PLAYING, timestamps: None, details: None, state: None, assets: None, sync_id: None };
         assert!(Activity::list_is_valid(&[playing("Elden Ring")]));
         assert!(Activity::list_is_valid(&[playing("Pokémon 🎮")]));
         assert!(Activity::list_is_valid(&[playing(&"é".repeat(128))]));
@@ -5151,7 +5156,14 @@ mod tests {
         assert!(Activity::list_is_valid(&[with_image(&format!("app:{hash}"))]), "a game may carry an app icon");
         assert_eq!(with_image(&format!("app:{hash}")).app_hash(), Some(hash.as_str()));
         assert!(Activity::list_is_valid(&[Activity { assets: Some(ActivityAssets { large_image: None }), ..game.clone() }]));
-        for image in [format!("spotify:{}", "ab01".repeat(10)), format!("app:{}", "AB01".repeat(16)), format!("app:{}", "ab01".repeat(10)), format!("app:{hash}0"), hash.clone(), "https://x/y.png".into()] {
+        for image in [
+            format!("spotify:{}", "ab01".repeat(10)),
+            format!("app:{}", "AB01".repeat(16)),
+            format!("app:{}", "ab01".repeat(10)),
+            format!("app:{hash}0"),
+            hash.clone(),
+            "https://x/y.png".into(),
+        ] {
             assert!(!Activity::list_is_valid(&[with_image(&image)]), "{image} must be rejected on a game");
         }
     }
