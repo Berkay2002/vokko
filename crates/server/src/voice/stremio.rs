@@ -30,6 +30,7 @@ use crate::state::AppState;
 use crate::store;
 use crate::stremio::addons::{self, language_code};
 use crate::stremio::bot::{BotError, Desired, secrets_match};
+use crate::stremio::library::{self, Finished};
 use crate::stremio::rank::{Candidate, Source};
 use crate::stremio::{Active, Listed, TitleInfo, active, limit, lock, user_addons};
 
@@ -96,6 +97,31 @@ pub struct Session {
     dirty: bool,
     last_put: Instant,
     bot_down_since: Option<Instant>,
+    /// Who started the current item and where it began, for the write-back to their Stremio library (`stremio::library`).
+    tracked: Option<Tracked>,
+}
+
+/// The item being played as the library write-back needs it.
+struct Tracked {
+    /// The user who started this item (the PUT caller, or whoever queued it), not the session's `started_by`.
+    owner: i64,
+    info: TitleInfo,
+    began_ms: u64,
+    /// Someone else moved the playhead: where it ends up is not what the owner watched, so nothing is saved for this item.
+    foreign_seek: bool,
+    /// When the item started (unix ms): a library entry changed, or an account linked, after this is not what the item began with.
+    started_ms: i64,
+    /// Where the video was when its owner left the call; what was watched after that is not theirs to save.
+    owner_left_at: Option<u64>,
+}
+
+/// The bot reports every 5 s; a silent bot is not assumed to have kept playing for longer than two reports when the item is saved.
+const MAX_DRIFT_MS: u64 = 10_000;
+
+/// `position_ms` moved on by the time since `updated_at_ms` (at most `max_drift`), while `playing`.
+fn extrapolate(position_ms: u64, updated_at_ms: i64, playing: bool, now_ms: i64, max_drift: u64) -> u64 {
+    let moved = if playing { ((now_ms - updated_at_ms).max(0) as u64).min(max_drift) } else { 0 };
+    position_ms + moved
 }
 
 impl Session {
@@ -128,10 +154,43 @@ impl Session {
         }
     }
 
+    /// Notes who started the current item (call right after `begin`) and, for a resume, where it starts.
+    fn track(&mut self, info: &TitleInfo, owner: i64, began_ms: u64) {
+        self.tracked = Some(Tracked { owner, info: info.clone(), began_ms, foreign_seek: false, started_ms: unix_millis(), owner_left_at: None });
+        self.position_ms = began_ms;
+    }
+
+    /// The current item as it stands now (or, with `ended`, where the bot said it ended), for the starter's library; each item is
+    /// taken once. `None` when the bot never reported a duration (it never played).
+    fn take_finished(&mut self, ended: Option<u64>, now_ms: i64) -> Option<Finished> {
+        let duration_ms = self.duration_ms?;
+        let tracked = self.tracked.take().filter(|tracked| !tracked.foreign_seek)?;
+        let position_ms = match ended {
+            Some(reported) => library::ended_position(reported, duration_ms),
+            None => self.drifted(now_ms, MAX_DRIFT_MS),
+        };
+        let (kind, video_id) = tracked.info.video?;
+        Some(Finished {
+            owner: tracked.owner,
+            kind,
+            video_id,
+            name: tracked.info.title,
+            poster: tracked.info.poster,
+            position_ms: tracked.owner_left_at.map_or(position_ms, |left| position_ms.min(left)),
+            duration_ms,
+            began_ms: tracked.began_ms,
+            started_ms: tracked.started_ms,
+        })
+    }
+
     /// Where the video is right now.
     fn here(&self, now_ms: i64) -> u64 {
-        let moved = if self.playing { (now_ms - self.updated_at_ms).max(0) as u64 } else { 0 };
-        let position = self.position_ms + moved;
+        self.drifted(now_ms, u64::MAX)
+    }
+
+    /// `here`, but with at most `max_drift` of playing counted since the last time the position was set (a report or a steer).
+    fn drifted(&self, now_ms: i64, max_drift: u64) -> u64 {
+        let position = extrapolate(self.position_ms, self.updated_at_ms, self.playing, now_ms, max_drift);
         self.duration_ms.map_or(position, |duration| position.min(duration))
     }
 
@@ -305,11 +364,14 @@ async fn start(
     if crate::voice::spotify::playing_in(&state, channel_id) {
         return Err(crate::voice::spotify::blocks_stremio());
     }
+    if body.position_ms.is_some_and(|position| position > STREMIO_POSITION_MAX_MS) {
+        return Err(ApiErr::invalid("position_ms", "Must be between 0 and 86400000."));
+    }
     limit(&state, "stremio-play", user_id, 3.0, 3.0 / 60.0)?;
     let listed = playable(&state, "sid", &body.sid, user_id)?;
     let (media, headers) = prepare(&active, &listed.candidate).await?;
     let generation = state.stremio.next_generation();
-    let (view, desired, had_one) = {
+    let (view, desired, had_one, replaced) = {
         let mut sessions = lock(&state.stremio.sessions);
         // Lock order is Stremio's sessions, then Spotify's slot (the same in Spotify's start): the check and the insert below are one step.
         if crate::voice::spotify::playing_in(&state, channel_id) {
@@ -345,12 +407,18 @@ async fn start(
             dirty: false,
             last_put: Instant::now(),
             bot_down_since: None,
+            tracked: None,
         });
         let token = bot_token(&state, channel_id, &session.room).ok_or_else(ApiErr::internal)?;
+        let replaced = session.take_finished(None, unix_millis());
         session.begin(&listed.info, listed.candidate.clone(), media, headers, generation, token);
+        session.track(&listed.info, user_id, body.position_ms.unwrap_or(0));
         let desired = session.desired(&state, unix_millis()).ok_or_else(ApiErr::internal)?;
-        (session.view(channel_id), desired, had_one)
+        (session.view(channel_id), desired, had_one, replaced)
     };
+    if let Some(replaced) = replaced {
+        library::save(&state, replaced);
+    }
     if let Err(error) = active.clients.bot.put(channel_id, &desired).await {
         let removed = {
             let mut sessions = lock(&state.stremio.sessions);
@@ -435,6 +503,11 @@ async fn control(
         }
         let steer = steer || retrack;
         if steer {
+            if body.position_ms.is_some()
+                && let Some(tracked) = session.tracked.as_mut().filter(|tracked| tracked.owner != user_id)
+            {
+                tracked.foreign_seek = true;
+            }
             session.steer(body.playing, body.position_ms, now);
         }
         (before, session.view(channel_id), steer.then(|| session.desired(&state, now)).flatten())
@@ -565,7 +638,10 @@ fn touch(state: &AppState, channel_id: i64, change: impl FnOnce(&mut Session)) {
 
 /// Ends the channel's session, if any: the bot drops it and everyone who can see the channel hears.
 pub(crate) async fn end(state: &AppState, channel_id: i64) {
-    let Some(session) = lock(&state.stremio.sessions).remove(&channel_id) else { return };
+    let Some(mut session) = lock(&state.stremio.sessions).remove(&channel_id) else { return };
+    if let Some(finished) = session.take_finished(None, unix_millis()) {
+        library::save(state, finished);
+    }
     if let Some(clients) = &state.stremio.clients {
         let bot = clients.bot.clone();
         let rooms = state.stremio.media_rooms();
@@ -595,15 +671,37 @@ pub(crate) async fn remove_strangers(state: &AppState, channel_id: i64) {
 
 /// A person left the call (or was removed from it): their viewer connections go.
 pub(crate) fn user_left(state: &AppState, channel_id: i64) {
-    if lock(&state.stremio.sessions).contains_key(&channel_id) {
-        let state = state.clone();
-        tokio::spawn(async move { remove_strangers(&state, channel_id).await });
+    let Some(owner) = lock(&state.stremio.sessions).get(&channel_id).map(|session| session.tracked.as_ref().map(|tracked| tracked.owner)) else { return };
+    // The owner went: the rest of the item is not theirs, so their library gets the position they left at, not the end.
+    if let Some(owner) = owner.filter(|owner| !crate::voice::state::in_channel(state, *owner, channel_id)) {
+        touch(state, channel_id, |session| {
+            let here = session.drifted(unix_millis(), MAX_DRIFT_MS);
+            if let Some(tracked) = session.tracked.as_mut().filter(|tracked| tracked.owner == owner && tracked.owner_left_at.is_none()) {
+                tracked.owner_left_at = Some(here);
+            }
+        });
     }
+    let state = state.clone();
+    tokio::spawn(async move { remove_strangers(&state, channel_id).await });
 }
 
 /// The current item is over (or skipped): plays the next queued one, else ends the session. Items that cannot be opened are passed
-/// over. With `expected` set, nothing happens if the session has moved on to another item meanwhile.
-async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, expected: Option<u64>) {
+/// over. With `ended` set (the generation of the item that ended by itself and the position the bot reported), nothing happens if
+/// the session has moved on to another item meanwhile.
+async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, ended: Option<(u64, u64)>) {
+    let expected = ended.map(|(generation, _)| generation);
+    // The item that is over goes to its starter's library once, before anything replaces it.
+    let finished = {
+        let mut sessions = lock(&state.stremio.sessions);
+        let Some(session) = sessions.get_mut(&channel_id) else { return };
+        if expected.is_some_and(|generation| generation != session.generation) {
+            return;
+        }
+        session.take_finished(ended.map(|(_, position_ms)| position_ms), unix_millis())
+    };
+    if let Some(finished) = finished {
+        library::save(state, finished);
+    }
     loop {
         let next = {
             let mut sessions = lock(&state.stremio.sessions);
@@ -629,6 +727,7 @@ async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, expecte
                 return;
             }
             session.begin(&next.info, next.candidate, media, headers, generation, token);
+            session.track(&next.info, next.added_by, 0);
             let Some(desired) = session.desired(state, unix_millis()) else { return };
             (session.view(channel_id), desired)
         };
@@ -737,7 +836,8 @@ pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(e
     enum Next {
         Nothing,
         Announce(StremioState),
-        Advance(u64),
+        /// The generation of the item that ended and where the bot says it ended.
+        Advance(u64, u64),
         Retry(u64, Candidate, u64),
     }
     let next = {
@@ -770,7 +870,7 @@ pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(e
                 session.subtitle_tracks = subtitle_tracks;
                 Next::Announce(session.view(channel_id))
             }
-            "ended" if !stale && session.status != StremioStatus::Error => Next::Advance(session.generation),
+            "ended" if !stale && session.status != StremioStatus::Error => Next::Advance(session.generation, event.position_ms),
             "error" if !stale && session.status != StremioStatus::Error => {
                 if session.retried {
                     session.status = StremioStatus::Error;
@@ -793,7 +893,7 @@ pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(e
     match next {
         Next::Nothing => {}
         Next::Announce(view) => announce(&state, channel_id, Some(view)).await,
-        Next::Advance(generation) => advance(&state, &active, channel_id, Some(generation)).await,
+        Next::Advance(generation, position_ms) => advance(&state, &active, channel_id, Some((generation, position_ms))).await,
         Next::Retry(generation, candidate, position_ms) => retry(&state, &active, channel_id, generation, candidate, position_ms).await,
     }
     StatusCode::NO_CONTENT
@@ -901,5 +1001,19 @@ async fn sweep(state: &AppState) {
                 session.bot_down_since.get_or_insert_with(Instant::now);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_silent_bot_is_not_assumed_to_keep_playing() {
+        assert_eq!(extrapolate(60_000, 1_000, true, 4_000, MAX_DRIFT_MS), 63_000, "a report is due: the position moves on with the clock");
+        assert_eq!(extrapolate(60_000, 1_000, true, 3_601_000, MAX_DRIFT_MS), 70_000, "an hour without a report counts as ten seconds");
+        assert_eq!(extrapolate(60_000, 1_000, true, 3_601_000, u64::MAX), 3_660_000, "what clients see is not capped");
+        assert_eq!(extrapolate(60_000, 1_000, false, 3_601_000, MAX_DRIFT_MS), 60_000, "paused");
+        assert_eq!(extrapolate(60_000, 5_000, true, 1_000, MAX_DRIFT_MS), 60_000, "a clock that went back");
     }
 }

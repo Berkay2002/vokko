@@ -1639,6 +1639,9 @@ pub struct StremioUpdate {
 #[derive(Clone, Debug, Deserialize)]
 pub struct StremioStartRequest {
     pub sid: String,
+    /// Where to start (0..=24 h), for resuming a saved position; the beginning when absent.
+    #[serde(default)]
+    pub position_ms: Option<u64>,
 }
 
 /// `PATCH /channels/{id}/stremio`.
@@ -1771,6 +1774,29 @@ pub struct StremioStream {
     /// `torrent`, `external` or `youtube` when `playable` is false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unsupported: Option<String>,
+}
+
+/// An entry of `GET /stremio/continue`: a title from the caller's own Stremio library that has progress.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioContinueItem {
+    /// `tt<imdb>`.
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster: Option<String>,
+    /// Series only: the episode to continue, `tt<imdb>:<season>:<episode>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub season: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub episode: Option<u32>,
+    /// 0 when the next episode is waiting (nothing of it has been watched yet).
+    pub position_ms: u64,
+    /// 0 when unknown.
+    pub duration_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

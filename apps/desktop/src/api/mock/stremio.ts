@@ -9,6 +9,7 @@ import {
   STREMIO_POSITION_MAX_MS,
   STREMIO_QUEUE_MAX,
   type StremioAddonSubtitles,
+  type StremioContinueItem,
   type StremioCues,
   type StremioItem,
   type StremioMeta,
@@ -59,7 +60,7 @@ const TITLES: StremioMeta[] = [
       [2, 2, "Grilled"],
     ].map(([season, episode, name]) => ({ id: `tt0903747:${season}:${episode}`, season: season as number, episode: episode as number, name: name as string, released: `2008-0${season}-1${episode}`, thumbnail: `https://episodes.metahub.space/tt0903747/${season}/${episode}/w780.jpg` })),
   },
-  { id: "tt0944947", type: "series", name: "Game of Thrones", year: "2011", runtime: "57 min", poster: poster("tt0944947"), description: "Nine noble families fight for control over the lands of Westeros.", videos: [{ id: "tt0944947:1:1", season: 1, episode: 1, name: "Winter Is Coming" }] },
+  { id: "tt0944947", type: "series", name: "Game of Thrones", year: "2011", runtime: "57 min", poster: poster("tt0944947"), description: "Nine noble families fight for control over the lands of Westeros.", videos: [{ id: "tt0944947:1:1", season: 1, episode: 1, name: "Winter Is Coming" }, { id: "tt0944947:1:2", season: 1, episode: 2, name: "The Kingsroad" }] },
 ];
 
 const searchItem = (m: StremioMeta): StremioSearchItem => ({ id: m.id, type: m.type, name: m.name, ...(m.poster ? { poster: m.poster } : {}), ...(m.year ? { year: m.year } : {}) });
@@ -150,6 +151,31 @@ route("GET", `/stremio/meta/(movie|series)/(tt\\d+)`, ({ params }) => {
   return { ...meta, videos: meta.videos.map(v => ({ ...v })) };
 });
 
+// ---- continue watching (the caller's own library; every linked user starts with the same three) ----
+
+const SERIES_MS = 3_000_000;
+const MOVIE_MS = 7_200_000;
+const libraries = new Map<string, StremioContinueItem[]>();
+
+function continueOf(userId: string): StremioContinueItem[] {
+  const own = libraries.get(userId);
+  if (own) return own;
+  const item = (id: string, videoId: string | null, position_ms: number, duration_ms: number): StremioContinueItem => {
+    const meta = TITLES.find(m => m.id === id)!;
+    const video = meta.videos.find(v => v.id === videoId);
+    return { id, type: meta.type, name: meta.name, ...(meta.poster ? { poster: meta.poster } : {}), ...(video ? { video_id: video.id, season: video.season, episode: video.episode } : {}), position_ms, duration_ms };
+  };
+  // Newest first: half way into an episode, half way into a film, and an episode past its credits (the next one is offered).
+  const seeded = [item("tt0903747", "tt0903747:1:2", SERIES_MS / 2, SERIES_MS), item("tt0113277", null, MOVIE_MS / 2, MOVIE_MS), item("tt0944947", "tt0944947:1:1", 2_850_000, SERIES_MS)];
+  libraries.set(userId, seeded);
+  return seeded;
+}
+
+route("GET", "/stremio/continue", ({ viewer }) => {
+  requireLinked(viewer.user.id);
+  return continueOf(viewer.user.id).map(i => ({ ...i }));
+});
+
 // ---- streams ----
 
 interface Candidate {
@@ -178,7 +204,7 @@ function listStreams(userId: string, kind: string, videoId: string): StremioStre
     sidCounter += 1;
     const sid = `sid-${sidCounter}-${Math.random().toString(36).slice(2, 10)}`;
     const item: StremioItem = { title: meta.name, ...(subtitle ? { subtitle } : {}), ...(meta.poster ? { poster: meta.poster } : {}), label: row.label };
-    streams.set(sid, { userId, item, duration_ms: meta.type === "movie" ? 7_200_000 : 3_000_000 });
+    streams.set(sid, { userId, item, duration_ms: meta.type === "movie" ? MOVIE_MS : SERIES_MS });
     return { sid, ...row };
   });
 }
@@ -285,9 +311,9 @@ function candidate(userId: string, field: string, value: unknown): Candidate {
   return found;
 }
 
-function begin(channel: MockChannel, item: StremioItem, duration: number, queue: StremioState["queue"], startedBy: string, now = Date.now()): StremioState {
+function begin(channel: MockChannel, item: StremioItem, duration: number, queue: StremioState["queue"], startedBy: string, now = Date.now(), position = 0): StremioState {
   durations.set(channel.id, duration);
-  const state: StremioState = { item, status: "starting", playing: true, position_ms: 0, updated_at_ms: now, started_by: startedBy, bot_identity: `bot:stremio:${channel.id}`, queue };
+  const state: StremioState = { item, status: "starting", playing: true, position_ms: position, updated_at_ms: now, started_by: startedBy, bot_identity: `bot:stremio:${channel.id}`, queue };
   sessions.set(channel.id, state);
   botStarts(channel);
   return state;
@@ -297,8 +323,10 @@ route("PUT", `/channels/${ID}/stremio`, ({ viewer, params, body }) => {
   const channel = connectedChannel(viewer.user.id, params[0] ?? "");
   requireLinked(viewer.user.id);
   const picked = candidate(viewer.user.id, "sid", body.sid);
+  const at = body.position_ms;
+  if (at !== undefined && (typeof at !== "number" || !Number.isInteger(at) || at < 0 || at > STREMIO_POSITION_MAX_MS)) invalid("position_ms", `Must be between 0 and ${STREMIO_POSITION_MAX_MS}.`);
   const current = sessions.get(channel.id);
-  const next = begin(channel, { ...picked.item }, picked.duration_ms, current?.queue ?? [], current?.started_by ?? viewer.user.id);
+  const next = begin(channel, { ...picked.item }, picked.duration_ms, current?.queue ?? [], current?.started_by ?? viewer.user.id, Date.now(), typeof at === "number" ? at : 0);
   announce(channel, next);
   return copy(next);
 });

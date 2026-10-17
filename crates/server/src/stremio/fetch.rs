@@ -20,6 +20,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(8);
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
+/// A whole library (`datastoreGet` with `all`) is one JSON array of every title the user ever opened.
+const LIBRARY_JSON_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_URL_LEN: usize = 4096;
 const MAX_REDIRECTS: usize = 5;
 
@@ -132,6 +134,12 @@ impl Fetcher {
         self.json(self.client.post(url).json(body)).await
     }
 
+    /// Like `post_json`, for the answers that can be big (a whole Stremio library): up to `LIBRARY_JSON_BYTES`.
+    pub async fn post_json_large(&self, url: &str, body: &Value) -> Result<Value, FetchError> {
+        let url = self.parse(url)?;
+        read_json_up_to(self.client.post(url).json(body).send().await.map_err(network)?, LIBRARY_JSON_BYTES).await
+    }
+
     async fn json(&self, request: reqwest::RequestBuilder) -> Result<Value, FetchError> {
         read_json(request.send().await.map_err(network)?).await
     }
@@ -189,7 +197,11 @@ async fn read_capped(mut response: reqwest::Response, max: usize) -> Result<Vec<
 }
 
 async fn read_json(response: reqwest::Response) -> Result<Value, FetchError> {
-    serde_json::from_slice(&read_capped(response, MAX_JSON_BYTES).await?).map_err(|_| FetchError::Invalid)
+    read_json_up_to(response, MAX_JSON_BYTES).await
+}
+
+async fn read_json_up_to(response: reqwest::Response, max: usize) -> Result<Value, FetchError> {
+    serde_json::from_slice(&read_capped(response, max).await?).map_err(|_| FetchError::Invalid)
 }
 
 fn network(error: reqwest::Error) -> FetchError {

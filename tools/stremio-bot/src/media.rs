@@ -16,7 +16,7 @@ use livekit::webrtc::stats::RtcStats;
 use livekit::webrtc::video_frame::{I420Buffer, VideoFrame, VideoRotation};
 use livekit::webrtc::video_source::native::NativeVideoSource;
 use livekit::webrtc::video_source::{RtcVideoSource, VideoResolution};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
@@ -237,7 +237,7 @@ impl Pipeline {
         if let Some(pipe) = child.stderr.take() {
             let (stderr, url) = (stderr.clone(), d.media_url.clone());
             tasks.push(tokio::spawn(async move {
-                let mut lines = BufReader::new(pipe).lines();
+                let mut lines = CappedLines::new(pipe);
                 while let Ok(Some(line)) = lines.next_line().await {
                     if let (false, Ok(mut last)) = (line.trim().is_empty(), stderr.lock()) {
                         *last = scrub(&line, &url);
@@ -362,13 +362,52 @@ async fn audio_loop(listener: TcpListener, source: NativeAudioSource, counters: 
     }
 }
 
+/// Longest line kept from ffmpeg's stderr or a subtitle stream. Subtitle text comes from the media, so it is untrusted: the
+/// rest of a longer line is dropped, never buffered.
+const MAX_LINE_BYTES: usize = 8 * 1024;
+
+/// `lines()` with a cap: a line longer than `MAX_LINE_BYTES` is cut there and its rest dropped. Cancel-safe like `next_line`
+/// (the partial line lives in `self`), so it can sit under a timeout.
+struct CappedLines<R> {
+    reader: BufReader<R>,
+    line: Vec<u8>,
+}
+
+impl<R: AsyncRead + Unpin> CappedLines<R> {
+    fn new(reader: R) -> Self {
+        Self { reader: BufReader::new(reader), line: Vec::new() }
+    }
+
+    async fn next_line(&mut self) -> std::io::Result<Option<String>> {
+        loop {
+            let chunk = self.reader.fill_buf().await?;
+            if chunk.is_empty() {
+                return Ok((!self.line.is_empty()).then(|| self.take()));
+            }
+            let (used, done) = chunk.iter().position(|&b| b == b'\n').map_or((chunk.len(), false), |i| (i + 1, true));
+            let room = MAX_LINE_BYTES.saturating_sub(self.line.len());
+            self.line.extend_from_slice(&chunk[..used.min(room)]);
+            self.reader.consume(used);
+            if done {
+                return Ok(Some(self.take()));
+            }
+        }
+    }
+
+    fn take(&mut self) -> String {
+        let line = String::from_utf8_lossy(&self.line).trim_end_matches(['\n', '\r']).to_owned();
+        self.line.clear();
+        line
+    }
+}
+
 /// ffmpeg writes a cue in one flush; this long without another line and the cue is complete.
 const CUE_SETTLE: Duration = Duration::from_millis(150);
 
 /// Reads the WebVTT ffmpeg writes for one text subtitle stream and queues its cues. The text is cleaned and capped in `VttReader`.
 async fn subtitle_loop(listener: TcpListener, index: u32, start_ms: u64, queue: mpsc::Sender<(u32, StremioCue)>) {
     let Some(stream) = accept(listener).await else { return };
-    let mut lines = BufReader::new(stream).lines();
+    let mut lines = CappedLines::new(stream);
     let (mut reader, mut budget) = (VttReader::new(start_ms), Budget::new(Instant::now()));
     loop {
         // ffmpeg closes a cue with the blank line it writes before the next one, so a block that has stopped growing is a cue.
@@ -409,6 +448,16 @@ fn frame_due(next: Option<Instant>, now: Instant, interval: Duration) -> Instant
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn an_overlong_line_is_cut_and_the_next_one_still_read() {
+        let input = format!("{}\r\nnext\nlast", "x".repeat(MAX_LINE_BYTES * 4));
+        let mut lines = CappedLines::new(input.as_bytes());
+        assert_eq!(lines.next_line().await.ok().flatten().map(|l| l.len()), Some(MAX_LINE_BYTES));
+        assert_eq!(lines.next_line().await.ok().flatten().as_deref(), Some("next"));
+        assert_eq!(lines.next_line().await.ok().flatten().as_deref(), Some("last"));
+        assert_eq!(lines.next_line().await.ok().flatten(), None);
+    }
 
     #[test]
     fn frames_keep_their_beat_and_rebase_after_a_stall() {
