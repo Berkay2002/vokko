@@ -12,6 +12,10 @@ workspace = true
 name = "stremio-bot"
 path = "src/main.rs"
 
+[features]
+# Only for the local measurement harness (see plan::local_media); never enabled in a production build.
+test-harness = []
+
 [dependencies]
 vokko-protocol.workspace = true
 livekit = { version = "0.9.5", features = ["rustls-tls-webpki-roots"] }

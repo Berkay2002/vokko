@@ -207,10 +207,26 @@ test('someone else starts it: the line shows outside the call, the tile when we 
   await expect(tile.locator('.stremio-by')).toContainText('Started by Alice');
   await expect(tile).toHaveAttribute('data-status', 'playing', { timeout: 10_000 });
   await expect(tile).toHaveAttribute('data-room', 'connected');
+  // The viewer Room belongs to the call: Focus and Back to grid must not reconnect it (a new connection passes through "connecting").
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __rooms: string[] }).__rooms = seen;
+    const note = (el: Element) => el.querySelectorAll('[data-room]').forEach(e => seen.push(e.getAttribute('data-room') ?? ''));
+    new MutationObserver(list =>
+      list.forEach(m => {
+        if (m.type === 'attributes') seen.push((m.target as Element).getAttribute('data-room') ?? '');
+        // A tile that mounts fresh (and would open its own Room) arrives with its data-room already set.
+        m.addedNodes.forEach(n => n instanceof Element && (n.hasAttribute('data-room') && seen.push(n.getAttribute('data-room') ?? ''), note(n)));
+      }),
+    ).observe(document.body, { attributes: true, attributeFilter: ['data-room'], childList: true, subtree: true });
+  });
   await tile.getByRole('button', { name: 'Focus Stremio' }).click();
   await expect(tile).toHaveClass(/focused/);
   await tile.getByRole('button', { name: 'Back to grid' }).click();
   await expect(tile).toHaveClass(/grid/);
+  await page.waitForTimeout(300);
+  expect((await page.evaluate(() => (window as unknown as { __rooms: string[] }).__rooms)).filter(r => r !== 'connected')).toEqual([]);
+  await expect(tile).toHaveAttribute('data-room', 'connected');
 
   // Alice stops it from her side: the tile and the line go for us, and she can start it again.
   await as(page, 'alice', 'DELETE', path);

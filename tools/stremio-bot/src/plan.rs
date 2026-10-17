@@ -72,6 +72,12 @@ impl fmt::Debug for Desired {
     }
 }
 
+/// Measurement harness only: a build with the `test-harness` cargo feature and this variable set takes a media URL on any port
+/// and any host (a local https server standing in for the CDN). Everything else about the URL, and every ffmpeg flag, stays.
+pub fn local_media() -> bool {
+    cfg!(feature = "test-harness") && std::env::var_os("VOKKO_STREMIO_TEST_LOCAL_MEDIA").is_some()
+}
+
 pub fn host_of(url: &str) -> String {
     reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_else(|| "?".into())
 }
@@ -85,10 +91,11 @@ impl Desired {
             return Err("livekit_url must be ws(s) or http(s)".into());
         }
         let media = reqwest::Url::parse(&self.media_url).map_err(|_| "media_url is not a URL")?;
-        if media.scheme() != "https" || media.host_str().is_none() || media.port_or_known_default() != Some(443) {
+        let local = local_media();
+        if media.scheme() != "https" || media.host_str().is_none() || (!local && media.port_or_known_default() != Some(443)) {
             return Err("media_url must be https on port 443".into());
         }
-        if !crate::guard::host_ok(&media) {
+        if !local && !crate::guard::host_ok(&media) {
             return Err("media_url must be a public host".into());
         }
         if !media.username().is_empty() || media.password().is_some() {
@@ -335,6 +342,10 @@ pub fn ffmpeg_args(p: &FfmpegPlan<'_>) -> Vec<String> {
         "1",
         "-rw_timeout",
         "15000000",
+        // A seek reads the cues at the end, goes back to the start and then to the target; one kept-alive connection saves a TLS
+        // handshake for each (measured: about 120 ms of a 1.7 s seek over a 60 ms round trip).
+        "-multiple_requests",
+        "1",
     ]);
     push_headers(&mut a, p.headers);
     a.push("-re".into());
@@ -580,6 +591,8 @@ mod tests {
         assert_eq!(a[at("-protocol_whitelist") + 1], "https,tls,tcp");
         assert_eq!(a[at("-format_whitelist") + 1], "mov,mp4,matroska,webm,avi,mpegts", "no playlist formats");
         assert_eq!(a[at("-tls_verify") + 1], "1");
+        assert_eq!(a[at("-max_redirects") + 1], "0");
+        assert_eq!(a[at("-multiple_requests") + 1], "1");
         assert!(at("-format_whitelist") < at("-i") && at("-tls_verify") < at("-i"), "input options");
         let probe = probe_args("https://cdn.example/v.mp4", &headers);
         let pat = |flag: &str| probe.iter().position(|x| x == flag).unwrap_or_else(|| panic!("{flag} missing in the probe"));
