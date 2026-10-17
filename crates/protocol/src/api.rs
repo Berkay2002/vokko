@@ -153,6 +153,8 @@ pub mod message_flags {
     pub const EPHEMERAL: u32 = 1 << 6;
     /// Deferred interaction response ("is thinking...") until the bot edits `@original`.
     pub const LOADING: u32 = 1 << 7;
+    /// A voice message: one audio attachment and no content; sending one needs `SEND_VOICE_MESSAGES`.
+    pub const IS_VOICE_MESSAGE: u32 = 1 << 13;
 }
 numeric_enum!(
     /// `MessageReference.type`: 0 = reply / default, 1 = forward (`message_snapshots` carries the copy).
@@ -2457,6 +2459,9 @@ pub struct CreateMessageRequest {
     /// Read the message aloud to the viewers of the channel. Needs `SEND_TTS_MESSAGES`; without it the message is still sent, with `tts` false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tts: Option<bool>,
+    /// `message_flags`: only `IS_VOICE_MESSAGE` is read (needs `SEND_VOICE_MESSAGES`, one attachment, no content); other bits are ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u32>,
 }
 
 /// One pending upload referenced by `CreateMessageRequest.attachments`.

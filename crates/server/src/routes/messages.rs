@@ -8,11 +8,13 @@ use axum::routing::{get, post, put};
 use serde::Deserialize;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use vokko_protocol::api::permissions::{ATTACH_FILES, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_POLLS};
+use vokko_protocol::api::permissions::{
+    ATTACH_FILES, EMBED_LINKS, MANAGE_MESSAGES, MENTION_EVERYONE, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_POLLS, SEND_VOICE_MESSAGES,
+};
 use vokko_protocol::api::{
     AckBulkRequest, AllowedMentions, AuditEntryInfo, AuditLogEvent, CreateMessageRequest, EditMessageRequest, Embed, GatewayEvent, Message, MessageAck,
     MessageDelete, MessageReferenceType, MessageType, PendingAttachmentMeta, PinnedMessage, PinnedMessagesPage, SUPPRESS_EMBEDS, Snowflake, TypingStart,
-    message_flags::IS_CROSSPOST,
+    message_flags::{IS_CROSSPOST, IS_VOICE_MESSAGE},
 };
 
 use crate::access::{self, ChannelAccess, channel_access};
@@ -230,6 +232,8 @@ pub struct Extras {
     pub poll: Option<polls::PollDraft>,
     /// Stored as the message's `tts` flag; callers decide it from `SEND_TTS_MESSAGES`.
     pub tts: bool,
+    /// No link embeds for this message (the author lacks `EMBED_LINKS`).
+    pub no_unfurl: bool,
 }
 
 /// Stores a message, updates read states / unread counters, reopens closed DMs and fans MESSAGE_CREATE out.
@@ -458,6 +462,7 @@ async fn insert_message_stored(
     state.hub.send_with(&viewers, "MESSAGE_CREATE", |user| serde_json::to_value(view.for_viewer(user)).unwrap_or_default());
     if matches!(draft.kind, MessageType::Default | MessageType::Reply | MessageType::ChatInputCommand | MessageType::ContextMenuCommand)
         && extras.embeds.is_none()
+        && !extras.no_unfurl
     {
         unfurl::spawn(state, channel.clone(), message_id, draft.content, Vec::new());
     }
@@ -572,6 +577,17 @@ async fn create_message(
         }
     }
     let sticker_ids = body.sticker_ids.unwrap_or_default();
+    let voice_message = body.flags.is_some_and(|flags| flags & IS_VOICE_MESSAGE != 0);
+    if voice_message {
+        access.require(SEND_VOICE_MESSAGES)?;
+        // Discord's shape: exactly one (audio) attachment and nothing else.
+        if attachments.len() != 1 {
+            return Err(ApiErr::invalid(attachments_field, "A voice message has exactly one audio attachment."));
+        }
+        if !body.content.as_deref().unwrap_or("").is_empty() || !sticker_ids.is_empty() || body.poll.is_some() {
+            return Err(ApiErr::invalid("flags", "A voice message cannot carry content, stickers or a poll."));
+        }
+    }
     let forwarding = body.message_reference.as_ref().is_some_and(|reference| reference.kind == Some(MessageReferenceType::Forward));
     if forwarding && (!body.content.as_deref().unwrap_or("").trim().is_empty() || !attachments.is_empty() || !sticker_ids.is_empty()) {
         return Err(ApiErr::invalid("message_reference", "A forward cannot carry content, attachments or stickers."));
@@ -630,7 +646,14 @@ async fn create_message(
     // deciding inside the transaction closes the race with the auto-archive sweep) together with the insert.
     // Without SEND_TTS_MESSAGES the flag is dropped and the message is sent as usual (Discord does the same).
     let tts = body.tts.unwrap_or(false) && access.permissions & vokko_protocol::api::permissions::SEND_TTS_MESSAGES != 0;
-    let extras = Extras { reopen_thread: access.channel.is_thread(), poll, tts, ..Extras::default() };
+    let extras = Extras {
+        reopen_thread: access.channel.is_thread(),
+        poll,
+        tts,
+        flags: if voice_message { IS_VOICE_MESSAGE as i32 } else { 0 },
+        no_unfurl: access.permissions & EMBED_LINKS == 0,
+        ..Extras::default()
+    };
     let view = insert_message_with(&state, &access.channel, user_id, draft, extras).await?;
     if access.channel.is_thread() {
         // Talking in a thread joins it.
@@ -749,7 +772,8 @@ async fn edit_message(
         tx.commit().await?;
         media::remove_files(&state, &removed).await;
         broadcast_update(&state, &access.channel, mid).await?;
-        if !suppressed {
+        // Without EMBED_LINKS an edit adds no new link embeds.
+        if !suppressed && access.permissions & EMBED_LINKS != 0 {
             unfurl::spawn(&state, access.channel.clone(), mid, content, kept);
         }
     }

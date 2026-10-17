@@ -5,7 +5,7 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Path, RawQuery, State};
 use axum::routing::get;
-use vokko_protocol::api::permissions::{ATTACH_FILES, MANAGE_THREADS, READ_MESSAGE_HISTORY, SEND_MESSAGES};
+use vokko_protocol::api::permissions::{ATTACH_FILES, EMBED_LINKS, MANAGE_THREADS, READ_MESSAGE_HISTORY, SEND_MESSAGES};
 use vokko_protocol::api::{
     ChannelType, CreateChannelRequest, DefaultReaction, ForumPost, ForumTagRequest, MessageType, Snowflake, StartForumPostRequest, ThreadSearchQuery,
     ThreadSearchResponse, UpdateChannelRequest, channel_flags,
@@ -331,14 +331,17 @@ pub async fn create_post(state: &AppState, user_id: i64, access: &ChannelAccess,
         stickers: Vec::new(),
         forward: None,
     };
-    let view = match insert_message_with(state, &row, user_id, draft, Extras { id: Some(id), ..Extras::default() }).await {
-        Ok(view) => view,
-        Err(error) => {
-            // The post is the message: without it there is no post.
-            threads::delete_threads(state, vec![row], false).await?;
-            return Err(error);
-        }
-    };
+    let view =
+        match insert_message_with(state, &row, user_id, draft, Extras { id: Some(id), no_unfurl: access.permissions & EMBED_LINKS == 0, ..Extras::default() })
+            .await
+        {
+            Ok(view) => view,
+            Err(error) => {
+                // The post is the message: without it there is no post.
+                threads::delete_threads(state, vec![row], false).await?;
+                return Err(error);
+            }
+        };
     let channel = created_response(state, id, user_id).await?;
     Ok(Json(ForumPost { channel, message: view.for_viewer(user_id) }))
 }

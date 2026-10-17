@@ -153,6 +153,32 @@ async fn editing_keeps_suppresses_and_restores_embeds() {
 }
 
 #[tokio::test]
+async fn no_embeds_without_embed_links() {
+    let app = app_with_unfurl().await;
+    let pages = PageServer::start().await;
+    let (owner, _) = app.register("sam").await;
+    let (member, _) = app.register("alice").await;
+    let (guild, channel) = app.guild_with_channel(&owner).await;
+    let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &owner, json!({})).await;
+    app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &member, json!({})).await;
+    let deny = (1u64 << 14).to_string();
+    let (status, _) = app.put_json(&format!("/channels/{channel}/permissions/{guild}"), &owner, json!({"type": 0, "allow": "0", "deny": deny})).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // neither on send nor on an edit that adds a link
+    let sent = send(&app, &member, &channel, &format!("look {}", pages.url("/page"))).await;
+    let id = sent["id"].as_str().expect("id").to_owned();
+    let (status, _) = app.patch(&format!("/channels/{channel}/messages/{id}"), &member, json!({"content": format!("now {}", pages.url("/image.png"))})).await;
+    assert_eq!(status, StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(message(&app, &member, &channel, &id).await["embeds"], json!([]));
+    assert_eq!(pages.total(), 0, "nothing is fetched");
+    // the owner (every permission) still gets them in the same channel
+    let sent = send(&app, &owner, &channel, &format!("look {}", pages.url("/page"))).await;
+    wait_for_embeds(&app, &owner, &channel, sent["id"].as_str().expect("id"), 1).await;
+}
+
+#[tokio::test]
 async fn private_hosts_are_never_fetched_unless_allowed() {
     let pages = PageServer::start().await;
     let strict = Unfurler::new(UnfurlConfig::default());

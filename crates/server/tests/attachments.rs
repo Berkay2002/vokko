@@ -160,3 +160,32 @@ async fn edit_keep_list_removes_attachments_and_their_files() {
     let (status, error) = app.patch(&format!("/channels/{channel}/messages/{text_id}"), &owner, json!({"content": "  "})).await;
     assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50006)), "{error}");
 }
+
+#[tokio::test]
+async fn voice_messages_need_send_voice_messages() {
+    let (app, owner, channel) = setup().await;
+    let (member, _) = app.register("alice").await;
+    let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &owner, json!({})).await;
+    app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &member, json!({})).await;
+    let base = format!("/channels/{channel}/messages");
+    const VOICE: u32 = 1 << 13;
+
+    // @everyone does not have SEND_VOICE_MESSAGES: refused, the same file as a plain attachment is fine
+    let clip = upload(&app, &member, &channel, "voice-message.ogg").await;
+    let (status, error) = app.post(&base, &member, json!({"attachment_ids": [clip["id"]], "flags": VOICE})).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(50013)), "{error}");
+    let (status, plain) = app.post(&base, &member, json!({"attachment_ids": [clip["id"]], "flags": 4})).await;
+    assert_eq!(status, StatusCode::OK, "{plain}");
+    assert_eq!(plain["flags"].as_u64().unwrap_or(0), 0, "other create flags are ignored: {plain}");
+
+    // the owner holds it: one attachment and nothing else
+    let clip = upload(&app, &owner, &channel, "voice-message.ogg").await;
+    let other = upload(&app, &owner, &channel, "other.ogg").await;
+    let (status, _) = app.post(&base, &owner, json!({"attachment_ids": [clip["id"], other["id"]], "flags": VOICE})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = app.post(&base, &owner, json!({"content": "hi", "attachment_ids": [clip["id"]], "flags": VOICE})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, sent) = app.post(&base, &owner, json!({"attachment_ids": [clip["id"]], "flags": VOICE})).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert_eq!(sent["flags"], VOICE);
+}
