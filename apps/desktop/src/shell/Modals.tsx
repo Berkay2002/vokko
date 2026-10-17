@@ -15,6 +15,7 @@ import { FullProfileModal } from "./DmProfilePanel";
 import { GuildPrivacyModal } from "./GuildPrivacyModal";
 import { DmRefusedModal } from "./DmRefusedModal";
 import { ReportModal } from "./ReportModal";
+import { ReportProblemModal } from "./ReportProblemModal";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
 import { closeModal, useModals, type ModalSpec } from "./modalStore";
@@ -600,6 +601,8 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
       return <QuickSwitcher key={id} />;
     case "shortcuts":
       return <ShortcutsModal key={id} />;
+    case "reportProblem":
+      return <ReportProblemModal key={id} />;
     case "profile":
       return <FullProfileModal key={id} userId={spec.userId} guildId={spec.guildId} />;
     case "serverSettings":
