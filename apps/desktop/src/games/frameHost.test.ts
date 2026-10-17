@@ -88,15 +88,17 @@ describe("website games", () => {
   });
 
   it("room links stay on the game's host", () => {
-    expect(checkRoomUrl("https://krunker.io/", "https://krunker.io/?game=FRA:abc12")).toBe("https://krunker.io/?game=FRA:abc12");
-    expect(checkRoomUrl("https://krunker.io/", " https://www.krunker.io/r ")).toBe("https://www.krunker.io/r");
-    expect(checkRoomUrl("https://shellshock.io/", "https://shellshock.io/#AbC1")).toBe("https://shellshock.io/#AbC1");
-    expect(checkRoomUrl("https://krunker.io/", "https://KRUNKER.io./x")).toBe("https://krunker.io./x");
+    expect(checkRoomUrl("https://krunker.io/", "https://krunker.io/?game=FRA:abc12", true)).toBe("https://krunker.io/?game=FRA:abc12");
+    expect(checkRoomUrl("https://krunker.io/", " https://www.krunker.io/r ", true)).toBe("https://www.krunker.io/r");
+    expect(checkRoomUrl("https://shellshock.io/", "https://shellshock.io/#AbC1", true)).toBe("https://shellshock.io/#AbC1");
+    expect(checkRoomUrl("https://krunker.io/", "https://KRUNKER.io./x", true)).toBe("https://krunker.io./x");
+    expect(checkRoomUrl("https://play.example.com/", "https://play.example.com/r/1", false)).toBe("https://play.example.com/r/1");
+    expect(checkRoomUrl("https://play.example.com/", "https://evil.play.example.com/", false), "guild games: the exact host only").toBeNull();
     for (const bad of ["http://krunker.io/", "https://u@krunker.io/", "https://u:p@krunker.io/", "https://evilkrunker.io/", "https://krunker.io.evil.example/", "javascript:alert(1)", "/?game=1", ""]) {
-      expect(checkRoomUrl("https://krunker.io/", bad), bad).toBeNull();
+      expect(checkRoomUrl("https://krunker.io/", bad, true), bad).toBeNull();
     }
-    expect(checkRoomUrl("https://krunker.io/", `https://krunker.io/?${"x".repeat(512 - 20)}`)).not.toBeNull();
-    expect(checkRoomUrl("https://krunker.io/", `https://krunker.io/?${"x".repeat(513 - 20)}`)).toBeNull();
+    expect(checkRoomUrl("https://krunker.io/", `https://krunker.io/?${"x".repeat(512 - 20)}`, true)).not.toBeNull();
+    expect(checkRoomUrl("https://krunker.io/", `https://krunker.io/?${"x".repeat(513 - 20)}`, true)).toBeNull();
   });
 
   it("loads a room link only on the client's game host and never on the app's hosts", () => {
@@ -104,8 +106,8 @@ describe("website games", () => {
     expect(roomFrameUrl(krunker, "https://krunker.io/?game=FRA:abc12", [APP, API])).toBe("https://krunker.io/?game=FRA:abc12");
     expect(roomFrameUrl({ ...krunker, url: "https://evil.example/" }, "https://evil.example/", [APP, API])).toBeNull();
     const parent: GameManifest = { ...third("https://example.com/"), kind: "web" };
-    expect(roomFrameUrl(parent, "https://play.example.com/r", ["https://app.example.com"])).toBe("https://play.example.com/r");
-    expect(roomFrameUrl(parent, "https://app.example.com/", ["https://app.example.com"])).toBeNull();
+    expect(roomFrameUrl(parent, "https://play.example.com/r", ["https://app.example.com"]), "guild games: the exact host only").toBeNull();
+    expect(roomFrameUrl({ ...parent, url: "https://play.example.com/" }, "https://play.example.com/r", ["https://app.example.com"])).toBe("https://play.example.com/r");
     expect(roomFrameUrl(parent, "https://example.com/", ["https://app.example.com"])).toBeNull();
   });
 });

@@ -1,5 +1,7 @@
 //! A guild's game catalog (docs/design/games-host.md section 4): web games members with MANAGE_GUILD allow in the guild's calls.
 //! `GET|POST /guilds/{id}/games`, `PATCH|DELETE /guilds/{id}/games/{game_id}`, audit entries and GUILD_GAMES_UPDATE.
+use std::net::IpAddr;
+
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch};
@@ -19,6 +21,7 @@ use crate::config::Config;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, parse_id};
 use crate::state::AppState;
+use crate::unfurl::is_public_ip;
 use crate::voice::watch::hidden_char;
 
 /// Longest manifest URL, in bytes.
@@ -98,6 +101,7 @@ fn check_players(min: u8, max: u8) -> ApiResult<()> {
 /// An absolute `https:` URL (with `VOKKO_DEV=1` also `http://127.0.0.1` / `http://localhost`), at most 512 bytes, without
 /// userinfo or fragment, on another host than this server and its web app, whatever the port (a game there would share their
 /// origin or their cookies). A trailing `.` does not make a host another one. In dev a loopback game only needs another port.
+/// Outside dev, never a loopback, private or link-local host: the frame would load a page on the viewer's own machine or network.
 pub fn check_url(config: &Config, raw: &str) -> ApiResult<String> {
     let raw = raw.trim();
     let bad = |message: &str| ApiErr::invalid("url", message);
@@ -109,6 +113,11 @@ pub fn check_url(config: &Config, raw: &str) -> ApiResult<String> {
     let local = matches!(host(&url).as_deref(), Some("127.0.0.1" | "localhost"));
     if !(url.scheme() == "https" || (config.dev && url.scheme() == "http" && local)) || url.host_str().is_none_or(str::is_empty) {
         return Err(bad("Must be an https URL."));
+    }
+    let host_ip = url.host_str().and_then(|host| host.trim_start_matches('[').trim_end_matches(']').parse::<IpAddr>().ok());
+    let local_name = host(&url).is_some_and(|host| host.eq_ignore_ascii_case("localhost") || host.to_ascii_lowercase().ends_with(".localhost"));
+    if !config.dev && (local_name || host_ip.is_some_and(|ip| !is_public_ip(ip))) {
+        return Err(bad("Must not be a local or private network address."));
     }
     if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
         return Err(bad("Must not contain a user name, password or fragment."));
@@ -319,6 +328,16 @@ mod tests {
             "javascript:alert(1)",
             "/games/sketch/",
             "",
+            "https://localhost/",
+            "https://game.localhost/",
+            "https://127.0.0.1/",
+            "https://2130706433/",
+            "https://10.0.0.5/",
+            "https://192.168.1.1/",
+            "https://169.254.169.254/",
+            "https://[::1]/",
+            "https://[fe80::1]/",
+            "https://[::ffff:192.168.1.1]/",
         ] {
             assert!(check_url(&config, bad).is_err(), "{bad}");
         }
@@ -330,6 +349,7 @@ mod tests {
         config.dev = true;
         assert!(check_url(&config, "http://localhost:5173/").is_ok() && check_url(&config, "http://127.0.0.1:1454/mock/").is_ok());
         assert!(check_url(&config, "http://play.example.com/").is_err(), "dev only opens up the loopback hosts");
+        assert!(check_url(&config, "https://192.168.1.1/").is_ok(), "dev allows private hosts");
 
         assert_eq!(clean_name("  Codenames  ").expect("ok"), "Codenames");
         for bad in ["", "   ", "a\u{202E}b", "a\u{200B}b", "a\nb", &"x".repeat(33)] {

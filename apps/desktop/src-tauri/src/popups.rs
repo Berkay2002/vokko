@@ -1,6 +1,8 @@
 //! New-window requests from the webview (`window.open`, `target="_blank"`, a website game's popups): `http:` / `https:` URLs open
-//! in the system browser, at most one a second; the webview itself never opens a window. Anything else is denied.
+//! in the system browser, at most one a second and three in 30 seconds (a framed page must not spam browser tabs); the webview
+//! itself never opens a window. Anything else is denied.
 
+use std::collections::VecDeque;
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -9,15 +11,21 @@ use tauri::webview::NewWindowResponse;
 use tauri::{Url, webview::NewWindowFeatures};
 
 const MIN_GAP: Duration = Duration::from_secs(1);
+const BURST: usize = 3;
+const BURST_WINDOW: Duration = Duration::from_secs(30);
 
-static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+static RECENT: Mutex<VecDeque<Instant>> = Mutex::new(VecDeque::new());
 
-/// Whether `url` may go to the system browser now: http(s) only, and not within a second of the last one.
-fn allowed(url: &Url, now: Instant, last: &mut Option<Instant>) -> bool {
-    if !matches!(url.scheme(), "http" | "https") || last.is_some_and(|last| now.duration_since(last) < MIN_GAP) {
+/// Whether `url` may go to the system browser now: http(s) only, not within a second of the last one, and at most [`BURST`] in
+/// [`BURST_WINDOW`]. `recent` holds the times of the ones that went.
+fn allowed(url: &Url, now: Instant, recent: &mut VecDeque<Instant>) -> bool {
+    while recent.front().is_some_and(|&at| now.duration_since(at) >= BURST_WINDOW) {
+        recent.pop_front();
+    }
+    if !matches!(url.scheme(), "http" | "https") || recent.len() >= BURST || recent.back().is_some_and(|&at| now.duration_since(at) < MIN_GAP) {
         return false;
     }
-    *last = Some(now);
+    recent.push_back(now);
     true
 }
 
@@ -45,7 +53,7 @@ fn open_in_browser(url: &str) -> std::io::Result<()> {
 }
 
 pub fn on_new_window<R: Runtime>(url: Url, _features: NewWindowFeatures) -> NewWindowResponse<R> {
-    let go = LAST.lock().map(|mut last| allowed(&url, Instant::now(), &mut last)).unwrap_or(false);
+    let go = RECENT.lock().map(|mut recent| allowed(&url, Instant::now(), &mut recent)).unwrap_or(false);
     if go && let Err(error) = open_in_browser(url.as_str()) {
         log::warn!("could not open a link in the browser: {error}");
     }
@@ -60,12 +68,24 @@ mod tests {
     fn only_web_urls_and_one_a_second() {
         let url = |raw: &str| Url::parse(raw).expect("url");
         let start = Instant::now();
-        let mut last = None;
+        let mut last = VecDeque::new();
         assert!(allowed(&url("https://shellshock.io/"), start, &mut last));
         assert!(!allowed(&url("https://krunker.io/"), start + Duration::from_millis(500), &mut last), "within a second");
         assert!(allowed(&url("http://example.com/"), start + Duration::from_millis(1000), &mut last));
         for bad in ["file:///C:/Windows/System32/calc.exe", "javascript:alert(1)", "vokko://invite/x", "ms-settings:", "data:text/html,x"] {
             assert!(!allowed(&url(bad), start + Duration::from_secs(10), &mut last), "{bad}");
         }
+    }
+
+    #[test]
+    fn three_in_thirty_seconds() {
+        let url = Url::parse("https://krunker.io/").expect("url");
+        let start = Instant::now();
+        let at = |secs: u64| start + Duration::from_secs(secs);
+        let mut recent = VecDeque::new();
+        assert!(allowed(&url, at(0), &mut recent) && allowed(&url, at(2), &mut recent) && allowed(&url, at(4), &mut recent));
+        assert!(!allowed(&url, at(6), &mut recent), "a fourth within 30 seconds");
+        assert!(!allowed(&url, at(29), &mut recent), "still within 30 seconds of the first");
+        assert!(allowed(&url, at(30), &mut recent), "the first has aged out");
     }
 }

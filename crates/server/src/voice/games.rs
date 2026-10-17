@@ -98,9 +98,9 @@ pub fn builtins() -> Vec<GameManifest> {
     .collect()
 }
 
-/// A room link for the web game at `game_url`: `https`, at most 512 bytes, no user info, on the game's host or a subdomain of it
-/// (a trailing `.` ignored). A fragment is fine: some games keep the room code there.
-pub fn check_room_url(game_url: &str, raw: &str) -> ApiResult<String> {
+/// A room link for the web game at `game_url`: `https`, at most 512 bytes, no user info, on the game's host (a trailing `.` ignored)
+/// or, with `subdomains` (built-ins, whose hosts are known), a subdomain of it. A fragment is fine: some games keep the room code there.
+pub fn check_room_url(game_url: &str, raw: &str, subdomains: bool) -> ApiResult<String> {
     let bad = |message: &str| ApiErr::invalid("url", message);
     let raw = raw.trim();
     if raw.len() > GAME_URL_MAX_BYTES {
@@ -114,7 +114,7 @@ pub fn check_room_url(game_url: &str, raw: &str) -> ApiResult<String> {
     let (Some(room), Some(game)) = (host(&url), reqwest::Url::parse(game_url).ok().as_ref().and_then(host)) else {
         return Err(bad("Must be a link to this game."));
     };
-    if room != game && !room.ends_with(&format!(".{game}")) {
+    if room != game && !(subdomains && room.ends_with(&format!(".{game}"))) {
         return Err(bad("Must be a link to this game."));
     }
     let url = String::from(url);
@@ -188,7 +188,7 @@ async fn start(
         None => Ok(Some(session.clone())),
     })?;
     // An edit or removal that ran between `resolve` and the insert missed this session: check again and take it back.
-    if resolve(&state, &channel, &body.game_id).await.ok().is_none_or(|now| now.url != session.game.url) {
+    if resolve(&state, &channel, &body.game_id).await.ok().is_none_or(|now| now.url != session.game.url || now.kind != session.game.kind) {
         let _ = state.voice.game_update(channel_id, |current| {
             Ok(if current.is_some_and(|current| current.session_id == session.session_id) { None } else { current.cloned() })
         });
@@ -251,7 +251,7 @@ async fn room(
     let channel_id = require_in_voice(&state, user_id, &id).await?;
     let not_web = || ApiErr::invalid("url", "No website game is running in this call.");
     let session = state.voice.game_get(channel_id).filter(|session| session.game.kind == GameKind::Web).ok_or_else(not_web)?;
-    let room_url = body.url.as_deref().map(|raw| check_room_url(&session.game.url, raw)).transpose()?;
+    let room_url = body.url.as_deref().map(|raw| check_room_url(&session.game.url, raw, session.game.id.starts_with("builtin:"))).transpose()?;
     let (_, after) = state.voice.game_update(channel_id, |current| match current {
         Some(current) if current.session_id == session.session_id => Ok(Some(GameSession { room_url: room_url.clone(), ..current.clone() })),
         _ => Err(not_web()),
@@ -320,9 +320,9 @@ mod tests {
     fn room_urls_stay_on_the_games_host() {
         let game = "https://krunker.io/";
         for good in ["https://krunker.io/?game=FRA:abc12", " https://krunker.io/?game=FRA:abc12 ", "https://www.krunker.io/room", "https://KRUNKER.io./#ABCD"] {
-            assert!(check_room_url(game, good).is_ok(), "{good}");
+            assert!(check_room_url(game, good, true).is_ok(), "{good}");
         }
-        assert_eq!(check_room_url("https://shellshock.io/", "https://shellshock.io/#AbC1").expect("fragment"), "https://shellshock.io/#AbC1");
+        assert_eq!(check_room_url("https://shellshock.io/", "https://shellshock.io/#AbC1", true).expect("fragment"), "https://shellshock.io/#AbC1");
         for bad in [
             "http://krunker.io/?game=x",
             "https://user@krunker.io/",
@@ -334,11 +334,14 @@ mod tests {
             "/?game=x",
             "",
         ] {
-            assert!(check_room_url(game, bad).is_err(), "{bad}");
+            assert!(check_room_url(game, bad, true).is_err(), "{bad}");
         }
-        assert!(check_room_url(game, &format!("https://krunker.io/?{}", "x".repeat(512 - 20))).is_ok(), "512 bytes");
-        assert!(check_room_url(game, &format!("https://krunker.io/?{}", "x".repeat(513 - 20))).is_err(), "513 bytes");
-        assert!(check_room_url("/games/sketch/index.html", "https://krunker.io/").is_err(), "no host to match");
+        assert!(check_room_url(game, &format!("https://krunker.io/?{}", "x".repeat(512 - 20)), true).is_ok(), "512 bytes");
+        assert!(check_room_url(game, &format!("https://krunker.io/?{}", "x".repeat(513 - 20)), true).is_err(), "513 bytes");
+        assert!(check_room_url("/games/sketch/index.html", "https://krunker.io/", true).is_err(), "no host to match");
+        let guild = "https://play.example.com/";
+        assert!(check_room_url(guild, "https://play.example.com/r/1", false).is_ok());
+        assert!(check_room_url(guild, "https://evil.play.example.com/", false).is_err(), "guild games: the exact host only");
     }
 
     /// The desktop app's list (apps/desktop/src/games/builtin.ts) and this one must match game for game, field for field.

@@ -107,9 +107,10 @@ const ROOM_URL_MAX_BYTES = 512;
 
 /**
  * A room link for the website game at `gameUrl` (the server's rule for PUT /channels/{id}/game/room): https, at most 512 bytes,
- * no user info, on the game's host or a subdomain of it (a trailing dot ignored); a fragment is fine. The normalized URL, or null.
+ * no user info, on the game's host (a trailing dot ignored) or, with `subdomains` (built-ins, whose hosts are known), a subdomain
+ * of it; a fragment is fine. The normalized URL, or null.
  */
-export function checkRoomUrl(gameUrl: string, raw: string): string | null {
+export function checkRoomUrl(gameUrl: string, raw: string, subdomains: boolean): string | null {
   let room: URL;
   let game: URL;
   try {
@@ -120,7 +121,7 @@ export function checkRoomUrl(gameUrl: string, raw: string): string | null {
   }
   if (room.protocol !== "https:" || room.username || room.password) return null;
   const [roomHost, gameHost] = [bareHost(room.hostname), bareHost(game.hostname)];
-  if (!roomHost || !gameHost || (roomHost !== gameHost && !roomHost.endsWith(`.${gameHost}`))) return null;
+  if (!roomHost || !gameHost || (roomHost !== gameHost && !(subdomains && roomHost.endsWith(`.${gameHost}`)))) return null;
   const href = room.href;
   return new TextEncoder().encode(raw.trim()).length > ROOM_URL_MAX_BYTES || new TextEncoder().encode(href).length > ROOM_URL_MAX_BYTES ? null : href;
 }
@@ -130,7 +131,7 @@ export function checkRoomUrl(gameUrl: string, raw: string): string | null {
  * on one of the app's hosts or a parent or subdomain of one (a framed page on the app's origin could lift its own sandbox).
  */
 export function roomFrameUrl(game: GameManifest, raw: string, app: string[] = appOrigins()): string | null {
-  const url = checkRoomUrl(frameUrl(game), raw);
+  const url = checkRoomUrl(frameUrl(game), raw, isBuiltin(game));
   if (url === null) return null;
   const host = bareHost(new URL(url).hostname);
   return hostsOf(app).some(a => a === host || a.endsWith(`.${host}`) || host.endsWith(`.${a}`)) ? null : url;

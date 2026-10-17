@@ -16,7 +16,7 @@ import { Tooltip } from "../ui";
 import { Popout } from "../ui/Popout";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
 import { gamePlayers, relayGame, shareGameRoom, stopGame } from "./api";
-import { isWebGame } from "./builtin";
+import { isBuiltin, isWebGame } from "./builtin";
 import {
   checkRoomUrl,
   roomFrameUrl,
@@ -153,6 +153,7 @@ function ShareRoom({ channelId, session }: { channelId: Snowflake; session: Game
   const send = (url: string | null) => {
     setError(null);
     setBusy(true);
+    const before = sharedHere.get(session.session_id);
     if (url) sharedHere.set(session.session_id, url);
     shareGameRoom(channelId, url).then(
       () => {
@@ -161,13 +162,18 @@ function ShareRoom({ channelId, session }: { channelId: Snowflake; session: Game
         setValue("");
       },
       (e: unknown) => {
+        // Not shared after all: a later broadcast of this link (someone else's) must load it here too.
+        if (url && sharedHere.get(session.session_id) === url) {
+          if (before === undefined) sharedHere.delete(session.session_id);
+          else sharedHere.set(session.session_id, before);
+        }
         setBusy(false);
         setError(e instanceof ApiRequestError ? e.message : "Couldn't share the link. Try again.");
       },
     );
   };
   const submit = () => {
-    const url = checkRoomUrl(trustedManifest(session.game).url, value);
+    const url = checkRoomUrl(trustedManifest(session.game).url, value, isBuiltin(session.game));
     if (!url) return setError(`Paste an https link to ${host}.`);
     send(url);
   };

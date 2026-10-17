@@ -7,7 +7,7 @@
 
 import { GAME_RELAY_MAX_BYTES, GUILD_GAMES_MAX, type GameAspect, type GameKind, type GameManifest, type GamePlayer, type GameSession, type GameUpdate } from "../types";
 import { Perm, hasBit } from "../permissions";
-import { BUILTIN_GAMES } from "../../games/builtin";
+import { BUILTIN_GAMES, isBuiltin } from "../../games/builtin";
 import { checkRoomUrl } from "../../games/frameHost";
 import { canView, channelPermsOf } from "./access";
 import { db, nextId, type MockChannel } from "./db";
@@ -227,7 +227,7 @@ route("PUT", `/channels/${ID}/game/room`, ({ viewer, params, body }) => {
   if (!session || session.game.kind !== "web") return invalid("url", "No website game is running in this call.");
   let room: string | null = null;
   if (body.url !== null && body.url !== undefined) {
-    room = (typeof body.url === "string" ? checkRoomUrl(session.game.url, body.url) : null) ?? invalid("url", "Must be a link to this game.");
+    room = (typeof body.url === "string" ? checkRoomUrl(session.game.url, body.url, isBuiltin(session.game)) : null) ?? invalid("url", "Must be a link to this game.");
   }
   session.room_url = room;
   announce(channel, session);

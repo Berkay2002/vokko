@@ -356,13 +356,15 @@ async fn a_web_game_shares_its_room_link_with_the_call() {
     assert_eq!(owner_ws.wait_for("GAME_UPDATE").await["state"], shared, "viewers get it");
     // Alice still has the earlier starts and stops queued: the room update is the next one with a link.
     while alice_ws.wait_for("GAME_UPDATE").await["state"]["room_url"] != shared["room_url"] {}
-    let (status, sub) = w.app.put_json(&room, &w.alice, json!({"url": "https://eu.play.example.com/r/x"})).await;
-    assert_eq!((status, sub["room_url"].as_str()), (StatusCode::OK, Some("https://eu.play.example.com/r/x")), "a subdomain");
+    let (status, _) = w.app.put_json(&room, &w.alice, json!({"url": "https://eu.play.example.com/r/x"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "a guild game's links stay on its exact host");
+    let (status, sub) = w.app.put_json(&room, &w.alice, json!({"url": "https://play.example.com/r/x"})).await;
+    assert_eq!((status, sub["room_url"].as_str()), (StatusCode::OK, Some("https://play.example.com/r/x")), "another room");
     owner_ws.wait_for("GAME_UPDATE").await;
 
     // A late joiner gets the link with the session (READY); null clears it.
     let (_, ready) = Client::identify(&w.address, &w.owner).await;
-    assert_eq!(ready["guilds"][0]["games"][0]["state"]["room_url"], "https://eu.play.example.com/r/x");
+    assert_eq!(ready["guilds"][0]["games"][0]["state"]["room_url"], "https://play.example.com/r/x");
     let (status, cleared) = w.app.put_json(&room, &w.alice, json!({"url": null})).await;
     assert_eq!((status, cleared["room_url"].clone()), (StatusCode::OK, Value::Null));
     assert!(owner_ws.wait_for("GAME_UPDATE").await["state"]["room_url"].is_null());
