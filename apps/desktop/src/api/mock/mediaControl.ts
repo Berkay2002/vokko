@@ -26,15 +26,16 @@ export function requireControl(channel: MockChannel, userId: string, hostId: str
 
 /** A fresh control block for a new item: no votes yet. `added_by` is always set (undefined while nothing plays) so spreading it
  * over an old state clears the old adder. */
-export const freshControl = (channelId: string, hostId: string, addedBy: string | undefined): MediaControl => ({
+export const freshControl = (channelId: string, hostId: string, addedBy: string | undefined, itemSeq = 0): MediaControl => ({
   host_id: hostId,
   added_by: addedBy,
   skip_votes: [],
   skip_needed: skipNeeded(listeners(channelId).length),
+  item_seq: itemSeq,
 });
 
 /** Same host, new current item: votes go. */
-export const nextItem = (channelId: string, control: MediaControl, addedBy: string | undefined): MediaControl => freshControl(channelId, control.host_id, addedBy);
+export const nextItem = (channelId: string, control: MediaControl, addedBy: string | undefined): MediaControl => freshControl(channelId, control.host_id, addedBy, control.item_seq + 1);
 
 /** Drops votes of people who stopped listening, moves the host off someone who left (to whoever has been in the call longest),
  * recounts. `passed` is true when the votes now reach the threshold. */
@@ -50,7 +51,8 @@ export function recount(channelId: string, control: MediaControl): { control: Me
  * `skip: true|false` from `userId`: "skip" when a controller or the current item's adder asks (or a vote reaches the threshold),
  * else the control block with the vote added or withdrawn.
  */
-export function skipOrVote(channel: MockChannel, userId: string, control: MediaControl, skip: boolean): { skip: true } | { skip: false; control: MediaControl } {
+export function skipOrVote(channel: MockChannel, userId: string, control: MediaControl, skip: boolean, itemSeq?: unknown): { skip: true } | { skip: false; control: MediaControl } {
+  if (itemSeq !== undefined && itemSeq !== control.item_seq) return { skip: false, control: controlOf(control) }; // for an item that is gone
   if (skip && (controls(channel, userId, control.host_id) || control.added_by === userId)) return { skip: true };
   const votes = control.skip_votes.filter(id => id !== userId);
   if (skip) votes.push(userId);
@@ -72,4 +74,5 @@ export const controlOf = (state: MediaControl): MediaControl => ({
   ...(state.added_by ? { added_by: state.added_by } : {}),
   skip_votes: [...state.skip_votes],
   skip_needed: state.skip_needed,
+  item_seq: state.item_seq,
 });

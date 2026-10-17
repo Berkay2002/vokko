@@ -889,6 +889,7 @@ export interface MediaControl {
   added_by?: Snowflake; // who put the current item in play; may skip it without a vote (Spotify omits it while idle)
   skip_votes: Snowflake[]; // votes to skip the current item, in vote order
   skip_needed: number; // max(1, ceil(listeners / 2))
+  item_seq: number; // changes with every item change and when a skip passes; Stremio and Spotify skips name it
 }
 
 export const WATCH_TOGETHER_QUEUE_MAX = 20;
@@ -1055,6 +1056,7 @@ export interface StremioPatchRequest {
   queue_add?: string; // sid
   queue_remove?: number; // index
   skip?: boolean;
+  item_seq?: number; // with skip: does nothing unless this item is still current
   audio?: number; // an audio track id
   burned_subtitle?: number | null; // a bitmap subtitle track id, or null to turn burn-in off
 }
@@ -1163,7 +1165,7 @@ export interface SpotifyUpdate {
 export type SpotifyPatchRequest =
   | { playing: boolean }
   | { position_ms: number }
-  | { skip: boolean } // true: skip (controller, or the current item's adder) or vote; false: withdraw the vote
+  | { skip: boolean; item_seq?: number } // item_seq: does nothing unless that item is still current; true: skip (controller, or the current item's adder) or vote; false: withdraw the vote
   | { previous: true }
   | { loop: SpotifyLoop }
   | { shuffle: true }

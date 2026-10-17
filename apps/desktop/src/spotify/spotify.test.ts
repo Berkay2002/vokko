@@ -24,6 +24,7 @@ const state = (over: Partial<SpotifyState> = {}): SpotifyState => ({
   host_id: "1",
   skip_votes: [],
   skip_needed: 1,
+  item_seq: 0,
   ...over,
 });
 

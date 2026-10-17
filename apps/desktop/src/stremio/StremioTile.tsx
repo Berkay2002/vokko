@@ -236,7 +236,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
                   </ControlButton>
                 </>
               )}
-              <ControlButton label={skip.label} tip={skip.vote ? `${skip.label}: skips when half the listeners vote` : undefined} active={skip.vote ? skip.voted : undefined} onClick={() => run(controlStremio(channelId, { skip: skip.skip }))}>
+              <ControlButton label={skip.label} tip={skip.vote ? `${skip.label}: skips when half the listeners vote` : undefined} active={skip.vote ? skip.voted : undefined} onClick={() => run(controlStremio(channelId, { skip: skip.skip, item_seq: state.item_seq }))}>
                 <SkipForward size={18} />
                 {skip.vote && <span className="media-vote-count">{state.skip_votes.length}/{state.skip_needed}</span>}
               </ControlButton>

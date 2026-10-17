@@ -351,7 +351,7 @@ route("PATCH", `/channels/${ID}/spotify`, ({ viewer, params, body }): SpotifyRep
     }
     case "skip": {
       if (!state.track) break;
-      const outcome = skipOrVote(channel, viewer.user.id, state, body.skip === true);
+      const outcome = skipOrVote(channel, viewer.user.id, state, body.skip === true, body.item_seq);
       state = outcome.skip ? advance(s, now, false) : { ...state, ...outcome.control };
       break;
     }

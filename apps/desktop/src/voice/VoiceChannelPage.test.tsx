@@ -94,7 +94,7 @@ describe('stageTiles', () => {
 });
 
 describe('Watch Together tile', () => {
-  const session = { video_id: 'dQw4w9WgXcQ', playing: true, position_ms: 0, updated_at_ms: 1, started_by: '2', queue: [] as string[], queue_added_by: [] as string[], host_id: '2', skip_votes: [] as string[], skip_needed: 1 };
+  const session = { video_id: 'dQw4w9WgXcQ', playing: true, position_ms: 0, updated_at_ms: 1, started_by: '2', queue: [] as string[], queue_added_by: [] as string[], host_id: '2', skip_votes: [] as string[], skip_needed: 1, item_seq: 0 };
 
   it('is the first tile, only while the session is on a channel we are connected to', () => {
     const states = [voiceState('1'), voiceState('2')];
@@ -117,7 +117,7 @@ describe('Watch Together tile', () => {
 });
 
 describe('Stremio tile', () => {
-  const session = { item: { title: 'Heat', label: '1080p' }, status: 'starting', playing: true, position_ms: 0, updated_at_ms: 1, started_by: '2', bot_identity: 'bot:stremio:c1', queue: [] as unknown[], host_id: '2', skip_votes: [] as string[], skip_needed: 1 };
+  const session = { item: { title: 'Heat', label: '1080p' }, status: 'starting', playing: true, position_ms: 0, updated_at_ms: 1, started_by: '2', bot_identity: 'bot:stremio:c1', queue: [] as unknown[], host_id: '2', skip_votes: [] as string[], skip_needed: 1, item_seq: 0 };
 
   it('comes after the Watch Together tile and before the people, only in the call we are in', () => {
     const states = [voiceState('1'), voiceState('2')];
@@ -140,7 +140,7 @@ describe('Stremio tile', () => {
 
 describe('Spotify tile', () => {
   const track = { uri: 'spotify:track:4uLU6hMCjMI75M1A2tKUQC', title: 'One More Time', artists: ['Daft Punk'], duration_ms: 320_000, explicit: false };
-  const session = { status: 'playing', track, playing: true, position_ms: 0, updated_at_ms: 1, loop: 'off', queue: [] as unknown[], queue_len: 0, can_previous: false, started_by: '2', bot_identity: 'bot:spotify:c1', host_id: '2', skip_votes: [] as string[], skip_needed: 1 };
+  const session = { status: 'playing', track, playing: true, position_ms: 0, updated_at_ms: 1, loop: 'off', queue: [] as unknown[], queue_len: 0, can_previous: false, started_by: '2', bot_identity: 'bot:spotify:c1', host_id: '2', skip_votes: [] as string[], skip_needed: 1, item_seq: 0 };
 
   it('comes before the people, only in the call we are in', () => {
     const states = [voiceState('1'), voiceState('2')];

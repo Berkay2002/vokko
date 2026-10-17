@@ -333,7 +333,7 @@ route("PUT", `/channels/${ID}/stremio`, ({ viewer, params, body }) => {
   const current = sessions.get(channel.id);
   // Starting is open to everyone in the call; replacing what plays is a controller's.
   if (current) requireControl(channel, viewer.user.id, current.host_id);
-  const control = freshControl(channel.id, current?.host_id ?? viewer.user.id, viewer.user.id);
+  const control = freshControl(channel.id, current?.host_id ?? viewer.user.id, viewer.user.id, current ? current.item_seq + 1 : 0);
   const next = begin(channel, { ...picked.item }, picked.duration_ms, current?.queue ?? [], current?.started_by ?? viewer.user.id, control, Date.now(), typeof at === "number" ? at : 0);
   announce(channel, next);
   return copy(next);
@@ -357,7 +357,7 @@ route("PATCH", `/channels/${ID}/stremio`, ({ viewer, params, body }) => {
   const next = copy(before);
   const here = next.playing ? next.position_ms + Math.max(0, now - next.updated_at_ms) : next.position_ms;
   if (patch.skip !== undefined) {
-    const outcome = skipOrVote(channel, viewer.user.id, before, patch.skip === true);
+    const outcome = skipOrVote(channel, viewer.user.id, before, patch.skip === true, patch.item_seq);
     if (outcome.skip) {
       const started = advance(channel, next, now);
       return started && copy(started);

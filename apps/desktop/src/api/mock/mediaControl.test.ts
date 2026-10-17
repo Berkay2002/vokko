@@ -190,7 +190,9 @@ describe("mock Stremio control", () => {
     call("b", "PATCH", stremio(), { queue_remove: 2 });
     expect(stremioOf(voiceId)?.queue.map(q => q.added_by)).toEqual([ids.host, ids.b]);
 
-    call("b", "PATCH", stremio(), { skip: true });
+    call("b", "PATCH", stremio(), { skip: true, item_seq: stremioOf(voiceId)!.item_seq + 1 }); // names an item that is not current
+    expect(stremioOf(voiceId)?.skip_votes).toEqual([]);
+    call("b", "PATCH", stremio(), { skip: true, item_seq: stremioOf(voiceId)!.item_seq });
     expect(stremioOf(voiceId)?.skip_votes).toEqual([ids.b]);
     call("c", "PATCH", stremio(), { skip: true });
     expect(stremioOf(voiceId)).toMatchObject({ added_by: ids.host, skip_votes: [], queue: [expect.objectContaining({ added_by: ids.b })] });
@@ -226,9 +228,14 @@ describe("mock Spotify control", () => {
     expect(errorOf(() => call("b", "PATCH", spotify(), { queue_remove: hostEntry.qid }))).toEqual({ status: 403, code: 50013 });
     call("b", "PATCH", spotify(), { queue_remove: spotifyOf(voiceId)!.queue[1]!.qid });
 
-    call("b", "PATCH", spotify(), { skip: true });
+    const seq = spotifyOf(voiceId)!.item_seq;
+    call("b", "PATCH", spotify(), { skip: true, item_seq: seq });
     expect(spotifyOf(voiceId)?.skip_votes).toEqual([ids.b]);
-    call("c", "PATCH", spotify(), { skip: true });
-    expect(spotifyOf(voiceId)).toMatchObject({ track: expect.objectContaining({ title: "Strobe" }), added_by: ids.host, skip_votes: [] });
+    call("c", "PATCH", spotify(), { skip: true, item_seq: seq });
+    expect(spotifyOf(voiceId)).toMatchObject({ track: expect.objectContaining({ title: "Strobe" }), added_by: ids.host, skip_votes: [], item_seq: seq + 1 });
+    // A vote for the track that just went is a no-op, and so is the host's skip.
+    call("c", "PATCH", spotify(), { skip: true, item_seq: seq });
+    call("host", "PATCH", spotify(), { skip: true, item_seq: seq });
+    expect(spotifyOf(voiceId)).toMatchObject({ track: expect.objectContaining({ title: "Strobe" }), skip_votes: [], item_seq: seq + 1 });
   });
 });

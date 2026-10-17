@@ -77,7 +77,7 @@ route("PUT", `/channels/${ID}/watch-together`, ({ viewer, params, body }) => {
     started_by: current?.started_by ?? viewer.user.id,
     queue: current?.queue ?? [],
     queue_added_by: current?.queue_added_by ?? [],
-    ...freshControl(channel.id, current?.host_id ?? viewer.user.id, viewer.user.id),
+    ...freshControl(channel.id, current?.host_id ?? viewer.user.id, viewer.user.id, current ? current.item_seq + 1 : 0),
   };
   if (!next.title) delete next.title;
   sessions.set(channel.id, next);

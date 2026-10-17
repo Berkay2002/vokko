@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_EVERYONE, Perm } from "../api/permissions";
 import { canControlMedia, queueQuota, skipAction } from "./useCanControlMedia";
 
-const control = { host_id: "1", added_by: "2", skip_votes: ["3"], skip_needed: 2 };
+const control = { host_id: "1", added_by: "2", skip_votes: ["3"], skip_needed: 2, item_seq: 0 };
 
 describe("canControlMedia", () => {
   it("is true in a DM call, with CONTROL_MEDIA, or for the host", () => {
