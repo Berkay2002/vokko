@@ -11,6 +11,7 @@ import { emit, emitToSession } from "./socket";
 import { messageFor, relationship } from "./views";
 import { voiceStates } from "./voice";
 import { watchOf } from "./watch";
+import { stremioOf } from "./stremio";
 
 interface MockCall {
   message_id: string;
@@ -48,6 +49,7 @@ function sortedRinging(call: MockCall): string[] {
 
 function callObject(channelId: string, call: MockCall): Call {
   const watching = watchOf(channelId);
+  const stremio = stremioOf(channelId);
   return {
     channel_id: channelId,
     message_id: call.message_id,
@@ -55,6 +57,7 @@ function callObject(channelId: string, call: MockCall): Call {
     ringing: sortedRinging(call),
     voice_states: statesIn(channelId).map(s => ({ ...s })),
     ...(watching ? { watch_together: { ...watching, queue: [...watching.queue] } } : {}),
+    ...(stremio ? { stremio: [{ channel_id: channelId, state: { ...stremio, queue: stremio.queue.map(q => ({ ...q })) } }] } : {}),
   };
 }
 

@@ -2,7 +2,7 @@
 // wraps this reducer and the engine (./engine.ts) turns model changes into op 4 frames and transport calls.
 // Wire contract: docs/api.md "Voice (V1)"; client plan: docs/design/voice.md §3.
 
-import type { Channel, Snowflake, StageInstance, VoiceConnectFailure, VoiceState, WatchTogetherState, WatchTogetherUpdate } from "../api/types";
+import type { Channel, Snowflake, StageInstance, VoiceConnectFailure, StremioState, StremioUpdate, VoiceState, WatchTogetherState, WatchTogetherUpdate } from "../api/types";
 
 export type VoiceStatus = "idle" | "connecting" | "rtc_connecting" | "connected" | "reconnecting" | "disconnected";
 export type InputMode = "vad" | "ptt";
@@ -102,6 +102,8 @@ export interface VoiceModel {
   stages: Record<Snowflake, StageInstance>;
   /** Watch Together sessions by voice channel or DM call id (READY / GUILD_CREATE `watch_together`, CALL_CREATE, WATCH_TOGETHER_UPDATE). */
   watch: Record<Snowflake, WatchTogetherState>;
+  /** Stremio sessions by voice channel or DM call id (READY / GUILD_CREATE `stremio`, CALL_CREATE, STREMIO_UPDATE). */
+  stremio: Record<Snowflake, StremioState>;
 }
 
 export const initialVoiceModel: VoiceModel = {
@@ -129,6 +131,7 @@ export const initialVoiceModel: VoiceModel = {
   channelStatus: {},
   stages: {},
   watch: {},
+  stremio: {},
 };
 
 interface GuildVoiceEntry {
@@ -137,6 +140,7 @@ interface GuildVoiceEntry {
   channels?: Pick<Channel, "id" | "type" | "status">[];
   stage_instances?: StageInstance[];
   watch_together?: WatchTogetherUpdate[];
+  stremio?: StremioUpdate[];
 }
 
 export type VoiceAction =
@@ -173,7 +177,9 @@ export type VoiceAction =
   /** STAGE_INSTANCE_CREATE / UPDATE (`ended: false`) and DELETE (`ended: true`). */
   | { type: "stageInstance"; instance: StageInstance; ended: boolean }
   /** WATCH_TOGETHER_UPDATE (`state: null` = ended). */
-  | { type: "watchTogether"; channelId: Snowflake; state: WatchTogetherState | null };
+  | { type: "watchTogether"; channelId: Snowflake; state: WatchTogetherState | null }
+  /** STREMIO_UPDATE (`state: null` = ended). */
+  | { type: "stremio"; channelId: Snowflake; state: StremioState | null };
 
 const isOwn = (model: VoiceModel, state: VoiceState) => model.meId !== null && state.user_id === model.meId;
 
@@ -250,6 +256,17 @@ function setWatch(watch: Record<Snowflake, WatchTogetherState>, channelId: Snowf
   return { ...watch, [channelId]: state };
 }
 
+function seedStremio(sessions: Record<Snowflake, StremioState>, list: StremioUpdate[] | undefined): Record<Snowflake, StremioState> {
+  let next = sessions;
+  for (const update of list ?? []) next = setStremio(next, update.channel_id, update.state);
+  return next;
+}
+
+function setStremio(sessions: Record<Snowflake, StremioState>, channelId: Snowflake, state: StremioState | null): Record<Snowflake, StremioState> {
+  if (!state) return without(sessions, channelId);
+  return { ...sessions, [channelId]: state };
+}
+
 function onOwnState(model: VoiceModel, state: VoiceState): VoiceModel {
   if (state.channel_id === null) {
     const states = without(model.states, state.user_id);
@@ -292,7 +309,9 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
       // A DM call's session is not in READY (its CALL_CREATE follows); the one of the call we are in is re-sent when op 4 re-binds.
       let watch: Record<Snowflake, WatchTogetherState> = {};
       for (const guild of action.guilds) watch = seedWatch(watch, guild.watch_together);
-      return pruneSpeaking({ ...own, meId: action.meId, enabled: action.voiceEnabled, states, channelStatus, stages, watch });
+      let stremio: Record<Snowflake, StremioState> = {};
+      for (const guild of action.guilds) stremio = seedStremio(stremio, guild.stremio);
+      return pruneSpeaking({ ...own, meId: action.meId, enabled: action.voiceEnabled, states, channelStatus, stages, watch, stremio });
     }
     case "guildCreate": {
       const next = {
@@ -301,6 +320,7 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
         channelStatus: seedStatuses(model.channelStatus, action.guild.channels),
         stages: replaceGuildStages(model.stages, action.guild.id, action.guild.stage_instances ?? []),
         watch: seedWatch(model.watch, action.guild.watch_together),
+        stremio: seedStremio(model.stremio, action.guild.stremio),
       };
       return pruneSpeaking(next);
     }
@@ -433,7 +453,8 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
       const channelStatus = without(model.channelStatus, action.channelId);
       const stages = without(model.stages, action.channelId);
       const watch = without(model.watch, action.channelId);
-      return channelStatus === model.channelStatus && stages === model.stages && watch === model.watch ? model : { ...model, channelStatus, stages, watch };
+      const stremio = without(model.stremio, action.channelId);
+      return channelStatus === model.channelStatus && stages === model.stages && watch === model.watch && stremio === model.stremio ? model : { ...model, channelStatus, stages, watch, stremio };
     }
     case "stageInstance": {
       const id = action.instance.channel_id;
@@ -443,6 +464,10 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
     case "watchTogether": {
       if (!action.state && !(action.channelId in model.watch)) return model;
       return { ...model, watch: setWatch(model.watch, action.channelId, action.state) };
+    }
+    case "stremio": {
+      if (!action.state && !(action.channelId in model.stremio)) return model;
+      return { ...model, stremio: setStremio(model.stremio, action.channelId, action.state) };
     }
     case "channelStatus": {
       const channelStatus = setStatus(model.channelStatus, action.channelId, action.status);

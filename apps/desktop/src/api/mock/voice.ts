@@ -21,6 +21,7 @@ import { emit as emitAll, emitToSession as emitToSessionAll } from "./socket";
 import { membersOf } from "./views";
 import { callJoined, callReleased, dmRefusal } from "./calls";
 import { endWatch, watchOf } from "./watch";
+import { endStremio, stremioOf } from "./stremio";
 
 export const MOCK_VOICE_ENDPOINT = "mock://voice";
 
@@ -127,7 +128,10 @@ function emitStatus(emit: Emit, channel: MockChannel): void {
 function releaseChannel(emit: Emit, channelId: string | null): void {
   if (!channelId) return;
   callReleased(channelId);
-  if (![...voiceStates.values()].some(s => s.channel_id === channelId)) endWatch(channelId);
+  if (![...voiceStates.values()].some(s => s.channel_id === channelId)) {
+    endWatch(channelId);
+    endStremio(channelId);
+  }
   const channel = db.channels.get(channelId);
   if (channel && stageInstances.has(channelId) && ![...voiceStates.values()].some(s => s.channel_id === channelId && isStageModerator(channel, s.user_id))) {
     endStage(channelId, emit);
@@ -206,6 +210,8 @@ export function handleVoiceStateUpdate(sessionId: string, userId: string, cmd: V
   // A late joiner syncs to the running Watch Together session.
   const watching = watchOf(channel.id);
   if (watching) emitToSession(sessionId, "WATCH_TOGETHER_UPDATE", { channel_id: channel.id, state: { ...watching, queue: [...watching.queue] } });
+  const stremio = stremioOf(channel.id);
+  if (stremio) emitToSession(sessionId, "STREMIO_UPDATE", { channel_id: channel.id, state: { ...stremio, queue: stremio.queue.map(q => ({ ...q })) } });
   if (!channel.guild_id) callJoined(channel, userId);
   if (current && current.channel_id && current.channel_id !== channel.id) {
     // Those who could see the old channel but not the new one see the user leave.

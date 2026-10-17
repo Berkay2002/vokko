@@ -23,7 +23,7 @@ import { resolveDeviceId, withDeviceFallback } from "./devices";
 import { summariseRtpStats, voiceDebug, voiceDebugEnabled } from "./debugLog";
 import { GateProcessor } from "./gate";
 import type { ConnectionQuality, VoiceDevice, VoiceSettings } from "./reducer";
-import type { TransportCallbacks, TransportOptions, VoiceTransport, CameraStart } from "./transport";
+import { isBotIdentity, type TransportCallbacks, type TransportOptions, type VoiceTransport, type CameraStart } from "./transport";
 import { PingSmoother, selectedPairRttMs } from "./ping";
 import { LiveKitVideo } from "./livekitVideo";
 import type { VideoSource } from "./mediaStore";
@@ -285,7 +285,7 @@ export class LiveKitTransport implements VoiceTransport {
       .on(RoomEvent.TrackMuted, (_pub, participant) => this.reportScreen(participant))
       .on(RoomEvent.TrackUnmuted, (_pub, participant) => this.reportScreen(participant))
       .on(RoomEvent.ParticipantConnected, participant => this.reportScreen(participant))
-      .on(RoomEvent.ParticipantDisconnected, participant => this.cb.screenLive?.(participant.identity, false))
+      .on(RoomEvent.ParticipantDisconnected, participant => isBotIdentity(participant.identity) || this.cb.screenLive?.(participant.identity, false))
       .on(RoomEvent.TrackSubscribed, (track, pub, participant) => this.attach(track, pub, participant))
       .on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
         if (this.video.detach(track, pub, participant)) return;
@@ -293,7 +293,7 @@ export class LiveKitTransport implements VoiceTransport {
       })
       .on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
         if (this.room !== room) return;
-        this.cb.speaking(speakers.filter(p => p.identity !== room.localParticipant.identity).map(p => p.identity));
+        this.cb.speaking(speakers.filter(p => p.identity !== room.localParticipant.identity && !isBotIdentity(p.identity)).map(p => p.identity));
       })
       .on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
         if (this.room !== room || participant.identity !== room.localParticipant.identity) return;
@@ -314,7 +314,7 @@ export class LiveKitTransport implements VoiceTransport {
   /** Tells the engine whether this participant has a live (published, not muted) screen share; muted = capped by the server. */
   private reportScreen(participant: Participant): void {
     const remote = this.room?.remoteParticipants.get(participant.identity);
-    if (!remote || remote !== participant) return;
+    if (!remote || remote !== participant || isBotIdentity(participant.identity)) return;
     let live = false;
     for (const pub of remote.trackPublications.values()) if (pub.source === Track.Source.ScreenShare && !pub.isMuted) live = true;
     this.cb.screenLive?.(participant.identity, live);
@@ -322,6 +322,7 @@ export class LiveKitTransport implements VoiceTransport {
 
   /** Subscription policy: every microphone track, unless locally muted (volume 0 = unsubscribed, saves egress). */
   private consider(pub: RemoteTrackPublication, participant: RemoteParticipant): void {
+    if (isBotIdentity(participant.identity)) return;
     const volume = this.volumeOf(participant.identity);
     if (this.video.consider(pub, participant, this.selfDeaf ? 0 : volume)) return;
     if (pub.kind !== Track.Kind.Audio || pub.source !== Track.Source.Microphone) return;
@@ -330,6 +331,7 @@ export class LiveKitTransport implements VoiceTransport {
   }
 
   private attach(track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant): void {
+    if (isBotIdentity(participant.identity)) return;
     if (this.video.attach(track, pub, participant)) return;
     if (track.kind !== Track.Kind.Audio || !this.audioHost) return;
     const el = track.attach();

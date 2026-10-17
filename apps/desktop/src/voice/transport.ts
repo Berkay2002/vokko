@@ -76,4 +76,7 @@ export interface VoiceTransport {
   syncVideo?(): void;
 }
 
+/** Participants of the media rooms (the Stremio bot) have identities like `bot:stremio:<channel_id>`; they are not users, so nothing maps them to one. */
+export const isBotIdentity = (identity: string): boolean => identity.startsWith("bot:");
+
 export const isMockEndpoint = (endpoint: string): boolean => endpoint.startsWith("mock://");
