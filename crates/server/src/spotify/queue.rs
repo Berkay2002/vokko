@@ -127,7 +127,7 @@ impl Queue {
         {
             self.remember(finished.clone());
             if self.loop_mode == SpotifyLoop::Queue {
-                // The cap is not enforced here: the track was in the list a moment ago.
+                // Neither the cap nor the per-user quota is enforced here: the track was in the list a moment ago (bot-control.md §2.5).
                 self.entries.push(Entry::new(finished, self.current_by));
             }
         }
