@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, ReactNode, RefObject, UIEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, X } from "lucide-react";
-import { useFocusTrap, useLayer } from "../../ui";
+import { useFocusTrap, useInertApp, useLayer } from "../../ui";
 import { blockedByUnsaved } from "./unsaved";
 
 /**
@@ -58,6 +58,7 @@ export function SettingsModal({ label, title, side, onClose, children, scrollRef
   }, []);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   useLayer(true, requestClose);
+  useInertApp(true);
   useFocusTrap(true, () => root.current);
 
   return createPortal(

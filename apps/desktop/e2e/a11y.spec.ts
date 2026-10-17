@@ -384,10 +384,13 @@ test.describe('keyboard: dialogs', () => {
   });
 
   test('settings background is hidden from assistive tech while a settings overlay is open', async ({ page }) => {
-    test.fail(true, 'A11Y-13: .app-frame is neither inert nor aria-hidden behind the settings overlay');
+    // A11Y-13: the app body is inert behind the overlay (the title bar stays live for the window controls), and live again after
     await openUserSettings(page, 'Appearance');
-    const hidden = await page.locator('.app-frame').evaluate(el => el.hasAttribute('inert') || el.getAttribute('aria-hidden') === 'true');
-    expect(hidden).toBe(true);
+    const body = page.locator('.app-frame > .app-body');
+    await expect(body).toHaveAttribute('inert', '');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'User Settings' })).toHaveCount(0);
+    await expect(body).not.toHaveAttribute('inert');
   });
 });
 

@@ -174,3 +174,20 @@ export function useFocusTrap(active: boolean, container: () => HTMLElement | nul
     };
   }, [on]);
 }
+
+/** Overlays open over the app; the app body behind them is `inert` (out of the a11y tree and Tab order) while any is open. The title bar
+ * stays live: its window controls must keep working. */
+let inertCount = 0;
+
+/** Make the app frame's `.app-body` inert while `active`. Call it before `useFocusTrap`, so the frame is live again when focus is restored. */
+export function useInertApp(active: boolean): void {
+  useEffect(() => {
+    if (!active) return;
+    inertCount += 1;
+    document.querySelector(".app-frame > .app-body")?.setAttribute("inert", "");
+    return () => {
+      inertCount -= 1;
+      if (inertCount === 0) document.querySelector(".app-frame > .app-body")?.removeAttribute("inert");
+    };
+  }, [active]);
+}
