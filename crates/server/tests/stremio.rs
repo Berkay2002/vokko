@@ -47,6 +47,8 @@ struct Mock {
     library_down: AtomicBool,
     /// The next `datastoreGet` answers late (a slow Stremio): the write-back of an earlier item must not land after a later one.
     slow_get: AtomicBool,
+    /// `second.mkv` answers late: an advance to it takes a while.
+    slow_media: AtomicBool,
 }
 
 impl Mock {
@@ -180,6 +182,13 @@ async fn media_file() -> Response {
     (StatusCode::PARTIAL_CONTENT, [(header::CONTENT_TYPE, "video/x-matroska")], vec![0_u8]).into_response()
 }
 
+async fn media_second(State(mock): State<Arc<Mock>>) -> Response {
+    if mock.slow_media.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(600)).await;
+    }
+    media_file().await
+}
+
 async fn catalog() -> Json<Value> {
     Json(json!({"metas": [
         {"id": "tt0113277", "name": "Heat", "poster": POSTER, "releaseInfo": "1995"},
@@ -224,6 +233,7 @@ async fn start_mock() -> Arc<Mock> {
         stored: Mutex::default(),
         library_down: AtomicBool::new(false),
         slow_get: AtomicBool::new(false),
+        slow_media: AtomicBool::new(false),
     });
     let router = Router::new()
         .route("/api/login", post(login))
@@ -240,7 +250,7 @@ async fn start_mock() -> Arc<Mock> {
         .route("/media/redirect", get(media_redirect))
         .route("/media/disguised", get(media_playlist))
         .route("/media/final.mkv", get(media_file))
-        .route("/media/second.mkv", get(media_file))
+        .route("/media/second.mkv", get(media_second))
         // Like the real Cinemeta, the browse catalog redirects to another path.
         .route("/cinemeta/catalog/{kind}/top.json", get(catalog_moved))
         .route("/cinemeta-catalogs/top/catalog/{kind}/top.json", get(catalog))
@@ -1722,4 +1732,37 @@ async fn without_control_media_others_vote_skip_their_own_and_queue_two() {
     );
     let (_, own) = w.app.patch(&w.path(), &w.carl, json!({"skip": true})).await;
     assert_eq!((own["added_by"].as_str(), own["queue"].as_array().map(Vec::len)), (Some(w.alice_id.as_str()), Some(0)));
+}
+
+/// A burst of skips while the next item is still being opened advances one item, not the whole queue: the adder's first skip
+/// passes, the rest find the item already being left. A skip naming an older `item_seq` does nothing.
+#[tokio::test]
+async fn a_burst_of_skips_advances_one_item() {
+    use vokko_protocol::api::permissions::CONTROL_MEDIA;
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.playing(&mut alice, "A 1080p").await;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.link(&w.carl).await;
+    w.join(&mut carl).await;
+    let (_, guilds) = w.app.get("/users/@me/guilds", &w.owner).await;
+    w.overwrite(guilds[0]["id"].as_str().expect("guild"), 0, CONTROL_MEDIA).await;
+    let mine = World::sid(&w.streams(&w.carl).await, "A 720p");
+    for _ in 0..2 {
+        assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"queue_add": mine})).await.0, StatusCode::OK);
+    }
+    let (_, his) = w.app.patch(&w.path(), &w.alice, json!({"skip": true})).await;
+    assert_eq!((his["added_by"].as_str(), his["queue"].as_array().map(Vec::len)), (Some(w.carl_id.as_str()), Some(1)));
+
+    // Opening the next item takes a while; carl's skips (his first as the adder, the rest votes, 1 of 2 needed) all land meanwhile.
+    w.mock.slow_media.store(true, Ordering::SeqCst);
+    let stale = his["item_seq"].as_u64().expect("item_seq") - 1;
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"skip": true, "item_seq": stale})).await.1["queue"].as_array().map(Vec::len), Some(1));
+    let path = w.path();
+    let burst = futures_util::future::join_all((0..5).map(|_| w.app.patch(&path, &w.carl, json!({"skip": true})))).await;
+    assert!(burst.iter().all(|(status, _)| *status == StatusCode::OK), "{burst:?}");
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let (status, now) = w.app.patch(&w.path(), &w.carl, json!({"skip": false})).await;
+    assert_eq!(status, StatusCode::OK, "the session goes on: {now}");
+    assert_eq!((now["added_by"].as_str(), now["queue"].as_array().map(Vec::len)), (Some(w.carl_id.as_str()), Some(0)), "{now}");
 }

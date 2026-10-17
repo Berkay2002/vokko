@@ -74,6 +74,7 @@ pub(crate) fn new_session(user_id: i64, room: &Room) -> MediaControl {
         added_by: Some(Snowflake::from(user_id)),
         skip_votes: Vec::new(),
         skip_needed: skip_needed(room.listeners().count()),
+        item_seq: 0,
     }
 }
 
@@ -81,6 +82,7 @@ pub(crate) fn new_session(user_id: i64, room: &Room) -> MediaControl {
 pub(crate) fn new_item(control: &mut MediaControl, added_by: Option<i64>) {
     control.skip_votes.clear();
     control.added_by = added_by.map(Snowflake::from);
+    control.item_seq = control.item_seq.wrapping_add(1);
 }
 
 /// Brings `control` in line with who is in the call: a host who left is replaced by the earliest joiner, the votes of people who
@@ -97,9 +99,13 @@ pub(crate) fn sync(control: &mut MediaControl, room: &Room) -> bool {
     !control.skip_votes.is_empty() && control.skip_votes.len() as u32 >= control.skip_needed
 }
 
-/// `skip: true|false` from the caller. A controller, or whoever added the current item, skips at once (`false` does nothing);
-/// anyone else votes or withdraws their vote. Returns whether the item is skipped now.
-pub(crate) fn skip_request(control: &mut MediaControl, ctx: &InVoice, skip: bool, room: &Room) -> bool {
+/// `skip: true|false` from the caller, for the item `item_seq` names (any when `None`; another one: nothing happens). A
+/// controller, or whoever added the current item, skips at once (`false` does nothing); anyone else votes or withdraws their
+/// vote. Returns whether the item is skipped now.
+pub(crate) fn skip_request(control: &mut MediaControl, ctx: &InVoice, skip: bool, item_seq: Option<u64>, room: &Room) -> bool {
+    if item_seq.is_some_and(|seq| seq != control.item_seq) {
+        return false;
+    }
     let me = Snowflake::from(ctx.user_id);
     if controls(ctx, control.host_id) || control.added_by == Some(me) {
         return skip;
@@ -124,17 +130,14 @@ pub(crate) fn quota(ctx: &InVoice, control: &MediaControl, mine: usize, per_user
 }
 
 /// Someone joined, left, or (un)deafened in `channel_id`: each media session there moves its host, drops lost votes, counts
-/// again and skips when the votes now suffice. Spawned: a skip can start the next Stremio item, which waits on the network.
+/// again and skips when the votes now suffice. Spawned: a skip can start the next Stremio item, which waits on the network. Each
+/// takes the call's snapshot under its session's lock, so refreshes that run out of order still count who is in the call now.
 pub(crate) fn refresh(state: &AppState, channel_id: i64) {
     let state = state.clone();
     tokio::spawn(async move {
-        let room = room(&state, channel_id);
-        if room.is_empty() {
-            return;
-        }
-        super::watch::refresh(&state, channel_id, &room).await;
-        super::stremio::refresh(&state, channel_id, &room).await;
-        super::spotify::refresh(&state, channel_id, &room).await;
+        super::watch::refresh(&state, channel_id).await;
+        super::stremio::refresh(&state, channel_id).await;
+        super::spotify::refresh(&state, channel_id).await;
     });
 }
 
@@ -161,5 +164,16 @@ mod tests {
         assert_eq!(quota(&ctx(7, 0), &control, 50, 3).ok(), Some(usize::MAX));
         assert_eq!(quota(&ctx(8, 0), &control, 1, 3).ok(), Some(2));
         assert!(quota(&ctx(8, 0), &control, 3, 3).is_err());
+    }
+
+    #[test]
+    fn a_skip_for_another_item_does_nothing() {
+        let mut control = MediaControl { host_id: Snowflake::from(7), item_seq: 4, ..MediaControl::default() };
+        let empty = Room { inside: Vec::new() };
+        assert!(!skip_request(&mut control, &ctx(7, 0), true, Some(3), &empty), "the host's skip for an old item");
+        assert!(skip_request(&mut control, &ctx(7, 0), true, Some(4), &empty));
+        assert!(skip_request(&mut control, &ctx(7, 0), true, None, &empty));
+        new_item(&mut control, None);
+        assert_eq!(control.item_seq, 5);
     }
 }

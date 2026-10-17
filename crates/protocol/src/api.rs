@@ -1500,6 +1500,10 @@ pub struct MediaControl {
     pub skip_votes: Vec<Snowflake>,
     /// Votes that skip it: half the listeners (in the call and not deafened), rounded up, at least 1.
     pub skip_needed: u32,
+    /// Changes with every item change (and when a skip passes). A Stremio or Spotify `skip` may name it as `item_seq`: a vote
+    /// or skip for an item that is no longer current is ignored.
+    #[serde(default)]
+    pub item_seq: u64,
 }
 
 /// `max(1, ceil(listeners / 2))`: 0 or 1 or 2 listeners -> 1, 3 -> 2, 4 -> 2, 5 -> 3.
@@ -1823,6 +1827,9 @@ pub struct StremioPatchRequest {
     pub queue_remove: Option<usize>,
     #[serde(default)]
     pub skip: Option<bool>,
+    /// With `skip`: the state's `item_seq` the skip or vote is for; ignored (200, current state) when the item has changed.
+    #[serde(default)]
+    pub item_seq: Option<u64>,
     /// An audio track `id` from the state.
     #[serde(default)]
     pub audio: Option<u32>,
@@ -2187,6 +2194,9 @@ pub struct SpotifyPatchRequest {
     pub position_ms: Option<u64>,
     #[serde(default)]
     pub skip: Option<bool>,
+    /// With `skip`: the state's `item_seq` the skip or vote is for; ignored (200, current state) when the item has changed.
+    #[serde(default)]
+    pub item_seq: Option<u64>,
     #[serde(default)]
     pub previous: Option<bool>,
     #[serde(default, rename = "loop")]
@@ -5788,7 +5798,7 @@ mod tests {
         assert_eq!((status.name(), status.data()), ("VOICE_CHANNEL_STATUS_UPDATE", json!({"id": "201", "guild_id": "300", "status": null})));
         let watch = json!({
             "video_id": "dQw4w9WgXcQ", "playing": true, "position_ms": 5, "updated_at_ms": 9, "started_by": "7", "queue": ["aaaaaaaaaaa"],
-            "queue_added_by": ["8"], "host_id": "7", "added_by": "7", "skip_votes": ["8"], "skip_needed": 2
+            "queue_added_by": ["8"], "host_id": "7", "added_by": "7", "skip_votes": ["8"], "skip_needed": 2, "item_seq": 3
         });
         round_trip::<WatchTogetherState>(watch.clone());
         let update = GatewayEvent::WatchTogetherUpdate(WatchTogetherUpdate { channel_id: Snowflake(201), state: None });
@@ -5797,12 +5807,12 @@ mod tests {
         let stremio = json!({
             "item": {"title": "Heat", "label": "1080p"}, "status": "paused", "playing": false, "position_ms": 5, "updated_at_ms": 9,
             "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [{"title": "Alien", "label": "720p", "added_by": "8"}],
-            "host_id": "7", "added_by": "7", "skip_votes": [], "skip_needed": 1
+            "host_id": "7", "added_by": "7", "skip_votes": [], "skip_needed": 1, "item_seq": 3
         });
         round_trip::<StremioState>(stremio.clone());
         let tracks = json!({
             "item": {"title": "Heat", "label": "1080p"}, "status": "playing", "playing": true, "position_ms": 5, "updated_at_ms": 9,
-            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [], "host_id": "8", "added_by": "7", "skip_votes": ["9"], "skip_needed": 2,
+            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [], "host_id": "8", "added_by": "7", "skip_votes": ["9"], "skip_needed": 2, "item_seq": 3,
             "audio_tracks": [{"id": 1, "language": "eng", "codec": "eac3", "default": true}, {"id": 2, "language": "swe", "title": "Commentary", "codec": "aac", "default": false}],
             "audio": 1,
             "subtitle_tracks": [{"id": 3, "kind": "text", "language": "eng", "codec": "subrip", "forced": false, "default": false},
@@ -5822,7 +5832,7 @@ mod tests {
         let track = json!({"uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC", "title": "Song", "artists": ["A"], "duration_ms": 1000, "explicit": false});
         let spotify = json!({
             "status": "playing", "track": track, "playing": true, "position_ms": 5, "updated_at_ms": 9, "loop": "queue", "queue_len": 1,
-            "can_previous": false, "started_by": "7", "bot_identity": "bot:spotify:201", "host_id": "7", "added_by": "8", "skip_votes": [], "skip_needed": 1,
+            "can_previous": false, "started_by": "7", "bot_identity": "bot:spotify:201", "host_id": "7", "added_by": "8", "skip_votes": [], "skip_needed": 1, "item_seq": 3,
             "queue": [{"qid": "q1", "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC", "title": "Song", "artists": ["A"], "duration_ms": 1000, "explicit": true, "added_by": "8"}]
         });
         round_trip::<SpotifyState>(spotify.clone());

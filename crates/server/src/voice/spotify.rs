@@ -399,7 +399,6 @@ async fn start(
     if let Some(session) = lock(&state.spotify.session).as_ref().filter(|session| session.channel_id == channel_id && session.queue.current.is_some()) {
         control::require_control(&ctx, &session.control)?;
     }
-    let call = control::room(&state, channel_id);
     let mut tracks = tracks_of(&active, kind, &item, SPOTIFY_QUEUE_MAX + 1).await?;
     if tracks.is_empty() {
         return Err(ApiErr::invalid("uri", "There is nothing to play in that."));
@@ -427,7 +426,7 @@ async fn start(
                 token: bot_token(&state, channel_id, &room).unwrap_or_default(),
                 room,
                 started_by: user_id,
-                control: control::new_session(user_id, &call),
+                control: control::new_session(user_id, &control::room(&state, channel_id)),
                 queue: Queue::default(),
                 status: SpotifyStatus::Starting,
                 error: None,
@@ -515,8 +514,8 @@ fn touch(state: &AppState, channel_id: i64, change: impl FnOnce(&mut Session)) {
 enum Op {
     Playing(bool),
     Position(u64),
-    /// `true` skips (or votes), `false` withdraws a vote.
-    Skip(bool),
+    /// `true` skips (or votes), `false` withdraws a vote; for the item `item_seq` names, if any.
+    Skip(bool, Option<u64>),
     Previous,
     Loop(SpotifyLoop),
     Shuffle,
@@ -544,7 +543,7 @@ fn one_op(body: SpotifyPatchRequest) -> ApiResult<Op> {
         ops.push(Op::Position(position));
     }
     if let Some(skip) = body.skip {
-        ops.push(Op::Skip(skip));
+        ops.push(Op::Skip(skip, body.item_seq));
     }
     if flag("previous", body.previous)? {
         ops.push(Op::Previous);
@@ -590,7 +589,6 @@ async fn control(
     let ctx = control::in_voice(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
     let op = one_op(body)?;
-    let room = control::room(&state, channel_id);
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
     // The tracks of a queue_add are found before the session is locked.
     let added = match &op {
@@ -611,7 +609,7 @@ async fn control(
         let mut vote_only = false;
         let controller = control::controls(&ctx, session.control.host_id);
         // Everything but skipping, appending and removing your own entries is a controller's.
-        let steers = !matches!(op, Op::Skip(_) | Op::Add { next: false, .. } | Op::Remove(_));
+        let steers = !matches!(op, Op::Skip(..) | Op::Add { next: false, .. } | Op::Remove(_));
         if steers && !controller {
             return Err(ApiErr::missing_permissions());
         }
@@ -628,8 +626,8 @@ async fn control(
                 }
                 session.steer(&state, None, Some(position), now);
             }
-            Op::Skip(skip) => {
-                if control::skip_request(&mut session.control, &ctx, skip, &room) {
+            Op::Skip(skip, item_seq) => {
+                if control::skip_request(&mut session.control, &ctx, skip, item_seq, &control::room(&state, channel_id)) {
                     stop_bot = session.leave(&state, Leave::Skipped, now);
                 } else {
                     vote_only = true;
@@ -722,11 +720,19 @@ async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(i
     active(&state)?;
     let ctx = control::in_voice(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
-    if let Some(session) = lock(&state.spotify.session).as_ref().filter(|session| session.channel_id == channel_id) {
-        control::require_control(&ctx, &session.control)?;
-    }
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
-    end(&state, channel_id).await;
+    // The check and the removal share the lock: a session started meanwhile is not ended by someone who does not control it.
+    let session = {
+        let mut slot = lock(&state.spotify.session);
+        match slot.as_ref().filter(|session| session.channel_id == channel_id) {
+            Some(session) => control::require_control(&ctx, &session.control)?,
+            None => return Ok(StatusCode::NO_CONTENT.into_response()),
+        }
+        slot.take()
+    };
+    if let Some(session) = session {
+        ended(&state, channel_id, session).await;
+    }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -751,6 +757,11 @@ pub(crate) async fn end(state: &AppState, channel_id: i64) {
         if slot.as_ref().is_some_and(|session| session.channel_id == channel_id) { slot.take() } else { None }
     };
     let Some(session) = session else { return };
+    ended(state, channel_id, session).await;
+}
+
+/// What follows a session's removal: the bot drops it, its room closes and everyone hears.
+async fn ended(state: &AppState, channel_id: i64, session: Session) {
     if let Some(bot) = &state.spotify.bot {
         let bot = bot.clone();
         let rooms = state.spotify.media_rooms();
@@ -779,14 +790,18 @@ pub(crate) async fn remove_strangers(state: &AppState) {
 }
 
 /// Who is in the call changed (`control::refresh`): host, votes and the count follow, and enough votes skip.
-pub(crate) async fn refresh(state: &AppState, channel_id: i64, room: &control::Room) {
+pub(crate) async fn refresh(state: &AppState, channel_id: i64) {
     let Ok(active) = active(state) else { return };
     let now = unix_millis();
     let change = {
         let mut slot = lock(&state.spotify.session);
         let Some(session) = slot.as_mut().filter(|session| session.channel_id == channel_id) else { return };
+        let room = control::room(state, channel_id);
+        if room.is_empty() {
+            return;
+        }
         let before = session.control.clone();
-        if control::sync(&mut session.control, room) {
+        if control::sync(&mut session.control, &room) {
             let stop_bot = session.leave(state, Leave::Skipped, now);
             session.change(state, now, stop_bot)
         } else if session.control != before {
