@@ -8,7 +8,7 @@ export { isDesktop } from "./tauri";
 export { DEFAULT_DESKTOP_PREFS, getDesktopPrefs, setDesktopPrefs, type DesktopPrefs } from "./prefs";
 export { getAutostart, setAutostart } from "./autostart";
 export { setTrayUnread } from "./tray";
-export { getAppVersion, syncWindowTheme } from "./window";
+export { getAppVersion, hideShareBar, syncWindowTheme } from "./window";
 export { requestAttention } from "./attention";
 export { onNativeMenu, type NativeMenuId } from "./menu";
 export { initDeepLinks, invitePath, onDeepLink, routeDeepLink, type DeepLink, type DeepLinkHandler } from "./deeplinks";

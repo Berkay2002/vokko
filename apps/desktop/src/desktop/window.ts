@@ -1,4 +1,4 @@
-import { isDesktop } from "./tauri";
+import { call, isDesktop } from "./tauri";
 
 /**
  * Makes the native window match the theme: its background colour (what shows while the webview resizes or loads) and its
@@ -27,4 +27,9 @@ export async function getAppVersion(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Hides WebView2's own "is sharing your screen" bar (Windows; a no-op elsewhere). Call once a screen share is live. */
+export async function hideShareBar(): Promise<void> {
+  await call<void>("desktop_hide_share_bar", undefined, undefined);
 }
