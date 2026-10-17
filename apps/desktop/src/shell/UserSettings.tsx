@@ -5,6 +5,7 @@ import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
 import type { InstanceInfo, User } from "../api/types";
+import { safeHttpUrl } from "../chat/embedUtil";
 import { isDesktop, useWindowChrome } from "../desktop";
 import { Avatar } from "./Avatar";
 import { closeModal, openModal } from "./modalStore";
@@ -185,7 +186,7 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
   // the instance's own terms (VOKKO_TERMS_URL) are the only legal page a Vokko server serves
   const [termsUrl, setTermsUrl] = useState<string | null>(null);
   useEffect(() => {
-    request<InstanceInfo>("GET", "/auth/instance").then(info => setTermsUrl(info.terms_url), () => setTermsUrl(null));
+    request<InstanceInfo>("GET", "/auth/instance").then(info => setTermsUrl(safeHttpUrl(info.terms_url)), () => setTermsUrl(null));
   }, []);
 
   // the sub-items are the headings of the page that is open
