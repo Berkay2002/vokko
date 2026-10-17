@@ -6,12 +6,13 @@ import { createContext, useContext, useEffect, useReducer, useState } from "reac
 import { ArrowLeft, Check, ExternalLink, Info, Link2, Play, Search, X } from "lucide-react";
 import { QrCode } from "../account/QrCode";
 import { ApiRequestError } from "../api/rest";
-import type { Snowflake, StremioMeta, StremioSearchItem, StremioStream, StremioStreams, StremioType } from "../api/types";
+import type { Snowflake, StremioContinueItem, StremioMeta, StremioSearchItem, StremioStream, StremioStreams, StremioType } from "../api/types";
 import { useVoice } from "../voice/store";
 import { useVoiceUi } from "../voice/uiStore";
-import { catalog, controlStremio, getAccount, getMeta, getStreams, loginWithEmail, pollLink, searchTitles, startLink, startStremio, unlinkAccount } from "./api";
+import { formatClock } from "../watch/youtube";
+import { catalog, controlStremio, getAccount, getContinue, getMeta, getStreams, loginWithEmail, pollLink, searchTitles, startLink, startStremio, unlinkAccount } from "./api";
 import { formatSize, isHeavy, reason, safeImage, unsupportedText } from "./format";
-import { bestStream, currentView, initialPanel, panelReducer, seasonsOf, type PanelAction, type PanelState } from "./panelState";
+import { bestStream, currentView, episodeLabel, initialPanel, panelReducer, progressOf, resumeTarget, seasonsOf, type PanelAction, type PanelState } from "./panelState";
 import { useStremioPanel } from "./panelStore";
 import { PosterImage } from "./PosterImage";
 import { StremioIcon } from "./StremioIcon";
@@ -206,6 +207,54 @@ function Row({ title, items, onOpen }: { title: string; items: StremioSearchItem
   );
 }
 
+/** A thin bar for how far in the movie or episode is; decorative, the card's label says the percentage. */
+function Progress({ share }: { share: number }) {
+  return share > 0 ? (
+    <span className="stremio-progress" aria-hidden="true">
+      <span className="stremio-progress-done" style={{ width: `${Math.round(share * 100)}%` }} />
+    </span>
+  ) : null;
+}
+
+function ContinueCard({ item, onOpen }: { item: StremioContinueItem; onOpen(item: StremioContinueItem): void }) {
+  const label = episodeLabel(item);
+  const share = progressOf(item);
+  return (
+    <button
+      type="button"
+      className="stremio-poster-card stremio-continue-card"
+      onClick={() => onOpen(item)}
+      data-continue-id={item.id}
+      aria-label={[item.name, label, share > 0 ? `${Math.round(share * 100)}% watched` : null].filter(Boolean).join(", ")}
+    >
+      <span className="stremio-poster-frame">
+        <PosterImage src={safeImage(item.poster)} lazy fallback={<StremioIcon size={28} />} />
+        <Progress share={share} />
+      </span>
+      <span className="stremio-poster-name">{item.name}</span>
+      {label && <span className="stremio-poster-year">{label}</span>}
+    </button>
+  );
+}
+
+/** The caller's own saved progress from their Stremio library; nothing is shown while it loads, when it is empty or when it cannot be read. */
+function ContinueRow({ dispatch }: { dispatch: Dispatch }) {
+  const items = useAsync(getContinue, []).data ?? [];
+  if (items.length === 0) return null;
+  const open = (item: StremioContinueItem) =>
+    dispatch({ type: "openTitle", item: { id: item.id, type: item.type, name: item.name, ...(item.poster ? { poster: item.poster } : {}) }, resume: item });
+  return (
+    <section className="stremio-row" aria-label="Continue watching">
+      <h3 className="stremio-row-title">Continue watching</h3>
+      <div className="stremio-row-items stremio-continue-items">
+        {items.map(item => (
+          <ContinueCard key={item.id} item={item} onOpen={open} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 const TYPE_TITLES: Record<StremioType, string> = { movie: "Movies", series: "Series" };
 
 function Home({ query, dispatch }: { query: string; dispatch: Dispatch }) {
@@ -227,6 +276,7 @@ function Home({ query, dispatch }: { query: string; dispatch: Dispatch }) {
         <Search size={16} aria-hidden="true" />
         <input className="input" type="search" aria-label="Search movies and series" placeholder="Search movies and series" value={typed} onChange={e => setTyped(e.target.value)} />
       </label>
+      {!query && <ContinueRow dispatch={dispatch} />}
       {rows.loading && <p className="stremio-muted">Loading…</p>}
       <Problem text={rows.error} />
       {rows.data?.map(row => <Row key={row.type} title={query ? TYPE_TITLES[row.type] : `Popular ${TYPE_TITLES[row.type].toLowerCase()}`} items={row.items} onOpen={open} />)}
@@ -236,7 +286,8 @@ function Home({ query, dispatch }: { query: string; dispatch: Dispatch }) {
 
 // ---- title page and streams ----
 
-function StreamList({ channelId, type, videoId, label }: { channelId: Snowflake; type: StremioType; videoId: string; label: string }) {
+/** `startAt` (ms) is where Play in call starts, to resume; Add to Up next has no position. */
+function StreamList({ channelId, type, videoId, label, startAt = 0 }: { channelId: Snowflake; type: StremioType; videoId: string; label: string; startAt?: number }) {
   const playing = useVoice(s => !!s.stremio[channelId]);
   const listed = useAsync<StremioStreams>(() => getStreams(type, videoId), [type, videoId]);
   const [picked, setPicked] = useState<string | null>(null);
@@ -254,7 +305,7 @@ function StreamList({ channelId, type, videoId, label }: { channelId: Snowflake;
     setNote(null);
     try {
       if (kind === "play") {
-        await startStremio(channelId, selected.sid);
+        await startStremio(channelId, selected.sid, startAt);
         useVoiceUi.getState().setFocusedTile(STREMIO_TILE_ID);
         useStremioPanel.getState().setOpen(false);
         return;
@@ -286,6 +337,11 @@ function StreamList({ channelId, type, videoId, label }: { channelId: Snowflake;
       {note && (
         <p className="stremio-note" role="status">
           {note}
+        </p>
+      )}
+      {selected && startAt > 0 && (
+        <p className="stremio-muted stremio-start-at">
+          {playing ? "Play now instead starts at" : "Starts at"} {formatClock(startAt)}
         </p>
       )}
       {selected && (
@@ -347,12 +403,36 @@ function Backdrop({ meta }: { meta: StremioMeta }) {
   );
 }
 
-function TitlePage({ channelId, item, dispatch }: { channelId: Snowflake; item: StremioSearchItem; dispatch: Dispatch }) {
+const videoLabel = (v: { season: number; episode: number; name?: string }) => `S${v.season}E${v.episode}${v.name ? ` ${v.name}` : ""}`;
+
+/** The episode a Continue watching card resumed (or, after a finished one, the next), with how far in it is and its streams. */
+function ResumeEpisode({ channelId, resume, videoId, label, positionMs, next }: { channelId: Snowflake; resume: StremioContinueItem; videoId: string; label: string; positionMs: number; next: boolean }) {
+  const finishedLabel = next && resume.duration_ms > 0 ? episodeLabel({ ...resume, duration_ms: 0 }) : null;
+  return (
+    <section className="stremio-resume" aria-label={next ? "Next episode" : "Continue watching"}>
+      <h3 className="stremio-row-title">{next ? "Next episode" : "Continue watching"}</h3>
+      <p className="stremio-resume-line">{label}</p>
+      {finishedLabel && <p className="stremio-muted">You finished {finishedLabel.replace(" · Up next", "")}.</p>}
+      {positionMs > 0 && (
+        <span className="stremio-progress inline" aria-hidden="true">
+          <span className="stremio-progress-done" style={{ width: `${Math.round(progressOf({ position_ms: positionMs, duration_ms: resume.duration_ms }) * 100)}%` }} />
+        </span>
+      )}
+      <StreamList channelId={channelId} type="series" videoId={videoId} label={label} startAt={positionMs} />
+    </section>
+  );
+}
+
+function TitlePage({ channelId, item, resume, dispatch }: { channelId: Snowflake; item: StremioSearchItem; resume?: StremioContinueItem; dispatch: Dispatch }) {
   const meta = useAsync(() => getMeta(item.type, item.id), [item.type, item.id]);
   const [season, setSeason] = useState<number | null>(null);
   const videos = meta.data?.videos ?? [];
   const seasons = seasonsOf(videos);
-  const shown = season ?? seasons[0] ?? 1;
+  const target = resume ? resumeTarget(resume, videos) : null;
+  const targetVideo = videos.find(v => v.id === target?.videoId);
+  // The season of the resumed episode is open, so it is in view in the list below (the card's own season if the title no longer lists it).
+  const targetSeason = targetVideo?.season ?? (target?.videoId && target.videoId === resume?.video_id ? resume.season : undefined);
+  const shown = season ?? targetSeason ?? seasons[0] ?? 1;
   return (
     <>
       {meta.loading && <p className="stremio-muted">Loading…</p>}
@@ -362,8 +442,20 @@ function TitlePage({ channelId, item, dispatch }: { channelId: Snowflake; item: 
           <Backdrop meta={meta.data} />
           {meta.data.description && <p className="stremio-description">{meta.data.description}</p>}
           {item.type === "movie" ? (
-            <StreamList channelId={channelId} type="movie" videoId={item.id} label={item.name} />
+            <StreamList channelId={channelId} type="movie" videoId={item.id} label={item.name} startAt={target?.positionMs ?? 0} />
           ) : (
+            <>
+              {resume && target?.videoId && (
+                <ResumeEpisode
+                  key={target.videoId}
+                  channelId={channelId}
+                  resume={resume}
+                  videoId={target.videoId}
+                  label={targetVideo ? videoLabel(targetVideo) : (episodeLabel({ ...resume, duration_ms: 1 }) ?? target.videoId)}
+                  positionMs={target.positionMs}
+                  next={target.next}
+                />
+              )}
             <section className="stremio-episodes" aria-label="Episodes">
               <div className="stremio-seasons" role="tablist" aria-label="Seasons">
                 {seasons.map(s => (
@@ -380,7 +472,7 @@ function TitlePage({ channelId, item, dispatch }: { channelId: Snowflake; item: 
                     const thumb = safeImage(v.thumbnail);
                     return (
                       <li key={v.id}>
-                        <button type="button" className="stremio-episode" data-video-id={v.id} onClick={() => dispatch({ type: "openStreams", videoId: v.id, label: `S${v.season}E${v.episode}${v.name ? ` ${v.name}` : ""}` })}>
+                        <button type="button" className={`stremio-episode${v.id === target?.videoId ? " current" : ""}`} aria-current={v.id === target?.videoId ? "true" : undefined} data-video-id={v.id} onClick={() => dispatch({ type: "openStreams", videoId: v.id, label: videoLabel(v) })}>
                           <span className="stremio-episode-thumb"><PosterImage src={thumb} lazy /></span>
                           <span className="stremio-episode-text">
                             <span className="stremio-episode-name">
@@ -394,6 +486,7 @@ function TitlePage({ channelId, item, dispatch }: { channelId: Snowflake; item: 
                   })}
               </ul>
             </section>
+            </>
           )}
         </>
       )}
@@ -449,7 +542,7 @@ export function StremioPanel({ channelId }: { channelId: Snowflake }) {
           {state.account === "unavailable" && <p className="stremio-muted">Stremio isn't set up on this server.</p>}
           {(state.account === "unlinked" || state.account === "linking" || state.account === "email") && <LinkCard state={state} dispatch={dispatch} />}
           {state.account === "linked" && view.name === "home" && <Home query={state.query} dispatch={dispatch} />}
-          {state.account === "linked" && view.name === "title" && <TitlePage channelId={channelId} item={view.item} dispatch={dispatch} />}
+          {state.account === "linked" && view.name === "title" && <TitlePage key={view.item.id} channelId={channelId} item={view.item} resume={view.resume} dispatch={dispatch} />}
           {state.account === "linked" && view.name === "streams" && <StreamList channelId={channelId} type={view.item.type} videoId={view.videoId} label={view.label} />}
         </LinkLost.Provider>
       </div>

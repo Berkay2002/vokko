@@ -8,6 +8,7 @@ mod media;
 mod plan;
 mod report;
 mod session;
+mod subs;
 
 use std::sync::Arc;
 use std::time::Duration;

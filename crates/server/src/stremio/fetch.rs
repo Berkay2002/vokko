@@ -20,6 +20,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(8);
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
+/// A whole library (`datastoreGet` with `all`) is one JSON array of every title the user ever opened.
+const LIBRARY_JSON_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_URL_LEN: usize = 4096;
 const MAX_REDIRECTS: usize = 5;
 
@@ -103,12 +105,12 @@ impl Fetcher {
     }
 
     /// Follows redirects by hand, each hop checked: Cinemeta answers its browse catalogs with a 307 to another host.
-    pub async fn get_json(&self, url: &str) -> Result<Value, FetchError> {
+    async fn get(&self, url: &str) -> Result<reqwest::Response, FetchError> {
         let mut url = self.parse(url)?;
         for _ in 0..=MAX_REDIRECTS {
             let response = self.client.get(url.clone()).send().await.map_err(network)?;
             if !response.status().is_redirection() {
-                return read_json(response).await;
+                return Ok(response);
             }
             let location = response.headers().get(LOCATION).and_then(|value| value.to_str().ok()).ok_or(FetchError::Invalid)?;
             url = url.join(location).map_err(|_| FetchError::Blocked)?;
@@ -117,9 +119,25 @@ impl Fetcher {
         Err(FetchError::Blocked)
     }
 
+    pub async fn get_json(&self, url: &str) -> Result<Value, FetchError> {
+        read_json(self.get(url).await?).await
+    }
+
+    /// A text file of at most `max` bytes (the limit counts while it streams in, not from Content-Length), as UTF-8 with bad bytes replaced.
+    pub async fn get_text(&self, url: &str, max: usize) -> Result<String, FetchError> {
+        let bytes = read_capped(self.get(url).await?, max).await?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
+    }
+
     pub async fn post_json(&self, url: &str, body: &Value) -> Result<Value, FetchError> {
         let url = self.parse(url)?;
         self.json(self.client.post(url).json(body)).await
+    }
+
+    /// Like `post_json`, for the answers that can be big (a whole Stremio library): up to `LIBRARY_JSON_BYTES`.
+    pub async fn post_json_large(&self, url: &str, body: &Value) -> Result<Value, FetchError> {
+        let url = self.parse(url)?;
+        read_json_up_to(self.client.post(url).json(body).send().await.map_err(network)?, LIBRARY_JSON_BYTES).await
     }
 
     async fn json(&self, request: reqwest::RequestBuilder) -> Result<Value, FetchError> {
@@ -164,18 +182,26 @@ impl Fetcher {
     }
 }
 
-async fn read_json(mut response: reqwest::Response) -> Result<Value, FetchError> {
+async fn read_capped(mut response: reqwest::Response, max: usize) -> Result<Vec<u8>, FetchError> {
     if !response.status().is_success() {
         return Err(FetchError::Status(response.status().as_u16()));
     }
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(network)? {
-        if body.len() + chunk.len() > MAX_JSON_BYTES {
+        if body.len() + chunk.len() > max {
             return Err(FetchError::TooLarge);
         }
         body.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&body).map_err(|_| FetchError::Invalid)
+    Ok(body)
+}
+
+async fn read_json(response: reqwest::Response) -> Result<Value, FetchError> {
+    read_json_up_to(response, MAX_JSON_BYTES).await
+}
+
+async fn read_json_up_to(response: reqwest::Response, max: usize) -> Result<Value, FetchError> {
+    serde_json::from_slice(&read_capped(response, max).await?).map_err(|_| FetchError::Invalid)
 }
 
 fn network(error: reqwest::Error) -> FetchError {

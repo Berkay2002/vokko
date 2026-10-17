@@ -6,6 +6,7 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
+use vokko_protocol::api::{STREMIO_TRACKS_MAX, StremioAudioTrack, StremioSubtitleKind, StremioSubtitleTrack};
 
 /// A session is dropped when the server has not renewed it for this long (design §3.3).
 pub const LEASE_TTL: Duration = Duration::from_secs(150);
@@ -14,6 +15,8 @@ pub const LEASE_TTL: Duration = Duration::from_secs(150);
 pub const DRIFT_MS: u64 = 3_000;
 pub const AUDIO_RATE: u64 = 48_000;
 const MAX_POSITION_MS: u64 = 48 * 3_600_000;
+/// Text subtitle streams that get their own ffmpeg output (and loopback connection); the rest of the file's text tracks are not offered.
+pub const MAX_TEXT_SUBS: usize = 8;
 
 /// What the server wants one session to be doing (`PUT /sessions/{channel_id}`, design §3.3).
 #[derive(Clone, Deserialize, PartialEq, Eq)]
@@ -32,6 +35,18 @@ pub struct Desired {
     /// Video bitrate in kbit/s (same unit as `VOKKO_STREMIO_BITRATE_KBPS`).
     #[serde(default = "default_bitrate")]
     pub bitrate: u32,
+    /// Changes with every item; echoed in the `tracks` event.
+    #[serde(default)]
+    pub generation: u64,
+    /// The audio stream index to play; none (or one the file does not have) means the file's default.
+    #[serde(default)]
+    pub audio: Option<u32>,
+    /// The bitmap subtitle stream index to burn in; none means no burn-in, unless the server does not know the tracks yet (`choose`).
+    #[serde(default)]
+    pub burned_subtitle: Option<u32>,
+    /// The server holds this item's track lists (it has seen the bot's `tracks` event), so a missing `burned_subtitle` is a choice.
+    #[serde(default)]
+    pub tracks_known: bool,
 }
 
 fn yes() -> bool {
@@ -54,6 +69,9 @@ impl fmt::Debug for Desired {
             .field("playing", &self.playing)
             .field("max_height", &self.max_height)
             .field("bitrate", &self.bitrate)
+            .field("audio", &self.audio)
+            .field("burned_subtitle", &self.burned_subtitle)
+            .field("tracks_known", &self.tracks_known)
             .finish_non_exhaustive()
     }
 }
@@ -122,6 +140,57 @@ pub struct Probe {
     pub duration_ms: Option<u64>,
     pub hdr: bool,
     pub has_audio: bool,
+    pub audio_tracks: Vec<StremioAudioTrack>,
+    pub subtitle_tracks: Vec<StremioSubtitleTrack>,
+}
+
+const BITMAP_SUBS: [&str; 4] = ["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle", "xsub"];
+const TEXT_SUBS: [&str; 7] = ["subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text"];
+
+/// The tags of a stream as the viewers will see them. The server cleans them again; this only keeps the report small.
+fn tags(stream: &serde_json::Value) -> (Option<String>, Option<String>) {
+    let tag = |key: &str, max: usize| {
+        let text: String = stream["tags"][key].as_str()?.chars().filter(|c| !c.is_control()).take(max).collect();
+        (!text.is_empty()).then_some(text)
+    };
+    (tag("language", 8).map(|l| l.to_ascii_lowercase()).filter(|l| l != "und"), tag("title", 80))
+}
+
+fn flag(stream: &serde_json::Value, name: &str) -> bool {
+    stream["disposition"][name].as_u64() == Some(1)
+}
+
+fn audio_track(stream: &serde_json::Value) -> Option<StremioAudioTrack> {
+    let (language, title) = tags(stream);
+    Some(StremioAudioTrack {
+        id: u32::try_from(stream["index"].as_u64()?).ok()?,
+        language,
+        title,
+        codec: stream["codec_name"].as_str().unwrap_or("unknown").to_owned(),
+        default: flag(stream, "default"),
+    })
+}
+
+/// `None` for a codec that is neither a text nor a bitmap format the bot can handle.
+fn subtitle_track(stream: &serde_json::Value) -> Option<StremioSubtitleTrack> {
+    let codec = stream["codec_name"].as_str()?;
+    let kind = if BITMAP_SUBS.contains(&codec) {
+        StremioSubtitleKind::Bitmap
+    } else if TEXT_SUBS.contains(&codec) {
+        StremioSubtitleKind::Text
+    } else {
+        return None;
+    };
+    let (language, title) = tags(stream);
+    Some(StremioSubtitleTrack {
+        id: u32::try_from(stream["index"].as_u64()?).ok()?,
+        kind,
+        language,
+        title,
+        codec: codec.to_owned(),
+        forced: flag(stream, "forced"),
+        default: flag(stream, "default"),
+    })
 }
 
 pub fn parse_probe(json: &str) -> Result<Probe, String> {
@@ -136,14 +205,52 @@ pub fn parse_probe(json: &str) -> Result<Probe, String> {
         (n > 0 && d > 0).then_some((n, d))
     };
     let transfer = video["color_transfer"].as_str().unwrap_or("");
+    let of_type = |kind: &'static str| streams.iter().filter(move |s| s["codec_type"] == kind);
+    let audio_tracks: Vec<_> = of_type("audio").filter_map(audio_track).take(STREMIO_TRACKS_MAX).collect();
+    let mut texts = 0;
+    let subtitle_tracks = of_type("subtitle")
+        .filter_map(subtitle_track)
+        .filter(|t| {
+            t.kind == StremioSubtitleKind::Bitmap || {
+                texts += 1;
+                texts <= MAX_TEXT_SUBS
+            }
+        })
+        .take(STREMIO_TRACKS_MAX)
+        .collect();
     Ok(Probe {
         width,
         height,
         fps: rate("avg_frame_rate").or_else(|| rate("r_frame_rate")),
         duration_ms: v["format"]["duration"].as_str().and_then(|d| d.parse::<f64>().ok()).filter(|d| d.is_finite() && *d > 0.0).map(|d| (d * 1000.0) as u64),
         hdr: matches!(transfer, "smpte2084" | "arib-std-b67"),
-        has_audio: streams.iter().any(|s| s["codec_type"] == "audio"),
+        has_audio: !audio_tracks.is_empty(),
+        audio_tracks,
+        subtitle_tracks,
     })
+}
+
+/// Which tracks one run of ffmpeg uses (stream indices of the file).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Choice {
+    pub audio: Option<u32>,
+    pub burned: Option<u32>,
+}
+
+/// What the bot plays when nobody chose: the audio marked default (else the first), and a forced picture subtitle if the file has one.
+pub fn defaults(probe: &Probe) -> Choice {
+    let audio = probe.audio_tracks.iter().find(|t| t.default).or(probe.audio_tracks.first()).map(|t| t.id);
+    let burned = probe.subtitle_tracks.iter().find(|t| t.forced && t.kind == StremioSubtitleKind::Bitmap).map(|t| t.id);
+    Choice { audio, burned }
+}
+
+/// The request's tracks, checked against the file. Until the server knows the file's tracks (`tracks_known`) no burn-in choice means
+/// the default; afterwards no choice means none, whichever run of the bot this is.
+pub fn choose(probe: &Probe, d: &Desired) -> Choice {
+    let default = defaults(probe);
+    let audio = d.audio.filter(|a| probe.audio_tracks.iter().any(|t| t.id == *a)).or(default.audio);
+    let burned = if !d.tracks_known && d.burned_subtitle.is_none() { default.burned } else { d.burned_subtitle };
+    Choice { audio, burned: burned.filter(|b| probe.subtitle_tracks.iter().any(|t| t.id == *b && t.kind == StremioSubtitleKind::Bitmap)) }
 }
 
 /// Output frame size and rate for one source: scaled down to `max_height`, never up, both sides even.
@@ -187,7 +294,12 @@ pub fn probe_args(media_url: &str, headers: &BTreeMap<String, String>) -> Vec<St
         "15000000",
     ]);
     push_headers(&mut a, headers);
-    a.extend(strings(&["-show_entries", "stream=codec_type,width,height,avg_frame_rate,r_frame_rate,color_transfer:format=duration", "-of", "json"]));
+    a.extend(strings(&[
+        "-show_entries",
+        "stream=index,codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,color_transfer:stream_tags=language,title:stream_disposition=default,forced:format=duration",
+        "-of",
+        "json",
+    ]));
     a.push(media_url.to_owned());
     a
 }
@@ -199,9 +311,14 @@ pub struct FfmpegPlan<'a> {
     pub geo: &'a Geometry,
     pub hdr: bool,
     pub has_audio: bool,
+    pub choice: Choice,
+    /// The source picture size, for a picture subtitle track that does not say how big its canvas is.
+    pub source_size: (u32, u32),
     /// ffmpeg connects to these two loopback listeners (one raw yuv420p video, one s16le stereo audio).
     pub video_port: u16,
     pub audio_port: u16,
+    /// One more loopback listener per text subtitle stream (file stream index, port): ffmpeg writes it as WebVTT.
+    pub text_subs: &'a [(u32, u16)],
 }
 
 const TONEMAP: &str = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv";
@@ -239,18 +356,36 @@ pub fn ffmpeg_args(p: &FfmpegPlan<'_>) -> Vec<String> {
     if p.start_ms > 0 {
         a.extend(["-ss".to_owned(), format!("{}.{:03}", p.start_ms / 1000, p.start_ms % 1000)]);
     }
-    a.extend(["-i".to_owned(), p.media_url.to_owned(), "-map".into(), "0:v:0".into()]);
+    if p.choice.burned.is_some() {
+        a.extend(["-canvas_size".to_owned(), format!("{}x{}", p.source_size.0, p.source_size.1)]);
+    }
+    a.extend(["-i".to_owned(), p.media_url.to_owned()]);
     let tonemap = if p.hdr { format!("{TONEMAP},") } else { String::new() };
-    a.extend([
-        "-vf".to_owned(),
-        format!("{tonemap}scale={}:{}:flags=bicubic,fps={},format=yuv420p", p.geo.width, p.geo.height, p.geo.fps_arg),
-        "-f".into(),
-        "rawvideo".into(),
-        format!("tcp://127.0.0.1:{}", p.video_port),
-    ]);
+    let shape = format!("{tonemap}scale={}:{}:flags=bicubic,fps={},format=yuv420p", p.geo.width, p.geo.height, p.geo.fps_arg);
+    // The overlay's output is 8-bit unless told otherwise; an HDR source is tonemapped after it and would lose two bits first.
+    let overlay = if p.hdr { "format=yuv420p10:" } else { "" };
+    match p.choice.burned {
+        // The picture subtitle is laid over the full-size frame before it is scaled. `eof_action=pass`: when the subtitle stream
+        // ends the picture goes on without the last image stuck on it.
+        Some(index) => a.extend([
+            "-filter_complex".to_owned(),
+            format!("[0:v:0][0:{index}]overlay={overlay}eof_action=pass[burned];[burned]{shape}[vout]"),
+            "-map".into(),
+            "[vout]".into(),
+        ]),
+        None => a.extend(["-map".to_owned(), "0:v:0".into(), "-vf".into(), shape]),
+    }
+    a.extend(["-f".to_owned(), "rawvideo".into(), format!("tcp://127.0.0.1:{}", p.video_port)]);
     if p.has_audio {
-        a.extend(strings(&["-map", "0:a:0", "-ac", "2", "-ar", "48000", "-f", "s16le"]));
+        let audio = p.choice.audio.map_or_else(|| "0:a:0".to_owned(), |index| format!("0:{index}"));
+        a.extend(["-map".to_owned(), audio]);
+        a.extend(strings(&["-ac", "2", "-ar", "48000", "-f", "s16le"]));
         a.push(format!("tcp://127.0.0.1:{}", p.audio_port));
+    }
+    for (index, port) in p.text_subs {
+        a.extend(["-map".to_owned(), format!("0:{index}")]);
+        a.extend(strings(&["-c:s", "webvtt", "-flush_packets", "1", "-f", "webvtt"]));
+        a.push(format!("tcp://127.0.0.1:{port}"));
     }
     a
 }
@@ -304,17 +439,22 @@ pub enum Action {
     Resume(u64),
     /// Playing, but further than `DRIFT_MS` from the server: seek.
     Seek(u64),
+    /// Playing with another audio track or burned-in subtitle: restart ffmpeg where the bot is now.
+    Retrack,
     /// Paused with a new position: remember it for the next resume.
     Hold(u64),
 }
 
 /// `current_ms` is where the bot is now. A token that changes alone does not matter: it only has to be valid at join time.
-pub fn reconcile(prev: &Desired, next: &Desired, current_ms: u64, playing_now: bool) -> Action {
+pub fn reconcile(prev: &Desired, next: &Desired, current_ms: u64, playing_now: bool, retrack: bool) -> Action {
     if prev.livekit_url != next.livekit_url {
         return Action::Reconnect;
     }
     if prev.media_url != next.media_url || prev.max_height != next.max_height || prev.bitrate != next.bitrate {
         return Action::Restart;
+    }
+    if retrack && playing_now && next.playing {
+        return Action::Retrack;
     }
     match (playing_now, next.playing) {
         (true, false) => Action::Pause,
@@ -400,7 +540,7 @@ mod tests {
         assert!(shown.contains("cdn.example"));
     }
 
-    const PROBE: &str = r#"{"streams":[{"codec_type":"audio"},{"codec_type":"video","width":1920,"height":1080,
+    const PROBE: &str = r#"{"streams":[{"index":1,"codec_type":"audio"},{"codec_type":"video","width":1920,"height":1080,
         "avg_frame_rate":"24000/1001","r_frame_rate":"24000/1001","color_transfer":"smpte2084"}],"format":{"duration":"596.474195"}}"#;
 
     #[test]
@@ -417,7 +557,7 @@ mod tests {
     }
 
     fn probe(w: u32, h: u32, fps: Option<(u32, u32)>) -> Probe {
-        Probe { width: w, height: h, fps, duration_ms: None, hdr: false, has_audio: true }
+        Probe { width: w, height: h, fps, duration_ms: None, hdr: false, has_audio: true, audio_tracks: Vec::new(), subtitle_tracks: Vec::new() }
     }
 
     #[test]
@@ -446,8 +586,11 @@ mod tests {
             geo: &geo,
             hdr: false,
             has_audio: true,
+            choice: Choice::default(),
+            source_size: (1920, 1080),
             video_port: 5001,
             audio_port: 5002,
+            text_subs: &[],
         };
         let a = ffmpeg_args(&plan);
         let at = |flag: &str| a.iter().position(|x| x == flag).unwrap_or_else(|| panic!("{flag} missing"));
@@ -468,14 +611,43 @@ mod tests {
         assert_eq!(a[at("-headers") + 1], "Referer: https://x/\r\n");
         assert_eq!(a[at("-vf") + 1], "scale=1280:720:flags=bicubic,fps=24/1,format=yuv420p");
         assert!(a.contains(&"tcp://127.0.0.1:5001".to_owned()) && a.contains(&"tcp://127.0.0.1:5002".to_owned()));
-        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "0:a:0"));
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "0:a:0"), "no choice: the first audio stream");
+        assert!(!a.contains(&"-filter_complex".to_owned()) && !a.contains(&"-canvas_size".to_owned()) && !a.contains(&"webvtt".to_owned()));
 
-        let no_audio = FfmpegPlan { has_audio: false, start_ms: 0, ..plan };
+        // A chosen audio stream is mapped by its index in the file, a text track gets its own WebVTT output, a picture subtitle is
+        // burned in with an overlay (the video then comes from the filter graph, not from -vf).
+        let tracks = FfmpegPlan { choice: Choice { audio: Some(3), burned: Some(5) }, text_subs: &[(4, 6001), (7, 6002)], ..plan };
+        let a = ffmpeg_args(&tracks);
+        let at = |flag: &str| a.iter().position(|x| x == flag).unwrap_or_else(|| panic!("{flag} missing"));
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "0:3") && !a.contains(&"0:a:0".to_owned()));
+        assert_eq!(a[at("-canvas_size") + 1], "1920x1080");
+        assert!(at("-canvas_size") < at("-i"), "an input option");
+        assert_eq!(
+            a[at("-filter_complex") + 1],
+            "[0:v:0][0:5]overlay=eof_action=pass[burned];[burned]scale=1280:720:flags=bicubic,fps=24/1,format=yuv420p[vout]"
+        );
+        assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[vout]") && !a.contains(&"-vf".to_owned()) && !a.contains(&"0:v:0".to_owned()));
+        for (index, port) in [(4, 6001), (7, 6002)] {
+            let i = a.iter().position(|x| *x == format!("0:{index}")).expect("text map");
+            assert_eq!(a[i - 1], "-map");
+            assert_eq!(a[i + 1..=i + 5], ["-c:s", "webvtt", "-flush_packets", "1", "-f"]);
+            assert_eq!((a[i + 6].as_str(), a[i + 7].as_str()), ("webvtt", format!("tcp://127.0.0.1:{port}").as_str()));
+        }
+        assert!(a.iter().filter(|x| x.starts_with("tcp://")).all(|x| x.starts_with("tcp://127.0.0.1:")), "outputs only go to loopback");
+
+        let no_audio = FfmpegPlan { has_audio: false, start_ms: 0, ..tracks };
+        let no_audio = FfmpegPlan { choice: Choice::default(), text_subs: &[], ..no_audio };
         let a = ffmpeg_args(&no_audio);
         assert!(!a.contains(&"-ss".to_owned()) && !a.contains(&"-ac".to_owned()));
 
         let hdr = FfmpegPlan { hdr: true, ..no_audio };
         assert!(ffmpeg_args(&hdr).iter().any(|x| x.starts_with("zscale=t=linear") && x.ends_with("format=yuv420p")));
+        let a = ffmpeg_args(&FfmpegPlan { choice: Choice { audio: None, burned: Some(5) }, ..hdr });
+        let graph = &a[a.iter().position(|x| x == "-filter_complex").expect("filter graph") + 1];
+        assert!(
+            graph.starts_with("[0:v:0][0:5]overlay=format=yuv420p10:eof_action=pass[burned];[burned]zscale=t=linear"),
+            "an HDR source keeps ten bits through the overlay: {graph}"
+        );
     }
 
     #[test]
@@ -497,9 +669,78 @@ mod tests {
         assert!(!lease.expired(t0), "a clock that goes backwards never expires");
     }
 
+    const TRACKS: &str = r#"{"streams":[
+        {"index":0,"codec_type":"video","codec_name":"h264","width":1920,"height":1080,"avg_frame_rate":"24/1"},
+        {"index":1,"codec_type":"audio","codec_name":"eac3","tags":{"language":"ENG","title":"Surround"},"disposition":{"default":0,"forced":0}},
+        {"index":2,"codec_type":"audio","codec_name":"aac","tags":{"language":"swe"},"disposition":{"default":1,"forced":0}},
+        {"index":3,"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"eng"},"disposition":{"default":0,"forced":0}},
+        {"index":4,"codec_type":"subtitle","codec_name":"hdmv_pgs_subtitle","tags":{"language":"und"},"disposition":{"default":0,"forced":1}},
+        {"index":5,"codec_type":"subtitle","codec_name":"hdmv_pgs_subtitle","tags":{"language":"fre"},"disposition":{"default":0,"forced":0}},
+        {"index":6,"codec_type":"subtitle","codec_name":"eia_608"},
+        {"index":7,"codec_type":"attachment","codec_name":"ttf"}],"format":{"duration":"60"}}"#;
+
+    #[test]
+    fn tracks_are_read_from_the_probe() {
+        let p = parse_probe(TRACKS).expect("probe");
+        let audio: Vec<_> = p.audio_tracks.iter().map(|t| (t.id, t.language.as_deref(), t.title.as_deref(), t.default)).collect();
+        assert_eq!(audio, [(1, Some("eng"), Some("Surround"), false), (2, Some("swe"), None, true)]);
+        let subs: Vec<_> = p.subtitle_tracks.iter().map(|t| (t.id, t.kind, t.language.as_deref(), t.forced)).collect();
+        assert_eq!(
+            subs,
+            [
+                (3, StremioSubtitleKind::Text, Some("eng"), false),
+                (4, StremioSubtitleKind::Bitmap, None, true),
+                (5, StremioSubtitleKind::Bitmap, Some("fre"), false)
+            ],
+            "an unknown codec is not offered and 'und' is no language"
+        );
+        assert!(
+            probe_args("https://cdn.example/v.mp4", &BTreeMap::new())
+                .iter()
+                .any(|x| x.contains("stream_tags=language,title") && x.contains("stream_disposition=default,forced"))
+        );
+        // At most MAX_TEXT_SUBS text tracks are offered; picture tracks do not count against them.
+        let many: String = (0..12).map(|i| format!(r#"{{"index":{},"codec_type":"subtitle","codec_name":"ass"}},"#, i + 1)).collect();
+        let json = format!(
+            r#"{{"streams":[{many}{{"index":20,"codec_type":"subtitle","codec_name":"dvd_subtitle"}},{{"index":0,"codec_type":"video","width":640,"height":360}}]}}"#
+        );
+        let p = parse_probe(&json).expect("probe");
+        assert_eq!(p.subtitle_tracks.iter().filter(|t| t.kind == StremioSubtitleKind::Text).count(), MAX_TEXT_SUBS);
+        assert!(p.subtitle_tracks.iter().any(|t| t.id == 20));
+    }
+
+    #[test]
+    fn defaults_and_choices_follow_the_file_and_the_request() {
+        let p = parse_probe(TRACKS).expect("probe");
+        assert_eq!(defaults(&p), Choice { audio: Some(2), burned: Some(4) }, "the default-flagged audio and the forced picture subtitle");
+        let first = parse_probe(&TRACKS.replace(r#""default":1"#, r#""default":0"#).replace(r#""forced":1"#, r#""forced":0"#)).expect("probe");
+        assert_eq!(defaults(&first), Choice { audio: Some(1), burned: None }, "else the first audio, no burn-in");
+        let mut d = desired();
+        assert_eq!(choose(&p, &d), Choice { audio: Some(2), burned: Some(4) }, "the server does not know the tracks yet: the defaults");
+        d.tracks_known = true;
+        assert_eq!(choose(&p, &d), Choice { audio: Some(2), burned: None }, "known and no burn-in choice means none, also after a bot restart");
+        d.audio = Some(1);
+        d.burned_subtitle = Some(5);
+        assert_eq!(choose(&p, &d), Choice { audio: Some(1), burned: Some(5) });
+        d.tracks_known = false;
+        assert_eq!(choose(&p, &d), Choice { audio: Some(1), burned: Some(5) }, "a request that names one wins");
+        d.audio = Some(99);
+        d.burned_subtitle = Some(3);
+        assert_eq!(choose(&p, &d), Choice { audio: Some(2), burned: None }, "unknown audio falls back, a text track is never burned");
+    }
+
     #[test]
     fn reconcile_rules() {
+        let reconcile = |prev: &Desired, next: &Desired, current_ms, playing_now| super::reconcile(prev, next, current_ms, playing_now, false);
         let a = desired();
+        assert_eq!(super::reconcile(&a, &a, 1000, true, true), Action::Retrack);
+        assert_eq!(super::reconcile(&a, &a, 1000, false, true), Action::Resume(1000), "not running: the start that follows uses the new tracks");
+        let mut pause = a.clone();
+        pause.playing = false;
+        assert_eq!(super::reconcile(&a, &pause, 1000, true, true), Action::Pause);
+        let mut moved = a.clone();
+        moved.media_url = "https://cdn.example/w.mp4".into();
+        assert_eq!(super::reconcile(&a, &moved, 1000, true, true), Action::Restart);
         let with = |edit: fn(&mut Desired)| {
             let mut d = a.clone();
             edit(&mut d);

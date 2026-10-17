@@ -118,6 +118,10 @@ https://vokko.example.com and LiveKit Cloud, and the updater (public key, endpoi
 and its password live outside the repo in `~/.vokko/updater.key` and `~/.vokko/updater.key.password` on the Windows PC and on buildhost; losing
 them means installed apps can never be updated again, so keep a backup. **Release with `tools/release-desktop.sh <version> "notes"`** from Git
 Bash on the Windows PC: it bumps the version, builds both platforms, uploads them to `/downloads/` and writes `latest.json` last.
+The macOS app is ad-hoc signed (`bundle.macOS.signingIdentity: "-"` in the overlay). Without it the binary is only linker-signed
+with no sealed resources, and a downloaded copy opens as "Vokko is damaged" with no way past it. Ad-hoc is not notarized: macOS
+still warns once, and the user allows it under System Settings, Privacy & Security, Open Anyway (or runs
+`xattr -dr com.apple.quarantine /Applications/Vokko.app`). Only a paid Developer ID with notarization removes the warning.
 
 (`npm run desktop:build` passes `--no-bundle`, so it produces no installer or signature.) The build writes the installer plus a `.sig`
 next to the updater artifact under `target\release\bundle`. Upload both and serve either the dynamic endpoint above or a static

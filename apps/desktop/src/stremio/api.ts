@@ -5,10 +5,12 @@ import { request } from "../api/rest";
 import type {
   Snowflake,
   StremioAccountStatus,
+  StremioContinueItem,
   StremioLinkStart,
   StremioMeta,
   StremioPatchRequest,
   StremioSearchItem,
+  StremioStartRequest,
   StremioState,
   StremioStreams,
   StremioType,
@@ -28,8 +30,11 @@ export const getMeta = (type: StremioType, id: string) => request<StremioMeta>("
 export const getStreams = (type: StremioType, videoId: string) => request<StremioStreams>("GET", `/stremio/streams/${type}/${videoId}`);
 
 const path = (channelId: Snowflake) => `/channels/${channelId}/stremio`;
-/** Play the stream `sid` now (replacing what is playing; the queue stays). */
-export const startStremio = (channelId: Snowflake, sid: string) => request<StremioState>("PUT", path(channelId), { sid });
+/** The caller's own Continue watching (their linked Stremio library, newest first, at most 20); `[]` when nothing is saved. */
+export const getContinue = () => request<StremioContinueItem[]>("GET", "/stremio/continue");
+/** Play the stream `sid` now (replacing what is playing; the queue stays), from `positionMs` when resuming. */
+export const startStremio = (channelId: Snowflake, sid: string, positionMs = 0) =>
+  request<StremioState>("PUT", path(channelId), { sid, ...(positionMs > 0 ? { position_ms: Math.round(positionMs) } : {}) } satisfies StremioStartRequest);
 export const controlStremio = (channelId: Snowflake, patch: StremioPatchRequest) => request<StremioState | null>("PATCH", path(channelId), patch);
 export const stopStremio = (channelId: Snowflake) => request<void>("DELETE", path(channelId));
 export const viewerToken = (channelId: Snowflake) => request<StremioViewerToken>("POST", `${path(channelId)}/viewer-token`);
