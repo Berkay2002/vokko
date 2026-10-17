@@ -412,6 +412,7 @@
     height: 48px;
   }
 
+  .voice-bar::before,
   .voice-bar-button[aria-label="Input options"],
   .voice-bar-button[aria-label="Camera options"],
   .voice-bar-side {

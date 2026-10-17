@@ -407,11 +407,11 @@ function ServerForm({ me, guild }: { me: User; guild: Guild }) {
   );
 }
 
-function ServerProfilesTab({ me }: { me: User }) {
+function ServerProfilesTab({ me, guildId }: { me: User; guildId?: string }) {
   const guilds = useStore(s => s.guilds);
   const guildOrder = useStore(s => s.guildOrder);
   const list = guildOrder.map(id => guilds[id]).filter((g): g is Guild => !!g);
-  const [selected, setSelected] = useState<string>(list[0]?.id ?? "");
+  const [selected, setSelected] = useState<string>(guildId ?? list[0]?.id ?? "");
   const guild = guilds[selected] ?? list[0];
   if (!guild) return <p className="settings-todo">You are not in any servers yet.</p>;
   return (
@@ -424,8 +424,9 @@ function ServerProfilesTab({ me }: { me: User }) {
   );
 }
 
-export function ProfilesPage({ me }: { me: User }) {
-  const [tab, setTab] = useState<"user" | "server">("user");
+/** `guildId` opens the per-server tab with that server picked (menu "Edit Per-server Profile"). */
+export function ProfilesPage({ me, guildId }: { me: User; guildId?: string }) {
+  const [tab, setTab] = useState<"user" | "server">(guildId ? "server" : "user");
   // A dirty draft would be dropped with the tab, so the unsaved guard answers the click with a shake instead.
   const go = (next: "user" | "server") => {
     if (next !== tab && !blockedByUnsaved()) setTab(next);
@@ -441,7 +442,7 @@ export function ProfilesPage({ me }: { me: User }) {
           Per-server profiles
         </button>
       </div>
-      {tab === "user" ? <UserProfileTab me={me} /> : <ServerProfilesTab me={me} />}
+      {tab === "user" ? <UserProfileTab me={me} /> : <ServerProfilesTab me={me} guildId={guildId} />}
     </div>
   );
 }

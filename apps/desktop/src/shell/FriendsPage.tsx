@@ -21,7 +21,7 @@ import { Avatar, GuildIcon } from "./Avatar";
 import { copyText, openDirectMessage } from "./actions";
 import { openProfile } from "./profileStore";
 import { go, guildPath } from "./nav";
-import { UNAVAILABLE } from "./menus";
+import { callUser } from "../calls/engine";
 import { openModal } from "./modalStore";
 
 type Tab = "online" | "all" | "pending" | "suggestions" | "blocked" | "add";
@@ -94,8 +94,8 @@ function PersonRow({ relationship, mode }: { relationship: Relationship; mode: "
               event => {
                 const rect = event.currentTarget.getBoundingClientRect();
                 menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [
-                  { id: "video-call", label: "Start Video Call", disabled: true, tooltip: UNAVAILABLE },
-                  { id: "voice-call", label: "Start Voice Call", disabled: true, tooltip: UNAVAILABLE },
+                  { id: "video-call", label: "Start Video Call", onSelect: () => void callUser(user.id, true) },
+                  { id: "voice-call", label: "Start Voice Call", onSelect: () => void callUser(user.id) },
                   { id: "remove", label: "Remove Friend", danger: true, onSelect: () => openModal({ type: "removeFriend", userId: user.id }) },
                 ]);
               },

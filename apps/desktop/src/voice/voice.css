@@ -1064,10 +1064,17 @@
   background: var(--button-danger-background-disabled, #d22d39);
 }
 
+/* The side buttons get their own slot: an equal flexible spacer on the left keeps the middle centred while there is room,
+   and when the stage is narrow (chat open) the spacer shrinks first instead of the side sliding over the hang-up. */
+.voice-bar::before {
+  content: "";
+  flex: 1 1 0;
+}
+
 .voice-bar-side {
-  position: absolute;
-  right: 0;
   display: flex;
+  flex: 1 1 0;
+  justify-content: flex-end;
   align-items: center;
   gap: 4px;
 }

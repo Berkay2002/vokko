@@ -62,6 +62,24 @@ test('register: closed instances say so instead of showing the form', async ({ p
   await expect(page.getByLabel('Email')).toHaveCount(0);
 });
 
+test('register: a card taller than the window scrolls from its top on a phone', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 640 });
+  await page.goto('/login?mockLatency=0');
+  await mockReady(page);
+  await page.evaluate(() => (window as unknown as Hooks).__vokkoMockAccounts.instance({ terms: 'I agree to the house rules.', terms_url: 'https://example.test/terms' }));
+  await goInApp(page, '/register');
+  const card = page.locator('.auth-card');
+  await expect(card).toBeVisible();
+  const box = (await card.boundingBox())!;
+  expect(box.height).toBeGreaterThan(640);
+  // The top (logo and heading) is on screen, not cut off above the page, and the rest scrolls into view.
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  await page.getByRole('button', { name: 'Continue', exact: true }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeInViewport();
+  await page.locator('.auth-page').evaluate(el => el.scrollTo(0, 0));
+  await expect(page.getByRole('heading', { level: 1 })).toBeInViewport();
+});
+
 async function openMyAccount(page: import('@playwright/test').Page) {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.locator('.dm-row').first().waitFor();

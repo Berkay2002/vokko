@@ -186,7 +186,7 @@ function MyAccount({ me }: { me: User }) {
   );
 }
 
-export function UserSettings({ section }: { section?: string }) {
+export function UserSettings({ section, guildId }: { section?: string; guildId?: string }) {
   const me = useStore(s => s.me);
   const [current, setCurrent] = useState(SECTIONS.some(s => s.id === section) ? (section as string) : "account");
   const [subs, setSubs] = useState<string[]>([]);
@@ -246,7 +246,7 @@ export function UserSettings({ section }: { section?: string }) {
       case "account":
         return <MyAccount me={me} />;
       case "profiles":
-        return <ProfilesPage me={me} />;
+        return <ProfilesPage me={me} guildId={guildId} />;
       case "notifications":
         return <NotificationsPage />;
       case "windows":
