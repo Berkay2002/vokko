@@ -109,6 +109,11 @@
   user-select: none;
 }
 
+/* Below the notification banner (placeAtPoint keeps the top there too). */
+html.has-top-banner .context-menu {
+  max-height: calc(100vh - 16px - var(--notify-banner-height));
+}
+
 .context-menu-item {
   display: flex;
   align-items: center;

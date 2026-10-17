@@ -29,11 +29,18 @@ export function placeNear(anchor: DOMRect, width: number, height: number, side: 
   return { left, top, side: used };
 }
 
-/** Position a box at a point (context menus): shift left/up when it would overflow. */
+/** The highest a context menu may reach: below the notification banner while one shows (it would cover the banner's button). */
+export function menuTop(): number {
+  const root = document.documentElement;
+  if (!root.classList.contains("has-top-banner")) return MARGIN;
+  return MARGIN + (parseFloat(getComputedStyle(root).getPropertyValue("--notify-banner-height")) || 0);
+}
+
+/** Position a box at a point (context menus): shift left/up when it would overflow, never above [menuTop]. */
 export function placeAtPoint(x: number, y: number, width: number, height: number): { left: number; top: number } {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const left = x + width + MARGIN > vw ? Math.max(MARGIN, x - width) : x;
-  const top = y + height + MARGIN > vh ? Math.max(MARGIN, vh - height - MARGIN) : y;
+  const top = y + height + MARGIN > vh ? Math.max(menuTop(), vh - height - MARGIN) : y;
   return { left, top };
 }
