@@ -57,6 +57,8 @@ let activeToken: string | null = null;
  * before the next op 4 or, after an op 4, the wait for its token; it is cleared as soon as a token starts a connect.
  */
 let retry: { startedAt: number; attempt: number; timer: ReturnType<typeof setTimeout> | null } | null = null;
+/** Channel of the last connect: a new token for the same channel is a reconnect, which puts our camera / screen share back. */
+let mediaChannel: Snowflake | null = null;
 let unbindPtt: (() => void) | null = null;
 let boundPtt: string | null = null;
 
@@ -369,7 +371,10 @@ async function connect(endpoint: string, token: string): Promise<void> {
   try {
     const t = await transportFor(endpoint);
     if (activeToken !== token) return; // superseded meanwhile
-    await t.connect(endpoint, token, transportOptions(getVoice()));
+    const channelId = getVoice().channelId;
+    const resume = mediaChannel !== null && mediaChannel === channelId;
+    mediaChannel = channelId;
+    await t.connect(endpoint, token, { ...transportOptions(getVoice()), resume });
     if (activeToken !== token) return;
     // Every connect starts the transport from scratch (a new room forgets what we watch), but the media store keeps the
     // Watch Stream and quality choices across a reconnect: hand them back, or a watched stream shows only its avatar.
@@ -476,6 +481,7 @@ function sync(next: VoiceModel, prev: VoiceModel): void {
   // Connection lifecycle.
   if (next.channelId === null && prev.channelId !== null) {
     activeToken = null;
+    mediaChannel = null;
     stopRetry();
     void transport?.disconnect();
     resetMedia();
@@ -565,15 +571,16 @@ export function wireVoice(): void {
 
   gateway.on("READY", ready => {
     dispatch({ type: "ready", meId: ready.user.id, voiceEnabled: !!ready.media?.voice_enabled, guilds: ready.guilds });
-    // Re-identified while in voice: re-send op 4 so the server re-binds us without a leave (§1.6).
+    // Re-identified while in voice: re-send op 4 so the server re-binds us to the new gateway session without a leave (§1.6).
+    // It keeps our voice session and sends no token, so a live media connection stays as it is.
     const model = getVoice();
     if (model.channelId) {
       dispatch({ type: "rejoin" });
       sendOp4(model.guildId, model.channelId);
-      // A reconnect in progress now waits for this op 4's token instead of sending its own.
+      // Media was lost meanwhile: ask for a token on the new session now instead of after the backoff.
       if (retry && activeToken === null) {
         clearRetryTimer();
-        scheduleRetry(TOKEN_WAIT_MS);
+        reconnect();
       }
     }
   });
