@@ -1,13 +1,17 @@
 // The Spotify tile: no picture, only the server's session state (art, title, artists, a seek bar from {position_ms, updated_at_ms}),
 // previous / play-pause / skip, shuffle (reorders the queue once), loop (off, queue, track), stop, local volume and Up next with
 // remove. Every button is a PATCH that comes back to everyone as SPOTIFY_UPDATE. The sound plays from the call's viewer Room.
+// Someone without control (useCanControlMedia) sees no seek, shuffle, previous, play / pause, loop or stop, votes to skip, and
+// removes only their own Up next entries.
 
 import { useEffect, useState } from "react";
 import { ListMusic, Maximize2, Minimize2, Pause, Play, Plus, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Square, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
-import type { Snowflake, SpotifyLoop, SpotifyState } from "../api/types";
+import { SPOTIFY_QUEUE_PER_USER, type Snowflake, type SpotifyLoop, type SpotifyState } from "../api/types";
 import { Tooltip } from "../ui";
+import { MediaVotes, useHostLabel } from "../voice/MediaVotes";
 import { useVoice } from "../voice/store";
+import { queueQuota, skipAction, useCanControlMedia, useMeId } from "../voice/useCanControlMedia";
 import { formatClock } from "../watch/youtube";
 import { reason } from "../stremio/format";
 import { startViewerAudio, useViewerSlot } from "../stremio/viewerStore";
@@ -37,9 +41,9 @@ function useNow(everyMs: number): number {
   return now;
 }
 
-function ControlButton({ label, active, disabled, onClick, children, primary }: { label: string; active?: boolean; disabled?: boolean; onClick(): void; children: React.ReactNode; primary?: boolean }) {
+function ControlButton({ label, tip, active, disabled, onClick, children, primary }: { label: string; tip?: string; active?: boolean; disabled?: boolean; onClick(): void; children: React.ReactNode; primary?: boolean }) {
   return (
-    <Tooltip content={label} side="top">
+    <Tooltip content={tip ?? label} side="top">
       <button type="button" className={`stremio-button${active ? " active" : ""}${primary ? " spotify-main-button" : ""}`} aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick}>
         {children}
       </button>
@@ -47,9 +51,11 @@ function ControlButton({ label, active, disabled, onClick, children, primary }: 
   );
 }
 
-function UpNext({ channelId, state, onFail }: { channelId: Snowflake; state: SpotifyState; onFail(message: string): void }) {
+function UpNext({ channelId, state, onFail, controller, meId }: { channelId: Snowflake; state: SpotifyState; onFail(message: string): void; controller: boolean; meId: Snowflake | undefined }) {
   const users = useStore(s => s.users);
   const more = state.queue_len - state.queue.length;
+  // shortcut: counts own entries among the first SPOTIFY_EVENT_QUEUE_MAX the event carries, so a long queue can under-count; the server enforces the real quota.
+  const quota = queueQuota(state.queue.map(q => q.added_by), meId, controller, SPOTIFY_QUEUE_PER_USER);
   return (
     <aside className="stremio-queue spotify-queue" aria-label="Up next">
       <h3 className="stremio-queue-title">Up next</h3>
@@ -66,18 +72,25 @@ function UpNext({ channelId, state, onFail }: { channelId: Snowflake; state: Spo
                   <span className="stremio-queue-name">{entry.title}</span>
                   <span className="stremio-queue-sub">{[artistsText(entry.artists), by ? `added by ${displayName(by)}` : null].filter(Boolean).join(" · ")}</span>
                 </span>
-                <button type="button" className="stremio-button" aria-label={`Remove ${entry.title} from Up next`} onClick={() => controlSpotify(channelId, { queue_remove: entry.qid }).catch(e => onFail(reason(e)))}>
-                  <X size={14} />
-                </button>
+                {(controller || entry.added_by === meId) && (
+                  <button type="button" className="stremio-button" aria-label={`Remove ${entry.title} from Up next`} onClick={() => controlSpotify(channelId, { queue_remove: entry.qid }).catch(e => onFail(reason(e)))}>
+                    <X size={14} />
+                  </button>
+                )}
               </li>
             );
           })}
         </ol>
       )}
       {more > 0 && <p className="stremio-queue-empty">and {more} more</p>}
-      <button type="button" className="btn btn-secondary stremio-queue-add" onClick={openSpotifyPanel}>
+      <button type="button" className="btn btn-secondary stremio-queue-add" disabled={quota?.full} onClick={openSpotifyPanel}>
         <Plus size={14} aria-hidden="true" /> Search the catalog
       </button>
+      {quota && (
+        <p className="media-quota" data-queue-quota={quota.mine}>
+          {quota.hint}
+        </p>
+      )}
     </aside>
   );
 }
@@ -90,6 +103,10 @@ export function SpotifyTile(props: { channelId: Snowflake; variant: SpotifyVaria
 
 function SpotifyTileBody({ channelId, variant, onActivate, state }: { channelId: Snowflake; variant: SpotifyVariant; onActivate?: () => void; state: SpotifyState }) {
   const starter = useStore(s => s.users[state.started_by]);
+  const hostLabel = useHostLabel(state, state.started_by);
+  const meId = useMeId();
+  const controller = useCanControlMedia(channelId, state.host_id);
+  const skip = skipAction(state, meId, controller);
   const deaf = useVoice(s => s.selfDeaf);
   const volume = useSpotifyVolume(s => s.volume);
   const viewer = useViewerSlot(channelId);
@@ -138,7 +155,7 @@ function SpotifyTileBody({ channelId, variant, onActivate, state }: { channelId:
             <SpotifyIcon size={16} />
             <span className="spotify-head-name">Spotify</span>
             <span className="voice-bot-badge">Bot</span>
-            {starter && <span className="spotify-head-by">Started by {displayName(starter)}</span>}
+            {starter && <span className="spotify-head-by">{[`Started by ${displayName(starter)}`, hostLabel].filter(Boolean).join(" · ")}</span>}
           </div>
           <div className="spotify-now">
             <Art art={track?.art} className="spotify-now-art" />
@@ -156,6 +173,7 @@ function SpotifyTileBody({ channelId, variant, onActivate, state }: { channelId:
                   {state.notice}
                 </span>
               )}
+              <MediaVotes control={state} />
             </div>
           </div>
           {(failure || viewer.blocked) && (
@@ -168,26 +186,30 @@ function SpotifyTileBody({ channelId, variant, onActivate, state }: { channelId:
               )}
             </div>
           )}
-          {queueOpen && <UpNext channelId={channelId} state={state} onFail={setFailure} />}
+          {queueOpen && <UpNext channelId={channelId} state={state} onFail={setFailure} controller={controller} meId={meId} />}
           <div className="stremio-bar spotify-bar">
             <div className="spotify-seek-row">
               <span className="stremio-time" aria-label="Position">
                 {formatClock(drag ?? position)}
               </span>
-              <input
-                className="stremio-seek spotify-seek"
-                type="range"
-                aria-label="Seek"
-                min={0}
-                max={Math.max(duration, 1)}
-                step={1000}
-                value={drag ?? position}
-                disabled={!track || error}
-                onChange={e => setDrag(Number(e.target.value))}
-                onPointerUp={commitSeek}
-                onKeyUp={commitSeek}
-                onBlur={commitSeek}
-              />
+              {controller ? (
+                <input
+                  className="stremio-seek spotify-seek"
+                  type="range"
+                  aria-label="Seek"
+                  min={0}
+                  max={Math.max(duration, 1)}
+                  step={1000}
+                  value={drag ?? position}
+                  disabled={!track || error}
+                  onChange={e => setDrag(Number(e.target.value))}
+                  onPointerUp={commitSeek}
+                  onKeyUp={commitSeek}
+                  onBlur={commitSeek}
+                />
+              ) : (
+                <span className="stremio-spacer" />
+              )}
               <span className="stremio-time" aria-label="Duration">
                 {formatClock(duration)}
               </span>
@@ -198,21 +220,28 @@ function SpotifyTileBody({ channelId, variant, onActivate, state }: { channelId:
                 <input type="range" aria-label="Spotify volume" min={0} max={100} value={volume} onChange={e => setSpotifyVolume(Number(e.target.value))} />
               </label>
               <span className="stremio-spacer" />
-              <ControlButton label="Shuffle the queue" disabled={error || state.queue_len < 2} onClick={() => run(controlSpotify(channelId, { shuffle: true }))}>
-                <Shuffle size={18} />
-              </ControlButton>
-              <ControlButton label="Previous" disabled={error} onClick={() => run(controlSpotify(channelId, { previous: true }))}>
-                <SkipBack size={18} />
-              </ControlButton>
-              <ControlButton primary label={state.playing ? "Pause" : "Play"} disabled={error || !track} onClick={() => run(controlSpotify(channelId, { playing: !state.playing }))}>
-                {state.playing ? <Pause size={18} /> : <Play size={18} />}
-              </ControlButton>
-              <ControlButton label="Skip" disabled={error || !track} onClick={() => run(controlSpotify(channelId, { skip: true }))}>
+              {controller && (
+                <>
+                  <ControlButton label="Shuffle the queue" disabled={error || state.queue_len < 2} onClick={() => run(controlSpotify(channelId, { shuffle: true }))}>
+                    <Shuffle size={18} />
+                  </ControlButton>
+                  <ControlButton label="Previous" disabled={error} onClick={() => run(controlSpotify(channelId, { previous: true }))}>
+                    <SkipBack size={18} />
+                  </ControlButton>
+                  <ControlButton primary label={state.playing ? "Pause" : "Play"} disabled={error || !track} onClick={() => run(controlSpotify(channelId, { playing: !state.playing }))}>
+                    {state.playing ? <Pause size={18} /> : <Play size={18} />}
+                  </ControlButton>
+                </>
+              )}
+              <ControlButton label={skip.label} tip={skip.vote ? `${skip.label}: skips when half the listeners vote` : undefined} active={skip.vote ? skip.voted : undefined} disabled={error || !track} onClick={() => run(controlSpotify(channelId, { skip: skip.skip }))}>
                 <SkipForward size={18} />
+                {skip.vote && <span className="media-vote-count">{state.skip_votes.length}/{state.skip_needed}</span>}
               </ControlButton>
-              <ControlButton label={LOOP_LABEL[state.loop]} active={state.loop !== "off"} disabled={error} onClick={() => run(controlSpotify(channelId, { loop: NEXT_LOOP[state.loop] }))}>
-                {state.loop === "track" ? <Repeat1 size={18} /> : <Repeat size={18} />}
-              </ControlButton>
+              {controller && (
+                <ControlButton label={LOOP_LABEL[state.loop]} active={state.loop !== "off"} disabled={error} onClick={() => run(controlSpotify(channelId, { loop: NEXT_LOOP[state.loop] }))}>
+                  {state.loop === "track" ? <Repeat1 size={18} /> : <Repeat size={18} />}
+                </ControlButton>
+              )}
               <span className="stremio-spacer" />
               <ControlButton label={`Up next (${state.queue_len})`} active={queueOpen} onClick={() => setQueueOpen(o => !o)}>
                 <ListMusic size={18} />
@@ -222,9 +251,11 @@ function SpotifyTileBody({ channelId, variant, onActivate, state }: { channelId:
                   {variant === "focused" ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
                 </ControlButton>
               )}
-              <ControlButton label="Stop Spotify" onClick={() => run(stopSpotify(channelId))}>
-                <Square size={18} />
-              </ControlButton>
+              {controller && (
+                <ControlButton label="Stop Spotify" onClick={() => run(stopSpotify(channelId))}>
+                  <Square size={18} />
+                </ControlButton>
+              )}
             </div>
           </div>
         </>

@@ -1,15 +1,18 @@
 // The Watch Together tile: the shared YouTube player (an iframe on our own embed page) with its control bar and "Up next" queue.
 // The server holds the truth ({video_id, playing, position_ms, updated_at_ms}); every client turns that into player commands,
 // seeks when it drifts more than 2 s, and sends its own button presses back as PATCHes, which everyone (itself included) then
-// applies from WATCH_TOGETHER_UPDATE. Volume is local.
+// applies from WATCH_TOGETHER_UPDATE. Volume is local. Someone without control (useCanControlMedia) sees no play / pause, seek or
+// stop, votes to skip, and may queue up to WATCH_TOGETHER_QUEUE_PER_USER videos.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ListVideo, Maximize2, Minimize2, Pause, Play, SkipForward, Square, Tv, Volume2, VolumeX } from "lucide-react";
-import { ApiRequestError } from "../api/rest";
 import { displayName, useStore } from "../api/store";
-import type { Snowflake, WatchTogetherState } from "../api/types";
+import { WATCH_TOGETHER_QUEUE_PER_USER, type Snowflake, type WatchTogetherState } from "../api/types";
+import { reason } from "../stremio/format";
 import { Tooltip } from "../ui";
+import { MediaVotes, useHostLabel } from "../voice/MediaVotes";
 import { useVoice } from "../voice/store";
+import { queueQuota, skipAction, useCanControlMedia, useMeId } from "../voice/useCanControlMedia";
 import { controlWatch, stopWatch } from "./api";
 import { EMBED_URL, parseEmbedMessage, sendToEmbed, type EmbedCommand, type PlayerState } from "./embed";
 import { DRIFT_MS, expectedPositionMs, formatClock, needsSeek, parseYouTubeLink } from "./youtube";
@@ -40,8 +43,6 @@ function useNow(everyMs: number): number {
   }, [everyMs]);
   return now;
 }
-
-const reason = (e: unknown) => (e instanceof ApiRequestError ? e.message : "Something went wrong. Try again.");
 
 /** Wires the iframe player to the shared state. */
 function useWatchPlayer(channelId: Snowflake, state: WatchTogetherState, volume: number) {
@@ -150,7 +151,7 @@ function useWatchPlayer(channelId: Snowflake, state: WatchTogetherState, volume:
   return { frame, onLoad, durationMs, errorCode };
 }
 
-function QueuePanel({ channelId, queue }: { channelId: Snowflake; queue: string[] }) {
+function QueuePanel({ channelId, queue, quota }: { channelId: Snowflake; queue: string[]; quota: ReturnType<typeof queueQuota> }) {
   const [link, setLink] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -184,10 +185,15 @@ function QueuePanel({ channelId, queue }: { channelId: Snowflake; queue: string[
       )}
       <form className="watch-queue-form" onSubmit={e => void add(e)}>
         <input className="input" aria-label="Add a YouTube link to the queue" placeholder="Paste a YouTube link" value={link} onChange={e => setLink(e.target.value)} />
-        <button type="submit" className="btn btn-secondary" disabled={busy || !link.trim()}>
+        <button type="submit" className="btn btn-secondary" disabled={busy || !link.trim() || quota?.full}>
           Add
         </button>
       </form>
+      {quota && (
+        <p className="media-quota" data-queue-quota={quota.mine}>
+          {quota.hint}
+        </p>
+      )}
       {error && (
         <p className="field-error" role="alert">
           {error}
@@ -197,9 +203,9 @@ function QueuePanel({ channelId, queue }: { channelId: Snowflake; queue: string[
   );
 }
 
-function ControlButton({ label, active, onClick, children }: { label: string; active?: boolean; onClick(): void; children: React.ReactNode }) {
+function ControlButton({ label, tip, active, onClick, children }: { label: string; tip?: string; active?: boolean; onClick(): void; children: React.ReactNode }) {
   return (
-    <Tooltip content={label} side="top">
+    <Tooltip content={tip ?? label} side="top">
       <button type="button" className={`watch-button${active ? " active" : ""}`} aria-label={label} aria-pressed={active} onClick={onClick}>
         {children}
       </button>
@@ -215,6 +221,10 @@ export function WatchTile(props: { channelId: Snowflake; variant: WatchVariant; 
 
 function WatchTileBody({ channelId, variant, onActivate, state }: { channelId: Snowflake; variant: WatchVariant; onActivate?: () => void; state: WatchTogetherState }) {
   const starter = useStore(s => s.users[state.started_by]);
+  const hostLabel = useHostLabel(state, state.started_by);
+  const meId = useMeId();
+  const controller = useCanControlMedia(channelId, state.host_id);
+  const skip = skipAction(state, meId, controller);
   const [volume, setVolume] = useState(readVolume);
   const [queueOpen, setQueueOpen] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
@@ -255,40 +265,46 @@ function WatchTileBody({ channelId, variant, onActivate, state }: { channelId: S
         <>
           <div className="watch-head">
             <span className="watch-title">{title}</span>
-            {starter && <span className="watch-by">Started by {displayName(starter)}</span>}
+            {starter && <span className="watch-by">{[`Started by ${displayName(starter)}`, hostLabel].filter(Boolean).join(" · ")}</span>}
+            <MediaVotes control={state} />
           </div>
           {(player.errorCode !== null || failure) && (
             <div className="watch-notice" role="alert">
               {player.errorCode !== null ? "This video can't be played here." : failure}
               {player.errorCode !== null && (
-                <button type="button" className="btn btn-secondary" onClick={() => run(controlWatch(channelId, { skip: true, video_id: state.video_id }))}>
-                  Skip
+                <button type="button" className="btn btn-secondary" aria-pressed={skip.vote ? skip.voted : undefined} onClick={() => run(controlWatch(channelId, { skip: skip.skip, video_id: state.video_id }))}>
+                  {skip.label}
                 </button>
               )}
             </div>
           )}
-          {queueOpen && <QueuePanel channelId={channelId} queue={state.queue} />}
+          {queueOpen && <QueuePanel channelId={channelId} queue={state.queue} quota={queueQuota(state.queue_added_by, meId, controller, WATCH_TOGETHER_QUEUE_PER_USER)} />}
           <div className="watch-bar">
-            <input
-              className="watch-seek"
-              type="range"
-              aria-label="Seek"
-              min={0}
-              max={Math.max(player.durationMs, 1)}
-              step={1000}
-              value={drag ?? position}
-              disabled={player.durationMs === 0}
-              onChange={e => setDrag(Number(e.target.value))}
-              onPointerUp={commitSeek}
-              onKeyUp={commitSeek}
-              onBlur={commitSeek}
-            />
+            {controller && (
+              <input
+                className="watch-seek"
+                type="range"
+                aria-label="Seek"
+                min={0}
+                max={Math.max(player.durationMs, 1)}
+                step={1000}
+                value={drag ?? position}
+                disabled={player.durationMs === 0}
+                onChange={e => setDrag(Number(e.target.value))}
+                onPointerUp={commitSeek}
+                onKeyUp={commitSeek}
+                onBlur={commitSeek}
+              />
+            )}
             <div className="watch-controls">
-              <ControlButton label={state.playing ? "Pause" : "Play"} onClick={() => run(controlWatch(channelId, { playing: !state.playing }))}>
-                {state.playing ? <Pause size={18} /> : <Play size={18} />}
-              </ControlButton>
-              <ControlButton label="Skip" onClick={() => run(controlWatch(channelId, { skip: true, video_id: state.video_id }))}>
+              {controller && (
+                <ControlButton label={state.playing ? "Pause" : "Play"} onClick={() => run(controlWatch(channelId, { playing: !state.playing }))}>
+                  {state.playing ? <Pause size={18} /> : <Play size={18} />}
+                </ControlButton>
+              )}
+              <ControlButton label={skip.label} tip={skip.vote ? `${skip.label}: skips when half the listeners vote` : undefined} active={skip.vote ? skip.voted : undefined} onClick={() => run(controlWatch(channelId, { skip: skip.skip, video_id: state.video_id }))}>
                 <SkipForward size={18} />
+                {skip.vote && <span className="media-vote-count">{state.skip_votes.length}/{state.skip_needed}</span>}
               </ControlButton>
               <span className="watch-time" aria-label="Position">
                 {formatClock(drag ?? position)}
@@ -307,9 +323,11 @@ function WatchTileBody({ channelId, variant, onActivate, state }: { channelId: S
                   {variant === "focused" ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
                 </ControlButton>
               )}
-              <ControlButton label="Stop Watch Together" onClick={() => run(stopWatch(channelId))}>
-                <Square size={18} />
-              </ControlButton>
+              {controller && (
+                <ControlButton label="Stop Watch Together" onClick={() => run(stopWatch(channelId))}>
+                  <Square size={18} />
+                </ControlButton>
+              )}
             </div>
           </div>
         </>

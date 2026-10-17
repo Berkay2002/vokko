@@ -6,8 +6,9 @@ import { createContext, useContext, useEffect, useReducer, useState } from "reac
 import { ArrowLeft, Check, ExternalLink, Info, Link2, Play, Search, X } from "lucide-react";
 import { QrCode } from "../account/QrCode";
 import { ApiRequestError } from "../api/rest";
-import type { Snowflake, StremioContinueItem, StremioMeta, StremioSearchItem, StremioStream, StremioStreams, StremioType } from "../api/types";
+import { STREMIO_QUEUE_PER_USER, type Snowflake, type StremioContinueItem, type StremioMeta, type StremioSearchItem, type StremioStream, type StremioStreams, type StremioType } from "../api/types";
 import { useVoice } from "../voice/store";
+import { queueQuota, useCanControlMedia, useMeId } from "../voice/useCanControlMedia";
 import { useVoiceUi } from "../voice/uiStore";
 import { formatClock } from "../watch/youtube";
 import { catalog, controlStremio, getAccount, getContinue, getMeta, getStreams, loginWithEmail, pollLink, searchTitles, startLink, startStremio, unlinkAccount } from "./api";
@@ -17,6 +18,7 @@ import { useStremioPanel } from "./panelStore";
 import { PosterImage } from "./PosterImage";
 import { StremioIcon } from "./StremioIcon";
 import "./stremio.css";
+import "../voice/mediaVotes.css";
 
 /** The id `useVoiceUi.focusedTile` holds for the Stremio tile (same idea as the Watch Together tile). */
 export const STREMIO_TILE_ID = "stremio";
@@ -288,7 +290,12 @@ function Home({ query, dispatch }: { query: string; dispatch: Dispatch }) {
 
 /** `startAt` (ms) is where Play in call starts, to resume; Add to Up next has no position. */
 function StreamList({ channelId, type, videoId, label, startAt = 0 }: { channelId: Snowflake; type: StremioType; videoId: string; label: string; startAt?: number }) {
-  const playing = useVoice(s => !!s.stremio[channelId]);
+  const session = useVoice(s => s.stremio[channelId]);
+  const playing = !!session;
+  const meId = useMeId();
+  // Replacing what plays is a controller's; everyone else queues, up to their quota.
+  const controller = useCanControlMedia(channelId, session?.host_id);
+  const quota = session ? queueQuota(session.queue.map(q => q.added_by), meId, controller, STREMIO_QUEUE_PER_USER) : null;
   const listed = useAsync<StremioStreams>(() => getStreams(type, videoId), [type, videoId]);
   const [picked, setPicked] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -348,12 +355,19 @@ function StreamList({ channelId, type, videoId, label, startAt = 0 }: { channelI
         <div className="stremio-actions">
           {playing ? (
             <>
-              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void act("queue")}>
+              <button type="button" className="btn btn-primary" disabled={busy || quota?.full} onClick={() => void act("queue")}>
                 Add to Up next
               </button>
-              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void act("play")}>
-                Play now instead
-              </button>
+              {controller && (
+                <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void act("play")}>
+                  Play now instead
+                </button>
+              )}
+              {quota && (
+                <span className="media-quota" data-queue-quota={quota.mine}>
+                  {quota.hint}
+                </span>
+              )}
             </>
           ) : (
             <button type="button" className="btn btn-primary stremio-play" disabled={busy} onClick={() => void act("play")}>
