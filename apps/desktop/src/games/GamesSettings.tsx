@@ -36,8 +36,9 @@ function GameDialog({ guildId, game, onClose }: { guildId: Snowflake; game: Game
   const [min, setMin] = useState(String(game?.min_players ?? 2));
   const [max, setMax] = useState(String(game?.max_players ?? 8));
   const [aspect, setAspect] = useState<GameAspect>(game?.aspect ?? "16:9");
+  const [web, setWeb] = useState(game?.kind === "web");
   const origin = originOf(url.trim());
-  const body = (): GameManifestRequest => ({ name: name.trim(), url: url.trim(), icon: icon.trim() || null, min_players: Number(min), max_players: Number(max), aspect });
+  const body = (): GameManifestRequest => ({ name: name.trim(), url: url.trim(), icon: icon.trim() || null, min_players: Number(min), max_players: Number(max), aspect, kind: web ? "web" : "sdk" });
   return (
     <FormDialog
       title={game ? `Edit ${game.name}` : "Add a game"}
@@ -74,6 +75,18 @@ function GameDialog({ guildId, game, onClose }: { guildId: Snowflake; game: Game
           <DialogField label="Shape" error={errors.aspect}>
             <Select<GameAspect> label="Shape" value={aspect} options={ASPECTS} onChange={setAspect} />
           </DialogField>
+          <label className="games-kind">
+            <input type="checkbox" checked={web} onChange={e => setWeb(e.target.checked)} />
+            <span>
+              <span className="games-kind-label">Website game with its own lobby</span>
+              <span className="games-kind-note">For games that don't use the Vokko SDK: allows sign-in forms, popups (opened in the browser), fullscreen and sharing a room link with the call.</span>
+            </span>
+          </label>
+          {errors.kind && (
+            <p className="field-error" role="alert">
+              {errors.kind}
+            </p>
+          )}
         </>
       )}
     </FormDialog>
@@ -134,6 +147,7 @@ export function GamesSettings({ guildId, canEdit }: { guildId: Snowflake; canEdi
                   <span className="games-row-name">{game.name}</span>
                   <span className="games-row-meta">
                     {originOf(game.url) ?? game.url} · {players(game)}
+                    {game.kind === "web" ? " · Website game" : ""}
                   </span>
                 </div>
                 {canEdit && (

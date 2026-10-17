@@ -1,7 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameManifest } from "../api/types";
 import { voiceReducer, initialVoiceModel } from "../voice/reducer";
-import { checkSend, FrameHost, frameOrigin, frameUrl, isHello, leaderOf, parsePortMessage, relayBytes, sandboxFor, SANDBOX_BUILTIN, SANDBOX_THIRD_PARTY, type GameToHost } from "./frameHost";
+import {
+  ALLOW_WEB,
+  checkRoomUrl,
+  checkSend,
+  frameAllow,
+  FrameHost,
+  frameOrigin,
+  frameUrl,
+  isHello,
+  leaderOf,
+  parsePortMessage,
+  relayBytes,
+  sandboxFor,
+  SANDBOX_BUILTIN,
+  SANDBOX_THIRD_PARTY,
+  SANDBOX_WEB,
+  type GameToHost,
+} from "./frameHost";
 
 const APP = "http://127.0.0.1:1453";
 const API = "https://vokko.example";
@@ -41,6 +58,44 @@ describe("sandbox choice", () => {
 
   it("never adds the flags the design forbids", () => {
     for (const s of [SANDBOX_BUILTIN, SANDBOX_THIRD_PARTY]) expect(s).not.toMatch(/top-navigation|popups|modals|forms|downloads|storage-access/);
+    expect(SANDBOX_WEB).not.toMatch(/top-navigation|modals|downloads|storage-access/);
+  });
+});
+
+describe("website games", () => {
+  const web = (url: string, id = "123"): GameManifest => ({ ...third(url), id, kind: "web" });
+
+  it("get forms, popups that leave the sandbox, fullscreen and the like, on their own origin only", () => {
+    expect(sandboxFor(web("https://skribbl.io/"), [APP, API])).toBe(SANDBOX_WEB);
+    expect(SANDBOX_WEB.split(" ").sort()).toEqual(["allow-forms", "allow-pointer-lock", "allow-popups", "allow-popups-to-escape-sandbox", "allow-same-origin", "allow-scripts"]);
+    expect(frameAllow(web("https://skribbl.io/"))).toBe(ALLOW_WEB);
+    expect(ALLOW_WEB).toBe("fullscreen; clipboard-write; autoplay; gamepad");
+    expect(frameAllow(third("https://play.example/"))).toBe("");
+    expect(frameAllow(sketch)).toBe("");
+    // The own-origin and https rules still hold.
+    expect(sandboxFor(web(`${API}/x/`), [APP, API])).toBeNull();
+    expect(sandboxFor(web("http://skribbl.io/"), [APP, API])).toBeNull();
+  });
+
+  it("built-ins come from the client's own list: the server cannot turn Sketch into a website game or move a site", () => {
+    expect(sandboxFor({ ...sketch, kind: "web" }, [APP, API])).toBe(SANDBOX_BUILTIN);
+    expect(frameAllow({ ...sketch, kind: "web" })).toBe("");
+    const krunker = web("https://evil.example/", "builtin:krunker");
+    expect(frameUrl(krunker, APP)).toBe("https://krunker.io/");
+    expect(frameOrigin(krunker)).toBe("https://krunker.io");
+    expect(sandboxFor({ ...krunker, kind: "sdk" }, [APP, API])).toBe(SANDBOX_WEB);
+  });
+
+  it("room links stay on the game's host", () => {
+    expect(checkRoomUrl("https://krunker.io/", "https://krunker.io/?game=FRA:abc12")).toBe("https://krunker.io/?game=FRA:abc12");
+    expect(checkRoomUrl("https://krunker.io/", " https://www.krunker.io/r ")).toBe("https://www.krunker.io/r");
+    expect(checkRoomUrl("https://shellshock.io/", "https://shellshock.io/#AbC1")).toBe("https://shellshock.io/#AbC1");
+    expect(checkRoomUrl("https://krunker.io/", "https://KRUNKER.io./x")).toBe("https://krunker.io./x");
+    for (const bad of ["http://krunker.io/", "https://u@krunker.io/", "https://u:p@krunker.io/", "https://evilkrunker.io/", "https://krunker.io.evil.example/", "javascript:alert(1)", "/?game=1", ""]) {
+      expect(checkRoomUrl("https://krunker.io/", bad), bad).toBeNull();
+    }
+    expect(checkRoomUrl("https://krunker.io/", `https://krunker.io/?${"x".repeat(512 - 20)}`)).not.toBeNull();
+    expect(checkRoomUrl("https://krunker.io/", `https://krunker.io/?${"x".repeat(513 - 20)}`)).toBeNull();
   });
 });
 

@@ -1,9 +1,11 @@
 // The game tile of a call (docs/design/games-host.md sections 3 and 7). In the grid or strip it is a cover; focused it loads
 // the game in a sandboxed frame under a Vokko-drawn header (name, origin, Close, Stop). The frame unloads when the tile is
 // left (the game gets `close` first). FrameHost speaks the SDK protocol; this file feeds it players and relayed messages.
+// Website games (kind "web") skip all of that: the frame shows on load, and the header has "Share room to call", whose link
+// every other tile then loads.
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Gamepad2, Square, X } from "lucide-react";
+import { Gamepad2, Link, Square, X } from "lucide-react";
 import { gateway } from "../api/gateway";
 import { Perm } from "../api/permissions";
 import { ApiRequestError } from "../api/rest";
@@ -11,10 +13,25 @@ import { appStore, avatarUrl, displayName, useStore } from "../api/store";
 import type { GameAspect, GameManifest, GamePlayer, GameSession, Snowflake, User } from "../api/types";
 import { usePermissions } from "../shell/usePermissions";
 import { Tooltip } from "../ui";
+import { Popout } from "../ui/Popout";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
-import { gamePlayers, relayGame, stopGame } from "./api";
-import { isBuiltin } from "./builtin";
-import { checkSend, FrameHost, frameOrigin, frameUrl, leaderOf, sandboxFor, type GameErrorCode, type GameToHost, type Player } from "./frameHost";
+import { gamePlayers, relayGame, shareGameRoom, stopGame } from "./api";
+import { isWebGame } from "./builtin";
+import {
+  checkRoomUrl,
+  checkSend,
+  frameAllow,
+  FrameHost,
+  frameOrigin,
+  frameUrl,
+  isBundled,
+  leaderOf,
+  sandboxFor,
+  trustedManifest,
+  type GameErrorCode,
+  type GameToHost,
+  type Player,
+} from "./frameHost";
 import { GameIcon } from "./GameIcon";
 import "./games.css";
 
@@ -23,9 +40,9 @@ export type GameVariant = "solo" | "grid" | "focused" | "strip" | "pip";
 const ASPECT: Record<GameAspect, number | null> = { "16:9": 16 / 9, "4:3": 4 / 3, "1:1": 1, fill: null };
 const NAME_MAX = 32;
 
-/** "Vokko" for built-ins, the origin's host for third-party games. */
+/** "Vokko" for bundled built-ins, the origin's host for third-party and website games. */
 export function originLabel(game: GameManifest): string {
-  if (isBuiltin(game)) return "Vokko";
+  if (isBundled(game)) return "Vokko";
   const origin = frameOrigin(game);
   return origin.replace(/^https:\/\//, "") || game.url;
 }
@@ -74,8 +91,145 @@ function errorCode(e: unknown): GameErrorCode {
   return e.status === 400 && e.api.errors && "data" in e.api.errors ? "too_large" : "invalid";
 }
 
+/** Room links this client shared, by session: its own tile is already in that room and does not reload. */
+const sharedHere = new Map<string, string>();
+
+/** A website game: no SDK and no port. The frame shows on load and follows the call's shared room link. */
+function WebGameFrame({ session, sandbox }: { session: GameSession; sandbox: string }) {
+  const game = session.game;
+  const [src, setSrc] = useState(() => session.room_url ?? frameUrl(game));
+  const [ready, setReady] = useState(false);
+  const room = session.room_url ?? null;
+  useEffect(() => {
+    if (room && room !== sharedHere.get(session.session_id)) {
+      setSrc(room);
+      setReady(false);
+    }
+  }, [room, session.session_id]);
+  const ratio = ASPECT[game.aspect] ?? null;
+  return (
+    <div className="game-stage">
+      <div className={`game-frame-box${ratio === null ? " fill" : ""}`} style={ratio === null ? undefined : ({ "--game-ar": ratio } as CSSProperties)}>
+        {/* Keyed by URL: a room link that differs only in its #fragment must still load the page anew. */}
+        <iframe
+          key={src}
+          className="game-frame"
+          src={src}
+          title={`${game.name} (game from ${originLabel(game)})`}
+          sandbox={sandbox}
+          allow={frameAllow(game)}
+          allowFullScreen
+          referrerPolicy="no-referrer"
+          data-room={room && src === room ? "joined" : undefined}
+          onLoad={() => setReady(true)}
+          {...{ credentialless: "" }}
+        />
+        {!ready && (
+          <div className="game-loading" role="status">
+            Loading {game.name}…
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** "Share room to call": paste the game's invite link; everyone else's tile loads it. */
+function ShareRoom({ channelId, session }: { channelId: Snowflake; session: GameSession }) {
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const host = (() => {
+    try {
+      return new URL(trustedManifest(session.game).url).hostname;
+    } catch {
+      return "";
+    }
+  })();
+  const send = (url: string | null) => {
+    setError(null);
+    setBusy(true);
+    if (url) sharedHere.set(session.session_id, url);
+    shareGameRoom(channelId, url).then(
+      () => {
+        setBusy(false);
+        setOpen(false);
+        setValue("");
+      },
+      (e: unknown) => {
+        setBusy(false);
+        setError(e instanceof ApiRequestError ? e.message : "Couldn't share the link. Try again.");
+      },
+    );
+  };
+  const submit = () => {
+    const url = checkRoomUrl(trustedManifest(session.game).url, value);
+    if (!url) return setError(`Paste an https link to ${host}.`);
+    send(url);
+  };
+  return (
+    <>
+      <Tooltip content="Share room to call" side="bottom">
+        <button type="button" ref={setAnchor} className={`game-button${session.room_url ? " active" : ""}`} aria-label="Share room to call" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+          <Link size={16} />
+        </button>
+      </Tooltip>
+      <Popout anchor={anchor} open={open} onClose={() => setOpen(false)} side="bottom" align="end" role="dialog" label="Share room to call" className="game-share" sheet="Share room to call">
+        <form
+          className="game-share-form"
+          onSubmit={e => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          <label className="game-share-label" htmlFor="game-share-url">
+            Room link
+          </label>
+          <input
+            id="game-share-url"
+            className="input"
+            type="url"
+            inputMode="url"
+            value={value}
+            placeholder={`https://${host}/…`}
+            maxLength={512}
+            spellCheck={false}
+            autoFocus
+            onChange={e => setValue(e.target.value)}
+          />
+          <p className="game-share-hint">Create a private room in the game, copy its invite link, paste it here. Everyone in the call joins it.</p>
+          {error && (
+            <p className="field-error" role="alert">
+              {error}
+            </p>
+          )}
+          {session.room_url && <p className="game-share-current">Shared now: {session.room_url}</p>}
+          <div className="game-share-actions">
+            {session.room_url && (
+              <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => send(null)}>
+                Clear
+              </button>
+            )}
+            <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !value.trim()}>
+              Share
+            </button>
+          </div>
+        </form>
+      </Popout>
+    </>
+  );
+}
+
 /** The game frame and its port, for one session. */
 function GameFrame({ channelId, guildId, session, onClose }: { channelId: Snowflake; guildId: Snowflake | null; session: GameSession; onClose(): void }) {
+  const sandbox = sandboxFor(session.game);
+  if (sandbox !== null && isWebGame(trustedManifest(session.game))) return <WebGameFrame session={session} sandbox={sandbox} />;
+  return <SdkGameFrame channelId={channelId} guildId={guildId} session={session} onClose={onClose} />;
+}
+
+function SdkGameFrame({ channelId, guildId, session, onClose }: { channelId: Snowflake; guildId: Snowflake | null; session: GameSession; onClose(): void }) {
   const game = session.game;
   const meId = useVoice(s => s.meId);
   const roster = useChannelVoiceStates(channelId)
@@ -208,10 +362,11 @@ function GameTileBody({ channelId, variant, onActivate, session }: { channelId: 
         <div className="game-head">
           <GameIcon game={game} size={20} />
           <span className="game-name">{game.name}</span>
-          <span className="game-origin" title={isBuiltin(game) ? undefined : frameOrigin(game)}>
+          <span className="game-origin" title={isBundled(game) ? undefined : frameOrigin(game)}>
             {originLabel(game)}
           </span>
           <span className="game-spacer" />
+          {isWebGame(trustedManifest(game)) && <ShareRoom channelId={channelId} session={session} />}
           {open && (
             <Tooltip content="Close (the game keeps running)" side="bottom">
               <button type="button" className="game-button" aria-label="Close game" onClick={close}>
