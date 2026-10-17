@@ -74,7 +74,7 @@ pub struct TitleInfo {
 
 /// A cached value and when it was fetched.
 /// `wss://host` -> `https://host`, `ws://host` -> `http://host`.
-fn http_url(url: &str) -> String {
+pub(crate) fn http_url(url: &str) -> String {
     url.replacen("wss://", "https://", 1).replacen("ws://", "http://", 1)
 }
 
