@@ -238,7 +238,7 @@ test.describe('voice', () => {
     await expect(page.locator('.voice-panel')).toBeVisible();
   });
 
-  test('tapping a voice channel shows the preview with a wide Join button, the call is a single control row, chat is a sheet', async ({ page }) => {
+  test('tapping a voice channel shows the preview with a wide Join button, the call is a single control row, chat covers the call', async ({ page }) => {
     await openStockTalk(page);
     await page.getByRole('button', { name: 'Show Channels' }).tap().catch(() => undefined);
     await page.locator('.sidebar-scroller').evaluate(el => { el.scrollTop = el.scrollHeight; });
@@ -254,19 +254,18 @@ test.describe('voice', () => {
     await expect(bar).toBeVisible();
     const ys = await bar.locator('.voice-bar-button:visible, .voice-hangup').evaluateAll(els => els.map(e => Math.round(e.getBoundingClientRect().top)));
     expect(new Set(ys).size).toBe(1);
-    // The chat icon in the header opens the call's text chat as a full-height sheet with its composer.
+    // The chat icon in the header opens the call's text chat as its own full-width screen over the call, with its composer and a close button.
     await page.getByRole('button', { name: /Show Chat|Open Chat/ }).first().tap();
-    const sheet = page.getByRole('dialog', { name: /chat$/ });
-    await expect(sheet).toBeVisible();
-    await page.waitForTimeout(400);
-    const sb = (await sheet.boundingBox())!;
-    expect(sb.x).toBe(0);
-    expect(sb.width).toBe(390);
-    expect(sb.height).toBeGreaterThan(700);
-    await expect(sheet.locator('.chat-textarea')).toBeVisible();
+    const chat = page.getByRole('complementary', { name: /chat$/ });
+    await expect(chat).toBeVisible();
+    const call = (await page.locator('.voice-page').boundingBox())!;
+    expect(await chat.boundingBox()).toEqual(call);
+    expect(call.width).toBe(390);
+    await expect(chat.locator('.chat-textarea')).toBeVisible();
     await noHorizontalScroll(page);
-    await page.keyboard.press('Escape');
-    await expect(sheet).toHaveCount(0);
+    await chat.getByRole('button', { name: 'Close Chat' }).tap();
+    await expect(chat).toHaveCount(0);
+    await expect(bar).toBeVisible();
   });
 
   test('the call view keeps a 40px+ disconnect button on a 360px phone', async ({ page }) => {

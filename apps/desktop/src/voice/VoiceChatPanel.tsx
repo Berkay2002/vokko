@@ -1,22 +1,11 @@
 import { MessageCircle, X } from "lucide-react";
 import { ChatView } from "../chat/ChatView";
 import type { Channel } from "../api/types";
-import { BottomSheet, usePhone } from "../ui";
 import { useVoiceUi } from "./uiStore";
 
-/** Text-in-voice side panel: the same chat as a text channel (message list + composer), under a small header. */
+/** Text-in-voice side panel: the same chat as a text channel (message list + composer), under a small header. On a phone it covers the call (voice.css). */
 export function VoiceChatPanel({ channel }: { channel: Channel }) {
   const name = channel.name ?? "this channel";
-  const phone = usePhone();
-  // A phone has no room for a side panel: the same chat is a full-height sheet over the call.
-  if (phone) {
-    return (
-      <BottomSheet open onClose={() => useVoiceUi.getState().setChatOpen(false)} label={`${name} chat`} className="voice-chat-sheet">
-        <h2 className="sheet-title">Chat</h2>
-        <ChatView key={channel.id} channelId={channel.id} />
-      </BottomSheet>
-    );
-  }
   return (
     <aside className="voice-chat" aria-label={`${name} chat`}>
       <header className="voice-chat-header">
