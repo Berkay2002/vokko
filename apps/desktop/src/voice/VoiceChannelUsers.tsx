@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, Film, Gamepad2, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
+import { ChevronRight, Gamepad2, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
+import { StremioIcon } from "../stremio";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
 import { TagChip } from "../perks/TagChip";
@@ -240,7 +241,7 @@ export function VoiceChannelUsers({ channel, guildId, canInvite }: { channel: Pi
       {bot && (
         <li className="voice-bot-user" data-bot-identity={bot}>
           <span className="voice-bot-avatar" aria-hidden="true">
-            <Film size={14} />
+            <StremioIcon size={14} />
           </span>
           <span>Stremio</span>
           <span className="voice-bot-badge">Bot</span>

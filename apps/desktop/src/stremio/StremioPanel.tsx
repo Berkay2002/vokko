@@ -3,7 +3,7 @@
 // talking to Stremio; this panel only ever sees titles, posters, labels and opaque stream ids.
 
 import { createContext, useContext, useEffect, useReducer, useState } from "react";
-import { ArrowLeft, ExternalLink, Film, Link2, Search, X } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, Info, Link2, Play, Search, X } from "lucide-react";
 import { QrCode } from "../account/QrCode";
 import { ApiRequestError } from "../api/rest";
 import type { Snowflake, StremioMeta, StremioSearchItem, StremioStream, StremioStreams, StremioType } from "../api/types";
@@ -13,6 +13,7 @@ import { catalog, controlStremio, getAccount, getMeta, getStreams, loginWithEmai
 import { formatSize, isHeavy, reason, safeImage, unsupportedText } from "./format";
 import { bestStream, currentView, initialPanel, panelReducer, seasonsOf, type PanelAction, type PanelState } from "./panelState";
 import { useStremioPanel } from "./panelStore";
+import { StremioIcon } from "./StremioIcon";
 import "./stremio.css";
 
 /** The id `useVoiceUi.focusedTile` holds for the Stremio tile (same idea as the Watch Together tile). */
@@ -180,7 +181,7 @@ function PosterCard({ item, onOpen }: { item: StremioSearchItem; onOpen(item: St
   const poster = safeImage(item.poster);
   return (
     <button type="button" className="stremio-poster-card" onClick={() => onOpen(item)} data-title-id={item.id}>
-      <span className="stremio-poster-frame">{poster ? <img src={poster} alt="" loading="lazy" /> : <Film size={28} aria-hidden="true" />}</span>
+      <span className="stremio-poster-frame">{poster ? <img src={poster} alt="" loading="lazy" /> : <StremioIcon size={28} />}</span>
       <span className="stremio-poster-name">{item.name}</span>
       {item.year && <span className="stremio-poster-year">{item.year}</span>}
     </button>
@@ -279,7 +280,7 @@ function StreamList({ channelId, type, videoId, label }: { channelId: Snowflake;
           ))}
         </div>
       ))}
-      {listed.data && listed.data.addon_errors.length > 0 && <p className="stremio-muted stremio-quiet">Couldn't reach: {listed.data.addon_errors.join(", ")}</p>}
+      {listed.data && listed.data.addon_errors.length > 0 && <p className="stremio-muted stremio-quiet stremio-unreached"><Info size={14} aria-hidden="true" /> Couldn't reach: {listed.data.addon_errors.join(", ")}</p>}
       <Problem text={problem} />
       {note && (
         <p className="stremio-note" role="status">
@@ -298,8 +299,8 @@ function StreamList({ channelId, type, videoId, label }: { channelId: Snowflake;
               </button>
             </>
           ) : (
-            <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void act("play")}>
-              Play in call
+            <button type="button" className="btn btn-primary stremio-play" disabled={busy} onClick={() => void act("play")}>
+              <Play size={16} aria-hidden="true" /> Play in call
             </button>
           )}
         </div>
@@ -322,6 +323,7 @@ function StreamRow({ stream, selected, onPick }: { stream: StremioStream; select
           </span>
         ))}
         {heavy && <span className="stremio-chip heavy">Heavy</span>}
+        {selected && <Check className="stremio-stream-check" size={16} aria-hidden="true" />}
       </span>
       <span className="stremio-stream-details">{disabled ? unsupportedText(stream) : stream.details.split("\n")[0]}</span>
     </button>
@@ -422,7 +424,7 @@ export function StremioPanel({ channelId }: { channelId: Snowflake }) {
             <ArrowLeft size={18} />
           </button>
         ) : (
-          <Film size={18} aria-hidden="true" />
+          <StremioIcon size={20} />
         )}
         <h2 className="stremio-panel-title">{view.name === "home" || state.account !== "linked" ? "Stremio" : view.item.name}</h2>
         {state.account === "linked" && (

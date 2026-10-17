@@ -20,10 +20,14 @@ type MockWin = {
 };
 type Stream = { sid: string; playable: boolean };
 
-const POSTER = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2b3a67"/><stop offset="1" stop-color="#8f2d56"/></linearGradient></defs><rect width="300" height="450" fill="url(#g)"/></svg>`;
+/** A flat poster whose colours depend on the url, so a row of them is tellable apart in the screenshots. */
+const poster = (url: string) => {
+  const hue = [...url].reduce((sum, c) => (sum * 31 + c.charCodeAt(0)) % 360, 7);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="450"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${hue} 45% 30%)"/><stop offset="1" stop-color="hsl(${(hue + 50) % 360} 55% 22%)"/></linearGradient></defs><rect width="300" height="450" fill="url(#g)"/></svg>`;
+};
 
 async function openGuild(page: Page): Promise<void> {
-  await page.route(/^https:\/\/(images|episodes)\.metahub\.space\/|^https:\/\/m\.media-amazon\.com\//, route => route.fulfill({ contentType: 'image/svg+xml', body: POSTER }));
+  await page.route(/^https:\/\/(images|episodes)\.metahub\.space\/|^https:\/\/m\.media-amazon\.com\//, route => route.fulfill({ contentType: 'image/svg+xml', body: poster(route.request().url()) }));
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.getByRole('link', { name: /^Sam's server/ }).click();
   await page.getByRole('list', { name: 'Channels' }).waitFor();
@@ -41,6 +45,7 @@ const shot = (page: Page, name: string) => (mkdirSync(SHOTS, { recursive: true }
 
 async function openStremio(page: Page): Promise<void> {
   await call(page).getByRole('button', { name: 'Activities' }).click();
+  await shot(page, MOBILE ? 'm0-activities-menu.png' : '09-activities-menu.png');
   await page.getByRole('menuitem', { name: 'Stremio' }).click();
   await expect(panel(page)).toBeVisible();
 }
@@ -237,6 +242,7 @@ test('phone width: panel, tile with the controls and the queue fit the screen', 
   await openStremio(page);
   await shot(page, 'm1-panel-not-linked.png');
   await panel(page).getByRole('button', { name: 'Link with Stremio' }).click();
+  await expect(panel(page).getByLabel('Link code')).not.toBeEmpty();
   await shot(page, 'm2-linking.png');
   await page.evaluate(() => (window as unknown as MockWin).__vokkoMockStremio.approve());
   await expect(panel(page).getByRole('searchbox', { name: 'Search movies and series' })).toBeVisible({ timeout: 10_000 });

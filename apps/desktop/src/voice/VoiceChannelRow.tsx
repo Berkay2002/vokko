@@ -1,7 +1,8 @@
 // A voice channel in the channel list: speaker, name, status line, elapsed timer, hover actions and the users underneath.
 
 import { useLocation } from "react-router";
-import { Film, Lock, MessageCircle, MonitorPlay, Pencil, Settings, UserPlus, Volume2 } from "lucide-react";
+import { Lock, MessageCircle, MonitorPlay, Pencil, Settings, UserPlus, Volume2 } from "lucide-react";
+import { StremioIcon } from "../stremio";
 import { Perm } from "../api/permissions";
 import { channelMentionCount, isChannelUnread, useStore } from "../api/store";
 import type { Channel, Guild } from "../api/types";
@@ -118,7 +119,7 @@ export function VoiceChannelRow({ channel, guild }: { channel: Channel; guild: G
       )}
       {stremioTitle && (
         <div className="voice-stremio-line" role="status">
-          <Film size={12} aria-hidden="true" />
+          <StremioIcon size={12} />
           <span>
             Watching <em>{stremioTitle}</em> on Stremio
           </span>

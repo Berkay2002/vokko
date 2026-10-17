@@ -4,7 +4,7 @@
 // (this client included) as STREMIO_UPDATE. Volume is local and plays the movie's audio from the viewer Room.
 
 import { useEffect, useRef, useState } from "react";
-import { ListVideo, Maximize2, Minimize2, Pause, Play, Plus, RotateCcw, RotateCw, SkipForward, Square, Tv, Volume2, VolumeX, X } from "lucide-react";
+import { ListVideo, Maximize2, Minimize2, Pause, Play, Plus, RotateCcw, RotateCw, SkipForward, Square, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import type { Snowflake, StremioState } from "../api/types";
 import { Tooltip } from "../ui";
@@ -12,6 +12,7 @@ import { useVoice } from "../voice/store";
 import { formatClock } from "../watch/youtube";
 import { controlStremio, stopStremio } from "./api";
 import { reason, safeImage, shownPositionMs, statusText } from "./format";
+import { StremioIcon } from "./StremioIcon";
 import { openStremioPanel } from "./panelStore";
 import { useViewer } from "./useViewer";
 import "./stremio.css";
@@ -81,6 +82,7 @@ function QueuePanel({ channelId, queue, onAdd }: { channelId: Snowflake; queue: 
             const by = users[item.added_by];
             return (
               <li key={`${item.title}-${i}`} className="stremio-queue-item" data-title={item.title}>
+                <span className="stremio-queue-art">{safeImage(item.poster) && <img src={safeImage(item.poster)} alt="" />}</span>
                 <span className="stremio-queue-text">
                   <span className="stremio-queue-name">{item.title}</span>
                   <span className="stremio-queue-sub">{[item.subtitle, by ? `added by ${displayName(by)}` : null].filter(Boolean).join(" · ")}</span>
@@ -168,7 +170,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
       )}
       {small ? (
         <button type="button" className="stremio-cover" aria-label="Focus Stremio" onClick={onActivate}>
-          <Tv size={variant === "pip" ? 20 : 24} aria-hidden="true" />
+          <StremioIcon size={variant === "pip" ? 20 : 24} />
           <span className="stremio-cover-text">Watching {state.item.title} on Stremio</span>
         </button>
       ) : (

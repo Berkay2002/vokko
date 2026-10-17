@@ -23,7 +23,7 @@ import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
 import { useVoiceUi } from "./uiStore";
 import { VoiceChatPanel } from "./VoiceChatPanel";
 import { WatchTile } from "../watch";
-import { openStremioPanel, StremioPanel, StremioTile, STREMIO_TILE_ID, useStremioPanel } from "../stremio";
+import { openStremioPanel, StremioIcon, StremioPanel, StremioTile, STREMIO_TILE_ID, useStremioPanel } from "../stremio";
 import { openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
 import { VIEWER_QUALITIES, VIEWER_QUALITY_LABEL, type ViewerQuality } from "./video/options";
 import "./video/video.css";
@@ -281,8 +281,8 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
           active={stremioOpen}
           onClick={e =>
             menu.open(below(e), [
-              { id: "watch-together", label: "Watch Together (YouTube)", onSelect: () => (watching ? useVoiceUi.getState().setFocusedTile(WATCH_TILE_ID) : openModal({ type: "watchTogether", channelId: channel.id })) },
-              { id: "stremio", label: "Stremio", onSelect: openStremioPanel },
+              { id: "watch-together", label: "Watch Together (YouTube)", icon: <MonitorPlay size={18} />, iconStart: true, sub: "Watch a YouTube video in sync", onSelect: () => (watching ? useVoiceUi.getState().setFocusedTile(WATCH_TILE_ID) : openModal({ type: "watchTogether", channelId: channel.id })) },
+              { id: "stremio", label: "Stremio", icon: <StremioIcon size={18} />, iconStart: true, sub: "Play a movie or episode from your Stremio", onSelect: openStremioPanel },
             ])
           }
         >
