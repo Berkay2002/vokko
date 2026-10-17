@@ -1050,6 +1050,16 @@ async fn a_busy_or_refusing_bot_fails_the_start_cleanly() {
 }
 
 #[tokio::test]
+async fn a_failed_put_on_a_running_session_keeps_it_for_the_sweep_to_retry() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.playing(&mut alice, 1).await;
+    w.bot.answer(500);
+    assert_eq!(w.play(&w.alice, &track_uri(2)).await.0, StatusCode::OK);
+    assert_eq!(w.app.get(&w.path(), &w.alice).await.0, StatusCode::OK, "the session survives");
+}
+
+#[tokio::test]
 async fn the_last_person_leaving_ends_the_session() {
     let w = world().await;
     let mut owner = Client::identify(&w.address, &w.owner).await.0;

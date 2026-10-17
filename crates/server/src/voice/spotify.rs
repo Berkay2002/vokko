@@ -443,19 +443,24 @@ async fn start(
     if let Err(error) = active.bot.put(&desired).await {
         if fresh {
             // Nothing was announced yet: the session never existed.
-            let dropped = {
+            let survives = {
                 let mut slot = lock(&state.spotify.session);
-                let ours = slot.as_ref().is_some_and(|session| session.seq == seq);
-                if ours {
-                    *slot = None;
-                } else if let Some(session) = slot.as_mut() {
-                    // Someone controlled it meanwhile: it lives on and is sent again by the sweep.
-                    session.dirty = true;
-                    session.bot_down_since.get_or_insert_with(Instant::now);
+                // Only this channel's session counts: it may have ended meanwhile and another channel started its own.
+                match slot.as_mut().filter(|session| session.channel_id == channel_id) {
+                    Some(session) if session.seq == seq => {
+                        *slot = None;
+                        false
+                    }
+                    Some(session) => {
+                        // Someone controlled it meanwhile: it lives on and is sent again by the sweep.
+                        session.dirty = true;
+                        session.bot_down_since.get_or_insert_with(Instant::now);
+                        true
+                    }
+                    None => false,
                 }
-                ours
             };
-            if dropped {
+            if !survives {
                 return Err(bot_failed(error));
             }
             let reply = Json(SpotifyReply { state: reply, left_out }).into_response();

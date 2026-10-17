@@ -127,9 +127,17 @@ impl Bot {
                 return Err(CatalogError::Unavailable);
             }
         }
-        let bytes = response.bytes().await.map_err(|_| CatalogError::Unavailable)?;
-        if bytes.len() > BODY_MAX {
+        if response.content_length().is_some_and(|length| length > BODY_MAX as u64) {
             return Err(CatalogError::Unavailable);
+        }
+        // Read chunk by chunk and stop at the cap: a chunked answer has no length to check up front.
+        let mut response = response;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| CatalogError::Unavailable)? {
+            if bytes.len() + chunk.len() > BODY_MAX {
+                return Err(CatalogError::Unavailable);
+            }
+            bytes.extend_from_slice(&chunk);
         }
         serde_json::from_slice(&bytes).map_err(|_| CatalogError::Unavailable)
     }

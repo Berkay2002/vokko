@@ -396,12 +396,16 @@ impl Catalog {
                     if response.content_length().is_some_and(|length| length > BODY_MAX) {
                         return Err(CatalogError::Unavailable);
                     }
-                    let bytes = response.bytes().await.map_err(|_| CatalogError::Unavailable)?;
-                    return if bytes.len() as u64 > BODY_MAX {
-                        Err(CatalogError::Unavailable)
-                    } else {
-                        serde_json::from_slice(&bytes).map_err(|_| CatalogError::Unavailable)
-                    };
+                    // Chunk by chunk with a running cap: a chunked answer has no length to check up front.
+                    let mut response = response;
+                    let mut bytes = Vec::new();
+                    while let Some(chunk) = response.chunk().await.map_err(|_| CatalogError::Unavailable)? {
+                        if (bytes.len() + chunk.len()) as u64 > BODY_MAX {
+                            return Err(CatalogError::Unavailable);
+                        }
+                        bytes.extend_from_slice(&chunk);
+                    }
+                    return serde_json::from_slice(&bytes).map_err(|_| CatalogError::Unavailable);
                 }
                 // The token was revoked or expired early: get a new one once.
                 401 if attempt == 0 => *lock(&self.token) = None,
