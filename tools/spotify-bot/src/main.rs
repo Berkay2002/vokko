@@ -2,25 +2,50 @@
 //! `spotify-bot login` stores the account's credentials once; with no arguments it serves the internal API. Stateless: everything
 //! it knows arrives in `PUT /session` and is dropped when the lease runs out.
 
+#[cfg(unix)]
 mod account;
+#[cfg(unix)]
 mod api;
+#[cfg(unix)]
 mod catalog;
+#[cfg(unix)]
 mod config;
+#[cfg(unix)]
 mod login;
+#[cfg(unix)]
 mod plan;
+#[cfg(unix)]
 mod pump;
+#[cfg(unix)]
 mod report;
+#[cfg(unix)]
 mod resample;
+#[cfg(unix)]
 mod session;
 
+#[cfg(unix)]
 use std::sync::Arc;
+#[cfg(unix)]
 use std::time::Duration;
 
+#[cfg(unix)]
 use tracing_subscriber::Layer;
+#[cfg(unix)]
 use tracing_subscriber::filter::{EnvFilter, FilterExt, filter_fn};
+#[cfg(unix)]
 use tracing_subscriber::layer::SubscriberExt;
+#[cfg(unix)]
 use tracing_subscriber::util::SubscriberInitExt;
 
+// The credentials file is guarded by unix modes and shutdown waits for SIGTERM, so the bot is unix only; elsewhere it only
+// builds (keeps `cargo clippy --workspace` working on the Windows PC).
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("spotify-bot runs on unix only");
+    std::process::exit(1);
+}
+
+#[cfg(unix)]
 #[tokio::main]
 async fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -46,6 +71,7 @@ async fn main() {
     }
 }
 
+#[cfg(unix)]
 async fn serve() {
     let cfg = match config::Config::from_env() {
         Ok(cfg) => cfg,
