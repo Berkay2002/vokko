@@ -12,9 +12,10 @@ async function home(page: Page): Promise<void> {
 const box = (page: Page, selector: string) => page.locator(selector).first().evaluate(e => ({ h: e.getBoundingClientRect().height, w: e.getBoundingClientRect().width }));
 const font = (page: Page, selector: string) => page.locator(selector).last().evaluate(e => { const c = getComputedStyle(e); return `${c.fontSize}/${c.lineHeight}/${c.fontWeight}`; });
 
-test('Help opens the keybinds page', async ({ page }) => {
+test('Help menu opens the keybinds page', async ({ page }) => {
   await home(page);
   await page.getByRole('button', { name: 'Help' }).click();
+  await page.getByRole('menuitem', { name: 'Keybinds' }).click();
   await expect(page.locator('.sm-side').getByText('Keybinds').first()).toBeVisible();
 });
 

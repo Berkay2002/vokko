@@ -303,8 +303,11 @@ test('Hide Muted Channels brings a channel back when its timed mute lapses, with
   await page.clock.install();
   await openChannel(page, 'general');
   await page.clock.resume();
-  await row(page, 'memes').click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Mute Channel' }).hover();
+  // Any scroll closes a context menu, and the message list may still be settling to the bottom: retry the open.
+  await expect(async () => {
+    await row(page, 'memes').click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Mute Channel' }).hover({ timeout: 1000 });
+  }).toPass();
   await page.getByRole('menuitem', { name: 'For 15 Minutes' }).click();
   await page.locator('.guild-header').getByRole('button', { name: "Sam's server" }).click();
   await page.locator('.guild-menu').getByRole('menuitemcheckbox', { name: 'Hide Muted Channels' }).click();
