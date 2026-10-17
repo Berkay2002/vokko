@@ -9,12 +9,14 @@ import { Category, Field, Select, Slider } from "../shell/settings/controls";
 import { effectiveVolume, soundKey } from "./helpers";
 import { playPreview } from "./playback";
 import { findSound, loadDefaults, loadEntrance, setEntranceSound, setSoundboardVolume, useSoundboard } from "./store";
+import { usePrefs } from "../ui/prefs";
 
 const NONE = "none";
 
 /** Picker for the entrance sound of `guildId` (null = global, used in every server without its own). */
 export function EntranceSoundField({ guildId }: { guildId: Snowflake | null }) {
-  const { defaults, guildSounds, entrance, volume } = useSoundboard();
+  const { defaults, guildSounds, entrance } = useSoundboard();
+  const volume = usePrefs(s => s.soundboardVolume);
   const guilds = useStore(s => s.guilds);
   const guildOrder = useStore(s => s.guildOrder);
 
@@ -54,7 +56,7 @@ export function EntranceSoundField({ guildId }: { guildId: Snowflake | null }) {
 
 /** The Soundboard block of User Settings > Voice & Video. */
 export function SoundboardVoiceSettings() {
-  const volume = useSoundboard(s => s.volume);
+  const volume = usePrefs(s => s.soundboardVolume);
   return (
     <Category title="Soundboard">
       <Field label="Soundboard volume" note="How loud sounds others play are for you (each sound also has its own volume).">
