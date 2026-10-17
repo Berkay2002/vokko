@@ -142,6 +142,9 @@ test('Enter in the emoji search picks the top result; it joins a 👍 pill spell
   await sent.hover();
   await sent.getByRole('toolbar', { name: 'Message actions' }).getByRole('button', { name: 'Add Reaction' }).click();
   const picker = page.getByRole('dialog', { name: 'Emoji picker' });
+  await expect(picker).toBeVisible();
+  await page.waitForTimeout(300); // past the tooltip delay: the click must not bring "Add Reaction" back over the picker
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
   await picker.getByLabel('Search emoji').fill('thumbsup');
   await picker.getByLabel('Search emoji').press('Enter');
   await expect(picker).toHaveCount(0);
