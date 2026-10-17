@@ -205,6 +205,38 @@ describe("voice engine: media reconnect", () => {
     expect(qualities).toEqual(["200:screen:720p"]);
   });
 
+  const reidentify = () =>
+    emit("READY", { v: 1, user: { id: ME }, session_id: "gw-2", guilds: [], private_channels: [], media: { voice_enabled: true } } as unknown as GatewayEvents["READY"]);
+
+  it("a gateway reconnect with the same voice session keeps the Room: the server re-binds us without a token", async () => {
+    await startCall();
+    slow!.connected();
+    reidentify();
+    expect(op4s()).toHaveLength(1);
+    // The server's answer: our state, same voice session, no VOICE_SERVER_UPDATE.
+    emit("VOICE_STATE_UPDATE", ownState("s1"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(slow?.connects).toHaveLength(1);
+    expect(slow?.disconnects).toBe(0);
+    expect(op4s()).toHaveLength(1);
+    expect(store.getVoice()).toMatchObject({ status: "connected", channelId: GENERAL, sessionId: "s1", pendingJoin: false });
+  });
+
+  it("a gateway reconnect while media is down asks for a token on the new session at once, and the reconnect resumes the call", async () => {
+    await startCall();
+    slow!.connected();
+    slow!.failed();
+    reidentify();
+    // One op 4 re-binds, the next (now on the bound session) asks for a token; no wait for the backoff.
+    expect(op4s()).toHaveLength(2);
+    serverUpdate("t2", "s1");
+    await flush();
+    expect(slow?.connects.map(c => [c.token, c.options.resume])).toEqual([
+      ["t1", false],
+      ["t2", true],
+    ]);
+  });
+
   it("an unanswered op 4 is re-sent only after the token wait", async () => {
     await startCall();
     slow!.connected();

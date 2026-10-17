@@ -450,13 +450,55 @@ async fn restart_restores_states_from_livekit_without_leave_events() {
     assert!(owner.silent_for("VOICE_STATE_UPDATE", Duration::from_millis(400)).await, "no leave events");
     assert!(w.app.state.voice.get(w.alice_id.parse().expect("id")).is_some(), "still within the grace period");
 
-    // The client comes back and claims its state with op 4: re-bound in place, no leave in between.
+    // The client comes back and claims its state with op 4: re-bound in place with the same voice session and no token, so its
+    // LiveKit connection stays; no leave in between.
     let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
     alice.voice(Some(&w.voice), false).await;
-    assert_eq!(alice.voice_answer().await.0, "VOICE_SERVER_UPDATE");
     let rebound = owner.wait_for("VOICE_STATE_UPDATE").await;
-    assert_eq!(rebound["channel_id"].as_str(), Some(w.voice.as_str()));
-    assert_ne!(rebound["session_id"], "restored");
+    assert_eq!((rebound["channel_id"].as_str(), rebound["session_id"].as_str()), (Some(w.voice.as_str()), Some("restored")));
+    assert_eq!(rebound["self_mute"], false, "the client's own mute replaces the guess from LiveKit");
+    assert!(alice.silent_for("VOICE_SERVER_UPDATE", Duration::from_millis(300)).await, "no new token: the room is kept");
+    let entry = w.app.state.voice.get(w.alice_id.parse().expect("id")).expect("claimed");
+    assert!(entry.unbound_since.is_none() && entry.gateway_session.is_some());
+    // A client that lost LiveKit meanwhile asks again on its new session: a fresh token for the same voice session.
+    alice.voice(Some(&w.voice), false).await;
+    let (name, answer) = alice.voice_answer().await;
+    assert_eq!((name.as_str(), answer["session_id"].as_str()), ("VOICE_SERVER_UPDATE", Some("restored")));
+}
+
+#[tokio::test]
+async fn a_re_identified_client_keeps_its_voice_session_without_a_new_token() {
+    let w = world_with(
+        |config| {
+            livekit(config);
+            config.voice_gateway_grace = Duration::from_millis(300);
+        },
+        FakeRoomService::new(),
+    )
+    .await;
+    let (mut owner, _) = Client::identify(&w.address, &w.owner).await;
+    let (mut alice, ready) = Client::identify(&w.address, &w.alice).await;
+    let gateway = ready["session_id"].as_str().expect("gateway session").to_owned();
+    let (session, _) = join(&mut alice, &w.voice).await;
+    owner.wait_for("VOICE_STATE_UPDATE").await;
+    let nonce = w.nonce(&w.alice_id);
+    assert_eq!(w.event("participant_joined", w.participant(&w.alice_id, &session, &nonce)).await, StatusCode::OK);
+
+    // The gateway drops and the client identifies again (its old session could not be resumed): same channel, op 4.
+    drop(alice);
+    while w.app.state.hub.session(&gateway).is_some_and(|old| old.detached_for().is_none()) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
+    alice.voice(Some(&w.voice), false).await;
+    assert_eq!(owner.wait_for("VOICE_STATE_UPDATE").await["session_id"].as_str(), Some(session.as_str()));
+    assert!(alice.silent_for("VOICE_SERVER_UPDATE", Duration::from_millis(100)).await, "no new token");
+    assert_eq!(w.nonce(&w.alice_id), nonce, "the live connection's token still counts");
+    // The old gateway session's grace period passes: the state belongs to the new one now.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(owner.silent_for("VOICE_STATE_UPDATE", Duration::from_millis(100)).await, "no leave");
+    let entry = w.app.state.voice.get(w.alice_id.parse().expect("id")).expect("still in voice");
+    assert!(entry.connected && entry.session_id == session);
 }
 
 #[tokio::test]
