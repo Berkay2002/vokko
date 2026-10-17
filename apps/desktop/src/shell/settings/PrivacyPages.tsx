@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import { Cloud, Code, Download, Gamepad2, Globe, MessageCircle, Music, Palette, Tv, Video } from "lucide-react";
+import { Download, Gamepad2, Globe, Palette } from "lucide-react";
+import { siBluesky, siGithub, siReddit, siSpotify, siSteam, siTwitch, siYoutube, type SimpleIcon } from "simple-icons";
+import { BrandIcon } from "../../ui/BrandIcon";
 import { ApiRequestError, RateLimitedError, request } from "../../api/rest";
 import { useStore } from "../../api/store";
 import { RelationshipType, type UserDataExport } from "../../api/types";
@@ -250,14 +252,14 @@ export function ActivityPrivacyPage() {
   );
 }
 
-const PROVIDERS: { name: string; icon: typeof Cloud }[] = [
-  { name: "Steam", icon: Gamepad2 },
-  { name: "Twitch", icon: Tv },
-  { name: "YouTube", icon: Video },
-  { name: "GitHub", icon: Code },
-  { name: "Reddit", icon: MessageCircle },
-  { name: "Bluesky", icon: Cloud },
-  { name: "Domain", icon: Globe },
+const PROVIDERS: { name: string; icon: Pick<SimpleIcon, "path"> | null }[] = [
+  { name: "Steam", icon: siSteam },
+  { name: "Twitch", icon: siTwitch },
+  { name: "YouTube", icon: siYoutube },
+  { name: "GitHub", icon: siGithub },
+  { name: "Reddit", icon: siReddit },
+  { name: "Bluesky", icon: siBluesky },
+  { name: "Domain", icon: null },
 ];
 
 export function ConnectedAppsPage() {
@@ -267,15 +269,15 @@ export function ConnectedAppsPage() {
         <p className="sm-sub-note">These are accounts on other services. Linking them to Vokko is not available yet.</p>
         <SubHeading>Add a new connection</SubHeading>
         <div className="sm-provider-grid">
-          {PROVIDERS.map(({ name, icon: Icon }) => (
+          {PROVIDERS.map(({ name, icon }) => (
             <button key={name} type="button" className="sm-provider" disabled aria-label={`Connect ${name}`} title={`${name} (not available yet)`}>
-              <Icon size={20} />
+              {icon ? <BrandIcon icon={icon} /> : <Globe size={20} aria-hidden="true" />}
             </button>
           ))}
         </div>
         <div className="sm-list-item" data-testid="spotify-connection">
           <span className="sm-spotify-tile" aria-hidden="true">
-            <Music size={20} />
+            <BrandIcon icon={siSpotify} size={24} />
           </span>
           <span className="sm-list-text">
             <span className="sm-list-name">Spotify</span>

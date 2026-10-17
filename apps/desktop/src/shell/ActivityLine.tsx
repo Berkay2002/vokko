@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Gamepad2 } from "lucide-react";
+import { Gamepad2, Music } from "lucide-react";
 import { activityLabel, formatClock, formatPlaytime, playingActivity, shownActivity } from "../activity/format";
 import { useStore } from "../api/store";
 import type { Activity, Snowflake } from "../api/types";
@@ -25,9 +25,19 @@ export function useShownActivity(userId: Snowflake | null | undefined): Activity
   return useStore(s => (userId ? shownActivity(s.presences[userId]) : null));
 }
 
-/** One line for lists: "Playing Factorio · 12m" or "Listening to Spotify". Truncates with an ellipsis through the `className` the caller styles. */
-export function ActivityLine({ activity, className }: { activity: Activity; className?: string }) {
+/** One line for lists: "Playing Factorio · 12m" or "Listening to Spotify". Truncates with an ellipsis through the `className` the caller styles.
+ *  `variant="song"` shows a Spotify song as a green note and the artist (plus "+N" for `more` other activities) instead. */
+export function ActivityLine({ activity, className, variant, more }: { activity: Activity; className?: string; variant?: "song"; more?: number }) {
   const now = useNow(30_000);
+  if (activity.type === 2 && variant === "song") {
+    return (
+      <span className={`${className ?? "activity-line"} activity-song`} data-testid="activity-line" title={activity.details ? `${activityLabel(activity)}: ${activity.details}` : activityLabel(activity)}>
+        <Music size={12} className="activity-song-icon" aria-hidden="true" />
+        <span className="activity-song-text">{activity.state || "Listening to Spotify"}</span>
+        {more ? <span className="activity-song-more">+{more}</span> : null}
+      </span>
+    );
+  }
   if (activity.type === 2) {
     return (
       <span className={className ?? "activity-line"} data-testid="activity-line" title={activity.details ? `${activityLabel(activity)}: ${activity.details}` : activityLabel(activity)}>

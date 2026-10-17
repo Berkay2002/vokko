@@ -74,7 +74,7 @@ function DmRow({ channel }: { channel: Channel }) {
           </span>
           {group && <span className="dm-sub">{recipients.length + 1} members</span>}
           {playing ? (
-            <ActivityLine activity={playing} className="dm-sub dm-activity" />
+            <ActivityLine activity={playing} className="dm-sub dm-activity" variant="song" />
           ) : inVoice ? (
             <span className="dm-sub dm-activity voice">
               <Volume2 size={12} strokeWidth={2.5} aria-hidden="true" />

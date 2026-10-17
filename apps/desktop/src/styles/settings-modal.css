@@ -954,8 +954,8 @@
   width: 40px;
   height: 40px;
   border-radius: 8px;
-  background: #1db954;
-  color: #000000;
+  background: #000000;
+  color: #1ed760;
 }
 
 .sm-provider:disabled {

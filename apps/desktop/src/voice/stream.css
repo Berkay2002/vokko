@@ -203,3 +203,21 @@
 .user-panel-voice-icon.user-panel-stream-icon {
   color: var(--icon-feedback-positive);
 }
+
+/* the compact Spotify card inside the hover card: no panel of its own */
+.stream-card .spotify-card-compact {
+  margin-top: 0;
+  background: none;
+}
+
+.spotify-card-compact .spotify-card-art {
+  width: 40px;
+  height: 40px;
+}
+
+.spotify-card-compact .spotify-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}

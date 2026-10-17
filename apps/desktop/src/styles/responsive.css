@@ -194,10 +194,6 @@
     display: none;
   }
 
-  .app-frame.nav-open .user-panel-buttons .user-panel-inbox {
-    display: flex;
-  }
-
   .app-frame.nav-open .user-panel-buttons .user-panel-button {
     width: 40px;
     height: 40px;

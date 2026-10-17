@@ -62,4 +62,14 @@ describe("activeFriends", () => {
     );
     expect(out).toEqual([]);
   });
+
+  it("marks a voice channel of a server in the store as shared, and a DM call as not", () => {
+    const dm = { d1: { id: "d1", type: ChannelType.DM, guild_id: null, name: null } as Channel };
+    const shared = activeFriends({ a: friend("a") }, { a: presence("a", null) }, { a: inVoice("a", "c1") }, channels, guilds);
+    expect(shared[0]?.guild?.name).toBe("Home");
+    const stranger = activeFriends({ a: friend("a") }, { a: presence("a", null) }, { a: inVoice("a", "c1") }, channels, {});
+    expect(stranger[0]?.guild).toBeNull();
+    const call = activeFriends({ a: friend("a") }, { a: presence("a", null) }, { a: inVoice("a", "d1") }, dm, guilds);
+    expect(call[0]?.guild).toBeNull();
+  });
 });

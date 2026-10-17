@@ -40,11 +40,12 @@ async function everyoneListens(page: Page) {
   );
 }
 
-test('the member list says "Listening to Spotify"', async ({ page }) => {
+test('the member list shows the artist after a music note', async ({ page }) => {
   await openStockTalk(page);
   await everyoneListens(page);
   const line = page.locator('.member-list [data-testid="activity-line"]').first();
-  await expect(line).toHaveText('Listening to Spotify');
+  await expect(line).toHaveText('M83; Anthony Gonzalez');
+  await expect(line.locator('.activity-song-icon')).toBeVisible();
 });
 
 test('the profile popout shows the song, its artists, a progress bar and Play on Spotify', async ({ page }) => {
