@@ -415,6 +415,17 @@ Discord sends reports to its own Trust & Safety team through an undocumented API
 - Closing or reopening records audit entry 250 (`ReportUpdate`, Vokko-only): `target_id` is the report id, the one change is `status` (old to new), `reason` comes from `X-Audit-Log-Reason`. The reporter, the target and the reason for the report are left out, since VIEW_AUDIT_LOG members need not be moderators. Setting the status a report already has records nothing.
 - No gateway event yet: moderators load the list.
 
+## Problem reports (Report a Problem)
+
+Vokko-only: Help menu (title bar and the macOS Help menu), Settings > Advanced > Support and the voice connection popout's Upload Logs send one. Reports are for the instance operator; there is no in-app reader (see self-hosting.md "Problem reports").
+
+| Method | Path | Body → Response |
+|---|---|---|
+| POST | /bug-reports | `CreateBugReportRequest` `{description, app_version, os, logs}` → `BugReportCreated` `{id}`. Signed in (401 without a token). `description` trimmed, 1-2000 characters; `app_version` at most 64, `os` at most 256 (400 50035 on the field). The whole body is capped at 256 KiB (413 40005). Rate limit per user: 3 reports, then one every 10 minutes (429 `RateLimitError`) |
+
+- `logs`: the client's last 500 console warning/error, uncaught error and voice/LiveKit event lines, each at most 1000 characters. The client scrubs them before storing (`apps/desktop/src/report/logBuffer.ts`: JWTs, `Bearer`/`Bot` headers, any `token`/`secret`/`password`/`signature`/`sig`/`auth*`/`api_key`/`cookie`/`session`/`credential`/`ticket` key's value, OAuth `code`/`state`, and long strings mixing letters and digits) and drops `content` fields of logged objects. The server also replaces the caller's own token wherever it appears.
+- Stored with the user id and time; deleted 30 days after creation (hourly sweep). Deleting the account deletes its reports.
+
 ## Apply to Join (join requests, Server Settings > Access)
 
 Discord's member verification form and guild join requests. A guild's `join_mode` (also on `Invite.guild`) is `0` Invite Only (default) or `1` Apply to Join; MANAGE_GUILD switches it through PATCH /guilds/{id} `{join_mode}` (other values → 400 50035), audit key `join_mode`.
@@ -458,6 +469,8 @@ clients apply them to `results` (and `me_voted` when `user_id` is theirs).
 Semantics notes: a reply puts the replied-to author in `mentions` (Discord default). Pinning emits MESSAGE_UPDATE for the pinned message plus a type 6 system message (MESSAGE_CREATE). `referenced_message.reactions` is always `[]`. Role mentions only drive `mention_count` (no `mention_roles` field).
 
 Message search (`MessageSearchQuery`): Discord's query shape. Array filters use repeated keys (`?has=image&has=link`, `?author_id=1&author_id=2`; values inside one filter are OR, different filters are AND, except repeated `has` which is AND). `content`: words, case-insensitive, all must appear (`simple` Postgres text search, so Swedish and English both work with no stemming); `"quoted phrase"` and `-excluded` follow `websearch_to_tsquery`. `author_id` (users), `mentions` (users, includes reply targets), `channel_id` (guild route only; channels the caller cannot read are ignored), `has` = `link | embed | file | image | video | sound | sticker` (`file` = any attachment; `image`/`video`/`sound` by attachment content type or embed type; `sticker` = the message has sticker items), `pinned` (`true` only pinned, `false` only unpinned, absent both), `min_id` / `max_id` (exclusive snowflakes: Discord's after/before/during are computed client-side from the date), `offset` (0-9975, default 0), `limit` (1-25, default 25), `sort_by` (`timestamp` default | `relevance`), `sort_order` (`desc` default | `asc`). Out-of-range values → 400 50035. `relevance` without `content` falls back to timestamp. Only user messages are searched (types 0 and 19): pin notices and join messages never match, so `from:` alone lists real messages. Response `{total_results, messages: Message[][]}`: `total_results` counts every match in the readable set (before offset/limit) and never includes channels the caller cannot read; each hit is a one-element array (Discord's shape, no context messages), with `Reaction.me` filled for the caller.
+
+Desktop releases: READY carries `desktop_version` (the `version` of the downloads' updater manifest, `VOKKO_DESKTOP_LATEST_JSON`; omitted when the server has none), and when that file changes the server sends `DESKTOP_VERSION {version}` to every connected session (checked every 60 s; an unreadable or half-written file changes nothing). The desktop app runs its normal update check when the version is newer than its own; installing still waits for the user's restart. Browsers ignore both.
 
 Read states: READY includes a read state for every channel the user can see that has messages. When a user joins a guild or a DM is created, their read state starts at the channel's latest message (nothing is unread). A channel without a read state counts as unread on the client.
 

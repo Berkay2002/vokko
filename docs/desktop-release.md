@@ -88,7 +88,7 @@ The release overlay's `targets` stays `["nsis"]`; Linux passes `--bundles appima
   `update-desktop-database` and `xdg-mime`, which desktop distros ship; a failure is only logged).
 - `tools/release-linux.sh <version> <out dir>` builds from the checkout's HEAD (sent in as a git bundle; the distro has no GitHub
   credentials), signs the AppImage with `~/.vokko/updater.key` passed through `WSLENV` and copies the AppImage, its `.sig` and
-  the .deb to `<out dir>`. It uploads nothing, so running it alone is the dry run.
+  the .deb to `<out dir>`. It uploads nothing, so running it alone is the Linux-only dry run.
 
 One-time setup of the distro, from a Windows shell (everything on E:; it never touches the `docker-desktop` distro):
 
@@ -150,7 +150,11 @@ https://vokko.example.com and LiveKit Cloud, and the updater (public key, endpoi
 and its password live outside the repo in `~/.vokko/updater.key` and `~/.vokko/updater.key.password` on the Windows PC and on buildhost; losing
 them means installed apps can never be updated again, so keep a backup. **Release with `tools/release-desktop.sh <version> "notes"`** from Git
 Bash on the Windows PC: it bumps the version, builds all three platforms (Linux through `tools/release-linux.sh`, see Linux
-below), uploads them to `/downloads/` and writes `latest.json` last.
+below), uploads them to `/downloads/` and writes `latest.json` last. It pulls first and re-execs the pulled copy of itself (its body
+is one function, so the pull can't change the script under the running bash). `latest.json` goes out only after it lists
+`windows-x86_64`, `darwin-aarch64` and `linux-x86_64` at the new version and each url answers `curl -fsI`; the served copy is
+checked the same way, and any miss fails the run loudly. `tools/release-desktop.sh --dry-run` builds all three at the current
+version (no bump, commit, push or upload; main must equal origin/main, which buildhost builds) and checks a local `latest.json`.
 The macOS app is ad-hoc signed (`bundle.macOS.signingIdentity: "-"` in the overlay). Without it the binary is only linker-signed
 with no sealed resources, and a downloaded copy opens as "Vokko is damaged" with no way past it. Ad-hoc is not notarized: macOS
 still warns once, and the user allows it under System Settings, Privacy & Security, Open Anyway (or runs
@@ -176,7 +180,12 @@ strictly newer version.
 
 ### Runtime flow
 
-1. `initUpdater()` (via `initDesktop()`) checks 30 s after launch and then every 4 h, only when the build is configured.
+1. `initUpdater()` (via `initDesktop()`) checks 30 s after launch and then every 4 h, only when the build is configured. The server also
+   pushes the latest release: it reads `latest.json` from the downloads directory every 60 s (`VOKKO_DESKTOP_LATEST_JSON`, set in
+   deploy/docker-compose.yml) and sends its `version` in READY `desktop_version` and, when it changes, as `DESKTOP_VERSION` to every
+   connected session. `noticeLatestVersion()` (wired in main.tsx) runs the same check right away when that version is newer than the
+   app's, unless a check or download is under way or an update is already ready. So a release reaches running apps within about a
+   minute of `latest.json` being written; the 4 h timer stays as the fallback.
 2. `check` finds an update: status `available`; it downloads in the background (`downloading` with byte progress); status `ready`.
 3. The shell shows the "update ready, restart" banner from `useDesktopUpdate()` (`status.state === "ready"`) and calls `restartToUpdate()`.
    On Windows the installer takes over and exits the app; on macOS/Linux the app restarts itself. The download is never installed

@@ -3969,6 +3969,25 @@ pub struct CreateReportRequest {
     pub details: Option<String>,
 }
 
+/// `POST /bug-reports` ("Report a problem"): kept for the instance operator, deleted after 30 days.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CreateBugReportRequest {
+    /// What went wrong, 1-2000 characters (trimmed).
+    pub description: String,
+    /// Client version, at most 64 characters.
+    pub app_version: String,
+    /// Operating system and browser, at most 256 characters.
+    pub os: String,
+    /// Recent client log lines (warnings, errors, voice events) with secrets scrubbed by the client; the whole body is capped at 256 KiB.
+    #[serde(default)]
+    pub logs: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BugReportCreated {
+    pub id: Snowflake,
+}
+
 /// `PATCH /guilds/{id}/reports/{report_id}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpdateReportRequest {
@@ -4315,6 +4334,15 @@ pub struct ReadyEvent {
     #[serde(default)]
     pub guild_layout: GuildLayout,
     pub media: InstanceMediaConfig,
+    /// Latest desktop release this server knows of (`version` of the downloads' `latest.json`); absent when none is configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub desktop_version: Option<String>,
+}
+
+/// DESKTOP_VERSION: sent to every connected session when the server sees a new desktop release (same value as READY `desktop_version`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DesktopVersion {
+    pub version: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -4930,6 +4958,7 @@ pub enum GatewayEvent {
     InviteCreate(Box<InviteMetadata>),
     InviteDelete(InviteDelete),
     GuildLayoutUpdate(GuildLayout),
+    DesktopVersion(DesktopVersion),
     /// GUILD_JOIN_REQUEST_*: to the applicant and members with KICK_MEMBERS or MANAGE_GUILD.
     GuildJoinRequestCreate(Box<GuildJoinRequestEvent>),
     GuildJoinRequestUpdate(Box<GuildJoinRequestEvent>),
@@ -5019,6 +5048,7 @@ impl GatewayEvent {
             Self::InviteCreate(_) => "INVITE_CREATE",
             Self::InviteDelete(_) => "INVITE_DELETE",
             Self::GuildLayoutUpdate(_) => "GUILD_LAYOUT_UPDATE",
+            Self::DesktopVersion(_) => "DESKTOP_VERSION",
             Self::GuildJoinRequestCreate(_) => "GUILD_JOIN_REQUEST_CREATE",
             Self::GuildJoinRequestUpdate(_) => "GUILD_JOIN_REQUEST_UPDATE",
             Self::GuildJoinRequestDelete(_) => "GUILD_JOIN_REQUEST_DELETE",
@@ -5093,6 +5123,7 @@ impl GatewayEvent {
             Self::InviteCreate(value) => serde_json::to_value(value),
             Self::InviteDelete(value) => serde_json::to_value(value),
             Self::GuildLayoutUpdate(value) => serde_json::to_value(value),
+            Self::DesktopVersion(value) => serde_json::to_value(value),
             Self::GuildJoinRequestCreate(value) | Self::GuildJoinRequestUpdate(value) => serde_json::to_value(value),
             Self::GuildJoinRequestDelete(value) => serde_json::to_value(value),
         };
@@ -5710,6 +5741,8 @@ mod tests {
         assert!(empty.guild_folders.is_empty() && empty.guild_positions.is_empty());
         let update = GatewayEvent::GuildLayoutUpdate(empty);
         assert_eq!((update.name(), update.data()), ("GUILD_LAYOUT_UPDATE", json!({"guild_folders": [], "guild_positions": []})));
+        let desktop = GatewayEvent::DesktopVersion(DesktopVersion { version: "0.1.9".to_owned() });
+        assert_eq!((desktop.name(), desktop.data()), ("DESKTOP_VERSION", json!({"version": "0.1.9"})));
     }
 
     #[test]

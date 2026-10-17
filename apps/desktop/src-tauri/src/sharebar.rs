@@ -4,7 +4,8 @@
 
 use tauri::AppHandle;
 
-/// Called by the page once a screen share is live. Returns at once; the lookup runs on its own thread.
+/// Called by the page just before it opens the screen picker, so the bar is hidden as it shows instead of after the share is
+/// published. Returns at once; the lookup runs on its own thread.
 #[tauri::command]
 pub fn desktop_hide_share_bar(app: AppHandle) {
     #[cfg(windows)]
@@ -53,12 +54,14 @@ mod win {
             if pid == 0 {
                 return;
             }
-            // The bar appears as the capture starts; give it a few seconds.
-            for _ in 0..50 {
+            // The bar shows once a source is picked, which may take the user a while. Polling every 15 ms keeps any flash to a frame
+            // or two (at 100 ms, called after the publish, it stayed up 0.3 s or more).
+            // ponytail: gives up after 2 minutes in the picker; a WinEvent hook (EVENT_OBJECT_SHOW) would remove the limit.
+            for _ in 0..8000 {
                 if hide_bar(pid, &host) {
                     return;
                 }
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(15));
             }
             log::warn!("screen share bar not found");
         });

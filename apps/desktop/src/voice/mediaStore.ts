@@ -4,7 +4,7 @@
 import { create } from "zustand";
 import type { Snowflake, VoiceState } from "../api/types";
 import { useVoice } from "./store";
-import type { ViewerQuality } from "./video/options";
+import type { StreamLayer, ViewerQuality } from "./video/options";
 
 export type VideoSource = "camera" | "screen";
 
@@ -12,6 +12,8 @@ export type VideoSource = "camera" | "screen";
 export interface VideoHandle {
   attach(element: HTMLVideoElement): void;
   detach(element: HTMLVideoElement): void;
+  /** The layers a remote stream is published with, when known (the stream quality menu offers these). */
+  layers?: readonly StreamLayer[];
 }
 
 export const videoKey = (userId: Snowflake, source: VideoSource): string => `${userId}:${source}`;

@@ -22,6 +22,7 @@ import { messageStore } from "./chat/messageStore";
 import { preloadHighlighter } from "./chat/markdown";
 import { preloadSettings } from "./shell/Modals";
 import { startNotify } from "./notify";
+import { installLogCapture } from "./report/logBuffer";
 import { startThreadMuteMigration } from "./threads/muteMigration";
 import "./styles/tokens.css";
 import "./styles/themes.generated.css";
@@ -52,6 +53,8 @@ import "./voice";
 import "./calls";
 import "./soundboard";
 
+installLogCapture(); // console warnings/errors feed "Report a problem" (scrubbed, kept in memory)
+
 // Mock mode only: expose internals to Playwright scripts and the console (no effect in real builds).
 if (MOCK) (window as unknown as { __vokko: unknown }).__vokko = { gateway, desktop, messageStore, ...rest, ...store };
 
@@ -62,6 +65,9 @@ bootstrap();
 startNotify();
 startThreadMuteMigration(); // old per-device thread mutes move onto the server thread member, once
 void initDesktop(); // deep links + updater + tray unread dot; no-op outside the Tauri webview
+// A release the server announces is checked for right away (the updater ignores it in the browser or without updater config).
+gateway.on("READY", ready => void (ready.desktop_version && desktop.noticeLatestVersion(ready.desktop_version)));
+gateway.on("DESKTOP_VERSION", ({ version }) => void desktop.noticeLatestVersion(version));
 startGameDetection(); // desktop only: detected game goes out as presence
 
 const root = document.getElementById("root");

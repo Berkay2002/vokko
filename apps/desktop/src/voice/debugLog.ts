@@ -1,6 +1,8 @@
 // Voice & Video > Advanced > Debug logging: connection events and WebRTC statistics go to the developer console.
 // Off by default; the pref is read on every call so the switch takes effect without reconnecting.
+// Events always go to the "Report a problem" log ring, which is only sent when the user reports.
 
+import { recordLog } from "../report/logBuffer";
 import { getPrefs } from "../ui/prefs";
 
 export function voiceDebugEnabled(): boolean {
@@ -8,6 +10,7 @@ export function voiceDebugEnabled(): boolean {
 }
 
 export function voiceDebug(event: string, detail?: unknown): void {
+  recordLog("voice", detail === undefined ? [event] : [event, detail]);
   if (!voiceDebugEnabled()) return;
   if (detail === undefined) console.debug(`[vokko:voice] ${event}`);
   else console.debug(`[vokko:voice] ${event}`, detail);

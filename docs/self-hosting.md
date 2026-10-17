@@ -63,6 +63,7 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_GIF_API_KEY` | empty | Provider API key; required when `VOKKO_GIF_PROVIDER` is not `none`. |
 | `VOKKO_GIF_BASE_URL` | provider default | Override of the provider's API origin (mirrors, tests). |
 | `VOKKO_REMINDER_POLL_SECS` | `15` | How often due message reminders are delivered. |
+| `VOKKO_DESKTOP_LATEST_JSON` | unset (compose: `/downloads/latest.json`) | Path of the desktop updater's `latest.json`. The server reads it every 60 s and sends a new `version` to every connected client (READY `desktop_version`, DESKTOP_VERSION), so installed apps look for the update within a minute. A missing or unreadable file changes nothing. |
 | `VOKKO_TRUST_PROXY` | off | `on`/`1`/`true`/`yes`: take the client address from the last `X-Forwarded-For` entry. Only behind a proxy that sets it (the bundled Caddy does), otherwise clients can spoof their address and dodge rate limits. Uses the last `X-Forwarded-For` line, so exactly one proxy hop. |
 | `VOKKO_CORS_ORIGINS` | unset (localhost on any port) | Comma-separated exact origins allowed to call the API from a browser, e.g. `https://chat.example.com,https://web.example.com`. Scheme and host (and port if not default), no path, no `*`. When set it replaces the localhost defaults; the Tauri origins stay allowed. Bad entries stop the server at start. |
 | `VOKKO_REGISTRATION` | `open` | `closed`: `POST /api/v1/auth/register` answers 403 (code 40002). Existing accounts, login and `seed` are unaffected, so create the accounts you need first, then close it. Anything else than `open`/`closed` stops the server at start. |
@@ -339,7 +340,7 @@ cloudflared tunnel ingress rule https://chat.example.com
 
 and restart `cloudflared`. The `/gateway` websocket works through the tunnel without extra settings. `VOKKO_TRUSTED_PROXIES=private_ranges` lets Caddy take the client from the rightmost untrusted `X-Forwarded-For` entry (the one Cloudflare appends) and forward it to the server, so rate limits see each visitor's address rather than the tunnel's. Keep the web port on loopback: the setting trusts any private peer, and with Docker Desktop or OrbStack every peer looks private. LiveKit Cloud reaches `/internal/livekit/webhook` through the same hostname (see docs/self-hosting-free.md).
 
-Desktop installers placed in `deploy/downloads/` are served at `/downloads/<file>` with `Content-Disposition: attachment` and no directory listing; the web client's Download Apps dialog links `Vokko-windows-setup.exe` and `Vokko-mac.dmg`.
+Desktop installers placed in `deploy/downloads/` are served at `/downloads/<file>` with `Content-Disposition: attachment` and no directory listing; the web client's Download Apps dialog links `Vokko-windows-setup.exe` and `Vokko-mac.dmg`. The server container mounts the same directory read-only to watch `latest.json` (`VOKKO_DESKTOP_LATEST_JSON`).
 
 ## Health check
 
@@ -348,6 +349,22 @@ Desktop installers placed in `deploy/downloads/` are served at `/downloads/<file
 ## Upload limit
 
 Every user gets Discord Nitro's upload limit for free: one file may be up to 500 MiB, or `VOKKO_MAX_UPLOAD_MB` when you set it lower, whichever is lower (values above 500 are lowered to 500). Uploads are streamed to disk and from there to the storage backend (S3 included), so a large file does not sit in memory. A message holds up to 10 files, a user streams at most 3 uploads at once, and each user may have 100 MiB of not-yet-sent uploads, or one file's worth when the per-file limit is larger (those are deleted after an hour). Budget disk accordingly: at 500 MiB that is up to 500 MiB of pending uploads per active user. Change the limit in `deploy/.env` and `docker compose up -d`. A reverse proxy in front must allow at least that much (nginx: `client_max_body_size 501m`; Caddy has no limit by default). The bundled client checks the 500 MiB limit in the composer; a file under that but over a lower server limit is refused by the server (413) and the client says so.
+
+## Problem reports
+
+"Report a Problem" in the client stores the user's description, app version, OS and a scrubbed tail of the client log in the
+`bug_reports` table (docs/api.md "Problem reports"). There is no admin UI; read them with psql:
+
+```sql
+SELECT r.id, r.created_at, u.username, r.app_version, r.os, r.description
+FROM bug_reports r JOIN users u ON u.id = r.user_id
+ORDER BY r.created_at DESC LIMIT 20;
+
+SELECT logs FROM bug_reports WHERE id = <id>;  -- the reference the user was shown
+```
+
+Rows are deleted 30 days after they were sent. Treat the logs as private: the client removes tokens and message text, but
+log lines can still name channels, servers and users.
 
 ## Not production-ready yet
 

@@ -87,9 +87,12 @@ services:
       VOKKO_REGISTRATION: ${VOKKO_REGISTRATION:-open}
       # `on` only when every request arrives through a reverse proxy that appends the client address (the bundled Caddy does).
       VOKKO_TRUST_PROXY: ${VOKKO_TRUST_PROXY:-off}
+      # The desktop updater manifest from the downloads below: a new `version` is pushed to connected apps (no file = off).
+      VOKKO_DESKTOP_LATEST_JSON: /downloads/latest.json
       RUST_LOG: ${RUST_LOG:-vokko_server=info,warn}
     volumes:
       - vokko-data:/data
+      - ${VOKKO_DOWNLOADS_DIR:-./downloads}:/downloads:ro
     ports:
       # Loopback by default: put Caddy (or another TLS proxy) in front. Use 0.0.0.0:8710 only on a trusted LAN.
       - "${VOKKO_SERVER_LISTEN:-127.0.0.1:8710}:8710"

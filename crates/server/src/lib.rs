@@ -8,6 +8,7 @@ pub mod auth;
 pub mod bot_routes;
 pub mod config;
 pub mod crypto;
+pub mod desktop_version;
 pub mod embed_media;
 pub mod emojis;
 pub mod error;

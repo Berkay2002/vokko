@@ -653,6 +653,46 @@ html .chat-attach-menu {
   padding-left: 0;
 }
 
+/* ---- Report a Problem ---- */
+.report-problem .mod-reason,
+.report-problem-sent {
+  border: 1px solid var(--border-normal);
+}
+
+.report-problem .mod-reason {
+  min-height: 120px;
+  margin-top: 8px;
+}
+
+.report-problem-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-strong);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.report-problem-sent {
+  max-height: 180px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--background-mod-subtle);
+  color: var(--text-default);
+  font-family: var(--font-code);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .role-dot {
   display: inline-block;
   width: 12px;
