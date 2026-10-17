@@ -1358,6 +1358,23 @@ async fn nothing_is_written_for_an_odd_item_a_failing_stremio_or_a_few_seconds()
 }
 
 #[tokio::test]
+async fn another_members_seek_keeps_the_item_out_of_the_starters_library() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    w.join(&mut carl).await;
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 0, Some("tt0111161"))]);
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    // Pausing and resuming is fine; carl jumping to the credits is not alice's watching.
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"playing": true})).await.0, StatusCode::OK);
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"position_ms": 7_100_000})).await.0, StatusCode::OK);
+    w.stop_and_settle(&w.alice).await;
+    assert!(w.mock.puts("AUTHKEY-1").is_empty() && w.mock.puts(CARL_KEY).is_empty(), "no write after someone else's seek");
+}
+
+#[tokio::test]
 async fn a_finished_movie_is_watched_and_a_finished_episode_moves_on_to_the_next() {
     let w = world().await;
     let mut alice = Client::identify(&w.address, &w.alice).await.0;

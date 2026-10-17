@@ -89,6 +89,8 @@ struct Tracked {
     owner: i64,
     info: TitleInfo,
     began_ms: u64,
+    /// Someone else moved the playhead: where it ends up is not what the owner watched, so nothing is saved for this item.
+    foreign_seek: bool,
 }
 
 impl Session {
@@ -119,7 +121,7 @@ impl Session {
 
     /// Notes who started the current item (call right after `begin`) and, for a resume, where it starts.
     fn track(&mut self, info: &TitleInfo, owner: i64, began_ms: u64) {
-        self.tracked = Some(Tracked { owner, info: info.clone(), began_ms });
+        self.tracked = Some(Tracked { owner, info: info.clone(), began_ms, foreign_seek: false });
         self.position_ms = began_ms;
     }
 
@@ -127,7 +129,7 @@ impl Session {
     /// `None` when the bot never reported a duration (it never played).
     fn take_finished(&mut self, ended: bool, now_ms: i64) -> Option<Finished> {
         let duration_ms = self.duration_ms?;
-        let tracked = self.tracked.take()?;
+        let tracked = self.tracked.take().filter(|tracked| !tracked.foreign_seek)?;
         Some(Finished {
             owner: tracked.owner,
             kind: tracked.info.kind,
@@ -413,6 +415,11 @@ async fn control(
             session.queue.push(queued);
         }
         if steer {
+            if body.position_ms.is_some()
+                && let Some(tracked) = session.tracked.as_mut().filter(|tracked| tracked.owner != user_id)
+            {
+                tracked.foreign_seek = true;
+            }
             session.steer(body.playing, body.position_ms, now);
         }
         (before, session.view(channel_id), steer.then(|| session.desired(&state, now)).flatten())
