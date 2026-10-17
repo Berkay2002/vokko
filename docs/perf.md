@@ -74,3 +74,29 @@ What changed:
   separate chunks. Highlighting and settings are preloaded at idle after first paint, so code blocks rarely show uncoloured and
   settings open without a fallback. The mock backend chunk is only fetched in mock builds (before bootstrap). Emoji data
   (`data`, `joypixels`) and the LiveKit voice/video transport were already lazy chunks; there is no MediaPipe in the client yet. CSS is not split: the theme and shell styles are needed for the first paint.
+
+## Round 2 (2026-10-18): startup bundle regrowth, cold start, channel open
+
+The initial bundle had grown back to 2,166 kB (633 kB gzip) through three static imports:
+- `stremio/viewerConnection.ts` imported `viewer.ts`, which pulls in all of livekit-client (508 kB) from the voice sidebar. It now
+  imports it when a viewer Room opens.
+- The rail context menu (`shell/menus.tsx`) imported `serverSettingsSections` from `ServerSettings.tsx`, which pulled every Server
+  Settings page into the entry. The section list lives in `shell/settings/serverSections.ts`; `ServerSettings.tsx` imports
+  Onboarding, Soundboard and Games settings by path, so the feature indexes no longer drag them in.
+- The profile editor is a lazy modal like the settings screens (preloaded at idle with them).
+
+A new step, **cold start**, opens `/channels/@me?as=sam` in a fresh context, clicks the first guild as soon as its icon exists
+and stops when its messages are painted (median of 5, also with 4x CPU and 20 Mbit/s). `VOKKO_PERF_PORT` overrides the port.
+
+The message list opens at the bottom with `initialScrollTop` instead of `initialTopMostItemIndex`: react-virtuoso waits four frames
+before scrolling to an initial index and then paints one frame of the wrong rows. Jump-to-message still uses the index.
+
+| Metric (home server M4, loaded machine) | Before | After |
+|---|---|---|
+| Initial JS | 2,166 kB (633 kB gzip) | 1,511 kB (466 kB gzip) |
+| Cold start to first channel messages | 361 ms | 305 ms |
+| Switch back to a visited channel (median) | 92 ms | 68 ms |
+| Cold open of #firehose | 160 ms | 129 ms |
+| Message scroll frames > 50 ms (30,000 px) | 4 | 1 |
+
+A trace of a 250,000 px scroll through 2,450 messages shows no main-thread task over 50 ms.
