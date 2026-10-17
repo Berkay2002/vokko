@@ -55,7 +55,7 @@ export function ExpressionPickerPopout({ anchor, open, initialTab, onClose, onPi
   const picker = <ExpressionPicker key={initialTab} initialTab={initialTab} onPickEmoji={onPickEmoji} channelId={channelId} onPickGif={onPickGif} onPickSticker={onPickSticker} />;
   // On a phone the picker is a sheet docked under the composer, which stays visible above it.
   if (phone) return <BottomSheet dock open={open} onClose={onClose} anchor={anchor} label="Emoji, GIFs and stickers">{picker}</BottomSheet>;
-  return <Popout anchor={anchor} open={open} onClose={onClose} side="top">{picker}</Popout>;
+  return <Popout anchor={anchor} open={open} onClose={onClose} side="top" align="end">{picker}</Popout>;
 }
 
 /** Small popout for the "Apps" button: there are no apps yet. */
