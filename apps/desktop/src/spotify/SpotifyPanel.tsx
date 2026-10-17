@@ -181,8 +181,8 @@ function PageHead({ art, title, sub, round, children }: { art?: string; title: s
       <div className="spotify-page-text">
         <h3 className="spotify-page-title">{title}</h3>
         <p className="stremio-muted">{sub}</p>
-        {children}
       </div>
+      {children}
     </div>
   );
 }

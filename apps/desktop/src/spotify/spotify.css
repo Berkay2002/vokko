@@ -222,8 +222,13 @@
 
 .spotify-page-head {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   align-items: flex-end;
+}
+
+.spotify-page-head > .spotify-actions {
+  flex-basis: 100%;
 }
 
 .spotify-page-text {
@@ -386,6 +391,13 @@
 
   .spotify-now-title {
     font-size: 15px;
+  }
+
+  /* too short for a side list: Up next covers the tile above the controls */
+  .spotify-queue {
+    inset: 8px 8px 76px;
+    width: auto;
+    z-index: 2;
   }
 
   .spotify-now-album,
