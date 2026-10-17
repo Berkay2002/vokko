@@ -1,8 +1,8 @@
 //! Games in calls (docs/design/games-host.md section 5): one web game per voice channel or DM call, held in memory like Watch
 //! Together, and a relay that carries the game's messages to the people in the call over the gateway. The game itself runs in a
 //! sandboxed frame on each client; the server only knows which game runs, who is in the call and each player's app id.
-//! `PUT|DELETE /channels/{id}/game`, `GET /channels/{id}/game/players`, `POST /channels/{id}/game/messages`, GAME_UPDATE and
-//! GAME_MESSAGE.
+//! `PUT|DELETE /channels/{id}/game`, `GET /channels/{id}/game/players`, `POST /channels/{id}/game/messages`,
+//! `PUT /channels/{id}/game/room` (a website game's shared room link), GAME_UPDATE and GAME_MESSAGE.
 use std::collections::HashSet;
 
 use axum::extract::{DefaultBodyLimit, Path, State};
@@ -14,8 +14,8 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use vokko_protocol::api::permissions::MANAGE_CHANNELS;
 use vokko_protocol::api::{
-    GAME_RELAY_MAX_BYTES, GameAspect, GameManifest, GameMessage, GamePlayer, GameRelayRequest, GameSession, GameStartRequest, GameUpdate, GatewayEvent,
-    Snowflake,
+    GAME_RELAY_MAX_BYTES, GameAspect, GameKind, GameManifest, GameMessage, GamePlayer, GameRelayRequest, GameRoomRequest, GameSession, GameStartRequest,
+    GameUpdate, GatewayEvent, Snowflake,
 };
 
 use super::unix_millis;
@@ -24,6 +24,7 @@ use crate::access;
 use crate::auth::{AuthUser, random_hex};
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, parse_id};
+use crate::games::GAME_URL_MAX_BYTES;
 use crate::state::AppState;
 use crate::store::{self, ChannelRow};
 
@@ -43,20 +44,58 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/channels/{id}/game", put(start).delete(stop))
         .route("/channels/{id}/game/players", get(players))
+        .route("/channels/{id}/game/room", put(room))
         .route("/channels/{id}/game/messages", post(relay).layer(DefaultBodyLimit::max(GAME_RELAY_MAX_BYTES + 1024)))
 }
 
-/// The games every call may start (the desktop app ships them under `/games/<name>/`).
+/// The games every call may start: SDK games the desktop app ships under `/games/<name>/`, and website games that run on their
+/// own servers (the desktop app keeps the same list in `src/games/builtin.ts`).
 pub fn builtins() -> Vec<GameManifest> {
-    vec![GameManifest {
-        id: "builtin:sketch".to_owned(),
-        name: "Sketch".to_owned(),
-        url: "/games/sketch/index.html".to_owned(),
-        icon: Some("✏️".to_owned()),
-        min_players: 2,
-        max_players: 12,
-        aspect: GameAspect::Wide,
-    }]
+    let game = |id: &str, name: &str, url: &str, icon: &str, players: (u8, u8), aspect: GameAspect, kind: GameKind| GameManifest {
+        id: format!("builtin:{id}"),
+        name: name.to_owned(),
+        url: url.to_owned(),
+        icon: Some(icon.to_owned()),
+        min_players: players.0,
+        max_players: players.1,
+        aspect,
+        kind,
+    };
+    vec![
+        game("sketch", "Sketch", "/games/sketch/index.html", "✏️", (2, 12), GameAspect::Wide, GameKind::Sdk),
+        game("betrayal", "Betrayal", "https://betrayal.io/", "🔪", (4, 12), GameAspect::Wide, GameKind::Web),
+        game("shellshockers", "Shell Shockers", "https://shellshock.io/", "🥚", (2, 16), GameAspect::Wide, GameKind::Web),
+        game("smashkarts", "Smash Karts", "https://smashkarts.io/", "🏎️", (2, 8), GameAspect::Wide, GameKind::Web),
+        game("skribbl", "skribbl.io", "https://skribbl.io/", "🖍️", (2, 16), GameAspect::Fill, GameKind::Web),
+        game("codenames", "Codenames", "https://codenames.game/", "🕵️", (4, 16), GameAspect::Fill, GameKind::Web),
+        game("krunker", "Krunker", "https://krunker.io/", "🎯", (2, 16), GameAspect::Wide, GameKind::Web),
+    ]
+}
+
+/// A room link for the web game at `game_url`: `https`, at most 512 bytes, no user info, on the game's host or a subdomain of it
+/// (a trailing `.` ignored). A fragment is fine: some games keep the room code there.
+pub fn check_room_url(game_url: &str, raw: &str) -> ApiResult<String> {
+    let bad = |message: &str| ApiErr::invalid("url", message);
+    let raw = raw.trim();
+    if raw.len() > GAME_URL_MAX_BYTES {
+        return Err(bad(&format!("Must be {GAME_URL_MAX_BYTES} or fewer in length.")));
+    }
+    let url = reqwest::Url::parse(raw).map_err(|_| bad("Not a well formed URL."))?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+        return Err(bad("Must be an https URL without a user name or password."));
+    }
+    let host = |url: &reqwest::Url| url.host_str().map(|host| host.trim_end_matches('.').to_ascii_lowercase()).filter(|host| !host.is_empty());
+    let (Some(room), Some(game)) = (host(&url), reqwest::Url::parse(game_url).ok().as_ref().and_then(host)) else {
+        return Err(bad("Must be a link to this game."));
+    };
+    if room != game && !room.ends_with(&format!(".{game}")) {
+        return Err(bad("Must be a link to this game."));
+    }
+    let url = String::from(url);
+    if url.len() > GAME_URL_MAX_BYTES {
+        return Err(bad(&format!("Must be {GAME_URL_MAX_BYTES} or fewer in length.")));
+    }
+    Ok(url)
 }
 
 /// `base64url(HMAC-SHA256(k, game_id ":" origin ":" user_id))[..22]`: stable per game, origin and user, different across games and
@@ -117,7 +156,7 @@ async fn start(
     let channel_id = require_in_voice(&state, user_id, &id).await?;
     let channel = store::channel_row(&state, channel_id).await?.ok_or_else(ApiErr::missing_permissions)?;
     let game = resolve(&state, &channel, &body.game_id).await?;
-    let session = GameSession { session_id: random_hex(8), game, started_by: Snowflake::from(user_id), started_at_ms: unix_millis() };
+    let session = GameSession { session_id: random_hex(8), game, started_by: Snowflake::from(user_id), started_at_ms: unix_millis(), room_url: None };
     state.voice.game_update(channel_id, |current| match current {
         Some(_) => Err(ApiErr::new(StatusCode::CONFLICT, 40090, "A game is already running")),
         None => Ok(Some(session.clone())),
@@ -175,6 +214,27 @@ async fn relay(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+/// Shares a room link of the running web game with the call (or clears it); every tile loads it.
+async fn room(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<GameRoomRequest>,
+) -> ApiResult<Json<GameSession>> {
+    limited_key(&state, user_id, "game-control", CONTROL_BURST, CONTROL_PER_SECOND)?;
+    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let not_web = || ApiErr::invalid("url", "No website game is running in this call.");
+    let session = state.voice.game_get(channel_id).filter(|session| session.game.kind == GameKind::Web).ok_or_else(not_web)?;
+    let room_url = body.url.as_deref().map(|raw| check_room_url(&session.game.url, raw)).transpose()?;
+    let (_, after) = state.voice.game_update(channel_id, |current| match current {
+        Some(current) if current.session_id == session.session_id => Ok(Some(GameSession { room_url: room_url.clone(), ..current.clone() })),
+        _ => Err(not_web()),
+    })?;
+    let session = after.ok_or_else(not_web)?;
+    announce(&state, channel_id, Some(session.clone())).await;
+    Ok(Json(session))
+}
+
 async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Response> {
     limited_key(&state, user_id, "game-control", CONTROL_BURST, CONTROL_PER_SECOND)?;
     // A guild member with MANAGE_CHANNELS on the channel may stop it from outside the call; everyone else must be in it.
@@ -224,4 +284,34 @@ async fn announce(state: &AppState, channel_id: i64, session: Option<GameSession
     let Ok(Some(row)) = store::channel_row(state, channel_id).await else { return };
     let Ok(viewers) = access::channel_viewers(state, &row).await else { return };
     state.hub.send(&viewers, &GatewayEvent::GameUpdate(GameUpdate { channel_id: Snowflake::from(channel_id), state: session }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn room_urls_stay_on_the_games_host() {
+        let game = "https://krunker.io/";
+        for good in ["https://krunker.io/?game=FRA:abc12", " https://krunker.io/?game=FRA:abc12 ", "https://www.krunker.io/room", "https://KRUNKER.io./#ABCD"] {
+            assert!(check_room_url(game, good).is_ok(), "{good}");
+        }
+        assert_eq!(check_room_url("https://shellshock.io/", "https://shellshock.io/#AbC1").expect("fragment"), "https://shellshock.io/#AbC1");
+        for bad in [
+            "http://krunker.io/?game=x",
+            "https://user@krunker.io/",
+            "https://u:p@krunker.io/",
+            "https://evilkrunker.io/",
+            "https://krunker.io.evil.example/",
+            "https://example.com/?u=https://krunker.io/",
+            "javascript:alert(1)",
+            "/?game=x",
+            "",
+        ] {
+            assert!(check_room_url(game, bad).is_err(), "{bad}");
+        }
+        assert!(check_room_url(game, &format!("https://krunker.io/?{}", "x".repeat(512 - 20))).is_ok(), "512 bytes");
+        assert!(check_room_url(game, &format!("https://krunker.io/?{}", "x".repeat(513 - 20))).is_err(), "513 bytes");
+        assert!(check_room_url("/games/sketch/index.html", "https://krunker.io/").is_err(), "no host to match");
+    }
 }
