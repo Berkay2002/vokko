@@ -30,7 +30,9 @@ const CONNECT_WAIT: Duration = Duration::from_secs(45);
 const AUDIO_CHUNK_BYTES: usize = 480 * 2 * 2;
 
 pub async fn probe(cfg: &Config, d: &Desired) -> Result<Probe, String> {
-    crate::guard::resolves_public(&d.media_url).await?;
+    if !plan::local_media() {
+        crate::guard::resolves_public(&d.media_url).await?;
+    }
     let out = tokio::time::timeout(
         Duration::from_secs(30),
         Command::new(&cfg.ffprobe).args(plan::probe_args(&d.media_url, &d.headers)).stdin(Stdio::null()).kill_on_drop(true).output(),

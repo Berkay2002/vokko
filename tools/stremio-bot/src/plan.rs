@@ -58,6 +58,12 @@ impl fmt::Debug for Desired {
     }
 }
 
+/// Measurement harness only: a build with the `test-harness` cargo feature and this variable set takes a media URL on any port
+/// and any host (a local https server standing in for the CDN). Everything else about the URL, and every ffmpeg flag, stays.
+pub fn local_media() -> bool {
+    cfg!(feature = "test-harness") && std::env::var_os("VOKKO_STREMIO_TEST_LOCAL_MEDIA").is_some()
+}
+
 pub fn host_of(url: &str) -> String {
     reqwest::Url::parse(url).ok().and_then(|u| u.host_str().map(str::to_owned)).unwrap_or_else(|| "?".into())
 }
@@ -71,10 +77,11 @@ impl Desired {
             return Err("livekit_url must be ws(s) or http(s)".into());
         }
         let media = reqwest::Url::parse(&self.media_url).map_err(|_| "media_url is not a URL")?;
-        if media.scheme() != "https" || media.host_str().is_none() || media.port_or_known_default() != Some(443) {
+        let local = local_media();
+        if media.scheme() != "https" || media.host_str().is_none() || (!local && media.port_or_known_default() != Some(443)) {
             return Err("media_url must be https on port 443".into());
         }
-        if !crate::guard::host_ok(&media) {
+        if !local && !crate::guard::host_ok(&media) {
             return Err("media_url must be a public host".into());
         }
         if !media.username().is_empty() || media.password().is_some() {
