@@ -676,7 +676,7 @@
 /* ---- shared settings controls re-skinned for this column only (reference: settings-modal spec "Content styles", measured from the frames) ----
  * Server and channel settings keep the base look from settings.css / ui.css. Changed shared selectors, all prefixed `.sm-column`:
  * .field-label, .settings-field, .switch-row (+ -label, -note), .settings-field-note, .sr-group, .sr-row, .sr-label, .sr-note,
- * .select, .slider-input (+ thumb), .input, .settings-unavailable. The switch itself keeps its markup (.switch > .switch-knob). */
+ * .select, .slider-input (+ thumb), .settings-unavailable. The switch itself keeps its markup (.switch > .switch-knob). */
 .sm-column .field-label {
   margin-bottom: 8px;
   color: var(--text-strong);
@@ -743,12 +743,6 @@
 
 .sm-column .select:hover:not(:disabled) {
   border-color: var(--input-border-hover);
-}
-
-.sm-column .input {
-  border: 1px solid var(--input-border-default);
-  border-radius: 8px;
-  background: var(--input-background-default);
 }
 
 .sm-column .slider-input {
