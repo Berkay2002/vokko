@@ -43,6 +43,8 @@ export interface TransportOptions {
   videoOf?(userId: Snowflake): { camera: boolean; screen: boolean };
   /** Quality a viewer asked for on a stream (settings default when never changed). */
   viewerQuality?(userId: Snowflake, source: VideoSource): ViewerQuality;
+  /** A reconnect into the same call: publish again the camera / screen share the previous connection had (never new ones). */
+  resume?: boolean;
 }
 
 export interface CameraStart {
