@@ -4,7 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 import { Compass, Download, Plus, Users, Volume2 } from "lucide-react";
 import { useVoice } from "../voice";
 import { useCalls } from "../calls/store";
-import logo from "../../assets/icon.svg";
+import logo from "../../../../assets/brand/vokko-icon.svg";
 import { avatarUrl, channelMentionCount, dmName, guildUnread, isChannelUnread, useStore } from "../api/store";
 import { ChannelType, RelationshipType, type Channel, type Guild, type Snowflake } from "../api/types";
 import { Tooltip, useContextMenu } from "../ui";

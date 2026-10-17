@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { ApiRequestError } from "../api/errors";
-import logo from "../../assets/icon.svg";
+import logo from "../../../../assets/brand/vokko-icon.svg";
 import "./auth.css";
 
 /** Field errors of a 50035 response (both the server's `{field: {_errors: [{message}]}}` and the flat `{field: {message}}`), `_` for the rest. */

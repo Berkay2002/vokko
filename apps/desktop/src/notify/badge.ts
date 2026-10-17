@@ -1,7 +1,7 @@
 // Unread state outside the UI: the document title, the favicon dot (browser) and the window badge (Tauri).
 
 import { isTauri } from "@tauri-apps/api/core";
-import iconSvg from "../../assets/icon.svg?raw";
+import iconSvg from "../../../../assets/brand/vokko-icon.svg?raw";
 import { IS_MAC } from "../desktop/tauri";
 import { setTrayUnread } from "../desktop/tray";
 import { dmName, type AppState } from "../api/store";
@@ -77,7 +77,8 @@ export function faviconSvg(summary: Pick<UnreadSummary, "mentions" | "unread">):
   } else if (summary.unread) {
     badge = `<circle cx="392" cy="120" r="96" fill="#fff"/><circle cx="392" cy="120" r="64" fill="#f23f42"/>`;
   }
-  return `${base}${badge}</svg>`;
+  // The badge coordinates are for a 512 box, the icon is drawn in 1024.
+  return `${base}<g transform="scale(2)">${badge}</g></svg>`;
 }
 
 let faviconLink: HTMLLinkElement | null = null;
