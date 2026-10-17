@@ -270,6 +270,9 @@ async fn start(
 ) -> ApiResult<Response> {
     let active = active(&state)?;
     let channel_id = require_in_voice(&state, user_id, &id).await?;
+    if crate::voice::spotify::playing_in(&state, channel_id) {
+        return Err(crate::voice::spotify::blocks_stremio());
+    }
     limit(&state, "stremio-play", user_id, 3.0, 3.0 / 60.0)?;
     let listed = playable(&state, "sid", &body.sid, user_id)?;
     let (media, headers) = prepare(&active, &listed.candidate).await?;
@@ -411,16 +414,23 @@ async fn viewer_token(State(state): State<AppState>, AuthUser(user_id): AuthUser
     let Some(room) = lock(&state.stremio.sessions).get(&channel_id).map(|session| session.room.clone()) else {
         return Err(ApiErr::conflict(40033, "Nothing is playing in this channel."));
     };
+    let token = media_viewer_token(&active.cfg.media_api_key, active.cfg.media_api_secret.expose(), &room, user_id, VIEWER_TOKEN_TTL_SECS)
+        .ok_or_else(ApiErr::internal)?;
+    Ok(Json(StremioViewerToken { url: active.cfg.media_url.clone(), token }))
+}
+
+/// A subscribe-only token for a media room (shared with Spotify). A fresh identity per token: two devices of one account must not
+/// kick each other out of the room.
+pub(crate) fn media_viewer_token(api_key: &str, api_secret: &str, room: &str, user_id: i64, ttl_secs: i64) -> Option<String> {
     let now = unix_now();
-    // A fresh identity per token: two devices of one account must not kick each other out of the room.
     let claims = Claims {
-        iss: active.cfg.media_api_key.clone(),
+        iss: api_key.to_owned(),
         sub: format!("viewer:{user_id}:{}", random_hex(4)),
         nbf: now - 10,
-        exp: now + VIEWER_TOKEN_TTL_SECS,
+        exp: now + ttl_secs,
         name: "Viewer".to_owned(),
         video: Some(VideoGrant {
-            room: Some(room),
+            room: Some(room.to_owned()),
             room_join: true,
             can_subscribe: true,
             can_publish: false,
@@ -429,8 +439,7 @@ async fn viewer_token(State(state): State<AppState>, AuthUser(user_id): AuthUser
         }),
         ..Claims::default()
     };
-    let token = token::sign(active.cfg.media_api_secret.expose(), &claims).ok_or_else(ApiErr::internal)?;
-    Ok(Json(StremioViewerToken { url: active.cfg.media_url.clone(), token }))
+    token::sign(api_secret, &claims)
 }
 
 fn touch(state: &AppState, channel_id: i64, change: impl FnOnce(&mut Session)) {

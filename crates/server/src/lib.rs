@@ -27,6 +27,7 @@ pub mod routes;
 pub mod safety;
 pub mod seed;
 pub mod soundboard;
+pub mod spotify;
 pub mod state;
 pub mod stickers;
 pub mod storage;
@@ -110,6 +111,7 @@ pub fn router(state: AppState) -> Router {
         .route("/gateway", axum::routing::get(gateway::upgrade))
         .route("/internal/livekit/webhook", axum::routing::post(voice::webhook::receive))
         .route("/internal/stremio/bot", axum::routing::post(voice::stremio::bot_event))
+        .route("/internal/spotify/bot", axum::routing::post(voice::spotify::bot_event))
         .fallback(|| async { error::ApiErr::not_found() })
         .layer(cors)
         .with_state(state)

@@ -38,7 +38,7 @@ pub async fn guild_with_state(state: &AppState, guild_id: i64, viewer: i64) -> A
         stage_instances,
         watch_together,
         stremio,
-        spotify: Vec::new(),
+        spotify: crate::voice::spotify::states_in(state, &visible),
     })
 }
 

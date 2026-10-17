@@ -72,6 +72,8 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(crate::voice::watch::routes())
         .merge(crate::voice::stremio::routes())
         .merge(crate::stremio::routes())
+        .merge(crate::voice::spotify::routes())
+        .merge(crate::spotify::routes())
         .merge(threads::routes())
         .merge(forums::routes())
         .merge(follows::routes())
