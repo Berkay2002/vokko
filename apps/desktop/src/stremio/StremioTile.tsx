@@ -5,14 +5,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ListVideo, Maximize2, Minimize2, Pause, Play, Plus, RotateCcw, RotateCw, SkipForward, Square, Tv, Volume2, VolumeX, X } from "lucide-react";
-import { ApiRequestError } from "../api/rest";
 import { displayName, useStore } from "../api/store";
 import type { Snowflake, StremioState } from "../api/types";
 import { Tooltip } from "../ui";
 import { useVoice } from "../voice/store";
 import { formatClock } from "../watch/youtube";
 import { controlStremio, stopStremio } from "./api";
-import { safeImage, shownPositionMs, statusText } from "./format";
+import { reason, safeImage, shownPositionMs, statusText } from "./format";
 import { openStremioPanel } from "./panelStore";
 import { useViewer } from "./useViewer";
 import "./stremio.css";
@@ -41,7 +40,6 @@ function useNow(everyMs: number): number {
   return now;
 }
 
-const reason = (e: unknown) => (e instanceof ApiRequestError ? e.message : "Something went wrong. Try again.");
 
 function ControlButton({ label, active, disabled, onClick, children }: { label: string; active?: boolean; disabled?: boolean; onClick(): void; children: React.ReactNode }) {
   return (

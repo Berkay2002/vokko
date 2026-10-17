@@ -1,7 +1,19 @@
 // Small pure helpers for the Stremio panel and tile.
 
+import { ApiRequestError } from "../api/rest";
 import { STREMIO_IMAGE_HOSTS, type StremioState, type StremioStream } from "../api/types";
 import { expectedPositionMs } from "../watch/youtube";
+
+/** What to tell the user about a failed call: a field's own message when the server named one ("Invalid Form Body" alone says nothing). */
+export function reason(e: unknown): string {
+  if (!(e instanceof ApiRequestError)) return "Something went wrong. Try again.";
+  for (const value of Object.values(e.api.errors ?? {})) {
+    const entry = value as { message?: string; _errors?: { message?: string }[] } | undefined;
+    const message = entry?.message ?? entry?._errors?.[0]?.message;
+    if (message) return message;
+  }
+  return e.message;
+}
 
 /** The picture URL when it is https on one of the poster hosts the CSP lets through, else nothing (a broken image is worse than none). */
 export function safeImage(url: string | undefined): string | undefined {

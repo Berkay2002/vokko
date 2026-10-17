@@ -428,6 +428,10 @@
   cursor: pointer;
 }
 
+.stremio-panel-header .stremio-linkish {
+  align-self: center;
+}
+
 .stremio-linkish:hover {
   text-decoration: underline;
 }

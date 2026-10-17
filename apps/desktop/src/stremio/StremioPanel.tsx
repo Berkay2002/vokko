@@ -5,12 +5,11 @@
 import { useEffect, useReducer, useState } from "react";
 import { ArrowLeft, ExternalLink, Film, Link2, Search, X } from "lucide-react";
 import { QrCode } from "../account/QrCode";
-import { ApiRequestError } from "../api/rest";
 import type { Snowflake, StremioMeta, StremioSearchItem, StremioStream, StremioStreams, StremioType } from "../api/types";
 import { useVoice } from "../voice/store";
 import { useVoiceUi } from "../voice/uiStore";
 import { catalog, controlStremio, getAccount, getMeta, getStreams, loginWithEmail, pollLink, searchTitles, startLink, startStremio, unlinkAccount } from "./api";
-import { formatSize, isHeavy, safeImage, unsupportedText } from "./format";
+import { formatSize, isHeavy, reason, safeImage, unsupportedText } from "./format";
 import { bestStream, currentView, initialPanel, panelReducer, seasonsOf, type PanelAction, type PanelState } from "./panelState";
 import { useStremioPanel } from "./panelStore";
 import "./stremio.css";
@@ -22,7 +21,6 @@ const POLL_MS = 3000;
 const LINK_LIFETIME_MS = 5 * 60_000;
 const SEARCH_DELAY_MS = 300;
 
-const reason = (e: unknown) => (e instanceof ApiRequestError ? e.message : "Something went wrong. Try again.");
 
 type Dispatch = (action: PanelAction) => void;
 

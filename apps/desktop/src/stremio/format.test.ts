@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSize, isHeavy, safeImage, shownPositionMs, statusText } from "./format";
+import { ApiRequestError } from "../api/rest";
+import { formatSize, isHeavy, reason, safeImage, shownPositionMs, statusText } from "./format";
 
 const state = { status: "playing" as const, playing: true, position_ms: 10_000, updated_at_ms: 1_000_000, duration_ms: 60_000 };
 
@@ -41,5 +42,14 @@ describe("Stremio formatting", () => {
     expect(statusText({ status: "playing" }, "failed")).toContain("Trying again");
     expect(statusText({ status: "paused" }, "connected")).toBe("Paused");
     expect(statusText({ status: "playing" }, "connected")).toBe("");
+  });
+});
+
+describe("reason", () => {
+  it("prefers the field message the server named over the generic one", () => {
+    const error = new ApiRequestError(400, { code: 50035, message: "Invalid Form Body", errors: { password: { code: "INVALID", message: "Stremio did not accept that email and password." } } });
+    expect(reason(error)).toBe("Stremio did not accept that email and password.");
+    expect(reason(new ApiRequestError(403, { code: 50013, message: "Missing Permissions" }))).toBe("Missing Permissions");
+    expect(reason(new Error("boom"))).toBe("Something went wrong. Try again.");
   });
 });
