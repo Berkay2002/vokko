@@ -19,10 +19,13 @@ librespot-oauth = { git = "https://github.com/Berkay2002/librespot", rev = "44c8
 librespot-playback = { git = "https://github.com/Berkay2002/librespot", rev = "44c8444b6b6a39b8d2f1367be0aaeb7913f00c24", default-features = false, features = ["rustls-tls-webpki-roots"] }
 librespot-metadata = { git = "https://github.com/Berkay2002/librespot", rev = "44c8444b6b6a39b8d2f1367be0aaeb7913f00c24", default-features = false, features = ["rustls-tls-webpki-roots"] }
 livekit = { version = "0.9.5", features = ["rustls-tls-webpki-roots"] }
+serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
+axum.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+futures-util.workspace = true
+rustls.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-rustls.workspace = true
-
-[dev-dependencies]
-futures-util.workspace = true
