@@ -311,6 +311,10 @@ async fn start(
     let generation = state.stremio.next_generation();
     let (view, desired, had_one) = {
         let mut sessions = lock(&state.stremio.sessions);
+        // Lock order is Stremio's sessions, then Spotify's slot (the same in Spotify's start): the check and the insert below are one step.
+        if crate::voice::spotify::playing_in(&state, channel_id) {
+            return Err(crate::voice::spotify::blocks_stremio());
+        }
         let had_one = sessions.contains_key(&channel_id);
         // Changing the item keeps the queue and who started the session.
         let session = sessions.entry(channel_id).or_insert_with(|| Session {

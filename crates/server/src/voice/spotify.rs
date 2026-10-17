@@ -395,6 +395,11 @@ async fn start(
     let first = tracks.remove(0);
     let now = unix_millis();
     let (reply, change, fresh, left_out) = {
+        // Lock order is Stremio's sessions, then Spotify's slot (the same in Stremio's start): no movie can start between this check and the insert.
+        let stremio = lock(&state.stremio.sessions);
+        if stremio.contains_key(&channel_id) {
+            return Err(ApiErr::new(StatusCode::CONFLICT, 40034, "Another media activity is running in this channel. Stop the movie first."));
+        }
         let mut slot = lock(&state.spotify.session);
         if slot.as_ref().is_some_and(|session| session.channel_id != channel_id) {
             return Err(ApiErr::new(StatusCode::CONFLICT, 40035, "Spotify is already playing in another call."));
