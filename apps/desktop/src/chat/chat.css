@@ -66,6 +66,8 @@
   --chat-radius: 8px;
   --chat-composer-margin: 16px;
 }
+/* Onyx: the chat and the lowest background are both #000, so a hidden spoiler would vanish into the page: give it a visible block. */
+:root.theme-onyx { --chat-spoiler-hidden: var(--background-mod-strong); }
 .chat-view, .chat-pins, .chat-lightbox, .chat-emoji-picker, .chat-expression-picker, .chat-autocomplete, .chat-attach-menu, .chat-apps-panel, .chat-reactions-modal { font-family: var(--chat-font); }
 
 .chat-view { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; background: var(--background-gradient-chat, var(--chat-bg)); color: var(--chat-text); font-size: var(--chat-font-size); }
