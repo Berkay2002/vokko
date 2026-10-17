@@ -10,7 +10,7 @@ DISTRO=vokko-linux
 cd "$(git rev-parse --show-toplevel)"
 mkdir -p "$OUT"
 export MSYS_NO_PATHCONV=1 # Git Bash would rewrite the /paths inside the WSL command line
-OUT_WSL=$(wsl -d "$DISTRO" -- wslpath -a "$(cygpath -w "$OUT")" | tr -d '\r')
+OUT_WSL=$(wsl -d "$DISTRO" -- wslpath -a "$(cygpath -m "$OUT")" | tr -d '\r')
 
 # The distro has no credentials for origin, so the commit travels as a bundle.
 git bundle create -q "$OUT/vokko.bundle" HEAD
