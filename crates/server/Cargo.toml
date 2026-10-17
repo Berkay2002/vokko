@@ -43,6 +43,8 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 sha1 = "0.10"
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "hostname", "tokio1-rustls-tls"] }
 chacha20poly1305 = "0.10"
+hkdf = "0.12"
+unicode-segmentation = "1"
 
 [dev-dependencies]
 rsa = { version = "0.9", features = ["pem"] }
