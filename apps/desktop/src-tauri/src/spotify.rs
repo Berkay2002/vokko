@@ -28,10 +28,9 @@ pub async fn spotify_now_playing() -> Option<NowPlaying> {
 fn read() -> Option<NowPlaying> {
     use std::process::Command;
     // Asking an app that is not running would launch it, so look at the process list first.
-    if !Command::new("pgrep").args(["-x", "Spotify"]).output().ok()?.status.success() {
+    if !run(Command::new("pgrep").args(["-x", "Spotify"]), TIMEOUT)?.status.success() {
         return None;
     }
-    // ponytail: no timeout around osascript (a hung Spotify blocks one poll thread); the frontend never overlaps polls.
     // `is running` again inside the script: Spotify may quit after pgrep, and a bare `tell` would launch it again.
     let script = r#"if application "Spotify" is not running then return ""
 tell application "Spotify"
@@ -40,8 +39,30 @@ tell application "Spotify"
   set d to ASCII character 31
   return (name of t) & d & (artist of t) & d & (album of t) & d & (id of t) & d & (artwork url of t) & d & ((duration of t) as text) & d & ((round ((player position) * 1000)) as text)
 end tell"#;
-    let output = Command::new("osascript").args(["-e", script]).output().ok()?;
+    let output = run(Command::new("osascript").args(["-e", script]), TIMEOUT)?;
     output.status.success().then(|| parse_applescript(&String::from_utf8_lossy(&output.stdout))).flatten()
+}
+
+#[cfg(target_os = "macos")]
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Runs `command` and collects its output, killing it after `timeout`: a hung Spotify must not block the poll thread forever.
+#[cfg(target_os = "macos")]
+fn run(command: &mut std::process::Command, timeout: std::time::Duration) -> Option<std::process::Output> {
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+    // The output is one short line, far below the pipe buffer, so waiting before reading cannot deadlock.
+    let mut child = command.stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let deadline = Instant::now() + timeout;
+    while child.try_wait().ok()?.is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    child.wait_with_output().ok()
 }
 
 #[cfg(windows)]
@@ -111,6 +132,17 @@ fn parse_applescript(output: &str) -> Option<NowPlaying> {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn run_kills_a_hung_command() {
+        use std::{process::Command, time::Duration, time::Instant};
+        let start = Instant::now();
+        assert!(run(Command::new("sleep").arg("10"), Duration::from_millis(200)).is_none());
+        assert!(start.elapsed() < Duration::from_secs(2));
+        let output = run(Command::new("echo").arg("hi"), TIMEOUT).expect("echo runs");
+        assert_eq!(output.stdout, b"hi\n");
+    }
 
     const IMAGE: &str = "ab67616d00001e02e0f5c2a1b3d4e5f60718293a";
 

@@ -1,13 +1,19 @@
 // Chess: react-chessboard (MIT) draws the board, chess.js (BSD-2-Clause) the rules, boardgame.io carries the moves.
-// Drag a piece or click it and then its target square. Pawns promote to a queen.
+// Drag a piece or click it and then its target square. A pawn reaching the last rank opens a picker for the new piece.
 
 import { useState } from "react";
-import { Chessboard } from "react-chessboard";
+import { Chessboard, defaultPieces } from "react-chessboard";
 import type { Square } from "chess.js";
 import { mount, holders, type BoardProps } from "../_bgio/ui";
 import { CHESS, replay, sideToMove, type ChessG, type ChessResult } from "./game";
 
 const SIDE = { "0": "White", "1": "Black" } as const;
+const PROMOTIONS = [
+  ["q", "Queen"],
+  ["r", "Rook"],
+  ["b", "Bishop"],
+  ["n", "Knight"],
+] as const;
 
 function resultText(r: ChessResult): string {
   if (!r.winner) return `Draw by ${r.reason}`;
@@ -21,13 +27,20 @@ function Board({ room, state, seat, move }: BoardProps<ChessG>) {
   const playing = !G.result && (seat === "0" || seat === "1");
   const myTurn = playing && seat === turn;
   const [picked, setPicked] = useState<string | null>(null);
+  const [promoting, setPromoting] = useState<{ from: string; to: string } | null>(null);
+  const flipped = seat === "1";
 
   const tryMove = (from: string, to: string): boolean => {
     setPicked(null);
+    setPromoting(null);
     if (!myTurn) return false;
     const legal = chess.moves({ square: from as Square, verbose: true }).find(m => m.to === to);
     if (!legal) return false;
-    move("move", from, to, legal.promotion ? "q" : undefined); // ponytail: always a queen; add a picker if anyone asks
+    if (legal.promotion) {
+      setPromoting({ from, to });
+      return false; // the pawn stays put until a piece is picked
+    }
+    move("move", from, to);
     return true;
   };
 
@@ -58,11 +71,40 @@ function Board({ room, state, seat, move }: BoardProps<ChessG>) {
   return (
     <div className="chess">
       <div className="chess-board" data-turn={turn}>
+        {promoting && myTurn && (
+          // The promotion square is always on the top rank from the mover's side, so the column runs down from there.
+          <div
+            className="chess-promo"
+            role="menu"
+            aria-label="Promote to"
+            style={{ left: `${(flipped ? 7 - (promoting.to.charCodeAt(0) - 97) : promoting.to.charCodeAt(0) - 97) * 12.5}%` }}
+            onKeyDown={e => e.key === "Escape" && setPromoting(null)}
+          >
+            {PROMOTIONS.map(([piece, label], i) => (
+              <button
+                key={piece}
+                role="menuitem"
+                aria-label={label}
+                title={label}
+                autoFocus={i === 0}
+                onClick={() => {
+                  move("move", promoting.from, promoting.to, piece);
+                  setPromoting(null);
+                }}
+              >
+                {defaultPieces[`${flipped ? "b" : "w"}${piece.toUpperCase()}`]?.()}
+              </button>
+            ))}
+            <button className="chess-promo-cancel" aria-label="Cancel" title="Cancel" onClick={() => setPromoting(null)}>
+              ✕
+            </button>
+          </div>
+        )}
         <Chessboard
           options={{
             id: "vokko-chess",
             position: chess.fen(),
-            boardOrientation: seat === "1" ? "black" : "white",
+            boardOrientation: flipped ? "black" : "white",
             allowDragging: myTurn,
             canDragPiece: ({ piece }) => myTurn && (piece.pieceType[0] === "w" ? "0" : "1") === seat,
             onPieceDrop: ({ sourceSquare, targetSquare }) => !!targetSquare && tryMove(sourceSquare, targetSquare),
@@ -109,7 +151,12 @@ function Board({ room, state, seat, move }: BoardProps<ChessG>) {
 
 const CSS = `
 .chess { flex: 1; min-height: 0; display: flex; gap: 16px; padding: 12px 16px; align-items: flex-start; justify-content: center; }
-.chess-board { width: min(calc(100vh - 110px), calc(100vw - 300px)); max-width: 640px; min-width: 240px; flex: none; }
+.chess-board { position: relative; width: min(calc(100vh - 110px), calc(100vw - 300px)); max-width: 640px; min-width: 240px; flex: none; }
+.chess-promo { position: absolute; top: 0; z-index: 10; width: 12.5%; display: flex; flex-direction: column; background: var(--panel); border-radius: 0 0 8px 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .5); overflow: hidden; }
+.chess-promo button { aspect-ratio: 1; padding: 6%; border: 0; border-radius: 0; background: transparent; cursor: pointer; display: grid; place-items: center; }
+.chess-promo button svg { width: 100%; height: 100%; }
+.chess-promo button:hover, .chess-promo button:focus-visible { background: var(--accent); outline: none; }
+.chess-promo .chess-promo-cancel { aspect-ratio: auto; padding: 4px; color: var(--muted); font-size: 14px; }
 .chess-side { width: 240px; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .chess-player { display: flex; gap: 8px; align-items: center; background: var(--panel); padding: 8px 10px; border-radius: 8px; border: 2px solid transparent; }
 .chess-player.to-move { border-color: var(--accent); }

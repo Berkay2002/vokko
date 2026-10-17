@@ -96,9 +96,8 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   const draft = useDraft(channelId);
   const area = useRef<ComposerField>(null);
   const plusBtn = useRef<HTMLButtonElement>(null);
-  const gifBtn = useRef<HTMLButtonElement>(null);
-  const stickerBtn = useRef<HTMLButtonElement>(null);
-  const emojiBtn = useRef<HTMLButtonElement>(null);
+  // The GIF, sticker and emoji buttons share one anchor, so the picker opens in the same place whichever tab it starts on.
+  const exprButtons = useRef<HTMLDivElement>(null);
   const appsBtn = useRef<HTMLButtonElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [caret, setCaret] = useState(0);
@@ -403,14 +402,14 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
         <input ref={fileInput} type="file" multiple hidden onChange={e => { addFiles(channelId, [...(e.target.files ?? [])]); e.target.value = ''; }} />
         <ComposerInput fieldRef={area} value={text} placeholder={placeholder} mentions={draft.tokens.map(t => t.display)} resetKey={channelId}
           onChange={onChange} onKeyDown={onKeyDown} onPaste={onPaste} onCaret={setCaret} />
-        <div className="chat-composer-actions">
+        <div ref={exprButtons} className="chat-composer-actions">
           {remaining <= 200 && hasText && <span className={`chat-counter${remaining < 0 ? ' over' : ''}`} aria-live="polite">{remaining}</span>}
-          <Tooltip content="Open GIF picker" side="top"><button ref={gifBtn} type="button" className="chat-composer-btn" aria-label="Open GIF picker" aria-expanded={expr === 'gif'} onClick={() => setExpr(v => (v === 'gif' ? null : 'gif'))}><span className="chat-gif-glyph" aria-hidden="true">GIF</span></button></Tooltip>
-          <Tooltip content="Open sticker picker" side="top"><button ref={stickerBtn} type="button" className="chat-composer-btn" aria-label="Open sticker picker" aria-expanded={expr === 'sticker'} onClick={() => setExpr(v => (v === 'sticker' ? null : 'sticker'))}><Sticker size={24} /></button></Tooltip>
-          <Tooltip content="Select Emoji" side="top"><button ref={emojiBtn} type="button" className="chat-composer-btn" aria-label="Select emoji" aria-expanded={expr === 'emoji'} onClick={() => setExpr(v => (v === 'emoji' ? null : 'emoji'))}><Smile size={24} /></button></Tooltip>
-          <Tooltip content="Apps" side="top"><button ref={appsBtn} type="button" className="chat-composer-btn" aria-label="Apps" aria-expanded={appsOpen} onClick={() => setAppsOpen(v => !v)}><LayoutGrid size={24} /></button></Tooltip>
+          <Tooltip content="Open GIF picker" side="top"><button type="button" className="chat-composer-btn" aria-label="Open GIF picker" aria-expanded={expr === 'gif'} onClick={() => setExpr(v => (v === 'gif' ? null : 'gif'))}><span className="chat-gif-glyph" aria-hidden="true">GIF</span></button></Tooltip>
+          <Tooltip content="Open sticker picker" side="top"><button type="button" className="chat-composer-btn" aria-label="Open sticker picker" aria-expanded={expr === 'sticker'} onClick={() => setExpr(v => (v === 'sticker' ? null : 'sticker'))}><Sticker size={24} /></button></Tooltip>
+          <Tooltip content="Select Emoji" side="top"><button type="button" className="chat-composer-btn" aria-label="Select emoji" aria-expanded={expr === 'emoji'} onClick={() => setExpr(v => (v === 'emoji' ? null : 'emoji'))}><Smile size={24} /></button></Tooltip>
+          <Tooltip content="Apps" side="top"><button ref={appsBtn} type="button" className="chat-composer-btn" aria-label="Apps" aria-expanded={appsOpen} onClick={() => { setExpr(null); setAppsOpen(v => !v); }}><LayoutGrid size={24} /></button></Tooltip>
         </div>
-        <ExpressionPickerPopout anchor={expr === 'gif' ? gifBtn : expr === 'sticker' ? stickerBtn : emojiBtn} open={expr !== null} initialTab={expr ?? 'emoji'}
+        <ExpressionPickerPopout anchor={exprButtons} open={expr !== null} initialTab={expr ?? 'emoji'}
           onClose={() => setExpr(null)} onPickEmoji={e => { setExpr(null); insertEmoji(e.id ? emojiMarkup({ id: e.id, name: e.name, animated: !!e.animated }) : e.name); }}
           channelId={channelId} onPickGif={(gif: Gif) => sendMedia({ content: gif.url })} onPickSticker={s => sendMedia({ content: '', stickers: [s] })} />
         <AppLauncherPopout anchor={appsBtn} open={appsOpen} onClose={() => setAppsOpen(false)} channelId={channelId} onPick={next => setTextAt(next, next.length)} />
