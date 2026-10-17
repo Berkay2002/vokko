@@ -33,7 +33,7 @@ const as = (page: Page, user: string, method: string, path: string, body?: unkno
   page.evaluate(([u, m, p, b]) => (window as unknown as MockWin).__vokkoMock.requestAs(u as string, m as string, p as string, b), [user, method, path, body] as const);
 /** The first playable stream sid Alice or Bob would get for a title. */
 const sidFor = async (page: Page, user: string, path: string) => ((await as(page, user, 'GET', path)) as { streams: Stream[] }).streams.find(s => s.playable)!.sid;
-const shot = (page: Page, name: string) => page.screenshot({ path: join(SHOTS, name) });
+const shot = (page: Page, name: string) => (mkdirSync(SHOTS, { recursive: true }), page.screenshot({ path: join(SHOTS, name) }));
 
 async function openStremio(page: Page): Promise<void> {
   await call(page).getByRole('button', { name: 'Activities' }).click();
@@ -42,7 +42,6 @@ async function openStremio(page: Page): Promise<void> {
 }
 
 test('link, search, pick a stream, play in call, control it from others, stop', async ({ page }) => {
-  mkdirSync(SHOTS, { recursive: true });
   await openGuild(page);
   const channelId = await general(page);
   const path = `/channels/${channelId}/stremio`;
@@ -150,7 +149,6 @@ test('link, search, pick a stream, play in call, control it from others, stop', 
   await expect(queue.locator('.stremio-queue-item')).toHaveCount(2);
   await expect(queue.locator('.stremio-queue-item').nth(1)).toContainText('Breaking Bad');
   await shot(page, '07-tile-playing-up-next.png');
-  await shot(page, '08-sidebar-line.png');
 
   // Skip plays The Matrix for everyone; Alice skips again to the episode; the last skip with an empty queue ends it.
   await tile.getByRole('button', { name: 'Skip to next' }).click();
@@ -159,7 +157,7 @@ test('link, search, pick a stream, play in call, control it from others, stop', 
   await as(page, 'alice', 'PATCH', path, { skip: true });
   await expect(tile.locator('.stremio-title')).toContainText('Breaking Bad');
   await expect(tile.locator('.stremio-by')).toContainText('S1E2');
-  // A foreign sid is refused, and a leaver can't steer it.
+  // A sid nobody listed is refused.
   await expect(as(page, 'alice', 'PATCH', path, { queue_add: 'not-a-sid' })).rejects.toBeTruthy();
 
   // Stop ends it for everyone and the tile, the viewer Room and the sidebar line go.
@@ -178,6 +176,7 @@ test('someone else starts it: the line shows outside the call, the tile when we 
   await as(page, 'alice', 'PUT', path, { sid });
   await expect(page.locator('.voice-stremio-line')).toContainText('Watching Heat on Stremio');
   await expect(page.locator('.voice-tile.stremio')).toHaveCount(0);
+  await shot(page, '08-sidebar-line.png');
 
   // Joining brings the tile along (late joiner), already playing, and connects the viewer Room.
   await page.getByRole('button', { name: 'General voice channel' }).click();
@@ -190,6 +189,14 @@ test('someone else starts it: the line shows outside the call, the tile when we 
   await expect(tile).toHaveClass(/focused/);
   await tile.getByRole('button', { name: 'Back to grid' }).click();
   await expect(tile).toHaveClass(/grid/);
+
+  // Alice stops it from her side: the tile and the line go for us, and she can start it again.
+  await as(page, 'alice', 'DELETE', path);
+  await expect(tile).toHaveCount(0);
+  await expect(page.locator('.voice-stremio-line')).toHaveCount(0);
+  await as(page, 'alice', 'PUT', path, { sid: await sidFor(page, 'alice', '/stremio/streams/movie/tt0133093') });
+  await expect(tile).toBeVisible();
+  await expect(tile.locator('.stremio-title')).toContainText('The Matrix');
 
   // Everyone else leaves, then we do: the session ends with the last person.
   await page.evaluate(() => {
