@@ -127,8 +127,13 @@ route("GET", "/spotify/search", ({ query }) => {
     if (kind === "playlist") results.playlists = [playlistSummary(byId(PLAYLISTS, id))];
     return results;
   }
-  const has = (...texts: (string | undefined)[]) => texts.some(t => t?.toLowerCase().includes(q.toLowerCase()));
-  if (types.includes("track")) results.tracks = TRACKS.filter(t => has(t.title, t.album, ...t.artists)).slice(0, 10);
+  // Spotify's field filters, as the desktop's Windows track lookup sends them: track:"<title>" artist:"<artist>"
+  const fields = new Map([...q.matchAll(/(track|artist):"([^"]*)"/g)].map(([, field = "", value = ""]) => [field, value.trim().toLowerCase()]));
+  const text = q.replace(/(track|artist):"[^"]*"/g, " ").trim().toLowerCase();
+  const has = (...texts: (string | undefined)[]) => !!text && texts.some(t => t?.toLowerCase().includes(text));
+  const byFields = (t: SpotifyTrack) =>
+    (!fields.has("track") || t.title.toLowerCase().includes(fields.get("track")!)) && (!fields.has("artist") || t.artists.some(a => a.toLowerCase().includes(fields.get("artist")!)));
+  if (types.includes("track")) results.tracks = TRACKS.filter(t => byFields(t) && (!text || has(t.title, t.album, ...t.artists))).slice(0, 10);
   if (types.includes("album")) results.albums = ALBUMS.filter(a => has(a.name, ...a.artists)).map(summary);
   if (types.includes("artist")) results.artists = ARTISTS.filter(a => has(a.name)).map(artistSummary);
   if (types.includes("playlist")) results.playlists = PLAYLISTS.filter(p => has(p.name, ...p.tracks.flatMap(t => t.artists))).map(playlistSummary);

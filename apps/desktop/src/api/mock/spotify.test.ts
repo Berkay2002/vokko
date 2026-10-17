@@ -66,6 +66,8 @@ describe("mock Spotify catalog", () => {
   it("searches by type, looks up pasted links and refuses bad input", () => {
     expect(search("plain", "one more").tracks.map(t => t.title)).toEqual(["One More Time"]);
     expect(search("plain", "daft", "artist").tracks).toEqual([]);
+    expect(search("plain", 'track:"get lucky" artist:"Daft Punk"').tracks.map(t => t.title)).toEqual(["Get Lucky"]);
+    expect(search("plain", 'track:"get lucky" artist:"deadmau5"').tracks).toEqual([]);
     const album = discovery();
     expect(search("plain", `https://open.spotify.com/intl-de/album/${album.id}?si=x`).albums.map(a => a.name)).toEqual(["Discovery"]);
     expect(errorOf(() => search("plain", ""))?.code).toBe(50035);

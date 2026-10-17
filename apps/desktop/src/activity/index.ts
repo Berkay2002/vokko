@@ -21,7 +21,7 @@ import { readNowPlaying } from "../desktop/spotify";
 import { resendOwnStatus } from "../shell/actions";
 import { cleanName } from "./format";
 import { setOwnActivities } from "./own";
-import { playsInCall, sameSpotifyMoment, spotifyActivity } from "./spotify";
+import { lookUpTrack, playsInCall, sameSpotifyMoment, spotifyActivity, withCatalog } from "./spotify";
 import { voiceStore } from "../voice/store";
 
 // Game detection and the user's own activity. The desktop shell lists running executables; this store matches them against
@@ -131,7 +131,13 @@ export async function refreshSpotify(): Promise<void> {
   }
   spotifyBusy = true;
   try {
-    const next = spotifyActivity(await readNowPlaying(), Date.now());
+    const playing = await readNowPlaying();
+    let next = spotifyActivity(playing, Date.now());
+    // Windows gives no track id or art: the server's catalog search fills them in, once per track (macOS already has them).
+    const artist = cleanName(playing?.artists[0] ?? "");
+    if (next?.details && !next.sync_id && artist) next = withCatalog(next, await lookUpTrack(next.details, artist));
+    const now = useActivity.getState();
+    if (!now.spotify || !now.share) return;
     if (!sameSpotifyMoment(useActivity.getState().listening, next)) useActivity.setState({ listening: next });
   } finally {
     spotifyBusy = false;
