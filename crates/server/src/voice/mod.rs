@@ -5,6 +5,7 @@ pub mod calls;
 pub mod games;
 pub mod livekit;
 pub mod moderation;
+pub mod spotify;
 pub mod stage;
 pub mod state;
 pub mod status;
