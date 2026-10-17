@@ -389,7 +389,7 @@ fork builds inside the workspace (no existing package changed version; 78 new lo
 crates alone 1 min 25 s with `CARGO_BUILD_JOBS=4`, with livekit/libwebrtc about 4 min cold; the binary is 32.6 MB with libwebrtc,
 7.6 MB for login alone); login works; audio is resampled to 48 kHz in the bot; the owner playing elsewhere does not kick the bot;
 the Web API cannot give playlist tracks or artist top tracks, so the bot reads those over librespot (§4.3). §4 is frozen with
-those changes.
+those changes. The bot worker removed the spike commands (`tone`, `play`, `meta`, `examples/listen`); they remain on branch `worktree-spotify-spike`.
 
 Then three workers, by file ownership, against the frozen §4:
 1. **Server:** `crates/server/src/spotify/{mod,webapi}.rs`, `voice/spotify.rs`, `voice/media.rs` (the shared signer, moved from

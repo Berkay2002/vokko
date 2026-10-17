@@ -235,6 +235,31 @@ Notes:
 - **Addons and links.** The server only fetches https URLs on port 443 of public hosts (plus IP literals in `VOKKO_STREMIO_FETCH_ALLOW`, for a self-hosted addon on your LAN), follows redirects itself and caps every response. Stream URLs, addon configuration and the Stremio key never reach a client or a log.
 - **Quality.** `VOKKO_STREMIO_MAX_HEIGHT` (1080) and `VOKKO_STREMIO_BITRATE_KBPS` (6000) set what the bot encodes; a paused session stops after `VOKKO_STREMIO_PAUSE_TIMEOUT_MIN` (15) minutes. Each session is one ffmpeg process and one 6 Mbit/s upload per viewer through the SFU, so watch the uplink.
 
+## Spotify in calls
+
+A voice channel or DM call can listen to Spotify together. Playback runs on one server-wide "house" Spotify Premium account in a native bot on the Mac (`tools/spotify-bot`, librespot), which publishes the audio (Opus stereo, 160 kbit/s) into the same media LiveKit as Stremio. There is at most one Spotify session on the whole server. The bot never reports plays: house account history, recently played, recommendations and Wrapped stay untouched, and it does not show up as a Connect device. The design is in docs/design/spotify-bot.md.
+
+| Piece | Runs | Reachable at |
+| --- | --- | --- |
+| media LiveKit | as in "Stremio in calls" | `127.0.0.1:7880` |
+| spotify-bot | native, launchd `org.vokko.spotify-bot` | `127.0.0.1:8721` (the server calls it at `VOKKO_SPOTIFY_BOT_URL`) |
+
+Setup:
+
+1. Set up the media LiveKit as in "Stremio in calls" steps 1, 3 and 5 if it is not there yet.
+2. Build the bot with `cargo build --release -p spotify-bot` and copy `target/release/spotify-bot` to `~/.local/bin/`.
+3. Log the house account in once, on the home server: `spotify-bot login`. It prints a Spotify URL that redirects to `http://127.0.0.1:8898/login`. Over SSH, forward that port first (`ssh -L 8898:127.0.0.1:8898 buildhost`) and open the URL in the PC's browser. It writes `~/.config/vokko/spotify-bot/credentials.json` with mode 600; the bot refuses to start if the file is group- or world-readable. The directory is outside external-disk because launchd agents cannot read external-disk.
+4. Register a Spotify developer app ("Vokko catalog"; no redirect URI is used). The server reads search and metadata with its client-credentials token, which has no user, so nothing of the house account can come back. Playlist tracks and artist top tracks are not available to such a token, so the server reads those from the bot.
+5. Copy `deploy/launchd/org.vokko.spotify-bot.plist`, set `VOKKO_SPOTIFY_BOT_SECRET` (at least 16 characters; the server gets the same value) and load it. Check it with `curl -s http://127.0.0.1:8721/healthz`.
+6. In `deploy/.env` set `VOKKO_SPOTIFY_CLIENT_ID` / `_CLIENT_SECRET` (step 4), `VOKKO_SPOTIFY_BOT_URL=http://host.internal:8721` and `VOKKO_SPOTIFY_BOT_SECRET`, next to the media LiveKit keys. `VOKKO_SPOTIFY_MARKET` (default `SE`) must match the plist. Then `docker compose up -d`.
+
+Notes:
+
+- **`/internal/spotify/bot` must stay off the public proxy**, like the Stremio route. The bot's own port only needs to be reachable from the server's container (see the `host.internal` note under "Stremio in calls").
+- **Login rejected.** If Spotify rejects the stored credentials the bot reports `auth`, the call shows the error and the session stops. Run `spotify-bot login` again (step 3); the agent picks up the new file on the next session.
+- **Logs.** `~/Library/Logs/vokko-spotify-bot.log`. librespot logs at warn; tokens, credentials and track names are never logged.
+- **The house account.** Its owner can keep using Spotify on their own devices: the bot is not a Connect device, so neither side stops the other. The account needs Premium.
+
 ## Backups
 
 State is the `pgdata` volume (messages, users, everything structured) and the `vokko-data` volume (uploaded files; with `VOKKO_STORAGE=s3` the bucket instead). Back up both; the database rows reference files by id.
