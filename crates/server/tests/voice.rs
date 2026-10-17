@@ -1402,6 +1402,23 @@ async fn watch_together_without_control_media_votes_skips_and_queues_within_a_qu
     let (_, queued) = w.app.patch(&path, &w.alice, json!({"queue_add": "ddddddddddd"})).await;
     assert_eq!(queued["queue_added_by"], json!([w.carl_id, w.carl_id, w.carl_id, w.alice_id]));
 
+    // Anyone takes back their own entry, controllers any; someone else's is 403 and a stale index changes nothing.
+    let remove = |index: usize, video: &str| json!({"queue_remove": {"index": index, "video_id": video}});
+    w.app.patch(&path, &w.owner, json!({"queue_add": "eeeeeeeeeee"})).await;
+    assert_eq!(w.app.patch(&path, &w.carl, remove(3, "ddddddddddd")).await.0, StatusCode::FORBIDDEN, "alice's entry");
+    for (index, video) in [(4, "ddddddddddd"), (9, "ddddddddddd")] {
+        let (status, state) = w.app.patch(&path, &w.carl, remove(index, video)).await;
+        assert_eq!((status, state["queue"].as_array().map(Vec::len)), (StatusCode::OK, Some(5)), "stale {index}");
+    }
+    let (_, removed) = w.app.patch(&path, &w.alice, remove(3, "ddddddddddd")).await;
+    assert_eq!(
+        (removed["queue"].clone(), removed["queue_added_by"].clone()),
+        (json!(["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "eeeeeeeeeee"]), json!([w.carl_id, w.carl_id, w.carl_id, owner_id]))
+    );
+    w.app.patch(&path, &w.alice, json!({"queue_add": "ddddddddddd"})).await;
+    let (_, removed) = w.app.patch(&path, &w.owner, remove(3, "eeeeeeeeeee")).await;
+    assert_eq!(removed["queue_added_by"], json!([w.carl_id, w.carl_id, w.carl_id, w.alice_id]), "a controller removes anyone's");
+
     // Votes: 3 listeners need 2; a withdrawn vote goes; the second vote skips and clears the votes.
     let (_, voted) = w.app.patch(&path, &w.carl, json!({"skip": true})).await;
     assert_eq!((voted["video_id"].as_str(), voted["skip_votes"].clone(), voted["skip_needed"].as_u64()), (Some("dQw4w9WgXcQ"), json!([w.carl_id]), Some(2)));

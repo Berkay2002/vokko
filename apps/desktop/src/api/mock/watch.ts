@@ -113,6 +113,13 @@ route("PATCH", `/channels/${ID}/watch-together`, ({ viewer, params, body }) => {
   }
   // Anyone fills in a missing title (the clients' auto-fill); replacing one is a controller's, else a silent no-op as on the server.
   if (newTitle && (controller || !before.title)) next.title = newTitle;
+  // Anyone takes back their own entry, controllers any; a stale index (the queue moved) is a no-op.
+  const remove = patch.queue_remove;
+  if (remove && Number.isInteger(remove.index) && remove.index >= 0 && next.queue[remove.index] === remove.video_id) {
+    if (!controller && next.queue_added_by[remove.index] !== viewer.user.id) fail(403, 50013, MISSING_PERMISSIONS);
+    next.queue.splice(remove.index, 1);
+    next.queue_added_by.splice(remove.index, 1);
+  }
   if (added !== undefined) {
     if (next.queue.length >= WATCH_TOGETHER_QUEUE_MAX) invalid("queue_add", `The queue holds at most ${WATCH_TOGETHER_QUEUE_MAX} videos.`);
     requireQuota(channel, viewer.user.id, before.host_id, next.queue_added_by, WATCH_TOGETHER_QUEUE_PER_USER);

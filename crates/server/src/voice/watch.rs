@@ -187,6 +187,16 @@ async fn control(
         if title.is_some() && (controller || next.title.is_none()) {
             next.title = title.clone();
         }
+        // Anyone takes back their own entry, controllers any; a stale index (the queue moved) is a no-op.
+        if let Some(remove) = body.queue_remove.as_ref().filter(|remove| next.queue.get(remove.index) == Some(&remove.video_id)) {
+            if !controller && next.queue_added_by.get(remove.index).is_none_or(|adder| adder.db() != user_id) {
+                return Err(ApiErr::missing_permissions());
+            }
+            next.queue.remove(remove.index);
+            if remove.index < next.queue_added_by.len() {
+                next.queue_added_by.remove(remove.index);
+            }
+        }
         if let Some(added) = &body.queue_add {
             let mine = next.queue_added_by.iter().filter(|adder| adder.db() == user_id).count();
             control::quota(&ctx, &next.control, mine, WATCH_TOGETHER_QUEUE_PER_USER)?;

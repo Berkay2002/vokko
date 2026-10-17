@@ -918,6 +918,7 @@ export interface WatchTogetherPatchRequest {
   position_ms?: number;
   title?: string;
   queue_add?: string;
+  queue_remove?: { index: number; video_id: string }; // a no-op unless queue[index] is still video_id; your own entries, or any as a controller
   skip?: boolean;
   video_id?: string; // with skip: does nothing unless this video is still current
 }

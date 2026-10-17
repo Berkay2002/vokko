@@ -252,8 +252,7 @@ through `controls()` or the vote/quota path, none is missed.
 
 ## 8. Open follow-ups
 
-- Watch Together has no `queue_remove`, so a non-controller can't take back their own entry (it counts toward their quota of 3
-  until it plays or a controller clears the queue). Add `WatchTogetherPatchRequest.queue_remove` (own entries for everyone,
-  any for controllers, like Stremio) if people ask.
+- Done (2026-10-17): Watch Together has `queue_remove: {index, video_id}` (own entries for everyone, any for controllers, like
+  Stremio; a no-op when the entry at `index` is no longer `video_id`), and the Up next panel shows a remove button to whoever may use it.
 - The migration (`20261017130000_control_media.sql`) has no test of its own; the default @everyone bit and the role-write
   check (bit 60 accepted, 61 refused) are tested in `tests/guilds.rs`.
