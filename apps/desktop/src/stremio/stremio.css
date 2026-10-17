@@ -672,6 +672,58 @@
   font-size: 12px;
 }
 
+/* Continue watching: the poster card plus a progress bar along the bottom of the poster. */
+.stremio-continue-card .stremio-poster-frame {
+  position: relative;
+}
+
+.stremio-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 4px;
+  background: rgb(0 0 0 / 0.55);
+}
+
+.stremio-progress.inline {
+  position: static;
+  display: block;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--background-surface-higher);
+}
+
+.stremio-progress-done {
+  display: block;
+  height: 100%;
+  background: var(--brand-500);
+}
+
+.stremio-resume {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  background: var(--background-surface-high);
+}
+
+.stremio-resume-line {
+  margin: 0;
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stremio-start-at {
+  margin: 0;
+}
+
+.stremio-episode.current {
+  outline: 2px solid var(--brand-500);
+}
+
 .stremio-hero {
   border-radius: var(--radius-md);
   background: var(--background-surface-higher) center / cover no-repeat;
