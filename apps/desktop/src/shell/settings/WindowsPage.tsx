@@ -1,6 +1,18 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_DESKTOP_PREFS, checkForUpdate, getAppVersion, getAutostart, getDesktopPrefs, restartToUpdate, setAutostart, setDesktopPrefs, useDesktopUpdate, type DesktopPrefs, type UpdateStatus } from "../../desktop";
+import { DEFAULT_DESKTOP_PREFS, checkForUpdate, getAppVersion, getAutostart, getDesktopPrefs, restartToUpdate, setAutostart, setDesktopPrefs, useDesktopUpdate, useWindowChrome, type DesktopPrefs, type UpdateStatus, type WindowChrome } from "../../desktop";
 import { Category, Page, SwitchRow } from "./controls";
+
+const OS_NAMES: Record<WindowChrome["platform"], string> = { windows: "Windows", macos: "macOS", linux: "Linux" };
+
+/** The OS the desktop shell runs on, by name ("your computer" until the shell answered). */
+export function osName(platform: WindowChrome["platform"] | undefined): string {
+  return platform ? OS_NAMES[platform] : "your computer";
+}
+
+/** Title of this page and its sidebar entry: "Windows Settings" on Windows, "Linux Settings" on Linux, like Discord. */
+export function desktopSettingsTitle(platform: WindowChrome["platform"] | undefined): string {
+  return platform ? `${OS_NAMES[platform]} Settings` : "Desktop Settings";
+}
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : typeof error === "string" ? error : "Something went wrong.");
 
@@ -69,6 +81,7 @@ function UpdatesCategory() {
 
 /** Desktop-only settings (Tauri shell): tray behaviour, run-on-startup and updates. The page is hidden in the browser build. */
 export function WindowsPage() {
+  const platform = useWindowChrome()?.platform;
   const [prefs, setPrefs] = useState<DesktopPrefs>(DEFAULT_DESKTOP_PREFS);
   const [autostart, setAutostartState] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -110,9 +123,9 @@ export function WindowsPage() {
   };
 
   return (
-    <Page title="Windows Settings">
+    <Page title={desktopSettingsTitle(platform)}>
       <Category title="System Startup Behavior">
-        <SwitchRow label="Open Vokko" note="Start Vokko when you log in to Windows." checked={autostart} disabled={!loaded} onChange={on => void changeAutostart(on)} />
+        <SwitchRow label="Open Vokko" note={`Start Vokko when you log in to ${osName(platform)}.`} checked={autostart} disabled={!loaded} onChange={on => void changeAutostart(on)} />
         <SwitchRow label="Start Minimized" note="Vokko opens in the system tray instead of showing its window." checked={prefs.startMinimized} disabled={!loaded} onChange={on => void changePref({ startMinimized: on })} />
       </Category>
       <Category title="Close Button">

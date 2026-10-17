@@ -48,6 +48,26 @@ async fn guild_creation_has_defaults() {
     assert_eq!(members[0]["user"]["username"], "sam");
 }
 
+/// Migration 20261017130000_control_media run on rows from before it: @everyone gains bit 60 and no other bit changes anywhere.
+#[tokio::test]
+async fn the_control_media_migration_sets_bit_60_on_everyone_only() {
+    const CONTROL_MEDIA: i64 = 1 << 60;
+    let app = TestApp::new().await;
+    let (token, _) = app.register("sam").await;
+    let guild_id: i64 = id_of(&app.post("/guilds", &token, json!({"name": "Old"})).await.1).parse().expect("id");
+    let (_, role) = app.post(&format!("/guilds/{guild_id}/roles"), &token, json!({"name": "mods", "permissions": "8"})).await;
+    let role_id: i64 = id_of(&role).parse().expect("id");
+    let permissions_of = |id: i64| sqlx::query_scalar::<_, i64>("SELECT permissions FROM roles WHERE id = $1").bind(id).fetch_one(&app.state.db);
+    let old_everyone = 0b1010_0111_0000_0110_i64 | 1 << 59;
+    sqlx::query("UPDATE roles SET permissions = $2 WHERE id = $1").bind(guild_id).bind(old_everyone).execute(&app.state.db).await.expect("old @everyone");
+    let old_mods = permissions_of(role_id).await.expect("mods");
+    assert_eq!(old_mods & CONTROL_MEDIA, 0);
+
+    sqlx::raw_sql(include_str!("../migrations/20261017130000_control_media.sql")).execute(&app.state.db).await.expect("migration");
+    assert_eq!(permissions_of(guild_id).await.expect("@everyone"), old_everyone | CONTROL_MEDIA);
+    assert_eq!(permissions_of(role_id).await.expect("mods"), old_mods, "other roles stay as they are");
+}
+
 #[tokio::test]
 async fn non_members_are_denied_and_invites_work() {
     let app = TestApp::new().await;

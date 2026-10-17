@@ -369,6 +369,15 @@ async function connect(endpoint: string, token: string): Promise<void> {
     const t = await transportFor(endpoint);
     if (activeToken !== token) return; // superseded meanwhile
     await t.connect(endpoint, token, transportOptions(getVoice()));
+    if (activeToken !== token) return;
+    // Every connect starts the transport from scratch (a new room forgets what we watch), but the media store keeps the
+    // Watch Stream and quality choices across a reconnect: hand them back, or a watched stream shows only its avatar.
+    const media = getMedia();
+    for (const userId of Object.keys(media.watching)) t.watchStream?.(userId, true);
+    for (const [key, quality] of Object.entries(media.quality)) {
+      const [userId, source] = key.split(":") as [Snowflake, VideoSource];
+      t.setViewerQuality?.(userId, source, quality);
+    }
   } catch (error) {
     // The transport could not even start (e.g. the LiveKit chunk failed to load): same as a lost connection.
     console.warn("voice: connect failed", error);

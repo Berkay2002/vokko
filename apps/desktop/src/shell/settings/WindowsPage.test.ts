@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { updateSummary } from "./WindowsPage";
+import { desktopSettingsTitle, osName, updateSummary } from "./WindowsPage";
 
 describe("updateSummary", () => {
   it("says what the updater is doing", () => {
@@ -11,5 +11,16 @@ describe("updateSummary", () => {
     expect(updateSummary({ state: "ready", version: "0.2.0" }, "0.1.0")).toBe("Vokko 0.2.0 is ready to install.");
     expect(updateSummary({ state: "error", message: "offline" }, "0.1.0")).toBe("Could not check for updates: offline");
     expect(updateSummary({ state: "upToDate" }, "0.1.0")).toBe("Vokko is up to date (0.1.0).");
+  });
+});
+
+describe("desktopSettingsTitle", () => {
+  it("names the OS the shell runs on", () => {
+    expect(desktopSettingsTitle("windows")).toBe("Windows Settings");
+    expect(desktopSettingsTitle("linux")).toBe("Linux Settings");
+    expect(desktopSettingsTitle("macos")).toBe("macOS Settings");
+    expect(desktopSettingsTitle(undefined)).toBe("Desktop Settings");
+    expect(osName("linux")).toBe("Linux");
+    expect(osName(undefined)).toBe("your computer");
   });
 });

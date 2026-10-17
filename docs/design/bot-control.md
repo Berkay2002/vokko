@@ -117,7 +117,10 @@ Non-controllers may have at most this many entries of their own in the queue at 
 queue max. Watch 3 (of 20), Stremio 2 (of 10), Spotify 10 (of 200). New constants `WATCH_TOGETHER_QUEUE_PER_USER`,
 `STREMIO_QUEUE_PER_USER`, `SPOTIFY_QUEUE_PER_USER` in `crates/protocol/src/api.rs`. A Spotify album or playlist added by a
 non-controller adds what fits in their quota, and the response's "left out" count (spotify-bot.md §4.2) says the rest; the same
-cap applies to the rest of an album or playlist a non-controller starts on an idle session. Watch
+cap applies to the rest of an album or playlist a non-controller starts on an idle session. The quota is checked only on add. A Spotify track that
+loop `queue` appends again after it played (or that `previous` puts back) keeps its adder and counts as theirs, but is never
+refused or dropped: their own playing track coming back can put a non-controller one or more above the quota, and they add again
+once they are under it (the queue max still bounds everything). Watch
 gains a parallel `queue_added_by` list (§3.2) so the server can count and the UI can show "added by".
 
 ### 2.6 What happens when people leave
@@ -252,7 +255,11 @@ through `controls()` or the vote/quota path, none is missed.
 
 ## 8. Open follow-ups
 
+- Done (2026-10-18): loop `queue` and the Spotify quota. Re-queued tracks keep their adder and are never refused; the quota
+  only gates adding (§2.5), tested in `tests/spotify.rs`.
+
 - Done (2026-10-17): Watch Together has `queue_remove: {index, video_id}` (own entries for everyone, any for controllers, like
   Stremio; a no-op when the entry at `index` is no longer `video_id`), and the Up next panel shows a remove button to whoever may use it.
-- The migration (`20261017130000_control_media.sql`) has no test of its own; the default @everyone bit and the role-write
-  check (bit 60 accepted, 61 refused) are tested in `tests/guilds.rs`.
+- Done (2026-10-18): the migration (`20261017130000_control_media.sql`) is tested in `tests/guilds.rs` on rows from before it
+  (@everyone gains bit 60, no other bit or role changes), next to the default @everyone bit and the role-write check (bit 60
+  accepted, 61 refused).

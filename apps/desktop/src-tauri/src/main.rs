@@ -8,6 +8,7 @@ mod links;
 mod macos;
 mod popups;
 mod prefs;
+mod sharebar;
 mod shortcuts;
 mod spotify;
 mod streamer;
@@ -239,6 +240,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             updates::desktop_update_check,
             updates::desktop_update_download,
             updates::desktop_update_install,
+            sharebar::desktop_hide_share_bar,
             shortcuts::desktop_shortcut_register,
             shortcuts::desktop_shortcut_unregister,
             shortcuts::desktop_shortcut_list,

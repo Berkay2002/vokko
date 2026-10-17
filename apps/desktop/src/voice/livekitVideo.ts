@@ -4,6 +4,7 @@
 
 import { Track, TrackEvent, VideoPreset, VideoQuality, type LocalTrackPublication, type RemoteParticipant, type RemoteTrack, type RemoteTrackPublication, type Room, type TrackPublishOptions } from "livekit-client";
 import type { Snowflake } from "../api/types";
+import { hideShareBar } from "../desktop/window";
 import type { VideoHandle, VideoSource } from "./mediaStore";
 import type { CameraStart, TransportCallbacks } from "./transport";
 import { openCamera, type CameraSession } from "./video/cameraSession";
@@ -134,6 +135,7 @@ export class LiveKitVideo {
         return;
       }
       this.screen = { publication, room };
+      void hideShareBar();
       publication.track?.once(TrackEvent.Ended, () => {
         if (this.screen?.publication !== publication) return;
         void this.stopScreen().then(() => this.cb.localVideoEnded?.("screen"));
@@ -222,9 +224,25 @@ export class LiveKitVideo {
   async reset(): Promise<void> {
     this.watching.clear();
     this.qualities.clear();
+    // The room's listeners are gone before it disconnects, so no TrackUnsubscribed will clear these: every handle points at a
+    // track of the old room (a reconnect would leave black tiles and a camera button that says on with nothing published).
+    for (const participant of this.room()?.remoteParticipants.values() ?? []) {
+      this.cb.video?.(participant.identity, "camera", null);
+      this.cb.video?.(participant.identity, "screen", null);
+    }
     const camera = this.camera;
+    const screen = this.screen;
     this.camera = null;
     this.screen = null;
+    const id = this.selfId();
+    if (camera) {
+      if (id) this.cb.video?.(id, "camera", null);
+      this.cb.localVideoEnded?.("camera");
+    }
+    if (screen) {
+      if (id) this.cb.video?.(id, "screen", null);
+      this.cb.localVideoEnded?.("screen");
+    }
     if (camera) await camera.session.stop().catch(() => undefined);
   }
 }
