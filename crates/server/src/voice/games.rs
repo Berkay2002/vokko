@@ -51,11 +51,11 @@ pub fn builtins() -> Vec<GameManifest> {
     vec![GameManifest {
         id: "builtin:sketch".to_owned(),
         name: "Sketch".to_owned(),
-        url: "/games/sketch/".to_owned(),
-        icon: Some("🎨".to_owned()),
+        url: "/games/sketch/index.html".to_owned(),
+        icon: Some("✏️".to_owned()),
         min_players: 2,
-        max_players: 16,
-        aspect: GameAspect::Standard,
+        max_players: 12,
+        aspect: GameAspect::Wide,
     }]
 }
 
