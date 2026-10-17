@@ -8,7 +8,11 @@ import { join } from 'node:path';
 // in General (and already linked to Stremio), acting through __vokkoMock.requestAs.
 // Run from apps/desktop: npx playwright test -c e2e/stremio.config.ts
 
-const SHOTS = process.env.STREMIO_SHOTS ?? '/srv/vokko/.claude/artifacts/vokko-stremio-desktop';
+const MOBILE = !!process.env.STREMIO_MOBILE;
+const SHOTS = process.env.STREMIO_SHOTS ?? `/srv/vokko/.claude/artifacts/vokko-stremio-desktop${MOBILE ? '/mobile' : ''}`;
+
+// STREMIO_MOBILE=1 runs only the phone-width test (the last one) to take the mobile screenshots.
+if (MOBILE) test.use({ viewport: { width: 390, height: 844 } });
 
 type MockWin = {
   __vokkoMock: { channelIdByName(name: string): string | null; requestAs(user: string, method: string, path: string, body?: unknown): unknown; voice(user: string, channelId: string | null): void };
@@ -42,6 +46,7 @@ async function openStremio(page: Page): Promise<void> {
 }
 
 test('link, search, pick a stream, play in call, control it from others, stop', async ({ page }) => {
+  test.skip(MOBILE, 'desktop flow');
   await openGuild(page);
   const channelId = await general(page);
   const path = `/channels/${channelId}/stremio`;
@@ -172,6 +177,7 @@ test('link, search, pick a stream, play in call, control it from others, stop', 
 });
 
 test('someone else starts it: the line shows outside the call, the tile when we join, and it ends when the call empties', async ({ page }) => {
+  test.skip(MOBILE, 'desktop flow');
   await openGuild(page);
   const channelId = await general(page);
   const path = `/channels/${channelId}/stremio`;
@@ -212,4 +218,34 @@ test('someone else starts it: the line shows outside the call, the tile when we 
   await call(page).getByRole('button', { name: 'Leave voice channel' }).click();
   await expect(page.locator('.voice-stremio-line')).toHaveCount(0);
   await expect(page.locator('.voice-tile.stremio')).toHaveCount(0);
+});
+
+test('phone width: panel, tile with the controls and the queue fit the screen', async ({ page }) => {
+  test.skip(!MOBILE, 'run with STREMIO_MOBILE=1');
+  await openGuild(page);
+  const channelId = await general(page);
+  const path = `/channels/${channelId}/stremio`;
+  await page.getByRole('button', { name: 'General voice channel' }).click();
+  await page.getByRole('button', { name: 'Join Voice', exact: true }).click();
+  await openStremio(page);
+  await shot(page, 'm1-panel-not-linked.png');
+  await panel(page).getByRole('button', { name: 'Link with Stremio' }).click();
+  await shot(page, 'm2-linking.png');
+  await page.evaluate(() => (window as unknown as MockWin).__vokkoMockStremio.approve());
+  await expect(panel(page).getByRole('searchbox', { name: 'Search movies and series' })).toBeVisible({ timeout: 10_000 });
+  await panel(page).getByRole('searchbox', { name: 'Search movies and series' }).fill('heat');
+  await expect(panel(page).locator('[data-title-id="tt0113277"]')).toBeVisible();
+  await shot(page, 'm3-search-results.png');
+  await panel(page).locator('[data-title-id="tt0113277"]').click();
+  await expect(panel(page).getByRole('radio')).toHaveCount(5);
+  await shot(page, 'm4-stream-list.png');
+  await panel(page).getByRole('button', { name: 'Play in call' }).click();
+  const tile = call(page).locator('.voice-tile.stremio');
+  await expect(tile).toHaveAttribute('data-status', 'playing', { timeout: 10_000 });
+  await as(page, 'bob', 'PATCH', path, { queue_add: await sidFor(page, 'bob', '/stremio/streams/movie/tt0133093') });
+  await tile.getByRole('button', { name: 'Up next (1)' }).click();
+  await shot(page, 'm5-tile-playing-up-next.png');
+  // Nothing sticks out sideways: the tile's controls stay inside the viewport.
+  const box = await tile.getByRole('button', { name: 'Stop Stremio' }).boundingBox();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390);
 });

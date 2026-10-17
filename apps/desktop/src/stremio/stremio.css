@@ -318,6 +318,21 @@
   color: var(--text-default);
 }
 
+/* phone: a 400px column would push the call off the screen, so the panel covers the call page (Close brings it back) */
+@media (max-width: 767px) {
+  .voice-page:has(> .stremio-panel) {
+    position: relative;
+  }
+
+  .voice-page > .stremio-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    width: auto;
+    border-left: 0;
+  }
+}
+
 .dm-call .stremio-panel {
   width: 100%;
   max-width: 960px;
