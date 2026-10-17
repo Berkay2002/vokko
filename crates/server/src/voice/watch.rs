@@ -7,8 +7,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::put;
 use axum::{Json, Router};
 use vokko_protocol::api::{
-    ChannelType, GatewayEvent, Snowflake, WATCH_TOGETHER_POSITION_MAX_MS, WATCH_TOGETHER_QUEUE_MAX, WATCH_TOGETHER_TITLE_MAX_CHARS, WatchTogetherPatchRequest,
-    WatchTogetherStartRequest, WatchTogetherState, WatchTogetherUpdate,
+    ChannelType, GatewayEvent, MediaControl, Snowflake, WATCH_TOGETHER_POSITION_MAX_MS, WATCH_TOGETHER_QUEUE_MAX, WATCH_TOGETHER_TITLE_MAX_CHARS,
+    WatchTogetherPatchRequest, WatchTogetherStartRequest, WatchTogetherState, WatchTogetherUpdate,
 };
 
 use super::unix_millis;
@@ -111,8 +111,20 @@ async fn start(
     }
     // Changing the video keeps the queue and who started the session; a new session starts with an empty queue.
     let (_, next) = state.voice.watch_update(channel_id, |current| {
-        let (started_by, queue) = current.map_or((Snowflake::from(user_id), Vec::new()), |current| (current.started_by, current.queue.clone()));
-        Ok(Some(WatchTogetherState { video_id: body.video_id.clone(), title, playing: true, position_ms: 0, updated_at_ms: unix_millis(), started_by, queue }))
+        let (started_by, queue, queue_added_by) = current
+            .map_or((Snowflake::from(user_id), Vec::new(), Vec::new()), |current| (current.started_by, current.queue.clone(), current.queue_added_by.clone()));
+        let control = MediaControl { host_id: started_by, added_by: Some(Snowflake::from(user_id)), skip_votes: Vec::new(), skip_needed: 1 };
+        Ok(Some(WatchTogetherState {
+            video_id: body.video_id.clone(),
+            title,
+            playing: true,
+            position_ms: 0,
+            updated_at_ms: unix_millis(),
+            started_by,
+            queue,
+            queue_added_by,
+            control,
+        }))
     })?;
     announce(&state, channel_id, next.clone()).await;
     Ok(Json(next).into_response())
@@ -151,6 +163,7 @@ async fn control(
                 return Ok(None);
             }
             next.video_id = next.queue.remove(0);
+            next.control.added_by = (!next.queue_added_by.is_empty()).then(|| next.queue_added_by.remove(0));
             next.title = None;
             next.playing = true;
             next.position_ms = 0;
@@ -168,6 +181,7 @@ async fn control(
                 return Err(ApiErr::invalid("queue_add", &format!("The queue holds at most {WATCH_TOGETHER_QUEUE_MAX} videos.")));
             }
             next.queue.push(added.clone());
+            next.queue_added_by.push(Snowflake::from(user_id));
         }
         Ok(Some(next))
     })?;

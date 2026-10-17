@@ -110,6 +110,7 @@ impl Session {
             can_previous: self.queue.can_previous(),
             started_by: Snowflake::from(self.started_by),
             bot_identity: bot_identity(self.channel_id),
+            control: vokko_protocol::api::MediaControl { host_id: Snowflake::from(self.started_by), skip_needed: 1, ..Default::default() },
         }
     }
 

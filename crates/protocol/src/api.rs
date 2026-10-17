@@ -275,11 +275,14 @@ pub mod permissions {
     pub const PIN_MESSAGES: u64 = 1 << 51;
     pub const BYPASS_SLOWMODE: u64 = 1 << 52;
     pub const MANAGE_OFFICIAL_MESSAGES: u64 = 1 << 53;
+    /// Vokko-only (docs/design/bot-control.md): pause, seek, skip, stop and reorder Watch Together, Stremio and Spotify in a call.
+    /// High on purpose, so Discord's future bits never collide.
+    pub const CONTROL_MEDIA: u64 = 1 << 60;
 
     /// Every defined permission bit (what the owner and administrators resolve to).
-    pub const ALL: u64 = (1 << 54) - 1 - (1 << 47);
+    pub const ALL: u64 = ((1 << 54) - 1 - (1 << 47)) | CONTROL_MEDIA;
     /// Every permission name with its bit, in bit order.
-    pub const NAMED: [(&str, u64); 53] = [
+    pub const NAMED: [(&str, u64); 54] = [
         ("CREATE_INSTANT_INVITE", CREATE_INSTANT_INVITE),
         ("KICK_MEMBERS", KICK_MEMBERS),
         ("BAN_MEMBERS", BAN_MEMBERS),
@@ -333,8 +336,9 @@ pub mod permissions {
         ("PIN_MESSAGES", PIN_MESSAGES),
         ("BYPASS_SLOWMODE", BYPASS_SLOWMODE),
         ("MANAGE_OFFICIAL_MESSAGES", MANAGE_OFFICIAL_MESSAGES),
+        ("CONTROL_MEDIA", CONTROL_MEDIA),
     ];
-    /// What the @everyone role of a new guild grants: the 27-bit default set of the Discord client.
+    /// What the @everyone role of a new guild grants: the 27-bit default set of the Discord client, plus Vokko's CONTROL_MEDIA.
     pub const DEFAULT_EVERYONE: u64 = CREATE_INSTANT_INVITE
         | CHANGE_NICKNAME
         | VIEW_CHANNEL
@@ -361,7 +365,8 @@ pub mod permissions {
         | USE_APPLICATION_COMMANDS
         | CREATE_GUILD_EXPRESSIONS
         | CREATE_EVENTS
-        | USE_EXTERNAL_APPS;
+        | USE_EXTERNAL_APPS
+        | CONTROL_MEDIA;
     /// A timed-out member keeps only these.
     pub const TIMEOUT_ALLOWED: u64 = VIEW_CHANNEL | READ_MESSAGE_HISTORY;
 }
@@ -1423,6 +1428,8 @@ pub struct VoiceChannelStatusUpdate {
 
 /// Longest a Watch Together queue gets.
 pub const WATCH_TOGETHER_QUEUE_MAX: usize = 20;
+/// Queue entries one person without control may have in a Watch Together queue at once (docs/design/bot-control.md §2.5).
+pub const WATCH_TOGETHER_QUEUE_PER_USER: usize = 3;
 /// Furthest position a Watch Together seek may name (24 hours).
 pub const WATCH_TOGETHER_POSITION_MAX_MS: u64 = 24 * 60 * 60 * 1000;
 /// Longest title a Watch Together session carries.
@@ -1444,6 +1451,11 @@ pub struct WatchTogetherState {
     /// Video ids up next, at most `WATCH_TOGETHER_QUEUE_MAX`.
     #[serde(default)]
     pub queue: Vec<String>,
+    /// Who added each `queue` entry (same length and order).
+    #[serde(default)]
+    pub queue_added_by: Vec<Snowflake>,
+    #[serde(flatten)]
+    pub control: MediaControl,
 }
 
 /// `PUT /channels/{id}/watch-together`: start a session or change its video.
@@ -1472,6 +1484,29 @@ pub struct WatchTogetherPatchRequest {
     pub video_id: Option<String>,
 }
 
+/// Who controls a Watch Together, Stremio or Spotify session and the skip vote on its current item (docs/design/bot-control.md
+/// sections 2 and 3), flattened into each state. A controller is someone in the call who is in a DM call, holds CONTROL_MEDIA in
+/// the channel, or is `host_id`. Everyone else in the call may vote to skip (`skip: true`; `skip: false` withdraws), skip the
+/// item they added (`added_by`) at once, add to the end of the queue up to the per-user quota and remove their own entries.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MediaControl {
+    /// Starts as `started_by`; when the host leaves the call it moves to whoever has been in the call longest.
+    pub host_id: Snowflake,
+    /// Who added the current item (the `PUT` caller, or the queue entry's adder): they may skip it without a vote.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_by: Option<Snowflake>,
+    /// Votes to skip the current item, in vote order; cleared whenever the item changes.
+    #[serde(default)]
+    pub skip_votes: Vec<Snowflake>,
+    /// Votes that skip it: half the listeners (in the call and not deafened), rounded up, at least 1.
+    pub skip_needed: u32,
+}
+
+/// `max(1, ceil(listeners / 2))`: 0 or 1 or 2 listeners -> 1, 3 -> 2, 4 -> 2, 5 -> 3.
+pub fn skip_needed(listeners: usize) -> u32 {
+    listeners.div_ceil(2).max(1) as u32
+}
+
 /// WATCH_TOGETHER_UPDATE, to everyone who can see the channel; `state: null` = no session (also on the READY / GUILD_CREATE
 /// list `watch_together`, which only names channels that have one).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1482,6 +1517,8 @@ pub struct WatchTogetherUpdate {
 
 /// Longest Up next queue of a Stremio session.
 pub const STREMIO_QUEUE_MAX: usize = 10;
+/// Queue entries one person without control may have in a Stremio queue at once.
+pub const STREMIO_QUEUE_PER_USER: usize = 2;
 /// Furthest position a Stremio seek may name before the duration is known (24 hours).
 pub const STREMIO_POSITION_MAX_MS: u64 = 24 * 60 * 60 * 1000;
 
@@ -1625,6 +1662,8 @@ pub struct StremioState {
     /// The `id` of the bitmap subtitle burned into the picture for everyone, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub burned_subtitle: Option<u32>,
+    #[serde(flatten)]
+    pub control: MediaControl,
 }
 
 /// STREMIO_UPDATE, to everyone who can see the channel (`state: null` = ended), and the entries of the `stremio` lists on READY
@@ -1938,6 +1977,8 @@ pub struct StremioStreamList {
 
 /// Longest Spotify queue.
 pub const SPOTIFY_QUEUE_MAX: usize = 200;
+/// Queue entries one person without control may have in the Spotify queue at once; an album or playlist adds what fits.
+pub const SPOTIFY_QUEUE_PER_USER: usize = 10;
 /// Queue entries a SPOTIFY_UPDATE (and READY / `Call`) carries; `GET /channels/{id}/spotify` has all of them.
 pub const SPOTIFY_EVENT_QUEUE_MAX: usize = 50;
 
@@ -2094,6 +2135,9 @@ pub struct SpotifyState {
     pub started_by: Snowflake,
     /// `bot:spotify:<channel_id>`.
     pub bot_identity: String,
+    /// `added_by` is who put `track` in play; absent while nothing plays.
+    #[serde(flatten)]
+    pub control: MediaControl,
 }
 
 /// What `PUT` and `PATCH` answer: the state, plus `left_out` when an album or playlist did not fit in the queue.
@@ -5160,6 +5204,13 @@ mod tests {
     }
 
     #[test]
+    fn skip_needed_is_half_the_listeners_rounded_up() {
+        let table: Vec<u32> = (0..=5).map(skip_needed).collect();
+        assert_eq!(table, [1, 1, 1, 2, 2, 3]);
+        assert_eq!(skip_needed(10), 5);
+    }
+
+    #[test]
     fn permission_table_is_complete() {
         use super::permissions::*;
         let mut seen = 0_u64;
@@ -5168,11 +5219,13 @@ mod tests {
             assert_eq!(seen & bit, 0, "{name} is unique");
             seen |= bit;
         }
-        assert_eq!(NAMED.len(), 53);
+        assert_eq!(NAMED.len(), 54);
         assert_eq!(seen, ALL);
         assert_eq!(ALL & (1 << 47), 0, "bit 47 is unassigned");
-        assert_eq!(NAMED.last().map(|(_, bit)| bit.trailing_zeros()), Some(53));
-        assert_eq!(DEFAULT_EVERYONE.count_ones(), 27);
+        assert_eq!(NAMED.last().map(|(_, bit)| bit.trailing_zeros()), Some(60));
+        // Discord's 27 plus Vokko's CONTROL_MEDIA.
+        assert_eq!(DEFAULT_EVERYONE.count_ones(), 28);
+        assert_ne!(DEFAULT_EVERYONE & CONTROL_MEDIA, 0);
         assert_eq!(DEFAULT_EVERYONE & !ALL, 0);
         assert_eq!(DEFAULT_EVERYONE & ADMINISTRATOR, 0);
         assert_ne!(DEFAULT_EVERYONE & VIEW_CHANNEL, 0);
@@ -5733,19 +5786,23 @@ mod tests {
         );
         let status = GatewayEvent::VoiceChannelStatusUpdate(VoiceChannelStatusUpdate { id: Snowflake(201), guild_id: Snowflake(300), status: None });
         assert_eq!((status.name(), status.data()), ("VOICE_CHANNEL_STATUS_UPDATE", json!({"id": "201", "guild_id": "300", "status": null})));
-        let watch = json!({"video_id": "dQw4w9WgXcQ", "playing": true, "position_ms": 5, "updated_at_ms": 9, "started_by": "7", "queue": ["aaaaaaaaaaa"]});
+        let watch = json!({
+            "video_id": "dQw4w9WgXcQ", "playing": true, "position_ms": 5, "updated_at_ms": 9, "started_by": "7", "queue": ["aaaaaaaaaaa"],
+            "queue_added_by": ["8"], "host_id": "7", "added_by": "7", "skip_votes": ["8"], "skip_needed": 2
+        });
         round_trip::<WatchTogetherState>(watch.clone());
         let update = GatewayEvent::WatchTogetherUpdate(WatchTogetherUpdate { channel_id: Snowflake(201), state: None });
         assert_eq!((update.name(), update.data()), ("WATCH_TOGETHER_UPDATE", json!({"channel_id": "201", "state": null})));
         round_trip::<WatchTogetherUpdate>(json!({"channel_id": "201", "state": watch}));
         let stremio = json!({
             "item": {"title": "Heat", "label": "1080p"}, "status": "paused", "playing": false, "position_ms": 5, "updated_at_ms": 9,
-            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [{"title": "Alien", "label": "720p", "added_by": "8"}]
+            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [{"title": "Alien", "label": "720p", "added_by": "8"}],
+            "host_id": "7", "added_by": "7", "skip_votes": [], "skip_needed": 1
         });
         round_trip::<StremioState>(stremio.clone());
         let tracks = json!({
             "item": {"title": "Heat", "label": "1080p"}, "status": "playing", "playing": true, "position_ms": 5, "updated_at_ms": 9,
-            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [],
+            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [], "host_id": "8", "added_by": "7", "skip_votes": ["9"], "skip_needed": 2,
             "audio_tracks": [{"id": 1, "language": "eng", "codec": "eac3", "default": true}, {"id": 2, "language": "swe", "title": "Commentary", "codec": "aac", "default": false}],
             "audio": 1,
             "subtitle_tracks": [{"id": 3, "kind": "text", "language": "eng", "codec": "subrip", "forced": false, "default": false},
@@ -5765,7 +5822,7 @@ mod tests {
         let track = json!({"uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC", "title": "Song", "artists": ["A"], "duration_ms": 1000, "explicit": false});
         let spotify = json!({
             "status": "playing", "track": track, "playing": true, "position_ms": 5, "updated_at_ms": 9, "loop": "queue", "queue_len": 1,
-            "can_previous": false, "started_by": "7", "bot_identity": "bot:spotify:201",
+            "can_previous": false, "started_by": "7", "bot_identity": "bot:spotify:201", "host_id": "7", "added_by": "8", "skip_votes": [], "skip_needed": 1,
             "queue": [{"qid": "q1", "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC", "title": "Song", "artists": ["A"], "duration_ms": 1000, "explicit": true, "added_by": "8"}]
         });
         round_trip::<SpotifyState>(spotify.clone());

@@ -136,6 +136,7 @@ impl Session {
             duration_ms: self.duration_ms,
             started_by: Snowflake::from(self.started_by),
             bot_identity: bot_identity(channel_id),
+            control: vokko_protocol::api::MediaControl { host_id: Snowflake::from(self.started_by), skip_needed: 1, ..Default::default() },
             audio_tracks: self.audio_tracks.clone(),
             audio: self.audio,
             subtitle_tracks: self.subtitle_tracks.clone(),
