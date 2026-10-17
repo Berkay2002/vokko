@@ -11,4 +11,8 @@ export interface GameCredit {
   file?: string;
 }
 
-export const GAME_CREDITS: Record<string, GameCredit[]> = {};
+export const GAME_CREDITS: Record<string, GameCredit[]> = {
+  "builtin:telephone": [
+    { work: "drawphone (game rules and turn order)", author: "Tanner Krewson", url: "https://github.com/tannerkrewson/drawphone", license: "MIT", file: "/games/telephone/LICENSE-drawphone.txt" },
+  ],
+};

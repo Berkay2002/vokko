@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'none'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Telephone</title>
+<link rel="stylesheet" href="./telephone.css" />
+</head>
+<body>
+<main id="app">
+  <header>
+    <strong>Telephone</strong>
+    <span id="status" aria-live="polite">Connecting...</span>
+    <span id="timer"></span>
+  </header>
+
+  <section id="lobby" hidden>
+    <p id="note" hidden></p>
+    <p class="how">Write a prompt, the next player draws it, the next one describes the drawing, and so on. At the end every chain is revealed.</p>
+    <h2>Players</h2>
+    <ul id="roster" class="names"></ul>
+    <div id="host" hidden>
+      <label>Turns <select id="turns"></select></label>
+      <button type="button" id="start" class="primary">Start</button>
+    </div>
+    <p id="lobby-hint" class="muted"></p>
+  </section>
+
+  <section id="play" hidden>
+    <p id="instruction"></p>
+    <p id="prompt"></p>
+    <div id="incoming-wrap" hidden>
+      <img id="incoming" alt="The drawing to describe" />
+      <span id="incoming-wait">Loading the drawing...</span>
+    </div>
+    <div id="pad" hidden>
+      <canvas id="canvas" width="480" height="360" aria-label="Drawing pad"></canvas>
+      <div id="tools">
+        <span id="colors"></span>
+        <span id="sizes"></span>
+        <button type="button" id="eraser" aria-pressed="false">Eraser</button>
+        <button type="button" id="undo">Undo</button>
+        <button type="button" id="clear">Clear</button>
+        <button type="button" id="send-drawing" class="primary">Done</button>
+      </div>
+    </div>
+    <div id="text-row" hidden>
+      <input id="text" type="text" maxlength="80" autocomplete="off" aria-label="Your answer" />
+      <button type="button" id="suggest">Suggest</button>
+      <button type="button" id="send-text" class="primary">Done</button>
+    </div>
+    <p id="wait" class="muted" hidden></p>
+    <ul id="waiting" class="names"></ul>
+  </section>
+
+  <section id="reveal" hidden>
+    <h2 id="chain-title"></h2>
+    <ol id="links"></ol>
+    <div id="reveal-host" hidden>
+      <button type="button" id="prev">Previous</button>
+      <button type="button" id="next" class="primary">Next chain</button>
+      <button type="button" id="again">New game</button>
+    </div>
+    <p id="reveal-hint" class="muted"></p>
+  </section>
+</main>
+<script src="../vokko-games.js"></script>
+<script src="./telephone-prompts.js"></script>
+<script src="./telephone-core.js"></script>
+<script src="./telephone.js"></script>
+</body>
+</html>
