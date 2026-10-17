@@ -166,3 +166,14 @@
 .search-page-btn.current { background: var(--chat-brand); color: var(--chat-on-brand); }
 .search-page-btn:disabled { opacity: 0.4; cursor: default; }
 .search-page-gap { padding: 0 4px; color: var(--chat-text-muted); }
+
+/* ---- phone (<= 767px, NARROW_QUERY): the results are a page of their own over the chat, as on Discord mobile. No hover, so no
+   Jump button (a tap on the card jumps and closes the page), and the category label gives way to the channel name. ---- */
+@media (max-width: 767px) {
+  .channel-body:has(> .search-panel) > .channel-chat { display: none; }
+  .search-panel { flex: 1; width: auto; border-left: 0; }
+  .search-panel-head { padding: 8px 12px; }
+  .search-panel-body { padding: 8px 12px 16px; }
+  .search-group-category, .search-hit-jump { display: none; }
+  .search-hit { padding: 8px 12px; }
+}

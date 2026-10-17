@@ -9,6 +9,7 @@ import { Markdown } from '../chat/markdown';
 import { formatMessageTimestamp } from '../chat/util';
 import { clearHighlights, paintHighlights } from './highlight';
 import { jumpToHit } from './jump';
+import { NARROW_QUERY } from './shell';
 import { groupByChannel, MAX_OFFSET, pageButtons, PAGE_SIZE, type SearchSort } from './query';
 import { Popout, dmName, useStore } from './shell';
 import { searchActions, searchStore } from './store';
@@ -130,7 +131,8 @@ function Hit({ hit, currentChannelId }: { hit: Message; currentChannelId: string
   const chat = useChat();
   const ref = hit.referenced_message;
   const color = chat.colorOf(hit);
-  const jump = () => { void jumpToHit(hit, currentChannelId); };
+  // on a phone the results cover the chat: close them so the jump lands in view (the draft stays in the box)
+  const jump = () => { if (matchMedia(NARROW_QUERY).matches) searchActions.closePanel(); void jumpToHit(hit, currentChannelId); };
   return <article className="search-hit" data-message-id={hit.id} tabIndex={0}
     onClick={e => { if (!(e.target as HTMLElement).closest('a, button, [role="button"]')) jump(); }}
     onKeyDown={e => { if (e.key === 'Enter' && e.target === e.currentTarget) jump(); }}>

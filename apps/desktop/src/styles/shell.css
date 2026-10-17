@@ -1964,6 +1964,10 @@ img.active-card-art {
   gap: 8px;
 }
 
+.friends-add-icon {
+  display: none;
+}
+
 /* Six tabs do not fit next to the title in a narrow column: keep the icon, hide the word (still there for screen readers) and the dot. */
 @container (max-width: 760px) {
   .friends-title h1 {
