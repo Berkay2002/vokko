@@ -2,11 +2,11 @@ import { defineConfig } from '@playwright/test';
 
 // Stremio mock e2e on its own fresh Vite (port 1446) so a Vite from another worktree is never reused by accident.
 // Run from apps/desktop: npx playwright test -c e2e/stremio.config.ts
-const PORT = 1446;
+const PORT = Number(process.env.STREMIO_PORT ?? 1446);
 
 export default defineConfig({
   testDir: '.',
-  testMatch: /stremio\.spec\.ts$/,
+  testMatch: /stremio(-tracks)?\.spec\.ts$/,
   timeout: 60_000,
   fullyParallel: false,
   workers: 1,

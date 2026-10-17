@@ -5,6 +5,7 @@ pub mod addons;
 pub mod bot;
 pub mod client;
 pub mod fetch;
+pub mod library;
 pub mod rank;
 
 use std::collections::HashMap;
@@ -70,7 +71,7 @@ pub struct TitleInfo {
     pub title: String,
     pub subtitle: Option<String>,
     pub poster: Option<String>,
-    /// `(type, video id)` as the addons know it, for asking them about subtitles.
+    /// `(type, video id)` as the addons know it: for asking them about subtitles and for the library write-back.
     pub video: Option<(String, String)>,
 }
 
@@ -106,6 +107,8 @@ pub struct Stremio {
     metas: Mutex<HashMap<String, Cached<StremioMeta>>>,
     subs: Mutex<HashMap<String, ListedSub>>,
     pub(crate) sessions: Mutex<HashMap<i64, crate::voice::stremio::Session>>,
+    /// Library write-backs by owner (`library::save`).
+    pub(crate) library_writes: Mutex<HashMap<i64, library::Writes>>,
     /// The media LiveKit's RoomService (rooms are closed and viewers removed through it); a fake in tests.
     media_rooms: Mutex<Arc<dyn RoomService>>,
     generation: AtomicU64,
@@ -140,6 +143,7 @@ impl Stremio {
             metas: Mutex::default(),
             subs: Mutex::default(),
             sessions: Mutex::default(),
+            library_writes: Mutex::default(),
             generation: AtomicU64::new(1),
         }
     }
@@ -253,6 +257,7 @@ pub fn routes() -> Router<AppState> {
         .route("/stremio/catalog", get(browse))
         .route("/stremio/meta/{kind}/{id}", get(meta))
         .route("/stremio/streams/{kind}/{video_id}", get(streams))
+        .route("/stremio/continue", get(library::continue_watching))
 }
 
 // ---- the linked account ----
@@ -261,7 +266,7 @@ fn aad(user_id: i64) -> Vec<u8> {
     format!("stremio:{user_id}").into_bytes()
 }
 
-async fn load_key(state: &AppState, active: &Active<'_>, user_id: i64) -> ApiResult<Option<(Secret, OffsetDateTime)>> {
+pub(crate) async fn load_key(state: &AppState, active: &Active<'_>, user_id: i64) -> ApiResult<Option<(Secret, OffsetDateTime)>> {
     let row: Option<(Vec<u8>, OffsetDateTime)> =
         sqlx::query_as("SELECT auth_key_enc, linked_at FROM stremio_accounts WHERE user_id = $1").bind(user_id).fetch_optional(&state.db).await?;
     let Some((sealed, linked_at)) = row else { return Ok(None) };
@@ -287,12 +292,12 @@ async fn store_key(state: &AppState, active: &Active<'_>, user_id: i64, key: &Se
 }
 
 /// Stremio says the key is dead: forget it, so the UI asks for a new link.
-async fn drop_key(state: &AppState, user_id: i64) {
+pub(crate) async fn drop_key(state: &AppState, user_id: i64) {
     let _ = sqlx::query("DELETE FROM stremio_accounts WHERE user_id = $1").bind(user_id).execute(&state.db).await;
     state.stremio.forget(user_id);
 }
 
-fn account_error(error: AccountError) -> ApiErr {
+pub(crate) fn account_error(error: AccountError) -> ApiErr {
     match error {
         AccountError::Rejected => ApiErr::invalid("account", "Stremio did not accept that."),
         AccountError::SessionGone => ApiErr::missing_permissions(),
@@ -418,7 +423,7 @@ async fn browse(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQ
 }
 
 /// Cinemeta's meta of a title, cached for ten minutes (the title page and the stream list both need it).
-async fn cached_meta(state: &AppState, active: &Active<'_>, kind: &str, id: &str) -> Result<Arc<StremioMeta>, FetchError> {
+pub(crate) async fn cached_meta(state: &AppState, active: &Active<'_>, kind: &str, id: &str) -> Result<Arc<StremioMeta>, FetchError> {
     let key = format!("{kind}/{id}");
     if let Some((at, meta)) = lock(&state.stremio.metas).get(&key)
         && at.elapsed() < META_TTL

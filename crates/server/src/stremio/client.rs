@@ -8,6 +8,8 @@ use crate::crypto::Secret;
 
 /// Addons used from an account: more would make every stream listing a fan-out of requests.
 const MAX_ADDONS: usize = 25;
+/// The datastore collection of a user's library (`LIBRARY_COLLECTION_NAME` in stremio-core's constants.rs).
+const LIBRARY: &str = "libraryItem";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum AccountError {
@@ -66,6 +68,25 @@ impl Account {
         let answer = self.call("addonCollectionGet", json!({"type": "AddonCollectionGet", "authKey": key.expose(), "update": true})).await?;
         let entries = answer["addons"].as_array().ok_or(AccountError::Unavailable)?;
         Ok(entries.iter().filter_map(Addon::from_collection).filter(|addon| addon.reachable(&self.fetcher)).take(MAX_ADDONS).collect())
+    }
+
+    /// The account's whole library as raw JSON items (`datastoreGet` with `all`), see `library.rs`.
+    pub async fn library_all(&self, key: &Secret) -> Result<Vec<Value>, AccountError> {
+        let body = json!({"authKey": key.expose(), "collection": LIBRARY, "ids": [], "all": true});
+        let answer = result(self.fetcher.post_json_large(&format!("{}/api/datastoreGet", self.api), &body).await)?;
+        answer.as_array().cloned().ok_or(AccountError::Unavailable)
+    }
+
+    /// One library item as raw JSON, `None` when the account has no item with that id. An error is never "missing".
+    pub async fn library_item(&self, key: &Secret, id: &str) -> Result<Option<Value>, AccountError> {
+        let answer = self.call("datastoreGet", json!({"authKey": key.expose(), "collection": LIBRARY, "ids": [id], "all": false})).await?;
+        let items = answer.as_array().ok_or(AccountError::Unavailable)?;
+        Ok(items.iter().find(|item| item["_id"] == id).cloned())
+    }
+
+    /// Stores one library item (`datastorePut`; the item replaces the stored one).
+    pub async fn library_put(&self, key: &Secret, item: Value) -> Result<(), AccountError> {
+        self.call("datastorePut", json!({"authKey": key.expose(), "collection": LIBRARY, "changes": [item]})).await.map(drop)
     }
 
     /// A code to approve at `link` in a browser that is logged in to Stremio.

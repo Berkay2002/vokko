@@ -1000,6 +1000,22 @@ export interface StremioPatchRequest {
   audio?: number; // an audio track id
   burned_subtitle?: number | null; // a bitmap subtitle track id, or null to turn burn-in off
 }
+export interface StremioStartRequest {
+  sid: string;
+  position_ms?: number; // 0..=STREMIO_POSITION_MAX_MS: start there, to resume
+}
+/** One card of Continue watching: a title of the caller's own Stremio library with progress. */
+export interface StremioContinueItem {
+  id: string; // tt1234567
+  type: StremioType;
+  name: string;
+  poster?: string;
+  video_id?: string; // the episode to continue (series)
+  season?: number;
+  episode?: number;
+  position_ms: number; // 0 with duration_ms 0 when the next episode is waiting
+  duration_ms: number;
+}
 export interface StremioViewerToken {
   url: string; // wss:// signalling URL of the media LiveKit
   token: string;
