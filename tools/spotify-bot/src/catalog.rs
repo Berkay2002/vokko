@@ -11,8 +11,10 @@ use serde::Serialize;
 
 const TEXT_MAX_CHARS: usize = 200;
 pub const PAGE_MAX: usize = 100;
-/// Track metadata requests in flight at once.
+/// Track metadata requests in flight at once for one read.
 const PARALLEL: usize = 10;
+/// And for all reads together: the account's session is shared with playback, so many catalog reads at once must not crowd it.
+static METADATA: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(PARALLEL);
 /// The 300 px album cover (the 64 px one is `ab67616d00004851`, 640 px `ab67616d0000b273`).
 const COVER_300: &str = "ab67616d00001e02";
 
@@ -34,6 +36,8 @@ pub struct TrackOut {
 pub struct PlaylistPage {
     pub name: String,
     pub total: u64,
+    /// Whether Spotify itself owns the playlist: the server shows a playlist that its own Web API token cannot see only if this is true.
+    pub spotify_owned: bool,
     pub tracks: Vec<TrackOut>,
 }
 
@@ -133,7 +137,10 @@ fn read_error(error: &Error) -> CatalogError {
 async fn tracks(session: &Session, uris: Vec<SpotifyUri>, market: &str) -> Vec<TrackOut> {
     let now = Date::now_utc();
     stream::iter(uris.into_iter().filter(|uri| matches!(uri, SpotifyUri::Track { .. })))
-        .map(|uri| async move { Track::get(session, &uri).await.ok() })
+        .map(|uri| async move {
+            let _slot = METADATA.acquire().await.ok()?;
+            Track::get(session, &uri).await.ok()
+        })
         .buffered(PARALLEL)
         .filter_map(|track| async move { track })
         .filter(|track| std::future::ready(track.earliest_live_timestamp <= now && playable_in(track.restrictions.iter(), market)))
@@ -150,7 +157,16 @@ pub async fn playlist(session: &Session, id: &str, offset: usize, limit: usize, 
     let uri = SpotifyUri::Playlist { id: id_of(id)?, user: None };
     let list = Playlist::get_range(session, &uri, offset, limit.min(PAGE_MAX)).await.map_err(|e| read_error(&e))?;
     let uris = list.contents.items.iter().map(|item| item.id.clone()).take(PAGE_MAX).collect();
-    Ok(PlaylistPage { name: clean(list.name()), total: u64::try_from(list.length).unwrap_or(0), tracks: tracks(session, uris, market).await })
+    let spotify_owned = is_spotify_owner(match &list.id {
+        SpotifyUri::Playlist { user: Some(owner), .. } => owner,
+        _ => "",
+    });
+    Ok(PlaylistPage { name: clean(list.name()), total: u64::try_from(list.length).unwrap_or(0), spotify_owned, tracks: tracks(session, uris, market).await })
+}
+
+/// Playlists made by Spotify itself (Today's Top Hits, ...) have the user name `spotify`.
+fn is_spotify_owner(username: &str) -> bool {
+    username == "spotify"
 }
 
 pub async fn top_tracks(session: &Session, id: &str, market: &str) -> Result<TopTracks, CatalogError> {
@@ -184,6 +200,12 @@ mod tests {
         assert!(!valid_id("4uLU6hMCjMI75M1A2tKUQ/"));
         assert!(!valid_id("me"));
         assert!(valid_market("SE") && !valid_market("se") && !valid_market("SWE"));
+    }
+
+    #[test]
+    fn only_spotifys_own_playlists_are_spotify_owned() {
+        assert!(is_spotify_owner("spotify"));
+        assert!(!is_spotify_owner("Spotify") && !is_spotify_owner("spotify2") && !is_spotify_owner("") && !is_spotify_owner("someone"));
     }
 
     #[test]

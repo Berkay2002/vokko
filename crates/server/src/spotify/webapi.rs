@@ -22,7 +22,7 @@ const ITEM_TTL: Duration = Duration::from_secs(10 * 60);
 /// Cache entries per kind; search keys are user text, so the cache is bounded (when full, expired entries go, then everything).
 const CACHE_MAX: usize = 500;
 /// Longest pause a `Retry-After` can cause.
-const PAUSE_MAX: Duration = Duration::from_secs(60 * 60);
+const PAUSE_MAX: Duration = Duration::from_secs(5 * 60);
 const BODY_MAX: u64 = 4 * 1024 * 1024;
 const SEARCH_PAGE: u32 = 10;
 /// Searched albums an artist page lists.

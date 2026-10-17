@@ -16,19 +16,19 @@ mod session;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer;
+use tracing_subscriber::filter::{EnvFilter, FilterExt, filter_fn};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::main]
 async fn main() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    // librespot logs the account name at info, so it stays at warn whatever RUST_LOG says.
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,libwebrtc=warn,livekit=warn"));
-    // A directive's target is a prefix, so this covers every librespot_* crate.
-    let filter = match "librespot=warn".parse() {
-        Ok(directive) => filter.add_directive(directive),
-        Err(_) => filter,
-    };
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    // librespot logs the account name at info, so every librespot* target stays at warn whatever RUST_LOG says: a more specific
+    // directive such as `librespot_core=info` beats a general one, so this is a second filter on top of RUST_LOG, not a directive.
+    let env = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,libwebrtc=warn,livekit=warn"));
+    let quiet_librespot = filter_fn(|meta| !meta.target().starts_with("librespot") || *meta.level() <= tracing::Level::WARN);
+    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_filter(env.and(quiet_librespot))).init();
 
     match std::env::args().nth(1).as_deref() {
         Some("login") => match login::run().await {

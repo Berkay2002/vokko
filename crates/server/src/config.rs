@@ -213,14 +213,14 @@ pub fn parse_spotify(env: &DotEnv) -> Result<Option<SpotifyConfig>, String> {
     if let Some(url) = env.get("VOKKO_MEDIA_LIVEKIT_BOT_URL").filter(|url| !url.trim().is_empty()) {
         config.bot_media_url = url.trim().trim_end_matches('/').to_owned();
     }
-    if let Some(market) = env.get("VOKKO_SPOTIFY_MARKET") {
+    if let Some(market) = env.get("VOKKO_SPOTIFY_MARKET").filter(|value| !value.trim().is_empty()) {
         let market = market.trim().to_ascii_uppercase();
         if market.len() != 2 || !market.bytes().all(|byte| byte.is_ascii_uppercase()) {
             return Err(format!("VOKKO_SPOTIFY_MARKET must be a two-letter country code, got {market}"));
         }
         config.market = market;
     }
-    if let Some(value) = env.get("VOKKO_SPOTIFY_IDLE_MIN") {
+    if let Some(value) = env.get("VOKKO_SPOTIFY_IDLE_MIN").filter(|value| !value.trim().is_empty()) {
         let minutes: u64 = value
             .trim()
             .parse()

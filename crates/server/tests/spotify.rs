@@ -111,7 +111,7 @@ async fn one_album(Path(id): Path<String>) -> Json<Value> {
 
 /// The Web API gives a playlist's header only; Spotify-owned playlists are 404 for a client-credentials token.
 async fn one_playlist(Path(id): Path<String>) -> Response {
-    if number(&id) == 99 {
+    if matches!(number(&id), 98 | 99) {
         return StatusCode::NOT_FOUND.into_response();
     }
     Json(json!({"id": id, "name": "Mix", "owner": {"id": "someone", "display_name": "Sam"}, "images": []})).into_response()
@@ -250,7 +250,7 @@ fn bot_catalog(path: &str, query: Option<&str>) -> Response {
         ["catalog", "playlists", id] if number(id) != 0 => {
             let mut tracks: Vec<Value> = (offset + 1..=(offset + 100).min(250)).map(bot_track).collect();
             tracks.push(json!({"uri": "spotify:episode:0000000000000000000099", "title": "Podcast"}));
-            Json(json!({"name": "Bot Mix", "total": 250, "tracks": tracks})).into_response()
+            Json(json!({"name": "Bot Mix", "total": 250, "spotify_owned": number(id) == 99, "tracks": tracks})).into_response()
         }
         ["catalog", "artists", id, "top-tracks"] if number(id) != 0 => Json(json!({"tracks": [bot_track(1), bot_track(2)]})).into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
@@ -1060,6 +1060,40 @@ async fn a_failed_put_on_a_running_session_keeps_it_for_the_sweep_to_retry() {
 }
 
 #[tokio::test]
+async fn a_private_playlist_is_not_shown_and_bot_reads_are_capped_for_everyone() {
+    let w = world().await;
+    let reads = |w: &World| w.bot.all().iter().filter(|request| request.path.starts_with("/catalog/")).count();
+    // The Web API hides it and the bot does not call it Spotify's own: a playlist of the house account stays unreachable by id.
+    let private = "/spotify/playlists/P000000000000000000098";
+    assert_eq!(w.app.get(private, &w.alice).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(w.app.get("/spotify/playlists/P000000000000000000099", &w.alice).await.0, StatusCode::OK, "Spotify's own is");
+
+    // An offset past the end costs the bot nothing: the length of the first page answers it, and it is not cached per offset.
+    let first = "/spotify/playlists/P000000000000000000001";
+    assert_eq!(w.app.get(first, &w.alice).await.0, StatusCode::OK);
+    let before = reads(&w);
+    for offset in [250, 5000, 99_999] {
+        let (status, page) = w.app.get(&format!("{first}?offset={offset}"), &w.alice).await;
+        assert_eq!((status, page["total"].clone(), page["tracks"].as_array().map(Vec::len)), (StatusCode::OK, json!(250), Some(0)), "{offset}");
+    }
+    assert_eq!(reads(&w), before, "no bot read for an offset past the end");
+
+    // Whoever asks, the bot gets a burst of 10 reads and then a slow trickle: new playlists run into the cap.
+    let mut limited = None;
+    for n in 2..=30 {
+        let (status, body) = w.app.get(&format!("/spotify/playlists/P{n:021}"), &w.alice).await;
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            limited = Some(n);
+            break;
+        }
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    assert!(limited.is_some_and(|n| n <= 12), "{limited:?}");
+    assert!(reads(&w) <= 11, "{} reads", reads(&w));
+    assert_eq!(w.app.get(first, &w.carl).await.0, StatusCode::OK, "what is cached is still served");
+}
+
+#[tokio::test]
 async fn the_last_person_leaving_ends_the_session() {
     let w = world().await;
     let mut owner = Client::identify(&w.address, &w.owner).await.0;
@@ -1244,12 +1278,13 @@ async fn the_bot_endpoint_checks_its_secret_and_ignores_what_it_does_not_know() 
         assert_eq!(w.bot_event(BOT_SECRET, odd).await, StatusCode::NO_CONTENT);
     }
     assert_eq!(w.state(&w.alice).await["track"]["uri"], track_uri(1));
-    let request = Request::post("/internal/spotify/bot")
-        .header("authorization", format!("Bearer {BOT_SECRET}"))
-        .header("content-type", "application/json")
-        .body(Body::from("not json"))
-        .expect("request");
-    assert!(w.app.router.clone().oneshot(request).await.expect("response").status().is_client_error());
+    // The secret is checked before the body is read as JSON.
+    for (authorization, expected) in
+        [(format!("Bearer {BOT_SECRET}"), StatusCode::UNPROCESSABLE_ENTITY), ("Bearer wrong-secret-0123456789".to_owned(), StatusCode::UNAUTHORIZED)]
+    {
+        let request = Request::post("/internal/spotify/bot").header("authorization", authorization).body(Body::from("not json")).expect("request");
+        assert_eq!(w.app.router.clone().oneshot(request).await.expect("response").status(), expected);
+    }
 }
 
 #[tokio::test]

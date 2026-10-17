@@ -1,7 +1,8 @@
 //! The server's side of the Spotify bot's internal API (docs/api.md "Bot contract"): `PUT` and `DELETE` on `/session` with the
 //! bearer secret. A plain client, like Stremio's: the bot lives on the host (`http://host.internal:8721`), which an SSRF-guarded
 //! client would refuse. The bot has one session at most, so the channel travels in the body.
-use std::time::Duration;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use vokko_protocol::api::SpotifyTrack;
@@ -15,6 +16,10 @@ const READ_TTL: Duration = Duration::from_secs(10 * 60);
 const BODY_MAX: usize = 4 * 1024 * 1024;
 /// Tracks the server takes from one bot answer (a page is 100).
 const PAGE_MAX: usize = 100;
+/// Catalog reads the server makes of the bot, for everyone together: each one makes the bot look up to 100 tracks with the owner's
+/// account, so a burst of 10 and one every 2 s on average.
+const READ_BURST: f64 = 10.0;
+const READ_PER_SECOND: f64 = 0.5;
 
 /// What the bot should be doing. Holds the room token, so it has no `Debug`.
 #[derive(Serialize)]
@@ -36,6 +41,8 @@ pub struct Desired {
 pub struct BotPlaylist {
     pub name: String,
     pub total: u32,
+    /// Whether Spotify itself owns the playlist (the bot says so; a private playlist of the house account is not shown by id).
+    pub spotify_owned: bool,
     pub tracks: Vec<SpotifyTrack>,
 }
 
@@ -56,6 +63,8 @@ struct RawTrack {
 struct RawPlaylist {
     name: Option<String>,
     total: Option<u32>,
+    #[serde(default)]
+    spotify_owned: bool,
     #[serde(default)]
     tracks: Vec<RawTrack>,
 }
@@ -91,6 +100,8 @@ pub struct Bot {
     market: String,
     playlists: std::sync::Arc<Cache<BotPlaylist>>,
     top_tracks: std::sync::Arc<Cache<Vec<SpotifyTrack>>>,
+    /// Tokens left for catalog reads and when they were counted.
+    reads: std::sync::Arc<Mutex<(f64, Instant)>>,
 }
 
 impl Bot {
@@ -109,12 +120,26 @@ impl Bot {
             market: market.to_owned(),
             playlists: std::sync::Arc::new(Cache::new(READ_TTL)),
             top_tracks: std::sync::Arc::new(Cache::new(READ_TTL)),
+            reads: std::sync::Arc::new(Mutex::new((READ_BURST, Instant::now()))),
         }
+    }
+
+    /// One token of the server-wide bucket for a catalog read that goes to the bot (cache hits do not come here).
+    fn allow_read(&self) -> Result<(), CatalogError> {
+        let mut bucket = crate::stremio::lock(&self.reads);
+        let now = Instant::now();
+        let tokens = (bucket.0 + now.duration_since(bucket.1).as_secs_f64() * READ_PER_SECOND).min(READ_BURST);
+        if tokens < 1.0 {
+            return Err(CatalogError::RateLimited(Duration::from_secs_f64((1.0 - tokens) / READ_PER_SECOND)));
+        }
+        *bucket = (tokens - 1.0, now);
+        Ok(())
     }
 
     /// `GET {bot}/catalog/...` (docs/api.md "Bot contract"): the two reads the Web API refuses a client-credentials token. A 404 is an
     /// id Spotify does not know; every other failure (down, busy, `auth`) is "unavailable".
     async fn read<T: serde::de::DeserializeOwned>(&self, path: String) -> Result<T, CatalogError> {
+        self.allow_read()?;
         let response = self.client.get(format!("{}{path}", self.base)).bearer_auth(self.secret.expose()).send().await.map_err(|error| {
             tracing::warn!("spotify bot: a catalog read failed ({})", if error.is_timeout() { "timeout" } else { "connection" });
             CatalogError::Unavailable
@@ -142,18 +167,30 @@ impl Bot {
         serde_json::from_slice(&bytes).map_err(|_| CatalogError::Unavailable)
     }
 
-    /// The tracks of a playlist, 100 from `offset`.
+    /// The tracks of a playlist, 100 from `offset`. The length comes from the first page, so an offset past the end is answered
+    /// with an empty page and never reaches the bot (a made-up offset would otherwise cost the bot a read and a cache entry).
     pub async fn playlist(&self, id: &str, offset: u32) -> Result<BotPlaylist, CatalogError> {
         if !valid_id(id) {
             return Err(CatalogError::NotFound);
         }
+        let first = self.playlist_at(id, 0).await?;
+        if offset == 0 {
+            return Ok(first);
+        }
+        if offset >= first.total {
+            return Ok(BotPlaylist { tracks: Vec::new(), ..first });
+        }
+        self.playlist_at(id, offset).await
+    }
+
+    async fn playlist_at(&self, id: &str, offset: u32) -> Result<BotPlaylist, CatalogError> {
         let key = format!("{id}:{offset}");
         if let Some(hit) = self.playlists.get(&key) {
             return Ok(hit);
         }
         let raw: RawPlaylist = self.read(format!("/catalog/playlists/{id}?offset={offset}&limit={PAGE_MAX}")).await?;
         let tracks: Vec<SpotifyTrack> = raw.tracks.into_iter().filter_map(reduce).take(PAGE_MAX).collect();
-        let playlist = BotPlaylist { name: clean(raw.name.as_deref().unwrap_or("")), total: raw.total.unwrap_or(0), tracks };
+        let playlist = BotPlaylist { name: clean(raw.name.as_deref().unwrap_or("")), total: raw.total.unwrap_or(0), spotify_owned: raw.spotify_owned, tracks };
         self.playlists.put(key, playlist.clone());
         Ok(playlist)
     }

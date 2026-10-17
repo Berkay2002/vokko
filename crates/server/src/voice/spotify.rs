@@ -5,6 +5,7 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -749,12 +750,14 @@ pub struct BotEvent {
 }
 
 /// `POST /internal/spotify/bot` (never behind Caddy): the bot reports `started`, `position` (every 5 s), `ended` and `error`.
-pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(event): Json<BotEvent>) -> StatusCode {
+pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> StatusCode {
     let Ok(active) = active(&state) else { return StatusCode::NOT_FOUND };
     let given = headers.get(header::AUTHORIZATION).and_then(|value| value.to_str().ok()).and_then(|value| value.strip_prefix("Bearer ")).unwrap_or("");
     if !secrets_match(given.as_bytes(), active.cfg.bot_secret.expose().as_bytes()) {
         return StatusCode::UNAUTHORIZED;
     }
+    // The body is parsed only for a caller that knows the secret.
+    let Ok(event) = serde_json::from_slice::<BotEvent>(&body) else { return StatusCode::UNPROCESSABLE_ENTITY };
     // An event for a session that is gone is not an error (the bot retries everything but `position` on a failure).
     let Some(channel_id) = event.channel_id.parse::<i64>().ok() else { return StatusCode::NO_CONTENT };
     let now = unix_millis();

@@ -200,7 +200,9 @@ pub(crate) async fn playlist_page(active: &Active<'_>, id: &str, offset: u32) ->
     let page = active.bot.playlist(id, offset).await?;
     let (name, owner_name, art) = match head {
         Some(head) => (head.name, head.owner_name, head.art),
-        None => (page.name, "Spotify".to_owned(), None),
+        // The bot reads with the house account, which can see private playlists the Web API hides: only Spotify's own are shown.
+        None if page.spotify_owned => (page.name, "Spotify".to_owned(), None),
+        None => return Err(CatalogError::NotFound),
     };
     Ok(SpotifyPlaylist { id: id.to_owned(), name, owner_name, art, total: page.total, tracks: page.tracks })
 }
