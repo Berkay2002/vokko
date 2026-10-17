@@ -176,7 +176,12 @@ strictly newer version.
 
 ### Runtime flow
 
-1. `initUpdater()` (via `initDesktop()`) checks 30 s after launch and then every 4 h, only when the build is configured.
+1. `initUpdater()` (via `initDesktop()`) checks 30 s after launch and then every 4 h, only when the build is configured. The server also
+   pushes the latest release: it reads `latest.json` from the downloads directory every 60 s (`VOKKO_DESKTOP_LATEST_JSON`, set in
+   deploy/docker-compose.yml) and sends its `version` in READY `desktop_version` and, when it changes, as `DESKTOP_VERSION` to every
+   connected session. `noticeLatestVersion()` (wired in main.tsx) runs the same check right away when that version is newer than the
+   app's, unless a check or download is under way or an update is already ready. So a release reaches running apps within about a
+   minute of `latest.json` being written; the 4 h timer stays as the fallback.
 2. `check` finds an update: status `available`; it downloads in the background (`downloading` with byte progress); status `ready`.
 3. The shell shows the "update ready, restart" banner from `useDesktopUpdate()` (`status.state === "ready"`) and calls `restartToUpdate()`.
    On Windows the installer takes over and exits the app; on macOS/Linux the app restarts itself. The download is never installed

@@ -38,6 +38,7 @@ async fn serve(state: AppState) -> Result<(), String> {
     let _ = tokio::fs::remove_dir_all(state.incoming_dir()).await;
     vokko_server::media::spawn_cleanup(state.clone());
     vokko_server::reminders::spawn(state.clone());
+    vokko_server::desktop_version::spawn(state.clone());
     vokko_server::voice::spawn_tasks(state.clone());
     vokko_server::voice::stremio::spawn_tasks(state.clone());
     vokko_server::voice::spotify::spawn_tasks(state.clone());

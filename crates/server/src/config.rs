@@ -82,6 +82,11 @@ pub struct Config {
     /// Signs embed image proxy URLs (`crate::embed_media`): derived from `VOKKO_SECRETS_KEY`, else random per process (proxy URLs
     /// then change on every restart, which only costs clients their image cache).
     pub embed_media_key: crate::crypto::SecretsKey,
+    /// `VOKKO_DESKTOP_LATEST_JSON`: the desktop updater's `latest.json` in the downloads directory. Its `version` goes to clients
+    /// in READY and DESKTOP_VERSION so installed apps check for the update right away (`crate::desktop_version`). `None`: off.
+    pub desktop_latest_json: Option<PathBuf>,
+    /// How often that file is read again (60 s).
+    pub desktop_version_poll: Duration,
     /// `VOKKO_DEV=1`: game manifests may also point at `http://127.0.0.1` / `http://localhost`.
     pub dev: bool,
 }
@@ -610,6 +615,7 @@ impl Config {
         } else {
             tracing::warn!("VOKKO_SECRETS_KEY is not set: game app ids and embed image URLs change on every restart");
         }
+        config.desktop_latest_json = env.get("VOKKO_DESKTOP_LATEST_JSON").filter(|path| !path.trim().is_empty()).map(PathBuf::from);
         config.dev = env.get("VOKKO_DEV").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "on" | "true" | "yes"));
         if let Some(value) = env.get("VOKKO_VOICE_BITRATE_MAX") {
             let bitrate: u32 = value.trim().parse().map_err(|_| format!("VOKKO_VOICE_BITRATE_MAX must be bps, got {value}"))?;
@@ -654,6 +660,8 @@ impl Config {
             spotify: None,
             games_app_key: crate::crypto::SecretsKey::random(),
             embed_media_key: crate::crypto::SecretsKey::random(),
+            desktop_latest_json: None,
+            desktop_version_poll: Duration::from_secs(60),
             dev: false,
             cors_origins: None,
             registration_open: true,

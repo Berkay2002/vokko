@@ -2063,6 +2063,7 @@ export interface ReadyEvent {
   relationships: Relationship[];
   guild_layout: GuildLayout;
   media?: InstanceMediaConfig; // always sent by the server; absent = voice unavailable
+  desktop_version?: string; // latest desktop release the server knows of (its downloads' latest.json); absent = not configured
 }
 
 export enum RelationshipType {
@@ -2164,6 +2165,7 @@ export interface GatewayEvents {
   INVITE_CREATE: InviteMetadata; // to members who can list it: MANAGE_GUILD, or MANAGE_CHANNELS on the invite's channel
   INVITE_DELETE: { code: string; guild_id: Snowflake; channel_id: Snowflake }; // same audience; revoked (not on expiry or last use)
   GUILD_LAYOUT_UPDATE: GuildLayout; // the user's own sessions only
+  DESKTOP_VERSION: { version: string }; // every session, when the server sees a new desktop release (same value as READY desktop_version)
 }
 
 // ---- Applications, bots, slash commands, interactions, webhooks (docs/api.md "Apps") ----
