@@ -278,7 +278,14 @@ async fn video_loop(
     let (luma, chroma) = (w * h, (w / 2) * (h / 2));
     let mut raw = vec![0u8; luma + 2 * chroma];
     let mut first = true;
+    let interval = Duration::from_secs_f64(1.0 / geo.fps);
+    let mut next: Option<Instant> = None;
     while stream.read_exact(&mut raw).await.is_ok() {
+        // ffmpeg writes video in bursts (it blocks on the real-time audio socket in between), and libwebrtc drops frames that
+        // arrive closer together than max_framerate allows, so each frame is handed over on its own beat.
+        let due = frame_due(next, Instant::now(), interval);
+        tokio::time::sleep_until(due.into()).await;
+        next = Some(due + interval);
         let mut buffer = I420Buffer::new(geo.width, geo.height);
         {
             let (y, u, v) = buffer.data_mut();
@@ -313,5 +320,31 @@ async fn audio_loop(listener: TcpListener, source: NativeAudioSource, counters: 
             return;
         }
         counters.audio_samples.fetch_add(480, Ordering::Relaxed);
+    }
+}
+
+/// When to hand over the next frame: on the beat after the previous one, or now when that beat is long gone (after a network
+/// stall), so a late stream is not flushed as a burst.
+fn frame_due(next: Option<Instant>, now: Instant, interval: Duration) -> Instant {
+    match next {
+        Some(due) if due + 10 * interval > now => due,
+        _ => now,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frames_keep_their_beat_and_rebase_after_a_stall() {
+        let (t0, i) = (Instant::now(), Duration::from_millis(40));
+        assert_eq!(frame_due(None, t0, i), t0);
+        // A burst: the frame arrived early, it waits for its beat.
+        assert_eq!(frame_due(Some(t0 + i), t0, i), t0 + i);
+        // Slightly late: still on the old beat, so the clock catches up.
+        assert_eq!(frame_due(Some(t0), t0 + 3 * i, i), t0);
+        // Long stall: start a new beat now.
+        assert_eq!(frame_due(Some(t0), t0 + 11 * i, i), t0 + 11 * i);
     }
 }
