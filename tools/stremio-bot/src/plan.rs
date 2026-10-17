@@ -71,8 +71,8 @@ impl Desired {
             return Err("livekit_url must be ws(s) or http(s)".into());
         }
         let media = reqwest::Url::parse(&self.media_url).map_err(|_| "media_url is not a URL")?;
-        if media.scheme() != "https" || media.host_str().is_none() {
-            return Err("media_url must be https".into());
+        if media.scheme() != "https" || media.host_str().is_none() || media.port_or_known_default() != Some(443) {
+            return Err("media_url must be https on port 443".into());
         }
         if !crate::guard::host_ok(&media) {
             return Err("media_url must be a public host".into());
@@ -161,8 +161,24 @@ pub fn geometry(probe: &Probe, max_height: u32) -> Geometry {
     Geometry { width, height, fps_arg, fps }
 }
 
+/// Container formats ffmpeg may open. A playlist format (HLS, DASH, concat) would make it open further URLs the guard never saw.
+const FORMATS: &str = "mov,mp4,matroska,webm,avi,mpegts";
+
 pub fn probe_args(media_url: &str, headers: &BTreeMap<String, String>) -> Vec<String> {
-    let mut a = strings(&["-v", "error", "-protocol_whitelist", "https,tls,tcp", "-max_redirects", "0", "-rw_timeout", "15000000"]);
+    let mut a = strings(&[
+        "-v",
+        "error",
+        "-protocol_whitelist",
+        "https,tls,tcp",
+        "-format_whitelist",
+        FORMATS,
+        "-tls_verify",
+        "1",
+        "-max_redirects",
+        "0",
+        "-rw_timeout",
+        "15000000",
+    ]);
     push_headers(&mut a, headers);
     a.extend(strings(&["-show_entries", "stream=codec_type,width,height,avg_frame_rate,r_frame_rate,color_transfer:format=duration", "-of", "json"]));
     a.push(media_url.to_owned());
@@ -193,6 +209,10 @@ pub fn ffmpeg_args(p: &FfmpegPlan<'_>) -> Vec<String> {
         "error",
         "-protocol_whitelist",
         "https,tls,tcp",
+        "-format_whitelist",
+        FORMATS,
+        "-tls_verify",
+        "1",
         // The server already followed the redirects to this file; one that appears now (say, only for ffmpeg's user agent) is not followed.
         "-max_redirects",
         "0",
@@ -333,6 +353,7 @@ mod tests {
         assert!(bad(|d| d.media_url = "http://cdn.example/v.mp4".into()));
         assert!(bad(|d| d.media_url = "file:///etc/passwd".into()));
         assert!(bad(|d| d.media_url = "not a url".into()));
+        assert!(bad(|d| d.media_url = "https://cdn.example:8443/v.mp4".into()));
         assert!(bad(|d| d.media_url = "https://user:pw@cdn.example/v.mp4".into()));
         assert!(bad(|d| d.media_url = "https://8.8.8.8@127.0.0.1/v.mp4".into()));
         for private in [
@@ -420,6 +441,14 @@ mod tests {
         let a = ffmpeg_args(&plan);
         let at = |flag: &str| a.iter().position(|x| x == flag).unwrap_or_else(|| panic!("{flag} missing"));
         assert_eq!(a[at("-protocol_whitelist") + 1], "https,tls,tcp");
+        assert_eq!(a[at("-format_whitelist") + 1], "mov,mp4,matroska,webm,avi,mpegts", "no playlist formats");
+        assert_eq!(a[at("-tls_verify") + 1], "1");
+        assert!(at("-format_whitelist") < at("-i") && at("-tls_verify") < at("-i"), "input options");
+        let probe = probe_args("https://cdn.example/v.mp4", &headers);
+        let pat = |flag: &str| probe.iter().position(|x| x == flag).unwrap_or_else(|| panic!("{flag} missing in the probe"));
+        assert_eq!(probe[pat("-format_whitelist") + 1], "mov,mp4,matroska,webm,avi,mpegts");
+        assert_eq!(probe[pat("-tls_verify") + 1], "1");
+        assert_eq!(probe.last().map(String::as_str), Some("https://cdn.example/v.mp4"));
         assert_eq!(a[at("-ss") + 1], "61.500");
         assert!(at("-re") < at("-ss") && at("-ss") < at("-i"), "-re and -ss are input options");
         assert_eq!(a[at("-i") + 1], "https://cdn.example/v.mp4");

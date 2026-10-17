@@ -6,6 +6,9 @@ use super::addons::Addon;
 use super::fetch::{FetchError, Fetcher};
 use crate::crypto::Secret;
 
+/// Addons used from an account: more would make every stream listing a fan-out of requests.
+const MAX_ADDONS: usize = 25;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum AccountError {
     /// Stremio says the session does not exist (error code 1): the authKey is dead and the user has to link again.
@@ -62,7 +65,7 @@ impl Account {
     pub async fn addons(&self, key: &Secret) -> Result<Vec<Addon>, AccountError> {
         let answer = self.call("addonCollectionGet", json!({"type": "AddonCollectionGet", "authKey": key.expose(), "update": true})).await?;
         let entries = answer["addons"].as_array().ok_or(AccountError::Unavailable)?;
-        Ok(entries.iter().filter_map(Addon::from_collection).filter(|addon| addon.reachable(&self.fetcher)).collect())
+        Ok(entries.iter().filter_map(Addon::from_collection).filter(|addon| addon.reachable(&self.fetcher)).take(MAX_ADDONS).collect())
     }
 
     /// A code to approve at `link` in a browser that is logged in to Stremio.

@@ -153,7 +153,7 @@ impl Fetcher {
                     return Err(FetchError::Status(status.as_u16()));
                 }
                 let kind = response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("").to_ascii_lowercase();
-                if kind.starts_with("text/") || kind.contains("json") || kind.contains("html") || kind.contains("xml") {
+                if kind.starts_with("text/") || kind.contains("json") || kind.contains("html") || kind.contains("xml") || kind.contains("mpegurl") {
                     return Err(FetchError::Invalid);
                 }
                 return Ok(Secret::new(url.as_str()));

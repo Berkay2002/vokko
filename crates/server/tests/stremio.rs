@@ -79,6 +79,8 @@ async fn addon_a_streams(State(mock): State<Arc<Mock>>) -> Json<Value> {
         {"name": "A 720p", "description": "Movie.720p.WEB-DL\n1.1 GB", "url": format!("{base}/media/second.mkv"), "behaviorHints": {"videoSize": 1_100_000_000_u64}},
         {"name": "Torrent 1080p", "infoHash": "abcdef"},
         {"name": "Private 1080p", "url": "http://10.0.0.5/x.mkv"},
+        {"name": "Playlist 1080p", "url": format!("{base}/media/live.m3u8?token=1")},
+        {"name": "Disguised 1080p", "url": format!("{base}/media/disguised")},
     ]}))
 }
 
@@ -89,6 +91,10 @@ async fn addon_b_streams() -> StatusCode {
 async fn media_redirect(State(mock): State<Arc<Mock>>) -> Response {
     mock.redirect_hits.fetch_add(1, Ordering::SeqCst);
     (StatusCode::FOUND, [(header::LOCATION, "/media/final.mkv")]).into_response()
+}
+
+async fn media_playlist() -> Response {
+    (StatusCode::OK, [(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")], "#EXTM3U\n").into_response()
 }
 
 async fn media_file() -> Response {
@@ -140,6 +146,7 @@ async fn start_mock() -> Arc<Mock> {
         .route("/addon-a/SECRETCFG/stream/{kind}/{file}", get(addon_a_streams))
         .route("/addon-b/SECRETCFG2/stream/{kind}/{file}", get(addon_b_streams))
         .route("/media/redirect", get(media_redirect))
+        .route("/media/disguised", get(media_playlist))
         .route("/media/final.mkv", get(media_file))
         .route("/media/second.mkv", get(media_file))
         .route("/cinemeta/catalog/{kind}/top.json", get(catalog))
@@ -623,7 +630,7 @@ async fn stream_lists_hide_urls_and_sids_belong_to_their_user() {
     assert_no_secrets("the stream list", &listing);
     assert_eq!(listing["addon_errors"], json!(["Broken"]), "the failing addon is named, the local one is never called");
     let streams = listing["streams"].as_array().expect("streams");
-    assert_eq!(streams.len(), 4, "{listing}");
+    assert_eq!(streams.len(), 6, "{listing}");
     assert_eq!(streams[0]["label"], "A 1080p", "playable and closest to 1080p first");
     assert_eq!((streams[0]["playable"].as_bool(), streams[0]["resolution"].as_u64(), streams[0]["addon"].as_str()), (Some(true), Some(1080), Some("Addon A")));
     for key in streams[0].as_object().expect("object").keys() {
@@ -633,6 +640,8 @@ async fn stream_lists_hide_urls_and_sids_belong_to_their_user() {
     assert_eq!((torrent["playable"].as_bool(), torrent["unsupported"].as_str()), (Some(false), Some("torrent")));
     let private = streams.iter().find(|stream| stream["label"] == "Private 1080p").expect("private");
     assert_eq!(private["playable"], false, "a link the server would never open is not playable");
+    let hls = streams.iter().find(|stream| stream["label"] == "Playlist 1080p").expect("playlist");
+    assert_eq!((hls["playable"].as_bool(), hls["unsupported"].as_str()), (Some(false), Some("hls")), "ffmpeg would open the segments unchecked");
 
     let mut alice = Client::identify(&w.address, &w.alice).await.0;
     w.join(&mut alice).await;
@@ -645,6 +654,13 @@ async fn stream_lists_hide_urls_and_sids_belong_to_their_user() {
     assert_eq!(w.app.put_json(&w.path(), &w.alice, json!({"sid": "nope"})).await.0, StatusCode::BAD_REQUEST);
     assert_eq!(w.app.put_json(&w.path(), &w.alice, json!({"sid": World::sid(&listing, "Torrent 1080p")})).await.0, StatusCode::BAD_REQUEST);
     assert_eq!(w.app.put_json(&w.path(), &w.alice, json!({"sid": World::sid(&listing, "Private 1080p")})).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(w.app.put_json(&w.path(), &w.alice, json!({"sid": World::sid(&listing, "Playlist 1080p")})).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        w.app.put_json(&w.path(), &w.alice, json!({"sid": World::sid(&listing, "Disguised 1080p")})).await.0,
+        StatusCode::BAD_REQUEST,
+        "a playlist by content type"
+    );
+    assert!(w.bot.puts(&w.voice).is_empty());
     let (status, state) = w.app.put_json(&w.path(), &w.alice, json!({"sid": sid})).await;
     assert_eq!(status, StatusCode::OK, "{state}");
     assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"queue_add": sid})).await.0, StatusCode::BAD_REQUEST, "carl cannot queue alice's sid");

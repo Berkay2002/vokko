@@ -1,7 +1,8 @@
 //! The bot's own check of where ffmpeg may connect. The server already vetted the link when it resolved it; this is the second
-//! wall, mirroring the server's `unfurl::is_public_ip`. Gap: ffmpeg looks the name up again when it connects, so a host that
-//! answers differently the second time (DNS rebinding) is not caught; closing that needs the connection pinned to the checked
-//! address (a local proxy), which ffmpeg cannot do by itself.
+//! wall, mirroring the server's `unfurl::is_public_ip`. ffmpeg looks the name up again when it connects, so the checked
+//! address is not pinned (DNS rebinding). That gap is accepted: ffmpeg runs with `-tls_verify 1`, so a rebind to an address that does
+//! not hold a valid certificate for the name fails at the handshake (tested in the security review). Only https on port 443 and only
+//! the plain container formats in `plan::FORMATS` are opened, so no playlist can lead it to other URLs.
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub fn is_public_ip(ip: IpAddr) -> bool {

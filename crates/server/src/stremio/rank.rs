@@ -116,7 +116,11 @@ pub fn parse_stream(addon: &str, stream: &Value) -> Option<Candidate> {
     let filename = hints["filename"].as_str().unwrap_or("");
     let source = if let Some(url) = stream["url"].as_str() {
         // The scheme and host are judged by the fetcher (`addons::fetch_streams`), which knows the allow-list.
-        if (url.starts_with("https://") || url.starts_with("http://")) && url.len() <= super::fetch::MAX_URL_LEN {
+        let playlist = url.split(['?', '#']).next().is_some_and(|path| path.to_ascii_lowercase().ends_with(".m3u8"));
+        if playlist {
+            // HLS: ffmpeg would open every segment URL itself, past the checks on this one.
+            Source::Unsupported("hls")
+        } else if (url.starts_with("https://") || url.starts_with("http://")) && url.len() <= super::fetch::MAX_URL_LEN {
             Source::Url { url: Secret::new(url), headers: proxy_headers(hints) }
         } else {
             Source::Unsupported("external")
