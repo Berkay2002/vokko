@@ -3,7 +3,7 @@
 // The server holds the truth ({status, playing, position_ms, updated_at_ms}); every button is a PATCH that comes back to everyone
 // (this client included) as STREMIO_UPDATE. Volume is local and plays the movie's audio from the viewer Room.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { ListVideo, Maximize2, Minimize2, Pause, Play, Plus, RotateCcw, RotateCw, SkipForward, Square, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import type { Snowflake, StremioState } from "../api/types";
@@ -14,23 +14,15 @@ import { controlStremio, stopStremio } from "./api";
 import { reason, safeImage, shownPositionMs, statusText } from "./format";
 import { StremioIcon } from "./StremioIcon";
 import { openStremioPanel } from "./panelStore";
-import { useViewer } from "./useViewer";
+import { PosterImage } from "./PosterImage";
+import { SeekCoalescer } from "./seek";
+import { setViewerVolume, startViewerAudio, useViewerSlot, useViewerStore } from "./viewerStore";
+import type { VideoHandle } from "../voice/mediaStore";
 import "./stremio.css";
 
 export type StremioVariant = "solo" | "grid" | "focused" | "strip" | "pip";
 
-const VOLUME_KEY = "vokko.stremio.volume";
 const JUMP_MS = 10_000;
-
-function readVolume(): number {
-  try {
-    const raw = localStorage.getItem(VOLUME_KEY);
-    const value = Number(raw);
-    return raw !== null && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 60;
-  } catch {
-    return 60;
-  }
-}
 
 function useNow(everyMs: number): number {
   const [now, setNow] = useState(() => Date.now());
@@ -53,7 +45,7 @@ function ControlButton({ label, active, disabled, onClick, children }: { label: 
 }
 
 /** The `<video>` of the viewer Room's picture; the element belongs to React and the handle only attaches to it. */
-function RoomVideo({ handle }: { handle: NonNullable<ReturnType<typeof useViewer>["video"]> }) {
+function RoomVideo({ handle }: { handle: VideoHandle }) {
   const element = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const el = element.current;
@@ -82,7 +74,7 @@ function QueuePanel({ channelId, queue, onAdd }: { channelId: Snowflake; queue: 
             const by = users[item.added_by];
             return (
               <li key={`${item.title}-${i}`} className="stremio-queue-item" data-title={item.title}>
-                <span className="stremio-queue-art">{safeImage(item.poster) && <img src={safeImage(item.poster)} alt="" />}</span>
+                <span className="stremio-queue-art"><PosterImage src={safeImage(item.poster)} /></span>
                 <span className="stremio-queue-text">
                   <span className="stremio-queue-name">{item.title}</span>
                   <span className="stremio-queue-sub">{[item.subtitle, by ? `added by ${displayName(by)}` : null].filter(Boolean).join(" · ")}</span>
@@ -115,17 +107,23 @@ export function StremioTile(props: { channelId: Snowflake; variant: StremioVaria
 
 function StremioTileBody({ channelId, variant, onActivate, state }: { channelId: Snowflake; variant: StremioVariant; onActivate?: () => void; state: StremioState }) {
   const starter = useStore(s => s.users[state.started_by]);
-  const inCall = useVoice(s => s.channelId === channelId);
   const deaf = useVoice(s => s.selfDeaf);
-  const [volume, setVolume] = useState(readVolume);
+  const volume = useViewerStore(s => s.volume);
   const [queueOpen, setQueueOpen] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const now = useNow(500);
-  const viewer = useViewer(channelId, inCall, state.bot_identity, deaf ? 0 : volume / 100);
+  const viewer = useViewerSlot(channelId);
+  const [, redraw] = useReducer((n: number) => n + 1, 0);
+  const id = useRef(channelId);
+  id.current = channelId;
+  const [seeker] = useState(
+    () => new SeekCoalescer(ms => controlStremio(id.current, { position_ms: ms }), redraw, e => setFailure(reason(e))),
+  );
+  useEffect(() => () => seeker.flushNow(), [seeker]);
 
   const small = variant === "strip" || variant === "pip";
-  const position = shownPositionMs(state, now);
+  const position = seeker.target ?? shownPositionMs(state, now);
   const duration = state.duration_ms ?? 0;
   const poster = safeImage(state.item.poster);
   const showPicture = viewer.video !== null && state.status !== "error";
@@ -134,18 +132,14 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
     setFailure(null);
     promise.catch(e => setFailure(reason(e)));
   };
-  const seekTo = (ms: number) => run(controlStremio(channelId, { position_ms: Math.max(0, Math.min(Math.round(ms), duration || ms)) }));
-  const changeVolume = (value: number) => {
-    setVolume(value);
-    try {
-      localStorage.setItem(VOLUME_KEY, String(value));
-    } catch {
-      /* not saved */
-    }
+  const jump = (delta: number) => {
+    setFailure(null);
+    seeker.nudge(delta, position, 0, duration || Number.POSITIVE_INFINITY);
   };
   const commitSeek = () => {
     if (drag === null) return;
-    seekTo(drag);
+    setFailure(null);
+    seeker.seek(Math.round(drag), true);
     setDrag(null);
   };
   const title = state.item.subtitle ? `${state.item.title}, ${state.item.subtitle}` : state.item.title;
@@ -162,7 +156,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
       aria-label={`Stremio: ${title}`}
     >
       {viewer.video && <RoomVideo handle={viewer.video} />}
-      {!showPicture && poster && <img className="stremio-poster" src={poster} alt="" />}
+      {!showPicture && <PosterImage className="stremio-poster" src={poster} />}
       {status && (
         <div className="stremio-status" role="status">
           {status}
@@ -187,7 +181,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
             <div className="stremio-notice" role="alert">
               {failure ?? "Your browser is holding back the sound."}
               {!failure && (
-                <button type="button" className="btn btn-secondary" onClick={viewer.startAudio}>
+                <button type="button" className="btn btn-secondary" onClick={startViewerAudio}>
                   Turn on sound
                 </button>
               )}
@@ -213,10 +207,10 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
               <ControlButton label={state.playing ? "Pause" : "Play"} disabled={state.status === "error"} onClick={() => run(controlStremio(channelId, { playing: !state.playing }))}>
                 {state.playing ? <Pause size={18} /> : <Play size={18} />}
               </ControlButton>
-              <ControlButton label="Back 10 seconds" disabled={duration === 0} onClick={() => seekTo(position - JUMP_MS)}>
+              <ControlButton label="Back 10 seconds" disabled={duration === 0} onClick={() => jump(-JUMP_MS)}>
                 <RotateCcw size={18} />
               </ControlButton>
-              <ControlButton label="Forward 10 seconds" disabled={duration === 0} onClick={() => seekTo(position + JUMP_MS)}>
+              <ControlButton label="Forward 10 seconds" disabled={duration === 0} onClick={() => jump(JUMP_MS)}>
                 <RotateCw size={18} />
               </ControlButton>
               <ControlButton label={state.queue.length > 0 ? "Skip to next" : "Skip and stop"} onClick={() => run(controlStremio(channelId, { skip: true }))}>
@@ -229,7 +223,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
               <span className="stremio-spacer" />
               <label className="stremio-volume">
                 {volume === 0 || deaf ? <VolumeX size={16} aria-hidden="true" /> : <Volume2 size={16} aria-hidden="true" />}
-                <input type="range" aria-label="Stremio volume" min={0} max={100} value={volume} onChange={e => changeVolume(Number(e.target.value))} />
+                <input type="range" aria-label="Stremio volume" min={0} max={100} value={volume} onChange={e => setViewerVolume(Number(e.target.value))} />
               </label>
               <ControlButton label={`Up next (${state.queue.length})`} active={queueOpen} onClick={() => setQueueOpen(o => !o)}>
                 <ListVideo size={18} />
