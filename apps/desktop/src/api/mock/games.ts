@@ -225,8 +225,15 @@ route("POST", `/channels/${ID}/game/messages`, ({ viewer, params, body }) => {
   const from = mockAppId(session.game.id, viewer.user.id);
   emit(recipients, "GAME_MESSAGE", { channel_id: channel.id, session_id: session.session_id, from, data: JSON.parse(text) });
   answerPing(channel.id, session, viewer.user.id, recipients, body.data);
+  relayTap?.(viewer.user.username, JSON.parse(text), typeof body.to === "string" ? body.to : null);
   return undefined;
 });
+
+/** Test hook (`__vokkoMock.gameRelay`): sees every relay send, so a Playwright test can bridge two pages' mocks. */
+let relayTap: ((from: string, data: unknown, to: string | null) => void) | null = null;
+export function setRelayTap(fn: typeof relayTap): void {
+  relayTap = fn;
+}
 
 /** The seeded second participant: answers a ping to the sender, a moment later, through the relay. */
 function answerPing(channelId: string, session: GameSession, senderId: string, recipients: string[], data: unknown): void {
