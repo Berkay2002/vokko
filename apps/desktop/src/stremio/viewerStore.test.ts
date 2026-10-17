@@ -6,6 +6,7 @@ vi.mock("./api", () => ({ viewerToken: token }));
 vi.mock("../spotify/api", () => ({ listenerToken: listener }));
 
 const { IDLE_SLOT, botOutput, botVolumeKey, syncViewer, useViewerStore } = await import("./viewerStore");
+await import("./viewer"); // viewerConnection loads it lazily: have it cached before the fake timers start
 
 const slot = () => useViewerStore.getState().slot;
 const target = { channelId: "c1", bot: "bot:stremio:c1", kind: "stremio" as const };

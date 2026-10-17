@@ -18,7 +18,6 @@ import { ReportModal } from "./ReportModal";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
 import { closeModal, useModals, type ModalSpec } from "./modalStore";
-import { ProfileEditor } from "../profile-editor";
 import { QuickSwitcher } from "./QuickSwitcher";
 import { ShortcutsModal } from "./ShortcutsModal";
 import { TopicModal } from "./TopicModal";
@@ -27,23 +26,25 @@ import { SERVER_TEMPLATES, type ServerTemplate } from "./templates";
 import { CameraPreviewModal, ChannelStatusModal, ScreenSharePickerModal } from "../voice";
 import { WatchModal } from "../watch";
 
-// The settings screens are split out of the startup bundle; `preloadSettings()` fetches them at idle so opening one does not wait.
+// The settings screens and the profile editor are split out of the startup bundle; `preloadSettings()` fetches them at idle so opening one does not wait.
 // A failed fetch (dev server restart, stale chunk after a redeploy) is retried once; if that fails too, ChunkBoundary offers a retry.
 const loadUserSettings = () => import("./UserSettings");
 const loadServerSettings = () => import("./ServerSettings");
 const loadChannelSettings = () => import("./ChannelSettings");
+const loadProfileEditor = () => import("../profile-editor/ProfileEditor");
 const retryOnce = <T,>(load: () => Promise<T>) => load().catch(() => load());
 const lazySettings = () => ({
   UserSettings: lazy(() => retryOnce(loadUserSettings).then(m => ({ default: m.UserSettings }))),
   ServerSettings: lazy(() => retryOnce(loadServerSettings).then(m => ({ default: m.ServerSettings }))),
   ChannelSettings: lazy(() => retryOnce(loadChannelSettings).then(m => ({ default: m.ChannelSettings }))),
+  ProfileEditor: lazy(() => retryOnce(loadProfileEditor).then(m => ({ default: m.ProfileEditor }))),
 });
 // React keeps a failed lazy() rejected for good, so a retry needs fresh components.
-let { UserSettings, ServerSettings, ChannelSettings } = lazySettings();
+let { UserSettings, ServerSettings, ChannelSettings, ProfileEditor } = lazySettings();
 
 export function preloadSettings(): void {
   // Only a warm-up: a failure here is retried when the screen is opened.
-  for (const load of [loadUserSettings, loadServerSettings, loadChannelSettings]) load().catch(() => {});
+  for (const load of [loadUserSettings, loadServerSettings, loadChannelSettings, loadProfileEditor]) load().catch(() => {});
 }
 
 /** A settings screen whose chunk could not be loaded: a small dialog to try again or close, instead of an empty app. */
@@ -53,7 +54,7 @@ class ChunkBoundary extends Component<{ children: ReactNode }, { failed: boolean
     return { failed: true };
   }
   retry = () => {
-    ({ UserSettings, ServerSettings, ChannelSettings } = lazySettings());
+    ({ UserSettings, ServerSettings, ChannelSettings, ProfileEditor } = lazySettings());
     this.setState({ failed: false });
   };
   render() {
