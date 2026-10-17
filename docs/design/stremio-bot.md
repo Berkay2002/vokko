@@ -403,5 +403,14 @@ Decided with the owner (no libass or other change to the host's ffmpeg, no URL e
   returns cues by an opaque id, with no cache. The client keeps the choice locally and renders the cue as plain text above the picture, timed against the
   shown position; the data listener is on the viewer Room the tile already has.
 - **Known limits.** Cues are sent once, so a late joiner or a backwards seek has no earlier cues until playback passes them; sync follows ffmpeg's
-  read-ahead; the default burn-in is adopted from the first `tracks` report, so a viewer's PATCH racing it is overwritten once at most. Bitmap burn-in was not
-  run against a real file in testing (no sample, no libass locally); the ffmpeg arguments are unit-tested.
+  read-ahead; the default burn-in is adopted from the first `tracks` report, so a viewer's PATCH racing it is overwritten once at most.
+- **Restarts.** The lease carries `tracks_known` (true once the server holds the item's track lists). Until then no `burned_subtitle` means the file's
+  default; after it, none means off, so a bot that restarts mid-item does not burn in a subtitle somebody turned off. With an HDR source the overlay
+  keeps ten bits (`overlay=format=yuv420p10`) because the tonemap runs after it. If ffmpeg fails while the text outputs are on, the retry runs without
+  them (warn log, no URL): a malformed text stream costs the cues, not the film.
+- **Checked against real ffmpeg 9.0.2** (local MKV with SRT, ASS and a hand-built VobSub track, the bot's test-harness build, a real LiveKit server and
+  the viewer in headless Chrome): the burned-in box shows for exactly the cue's seconds, text cues arrive on topics `subs:2` and `subs:3` as the
+  playback reaches them, with ASS markup stripped. This found that ffmpeg's WebVTT muxer writes the blank line that closes a cue just before the *next*
+  cue, so the reader publishes a block once it has stopped growing for 150 ms instead of waiting for that line (cues used to arrive after they ended).
+  Not covered: PGS (same overlay path as VobSub), a text stream that really breaks ffmpeg (the fallback was run with a wrapper that fails any `-f webvtt`
+  output). When ffmpeg dies before it has connected, the bot notices after the 15 s accept timeout, so the fallback costs that long.
