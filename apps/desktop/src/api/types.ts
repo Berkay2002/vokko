@@ -826,12 +826,56 @@ export interface Call {
   voice_states: VoiceState[]; // who is in the call (guild_id null)
   watch_together?: WatchTogetherState; // the call's Watch Together session, omitted when none
   stremio?: StremioUpdate[]; // the call's Stremio session (at most one entry), omitted when none
+  game?: GameSession; // the call's game session, omitted when none
 }
 export interface CallRingRequest {
   recipients?: Snowflake[] | null; // POST /call/ring: absent = every recipient not in the call; POST /call/stop-ringing: absent = yourself
 }
 export interface EditCallRequest {
   region: string | null; // PATCH /channels/{id}/call
+}
+
+// ---- Games in calls (docs/design/games-host.md sections 4 and 5: a web game everyone in a call plays in a sandboxed frame) ----
+
+export const GAME_RELAY_MAX_BYTES = 4096;
+export const GUILD_GAMES_MAX = 25;
+export type GameAspect = "16:9" | "4:3" | "1:1" | "fill";
+export interface GameManifest {
+  id: string; // snowflake for guild games, "builtin:<name>" for built-ins
+  name: string; // 1-32 chars
+  url: string; // absolute https (built-ins: a path inside the app)
+  icon?: string | null; // one emoji, or none
+  min_players: number; // 1-16
+  max_players: number; // min_players-16
+  aspect: GameAspect;
+}
+export type GameManifestRequest = Omit<GameManifest, "id" | "aspect"> & { aspect?: GameAspect }; // POST /guilds/{id}/games; PATCH takes any subset
+export interface GameSession {
+  session_id: string; // 16 hex
+  game: GameManifest;
+  started_by: Snowflake;
+  started_at_ms: number;
+}
+export interface GameUpdate {
+  channel_id: Snowflake;
+  state: GameSession | null; // null = no session
+}
+export interface GameStartRequest {
+  game_id: string;
+}
+export interface GamePlayer {
+  user_id: Snowflake;
+  app_id: string; // 22-char base64url, stable per game and user
+}
+export interface GameRelayRequest {
+  data: unknown; // any JSON, at most GAME_RELAY_MAX_BYTES serialized
+  to?: string | null; // one player's app_id; absent = everyone in the call but the sender
+}
+export interface GameMessage {
+  channel_id: Snowflake;
+  session_id: string;
+  from: string; // app_id
+  data: unknown;
 }
 
 // ---- Watch Together (docs/api.md "Voice (V1)": a YouTube video everyone in a voice channel or DM call watches in sync) ----
@@ -1837,7 +1881,7 @@ export interface ReadyEvent {
   user: User;
   session_id: string;
   // voice_states: always sent by the server (optional here so fixtures without voice stay valid); threads = active threads the user can see (not in channels); emojis absent = none
-  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[]; watch_together?: WatchTogetherUpdate[]; stremio?: StremioUpdate[] })[]; // stage_instances: live stages the user can see, omitted when none; watch_together: Watch Together sessions in voice channels the user can see, omitted when none
+  guilds: (Guild & { channels: Channel[]; members: GuildMember[]; member_count: number; stickers?: Sticker[]; soundboard_sounds?: SoundboardSound[]; voice_states?: VoiceState[]; threads?: Channel[]; emojis?: GuildEmoji[]; stage_instances?: StageInstance[]; watch_together?: WatchTogetherUpdate[]; stremio?: StremioUpdate[]; games?: GameUpdate[] })[]; // stage_instances: live stages the user can see, omitted when none; watch_together: Watch Together sessions in voice channels the user can see, omitted when none
   private_channels: Channel[]; // DMs and group DMs
   presences: Presence[];
   read_states: ReadState[];
@@ -1910,6 +1954,9 @@ export interface GatewayEvents {
   VOICE_CONNECT_FAILED: { guild_id: Snowflake | null; channel_id: Snowflake; reason: VoiceConnectFailure }; // Vokko-only, requesting session only
   VOICE_CHANNEL_STATUS_UPDATE: { id: Snowflake; guild_id: Snowflake; status: string | null }; // to viewers of the channel; cleared (null) when the channel empties
   WATCH_TOGETHER_UPDATE: WatchTogetherUpdate; // to viewers of the channel on every change; state null = ended (also when the last person leaves voice); a joiner gets the running session after VOICE_SERVER_UPDATE
+  GAME_UPDATE: GameUpdate; // to viewers of the channel on every change; state null = ended (stop, or the last person left voice)
+  GAME_MESSAGE: GameMessage; // relayed game data, to the people in that call only (sender excluded unless `to` names them)
+  GUILD_GAMES_UPDATE: { guild_id: Snowflake }; // the guild's game list changed: refetch GET /guilds/{id}/games
   STREMIO_UPDATE: StremioUpdate; // to viewers of the channel on every change; state null = ended; a joiner gets the running session after VOICE_SERVER_UPDATE
   STAGE_INSTANCE_CREATE: StageInstance; // to viewers of the stage channel
   STAGE_INSTANCE_UPDATE: StageInstance;
