@@ -192,7 +192,7 @@ function ActiveCard({ entry }: { entry: ActiveEntry }) {
           {entry.activity && <ActivityLine activity={entry.activity} className="active-card-sub" />}
         </span>
         {(entry.voice || entry.activity) && (
-          <span className={`active-card-icon ${entry.activity ? "active-card-game" : "active-card-voice"}`} aria-hidden="true">
+          <span className={`active-card-icon ${entry.activity ? (entry.activity.type === 2 ? "active-card-spotify" : "active-card-game") : "active-card-voice"}`} aria-hidden="true">
             {entry.activity ? entry.activity.type === 2 ? <BrandIcon icon={siSpotify} size={16} /> : <ActivityIcon activity={entry.activity} size={16} fill /> : <Volume2 size={16} />}
           </span>
         )}

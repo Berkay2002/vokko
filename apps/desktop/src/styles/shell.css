@@ -2443,6 +2443,10 @@ img.active-card-art {
   color: var(--interactive-normal);
 }
 
+.active-card-spotify {
+  color: #1ed760;
+}
+
 /* ---- modal content ---- */
 .modal.modal-compact {
   width: 480px;
