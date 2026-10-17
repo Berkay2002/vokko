@@ -57,7 +57,8 @@ async fn bad_uploads_are_refused() {
     let (token, _) = app.register("alice").await;
     let mut jpeg_like = vec![0xff, 0xd8, 0xff, 0xe0];
     jpeg_like.extend_from_slice(&[0; 64]);
-    let cases: [(&str, Option<&str>, &str, Vec<u8>, StatusCode); 7] = [
+    type Case<'a> = (&'a str, Option<&'a str>, &'a str, Vec<u8>, StatusCode);
+    let cases: [Case; 7] = [
         ("no token", None, "image/png", png(64, 64, 1), StatusCode::UNAUTHORIZED),
         ("not a PNG", Some(&token), "image/png", jpeg_like.clone(), StatusCode::BAD_REQUEST),
         ("wrong content type", Some(&token), "image/jpeg", png(64, 64, 1), StatusCode::BAD_REQUEST),

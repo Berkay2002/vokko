@@ -42,7 +42,9 @@ pub fn normalize(upload: &[u8]) -> Option<Vec<u8>> {
     let mut canvas = RgbaImage::new(SIZE, SIZE);
     imageops::replace(&mut canvas, &fitted, i64::from((SIZE - fitted_width) / 2), i64::from((SIZE - fitted_height) / 2));
     let mut out = Vec::new();
-    PngEncoder::new_with_quality(&mut out, CompressionType::Default, PngFilter::Adaptive).write_image(canvas.as_raw(), SIZE, SIZE, ExtendedColorType::Rgba8).ok()?;
+    PngEncoder::new_with_quality(&mut out, CompressionType::Default, PngFilter::Adaptive)
+        .write_image(canvas.as_raw(), SIZE, SIZE, ExtendedColorType::Rgba8)
+        .ok()?;
     Some(out)
 }
 
