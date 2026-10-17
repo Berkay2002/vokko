@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MessageType, type User } from "../api/types";
-import { decide, effectiveLevel, isMutedAt, mentionsMyRole, shouldBounce, type NotifyInput, type NotifyLocalState } from "./decide";
+import { decide, decideReaction, effectiveLevel, isMutedAt, mentionsMyRole, shouldBounce, type NotifyInput, type NotifyLocalState, type ReactionNotifyInput } from "./decide";
 
 const ME = "100";
 const user = (id: string): User => ({ id, username: `u${id}`, global_name: null, avatar: null }) as unknown as User;
@@ -154,5 +154,37 @@ describe("message requests", () => {
     expect(decide(input({ ...base, friend: false, prefs: { ...prefs, messageRequests: true } })).reason).toBe("message-request");
     expect(decide(input({ ...base, friend: true, prefs: { ...prefs, messageRequests: true } })).kind).toBe("mention");
     expect(decide(input({ ...base, friend: false, prefs: { ...prefs, messageRequests: false } })).kind).toBe("mention");
+  });
+});
+
+describe("decideReaction", () => {
+  const reactionInput = (patch: Partial<ReactionNotifyInput> = {}): ReactionNotifyInput => {
+    const { message: _message, myRoleIds: _roles, ...base } = input();
+    void _message;
+    void _roles;
+    return { ...base, reaction: { user_id: "200", message_author_id: ME }, pref: "all", ...patch };
+  };
+
+  it("fires for someone else's reaction to my message, as a plain message sound", () => {
+    expect(decideReaction(reactionInput())).toMatchObject({ desktop: true, sound: "message", kind: "message", reason: "reaction" });
+  });
+
+  it("ignores my own reactions and reactions to other people's messages", () => {
+    expect(decideReaction(reactionInput({ reaction: { user_id: ME, message_author_id: ME } })).kind).toBeNull();
+    expect(decideReaction(reactionInput({ reaction: { user_id: "200", message_author_id: "300" } })).kind).toBeNull();
+    expect(decideReaction(reactionInput({ reaction: { user_id: "200" } })).kind).toBeNull();
+  });
+
+  it("follows the setting: all, only direct messages, never", () => {
+    expect(decideReaction(reactionInput({ pref: "never", dm: "dm" })).reason).toBe("pref-never");
+    expect(decideReaction(reactionInput({ pref: "dm" })).reason).toBe("pref-dm");
+    expect(decideReaction(reactionInput({ pref: "dm", dm: "dm", scopes: ["c1"] })).kind).toBe("message");
+    expect(decideReaction(reactionInput({ pref: "dm", dm: "group", scopes: ["c1"] })).kind).toBe("message");
+  });
+
+  it("do-not-disturb and mutes silence it; the channel level does not", () => {
+    expect(decideReaction(reactionInput({ status: "dnd" })).reason).toBe("dnd");
+    expect(decideReaction(reactionInput({ local: { ...emptyLocal(), mutedUntil: { g1: -1 } } })).reason).toBe("muted");
+    expect(decideReaction(reactionInput({ local: { ...emptyLocal(), notify: { c1: "none" } } })).kind).toBe("message");
   });
 });

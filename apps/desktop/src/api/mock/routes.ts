@@ -629,7 +629,7 @@ route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, 
   const list = burst ? (reaction.burst_ids ??= []) : reaction.user_ids;
   if (!list.includes(viewer.user.id)) {
     list.push(viewer.user.id);
-    emit(channelAudience(channel), "MESSAGE_REACTION_ADD", reactionEvent(viewer.user.id, channel.id, message.id, emoji, burst));
+    emit(channelAudience(channel), "MESSAGE_REACTION_ADD", { ...reactionEvent(viewer.user.id, channel.id, message.id, emoji, burst), message_author_id: message.author_id });
   }
   return undefined;
 });

@@ -4378,6 +4378,9 @@ pub struct MessageReaction {
     /// `type == 1`, kept for Discord parity.
     #[serde(default)]
     pub burst: bool,
+    /// Author of the reacted message; MESSAGE_REACTION_ADD only (Discord's field), for "someone reacted to my message".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_author_id: Option<Snowflake>,
 }
 
 fn normal_reaction() -> ReactionType {

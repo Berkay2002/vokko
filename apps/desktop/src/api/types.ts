@@ -1542,6 +1542,7 @@ export interface MessageReactionEvent {
   emoji: ReactionEmoji;
   type: ReactionType;
   burst: boolean; // type === Burst
+  message_author_id?: Snowflake; // MESSAGE_REACTION_ADD only: author of the reacted message
 }
 
 export interface EditUserRequest {

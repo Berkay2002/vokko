@@ -1,7 +1,7 @@
 // The pure "should this message notify me" decision. No store, DOM or timers in here: the controller gathers the inputs
 // (local mute/level state, prefs, focus, route) and acts on the result, so every rule is unit-testable.
 
-import { MessageType, ThreadMemberFlags, type Message, type PresenceStatus, type Snowflake, type ThreadMember } from "../api/types";
+import { MessageType, ThreadMemberFlags, type Message, type MessageReactionEvent, type PresenceStatus, type Snowflake, type ThreadMember } from "../api/types";
 
 export type NotifyLevel = "default" | "all" | "unreads-mentions" | "mentions" | "none";
 export type NotifyKind = "mention" | "message";
@@ -121,10 +121,37 @@ export function decide(input: NotifyInput): NotifyDecision {
 
   const kind: NotifyKind = addressed ? "mention" : "message";
   const reason = direct ? "mention" : everyone ? "everyone" : role ? "role" : input.dm === "dm" ? "dm" : "all";
+  return deliver(input, kind, reason);
+}
 
+/** Sound and OS notification for something that is relevant: prefs, streamer mode and "already looking at it" apply. */
+function deliver(input: Pick<NotifyInput, "prefs" | "focused" | "viewing">, kind: NotifyKind, reason: string): NotifyDecision {
+  const { prefs } = input;
   const soundAllowed = prefs.notificationSounds && !(prefs.streamerMode && prefs.streamerDisableSounds) && !(input.focused && input.viewing && !prefs.soundCurrentChannel);
   const desktopAllowed = prefs.desktopNotifications && !(prefs.streamerMode && prefs.streamerDisableNotifications) && !(input.focused && input.viewing);
   return { desktop: desktopAllowed, sound: soundAllowed ? kind : null, kind, reason };
+}
+
+export type ReactionNotifyPref = "all" | "dm" | "never";
+
+export interface ReactionNotifyInput extends Omit<NotifyInput, "message" | "myRoleIds" | "friend"> {
+  reaction: Pick<MessageReactionEvent, "user_id" | "message_author_id">;
+  /** Settings > Notifications > Reaction notifications. */
+  pref: ReactionNotifyPref;
+}
+
+/**
+ * Someone reacted to my message: "all" anywhere, "dm" only in DMs and group DMs, "never" off. Do-not-disturb and mutes
+ * silence it like a message; the channel's notification level does not (Discord's behaviour).
+ */
+export function decideReaction(input: ReactionNotifyInput): NotifyDecision {
+  const { reaction, meId } = input;
+  if (reaction.user_id === meId || reaction.message_author_id !== meId) return NONE("not-mine");
+  if (input.pref === "never") return NONE("pref-never");
+  if (input.pref === "dm" && input.dm === null) return NONE("pref-dm");
+  if (input.status === "dnd") return NONE("dnd");
+  if (input.scopes.some(id => isMutedAt(input.local, id, input.now))) return NONE("muted");
+  return deliver(input, "message", "reaction");
 }
 
 /**
