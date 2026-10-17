@@ -356,11 +356,11 @@ Same bearer and loopback listener as the session routes; they work with or witho
    - Everything else the bot sends is a read or auth: `login5.spotify.com` login (`core/src/login5.rs:66`), `clienttoken`
      (`spclient.rs:150`), keymaster token (`core/src/token.rs:109`), extended-metadata POST (`spclient.rs:589`, a read),
      autoplay `context-resolve` (`spclient.rs:923`, a read, unused by the bot), audio key and CDN fetches, playlist and
-     metadata reads. The AP login carries device info, which does not show as a device without the connect-state PUT.
+     metadata reads. The AP login carries device info; that it does not show as a device without the connect-state PUT is expected from the code **[unverified live]**.
    - Guard: `tools/spotify-bot/tests/no_play_reports.rs` fails if `Cargo.toml` or `Cargo.lock` gains `librespot-connect` or
      `-discovery`, or if the bot's sources mention `Spirc`, `put_connect_state`, `delete_connect_state`, `dealer()` or `mercury()`.
    - Live check (2026-10-17, same day, three plays 19:18 to 19:31): the track was not in Recently played on the owner's phone or
-     in the desktop app. Wrapped and recommendation effects cannot be checked this way; the audit above is what supports them.
+     in the desktop app. No positive control yet (a track started from search in the official app should appear in the same view). Wrapped and recommendation effects cannot be checked this way; the audit above is what supports them.
    - Streaming still happens (key and CDN fetch), so Spotify can count a stream server-side. Nothing in librespot can suppress
      that; if it matters, only a dedicated account avoids it. Not seen in the history check.
 8. **Bot channel:** separate bearer secret (16+ characters), loopback listener, `/internal/spotify/bot` off the public proxy, lease

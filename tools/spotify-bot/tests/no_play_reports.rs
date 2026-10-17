@@ -29,11 +29,18 @@ fn lockfile_has_no_connect_crates() {
 
 #[test]
 fn sources_do_not_touch_play_state_apis() {
-    for entry in std::fs::read_dir(root().join("src")).unwrap() {
-        let path = entry.unwrap().path();
-        let text = std::fs::read_to_string(&path).unwrap();
-        for word in FORBIDDEN_IN_SOURCE {
-            assert!(!text.contains(word), "{} uses {word}", path.display());
+    let mut dirs = vec![root().join("src")];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for word in FORBIDDEN_IN_SOURCE {
+                assert!(!text.contains(word), "{} uses {word}", path.display());
+            }
         }
     }
 }
