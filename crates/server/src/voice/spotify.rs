@@ -616,6 +616,11 @@ async fn control(
     Ok(reply)
 }
 
+/// The bot already plays what the state says (it just reported so): tell the clients only.
+fn announce_only(change: Change) -> Change {
+    Change { desired: None, ..change }
+}
+
 /// Tells the bot (stop, or the desired state) and everyone watching what a change left.
 async fn settle(state: &AppState, active: &Active<'_>, channel_id: i64, change: Change) {
     if change.stop_bot {
@@ -745,7 +750,7 @@ pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(e
                 session.updated_at_ms = now;
                 session.bot_down_since = None;
                 session.sync_status();
-                Some(session.change(&state, now, false))
+                Some(announce_only(session.change(&state, now, false)))
             }
             // Positions are not announced: clients extrapolate. They only correct the server's idea of where the bot is.
             "position" if event.seq >= session.steer_seq => {
@@ -755,7 +760,7 @@ pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(e
                 if waiting {
                     session.status = SpotifyStatus::Playing;
                     session.sync_status();
-                    Some(session.change(&state, now, false))
+                    Some(announce_only(session.change(&state, now, false)))
                 } else {
                     None
                 }
