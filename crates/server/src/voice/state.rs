@@ -645,6 +645,7 @@ pub(crate) fn broadcast<'a>(state: &'a AppState, entry: &'a VoiceEntry, left: bo
 
 /// The last person left `channel_id`: its voice status goes (VOICE_CHANNEL_STATUS_UPDATE with `null`), a DM call ends.
 async fn release_channel(state: &AppState, channel_id: i64) {
+    super::stremio::user_left(state, channel_id);
     let inside: Vec<VoiceEntry> = state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id).collect();
     if !inside.iter().any(VoiceEntry::moderator) {
         // The last stage moderator left: the stage (if one is live) ends. Spawned, so no user lock is held while it demotes others.

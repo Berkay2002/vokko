@@ -376,3 +376,8 @@ The owner chose a split, which replaces the Cloud-only parts above (§2 bot join
   CGNAT, so there are no router port forwards: viewers connect through STUN-discovered candidates (`use_external_ip: false`, interface and IP pinned in
   `deploy/media-livekit.yaml`), and a viewer behind a symmetric NAT may fail because there is no TURN. The bot connects to the media LiveKit locally
   (`VOKKO_MEDIA_LIVEKIT_BOT_URL`, `ws://127.0.0.1:7880`) instead of through the tunnel. See docs/self-hosting.md "Stremio in calls".
+  Decision 2026-10-17 (viewer tokens, from the security review): every session gets its own media room `stremio-<channel_id>-<random hex>`, which is
+  only in the tokens (the bot reads it from its token, the PUT has no room field), so a token from one session opens nothing of the next one in the
+  channel. The server deletes the room when the session ends, removes `viewer:<user_id>:*` from the room when that user leaves the call or loses
+  access, and sweeps the room on every tick (a token can reconnect until its 6 h expiry). The 6 h TTL stays. The server uses the media LiveKit's
+  RoomService API at `VOKKO_MEDIA_LIVEKIT_URL` (`wss` to `https`), through the same tunnel hostname.

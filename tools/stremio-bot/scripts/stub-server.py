@@ -5,7 +5,7 @@
   stub-server.py put CHANNEL URL [key=value...] PUT /sessions/CHANNEL on the bot (mints the LiveKit token itself)
   stub-server.py delete CHANNEL                 DELETE /sessions/CHANNEL
 
-put options: position_ms=0 playing=true max_height=720 bitrate=2000 livekit_url=ws://127.0.0.1:7880
+put options: room=stremio-CHANNEL-<random> position_ms=0 playing=true max_height=720 bitrate=2000 livekit_url=ws://127.0.0.1:7880
 Environment: VOKKO_STREMIO_BOT_SECRET (required), BOT=http://127.0.0.1:8720, LK_KEY=devkey, LK_SECRET=secret
 """
 import base64, hashlib, hmac, json, os, sys, time, urllib.request
@@ -69,7 +69,7 @@ def main():
         opts = dict(a.split("=", 1) for a in sys.argv[4:])
         body = {
             "livekit_url": opts.get("livekit_url", "ws://127.0.0.1:7880"),
-            "token": token(f"stremio-{channel}", f"bot:stremio:{channel}"),
+            "token": token(opts.get("room", f"stremio-{channel}-{os.urandom(4).hex()}"), f"bot:stremio:{channel}"),
             "media_url": url, "headers": {},
             "position_ms": int(opts.get("position_ms", 0)),
             "playing": opts.get("playing", "true") == "true",

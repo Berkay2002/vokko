@@ -23,7 +23,7 @@ use tower::ServiceExt;
 use vokko_protocol::api::permissions::{CONNECT, VIEW_CHANNEL};
 use vokko_server::config::{Cidr, Config, LiveKitConfig, StremioConfig};
 use vokko_server::crypto::SecretsKey;
-use vokko_server::voice::livekit::FakeRoomService;
+use vokko_server::voice::livekit::{FakeRoomService, Participant};
 use vokko_server::voice::token;
 
 const MEDIA_KEY: &str = "media-key";
@@ -301,6 +301,8 @@ struct World {
     app: TestApp,
     mock: Arc<Mock>,
     bot: Arc<Bot>,
+    /// The media LiveKit's RoomService.
+    media: Arc<FakeRoomService>,
     address: String,
     voice: String,
     owner: String,
@@ -354,10 +356,12 @@ async fn world_with(tune: impl FnOnce(&mut StremioConfig), adjust: impl FnOnce(&
         FakeRoomService::new(),
     )
     .await;
-    build(app, mock, bot).await
+    let media = FakeRoomService::new();
+    app.state.stremio.set_media_rooms(media.clone());
+    build(app, mock, bot, media).await
 }
 
-async fn build(app: TestApp, mock: Arc<Mock>, bot: Arc<Bot>) -> World {
+async fn build(app: TestApp, mock: Arc<Mock>, bot: Arc<Bot>, media: Arc<FakeRoomService>) -> World {
     let address = app.serve().await;
     let (owner, _) = app.register("sam").await;
     let (alice, alice_user) = app.register("alice").await;
@@ -371,7 +375,7 @@ async fn build(app: TestApp, mock: Arc<Mock>, bot: Arc<Bot>) -> World {
         assert_eq!(app.post(&format!("/invites/{code}"), token, json!({})).await.0, StatusCode::OK);
     }
     let id = |user: &Value| user["id"].as_str().expect("id").to_owned();
-    World { app, mock, bot, address, voice, owner, alice, alice_id: id(&alice_user), carl, carl_id: id(&carl_user) }
+    World { app, mock, bot, media, address, voice, owner, alice, alice_id: id(&alice_user), carl, carl_id: id(&carl_user) }
 }
 
 impl World {
@@ -674,7 +678,8 @@ async fn playing_follows_the_bot_contract_and_shows_no_urls() {
     let claims = token::verify(MEDIA_SECRET, put["token"].as_str().expect("token"), vokko_server::voice::unix_now()).expect("signed with the media secret");
     let grant = claims.video.expect("grant");
     assert_eq!((claims.iss.as_str(), claims.sub.as_str()), (MEDIA_KEY, format!("bot:stremio:{ch}").as_str()));
-    assert_eq!(grant.room.as_deref(), Some(format!("stremio-{ch}").as_str()));
+    let room = grant.room.clone().expect("room");
+    assert!(room.starts_with(&format!("stremio-{ch}-")) && room.len() > format!("stremio-{ch}-").len() + 8, "{room}");
     assert!(grant.room_join && grant.can_publish && !grant.can_subscribe && !grant.can_publish_data && !grant.hidden);
     assert_eq!(grant.can_publish_sources, ["screen_share", "screen_share_audio"]);
 
@@ -839,7 +844,7 @@ async fn viewer_tokens_are_subscribe_only_and_need_a_running_session() {
     let now = vokko_server::voice::unix_now();
     let claims = token::verify(MEDIA_SECRET, first["token"].as_str().expect("token"), now).expect("signed with the media secret");
     let grant = claims.video.expect("grant");
-    assert_eq!(grant.room.as_deref(), Some(format!("stremio-{}", w.voice).as_str()));
+    assert!(grant.room.as_deref().is_some_and(|room| room.starts_with(&format!("stremio-{}-", w.voice))), "{:?}", grant.room);
     assert!(grant.room_join && grant.can_subscribe && !grant.can_publish && !grant.can_publish_data && grant.can_publish_sources.is_empty());
     assert!(claims.sub.starts_with(&format!("viewer:{}:", w.alice_id)), "{}", claims.sub);
     assert!((6 * 3600 - 30..=6 * 3600 + 30).contains(&(claims.exp - now)), "6 h");
@@ -1023,4 +1028,69 @@ async fn the_expensive_routes_are_rate_limited() {
         codes.push(w.app.post("/users/@me/stremio/link", &w.alice, json!({})).await.0);
     }
     assert!(codes.contains(&StatusCode::TOO_MANY_REQUESTS), "and link codes: {codes:?}");
+}
+
+/// The room name of the viewer token (or of a bot PUT token).
+fn room_of(token: &str) -> String {
+    token::verify(MEDIA_SECRET, token, vokko_server::voice::unix_now()).expect("signed with the media secret").video.expect("grant").room.expect("room")
+}
+
+fn viewer(identity: &str) -> Participant {
+    Participant { identity: identity.to_owned(), ..Participant::default() }
+}
+
+#[tokio::test]
+async fn every_session_has_its_own_media_room_and_it_is_closed_when_it_ends() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.playing(&mut alice, "A 1080p").await;
+    let viewer_path = format!("{}/viewer-token", w.path());
+    let (_, first) = w.app.post(&viewer_path, &w.alice, json!({})).await;
+    let first_room = room_of(first["token"].as_str().expect("token"));
+    assert_eq!(room_of(w.bot.puts(&w.voice)[0]["token"].as_str().expect("token")), first_room, "the bot and the viewers share the room");
+    // Changing the item keeps the session and its room.
+    let sid = World::sid(&w.streams(&w.alice).await, "A 720p");
+    w.app.put_json(&w.path(), &w.alice, json!({"sid": sid})).await;
+    let (_, again) = w.app.post(&viewer_path, &w.alice, json!({})).await;
+    assert_eq!(room_of(again["token"].as_str().expect("token")), first_room);
+
+    assert_eq!(w.app.delete(&w.path(), &w.alice).await.0, StatusCode::NO_CONTENT);
+    until("the room is closed", || w.media.calls().contains(&format!("DeleteRoom {first_room}"))).await;
+
+    // The next session in the same channel is a different room: the old token opens nothing of it.
+    let sid = World::sid(&w.streams(&w.alice).await, "A 1080p");
+    w.app.put_json(&w.path(), &w.alice, json!({"sid": sid})).await;
+    let (_, next) = w.app.post(&viewer_path, &w.alice, json!({})).await;
+    let next_room = room_of(next["token"].as_str().expect("token"));
+    assert_ne!(next_room, first_room);
+    assert_eq!(room_of(w.bot.puts(&w.voice).last().expect("put")["token"].as_str().expect("token")), next_room);
+}
+
+#[tokio::test]
+async fn a_viewer_who_leaves_the_call_is_removed_from_the_media_room() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.playing(&mut alice, "A 1080p").await;
+    w.link(&w.carl).await;
+    w.join(&mut carl).await;
+    let viewer_path = format!("{}/viewer-token", w.path());
+    let (_, token) = w.app.post(&viewer_path, &w.carl, json!({})).await;
+    let room = room_of(token["token"].as_str().expect("token"));
+    let carl_viewer = format!("viewer:{}:ab12cd34", w.carl_id);
+    let alice_viewer = format!("viewer:{}:ef56ef56", w.alice_id);
+    for identity in [&carl_viewer, &alice_viewer, "bot:stremio:1"] {
+        w.media.add_participant(&room, viewer(identity));
+    }
+
+    carl.voice(None).await;
+    until("carl's viewer is removed", || w.media.calls().contains(&format!("RemoveParticipant {room} {carl_viewer}"))).await;
+    let calls = w.media.calls();
+    assert!(!calls.iter().any(|call| call.contains(&alice_viewer) || call.contains("bot:stremio")), "only the leaver goes: {calls:?}");
+
+    // A token that outlives the person's place in the call joins again, and the next tick removes it once more.
+    w.media.add_participant(&room, viewer(&carl_viewer));
+    let before = w.media.calls().iter().filter(|call| call.starts_with("RemoveParticipant")).count();
+    vokko_server::voice::stremio::spawn_tasks(w.app.state.clone());
+    until("the sweep removes the returning viewer", || w.media.calls().iter().filter(|call| call.starts_with("RemoveParticipant")).count() > before).await;
 }

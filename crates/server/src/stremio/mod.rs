@@ -36,6 +36,7 @@ use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, ApiQuery};
 use crate::state::AppState;
 use crate::store::iso;
+use crate::voice::livekit::{HttpRoomService, NoRoomService, RoomService};
 
 /// How long a listed stream's `sid` stays valid.
 const SID_TTL: Duration = Duration::from_secs(30 * 60);
@@ -72,6 +73,11 @@ pub struct TitleInfo {
 }
 
 /// A cached value and when it was fetched.
+/// `wss://host` -> `https://host`, `ws://host` -> `http://host`.
+fn http_url(url: &str) -> String {
+    url.replacen("wss://", "https://", 1).replacen("ws://", "http://", 1)
+}
+
 type Cached<T> = (Instant, Arc<T>);
 
 struct Pending {
@@ -87,6 +93,8 @@ pub struct Stremio {
     addons: Mutex<HashMap<i64, Cached<Vec<Addon>>>>,
     metas: Mutex<HashMap<String, Cached<StremioMeta>>>,
     pub(crate) sessions: Mutex<HashMap<i64, crate::voice::stremio::Session>>,
+    /// The media LiveKit's RoomService (rooms are closed and viewers removed through it); a fake in tests.
+    media_rooms: Mutex<Arc<dyn RoomService>>,
     generation: AtomicU64,
 }
 
@@ -100,8 +108,19 @@ impl Stremio {
             let fetcher = Fetcher::new(config.fetch_allow.clone());
             Clients { account: Account::new(fetcher.clone(), &config.api_url, &config.link_url), bot: Bot::new(&config.bot_url, &config.bot_secret), fetcher }
         });
+        // The server reaches the media LiveKit the way viewers do (its signalling port also serves the RoomService API).
+        let media_rooms: Arc<dyn RoomService> =
+            match config.as_ref().map(|c| HttpRoomService::new(&http_url(&c.media_url), &c.media_api_key, c.media_api_secret.expose())) {
+                Some(Ok(rooms)) => Arc::new(rooms),
+                Some(Err(error)) => {
+                    tracing::warn!(%error, "no RoomService for the media LiveKit: viewers are not removed and rooms are not closed");
+                    Arc::new(NoRoomService)
+                }
+                None => Arc::new(NoRoomService),
+            };
         Self {
             clients,
+            media_rooms: Mutex::new(media_rooms),
             listed: Mutex::default(),
             pending: Mutex::default(),
             addons: Mutex::default(),
@@ -109,6 +128,14 @@ impl Stremio {
             sessions: Mutex::default(),
             generation: AtomicU64::new(1),
         }
+    }
+
+    pub fn set_media_rooms(&self, rooms: Arc<dyn RoomService>) {
+        *lock(&self.media_rooms) = rooms;
+    }
+
+    pub(crate) fn media_rooms(&self) -> Arc<dyn RoomService> {
+        lock(&self.media_rooms).clone()
     }
 
     pub(crate) fn next_generation(&self) -> u64 {

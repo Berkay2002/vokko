@@ -49,6 +49,9 @@ struct Queued {
 }
 
 pub struct Session {
+    /// The media LiveKit room of this session: `stremio-<channel_id>-<random>`, new for every session, so a token from an earlier
+    /// session (or one that outlived its holder's place in the call) is no use against the next one in the same channel.
+    room: String,
     item: StremioItem,
     status: StremioStatus,
     error: Option<String>,
@@ -173,13 +176,13 @@ pub fn bot_identity(channel_id: i64) -> String {
     format!("bot:stremio:{channel_id}")
 }
 
-/// The media LiveKit room of a channel.
-pub fn media_room(channel_id: i64) -> String {
-    format!("stremio-{channel_id}")
+/// A fresh media LiveKit room name for a new session.
+fn new_room(channel_id: i64) -> String {
+    format!("stremio-{channel_id}-{}", random_hex(8))
 }
 
-/// The bot's token: it publishes the two screen-share sources into its room and nothing else (no subscribing, no data).
-fn bot_token(state: &AppState, channel_id: i64) -> Option<String> {
+/// The bot's token: it publishes the two screen-share sources into the session's room and nothing else (no subscribing, no data).
+fn bot_token(state: &AppState, channel_id: i64, room: &str) -> Option<String> {
     let cfg = state.config.stremio.as_ref()?;
     let now = unix_now();
     let claims = Claims {
@@ -190,7 +193,7 @@ fn bot_token(state: &AppState, channel_id: i64) -> Option<String> {
         name: "Stremio".to_owned(),
         metadata: serde_json::json!({"bot": "stremio", "channel_id": channel_id.to_string()}).to_string(),
         video: Some(VideoGrant {
-            room: Some(media_room(channel_id)),
+            room: Some(room.to_owned()),
             room_join: true,
             can_publish: true,
             can_publish_sources: vec!["screen_share".to_owned(), "screen_share_audio".to_owned()],
@@ -270,13 +273,13 @@ async fn start(
     limit(&state, "stremio-play", user_id, 3.0, 3.0 / 60.0)?;
     let listed = playable(&state, "sid", &body.sid, user_id)?;
     let (media, headers) = prepare(&active, &listed.candidate).await?;
-    let token = bot_token(&state, channel_id).ok_or_else(ApiErr::internal)?;
     let generation = state.stremio.next_generation();
     let (view, desired, had_one) = {
         let mut sessions = lock(&state.stremio.sessions);
         let had_one = sessions.contains_key(&channel_id);
         // Changing the item keeps the queue and who started the session.
         let session = sessions.entry(channel_id).or_insert_with(|| Session {
+            room: new_room(channel_id),
             item: StremioItem { title: String::new(), subtitle: None, poster: None, label: String::new() },
             status: StremioStatus::Starting,
             error: None,
@@ -289,7 +292,7 @@ async fn start(
             candidate: listed.candidate.clone(),
             media: media.clone(),
             headers: BTreeMap::new(),
-            token: token.clone(),
+            token: String::new(),
             generation,
             changed: Instant::now(),
             paused_since: None,
@@ -299,6 +302,7 @@ async fn start(
             last_put: Instant::now(),
             bot_down_since: None,
         });
+        let token = bot_token(&state, channel_id, &session.room).ok_or_else(ApiErr::internal)?;
         session.begin(&listed.info, listed.candidate.clone(), media, headers, generation, token);
         let desired = session.desired(&state, unix_millis()).ok_or_else(ApiErr::internal)?;
         (session.view(channel_id), desired, had_one)
@@ -404,9 +408,9 @@ async fn viewer_token(State(state): State<AppState>, AuthUser(user_id): AuthUser
     let active = active(&state)?;
     let channel_id = require_in_voice(&state, user_id, &id).await?;
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
-    if !lock(&state.stremio.sessions).contains_key(&channel_id) {
+    let Some(room) = lock(&state.stremio.sessions).get(&channel_id).map(|session| session.room.clone()) else {
         return Err(ApiErr::conflict(40033, "Nothing is playing in this channel."));
-    }
+    };
     let now = unix_now();
     // A fresh identity per token: two devices of one account must not kick each other out of the room.
     let claims = Claims {
@@ -416,7 +420,7 @@ async fn viewer_token(State(state): State<AppState>, AuthUser(user_id): AuthUser
         exp: now + VIEWER_TOKEN_TTL_SECS,
         name: "Viewer".to_owned(),
         video: Some(VideoGrant {
-            room: Some(media_room(channel_id)),
+            room: Some(room),
             room_join: true,
             can_subscribe: true,
             can_publish: false,
@@ -439,14 +443,40 @@ fn touch(state: &AppState, channel_id: i64, change: impl FnOnce(&mut Session)) {
 
 /// Ends the channel's session, if any: the bot drops it and everyone who can see the channel hears.
 pub(crate) async fn end(state: &AppState, channel_id: i64) {
-    let Some(_) = lock(&state.stremio.sessions).remove(&channel_id) else { return };
+    let Some(session) = lock(&state.stremio.sessions).remove(&channel_id) else { return };
     if let Some(clients) = &state.stremio.clients {
         let bot = clients.bot.clone();
+        let rooms = state.stremio.media_rooms();
+        let room = session.room;
         tokio::spawn(async move {
             let _ = bot.delete(channel_id).await;
+            // Closing the room disconnects the viewers still in it; their tokens name a room that never comes back.
+            let _ = rooms.delete_room(&room).await;
         });
     }
     announce(state, channel_id, None).await;
+}
+
+/// Removes everyone from the session's media room whose viewer identity (`viewer:<user_id>:<hex>`) belongs to someone who is not in
+/// the call. Run when a person leaves or loses access, and on every tick (a token can join again until it expires).
+pub(crate) async fn remove_strangers(state: &AppState, channel_id: i64) {
+    let Some(room) = lock(&state.stremio.sessions).get(&channel_id).map(|session| session.room.clone()) else { return };
+    let rooms = state.stremio.media_rooms();
+    let Ok(inside) = rooms.list_participants(&room).await else { return };
+    for participant in inside {
+        let user_id = participant.identity.strip_prefix("viewer:").and_then(|rest| rest.split(':').next()).and_then(|id| id.parse::<i64>().ok());
+        if user_id.is_some_and(|user_id| !crate::voice::state::in_channel(state, user_id, channel_id)) {
+            let _ = rooms.remove_participant(&room, &participant.identity).await;
+        }
+    }
+}
+
+/// A person left the call (or was removed from it): their viewer connections go.
+pub(crate) fn user_left(state: &AppState, channel_id: i64) {
+    if lock(&state.stremio.sessions).contains_key(&channel_id) {
+        let state = state.clone();
+        tokio::spawn(async move { remove_strangers(&state, channel_id).await });
+    }
 }
 
 /// The current item is over (or skipped): plays the next queued one, else ends the session. Items that cannot be opened are passed
@@ -466,7 +496,8 @@ async fn advance(state: &AppState, active: &Active<'_>, channel_id: i64, expecte
             return;
         };
         let Ok((media, headers)) = prepare(active, &next.candidate).await else { continue };
-        let Some(token) = bot_token(state, channel_id) else { return };
+        let Some(room) = lock(&state.stremio.sessions).get(&channel_id).map(|session| session.room.clone()) else { return };
+        let Some(token) = bot_token(state, channel_id, &room) else { return };
         let generation = state.stremio.next_generation();
         let (view, desired) = {
             let mut sessions = lock(&state.stremio.sessions);
@@ -666,6 +697,11 @@ async fn sweep(state: &AppState) {
     }
     for channel_id in stop {
         end(state, channel_id).await;
+    }
+    // A viewer token outlives the person's place in the call (6 h), so who is in the media room is checked against who is in voice.
+    let rooms: Vec<i64> = lock(&state.stremio.sessions).keys().copied().collect();
+    for channel_id in rooms {
+        remove_strangers(state, channel_id).await;
     }
     for (channel_id, generation, desired) in resend {
         let sent = clients.bot.put(channel_id, &desired).await.is_ok();
