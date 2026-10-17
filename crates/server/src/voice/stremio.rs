@@ -198,6 +198,7 @@ impl Session {
             generation: self.generation,
             audio: self.audio,
             burned_subtitle: self.burned,
+            tracks_known: !self.audio_tracks.is_empty() || !self.subtitle_tracks.is_empty(),
         })
     }
 }

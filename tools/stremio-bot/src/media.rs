@@ -194,6 +194,7 @@ impl Pipeline {
         probe: &Probe,
         geo: &Geometry,
         choice: Choice,
+        with_text: bool,
         start_ms: u64,
         out: &Published,
         notify: Notify,
@@ -203,7 +204,7 @@ impl Pipeline {
         let port = |l: &TcpListener| l.local_addr().map(|a| a.port()).map_err(|e| e.to_string());
         // One loopback listener per text subtitle stream; ffmpeg writes each as WebVTT.
         let mut text_listeners = Vec::new();
-        for track in probe.subtitle_tracks.iter().filter(|t| t.kind == StremioSubtitleKind::Text) {
+        for track in probe.subtitle_tracks.iter().filter(|t| with_text && t.kind == StremioSubtitleKind::Text) {
             let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
             text_listeners.push((track.id, listener));
         }

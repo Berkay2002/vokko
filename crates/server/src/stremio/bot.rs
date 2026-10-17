@@ -27,6 +27,9 @@ pub struct Desired {
     pub audio: Option<u32>,
     /// The bitmap subtitle stream index to burn in, if any.
     pub burned_subtitle: Option<u32>,
+    /// True once the server holds this item's track lists. Until then no `burned_subtitle` means "the file's default"; after it,
+    /// none means off (so a bot that restarts mid-item does not burn in a subtitle somebody turned off).
+    pub tracks_known: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]

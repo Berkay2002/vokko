@@ -41,9 +41,12 @@ pub struct Desired {
     /// The audio stream index to play; none (or one the file does not have) means the file's default.
     #[serde(default)]
     pub audio: Option<u32>,
-    /// The bitmap subtitle stream index to burn in; none means no burn-in, except right after a new item starts (`choose`).
+    /// The bitmap subtitle stream index to burn in; none means no burn-in, unless the server does not know the tracks yet (`choose`).
     #[serde(default)]
     pub burned_subtitle: Option<u32>,
+    /// The server holds this item's track lists (it has seen the bot's `tracks` event), so a missing `burned_subtitle` is a choice.
+    #[serde(default)]
+    pub tracks_known: bool,
 }
 
 fn yes() -> bool {
@@ -68,6 +71,7 @@ impl fmt::Debug for Desired {
             .field("bitrate", &self.bitrate)
             .field("audio", &self.audio)
             .field("burned_subtitle", &self.burned_subtitle)
+            .field("tracks_known", &self.tracks_known)
             .finish_non_exhaustive()
     }
 }
@@ -240,12 +244,12 @@ pub fn defaults(probe: &Probe) -> Choice {
     Choice { audio, burned }
 }
 
-/// The request's tracks, checked against the file. `fresh` is the first run of a new item: the server has not seen the file's tracks
-/// yet, so no burn-in choice means the default; afterwards no choice means none.
-pub fn choose(probe: &Probe, d: &Desired, fresh: bool) -> Choice {
+/// The request's tracks, checked against the file. Until the server knows the file's tracks (`tracks_known`) no burn-in choice means
+/// the default; afterwards no choice means none, whichever run of the bot this is.
+pub fn choose(probe: &Probe, d: &Desired) -> Choice {
     let default = defaults(probe);
     let audio = d.audio.filter(|a| probe.audio_tracks.iter().any(|t| t.id == *a)).or(default.audio);
-    let burned = if fresh && d.burned_subtitle.is_none() { default.burned } else { d.burned_subtitle };
+    let burned = if !d.tracks_known && d.burned_subtitle.is_none() { default.burned } else { d.burned_subtitle };
     Choice { audio, burned: burned.filter(|b| probe.subtitle_tracks.iter().any(|t| t.id == *b && t.kind == StremioSubtitleKind::Bitmap)) }
 }
 
@@ -358,12 +362,14 @@ pub fn ffmpeg_args(p: &FfmpegPlan<'_>) -> Vec<String> {
     a.extend(["-i".to_owned(), p.media_url.to_owned()]);
     let tonemap = if p.hdr { format!("{TONEMAP},") } else { String::new() };
     let shape = format!("{tonemap}scale={}:{}:flags=bicubic,fps={},format=yuv420p", p.geo.width, p.geo.height, p.geo.fps_arg);
+    // The overlay's output is 8-bit unless told otherwise; an HDR source is tonemapped after it and would lose two bits first.
+    let overlay = if p.hdr { "format=yuv420p10:" } else { "" };
     match p.choice.burned {
         // The picture subtitle is laid over the full-size frame before it is scaled. `eof_action=pass`: when the subtitle stream
         // ends the picture goes on without the last image stuck on it.
         Some(index) => a.extend([
             "-filter_complex".to_owned(),
-            format!("[0:v:0][0:{index}]overlay=eof_action=pass[burned];[burned]{shape}[vout]"),
+            format!("[0:v:0][0:{index}]overlay={overlay}eof_action=pass[burned];[burned]{shape}[vout]"),
             "-map".into(),
             "[vout]".into(),
         ]),
@@ -636,6 +642,12 @@ mod tests {
 
         let hdr = FfmpegPlan { hdr: true, ..no_audio };
         assert!(ffmpeg_args(&hdr).iter().any(|x| x.starts_with("zscale=t=linear") && x.ends_with("format=yuv420p")));
+        let a = ffmpeg_args(&FfmpegPlan { choice: Choice { audio: None, burned: Some(5) }, ..hdr });
+        let graph = &a[a.iter().position(|x| x == "-filter_complex").expect("filter graph") + 1];
+        assert!(
+            graph.starts_with("[0:v:0][0:5]overlay=format=yuv420p10:eof_action=pass[burned];[burned]zscale=t=linear"),
+            "an HDR source keeps ten bits through the overlay: {graph}"
+        );
     }
 
     #[test]
@@ -704,15 +716,17 @@ mod tests {
         let first = parse_probe(&TRACKS.replace(r#""default":1"#, r#""default":0"#).replace(r#""forced":1"#, r#""forced":0"#)).expect("probe");
         assert_eq!(defaults(&first), Choice { audio: Some(1), burned: None }, "else the first audio, no burn-in");
         let mut d = desired();
-        assert_eq!(choose(&p, &d, true), Choice { audio: Some(2), burned: Some(4) }, "a new item starts with the defaults");
-        assert_eq!(choose(&p, &d, false), Choice { audio: Some(2), burned: None }, "afterwards no burn-in choice means none");
+        assert_eq!(choose(&p, &d), Choice { audio: Some(2), burned: Some(4) }, "the server does not know the tracks yet: the defaults");
+        d.tracks_known = true;
+        assert_eq!(choose(&p, &d), Choice { audio: Some(2), burned: None }, "known and no burn-in choice means none, also after a bot restart");
         d.audio = Some(1);
         d.burned_subtitle = Some(5);
-        assert_eq!(choose(&p, &d, false), Choice { audio: Some(1), burned: Some(5) });
-        assert_eq!(choose(&p, &d, true), Choice { audio: Some(1), burned: Some(5) }, "a request that names one wins");
+        assert_eq!(choose(&p, &d), Choice { audio: Some(1), burned: Some(5) });
+        d.tracks_known = false;
+        assert_eq!(choose(&p, &d), Choice { audio: Some(1), burned: Some(5) }, "a request that names one wins");
         d.audio = Some(99);
         d.burned_subtitle = Some(3);
-        assert_eq!(choose(&p, &d, false), Choice { audio: Some(2), burned: None }, "unknown audio falls back, a text track is never burned");
+        assert_eq!(choose(&p, &d), Choice { audio: Some(2), burned: None }, "unknown audio falls back, a text track is never burned");
     }
 
     #[test]

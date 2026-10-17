@@ -1177,6 +1177,7 @@ async fn tracks_are_reported_and_chosen_without_urls_and_a_new_choice_restarts_t
     let first = w.bot.puts(&w.voice).remove(0);
     let generation = first["generation"].clone();
     assert!(generation.is_u64() && first["audio"].is_null() && first["burned_subtitle"].is_null(), "{first}");
+    assert_eq!(first["tracks_known"], false, "the bot may use the file's defaults until the server has the tracks");
 
     // A report for another item is ignored; the right one sets the lists and the bot's defaults.
     assert_eq!(w.event("tracks", tracks_event(&json!(generation.as_u64().unwrap() + 1000))).await, StatusCode::NO_CONTENT);
@@ -1194,6 +1195,15 @@ async fn tracks_are_reported_and_chosen_without_urls_and_a_new_choice_restarts_t
     assert!(audio[3]["title"].is_null(), "www. titles are dropped");
     assert_eq!((state["audio"].as_u64(), state["burned_subtitle"].as_u64()), (Some(2), Some(5)));
     assert_eq!(state["subtitle_tracks"].as_array().map(Vec::len), Some(2));
+    let (_, off) = w.app.patch(&w.path(), &w.alice, json!({"burned_subtitle": null})).await;
+    assert!(off.get("burned_subtitle").is_none(), "{off}");
+    let known = w.bot.puts(&w.voice).pop().expect("put");
+    assert_eq!(
+        (known["tracks_known"].clone(), known["burned_subtitle"].is_null()),
+        (json!(true), true),
+        "off after the tracks are known: a restarted bot keeps it off"
+    );
+    w.app.patch(&w.path(), &w.alice, json!({"burned_subtitle": 5})).await;
 
     // Choosing validates against the reported tracks, needs the call, and restarts the bot at the current position with the new choice.
     let puts_before = w.bot.puts(&w.voice).len();
