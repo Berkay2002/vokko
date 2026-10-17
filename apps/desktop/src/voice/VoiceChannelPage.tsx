@@ -24,6 +24,7 @@ import { useVoiceUi } from "./uiStore";
 import { VoiceChatPanel } from "./VoiceChatPanel";
 import { WatchTile } from "../watch";
 import { openStremioPanel, StremioIcon, StremioPanel, StremioTile, STREMIO_TILE_ID, useStremioPanel } from "../stremio";
+import { openSpotifyPanel, SpotifyIcon, SpotifyPanel, SpotifyTile, SPOTIFY_TILE_ID, useSpotifyPanel } from "../spotify";
 import { GAME_TILE_ID, GameTile, useGameMenuItems } from "../games";
 import { openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
 import { VIEWER_QUALITIES, VIEWER_QUALITY_LABEL, type ViewerQuality } from "./video/options";
@@ -64,6 +65,8 @@ export interface StageTile {
   watch?: boolean;
   /** The Stremio tile (`id` "stremio"): shown while the channel has a session and we are in the call. */
   stremio?: boolean;
+  /** The Spotify tile (`id` "spotify"): shown while the channel has a session and we are in the call. */
+  spotify?: boolean;
   /** The game tile (`id` "game"): shown while the channel has a game session and we are in the call. */
   game?: boolean;
 }
@@ -73,7 +76,7 @@ export const WATCH_TILE_ID = "watch";
 export const stageTileId = (userId: Snowflake, stream: boolean): string => (stream ? `${userId}:stream` : userId);
 
 /** The tiles for `states`, in order: each user tile preceded by their stream tile when `streaming` says they stream. */
-export function stageTiles(states: VoiceState[], streaming: (state: VoiceState) => boolean, watching = false, stremio = false, game = false): StageTile[] {
+export function stageTiles(states: VoiceState[], streaming: (state: VoiceState) => boolean, watching = false, stremio = false, spotify = false, game = false): StageTile[] {
   const tiles = states.flatMap(state => {
     const user = { id: stageTileId(state.user_id, false), state, stream: false };
     return streaming(state) ? [{ id: stageTileId(state.user_id, true), state, stream: true }, user] : [user];
@@ -82,6 +85,7 @@ export function stageTiles(states: VoiceState[], streaming: (state: VoiceState) 
   const extra: StageTile[] = [];
   if (first && watching) extra.push({ id: WATCH_TILE_ID, state: first, stream: false, watch: true });
   if (first && stremio) extra.push({ id: STREMIO_TILE_ID, state: first, stream: false, stremio: true });
+  if (first && spotify) extra.push({ id: SPOTIFY_TILE_ID, state: first, stream: false, spotify: true });
   if (first && game) extra.push({ id: GAME_TILE_ID, state: first, stream: false, game: true });
   return [...extra, ...tiles];
 }
@@ -91,14 +95,16 @@ export function useStageTiles(states: VoiceState[], channelId?: Snowflake): Stag
   const streaming = useStreamingCheck();
   const watching = useVoice(s => !!channelId && s.channelId === channelId && !!s.watch[channelId]);
   const stremio = useVoice(s => !!channelId && s.channelId === channelId && !!s.stremio[channelId]);
+  const spotify = useVoice(s => !!channelId && s.channelId === channelId && !!s.spotify[channelId]);
   const game = useVoice(s => !!channelId && s.channelId === channelId && !!s.games[channelId]);
-  return stageTiles(states, streaming, watching, stremio, game);
+  return stageTiles(states, streaming, watching, stremio, spotify, game);
 }
 
 /** One tile of the stage as `variant`: the shared player, or a participant (their camera / stream). */
 function StageTileView({ tile, channelId, guildId, variant, onActivate }: { tile: StageTile; channelId: Snowflake; guildId: Snowflake | null; variant: TileVariant; onActivate?: () => void }) {
   if (tile.watch) return <WatchTile channelId={channelId} variant={variant} onActivate={onActivate} />;
   if (tile.stremio) return <StremioTile channelId={channelId} variant={variant} onActivate={onActivate} />;
+  if (tile.spotify) return <SpotifyTile channelId={channelId} variant={variant} onActivate={onActivate} />;
   if (tile.game) return <GameTile channelId={channelId} variant={variant} onActivate={onActivate} />;
   return <Tile state={tile.state} guildId={guildId} variant={variant} stream={tile.stream} onActivate={onActivate} />;
 }
@@ -237,6 +243,7 @@ function useActivityItems(channel: Channel): MenuItem[] {
   return [
     { id: "watch-together", label: "Watch Together (YouTube)", icon: <MonitorPlay size={18} />, iconStart: true, sub: "Watch a YouTube video in sync", onSelect: () => (watching ? useVoiceUi.getState().setFocusedTile(WATCH_TILE_ID) : openModal({ type: "watchTogether", channelId: channel.id })) },
     { id: "stremio", label: "Stremio", icon: <StremioIcon size={18} />, iconStart: true, sub: "Play a movie or episode from your Stremio", onSelect: openStremioPanel },
+    { id: "spotify", label: "Spotify", icon: <SpotifyIcon size={18} />, iconStart: true, sub: "Play music for everyone in the call", onSelect: openSpotifyPanel },
     ...(games.length > 0 ? [{ type: "separator" as const }, ...games] : []),
   ];
 }
@@ -249,6 +256,7 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
   const screenOn = useMedia(s => s.screenOn);
   const watching = useVoice(s => !!s.watch[channel.id]);
   const stremioOpen = useStremioPanel(s => s.open);
+  const spotifyOpen = useSpotifyPanel(s => s.open);
   const menu = useContextMenu();
   const { micItems } = useDeviceMenus();
   const chatOpen = useVoiceUi(s => s.chatOpen);
@@ -296,7 +304,7 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
         </BarButton>
         <BarButton
           label="Activities"
-          active={stremioOpen}
+          active={stremioOpen || spotifyOpen}
           onClick={e => menu.open(below(e), activityItems)}
         >
           <LayoutGrid size={20} />
@@ -473,6 +481,7 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
   const elsewhere = useVoice(s => s.channelId !== null && s.channelId !== channel.id);
   const chatOpen = useVoiceUi(s => s.chatOpen);
   const stremioOpen = useStremioPanel(s => s.open);
+  const spotifyOpen = useSpotifyPanel(s => s.open);
   const tiles = useStageTiles(states, channel.id);
   // Count tiles, not people: someone alone in the call who streams still has two (their camera and their screen).
   const multiple = tiles.length > 1;
@@ -494,7 +503,7 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
   // Not for the Watch Together tile: asking for it (the dialog's Start) can land before the session's event does, and it simply
   // is not on the stage again until a session exists. The same goes for the Stremio tile.
   useEffect(() => {
-    if (focusedId && focusedId !== WATCH_TILE_ID && focusedId !== STREMIO_TILE_ID && focusedId !== GAME_TILE_ID && !focused) useVoiceUi.getState().setFocusedTile(null);
+    if (focusedId && focusedId !== WATCH_TILE_ID && focusedId !== STREMIO_TILE_ID && focusedId !== SPOTIFY_TILE_ID && focusedId !== GAME_TILE_ID && !focused) useVoiceUi.getState().setFocusedTile(null);
   }, [focusedId, focused]);
 
   // Escape leaves focus mode. Capture phase, so it runs before the shell's Escape (mark as read), which skips prevented events.
@@ -550,6 +559,7 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
         </div>
       )}
       {stremioOpen && connected && <StremioPanel channelId={channel.id} />}
+      {spotifyOpen && connected && <SpotifyPanel channelId={channel.id} />}
       {chatOpen && <VoiceChatPanel channel={channel} />}
     </section>
   );

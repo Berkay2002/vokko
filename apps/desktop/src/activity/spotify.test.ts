@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiRequestError } from "../api/rest";
+import type { SpotifySearchResults, SpotifyTrack } from "../api/types";
 import { activityListIsValid } from "../api/mock/activities";
 import type { NowPlaying } from "../desktop/spotify";
 import { listeningActivity, shownActivity, spotifyImageUrl, spotifyOpenUrl } from "./format";
-import { sameSpotifyMoment, spotifyActivity } from "./spotify";
+import { lookUpTrack, matchTrack, resetTrackLookups, sameSpotifyMoment, spotifyActivity, withCatalog } from "./spotify";
 
 const IMAGE = "ab67616d00001e02e0f5c2a1b3d4e5f60718293a";
 const track = (over: Partial<NowPlaying> = {}): NowPlaying => ({
@@ -81,5 +83,50 @@ describe("Spotify display helpers", () => {
     expect(shownActivity({ activities: [activity, game] })).toBe(game);
     expect(shownActivity({ activities: [activity] })).toBe(activity);
     expect(listeningActivity({ activities: [game] })).toBeNull();
+  });
+});
+
+describe("Windows track lookup", () => {
+  const hit = (over: Partial<SpotifyTrack> = {}): SpotifyTrack => ({ uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC", title: "One More Time", artists: ["Daft Punk"], art: IMAGE, duration_ms: 320_000, explicit: false, ...over });
+  const results = (tracks: SpotifyTrack[]): SpotifySearchResults => ({ tracks, albums: [], artists: [], playlists: [] });
+  beforeEach(() => resetTrackLookups());
+
+  it("takes the first result with the same name whose artists include the first artist", () => {
+    const cover = hit({ uri: "spotify:track:0000000000000000000000", artists: ["Someone Else"] });
+    expect(matchTrack("one more time", "DAFT PUNK", [cover, hit()])).toEqual({ sync_id: "4uLU6hMCjMI75M1A2tKUQC", image: IMAGE });
+    expect(matchTrack("One More Time (Live)", "Daft Punk", [hit()])).toBeNull();
+    expect(matchTrack("One More Time", "Daft Punk", [hit({ art: "not-hex" })])).toEqual({ sync_id: "4uLU6hMCjMI75M1A2tKUQC" });
+    expect(matchTrack("One More Time", "Daft Punk", [hit({ uri: "spotify:episode:4uLU6hMCjMI75M1A2tKUQC" })])).toBeNull();
+  });
+
+  it("asks once per track, hits and misses alike, with Spotify's field filters", async () => {
+    const find = vi.fn(async (q: string) => results(q.includes("One More Time") ? [hit()] : []));
+    expect(await lookUpTrack("One More Time", "Daft Punk", find)).toMatchObject({ sync_id: "4uLU6hMCjMI75M1A2tKUQC" });
+    expect(find).toHaveBeenCalledWith('track:"One More Time" artist:"Daft Punk"');
+    await lookUpTrack("one more time", "daft punk", find);
+    expect(await lookUpTrack("Unknown", "Nobody", find)).toBeNull();
+    expect(await lookUpTrack("Unknown", "Nobody", find)).toBeNull();
+    expect(find).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back quietly: a failure is a miss, and 404 10000 turns lookups off for the session", async () => {
+    const limited = vi.fn(async () => Promise.reject(new ApiRequestError(429, { code: 0, message: "slow down" })));
+    expect(await lookUpTrack("A", "B", limited)).toBeNull();
+    const off = vi.fn(async () => Promise.reject(new ApiRequestError(404, { code: 10000, message: "Unknown" })));
+    expect(await lookUpTrack("C", "D", off)).toBeNull();
+    const find = vi.fn(async () => results([hit()]));
+    expect(await lookUpTrack("One More Time", "Daft Punk", find)).toBeNull();
+    expect(find).not.toHaveBeenCalled();
+    expect(await lookUpTrack("x".repeat(100), "Daft Punk", find)).toBeNull();
+  });
+
+  it("adds the id and art only to an activity without them, in a shape the server accepts", () => {
+    const windows = spotifyActivity(track({ track_id: null, image_id: null }), 1_000_000)!;
+    const filled = withCatalog(windows, { sync_id: "4uLU6hMCjMI75M1A2tKUQC", image: IMAGE });
+    expect(filled).toMatchObject({ sync_id: "4uLU6hMCjMI75M1A2tKUQC", assets: { large_image: `spotify:${IMAGE}` } });
+    expect(activityListIsValid([filled])).toBe(true);
+    expect(withCatalog(windows, null)).toBe(windows);
+    const mac = spotifyActivity(track(), 1_000_000)!;
+    expect(withCatalog(mac, { sync_id: "0000000000000000000000" })).toBe(mac);
   });
 });

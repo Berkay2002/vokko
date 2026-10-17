@@ -5,7 +5,7 @@
 import { create } from "zustand";
 import type { Snowflake } from "../api/types";
 import type { VideoHandle } from "../voice/mediaStore";
-import { ViewerConnection, type RoomState } from "./viewerConnection";
+import { ViewerConnection, type MediaKind, type RoomState } from "./viewerConnection";
 import type { VideoStats } from "./viewerStats";
 
 export interface ViewerSlot {
@@ -55,8 +55,8 @@ let active: { key: string; connection: ViewerConnection } | null = null;
 let output = 1;
 
 /** Opens the viewer Room for `target`, or closes it for null. Calling it again with the same target does nothing. */
-export function syncViewer(target: { channelId: Snowflake; bot: string } | null): void {
-  const key = target ? `${target.channelId}:${target.bot}` : "";
+export function syncViewer(target: { channelId: Snowflake; bot: string; kind: MediaKind } | null): void {
+  const key = target ? `${target.channelId}:${target.bot}:${target.kind}` : "";
   if ((active?.key ?? "") === key) return;
   active?.connection.close();
   active = null;
@@ -69,7 +69,7 @@ export function syncViewer(target: { channelId: Snowflake; bot: string } | null)
   const publish = (patch: Partial<ViewerSlot>) => {
     if (active === mine) useViewerStore.setState(s => ({ channelId: target.channelId, slot: { ...(s.channelId === target.channelId ? s.slot : IDLE_SLOT), ...patch } }));
   };
-  mine.connection = new ViewerConnection(target.channelId, target.bot, output, { room: room => publish({ room }), video: video => publish({ video }), blocked: blocked => publish({ blocked }) });
+  mine.connection = new ViewerConnection(target.channelId, target.bot, target.kind, output, { room: room => publish({ room }), video: video => publish({ video }), blocked: blocked => publish({ blocked }) });
 }
 
 export function setViewerOutput(volume: number): void {

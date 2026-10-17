@@ -26,6 +26,7 @@ import { db, type MockChannel } from "./db";
 import { fail, MISSING_PERMISSIONS, requireChannel } from "./ops";
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
+import { spotifyOf } from "./spotify";
 import { voiceAudience, voiceStates } from "./voice";
 
 export const MOCK_STREMIO_ENDPOINT = "mock://stremio";
@@ -323,6 +324,7 @@ route("PUT", `/channels/${ID}/stremio`, ({ viewer, params, body }) => {
   const channel = connectedChannel(viewer.user.id, params[0] ?? "");
   requireLinked(viewer.user.id);
   const picked = candidate(viewer.user.id, "sid", body.sid);
+  if (spotifyOf(channel.id)) fail(409, 40034, "Another media activity is running in this channel. Stop the music first.");
   const at = body.position_ms;
   if (at !== undefined && (typeof at !== "number" || !Number.isInteger(at) || at < 0 || at > STREMIO_POSITION_MAX_MS)) invalid("position_ms", `Must be between 0 and ${STREMIO_POSITION_MAX_MS}.`);
   const current = sessions.get(channel.id);

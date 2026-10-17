@@ -1,13 +1,16 @@
 // One call's viewer Room with its retries: it connects as soon as it is made and disconnects on close(). Keyed by the caller on
-// (channel, bot) only: a pause or seek must never reconnect. viewerStore.ts owns the single instance of a call.
+// (channel, bot) only: a pause or seek must never reconnect. viewerStore.ts owns the single instance of a call. `kind` picks the
+// token route: a channel has at most one media activity (Stremio or Spotify), and both play through this one Room.
 
 import type { Snowflake } from "../api/types";
 import type { VideoHandle } from "../voice/mediaStore";
+import { listenerToken } from "../spotify/api";
 import { viewerToken } from "./api";
 import { createViewer, type Viewer } from "./viewer";
 import type { VideoStats } from "./viewerStats";
 
 export type RoomState = "connecting" | "connected" | "closed" | "failed";
+export type MediaKind = "stremio" | "spotify";
 
 export interface ConnectionHooks {
   room(state: RoomState): void;
@@ -26,6 +29,7 @@ export class ViewerConnection {
   constructor(
     private readonly channelId: Snowflake,
     private readonly botIdentity: string,
+    private readonly kind: MediaKind,
     private volume: number,
     private readonly hooks: ConnectionHooks,
   ) {
@@ -65,7 +69,7 @@ export class ViewerConnection {
   private async open(): Promise<void> {
     let current: Viewer | null = null;
     try {
-      const { url, token } = await viewerToken(this.channelId);
+      const { url, token } = await (this.kind === "spotify" ? listenerToken : viewerToken)(this.channelId);
       if (this.closed) return;
       const old = this.viewer;
       this.viewer = null;

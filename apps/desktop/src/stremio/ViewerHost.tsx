@@ -1,7 +1,9 @@
-// Mounted once with the app shell: it opens the viewer Room of the call we are in while that call has a Stremio session
-// (viewerStore.ts) and closes it when either ends. The tiles never connect, whatever the layout does to them.
+// Mounted once with the app shell: it opens the viewer Room of the call we are in while that call has a Stremio or Spotify session
+// (viewerStore.ts; at most one media activity per channel) and closes it when either ends. The tiles never connect, whatever the
+// layout does to them.
 
 import { useEffect } from "react";
+import { useSpotifyVolume } from "../spotify/volume";
 import { useVoice } from "../voice/store";
 import { readViewerStats, setViewerOutput, syncViewer, useViewerStore } from "./viewerStore";
 
@@ -24,29 +26,34 @@ function debugOn(): boolean {
 
 export function StremioViewerHost() {
   const channelId = useVoice(s => s.channelId);
-  const bot = useVoice(s => (s.channelId ? s.stremio[s.channelId]?.bot_identity : undefined));
+  const stremioBot = useVoice(s => (s.channelId ? s.stremio[s.channelId]?.bot_identity : undefined));
+  const spotifyBot = useVoice(s => (s.channelId ? s.spotify[s.channelId]?.bot_identity : undefined));
+  const kind = stremioBot ? "stremio" : spotifyBot ? "spotify" : null;
+  const bot = stremioBot ?? spotifyBot;
   const deaf = useVoice(s => s.selfDeaf);
-  const volume = useViewerStore(s => s.volume);
+  const stremioVolume = useViewerStore(s => s.volume);
+  const spotifyVolume = useSpotifyVolume(s => s.volume);
+  const volume = kind === "spotify" ? spotifyVolume : stremioVolume;
 
   useEffect(() => {
     setViewerOutput(deaf ? 0 : volume / 100);
   }, [deaf, volume]);
 
   useEffect(() => {
-    syncViewer(channelId && bot ? { channelId, bot } : null);
-  }, [channelId, bot]);
+    syncViewer(channelId && bot && kind ? { channelId, bot, kind } : null);
+  }, [channelId, bot, kind]);
 
   useEffect(() => () => syncViewer(null), []);
 
   useEffect(() => {
-    if (!channelId || !bot || !debugOn()) return;
+    if (!channelId || !stremioBot || !debugOn()) return;
     window.__vokkoStremio = { stats: readViewerStats };
     const timer = setInterval(() => void readViewerStats().then(s => s && console.info("[stremio] receive", s)), 5000);
     return () => {
       clearInterval(timer);
       delete window.__vokkoStremio;
     };
-  }, [channelId, bot]);
+  }, [channelId, stremioBot]);
 
   return null;
 }
