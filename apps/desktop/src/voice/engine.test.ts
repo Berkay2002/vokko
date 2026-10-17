@@ -2,7 +2,7 @@
 // The gateway, REST and sounds are faked; transports come from setTransportFactory.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { GatewayEvents, VoiceState, VoiceStateUpdateCommand } from "../api/types";
+import { ChannelType, type Channel, type GatewayEvents, type VoiceState, type VoiceStateUpdateCommand } from "../api/types";
 import type { TransportCallbacks, TransportOptions, VoiceTransport } from "./transport";
 
 const gw = vi.hoisted(() => ({
@@ -205,6 +205,38 @@ describe("voice engine: media reconnect", () => {
     expect(qualities).toEqual(["200:screen:720p"]);
   });
 
+  const reidentify = () =>
+    emit("READY", { v: 1, user: { id: ME }, session_id: "gw-2", guilds: [], private_channels: [], media: { voice_enabled: true } } as unknown as GatewayEvents["READY"]);
+
+  it("a gateway reconnect with the same voice session keeps the Room: the server re-binds us without a token", async () => {
+    await startCall();
+    slow!.connected();
+    reidentify();
+    expect(op4s()).toHaveLength(1);
+    // The server's answer: our state, same voice session, no VOICE_SERVER_UPDATE.
+    emit("VOICE_STATE_UPDATE", ownState("s1"));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(slow?.connects).toHaveLength(1);
+    expect(slow?.disconnects).toBe(0);
+    expect(op4s()).toHaveLength(1);
+    expect(store.getVoice()).toMatchObject({ status: "connected", channelId: GENERAL, sessionId: "s1", pendingJoin: false });
+  });
+
+  it("a gateway reconnect while media is down asks for a token on the new session at once, and the reconnect resumes the call", async () => {
+    await startCall();
+    slow!.connected();
+    slow!.failed();
+    reidentify();
+    // One op 4 re-binds, the next (now on the bound session) asks for a token; no wait for the backoff.
+    expect(op4s()).toHaveLength(2);
+    serverUpdate("t2", "s1");
+    await flush();
+    expect(slow?.connects.map(c => [c.token, c.options.resume])).toEqual([
+      ["t1", false],
+      ["t2", true],
+    ]);
+  });
+
   it("an unanswered op 4 is re-sent only after the token wait", async () => {
     await startCall();
     slow!.connected();
@@ -379,5 +411,22 @@ describe("voice engine: camera and screen share together", () => {
     expect(Object.keys(media.getMedia().videos)).toEqual([`${ME}:screen`]);
     expect(t.screen).toEqual(choice);
     expect(gw.sent.at(-1)).toMatchObject({ self_video: false, self_stream: true });
+  });
+});
+
+describe("voice engine: no WebRTC (the Linux app's WebKitGTK)", () => {
+  it("refuses a join with webrtc_unsupported against a real server, and allows it once RTCPeerConnection exists", async () => {
+    vi.resetModules();
+    vi.doMock("../api/config", async orig => ({ ...(await orig<typeof import("../api/config")>()), MOCK: false }));
+    gw.handlers.clear();
+    const real = await import("./engine");
+    real.wireVoice();
+    emit("READY", { v: 1, user: { id: ME }, session_id: "gw-1", guilds: [], private_channels: [], media: { voice_enabled: true } } as unknown as GatewayEvents["READY"]);
+    const dm = { id: "30", type: ChannelType.DM } as Channel;
+    expect(real.joinRefusal(dm)).toBe("webrtc_unsupported");
+    vi.stubGlobal("RTCPeerConnection", class {});
+    expect(real.joinRefusal(dm)).toBeNull();
+    vi.unstubAllGlobals();
+    vi.doUnmock("../api/config");
   });
 });

@@ -3182,11 +3182,12 @@ img.active-card-art {
 }
 
 /* ---- auth ---- */
+/* the card centres with auto margins rather than align-items, so a card taller than the window scrolls from its top */
 .auth-page {
   display: flex;
-  align-items: center;
-  justify-content: center;
   height: 100%;
+  padding: 16px 0;
+  overflow-y: auto;
   /* the theme's accent fading into its darkest surface, so the login page follows the chosen theme */
   background: radial-gradient(
     circle at 20% 20%,
@@ -3198,8 +3199,10 @@ img.active-card-art {
 }
 
 .auth-card {
+  flex: none;
   width: 480px;
   max-width: calc(100vw - 32px);
+  margin: auto;
   padding: 32px;
   border-radius: var(--radius-md);
   background: var(--modal-background);

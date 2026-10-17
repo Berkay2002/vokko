@@ -4,7 +4,7 @@
 
 import type { LocalVideoTrack } from "livekit-client";
 import { withDeviceFallback } from "../devices";
-import type { BackgroundChoice } from "./backgrounds";
+import { NO_BACKGROUND, type BackgroundChoice } from "./backgrounds";
 import { BackgroundController } from "./processor";
 import { buildCamera, type CameraResolution } from "./options";
 
@@ -14,6 +14,8 @@ export interface CameraSession {
   attach(element: HTMLVideoElement): void;
   detach(element: HTMLVideoElement): void;
   setBackground(choice: BackgroundChoice): Promise<void>;
+  /** The background last applied (none until one is). */
+  background(): BackgroundChoice;
   /** Stops the capture and the processor. The session is not used again. */
   stop(): Promise<void>;
 }
@@ -111,13 +113,18 @@ export async function openCamera(options: OpenCameraOptions): Promise<CameraSess
     }
   }
   const controller = new BackgroundController(track);
+  let background = NO_BACKGROUND;
   let stopped = false;
   return {
     track,
     deviceId,
     attach: element => void track.attach(element),
     detach: element => void track.detach(element),
-    setBackground: choice => controller.set(choice),
+    setBackground: async choice => {
+      await controller.set(choice);
+      background = choice;
+    },
+    background: () => background,
     stop: async () => {
       if (stopped) return;
       stopped = true;

@@ -35,6 +35,7 @@ export const VOICE_ERROR_TEXT: Record<VoiceErrorReason, string> = {
   connection_lost: "Lost the voice connection and could not reconnect.",
   permission_denied: "Microphone access was denied. Others can't hear you.",
   no_microphone: "No microphone found. Others can't hear you.",
+  webrtc_unsupported: "Voice calls and screen sharing don't work in the Linux app yet. Use Vokko in your browser for calls.",
 };
 
 export const QUALITY_LABEL: Record<ConnectionQuality, string> = { excellent: "Excellent", good: "Good", poor: "Poor", lost: "Lost", unknown: "Unknown" };

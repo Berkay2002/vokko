@@ -78,7 +78,7 @@ impl AppState {
         let unfurler = Unfurler::new(config.unfurl);
         let accounts = Accounts::new(&config.accounts);
         let gifs = GifProxy::new(config.gif.clone(), config.unfurl.allow_private);
-        let embed_media = crate::embed_media::EmbedMediaProxy::new(config.unfurl.allow_private);
+        let embed_media = crate::embed_media::EmbedMediaProxy::new(config.unfurl.allow_private, config.data_dir.join("embed-media"));
         let voice = Voice::new(rooms, &config);
         let stremio = crate::stremio::Stremio::new(&config.stremio);
         let spotify = crate::spotify::Spotify::new(&config.spotify);

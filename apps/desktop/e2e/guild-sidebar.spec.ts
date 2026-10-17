@@ -72,6 +72,9 @@ test('1. server header: dropdown items, per-server profile, hide muted, banner v
 
   await menu.getByRole('menuitem', { name: 'Edit Per-server Profile' }).click();
   await expect(page.getByRole('heading', { name: 'Profiles' })).toBeVisible();
+  // Opens on the per-server tab with this server picked.
+  await expect(page.getByRole('tab', { name: 'Per-server profiles' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('combobox', { name: 'Server', exact: true })).toContainText("Sam's server");
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'Profiles' })).toHaveCount(0);
 

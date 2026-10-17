@@ -15,13 +15,14 @@ import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
 import { openProfile } from "./ProfileCard";
 import { userAppsItems } from "../apps/menus";
-import { serverSettingsSections } from "./ServerSettings";
+import { serverSettingsSections } from "./settings/serverSections";
 import { voiceModerationItems, voiceUserMenuItems } from "../voice/voiceMenus";
 import { moveToCategory, stepChannel } from "../guild/moves";
 import { stepTarget } from "../guild/reorder";
 import { getVoice } from "../voice/store";
 import { useVoiceUi } from "../voice/uiStore";
 import { getPrefs } from "../ui/prefs";
+import { callUser, startCall } from "../calls/engine";
 
 /** Settings > Advanced > Developer Mode adds the "Copy … ID" items. */
 const devOnly = (items: MenuItem[]): MenuItem[] => (getPrefs().developerMode ? items : []);
@@ -32,6 +33,8 @@ const copy = (text: string) => () => copyText(text);
 const sep: MenuItem = { type: "separator" };
 const local = () => useLocalState.getState();
 const unavailable = (id: string, label: string, icon?: ReactNode): MenuItem => ({ id, label, icon, disabled: true, tooltip: UNAVAILABLE });
+/** User Settings > Profiles, on the per-server tab with this server picked. */
+const editServerProfile = (guildId: Snowflake) => openModal({ type: "userSettings", section: "profiles", guildId });
 
 /** Groups separated by separators; empty groups are dropped. */
 function groups(...lists: MenuItem[][]): MenuItem[] {
@@ -148,7 +151,7 @@ export function guildContextItems(guild: Guild): MenuItem[] {
           ]
         : []),
       { id: "privacy", label: "Privacy Settings", onSelect: () => openModal({ type: "guildPrivacy", guildId: guild.id }) },
-      unavailable("per-server-profile", "Edit Per-server Profile"),
+      { id: "per-server-profile", label: "Edit Per-server Profile", onSelect: () => editServerProfile(guild.id) },
     ],
     can(Perm.MANAGE_CHANNELS)
       ? [
@@ -206,7 +209,7 @@ function guildDropdownItemsPlain(guild: Guild): MenuItem[] {
       { id: "notifications", label: "Notification Settings", onSelect: () => openModal({ type: "notificationSettings", scopeId: guild.id, title: guild.name, guild: true }) },
       { id: "privacy", label: "Privacy Settings", onSelect: () => openModal({ type: "guildPrivacy", guildId: guild.id }) },
     ],
-    [{ id: "per-server-profile", label: "Edit Per-server Profile", onSelect: () => openModal({ type: "userSettings", section: "profiles" }) }, hideMutedItem(guild)],
+    [{ id: "per-server-profile", label: "Edit Per-server Profile", onSelect: () => editServerProfile(guild.id) }, hideMutedItem(guild)],
     owner ? [] : [{ id: "leave", label: "Leave Server", danger: true, onSelect: () => openModal({ type: "leaveServer", guildId: guild.id }) }],
     devOnly([{ id: "copy-id", label: "Copy Server ID", onSelect: copy(guild.id) }]),
   );
@@ -378,11 +381,11 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
     [
       { id: "profile", label: "Profile", disabled: !anchor, onSelect: () => anchor && openProfile(anchor, user.id, options.guildId ?? null) },
       options.onMention ? { id: "mention", label: "Mention", onSelect: () => options.onMention?.(user) } : unavailable("mention", "Mention"),
-      ...(isMe ? [] : [{ id: "message", label: "Message", onSelect: () => void openDirectMessage(user.id) } satisfies MenuItem, unavailable("call", "Start a Call")]),
+      ...(isMe ? [] : [{ id: "message", label: "Message", onSelect: () => void openDirectMessage(user.id) } satisfies MenuItem, { id: "call", label: "Start a Call", onSelect: () => void callUser(user.id) } satisfies MenuItem]),
     ],
     voiceUserMenuItems(user.id),
     isMe
-      ? [unavailable("per-server-profile", "Edit Per-server Profile"), ...(mayNick ? [{ id: "change-nickname", label: "Change Nickname", onSelect: () => openModal({ type: "nickname", ...target }) } satisfies MenuItem] : [])]
+      ? [...(guild ? [{ id: "per-server-profile", label: "Edit Per-server Profile", onSelect: () => editServerProfile(guild.id) } satisfies MenuItem] : []), ...(mayNick ? [{ id: "change-nickname", label: "Change Nickname", onSelect: () => openModal({ type: "nickname", ...target }) } satisfies MenuItem] : [])]
       : [
           unavailable("invite-to-server", "Invite to Server"),
           ...relationshipItems(user, options.guildId),
@@ -425,7 +428,7 @@ export function dmContextItems(channel: Channel, options: { anchor?: HTMLElement
     other
       ? [
           { id: "profile", label: "Profile", disabled: !options.anchor, onSelect: () => options.anchor && openProfile(options.anchor, other.id, null) },
-          unavailable("call", "Start a Call"),
+          { id: "call", label: "Start a Call", onSelect: () => void startCall(channel) },
         ]
       : [],
     other ? relationshipItems(other) : [],

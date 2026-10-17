@@ -121,6 +121,32 @@ test('chess: fool\'s mate between two copies', async ({ browser }) => {
   await shot(white, 'chess-end');
 });
 
+test('chess: a pawn on the last rank asks which piece it becomes', async ({ browser }) => {
+  test.setTimeout(120_000);
+  const sides = await open(browser, ['sam', 'alice'], 'builtin:chess', 'Chess');
+  const [white, black] = sides as [Side, Side];
+  await sit(white, 'White', sides);
+  await sit(black, 'Black', sides);
+  await game(black).getByRole('button', { name: 'Start' }).click();
+  const play = async (s: Side, from: string, to: string, next: string) => {
+    await game(s).locator(`[data-square="${from}"]`).click();
+    await game(s).locator(`[data-square="${to}"]`).click();
+    for (const o of sides) await expect(status(o)).toHaveText(next);
+  };
+  await expect(status(white)).toHaveText('White to move', { timeout: 15_000 });
+  const moves = [['h2', 'h4'], ['g7', 'g5'], ['h4', 'g5'], ['h7', 'h6'], ['g5', 'h6'], ['f8', 'g7'], ['h6', 'g7'], ['a7', 'a6']] as const;
+  for (const [i, [from, to]] of moves.entries()) await play(i % 2 ? black : white, from, to, i % 2 ? 'White to move' : 'Black to move');
+  await game(white).locator('[data-square="g7"]').click();
+  await game(white).locator('[data-square="h8"]').click();
+  const picker = game(white).getByRole('menu', { name: 'Promote to' });
+  await expect(picker.getByRole('menuitem')).toHaveCount(4);
+  await expect(status(white)).toHaveText('White to move'); // nothing sent until a piece is picked
+  await shot(white, 'chess-promotion');
+  await picker.getByRole('menuitem', { name: 'Knight' }).click();
+  for (const o of sides) await expect(status(o)).toHaveText('Black to move');
+  await expect(game(black).getByRole('list', { name: 'Moves' })).toContainText('gxh8=N');
+});
+
 test('four in a row: a vertical four wins', async ({ browser }) => {
   test.setTimeout(120_000);
   const sides = await open(browser, ['sam', 'alice'], 'builtin:four-in-a-row', 'Four in a Row');

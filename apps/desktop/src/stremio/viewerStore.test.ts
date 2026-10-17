@@ -6,6 +6,7 @@ vi.mock("./api", () => ({ viewerToken: token }));
 vi.mock("../spotify/api", () => ({ listenerToken: listener }));
 
 const { IDLE_SLOT, botOutput, botVolumeKey, syncViewer, useViewerStore } = await import("./viewerStore");
+await import("./viewer"); // viewerConnection loads it lazily: have it cached before the fake timers start
 
 const slot = () => useViewerStore.getState().slot;
 const target = { channelId: "c1", bot: "bot:stremio:c1", kind: "stremio" as const };
@@ -66,6 +67,15 @@ describe("the call's viewer Room", () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(token).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays unsupported, without retries, on a real server in a webview with no WebRTC (the Linux app)", async () => {
+    token.mockResolvedValue({ url: "wss://live.example", token: "t" });
+    syncViewer(target);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(slot().room).toBe("unsupported");
+    expect(token).toHaveBeenCalledTimes(1);
+    token.mockResolvedValue({ url: "mock://stremio", token: "t" });
   });
 });
 

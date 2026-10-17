@@ -1,14 +1,27 @@
 // Camera, screen share and remote video for the LiveKit transport (kept apart from livekitTransport.ts, which owns the
 // microphone and the room). Cameras are subscribed as soon as they are published; screen shares and their audio only
 // while the user watches them (docs/design/voice.md §3.1). Our own camera is the preview's track, published as is.
+// A reconnect into the same call keeps our camera and screen share and publishes them again in the new room.
 
-import { Track, TrackEvent, VideoPreset, VideoQuality, type LocalTrackPublication, type RemoteParticipant, type RemoteTrack, type RemoteTrackPublication, type Room, type TrackPublishOptions } from "livekit-client";
+import {
+  Track,
+  TrackEvent,
+  VideoPreset,
+  VideoQuality,
+  type LocalTrack,
+  type LocalTrackPublication,
+  type RemoteParticipant,
+  type RemoteTrack,
+  type RemoteTrackPublication,
+  type Room,
+  type TrackPublishOptions,
+} from "livekit-client";
 import type { Snowflake } from "../api/types";
 import { hideShareBar } from "../desktop/window";
 import type { VideoHandle, VideoSource } from "./mediaStore";
 import type { CameraStart, TransportCallbacks } from "./transport";
 import { openCamera, type CameraSession } from "./video/cameraSession";
-import { buildCamera, buildScreenShare, detectCodecSupport, serverTakesSvcSimulcast, viewerRequest, type EncodingPlan, type LayerQuality, type PlainPreset, type ScreenShareChoice, type StreamLayer, type ViewerQuality } from "./video/options";
+import { buildCamera, buildScreenShare, detectCodecSupport, serverTakesSvcSimulcast, viewerRequest, type CameraResolution, type EncodingPlan, type LayerQuality, type PlainPreset, type ScreenShareChoice, type StreamLayer, type ViewerQuality } from "./video/options";
 
 const toPresets = (layers: PlainPreset[]): VideoPreset[] => layers.map(l => new VideoPreset({ width: l.width, height: l.height, maxBitrate: l.maxBitrate, maxFramerate: l.maxFramerate }));
 
@@ -38,15 +51,36 @@ export function layersOf(pub: Pick<RemoteTrackPublication, "trackInfo">): Stream
   });
 }
 
+// An SFU too old for VP9 / AV1 simulcast would get one layer: VP8 / H.264 simulcast instead, as on WebKit.
+function screenRequest(room: Room, choice: ScreenShareChoice) {
+  const support = detectCodecSupport();
+  return buildScreenShare(choice, { ...support, svcSimulcast: support.svcSimulcast !== false && serverTakesSvcSimulcast(room.serverInfo?.version) });
+}
+
 function errorName(error: unknown): string {
   return (error as { name?: string } | null)?.name ?? "";
 }
 
+const live = (track: LocalTrack | undefined): track is LocalTrack => track?.mediaStreamTrack.readyState === "live";
+
+interface CameraCapture {
+  session: CameraSession;
+  resolution: CameraResolution;
+}
+
+/** A screen share's capture: the video track and, when shared, its audio. */
+interface ScreenCapture {
+  tracks: LocalTrack[];
+  choice: ScreenShareChoice;
+}
+
 export class LiveKitVideo {
-  private camera: { session: CameraSession; publication: LocalTrackPublication; room: Room } | null = null;
+  private camera: (CameraCapture & { publication: LocalTrackPublication; room: Room }) | null = null;
   private cameraStarting = false;
-  private screen: { publication: LocalTrackPublication; room: Room } | null = null;
+  private screen: (ScreenCapture & { publication: LocalTrackPublication; room: Room }) | null = null;
   private screenStarting = false;
+  /** What we published when the room went away for a reconnect: published again by resume(), stopped by reset(false). */
+  private carried: { camera: CameraCapture | null; screen: ScreenCapture | null } = { camera: null, screen: null };
   private readonly watching = new Set<Snowflake>();
   private readonly qualities = new Map<string, ViewerQuality>();
 
@@ -79,34 +113,46 @@ export class LiveKitVideo {
         if (owned) await session.stop();
         return;
       }
-      const plan = buildCamera(start.resolution).publish;
-      const publication = await room.localParticipant.publishTrack(session.track, { ...publishOptions(plan, false), source: Track.Source.Camera, name: "camera" });
-      if (this.room() !== room) {
-        // Left (or reconnected into another room) while publishing: nothing may keep the camera running.
-        await room.localParticipant.unpublishTrack(session.track, false).catch(() => undefined);
-        await session.stop().catch(() => undefined);
-        return;
-      }
-      this.camera = { session, publication, room };
-      const ended = () => {
-        if (this.camera?.session !== session) return;
-        void this.stopCamera().then(() => this.cb.localVideoEnded?.("camera"));
-      };
-      session.track.once(TrackEvent.Ended, ended);
-      const id = this.selfId();
-      if (id) this.cb.video?.(id, "camera", handleOf(session));
+      await this.publishCamera(room, { session, resolution: start.resolution });
     } catch (error) {
       if (session) await session.stop().catch(() => undefined);
-      const name = errorName(error);
-      this.cb.videoFailed?.("camera", name === "NotAllowedError" || name === "SecurityError" ? "permission_denied" : name === "NotFoundError" || name === "OverconstrainedError" || name === "DevicesNotFoundError" ? "not_found" : "failed");
+      this.cameraFailed(error);
     } finally {
       this.cameraStarting = false;
     }
   }
 
+  private cameraFailed(error: unknown): void {
+    const name = errorName(error);
+    this.cb.videoFailed?.("camera", name === "NotAllowedError" || name === "SecurityError" ? "permission_denied" : name === "NotFoundError" || name === "OverconstrainedError" || name === "DevicesNotFoundError" ? "not_found" : "failed");
+  }
+
+  private async publishCamera(room: Room, capture: CameraCapture): Promise<void> {
+    const { session } = capture;
+    const plan = buildCamera(capture.resolution).publish;
+    const publication = await room.localParticipant.publishTrack(session.track, { ...publishOptions(plan, false), source: Track.Source.Camera, name: "camera" });
+    if (this.room() !== room) {
+      // Left (or reconnected into another room) while publishing: nothing may keep the camera running.
+      await room.localParticipant.unpublishTrack(session.track, false).catch(() => undefined);
+      await session.stop().catch(() => undefined);
+      return;
+    }
+    this.camera = { ...capture, publication, room };
+    const ended = () => {
+      if (this.camera?.session !== session) return;
+      void this.stopCamera().then(() => this.cb.localVideoEnded?.("camera"));
+    };
+    session.track.once(TrackEvent.Ended, ended);
+    const id = this.selfId();
+    if (id) this.cb.video?.(id, "camera", handleOf(session));
+  }
+
   private async stopCamera(): Promise<void> {
     const current = this.camera;
     this.camera = null;
+    const carried = this.carried.camera;
+    this.carried.camera = null;
+    await carried?.session.stop().catch(() => undefined);
     const id = this.selfId();
     if (id) this.cb.video?.(id, "camera", null);
     if (!current) return;
@@ -130,9 +176,7 @@ export class LiveKitVideo {
     // Armed before the picker opens, so WebView2's own sharing bar is hidden as it appears rather than after the publish.
     void hideShareBar();
     try {
-      // An SFU too old for VP9 / AV1 simulcast would get one layer: VP8 / H.264 simulcast instead, as on WebKit.
-      const support = detectCodecSupport();
-      const request = buildScreenShare(choice, { ...support, svcSimulcast: support.svcSimulcast !== false && serverTakesSvcSimulcast(room.serverInfo?.version) });
+      const request = screenRequest(room, choice);
       const publication = await room.localParticipant.setScreenShareEnabled(
         true,
         {
@@ -150,16 +194,11 @@ export class LiveKitVideo {
         else await room.localParticipant.setScreenShareEnabled(false).catch(() => undefined);
         return;
       }
-      this.screen = { publication, room };
+      const audio = room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)?.track;
+      const tracks = [publication.track, audio].filter((track): track is LocalTrack => !!track);
+      this.adoptScreen(room, publication, { tracks, choice });
       // The system picker decides whether audio comes along (Windows: a whole screen with "Share system audio" ticked).
       if (choice.audio && !room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)) this.cb.screenAudioMissing?.();
-      publication.track?.once(TrackEvent.Ended, () => {
-        if (this.screen?.publication !== publication) return;
-        void this.stopScreen().then(() => this.cb.localVideoEnded?.("screen"));
-      });
-      const id = this.selfId();
-      const track = publication.track;
-      if (id && track) this.cb.video?.(id, "screen", { attach: el => void track.attach(el), detach: el => void track.detach(el) });
     } catch (error) {
       const name = errorName(error);
       // Closing the browser's picker is a choice, not a failure.
@@ -170,13 +209,76 @@ export class LiveKitVideo {
     }
   }
 
+  private adoptScreen(room: Room, publication: LocalTrackPublication, capture: ScreenCapture): void {
+    this.screen = { ...capture, publication, room };
+    const [track] = capture.tracks;
+    track?.once(TrackEvent.Ended, () => {
+      if (this.screen?.publication !== publication) return;
+      void this.stopScreen().then(() => this.cb.localVideoEnded?.("screen"));
+    });
+    const id = this.selfId();
+    if (id && track) this.cb.video?.(id, "screen", { attach: el => void track.attach(el), detach: el => void track.detach(el) });
+  }
+
   private async stopScreen(): Promise<void> {
     const current = this.screen;
     this.screen = null;
+    for (const track of this.carried.screen?.tracks ?? []) track.stop();
+    this.carried.screen = null;
     const id = this.selfId();
     if (id) this.cb.video?.(id, "screen", null);
     if (!current) return;
     await current.room.localParticipant.setScreenShareEnabled(false).catch(() => undefined);
+  }
+
+  // ---- reconnect ----
+
+  /**
+   * The next room of the same call is joined: publish again what reset(true) kept. A screen share whose capture ended
+   * meanwhile stays off (a new one would need the picker); a camera LiveKit stopped with the lost room is opened again on
+   * the same device with the same background, or stays off when that fails (never a plain picture of the room).
+   */
+  async resume(): Promise<void> {
+    const { camera, screen } = this.carried;
+    this.carried = { camera: null, screen: null };
+    const room = this.room();
+    const id = this.selfId();
+    if (camera) {
+      let session: CameraSession | null = camera.session;
+      try {
+        if (!room || !this.joined()) throw new Error("not joined");
+        if (!live(session.track)) {
+          await session.stop();
+          session = null;
+          const reopened = await openCamera({ deviceId: camera.session.deviceId, resolution: camera.resolution });
+          session = reopened;
+          await reopened.setBackground(camera.session.background());
+        }
+        if (this.room() !== room) throw new Error("left");
+        await this.publishCamera(room, { session, resolution: camera.resolution });
+      } catch (error) {
+        await session?.stop().catch(() => undefined);
+        if (id) this.cb.video?.(id, "camera", null);
+        if (this.room() === room && room) this.cameraFailed(error);
+        else this.cb.localVideoEnded?.("camera");
+      }
+    }
+    if (screen) {
+      const [video, audio] = screen.tracks;
+      try {
+        if (!room || !this.joined() || !live(video)) throw new Error("ended");
+        const plan = screenRequest(room, screen.choice).publish;
+        const publication = await room.localParticipant.publishTrack(video, { ...publishOptions(plan, true), source: Track.Source.ScreenShare, name: "screen" });
+        if (live(audio)) await room.localParticipant.publishTrack(audio, { source: Track.Source.ScreenShareAudio, name: "screen_audio" });
+        if (this.room() !== room) throw new Error("left");
+        this.adoptScreen(room, publication, { tracks: live(audio) ? [video, audio] : [video], choice: screen.choice });
+      } catch {
+        if (this.room() === room) await room?.localParticipant.setScreenShareEnabled(false).catch(() => undefined);
+        for (const track of screen.tracks) track.stop();
+        if (id) this.cb.video?.(id, "screen", null);
+        this.cb.localVideoEnded?.("screen");
+      }
+    }
   }
 
   // ---- remote ----
@@ -238,8 +340,11 @@ export class LiveKitVideo {
     else pub.setVideoDimensions({ width: request.width, height: request.height });
   }
 
-  /** The room is gone: stop what we publish and forget watch / quality choices. */
-  async reset(): Promise<void> {
+  /**
+   * The room is gone: forget watch / quality choices and stop what we publish, or with `carry` (a reconnect into the same
+   * call) keep it for resume(). Runs its synchronous part before the caller disconnects the old room.
+   */
+  async reset(carry = false): Promise<void> {
     this.watching.clear();
     this.qualities.clear();
     // The room's listeners are gone before it disconnects, so no TrackUnsubscribed will clear these: every handle points at a
@@ -252,15 +357,29 @@ export class LiveKitVideo {
     const screen = this.screen;
     this.camera = null;
     this.screen = null;
+    if (carry) {
+      // Out of the old room first, without stopping: Room.disconnect() stops every local track still published. A camera
+      // or screen share LiveKit already stopped (the room was lost) is carried too; resume() decides what comes back.
+      for (const track of [camera?.session.track, ...(screen?.tracks ?? [])]) {
+        if (live(track)) void (camera?.room ?? screen?.room)?.localParticipant.unpublishTrack(track, false).catch(() => undefined);
+      }
+      if (camera) this.carried.camera = { session: camera.session, resolution: camera.resolution };
+      if (screen) this.carried.screen = { tracks: screen.tracks, choice: screen.choice };
+      return;
+    }
+    const carried = this.carried;
+    this.carried = { camera: null, screen: null };
     const id = this.selfId();
-    if (camera) {
+    if (camera || carried.camera) {
       if (id) this.cb.video?.(id, "camera", null);
       this.cb.localVideoEnded?.("camera");
     }
-    if (screen) {
+    if (screen || carried.screen) {
       if (id) this.cb.video?.(id, "screen", null);
       this.cb.localVideoEnded?.("screen");
     }
+    for (const track of carried.screen?.tracks ?? []) track.stop();
+    await carried.camera?.session.stop().catch(() => undefined);
     if (camera) await camera.session.stop().catch(() => undefined);
   }
 }

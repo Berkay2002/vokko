@@ -38,14 +38,22 @@ export function setUnauthorizedHandler(fn: Unauthorized | null): void {
   onUnauthorized = fn;
 }
 
-function toApiError(status: number, text: string): ApiError {
+/** Shown for every request that never got an answer (offline, DNS, refused, CORS). */
+export const OFFLINE_MESSAGE = "Can't reach Vokko. Check your connection.";
+
+/** The server's JSON error, or a short message: a proxy in front of it (Cloudflare tunnel, Caddy) answers with an HTML page
+ *  while the server is down or restarting, and that page must not become the error text. */
+export function toApiError(status: number, text: string): ApiError {
   try {
     const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === "object" && "code" in parsed && "message" in parsed) return parsed as ApiError;
   } catch {
     /* not JSON */
   }
-  return { code: 0, message: text || `HTTP ${status}` };
+  if (status === 502 || status === 503 || status === 504 || (status >= 520 && status <= 530)) return { code: 0, message: "Vokko is restarting, try again in a moment." };
+  const plain = text.trim();
+  if (plain && plain.length <= 200 && !plain.startsWith("<")) return { code: 0, message: plain };
+  return { code: 0, message: `Vokko had a problem (HTTP ${status}). Try again.` };
 }
 
 function failIfUnauthorized(status: number, path: string): void {
@@ -110,8 +118,8 @@ async function send<T>(method: Method, path: string, body: unknown, options: Req
   let response: Response;
   try {
     response = await fetch(`${REST_BASE}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  } catch (error) {
-    throw new ApiRequestError(0, { code: 0, message: error instanceof Error ? error.message : "Network error" });
+  } catch {
+    throw new ApiRequestError(0, { code: 0, message: OFFLINE_MESSAGE });
   }
   if (response.status === 204) return undefined as T;
   const text = await response.text();
@@ -138,7 +146,7 @@ export function uploadAttachment(channelId: string, file: File, onProgress?: (fr
     xhr.upload.onprogress = event => {
       if (event.lengthComputable) onProgress?.(event.loaded / event.total);
     };
-    xhr.onerror = () => reject(new ApiRequestError(0, { code: 0, message: "Network error" }));
+    xhr.onerror = () => reject(new ApiRequestError(0, { code: 0, message: OFFLINE_MESSAGE }));
     xhr.onabort = () => reject(new DOMException("Upload aborted", "AbortError"));
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {

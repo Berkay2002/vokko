@@ -17,7 +17,7 @@ import { Perm, hasBit } from "../permissions";
 import { canView, channelPermsOf, guildPermsOf } from "./access";
 import { fail, MISSING_PERMISSIONS } from "./ops";
 import { db, nextId, type MockChannel } from "./db";
-import { emit as emitAll, emitToSession as emitToSessionAll } from "./socket";
+import { emit as emitAll, emitToSession as emitToSessionAll, sessionLive } from "./socket";
 import { membersOf } from "./views";
 import { callJoined, callReleased, dmRefusal } from "./calls";
 import { endWatch, recountWatch, watchOf } from "./watch";
@@ -211,6 +211,15 @@ export function handleVoiceStateUpdate(sessionId: string, userId: string, cmd: V
     }
     // Unchanged op 4 from the bound session: the client reconnects; fresh token for the same voice session, no broadcast.
     emitToSession(sessionId, "VOICE_SERVER_UPDATE", serverUpdate(channel, userId, current.session_id));
+    return;
+  }
+  if (current && current.channel_id === channel.id && !sessionLive(owners.get(userId))) {
+    // Like the server: a new gateway session claims the call its gone predecessor held (server restart, re-identify). The
+    // client is still connected to the media, so the voice session stays and no token is sent.
+    const next = stageAware(channel, stateFor(userId, channel, current.session_id, cmd, current.connected_at), current);
+    voiceStates.set(userId, next);
+    owners.set(userId, sessionId);
+    broadcast(emit, next, channel);
     return;
   }
   // New binding (first join, move, other gateway session): new voice session id and token.

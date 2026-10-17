@@ -4,12 +4,14 @@
 
 import type { Snowflake } from "../api/types";
 import type { VideoHandle } from "../voice/mediaStore";
+import { isMockEndpoint } from "../voice/transport";
 import { listenerToken } from "../spotify/api";
 import { viewerToken } from "./api";
-import { createViewer, type Viewer } from "./viewer";
+import type { Viewer } from "./viewer";
 import type { VideoStats } from "./viewerStats";
 
-export type RoomState = "connecting" | "connected" | "closed" | "failed";
+/** "unsupported": the webview has no WebRTC (the Linux app's WebKitGTK), so the Room can never connect and is not retried. */
+export type RoomState = "connecting" | "connected" | "closed" | "failed" | "unsupported";
 export type MediaKind = "stremio" | "spotify";
 
 export interface ConnectionHooks {
@@ -70,6 +72,12 @@ export class ViewerConnection {
     let current: Viewer | null = null;
     try {
       const { url, token } = await (this.kind === "spotify" ? listenerToken : viewerToken)(this.channelId);
+      if (!isMockEndpoint(url) && typeof RTCPeerConnection === "undefined") {
+        if (!this.closed) this.hooks.room("unsupported");
+        return;
+      }
+      // Lazy: viewer.ts pulls in livekit-client, which the first screen must not download.
+      const { createViewer } = await import("./viewer");
       if (this.closed) return;
       const old = this.viewer;
       this.viewer = null;
