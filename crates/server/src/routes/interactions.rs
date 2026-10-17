@@ -384,6 +384,8 @@ async fn post_message(state: &AppState, row: &InteractionRow, request: &WebhookM
     if ephemeral {
         let author = store::user(state, row.application_id).await?.ok_or_else(ApiErr::unknown_application)?;
         let mentioned = store::users(state, &mentions.users).await?;
+        let mut embeds = embeds;
+        crate::embed_media::fill(state, &mut embeds);
         let message = Message {
             id: Snowflake::from(state.ids.next()),
             channel_id: Snowflake::from(channel.id),

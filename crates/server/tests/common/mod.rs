@@ -281,6 +281,16 @@ async fn serve_page(mut stream: tokio::net::TcpStream, hits: std::sync::Arc<std:
         "/loop" => ("302 Found", "text/plain", "Location: /loop\r\n".to_owned(), Vec::new()),
         "/image.png" => ("200 OK", "image/png", String::new(), vec![0x89, b'P', b'N', b'G']),
         "/text" => ("200 OK", "text/plain", String::new(), b"just text".to_vec()),
+        // a real 1x1 PNG header, a PNG-labelled HTML page, an SVG and a PNG past the embed-media cap
+        "/card.png" => ("200 OK", "image/png", String::new(), TINY_PNG.to_vec()),
+        "/to-card" => ("302 Found", "text/plain", "Location: /card.png\r\n".to_owned(), Vec::new()),
+        "/fake.png" => ("200 OK", "image/png", String::new(), b"<html><script>alert(1)</script></html>".to_vec()),
+        "/icon.svg" => ("200 OK", "image/svg+xml", String::new(), b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".to_vec()),
+        "/huge.png" => {
+            let mut body = TINY_PNG.to_vec();
+            body.resize(9 * 1024 * 1024, 0);
+            ("200 OK", "image/png", String::new(), body)
+        }
         "/late" => {
             // The Open Graph tags start after the 1 MiB cap.
             let mut html = String::from("<html><head>");
@@ -318,3 +328,7 @@ impl Drop for TestApp {
         .join();
     }
 }
+
+/// The signature, IHDR (1x1) and IEND of a PNG: enough for `sniff_image`.
+pub const TINY_PNG: [u8; 33] =
+    [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89];

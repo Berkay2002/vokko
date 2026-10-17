@@ -837,6 +837,10 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
         let poll = polls.remove(&row.id);
         let mut message = message;
         message.poll = poll.as_ref().map(|poll| Box::new(poll.for_viewer(viewer)));
+        crate::embed_media::fill(state, &mut message.embeds);
+        for snapshot in &mut message.message_snapshots {
+            crate::embed_media::fill(state, &mut snapshot.message.embeds);
+        }
         views.push(MessageView { message, reaction_users, poll });
     }
     Ok(views)

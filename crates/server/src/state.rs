@@ -24,6 +24,7 @@ pub struct Inner {
     pub unfurler: Unfurler,
     pub accounts: Accounts,
     pub gifs: GifProxy,
+    pub embed_media: crate::embed_media::EmbedMediaProxy,
     pub voice: Voice,
     pub stremio: crate::stremio::Stremio,
     pub spotify: crate::spotify::Spotify,
@@ -75,6 +76,7 @@ impl AppState {
         let unfurler = Unfurler::new(config.unfurl);
         let accounts = Accounts::new(&config.accounts);
         let gifs = GifProxy::new(config.gif.clone(), config.unfurl.allow_private);
+        let embed_media = crate::embed_media::EmbedMediaProxy::new(config.unfurl.allow_private);
         let voice = Voice::new(rooms, &config);
         let stremio = crate::stremio::Stremio::new(&config.stremio);
         let spotify = crate::spotify::Spotify::new(&config.spotify);
@@ -87,6 +89,7 @@ impl AppState {
             unfurler,
             accounts,
             gifs,
+            embed_media,
             voice,
             stremio,
             spotify,
