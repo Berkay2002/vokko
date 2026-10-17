@@ -4,6 +4,7 @@
 
 import { Track, TrackEvent, VideoPreset, VideoQuality, type LocalTrackPublication, type RemoteParticipant, type RemoteTrack, type RemoteTrackPublication, type Room, type TrackPublishOptions } from "livekit-client";
 import type { Snowflake } from "../api/types";
+import { hideShareBar } from "../desktop/window";
 import type { VideoHandle, VideoSource } from "./mediaStore";
 import type { CameraStart, TransportCallbacks } from "./transport";
 import { openCamera, type CameraSession } from "./video/cameraSession";
@@ -134,6 +135,7 @@ export class LiveKitVideo {
         return;
       }
       this.screen = { publication, room };
+      void hideShareBar();
       publication.track?.once(TrackEvent.Ended, () => {
         if (this.screen?.publication !== publication) return;
         void this.stopScreen().then(() => this.cb.localVideoEnded?.("screen"));
