@@ -5,7 +5,7 @@ import { ChannelType, type Channel, type User, type VoiceState } from '../api/ty
 
 // zustand hooks read their initial state during server rendering, so the stores the stage reads are replaced by plain objects.
 const fake = vi.hoisted(() => ({
-  voice: { meId: '1' as string | null, channelId: 'c1' as string | null, states: [] as unknown[], watch: {} as Record<string, unknown> },
+  voice: { meId: '1' as string | null, channelId: 'c1' as string | null, states: [] as unknown[], watch: {} as Record<string, unknown>, stremio: {} as Record<string, unknown> },
   media: { videos: {} as Record<string, unknown>, watching: {} as Record<string, true>, quality: {}, liveScreens: {} as Record<string, true>, cameraOn: false, screenOn: false, error: null },
   ui: { focusedTile: null as string | null, membersHidden: false, chatOpen: false, focusStream: null as string | null },
 }));
@@ -71,6 +71,7 @@ beforeEach(() => {
   fake.voice.channelId = 'c1';
   fake.voice.states = [];
   fake.voice.watch = {};
+  fake.voice.stremio = {};
   fake.media.videos = {};
   fake.media.watching = {};
   fake.media.liveScreens = {};
@@ -110,6 +111,28 @@ describe('Watch Together tile', () => {
     expect(users).toHaveLength(2);
 
     fake.voice.channelId = null; // watching the channel's page without being in the call: no player
+    expect(tiles(render())).toHaveLength(2);
+  });
+});
+
+describe('Stremio tile', () => {
+  const session = { item: { title: 'Heat', label: '1080p' }, status: 'starting', playing: true, position_ms: 0, updated_at_ms: 1, started_by: '2', bot_identity: 'bot:stremio:c1', queue: [] as unknown[] };
+
+  it('comes after the Watch Together tile and before the people, only in the call we are in', () => {
+    const states = [voiceState('1'), voiceState('2')];
+    expect(stageTiles(states, () => false, true, true).map(t => t.id)).toEqual(['watch', 'stremio', '1', '2']);
+    expect(stageTiles(states, () => false, false, true).map(t => t.id)).toEqual(['stremio', '1', '2']);
+    expect(stageTiles([], () => false, false, true)).toEqual([]);
+
+    fake.voice.states = states;
+    fake.voice.stremio = { c1: session };
+    const [stremio, ...users] = tiles(render());
+    expect(stremio.attrs).toContain('stremio');
+    expect(stremio.attrs).toContain('data-status="starting"');
+    expect(stremio.body).toContain('Heat');
+    expect(users).toHaveLength(2);
+
+    fake.voice.channelId = null;
     expect(tiles(render())).toHaveLength(2);
   });
 });

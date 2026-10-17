@@ -418,7 +418,7 @@
 
   .voice-bar-button[aria-label="Input options"],
   .voice-bar-button[aria-label="Camera options"],
-  .voice-bar-button[aria-label="Start an activity"],
+  .voice-bar-button[aria-label="Activities"],
   .voice-bar-side {
     display: none;
   }
