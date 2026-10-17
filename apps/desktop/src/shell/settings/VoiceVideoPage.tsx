@@ -341,7 +341,6 @@ export function VoiceVideoPage() {
             <SwitchRow label="Advanced Voice Activity" note="Not available yet: needs voice detection from the noise suppressor" checked={false} disabled onChange={() => undefined} />
             <SwitchRow label="Bypass System Input Processing" note="Asks for the raw microphone signal with no echo, noise or gain processing from the system." checked={bypass} onChange={v => setPref("bypassSystemProcessing", v)} />
             <SwitchRow label="Attenuation" note="Lowering other apps needs OS integration that the desktop client does not have yet" checked={false} disabled onChange={() => undefined} />
-            <SwitchRow label="Skip QoS packet priority" note="Packet priority marking is not available in a webview" checked={false} disabled onChange={() => undefined} />
           </div>
         )}
       </Category>
