@@ -5,7 +5,7 @@ const listener = vi.hoisted(() => vi.fn(async () => ({ url: "mock://spotify", to
 vi.mock("./api", () => ({ viewerToken: token }));
 vi.mock("../spotify/api", () => ({ listenerToken: listener }));
 
-const { IDLE_SLOT, syncViewer, useViewerStore } = await import("./viewerStore");
+const { IDLE_SLOT, botOutput, botVolumeKey, syncViewer, useViewerStore } = await import("./viewerStore");
 
 const slot = () => useViewerStore.getState().slot;
 const target = { channelId: "c1", bot: "bot:stremio:c1", kind: "stremio" as const };
@@ -66,6 +66,23 @@ describe("the call's viewer Room", () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(token).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a bot's User Volume", () => {
+  const model = (volumes: Record<string, number>, localMutes: Record<string, true> = {}, selfDeaf = false) => ({ volumes, localMutes, selfDeaf });
+
+  it("scales the tile slider by the bot's own 0-200 % level, kept per kind", () => {
+    expect(botVolumeKey("spotify")).toBe("bot:spotify");
+    expect(botOutput(model({}), "spotify", 60)).toBeCloseTo(0.6);
+    expect(botOutput(model({ "bot:spotify": 200 }), "spotify", 60)).toBeCloseTo(1.2);
+    expect(botOutput(model({ "bot:spotify": 50 }), "stremio", 80)).toBeCloseTo(0.8);
+    expect(botOutput(model({ "bot:stremio": 0 }), "stremio", 80)).toBe(0);
+  });
+
+  it("is silent while the bot is locally muted or we are deafened", () => {
+    expect(botOutput(model({ "bot:spotify": 150 }, { "bot:spotify": true }), "spotify", 60)).toBe(0);
+    expect(botOutput(model({ "bot:spotify": 150 }, {}, true), "spotify", 60)).toBe(0);
   });
 });
 

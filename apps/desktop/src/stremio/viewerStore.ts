@@ -5,6 +5,7 @@
 import { create } from "zustand";
 import type { Snowflake } from "../api/types";
 import type { VideoHandle } from "../voice/mediaStore";
+import { playbackVolume, type VoiceModel } from "../voice/reducer";
 import { ViewerConnection, type MediaKind, type RoomState } from "./viewerConnection";
 import type { VideoStats } from "./viewerStats";
 
@@ -50,8 +51,16 @@ export function setViewerVolume(volume: number): void {
   }
 }
 
+/** A bot's key in the voice model's per-user volumes and local mutes: one per kind, so it follows the bot from call to call. */
+export const botVolumeKey = (kind: MediaKind): string => `bot:${kind}`;
+
+/** The bot's level as played, 0..2: its tile slider (0..100) times its User Volume (0..200 %, local Mute 0); 0 while deafened. */
+export function botOutput(model: Pick<VoiceModel, "volumes" | "localMutes" | "selfDeaf">, kind: MediaKind, tileVolume: number): number {
+  return model.selfDeaf ? 0 : (tileVolume / 100) * playbackVolume(model, botVolumeKey(kind));
+}
+
 let active: { key: string; connection: ViewerConnection } | null = null;
-/** 0..1 as played: the volume slider, or 0 while deafened. */
+/** 0..2 as played (botOutput). */
 let output = 1;
 
 /** Opens the viewer Room for `target`, or closes it for null. Calling it again with the same target does nothing. */

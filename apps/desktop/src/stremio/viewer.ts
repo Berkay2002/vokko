@@ -30,7 +30,7 @@ export interface Viewer {
 }
 
 class LiveKitViewer implements Viewer {
-  private readonly room = new Room({ adaptiveStream: true, dynacast: false });
+  private readonly room = new Room({ adaptiveStream: true, dynacast: false, webAudioMix: true }) // User Volume above 100 % goes through Web Audio gain;
   private volume = 1;
   private audio: RemoteAudioTrack | null = null;
   private videoTrack: RemoteTrack | null = null;

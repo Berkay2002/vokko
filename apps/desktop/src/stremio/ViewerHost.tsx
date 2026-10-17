@@ -5,7 +5,7 @@
 import { useEffect } from "react";
 import { useSpotifyVolume } from "../spotify/volume";
 import { useVoice } from "../voice/store";
-import { readViewerStats, setViewerOutput, syncViewer, useViewerStore } from "./viewerStore";
+import { botOutput, readViewerStats, setViewerOutput, syncViewer, useViewerStore } from "./viewerStore";
 
 const DEBUG_KEY = "vokko.stremio.debug";
 
@@ -30,14 +30,14 @@ export function StremioViewerHost() {
   const spotifyBot = useVoice(s => (s.channelId ? s.spotify[s.channelId]?.bot_identity : undefined));
   const kind = stremioBot ? "stremio" : spotifyBot ? "spotify" : null;
   const bot = stremioBot ?? spotifyBot;
-  const deaf = useVoice(s => s.selfDeaf);
   const stremioVolume = useViewerStore(s => s.volume);
   const spotifyVolume = useSpotifyVolume(s => s.volume);
   const volume = kind === "spotify" ? spotifyVolume : stremioVolume;
+  const output = useVoice(s => (kind ? botOutput(s, kind, volume) : 0));
 
   useEffect(() => {
-    setViewerOutput(deaf ? 0 : volume / 100);
-  }, [deaf, volume]);
+    setViewerOutput(output);
+  }, [output]);
 
   useEffect(() => {
     syncViewer(channelId && bot && kind ? { channelId, bot, kind } : null);

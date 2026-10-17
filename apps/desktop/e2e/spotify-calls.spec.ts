@@ -165,6 +165,45 @@ test('a late joiner gets the running session, and it ends when the call empties'
   await expect(page.locator('.voice-tile.spotify')).toHaveCount(0);
 });
 
+test("the bot's own User Volume and Mute: right-click its row or tile, kept after a reload", async ({ page }) => {
+  await openGuild(page);
+  const general = await channelId(page, 'General');
+  const { album } = await ids(page);
+  await as(page, 'alice', 'PUT', `/channels/${general}/spotify`, { uri: `spotify:album:${album}` });
+  const row = page.locator('[data-bot-identity^="bot:spotify:"]');
+  const slider = page.getByRole('slider', { name: 'User Volume' });
+
+  await row.click({ button: 'right' });
+  await expect(slider).toHaveValue('100');
+  // a bot has no profile, DM or friendship: only the volume and the local mute
+  await expect(page.locator('[role^="menuitem"]')).toHaveText(['Mute']);
+  await slider.fill('150');
+  await expect(page.locator('.voice-volume-value')).toHaveText('150%');
+  if (MOBILE) await page.waitForTimeout(500); // the phone's bottom sheet slides in
+  await shot(page, MOBILE ? 'bot-volume-phone.png' : 'bot-volume-sidebar.png');
+  await page.getByRole('menuitemcheckbox', { name: 'Mute' }).click();
+  await expect(row.getByRole('img', { name: 'Locally Muted' })).toBeVisible();
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitemcheckbox', { name: 'Mute' }).click();
+  await expect(row.getByRole('img', { name: 'Locally Muted' })).toHaveCount(0);
+
+  if (!MOBILE) {
+    // the tile in the call opens the same menu on the same setting
+    await page.getByRole('button', { name: 'General voice channel' }).click();
+    await expect(tile(page)).toHaveAttribute('data-status', 'playing', { timeout: 10_000 });
+    await tile(page).locator('.spotify-now-title').click({ button: 'right' });
+    await expect(slider).toHaveValue('150');
+    await shot(page, 'bot-volume-tile.png');
+    await page.keyboard.press('Escape');
+  }
+
+  // personal and local: the mock forgets the session on reload, the level stays in this client's voice settings
+  await openGuild(page);
+  await as(page, 'alice', 'PUT', `/channels/${await channelId(page, 'General')}/spotify`, { uri: `spotify:album:${album}` });
+  await row.click({ button: 'right' });
+  await expect(slider).toHaveValue('150');
+});
+
 test('409: the house account already plays in another channel', async ({ page }) => {
   test.skip(MOBILE, 'desktop flow');
   await openGuild(page);
