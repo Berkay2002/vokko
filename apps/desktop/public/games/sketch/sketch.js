@@ -4,7 +4,7 @@
  * Relay data reaches the page only via textContent or the canvas.
  */
 (async () => {
-  const { C } = SketchCore;
+  const { C, toBoard } = SketchCore;
   const COLORS = ["#202124", "#e8453c", "#3b7ded", "#2fa84f", "#f29d38", "#ffffff"];
   const WIDTHS = [3, 8, 20];
 
@@ -111,10 +111,7 @@
 
   /** @param {PointerEvent} e */
   function point(e) {
-    const r = canvas.getBoundingClientRect();
-    const x = Math.round(((e.clientX - r.left) * C.W) / r.width);
-    const y = Math.round(((e.clientY - r.top) * C.H) / r.height);
-    const p = [Math.max(0, Math.min(C.W, x)), Math.max(0, Math.min(C.H, y))];
+    const p = toBoard(canvas.getBoundingClientRect(), e.clientX, e.clientY);
     pending.push(...p);
     drawPoints(strokeId, color, width, p);
     if (pending.length >= C.MAX_POINTS * 2) flush();

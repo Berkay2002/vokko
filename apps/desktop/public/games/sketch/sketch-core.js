@@ -330,6 +330,18 @@ var SketchCore = (() => {
     };
   }
 
-  return { create, C };
+  /**
+   * A pointer position in canvas units. The canvas is drawn with object-fit: contain, so map against the drawn content
+   * box (centred in the element box `r`), not the whole box; clamped to the board.
+   * @param {{ left: number, top: number, width: number, height: number }} r @param {number} x @param {number} y
+   */
+  function toBoard(r, x, y) {
+    const s = Math.min(r.width / C.W, r.height / C.H);
+    const bx = Math.round((x - r.left - (r.width - C.W * s) / 2) / s);
+    const by = Math.round((y - r.top - (r.height - C.H * s) / 2) / s);
+    return [Math.max(0, Math.min(C.W, bx)), Math.max(0, Math.min(C.H, by))];
+  }
+
+  return { create, toBoard, C };
 })();
 globalThis.SketchCore = SketchCore;

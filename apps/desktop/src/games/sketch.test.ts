@@ -177,3 +177,14 @@ describe('SketchCore rounds', () => {
     expect(c.st).toMatchObject({ n: 6, drawer: 'c', over: false, word: 'apple' });
   });
 });
+
+describe('toBoard', () => {
+  it('maps to the drawn 4:3 content box of a letterboxed canvas and clamps to the board', () => {
+    // 704x433 box: the content is 577.33 wide, centred with 63.33 px side margins.
+    const r = { left: 10, top: 20, width: 704, height: 433 };
+    expect(SketchCore.toBoard(r, 10 + 352, 20 + 216.5)).toEqual([400, 300]);
+    expect(SketchCore.toBoard(r, 10 + 63.34, 20)).toEqual([0, 0]);
+    expect(SketchCore.toBoard(r, 10, 20 + 433)).toEqual([0, 600]); // in the side margin
+    expect(SketchCore.toBoard({ left: 0, top: 0, width: 400, height: 300 }, 100, 75)).toEqual([200, 150]);
+  });
+});

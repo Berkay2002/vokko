@@ -90,6 +90,22 @@
   aspect-ratio: auto;
 }
 
+/* Phones: a 16:9 box in a portrait stage is a strip with black above and below, so the focused game takes the whole stage
+   (the game gets a portrait frame; Sketch lays itself out for it). */
+@media (max-width: 767px) {
+  .voice-focus-frame:has(> .voice-tile.game.focused) {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+  }
+
+  .voice-tile.game.focused .game-frame-box {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+  }
+}
+
 .game-frame {
   position: absolute;
   inset: 0;
