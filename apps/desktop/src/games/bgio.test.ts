@@ -158,6 +158,10 @@ describe("chess over the relay", () => {
     hub.peers.get("c")!.sdk.send({ t: "a", m: "1", s: 0, act: { type: "MAKE_MOVE", payload: { type: "resign", args: [], playerID: "0" } } }, "a");
     hub.flush();
     expect(ctx(a).gameover).toBeUndefined();
+    // Nor can it take over the room while the host is still there.
+    hub.peers.get("c")!.sdk.send({ t: "room", room: { v: 99, host: "c", phase: "lobby", match: 1, seats: { c: "0" }, note: "" } });
+    hub.flush();
+    for (const r of [a, b]) expect(r.room).toMatchObject({ host: "a", phase: "play" });
     for (const [who, from, to] of [[a, "f2", "f3"], [b, "e7", "e5"], [a, "g2", "g4"], [b, "d8", "h4"]] as const) move(who, "move", from, to);
     for (const r of [a, b, c]) expect(G<{ moves: string[] }>(r).moves).toEqual(["f3", "e5", "g4", "Qh4#"]);
     expect(ctx(c).gameover).toEqual({ winner: "1", reason: "checkmate" });  });

@@ -128,6 +128,8 @@ export class BoardRoom {
   /** Copies that have the game open (they said hi or answered ours), not counting this one. */
   readonly open = new Set<string>();
   private hosted: Hosted | null = null;
+  /** A takeover room that came before we saw the old host leave. */
+  private pendingRoom: { room: Room; from: string } | null = null;
   private transport: VokkoTransport | null = null;
   private chunks = new Map<string, { n: number; parts: string[] }>();
   private chunkSeq = 0;
@@ -221,11 +223,9 @@ export class BoardRoom {
         this.post({ t: "here", room: this.room }, from);
         return this.changed();
       case "here":
+        // Only the host's own answer counts; other copies' answers just say they are open.
         this.open.add(from);
-        if (!this.room && isRoom(msg.room)) {
-          this.open.add(msg.room.host);
-          this.applyRoom(msg.room);
-        }
+        if (!this.room && isRoom(msg.room) && msg.room.host === from) this.applyRoom(msg.room);
         return this.changed();
       case "bye":
         this.open.delete(from);
@@ -273,12 +273,30 @@ export class BoardRoom {
     return appId === this.sdk.leader ? "" : appId; // the leader sorts first, then app ids
   }
 
+  /** The best-ranked of this copy and the open ones: who hosts after the host leaves. */
+  private nextHost(): string {
+    return [this.me, ...this.open].sort((a, b) => (this.rank(a) < this.rank(b) ? -1 : 1))[0]!;
+  }
+
+  /**
+   * A room from `from`, who says it hosts. Taken from the current host; from anyone else only (a) when two copies opened
+   * alone at once and both hold an untouched lobby (the better-ranked one wins), or (b) as the takeover after the host
+   * left, from the copy the rank rule picks. A takeover that arrives before we saw the host leave waits in `pendingRoom`.
+   */
   private onRoom(room: Room, from: string): void {
-    if (this.isHost && from !== this.me) {
-      // Two hosts (both opened alone at once): the better-ranked one keeps hosting, the other adopts its room.
-      if (this.rank(from) < this.rank(this.me)) this.dropHosting();
-      else return this.broadcastRoom();
+    const current = this.room;
+    if (current && from !== current.host) {
+      const fresh = current.match === 0 && current.phase === "lobby" && room.match === 0;
+      const hostGone = !this.open.has(current.host) && current.host !== this.me;
+      if (fresh && this.rank(from) < this.rank(current.host)) {
+        if (this.isHost) this.dropHosting();
+      } else if (!(hostGone && this.nextHost() === from)) {
+        this.pendingRoom = { room, from };
+        if (this.isHost) this.broadcastRoom(); // let the other copy see who hosts
+        return;
+      }
     }
+    this.pendingRoom = null;
     this.open.add(from);
     this.applyRoom(room);
   }
@@ -295,15 +313,16 @@ export class BoardRoom {
     const room = this.room;
     if (!room) return this.changed();
     if (gone.includes(room.host)) {
-      const next = [this.me, ...this.open].sort((a, b) => (this.rank(a) < this.rank(b) ? -1 : 1))[0];
+      const next = this.nextHost();
       if (next === this.me) this.becomeHost(room);
+      else if (this.pendingRoom?.from === next) this.onRoom(this.pendingRoom.room, next);
       return this.changed();
     }
     if (this.isHost && room.phase === "lobby") {
       // Free the seats of people who are gone, in the lobby only (in play a seat waits for its player to come back).
       const inCall = new Set(this.sdk.players.map(p => p.app_id));
       const seats = Object.fromEntries(Object.entries(room.seats).filter(([id]) => id === this.me || (this.open.has(id) && inCall.has(id))));
-      if (Object.keys(seats).length !== Object.keys(room.seats).length) this.setRoom({ ...room, seats });
+      if (Object.keys(seats).length !== Object.keys(room.seats).length) this.setRoom({ ...room, v: room.v + 1, seats });
     }
     this.changed();
   }
@@ -493,7 +512,8 @@ export class BoardRoom {
       entry.to.push(id);
       views.set(key, entry);
     }
-    if (views.size === 1) {
+    // A broadcast reaches everyone in the call, open or not, so games with hidden info always send per copy.
+    if (views.size === 1 && !this.def.hidden) {
       const [{ out }] = views.values();
       this.transport?.deliver(out);
       this.post({ t: "d", m: this.hosted?.matchID, d: out });
