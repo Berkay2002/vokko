@@ -73,6 +73,36 @@ Everything macOS-specific is in `src-tauri/src/macos.rs` (`#[cfg(target_os = "ma
 - **Debugging without screen capture** (debug builds): `VOKKO_DEBUG_DOCK=1` logs the Dock tile's badge label whenever it
   changes; the menu bar and window decoration state are logged once at startup.
 
+## Linux
+
+x86_64 only, built on the Windows PC in a WSL 2 distro (GitHub Actions is not available). Downloads: `Vokko-linux.AppImage` (what
+the updater installs, `linux-x86_64` in `latest.json`) and `Vokko-linux.deb`, next to the versioned `Vokko_<v>_amd64.*` files.
+The release overlay's `targets` stays `["nsis"]`; Linux passes `--bundles appimage,deb` the way macOS passes `app,dmg`.
+
+- Platform code: the process list (`games.rs`, `streamer.rs`) reads `/proc`; app info gives the executable name with no icon;
+  the local Spotify read answers nothing (no MPRIS), so a Linux desktop sends no Spotify activity; the page draws the window
+  buttons as on Windows. The tray needs an AppIndicator host (GNOME needs the AppIndicator extension); without one the
+  icon is invisible and a window closed to the tray comes back by starting Vokko again (single instance).
+- `vokko://`: the .deb registers it through its `.desktop` file; an AppImage registers itself on every start (`register_all` in
+  `main.rs` when `$APPIMAGE` is set, a `.desktop` file in `~/.local/share/applications`).
+- `tools/release-linux.sh <version> <out dir>` builds from the checkout's HEAD (sent in as a git bundle; the distro has no GitHub
+  credentials), signs the AppImage with `~/.vokko/updater.key` passed through `WSLENV` and copies the AppImage, its `.sig` and
+  the .deb to `<out dir>`. It uploads nothing, so running it alone is the dry run.
+
+One-time setup of the distro, from a Windows shell (everything on E:; it never touches the `docker-desktop` distro):
+
+```bat
+mkdir E:\WSL\vokko-linux
+curl -L -o E:\WSL\jammy.rootfs.tar.gz https://cloud-images.ubuntu.com/wsl/jammy/current/ubuntu-jammy-wsl-amd64-ubuntu22.04lts.rootfs.tar.gz
+wsl --import vokko-linux E:\WSL\vokko-linux E:\WSL\jammy.rootfs.tar.gz --version 2
+```
+
+Then as root in the distro: `apt-get install build-essential curl wget file git xdg-utils pkg-config libssl-dev libxdo-dev
+libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev xz-utils`, `useradd -m -s /bin/bash vokko` and
+`[user] default=vokko` in `/etc/wsl.conf`; as `vokko`: rustup (stable, clippy) and Node 22 unpacked to `~/node` (the script puts
+`~/node/bin` and `~/.cargo/bin` on PATH). Ubuntu 22.04 keeps glibc at 2.35, so the binaries run on most current distros.
+Remove it all with `wsl --unregister vokko-linux` and deleting `E:\WSL`.
+
 ## Updater
 
 Inactive by default: the updater plugin refuses to start without `pubkey`, so it is only registered when the Tauri config contains a
@@ -117,7 +147,8 @@ npx tauri build --config release.json
 https://vokko.example.com and LiveKit Cloud, and the updater (public key, endpoint `https://vokko.example.com/downloads/latest.json`). The private key
 and its password live outside the repo in `~/.vokko/updater.key` and `~/.vokko/updater.key.password` on the Windows PC and on buildhost; losing
 them means installed apps can never be updated again, so keep a backup. **Release with `tools/release-desktop.sh <version> "notes"`** from Git
-Bash on the Windows PC: it bumps the version, builds both platforms, uploads them to `/downloads/` and writes `latest.json` last.
+Bash on the Windows PC: it bumps the version, builds all three platforms (Linux through `tools/release-linux.sh`, see Linux
+below), uploads them to `/downloads/` and writes `latest.json` last.
 The macOS app is ad-hoc signed (`bundle.macOS.signingIdentity: "-"` in the overlay). Without it the binary is only linker-signed
 with no sealed resources, and a downloaded copy opens as "Vokko is damaged" with no way past it. Ad-hoc is not notarized: macOS
 still warns once, and the user allows it under System Settings, Privacy & Security, Open Anyway (or runs
