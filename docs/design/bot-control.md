@@ -1,6 +1,6 @@
 # Who controls media in a call (design)
 
-Status: proposal, 2026-10-17. Nothing here is built. It covers Watch Together, the Stremio bot and the Spotify bot
+Status: proposal, 2026-10-17, owner answers in §7 (owner confirmed). Nothing here is built. It covers Watch Together, the Stremio bot and the Spotify bot
 (docs/design/spotify-bot.md, not built yet). Build it after the Stremio and Spotify branches merge (§9).
 
 Goal: in a big call, one person can no longer pause, seek, skip, stop or replace what everyone is watching or hearing. Small
@@ -75,7 +75,7 @@ call: to the person in the call (`VoiceEntry` of that channel) with the earliest
 | Start a session when none runs | yes | yes (becomes host) |
 | Replace the current item (PUT) | yes | 403 50013 |
 | Play / pause / seek, previous, loop, shuffle (Spotify) | yes | 403 50013 |
-| Skip | skips now | counts as a vote (§2.4) |
+| Skip | skips now | skips now if they added the current item (owner confirmed), else counts as a vote (§2.4) |
 | Stop (DELETE) | yes | 403 50013 (a vote that skips the last item ends it) |
 | Add to the end of the queue | up to the queue max | up to the per-user quota (§2.5) |
 | Play next / move / clear / shuffle the queue (Spotify) | yes | 403 50013 |
@@ -87,7 +87,9 @@ No vote-to-stop: skipping the last item already ends the session, so "vote to sk
 
 ### 2.4 Vote to skip
 
-- `PATCH {skip: true}` from a non-controller adds their vote for the current item; `{skip: false}` withdraws it. A
+- Whoever added the current item skips it at once, without a vote (owner confirmed). For a fresh PUT that is the person who
+  sent it; for an item taken from the queue it is that entry's adder.
+- `PATCH {skip: true}` from any other non-controller adds their vote for the current item; `{skip: false}` withdraws it. A
   controller's `skip: true` skips at once (today's behaviour). Watch keeps its `video_id` guard: a vote naming a video that is
   no longer current is a no-op (200, current state).
 - **Who counts:** listeners = people connected to the channel's voice who are not deafened (self or server). Bots never count
@@ -144,6 +146,7 @@ Each of `WatchTogetherState`, `StremioState` and `SpotifyState` gains:
 host_id: Snowflake          // who controls besides CONTROL_MEDIA holders; starts as started_by
 skip_votes: [Snowflake]     // voters for the current item, in vote order
 skip_needed: u32            // max(1, ceil(listeners / 2)) when the state was sent
+added_by: Snowflake         // who added the current item (PUT caller, or the queue entry's adder); may skip it
 ```
 
 `WatchTogetherState` also gains `queue_added_by: [Snowflake]` (same length and order as `queue`; `#[serde(default)]`).
@@ -202,6 +205,7 @@ Server integration (`crates/server/tests/voice.rs` watch tests, `tests/stremio.r
 - Votes: 3 listeners, 1 vote → no skip, `skip_votes` = [B], `skip_needed` 2; second vote skips and clears votes; withdraw
   works; a voter leaving drops the vote; a listener leaving makes 1 of 2 enough and skips; a deafened member does not count.
 - Watch auto-advance: 3 non-controllers each send `skip + video_id`; the video advances once, at the second report.
+- Adder skip: B queues a video, it becomes current, B's `skip: true` skips it with no vote; C's (not the adder) is a vote.
 - Host leaves: `host_id` moves to the earliest joiner, announced; last person leaving still ends the session.
 - Quota: B's 4th Watch entry → 400 50035 `queue_add`; a controller is not limited; Spotify album from B adds 10 and reports
   the rest left out.
@@ -228,12 +232,10 @@ Freeze §3 first (protocol types + docs/api.md in the server worker's first comm
 A final review (`reviewer`) checks the access rule end to end: every mutating branch of the three `control` handlers goes
 through `controls()` or the vote/quota path, none is missed.
 
-## 7. Open questions for the owner
+## 7. Owner answers (2026-10-17, owner confirmed)
 
-1. Default: keep "everyone controls" (bit on @everyone, new and existing servers), or make new servers DJ mode by default?
-   This doc picks everyone.
-2. Should the person who added the current item be able to skip it without a vote (common in music bots)? Left out for now.
-3. Should the host be able to hand over host, or turn on "everyone controls" for just this session from the tile? Left out:
-   the permission screens already cover it per channel.
-4. Vote threshold: half rounded up (picked) or more than half (4 people → 3)?
-5. Quotas 3 / 2 / 10 per non-controller: fine?
+1. Default: everyone controls (CONTROL_MEDIA on @everyone for new and existing servers).
+2. Whoever added the current item can skip it without a vote (§2.3, §2.4, `added_by` in §3.2).
+3. No host hand-off and no per-session "everyone controls" toggle for now.
+4. Vote threshold: half the listeners, rounded up.
+5. Quotas per non-controller: Watch 3, Stremio 2, Spotify 10.
