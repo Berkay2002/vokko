@@ -13,6 +13,7 @@ import { catalog, controlStremio, getAccount, getMeta, getStreams, loginWithEmai
 import { formatSize, isHeavy, reason, safeImage, unsupportedText } from "./format";
 import { bestStream, currentView, initialPanel, panelReducer, seasonsOf, type PanelAction, type PanelState } from "./panelState";
 import { useStremioPanel } from "./panelStore";
+import { PosterImage } from "./PosterImage";
 import { StremioIcon } from "./StremioIcon";
 import "./stremio.css";
 
@@ -181,7 +182,7 @@ function PosterCard({ item, onOpen }: { item: StremioSearchItem; onOpen(item: St
   const poster = safeImage(item.poster);
   return (
     <button type="button" className="stremio-poster-card" onClick={() => onOpen(item)} data-title-id={item.id}>
-      <span className="stremio-poster-frame">{poster ? <img src={poster} alt="" loading="lazy" /> : <StremioIcon size={28} />}</span>
+      <span className="stremio-poster-frame"><PosterImage src={poster} lazy fallback={<StremioIcon size={28} />} /></span>
       <span className="stremio-poster-name">{item.name}</span>
       {item.year && <span className="stremio-poster-year">{item.year}</span>}
     </button>
@@ -336,7 +337,7 @@ function Backdrop({ meta }: { meta: StremioMeta }) {
   return (
     <div className="stremio-hero" style={background ? { backgroundImage: `url(${background})` } : undefined}>
       <div className="stremio-hero-body">
-        {poster && <img className="stremio-hero-poster" src={poster} alt="" />}
+        <PosterImage className="stremio-hero-poster" src={poster} />
         <div>
           <h3 className="stremio-hero-title">{meta.name}</h3>
           <p className="stremio-muted">{[meta.year, meta.runtime].filter(Boolean).join(" · ")}</p>
@@ -380,7 +381,7 @@ function TitlePage({ channelId, item, dispatch }: { channelId: Snowflake; item: 
                     return (
                       <li key={v.id}>
                         <button type="button" className="stremio-episode" data-video-id={v.id} onClick={() => dispatch({ type: "openStreams", videoId: v.id, label: `S${v.season}E${v.episode}${v.name ? ` ${v.name}` : ""}` })}>
-                          <span className="stremio-episode-thumb">{thumb && <img src={thumb} alt="" loading="lazy" />}</span>
+                          <span className="stremio-episode-thumb"><PosterImage src={thumb} lazy /></span>
                           <span className="stremio-episode-text">
                             <span className="stremio-episode-name">
                               {v.episode}. {v.name ?? `Episode ${v.episode}`}
