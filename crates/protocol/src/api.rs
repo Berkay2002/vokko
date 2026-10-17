@@ -973,6 +973,9 @@ pub struct EmbedFooter {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
+    /// The signed same-origin copy of `icon_url`, set on serialization like `EmbedMedia::proxy_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_icon_url: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -990,6 +993,9 @@ pub struct EmbedAuthor {
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
+    /// The signed same-origin copy of `icon_url`, set on serialization like `EmbedMedia::proxy_url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_icon_url: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

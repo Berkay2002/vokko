@@ -343,12 +343,12 @@ export interface Embed {
   url?: string;
   timestamp?: ISO8601;
   color?: number;
-  footer?: { text: string; icon_url?: string };
+  footer?: { text: string; icon_url?: string; proxy_icon_url?: string };
   image?: EmbedMedia;
   thumbnail?: EmbedMedia;
   video?: EmbedMedia;
   provider?: { name?: string; url?: string };
-  author?: { name: string; url?: string; icon_url?: string };
+  author?: { name: string; url?: string; icon_url?: string; proxy_icon_url?: string };
   fields?: { name: string; value: string; inline?: boolean }[];
 }
 
