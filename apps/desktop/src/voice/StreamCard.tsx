@@ -7,7 +7,10 @@ import { Gamepad2, Monitor } from "lucide-react";
 import { formatClock } from "../activity/format";
 import { appStore } from "../api/store";
 import type { Snowflake } from "../api/types";
+import { ActivityIcon } from "../shell/ActivityIcon";
 import { usePlaying } from "../shell/ActivityLine";
+import { SpotifyCard } from "../shell/SpotifyCard";
+import type { Activity } from "../api/types";
 import { go, guildPath } from "../shell/nav";
 import { placeNear } from "../ui";
 import { joinVoiceChannel, watchStream } from "./engine";
@@ -92,6 +95,8 @@ export interface StreamCardProps {
   userId: Snowflake;
   channelId: Snowflake;
   name: string;
+  /** Set when the row shows a song instead of a stream: the card is then the compact Spotify card. */
+  listening?: Activity | null;
   /** Pointer enters / leaves the card (the row keeps it open across the gap). */
   onPointerEnter: () => void;
   onPointerLeave: () => void;
@@ -104,7 +109,7 @@ export interface StreamCardProps {
  * A plain portal rather than a `Popout`: a popout registers an overlay layer, which would take Escape from whatever has focus
  * (the composer) while the pointer merely rests on a row. Escape here is handled only when focus is in the card or the row.
  */
-export function StreamCard({ anchor, open, focusTick, onDismiss, userId, channelId, name, onPointerEnter, onPointerLeave, onBlurOut, boxRef }: StreamCardProps) {
+export function StreamCard({ anchor, open, focusTick, onDismiss, userId, channelId, name, listening, onPointerEnter, onPointerLeave, onBlurOut, boxRef }: StreamCardProps) {
   // Only shown when the stream is already coming in (we are watching it): subscribing just for a preview is not cheap.
   const screen = useVideo(userId, "screen");
   const own = voiceStore(s => s.meId === userId);
@@ -140,7 +145,7 @@ export function StreamCard({ anchor, open, focusTick, onDismiss, userId, channel
     if (!open || !placed || focusTick === focusWanted.current) return;
     focusWanted.current = focusTick;
     const el = boxRef.current;
-    (el?.querySelector<HTMLElement>(".stream-card-watch") ?? el)?.focus();
+    (el?.querySelector<HTMLElement>(".stream-card-watch, .spotify-play") ?? el)?.focus();
   }, [open, placed, focusTick, boxRef]);
 
   if (!open) return null;
@@ -148,10 +153,10 @@ export function StreamCard({ anchor, open, focusTick, onDismiss, userId, channel
     <div
       ref={boxRef}
       role="dialog"
-      aria-label={`${name} is streaming`}
+      aria-label={listening ? `${name} is listening to Spotify` : `${name} is streaming`}
       tabIndex={-1}
       className="popout stream-card-popout stream-card"
-      data-testid="stream-card"
+      data-testid={listening ? "listen-card" : "stream-card"}
       style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}
       onMouseEnter={onPointerEnter}
       onMouseLeave={onPointerLeave}
@@ -166,6 +171,10 @@ export function StreamCard({ anchor, open, focusTick, onDismiss, userId, channel
         if (!next || !e.currentTarget.contains(next)) onBlurOut(next);
       }}
     >
+      {listening ? (
+        <SpotifyCard activity={listening} compact />
+      ) : (
+        <>
       <div className="stream-card-header">
         <span className="stream-card-heading">Streaming now</span>
         <LivePill />
@@ -182,7 +191,7 @@ export function StreamCard({ anchor, open, focusTick, onDismiss, userId, channel
       {playing && (
         <div className="stream-card-activity" data-testid="stream-card-activity">
           <span className="stream-card-game-icon" aria-hidden="true">
-            <Gamepad2 size={24} />
+            <ActivityIcon activity={playing} size={24} fill />
           </span>
           <span className="stream-card-activity-text">
             <span className="stream-card-game">{playing.name}</span>
@@ -207,6 +216,8 @@ export function StreamCard({ anchor, open, focusTick, onDismiss, userId, channel
           <Monitor size={18} aria-hidden="true" />
           Watch Stream
         </button>
+      )}
+        </>
       )}
     </div>,
     document.body,

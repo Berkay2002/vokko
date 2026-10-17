@@ -38,3 +38,22 @@ describe("mock activity validation (same rules as the server)", () => {
     for (const list of bad) expect(activityListIsValid(list), JSON.stringify(list)).toBe(false);
   });
 });
+
+describe("mock app flag", () => {
+  it("allows app on a game only, as a boolean", () => {
+    expect(activityListIsValid([{ ...game, app: true }])).toBe(true);
+    expect(activityListIsValid([{ ...game, app: "yes" as unknown as boolean }])).toBe(false);
+    expect(activityListIsValid([{ ...spotify(), app: true }])).toBe(false);
+  });
+});
+
+describe("mock app: images", () => {
+  const hash = "ab".repeat(32);
+  it("allows app:<64 hex> on a game only", () => {
+    expect(activityListIsValid([{ ...game, assets: { large_image: `app:${hash}` } }])).toBe(true);
+    for (const image of [`app:${hash.slice(1)}`, `app:${hash.toUpperCase()}`, `app:${hash}x`, "https://x.test/a.png"]) {
+      expect(activityListIsValid([{ ...game, assets: { large_image: image } }]), image).toBe(false);
+    }
+    expect(activityListIsValid([{ ...spotify(), assets: { large_image: `app:${hash}` } }])).toBe(false);
+  });
+});

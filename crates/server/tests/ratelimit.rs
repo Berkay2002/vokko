@@ -181,3 +181,25 @@ async fn avatar_and_banner_gif_imports_share_one_small_bucket_per_user() {
     assert!((3..=4).contains(&limited_at), "burst of 3 plus a little refill, got {limited_at}");
     assert_ne!(app.post("/users/@me/banners/gif", &other, body).await.0, 429, "another user has their own bucket");
 }
+
+#[tokio::test]
+async fn app_icon_uploads_have_a_small_bucket_and_downloads_none() {
+    // default limits: 30 per route; an icon upload decodes an image, so it gets 10, then one every 2 seconds
+    let app = TestApp::with_config(|config| config.rate_limit = Some(RateLimit::default())).await;
+    let (token, _) = app.register("sam").await;
+    let (other, _) = app.register("alice").await;
+    let mut limited_at = None;
+    for request in 0..14 {
+        if app.post_bytes("/app-icons", Some(&token), "image/png", Vec::new()).await.0 == 429 {
+            limited_at = Some(request);
+            break;
+        }
+    }
+    let limited_at = limited_at.expect("the upload bucket ran dry");
+    assert!((10..=11).contains(&limited_at), "burst of 10 plus a little refill, got {limited_at}");
+    assert_ne!(app.post_bytes("/app-icons", Some(&other), "image/png", Vec::new()).await.0, 429, "another user has their own bucket");
+    for _ in 0..40 {
+        let request = Request::builder().uri(format!("/api/v1/app-icons/{}", "0".repeat(64))).body(Body::empty()).unwrap();
+        assert_eq!(app.router.clone().oneshot(request).await.unwrap().status(), StatusCode::NOT_FOUND, "icon downloads are never limited");
+    }
+}

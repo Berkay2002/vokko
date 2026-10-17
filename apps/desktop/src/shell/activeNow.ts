@@ -11,6 +11,8 @@ export interface ActiveEntry {
   activity: Activity | null;
   /** The voice channel they are in (voice cards only): its members and the Join button. */
   channel: Channel | null;
+  /** The channel's server when it is in our store, i.e. one we share; null for DM calls. */
+  guild: Guild | null;
 }
 
 const rank = (entry: ActiveEntry) => (entry.voice ? 0 : entry.activity ? 1 : 2);
@@ -34,12 +36,12 @@ export function activeFriends(
     const channel = state?.channel_id ? channels[state.channel_id] : undefined;
     if (channel) {
       const guild = channel.guild_id ? guilds[channel.guild_id] : undefined;
-      out.push({ relationship, text: `In ${channel.name ?? "a call"}${guild ? ` · ${guild.name}` : ""}`, voice: true, activity, channel });
+      out.push({ relationship, text: `In ${channel.name ?? "a call"}${guild ? ` · ${guild.name}` : ""}`, voice: true, activity, channel, guild: guild ?? null });
       continue;
     }
     const custom = shown?.custom_status;
-    if (activity) out.push({ relationship, text: "", voice: false, activity, channel: null });
-    else if (custom) out.push({ relationship, text: custom, voice: false, activity: null, channel: null });
+    if (activity) out.push({ relationship, text: "", voice: false, activity, channel: null, guild: null });
+    else if (custom) out.push({ relationship, text: custom, voice: false, activity: null, channel: null, guild: null });
   }
   return out.sort((a, b) => rank(a) - rank(b));
 }

@@ -1,3 +1,4 @@
+import { appIconSrc } from "../api/appIcons";
 import type { Activity, Presence } from "../api/types";
 
 /** The activity to show for a presence: the first "Playing" one. */
@@ -5,9 +6,14 @@ export function playingActivity(presence: Pick<Presence, "activities"> | undefin
   return presence?.activities?.find(activity => activity.type === 0) ?? null;
 }
 
-/** "Playing Factorio". */
+/** "Using" for an app (the sender set `app`), "Playing" for a game and for senders that predate the flag. */
+export function playingVerb(activity: Activity): string {
+  return activity.app === true ? "Using" : "Playing";
+}
+
+/** "Playing Factorio" or "Using Google Chrome". */
 export function playingLabel(activity: Activity): string {
-  return `Playing ${activity.name}`;
+  return `${playingVerb(activity)} ${activity.name}`;
 }
 
 /** Whole minutes since `start` as a compact string: "<1m", "12m", "1h 05m", "2d 3h". Empty without a start time. */
@@ -40,9 +46,17 @@ export function shownActivity(presence: Pick<Presence, "activities"> | undefined
   return playingActivity(presence) ?? listeningActivity(presence);
 }
 
-/** "Playing Factorio" or "Listening to Spotify". */
+/** "Playing Factorio", "Using Google Chrome" or "Listening to Spotify". */
 export function activityLabel(activity: Activity): string {
   return activity.type === 2 ? "Listening to Spotify" : playingLabel(activity);
+}
+
+const APP_IMAGE = /^app:([0-9a-f]{64})$/;
+
+/** The icon of a Playing activity's app, built from the validated hash only (never a URL taken from the activity); null without one. */
+export function appIconUrl(activity: Activity): string | null {
+  const hash = activity.type === 0 ? APP_IMAGE.exec(activity.assets?.large_image ?? "")?.[1] : undefined;
+  return hash ? appIconSrc(hash) : null;
 }
 
 const IMAGE_ID = /^spotify:([0-9a-f]{40})$/;

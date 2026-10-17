@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronRight, Gamepad2, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
+import { ChevronRight, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
 import { StremioIcon } from "../stremio";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
 import { TagChip } from "../perks/TagChip";
 import { useContextMenu } from "../ui";
+import { listeningActivity, playingLabel } from "../activity/format";
+import { ActivityIcon } from "../shell/ActivityIcon";
 import { usePlaying } from "../shell/ActivityLine";
 import { Avatar } from "../shell/Avatar";
 import { userContextItems } from "../shell/menus";
@@ -141,7 +143,9 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
   const row = useRef<HTMLLIElement>(null);
   const playing = usePlaying(state.user_id);
   const streaming = useIsStreaming(state);
-  const card = useStreamCard(streaming, row);
+  const listening = useStore(s => listeningActivity(s.presences[state.user_id]));
+  const carded = streaming || !!listening;
+  const card = useStreamCard(carded, row);
   if (!user) return null;
   const name = displayName(user, member);
   const muted = state.mute || state.self_mute || state.suppress;
@@ -154,8 +158,8 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
       data-speaking={speaking || undefined}
       tabIndex={0}
       aria-label={`${name}${streaming ? ", streaming" : ""}${speaking ? ", speaking" : ""}`}
-      aria-haspopup={streaming ? "dialog" : undefined}
-      aria-expanded={streaming ? card.open : undefined}
+      aria-haspopup={carded ? "dialog" : undefined}
+      aria-expanded={carded ? card.open : undefined}
       {...card.rowProps}
       onClick={() => {
         card.close();
@@ -179,8 +183,8 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
       <TagChip tag={user.primary_guild} guildName={tagGuildName} />
       {streaming && <LivePill className="voice-user-live" />}
       {playing && (
-        <span className="voice-user-game" role="img" aria-label={`Playing ${playing.name}`} title={`Playing ${playing.name}`}>
-          <Gamepad2 size={14} />
+        <span className="voice-user-game" role="img" aria-label={playingLabel(playing)} title={playingLabel(playing)}>
+          <ActivityIcon activity={playing} size={14} />
         </span>
       )}
       <span className="voice-user-icons">
@@ -207,7 +211,7 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
       </span>
     </li>
   );
-  if (!streaming || !state.channel_id) return item;
+  if (!carded || !state.channel_id) return item;
   // A sibling of the row, not a child: React events bubble through portals, so a click in the card would open the profile.
   return (
     <>
@@ -220,6 +224,7 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
         userId={state.user_id}
         channelId={state.channel_id}
         name={name}
+        listening={streaming ? null : listening}
         boxRef={card.box}
         {...card.cardProps}
       />

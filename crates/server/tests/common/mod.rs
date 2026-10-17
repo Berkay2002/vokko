@@ -101,6 +101,18 @@ impl TestApp {
         (status, value)
     }
 
+    /// POSTs raw bytes (not JSON) with the given content type.
+    pub async fn post_bytes(&self, path: &str, token: Option<&str>, content_type: &str, body: Vec<u8>) -> (StatusCode, Value) {
+        let mut builder = Request::builder().method(Method::POST).uri(format!("/api/v1{path}")).header("content-type", content_type);
+        if let Some(token) = token {
+            builder = builder.header("authorization", token);
+        }
+        let response = self.router.clone().oneshot(builder.body(Body::from(body)).expect("request")).await.expect("response");
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.expect("body");
+        (status, if bytes.is_empty() { Value::Null } else { serde_json::from_slice(&bytes).unwrap_or(Value::Null) })
+    }
+
     pub async fn get(&self, path: &str, token: &str) -> (StatusCode, Value) {
         self.send(Method::GET, path, Some(token), None).await
     }

@@ -1,5 +1,6 @@
 import { ArrowLeftRight, ChevronRight, Copy, Pencil } from "lucide-react";
 import { displayName, useStore } from "../api/store";
+import type { Activity } from "../api/types";
 import { ProfileBanner } from "../perks/ProfileBanner";
 import { ProfileCardLayers } from "../perks/ProfileEffect";
 import { resolveProfile, themeVars } from "../perks/profile";
@@ -10,6 +11,10 @@ import { Avatar, StatusBadge } from "./Avatar";
 import { copyText, type SelectableStatus } from "./actions";
 import { openModal } from "./modalStore";
 import { InVoiceCard } from "../voice";
+import { activitiesFor, useActivity } from "../activity";
+import { listeningActivity, playingActivity } from "../activity/format";
+import { ActivityCard } from "./ActivityLine";
+import { SpotifyCard } from "./SpotifyCard";
 
 const OPTIONS: { value: SelectableStatus; label: string; hint?: string; badge: "online" | "idle" | "dnd" | "offline" }[] = [
   { value: "online", label: "Online", badge: "online" },
@@ -17,6 +22,26 @@ const OPTIONS: { value: SelectableStatus; label: string; hint?: string; badge: "
   { value: "dnd", label: "Do Not Disturb", hint: "You will not receive any desktop notifications.", badge: "dnd" },
   { value: "invisible", label: "Invisible", hint: "You will appear offline.", badge: "offline" },
 ];
+
+/** The signed-in user's own game and song cards. Reads the presence the server echoed back, else what this client is sending. */
+export function useOwnActivities(userId: string): Activity[] {
+  const echoed = useStore(s => s.presences[userId]);
+  const local = useActivity(s => s);
+  return echoed?.activities?.length ? echoed.activities : activitiesFor(local);
+}
+
+export function OwnActivity({ userId }: { userId: string }) {
+  const presence = { activities: useOwnActivities(userId) };
+  const playing = playingActivity(presence);
+  const listening = listeningActivity(presence);
+  if (!playing && !listening) return null;
+  return (
+    <div className="user-popout-activity">
+      {playing && <ActivityCard activity={playing} />}
+      {listening && <SpotifyCard activity={listening} />}
+    </div>
+  );
+}
 
 export interface UserPanelPopoutProps {
   anchor: HTMLElement | null;
@@ -85,6 +110,7 @@ export function UserPanelPopout({ anchor, open, onClose, status, onStatus, custo
         </div>
         {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
       </div>
+      <OwnActivity userId={me.id} />
       {inVoice && <InVoiceCard userId={me.id} onOpen={onClose} />}
       <div className="user-popout-menu" role="menu">
         <div className="user-popout-card" role="group">

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Gamepad2 } from "lucide-react";
-import { activityLabel, formatClock, formatPlaytime, playingActivity, shownActivity } from "../activity/format";
+import { Music } from "lucide-react";
+import { activityLabel, formatClock, formatPlaytime, playingActivity, playingLabel, playingVerb, shownActivity } from "../activity/format";
 import { useStore } from "../api/store";
 import type { Activity, Snowflake } from "../api/types";
+import { ActivityIcon } from "./ActivityIcon";
 
 /** Re-renders every `intervalMs` while mounted; the value is Date.now(). */
 export function useNow(intervalMs: number): number {
@@ -15,7 +16,7 @@ export function useNow(intervalMs: number): number {
   return now;
 }
 
-/** The "Playing X" the user is shown with: the first Playing activity of their presence, null when there is none. */
+/** The "Playing X" (or "Using X") the user is shown with: the first Playing activity of their presence, null when there is none. */
 export function usePlaying(userId: Snowflake | null | undefined): Activity | null {
   return useStore(s => (userId ? playingActivity(s.presences[userId]) : null));
 }
@@ -25,9 +26,19 @@ export function useShownActivity(userId: Snowflake | null | undefined): Activity
   return useStore(s => (userId ? shownActivity(s.presences[userId]) : null));
 }
 
-/** One line for lists: "Playing Factorio · 12m" or "Listening to Spotify". Truncates with an ellipsis through the `className` the caller styles. */
-export function ActivityLine({ activity, className }: { activity: Activity; className?: string }) {
+/** One line for lists: "Playing Factorio · 12m" or "Listening to Spotify". Truncates with an ellipsis through the `className` the caller styles.
+ *  `variant="song"` shows a Spotify song as a green note and the artist (plus "+N" for `more` other activities) instead. */
+export function ActivityLine({ activity, className, variant, more }: { activity: Activity; className?: string; variant?: "song"; more?: number }) {
   const now = useNow(30_000);
+  if (activity.type === 2 && variant === "song") {
+    return (
+      <span className={`${className ?? "activity-line"} activity-song`} data-testid="activity-line" title={activity.details ? `${activityLabel(activity)}: ${activity.details}` : activityLabel(activity)}>
+        <Music size={12} className="activity-song-icon" aria-hidden="true" />
+        <span className="activity-song-text">{activity.state || "Listening to Spotify"}</span>
+        {more ? <span className="activity-song-more">+{more}</span> : null}
+      </span>
+    );
+  }
   if (activity.type === 2) {
     return (
       <span className={className ?? "activity-line"} data-testid="activity-line" title={activity.details ? `${activityLabel(activity)}: ${activity.details}` : activityLabel(activity)}>
@@ -37,23 +48,23 @@ export function ActivityLine({ activity, className }: { activity: Activity; clas
   }
   const elapsed = formatPlaytime(activity.timestamps?.start, now);
   return (
-    <span className={className ?? "activity-line"} data-testid="activity-line" title={elapsed ? `Playing ${activity.name} for ${elapsed}` : `Playing ${activity.name}`}>
-      Playing <strong>{activity.name}</strong>
+    <span className={className ?? "activity-line"} data-testid="activity-line" title={elapsed ? `${playingLabel(activity)} for ${elapsed}` : playingLabel(activity)}>
+      {playingVerb(activity)} <strong>{activity.name}</strong>
       {elapsed && <span className="activity-elapsed"> · {elapsed}</span>}
     </span>
   );
 }
 
-/** The profile popout's activity block: "Playing a game", the name and a live elapsed clock. */
+/** The profile popout's activity block: "Playing a game" ("Using an app"), the name and a live elapsed clock. */
 export function ActivityCard({ activity }: { activity: Activity }) {
   const start = activity.timestamps?.start;
   const now = useNow(1000);
   return (
     <div className="activity-card" data-testid="activity-card">
-      <div className="activity-card-heading">Playing a game</div>
+      <div className="activity-card-heading">{activity.app === true ? "Using an app" : "Playing a game"}</div>
       <div className="activity-card-body">
         <span className="activity-card-icon" aria-hidden="true">
-          <Gamepad2 size={24} />
+          <ActivityIcon activity={activity} size={24} fill />
         </span>
         <span className="activity-card-text">
           <span className="activity-card-name">{activity.name}</span>

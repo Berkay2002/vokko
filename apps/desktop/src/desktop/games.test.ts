@@ -34,6 +34,16 @@ describe("normalizeExe", () => {
   });
 });
 
+describe("matchGame: games and apps", () => {
+  it("marks an app the user added, and a shipped kind: app entry, but not a shipped game", () => {
+    const mine = [{ name: "Google Chrome", exe: ["chrome.exe"] }];
+    expect(matchGame([proc("chrome.exe")], mine)?.app).toBe(true);
+    expect(matchGame([proc("ELDENRING.exe")], mine)?.app).toBeUndefined();
+    const shipped = [{ name: "VS Code", exe: ["code.exe"], kind: "app" }];
+    expect(matchGame([proc("code.exe")], [], shipped)?.app).toBe(true);
+  });
+});
+
 describe("matchGame", () => {
   it("finds a shipped game by executable name, case-insensitively", () => {
     expect(matchGame([proc("svchost.exe"), proc("ELDENRING.exe", 5_000)])).toEqual({ name: "Elden Ring", exe: "ELDENRING.exe", startedAt: 5_000 });

@@ -67,7 +67,7 @@ export interface UserPrimaryGuild {
   color_secondary: number;
 }
 
-/** What a user is doing: type 0 "Playing" (a game) or type 2 "Listening" (name exactly "Spotify"). Timestamps are unix ms. At most one of each type per presence. */
+/** What a user is doing: type 0 "Playing" (a game; "Using" with `app`) or type 2 "Listening" (name exactly "Spotify"). Timestamps are unix ms. At most one of each type per presence. */
 export interface Activity {
   name: string; // 1-128 chars
   type: 0 | 2;
@@ -77,6 +77,7 @@ export interface Activity {
   state?: string; // artists joined with "; ", 1-128 chars
   assets?: { large_image?: string }; // "spotify:" + 40 lowercase hex (Spotify's image id)
   sync_id?: string; // Spotify track id, 22 letters/digits
+  app?: boolean; // type 0: a program the user added, not a game ("Using X"); absent = a game
 }
 
 export interface Presence {

@@ -8,7 +8,9 @@ import { InboxPopout } from "./Inbox";
 import { closeModal, openModal, useModals } from "./modalStore";
 import { NARROW_QUERY } from "./navDrawer";
 import { useMediaQuery } from "./useMediaQuery";
-import { UserPanelPopout } from "./UserPanelPopout";
+import { UserPanelPopout, useOwnActivities } from "./UserPanelPopout";
+import { ActivityLine } from "./ActivityLine";
+import { listeningActivity } from "../activity/format";
 import { toggleSelfDeaf, toggleSelfMute, useDeviceMenus, useVoice } from "../voice";
 
 const LABEL: Record<string, string> = { online: "Online", idle: "Idle", dnd: "Do Not Disturb", offline: "Invisible" };
@@ -42,6 +44,8 @@ export function UserPanel() {
   const inVoice = useVoice(s => s.meId !== null && s.states[s.meId]?.channel_id != null);
   const sharing = useVoice(s => s.meId !== null && !!s.states[s.meId]?.self_stream);
   const { micItems, headphoneItems } = useDeviceMenus();
+  const ownActivities = useOwnActivities(me?.id ?? "");
+  const song = listeningActivity({ activities: ownActivities });
 
   // Re-apply the user's chosen status after every (re)identify: the server starts a session as "online".
   useEffect(() => {
@@ -82,7 +86,7 @@ export function UserPanel() {
             <span className="user-panel-sub-status">
               {inVoice && sharing && <Monitor size={12} className="user-panel-voice-icon user-panel-stream-icon" aria-hidden="true" />}
               {inVoice && !sharing && <Volume2 size={12} className="user-panel-voice-icon" aria-hidden="true" />}
-              {inVoice ? (sharing ? "Sharing Your Screen" : "In voice channel") : subtitle}
+              {inVoice ? (sharing ? "Sharing Your Screen" : "In voice channel") : song ? <ActivityLine activity={song} variant="song" more={ownActivities.length - 1} className="user-panel-song" /> : subtitle}
             </span>
             <span className="user-panel-sub-username personal-info">{me.username}</span>
           </span>
@@ -105,9 +109,12 @@ export function UserPanel() {
           </Tooltip>
           <DeviceChevron label="Output Options" onOpen={rect => menu.open({ clientX: rect.left, clientY: rect.top }, headphoneItems())} />
         </div>
-        <button ref={setInboxAnchor} type="button" className="user-panel-button user-panel-inbox" aria-label="Inbox" aria-expanded={inboxOpen} onClick={() => (inboxOpen ? closeModal() : openModal({ type: "inbox" }))}>
-          <Inbox size={20} />
-        </button>
+        {/* phone only (the title bar has the Inbox elsewhere); rendered, not hidden by CSS: .user-panel-button's display: flex came later in shell.css and beat the old display: none */}
+        {narrow && (
+          <button ref={setInboxAnchor} type="button" className="user-panel-button user-panel-inbox" aria-label="Inbox" aria-expanded={inboxOpen} onClick={() => (inboxOpen ? closeModal() : openModal({ type: "inbox" }))}>
+            <Inbox size={20} />
+          </button>
+        )}
         <Tooltip content="User Settings" side="top">
           <button type="button" className="user-panel-button" aria-label="User Settings" onClick={() => openModal({ type: "userSettings" })}>
             <Settings size={20} />

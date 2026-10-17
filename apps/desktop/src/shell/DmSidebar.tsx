@@ -9,6 +9,7 @@ import { Nameplate, nameplateRowClass } from "../perks/NameStyles";
 import { Avatar } from "./Avatar";
 import { closeDirectMessage } from "./actions";
 import { useIsMuted } from "./localState";
+import { playingVerb } from "../activity/format";
 import { ActivityLine, useShownActivity } from "./ActivityLine";
 import { dmContextItems } from "./menus";
 import { openModal } from "./modalStore";
@@ -43,7 +44,7 @@ function DmRow({ channel }: { channel: Channel }) {
     name,
     unreadLabel(muted ? 0 : mentions, unread && !muted),
     status && STATUS_LABEL[status],
-    playing ? (playing.type === 2 ? "listening to Spotify" : `playing ${playing.name}`) : inVoice ? "in voice" : custom,
+    playing ? (playing.type === 2 ? "listening to Spotify" : `${playingVerb(playing).toLowerCase()} ${playing.name}`) : inVoice ? "in voice" : custom,
     group ? `${recipients.length + 1} members` : null,
   ]
     .filter(Boolean)
@@ -74,7 +75,7 @@ function DmRow({ channel }: { channel: Channel }) {
           </span>
           {group && <span className="dm-sub">{recipients.length + 1} members</span>}
           {playing ? (
-            <ActivityLine activity={playing} className="dm-sub dm-activity" />
+            <ActivityLine activity={playing} className="dm-sub dm-activity" variant="song" />
           ) : inVoice ? (
             <span className="dm-sub dm-activity voice">
               <Volume2 size={12} strokeWidth={2.5} aria-hidden="true" />

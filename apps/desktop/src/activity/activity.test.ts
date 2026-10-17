@@ -51,6 +51,11 @@ describe("activitiesFor", () => {
     expect(activitiesFor({ share: true, detected: { name: "Factorio", exe: "factorio.exe", startedAt: 1234 } })).toEqual([{ name: "Factorio", type: 0, timestamps: { start: 1234 } }]);
   });
 
+  it("marks an app with app: true and leaves a game without the flag", () => {
+    expect(activitiesFor({ share: true, detected: { name: "Google Chrome", exe: "chrome.exe", startedAt: 5, app: true } })).toEqual([{ name: "Google Chrome", type: 0, app: true, timestamps: { start: 5 } }]);
+    expect(activitiesFor({ share: true, detected: { name: "Factorio", exe: "f.exe", startedAt: 5 } })[0]).not.toHaveProperty("app");
+  });
+
   it("omits timestamps when the start is unknown, and is empty when sharing is off or nothing is detected", () => {
     expect(activitiesFor({ share: true, detected: { name: "Factorio", exe: "f.exe", startedAt: 0 } })).toEqual([{ name: "Factorio", type: 0 }]);
     expect(activitiesFor({ share: false, detected: { name: "Factorio", exe: "f.exe", startedAt: 5 } })).toEqual([]);

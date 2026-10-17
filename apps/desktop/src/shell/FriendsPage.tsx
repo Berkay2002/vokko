@@ -1,12 +1,15 @@
 import { useMemo, useState } from "react";
 import { NavToggle } from "./NavToggle";
-import { Check, Gamepad2, MessageCircle, MoreVertical, Music, Search, Users, Volume2, X } from "lucide-react";
+import { siSpotify } from "simple-icons";
+import { BrandIcon } from "../ui/BrandIcon";
+import { Check, MessageCircle, MoreVertical, Search, Users, Volume2, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
-import { RelationshipType, type Activity, type Channel, type Relationship, type User } from "../api/types";
+import { RelationshipType, type Activity, type Channel, type Guild, type Relationship, type User } from "../api/types";
 import { joinVoiceChannel } from "../voice";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
+import { ActivityIcon } from "./ActivityIcon";
 import { ActivityLine, useNow } from "./ActivityLine";
 import { SpotifyArt } from "./SpotifyCard";
 import { formatClock } from "../activity/format";
@@ -14,7 +17,7 @@ import { activeFriends, type ActiveEntry } from "./activeNow";
 import { Tooltip, useContextMenu } from "../ui";
 import { getPrefs } from "../ui/prefs";
 import { FriendSuggestionsTab } from "../community";
-import { Avatar } from "./Avatar";
+import { Avatar, GuildIcon } from "./Avatar";
 import { copyText, openDirectMessage } from "./actions";
 import { openProfile } from "./profileStore";
 import { go, guildPath } from "./nav";
@@ -185,17 +188,18 @@ function ActiveCard({ entry }: { entry: ActiveEntry }) {
         <Avatar user={relationship.user} size={32} status />
         <span className="active-card-text">
           <span className="active-card-name">{displayName(relationship.user)}</span>
-          {(entry.voice || !entry.activity) && <span className="active-card-sub">{entry.text}</span>}
+          {!entry.activity && <span className="active-card-sub">{entry.text}</span>}
           {entry.activity && <ActivityLine activity={entry.activity} className="active-card-sub" />}
         </span>
         {(entry.voice || entry.activity) && (
-          <span className={`active-card-icon ${entry.voice ? "active-card-voice" : "active-card-game"}`} aria-hidden="true">
-            {entry.voice ? <Volume2 size={16} /> : entry.activity?.type === 2 ? <Music size={16} /> : <Gamepad2 size={16} />}
+          <span className={`active-card-icon ${entry.activity ? "active-card-game" : "active-card-voice"}`} aria-hidden="true">
+            {entry.activity ? entry.activity.type === 2 ? <BrandIcon icon={siSpotify} size={16} /> : <ActivityIcon activity={entry.activity} size={16} fill /> : <Volume2 size={16} />}
           </span>
         )}
       </button>
+      {entry.channel && entry.guild && <VoiceRow channel={entry.channel} guild={entry.guild} />}
       {entry.activity && <ActiveBody activity={entry.activity} user={relationship.user} />}
-      {entry.channel && <VoiceDetails channel={entry.channel} />}
+      {entry.channel && !entry.guild && <VoiceDetails channel={entry.channel} />}
     </div>
   );
 }
@@ -211,7 +215,7 @@ function ActiveBody({ activity, user }: { activity: Activity; user: User }) {
         <SpotifyArt activity={activity} className="active-card-art" />
       ) : (
         <span className="active-card-art" aria-hidden="true">
-          <Gamepad2 size={20} />
+          <ActivityIcon activity={activity} size={20} fill />
         </span>
       )}
       <span className="active-card-body-text">
@@ -227,6 +231,47 @@ function ActiveBody({ activity, user }: { activity: Activity; user: User }) {
 }
 
 const MAX_FACES = 6;
+const ROW_FACES = 3;
+
+/** The voice channel of a server we share, always visible under the header: server icon with a speaker badge, the channel, the
+ *  server and who is in it. Clicking it joins, as Join Voice in the unfolding details does. */
+function VoiceRow({ channel, guild }: { channel: Channel; guild: Guild }) {
+  const states = useChannelVoiceStates(channel.id);
+  const users = useStore(s => s.users);
+  const inside = useVoice(s => s.channelId === channel.id);
+  const guildId = guild.id;
+  const people = states.map(state => users[state.user_id]).filter(user => user !== undefined);
+  return (
+    <button
+      type="button"
+      className="active-card-voice-row"
+      aria-label={`${inside ? "Open" : "Join"} ${channel.name ?? "voice"} · ${guild.name}, ${states.length} in voice`}
+      onClick={() => {
+        if (!inside) joinVoiceChannel(channel);
+        go(guildPath(guildId, channel.id));
+      }}
+    >
+      <span className="active-card-voice-guild">
+        <GuildIcon guild={guild} size={32} />
+        <span className="active-card-voice-badge" aria-hidden="true">
+          <Volume2 size={10} />
+        </span>
+      </span>
+      <span className="active-card-body-text">
+        <span className="active-card-title">{channel.name ?? "Voice"}</span>
+        <span className="active-card-body-sub">{guild.name}</span>
+      </span>
+      <span className="active-card-faces active-card-voice-faces" aria-hidden="true">
+        {people.slice(0, ROW_FACES).map(user => (
+          <span key={user.id} className="active-card-face">
+            <Avatar user={user} size={24} />
+          </span>
+        ))}
+        {states.length > ROW_FACES && <span className="active-card-face-more">+{states.length - ROW_FACES}</span>}
+      </span>
+    </button>
+  );
+}
 
 /** Voice card extras, unfolding on hover or keyboard focus (as on Discord): a button with the channel, server and who is in it that
  *  opens the channel without joining, next to Join. DM calls have no server to open: plain faces, and no Join (answering one goes

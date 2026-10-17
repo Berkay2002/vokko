@@ -37,7 +37,7 @@ const MemberRow = memo(function MemberRow({ member, guildId, offline }: { member
           <TagChip tag={member.user.primary_guild} />
           <TimeoutBadge until={member.communication_disabled_until} />
         </span>
-        {playing ? <ActivityLine activity={playing} className="member-status" /> : custom && <span className="member-status">{custom}</span>}
+        {playing ? <ActivityLine activity={playing} className="member-status" variant="song" /> : custom && <span className="member-status">{custom}</span>}
       </span>
     </button>
   );
