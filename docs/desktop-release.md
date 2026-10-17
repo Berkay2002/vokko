@@ -137,7 +137,8 @@ don't turn it on. Checked on WebKitGTK 2.52.6 (Ubuntu 26.04) with `enable-webrtc
 and `getDisplayMedia` exist, `RTCPeerConnection` is undefined. No GStreamer plugin fixes that, so the AppImage and the .deb
 can't join LiveKit (calls, screen share, Watch Together streams). `joinRefusal` (voice/engine.ts) answers
 `webrtc_unsupported` when `RTCPeerConnection` is missing against a real server, and the voice panel says to use the browser;
-the mock backend (FakeTransport) still joins. Making it work needs our own WebKitGTK built with `-DENABLE_WEB_RTC=ON
+the Stremio / Spotify viewer Room (stremio/viewerConnection.ts) goes to `unsupported` instead of retrying and its tile says the
+same. The mock backend (FakeTransport, FakeViewer) still works. Making it work needs our own WebKitGTK built with `-DENABLE_WEB_RTC=ON
 -DUSE_GSTREAMER_WEBRTC=ON` bundled in the AppImage (plus gstreamer1.0-plugins-bad and gstreamer1.0-nice), or native LiveKit in
 the Rust backend.
 

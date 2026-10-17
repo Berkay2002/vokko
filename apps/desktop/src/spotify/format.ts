@@ -2,6 +2,7 @@
 
 import { ApiRequestError } from "../api/rest";
 import { SPOTIFY_ART_URL, type SpotifyState } from "../api/types";
+import type { RoomState } from "../stremio/viewerConnection";
 import { expectedPositionMs } from "../watch/youtube";
 
 const ART_ID = /^[0-9a-f]{40}$/;
@@ -19,7 +20,8 @@ export function shownPositionMs(state: Pick<SpotifyState, "status" | "playing" |
 }
 
 /** The status line of the tile, or "" when it plays normally. */
-export function statusText(state: Pick<SpotifyState, "status" | "error" | "track">, room: "connecting" | "connected" | "closed" | "failed"): string {
+export function statusText(state: Pick<SpotifyState, "status" | "error" | "track">, room: RoomState): string {
+  if (room === "unsupported") return "Listening along doesn't work in the Linux app yet. Use Vokko in your browser.";
   if (state.status === "error") return state.error || "Playback failed.";
   if (state.status === "starting") return "Starting…";
   if (state.status === "loading") return "Loading…";
