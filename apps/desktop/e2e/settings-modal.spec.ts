@@ -34,6 +34,22 @@ test('User Settings is an inset modal over the app with one close button in the 
   await expect(dialog).toHaveCount(0);
 });
 
+test('the sidebar footer links only the instance terms, and only when the server has them', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.locator('.dm-row').first().waitFor();
+  const dialog = page.getByRole('dialog', { name: 'User Settings' });
+  await page.getByRole('button', { name: 'User Settings' }).click();
+  await expect(dialog.locator('.sm-build')).toBeVisible();
+  await expect(dialog.locator('.sm-side-links')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  type Hooks = { __vokkoMockAccounts: { instance(patch: Record<string, unknown>): void } };
+  await page.evaluate(() => (window as unknown as Hooks).__vokkoMockAccounts.instance({ terms_url: 'https://example.test/terms' }));
+  await page.getByRole('button', { name: 'User Settings' }).click();
+  await expect(dialog.getByRole('link', { name: 'Terms of Service' })).toHaveAttribute('href', 'https://example.test/terms');
+  await expect(dialog.getByText('Privacy Policy')).toHaveCount(0);
+});
+
 test('My Account is one scrolling page: sub-items follow the sections and Display Name edits inline', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.locator('.dm-row').first().waitFor();

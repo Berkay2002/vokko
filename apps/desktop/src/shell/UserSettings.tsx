@@ -1,10 +1,10 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { UIEvent } from "react";
 import { Accessibility, Bell, Code, Gamepad2, Joystick, Keyboard, Languages, LogOut, MessageCircle, Mic, MessagesSquare, Monitor, Palette, Pencil, Plug, Radio, Search, ShieldCheck, User as UserIcon, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
-import type { User } from "../api/types";
+import type { InstanceInfo, User } from "../api/types";
 import { isDesktop, useWindowChrome } from "../desktop";
 import { Avatar } from "./Avatar";
 import { closeModal, openModal } from "./modalStore";
@@ -182,6 +182,11 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
   const [query, setQuery] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
   const platform = useWindowChrome()?.platform;
+  // the instance's own terms (VOKKO_TERMS_URL) are the only legal page a Vokko server serves
+  const [termsUrl, setTermsUrl] = useState<string | null>(null);
+  useEffect(() => {
+    request<InstanceInfo>("GET", "/auth/instance").then(info => setTermsUrl(info.terms_url), () => setTermsUrl(null));
+  }, []);
 
   // the sub-items are the headings of the page that is open
   useLayoutEffect(() => {
@@ -328,13 +333,13 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
           <button type="button" className="sm-build" title="Copy build info" onClick={() => void navigator.clipboard?.writeText(BUILD)}>
             {BUILD}
           </button>
-          <div className="sm-side-links">
-            <button type="button">Privacy Policy</button>
-            <span aria-hidden="true">&bull;</span>
-            <button type="button">Terms of Service</button>
-            <span aria-hidden="true">&bull;</span>
-            <button type="button">More</button>
-          </div>
+          {termsUrl && (
+            <div className="sm-side-links">
+              <a href={termsUrl} target="_blank" rel="noreferrer">
+                Terms of Service
+              </a>
+            </div>
+          )}
         </div>
       </div>
     </>
