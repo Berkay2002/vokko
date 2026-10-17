@@ -492,7 +492,7 @@ pub struct Presence {
     pub activities: Vec<Activity>,
 }
 
-/// An activity shown next to a user's presence: type 0 "Playing" (a detected game) or type 2 "Listening" (Spotify only).
+/// An activity shown next to a user's presence: type 0 "Playing" (a detected game or app) or type 2 "Listening" (Spotify only).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Activity {
     pub name: String,
@@ -506,7 +506,8 @@ pub struct Activity {
     /// Listening only: the artists, joined with "; ".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
-    /// Listening only: the album art as `spotify:<40 hex>` (Spotify's image id).
+    /// Playing: the app's icon as `app:<64 hex>` (the SHA-256 of the 64x64 PNG the server stores, `POST /app-icons`). Listening: the
+    /// album art as `spotify:<40 hex>` (Spotify's image id).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assets: Option<ActivityAssets>,
     /// Listening only: the Spotify track id (22 letters or digits).
@@ -533,6 +534,8 @@ pub struct ActivityAssets {
 impl Activity {
     /// "Playing".
     pub const PLAYING: u8 = 0;
+    /// Prefix of a Playing activity's `assets.large_image`: `app:<64 lowercase hex>`.
+    pub const APP_IMAGE_PREFIX: &'static str = "app:";
     /// "Listening to Spotify".
     pub const LISTENING: u8 = 2;
     pub const SPOTIFY: &'static str = "Spotify";
@@ -542,7 +545,8 @@ impl Activity {
 
     /// Whether a client-supplied activity list is acceptable: at most two entries of different kinds; type 0 (a name of 1 to
     /// 128 characters (code points) that shows something and holds no control, zero-width or bidirectional-override
-    /// characters, a start time that is not negative, none of the Spotify-only fields) or type 2 (the name "Spotify",
+    /// characters, a start time that is not negative, optionally `assets.large_image` as `app:<64 hex>`, none of the other
+    /// Spotify-only fields) or type 2 (the name "Spotify",
     /// optional `details` and `state` under the same text rules, `assets.large_image` as `spotify:<40 hex>`, `sync_id` as 22
     /// letters or digits, `timestamps.end` not negative and not before `start`).
     pub fn list_is_valid(list: &[Activity]) -> bool {
@@ -556,19 +560,34 @@ impl Activity {
             return false;
         }
         match self.kind {
-            Self::PLAYING => end.is_none() && self.details.is_none() && self.state.is_none() && self.assets.is_none() && self.sync_id.is_none(),
+            Self::PLAYING => {
+                end.is_none()
+                    && self.details.is_none()
+                    && self.state.is_none()
+                    && self.sync_id.is_none()
+                    && self.assets.as_ref().is_none_or(|assets| assets.large_image.as_deref().is_none_or(|image| Self::hash_id(image, Self::APP_IMAGE_PREFIX, 64)))
+            }
             Self::LISTENING => {
                 self.name == Self::SPOTIFY
                     && self.details.as_deref().is_none_or(Self::text_is_valid)
                     && self.state.as_deref().is_none_or(Self::text_is_valid)
-                    && self.assets.as_ref().and_then(|assets| assets.large_image.as_deref()).is_none_or(|image| {
-                        image.strip_prefix("spotify:").is_some_and(|id| id.len() == 40 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
-                    })
+                    && self.assets.as_ref().and_then(|assets| assets.large_image.as_deref()).is_none_or(|image| Self::hash_id(image, "spotify:", 40))
                     && self.sync_id.as_deref().is_none_or(|id| id.len() == 22 && id.bytes().all(|b| b.is_ascii_alphanumeric()))
                     && end.is_none_or(|end| end >= 0 && start.is_none_or(|start| end >= start))
             }
             _ => false,
         }
+    }
+
+    /// `prefix` followed by exactly `len` lowercase hex digits.
+    fn hash_id(image: &str, prefix: &str, len: usize) -> bool {
+        image.strip_prefix(prefix).is_some_and(|id| id.len() == len && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+    }
+
+    /// The hash of an `app:<64 hex>` image, `None` for anything else.
+    pub fn app_hash(&self) -> Option<&str> {
+        let image = self.assets.as_ref()?.large_image.as_deref()?;
+        if self.kind == Self::PLAYING && Self::hash_id(image, Self::APP_IMAGE_PREFIX, 64) { image.strip_prefix(Self::APP_IMAGE_PREFIX) } else { None }
     }
 
     fn text_is_valid(text: &str) -> bool {
@@ -5096,7 +5115,7 @@ mod tests {
         assert!(!Activity::list_is_valid(&[spotify(), spotify()]), "one of each kind");
         assert!(!Activity::list_is_valid(&[game.clone(), game.clone()]));
         type Change = fn(&mut Activity);
-        let broken: [(&str, Change); 12] = [
+        let broken: [(&str, Change); 13] = [
             ("name", |a| a.name = "Apple Music".into()),
             ("type", |a| a.kind = 1),
             ("blank details", |a| a.details = Some("  ".into())),
@@ -5105,6 +5124,7 @@ mod tests {
             ("image host", |a| a.assets = Some(ActivityAssets { large_image: Some("https://i.scdn.co/x".into()) })),
             ("image case", |a| a.assets = Some(ActivityAssets { large_image: Some(format!("spotify:{}", "AB01".repeat(10))) })),
             ("image length", |a| a.assets = Some(ActivityAssets { large_image: Some("spotify:ab01".into()) })),
+            ("app image on Spotify", |a| a.assets = Some(ActivityAssets { large_image: Some(format!("app:{}", "ab01".repeat(16))) })),
             ("sync_id length", |a| a.sync_id = Some("4uLU6hMCjMI75M1A2tKUQ".into())),
             ("sync_id chars", |a| a.sync_id = Some("4uLU6hMCjMI75M1A2tKU/C".into())),
             ("end before start", |a| a.timestamps = Some(ActivityTimestamps { start: Some(5), end: Some(4) })),
@@ -5115,17 +5135,24 @@ mod tests {
             change(&mut activity);
             assert!(!Activity::list_is_valid(&[activity]), "{what} must be rejected");
         }
-        let spotify_only: [(&str, Change); 5] = [
+        let spotify_only: [(&str, Change); 4] = [
             ("details", |a| a.details = Some("x".into())),
             ("state", |a| a.state = Some("x".into())),
             ("sync_id", |a| a.sync_id = Some("4uLU6hMCjMI75M1A2tKUQC".into())),
-            ("assets", |a| a.assets = Some(ActivityAssets { large_image: None })),
             ("end", |a| a.timestamps = Some(ActivityTimestamps { start: Some(1), end: Some(2) })),
         ];
         for (what, change) in spotify_only {
             let mut activity = game.clone();
             change(&mut activity);
             assert!(!Activity::list_is_valid(&[activity]), "a game must not carry {what}");
+        }
+        let with_image = |image: &str| Activity { assets: Some(ActivityAssets { large_image: Some(image.into()) }), ..game.clone() };
+        let hash = "ab01".repeat(16);
+        assert!(Activity::list_is_valid(&[with_image(&format!("app:{hash}"))]), "a game may carry an app icon");
+        assert_eq!(with_image(&format!("app:{hash}")).app_hash(), Some(hash.as_str()));
+        assert!(Activity::list_is_valid(&[Activity { assets: Some(ActivityAssets { large_image: None }), ..game.clone() }]));
+        for image in [format!("spotify:{}", "ab01".repeat(10)), format!("app:{}", "AB01".repeat(16)), format!("app:{}", "ab01".repeat(10)), format!("app:{hash}0"), hash.clone(), "https://x/y.png".into()] {
+            assert!(!Activity::list_is_valid(&[with_image(&image)]), "{image} must be rejected on a game");
         }
     }
 
