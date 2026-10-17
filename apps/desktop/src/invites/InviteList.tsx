@@ -99,7 +99,7 @@ export function InviteList({ guildId, channelId, canManage }: { guildId: Snowfla
                   )}
                 </td>
                 <td>
-                  <code className="ss-id">{invite.code}</code>
+                  <code className="ss-id invite-secret">{invite.code}</code>
                   {invite.temporary && <span className="invite-tag">Temporary</span>}
                 </td>
                 {!channelId && <td>#{channels[invite.channel.id]?.name ?? invite.channel.name}</td>}

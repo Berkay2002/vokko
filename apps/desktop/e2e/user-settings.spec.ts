@@ -173,6 +173,9 @@ test('Streamer Mode: personal info and invite links are blurred, options need th
   const filter = await page.locator('.user-panel-sub-username').evaluate(el => getComputedStyle(el).filter);
   expect(filter).toContain('blur');
   await expect.poll(async () => (await blob(page)).settings.streamer_mode).toBe(true);
+  const account = await openSettings(page, 'My Account');
+  await expect(account.locator('.sm-row', { hasText: 'Email' }).locator('.personal-info')).toHaveCSS('filter', /blur/);
+  await closeSettings(page);
 
   // personal info off: the username is readable again
   const again = await openSettings(page, 'Streamer Mode');

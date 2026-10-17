@@ -1,6 +1,6 @@
 // The "Account Info" rows of My Account (settings slot `accountIdentity`): display name, username and email.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { appStore, displayName } from "../api/store";
@@ -115,7 +115,7 @@ function EmailDialog({ email, onClose }: { email: string; onClose(): void }) {
   );
 }
 
-function VerificationNotice({ text }: { text: string }) {
+function VerificationNotice({ text }: { text: ReactNode }) {
   const [sent, setSent] = useState<"idle" | "sent" | "failed">("idle");
   return (
     <div className="acct-notice warning" role="status">
@@ -167,7 +167,7 @@ export function AccountIdentity({ me }: { me: User }) {
           Edit
         </button>
       </SettingsRow>
-      {info?.pending_email && <VerificationNotice text={`We sent a verification link to ${info.pending_email}. Your email changes once you open it.`} />}
+      {info?.pending_email && <VerificationNotice text={<>We sent a verification link to <span className="personal-info">{info.pending_email}</span>. Your email changes once you open it.</>} />}
       {info && !info.pending_email && !info.verified && <VerificationNotice text="Your email isn't verified yet. Check your inbox for the link." />}
       {dialog === "username" && <UsernameDialog me={me} hasPassword={hasPassword} onClose={() => setDialog(null)} />}
       {dialog === "email" && info && <EmailDialog email={info.email} onClose={() => setDialog(null)} />}
