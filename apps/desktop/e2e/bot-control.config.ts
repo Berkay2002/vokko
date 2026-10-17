@@ -2,8 +2,8 @@ import { defineConfig } from '@playwright/test';
 
 // Who controls media in a call (e2e/bot-control.spec.ts) on its own fresh Vite (port 1461). BOTCTL_SPECS (a regex) runs other
 // specs on the same port instead, e.g. BOTCTL_SPECS='(watch-together|stremio.*|spotify.*|voice-ui)\.spec\.ts$'.
-// Run from apps/desktop: npx playwright test -c e2e/bot-control.config.ts
-const PORT = 1461;
+// Run from apps/desktop: npx playwright test -c e2e/bot-control.config.ts (BOTCTL_PORT moves it off 1461 for a parallel worker)
+const PORT = Number(process.env.BOTCTL_PORT ?? 1461);
 
 export default defineConfig({
   testDir: '.',

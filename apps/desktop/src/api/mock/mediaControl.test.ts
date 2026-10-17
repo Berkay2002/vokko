@@ -100,6 +100,21 @@ describe("mock Watch Together control", () => {
     expect(watchOf(voiceId)?.queue_added_by).toEqual([ids.c, ids.c, ids.c]);
   });
 
+  it("anyone removes their own queue entry, the host any; a stale index is a no-op", () => {
+    djMode();
+    for (const name of ["host", "b", "c"]) op4(name, voiceId);
+    call("b", "PUT", watch(), { video_id: VIDEO });
+    for (const [who, id] of [["c", A], ["host", B], ["c", C]] as const) call(who, "PATCH", watch(), { queue_add: id });
+    expect(errorOf(() => call("c", "PATCH", watch(), { queue_remove: { index: 1, video_id: B } }))).toEqual({ status: 403, code: 50013 });
+    call("c", "PATCH", watch(), { queue_remove: { index: 1, video_id: C } }); // stale: C is at 2
+    call("c", "PATCH", watch(), { queue_remove: { index: 7, video_id: C } });
+    expect(watchOf(voiceId)?.queue).toEqual([A, B, C]);
+    call("c", "PATCH", watch(), { queue_remove: { index: 2, video_id: C } });
+    expect(watchOf(voiceId)).toMatchObject({ queue: [A, B], queue_added_by: [ids.c, ids.host] });
+    call("b", "PATCH", watch(), { queue_remove: { index: 0, video_id: A } });
+    expect(watchOf(voiceId)).toMatchObject({ queue: [B], queue_added_by: [ids.host] });
+  });
+
   it("votes skip at half the listeners, can be withdrawn, and the adder skips at once", () => {
     djMode();
     op4("host", voiceId);

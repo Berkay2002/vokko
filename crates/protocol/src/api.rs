@@ -1466,7 +1466,7 @@ pub struct WatchTogetherStartRequest {
     pub title: Option<String>,
 }
 
-/// `PATCH /channels/{id}/watch-together`: play / pause / seek, set the title, add to the queue, or skip. With `skip`, a
+/// `PATCH /channels/{id}/watch-together`: play / pause / seek, set the title, add to or remove from the queue, or skip. With `skip`, a
 /// `video_id` makes it a no-op unless that video is still the current one (every client reports "ended" at once).
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct WatchTogetherPatchRequest {
@@ -1479,9 +1479,18 @@ pub struct WatchTogetherPatchRequest {
     #[serde(default)]
     pub queue_add: Option<String>,
     #[serde(default)]
+    pub queue_remove: Option<WatchTogetherQueueRemove>,
+    #[serde(default)]
     pub skip: Option<bool>,
     #[serde(default)]
     pub video_id: Option<String>,
+}
+
+/// One queue entry to remove: a no-op unless `queue[index]` is still `video_id` (the queue moved since the client saw it).
+#[derive(Clone, Debug, Deserialize)]
+pub struct WatchTogetherQueueRemove {
+    pub index: usize,
+    pub video_id: String,
 }
 
 /// Who controls a Watch Together, Stremio or Spotify session and the skip vote on its current item (docs/design/bot-control.md

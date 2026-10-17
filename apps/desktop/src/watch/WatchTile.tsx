@@ -2,10 +2,10 @@
 // The server holds the truth ({video_id, playing, position_ms, updated_at_ms}); every client turns that into player commands,
 // seeks when it drifts more than 2 s, and sends its own button presses back as PATCHes, which everyone (itself included) then
 // applies from WATCH_TOGETHER_UPDATE. Volume is local. Someone without control (useCanControlMedia) sees no play / pause, seek or
-// stop, votes to skip, and may queue up to WATCH_TOGETHER_QUEUE_PER_USER videos.
+// stop, votes to skip, and may queue up to WATCH_TOGETHER_QUEUE_PER_USER videos and take their own back out.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ListVideo, Maximize2, Minimize2, Pause, Play, SkipForward, Square, Tv, Volume2, VolumeX } from "lucide-react";
+import { ListVideo, Maximize2, Minimize2, Pause, Play, SkipForward, Square, Tv, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import { WATCH_TOGETHER_QUEUE_PER_USER, type Snowflake, type WatchTogetherState } from "../api/types";
 import { reason } from "../stremio/format";
@@ -151,7 +151,9 @@ function useWatchPlayer(channelId: Snowflake, state: WatchTogetherState, volume:
   return { frame, onLoad, durationMs, errorCode };
 }
 
-function QueuePanel({ channelId, queue, quota }: { channelId: Snowflake; queue: string[]; quota: ReturnType<typeof queueQuota> }) {
+function QueuePanel({ channelId, state, controller, meId }: { channelId: Snowflake; state: WatchTogetherState; controller: boolean; meId: Snowflake | undefined }) {
+  const queue = state.queue;
+  const quota = queueQuota(state.queue_added_by, meId, controller, WATCH_TOGETHER_QUEUE_PER_USER);
   const [link, setLink] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -169,6 +171,10 @@ function QueuePanel({ channelId, queue, quota }: { channelId: Snowflake; queue: 
     }
     setBusy(false);
   };
+  const remove = (index: number, id: string) => {
+    setError(null);
+    controlWatch(channelId, { queue_remove: { index, video_id: id } }).catch(e => setError(reason(e)));
+  };
   return (
     <aside className="watch-queue" aria-label="Up next">
       <h3 className="watch-queue-title">Up next</h3>
@@ -178,7 +184,12 @@ function QueuePanel({ channelId, queue, quota }: { channelId: Snowflake; queue: 
         <ol className="watch-queue-list">
           {queue.map((id, i) => (
             <li key={`${id}-${i}`} className="watch-queue-item" data-video-id={id}>
-              {id}
+              <span className="watch-queue-id">{id}</span>
+              {(controller || state.queue_added_by[i] === meId) && (
+                <button type="button" className="watch-button watch-queue-remove" aria-label={`Remove ${id} from Up next`} onClick={() => remove(i, id)}>
+                  <X size={14} />
+                </button>
+              )}
             </li>
           ))}
         </ol>
@@ -278,7 +289,7 @@ function WatchTileBody({ channelId, variant, onActivate, state }: { channelId: S
               )}
             </div>
           )}
-          {queueOpen && <QueuePanel channelId={channelId} queue={state.queue} quota={queueQuota(state.queue_added_by, meId, controller, WATCH_TOGETHER_QUEUE_PER_USER)} />}
+          {queueOpen && <QueuePanel channelId={channelId} state={state} controller={controller} meId={meId} />}
           <div className="watch-bar">
             {controller && (
               <input

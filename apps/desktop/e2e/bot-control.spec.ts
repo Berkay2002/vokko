@@ -102,6 +102,17 @@ test('Watch Together: a non-controller votes, queues up to the quota, skips what
   await queue.getByLabel('Add a YouTube link to the queue').fill('https://youtu.be/ddddddddddd');
   await expect(queue.getByRole('button', { name: 'Add' })).toBeDisabled();
   expect(await errorCode(page, 'carol', 'PATCH', path, { queue_add: 'ddddddddddd' })).toBe(50035);
+
+  // I take back my own entries, not Alice's (the server refuses that too); a stale index does nothing.
+  await as(page, 'alice', 'PATCH', path, { queue_add: 'eeeeeeeeeee' });
+  await expect(queue.getByRole('button', { name: /^Remove / })).toHaveCount(3);
+  await expect(queue.getByRole('button', { name: 'Remove eeeeeeeeeee from Up next' })).toHaveCount(0);
+  expect(await errorCode(page, 'carol', 'PATCH', path, { queue_remove: { index: 3, video_id: 'eeeeeeeeeee' } })).toBe(50013);
+  expect(await errorCode(page, 'carol', 'PATCH', path, { queue_remove: { index: 0, video_id: QUEUED[2] } })).toBeNull();
+  await shots(page, 'watch-queue');
+  await queue.getByRole('button', { name: `Remove ${QUEUED[2]} from Up next` }).click();
+  await expect(queue.locator('.watch-queue-item')).toHaveCount(3);
+  await expect(queue.locator('.media-quota')).toHaveText('2 of 3 added');
   await tile.getByRole('button', { name: /^Up next/ }).click();
 
   // One vote of two: everyone sees the count; withdrawing and voting again works.
