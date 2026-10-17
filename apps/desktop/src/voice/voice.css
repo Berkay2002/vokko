@@ -1003,15 +1003,6 @@
   background: var(--text-default);
 }
 
-/* own tile: only the state icons until the pointer is over it */
-.voice-tile.own:not(:hover) .voice-tile-name-text {
-  display: none;
-}
-
-.voice-tile.own:not(:hover) .voice-tile-name:not(:has(svg)) {
-  display: none;
-}
-
 /* control bar */
 .voice-bar {
   position: relative;
