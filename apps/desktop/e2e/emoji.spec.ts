@@ -127,3 +127,15 @@ test('an emoji from a server you are not in still renders, and its popout says i
   await expect(pop).toContainText('can’t use');
   await expect(pop.locator('img')).toBeVisible();
 });
+
+test('Enter in the emoji search picks the top result', async ({ page }) => {
+  await openChannel(page, 'random');
+  const sent = page.locator('.chat-msg').last();
+  await sent.hover();
+  await sent.getByRole('button', { name: 'Add Reaction' }).click();
+  const picker = page.getByRole('dialog', { name: 'Emoji picker' });
+  await picker.getByLabel('Search emoji').fill('thumbsup');
+  await picker.getByLabel('Search emoji').press('Enter');
+  await expect(picker).toHaveCount(0);
+  await expect(sent.locator('.chat-reaction.me')).toContainText('👍');
+});
