@@ -85,7 +85,7 @@ export function DataPrivacyPage({ onOpen }: { onOpen: Open }) {
         <SubHeading note="Vokko stores the messages, servers and direct messages you create so it can deliver them to you and the people you talk to. That is all it uses your data for.">
           Use data to make Vokko work
         </SubHeading>
-        <Unavailable>There is no analytics, personalisation or sponsored content in Vokko, so the switches Discord shows here do not exist.</Unavailable>
+        <Unavailable>Vokko has no analytics, personalisation or sponsored content, so there is nothing to turn off here.</Unavailable>
         <RequestData />
       </Category>
       <Category title="Profile Privacy">

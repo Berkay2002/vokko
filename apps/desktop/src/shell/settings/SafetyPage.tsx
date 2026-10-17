@@ -25,7 +25,7 @@ const LEVELS: { value: string; label: string; note: string }[] = [
   { value: String(VerificationLevel.Low), label: "Low", note: "Must have a Vokko account (Vokko has no email verification, so every account passes)." },
   { value: String(VerificationLevel.Medium), label: "Medium", note: "Must be registered on Vokko for longer than 5 minutes." },
   { value: String(VerificationLevel.High), label: "High", note: "Must also be a member of this server for longer than 10 minutes." },
-  { value: String(VerificationLevel.VeryHigh), label: "Highest", note: "Discord asks for a verified phone; Vokko applies the High rules." },
+  { value: String(VerificationLevel.VeryHigh), label: "Highest", note: "Same as High: Vokko has no phone verification." },
 ];
 
 const FILTERS: { value: string; label: string; note: string }[] = [
