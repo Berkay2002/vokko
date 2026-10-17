@@ -51,7 +51,7 @@ function DmRelationRow({ user, name }: { user: User; name: string }) {
 
   const friendButton = (() => {
     switch (type) {
-      case RelationshipType.Friend: return <button type="button" className="chat-start-btn" disabled={busy} onClick={() => void run('DELETE')}>Remove Friend</button>;
+      case RelationshipType.Friend: return <button type="button" className="chat-start-btn" disabled={busy} onClick={() => openModal({ type: 'removeFriend', userId: user.id })}>Remove Friend</button>;
       case RelationshipType.OutgoingRequest: return <button type="button" className="chat-start-btn" disabled>Friend Request Sent</button>;
       case RelationshipType.IncomingRequest: return <>
         <button type="button" className="chat-start-btn" disabled={busy} onClick={() => void run('PUT')}>Accept Friend Request</button>
