@@ -89,7 +89,7 @@ Game manifest (server-validated; the same shape for built-ins, which are constan
 - `url`: absolute, `https:` only (plus `http://127.0.0.1|localhost:*` when the server runs with `VOKKO_DEV=1`), no userinfo, no
   fragment, at most 512 bytes. Its origin must differ from the server's public origin and the web app origin (config
   `public_url`); rejected with `url` "Must not be this server's own address". Outside dev, loopback, private and link-local hosts
-  (`localhost`, `*.localhost`, and IPs `unfurl::is_public_ip` refuses) are rejected with "Must not be a local or private network address".
+  (`unfurl::host_allowed`: `localhost`, `.local`, `.internal` and non-public IPs) are rejected with "Must not be a local or private network address".
 - `icon`: optional, one emoji grapheme (max 16 bytes, no `hidden_char`). `min_players` 1-16, `max_players` min-16. `aspect`:
   `"16:9" | "4:3" | "1:1" | "fill"`, default `"16:9"`.
 - At most 25 games per guild. Routes (MANAGE_GUILD to write, any member to read):

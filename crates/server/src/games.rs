@@ -1,7 +1,5 @@
 //! A guild's game catalog (docs/design/games-host.md section 4): web games members with MANAGE_GUILD allow in the guild's calls.
 //! `GET|POST /guilds/{id}/games`, `PATCH|DELETE /guilds/{id}/games/{game_id}`, audit entries and GUILD_GAMES_UPDATE.
-use std::net::IpAddr;
-
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, patch};
@@ -21,7 +19,7 @@ use crate::config::Config;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, parse_id};
 use crate::state::AppState;
-use crate::unfurl::is_public_ip;
+use crate::unfurl::host_allowed;
 use crate::voice::watch::hidden_char;
 
 /// Longest manifest URL, in bytes.
@@ -101,7 +99,9 @@ fn check_players(min: u8, max: u8) -> ApiResult<()> {
 /// An absolute `https:` URL (with `VOKKO_DEV=1` also `http://127.0.0.1` / `http://localhost`), at most 512 bytes, without
 /// userinfo or fragment, on another host than this server and its web app, whatever the port (a game there would share their
 /// origin or their cookies). A trailing `.` does not make a host another one. In dev a loopback game only needs another port.
-/// Outside dev, never a loopback, private or link-local host: the frame would load a page on the viewer's own machine or network.
+/// Outside dev, never a loopback, private or link-local IP or a `localhost` / `.local` / `.internal` name (link previews' rule): the
+/// frame would load a page on the viewer's own machine or network. A public name that resolves privately is not caught here: the
+/// server never fetches the URL and DNS can change later, so only the viewer's browser could check that.
 pub fn check_url(config: &Config, raw: &str) -> ApiResult<String> {
     let raw = raw.trim();
     let bad = |message: &str| ApiErr::invalid("url", message);
@@ -114,9 +114,7 @@ pub fn check_url(config: &Config, raw: &str) -> ApiResult<String> {
     if !(url.scheme() == "https" || (config.dev && url.scheme() == "http" && local)) || url.host_str().is_none_or(str::is_empty) {
         return Err(bad("Must be an https URL."));
     }
-    let host_ip = url.host_str().and_then(|host| host.trim_start_matches('[').trim_end_matches(']').parse::<IpAddr>().ok());
-    let local_name = host(&url).is_some_and(|host| host.eq_ignore_ascii_case("localhost") || host.to_ascii_lowercase().ends_with(".localhost"));
-    if !config.dev && (local_name || host_ip.is_some_and(|ip| !is_public_ip(ip))) {
+    if !host_allowed(&url, config.dev) {
         return Err(bad("Must not be a local or private network address."));
     }
     if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
@@ -330,6 +328,8 @@ mod tests {
             "",
             "https://localhost/",
             "https://game.localhost/",
+            "https://router.local/",
+            "https://wiki.corp.internal/",
             "https://127.0.0.1/",
             "https://2130706433/",
             "https://10.0.0.5/",

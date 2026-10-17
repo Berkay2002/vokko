@@ -382,13 +382,17 @@ export function ContextMenuHost() {
   useEffect(() => {
     if (!open || phone) return;
     const close = () => hide();
+    // A long menu scrolls inside itself (.context-menu max-height); only a scroll elsewhere moves its anchor.
+    const onScroll = (event: Event) => {
+      if (!(event.target instanceof Element && event.target.closest(".context-menu"))) hide();
+    };
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
-    document.addEventListener("scroll", close, true);
+    document.addEventListener("scroll", onScroll, true);
     return () => {
       window.removeEventListener("resize", close);
       window.removeEventListener("blur", close);
-      document.removeEventListener("scroll", close, true);
+      document.removeEventListener("scroll", onScroll, true);
     };
   }, [open, hide, phone]);
   if (!open) return null;

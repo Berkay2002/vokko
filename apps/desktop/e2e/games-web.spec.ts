@@ -129,8 +129,14 @@ test('a website game: frame on load, share a room link, others and a late joiner
 
 test('the Activities picker links to credits and licenses', async ({ browser }) => {
   const sam = await signIn(browser, 'sam');
+  // Short enough that the menu scrolls inside itself, which must not close it.
+  await sam.page.setViewportSize({ width: 1440, height: 600 });
   await call(sam.page).getByRole('button', { name: 'Activities', exact: true }).click();
-  await sam.page.getByRole('menu').getByRole('menuitem', { name: /Credits and licenses/ }).click();
+  const menu = sam.page.getByRole('menu');
+  await menu.evaluate(el => el.scrollBy(0, el.scrollHeight));
+  await sam.page.waitForTimeout(100);
+  await expect(menu).toBeVisible();
+  await menu.getByRole('menuitem', { name: /Credits and licenses/ }).click();
   const dialog = sam.page.getByRole('dialog', { name: 'Credits and licenses' });
   await expect(dialog.locator('[data-game-id="builtin:krunker"]')).toContainText('Runs on krunker.io. Its ads, accounts and terms apply.');
   await expect(dialog.locator('[data-game-id="builtin:sketch"]')).toContainText('Sketch');
