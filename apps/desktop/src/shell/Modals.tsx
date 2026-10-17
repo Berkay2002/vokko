@@ -621,7 +621,7 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
     case "notificationSettings":
       return <NotificationSettingsModal key={id} scopeId={spec.scopeId} title={spec.title} guild={spec.guild} />;
     case "userSettings":
-      return <UserSettings key={id} section={spec.section} />;
+      return <UserSettings key={id} section={spec.section} guildId={spec.guildId} />;
     case "profileEditor":
       return <ProfileEditor key={id} />;
     case "voiceStatus":

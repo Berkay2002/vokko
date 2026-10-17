@@ -36,7 +36,7 @@ export type ModalSpec =
   | { type: "watchTogether"; channelId: Snowflake }
   | { type: "cameraPreview" }
   | { type: "screenShare" }
-  | { type: "userSettings"; section?: string }
+  | { type: "userSettings"; section?: string; guildId?: string }
   | { type: "profileEditor" };
 
 /** Full-screen settings stay mounted underneath these small dialogs and come back when the dialog closes. */

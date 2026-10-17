@@ -8,6 +8,7 @@ import { appStore, dmName } from "../api/store";
 import type { CallRingRequest, Channel, Snowflake } from "../api/types";
 import { notificationAdapter } from "../notify/desktop";
 import { dmPath, go } from "../shell/nav";
+import { openDirectMessage } from "../shell/actions";
 import { openModal } from "../shell/modalStore";
 import { getPrefs } from "../ui/prefs";
 import { joinVoiceChannel, leaveVoice } from "../voice/engine";
@@ -28,6 +29,12 @@ export function startCall(channel: Channel, video = false): VoiceErrorReason | n
   const refusal = joinVoiceChannel(channel);
   if (!refusal && video) openModal({ type: "cameraPreview" });
   return refusal;
+}
+
+/** Menu "Start a Call" / "Start Voice/Video Call" on a user: open the DM with them and call there. */
+export async function callUser(userId: Snowflake, video = false): Promise<void> {
+  const channel = await openDirectMessage(userId);
+  if (channel) startCall(channel, video);
 }
 
 /** Accept an incoming call: open the DM and join its voice. */

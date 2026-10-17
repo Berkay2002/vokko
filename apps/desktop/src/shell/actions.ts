@@ -93,19 +93,22 @@ export async function deleteGuild(guildId: Snowflake): Promise<void> {
 }
 
 /** Open (or create) the DM with `userId` and navigate to it. */
-export async function openDirectMessage(userId: Snowflake): Promise<void> {
+/** Opens (or creates) the DM and navigates to it; undefined when the other side refuses DMs. */
+export async function openDirectMessage(userId: Snowflake): Promise<Channel | undefined> {
   try {
     const channel = await request<Channel>("POST", "/users/@me/channels", { recipient_id: userId });
     appStore.getState().upsertChannel(channel);
     go(dmPath(channel.id));
+    return channel;
   } catch (e) {
     if (!isDmRefused(e)) throw e;
     openModal({ type: "dmRefused" });
+    return undefined;
   }
 }
 
 export async function createGroupDM(userIds: Snowflake[]): Promise<void> {
-  if (userIds.length === 1 && userIds[0]) return openDirectMessage(userIds[0]);
+  if (userIds.length === 1 && userIds[0]) return void (await openDirectMessage(userIds[0]));
   const channel = await request<Channel>("POST", "/users/@me/channels", { recipient_ids: userIds });
   appStore.getState().upsertChannel(channel);
   go(dmPath(channel.id));

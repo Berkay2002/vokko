@@ -89,13 +89,13 @@ test('user-panel popout: profile card, status submenu, switch accounts, copy ID,
   await expect(page.locator('.sm-side')).toBeVisible();
 });
 
-test('friend More menu: calls are unavailable, Remove Friend removes the row', async ({ page }) => {
+test('friend More menu: calls are enabled, Remove Friend removes the row', async ({ page }) => {
   await home(page);
   const row = page.locator('.people-row', { hasText: 'Alice' });
   await row.hover();
   await row.getByRole('button', { name: 'More' }).click();
-  await expect(page.getByRole('menuitem', { name: 'Start Video Call' })).toHaveAttribute('aria-disabled', 'true');
-  await expect(page.getByRole('menuitem', { name: 'Start Voice Call' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByRole('menuitem', { name: 'Start Video Call' })).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByRole('menuitem', { name: 'Start Voice Call' })).not.toHaveAttribute('aria-disabled', 'true');
   await page.getByRole('menuitem', { name: 'Remove Friend' }).click();
   const dialog = page.getByRole('dialog', { name: "Remove 'Alice'" });
   // Cancel keeps the friend; only the dialog's Remove Friend sends the DELETE
