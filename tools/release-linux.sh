@@ -10,7 +10,8 @@ DISTRO=vokko-linux
 cd "$(git rev-parse --show-toplevel)"
 mkdir -p "$OUT"
 export MSYS_NO_PATHCONV=1 # Git Bash would rewrite the /paths inside the WSL command line
-OUT_WSL=$(wsl -d "$DISTRO" -- wslpath -a "$(cygpath -m "$OUT")" | tr -d '\r')
+# wsl reads stdin, so every call gets </dev/null: a caller piping a script into bash (over ssh, say) would lose the rest of it.
+OUT_WSL=$(wsl -d "$DISTRO" -- wslpath -a "$(cygpath -m "$OUT")" </dev/null | tr -d '\r')
 
 # The distro has no credentials for origin, so the commit travels as a bundle.
 git bundle create -q "$OUT/vokko.bundle" HEAD
@@ -30,6 +31,6 @@ wsl -d "$DISTRO" --cd "~" -e bash -c "set -euo pipefail; export PATH=\$HOME/node
   (cd apps/desktop && npx tauri build --config release.production.json --bundles appimage,deb > /tmp/vokko-linuxbuild.log 2>&1) ||
     { tail -20 /tmp/vokko-linuxbuild.log; exit 1; }
   cp target/release/bundle/appimage/Vokko_${VERSION}_amd64.AppImage target/release/bundle/appimage/Vokko_${VERSION}_amd64.AppImage.sig \
-    target/release/bundle/deb/Vokko_${VERSION}_amd64.deb '$OUT_WSL/'"
+    target/release/bundle/deb/Vokko_${VERSION}_amd64.deb '$OUT_WSL/'" </dev/null
 rm -f "$OUT/vokko.bundle"
 test -f "$OUT/Vokko_${VERSION}_amd64.AppImage.sig"
