@@ -181,6 +181,8 @@ test('Watch Stream on the channel preview (not in the call) joins and watches', 
   await live(true);
   await expect(call.getByRole('button', { name: 'Watch Stream' })).toBeVisible();
   await expect(call.locator('video[data-source="screen"]')).toHaveCount(0);
+  // The unwatched stream tile shows only the button, not the streamer's avatar under it.
+  await expect(call.locator('.voice-tile.stream .voice-tile-avatar')).toHaveCount(0);
 });
 
 test('sharing your screen: the panel shows the share with a stop button, the user panel says so', async ({ page }) => {

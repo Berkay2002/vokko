@@ -168,7 +168,7 @@ export function Tile({ state, guildId, variant, stream = false, onActivate }: { 
         <TileVideo key="screen" handle={screen} source="screen" mirror={false} />
       ) : !stream && camera ? (
         <TileVideo key="camera" handle={camera} source="camera" mirror={own} />
-      ) : (
+      ) : stream && !own && !watching && !small ? null /* the Watch Stream button stands alone on the tile, as in Discord */ : (
         <Avatar user={user} member={member} size={AVATAR_SIZE[variant]} decoration={false} className="voice-tile-avatar" />
       )}
       {!stream && <SoundEffectBadge userId={state.user_id} />}
