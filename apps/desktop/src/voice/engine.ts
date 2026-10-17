@@ -22,7 +22,7 @@ import { isMockEndpoint, type TransportCallbacks, type VoiceTransport } from "./
 import { sensitivityToDb } from "./vad";
 import { parseBackground } from "./video/backgrounds";
 import { openCamera, type CameraSession } from "./video/cameraSession";
-import { DEFAULT_SCREEN_SHARE, isCameraResolution, isViewerQuality, type ScreenShareChoice, type ViewerQuality } from "./video/options";
+import { DEFAULT_SCREEN_SHARE, isCameraResolution, isStreamContent, isViewerQuality, missingAudioNote, type ScreenShareChoice, type ViewerQuality } from "./video/options";
 
 /** Media reconnect: re-send op 4 with this backoff (1 s → 5 s) after a close and give up after two minutes (§3.6). */
 export const RETRY_BASE_MS = 1000;
@@ -184,7 +184,7 @@ export async function refreshVoiceDevices(): Promise<void> {
 export function screenChoiceFromPrefs(prefs: Prefs = getPrefs()): ScreenShareChoice {
   const resolution = (["720p", "1080p", "1440p", "source"] as const).find(r => r === prefs.streamResolution) ?? DEFAULT_SCREEN_SHARE.resolution;
   const fps = prefs.streamFps === 15 || prefs.streamFps === 60 ? prefs.streamFps : 30;
-  return { resolution, fps, audio: prefs.streamAudio };
+  return { resolution, fps, audio: prefs.streamAudio, ...(isStreamContent(prefs.streamContent) ? { content: prefs.streamContent } : {}) };
 }
 
 export const cameraResolutionFromPrefs = (prefs: Prefs = getPrefs()) => (isCameraResolution(prefs.cameraResolution) ? prefs.cameraResolution : "720p");
@@ -316,6 +316,7 @@ const callbacks: TransportCallbacks = {
     voiceDebug("video failed", { source, reason });
     setLocalState({ error: VIDEO_ERRORS[reason], ...(source === "camera" ? { cameraOn: false } : { screenOn: false }) });
   },
+  screenAudioMissing: () => setLocalState({ error: missingAudioNote(typeof navigator === "undefined" ? "" : navigator.userAgent) }),
   closed: ({ final, reason }) => {
     activeToken = null;
     if (getVoice().channelId === null) return;

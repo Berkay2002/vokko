@@ -51,7 +51,8 @@ test('Go Live: every resolution and frame rate is offered, the choice goes live 
   await share.getByRole('combobox', { name: 'Frame rate' }).click();
   await expect(page.getByRole('listbox', { name: 'Frame rate' }).getByRole('option')).toHaveText(['15 fps', '30 fps', '60 fps']);
   await page.getByRole('option', { name: '60 fps', exact: true }).click();
-  await expect(share.getByText(/^1440p · 60 fps · /)).toBeVisible();
+  await share.getByRole('radio', { name: /^Screen sharing/ }).click();
+  await expect(share.getByText(/^1440p · 60 fps · Screen sharing · /)).toBeVisible();
   if (SHOTS) {
     mkdirSync(SHOTS, { recursive: true });
     await page.screenshot({ path: `${SHOTS}/go-live.png` });
@@ -63,7 +64,7 @@ test('Go Live: every resolution and frame rate is offered, the choice goes live 
   await expect(own.locator('.voice-tile-live')).toBeVisible();
   await expect(own.locator('video[data-source="screen"]')).toBeVisible();
   await expect(bar.getByRole('button', { name: 'Stop streaming' })).toHaveAttribute('aria-pressed', 'true');
-  expect(await prefs(page)).toMatchObject({ streamResolution: '1440p', streamFps: 60 });
+  expect(await prefs(page)).toMatchObject({ streamResolution: '1440p', streamFps: 60, streamContent: 'detail' });
 
   await bar.getByRole('button', { name: 'Stop streaming' }).click();
   await expect(own.locator('.voice-tile-live')).toHaveCount(0);
@@ -73,6 +74,7 @@ test('Go Live: every resolution and frame rate is offered, the choice goes live 
   await bar.getByRole('button', { name: 'Share your screen' }).click();
   await expect(dialog(page, 'Share your screen').getByRole('combobox', { name: 'Resolution' })).toHaveText('1440p');
   await expect(dialog(page, 'Share your screen').getByRole('combobox', { name: 'Frame rate' })).toHaveText('60 fps');
+  await expect(dialog(page, 'Share your screen').getByRole('radio', { name: /^Screen sharing/ })).toHaveAttribute('aria-checked', 'true');
 });
 
 test('camera and screen share at once: two tiles, the camera on the user tile and the screen on the stream tile', async ({ page }) => {
@@ -112,7 +114,8 @@ test('watching someone else\'s stream: Watch Stream, then the quality menu', asy
   await alice.getByRole('button', { name: 'Stream quality' }).click();
   await expect(page.getByRole('menuitemcheckbox', { name: 'Auto' })).toHaveAttribute('aria-checked', 'true');
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/watch-stream-menu.png` });
-  for (const label of ['Source', '720p', '480p']) await expect(page.getByRole('menuitemcheckbox', { name: label })).toBeVisible();
+  // The menu offers the layers the stream really has (the fake one is a 1080p share with 720p and 360p under it).
+  await expect(page.getByRole('menuitemcheckbox')).toHaveText(['Auto', 'Source', '720p', '360p']);
   await page.getByRole('menuitemcheckbox', { name: '720p' }).click();
   await expect(alice.getByRole('button', { name: 'Stream quality' })).toContainText('720p');
 
