@@ -324,7 +324,7 @@ Then three workers, by file ownership, against the frozen §4:
 | 1 | House account: librespot is unofficial and Spotify can ban the account | Accepted by the owner |
 | 2 | The fork's rev is from 2026-10-17, untested on this Mac (no checkout in the cargo cache), and may not share Vokko's lock file | Phase 0 builds it first; exclude the crate from the workspace if needed |
 | 3 | The playback login depends on Spotify's desktop client id accepting `127.0.0.1:8898` | Same as Spotifast today; if it breaks, both break, and the device-code flow is the fallback |
-| 4 | Client credentials need a new developer app; Spotify's development-mode rules keep changing | Phase 0 checks the five catalog calls; the bot-side catalog fallback (§2.4) is the backup |
-| 5 | What happens when the owner plays elsewhere without Spirc (kicked, silent, or both playing) | Phase 0 finds out. If nothing signals it, add Spirc only for its active-device signal |
+| 4 | Client credentials need a new developer app; Spotify's development-mode rules keep changing | Owner confirmed 2026-10-17: a new "Vokko catalog" app, separate from Spotifast's. Phase 0 checks the five catalog calls; the bot-side catalog fallback (§2.4) is the backup |
+| 5 | What happens when the owner plays elsewhere without Spirc (kicked, silent, or both playing) | Owner confirmed 2026-10-17: stop the session, no automatic retake (§8). Phase 0 finds out what the bot sees. If nothing signals it, add Spirc only for its active-device signal |
 | 6 | Bot plays in the owner's history or friend activity | Expected not to happen; if it does, a documented limitation |
 | 7 | Per-user Spotify accounts | Later extension, not designed here |
