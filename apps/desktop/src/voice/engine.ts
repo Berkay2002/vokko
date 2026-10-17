@@ -528,6 +528,14 @@ function sync(next: VoiceModel, prev: VoiceModel): void {
 
   // Others' cameras and screen shares follow the voice states (self_video / self_stream).
   if (next.states !== prev.states && next.channelId) transport?.syncVideo?.();
+  // A streamer who stops (and stays in the channel) is no longer watched: when they go live again, Watch Stream shows again, as in Discord.
+  if (next.states !== prev.states) {
+    for (const id of Object.keys(getMedia().watching)) {
+      const was = prev.states[id];
+      const now = next.states[id];
+      if (was?.self_stream && now && now.channel_id === was.channel_id && !now.self_stream) watchStream(id, false);
+    }
+  }
 
   if (next.volumes !== prev.volumes || next.localMutes !== prev.localMutes) {
     const ids = new Set([...Object.keys(next.volumes), ...Object.keys(prev.volumes), ...Object.keys(next.localMutes), ...Object.keys(prev.localMutes)]);

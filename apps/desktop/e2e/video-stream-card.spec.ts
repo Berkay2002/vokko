@@ -170,6 +170,17 @@ test('Watch Stream on the channel preview (not in the call) joins and watches', 
   await expect(page.getByRole('region', { name: 'Voice connection' }).getByRole('status')).toHaveText('Voice Connected');
   const tile = call.locator('.voice-tile.focused', { hasText: 'Alice' });
   await expect(tile.locator('video[data-source="screen"]')).toBeVisible();
+
+  // Alice stops and goes live again: like Discord, her new stream waits for another Watch Stream.
+  const live = (on: boolean) => page.evaluate(stream => {
+    const w = window as unknown as Win;
+    w.__vokkoMock.voice('alice', w.__vokkoMock.channelIdByName('General'), { selfStream: stream });
+  }, on);
+  await live(false);
+  await expect(call.locator('.voice-tile.stream')).toHaveCount(0);
+  await live(true);
+  await expect(call.getByRole('button', { name: 'Watch Stream' })).toBeVisible();
+  await expect(call.locator('video[data-source="screen"]')).toHaveCount(0);
 });
 
 test('sharing your screen: the panel shows the share with a stop button, the user panel says so', async ({ page }) => {
