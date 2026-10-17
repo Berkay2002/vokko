@@ -8,13 +8,15 @@ use std::time::Instant;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{post, put};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use vokko_protocol::api::{
-    GatewayEvent, STREMIO_POSITION_MAX_MS, STREMIO_QUEUE_MAX, Snowflake, StremioItem, StremioPatchRequest, StremioQueueItem, StremioStartRequest, StremioState,
-    StremioStatus, StremioUpdate, StremioViewerToken,
+    GatewayEvent, STREMIO_POSITION_MAX_MS, STREMIO_QUEUE_MAX, STREMIO_TRACKS_MAX, Snowflake, StremioAddonSubtitle, StremioAddonSubtitles, StremioAudioTrack,
+    StremioCues, StremioItem, StremioPatchRequest, StremioQueueItem, StremioStartRequest, StremioState, StremioStatus, StremioSubtitleKind,
+    StremioSubtitleTrack, StremioUpdate, StremioViewerToken,
 };
+use vokko_protocol::cues;
 
 use super::token::{self, Claims, VideoGrant};
 use super::watch::{CONTROL_BURST, CONTROL_PER_SECOND, require_in_voice};
@@ -26,18 +28,27 @@ use crate::error::{ApiErr, ApiResult};
 use crate::extract::ApiJson;
 use crate::state::AppState;
 use crate::store;
+use crate::stremio::addons::{self, language_code};
 use crate::stremio::bot::{BotError, Desired, secrets_match};
 use crate::stremio::rank::{Candidate, Source};
-use crate::stremio::{Active, Listed, TitleInfo, active, limit, lock};
+use crate::stremio::{Active, Listed, TitleInfo, active, limit, lock, user_addons};
 
 /// Bot token and viewer token lifetimes.
 const BOT_TOKEN_TTL_SECS: i64 = 12 * 60 * 60;
 const VIEWER_TOKEN_TTL_SECS: i64 = 6 * 60 * 60;
 /// Shown on the tile when playback failed. Never the bot's own message: ffmpeg errors can carry the media URL.
 const PLAYBACK_FAILED: &str = "Playback failed.";
+/// Subtitle files listed per request, the size of one file and the cues kept of it.
+const MAX_ADDON_SUBTITLES: usize = 200;
+const MAX_SUBTITLE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_CUES: usize = 5000;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/channels/{id}/stremio", put(start).patch(control).delete(stop)).route("/channels/{id}/stremio/viewer-token", post(viewer_token))
+    Router::new()
+        .route("/channels/{id}/stremio", put(start).patch(control).delete(stop))
+        .route("/channels/{id}/stremio/viewer-token", post(viewer_token))
+        .route("/channels/{id}/stremio/subtitles", get(addon_subtitles))
+        .route("/channels/{id}/stremio/subtitles/{sid}", get(addon_cues))
 }
 
 /// A stream waiting in the Up next queue. It was resolved from the account of `added_by` when they listed it.
@@ -68,6 +79,13 @@ pub struct Session {
     token: String,
     /// Changes with every new item; events and slow resolves that belong to an older one are dropped.
     generation: u64,
+    /// `(type, video id)` of the playing item, for asking addons about subtitles.
+    video: Option<(String, String)>,
+    /// What the bot found in the file (empty until it reports, and for every new item).
+    audio_tracks: Vec<StremioAudioTrack>,
+    subtitle_tracks: Vec<StremioSubtitleTrack>,
+    audio: Option<u32>,
+    burned: Option<u32>,
     /// The last item start, seek, pause or resume: bot events this soon afterwards describe the previous situation.
     changed: Instant,
     paused_since: Option<Instant>,
@@ -92,6 +110,10 @@ impl Session {
             duration_ms: self.duration_ms,
             started_by: Snowflake::from(self.started_by),
             bot_identity: bot_identity(channel_id),
+            audio_tracks: self.audio_tracks.clone(),
+            audio: self.audio,
+            subtitle_tracks: self.subtitle_tracks.clone(),
+            burned_subtitle: self.burned,
             queue: self
                 .queue
                 .iter()
@@ -138,6 +160,11 @@ impl Session {
         self.updated_at_ms = unix_millis();
         self.duration_ms = None;
         self.generation = generation;
+        self.video = info.video.clone();
+        self.audio_tracks.clear();
+        self.subtitle_tracks.clear();
+        self.audio = None;
+        self.burned = None;
         self.token = token;
         self.changed = Instant::now();
         self.paused_since = None;
@@ -168,6 +195,9 @@ impl Session {
             playing: self.playing,
             max_height: cfg.max_height,
             bitrate: cfg.bitrate_kbps,
+            generation: self.generation,
+            audio: self.audio,
+            burned_subtitle: self.burned,
         })
     }
 }
@@ -181,7 +211,8 @@ fn new_room(channel_id: i64) -> String {
     format!("stremio-{channel_id}-{}", random_hex(8))
 }
 
-/// The bot's token: it publishes the two screen-share sources into the session's room and nothing else (no subscribing, no data).
+/// The bot's token: it publishes the two screen-share sources into the session's room and the text subtitle cues as data (no
+/// subscribing). Viewers cannot publish data.
 fn bot_token(state: &AppState, channel_id: i64, room: &str) -> Option<String> {
     let cfg = state.config.stremio.as_ref()?;
     let now = unix_now();
@@ -198,7 +229,7 @@ fn bot_token(state: &AppState, channel_id: i64, room: &str) -> Option<String> {
             can_publish: true,
             can_publish_sources: vec!["screen_share".to_owned(), "screen_share_audio".to_owned()],
             can_subscribe: false,
-            can_publish_data: false,
+            can_publish_data: true,
             ..VideoGrant::default()
         }),
         ..Claims::default()
@@ -294,6 +325,11 @@ async fn start(
             headers: BTreeMap::new(),
             token: String::new(),
             generation,
+            video: None,
+            audio_tracks: Vec::new(),
+            subtitle_tracks: Vec::new(),
+            audio: None,
+            burned: None,
             changed: Instant::now(),
             paused_since: None,
             error_since: None,
@@ -349,6 +385,7 @@ async fn control(
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
     let skip = body.skip == Some(true);
     let steer = !skip && (body.playing.is_some() || body.position_ms.is_some());
+    let picks = !skip && (body.audio.is_some() || body.burned_subtitle.is_some());
     let now = unix_millis();
     let (before, after, desired) = {
         let mut sessions = lock(&state.stremio.sessions);
@@ -356,6 +393,16 @@ async fn control(
         let before = session.view(channel_id);
         if let Some(position) = body.position_ms.filter(|position| steer && session.duration_ms.is_some_and(|duration| *position > duration)) {
             return Err(ApiErr::invalid("position_ms", &format!("Must be between 0 and {} for this video.", session.duration_ms.unwrap_or(position))));
+        }
+        if body.audio.is_some_and(|audio| !session.audio_tracks.iter().any(|track| track.id == audio)) {
+            return Err(ApiErr::invalid("audio", "No such audio track."));
+        }
+        if body
+            .burned_subtitle
+            .flatten()
+            .is_some_and(|id| !session.subtitle_tracks.iter().any(|track| track.id == id && track.kind == StremioSubtitleKind::Bitmap))
+        {
+            return Err(ApiErr::invalid("burned_subtitle", "Only a picture-based subtitle track can be burned in."));
         }
         if body.queue_remove.is_some_and(|index| index >= session.queue.len()) {
             return Err(ApiErr::invalid("queue_remove", "No such queue entry."));
@@ -369,6 +416,16 @@ async fn control(
         if let Some(queued) = queued {
             session.queue.push(queued);
         }
+        // A new track restarts the bot's ffmpeg at the current position, like a seek.
+        let retrack =
+            picks && (body.audio.is_some_and(|audio| session.audio != Some(audio)) || body.burned_subtitle.is_some_and(|burned| session.burned != burned));
+        if let Some(audio) = body.audio {
+            session.audio = Some(audio);
+        }
+        if let Some(burned) = body.burned_subtitle {
+            session.burned = burned;
+        }
+        let steer = steer || retrack;
         if steer {
             session.steer(body.playing, body.position_ms, now);
         }
@@ -431,6 +488,61 @@ async fn viewer_token(State(state): State<AppState>, AuthUser(user_id): AuthUser
     };
     let token = token::sign(active.cfg.media_api_secret.expose(), &claims).ok_or_else(ApiErr::internal)?;
     Ok(Json(StremioViewerToken { url: active.cfg.media_url.clone(), token }))
+}
+
+/// Subtitle files the requester's own addons offer for the playing title. Only labels reach the client; the URLs stay here.
+async fn addon_subtitles(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<StremioAddonSubtitles>> {
+    let active = active(&state)?;
+    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    limit(&state, "stremio-subtitles", user_id, 5.0, 1.0 / 3.0)?;
+    let (generation, video) = playing(&state, channel_id)?;
+    let Some((kind, video_id)) = video else { return Ok(Json(StremioAddonSubtitles { subtitles: Vec::new(), addon_errors: Vec::new() })) };
+    let addons = user_addons(&state, &active, user_id).await?;
+    let (found, addon_errors) = addons::fetch_subtitles(&active.clients.fetcher, &addons, &kind, &video_id).await;
+    let found: Vec<_> = found.into_iter().take(MAX_ADDON_SUBTITLES).collect();
+    let sids = state.stremio.remember_subs(user_id, channel_id, generation, found.iter().map(|sub| sub.url.clone()).collect());
+    let mut per_addon: BTreeMap<String, usize> = BTreeMap::new();
+    let subtitles = found
+        .into_iter()
+        .zip(sids)
+        .map(|(sub, sid)| {
+            let n = per_addon.entry(sub.addon.clone()).and_modify(|n| *n += 1).or_insert(1);
+            StremioAddonSubtitle { sid, label: format!("{} {n}", sub.addon), addon: sub.addon, language: sub.language }
+        })
+        .collect();
+    Ok(Json(StremioAddonSubtitles { subtitles, addon_errors }))
+}
+
+/// The cues of one listed subtitle file: fetched with the same host rules as a stream, at most 2 MiB, SRT or WebVTT only.
+async fn addon_cues(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, sid)): Path<(String, String)>) -> ApiResult<Json<StremioCues>> {
+    let active = active(&state)?;
+    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    limit(&state, "stremio-subtitle-file", user_id, 10.0, 0.5)?;
+    let (generation, _) = playing(&state, channel_id)?;
+    let listed = state
+        .stremio
+        .listed_sub(&sid, user_id, channel_id, generation)
+        .ok_or_else(|| ApiErr::invalid("sid", "Unknown or expired subtitle. List the subtitles again."))?;
+    if let Some(cached) = listed.cues {
+        return Ok(Json(StremioCues { cues: cached.as_ref().clone() }));
+    }
+    let text = active
+        .clients
+        .fetcher
+        .get_text(listed.url.expose(), MAX_SUBTITLE_BYTES)
+        .await
+        .map_err(|_| ApiErr::invalid("sid", "That subtitle could not be opened."))?;
+    let parsed = std::sync::Arc::new(cues::parse(&text, MAX_CUES));
+    state.stremio.cache_cues(&sid, parsed.clone());
+    Ok(Json(StremioCues { cues: parsed.as_ref().clone() }))
+}
+
+/// The channel's current item (`generation`) and what it is, or "Nothing is playing".
+fn playing(state: &AppState, channel_id: i64) -> ApiResult<(u64, Option<(String, String)>)> {
+    lock(&state.stremio.sessions)
+        .get(&channel_id)
+        .map(|session| (session.generation, session.video.clone()))
+        .ok_or_else(|| ApiErr::conflict(40033, "Nothing is playing in this channel."))
 }
 
 fn touch(state: &AppState, channel_id: i64, change: impl FnOnce(&mut Session)) {
@@ -548,6 +660,57 @@ pub struct BotEvent {
     #[serde(default)]
     #[allow(dead_code)]
     message: Option<String>,
+    /// `tracks` only: the item (`generation` of the `PUT`) the lists belong to, what the bot found in the file and what it plays by default.
+    #[serde(default)]
+    generation: Option<u64>,
+    #[serde(default)]
+    audio_tracks: Vec<StremioAudioTrack>,
+    #[serde(default)]
+    subtitle_tracks: Vec<StremioSubtitleTrack>,
+    #[serde(default)]
+    audio: Option<u32>,
+    #[serde(default)]
+    burned_subtitle: Option<u32>,
+}
+
+/// A track title the bot read from the file: one short line of plain text, and nothing that looks like a link (it is shown to everyone).
+fn track_title(raw: Option<&str>) -> Option<String> {
+    let line = cues::clean_text(raw?).lines().next()?.chars().take(80).collect::<String>();
+    let lower = line.to_ascii_lowercase();
+    (!line.is_empty() && !lower.contains("://") && !lower.contains("www.")).then_some(line)
+}
+
+fn track_codec(raw: &str) -> String {
+    raw.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(32).collect::<String>().to_ascii_lowercase()
+}
+
+/// The bot's lists are data from inside a media file: capped, ids unique, languages and codecs validated, titles cleaned.
+fn sanitized_tracks(audio: Vec<StremioAudioTrack>, subtitles: Vec<StremioSubtitleTrack>) -> (Vec<StremioAudioTrack>, Vec<StremioSubtitleTrack>) {
+    let mut seen = HashSet::new();
+    let audio = audio
+        .into_iter()
+        .filter(|track| seen.insert(track.id))
+        .take(STREMIO_TRACKS_MAX)
+        .map(|track| StremioAudioTrack {
+            language: track.language.as_deref().and_then(language_code),
+            title: track_title(track.title.as_deref()),
+            codec: track_codec(&track.codec),
+            ..track
+        })
+        .collect();
+    let mut seen = HashSet::new();
+    let subtitles = subtitles
+        .into_iter()
+        .filter(|track| seen.insert(track.id))
+        .take(STREMIO_TRACKS_MAX)
+        .map(|track| StremioSubtitleTrack {
+            language: track.language.as_deref().and_then(language_code),
+            title: track_title(track.title.as_deref()),
+            codec: track_codec(&track.codec),
+            ..track
+        })
+        .collect();
+    (audio, subtitles)
 }
 
 /// `POST /internal/stremio/bot` (never behind Caddy): the bot reports `started`, `position` (every 5 s), `ended` and `error`.
@@ -586,6 +749,16 @@ pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(e
                 session.updated_at_ms = now;
                 session.duration_ms = event.duration_ms.or(session.duration_ms);
                 Next::Nothing
+            }
+            // The first report for an item sets the lists and the bot's defaults; later ones (after a re-resolve) keep what people chose.
+            "tracks" if event.generation == Some(session.generation) && session.audio_tracks.is_empty() && session.subtitle_tracks.is_empty() => {
+                let (audio_tracks, subtitle_tracks) = sanitized_tracks(event.audio_tracks, event.subtitle_tracks);
+                session.audio = event.audio.filter(|id| audio_tracks.iter().any(|track| track.id == *id));
+                session.burned =
+                    event.burned_subtitle.filter(|id| subtitle_tracks.iter().any(|track| track.id == *id && track.kind == StremioSubtitleKind::Bitmap));
+                session.audio_tracks = audio_tracks;
+                session.subtitle_tracks = subtitle_tracks;
+                Next::Announce(session.view(channel_id))
             }
             "ended" if !stale && session.status != StremioStatus::Error => Next::Advance(session.generation),
             "error" if !stale && session.status != StremioStatus::Error => {

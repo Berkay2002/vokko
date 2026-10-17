@@ -21,6 +21,12 @@ pub struct Desired {
     pub max_height: u32,
     /// kbit/s.
     pub bitrate: u32,
+    /// Changes with every item; the bot echoes it in its `tracks` event so a late report of an older item is ignored.
+    pub generation: u64,
+    /// The audio stream index to play; `None` lets the bot pick (the default one).
+    pub audio: Option<u32>,
+    /// The bitmap subtitle stream index to burn in, if any.
+    pub burned_subtitle: Option<u32>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

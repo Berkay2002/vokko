@@ -1495,6 +1495,82 @@ pub enum StremioStatus {
     Error,
 }
 
+/// Most audio or subtitle tracks the server keeps of one file.
+pub const STREMIO_TRACKS_MAX: usize = 32;
+
+/// An audio stream of the file. `id` is the container's stream index; the bot reported the rest. The audio language is shared:
+/// everyone hears the one that is playing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StremioAudioTrack {
+    pub id: u32,
+    /// ISO 639 code in lower case, as the file tags it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub codec: String,
+    #[serde(default)]
+    pub default: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StremioSubtitleKind {
+    /// Cues the bot publishes as data in the media room (topic `subs:<id>`); every viewer picks their own, locally.
+    Text,
+    /// A picture the bot burns into the video: shared, like the audio.
+    Bitmap,
+}
+
+/// A subtitle stream inside the file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StremioSubtitleTrack {
+    pub id: u32,
+    pub kind: StremioSubtitleKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub codec: String,
+    #[serde(default)]
+    pub forced: bool,
+    #[serde(default)]
+    pub default: bool,
+}
+
+/// One subtitle line: shown from `start_ms` to `end_ms` of the media. Plain text, no markup.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StremioCue {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub text: String,
+}
+
+/// An entry of `GET /channels/{id}/stremio/subtitles`: a subtitle one of the requester's addons offers for the playing title.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StremioAddonSubtitle {
+    /// Opaque, bound to the user who listed it, the channel and the playing item.
+    pub sid: String,
+    pub addon: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StremioAddonSubtitles {
+    pub subtitles: Vec<StremioAddonSubtitle>,
+    /// Addons that failed or timed out.
+    #[serde(default)]
+    pub addon_errors: Vec<String>,
+}
+
+/// `GET /channels/{id}/stremio/subtitles/{sid}`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StremioCues {
+    pub cues: Vec<StremioCue>,
+}
+
 /// What is playing. No URLs except an allow-listed `poster` (https on the Stremio image hosts).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StremioItem {
@@ -1538,6 +1614,17 @@ pub struct StremioState {
     /// Up next, at most `STREMIO_QUEUE_MAX`.
     #[serde(default)]
     pub queue: Vec<StremioQueueItem>,
+    /// The file's audio streams, once the bot has looked at it (empty before that).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub audio_tracks: Vec<StremioAudioTrack>,
+    /// The `id` of the audio stream in use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subtitle_tracks: Vec<StremioSubtitleTrack>,
+    /// The `id` of the bitmap subtitle burned into the picture for everyone, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub burned_subtitle: Option<u32>,
 }
 
 /// STREMIO_UPDATE, to everyone who can see the channel (`state: null` = ended), and the entries of the `stremio` lists on READY
@@ -1567,6 +1654,12 @@ pub struct StremioPatchRequest {
     pub queue_remove: Option<usize>,
     #[serde(default)]
     pub skip: Option<bool>,
+    /// An audio track `id` from the state.
+    #[serde(default)]
+    pub audio: Option<u32>,
+    /// A bitmap subtitle track `id` to burn in for everyone, or `null` to turn it off. Text subtitles are chosen locally by each viewer.
+    #[serde(default, deserialize_with = "double_option")]
+    pub burned_subtitle: Option<Option<u32>>,
 }
 
 /// `POST /channels/{id}/stremio/viewer-token`: a subscribe-only token for the media LiveKit room `stremio-<channel_id>`.
@@ -5236,6 +5329,22 @@ mod tests {
             "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [{"title": "Alien", "label": "720p", "added_by": "8"}]
         });
         round_trip::<StremioState>(stremio.clone());
+        let tracks = json!({
+            "item": {"title": "Heat", "label": "1080p"}, "status": "playing", "playing": true, "position_ms": 5, "updated_at_ms": 9,
+            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [],
+            "audio_tracks": [{"id": 1, "language": "eng", "codec": "eac3", "default": true}, {"id": 2, "language": "swe", "title": "Commentary", "codec": "aac", "default": false}],
+            "audio": 1,
+            "subtitle_tracks": [{"id": 3, "kind": "text", "language": "eng", "codec": "subrip", "forced": false, "default": false},
+                {"id": 4, "kind": "bitmap", "codec": "hdmv_pgs_subtitle", "forced": true, "default": false}],
+            "burned_subtitle": 4
+        });
+        round_trip::<StremioState>(tracks);
+        round_trip::<StremioAddonSubtitles>(json!({"subtitles": [{"sid": "s", "addon": "OpenSubtitles", "label": "x"}], "addon_errors": []}));
+        round_trip::<StremioCues>(json!({"cues": [{"start_ms": 1, "end_ms": 2, "text": "Hi"}]}));
+        let patch = |value: Value| serde_json::from_value::<StremioPatchRequest>(value).expect("patch");
+        assert_eq!(patch(json!({"audio": 2, "burned_subtitle": 4})).burned_subtitle, Some(Some(4)));
+        assert_eq!(patch(json!({"burned_subtitle": null})).burned_subtitle, Some(None));
+        assert_eq!(patch(json!({})).burned_subtitle, None);
         let update = GatewayEvent::StremioUpdate(StremioUpdate { channel_id: Snowflake(201), state: None });
         assert_eq!((update.name(), update.data()), ("STREMIO_UPDATE", json!({"channel_id": "201", "state": null})));
         round_trip::<StremioUpdate>(json!({"channel_id": "201", "state": stremio}));
