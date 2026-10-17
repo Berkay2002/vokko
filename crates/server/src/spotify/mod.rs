@@ -55,7 +55,7 @@ impl Spotify {
             };
         Self {
             catalog: config.as_ref().map(Catalog::new),
-            bot: config.as_ref().map(|c| Bot::new(&c.bot_url, &c.bot_secret)),
+            bot: config.as_ref().map(|c| Bot::new(&c.bot_url, &c.bot_secret, &c.market)),
             session: Mutex::default(),
             media_rooms: Mutex::new(media_rooms),
             seq: AtomicU64::new(1),
@@ -162,7 +162,12 @@ pub fn art_id(url: &str) -> Option<String> {
         return None;
     }
     let id = path.strip_prefix("image/")?.split(['?', '#']).next()?;
-    (id.len() == 40 && id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))).then(|| id.to_owned())
+    valid_art_id(id).then(|| id.to_owned())
+}
+
+/// A cover id: 40 lowercase hex digits.
+pub fn valid_art_id(id: &str) -> bool {
+    id.len() == 40 && id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 /// Text from Spotify: control and invisible characters removed, cut to 200 characters.
@@ -184,6 +189,28 @@ pub(crate) fn catalog_error(error: CatalogError) -> ApiErr {
 
 fn browse_limit(state: &AppState, user_id: i64) -> ApiResult<()> {
     limit(state, "spotify-browse", user_id, 10.0, 2.0)
+}
+
+// ---- playlist and artist pages: the Web API gives the header, the bot the tracks ----
+
+/// A playlist page. The header (name, owner, art) is Spotify's; the tracks and the length are the bot's, because a client-credentials
+/// token gets none. With no header (Spotify-owned playlists are 404 for it) the bot's name stands, owned by "Spotify", without art.
+pub(crate) async fn playlist_page(active: &Active<'_>, id: &str, offset: u32) -> Result<SpotifyPlaylist, CatalogError> {
+    let head = active.catalog.playlist_head(id).await?;
+    let page = active.bot.playlist(id, offset).await?;
+    let (name, owner_name, art) = match head {
+        Some(head) => (head.name, head.owner_name, head.art),
+        None => (page.name, "Spotify".to_owned(), None),
+    };
+    Ok(SpotifyPlaylist { id: id.to_owned(), name, owner_name, art, total: page.total, tracks: page.tracks })
+}
+
+/// An artist page. Top tracks come from the bot; if it cannot give them the page shows its albums without them.
+async fn artist_page(active: &Active<'_>, id: &str) -> Result<SpotifyArtist, CatalogError> {
+    let head = active.catalog.artist_head(id).await?;
+    let albums = active.catalog.artist_albums(id).await?;
+    let top_tracks = active.bot.top_tracks(id).await.unwrap_or_default();
+    Ok(SpotifyArtist { id: head.id, name: head.name, art: head.art, top_tracks, albums })
 }
 
 // ---- browse routes ----
@@ -236,7 +263,7 @@ async fn search(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQ
         Kind::Track => results.tracks.push(catalog.track(&id).await.map_err(catalog_error)?),
         Kind::Album => results.albums.push(album_summary(catalog.album(&id).await.map_err(catalog_error)?)),
         Kind::Artist => results.artists.push(catalog.artist_head(&id).await.map_err(catalog_error)?),
-        Kind::Playlist => results.playlists.push(playlist_summary(catalog.playlist(&id, 0).await.map_err(catalog_error)?)),
+        Kind::Playlist => results.playlists.push(playlist_summary(playlist_page(&active, &id, 0).await.map_err(catalog_error)?)),
     }
     Ok(Json(results))
 }
@@ -267,14 +294,14 @@ async fn playlist(
         return Err(ApiErr::invalid("offset", &format!("Must be at most {PLAYLIST_OFFSET_MAX}.")));
     }
     browse_limit(&state, user_id)?;
-    Ok(Json(active.catalog.playlist(&id, offset).await.map_err(catalog_error)?))
+    Ok(Json(playlist_page(&active, &id, offset).await.map_err(catalog_error)?))
 }
 
 async fn artist(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<SpotifyArtist>> {
     let active = active(&state)?;
     check_id(&id)?;
     browse_limit(&state, user_id)?;
-    Ok(Json(active.catalog.artist(&id).await.map_err(catalog_error)?))
+    Ok(Json(artist_page(&active, &id).await.map_err(catalog_error)?))
 }
 
 async fn track(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<SpotifyTrack>> {

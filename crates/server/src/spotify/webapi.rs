@@ -10,9 +10,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use vokko_protocol::api::{
-    SpotifyAlbum, SpotifyAlbumSummary, SpotifyArtist, SpotifyArtistSummary, SpotifyPlaylist, SpotifyPlaylistSummary, SpotifySearchResults, SpotifyTrack,
-};
+use vokko_protocol::api::{SpotifyAlbum, SpotifyAlbumSummary, SpotifyArtistSummary, SpotifyPlaylistSummary, SpotifySearchResults, SpotifyTrack};
 
 use super::{art_id, clean, valid_id};
 use crate::config::SpotifyConfig;
@@ -26,7 +24,6 @@ const CACHE_MAX: usize = 500;
 /// Longest pause a `Retry-After` can cause.
 const PAUSE_MAX: Duration = Duration::from_secs(60 * 60);
 const BODY_MAX: u64 = 4 * 1024 * 1024;
-const PLAYLIST_PAGE: u32 = 100;
 const SEARCH_PAGE: u32 = 10;
 /// Searched albums an artist page lists.
 const ARTIST_ALBUMS: u32 = 20;
@@ -43,12 +40,15 @@ pub enum CatalogError {
 
 /// The only requests this client can make: five catalog paths, with their variants.
 enum Call<'a> {
-    Search { q: &'a str, types: &'a str, offset: u32 },
+    Search {
+        q: &'a str,
+        types: &'a str,
+        offset: u32,
+    },
     Album(&'a str),
+    /// The header only: the Web API gives a client-credentials token no tracks (the bot reads them, `bot::Bot::playlist`).
     Playlist(&'a str),
-    PlaylistTracks(&'a str, u32),
     Artist(&'a str),
-    ArtistTopTracks(&'a str),
     ArtistAlbums(&'a str),
     Track(&'a str),
 }
@@ -61,9 +61,7 @@ impl Call<'_> {
             Self::Search { .. } => Some("/v1/search".to_owned()),
             Self::Album(id) => with("albums", id, ""),
             Self::Playlist(id) => with("playlists", id, ""),
-            Self::PlaylistTracks(id, _) => with("playlists", id, "/tracks"),
             Self::Artist(id) => with("artists", id, ""),
-            Self::ArtistTopTracks(id) => with("artists", id, "/top-tracks"),
             Self::ArtistAlbums(id) => with("artists", id, "/albums"),
             Self::Track(id) => with("tracks", id, ""),
         }
@@ -76,13 +74,6 @@ impl Call<'_> {
                 params.extend([("q", (*q).to_owned()), ("type", (*types).to_owned()), ("limit", SEARCH_PAGE.to_string()), ("offset", offset.to_string())]);
             }
             Self::Playlist(_) => params.push(("fields", "name,owner(id,display_name),images,tracks.total".to_owned())),
-            Self::PlaylistTracks(_, offset) => {
-                params.extend([
-                    ("limit", PLAYLIST_PAGE.to_string()),
-                    ("offset", offset.to_string()),
-                    ("fields", "items(track(type,is_local,is_playable,id,name,duration_ms,explicit,artists(name),album(name,images)))".to_owned()),
-                ]);
-            }
             Self::ArtistAlbums(_) => params.extend([("include_groups", "album,single".to_owned()), ("limit", ARTIST_ALBUMS.to_string())]),
             _ => {}
         }
@@ -90,33 +81,32 @@ impl Call<'_> {
     }
 }
 
-/// Whether `path` is one of the five catalog paths (the allow-list the tests check against).
+/// Whether `path` is one of the catalog paths (the allow-list the tests check against).
 pub fn allowed_path(path: &str) -> bool {
     let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
     match parts.as_slice() {
         ["v1", "search"] => true,
         ["v1", "albums" | "playlists" | "artists" | "tracks", id] => valid_id(id),
-        ["v1", "playlists", id, "tracks"] => valid_id(id),
-        ["v1", "artists", id, "top-tracks" | "albums"] => valid_id(id),
+        ["v1", "artists", id, "albums"] => valid_id(id),
         _ => false,
     }
 }
 
-struct Cache<T> {
+pub(crate) struct Cache<T> {
     ttl: Duration,
     entries: Mutex<HashMap<String, (Instant, T)>>,
 }
 
 impl<T: Clone> Cache<T> {
-    fn new(ttl: Duration) -> Self {
+    pub(crate) fn new(ttl: Duration) -> Self {
         Self { ttl, entries: Mutex::default() }
     }
 
-    fn get(&self, key: &str) -> Option<T> {
+    pub(crate) fn get(&self, key: &str) -> Option<T> {
         lock(&self.entries).get(key).filter(|(at, _)| at.elapsed() < self.ttl).map(|(_, value)| value.clone())
     }
 
-    fn put(&self, key: String, value: T) {
+    pub(crate) fn put(&self, key: String, value: T) {
         let mut entries = lock(&self.entries);
         if entries.len() >= CACHE_MAX {
             entries.retain(|_, (at, _)| at.elapsed() < self.ttl);
@@ -140,8 +130,10 @@ pub struct Catalog {
     paused_until: Mutex<Option<Instant>>,
     searches: Cache<SpotifySearchResults>,
     albums: Cache<SpotifyAlbum>,
-    playlists: Cache<SpotifyPlaylist>,
-    artists: Cache<SpotifyArtist>,
+    /// `None`: no header (Spotify-owned playlists are 404 for this token).
+    playlists: Cache<Option<SpotifyPlaylistSummary>>,
+    artists: Cache<SpotifyArtistSummary>,
+    artist_albums: Cache<Vec<SpotifyAlbumSummary>>,
     tracks: Cache<SpotifyTrack>,
 }
 
@@ -168,7 +160,6 @@ struct Owner {
 struct Page<T> {
     #[serde(default = "Vec::new")]
     items: Vec<Option<T>>,
-    total: Option<u32>,
 }
 
 #[derive(Deserialize, Default)]
@@ -220,12 +211,6 @@ struct ApiPlaylist {
     owner: Option<Owner>,
     #[serde(default)]
     images: Vec<Image>,
-    tracks: Option<Page<serde::de::IgnoredAny>>,
-}
-
-#[derive(Deserialize, Default)]
-struct PlaylistItem {
-    track: Option<ApiTrack>,
 }
 
 #[derive(Deserialize, Default)]
@@ -234,12 +219,6 @@ struct SearchBody {
     albums: Option<Page<ApiAlbum>>,
     artists: Option<Page<ApiArtist>>,
     playlists: Option<Page<ApiPlaylist>>,
-}
-
-#[derive(Deserialize, Default)]
-struct TopTracks {
-    #[serde(default)]
-    tracks: Vec<ApiTrack>,
 }
 
 #[derive(Deserialize)]
@@ -340,6 +319,7 @@ impl Catalog {
             albums: Cache::new(ITEM_TTL),
             playlists: Cache::new(ITEM_TTL),
             artists: Cache::new(ITEM_TTL),
+            artist_albums: Cache::new(ITEM_TTL),
             tracks: Cache::new(ITEM_TTL),
         }
     }
@@ -464,51 +444,39 @@ impl Catalog {
         Ok(album)
     }
 
-    pub async fn playlist(&self, id: &str, offset: u32) -> Result<SpotifyPlaylist, CatalogError> {
-        let key = format!("{id}:{offset}");
-        if let Some(hit) = self.playlists.get(&key) {
+    /// The playlist's name, owner and art. `None` when Spotify has no header for it (a Spotify-owned playlist, or one the token cannot
+    /// read); the caller then still has the bot's tracks.
+    pub async fn playlist_head(&self, id: &str) -> Result<Option<SpotifyPlaylistSummary>, CatalogError> {
+        if let Some(hit) = self.playlists.get(id) {
             return Ok(hit);
         }
-        let meta: ApiPlaylist = self.get(Call::Playlist(id)).await?;
-        let total = meta.tracks.as_ref().and_then(|page| page.total).unwrap_or(0);
-        let summary = playlist_summary(ApiPlaylist { id: Some(id.to_owned()), ..meta }).ok_or(CatalogError::NotFound)?;
-        let page: Page<PlaylistItem> = self.get(Call::PlaylistTracks(id, offset)).await?;
-        let tracks = page.items.into_iter().flatten().filter_map(|item| item.track).filter_map(|track| track_of(track, None)).collect();
-        let playlist = SpotifyPlaylist {
-            id: summary.id,
-            name: summary.name,
-            owner_name: summary.owner_name,
-            art: summary.art,
-            total: page.total.unwrap_or(total),
-            tracks,
+        let head = match self.get::<ApiPlaylist>(Call::Playlist(id)).await {
+            Ok(meta) => playlist_summary(ApiPlaylist { id: Some(id.to_owned()), ..meta }),
+            Err(CatalogError::NotFound) => None,
+            Err(error) => return Err(error),
         };
-        self.playlists.put(key, playlist.clone());
-        Ok(playlist)
+        self.playlists.put(id.to_owned(), head.clone());
+        Ok(head)
     }
 
-    pub async fn artist(&self, id: &str) -> Result<SpotifyArtist, CatalogError> {
+    pub async fn artist_head(&self, id: &str) -> Result<SpotifyArtistSummary, CatalogError> {
         if let Some(hit) = self.artists.get(id) {
             return Ok(hit);
         }
         let raw: ApiArtist = self.get(Call::Artist(id)).await?;
-        let summary = artist_summary(ApiArtist { id: Some(id.to_owned()), ..raw }).ok_or(CatalogError::NotFound)?;
-        let top: TopTracks = self.get(Call::ArtistTopTracks(id)).await?;
-        let albums: Page<ApiAlbum> = self.get(Call::ArtistAlbums(id)).await?;
-        let artist = SpotifyArtist {
-            id: summary.id,
-            name: summary.name,
-            art: summary.art,
-            top_tracks: top.tracks.into_iter().filter_map(|track| track_of(track, None)).collect(),
-            albums: albums.items.into_iter().flatten().filter_map(album_summary).collect(),
-        };
-        self.artists.put(id.to_owned(), artist.clone());
-        Ok(artist)
+        let head = artist_summary(ApiArtist { id: Some(id.to_owned()), ..raw }).ok_or(CatalogError::NotFound)?;
+        self.artists.put(id.to_owned(), head.clone());
+        Ok(head)
     }
 
-    /// The artist alone (for a pasted link): one call instead of the page's three.
-    pub async fn artist_head(&self, id: &str) -> Result<SpotifyArtistSummary, CatalogError> {
-        let raw: ApiArtist = self.get(Call::Artist(id)).await?;
-        artist_summary(ApiArtist { id: Some(id.to_owned()), ..raw }).ok_or(CatalogError::NotFound)
+    pub async fn artist_albums(&self, id: &str) -> Result<Vec<SpotifyAlbumSummary>, CatalogError> {
+        if let Some(hit) = self.artist_albums.get(id) {
+            return Ok(hit);
+        }
+        let albums: Page<ApiAlbum> = self.get(Call::ArtistAlbums(id)).await?;
+        let albums: Vec<SpotifyAlbumSummary> = albums.items.into_iter().flatten().filter_map(album_summary).collect();
+        self.artist_albums.put(id.to_owned(), albums.clone());
+        Ok(albums)
     }
 
     /// `types` is a comma list of `track,album,artist,playlist`, already checked by the caller.
@@ -544,9 +512,7 @@ mod tests {
             Call::Search { q: "me", types: "track", offset: 0 },
             Call::Album(ID),
             Call::Playlist(ID),
-            Call::PlaylistTracks(ID, 100),
             Call::Artist(ID),
-            Call::ArtistTopTracks(ID),
             Call::ArtistAlbums(ID),
             Call::Track(ID),
         ];
@@ -556,7 +522,17 @@ mod tests {
             assert!(!path.contains("/me") || path == "/v1/search", "{path}");
         }
         assert!(Call::Album("../me").path().is_none() && Call::Track("short").path().is_none());
-        for bad in ["/v1/me", "/v1/me/tracks", "/v1/me/player", "/v1/users/x/playlists", "/v1/recommendations", "/v1/albums/../me", "/v1/tracks"] {
+        for bad in [
+            "/v1/playlists/4uLU6hMCjMI75M1A2tKUQC/tracks",
+            "/v1/artists/4uLU6hMCjMI75M1A2tKUQC/top-tracks",
+            "/v1/me",
+            "/v1/me/tracks",
+            "/v1/me/player",
+            "/v1/users/x/playlists",
+            "/v1/recommendations",
+            "/v1/albums/../me",
+            "/v1/tracks",
+        ] {
             assert!(!allowed_path(bad), "{bad}");
         }
     }

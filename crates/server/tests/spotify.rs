@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::extract::{Path, Query, Request as AxumRequest, State};
+use axum::extract::{Path, Request as AxumRequest, State};
 use axum::http::{Request, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -109,15 +109,12 @@ async fn one_album(Path(id): Path<String>) -> Json<Value> {
     }))
 }
 
-async fn one_playlist(Path(id): Path<String>) -> Json<Value> {
-    let owner = if number(&id) == 99 { "spotify" } else { "someone" };
-    Json(json!({"id": id, "name": "Mix", "owner": {"id": owner, "display_name": "Sam"}, "images": [], "tracks": {"total": 250}}))
-}
-
-async fn playlist_tracks(Query(query): Query<std::collections::HashMap<String, String>>) -> Json<Value> {
-    let offset: u32 = query.get("offset").and_then(|offset| offset.parse().ok()).unwrap_or(0);
-    let items: Vec<Value> = (offset + 1..=(offset + 100).min(250)).map(|n| json!({"track": track_json(n)})).collect();
-    Json(json!({"items": items, "total": 250}))
+/// The Web API gives a playlist's header only; Spotify-owned playlists are 404 for a client-credentials token.
+async fn one_playlist(Path(id): Path<String>) -> Response {
+    if number(&id) == 99 {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    Json(json!({"id": id, "name": "Mix", "owner": {"id": "someone", "display_name": "Sam"}, "images": []})).into_response()
 }
 
 async fn search(State(mock): State<Arc<Mock>>) -> Response {
@@ -138,10 +135,6 @@ async fn one_artist(Path(id): Path<String>) -> Json<Value> {
     Json(json!({"id": id, "name": "Artist", "images": []}))
 }
 
-async fn top_tracks() -> Json<Value> {
-    Json(json!({"tracks": [track_json(1)]}))
-}
-
 async fn artist_albums() -> Json<Value> {
     Json(json!({"items": [{"id": format!("A{:021}", 1), "name": "Album", "artists": [{"name": "Artist"}], "release_date": "1999", "images": []}]}))
 }
@@ -155,10 +148,8 @@ async fn start_mock() -> (Arc<Mock>, String) {
         .route("/v1/tracks/{id}", get(one_track))
         .route("/v1/albums/{id}", get(one_album))
         .route("/v1/playlists/{id}", get(one_playlist))
-        .route("/v1/playlists/{id}/tracks", get(playlist_tracks))
         .route("/v1/search", get(search))
         .route("/v1/artists/{id}", get(one_artist))
-        .route("/v1/artists/{id}/top-tracks", get(top_tracks))
         .route("/v1/artists/{id}/albums", get(artist_albums))
         .layer(middleware::from_fn_with_state(mock.clone(), record))
         .with_state(mock.clone());
@@ -245,7 +236,28 @@ impl Bot {
     }
 }
 
-async fn bot_handler(State(bot): State<Arc<Bot>>, request: Request<Body>) -> StatusCode {
+fn bot_track(n: u32) -> Value {
+    let art = if n == 5 { "https://evil.example/x.jpg".to_owned() } else { HEX_ART.to_owned() };
+    json!({"uri": track_uri(n), "title": format!("Song {n}"), "artists": ["Artist"], "album": "Album", "art": art, "duration_ms": 200_000, "explicit": false})
+}
+
+/// The bot's catalog reads (docs/api.md "Bot contract"): a playlist page and an artist's top tracks.
+fn bot_catalog(path: &str, query: Option<&str>) -> Response {
+    let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    let offset: u32 =
+        query.and_then(|query| query.split('&').find_map(|pair| pair.strip_prefix("offset="))).and_then(|offset| offset.parse().ok()).unwrap_or(0);
+    match parts.as_slice() {
+        ["catalog", "playlists", id] if number(id) != 0 => {
+            let mut tracks: Vec<Value> = (offset + 1..=(offset + 100).min(250)).map(bot_track).collect();
+            tracks.push(json!({"uri": "spotify:episode:0000000000000000000099", "title": "Podcast"}));
+            Json(json!({"name": "Bot Mix", "total": 250, "tracks": tracks})).into_response()
+        }
+        ["catalog", "artists", id, "top-tracks"] if number(id) != 0 => Json(json!({"tracks": [bot_track(1), bot_track(2)]})).into_response(),
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn bot_handler(State(bot): State<Arc<Bot>>, request: Request<Body>) -> Response {
     let (parts, body) = request.into_parts();
     let bytes = axum::body::to_bytes(body, 1 << 20).await.unwrap_or_default();
     let authorized = parts.headers.get(header::AUTHORIZATION).and_then(|value| value.to_str().ok()) == Some(&format!("Bearer {BOT_SECRET}"));
@@ -256,12 +268,16 @@ async fn bot_handler(State(bot): State<Arc<Bot>>, request: Request<Body>) -> Sta
         body: serde_json::from_slice(&bytes).unwrap_or(Value::Null),
     });
     if !authorized {
-        return StatusCode::UNAUTHORIZED;
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if parts.uri.path().starts_with("/catalog/") {
+        return bot_catalog(parts.uri.path(), parts.uri.query());
     }
     match bot.status.load(Ordering::SeqCst) {
         0 => StatusCode::OK,
         status => StatusCode::from_u16(status).unwrap_or(StatusCode::OK),
     }
+    .into_response()
 }
 
 async fn start_bot() -> (Arc<Bot>, String) {
@@ -590,7 +606,7 @@ async fn browsing_reduces_the_catalog_and_only_ever_asks_for_allow_listed_paths(
     assert_eq!(found["playlists"].as_array().map(Vec::len), Some(1), "null and Spotify-owned playlists are dropped: {found}");
     assert_clean("search results", &found);
 
-    let (_, only) = w.app.get("/spotify/search?q=daft&type=track", &w.alice).await;
+    let (_, only) = w.app.get("/spotify/search?q=daft&type=track", &w.carl).await;
     assert!(only["tracks"].as_array().is_some_and(|tracks| !tracks.is_empty()));
     for bad in ["/spotify/search?q=", "/spotify/search?q=a&type=show", "/spotify/search?q=a&offset=5000", "/spotify/search?q=https://open.spotify.com/user/x"] {
         assert_eq!(w.app.get(bad, &w.alice).await.0, StatusCode::BAD_REQUEST, "{bad}");
@@ -605,8 +621,31 @@ async fn browsing_reduces_the_catalog_and_only_ever_asks_for_allow_listed_paths(
     assert_clean("an album", &album);
     let (status, playlist) = w.app.get("/spotify/playlists/P000000000000000000001?offset=100", &w.alice).await;
     assert_eq!((status, playlist["tracks"][0]["title"].as_str()), (StatusCode::OK, Some("Song 101")));
-    assert_eq!(playlist["total"], 250);
-    assert_eq!(w.app.get("/spotify/artists/R000000000000000000001", &w.alice).await.0, StatusCode::OK);
+    assert_eq!(
+        (playlist["total"].clone(), playlist["name"].as_str(), playlist["owner_name"].as_str()),
+        (json!(250), Some("Mix"), Some("Sam")),
+        "the header is Spotify's"
+    );
+    assert_eq!(playlist["tracks"].as_array().map(Vec::len), Some(100));
+    assert_clean("a playlist", &playlist);
+    // The bot's list is reduced again: the episode goes, and an art id that is not 40 hex goes.
+    let (_, first) = w.app.get("/spotify/playlists/P000000000000000000001", &w.alice).await;
+    assert_eq!(first["tracks"].as_array().map(Vec::len), Some(100), "the episode in the bot's list is dropped");
+    assert!(first["tracks"][0]["art"] == HEX_ART && first["tracks"][4]["art"].is_null(), "{}", first["tracks"][4]);
+    // A Spotify-owned playlist has no header for this token: the bot's name stands.
+    let (status, owned) = w.app.get("/spotify/playlists/P000000000000000000099", &w.alice).await;
+    assert_eq!(
+        (status, owned["name"].as_str(), owned["owner_name"].as_str(), owned["art"].is_null()),
+        (StatusCode::OK, Some("Bot Mix"), Some("Spotify"), true),
+        "{owned}"
+    );
+    let (status, artist) = w.app.get("/spotify/artists/R000000000000000000001", &w.alice).await;
+    assert_eq!(
+        (status, artist["top_tracks"].as_array().map(Vec::len), artist["albums"].as_array().map(Vec::len)),
+        (StatusCode::OK, Some(2), Some(1)),
+        "{artist}"
+    );
+    assert_clean("an artist", &artist);
     assert_eq!(w.app.get(&format!("/spotify/tracks/{}", tid(4)), &w.alice).await.0, StatusCode::OK);
     assert_eq!(w.app.get(&format!("/spotify/tracks/{}", tid(0)), &w.alice).await.0, StatusCode::NOT_FOUND, "an id Spotify does not know");
     for bad in ["/spotify/tracks/short", "/spotify/albums/..%2F..%2Fme", "/spotify/playlists/P000000000000000000001?offset=999999"] {
@@ -619,6 +658,12 @@ async fn browsing_reduces_the_catalog_and_only_ever_asks_for_allow_listed_paths(
     for path in paths.iter().filter(|path| path.starts_with("/v1/")) {
         assert!(allowed_path(path), "{path}");
         assert!(!path.contains("/me") && !path.contains("/users"), "{path}");
+    }
+    // And the bot was asked for nothing but the two catalog reads.
+    for request in w.bot.all() {
+        let parts: Vec<&str> = request.path.trim_start_matches('/').split('/').collect();
+        assert!(matches!(parts.as_slice(), ["catalog", "playlists", _] | ["catalog", "artists", _, "top-tracks"]), "{}", request.path);
+        assert!(request.authorized && request.method == "GET");
     }
     assert!(!paths.iter().any(|path| path == "/authorize" || path.contains("recently-played") || path.contains("player")), "{paths:?}");
 }
@@ -851,7 +896,7 @@ async fn an_unavailable_track_is_skipped_with_a_notice_that_clears_itself() {
 }
 
 #[tokio::test]
-async fn a_kicked_house_account_ends_the_playing_with_no_retake() {
+async fn a_rejected_login_stops_the_bot_and_nothing_retakes_the_session() {
     let w = world_with(|config| config.error_hold = Duration::from_millis(400), false).await;
     let mut alice = Client::identify(&w.address, &w.alice).await.0;
     let mut owner = Client::identify(&w.address, &w.owner).await.0;
@@ -860,14 +905,11 @@ async fn a_kicked_house_account_ends_the_playing_with_no_retake() {
     owner.voice_answer().await;
     assert_eq!(w.play(&w.alice, &track_uri(1)).await.0, StatusCode::OK);
     owner.spotify().await;
-    assert_eq!(
-        w.event("error", json!({"reason": "kicked", "message": format!("{HOUSE} started playing on iPhone https://x.example")})).await,
-        StatusCode::NO_CONTENT
-    );
+    assert_eq!(w.event("error", json!({"reason": "auth", "message": format!("{HOUSE} login rejected https://x.example")})).await, StatusCode::NO_CONTENT);
     let failed = owner.spotify().await;
     assert_eq!(
         (failed["state"]["status"].as_str(), failed["state"]["error"].as_str()),
-        (Some("error"), Some("The house Spotify account is playing somewhere else."))
+        (Some("error"), Some("Spotify needs the server owner to sign in again"))
     );
     assert_eq!(failed["state"]["playing"], false);
     assert_clean("the error state", &failed);
@@ -893,7 +935,7 @@ async fn a_rejected_login_shows_a_fixed_text_and_an_io_error_is_retried_once() {
     assert_eq!(w.state(&w.alice).await["status"], "playing", "no error shown for the first io error");
     assert_eq!(w.event("error", json!({"reason": "io", "position_ms": 9100})).await, StatusCode::NO_CONTENT);
     let state = w.state(&w.alice).await;
-    assert_eq!((state["status"].as_str(), state["error"].as_str()), (Some("error"), Some("Playback failed.")));
+    assert_eq!((state["status"].as_str(), state["error"].as_str()), (Some("error"), Some("Spotify lost its connection.")));
     assert!(w.bot.deletes() >= 1);
 
     let w = world().await;
@@ -902,7 +944,7 @@ async fn a_rejected_login_shows_a_fixed_text_and_an_io_error_is_retried_once() {
     for _ in 0..2 {
         assert_eq!(w.event("error", json!({"reason": format!("auth {HOUSE}")})).await, StatusCode::NO_CONTENT);
     }
-    assert_eq!(w.state(&w.alice).await["error"], "Playback failed.", "an unknown reason counts as io and is never shown");
+    assert_eq!(w.state(&w.alice).await["error"], "Spotify lost its connection.", "an unknown reason counts as io and is never shown");
     let w = world().await;
     let mut alice = Client::identify(&w.address, &w.alice).await.0;
     w.playing(&mut alice, 1).await;

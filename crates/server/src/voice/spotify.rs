@@ -33,9 +33,8 @@ use crate::stremio::{limit, lock};
 const BOT_TOKEN_TTL_SECS: i64 = 12 * 60 * 60;
 const LISTENER_TOKEN_TTL_SECS: i64 = 6 * 60 * 60;
 /// Fixed texts: nothing the bot or Spotify says reaches the state.
-const KICKED: &str = "The house Spotify account is playing somewhere else.";
 const NEEDS_LOGIN: &str = "Spotify needs the server owner to sign in again";
-const PLAYBACK_FAILED: &str = "Playback failed.";
+const LOST_CONNECTION: &str = "Spotify lost its connection.";
 const SKIPPED: &str = "Skipped an unavailable track";
 /// Playlist pages read to fill a queue (100 items each) and the most tracks an album can hold.
 const FILL_PAGES: u32 = 3;
@@ -349,7 +348,7 @@ async fn tracks_of(active: &Active<'_>, kind: Kind, id: &str, max: usize) -> Api
             let mut tracks = Vec::new();
             for page in 0..FILL_PAGES {
                 let offset = page * PAGE_ITEMS;
-                let page = active.catalog.playlist(id, offset).await.map_err(catalog_error)?;
+                let page = crate::spotify::playlist_page(active, id, offset).await.map_err(catalog_error)?;
                 tracks.extend(page.tracks);
                 if tracks.len() >= max || page.total <= offset + PAGE_ITEMS {
                     break;
@@ -442,20 +441,35 @@ async fn start(
     let Some(desired) = change.desired else { return Err(ApiErr::internal()) };
     let seq = desired.seq;
     if let Err(error) = active.bot.put(&desired).await {
-        let removed = {
-            let mut slot = lock(&state.spotify.session);
-            let ours = slot.as_ref().is_some_and(|session| session.seq == seq);
-            if ours {
-                *slot = None;
+        if fresh {
+            // Nothing was announced yet: the session never existed.
+            let dropped = {
+                let mut slot = lock(&state.spotify.session);
+                let ours = slot.as_ref().is_some_and(|session| session.seq == seq);
+                if ours {
+                    *slot = None;
+                } else if let Some(session) = slot.as_mut() {
+                    // Someone controlled it meanwhile: it lives on and is sent again by the sweep.
+                    session.dirty = true;
+                    session.bot_down_since.get_or_insert_with(Instant::now);
+                }
+                ours
+            };
+            if dropped {
+                return Err(bot_failed(error));
             }
-            ours
-        };
-        if removed && !fresh {
-            announce(&state, channel_id, None).await;
+            let reply = Json(SpotifyReply { state: reply, left_out }).into_response();
+            announce(&state, channel_id, Some(change.event)).await;
+            return Ok(reply);
         }
-        return Err(bot_failed(error));
+        // A running session keeps its place; the sweep sends the track again until the bot answers or the grace runs out.
+        touch(&state, channel_id, |session| {
+            session.dirty = true;
+            session.bot_down_since.get_or_insert_with(Instant::now);
+        });
+    } else {
+        touch(&state, channel_id, |session| session.last_put = Instant::now());
     }
-    touch(&state, channel_id, |session| session.last_put = Instant::now());
     announce(&state, channel_id, Some(change.event)).await;
     Ok(Json(SpotifyReply { state: reply, left_out }).into_response())
 }
@@ -719,7 +733,7 @@ pub struct BotEvent {
     position_ms: u64,
     #[serde(default)]
     seq: u64,
-    /// One of `unavailable`, `kicked`, `auth`, `io`; anything else counts as `io`. Never shown.
+    /// One of `unavailable`, `auth`, `io`; anything else counts as `io`. Never shown.
     #[serde(default)]
     reason: Option<String>,
 }
@@ -775,10 +789,6 @@ pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(e
                     session.note(SKIPPED);
                     Some(session.change(&state, now, stop_bot))
                 }
-                Some("kicked") => {
-                    session.fail(&state, KICKED, now);
-                    Some(session.change(&state, now, true))
-                }
                 Some("auth") => {
                     session.fail(&state, NEEDS_LOGIN, now);
                     Some(session.change(&state, now, true))
@@ -793,7 +803,7 @@ pub async fn bot_event(State(state): State<AppState>, headers: HeaderMap, Json(e
                     Some(session.change(&state, now, false))
                 }
                 _ => {
-                    session.fail(&state, PLAYBACK_FAILED, now);
+                    session.fail(&state, LOST_CONNECTION, now);
                     Some(session.change(&state, now, true))
                 }
             },
