@@ -113,7 +113,7 @@ describe("mock Stremio sessions", () => {
     op4("plain", voiceId);
     op4("other", voiceId);
     const first = playable("plain");
-    const started = call("plain", "PUT", path(), { sid: first[1]!.sid }) as StremioState;
+    const started = call("plain", "PUT", path(), { sid: first[0]!.sid }) as StremioState;
     expect(started).toMatchObject({ status: "starting", playing: true, started_by: ids.plain, bot_identity: `bot:stremio:${voiceId}`, item: { title: "Heat", label: "1080p WEB-DL" } });
     expect(JSON.stringify(started).replace(/https:\/\/images\.metahub\.space\S+?"/, "")).not.toMatch(/https?:/);
     vi.advanceTimersByTime(500);

@@ -25,8 +25,8 @@ import { emit } from "./socket";
 import { voiceAudience, voiceStates } from "./voice";
 
 export const MOCK_STREMIO_ENDPOINT = "mock://stremio";
-/** The stand-in bot reports "playing" this long after a session or an item starts. */
-const BOT_START_MS = 400;
+/** The stand-in bot reports "playing" this long after a session or an item starts (a test can stretch it to look at the starting tile). */
+let botStartMs = 400;
 const IMDB_ID = /^tt\d{1,10}$/;
 const VIDEO_ID = /^tt\d{1,10}(:\d{1,4}:\d{1,4})?$/;
 
@@ -155,8 +155,9 @@ function listStreams(userId: string, kind: string, videoId: string): StremioStre
   const video = meta.videos.find(v => v.id === videoId);
   const subtitle = video ? `S${video.season}E${video.episode}${video.name ? ` ${video.name}` : ""}` : undefined;
   const rows: Omit<StremioStream, "sid">[] = [
-    { addon: "Torrentio TB", label: "4K HDR REMUX", details: "Heat.1995.2160p.UHD.BluRay.REMUX.HDR.HEVC\n22.4 GB", size_bytes: 22_400_000_000, resolution: 2160, flags: ["hdr", "remux"], playable: true },
+    // Ranked like the server does (section 4.3): the plain 1080p first, the heavy 4K REMUX after it.
     { addon: "Torrentio TB", label: "1080p WEB-DL", details: "Heat.1995.1080p.WEB-DL.DDP5.1.H264\n6.1 GB", size_bytes: 6_100_000_000, resolution: 1080, flags: [], playable: true },
+    { addon: "Torrentio TB", label: "4K HDR REMUX", details: "Heat.1995.2160p.UHD.BluRay.REMUX.HDR.HEVC\n22.4 GB", size_bytes: 22_400_000_000, resolution: 2160, flags: ["hdr", "remux"], playable: true },
     { addon: "Torrentio TB", label: "720p BluRay", details: "Heat.1995.720p.BluRay.x264\n3.2 GB", size_bytes: 3_200_000_000, resolution: 720, flags: [], playable: true },
     { addon: "ThePirateBay+", label: "1080p", details: "Torrent only, no debrid link", resolution: 1080, flags: [], playable: false, unsupported: "torrent" },
     { addon: "YouTube", label: "Trailer", details: "Official trailer", flags: [], playable: false, unsupported: "youtube" },
@@ -218,7 +219,7 @@ function botStarts(channel: MockChannel): void {
       const next = { ...state, status: "playing" as const, duration_ms: durations.get(channel.id) ?? 7_200_000, updated_at_ms: Date.now() };
       sessions.set(channel.id, next);
       announce(channel, next);
-    }, BOT_START_MS),
+    }, botStartMs),
   );
 }
 
@@ -319,6 +320,9 @@ if (typeof window !== "undefined") {
       const next = { ...state, status: "error" as const, error: message, playing: false, updated_at_ms: Date.now() };
       sessions.set(channelId, next);
       announce(channel, next);
+    },
+    botDelay: (ms: number) => {
+      botStartMs = ms;
     },
     imageHosts: STREMIO_IMAGE_HOSTS,
   };
