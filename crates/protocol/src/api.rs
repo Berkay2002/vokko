@@ -546,7 +546,8 @@ impl Activity {
     /// optional `details` and `state` under the same text rules, `assets.large_image` as `spotify:<40 hex>`, `sync_id` as 22
     /// letters or digits, `timestamps.end` not negative and not before `start`).
     pub fn list_is_valid(list: &[Activity]) -> bool {
-        list.len() <= Self::MAX_PER_PRESENCE && list.iter().enumerate().all(|(i, activity)| list[..i].iter().all(|other| other.kind != activity.kind) && activity.is_valid())
+        list.len() <= Self::MAX_PER_PRESENCE
+            && list.iter().enumerate().all(|(i, activity)| list[..i].iter().all(|other| other.kind != activity.kind) && activity.is_valid())
     }
 
     fn is_valid(&self) -> bool {
@@ -1452,6 +1453,214 @@ pub struct WatchTogetherUpdate {
     pub state: Option<WatchTogetherState>,
 }
 
+/// Longest Up next queue of a Stremio session.
+pub const STREMIO_QUEUE_MAX: usize = 10;
+/// Furthest position a Stremio seek may name before the duration is known (24 hours).
+pub const STREMIO_POSITION_MAX_MS: u64 = 24 * 60 * 60 * 1000;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StremioStatus {
+    Starting,
+    Playing,
+    Paused,
+    Buffering,
+    Error,
+}
+
+/// What is playing. No URLs except an allow-listed `poster` (https on the Stremio image hosts).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioItem {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster: Option<String>,
+    /// The stream's quality label, for example `[TB+] Torrentio 1080p`.
+    pub label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioQueueItem {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster: Option<String>,
+    pub label: String,
+    pub added_by: Snowflake,
+}
+
+/// The Stremio session of a voice channel or DM call (Vokko-only, in memory). While `playing`, the expected position now is
+/// `position_ms + (now - updated_at_ms)`. The picture and sound come from the media LiveKit room (`bot_identity`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioState {
+    pub item: StremioItem,
+    pub status: StremioStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub playing: bool,
+    pub position_ms: u64,
+    /// Unix milliseconds of the server when `position_ms` was true.
+    pub updated_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    pub started_by: Snowflake,
+    /// `bot:stremio:<channel_id>`.
+    pub bot_identity: String,
+    /// Up next, at most `STREMIO_QUEUE_MAX`.
+    #[serde(default)]
+    pub queue: Vec<StremioQueueItem>,
+}
+
+/// STREMIO_UPDATE, to everyone who can see the channel (`state: null` = ended), and the entries of the `stremio` lists on READY
+/// guilds, GUILD_CREATE and `Call`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioUpdate {
+    pub channel_id: Snowflake,
+    pub state: Option<StremioState>,
+}
+
+/// `PUT /channels/{id}/stremio`.
+#[derive(Clone, Debug, Deserialize)]
+pub struct StremioStartRequest {
+    pub sid: String,
+}
+
+/// `PATCH /channels/{id}/stremio`.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct StremioPatchRequest {
+    #[serde(default)]
+    pub playing: Option<bool>,
+    #[serde(default)]
+    pub position_ms: Option<u64>,
+    #[serde(default)]
+    pub queue_add: Option<String>,
+    #[serde(default)]
+    pub queue_remove: Option<usize>,
+    #[serde(default)]
+    pub skip: Option<bool>,
+}
+
+/// `POST /channels/{id}/stremio/viewer-token`: a subscribe-only token for the media LiveKit room `stremio-<channel_id>`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioViewerToken {
+    /// `VOKKO_MEDIA_LIVEKIT_URL`.
+    pub url: String,
+    pub token: String,
+}
+
+/// `GET /users/@me/stremio`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioAccountStatus {
+    pub linked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_at: Option<String>,
+}
+
+/// `POST /users/@me/stremio/link`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioLinkStart {
+    pub code: String,
+    pub link: String,
+    pub expires_at: String,
+}
+
+/// `POST /users/@me/stremio/link/poll`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StremioLinkPoll {
+    pub linked: bool,
+}
+
+/// `POST /users/@me/stremio/login` (the password is used once, never stored or logged).
+#[derive(Clone, Deserialize)]
+pub struct StremioLoginRequest {
+    pub email: String,
+    pub password: String,
+}
+
+impl std::fmt::Debug for StremioLoginRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StremioLoginRequest").finish_non_exhaustive()
+    }
+}
+
+/// An entry of `GET /stremio/search` and `/stremio/catalog`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioTitle {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<String>,
+}
+
+/// An episode of a series in `StremioMeta`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioVideo {
+    /// `tt<imdb>:<season>:<episode>`.
+    pub id: String,
+    pub season: u32,
+    pub episode: u32,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub released: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<String>,
+}
+
+/// `GET /stremio/meta/{type}/{id}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioMeta {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub year: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(default)]
+    pub videos: Vec<StremioVideo>,
+}
+
+/// An entry of `GET /stremio/streams/{type}/{video_id}`. `sid` is opaque and bound to the user who listed it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioStream {
+    pub sid: String,
+    pub addon: String,
+    pub label: String,
+    pub details: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<u32>,
+    /// `hdr`, `dv`, `remux`, `hevc`, `10bit`.
+    #[serde(default)]
+    pub flags: Vec<String>,
+    pub playable: bool,
+    /// `torrent`, `external` or `youtube` when `playable` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unsupported: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StremioStreamList {
+    pub streams: Vec<StremioStream>,
+    /// Names of the addons that failed or timed out.
+    #[serde(default)]
+    pub addon_errors: Vec<String>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VoiceConnectFailure {
@@ -1492,6 +1701,9 @@ pub struct Call {
     /// The Watch Together session of the call, if one is running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watch_together: Option<WatchTogetherState>,
+    /// The Stremio session of the call, if one is running (at most one entry).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stremio: Vec<StremioUpdate>,
 }
 
 /// CALL_UPDATE: a `Call` without its voice states (those travel as VOICE_STATE_UPDATE).
@@ -3475,6 +3687,9 @@ pub struct GuildWithState {
     /// Watch Together sessions in the voice channels the receiver can see; omitted when there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub watch_together: Vec<WatchTogetherUpdate>,
+    /// Stremio sessions in the voice channels the receiver can see; omitted when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stremio: Vec<StremioUpdate>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -4068,6 +4283,7 @@ pub enum GatewayEvent {
     VoiceConnectFailed(VoiceConnectFailed),
     VoiceChannelStatusUpdate(VoiceChannelStatusUpdate),
     WatchTogetherUpdate(WatchTogetherUpdate),
+    StremioUpdate(StremioUpdate),
     StageInstanceCreate(StageInstance),
     StageInstanceUpdate(StageInstance),
     StageInstanceDelete(StageInstance),
@@ -4154,6 +4370,7 @@ impl GatewayEvent {
             Self::VoiceConnectFailed(_) => "VOICE_CONNECT_FAILED",
             Self::VoiceChannelStatusUpdate(_) => "VOICE_CHANNEL_STATUS_UPDATE",
             Self::WatchTogetherUpdate(_) => "WATCH_TOGETHER_UPDATE",
+            Self::StremioUpdate(_) => "STREMIO_UPDATE",
             Self::StageInstanceCreate(_) => "STAGE_INSTANCE_CREATE",
             Self::StageInstanceUpdate(_) => "STAGE_INSTANCE_UPDATE",
             Self::StageInstanceDelete(_) => "STAGE_INSTANCE_DELETE",
@@ -4228,6 +4445,7 @@ impl GatewayEvent {
             Self::VoiceConnectFailed(value) => serde_json::to_value(value),
             Self::VoiceChannelStatusUpdate(value) => serde_json::to_value(value),
             Self::WatchTogetherUpdate(value) => serde_json::to_value(value),
+            Self::StremioUpdate(value) => serde_json::to_value(value),
             Self::StageInstanceCreate(value) | Self::StageInstanceUpdate(value) | Self::StageInstanceDelete(value) => serde_json::to_value(value),
             Self::ThreadCreate(value) | Self::ThreadUpdate(value) => serde_json::to_value(value),
             Self::ThreadDelete(value) => serde_json::to_value(value),
@@ -4986,6 +5204,14 @@ mod tests {
         let update = GatewayEvent::WatchTogetherUpdate(WatchTogetherUpdate { channel_id: Snowflake(201), state: None });
         assert_eq!((update.name(), update.data()), ("WATCH_TOGETHER_UPDATE", json!({"channel_id": "201", "state": null})));
         round_trip::<WatchTogetherUpdate>(json!({"channel_id": "201", "state": watch}));
+        let stremio = json!({
+            "item": {"title": "Heat", "label": "1080p"}, "status": "paused", "playing": false, "position_ms": 5, "updated_at_ms": 9,
+            "started_by": "7", "bot_identity": "bot:stremio:201", "queue": [{"title": "Alien", "label": "720p", "added_by": "8"}]
+        });
+        round_trip::<StremioState>(stremio.clone());
+        let update = GatewayEvent::StremioUpdate(StremioUpdate { channel_id: Snowflake(201), state: None });
+        assert_eq!((update.name(), update.data()), ("STREMIO_UPDATE", json!({"channel_id": "201", "state": null})));
+        round_trip::<StremioUpdate>(json!({"channel_id": "201", "state": stremio}));
         let failed =
             GatewayEvent::VoiceConnectFailed(VoiceConnectFailed { guild_id: None, channel_id: Snowflake(5), reason: VoiceConnectFailure::ChannelFull });
         assert_eq!((failed.name(), failed.data()), ("VOICE_CONNECT_FAILED", json!({"guild_id": null, "channel_id": "5", "reason": "channel_full"})));
@@ -5069,7 +5295,8 @@ mod tests {
 
     #[test]
     fn activity_names_must_show_something_and_hold_no_invisible_characters() {
-        let playing = |name: &str| Activity { name: name.to_owned(), kind: Activity::PLAYING, timestamps: None, details: None, state: None, assets: None, sync_id: None };
+        let playing =
+            |name: &str| Activity { name: name.to_owned(), kind: Activity::PLAYING, timestamps: None, details: None, state: None, assets: None, sync_id: None };
         assert!(Activity::list_is_valid(&[playing("Elden Ring")]));
         assert!(Activity::list_is_valid(&[playing("Pokémon 🎮")]));
         assert!(Activity::list_is_valid(&[playing(&"é".repeat(128))]));

@@ -1,0 +1,31 @@
+# Second LiveKit for Stremio in calls (docs/self-hosting.md "Stremio in calls"). It runs natively on the home server next to the
+# stremio-bot; voice stays on the first LiveKit. Start it with the keys in the environment, never in this file:
+#   LIVEKIT_KEYS="<key>: <secret>" livekit-server --config deploy/media-livekit.yaml
+# (the same key and secret go to VOKKO_MEDIA_LIVEKIT_API_KEY / _API_SECRET).
+#
+# Signalling listens on loopback only; cloudflared publishes it as wss://live.vokko.example.com. Media goes to the viewers directly.
+# The home line is behind CGNAT, so nothing here needs a port forward: viewers reach the Mac through addresses their own STUN
+# lookup and ours discover (the provider NAT maps endpoint-independently). There is no TURN, so a viewer behind a symmetric
+# NAT may not connect.
+port: 7880
+bind_addresses:
+  - 127.0.0.1
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: false
+  stun_servers:
+    - stun.cloudflare.com:3478
+    - stun.l.google.com:19302
+  # Offer only the wired LAN address. The Mac also has Wi-Fi on the same subnet, Tailscale, OrbStack bridges and an IPv6 address
+  # that does not route; offering those broke connections. These are the home server's values: change them for another machine.
+  interfaces:
+    includes:
+      - en0
+  ips:
+    includes:
+      - 192.0.2.10/32
+turn:
+  enabled: false
+logging:
+  level: info

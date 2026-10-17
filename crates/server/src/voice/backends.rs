@@ -84,6 +84,10 @@ impl RoomService for Backend {
     fn mute_published_track<'a>(&'a self, room: &'a str, identity: &'a str, track_sid: &'a str) -> RoomFuture<'a, ()> {
         self.tracked(self.rooms.mute_published_track(room, identity, track_sid))
     }
+
+    fn delete_room<'a>(&'a self, room: &'a str) -> RoomFuture<'a, ()> {
+        self.tracked(self.rooms.delete_room(room))
+    }
 }
 
 pub struct Backends {

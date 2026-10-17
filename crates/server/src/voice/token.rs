@@ -25,6 +25,9 @@ pub struct VideoGrant {
     pub room_join: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub room_admin: bool,
+    /// Needed for LiveKit's DeleteRoom (and CreateRoom).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub room_create: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub room_list: bool,
     #[serde(default)]

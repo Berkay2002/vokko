@@ -6,6 +6,7 @@ pub mod audit;
 pub mod auth;
 pub mod bot_routes;
 pub mod config;
+pub mod crypto;
 pub mod emojis;
 pub mod error;
 pub mod events;
@@ -29,6 +30,7 @@ pub mod state;
 pub mod stickers;
 pub mod storage;
 pub mod store;
+pub mod stremio;
 pub mod threads;
 pub mod unfurl;
 pub mod voice;
@@ -106,6 +108,7 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", axum::routing::get(healthz))
         .route("/gateway", axum::routing::get(gateway::upgrade))
         .route("/internal/livekit/webhook", axum::routing::post(voice::webhook::receive))
+        .route("/internal/stremio/bot", axum::routing::post(voice::stremio::bot_event))
         .fallback(|| async { error::ApiErr::not_found() })
         .layer(cors)
         .with_state(state)

@@ -206,6 +206,35 @@ The server can use an ordered list of LiveKit backends: backend 1 is `VOKKO_LIVE
 - The server tells each client the signal URL of the room's backend, so clients need no setting. The packaged desktop app's content security policy (`connect-src` in `apps/desktop/release.production.json`) has to allow the signal host of every backend (`wss://*.livekit.cloud` is there; a self-hosted host must be added).
 - `docker-compose.yml` passes backends 2 and 3 through; add more variables there for more backends.
 
+## Stremio in calls
+
+People can link their own Stremio account and watch a movie or episode together in a voice channel or DM call. The server resolves the stream (Stremio addons, for example Torrentio with TorBox), a native bot on the Mac decodes it with ffmpeg and publishes it as a screen share into a second, self-hosted LiveKit (the "media" LiveKit), and viewers subscribe to that room. Voice stays on the first LiveKit. The design is in docs/design/stremio-bot.md (section 12 has the host layout).
+
+Pieces and where they run:
+
+| Piece | Runs | Reachable at |
+| --- | --- | --- |
+| vokko-server | docker (OrbStack) | `http://127.0.0.1:8710` from the host |
+| media LiveKit | native, launchd `org.vokko.media-livekit` | signalling `127.0.0.1:7880`, published as `wss://live.vokko.example.com` through the Cloudflare tunnel; media `7881/tcp` and `7882/udp` |
+| stremio-bot | native, launchd `org.vokko.stremio-bot` | `127.0.0.1:8720` (the server calls it at `VOKKO_STREMIO_BOT_URL`) |
+
+Setup (nothing in the repo does this for you):
+
+1. Install LiveKit (`brew install livekit`) and generate a key pair with `livekit-server generate-keys`. Copy `deploy/launchd/org.vokko.media-livekit.plist`, put `key: secret` into its `LIVEKIT_KEYS`, check the paths, and load it. Its config is `deploy/media-livekit.yaml`.
+2. Build the bot with `cargo build --release -p stremio-bot`, copy `target/release/stremio-bot` to `~/.local/bin/`, copy `deploy/launchd/org.vokko.stremio-bot.plist`, set `VOKKO_STREMIO_BOT_SECRET` (at least 16 characters; the server gets the same value) and load it. `ffmpeg` and `ffprobe` must be on the plist's `PATH`.
+3. Add a tunnel ingress rule for signalling and route the DNS name: `live.vokko.example.com` → `http://127.0.0.1:7880` in `~/.cloudflared/config.yml`, then `cloudflared tunnel route dns <tunnel> live.vokko.example.com` and restart `cloudflared`.
+4. In `deploy/.env` set `VOKKO_SECRETS_KEY` (`openssl rand -base64 32`; losing it unlinks every Stremio account), `VOKKO_MEDIA_LIVEKIT_URL=wss://live.vokko.example.com`, `VOKKO_MEDIA_LIVEKIT_API_KEY` / `_API_SECRET` (the pair from step 1), `VOKKO_MEDIA_LIVEKIT_BOT_URL=ws://127.0.0.1:7880` (the bot sits next to the LiveKit and skips the tunnel), `VOKKO_STREMIO_BOT_URL=http://host.internal:8720` and `VOKKO_STREMIO_BOT_SECRET`. vokko-server also calls the media LiveKit's RoomService API (`/twirp`) at `VOKKO_MEDIA_LIVEKIT_URL` (`wss` → `https`): the tunnel hostname passes it with the signalling websocket, nothing to add. It closes a session's room when the session ends and removes viewers who left the call; if the call fails it only logs, and the room closes on its own once empty. The feature stays off (every Stremio route answers 404) until all of the required ones are set. Then `docker compose up -d`.
+5. The desktop app's content security policy (`connect-src` in `apps/desktop/release.production.json`) has to allow `wss://live.vokko.example.com`, like any self-hosted LiveKit host.
+
+Notes:
+
+- **No inbound ports.** The home line is behind CGNAT, so router port forwards cannot work and are not used. Viewers reach the Mac through STUN-discovered (server reflexive) candidates: `media-livekit.yaml` sets `use_external_ip: false` and lists public STUN servers, and the provider NAT maps endpoint-independently, so the address a STUN server sees works for the viewers too. This was tested from a phone on mobile data. There is no TURN, so a viewer behind a symmetric NAT may fail to connect.
+- **Pin the interface and address.** `rtc.interfaces.includes` (`en0`) and `rtc.ips.includes` (`192.0.2.10/32`) in `media-livekit.yaml` are the home server's wired values; change them for another machine. The Mac also has Wi-Fi on the same subnet, Tailscale, OrbStack bridges and an IPv6 address that does not route; offering those candidates broke the connection. If the LAN address changes (DHCP), update the file and restart the LiveKit agent: `launchctl kickstart -k gui/$(id -u)/org.vokko.media-livekit`. With a public IP and no CGNAT you would set `use_external_ip: true` instead, which reads the public address once at start, so a changed home IP then needs the same restart.
+- **The server reaches the bot from a container.** `host.internal` is OrbStack's name for the Mac. The bot listens on `127.0.0.1:8720` by default (`VOKKO_STREMIO_BOT_LISTEN` in its plist); check from the container with `docker run --rm curlimages/curl -s http://host.internal:8720/healthz` before relying on it, and if it does not connect, bind the bot to an address the container can reach and keep the bearer secret long. The bot reaches the server at `VOKKO_STREMIO_SERVER_URL` (default `http://127.0.0.1:8710`, the published port).
+- **`/internal/stremio/bot` must stay off the public proxy.** The bundled Caddyfile only forwards `/api/*`, `/gateway`, `/healthz` and `/internal/livekit/webhook`; do the same in any other proxy. The route needs the bot's bearer secret anyway.
+- **Addons and links.** The server only fetches https URLs on port 443 of public hosts (plus IP literals in `VOKKO_STREMIO_FETCH_ALLOW`, for a self-hosted addon on your LAN), follows redirects itself and caps every response. Stream URLs, addon configuration and the Stremio key never reach a client or a log.
+- **Quality.** `VOKKO_STREMIO_MAX_HEIGHT` (1080) and `VOKKO_STREMIO_BITRATE_KBPS` (6000) set what the bot encodes; a paused session stops after `VOKKO_STREMIO_PAUSE_TIMEOUT_MIN` (15) minutes. Each session is one ffmpeg process and one 6 Mbit/s upload per viewer through the SFU, so watch the uplink.
+
 ## Backups
 
 State is the `pgdata` volume (messages, users, everything structured) and the `vokko-data` volume (uploaded files; with `VOKKO_STORAGE=s3` the bucket instead). Back up both; the database rows reference files by id.

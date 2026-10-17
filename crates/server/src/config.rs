@@ -72,6 +72,170 @@ pub struct Config {
     pub gif: GifConfig,
     /// How often due reminders are looked for.
     pub reminder_poll: Duration,
+    /// Stremio in voice calls; `None` (every `/stremio` route answers 404) unless it is fully configured.
+    pub stremio: Option<StremioConfig>,
+}
+
+/// Stremio in voice calls (docs/design/stremio-bot.md): `VOKKO_SECRETS_KEY`, the media LiveKit (`VOKKO_MEDIA_LIVEKIT_URL`,
+/// `_API_KEY`, `_API_SECRET`), the bot (`VOKKO_STREMIO_BOT_URL`, `_BOT_SECRET`) and the optional `VOKKO_STREMIO_*` settings. The
+/// feature is off unless all of those are set, or when `VOKKO_STREMIO=off`.
+#[derive(Clone, Debug)]
+pub struct StremioConfig {
+    pub secrets_key: crate::crypto::SecretsKey,
+    /// Public signalling URL of the media LiveKit, handed to viewers (`wss://live.vokko.example.com`).
+    pub media_url: String,
+    pub media_api_key: String,
+    pub media_api_secret: crate::crypto::Secret,
+    /// Signalling URL the native bot connects to (`VOKKO_MEDIA_LIVEKIT_BOT_URL`): the home server reaches its own LiveKit locally,
+    /// `ws://127.0.0.1:7880`, instead of going out through the tunnel. Defaults to `media_url`.
+    pub bot_media_url: String,
+    /// Where the native bot listens, as the server (in docker) reaches it: `http://host.internal:8720`.
+    pub bot_url: String,
+    pub bot_secret: crate::crypto::Secret,
+    /// Output height cap and video bitrate (kbit/s) the bot is asked for.
+    pub max_height: u32,
+    pub bitrate_kbps: u32,
+    /// A session paused this long stops.
+    pub pause_timeout: Duration,
+    /// Self-hosted addons and resolvers may live in these ranges (`VOKKO_STREMIO_FETCH_ALLOW`, empty by default).
+    pub fetch_allow: Vec<Cidr>,
+    /// Stremio's account API, its link service and the Cinemeta addon (tests point them at a mock).
+    pub api_url: String,
+    pub link_url: String,
+    pub cinemeta_url: String,
+    /// The bot drops a session not renewed for 150 s, so the server re-sends its `PUT` this often.
+    pub lease_interval: Duration,
+    /// How often sessions are checked for lease, pause timeout and error hold.
+    pub tick: Duration,
+    /// How long an `error` stays on the tile before the session stops.
+    pub error_hold: Duration,
+    /// Bot events this soon after an item started or was changed are stale (they describe the previous item or position).
+    pub event_grace: Duration,
+}
+
+/// An IP range (`10.0.0.0/8`, `fd00::/8`, or a bare address).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cidr {
+    network: std::net::IpAddr,
+    bits: u8,
+}
+
+impl Cidr {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let text = text.trim();
+        let (address, bits) = text.split_once('/').map_or((text, None), |(address, bits)| (address, Some(bits)));
+        let network: std::net::IpAddr = address.parse().map_err(|_| format!("{text} is not an IP range"))?;
+        let max = if network.is_ipv4() { 32 } else { 128 };
+        let bits = match bits {
+            Some(bits) => bits.parse::<u8>().ok().filter(|bits| *bits <= max).ok_or_else(|| format!("{text} is not an IP range"))?,
+            None => max,
+        };
+        Ok(Self { network, bits })
+    }
+
+    pub fn contains(&self, ip: std::net::IpAddr) -> bool {
+        fn leading_equal(a: &[u8], b: &[u8], bits: u8) -> bool {
+            let whole = usize::from(bits / 8);
+            a[..whole] == b[..whole] && ((bits).is_multiple_of(8) || (a[whole] ^ b[whole]) >> (8 - bits % 8) == 0)
+        }
+        match (self.network, ip) {
+            (std::net::IpAddr::V4(network), std::net::IpAddr::V4(ip)) => leading_equal(&network.octets(), &ip.octets(), self.bits),
+            (std::net::IpAddr::V6(network), std::net::IpAddr::V6(ip)) => leading_equal(&network.octets(), &ip.octets(), self.bits),
+            _ => false,
+        }
+    }
+}
+
+/// `VOKKO_STREMIO_FETCH_ALLOW`: comma-separated ranges.
+pub fn parse_cidr_list(value: &str) -> Result<Vec<Cidr>, String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(Cidr::parse)
+        .collect::<Result<_, _>>()
+        .map_err(|error| format!("VOKKO_STREMIO_FETCH_ALLOW: {error}"))
+}
+
+/// `Ok(None)` when Stremio is not (fully) configured or `VOKKO_STREMIO=off`; an error for values that are set but wrong.
+pub fn parse_stremio(env: &DotEnv) -> Result<Option<StremioConfig>, String> {
+    if env.get("VOKKO_STREMIO").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "off" | "0" | "false" | "no")) {
+        return Ok(None);
+    }
+    let [key, media_url, media_api_key, media_api_secret, bot_url, bot_secret] = [
+        "VOKKO_SECRETS_KEY",
+        "VOKKO_MEDIA_LIVEKIT_URL",
+        "VOKKO_MEDIA_LIVEKIT_API_KEY",
+        "VOKKO_MEDIA_LIVEKIT_API_SECRET",
+        "VOKKO_STREMIO_BOT_URL",
+        "VOKKO_STREMIO_BOT_SECRET",
+    ]
+    .map(|name| env.get(name));
+    let (Some(key), Some(media_url), Some(media_api_key), Some(media_api_secret), Some(bot_url), Some(bot_secret)) =
+        (key, media_url, media_api_key, media_api_secret, bot_url, bot_secret)
+    else {
+        return Ok(None);
+    };
+    if bot_secret.len() < 16 {
+        return Err("VOKKO_STREMIO_BOT_SECRET must be at least 16 characters".to_owned());
+    }
+    let number = |name: &str, default: u32, range: std::ops::RangeInclusive<u32>| -> Result<u32, String> {
+        let Some(value) = env.get(name) else { return Ok(default) };
+        value
+            .trim()
+            .parse()
+            .ok()
+            .filter(|number| range.contains(number))
+            .ok_or_else(|| format!("{name} must be a whole number from {} to {}, got {value}", range.start(), range.end()))
+    };
+    let mut config = StremioConfig::new(
+        crate::crypto::SecretsKey::parse(&key)?,
+        media_url.trim_end_matches('/').to_owned(),
+        media_api_key,
+        media_api_secret,
+        bot_url.trim_end_matches('/').to_owned(),
+        bot_secret,
+    );
+    if let Some(url) = env.get("VOKKO_MEDIA_LIVEKIT_BOT_URL").filter(|url| !url.trim().is_empty()) {
+        config.bot_media_url = url.trim().trim_end_matches('/').to_owned();
+    }
+    config.max_height = number("VOKKO_STREMIO_MAX_HEIGHT", config.max_height, 144..=1440)?;
+    config.bitrate_kbps = number("VOKKO_STREMIO_BITRATE_KBPS", config.bitrate_kbps, 100..=20_000)?;
+    config.pause_timeout = Duration::from_secs(u64::from(number("VOKKO_STREMIO_PAUSE_TIMEOUT_MIN", 15, 1..=1440)?) * 60);
+    config.fetch_allow = env.get("VOKKO_STREMIO_FETCH_ALLOW").map(|value| parse_cidr_list(&value)).transpose()?.unwrap_or_default();
+    Ok(Some(config))
+}
+
+impl StremioConfig {
+    pub fn new(
+        secrets_key: crate::crypto::SecretsKey,
+        media_url: String,
+        media_api_key: String,
+        media_api_secret: String,
+        bot_url: String,
+        bot_secret: String,
+    ) -> Self {
+        Self {
+            secrets_key,
+            bot_media_url: media_url.clone(),
+            media_url,
+            media_api_key,
+            media_api_secret: crate::crypto::Secret::new(media_api_secret),
+            bot_url,
+            bot_secret: crate::crypto::Secret::new(bot_secret),
+            max_height: 1080,
+            bitrate_kbps: 6000,
+            pause_timeout: Duration::from_secs(15 * 60),
+            fetch_allow: Vec::new(),
+            api_url: "https://api.strem.io".to_owned(),
+            link_url: "https://link.stremio.com".to_owned(),
+            cinemeta_url: "https://v3-cinemeta.strem.io".to_owned(),
+            lease_interval: Duration::from_secs(60),
+            tick: Duration::from_secs(1),
+            error_hold: Duration::from_secs(30),
+            event_grace: Duration::from_secs(5),
+        }
+    }
 }
 
 /// `VOKKO_GIF_PROVIDER` / `VOKKO_GIF_API_KEY` / `VOKKO_GIF_BASE_URL`.
@@ -310,6 +474,7 @@ impl Config {
         }
         config.accounts = AccountsConfig::from_env(&env, &config.public_url)?;
         config.livekit = parse_livekit(&env)?;
+        config.stremio = parse_stremio(&env)?;
         if let Some(value) = env.get("VOKKO_VOICE_BITRATE_MAX") {
             let bitrate: u32 = value.trim().parse().map_err(|_| format!("VOKKO_VOICE_BITRATE_MAX must be bps, got {value}"))?;
             if !(VOICE_BITRATE_MIN..=VOICE_BITRATE_CEILING_MAX).contains(&bitrate) {
@@ -349,6 +514,7 @@ impl Config {
             max_stickers_per_guild: 60,
             gif: GifConfig { provider: vokko_protocol::api::GifProvider::None, api_key: String::new(), base_url: None },
             reminder_poll: Duration::from_secs(15),
+            stremio: None,
             cors_origins: None,
             registration_open: true,
             livekit: Vec::new(),
@@ -459,6 +625,53 @@ mod tests {
         let same_key =
             [BACKEND_0.to_vec(), vec![("VOKKO_LIVEKIT_URL_2", "x"), ("VOKKO_LIVEKIT_API_KEY_2", "ka"), ("VOKKO_LIVEKIT_API_SECRET_2", "other")]].concat();
         assert_eq!(livekit(&same_key).map(|backends| backends.len()), Ok(2), "the same key name with another secret is fine");
+    }
+
+    #[test]
+    fn stremio_needs_every_key_and_can_be_switched_off() {
+        let key = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, [3_u8; 32]);
+        let all = [
+            ("VOKKO_SECRETS_KEY", key.as_str()),
+            ("VOKKO_MEDIA_LIVEKIT_URL", "wss://vokko-live.example/"),
+            ("VOKKO_MEDIA_LIVEKIT_API_KEY", "mk"),
+            ("VOKKO_MEDIA_LIVEKIT_API_SECRET", "ms"),
+            ("VOKKO_STREMIO_BOT_URL", "http://host.internal:8720/"),
+            ("VOKKO_STREMIO_BOT_SECRET", "0123456789abcdef"),
+        ];
+        let parse = |pairs: &[(&str, &str)]| super::parse_stremio(&DotEnv::from_pairs(pairs));
+        let config = parse(&all).expect("valid").expect("on");
+        assert_eq!(
+            (config.media_url.as_str(), config.bot_url.as_str(), config.max_height, config.bitrate_kbps),
+            ("wss://vokko-live.example", "http://host.internal:8720", 1080, 6000)
+        );
+        for skip in 0..all.len() {
+            let partial: Vec<_> = all.iter().enumerate().filter(|(index, _)| *index != skip).map(|(_, pair)| *pair).collect();
+            assert!(parse(&partial).expect("valid").is_none(), "without {}", all[skip].0);
+        }
+        assert!(parse(&[all.as_slice(), &[("VOKKO_STREMIO", "off")]].concat()).expect("valid").is_none());
+        assert!(parse(&[all.as_slice(), &[("VOKKO_STREMIO_MAX_HEIGHT", "9000")]].concat()).is_err());
+        assert!(parse(&[all.as_slice(), &[("VOKKO_STREMIO_FETCH_ALLOW", "10.0.0.0/33")]].concat()).is_err());
+        let mut short = all.to_vec();
+        short[5] = ("VOKKO_STREMIO_BOT_SECRET", "short");
+        assert!(parse(&short).is_err());
+        assert!(!format!("{config:?}").contains("0123456789abcdef"), "secrets stay out of Debug");
+    }
+
+    #[test]
+    fn cidr_ranges() {
+        use super::{Cidr, parse_cidr_list};
+        let ip = |text: &str| text.parse::<std::net::IpAddr>().expect("ip");
+        let net = Cidr::parse("10.1.0.0/16").expect("cidr");
+        assert!(net.contains(ip("10.1.255.9")) && !net.contains(ip("10.2.0.1")) && !net.contains(ip("::1")));
+        assert!(Cidr::parse("127.0.0.1").expect("cidr").contains(ip("127.0.0.1")));
+        assert!(!Cidr::parse("127.0.0.1/32").expect("cidr").contains(ip("127.0.0.2")));
+        assert!(Cidr::parse("10.0.0.0/13").expect("cidr").contains(ip("10.7.0.1")) && !Cidr::parse("10.0.0.0/13").expect("cidr").contains(ip("10.8.0.1")));
+        assert!(Cidr::parse("fd00::/8").expect("cidr").contains(ip("fd12::1")));
+        assert!(Cidr::parse("0.0.0.0/0").expect("cidr").contains(ip("8.8.8.8")));
+        assert_eq!(parse_cidr_list(" 10.0.0.0/8 , ,127.0.0.1/32").map(|list| list.len()), Ok(2));
+        for bad in ["x", "10.0.0.0/33", "10.0.0.0/", "::1/129"] {
+            assert!(Cidr::parse(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

@@ -39,7 +39,7 @@ fn check_video_id(field: &str, id: &str) -> ApiResult<()> {
 /// Characters a broadcast title may not carry: controls (newlines too), zero-width and joiner marks, bidi marks, embeddings and
 /// isolates (spoofing), the soft hyphen, word joiners and invisible operators, variation selectors, tags and the blank "filler"
 /// letters.
-fn hidden_char(c: char) -> bool {
+pub(crate) fn hidden_char(c: char) -> bool {
     c.is_control()
         || matches!(
             c,
@@ -78,7 +78,7 @@ fn clean_title(title: Option<&str>) -> ApiResult<Option<String>> {
 /// The channel id, if the caller is connected to its voice right now and would still be admitted to it: the voice join path's
 /// checks run again (VIEW_CHANNEL + CONNECT and not timed out in a guild; still a recipient and not blocked in a DM call), so
 /// someone who lost access while connected cannot keep steering the video. Else 403, like a missing permission.
-async fn require_in_voice(state: &AppState, user_id: i64, raw: &str) -> ApiResult<i64> {
+pub(crate) async fn require_in_voice(state: &AppState, user_id: i64, raw: &str) -> ApiResult<i64> {
     let id = parse_id(raw).ok_or_else(ApiErr::unknown_channel)?;
     if !super::state::in_channel(state, user_id, id) {
         return Err(ApiErr::missing_permissions());

@@ -158,6 +158,8 @@ pub trait RoomService: Send + Sync {
     /// Replaces the participant's permissions (publish sources, subscribe, hidden) without a reconnect.
     fn update_participant<'a>(&'a self, room: &'a str, identity: &'a str, permission: &'a Permission) -> RoomFuture<'a, ()>;
     fn mute_published_track<'a>(&'a self, room: &'a str, identity: &'a str, track_sid: &'a str) -> RoomFuture<'a, ()>;
+    /// Closes the room and disconnects everyone in it (a room that is already gone counts as done).
+    fn delete_room<'a>(&'a self, room: &'a str) -> RoomFuture<'a, ()>;
 }
 
 /// Voice disabled: nothing to talk to.
@@ -181,6 +183,10 @@ impl RoomService for NoRoomService {
     }
 
     fn mute_published_track<'a>(&'a self, _room: &'a str, _identity: &'a str, _track_sid: &'a str) -> RoomFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn delete_room<'a>(&'a self, _room: &'a str) -> RoomFuture<'a, ()> {
         Box::pin(async { Ok(()) })
     }
 }
@@ -273,6 +279,10 @@ impl RoomService for HttpRoomService {
             let body = json!({"room": room, "identity": identity, "track_sid": track_sid, "muted": true});
             gone_is_fine(self.call("MutePublishedTrack", admin(room), body).await)
         })
+    }
+
+    fn delete_room<'a>(&'a self, room: &'a str) -> RoomFuture<'a, ()> {
+        Box::pin(async move { gone_is_fine(self.call("DeleteRoom", VideoGrant { room_create: true, ..VideoGrant::default() }, json!({"room": room})).await) })
     }
 }
 
@@ -399,6 +409,15 @@ impl RoomService for FakeRoomService {
         if let Some(error) = self.refused("MutePublishedTrack") {
             return Box::pin(async move { Err(error) });
         }
+        Box::pin(async { Ok(()) })
+    }
+
+    fn delete_room<'a>(&'a self, room: &'a str) -> RoomFuture<'a, ()> {
+        lock(&self.calls).push(format!("DeleteRoom {room}"));
+        if let Some(error) = self.refused("DeleteRoom") {
+            return Box::pin(async move { Err(error) });
+        }
+        lock(&self.rooms).retain(|(name, _)| name != room);
         Box::pin(async { Ok(()) })
     }
 }

@@ -46,7 +46,9 @@ end tell"#;
 
 #[cfg(windows)]
 fn read() -> Option<NowPlaying> {
-    use windows::Media::Control::{GlobalSystemMediaTransportControlsSessionManager as Manager, GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status};
+    use windows::Media::Control::{
+        GlobalSystemMediaTransportControlsSessionManager as Manager, GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
+    };
     let manager = Manager::RequestAsync().ok()?.join().ok()?;
     for session in manager.GetSessions().ok()? {
         let app = session.SourceAppUserModelId().ok()?.to_string().to_lowercase();
@@ -114,7 +116,8 @@ mod tests {
 
     #[test]
     fn parses_a_playing_track() {
-        let line = format!("Song\u{1f}Some Artist\u{1f}Album\u{1f}spotify:track:4uLU6hMCjMI75M1A2tKUQC\u{1f}https://i.scdn.co/image/{IMAGE}\u{1f}215000\u{1f}12345\n");
+        let line =
+            format!("Song\u{1f}Some Artist\u{1f}Album\u{1f}spotify:track:4uLU6hMCjMI75M1A2tKUQC\u{1f}https://i.scdn.co/image/{IMAGE}\u{1f}215000\u{1f}12345\n");
         let expected = NowPlaying {
             title: "Song".into(),
             artists: vec!["Some Artist".into()],
@@ -135,7 +138,8 @@ mod tests {
         assert_eq!(parse_applescript("Ep\u{1f}Show\u{1f}\u{1f}spotify:episode:4uLU6hMCjMI75M1A2tKUQC\u{1f}\u{1f}30000\u{1f}0"), None);
         let local = parse_applescript("Mine\u{1f}Me\u{1f}\u{1f}spotify:local:x\u{1f}\u{1f}1000\u{1f}5").expect("local file");
         assert_eq!((local.track_id, local.image_id), (None, None));
-        let bad_art = parse_applescript("S\u{1f}A\u{1f}\u{1f}spotify:track:4uLU6hMCjMI75M1A2tKUQC\u{1f}https://evil.example/x.png\u{1f}1000\u{1f}5").expect("track");
+        let bad_art =
+            parse_applescript("S\u{1f}A\u{1f}\u{1f}spotify:track:4uLU6hMCjMI75M1A2tKUQC\u{1f}https://evil.example/x.png\u{1f}1000\u{1f}5").expect("track");
         assert_eq!(bad_art.image_id, None);
     }
 }
