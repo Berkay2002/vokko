@@ -17,7 +17,7 @@ import {
   SCREEN_FPS,
   SCREEN_RESOLUTIONS,
   VIEWER_QUALITIES,
-  VIEWER_QUALITY_LABEL,
+  viewerQualityLabel,
   type CameraResolution,
   type ScreenFps,
   type ScreenResolution,
@@ -421,7 +421,7 @@ export function VoiceVideoPage() {
               <Select<ViewerQuality>
                 label="Watching quality"
                 value={(VIEWER_QUALITIES as readonly string[]).includes(viewerQuality) ? (viewerQuality as ViewerQuality) : "auto"}
-                options={VIEWER_QUALITIES.map(q => ({ value: q, label: VIEWER_QUALITY_LABEL[q] }))}
+                options={VIEWER_QUALITIES.map(q => ({ value: q, label: viewerQualityLabel(q) }))}
                 onChange={v => setPref("viewerQuality", v)}
               />
             </Field>

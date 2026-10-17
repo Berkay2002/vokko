@@ -177,6 +177,7 @@ export const DEVICE_LOCAL: readonly PrefKey[] = [
   "streamResolution",
   "streamFps",
   "streamAudio",
+  "streamContent",
   "viewerQuality",
   "showStreamPreviews",
   "streamAttenuation",

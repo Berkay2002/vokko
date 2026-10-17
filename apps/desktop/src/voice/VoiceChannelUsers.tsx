@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, HeadphoneOff, Lock, MicOff, UserPlus, Video } from "lucide-react";
 import { StremioIcon } from "../stremio";
+import { botVolumeKey } from "../stremio/viewerStore";
+import type { MediaKind } from "../stremio/viewerConnection";
 import { SpotifyIcon } from "../spotify/SpotifyIcon";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
@@ -16,6 +18,7 @@ import { openProfile } from "../shell/ProfileCard";
 import { isChannelFull } from "./engine";
 import { useIsStreaming } from "./mediaStore";
 import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
+import { volumeMenuItems } from "./voiceMenus";
 import { SoundEffectBadge, useSoundFlashClass } from "../soundboard";
 import { LivePill, StreamCard } from "./StreamCard";
 
@@ -233,15 +236,25 @@ function VoiceUserRow({ state, guildId }: { state: VoiceState; guildId: Snowflak
   );
 }
 
-/** A media bot in the call (Stremio, Spotify): laid out like a user row, but no profile and no menu. */
-function BotRow({ identity, name, icon }: { identity: string; name: string; icon: ReactNode }) {
+/** A media bot in the call (Stremio, Spotify): laid out like a user row, no profile; its menu has User Volume and Mute only. */
+function BotRow({ identity, kind, name, icon }: { identity: string; kind: MediaKind; name: string; icon: ReactNode }) {
+  const menu = useContextMenu();
+  const key = botVolumeKey(kind);
+  const localMuted = useVoice(s => !!s.localMutes[key]);
   return (
-    <li className="voice-occupant voice-user voice-bot-user" data-bot-identity={identity}>
+    <li className="voice-occupant voice-user voice-bot-user" data-bot-identity={identity} onContextMenu={e => menu.open(e, volumeMenuItems(key))}>
       <span className="voice-user-avatar voice-bot-avatar" aria-hidden="true">
         {icon}
       </span>
       <span className="voice-occupant-name">{name}</span>
       <span className="voice-bot-badge">Bot</span>
+      {localMuted && (
+        <span className="voice-user-icons">
+          <StateIcon label="Locally Muted">
+            <MicOff size={14} />
+          </StateIcon>
+        </span>
+      )}
     </li>
   );
 }
@@ -258,8 +271,8 @@ export function VoiceChannelUsers({ channel, guildId, canInvite }: { channel: Pi
       {states.map(state => (
         <VoiceUserRow key={state.user_id} state={state} guildId={guildId} />
       ))}
-      {stremioBot && <BotRow identity={stremioBot} name="Stremio" icon={<StremioIcon size={14} />} />}
-      {spotifyBot && <BotRow identity={spotifyBot} name="Spotify" icon={<SpotifyIcon size={14} />} />}
+      {stremioBot && <BotRow identity={stremioBot} kind="stremio" name="Stremio" icon={<StremioIcon size={14} />} />}
+      {spotifyBot && <BotRow identity={spotifyBot} kind="spotify" name="Spotify" icon={<SpotifyIcon size={14} />} />}
       {inside && canInvite && (
         <li className="voice-invite-item">
           <button type="button" className="voice-invite-row" onClick={() => openModal({ type: "invite", channelId: channel.id })}>

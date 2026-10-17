@@ -27,6 +27,8 @@ export interface TransportCallbacks {
   localVideoEnded?(source: VideoSource): void;
   /** A camera / screen share start failed (permission denied, no camera). Cancelling the picker is not an error. */
   videoFailed?(source: VideoSource, reason: "permission_denied" | "not_found" | "failed"): void;
+  /** Our screen share went live without the audio it asked for (the platform or the picker gave none). */
+  screenAudioMissing?(): void;
 }
 
 export interface TransportOptions {

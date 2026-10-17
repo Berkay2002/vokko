@@ -21,7 +21,7 @@ import { hideShareBar } from "../desktop/window";
 import type { VideoHandle, VideoSource } from "./mediaStore";
 import type { CameraStart, TransportCallbacks } from "./transport";
 import { openCamera, type CameraSession } from "./video/cameraSession";
-import { buildCamera, buildScreenShare, viewerRequest, type CameraResolution, type EncodingPlan, type PlainPreset, type ScreenShareChoice, type ViewerQuality } from "./video/options";
+import { buildCamera, buildScreenShare, detectCodecSupport, serverTakesSvcSimulcast, viewerRequest, type CameraResolution, type EncodingPlan, type LayerQuality, type PlainPreset, type ScreenShareChoice, type StreamLayer, type ViewerQuality } from "./video/options";
 
 const toPresets = (layers: PlainPreset[]): VideoPreset[] => layers.map(l => new VideoPreset({ width: l.width, height: l.height, maxBitrate: l.maxBitrate, maxFramerate: l.maxFramerate }));
 
@@ -37,6 +37,24 @@ export function publishOptions(plan: EncodingPlan, screen: boolean): TrackPublis
     degradationPreference: plan.degradationPreference,
     ...(screen ? { screenShareEncoding: encoding, screenShareSimulcastLayers: layers } : { videoEncoding: encoding, videoSimulcastLayers: layers }),
   };
+}
+
+// Indexed by VideoQuality (LOW 0, MEDIUM 1, HIGH 2; OFF and unknown values have no entry).
+const LAYER_QUALITY: readonly LayerQuality[] = ["low", "medium", "high"];
+const qualityOf = (quality: LayerQuality): VideoQuality => (quality === "low" ? VideoQuality.LOW : quality === "medium" ? VideoQuality.MEDIUM : VideoQuality.HIGH);
+
+/** The layers a remote video is published with, as the server reports them (empty until its TrackInfo arrives). */
+export function layersOf(pub: Pick<RemoteTrackPublication, "trackInfo">): StreamLayer[] {
+  return (pub.trackInfo?.layers ?? []).flatMap(l => {
+    const quality = LAYER_QUALITY[l.quality];
+    return quality && l.width > 0 && l.height > 0 ? [{ width: l.width, height: l.height, quality }] : [];
+  });
+}
+
+// An SFU too old for VP9 / AV1 simulcast would get one layer: VP8 / H.264 simulcast instead, as on WebKit.
+function screenRequest(room: Room, choice: ScreenShareChoice) {
+  const support = detectCodecSupport();
+  return buildScreenShare(choice, { ...support, svcSimulcast: support.svcSimulcast !== false && serverTakesSvcSimulcast(room.serverInfo?.version) });
 }
 
 function errorName(error: unknown): string {
@@ -156,7 +174,7 @@ export class LiveKitVideo {
     }
     this.screenStarting = true;
     try {
-      const request = buildScreenShare(choice);
+      const request = screenRequest(room, choice);
       const publication = await room.localParticipant.setScreenShareEnabled(
         true,
         {
@@ -178,6 +196,8 @@ export class LiveKitVideo {
       const tracks = [publication.track, audio].filter((track): track is LocalTrack => !!track);
       this.adoptScreen(room, publication, { tracks, choice });
       void hideShareBar();
+      // The system picker decides whether audio comes along (Windows: a whole screen with "Share system audio" ticked).
+      if (choice.audio && !room.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio)) this.cb.screenAudioMissing?.();
     } catch (error) {
       const name = errorName(error);
       // Closing the browser's picker is a choice, not a failure.
@@ -246,7 +266,7 @@ export class LiveKitVideo {
       const [video, audio] = screen.tracks;
       try {
         if (!room || !this.joined() || !live(video)) throw new Error("ended");
-        const plan = buildScreenShare(screen.choice).publish;
+        const plan = screenRequest(room, screen.choice).publish;
         const publication = await room.localParticipant.publishTrack(video, { ...publishOptions(plan, true), source: Track.Source.ScreenShare, name: "screen" });
         if (live(audio)) await room.localParticipant.publishTrack(audio, { source: Track.Source.ScreenShareAudio, name: "screen_audio" });
         if (this.room() !== room) throw new Error("left");
@@ -286,7 +306,8 @@ export class LiveKitVideo {
   attach(track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant): boolean {
     if (track.kind !== Track.Kind.Video) return false;
     const source: VideoSource = pub.source === Track.Source.ScreenShare ? "screen" : "camera";
-    this.cb.video?.(participant.identity, source, { attach: el => void track.attach(el), detach: el => void track.detach(el) });
+    const layers = layersOf(pub);
+    this.cb.video?.(participant.identity, source, { attach: el => void track.attach(el), detach: el => void track.detach(el), ...(layers.length ? { layers } : {}) });
     this.applyQuality(pub, participant.identity, source);
     return true;
   }
@@ -313,8 +334,8 @@ export class LiveKitVideo {
 
   private applyQuality(pub: RemoteTrackPublication, userId: Snowflake, source: VideoSource): void {
     if (pub.kind !== Track.Kind.Video || !pub.isSubscribed) return;
-    const request = viewerRequest(this.qualities.get(`${userId}:${source}`) ?? "auto");
-    if (request.kind === "quality") pub.setVideoQuality(VideoQuality.HIGH);
+    const request = viewerRequest(this.qualities.get(`${userId}:${source}`) ?? "auto", layersOf(pub));
+    if (request.kind === "quality") pub.setVideoQuality(qualityOf(request.quality));
     else pub.setVideoDimensions({ width: request.width, height: request.height });
   }
 

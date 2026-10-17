@@ -150,8 +150,10 @@ export interface Prefs {
   streamResolution: string;
   streamFps: number;
   streamAudio: boolean;
+  /** Go Live's stream mode: "motion" (Gaming) | "detail" (Screen sharing) | "" = follow the frame rate. */
+  streamContent: string;
   cameraResolution: string;
-  /** What viewers ask for on a stream: "auto" | "source" | "720p" | "480p". */
+  /** What viewers ask for on a stream: "auto" | "source" | "720p" | "480p" (a stream's menu also offers its own layers). */
   viewerQuality: string;
   showStreamPreviews: boolean;
   /** Lower other voices while watching a stream, by `streamAttenuationStrength` percent. */
@@ -251,6 +253,7 @@ export const DEFAULT_PREFS: Prefs = {
   streamResolution: "1080p",
   streamFps: 30,
   streamAudio: true,
+  streamContent: "",
   cameraResolution: "720p",
   viewerQuality: "auto",
   showStreamPreviews: true,

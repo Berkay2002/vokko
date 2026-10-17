@@ -632,3 +632,28 @@ async fn client_close_is_answered_with_a_close_frame() {
         }
     }
 }
+
+#[tokio::test]
+async fn desktop_release_reaches_every_session() {
+    let w = world_with_config(|config| config.desktop_latest_json = Some(config.data_dir.join("latest.json"))).await;
+    let manifest = w.app.state.config.desktop_latest_json.clone().expect("configured");
+    let mut alice = Client::connect(&w.address).await;
+    assert!(alice.identify(&w.member).await.get("desktop_version").is_none(), "no file yet, no field");
+
+    std::fs::write(&manifest, r#"{"version":"0.1.8","platforms":{}}"#).expect("write latest.json");
+    vokko_server::desktop_version::refresh(&w.app.state).await;
+    assert_eq!(alice.wait_for("DESKTOP_VERSION").await, json!({"version": "0.1.8"}));
+    let mut bob = Client::connect(&w.address).await;
+    assert_eq!(bob.identify(&w.outsider).await["desktop_version"], "0.1.8");
+
+    // Unchanged or half-written files announce nothing.
+    vokko_server::desktop_version::refresh(&w.app.state).await;
+    std::fs::write(&manifest, r#"{"version":"0.1."#).expect("write partial");
+    vokko_server::desktop_version::refresh(&w.app.state).await;
+    assert!(bob.silent_for("DESKTOP_VERSION", Duration::from_millis(300)).await);
+
+    std::fs::write(&manifest, r#"{"version":"0.1.9","platforms":{}}"#).expect("write latest.json");
+    vokko_server::desktop_version::refresh(&w.app.state).await;
+    assert_eq!(alice.wait_for("DESKTOP_VERSION").await["version"], "0.1.9");
+    assert_eq!(bob.wait_for("DESKTOP_VERSION").await["version"], "0.1.9");
+}

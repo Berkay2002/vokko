@@ -2,6 +2,7 @@
 // published again in the new one; a capture that ended meanwhile is reopened (camera, same device and background) or turned off.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { layersOf } from "./livekitVideo";
 import type { TransportCallbacks } from "./transport";
 import type { CameraSession } from "./video/cameraSession";
 
@@ -192,5 +193,25 @@ describe("LiveKitVideo: reconnect into the same call", () => {
     room = new FakeRoom();
     await video.resume();
     expect(room.published.map(p => p.source)).toEqual(["screen_share", "screen_share_audio"]);
+  });
+});
+
+describe("layersOf", () => {
+  it("maps the TrackInfo layers and drops OFF / empty ones", () => {
+    const trackInfo = {
+      layers: [
+        { quality: 0, width: 640, height: 360 },
+        { quality: 1, width: 1280, height: 720 },
+        { quality: 2, width: 1920, height: 1080 },
+        { quality: 3, width: 1920, height: 1080 },
+        { quality: 2, width: 0, height: 0 },
+      ],
+    };
+    expect(layersOf({ trackInfo } as unknown as Parameters<typeof layersOf>[0])).toEqual([
+      { width: 640, height: 360, quality: "low" },
+      { width: 1280, height: 720, quality: "medium" },
+      { width: 1920, height: 1080, quality: "high" },
+    ]);
+    expect(layersOf({ trackInfo: undefined })).toEqual([]);
   });
 });
