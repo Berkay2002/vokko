@@ -41,5 +41,10 @@
 		try_files {path} /index.html
 		file_server
 		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+		# The web app's CSP, matching the packaged app's (release.production.json). frame-src https: because admins add game
+		# origins at runtime (docs/design/games-host.md section 7). Not on pages other pages frame: the Watch Together embed
+		# (loads YouTube's script, framed by the desktop app) and the built-in games (framed by the app, carry their own rules).
+		@app not path /youtube-embed.html /games/*
+		header @app Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; frame-src 'self' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.scdn.co https://images.metahub.space https://live.metahub.space https://episodes.metahub.space https://m.media-amazon.com; media-src 'self' blob:; connect-src 'self' https://*.livekit.cloud wss://*.livekit.cloud https://live.vokko.example.com wss://live.vokko.example.com; frame-ancestors 'none'"
 	}
 }
