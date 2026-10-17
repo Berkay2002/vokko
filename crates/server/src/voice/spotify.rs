@@ -13,13 +13,13 @@ use axum::routing::{post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use vokko_protocol::api::{
-    GatewayEvent, SPOTIFY_EVENT_QUEUE_MAX, SPOTIFY_QUEUE_MAX, Snowflake, SpotifyListenerToken, SpotifyLoop, SpotifyPatchRequest, SpotifyQueueEntry,
-    SpotifyReply, SpotifyStartRequest, SpotifyState, SpotifyStatus, SpotifyTrack, SpotifyUpdate,
+    GatewayEvent, MediaControl, SPOTIFY_EVENT_QUEUE_MAX, SPOTIFY_QUEUE_MAX, SPOTIFY_QUEUE_PER_USER, Snowflake, SpotifyListenerToken, SpotifyLoop,
+    SpotifyPatchRequest, SpotifyQueueEntry, SpotifyReply, SpotifyStartRequest, SpotifyState, SpotifyStatus, SpotifyTrack, SpotifyUpdate,
 };
 
 use super::token::{self, Claims, VideoGrant};
 use super::watch::{CONTROL_BURST, CONTROL_PER_SECOND, require_in_voice};
-use super::{unix_millis, unix_now};
+use super::{control, unix_millis, unix_now};
 use crate::access;
 use crate::auth::{AuthUser, random_hex};
 use crate::error::{ApiErr, ApiResult};
@@ -52,6 +52,8 @@ pub struct Session {
     /// The media LiveKit room of this session: `spotify-<channel_id>-<random>`, new for every session.
     room: String,
     started_by: i64,
+    /// Host, who put the current track in play, and the skip vote.
+    control: MediaControl,
     queue: Queue,
     status: SpotifyStatus,
     error: Option<&'static str>,
@@ -110,6 +112,7 @@ impl Session {
             can_previous: self.queue.can_previous(),
             started_by: Snowflake::from(self.started_by),
             bot_identity: bot_identity(self.channel_id),
+            control: self.control.clone(),
         }
     }
 
@@ -136,6 +139,7 @@ impl Session {
 
     /// The current track was just replaced (play now, skip, previous, the end of the last one): it starts from the top.
     fn new_track(&mut self, state: &AppState, now_ms: i64) {
+        control::new_item(&mut self.control, Some(self.queue.current_by()));
         self.bump(state);
         self.track_seq = self.seq;
         self.steer_seq = self.seq;
@@ -154,6 +158,7 @@ impl Session {
 
     /// Nothing is left to play: the bot is let go and the session waits for the next `queue_add` or `PUT`.
     fn go_idle(&mut self, state: &AppState, now_ms: i64) -> bool {
+        control::new_item(&mut self.control, None);
         self.bump(state);
         self.track_seq = self.seq;
         self.steer_seq = self.seq;
@@ -375,7 +380,8 @@ async fn start(
     ApiJson(body): ApiJson<SpotifyStartRequest>,
 ) -> ApiResult<Response> {
     let active = active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
     let (kind, item) = uri_of("uri", &body.uri)?;
     if kind == Kind::Artist {
         return Err(ApiErr::invalid("uri", "Pick a track, an album or a playlist."));
@@ -388,6 +394,10 @@ async fn start(
         lock(&state.spotify.session).as_ref().filter(|session| session.channel_id != channel_id).map(|session| (session.channel_id, session.started_by));
     if let Some((other, started_by)) = elsewhere {
         return Err(busy_elsewhere(&state, user_id, other, started_by).await);
+    }
+    // Anyone starts (also an idle session with nothing playing); replacing a playing track is a controller's (checked again below).
+    if let Some(session) = lock(&state.spotify.session).as_ref().filter(|session| session.channel_id == channel_id && session.queue.current.is_some()) {
+        control::require_control(&ctx, &session.control)?;
     }
     let mut tracks = tracks_of(&active, kind, &item, SPOTIFY_QUEUE_MAX + 1).await?;
     if tracks.is_empty() {
@@ -406,6 +416,9 @@ async fn start(
             return Err(ApiErr::new(StatusCode::CONFLICT, 40035, "Spotify is already playing in another call."));
         }
         let fresh = slot.is_none();
+        if let Some(session) = slot.as_ref().filter(|session| session.queue.current.is_some()) {
+            control::require_control(&ctx, &session.control)?;
+        }
         let session = slot.get_or_insert_with(|| {
             let room = new_room(channel_id);
             Session {
@@ -413,6 +426,7 @@ async fn start(
                 token: bot_token(&state, channel_id, &room).unwrap_or_default(),
                 room,
                 started_by: user_id,
+                control: control::new_session(user_id, &control::room(&state, channel_id)),
                 queue: Queue::default(),
                 status: SpotifyStatus::Starting,
                 error: None,
@@ -436,7 +450,12 @@ async fn start(
             *slot = None;
             return Err(ApiErr::internal());
         }
-        let left_out = session.queue.play_now(first, tracks, user_id);
+        // An album or playlist from someone without control (starting on an idle session) queues only what their quota allows.
+        let mine = session.queue.entries.iter().filter(|entry| entry.added_by == user_id).count();
+        let allowed = control::quota(&ctx, &session.control, mine, SPOTIFY_QUEUE_PER_USER).unwrap_or(0);
+        let over_quota = tracks.len().saturating_sub(allowed);
+        tracks.truncate(allowed);
+        let left_out = session.queue.play_now(first, tracks, user_id) + over_quota;
         session.new_track(&state, now);
         if fresh {
             session.status = SpotifyStatus::Starting;
@@ -495,11 +514,16 @@ fn touch(state: &AppState, channel_id: i64, change: impl FnOnce(&mut Session)) {
 enum Op {
     Playing(bool),
     Position(u64),
-    Skip,
+    /// `true` skips (or votes), `false` withdraws a vote; for the item `item_seq` names, if any.
+    Skip(bool, Option<u64>),
     Previous,
     Loop(SpotifyLoop),
     Shuffle,
-    Add { kind: Kind, id: String, next: bool },
+    Add {
+        kind: Kind,
+        id: String,
+        next: bool,
+    },
     Remove(String),
     Move(String, usize),
     Clear,
@@ -518,8 +542,8 @@ fn one_op(body: SpotifyPatchRequest) -> ApiResult<Op> {
     if let Some(position) = body.position_ms {
         ops.push(Op::Position(position));
     }
-    if flag("skip", body.skip)? {
-        ops.push(Op::Skip);
+    if let Some(skip) = body.skip {
+        ops.push(Op::Skip(skip, body.item_seq));
     }
     if flag("previous", body.previous)? {
         ops.push(Op::Previous);
@@ -562,7 +586,8 @@ async fn control(
     ApiJson(body): ApiJson<SpotifyPatchRequest>,
 ) -> ApiResult<Response> {
     let active = active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
     let op = one_op(body)?;
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
     // The tracks of a queue_add are found before the session is locked.
@@ -581,6 +606,13 @@ async fn control(
         let session = slot.as_mut().filter(|session| session.channel_id == channel_id).ok_or_else(nothing_playing)?;
         let mut left_out = 0;
         let mut stop_bot = false;
+        let mut vote_only = false;
+        let controller = control::controls(&ctx, session.control.host_id);
+        // Everything but skipping, appending and removing your own entries is a controller's.
+        let steers = !matches!(op, Op::Skip(..) | Op::Add { next: false, .. } | Op::Remove(_));
+        if steers && !controller {
+            return Err(ApiErr::missing_permissions());
+        }
         match op {
             Op::Playing(playing) => {
                 if session.queue.current.is_some() {
@@ -594,7 +626,13 @@ async fn control(
                 }
                 session.steer(&state, None, Some(position), now);
             }
-            Op::Skip => stop_bot = session.leave(&state, Leave::Skipped, now),
+            Op::Skip(skip, item_seq) => {
+                if control::skip_request(&mut session.control, &ctx, skip, item_seq, &control::room(&state, channel_id)) {
+                    stop_bot = session.leave(&state, Leave::Skipped, now);
+                } else {
+                    vote_only = true;
+                }
+            }
             Op::Previous => match session.queue.previous(session.here(now)) {
                 Back::Played => session.new_track(&state, now),
                 // A restart is a seek to the top that also resumes.
@@ -610,7 +648,12 @@ async fn control(
                 session.bump(&state);
             }
             Op::Add { next, .. } => {
-                left_out = session.queue.add(added.unwrap_or_default(), user_id, next);
+                let mine = session.queue.entries.iter().filter(|entry| entry.added_by == user_id).count();
+                let allowed = control::quota(&ctx, &session.control, mine, SPOTIFY_QUEUE_PER_USER)?;
+                let mut tracks = added.unwrap_or_default();
+                let over_quota = tracks.len().saturating_sub(allowed);
+                tracks.truncate(allowed);
+                left_out = session.queue.add(tracks, user_id, next) + over_quota;
                 if session.queue.current.is_none() && session.queue.advance(Leave::Skipped).is_some() {
                     session.new_track(&state, now);
                 } else {
@@ -618,6 +661,9 @@ async fn control(
                 }
             }
             Op::Remove(qid) => {
+                if session.queue.entries.iter().any(|entry| entry.qid == qid && entry.added_by != user_id) && !controller {
+                    return Err(ApiErr::missing_permissions());
+                }
                 if !session.queue.remove(&qid) {
                     return Err(ApiErr::invalid("queue_remove", "No such queue entry."));
                 }
@@ -634,7 +680,9 @@ async fn control(
                 session.bump(&state);
             }
         }
-        (session.change(&state, now, stop_bot), left_out as u32)
+        let change = session.change(&state, now, stop_bot);
+        // A vote changes nothing the bot plays: the clients hear of it, the bot is not sent the same state again.
+        (if vote_only { announce_only(change) } else { change }, left_out as u32)
     };
     let reply = Json(SpotifyReply { state: change.reply.clone(), left_out }).into_response();
     settle(&state, &active, channel_id, change).await;
@@ -670,9 +718,21 @@ async fn settle(state: &AppState, active: &Active<'_>, channel_id: i64, change: 
 
 async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Response> {
     active(&state)?;
-    let channel_id = require_in_voice(&state, user_id, &id).await?;
+    let ctx = control::in_voice(&state, user_id, &id).await?;
+    let channel_id = ctx.channel_id;
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
-    end(&state, channel_id).await;
+    // The check and the removal share the lock: a session started meanwhile is not ended by someone who does not control it.
+    let session = {
+        let mut slot = lock(&state.spotify.session);
+        match slot.as_ref().filter(|session| session.channel_id == channel_id) {
+            Some(session) => control::require_control(&ctx, &session.control)?,
+            None => return Ok(StatusCode::NO_CONTENT.into_response()),
+        }
+        slot.take()
+    };
+    if let Some(session) = session {
+        ended(&state, channel_id, session).await;
+    }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -697,6 +757,11 @@ pub(crate) async fn end(state: &AppState, channel_id: i64) {
         if slot.as_ref().is_some_and(|session| session.channel_id == channel_id) { slot.take() } else { None }
     };
     let Some(session) = session else { return };
+    ended(state, channel_id, session).await;
+}
+
+/// What follows a session's removal: the bot drops it, its room closes and everyone hears.
+async fn ended(state: &AppState, channel_id: i64, session: Session) {
     if let Some(bot) = &state.spotify.bot {
         let bot = bot.clone();
         let rooms = state.spotify.media_rooms();
@@ -722,6 +787,30 @@ pub(crate) async fn remove_strangers(state: &AppState) {
             let _ = rooms.remove_participant(&room, &participant.identity).await;
         }
     }
+}
+
+/// Who is in the call changed (`control::refresh`): host, votes and the count follow, and enough votes skip.
+pub(crate) async fn refresh(state: &AppState, channel_id: i64) {
+    let Ok(active) = active(state) else { return };
+    let now = unix_millis();
+    let change = {
+        let mut slot = lock(&state.spotify.session);
+        let Some(session) = slot.as_mut().filter(|session| session.channel_id == channel_id) else { return };
+        let room = control::room(state, channel_id);
+        if room.is_empty() {
+            return;
+        }
+        let before = session.control.clone();
+        if control::sync(&mut session.control, &room) {
+            let stop_bot = session.leave(state, Leave::Skipped, now);
+            session.change(state, now, stop_bot)
+        } else if session.control != before {
+            announce_only(session.change(state, now, false))
+        } else {
+            return;
+        }
+    };
+    settle(state, &active, channel_id, change).await;
 }
 
 /// A person left the call (or was removed from it): their listener connections go.

@@ -24,6 +24,11 @@ async fn guild_creation_has_defaults() {
     let permissions: u64 = roles[0]["permissions"].as_str().expect("permissions string").parse().expect("number");
     assert_ne!(permissions & (1 << 10), 0, "VIEW_CHANNEL");
     assert_eq!(permissions & (1 << 3), 0, "no ADMINISTRATOR");
+    assert_ne!(permissions & (1 << 60), 0, "CONTROL_MEDIA");
+    // Bit 60 is a known bit a role may carry; the bit above it is not.
+    let role = format!("/guilds/{guild_id}/roles/{guild_id}");
+    assert_eq!(app.patch(&role, &token, json!({"permissions": permissions.to_string()})).await.0, StatusCode::OK);
+    assert_eq!(app.patch(&role, &token, json!({"permissions": (permissions | 1 << 61).to_string()})).await.0, StatusCode::BAD_REQUEST);
 
     let (_, channels) = app.get(&format!("/guilds/{guild_id}/channels"), &token).await;
     let channels = channels.as_array().expect("channels");

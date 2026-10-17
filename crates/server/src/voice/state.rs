@@ -686,6 +686,9 @@ pub(crate) fn broadcast<'a>(state: &'a AppState, entry: &'a VoiceEntry, left: bo
         state.hub.send(&viewers, &GatewayEvent::VoiceStateUpdate(Box::new(payload)));
         if left {
             release_channel(state, entry.channel_id).await;
+        } else {
+            // A join or a (un)deafen changes who counts for media skip votes.
+            super::control::refresh(state, entry.channel_id);
         }
         viewers
     })
@@ -695,6 +698,7 @@ pub(crate) fn broadcast<'a>(state: &'a AppState, entry: &'a VoiceEntry, left: bo
 async fn release_channel(state: &AppState, channel_id: i64) {
     super::stremio::user_left(state, channel_id);
     super::spotify::user_left(state, channel_id);
+    super::control::refresh(state, channel_id);
     let inside: Vec<VoiceEntry> = state.voice.all().into_iter().filter(|entry| entry.channel_id == channel_id).collect();
     if !inside.iter().any(VoiceEntry::moderator) {
         // The last stage moderator left: the stage (if one is live) ends. Spawned, so no user lock is held while it demotes others.
