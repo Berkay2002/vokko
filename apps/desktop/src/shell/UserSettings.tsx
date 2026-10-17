@@ -46,7 +46,7 @@ interface SectionDef {
 // Order and grouping follow Discord's User Settings sidebar (research/discord-ui-inventory.md S1, settings-modal reference).
 // The Billing group (Nitro, Server Boost, Subscriptions, Gift Inventory, Billing) and the desktop-only game pages are left out on purpose.
 const ALL_SECTIONS: SectionDef[] = [
-  { id: "account", label: "My Account", icon: UserIcon, group: "", outline: ["Account Info", "Password & Security", "Account Status"], keywords: ["username", "display name", "email", "phone", "password", "security", "devices", "disable", "delete"] },
+  { id: "account", label: "My Account", icon: UserIcon, group: "", outline: ["Account Info", "Password & Security", "Sign-in Methods"], keywords: ["username", "display name", "email", "phone", "password", "security", "devices", "disable", "delete"] },
   { id: "privacy", label: "Data & Privacy", icon: ShieldCheck, group: "", outline: ["How Vokko Uses My Data", "Profile Privacy"], keywords: ["data", "personalization", "analytics", "profile", "request my data", "export"] },
   { id: "content", label: "Content & Social", icon: MessagesSquare, group: "", outline: ["Content Filters", "Spam Filters", "Direct Message (DM) Permissions", "Friend Request Permissions", "Ignore & Block"], keywords: ["messages", "dm", "friends", "block", "filter", "explicit", "spam", "permissions", "message requests", "friend requests"] },
   { id: "notifications", label: "Notifications", icon: Bell, group: "", keywords: ["sounds", "badges", "email", "desktop", "push", "mentions"] },
@@ -170,18 +170,6 @@ function MyAccount({ me }: { me: User }) {
           <SignIn />
         </SettingsBlock>
       )}
-      <SettingsBlock anchor="status" title="Account Status">
-        <SettingsRow label="Disable Account" value={<span className="sm-muted">Not available yet</span>}>
-          <button type="button" className="sm-btn" disabled title="Not available yet">
-            Disable
-          </button>
-        </SettingsRow>
-        <SettingsRow label="Delete Account" value={<span className="sm-muted">Not available yet</span>}>
-          <button type="button" className="sm-btn" disabled title="Not available yet">
-            Delete
-          </button>
-        </SettingsRow>
-      </SettingsBlock>
     </>
   );
 }
