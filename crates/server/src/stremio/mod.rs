@@ -21,7 +21,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Deserialize;
 use time::OffsetDateTime;
 use vokko_protocol::api::{
-    StremioAccountStatus, StremioCue, StremioLinkPoll, StremioLinkStart, StremioLoginRequest, StremioMeta, StremioStream, StremioStreamList, StremioTitle,
+    StremioAccountStatus, StremioLinkPoll, StremioLinkStart, StremioLoginRequest, StremioMeta, StremioStream, StremioStreamList, StremioTitle,
 };
 
 use self::addons::{Addon, valid_kind, valid_title_id, valid_video_id};
@@ -81,8 +81,6 @@ pub(crate) struct ListedSub {
     pub channel_id: i64,
     pub generation: u64,
     pub url: Secret,
-    /// Parsed on first use.
-    pub cues: Option<Arc<Vec<StremioCue>>>,
     created: Instant,
 }
 
@@ -204,7 +202,7 @@ impl Stremio {
                 let mut bytes = [0_u8; 16];
                 rand::fill(&mut bytes);
                 let sid = URL_SAFE_NO_PAD.encode(bytes);
-                subs.insert(sid.clone(), ListedSub { user_id, channel_id, generation, url, cues: None, created: now });
+                subs.insert(sid.clone(), ListedSub { user_id, channel_id, generation, url, created: now });
                 sid
             })
             .collect()
@@ -214,12 +212,6 @@ impl Stremio {
     pub(crate) fn listed_sub(&self, sid: &str, user_id: i64, channel_id: i64, generation: u64) -> Option<ListedSub> {
         let entry = lock(&self.subs).get(sid).cloned()?;
         (entry.user_id == user_id && entry.channel_id == channel_id && entry.generation == generation && entry.created.elapsed() < SID_TTL).then_some(entry)
-    }
-
-    pub(crate) fn cache_cues(&self, sid: &str, cues: Arc<Vec<StremioCue>>) {
-        if let Some(entry) = lock(&self.subs).get_mut(sid) {
-            entry.cues = Some(cues);
-        }
     }
 
     /// A user unlinked or relinked: their cached addons and listed streams go.

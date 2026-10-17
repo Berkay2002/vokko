@@ -7,6 +7,7 @@ pub const MAX_CUE_CHARS: usize = 300;
 pub const MAX_CUE_LINES: usize = 4;
 /// A cue that claims to last longer is cut to this.
 pub const MAX_CUE_MS: u64 = 30_000;
+const MAX_RAW_CHARS: usize = 4096;
 const MAX_START_MS: u64 = 48 * 3_600_000;
 
 /// `01:02:03,456`, `01:02:03.456` or the WebVTT short form `02:03.456`, in milliseconds.
@@ -38,18 +39,25 @@ fn hidden(c: char) -> bool {
     c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{feff}')
 }
 
-/// Removes `<tag>` (a `<` followed by a letter or `/`) and `{override}` blocks.
+/// Removes `<tag>` (a `<` followed by a letter or `/`) and `{override}` blocks. Linear: once a closing character is missing
+/// from the rest of the text, no later opener can find one either, so it is not searched for again.
 fn strip_markup(raw: &str) -> String {
     let chars: Vec<char> = raw.chars().collect();
     let mut out = String::with_capacity(raw.len());
+    let (mut no_angle, mut no_brace) = (false, false);
     let mut i = 0;
     while i < chars.len() {
         let close = match chars[i] {
-            '<' if chars.get(i + 1).is_some_and(|n| n.is_alphabetic() || *n == '/') => Some('>'),
-            '{' => Some('}'),
+            '<' if !no_angle && chars.get(i + 1).is_some_and(|n| n.is_alphabetic() || *n == '/') => Some(('>', &mut no_angle)),
+            '{' if !no_brace => Some(('}', &mut no_brace)),
             _ => None,
         };
-        match close.and_then(|close| chars[i..].iter().position(|c| *c == close)) {
+        let found = close.and_then(|(close, missing)| {
+            let found = chars[i..].iter().position(|c| *c == close);
+            *missing = found.is_none();
+            found
+        });
+        match found {
             Some(len) => i += len + 1,
             None => {
                 out.push(chars[i]);
@@ -63,6 +71,8 @@ fn strip_markup(raw: &str) -> String {
 /// Plain text of a cue: markup and hidden characters removed, a few entities decoded, at most `MAX_CUE_LINES` lines and
 /// `MAX_CUE_CHARS` characters. Empty when nothing visible is left.
 pub fn clean_text(raw: &str) -> String {
+    // A cue never needs more than this much source (markup included); the rest is not looked at.
+    let raw: String = raw.chars().take(MAX_RAW_CHARS).collect();
     let text = strip_markup(&raw.replace("\r\n", "\n").replace('\r', "\n").replace("\\N", "\n").replace("\\n", "\n"));
     let text = text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&");
     let lines: Vec<String> = text
@@ -126,6 +136,11 @@ mod tests {
         assert_eq!(clean_text("<b></b>  \n \n"), "");
         assert_eq!(clean_text("1\n2\n3\n4\n5\n6"), "1\n2\n3\n4");
         assert_eq!(clean_text(&"x".repeat(1000)).chars().count(), MAX_CUE_CHARS);
+        // Unclosed openers cost one pass, not one pass each.
+        let started = std::time::Instant::now();
+        assert_eq!(strip_markup(&"<a".repeat(200_000)).chars().count(), 400_000);
+        assert_eq!(clean_text(&"<a{".repeat(1_000_000)).chars().count(), MAX_CUE_CHARS);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 
     #[test]

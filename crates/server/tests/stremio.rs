@@ -1259,12 +1259,11 @@ async fn addon_subtitles_follow_the_host_rules_and_their_urls_stay_on_the_server
         );
     }
 
-    // The file is fetched by the server, cleaned, and cached; a 2 MiB cap applies.
+    // The file is fetched by the server, cleaned; a 2 MiB cap applies.
     let (first, big) = (subtitles[0]["sid"].as_str().unwrap(), subtitles[1]["sid"].as_str().unwrap());
     let (status, cues) = w.app.get(&format!("{list_path}/{first}"), &w.alice).await;
     assert_eq!(status, StatusCode::OK, "{cues}");
     assert_eq!(cues, json!({"cues": [{"start_ms": 1000, "end_ms": 2000, "text": "Hello there"}, {"start_ms": 3000, "end_ms": 4000, "text": "alert(1)Bye"}]}));
-    assert_eq!(w.app.get(&format!("{list_path}/{first}"), &w.alice).await.1, cues, "the second read comes from the cache");
     assert_eq!(w.app.get(&format!("{list_path}/{big}"), &w.alice).await.0, StatusCode::BAD_REQUEST, "over the size cap");
     assert_eq!(w.app.get(&format!("{list_path}/nope"), &w.alice).await.0, StatusCode::BAD_REQUEST);
 

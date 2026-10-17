@@ -523,18 +523,14 @@ async fn addon_cues(State(state): State<AppState>, AuthUser(user_id): AuthUser, 
         .stremio
         .listed_sub(&sid, user_id, channel_id, generation)
         .ok_or_else(|| ApiErr::invalid("sid", "Unknown or expired subtitle. List the subtitles again."))?;
-    if let Some(cached) = listed.cues {
-        return Ok(Json(StremioCues { cues: cached.as_ref().clone() }));
-    }
     let text = active
         .clients
         .fetcher
         .get_text(listed.url.expose(), MAX_SUBTITLE_BYTES)
         .await
         .map_err(|_| ApiErr::invalid("sid", "That subtitle could not be opened."))?;
-    let parsed = std::sync::Arc::new(cues::parse(&text, MAX_CUES));
-    state.stremio.cache_cues(&sid, parsed.clone());
-    Ok(Json(StremioCues { cues: parsed.as_ref().clone() }))
+    // Not cached on the server: the client keeps what it fetched, and up to 1.5 MB of cues per listed file would add up.
+    Ok(Json(StremioCues { cues: cues::parse(&text, MAX_CUES) }))
 }
 
 /// The channel's current item (`generation`) and what it is, or "Nothing is playing".
