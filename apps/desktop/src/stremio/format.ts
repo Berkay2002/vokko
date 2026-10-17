@@ -3,6 +3,7 @@
 import { ApiRequestError } from "../api/rest";
 import { STREMIO_IMAGE_HOSTS, type StremioState, type StremioStream } from "../api/types";
 import { expectedPositionMs } from "../watch/youtube";
+import type { RoomState } from "./viewerConnection";
 
 /** What to tell the user about a failed call: a field's own message when the server named one ("Invalid Form Body" alone says nothing). */
 export function reason(e: unknown): string {
@@ -58,7 +59,8 @@ export function unsupportedText(stream: StremioStream): string {
 }
 
 /** The status line on a tile that has no picture yet. */
-export function statusText(state: Pick<StremioState, "status" | "error">, room: "connecting" | "connected" | "closed" | "failed"): string {
+export function statusText(state: Pick<StremioState, "status" | "error">, room: RoomState): string {
+  if (room === "unsupported") return "Watching together doesn't work in the Linux app yet. Use Vokko in your browser.";
   if (state.status === "error") return state.error || "Something went wrong with the stream.";
   if (state.status === "starting") return "Starting…";
   if (state.status === "buffering") return "Buffering…";

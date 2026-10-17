@@ -59,6 +59,23 @@ test('incoming call: overlay with accept, accept with video and decline; accepti
   await expect(callRow(page)).toHaveText(/Alice started a call\./);
 });
 
+test('Start Voice Call in the friend menu and Start a Call in the DM menu open the DM and call', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  const row = page.locator('.people-row', { hasText: 'Alice' });
+  await row.hover();
+  await row.getByRole('button', { name: 'More' }).click();
+  await page.getByRole('menuitem', { name: 'Start Voice Call' }).click();
+  await expect(page).toHaveURL(/\/channels\/@me\/\d+$/);
+  await expect(panel(page).getByRole('group', { name: /ringing$/ })).toBeVisible();
+  await panel(page).getByRole('button', { name: 'Leave Call' }).click();
+  // Nobody answered, so the call may end with us leaving: only check we are out of it.
+  await expect(page.getByRole('button', { name: 'Leave Call' })).toHaveCount(0);
+
+  await page.locator('.dm-row', { hasText: 'Alice' }).first().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Start a Call' }).click();
+  await expect(panel(page).getByRole('button', { name: 'Leave Call' })).toBeVisible();
+});
+
 test('stacked incoming calls: the gap between the toasts is not caught by the overlay', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.getByRole('navigation', { name: 'Servers sidebar' }).waitFor();

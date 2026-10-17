@@ -370,8 +370,8 @@ log lines can still name channels, servers and users.
 
 ## Not production-ready yet
 
-- The bundled container healthcheck still only proves the port accepts connections; `GET /healthz` (see above) is the real check, but `deploy/` does not use it yet.
-- Voice V1 has no server mute/deafen, moves or DM calls yet; camera and screen share are not available (later milestones in `docs/design/voice.md`).
+- Only the Postgres service in `deploy/docker-compose.yml` has a healthcheck; the server service has none. `GET /healthz` (see above) is the check to point one at.
+- Voice, video, screen share and DM calls need the LiveKit server described under Voice (LiveKit); without it those features are unavailable and text chat still works.
 - Per-address limits treat an IPv6 /64 as one client (a single host usually holds a whole /64). Devices on one IPv6 LAN, or clients behind a NAT64 gateway (`64:ff9b::/96`), therefore share the login limit and the 16 unidentified gateway sockets, as devices behind one IPv4 NAT do.
 - Reports of DM messages (Report Message in a DM) have no guild, so no moderator sees them in the app: they are kept in the `reports` table with `guild_id IS NULL` until you delete them (`SELECT * FROM reports WHERE guild_id IS NULL AND status = 'open'`; close one with `UPDATE reports SET status = 'resolved', closed_at = now() WHERE id = ...`). Each keeps the reported text, also after the author deletes it or their account.
 - Signed-out logins and invite previews from IPv6 also share a limit per /48. Mobile carriers can put many subscribers in one /48, so one abusive client there can use up that limit for the others until it refills (minutes).
@@ -379,6 +379,6 @@ log lines can still name channels, servers and users.
 - Backups are a script plus your scheduler ([backups.md](backups.md)); there is no admin tooling for them (uploads can live in an S3-compatible bucket, `VOKKO_STORAGE=s3`).
 - Registration is open by default; set `VOKKO_REGISTRATION=closed` once your accounts exist. There is no invite-only mode or captcha.
 - `seed` creates accounts with a published password; development only.
-- The server speaks plain HTTP; TLS comes from the proxy. No audit logs, metrics endpoint or log rotation beyond Docker's own.
+- The server speaks plain HTTP; TLS comes from the proxy. Servers have an audit log (`GET /guilds/{id}/audit-logs`), but the instance has no metrics endpoint or log rotation beyond Docker's own.
 - Link previews fetch URLs from the server's network (private and loopback addresses are blocked); turn them off with `VOKKO_UNFURL=off` if you do not want outbound requests.
 - Pre-1.0: wire contract and schema may change between commits; always back up before upgrading.

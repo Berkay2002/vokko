@@ -68,6 +68,15 @@ describe("the call's viewer Room", () => {
     expect(token).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledTimes(1);
   });
+
+  it("stays unsupported, without retries, on a real server in a webview with no WebRTC (the Linux app)", async () => {
+    token.mockResolvedValue({ url: "wss://live.example", token: "t" });
+    syncViewer(target);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(slot().room).toBe("unsupported");
+    expect(token).toHaveBeenCalledTimes(1);
+    token.mockResolvedValue({ url: "mock://stremio", token: "t" });
+  });
 });
 
 describe("a bot's User Volume", () => {

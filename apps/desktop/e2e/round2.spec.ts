@@ -50,7 +50,12 @@ test('intro relationship row: mutual servers, remove/add friend, block and unblo
   const row = page.locator('.chat-start-relation');
   await expect(row).toContainText(/\d+ Mutual Servers?/);
   await expect(row.getByRole('button', { name: 'Remove Friend' })).toBeVisible();
+  // Asks first: Cancel keeps the friend, the dialog's Remove Friend removes.
   await row.getByRole('button', { name: 'Remove Friend' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+  await expect(row.getByRole('button', { name: 'Remove Friend' })).toBeVisible();
+  await row.getByRole('button', { name: 'Remove Friend' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Remove Friend' }).click();
   await expect(row.getByRole('button', { name: 'Add Friend' })).toBeVisible();
   await row.getByRole('button', { name: 'Add Friend' }).click();
   await expect(row.getByRole('button', { name: 'Friend Request Sent' })).toBeDisabled();

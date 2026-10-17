@@ -56,6 +56,27 @@ test('tooltips are 14/18 w500, the rail variant 16/20 w600', async ({ page }) =>
   expect(await font(page, '.tooltip')).toBe('16px/20px/600');
 });
 
+test('a click hides the tooltip and the focus it gives does not bring it back; a tap never shows one', async ({ page, browser }) => {
+  await home(page);
+  await page.getByRole('link', { name: 'Alice' }).first().click();
+  await page.locator('.chat-textarea').waitFor();
+  const pins = page.getByRole('button', { name: 'Pinned Messages', exact: true });
+  await pins.hover();
+  await expect(page.getByRole('tooltip', { name: 'Pinned Messages' })).toBeVisible();
+  await pins.click();
+  await expect(page.locator('.chat-pins')).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const tap = await phone.newPage();
+  await tap.goto('/channels/@me?as=sam&mockLatency=0');
+  await tap.getByRole('button', { name: 'Add a Server' }).tap();
+  await tap.waitForTimeout(400);
+  await expect(tap.getByRole('tooltip')).toHaveCount(0);
+  await phone.close();
+});
+
 test('user-panel popout: profile card, status submenu, switch accounts, copy ID, edit profile', async ({ page, context }) => {
   // Copy User ID is a developer-mode item (Settings > Advanced).
   await page.addInitScript(() => localStorage.setItem('vokko.prefs', JSON.stringify({ developerMode: true })));
@@ -89,13 +110,13 @@ test('user-panel popout: profile card, status submenu, switch accounts, copy ID,
   await expect(page.locator('.sm-side')).toBeVisible();
 });
 
-test('friend More menu: calls are unavailable, Remove Friend removes the row', async ({ page }) => {
+test('friend More menu: calls are enabled, Remove Friend removes the row', async ({ page }) => {
   await home(page);
   const row = page.locator('.people-row', { hasText: 'Alice' });
   await row.hover();
   await row.getByRole('button', { name: 'More' }).click();
-  await expect(page.getByRole('menuitem', { name: 'Start Video Call' })).toHaveAttribute('aria-disabled', 'true');
-  await expect(page.getByRole('menuitem', { name: 'Start Voice Call' })).toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByRole('menuitem', { name: 'Start Video Call' })).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByRole('menuitem', { name: 'Start Voice Call' })).not.toHaveAttribute('aria-disabled', 'true');
   await page.getByRole('menuitem', { name: 'Remove Friend' }).click();
   const dialog = page.getByRole('dialog', { name: "Remove 'Alice'" });
   // Cancel keeps the friend; only the dialog's Remove Friend sends the DELETE

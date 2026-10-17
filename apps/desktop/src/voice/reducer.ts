@@ -9,7 +9,7 @@ export type InputMode = "vad" | "ptt";
 export type ConnectionQuality = "excellent" | "good" | "poor" | "lost" | "unknown";
 
 /** Why the client is not (or no longer) in voice. Server refusals keep their wire names. */
-export type VoiceErrorReason = VoiceConnectFailure | "moved" | "kicked" | "connection_lost" | "permission_denied" | "no_microphone";
+export type VoiceErrorReason = VoiceConnectFailure | "moved" | "kicked" | "connection_lost" | "permission_denied" | "no_microphone" | "webrtc_unsupported";
 
 export interface VoiceError {
   reason: VoiceErrorReason;

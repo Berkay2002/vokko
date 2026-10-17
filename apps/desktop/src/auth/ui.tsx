@@ -16,8 +16,7 @@ export function fieldErrors(error: unknown): Record<string, string> {
     if (message) out[field] = message;
   }
   if (Object.keys(out).length === 0) {
-    if (error.status === 0) out._ = "Can't reach the server. Check your connection.";
-    else if (error.status === 429) out._ = "You are being rate limited. Try again in a moment.";
+    if (error.status === 429) out._ = "You are being rate limited. Try again in a moment.";
     else out._ = error.message;
   }
   return out;

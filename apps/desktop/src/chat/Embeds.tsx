@@ -99,6 +99,9 @@ function EmbedCard({ embed }: { embed: Embed }) {
   const link = safeHttpUrl(embed.url);
   const open = (e: React.MouseEvent, href: string) => { e.preventDefault(); chat.actions.openLink(href); };
   const mediaUrl = (m?: { url: string; proxy_url?: string }) => safeHttpUrl(m?.proxy_url ?? m?.url);
+  const iconUrl = (m?: { icon_url?: string; proxy_icon_url?: string }) => safeHttpUrl(m?.proxy_icon_url ?? m?.icon_url);
+  const authorIcon = iconUrl(embed.author);
+  const footerIcon = iconUrl(embed.footer);
 
   // Settings > Chat > "Display images and videos from links": off keeps the text of the card only.
   const inlineMedia = chat.display.inlineEmbedMedia;
@@ -126,7 +129,7 @@ function EmbedCard({ embed }: { embed: Embed }) {
       <div className="chat-embed-main">
         {embed.provider?.name && <div className="chat-embed-provider">{embed.provider.name}</div>}
         {embed.author && <div className="chat-embed-author">
-          {safeHttpUrl(embed.author.icon_url) && <Media className="chat-embed-author-icon" url={safeHttpUrl(embed.author.icon_url)} alt="" />}
+          {authorIcon && <Media className="chat-embed-author-icon" url={authorIcon} alt="" />}
           {authorUrl ? <a href={authorUrl} onClick={e => open(e, authorUrl)}>{embed.author.name}</a> : <span>{embed.author.name}</span>}
         </div>}
         {embed.title && (link
@@ -151,7 +154,7 @@ function EmbedCard({ embed }: { embed: Embed }) {
     </a>}
     {!inlineVideo && !showVideoPoster && image && <Media className="chat-embed-image" url={image} alt={embed.title ?? ''} />}
     {(embed.footer || embed.timestamp) && <div className="chat-embed-footer">
-      {embed.footer?.icon_url && safeHttpUrl(embed.footer.icon_url) && <Media className="chat-embed-footer-icon" url={safeHttpUrl(embed.footer.icon_url)} alt="" />}
+      {footerIcon && <Media className="chat-embed-footer-icon" url={footerIcon} alt="" />}
       <span>{embed.footer?.text}{embed.footer && embed.timestamp ? ' • ' : ''}{embed.timestamp ? formatFullDate(new Date(embed.timestamp)) : ''}</span>
     </div>}
   </article>;

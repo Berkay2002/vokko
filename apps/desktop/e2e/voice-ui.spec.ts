@@ -113,6 +113,10 @@ test('control bar: mute from the bar, popouts, text chat panel, leave', async ({
   await chat.getByRole('textbox', { name: 'Message General' }).fill('hello from voice');
   await page.keyboard.press('Enter');
   await expect(chat.getByText('hello from voice')).toBeVisible();
+  // With the chat open the stage is narrow: Pop out and Fullscreen keep their own slot right of the hang-up.
+  const hangup = await bar.getByRole('button', { name: 'Leave voice channel' }).boundingBox();
+  const popOut = await bar.getByRole('button', { name: 'Pop out' }).boundingBox();
+  expect(popOut!.x).toBeGreaterThanOrEqual(hangup!.x + hangup!.width);
   await page.getByRole('button', { name: 'Close Chat' }).click();
   await expect(page.getByRole('complementary', { name: 'General chat' })).toHaveCount(0);
 

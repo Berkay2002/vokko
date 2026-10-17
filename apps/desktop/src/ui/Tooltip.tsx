@@ -15,7 +15,16 @@ export interface TooltipProps {
   gap?: number;
 }
 
-/** Hover/focus tooltip. Wraps its children in a layout-neutral element (`display: contents`). */
+/** Keyboard focus only: a click or tap also focuses the trigger, and that must not bring the tooltip back over what it opened. */
+function keyboardFocus(target: EventTarget): boolean {
+  try {
+    return target instanceof Element && target.matches(":focus-visible");
+  } catch {
+    return true;
+  }
+}
+
+/** Hover (mouse only) / keyboard-focus tooltip; a press hides it. Wraps its children in a layout-neutral element (`display: contents`). */
 export function Tooltip({ content, children, side = "top", delay = 120, disabled, className, gap = 8 }: TooltipProps) {
   const wrapper = useRef<HTMLSpanElement>(null);
   const bubble = useRef<HTMLDivElement>(null);
@@ -46,7 +55,16 @@ export function Tooltip({ content, children, side = "top", delay = 120, disabled
 
   const visible = open && !disabled && content !== null && content !== undefined && content !== "";
   return (
-    <span ref={wrapper} style={{ display: "contents" }} onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide} onMouseDown={hide} aria-describedby={visible ? id : undefined}>
+    <span
+      ref={wrapper}
+      style={{ display: "contents" }}
+      onPointerEnter={e => e.pointerType === "mouse" && show()}
+      onPointerLeave={hide}
+      onPointerDown={hide}
+      onFocus={e => keyboardFocus(e.target) && show()}
+      onBlur={hide}
+      aria-describedby={visible ? id : undefined}
+    >
       {children}
       {visible &&
         createPortal(

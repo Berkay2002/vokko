@@ -74,6 +74,44 @@ async fn old_embeds_without_proxy_url_get_one_and_stored_values_are_not_trusted(
 }
 
 #[tokio::test]
+async fn author_and_footer_icons_get_a_proxy_icon_url() {
+    let app = private_ok().await;
+    let (token, _) = app.register("sam").await;
+    let (_, channel) = app.guild_with_channel(&token).await;
+    let (_, sent) = app.post(&format!("/channels/{channel}/messages"), &token, json!({"content": "icons"})).await;
+    let id: i64 = sent["id"].as_str().expect("id").parse().expect("id");
+    let embeds = json!([{"type": "rich",
+        "author": {"name": "a", "icon_url": "https://example.com/a.png", "proxy_icon_url": "https://evil.example/x"},
+        "footer": {"text": "f", "icon_url": "https://example.com/f.png"}},
+        {"type": "rich", "footer": {"text": "no icon", "proxy_icon_url": "https://evil.example/y"}}]);
+    sqlx::query("UPDATE messages SET embeds = $2::jsonb WHERE id = $1").bind(id).bind(embeds.to_string()).execute(&app.state.db).await.expect("update");
+    let (_, list) = app.get(&format!("/channels/{channel}/messages?limit=1"), &token).await;
+    let got = &list[0]["embeds"];
+    assert_eq!(got[0]["author"]["proxy_icon_url"], proxy_url(&app.state, "https://example.com/a.png").expect("signed"));
+    assert_eq!(got[0]["footer"]["proxy_icon_url"], proxy_url(&app.state, "https://example.com/f.png").expect("signed"));
+    assert!(got[1]["footer"].get("proxy_icon_url").is_none(), "a stored value without an icon is dropped");
+}
+
+#[tokio::test]
+async fn a_fetched_image_is_served_from_the_disk_cache_afterwards() {
+    let app = private_ok().await;
+    let pages = PageServer::start().await;
+    let url = proxy_url(&app.state, &pages.url("/card.png")).expect("signed");
+    for _ in 0..3 {
+        let (status, content_type, bytes, _) = fetch(&app, &url).await;
+        assert_eq!((status, content_type.as_deref(), bytes.as_slice()), (StatusCode::OK, Some("image/png"), &TINY_PNG[..]));
+    }
+    assert_eq!(pages.count("/card.png"), 1, "fetched once");
+    assert_eq!(std::fs::read_dir(app.data_dir.join("embed-media")).expect("cache dir").count(), 1);
+    // failures are not cached
+    let missing = proxy_url(&app.state, &pages.url("/missing")).expect("signed");
+    for _ in 0..2 {
+        assert_eq!(fetch(&app, &missing).await.0, StatusCode::BAD_GATEWAY);
+    }
+    assert_eq!(pages.count("/missing"), 2);
+}
+
+#[tokio::test]
 async fn bad_or_missing_signatures_are_404_and_never_fetch() {
     let app = private_ok().await;
     let pages = PageServer::start().await;
