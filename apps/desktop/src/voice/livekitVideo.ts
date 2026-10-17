@@ -115,6 +115,8 @@ export class LiveKitVideo {
       return;
     }
     this.screenStarting = true;
+    // Armed before the picker opens, so WebView2's own sharing bar is hidden as it appears rather than after the publish.
+    void hideShareBar();
     try {
       const request = buildScreenShare(choice);
       const publication = await room.localParticipant.setScreenShareEnabled(
@@ -135,7 +137,6 @@ export class LiveKitVideo {
         return;
       }
       this.screen = { publication, room };
-      void hideShareBar();
       publication.track?.once(TrackEvent.Ended, () => {
         if (this.screen?.publication !== publication) return;
         void this.stopScreen().then(() => this.cb.localVideoEnded?.("screen"));
