@@ -4,9 +4,7 @@ import { expect, test, type Page } from '@playwright/test';
 // FakeTransport (no getUserMedia). Seed: Alice and Bob in General (they "speak" every 1.5 s once you are in the call),
 // Nova in Gaming, Carol alone in Solo (user limit 1, so it is full).
 
-type MockWin = {
-  __vokkoMock: { channelIdByName(name: string): string | null; voice(user: string, channelId: string | null, opts?: { selfMute?: boolean }): void; restart(): void };
-};
+type MockWin = { __vokkoMock: { channelIdByName(name: string): string | null; voice(user: string, channelId: string | null, opts?: { selfMute?: boolean }): void } };
 
 async function openGuild(page: Page): Promise<void> {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
@@ -111,30 +109,6 @@ test('moving between channels keeps one connection', async ({ page }) => {
   await expect(userRow(page, 'General', 'Sam')).toHaveCount(0);
   await expect(panel(page)).toContainText("Gaming / Sam's server");
   await expect(panel(page).getByRole('status')).toHaveText('Voice Connected');
-});
-
-test('a server restart keeps the call: the client re-binds without leaving or reconnecting its media', async ({ page }) => {
-  await openGuild(page);
-  await page.getByRole('button', { name: 'General voice channel' }).click();
-  await expect(panel(page).getByRole('status')).toHaveText('Voice Connected');
-  // Every status the panel shows from now on (a media reconnect would walk through "RTC Connecting").
-  await panel(page).evaluate(el => {
-    const seen: string[] = [];
-    (window as unknown as { statuses: string[] }).statuses = seen;
-    new MutationObserver(() => {
-      const text = el.querySelector('[role="status"]')?.textContent ?? '(none)';
-      if (seen.at(-1) !== text) seen.push(text);
-    }).observe(el, { childList: true, characterData: true, subtree: true });
-  });
-  await page.evaluate(() => (window as unknown as MockWin).__vokkoMock.restart());
-  // Muted while the gateway is away: the op 4 after the re-identify carries it, so the icon proves the re-bind went through.
-  await page.getByRole('button', { name: 'Mute', exact: true }).click();
-  const me = userRow(page, 'General', 'Sam');
-  await expect(me.getByRole('img', { name: 'Muted' })).toBeVisible({ timeout: 15_000 });
-  await page.waitForTimeout(1500);
-  await expect(panel(page).getByRole('status')).toHaveText('Voice Connected');
-  expect(await page.evaluate(() => (window as unknown as { statuses: string[] }).statuses.filter(s => s !== 'Voice Connected'))).toEqual([]);
-  await expect(userRow(page, 'General', 'Alice')).toBeVisible();
 });
 
 test('server mute, move and disconnect from the user context menu', async ({ page }) => {

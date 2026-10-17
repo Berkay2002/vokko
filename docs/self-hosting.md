@@ -263,6 +263,8 @@ Notes:
 
 ## Backups
 
+`tools/backup.sh` does all of this nightly (verified, rotated, optionally copied off the machine) and `tools/restore.sh` puts one back; see [backups.md](backups.md). By hand:
+
 State is the `pgdata` volume (messages, users, everything structured) and the `vokko-data` volume (uploaded files; with `VOKKO_STORAGE=s3` the bucket instead). Back up both; the database rows reference files by id.
 
 ```sh
@@ -374,7 +376,7 @@ log lines can still name channels, servers and users.
 - Reports of DM messages (Report Message in a DM) have no guild, so no moderator sees them in the app: they are kept in the `reports` table with `guild_id IS NULL` until you delete them (`SELECT * FROM reports WHERE guild_id IS NULL AND status = 'open'`; close one with `UPDATE reports SET status = 'resolved', closed_at = now() WHERE id = ...`). Each keeps the reported text, also after the author deletes it or their account.
 - Signed-out logins and invite previews from IPv6 also share a limit per /48. Mobile carriers can put many subscribers in one /48, so one abusive client there can use up that limit for the others until it refills (minutes).
 - Single instance only: the gateway hub, replay buffers, presence and rate limiters live in process memory. No horizontal scaling; a restart drops every websocket (clients resume or reconnect).
-- There is no built-in backup, retention or admin tooling (uploads can live in an S3-compatible bucket, `VOKKO_STORAGE=s3`).
+- Backups are a script plus your scheduler ([backups.md](backups.md)); there is no admin tooling for them (uploads can live in an S3-compatible bucket, `VOKKO_STORAGE=s3`).
 - Registration is open by default; set `VOKKO_REGISTRATION=closed` once your accounts exist. There is no invite-only mode or captcha.
 - `seed` creates accounts with a published password; development only.
 - The server speaks plain HTTP; TLS comes from the proxy. No audit logs, metrics endpoint or log rotation beyond Docker's own.

@@ -303,9 +303,8 @@ function onOwnState(model: VoiceModel, state: VoiceState): VoiceModel {
   }
   const states = { ...model.states, [state.user_id]: state };
   if (model.channelId !== null && model.sessionId !== null && state.session_id === model.sessionId) {
-    // Same session: server-side move or a mute/deafen echo. While our own move is pending the channel stays the target; in the
-    // channel we asked for, it answers a re-identify's op 4 (the server re-bound us without a new token).
-    if (model.pendingJoin) return pruneSpeaking({ ...model, states, pendingJoin: state.channel_id !== model.channelId });
+    // Same session: server-side move or a mute/deafen echo. While our own move is pending the channel stays the target.
+    if (model.pendingJoin) return pruneSpeaking({ ...model, states });
     return pruneSpeaking({ ...model, states, channelId: state.channel_id, guildId: state.guild_id });
   }
   if (model.channelId !== null && model.serverSessionId !== null && state.session_id === model.serverSessionId) {

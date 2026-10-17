@@ -373,35 +373,6 @@ pub async fn handle_command(state: &AppState, session: &Arc<Session>, command: V
         return;
     }
 
-    // The same call claimed from a new gateway session whose predecessor is gone (a server restart restored the state with no
-    // owner, or the client re-identified after its old session died): the client is still in the LiveKit room, so the binding
-    // keeps its voice session and token and only changes owner. No token: a client that lost its connection meanwhile re-sends
-    // op 4 on this session and gets one above.
-    let claimable = state.voice.get(user_id).filter(|entry| {
-        entry.channel_id == channel_id
-            && entry.gateway_session.as_deref().is_none_or(|owner| state.hub.session(owner).is_none_or(|old| old.detached_for().is_some()))
-    });
-    if let Some(before) = claimable
-        && let Some(after) = state.voice.update_if(user_id, |entry| {
-            if entry.session_id != before.session_id {
-                return false;
-            }
-            entry.gateway_session = Some(session.id.clone());
-            entry.unbound_since = None;
-            entry.self_mute = command.self_mute || command.self_deaf;
-            entry.self_deaf = command.self_deaf;
-            entry.permissions = permissions;
-            if !entry.stage {
-                entry.suppress = permissions & SPEAK == 0;
-            }
-            true
-        })
-    {
-        sync_rights(state, &before, &after).await;
-        broadcast(state, &after, false).await;
-        return;
-    }
-
     let (user_limit, limited) = if row.is_dm() {
         (CALL_PARTICIPANT_MAX as u32, true)
     } else {

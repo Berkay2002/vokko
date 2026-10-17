@@ -69,18 +69,6 @@ export function onlineUserIds(): Set<string> {
   return new Set([...sessions.values()].filter(s => s.socket).map(s => s.userId));
 }
 
-/** A gateway session that exists and has a connection. */
-export function sessionLive(id: string | undefined): boolean {
-  return !!id && !!sessions.get(id)?.socket;
-}
-
-/** Test hook: a server restart. Every gateway session is forgotten (resume fails, clients identify again); voice states stay. */
-export function restartServer(): void {
-  const open = [...sessions.values()];
-  sessions.clear();
-  for (const session of open) session.socket?.drop(1006);
-}
-
 /** Test hook: abruptly drop every open mock connection (the client should resume). */
 export function dropAllConnections(code = 1006): void {
   for (const session of sessions.values()) session.socket?.drop(code);

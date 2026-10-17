@@ -1,12 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const socketEvents = vi.hoisted(() => [] as { users: string[]; t: string; d: unknown }[]);
-/** Gateway sessions that still have a connection. */
-const liveSessions = vi.hoisted(() => new Set<string>());
-vi.mock("./socket", () => ({
-  emit: (users: Iterable<string>, t: string, d: unknown) => void socketEvents.push({ users: [...users], t, d }),
-  sessionLive: (id: string | undefined) => !!id && liveSessions.has(id),
-}));
+vi.mock("./socket", () => ({ emit: (users: Iterable<string>, t: string, d: unknown) => void socketEvents.push({ users: [...users], t, d }) }));
 
 import { ApiRequestError } from "../errors";
 import { Perm } from "../permissions";
@@ -33,7 +28,6 @@ const op4 = (who: string, channel: string | null, session = `gw-${who}`, extra: 
 
 beforeEach(() => {
   socketEvents.length = 0;
-  liveSessions.clear();
   broadcast.length = 0;
   direct.length = 0;
   voiceStates.clear();
@@ -92,25 +86,11 @@ describe("mock voice server (op 4)", () => {
   });
 
   it("joining from another gateway session is a new binding with a new session id", () => {
-    liveSessions.add("gw-a");
     op4("plain", voiceId, "gw-a");
     const first = voiceStates.get(ids.plain!)!.session_id;
     op4("plain", voiceId, "gw-b");
     expect(direct.map(d => d.session)).toEqual(["gw-a", "gw-b"]);
     expect(voiceStates.get(ids.plain!)!.session_id).not.toBe(first);
-  });
-
-  it("a new gateway session claims the call of a gone one (server restart, re-identify): same session, no token", () => {
-    op4("plain", voiceId, "gw-a");
-    const first = voiceStates.get(ids.plain!)!.session_id;
-    broadcast.length = 0;
-    op4("plain", voiceId, "gw-b", { self_mute: true });
-    expect(direct.map(d => d.session)).toEqual(["gw-a"]);
-    expect(voiceStates.get(ids.plain!)).toMatchObject({ session_id: first, self_mute: true });
-    expect(broadcast[0]).toMatchObject({ t: "VOICE_STATE_UPDATE", d: { session_id: first, channel_id: voiceId } });
-    // Now bound to gw-b: an unchanged op 4 from it asks for a token (the client lost its media meanwhile).
-    op4("plain", voiceId, "gw-b", { self_mute: true });
-    expect(direct.at(-1)).toMatchObject({ session: "gw-b", t: "VOICE_SERVER_UPDATE", d: { session_id: first } });
   });
 
   it("refuses channels the user cannot see and full channels with VOICE_CONNECT_FAILED only", () => {

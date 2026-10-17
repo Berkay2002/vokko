@@ -105,11 +105,7 @@ server start, so a vokko-server restart rebuilds the table from LiveKit instead 
   `video_quality_mode`, guild media settings, stage instances, soundboard sounds, call system messages.
 - A voice state belongs to a gateway session. Gateway resume (op 6) keeps it. If the gateway session dies for good (resume
   buffer gone, or no reconnect within **60 s**), the server removes the participant. A new gateway session that wants to stay
-  in voice re-sends op 4 for the same channel. When the state has no live owner (restored after a server restart, or its old
-  gateway session is detached) the server re-binds it to the new session and keeps its voice `session_id` and token: no
-  VOICE_SERVER_UPDATE, only the VOICE_STATE_UPDATE, so the client's LiveKit room stays up. A client that lost its media
-  meanwhile sends op 4 again on the new session and gets a fresh token for the same voice session. An old session the
-  server still sees as attached is treated like another device (new binding, new token, the client reconnects).
+  in voice re-sends op 4 for the same channel; the server re-binds the state and reissues a token without a leave/join flash.
 - Joining from a second device moves voice there (Discord behaviour): the old session sees VOICE_STATE_UPDATE with a
   different `session_id` and tears down its LiveKit room; LiveKit's duplicate-identity kick is the backstop.
 - Delivery: VOICE_STATE_UPDATE goes to everyone who can see the channel (guild) or to the call's recipients (DM/group DM),
@@ -360,10 +356,7 @@ when the user clicks **Watch Stream** (Discord's model; the biggest egress saver
 - On `Disconnected` with reason other than client-initiated: retry by re-sending op 4 (fresh token) with backoff 1 s → 5 s
   (Discord's RTC backoff max is 5 s, client facts §Backoff), give up after 2 minutes. `DUPLICATE_IDENTITY` and
   `PARTICIPANT_REMOVED` are final (moved to another device / kicked) and never retried.
-- Gateway reconnect keeps media running; after a re-identify the client re-sends op 4 for its current channel (§1.6), and
-  the room is kept. A real reconnect into the same channel (a new token, or a retry after a lost room) publishes the camera
-  and screen share again: captures that are still live move to the new room; a camera LiveKit stopped is reopened on the same
-  device with the same background (or stays off if that fails); an ended screen capture stays off.
+- Gateway reconnect keeps media running; after a re-identify the client re-sends op 4 for its current channel (§1.6).
 
 ### 3.7 Tauri-native help (desktop only, `src-tauri`)
 - **Global PTT and mute/deafen hotkeys.** `tauri-plugin-global-shortcut` reports press and release but grabs the key

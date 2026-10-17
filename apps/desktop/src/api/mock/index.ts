@@ -19,7 +19,7 @@ import { seedBig } from "./seedBig";
 import { setMockMaintenance } from "./status";
 import { sweepArchivedThreads } from "./threads";
 import { sweepExpiredPolls } from "./polls";
-import { MockSocket, dropAllConnections, emit, restartServer, setOffline, tokenFor, userIdFromToken } from "./socket";
+import { MockSocket, dropAllConnections, emit, setOffline, tokenFor, userIdFromToken } from "./socket";
 import { setMockVoice, voiceStates } from "./voice";
 import { noteAudioUpload, seedGuildSounds } from "./soundboard";
 import { ringTimeout } from "./calls";
@@ -134,8 +134,6 @@ interface MockHooks {
   presence(username: string, status: PresenceStatus): void;
   /** Close all open gateway connections abruptly; the client should reconnect and resume. */
   dropConnections(): void;
-  /** A server restart: gateway sessions are forgotten (clients identify again), voice states survive. */
-  restart(): void;
   /** true: drop every connection and refuse new ones (the client shows its reconnecting banner); false: let it back in. */
   offline(on: boolean): void;
   /** Make the next `count` REST calls fail with 429 and `retry_after` seconds. */
@@ -205,7 +203,6 @@ const hooks: MockHooks = {
     emit([...db.accounts.keys()], "PRESENCE_UPDATE", { ...account.presence });
   },
   dropConnections: () => dropAllConnections(),
-  restart: () => restartServer(),
   offline: on => setOffline(on),
   rateLimit: (count, retryAfterSeconds = 1) => {
     rateLimit = { count, retryAfter: retryAfterSeconds };

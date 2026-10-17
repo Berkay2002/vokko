@@ -80,7 +80,7 @@ export class LiveKitTransport implements VoiceTransport {
   }
 
   async connect(endpoint: string, token: string, options: TransportOptions): Promise<void> {
-    await this.release(options.resume === true);
+    await this.disconnect();
     const generation = ++this.generation;
     this.leaving = false;
     this.options = options;
@@ -108,7 +108,7 @@ export class LiveKitTransport implements VoiceTransport {
     } catch (error) {
       if (this.room !== room || this.leaving) return;
       console.warn("voice: LiveKit connect failed", error);
-      this.teardownRoom(true); // retried: a camera / screen share carried into this attempt waits for the next one
+      this.teardownRoom();
       this.cb.closed({ final: false });
       return;
     }
@@ -123,22 +123,16 @@ export class LiveKitTransport implements VoiceTransport {
     this.statsTimer = setInterval(() => void this.logStats(room), STATS_POLL_MS);
     voiceDebug("connected", { room: room.name });
     void room.startAudio().catch(() => undefined);
-    void this.video.resume();
     // Self-muted: publish nothing; the first unmute publishes the microphone.
     if (!this.selfMute) await this.publishMic();
     void this.refreshDevices();
   }
 
   async disconnect(): Promise<void> {
-    await this.release(false);
-  }
-
-  /** Leaves the current room; `carry` keeps our camera / screen share for the next room of the same call. */
-  private async release(carry: boolean): Promise<void> {
     const room = this.room;
     this.generation += 1;
     this.leaving = true;
-    this.teardownRoom(carry);
+    this.teardownRoom();
     if (room) await room.disconnect().catch(() => undefined);
   }
 
@@ -309,10 +303,8 @@ export class LiveKitTransport implements VoiceTransport {
       .on(RoomEvent.MediaDevicesChanged, () => void this.refreshDevices())
       .on(RoomEvent.Disconnected, reason => {
         if (this.room !== room || this.leaving) return;
+        this.teardownRoom();
         // Duplicate identity = we joined from another device; removed = kicked / disconnected by a moderator. Never retried.
-        const final = reason === DisconnectReason.DUPLICATE_IDENTITY || reason === DisconnectReason.PARTICIPANT_REMOVED;
-        // A retry may bring the call back: keep what we published for it (a connect into another call drops it).
-        this.teardownRoom(!final);
         if (reason === DisconnectReason.DUPLICATE_IDENTITY) this.cb.closed({ final: true, reason: "moved" });
         else if (reason === DisconnectReason.PARTICIPANT_REMOVED) this.cb.closed({ final: true, reason: "kicked" });
         else this.cb.closed({ final: false });
@@ -474,7 +466,7 @@ export class LiveKitTransport implements VoiceTransport {
     this.cb.quality(this.lastQuality, this.lastPing);
   }
 
-  private teardownRoom(carry = false): void {
+  private teardownRoom(): void {
     this.joined = false;
     if (this.pingTimer) clearInterval(this.pingTimer);
     this.pingTimer = null;
@@ -486,7 +478,7 @@ export class LiveKitTransport implements VoiceTransport {
     const gate = this.gate;
     this.gate = null;
     void gate?.destroy().catch(() => undefined);
-    void this.video.reset(carry);
+    void this.video.reset();
     this.audioHost?.remove();
     this.audioHost = null;
     this.room?.removeAllListeners();
