@@ -8,9 +8,10 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { ListVideo, Maximize2, Minimize2, Pause, Play, Plus, RotateCcw, RotateCw, SkipForward, Square, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import { STREMIO_QUEUE_PER_USER, type Snowflake, type StremioState } from "../api/types";
-import { Tooltip } from "../ui";
+import { Tooltip, useContextMenu } from "../ui";
 import { MediaVotes, useHostLabel } from "../voice/MediaVotes";
 import { useVoice } from "../voice/store";
+import { volumeMenuItems } from "../voice/voiceMenus";
 import { queueQuota, skipAction, useCanControlMedia, useMeId } from "../voice/useCanControlMedia";
 import { formatClock } from "../watch/youtube";
 import { controlStremio, stopStremio } from "./api";
@@ -20,7 +21,7 @@ import { StremioIcon } from "./StremioIcon";
 import { openStremioPanel } from "./panelStore";
 import { PosterImage } from "./PosterImage";
 import { SeekCoalescer } from "./seek";
-import { setViewerVolume, startViewerAudio, useViewerSlot, useViewerStore } from "./viewerStore";
+import { botVolumeKey, setViewerVolume, startViewerAudio, useViewerSlot, useViewerStore } from "./viewerStore";
 import type { VideoHandle } from "../voice/mediaStore";
 import "./stremio.css";
 
@@ -130,6 +131,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
   const [failure, setFailure] = useState<string | null>(null);
   const now = useNow(500);
   const viewer = useViewerSlot(channelId);
+  const menu = useContextMenu();
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const id = useRef(channelId);
   id.current = channelId;
@@ -170,6 +172,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
       data-volume={deaf ? 0 : volume}
       role="group"
       aria-label={`Stremio: ${title}`}
+      onContextMenu={e => menu.open(e, volumeMenuItems(botVolumeKey("stremio")))}
     >
       {viewer.video && <RoomVideo handle={viewer.video} />}
       {!showPicture && <PosterImage className="stremio-poster" src={poster} />}

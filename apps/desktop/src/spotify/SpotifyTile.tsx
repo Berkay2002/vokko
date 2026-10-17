@@ -8,13 +8,14 @@ import { useEffect, useState } from "react";
 import { ListMusic, Maximize2, Minimize2, Pause, Play, Plus, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Square, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import { SPOTIFY_QUEUE_PER_USER, type Snowflake, type SpotifyLoop, type SpotifyState } from "../api/types";
-import { Tooltip } from "../ui";
+import { Tooltip, useContextMenu } from "../ui";
 import { MediaVotes, useHostLabel } from "../voice/MediaVotes";
 import { useVoice } from "../voice/store";
+import { volumeMenuItems } from "../voice/voiceMenus";
 import { queueQuota, skipAction, useCanControlMedia, useMeId } from "../voice/useCanControlMedia";
 import { formatClock } from "../watch/youtube";
 import { reason } from "../stremio/format";
-import { startViewerAudio, useViewerSlot } from "../stremio/viewerStore";
+import { botVolumeKey, startViewerAudio, useViewerSlot } from "../stremio/viewerStore";
 import { controlSpotify, stopSpotify } from "./api";
 import { artistsText, shownPositionMs, statusText } from "./format";
 import { openSpotifyPanel } from "./panelStore";
@@ -110,6 +111,7 @@ function SpotifyTileBody({ channelId, variant, onActivate, state }: { channelId:
   const deaf = useVoice(s => s.selfDeaf);
   const volume = useSpotifyVolume(s => s.volume);
   const viewer = useViewerSlot(channelId);
+  const menu = useContextMenu();
   const [queueOpen, setQueueOpen] = useState(false);
   const [drag, setDrag] = useState<number | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -142,6 +144,7 @@ function SpotifyTileBody({ channelId, variant, onActivate, state }: { channelId:
       data-volume={deaf ? 0 : volume}
       role="group"
       aria-label={`Spotify: ${title}`}
+      onContextMenu={e => menu.open(e, volumeMenuItems(botVolumeKey("spotify")))}
     >
       <Art art={track?.art} className="spotify-backdrop" />
       {small ? (

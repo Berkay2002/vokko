@@ -48,10 +48,15 @@ export function voiceUserMenuItems(userId: Snowflake): MenuItem[] {
     ];
   }
   if (model.states[userId]?.channel_id !== model.channelId) return [];
-  const muted = !!model.localMutes[userId];
+  return volumeMenuItems(userId);
+}
+
+/** "User Volume" (0-200 %) and local "Mute" for `id`: a person, or a media bot's volume key (botVolumeKey) on its row and tile. */
+export function volumeMenuItems(id: string): MenuItem[] {
+  const muted = !!getVoice().localMutes[id];
   return [
-    { id: "user-volume", label: "User Volume", render: () => <UserVolumeSlider userId={userId} /> },
-    { id: "local-mute", label: "Mute", checked: muted, onSelect: () => setLocalMute(userId, !muted) },
+    { id: "user-volume", label: "User Volume", render: () => <UserVolumeSlider userId={id} /> },
+    { id: "local-mute", label: "Mute", checked: muted, onSelect: () => setLocalMute(id, !muted) },
   ];
 }
 
