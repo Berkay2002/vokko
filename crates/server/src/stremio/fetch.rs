@@ -102,9 +102,19 @@ impl Fetcher {
         Ok(url)
     }
 
+    /// Follows redirects by hand, each hop checked: Cinemeta answers its browse catalogs with a 307 to another host.
     pub async fn get_json(&self, url: &str) -> Result<Value, FetchError> {
-        let url = self.parse(url)?;
-        self.json(self.client.get(url)).await
+        let mut url = self.parse(url)?;
+        for _ in 0..=MAX_REDIRECTS {
+            let response = self.client.get(url.clone()).send().await.map_err(network)?;
+            if !response.status().is_redirection() {
+                return read_json(response).await;
+            }
+            let location = response.headers().get(LOCATION).and_then(|value| value.to_str().ok()).ok_or(FetchError::Invalid)?;
+            url = url.join(location).map_err(|_| FetchError::Blocked)?;
+            self.check_url(&url)?;
+        }
+        Err(FetchError::Blocked)
     }
 
     pub async fn post_json(&self, url: &str, body: &Value) -> Result<Value, FetchError> {
@@ -113,18 +123,7 @@ impl Fetcher {
     }
 
     async fn json(&self, request: reqwest::RequestBuilder) -> Result<Value, FetchError> {
-        let mut response = request.send().await.map_err(network)?;
-        if !response.status().is_success() {
-            return Err(FetchError::Status(response.status().as_u16()));
-        }
-        let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(network)? {
-            if body.len() + chunk.len() > MAX_JSON_BYTES {
-                return Err(FetchError::TooLarge);
-            }
-            body.extend_from_slice(&chunk);
-        }
-        serde_json::from_slice(&body).map_err(|_| FetchError::Invalid)
+        read_json(request.send().await.map_err(network)?).await
     }
 
     /// Follows a stream's resolver URL (it redirects to the CDN file) with `Range: bytes=0-0`: at most 5 hops, the guard on every
@@ -163,6 +162,20 @@ impl Fetcher {
         .await
         .unwrap_or(Err(FetchError::Timeout))
     }
+}
+
+async fn read_json(mut response: reqwest::Response) -> Result<Value, FetchError> {
+    if !response.status().is_success() {
+        return Err(FetchError::Status(response.status().as_u16()));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(network)? {
+        if body.len() + chunk.len() > MAX_JSON_BYTES {
+            return Err(FetchError::TooLarge);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|_| FetchError::Invalid)
 }
 
 fn network(error: reqwest::Error) -> FetchError {

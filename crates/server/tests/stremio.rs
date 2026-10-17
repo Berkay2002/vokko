@@ -109,6 +109,10 @@ async fn catalog() -> Json<Value> {
     ]}))
 }
 
+async fn catalog_moved(Path(kind): Path<String>) -> Response {
+    (StatusCode::TEMPORARY_REDIRECT, [(header::LOCATION, format!("/cinemeta-catalogs/top/catalog/{kind}/top.json"))]).into_response()
+}
+
 async fn cinemeta_meta(Path((kind, _file)): Path<(String, String)>) -> Json<Value> {
     if kind == "series" {
         return Json(json!({"meta": {"name": "Breaking", "poster": POSTER, "background": "https://evil.example/b.jpg", "videos": [
@@ -149,7 +153,9 @@ async fn start_mock() -> Arc<Mock> {
         .route("/media/disguised", get(media_playlist))
         .route("/media/final.mkv", get(media_file))
         .route("/media/second.mkv", get(media_file))
-        .route("/cinemeta/catalog/{kind}/top.json", get(catalog))
+        // Like the real Cinemeta, the browse catalog redirects to another path.
+        .route("/cinemeta/catalog/{kind}/top.json", get(catalog_moved))
+        .route("/cinemeta-catalogs/top/catalog/{kind}/top.json", get(catalog))
         .route("/cinemeta/catalog/{kind}/top/{extra}", get(catalog))
         .route("/cinemeta/meta/{kind}/{file}", get(cinemeta_meta))
         .route("/link/api/v2/create", get(link_create))
@@ -586,6 +592,8 @@ async fn browsing_validates_ids_and_filters_images() {
     assert_eq!((titles[0]["id"].as_str(), titles[0]["poster"].as_str(), titles[0]["year"].as_str()), (Some("tt0113277"), Some(POSTER), Some("1995")));
     assert!(titles[1]["poster"].is_null(), "a poster from another host is dropped");
     assert_eq!(w.app.get("/stremio/catalog?type=series&genre=Action&skip=20", &w.alice).await.0, StatusCode::OK);
+    let (status, browsed) = w.app.get("/stremio/catalog?type=movie", &w.alice).await;
+    assert_eq!((status, browsed.as_array().map(Vec::len)), (StatusCode::OK, Some(2)), "the redirect is followed: {browsed}");
 
     for bad in [
         "/stremio/search?type=anime&q=x",
