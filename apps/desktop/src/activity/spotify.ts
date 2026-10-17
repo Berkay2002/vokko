@@ -1,4 +1,4 @@
-import type { Activity } from "../api/types";
+import type { Activity, SpotifyTrack } from "../api/types";
 import type { NowPlaying } from "../desktop/spotify";
 import { cleanName } from "./format";
 
@@ -26,4 +26,13 @@ export function spotifyActivity(track: NowPlaying | null | undefined, now: numbe
 export function sameSpotifyMoment(a: Activity | null, b: Activity | null): boolean {
   if (!a || !b) return a === b;
   return a.details === b.details && a.state === b.state && a.sync_id === b.sync_id && Math.abs((a.timestamps?.start ?? 0) - (b.timestamps?.start ?? 0)) < 3000;
+}
+
+/** Whether the local Spotify app plays what a Spotify session in a call plays (docs/design/spotify-bot.md section 9.6): then the
+ * "Listening to Spotify" presence is dropped, so the house account's playback never shows as someone's status. By track id where the
+ * player gives one (macOS), else by title and artists (Windows). Needs no knowledge of whose account the house one is. */
+export function playsInCall(listening: Activity, callTracks: SpotifyTrack[]): boolean {
+  return callTracks.some(t =>
+    listening.sync_id ? t.uri === `spotify:track:${listening.sync_id}` : cleanName(t.title) === listening.details && cleanName(t.artists.map(cleanName).filter(Boolean).join("; ")) === (listening.state ?? ""),
+  );
 }

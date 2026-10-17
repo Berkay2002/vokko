@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { appStore } from "../api/store";
-import type { Activity } from "../api/types";
+import type { Activity, SpotifyTrack } from "../api/types";
 import { isDesktop } from "../desktop";
 import { uploadAppIcon } from "../api/appIcons";
 import {
@@ -21,7 +21,8 @@ import { readNowPlaying } from "../desktop/spotify";
 import { resendOwnStatus } from "../shell/actions";
 import { cleanName } from "./format";
 import { setOwnActivities } from "./own";
-import { sameSpotifyMoment, spotifyActivity } from "./spotify";
+import { playsInCall, sameSpotifyMoment, spotifyActivity } from "./spotify";
+import { voiceStore } from "../voice/store";
 
 // Game detection and the user's own activity. The desktop shell lists running executables; this store matches them against
 // the shipped list and the games the user added, and keeps the signed-in user's presence activities in step.
@@ -75,7 +76,11 @@ export const useActivity = create<ActivityState>(() => ({
 }));
 
 /** The activities that go out with the user's presence for a given state: the game and Spotify, one of each at most. */
-export function activitiesFor(state: Pick<ActivityState, "share" | "detected"> & Partial<Pick<ActivityState, "spotify" | "listening" | "assets">>): Activity[] {
+export function activitiesFor(
+  state: Pick<ActivityState, "share" | "detected"> & Partial<Pick<ActivityState, "spotify" | "listening" | "assets">>,
+  /** What the Spotify sessions in calls play right now; the local Spotify activity is left out while it is one of them. */
+  callTracks: SpotifyTrack[] = [],
+): Activity[] {
   if (!state.share) return [];
   const list: Activity[] = [];
   const name = state.detected ? cleanName(state.detected.name) : "";
@@ -89,9 +94,12 @@ export function activitiesFor(state: Pick<ActivityState, "share" | "detected"> &
       ...(asset ? { assets: { large_image: asset } } : {}),
     });
   }
-  if (state.spotify && state.listening) list.push(state.listening);
+  if (state.spotify && state.listening && !playsInCall(state.listening, callTracks)) list.push(state.listening);
   return list;
 }
+
+/** The tracks the call Spotify sessions this client knows of are playing. */
+const callTracks = (): SpotifyTrack[] => Object.values(voiceStore.getState().spotify).flatMap(s => (s.playing && s.track ? [s.track] : []));
 
 function saveFlag(key: string, on: boolean): void {
   try {
@@ -262,7 +270,7 @@ export function startGameDetection(): () => void {
     timer = setTimeout(push, wait);
   };
   const apply = (force: boolean) => {
-    const list = activitiesFor(useActivity.getState());
+    const list = activitiesFor(useActivity.getState(), callTracks());
     setOwnActivities(list);
     const key = JSON.stringify(list);
     if (!force && key === sent) return;
@@ -275,6 +283,9 @@ export function startGameDetection(): () => void {
     if (state.detected !== prev.detected || state.share !== prev.share) void shareAppIcon();
     // turning Spotify (or sharing) on looks right away instead of at the next poll; turning it off withdraws it
     if (state.spotify !== prev.spotify || state.share !== prev.share) void refreshSpotify();
+  });
+  const stopCalls = voiceStore.subscribe((state, prev) => {
+    if (state.spotify !== prev.spotify) apply(false);
   });
   let wasConnected = connected();
   const stopConnection = appStore.subscribe(() => {
@@ -295,6 +306,7 @@ export function startGameDetection(): () => void {
   void refreshSpotify();
 
   return () => {
+    stopCalls();
     clearInterval(poll);
     clearInterval(spotifyPoll);
     useActivity.setState({ listening: null });
