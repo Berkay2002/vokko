@@ -284,6 +284,8 @@ test('continue watching: the row, an episode resumed at its offset, a film, and 
   await expect(panel(page).locator('.stremio-episode[aria-current="true"]')).toHaveAttribute('data-video-id', 'tt0903747:1:2');
   await expect(resume.getByText('Starts at 25:00')).toBeVisible();
   await shot(page, MOBILE ? 'm-continue-title.png' : '11-continue-title.png');
+  await panel(page).locator('.stremio-episode[aria-current="true"]').scrollIntoViewIfNeeded();
+  await shot(page, MOBILE ? 'm-continue-title-episodes.png' : '11b-continue-title-episodes.png');
   await resume.getByRole('button', { name: 'Play in call' }).click();
   const tile = call(page).locator('.voice-tile.stremio');
   await expect(tile).toHaveAttribute('data-status', 'playing', { timeout: 10_000 });
@@ -312,6 +314,7 @@ test('continue watching: the row, an episode resumed at its offset, a film, and 
   await expect(next).toContainText('You finished S1E1.');
   await expect(next.getByText(/starts at/i)).toHaveCount(0);
   await expect(panel(page).locator('.stremio-episode[aria-current="true"]')).toHaveAttribute('data-video-id', 'tt0944947:1:2');
+  await expect(next.getByRole('radio').first()).toBeVisible();
   await shot(page, MOBILE ? 'm-continue-next-episode.png' : '12-continue-next-episode.png');
   await next.getByRole('button', { name: 'Add to Up next' }).click();
   await expect(next.getByRole('status').filter({ hasText: 'Added to Up next.' })).toBeVisible();
