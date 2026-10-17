@@ -3,6 +3,7 @@
 //! contract, security rules and lifecycle, against a mock Stremio/addon/Cinemeta server and a fake bot. No real service is called.
 mod common;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -39,6 +40,55 @@ struct Mock {
     approved: AtomicBool,
     logouts: AtomicUsize,
     redirect_hits: AtomicUsize,
+    /// The libraries by authKey (`datastoreGet` / `datastorePut`), every stored item in the order of the PUTs, and a switch for a
+    /// Stremio that fails on library reads.
+    library: Mutex<HashMap<String, Vec<Value>>>,
+    stored: Mutex<Vec<(String, Value)>>,
+    library_down: AtomicBool,
+    /// The next `datastoreGet` answers late (a slow Stremio): the write-back of an earlier item must not land after a later one.
+    slow_get: AtomicBool,
+}
+
+impl Mock {
+    fn seed(&self, key: &str, items: Vec<Value>) {
+        self.library.lock().unwrap().insert(key.to_owned(), items);
+    }
+
+    /// The items put with `key`, oldest first.
+    fn puts(&self, key: &str) -> Vec<Value> {
+        self.stored.lock().unwrap().iter().filter(|(put_key, _)| put_key == key).map(|(_, item)| item.clone()).collect()
+    }
+}
+
+async fn datastore_get(State(mock): State<Arc<Mock>>, Json(body): Json<Value>) -> Response {
+    if mock.library_down.load(Ordering::SeqCst) {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+    assert_eq!(body["collection"], "libraryItem");
+    let ids: Vec<&str> = body["ids"].as_array().map(|ids| ids.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    let all = body["all"].as_bool() == Some(true);
+    // The answer is what the library holds now, however late it arrives.
+    let items: Vec<Value> = {
+        let library = mock.library.lock().unwrap();
+        library.get(body["authKey"].as_str().unwrap_or("")).cloned().unwrap_or_default()
+    };
+    if mock.slow_get.swap(false, Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
+    ok(Value::Array(items.into_iter().filter(|item| all || ids.contains(&item["_id"].as_str().unwrap_or(""))).collect())).into_response()
+}
+
+async fn datastore_put(State(mock): State<Arc<Mock>>, Json(body): Json<Value>) -> Json<Value> {
+    assert_eq!(body["collection"], "libraryItem");
+    let key = body["authKey"].as_str().unwrap_or("").to_owned();
+    for item in body["changes"].as_array().expect("changes") {
+        mock.stored.lock().unwrap().push((key.clone(), item.clone()));
+        let mut library = mock.library.lock().unwrap();
+        let items = library.entry(key.clone()).or_default();
+        items.retain(|stored| stored["_id"] != item["_id"]);
+        items.push(item.clone());
+    }
+    ok(json!({"success": true}))
 }
 
 fn ok(result: Value) -> Json<Value> {
@@ -50,7 +100,12 @@ fn fail(code: i64) -> Json<Value> {
 }
 
 async fn login(Json(body): Json<Value>) -> Json<Value> {
-    if body["password"] == "pw" { ok(json!({"authKey": "AUTHKEY-1", "user": {}})) } else { fail(2) }
+    // One key for the usual test account; any other email gets a key of its own (the library tests need two accounts).
+    let key = match body["email"].as_str() {
+        Some("a@b.test") => "AUTHKEY-1".to_owned(),
+        email => format!("AUTHKEY-{}", email.unwrap_or_default()),
+    };
+    if body["password"] == "pw" { ok(json!({"authKey": key, "user": {}})) } else { fail(2) }
 }
 
 async fn get_user(State(mock): State<Arc<Mock>>) -> Json<Value> {
@@ -63,7 +118,7 @@ async fn logout(State(mock): State<Arc<Mock>>) -> Json<Value> {
 }
 
 async fn addon_collection(State(mock): State<Arc<Mock>>) -> Json<Value> {
-    let manifest = |name: &str| json!({"name": name, "resources": ["stream"], "types": ["movie", "series"], "idPrefixes": ["tt"]});
+    let manifest = |name: &str| json!({"name": name, "resources": ["stream", "subtitles"], "types": ["movie", "series"], "idPrefixes": ["tt"]});
     ok(json!({"addons": [
         {"transportUrl": format!("{}/addon-a/SECRETCFG/manifest.json", mock.base), "manifest": manifest("Addon A")},
         {"transportUrl": format!("{}/addon-b/SECRETCFG2/manifest.json", mock.base), "manifest": manifest("Broken")},
@@ -82,6 +137,30 @@ async fn addon_a_streams(State(mock): State<Arc<Mock>>) -> Json<Value> {
         {"name": "Playlist 1080p", "url": format!("{base}/media/live.m3u8?token=1")},
         {"name": "Disguised 1080p", "url": format!("{base}/media/disguised")},
     ]}))
+}
+
+async fn addon_a_subtitles(State(mock): State<Arc<Mock>>) -> Json<Value> {
+    let base = &mock.base;
+    Json(json!({"subtitles": [
+        {"id": "1", "url": format!("{base}/subs/en.srt"), "lang": "eng"},
+        {"id": "2", "url": format!("{base}/subs/big.srt"), "lang": "sv_SE"},
+        {"id": "3", "url": "http://10.0.0.5/x.srt", "lang": "eng"},
+        {"id": "4", "url": "https://user:pw@evil.example/x.srt", "lang": "eng"},
+        {"id": "5", "url": "https://evil.example:8443/x.srt", "lang": "eng"},
+        {"id": "6", "url": "http://evil.example/x.srt", "lang": "eng"},
+        {"id": "7", "url": "ftp://evil.example/x.srt", "lang": "eng"},
+    ]}))
+}
+
+async fn subtitle_file(Path(file): Path<String>) -> Response {
+    let body = match file.as_str() {
+        "en.srt" => {
+            "1\r\n00:00:01,000 --> 00:00:02,000\r\n<i>Hello</i> {\\an8}there\r\n\r\n2\r\n00:00:03,000 --> 00:00:04,000\r\n<script>alert(1)</script>Bye\r\n"
+                .to_owned()
+        }
+        _ => "x".repeat(2 * 1024 * 1024 + 10),
+    };
+    (StatusCode::OK, [(header::CONTENT_TYPE, "application/x-subrip")], body).into_response()
 }
 
 async fn addon_b_streams() -> StatusCode {
@@ -141,14 +220,23 @@ async fn start_mock() -> Arc<Mock> {
         approved: AtomicBool::new(false),
         logouts: AtomicUsize::new(0),
         redirect_hits: AtomicUsize::new(0),
+        library: Mutex::default(),
+        stored: Mutex::default(),
+        library_down: AtomicBool::new(false),
+        slow_get: AtomicBool::new(false),
     });
     let router = Router::new()
         .route("/api/login", post(login))
         .route("/api/getUser", post(get_user))
         .route("/api/logout", post(logout))
         .route("/api/addonCollectionGet", post(addon_collection))
+        .route("/api/datastoreGet", post(datastore_get))
+        .route("/api/datastorePut", post(datastore_put))
         .route("/addon-a/SECRETCFG/stream/{kind}/{file}", get(addon_a_streams))
         .route("/addon-b/SECRETCFG2/stream/{kind}/{file}", get(addon_b_streams))
+        .route("/addon-a/SECRETCFG/subtitles/{kind}/{file}", get(addon_a_subtitles))
+        .route("/addon-b/SECRETCFG2/subtitles/{kind}/{file}", get(addon_b_streams))
+        .route("/subs/{file}", get(subtitle_file))
         .route("/media/redirect", get(media_redirect))
         .route("/media/disguised", get(media_playlist))
         .route("/media/final.mkv", get(media_file))
@@ -509,10 +597,13 @@ async fn every_route_is_404_without_the_feature() {
         ("GET", "/stremio/catalog?type=movie"),
         ("GET", "/stremio/meta/movie/tt0113277"),
         ("GET", "/stremio/streams/movie/tt0113277"),
+        ("GET", "/stremio/continue"),
         ("PUT", "/channels/1/stremio"),
         ("PATCH", "/channels/1/stremio"),
         ("DELETE", "/channels/1/stremio"),
         ("POST", "/channels/1/stremio/viewer-token"),
+        ("GET", "/channels/1/stremio/subtitles"),
+        ("GET", "/channels/1/stremio/subtitles/x"),
     ] {
         let body = (method != "GET" && method != "DELETE").then(|| json!({"sid": "x", "email": "a@b.test", "password": "pw"}));
         let (status, reply) = app.send(method.parse().expect("method"), path, Some(&token), body).await;
@@ -704,7 +795,7 @@ async fn playing_follows_the_bot_contract_and_shows_no_urls() {
     assert_eq!((claims.iss.as_str(), claims.sub.as_str()), (MEDIA_KEY, format!("bot:stremio:{ch}").as_str()));
     let room = grant.room.clone().expect("room");
     assert!(room.starts_with(&format!("stremio-{ch}-")) && room.len() > format!("stremio-{ch}-").len() + 8, "{room}");
-    assert!(grant.room_join && grant.can_publish && !grant.can_subscribe && !grant.can_publish_data && !grant.hidden);
+    assert!(grant.room_join && grant.can_publish && !grant.can_subscribe && grant.can_publish_data && !grant.hidden);
     assert_eq!(grant.can_publish_sources, ["screen_share", "screen_share_audio"]);
 
     // What clients see.
@@ -1117,4 +1208,469 @@ async fn a_viewer_who_leaves_the_call_is_removed_from_the_media_room() {
     let before = w.media.calls().iter().filter(|call| call.starts_with("RemoveParticipant")).count();
     vokko_server::voice::stremio::spawn_tasks(w.app.state.clone());
     until("the sweep removes the returning viewer", || w.media.calls().iter().filter(|call| call.starts_with("RemoveParticipant")).count() > before).await;
+}
+
+// ---- the linked library: Continue watching, resuming, and the write-back ----
+
+const CARL_KEY: &str = "AUTHKEY-carl@c.test";
+
+fn library_item(id: &str, kind: &str, name: &str, mtime: &str, offset: u64, video_id: Option<&str>) -> Value {
+    json!({
+        "_id": id, "name": name, "type": kind, "poster": POSTER, "posterShape": "poster", "removed": false, "temp": false,
+        "_ctime": "2020-01-01T00:00:00Z", "_mtime": mtime, "somethingNew": {"keep": [1, 2]},
+        "state": {"lastWatched": mtime, "timeWatched": 100, "timeOffset": offset, "overallTimeWatched": 1000, "timesWatched": 1, "flaggedWatched": 0,
+                  "duration": 7_200_000, "video_id": video_id, "watched": "opaque", "noNotif": false, "alsoNew": 7},
+        "behaviorHints": {"defaultVideoId": null, "extra": 1},
+    })
+}
+
+impl World {
+    async fn link_as(&self, token: &str, email: &str) {
+        let (status, body) = self.app.post("/users/@me/stremio/login", token, json!({"email": email, "password": "pw"})).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    }
+
+    /// Plays the stream `label` of `kind`/`video_id` as `token`, reports a start with `duration_ms`, moves to `position_ms` paused.
+    async fn play_to(&self, token: &str, kind: &str, video_id: &str, label: &str, duration_ms: u64, position_ms: u64) {
+        let (status, listing) = self.app.get(&format!("/stremio/streams/{kind}/{video_id}"), token).await;
+        assert_eq!(status, StatusCode::OK, "{listing}");
+        let (status, state) = self.app.put_json(&self.path(), token, json!({"sid": Self::sid(&listing, label)})).await;
+        assert_eq!(status, StatusCode::OK, "{state}");
+        assert_eq!(self.event("started", json!({"position_ms": 0, "duration_ms": duration_ms})).await, StatusCode::NO_CONTENT);
+        settle().await;
+        let (status, paused) = self.app.patch(&self.path(), token, json!({"playing": false, "position_ms": position_ms})).await;
+        assert_eq!(status, StatusCode::OK, "{paused}");
+    }
+
+    async fn stop_and_settle(&self, token: &str) {
+        assert_eq!(self.app.delete(&self.path(), token).await.0, StatusCode::NO_CONTENT);
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
+}
+
+#[tokio::test]
+async fn continue_watching_is_the_callers_own_row() {
+    let w = world().await;
+    w.link(&w.alice).await;
+    w.link_as(&w.carl, "carl@c.test").await;
+    let mut other_host = library_item("tt0903747", "series", "Alice Show", "2026-03-01T00:00:00Z", 900_000, Some("tt0903747:1:2"));
+    other_host["poster"] = json!("https://evil.example/p.jpg");
+    let mut removed = library_item("tt0000003", "movie", "Removed", "2026-05-01T00:00:00Z", 5000, Some("tt0000003"));
+    removed["removed"] = json!(true);
+    w.mock.seed(
+        "AUTHKEY-1",
+        vec![
+            library_item("tt0111161", "movie", "Alice Film", "2026-02-01T00:00:00Z", 600_000, Some("tt0111161")),
+            other_host,
+            removed,
+            library_item("tt0000004", "movie", "Finished", "2026-04-01T00:00:00Z", 0, Some("tt0000004")),
+            library_item("kitsu:1", "series", "Anime", "2026-06-01T00:00:00Z", 5000, Some("kitsu:1:1")),
+        ],
+    );
+    w.mock.seed(CARL_KEY, vec![library_item("tt0000009", "movie", "Carl Film", "2026-01-01T00:00:00Z", 5000, Some("tt0000009"))]);
+
+    let (status, row) = w.app.get("/stremio/continue", &w.alice).await;
+    assert_eq!(status, StatusCode::OK, "{row}");
+    assert_eq!(row.as_array().map(Vec::len), Some(2), "{row}");
+    assert_eq!(
+        (
+            row[0]["id"].as_str(),
+            row[0]["type"].as_str(),
+            row[0]["name"].as_str(),
+            row[0]["video_id"].as_str(),
+            row[0]["season"].as_u64(),
+            row[0]["episode"].as_u64()
+        ),
+        (Some("tt0903747"), Some("series"), Some("Alice Show"), Some("tt0903747:1:2"), Some(1), Some(2))
+    );
+    assert_eq!((row[0]["position_ms"].as_u64(), row[0]["duration_ms"].as_u64(), row[0]["poster"].is_null()), (Some(900_000), Some(7_200_000), true));
+    assert_eq!((row[1]["name"].as_str(), row[1]["poster"].as_str(), row[1]["video_id"].is_null()), (Some("Alice Film"), Some(POSTER), true));
+    assert_no_secrets("the Continue watching row", &row);
+    assert!(!row.to_string().contains("Carl Film"), "nothing of another account");
+
+    let (_, carls) = w.app.get("/stremio/continue", &w.carl).await;
+    assert_eq!(carls.as_array().map(Vec::len), Some(1));
+    assert_eq!(carls[0]["name"], "Carl Film");
+    let (status, nobody) = w.app.get("/stremio/continue", &w.owner).await;
+    assert_eq!((status, nobody), (StatusCode::OK, json!([])), "unlinked: an empty row");
+
+    // Nothing of it reaches a session: not the state, not the events.
+    let mut owner = Client::identify(&w.address, &w.owner).await.0;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let state = w.playing(&mut alice, "A 1080p").await;
+    let update = owner.stremio().await;
+    for text in [state.to_string(), update.to_string()] {
+        assert!(!text.contains("Alice Show") && !text.contains("Alice Film") && !text.contains("somethingNew"), "{text}");
+    }
+}
+
+#[tokio::test]
+async fn a_session_can_start_at_a_saved_position() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    let sid = World::sid(&w.streams(&w.alice).await, "A 1080p");
+    let (status, _) = w.app.put_json(&w.path(), &w.alice, json!({"sid": sid, "position_ms": 86_400_001_u64})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "past 24 hours");
+    assert!(w.bot.puts(&w.voice).is_empty(), "nothing started");
+    let (status, state) = w.app.put_json(&w.path(), &w.alice, json!({"sid": sid, "position_ms": 1_800_000})).await;
+    assert_eq!((status, state["position_ms"].as_u64()), (StatusCode::OK, Some(1_800_000)), "{state}");
+    let puts = w.bot.puts(&w.voice);
+    assert_eq!((puts.len(), puts[0]["position_ms"].as_u64()), (1, Some(1_800_000)));
+}
+
+#[tokio::test]
+async fn a_stopped_or_replaced_item_is_saved_to_the_library_of_whoever_started_it() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.link(&w.alice).await;
+    w.link_as(&w.carl, "carl@c.test").await;
+    w.join(&mut alice).await;
+    w.join(&mut carl).await;
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 0, Some("tt0111161"))]);
+
+    // alice starts a movie and pauses at 10 minutes; carl replaces it. The movie goes to alice's library, merged into her item.
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    let sid = World::sid(&w.streams(&w.carl).await, "A 720p");
+    assert_eq!(w.app.put_json(&w.path(), &w.carl, json!({"sid": sid})).await.0, StatusCode::OK);
+    until("alice's library", || !w.mock.puts("AUTHKEY-1").is_empty()).await;
+    let saved = w.mock.puts("AUTHKEY-1").remove(0);
+    assert_eq!(
+        (saved["state"]["timeOffset"].as_u64(), saved["state"]["duration"].as_u64(), saved["state"]["video_id"].as_str()),
+        (Some(600_000), Some(7_200_000), Some("tt0111161"))
+    );
+    assert_eq!(saved["somethingNew"], json!({"keep": [1, 2]}), "fields it does not own survive");
+    assert_eq!((saved["state"]["alsoNew"].as_u64(), saved["state"]["watched"].as_str()), (Some(7), Some("opaque")));
+    assert_eq!((saved["_ctime"].as_str(), saved["removed"].as_bool(), saved["temp"].as_bool()), (Some("2020-01-01T00:00:00Z"), Some(false), Some(false)));
+    assert_ne!(saved["_mtime"], "2020-02-01T00:00:00Z");
+    assert!(w.mock.puts(CARL_KEY).is_empty(), "carl did not start that one");
+
+    // carl's own item is saved to carl's library when alice stops the session, created because he has none.
+    assert_eq!(w.event("started", json!({"position_ms": 0, "duration_ms": 3_600_000})).await, StatusCode::NO_CONTENT);
+    settle().await;
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"playing": false, "position_ms": 1_200_000})).await.0, StatusCode::OK);
+    w.stop_and_settle(&w.alice).await;
+    let created = w.mock.puts(CARL_KEY);
+    assert_eq!(created.len(), 1, "{created:?}");
+    assert_eq!(
+        (created[0]["_id"].as_str(), created[0]["type"].as_str(), created[0]["name"].as_str(), created[0]["poster"].as_str()),
+        (Some("tt0111161"), Some("movie"), Some("Heat"), Some(POSTER))
+    );
+    assert_eq!(
+        (created[0]["removed"].as_bool(), created[0]["temp"].as_bool(), created[0]["state"]["timeOffset"].as_u64()),
+        (Some(true), Some(true), Some(1_200_000))
+    );
+    assert_eq!(w.mock.puts("AUTHKEY-1").len(), 1, "nothing more for alice");
+    let (_, row) = w.app.get("/stremio/continue", &w.carl).await;
+    assert_eq!(row[0]["name"], "Heat", "it shows in Continue watching");
+}
+
+#[tokio::test]
+async fn nothing_is_written_for_an_odd_item_a_failing_stremio_or_a_few_seconds() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    // An item that is not shaped like stremio-core's: left alone.
+    let mut odd = library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 0, Some("tt0111161"));
+    odd["state"]["timeOffset"] = json!("soon");
+    w.mock.seed("AUTHKEY-1", vec![odd]);
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    w.stop_and_settle(&w.alice).await;
+    assert!(w.mock.puts("AUTHKEY-1").is_empty(), "unknown shape: no write");
+
+    // Stremio fails on the read: that is not "missing", so no item is created.
+    w.mock.seed("AUTHKEY-1", Vec::new());
+    w.mock.library_down.store(true, Ordering::SeqCst);
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    w.stop_and_settle(&w.alice).await;
+    w.mock.library_down.store(false, Ordering::SeqCst);
+    assert!(w.mock.puts("AUTHKEY-1").is_empty(), "failed read: no create");
+
+    // Someone who left after a few seconds does not get a library item.
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 4000).await;
+    w.stop_and_settle(&w.alice).await;
+    assert!(w.mock.puts("AUTHKEY-1").is_empty(), "a few seconds: no write");
+}
+
+#[tokio::test]
+async fn another_members_seek_keeps_the_item_out_of_the_starters_library() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    w.join(&mut carl).await;
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 0, Some("tt0111161"))]);
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    // Pausing and resuming is fine; carl jumping to the credits is not alice's watching.
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"playing": true})).await.0, StatusCode::OK);
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"position_ms": 7_100_000})).await.0, StatusCode::OK);
+    w.stop_and_settle(&w.alice).await;
+    assert!(w.mock.puts("AUTHKEY-1").is_empty() && w.mock.puts(CARL_KEY).is_empty(), "no write after someone else's seek");
+}
+
+#[tokio::test]
+async fn a_finished_movie_is_watched_and_a_finished_episode_moves_on_to_the_next() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    w.mock.seed(
+        "AUTHKEY-1",
+        vec![
+            library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 300_000, Some("tt0111161")),
+            library_item("tt0903747", "series", "Breaking", "2020-02-01T00:00:00Z", 300_000, Some("tt0903747:1:2")),
+        ],
+    );
+    // The bot reports the end by itself.
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    settle().await;
+    assert_eq!(w.event("ended", json!({"position_ms": 7_200_000})).await, StatusCode::NO_CONTENT);
+    until("the movie in the library", || !w.mock.puts("AUTHKEY-1").is_empty()).await;
+    let movie = w.mock.puts("AUTHKEY-1").remove(0);
+    assert_eq!(
+        (movie["state"]["timeOffset"].as_u64(), movie["state"]["flaggedWatched"].as_u64(), movie["state"]["timesWatched"].as_u64()),
+        (Some(0), Some(1), Some(2))
+    );
+
+    w.play_to(&w.alice, "series", "tt0903747:1:2", "A 1080p", 3_000_000, 600_000).await;
+    settle().await;
+    assert_eq!(w.event("ended", json!({"position_ms": 3_000_000})).await, StatusCode::NO_CONTENT);
+    until("the episode in the library", || w.mock.puts("AUTHKEY-1").len() == 2).await;
+    let episode = w.mock.puts("AUTHKEY-1").remove(1);
+    assert_eq!((episode["state"]["video_id"].as_str(), episode["state"]["timeOffset"].as_u64()), (Some("tt0903747:1:3"), Some(1)));
+    assert_eq!(
+        (episode["state"]["timeWatched"].as_u64(), episode["state"]["flaggedWatched"].as_u64(), episode["state"]["timesWatched"].as_u64()),
+        (Some(0), Some(0), Some(2))
+    );
+    let (_, row) = w.app.get("/stremio/continue", &w.alice).await;
+    assert_eq!(
+        (row[0]["video_id"].as_str(), row[0]["season"].as_u64(), row[0]["episode"].as_u64(), row[0]["position_ms"].as_u64()),
+        (Some("tt0903747:1:3"), Some(1), Some(3), Some(0))
+    );
+    assert_eq!(row.as_array().map(Vec::len), Some(1), "the finished movie is gone from the row");
+}
+
+#[tokio::test]
+async fn an_end_before_the_credits_is_saved_where_the_bot_was() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 0, Some("tt0111161"))]);
+    // The link dropped or the file was cut: "ended" at 3,000,000 of 7,200,000 is not a watched movie.
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    settle().await;
+    assert_eq!(w.event("ended", json!({"position_ms": 3_000_000})).await, StatusCode::NO_CONTENT);
+    until("the library", || !w.mock.puts("AUTHKEY-1").is_empty()).await;
+    let saved = w.mock.puts("AUTHKEY-1").remove(0);
+    assert_eq!(
+        (saved["state"]["timeOffset"].as_u64(), saved["state"]["flaggedWatched"].as_u64(), saved["state"]["timesWatched"].as_u64()),
+        (Some(3_000_000), Some(0), Some(1))
+    );
+}
+
+#[tokio::test]
+async fn what_is_watched_after_the_starter_left_the_call_is_not_saved_to_their_library() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    w.join(&mut carl).await;
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 0, Some("tt0111161"))]);
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    // alice leaves at 10 minutes; carl keeps watching to the end.
+    alice.voice(None).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"playing": true})).await.0, StatusCode::OK);
+    settle().await;
+    assert_eq!(w.event("ended", json!({"position_ms": 7_200_000})).await, StatusCode::NO_CONTENT);
+    until("the library", || !w.mock.puts("AUTHKEY-1").is_empty()).await;
+    let saved = w.mock.puts("AUTHKEY-1").remove(0);
+    assert_eq!((saved["state"]["timeOffset"].as_u64(), saved["state"]["flaggedWatched"].as_u64()), (Some(600_000), Some(0)), "where alice left, not the end");
+    assert!(w.mock.puts(CARL_KEY).is_empty());
+}
+
+#[tokio::test]
+async fn one_owners_writes_land_in_the_order_the_items_finished() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0903747", "series", "Breaking", "2020-02-01T00:00:00Z", 300_000, Some("tt0903747:1:2"))]);
+    w.play_to(&w.alice, "series", "tt0903747:1:2", "A 1080p", 3_000_000, 600_000).await;
+    // The first item's read is slow; the second item finishes (and is queued) while it waits.
+    w.mock.slow_get.store(true, Ordering::SeqCst);
+    w.play_to(&w.alice, "series", "tt0903747:1:3", "A 1080p", 3_000_000, 900_000).await;
+    w.stop_and_settle(&w.alice).await;
+    until("both items", || w.mock.puts("AUTHKEY-1").len() == 2).await;
+    let puts = w.mock.puts("AUTHKEY-1");
+    assert_eq!((puts[0]["state"]["video_id"].as_str(), puts[0]["state"]["timeOffset"].as_u64()), (Some("tt0903747:1:2"), Some(600_000)));
+    assert_eq!((puts[1]["state"]["video_id"].as_str(), puts[1]["state"]["timeOffset"].as_u64()), (Some("tt0903747:1:3"), Some(900_000)));
+    assert_eq!(puts[1]["state"]["overallTimeWatched"].as_u64(), Some(2_101_100), "the second write started from the first one's result");
+}
+
+#[tokio::test]
+async fn an_item_changed_elsewhere_meanwhile_or_an_account_linked_meanwhile_is_not_overwritten() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.alice).await;
+    w.join(&mut alice).await;
+    // Stremio on the TV moved the movie after this session's item began (an _mtime from the future stands for that).
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2099-01-01T00:00:00Z", 1_000_000, Some("tt0111161"))]);
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    w.stop_and_settle(&w.alice).await;
+    assert!(w.mock.puts("AUTHKEY-1").is_empty(), "the TV's position stays");
+
+    // The account was linked again while the item played: it began under the old link.
+    w.mock.seed("AUTHKEY-1", vec![library_item("tt0111161", "movie", "Heat", "2020-02-01T00:00:00Z", 0, Some("tt0111161"))]);
+    w.play_to(&w.alice, "movie", "tt0111161", "A 1080p", 7_200_000, 600_000).await;
+    w.link(&w.alice).await;
+    w.stop_and_settle(&w.alice).await;
+    assert!(w.mock.puts("AUTHKEY-1").is_empty(), "relinked mid-item: nothing written");
+}
+
+/// What the bot reports after it probed the file: two audio tracks, a text and a bitmap subtitle, plus junk that must not get through.
+fn tracks_event(generation: &Value) -> Value {
+    json!({
+        "generation": generation,
+        "audio": 2,
+        "burned_subtitle": 5,
+        "audio_tracks": [
+            {"id": 1, "language": "ENG", "codec": "eac3", "default": false},
+            {"id": 2, "language": "swe", "title": "Svenska <b>5.1</b>", "codec": "aac", "default": true},
+            {"id": 2, "language": "fre", "codec": "aac", "default": false},
+            {"id": 7, "language": "not a tag!", "title": "see https://evil.example/x", "codec": "ac3"},
+            {"id": 8, "title": "www.spam.example", "codec": "ac3"},
+        ],
+        "subtitle_tracks": [
+            {"id": 4, "kind": "text", "language": "eng", "codec": "subrip", "forced": false, "default": false},
+            {"id": 5, "kind": "bitmap", "language": "eng", "title": "Forced", "codec": "hdmv_pgs_subtitle", "forced": true, "default": false},
+        ],
+    })
+}
+
+#[tokio::test]
+async fn tracks_are_reported_and_chosen_without_urls_and_a_new_choice_restarts_the_bot() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let state = w.playing(&mut alice, "A 1080p").await;
+    assert!(state.get("audio_tracks").is_none() && state.get("audio").is_none(), "nothing before the bot has looked: {state}");
+    let first = w.bot.puts(&w.voice).remove(0);
+    let generation = first["generation"].clone();
+    assert!(generation.is_u64() && first["audio"].is_null() && first["burned_subtitle"].is_null(), "{first}");
+    assert_eq!(first["tracks_known"], false, "the bot may use the file's defaults until the server has the tracks");
+
+    // A report for another item is ignored; the right one sets the lists and the bot's defaults.
+    assert_eq!(w.event("tracks", tracks_event(&json!(generation.as_u64().unwrap() + 1000))).await, StatusCode::NO_CONTENT);
+    assert!(w.app.patch(&w.path(), &w.alice, json!({})).await.1.get("audio_tracks").is_none(), "a stale report is dropped");
+    assert_eq!(w.event("tracks", tracks_event(&generation)).await, StatusCode::NO_CONTENT);
+    let (status, state) = w.app.patch(&w.path(), &w.alice, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_no_urls(&state);
+    assert_no_secrets("the track lists", &state);
+    let audio = state["audio_tracks"].as_array().expect("audio tracks");
+    assert_eq!(audio.iter().map(|track| track["id"].as_u64().unwrap()).collect::<Vec<_>>(), [1, 2, 7, 8], "a repeated id is dropped");
+    assert_eq!(audio[0]["language"], "eng", "language tags are lower-cased");
+    assert_eq!(audio[1]["title"], "Svenska 5.1", "markup is stripped from titles");
+    assert!(audio[2]["language"].is_null() && audio[2]["title"].is_null(), "a bad tag and a title with a link are dropped: {audio:?}");
+    assert!(audio[3]["title"].is_null(), "www. titles are dropped");
+    assert_eq!((state["audio"].as_u64(), state["burned_subtitle"].as_u64()), (Some(2), Some(5)));
+    assert_eq!(state["subtitle_tracks"].as_array().map(Vec::len), Some(2));
+    let (_, off) = w.app.patch(&w.path(), &w.alice, json!({"burned_subtitle": null})).await;
+    assert!(off.get("burned_subtitle").is_none(), "{off}");
+    let known = w.bot.puts(&w.voice).pop().expect("put");
+    assert_eq!(
+        (known["tracks_known"].clone(), known["burned_subtitle"].is_null()),
+        (json!(true), true),
+        "off after the tracks are known: a restarted bot keeps it off"
+    );
+    w.app.patch(&w.path(), &w.alice, json!({"burned_subtitle": 5})).await;
+
+    // Choosing validates against the reported tracks, needs the call, and restarts the bot at the current position with the new choice.
+    let puts_before = w.bot.puts(&w.voice).len();
+    for bad in [json!({"audio": 99}), json!({"burned_subtitle": 4}), json!({"burned_subtitle": 99})] {
+        assert_eq!(w.app.patch(&w.path(), &w.alice, bad.clone()).await.0, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"audio": 1})).await.0, StatusCode::FORBIDDEN, "carl is not in the call");
+    assert_eq!(w.bot.puts(&w.voice).len(), puts_before, "refused choices send nothing");
+    let (status, state) = w.app.patch(&w.path(), &w.alice, json!({"audio": 1})).await;
+    assert_eq!((status, state["audio"].as_u64()), (StatusCode::OK, Some(1)), "{state}");
+    let puts = w.bot.puts(&w.voice);
+    assert_eq!(puts.len(), puts_before + 1);
+    assert_eq!(
+        (puts[puts_before]["audio"].as_u64(), puts[puts_before]["burned_subtitle"].as_u64(), puts[puts_before]["generation"].clone()),
+        (Some(1), Some(5), generation.clone())
+    );
+    let (_, state) = w.app.patch(&w.path(), &w.alice, json!({"burned_subtitle": null})).await;
+    assert!(state.get("burned_subtitle").is_none(), "{state}");
+    let last = w.bot.puts(&w.voice).pop().expect("put");
+    assert_eq!((last["audio"].as_u64(), last["burned_subtitle"].is_null()), (Some(1), true));
+    // Choosing what is already chosen is not a restart.
+    let count = w.bot.puts(&w.voice).len();
+    assert_eq!(w.app.patch(&w.path(), &w.alice, json!({"audio": 1, "burned_subtitle": null})).await.0, StatusCode::OK);
+    assert_eq!(w.bot.puts(&w.voice).len(), count);
+
+    // A later report for the same item (after a re-resolve) keeps what people chose.
+    assert_eq!(w.event("tracks", tracks_event(&generation)).await, StatusCode::NO_CONTENT);
+    let (_, state) = w.app.patch(&w.path(), &w.alice, json!({})).await;
+    assert_eq!(state["audio"].as_u64(), Some(1));
+
+    // A new item starts without the old lists.
+    let sid = World::sid(&w.streams(&w.alice).await, "A 720p");
+    let (_, state) = w.app.put_json(&w.path(), &w.alice, json!({"sid": sid})).await;
+    assert!(state.get("audio_tracks").is_none() && state.get("audio").is_none() && state.get("burned_subtitle").is_none(), "{state}");
+}
+
+#[tokio::test]
+async fn addon_subtitles_follow_the_host_rules_and_their_urls_stay_on_the_server() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.link(&w.carl).await;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.join(&mut carl).await;
+    let list_path = format!("{}/subtitles", w.path());
+    assert_eq!(w.app.get(&list_path, &w.alice).await.0, StatusCode::FORBIDDEN, "alice is not in the call yet");
+    w.playing(&mut alice, "A 1080p").await;
+
+    let (status, listing) = w.app.get(&list_path, &w.alice).await;
+    assert_eq!(status, StatusCode::OK, "{listing}");
+    assert_no_secrets("the subtitle list", &listing);
+    assert!(!listing.to_string().contains("://"), "{listing}");
+    assert_eq!(listing["addon_errors"], json!(["Broken"]));
+    let subtitles = listing["subtitles"].as_array().expect("subtitles");
+    assert_eq!(
+        subtitles.iter().map(|sub| (sub["label"].as_str().unwrap(), sub["language"].as_str())).collect::<Vec<_>>(),
+        [("Addon A 1", Some("eng")), ("Addon A 2", Some("sv-se"))],
+        "private, http, userinfo, port and scheme rules drop the others"
+    );
+    for sub in subtitles {
+        assert_eq!(
+            sub.as_object().unwrap().keys().cloned().collect::<std::collections::BTreeSet<_>>(),
+            ["addon", "label", "language", "sid"].map(String::from).into()
+        );
+    }
+
+    // The file is fetched by the server, cleaned; a 2 MiB cap applies.
+    let (first, big) = (subtitles[0]["sid"].as_str().unwrap(), subtitles[1]["sid"].as_str().unwrap());
+    let (status, cues) = w.app.get(&format!("{list_path}/{first}"), &w.alice).await;
+    assert_eq!(status, StatusCode::OK, "{cues}");
+    assert_eq!(cues, json!({"cues": [{"start_ms": 1000, "end_ms": 2000, "text": "Hello there"}, {"start_ms": 3000, "end_ms": 4000, "text": "alert(1)Bye"}]}));
+    assert_eq!(w.app.get(&format!("{list_path}/{big}"), &w.alice).await.0, StatusCode::BAD_REQUEST, "over the size cap");
+    assert_eq!(w.app.get(&format!("{list_path}/nope"), &w.alice).await.0, StatusCode::BAD_REQUEST);
+
+    // Ids belong to the person who listed them, and carl has no listing of his own until he is linked and in the call.
+    assert_eq!(w.app.get(&format!("{list_path}/{first}"), &w.carl).await.0, StatusCode::BAD_REQUEST, "carl cannot read alice's id");
+    assert_eq!(w.app.get(&list_path, &w.owner).await.0, StatusCode::FORBIDDEN, "the owner is not in the call");
+    let unlinked = w.app.register("dave").await.0;
+    assert_eq!(w.app.get(&format!("/channels/{}/stremio/subtitles", w.voice), &unlinked).await.0, StatusCode::FORBIDDEN);
+
+    // A new item invalidates the old ids.
+    let sid = World::sid(&w.streams(&w.alice).await, "A 720p");
+    assert_eq!(w.app.put_json(&w.path(), &w.alice, json!({"sid": sid})).await.0, StatusCode::OK);
+    assert_eq!(w.app.get(&format!("{list_path}/{first}"), &w.alice).await.0, StatusCode::BAD_REQUEST);
 }

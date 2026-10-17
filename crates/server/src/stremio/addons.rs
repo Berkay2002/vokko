@@ -10,6 +10,7 @@ use super::rank::{self, Candidate, clean_text};
 use crate::crypto::Secret;
 
 const MAX_STREAMS_PER_ADDON: usize = 300;
+const MAX_SUBTITLES_PER_ADDON: usize = 100;
 const MAX_VIDEOS: usize = 2000;
 const MAX_RESULTS: usize = 100;
 /// Hosts Stremio's artwork lives on; any other image URL is dropped (the desktop CSP allows exactly these).
@@ -135,6 +136,58 @@ pub async fn fetch_streams(fetcher: &Fetcher, addons: &[Addon], kind: &str, vide
     (candidates, failed)
 }
 
+/// A subtitle file one of the user's addons offers. The URL stays on the server.
+#[derive(Clone, Debug)]
+pub struct AddonSubtitle {
+    pub addon: String,
+    pub url: Secret,
+    pub language: Option<String>,
+}
+
+/// A language tag as the menu can use it: `eng`, `en` or `pt-br`, lower case. Anything else is dropped.
+pub fn language_code(raw: &str) -> Option<String> {
+    let code = raw.trim().to_ascii_lowercase().replace('_', "-");
+    let (head, tail) = code.split_once('-').map_or((code.as_str(), None), |(head, tail)| (head, Some(tail)));
+    let ok = (2..=3).contains(&head.len())
+        && head.bytes().all(|b| b.is_ascii_lowercase())
+        && tail.is_none_or(|tail| (2..=4).contains(&tail.len()) && tail.bytes().all(|b| b.is_ascii_alphanumeric()));
+    ok.then_some(code)
+}
+
+/// The usable entries of an addon's `/subtitles` answer: a URL the fetcher would open, a language tag that looks like one.
+fn parse_subtitles(fetcher: &Fetcher, addon: &str, body: &Value) -> Vec<AddonSubtitle> {
+    body["subtitles"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .take(MAX_SUBTITLES_PER_ADDON)
+        .filter_map(|entry| {
+            let url = Url::parse(entry["url"].as_str()?).ok().filter(|url| fetcher.check_url(url).is_ok())?;
+            Some(AddonSubtitle { addon: addon.to_owned(), url: Secret::new(url.as_str()), language: entry["lang"].as_str().and_then(language_code) })
+        })
+        .collect()
+}
+
+/// Subtitle files of every addon that serves `video_id`, fetched in parallel like the streams, plus the names of the addons that failed.
+pub async fn fetch_subtitles(fetcher: &Fetcher, addons: &[Addon], kind: &str, video_id: &str) -> (Vec<AddonSubtitle>, Vec<String>) {
+    let calls = addons.iter().filter(|addon| addon.serves("subtitles", kind, video_id)).map(|addon| async move {
+        let url = format!("{}/subtitles/{kind}/{video_id}.json", addon.base.expose());
+        (addon, fetcher.get_json(&url).await)
+    });
+    let (mut found, mut failed) = (Vec::new(), Vec::new());
+    for (addon, answer) in join_all(calls).await {
+        match answer {
+            Ok(body) => found.extend(parse_subtitles(fetcher, &addon.name, &body)),
+            Err(error) => {
+                tracing::info!("stremio: addon {} failed for subtitles of {kind}: {error:?}", addon.name);
+                failed.push(addon.name.clone());
+            }
+        }
+    }
+    (found, failed)
+}
+
 fn catalog_url(base: &str, segments: &[&str]) -> Result<Url, FetchError> {
     let mut url = Url::parse(base).map_err(|_| FetchError::Blocked)?;
     url.path_segments_mut().map_err(|()| FetchError::Blocked)?.pop_if_empty().extend(segments);
@@ -258,6 +311,41 @@ mod tests {
         .expect("addon");
         assert!(!local.reachable(&Fetcher::new(Vec::new())) && torrentio.reachable(&Fetcher::new(Vec::new())));
         assert!(Addon::from_collection(&json!({"manifest": {}})).is_none());
+    }
+
+    #[test]
+    fn subtitle_entries_keep_only_urls_the_fetcher_would_open() {
+        let fetcher = Fetcher::new(Vec::new());
+        let body = json!({"subtitles": [
+            {"id": "1", "url": "https://subs.example/a.srt", "lang": "eng"},
+            {"id": "2", "url": "http://subs.example/b.srt", "lang": "swe"},
+            {"id": "3", "url": "https://10.0.0.5/c.srt", "lang": "eng"},
+            {"id": "4", "url": "https://user:pw@subs.example/d.srt", "lang": "eng"},
+            {"id": "5", "url": "https://subs.example:8443/e.srt", "lang": "eng"},
+            {"id": "6", "url": "https://localhost/f.srt"},
+            {"id": "7", "url": "file:///etc/passwd", "lang": "eng"},
+            {"id": "8", "url": "not a url"},
+            {"id": "9", "lang": "eng"},
+            {"id": "10", "url": "https://subs.example/g.srt", "lang": "<script>"}
+        ]});
+        let urls = |fetcher: &Fetcher| {
+            parse_subtitles(fetcher, "OpenSubtitles", &body).iter().map(|s| (s.url.expose().to_owned(), s.language.clone())).collect::<Vec<_>>()
+        };
+        assert_eq!(urls(&fetcher), [("https://subs.example/a.srt".to_owned(), Some("eng".to_owned())), ("https://subs.example/g.srt".to_owned(), None)]);
+        // The allow list opens a private range for an IP literal, as it does for streams; the other rules stay.
+        let home = Fetcher::new(vec![crate::config::Cidr::parse("10.0.0.0/8").expect("cidr")]);
+        assert_eq!(urls(&home).len(), 3);
+    }
+
+    #[test]
+    fn language_tags_are_checked() {
+        for good in ["eng", "EN", "pt-BR", "zh_hant", "swe"] {
+            assert!(language_code(good).is_some(), "{good}");
+        }
+        for bad in ["", "e", "english", "en-", "e1g", "en-<x>", "en-toolong", "../x"] {
+            assert_eq!(language_code(bad), None, "{bad}");
+        }
+        assert_eq!(language_code("pt_BR").as_deref(), Some("pt-br"));
     }
 
     #[test]

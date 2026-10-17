@@ -244,11 +244,11 @@ export function VoiceChannelUsers({ channel, guildId, canInvite }: { channel: Pi
         <VoiceUserRow key={state.user_id} state={state} guildId={guildId} />
       ))}
       {bot && (
-        <li className="voice-bot-user" data-bot-identity={bot}>
-          <span className="voice-bot-avatar" aria-hidden="true">
+        <li className="voice-occupant voice-user voice-bot-user" data-bot-identity={bot}>
+          <span className="voice-user-avatar voice-bot-avatar" aria-hidden="true">
             <StremioIcon size={14} />
           </span>
-          <span>Stremio</span>
+          <span className="voice-occupant-name">Stremio</span>
           <span className="voice-bot-badge">Bot</span>
         </li>
       )}

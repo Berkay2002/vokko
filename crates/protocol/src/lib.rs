@@ -4,6 +4,7 @@ use serde_json::Value;
 
 pub mod account;
 pub mod api;
+pub mod cues;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Community {

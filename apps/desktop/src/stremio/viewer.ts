@@ -5,6 +5,8 @@
 import { ConnectionState, RemoteAudioTrack, Room, RoomEvent, Track, type RemoteTrack, type RemoteTrackPublication, type RemoteParticipant } from "livekit-client";
 import type { VideoHandle } from "../voice/mediaStore";
 import { isMockEndpoint } from "../voice/transport";
+import { receiveCue } from "./subtitles";
+import { parseVideoStats, type VideoStats } from "./viewerStats";
 
 export type ViewerStatus = "connecting" | "connected" | "closed";
 
@@ -22,6 +24,8 @@ export interface Viewer {
   setVolume(volume: number): void;
   /** Resume sound after the browser blocked it (needs a user gesture). */
   startAudio(): void;
+  /** Receive-side numbers of the picture (debug readout), null when there is none yet. */
+  stats(): Promise<VideoStats | null>;
   disconnect(): void;
 }
 
@@ -29,6 +33,7 @@ class LiveKitViewer implements Viewer {
   private readonly room = new Room({ adaptiveStream: true, dynacast: false });
   private volume = 1;
   private audio: RemoteAudioTrack | null = null;
+  private videoTrack: RemoteTrack | null = null;
   private elements: HTMLMediaElement[] = [];
 
   constructor(private readonly cb: ViewerCallbacks) {}
@@ -39,6 +44,7 @@ class LiveKitViewer implements Viewer {
       .on(RoomEvent.TrackSubscribed, (track: RemoteTrack, pub: RemoteTrackPublication, participant: RemoteParticipant) => {
         if (!mine(participant)) return;
         if (track.kind === Track.Kind.Video && pub.source === Track.Source.ScreenShare) {
+          this.videoTrack = track;
           this.cb.video({ attach: el => void track.attach(el), detach: el => void track.detach(el) });
         } else if (track.kind === Track.Kind.Audio && pub.source === Track.Source.ScreenShareAudio && track instanceof RemoteAudioTrack) {
           this.audio = track;
@@ -53,10 +59,14 @@ class LiveKitViewer implements Viewer {
         if (!mine(participant)) return;
         if (track.kind === Track.Kind.Video) {
           track.detach();
+          if (track === this.videoTrack) this.videoTrack = null;
           this.cb.video(null);
         } else if (track === this.audio) {
           this.dropAudio();
         }
+      })
+      .on(RoomEvent.DataReceived, (payload: Uint8Array, participant?: RemoteParticipant, _kind?: unknown, topic?: string) => {
+        if (participant && mine(participant)) receiveCue(botIdentity, topic, payload);
       })
       .on(RoomEvent.AudioPlaybackStatusChanged, () => this.cb.audioBlocked(!this.room.canPlaybackAudio))
       .on(RoomEvent.Disconnected, () => this.cb.status("closed"));
@@ -72,6 +82,11 @@ class LiveKitViewer implements Viewer {
 
   startAudio(): void {
     void this.room.startAudio().catch(() => undefined);
+  }
+
+  async stats(): Promise<VideoStats | null> {
+    const report = await this.videoTrack?.receiver?.getStats();
+    return report ? parseVideoStats(report) : null;
   }
 
   disconnect(): void {
@@ -119,6 +134,10 @@ export class FakeViewer implements Viewer {
   }
 
   startAudio(): void {}
+
+  async stats(): Promise<VideoStats | null> {
+    return null;
+  }
 
   disconnect(): void {
     if (this.timer) clearTimeout(this.timer);
