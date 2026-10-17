@@ -88,7 +88,7 @@ The release overlay's `targets` stays `["nsis"]`; Linux passes `--bundles appima
   `update-desktop-database` and `xdg-mime`, which desktop distros ship; a failure is only logged).
 - `tools/release-linux.sh <version> <out dir>` builds from the checkout's HEAD (sent in as a git bundle; the distro has no GitHub
   credentials), signs the AppImage with `~/.vokko/updater.key` passed through `WSLENV` and copies the AppImage, its `.sig` and
-  the .deb to `<out dir>`. It uploads nothing, so running it alone is the dry run.
+  the .deb to `<out dir>`. It uploads nothing, so running it alone is the Linux-only dry run.
 
 One-time setup of the distro, from a Windows shell (everything on E:; it never touches the `docker-desktop` distro):
 
@@ -150,7 +150,11 @@ https://vokko.example.com and LiveKit Cloud, and the updater (public key, endpoi
 and its password live outside the repo in `~/.vokko/updater.key` and `~/.vokko/updater.key.password` on the Windows PC and on buildhost; losing
 them means installed apps can never be updated again, so keep a backup. **Release with `tools/release-desktop.sh <version> "notes"`** from Git
 Bash on the Windows PC: it bumps the version, builds all three platforms (Linux through `tools/release-linux.sh`, see Linux
-below), uploads them to `/downloads/` and writes `latest.json` last.
+below), uploads them to `/downloads/` and writes `latest.json` last. It pulls first and re-execs the pulled copy of itself (its body
+is one function, so the pull can't change the script under the running bash). `latest.json` goes out only after it lists
+`windows-x86_64`, `darwin-aarch64` and `linux-x86_64` at the new version and each url answers `curl -fsI`; the served copy is
+checked the same way, and any miss fails the run loudly. `tools/release-desktop.sh --dry-run` builds all three at the current
+version (no bump, commit, push or upload; main must equal origin/main, which buildhost builds) and checks a local `latest.json`.
 The macOS app is ad-hoc signed (`bundle.macOS.signingIdentity: "-"` in the overlay). Without it the binary is only linker-signed
 with no sealed resources, and a downloaded copy opens as "Vokko is damaged" with no way past it. Ad-hoc is not notarized: macOS
 still warns once, and the user allows it under System Settings, Privacy & Security, Open Anyway (or runs
