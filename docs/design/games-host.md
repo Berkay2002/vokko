@@ -167,6 +167,10 @@ Game → host:
   ignored so the protocol can grow. `v` lets a future v2 coexist.
 - `leader` = the starter's app id while they are in the call, else the smallest app id present. Games that need an authority
   (Sketch's word picker) use it; it is computed on the host from voice states, so all clients agree without server state.
+- Late join: `players` is the call, not who has the frame open, so a game cannot detect a late opener. The recommended pattern
+  (Sketch, `docs/games-sdk.md`): on connect the game broadcasts `sync?`; any copy that holds the public state answers with a
+  chunked snapshot to the asker (first answer wins by round number); the joiner buffers live messages and replays them after
+  the snapshot by sequence number. The joiner guesses in the current round and joins the drawer rotation from the next; the round's rules do not change.
 - Avatars: the host fetches the avatar through its own API client and sends a `Blob` (structured clone), so no URL that embeds a
   user id reaches the game. No avatar → `null`.
 - SDK surface (about 80 lines): `const vokko = await VokkoGames.connect(); vokko.me; vokko.players; vokko.leader;
