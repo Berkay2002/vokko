@@ -372,3 +372,7 @@ The owner chose a split, which replaces the Cloud-only parts above (§2 bot join
   Movie audio comes from that Room (local volume applies); voice keeps coming from the Cloud room.
 - Quality default becomes **1080p at up to 6 Mbit/s** (no data cap now); 720p stays as a per-session option.
 - Data usage alerts (§11 #1) are dropped.
+- **As built (2026-10-17):** signalling is `wss://live.vokko.example.com` through the Cloudflare tunnel, not a DNS-only record, and the home line is behind
+  CGNAT, so there are no router port forwards: viewers connect through STUN-discovered candidates (`use_external_ip: false`, interface and IP pinned in
+  `deploy/media-livekit.yaml`), and a viewer behind a symmetric NAT may fail because there is no TURN. The bot connects to the media LiveKit locally
+  (`VOKKO_MEDIA_LIVEKIT_BOT_URL`, `ws://127.0.0.1:7880`) instead of through the tunnel. See docs/self-hosting.md "Stremio in calls".
