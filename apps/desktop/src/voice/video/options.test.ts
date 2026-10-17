@@ -13,9 +13,15 @@ import {
   isScreenFps,
   isScreenResolution,
   isViewerQuality,
+  isWebKit,
+  missingAudioNote,
   pickCodec,
+  screenLayers,
+  viewerChoices,
+  viewerQualityLabel,
   viewerRequest,
   type CodecSupport,
+  type StreamLayer,
 } from "./options";
 
 const vp8Only: CodecSupport = { vp8: true };
@@ -82,26 +88,65 @@ describe("buildScreenShare", () => {
       const p = buildScreenShare({ resolution: "1080p", fps: 60, audio: false }, support).publish;
       expect(p.simulcast).toBe(true);
       expect(p.scalabilityMode).toBeUndefined();
-      expect(p.layers).toEqual([{ width: 1280, height: 720, maxBitrate: 2_000_000, maxFramerate: 30 }]);
+      expect(p.layers).toEqual([
+        { width: 640, height: 360, maxBitrate: 500_000, maxFramerate: 30 },
+        { width: 1280, height: 720, maxBitrate: 3_000_000, maxFramerate: 60 },
+      ]);
     }
   });
 
-  it("uses a 360p15 lower layer under 720p", () => {
+  it("uses only a 360p lower layer under 720p", () => {
     const p = buildScreenShare({ resolution: "720p", fps: 30, audio: false }, vp8Only).publish;
-    expect(p.layers).toEqual([{ width: 640, height: 360, maxBitrate: 400_000, maxFramerate: 15 }]);
+    expect(p.layers).toEqual([{ width: 640, height: 360, maxBitrate: 500_000, maxFramerate: 30 }]);
   });
 
-  it("turns simulcast off for vp9 and av1 (SVC)", () => {
-    const vp9 = buildScreenShare({ resolution: "1080p", fps: 30, audio: false }, { vp9: true, vp8: true }).publish;
+  it("layers stay below the top layer in size, bitrate and frame rate for every preset", () => {
+    for (const resolution of SCREEN_RESOLUTIONS) {
+      for (const fps of SCREEN_FPS) {
+        const plan = buildScreenShare({ resolution, fps, audio: false }, vp8Only).publish;
+        const layers = screenLayers({ resolution, fps });
+        expect(plan.layers).toEqual(layers);
+        expect(layers.length).toBe(resolution === "720p" ? 1 : 2);
+        for (const l of layers) {
+          expect(l.height).toBeLessThan(dimensionsOf(resolution).height);
+          expect(l.maxBitrate).toBeLessThan(plan.encoding.maxBitrate);
+          expect(l.maxFramerate).toBeLessThanOrEqual(fps);
+        }
+        // Lowest first, as LiveKit expects.
+        expect(layers.map(l => l.height)).toEqual([...layers.map(l => l.height)].sort((a, b) => a - b));
+      }
+    }
+  });
+
+  it("sends vp9 and av1 as rid simulcast with L1T3 per layer (one SVC stream would be a single spatial layer)", () => {
+    const vp9 = buildScreenShare({ resolution: "1080p", fps: 30, audio: false }, { vp9: true, vp8: true, svcSimulcast: true }).publish;
     expect(vp9.codec).toBe("vp9");
-    expect(vp9.simulcast).toBe(false);
+    expect(vp9.simulcast).toBe(true);
     expect(vp9.scalabilityMode).toBe("L1T3");
-    expect(vp9.layers).toEqual([]);
+    expect(vp9.layers.map(l => l.height)).toEqual([360, 720]);
     expect(vp9.backupCodec).toBe("vp8");
     const av1 = buildScreenShare({ resolution: "1440p", fps: 30, audio: false }, { ...everything, hardware: { av1: true } }).publish;
     expect(av1.codec).toBe("av1");
-    expect(av1.simulcast).toBe(false);
-    expect(av1.layers).toEqual([]);
+    expect(av1.simulcast).toBe(true);
+    expect(av1.layers.map(l => l.height)).toEqual([360, 720]);
+  });
+
+  it("avoids vp9 / av1 where they can't be simulcast (WebKit), so lower layers still exist", () => {
+    const p = buildScreenShare({ resolution: "1080p", fps: 60, audio: false }, { ...everything, svcSimulcast: false }).publish;
+    expect(p.codec).toBe("vp8");
+    expect(p.scalabilityMode).toBeUndefined();
+    expect(p.layers.length).toBe(2);
+    expect(buildScreenShare({ resolution: "1080p", fps: 60, audio: false }, { vp9: true, h264: true, vp8: false, svcSimulcast: false }).publish.codec).toBe("h264");
+  });
+
+  it("presets: 720p30, 1080p30, 1080p60 and Source get rising bitrates and the right hint", () => {
+    const plan = (resolution: (typeof SCREEN_RESOLUTIONS)[number], fps: 15 | 30 | 60) => buildScreenShare({ resolution, fps, audio: true }, everything);
+    expect(plan("720p", 30).publish.encoding).toEqual({ maxBitrate: 2_000_000, maxFramerate: 30 });
+    expect(plan("1080p", 30).publish.encoding).toEqual({ maxBitrate: 4_000_000, maxFramerate: 30 });
+    expect(plan("1080p", 60).publish.encoding).toEqual({ maxBitrate: 6_000_000, maxFramerate: 60 });
+    expect(plan("source", 60).publish.encoding).toEqual({ maxBitrate: 12_000_000, maxFramerate: 60 });
+    expect(plan("1080p", 60).capture.contentHint).toBe("motion");
+    expect(plan("1080p", 30).capture.contentHint).toBe("detail");
   });
 
   it("has no backup codec for vp8 / h264", () => {
@@ -191,9 +236,54 @@ describe("viewerRequest", () => {
     expect(viewerRequest("auto")).toEqual({ kind: "quality", quality: "high" });
     expect(viewerRequest("source")).toEqual({ kind: "quality", quality: "high" });
   });
-  it("720p and 480p cap by dimensions", () => {
+  it("without known layers, a height caps by 16:9 dimensions", () => {
     expect(viewerRequest("720p")).toEqual({ kind: "dimensions", width: 1280, height: 720 });
-    expect(viewerRequest("480p")).toEqual({ kind: "dimensions", width: 854, height: 480 });
+    expect(viewerRequest("480p")).toEqual({ kind: "dimensions", width: 853, height: 480 });
+  });
+  it("with layers, a height picks the tallest layer that fits, else the smallest", () => {
+    const layers: StreamLayer[] = [
+      { width: 640, height: 360, quality: "low" },
+      { width: 1920, height: 1080, quality: "high" },
+      { width: 1280, height: 720, quality: "medium" },
+    ];
+    expect(viewerRequest("720p", layers)).toEqual({ kind: "quality", quality: "medium" });
+    expect(viewerRequest("480p", layers)).toEqual({ kind: "quality", quality: "low" });
+    expect(viewerRequest("1080p", layers)).toEqual({ kind: "quality", quality: "high" });
+    expect(viewerRequest("240p", layers)).toEqual({ kind: "quality", quality: "low" });
+    expect(viewerRequest("auto", layers)).toEqual({ kind: "quality", quality: "high" });
+  });
+});
+
+describe("viewerChoices", () => {
+  it("offers Auto, Source and each lower layer the stream has", () => {
+    const layers: StreamLayer[] = [
+      { width: 640, height: 400, quality: "low" },
+      { width: 1280, height: 800, quality: "medium" },
+      { width: 1920, height: 1200, quality: "high" },
+    ];
+    expect(viewerChoices(layers)).toEqual(["auto", "source", "800p", "400p"]);
+    expect(viewerChoices([{ width: 1280, height: 720, quality: "high" }])).toEqual(["auto", "source"]);
+  });
+  it("falls back to the settings list when the layers are unknown", () => {
+    expect(viewerChoices()).toEqual(["auto", "source", "720p", "480p"]);
+    expect(viewerChoices([])).toEqual(["auto", "source", "720p", "480p"]);
+  });
+  it("labels", () => {
+    expect(viewerChoices(undefined).map(viewerQualityLabel)).toEqual(["Auto", "Source", "720p", "480p"]);
+  });
+});
+
+describe("share audio", () => {
+  const edge = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0";
+  const wkwebview = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)";
+  it("tells WebView2 / Chromium from WebKit", () => {
+    expect(isWebKit(edge)).toBe(false);
+    expect(isWebKit(wkwebview)).toBe(true);
+    expect(isWebKit("")).toBe(false);
+  });
+  it("explains the missing sound per platform", () => {
+    expect(missingAudioNote(edge)).toMatch(/whole screen/);
+    expect(missingAudioNote(wkwebview)).toMatch(/can't share audio/);
   });
 });
 
@@ -227,7 +317,10 @@ describe("type guards", () => {
   it("isViewerQuality", () => {
     expect(isViewerQuality("auto")).toBe(true);
     expect(isViewerQuality("480p")).toBe(true);
-    expect(isViewerQuality("1080p")).toBe(false);
+    expect(isViewerQuality("1080p")).toBe(true);
+    expect(isViewerQuality("p")).toBe(false);
+    expect(isViewerQuality("0p")).toBe(false);
+    expect(isViewerQuality("720")).toBe(false);
     expect(isViewerQuality({})).toBe(false);
   });
 });

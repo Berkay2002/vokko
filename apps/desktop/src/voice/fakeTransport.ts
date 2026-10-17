@@ -8,7 +8,7 @@ import { VadGate } from "./vad";
 import type { CameraStart, TransportCallbacks, TransportOptions, VoiceTransport } from "./transport";
 import type { VoiceSettings } from "./reducer";
 import type { VideoHandle, VideoSource } from "./mediaStore";
-import type { ScreenShareChoice, ViewerQuality } from "./video/options";
+import type { ScreenShareChoice, StreamLayer, ViewerQuality } from "./video/options";
 
 /** Speaking toggles every this many ms (on, off, on, …). */
 export const FAKE_SPEAK_PERIOD_MS = 1500;
@@ -18,6 +18,12 @@ export interface FakeMic {
   deviceId: string;
   muted: boolean;
 }
+
+const FAKE_SCREEN_LAYERS: readonly StreamLayer[] = [
+  { width: 640, height: 360, quality: "low" },
+  { width: 1280, height: 720, quality: "medium" },
+  { width: 1920, height: 1080, quality: "high" },
+];
 
 export class FakeTransport implements VoiceTransport {
   /** The published microphone, or null when nothing is published. */
@@ -193,7 +199,8 @@ export class FakeTransport implements VoiceTransport {
       if (this.remoteVideo.has(key)) continue;
       const picture = this.picture(key, source === "camera" ? "Camera" : "Screen share", source);
       this.remoteVideo.set(key, picture);
-      this.cb.video?.(user, source, picture.handle);
+      // Screens arrive like a 1080p share from the LiveKit transport: the stream quality menu offers its layers.
+      this.cb.video?.(user, source, source === "screen" ? { ...picture.handle, layers: FAKE_SCREEN_LAYERS } : picture.handle);
     }
   }
 

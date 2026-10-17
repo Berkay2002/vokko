@@ -27,7 +27,7 @@ import { openStremioPanel, StremioIcon, StremioPanel, StremioTile, STREMIO_TILE_
 import { openSpotifyPanel, SpotifyIcon, SpotifyPanel, SpotifyTile, SPOTIFY_TILE_ID, useSpotifyPanel } from "../spotify";
 import { GAME_TILE_ID, GameTile, useGameMenuItems } from "../games";
 import { openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
-import { VIEWER_QUALITIES, VIEWER_QUALITY_LABEL, type ViewerQuality } from "./video/options";
+import { viewerChoices, viewerQualityLabel, type ViewerQuality } from "./video/options";
 import "./video/video.css";
 
 /** Stable tile colour for people without a profile colour. */
@@ -195,13 +195,13 @@ export function Tile({ state, guildId, variant, stream = false, onActivate }: { 
               e.stopPropagation();
               const rect = e.currentTarget.getBoundingClientRect();
               menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, [
-                ...VIEWER_QUALITIES.map((q: ViewerQuality) => ({ id: `quality-${q}`, label: VIEWER_QUALITY_LABEL[q], checked: (quality ?? "auto") === q, onSelect: () => setViewerQuality(state.user_id, "screen", q) })),
+                ...viewerChoices(screen?.layers).map((q: ViewerQuality) => ({ id: `quality-${q}`, label: viewerQualityLabel(q), checked: (quality ?? "auto") === q, onSelect: () => setViewerQuality(state.user_id, "screen", q) })),
                 { type: "separator" as const },
                 { id: "stop-watching", label: "Stop Watching", onSelect: () => watchStream(state.user_id, false) },
               ]);
             }}
           >
-            {VIEWER_QUALITY_LABEL[quality ?? "auto"]} <ChevronDown size={14} aria-hidden="true" />
+            {viewerQualityLabel(quality ?? "auto")} <ChevronDown size={14} aria-hidden="true" />
           </button>
         </div>
       )}

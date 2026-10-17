@@ -6,13 +6,14 @@ export type ScreenResolution = "720p" | "1080p" | "1440p" | "source";
 export type ScreenFps = 15 | 30 | 60;
 export type StreamContent = "motion" | "detail";
 export type CameraResolution = "720p" | "1080p";
-/** What a viewer asks the SFU for on a remote video: Auto follows the tile size. */
-export type ViewerQuality = "auto" | "source" | "720p" | "480p";
+/** What a viewer asks the SFU for on a remote video: Auto follows the tile size, "<height>p" caps it at that layer. */
+export type ViewerQuality = "auto" | "source" | `${number}p`;
 export type VideoCodecName = "av1" | "vp9" | "h264" | "vp8";
 
 export const SCREEN_RESOLUTIONS: readonly ScreenResolution[] = ["720p", "1080p", "1440p", "source"];
 export const SCREEN_FPS: readonly ScreenFps[] = [15, 30, 60];
 export const CAMERA_RESOLUTIONS: readonly CameraResolution[] = ["720p", "1080p"];
+/** The settings default's choices (no stream to read layers from there). */
 export const VIEWER_QUALITIES: readonly ViewerQuality[] = ["auto", "source", "720p", "480p"];
 
 export interface ScreenShareChoice {
@@ -79,6 +80,8 @@ export interface CodecSupport {
   vp8?: boolean;
   /** Codecs the system reports it can encode in hardware (MediaCapabilities `powerEfficient`), once probed. */
   hardware?: Partial<Record<VideoCodecName, boolean>>;
+  /** VP9 / AV1 can be sent as rid simulcast (Chromium 113+). False on WebKit, where LiveKit would fall back to one layer. */
+  svcSimulcast?: boolean;
 }
 
 /**
@@ -152,10 +155,22 @@ export function detectCodecSupport(): CodecSupport {
     void probeHardwareEncoders();
     const caps = typeof RTCRtpSender !== "undefined" ? RTCRtpSender.getCapabilities?.("video") : null;
     const found = codecSupportFrom(caps?.codecs.map(c => c.mimeType));
-    return found.vp8 || found.vp9 || found.h264 || found.av1 ? { ...found, hardware: hardwareEncoders } : { vp8: true };
+    const svcSimulcast = !isWebKit(typeof navigator === "undefined" ? "" : navigator.userAgent);
+    return found.vp8 || found.vp9 || found.h264 || found.av1 ? { ...found, hardware: hardwareEncoders, svcSimulcast } : { vp8: true };
   } catch {
     return { vp8: true };
   }
+}
+
+/** Safari and WKWebView (the macOS app): no getDisplayMedia audio and only legacy SVC encodings. */
+export function isWebKit(userAgent: string): boolean {
+  return /AppleWebKit/.test(userAgent) && !/Chrome|Chromium|Edg\//.test(userAgent);
+}
+
+/** Why a share asked for audio but got none, in the platform's terms. */
+export function missingAudioNote(userAgent: string): string {
+  if (isWebKit(userAgent)) return "Your stream has no sound: this system can't share audio from a screen share.";
+  return 'Your stream has no sound: sound is only shared from a whole screen with "Share system audio" turned on (or a browser tab), not from a window.';
 }
 
 function layer(width: number, height: number, maxBitrate: number, maxFramerate: number): PlainPreset {
@@ -172,25 +187,31 @@ export interface ScreenShareRequest {
   publish: EncodingPlan;
 }
 
+/**
+ * Simulcast layers under a share, lowest first, so viewers on Auto (a small tile, a slow link) switch down instead of
+ * stalling: 360p at up to 30 fps under everything, plus 720p at the share's frame rate under the bigger sizes.
+ */
+export function screenLayers(choice: Pick<ScreenShareChoice, "resolution" | "fps">): PlainPreset[] {
+  const low = layer(640, 360, 500_000, Math.min(choice.fps, 30));
+  return choice.resolution === "720p" ? [low] : [low, layer(1280, 720, SCREEN_BITRATE["720p"][choice.fps], choice.fps)];
+}
+
 export function buildScreenShare(choice: ScreenShareChoice, support: CodecSupport = detectCodecSupport()): ScreenShareRequest {
   const size = dimensionsOf(choice.resolution);
   const content = contentHintOf(choice);
-  const codec = pickCodec(codecOrder(choice.resolution, support.hardware), support);
+  // VP9 / AV1 screen shares go out as rid simulcast with L1T3 per layer. As one SVC stream LiveKit would force a single
+  // spatial layer (and contentHint "motion"), so where that simulcast is unavailable VP8 / H.264 take over.
+  const order = codecOrder(choice.resolution, support.hardware).filter(c => support.svcSimulcast !== false || (c !== "vp9" && c !== "av1"));
+  const codec = pickCodec(order, support);
   const svc = codec === "vp9" || codec === "av1";
   const bitrate = SCREEN_BITRATE[choice.resolution][choice.fps];
-  const lowFps = Math.min(choice.fps, 15);
-  // One lower layer so slow viewers still get a picture: 360p15 under 720p, 720p30 under the bigger sizes (design §4.4).
-  const layers = svc
-    ? []
-    : choice.resolution === "720p"
-      ? [layer(640, 360, 400_000, lowFps)]
-      : [layer(1280, 720, 2_000_000, Math.min(choice.fps, 30))];
+  const layers = screenLayers(choice);
   return {
     capture: { audio: choice.audio, resolution: { ...size, frameRate: choice.fps }, contentHint: content },
     publish: {
       codec,
       backupCodec: backupFor(codec, support),
-      simulcast: !svc && layers.length > 0,
+      simulcast: true,
       scalabilityMode: svc ? "L1T3" : undefined,
       encoding: { maxBitrate: bitrate, maxFramerate: choice.fps },
       layers,
@@ -225,26 +246,45 @@ export function buildCamera(resolution: CameraResolution, support: CodecSupport 
   };
 }
 
+export type LayerQuality = "high" | "medium" | "low";
+
+/** A layer a remote stream is published with (from its TrackInfo). */
+export interface StreamLayer {
+  width: number;
+  height: number;
+  quality: LayerQuality;
+}
+
 /** What a viewer's quality choice becomes on a RemoteTrackPublication. */
-export type ViewerRequest = { kind: "quality"; quality: "high" | "medium" | "low" } | { kind: "dimensions"; width: number; height: number };
+export type ViewerRequest = { kind: "quality"; quality: LayerQuality } | { kind: "dimensions"; width: number; height: number };
 
 /**
  * Auto and Source both ask for the top layer: with adaptive stream on, LiveKit already lowers it to what the tile
  * shows, so Auto = "as big as the tile" and Source = "never less than the tile can show".
- * 720p / 480p cap the layer by dimensions (never above the tile either).
+ * "<height>p" picks the tallest layer not above that height (the smallest when all are); without known layers it caps
+ * the size by 16:9 dimensions (never above the tile either).
  */
-export function viewerRequest(choice: ViewerQuality): ViewerRequest {
-  switch (choice) {
-    case "720p":
-      return { kind: "dimensions", width: 1280, height: 720 };
-    case "480p":
-      return { kind: "dimensions", width: 854, height: 480 };
-    default:
-      return { kind: "quality", quality: "high" };
+export function viewerRequest(choice: ViewerQuality, layers?: readonly StreamLayer[]): ViewerRequest {
+  if (choice === "auto" || choice === "source") return { kind: "quality", quality: "high" };
+  const height = Number.parseInt(choice, 10);
+  if (layers?.length) {
+    const tallestFirst = [...layers].sort((a, b) => b.height - a.height);
+    const fit = tallestFirst.find(l => l.height <= height) ?? tallestFirst[tallestFirst.length - 1];
+    return { kind: "quality", quality: fit.quality };
   }
+  return { kind: "dimensions", width: Math.round((height * 16) / 9), height };
 }
 
-export const VIEWER_QUALITY_LABEL: Record<ViewerQuality, string> = { auto: "Auto", source: "Source", "720p": "720p", "480p": "480p" };
+/** The stream quality menu: Auto, Source and every lower layer the stream really has (the settings list while unknown). */
+export function viewerChoices(layers?: readonly StreamLayer[]): ViewerQuality[] {
+  if (!layers?.length) return [...VIEWER_QUALITIES];
+  const heights = [...new Set(layers.map(l => l.height))].sort((a, b) => b - a);
+  return ["auto", "source", ...heights.slice(1).map(h => `${h}p` as const)];
+}
+
+export function viewerQualityLabel(choice: ViewerQuality): string {
+  return choice === "auto" ? "Auto" : choice === "source" ? "Source" : choice;
+}
 
 export function describeScreenShare(choice: ScreenShareChoice): string {
   return `${RESOLUTION_LABEL[choice.resolution]} · ${choice.fps} fps`;
@@ -260,5 +300,8 @@ export function isCameraResolution(value: unknown): value is CameraResolution {
   return typeof value === "string" && (CAMERA_RESOLUTIONS as readonly string[]).includes(value);
 }
 export function isViewerQuality(value: unknown): value is ViewerQuality {
-  return typeof value === "string" && (VIEWER_QUALITIES as readonly string[]).includes(value);
+  return typeof value === "string" && (value === "auto" || value === "source" || /^[1-9]\d{1,3}p$/.test(value));
+}
+export function isStreamContent(value: unknown): value is StreamContent {
+  return value === "motion" || value === "detail";
 }
