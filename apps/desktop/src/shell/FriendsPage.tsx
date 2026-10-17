@@ -191,8 +191,8 @@ function ActiveCard({ entry }: { entry: ActiveEntry }) {
           {entry.activity && <ActivityLine activity={entry.activity} className="active-card-sub" />}
         </span>
         {(entry.voice || entry.activity) && (
-          <span className={`active-card-icon ${entry.voice ? "active-card-voice" : "active-card-game"}`} aria-hidden="true">
-            {entry.voice ? <Volume2 size={16} /> : entry.activity?.type === 2 ? <BrandIcon icon={siSpotify} size={16} /> : <Gamepad2 size={16} />}
+          <span className={`active-card-icon ${entry.activity ? "active-card-game" : "active-card-voice"}`} aria-hidden="true">
+            {entry.activity ? entry.activity.type === 2 ? <BrandIcon icon={siSpotify} size={16} /> : <Gamepad2 size={16} /> : <Volume2 size={16} />}
           </span>
         )}
       </button>
