@@ -256,7 +256,7 @@ describe('a game', () => {
     const task = net.st('c').task!;
     net.close('c');
     net.open('c');
-    await net.run(300);
+    await net.run(2500); // the leader takes one hi per copy a second, so the retry gets through
     expect(net.st('c')).toMatchObject({ phase: 'play', turn: 1, task: { chain: task.chain, kind: 'draw', text: task.text } });
 
     // b's first upload loses a chunk on the way to the leader; the retry gets through.

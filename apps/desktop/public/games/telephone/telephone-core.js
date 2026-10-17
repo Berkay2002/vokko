@@ -190,6 +190,7 @@ var TelephoneCore = (() => {
     /** @type {string[]} */ let present = [];
     /** @type {number[][]} */ let order = [];
     /** @type {TelephoneChain[]} */ let chains = [];
+    /** @type {Map<string, number>} when each copy last said hi */ const hiSeen = new Map();
 
     const asm = assembler();
     /** @type {{ data: any, to?: string }[]} */ const fast = [];
@@ -379,6 +380,9 @@ var TelephoneCore = (() => {
 
     /** @param {string} from */
     function leaderHi(from) {
+      // One hi per sender per second: a spamming copy must not make the leader queue the same data over and over.
+      if (Date.now() - (hiSeen.get(from) ?? -Infinity) < C.HI_RETRY_MS / 2) return;
+      hiSeen.set(from, Date.now());
       if (!present.includes(from)) present.push(from);
       if (st.phase === "lobby") return broadcastLobby();
       if (st.phase === "play") {
@@ -409,7 +413,7 @@ var TelephoneCore = (() => {
       if (kind === "describe" && prev?.img) Object.assign(task, { img: prev.img });
       out(task, player);
       const url = prev?.img && st.imgs.get(prev.img);
-      if (kind === "describe" && url && player !== me) for (const chunk of imageChunks(st.g, /** @type {string} */ (prev?.img), url)) out(chunk, player, true);
+      if (kind === "describe" && url && player !== me && !queuedFor(player, c)) for (const chunk of imageChunks(st.g, /** @type {string} */ (prev?.img), url)) out(chunk, player, true);
     }
 
     /** The link of a player who sent nothing: a random prompt in turn 0 (a chain needs a start), else a skip. @param {string} id @returns {TelephoneLink} */
