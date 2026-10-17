@@ -84,7 +84,8 @@ The release overlay's `targets` stays `["nsis"]`; Linux passes `--bundles appima
   buttons as on Windows. The tray needs an AppIndicator host (GNOME needs the AppIndicator extension); without one the
   icon is invisible and a window closed to the tray comes back by starting Vokko again (single instance).
 - `vokko://`: the .deb registers it through its `.desktop` file; an AppImage registers itself on every start (`register_all` in
-  `main.rs` when `$APPIMAGE` is set, a `.desktop` file in `~/.local/share/applications`).
+  `main.rs` when `$APPIMAGE` is set: a `vokko-desktop-handler.desktop` file in `~/.local/share/applications`, then
+  `update-desktop-database` and `xdg-mime`, which desktop distros ship; a failure is only logged).
 - `tools/release-linux.sh <version> <out dir>` builds from the checkout's HEAD (sent in as a git bundle; the distro has no GitHub
   credentials), signs the AppImage with `~/.vokko/updater.key` passed through `WSLENV` and copies the AppImage, its `.sig` and
   the .deb to `<out dir>`. It uploads nothing, so running it alone is the dry run.
@@ -100,7 +101,8 @@ wsl --import vokko-linux E:\WSL\vokko-linux E:\WSL\jammy.rootfs.tar.gz --version
 Then as root in the distro: `apt-get install build-essential curl wget file git xdg-utils pkg-config libssl-dev libxdo-dev
 libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev xz-utils`, `useradd -m -s /bin/bash vokko` and
 `[user] default=vokko` in `/etc/wsl.conf`; as `vokko`: rustup (stable, clippy) and Node 22 unpacked to `~/node` (the script puts
-`~/node/bin` and `~/.cargo/bin` on PATH). Ubuntu 22.04 keeps glibc at 2.35, so the binaries run on most current distros.
+`~/node/bin` and `~/.cargo/bin` on PATH). Built on Ubuntu 22.04, the binary needs glibc 2.34 or newer (Debian 12, Ubuntu 22.04,
+Fedora 35 and later).
 Remove it all with `wsl --unregister vokko-linux` and deleting `E:\WSL`.
 
 ## Updater
