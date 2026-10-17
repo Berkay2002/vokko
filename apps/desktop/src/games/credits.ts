@@ -33,4 +33,10 @@ export const GAME_CREDITS: Record<string, GameCredit[]> = {
   "builtin:trivia": [
     { work: "Open Trivia Database (questions)", author: "PIXELTAIL GAMES LLC and contributors", url: "https://opentdb.com", license: "CC-BY-SA-4.0", file: "/games/trivia/LICENSE-opentdb.txt" },
   ],
+  "builtin:crazy-eights": [
+    { work: "uno-game (rule flow reference)", author: "Guilherme Bromonschenkel", url: "https://github.com/guilhermebkel/uno-game", license: "MIT", file: "/games/crazy-eights/LICENSE-uno-game.txt" },
+  ],
+  "builtin:werewolf": [
+    { work: "OpenWerewolf (rules)", author: "James Craster", url: "https://github.com/JamesCraster/OpenWerewolf", license: "Apache-2.0", file: "/games/werewolf/LICENSE-OpenWerewolf.txt" },
+  ],
 };
