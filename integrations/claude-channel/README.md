@@ -152,7 +152,7 @@ Long sessions fill up the context: Claude Code compacts automatically, or run `/
 | `reply` | Send to a chat: `chat_id` + `text`, optionally `reply_to` (message ID) and `files` (absolute paths, max 10, the server's upload limit each). Splits long text at 2000 characters; files go with the first part. |
 | `react` | Add an emoji reaction. Unicode, or `name:id` / `<:name:id>` for custom emoji. |
 | `edit_message` | Edit one of the bot's messages (progress updates). |
-| `fetch_messages` | Recent history, oldest first, up to 100. Lines carry message IDs; `+Natt` marks attachments. Vokko's search isn't open to bots, so this is the only lookback. |
+| `fetch_messages` | Recent history, oldest first, up to 100. Lines carry message IDs; `+Natt` marks attachments. Vokko's search isn't open to bots, so this is the only lookback. In a channel opted in with `--allow`, other senders are left out. |
 | `download_attachment` | Save a message's attachments to `~/.claude/channels/vokko/inbox/` and return the paths. |
 
 Inbound messages show a typing indicator while Claude works. Attachments are listed (name, type, size) but only downloaded when Claude asks.

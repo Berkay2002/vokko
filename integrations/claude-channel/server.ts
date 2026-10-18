@@ -155,11 +155,12 @@ mcp.setRequestHandler(CallToolRequestSchema, async req => {
       case 'fetch_messages': {
         const msgs = await bot.history(args.channel as string, (args.limit as number | undefined) ?? 20)
         const me = bot.me?.id
-        // Tool result is newline-joined; multi-line content would forge adjacent rows. History includes
-        // ungated senders (messages without a mention in an opted-in channel still live in the history).
+        // Tool result is newline-joined; multi-line content would forge adjacent rows. history() drops senders
+        // outside a channel's allowFrom; messages without a mention from allowed senders are still included.
+        // The bot is told apart by id: a user could be named "me".
         const out = msgs
           .map(m => {
-            const who = m.author.id === me ? 'me' : m.author.username
+            const who = m.author.id === me ? `${m.author.username} (you)` : m.author.username
             const atts = m.attachments.length > 0 ? ` +${m.attachments.length}att` : ''
             return `[${m.timestamp}] ${who}: ${m.content.replace(/[\r\n]+/g, ' ⏎ ')}  (id: ${m.id}${atts})`
           })

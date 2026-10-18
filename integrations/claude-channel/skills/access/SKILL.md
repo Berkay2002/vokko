@@ -2,6 +2,7 @@
 name: access
 description: Manage Vokko channel access — approve pairings, edit allowlists, set DM/group policy. Use when the user asks to pair, approve someone, check who's allowed, or change policy for the Vokko channel.
 user-invocable: true
+disable-model-invocation: true
 allowed-tools:
   - Read
   - Write

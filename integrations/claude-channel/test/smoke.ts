@@ -144,8 +144,10 @@ try {
   check(!edited.error && (await latest(owner.token, dm)).content === 'edited by Claude', 'edit_message edits it')
   const reacted = await tool('react', { chat_id: dm, message_id: got?.meta.message_id, emoji: '👍' })
   check(!reacted.error, `react works (${reacted.text})`)
+  const traversal = await tool('react', { chat_id: dm, message_id: `../../${other}/messages/${got?.meta.message_id}`, emoji: '👍' })
+  check(traversal.error && traversal.text.includes('invalid message_id'), 'a path-traversal message_id is refused')
   const history = await tool('fetch_messages', { channel: dm, limit: 10 })
-  check(!history.error && history.text.includes('hello claude') && history.text.includes('me: edited by Claude'), 'fetch_messages lists history oldest-first')
+  check(!history.error && history.text.includes('hello claude') && history.text.includes(' (you): edited by Claude'), 'fetch_messages lists history oldest-first')
   const long = await tool('reply', { chat_id: dm, text: 'x'.repeat(4500) })
   check(/sent 3 parts/.test(long.text), `long replies are chunked (${long.text})`)
 
@@ -196,6 +198,8 @@ try {
   check(inbound.length === count, 'a sender outside the channel allowFrom is dropped')
   await api('POST', `/channels/${general}/messages`, owner.token, { content: `${mention} it is me` })
   check((await fresh(count))?.meta.user_id === owner.id, 'the channel allowFrom sender is delivered')
+  const gh = await tool('fetch_messages', { channel: general, limit: 20 })
+  check(!gh.error && gh.text.includes('it is me') && !gh.text.includes('let me in'), 'fetch_messages leaves out senders outside the channel allowFrom')
 
   // non-allowlisted DM under allowlist policy: silent
   writeAccess({ ...readAccess(), dmPolicy: 'allowlist' })

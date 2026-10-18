@@ -13,7 +13,7 @@
 
 import { randomBytes } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
-import { basename, join, sep } from 'path'
+import { basename, join, resolve as resolvePath, sep } from 'path'
 
 // ---- Vokko wire shapes (the subset used here; apps/desktop/src/api/types.ts is the source of truth) ----
 
@@ -150,6 +150,26 @@ export function nickname(owner: string, botName: string): string {
   return [...owner].slice(0, Math.max(1, 32 - [...suffix].length)).join('').trimEnd() + suffix
 }
 
+/** Throws unless id is a snowflake: ids from tool calls go into URL paths, and fetch collapses `..` and `%2e%2e`. */
+export function snowflake(id: unknown, what = 'id'): string {
+  if (typeof id !== 'string' || !/^\d{1,20}$/.test(id)) throw new Error(`invalid ${what}: ${JSON.stringify(id)}`)
+  return id
+}
+
+const PATH_LITERALS = new Set(['channels', 'messages', 'reactions', '@me', 'attachments', 'typing', 'users', 'applications', 'guilds', 'members'])
+
+/** The REST helper's path check: every segment is a snowflake or a fixed literal (the emoji after
+ * `reactions` excepted: encoded, no dots or slashes), and the query is plain key=value pairs. */
+export function checkPath(path: string): void {
+  const q = path.indexOf('?')
+  const segs = (q < 0 ? path : path.slice(0, q)).split('/')
+  const ok =
+    segs[0] === '' &&
+    segs.slice(1).every((s, i) => /^\d{1,20}$/.test(s) || PATH_LITERALS.has(s) || (segs[i] === 'reactions' && s !== '' && !/[./\\?#]|%2e|%2f|%5c/i.test(s))) &&
+    (q < 0 || /^\w+=\w+(&\w+=\w+)*$/.test(path.slice(q + 1)))
+  if (!ok) throw new Error(`refusing unsafe API path: ${path}`)
+}
+
 // Attachment names are uploader-controlled and land inside [...] annotations and newline-joined tool results.
 export function safeAttName(att: Attachment): string {
   return (att.filename || att.id).replace(/[\[\]\r\n;]/g, '_')
@@ -165,7 +185,8 @@ export class VokkoBot {
   private readonly bootAccess: Access | null
   private readonly channels = new Map<string, Channel>()
   private readonly dmByUser = new Map<string, string>()
-  private ownerName: string | null = null
+  private owner_: User | null = null
+  private pairingFullAt = -Infinity
   private ws: WebSocket | null = null
   private seq: number | null = null
   private sessionId: string | null = null
@@ -237,13 +258,20 @@ export class VokkoBot {
   assertSendable(f: string): void {
     // macOS and Windows file systems are case-insensitive by default: compare folded paths there.
     const fold = (p: string) => (process.platform === 'linux' ? p : p.toLowerCase())
-    let real: string, stateReal: string
-    try {
-      real = fold(realpathSync.native(f))
-      stateReal = fold(realpathSync.native(this.cfg.stateDir))
-    } catch {
-      return // statSync fails properly later; or the state dir is absent and there is nothing to leak
+    const resolve = (p: string) => {
+      try {
+        return fold(realpathSync.native(p))
+      } catch {
+        return null
+      }
     }
+    const real = resolve(f)
+    // /proc/self/environ holds an env-provided token; /dev and /sys are never meant as attachments.
+    // The given path counts too: /dev/stdin may resolve to a pipe realpath can't name.
+    for (const p of [resolvePath(f), real]) if (p && /^\/(proc|dev|sys)(\/|$)/.test(p)) throw new Error(`refusing to send a system pseudo-file: ${f}`)
+    if (!real) return // statSync fails properly later
+    const stateReal = resolve(this.cfg.stateDir)
+    if (!stateReal) return // no state dir: nothing to leak
     const inbox = join(stateReal, 'inbox')
     if (real.startsWith(stateReal + sep) && !real.startsWith(inbox + sep)) {
       throw new Error(`refusing to send channel state: ${f}`)
@@ -280,8 +308,11 @@ export class VokkoBot {
           return { action: 'pair', code, isResend: true }
         }
       }
-      // Cap pending at 3. Extra attempts are silently dropped.
-      if (Object.keys(access.pending).length >= 3) return { action: 'drop' }
+      // Cap pending at 3 (one per sender, above). Extra attempts are dropped and the owner is told.
+      if (Object.keys(access.pending).length >= 3) {
+        this.pairingFull(now)
+        return { action: 'drop' }
+      }
       const code = randomBytes(3).toString('hex')
       access.pending[code] = { senderId, chatId: msg.channel_id, createdAt: now, expiresAt: now + 60 * 60 * 1000, replies: 1 }
       this.saveAccess(access)
@@ -296,6 +327,17 @@ export class VokkoBot {
     if (groupAllowFrom.length > 0 && !groupAllowFrom.includes(senderId)) return { action: 'drop' }
     if ((policy.requireMention ?? true) && !this.isMentioned(msg, access.mentionPatterns)) return { action: 'drop' }
     return { action: 'deliver', access }
+  }
+
+  // Three accounts can hold every pairing slot for an hour: say so, at most once an hour.
+  private pairingFull(now: number): void {
+    if (now - this.pairingFullAt < 60 * 60 * 1000) return
+    this.pairingFullAt = now
+    const text = `Pairing is full: 3 requests are pending, so new ones are dropped until they expire (1 hour). If you don't know them, deny them with ${this.cfg.pairCommand.replace(/ pair$/, '')} deny <code>.`
+    this.cfg.log(`vokko channel: ${text}\n`)
+    this.ownerUser()
+      .then(u => u && this.dmUser(u.id, text))
+      .catch(err => this.cfg.log(`vokko channel: could not tell the owner that pairing is full: ${err}\n`))
   }
 
   private gateKey(channelId: string): string {
@@ -355,6 +397,7 @@ export class VokkoBot {
   // ---- REST ----
 
   async api<T>(method: string, path: string, body?: unknown): Promise<T> {
+    checkPath(path)
     for (let attempt = 0; ; attempt++) {
       const form = body instanceof FormData
       const res = await fetch(`${this.cfg.apiUrl}/api/v1${path}`, {
@@ -374,6 +417,7 @@ export class VokkoBot {
   // ---- outbound gate: tools reach only chats the inbound gate would deliver from ----
 
   async allowedChannel(id: string): Promise<void> {
+    snowflake(id, 'chat_id')
     const access = this.loadAccess()
     const ch = this.channels.get(id)
     if (ch?.type === 1) {
@@ -427,6 +471,7 @@ export class VokkoBot {
 
   async react(chatId: string, messageId: string, emoji: string): Promise<void> {
     await this.allowedChannel(chatId)
+    snowflake(messageId, 'message_id')
     // custom emoji may come as <:name:id> or <a:name:id>; Vokko takes name:id
     const e = emoji.replace(/^<a?:([^:>]+):(\d+)>$/, '$1:$2')
     await this.api('PUT', `/channels/${chatId}/messages/${messageId}/reactions/${encodeURIComponent(e)}/@me`)
@@ -434,36 +479,56 @@ export class VokkoBot {
 
   async edit(chatId: string, messageId: string, text: string): Promise<Message> {
     await this.allowedChannel(chatId)
+    snowflake(messageId, 'message_id')
     return this.api<Message>('PATCH', `/channels/${chatId}/messages/${messageId}`, { content: text })
   }
 
-  /** Newest `limit` messages, oldest first. */
+  /** Whether the inbound gate would let this author through in this chat (ourselves included).
+   * Opted-in channels restricted with an allowFrom list still hold everyone else's messages. */
+  senderAllowed(chatId: string, authorId: string): boolean {
+    if (authorId === this.me?.id) return true
+    const ch = this.channels.get(chatId)
+    if (ch?.type === 1) return true // a DM: the other side passed allowedChannel
+    const allow = this.loadAccess().groups[this.gateKey(chatId)]?.allowFrom ?? []
+    return allow.length === 0 || allow.includes(authorId)
+  }
+
+  /** Newest `limit` messages, oldest first, without senders the gate would drop. */
   async history(chatId: string, limit: number): Promise<Message[]> {
     await this.allowedChannel(chatId)
-    const msgs = await this.api<Message[]>('GET', `/channels/${chatId}/messages?limit=${Math.max(1, Math.min(limit, 100))}`)
-    return msgs.reverse()
+    const msgs = await this.api<Message[]>('GET', `/channels/${chatId}/messages?limit=${Math.max(1, Math.min(Math.floor(limit) || 1, 100))}`)
+    return msgs.filter(m => this.senderAllowed(chatId, m.author.id)).reverse()
   }
 
   async message(chatId: string, messageId: string): Promise<Message> {
     await this.allowedChannel(chatId)
+    snowflake(messageId, 'message_id')
     const [msg] = await this.api<Message[]>('GET', `/channels/${chatId}/messages?around=${messageId}&limit=1`)
     if (msg?.id !== messageId) throw new Error(`message ${messageId} not found`)
+    if (!this.senderAllowed(chatId, msg.author.id)) throw new Error(`message ${messageId} is from a sender not allowlisted in this channel`)
     return msg
   }
 
   /** Saves an attachment into <stateDir>/inbox and returns its path. */
   async download(att: Attachment): Promise<string> {
-    if (att.size > this.maxUploadBytes) throw new Error(`attachment too large: ${(att.size / 1024 / 1024).toFixed(1)}MB`)
-    // The token only goes to our own server, never to wherever an attachment URL might point.
-    const own = new URL(att.url).origin === new URL(this.cfg.apiUrl).origin
-    const res = await fetch(att.url, own ? { headers: { Authorization: `Bot ${this.cfg.token}` } } : {})
-    if (!res.ok) throw new Error(`download ${att.id}: ${res.status}`)
-    const buf = Buffer.from(await res.arrayBuffer())
+    const max = this.maxUploadBytes
+    if (att.size > max) throw new Error(`attachment too large: ${(att.size / 1024 / 1024).toFixed(1)}MB`)
+    // Attachment URLs are capability URLs (and may redirect off-origin when presigned): never send the token.
+    const res = await fetch(att.url)
+    if (!res.ok || !res.body) throw new Error(`download ${att.id}: ${res.status}`)
+    // att.size is the uploader's word: cap what is actually read.
+    const parts: Uint8Array[] = []
+    let total = 0
+    for await (const part of res.body as unknown as AsyncIterable<Uint8Array>) {
+      total += part.length
+      if (total > max) throw new Error(`attachment ${att.id} exceeds ${(max / 1024 / 1024).toFixed(0)}MB`)
+      parts.push(part)
+    }
     const rawExt = att.filename.includes('.') ? att.filename.slice(att.filename.lastIndexOf('.') + 1) : 'bin'
     const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '') || 'bin'
-    const path = join(this.inboxDir, `${Date.now()}-${att.id}.${ext}`)
-    mkdirSync(this.inboxDir, { recursive: true })
-    writeFileSync(path, buf)
+    const path = join(this.inboxDir, `${Date.now()}-${snowflake(att.id, 'attachment id')}.${ext}`)
+    mkdirSync(this.inboxDir, { recursive: true, mode: 0o700 })
+    writeFileSync(path, Buffer.concat(parts), { mode: 0o600 })
     return path
   }
 
@@ -484,17 +549,22 @@ export class VokkoBot {
 
   // ---- nickname ----
 
-  private async owner(): Promise<string | null> {
-    if (this.cfg.ownerName) return this.cfg.ownerName
-    if (this.ownerName) return this.ownerName
+  private async ownerUser(): Promise<User | null> {
+    if (this.owner_) return this.owner_
     try {
       const app = await this.api<{ owner_id: string }>('GET', '/applications/@me')
-      const owner = await this.api<User>('GET', `/users/${app.owner_id}`)
-      this.ownerName = owner.global_name || owner.username
+      this.owner_ = await this.api<User>('GET', `/users/${app.owner_id}`)
     } catch (err) {
-      this.cfg.log(`vokko channel: cannot read the application owner (set VOKKO_OWNER_NAME): ${err}\n`)
+      this.cfg.log(`vokko channel: cannot read the application owner: ${err}\n`)
     }
-    return this.ownerName
+    return this.owner_
+  }
+
+  private async owner(): Promise<string | null> {
+    if (this.cfg.ownerName) return this.cfg.ownerName
+    const u = await this.ownerUser()
+    if (!u) this.cfg.log('vokko channel: set VOKKO_OWNER_NAME to name the bot without /applications/@me\n')
+    return u ? u.global_name || u.username : null
   }
 
   private async setNickname(guild: Guild): Promise<void> {

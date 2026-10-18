@@ -2,6 +2,7 @@
 name: configure
 description: Set up the Vokko channel — save the bot token and server URL, and review access policy. Use when the user pastes a Vokko bot token, asks to configure Vokko, asks "how do I set this up" or "who can reach me," or wants to check channel status.
 user-invocable: true
+disable-model-invocation: true
 allowed-tools:
   - Read
   - Write
