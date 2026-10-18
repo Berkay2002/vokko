@@ -646,21 +646,29 @@ export class VokkoBot {
   private watchBridge(now = Date.now()): void {
     const marker = join(this.cfg.stateDir, BRIDGE_DOWN_MARKER)
     const st = this.loadAccess().guilds === false ? bridgeState(this.cfg.stateDir, now) : 'none'
+    // A marker that cannot be removed (EPERM, EBUSY) is tried again next tick, and "back" waits for it so it is sent once.
+    const clear = (): boolean => {
+      try {
+        rmSync(marker, { force: true })
+        return true
+      } catch (err) {
+        this.cfg.log(`vokko channel: cannot clear the bridge-down notice: ${err}\n`)
+        return false
+      }
+    }
     if (st === 'none') {
       this.downSince = null
-      rmSync(marker, { force: true })
+      clear()
       return
     }
     if (st === 'alive') {
       this.downSince = null
-      if (existsSync(marker)) {
-        rmSync(marker, { force: true })
-        this.notifyOwner('Servers are back on the API bridge.')
-      }
+      if (existsSync(marker) && clear()) this.notifyOwner('Servers are back on the API bridge.')
       return
     }
     this.downSince ??= now
     if (now - this.downSince < BRIDGE_DOWN_NOTICE_MS || existsSync(marker)) return
+    if (!this.ownerId) return // nobody to tell: a marker now would turn into a "back" without a "down"
     try {
       writeFileSync(`${marker}.tmp`, JSON.stringify({ at: now }), { mode: 0o600 })
       renameSync(`${marker}.tmp`, marker)

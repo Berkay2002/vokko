@@ -299,6 +299,20 @@ test("publicChannel: @everyone's view bit decides, a thread uses its parent, a p
   expect(calls.length).toBe(before) // the cached guild state is enough
 })
 
+test('no owner known yet: a long outage writes no marker, so no lone "back" follows', async () => {
+  const { bot, dir } = makeBot({ guilds: false })
+  respond = () => Response.json({ id: '1' })
+  const T = Date.now()
+  writeFileSync(join(dir, 'bridge-state.json'), JSON.stringify({ stoppedAt: T }))
+  ;(bot as any).watchBridge(T)
+  ;(bot as any).watchBridge(T + 70_000)
+  expect(existsSync(join(dir, 'bridge-down-notified.json'))).toBe(false)
+  beat(dir, T + 80_000)
+  ;(bot as any).watchBridge(T + 80_000)
+  await settle()
+  expect(calls.filter(c => c.url.endsWith(`/channels/${DM}/messages`))).toEqual([])
+})
+
 test('READY calls onReady once the bot counts as connected', () => {
   const { bot } = makeBot()
   respond = () => Response.json({})
