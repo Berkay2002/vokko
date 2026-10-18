@@ -217,7 +217,7 @@ async fn run(state: &AppState, user_id: i64, params: &Params, channels: Vec<i64>
 
 /// Channels of the guild where `user_id` has VIEW_CHANNEL and READ_MESSAGE_HISTORY after overwrites and timeout, plus the threads
 /// of those channels (archived ones too): private threads only when the caller is a member or holds MANAGE_THREADS.
-async fn readable_guild_channels(state: &AppState, user_id: i64, guild_id: i64) -> ApiResult<Vec<i64>> {
+pub(super) async fn readable_guild_channels(state: &AppState, user_id: i64, guild_id: i64) -> ApiResult<Vec<i64>> {
     let wanted = VIEW_CHANNEL | READ_MESSAGE_HISTORY;
     let parents: HashMap<i64, u64> = access::guild_channels_with_permissions(state, user_id, guild_id)
         .await?

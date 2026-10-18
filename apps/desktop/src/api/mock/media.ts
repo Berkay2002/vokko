@@ -311,6 +311,45 @@ route("DELETE", `/channels/${ID}/messages/${ID}/bookmark`, ({ viewer, params }) 
   return undefined;
 });
 
+// ---- recent mentions (Inbox > Mentions) ----
+
+const boolParam = (query: URLSearchParams, key: string): boolean => {
+  const raw = query.get(key);
+  if (raw === null || raw === "true") return true;
+  return raw === "false" ? false : invalid(key, "Must be true or false.");
+};
+
+route("GET", "/users/@me/mentions", ({ viewer, query }) => {
+  const me = viewer.user.id;
+  const limitRaw = query.get("limit");
+  const limit = limitRaw === null ? 25 : Number(limitRaw);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) return bodyError("limit", "Must be between 1 and 100.");
+  const before = query.get("before");
+  if (before !== null && !/^\d+$/.test(before)) return invalid("before", "Must be a snowflake.");
+  const guildId = query.get("guild_id");
+  const [roles, everyone] = [boolParam(query, "roles"), boolParam(query, "everyone")];
+  const dismissed = db.mentionDismissals.get(me);
+  const hits: MockMessage[] = [];
+  for (const channel of db.channels.values()) {
+    if (!channel.guild_id || (guildId && channel.guild_id !== guildId) || !canReadMessages(channel, me)) continue;
+    const myRoles = db.guilds.get(channel.guild_id)?.members.get(me)?.roles ?? [];
+    for (const m of sortedMessages(channel.id)) {
+      if (m.author_id === me || dismissed?.has(m.id) || (before && BigInt(m.id) >= BigInt(before))) continue;
+      const byRole = roles && [...m.content.matchAll(/<@&(\d+)>/g)].some(r => myRoles.includes(r[1] ?? ""));
+      if (m.mention_ids.includes(me) || (everyone && m.mention_everyone) || byRole) hits.push(m);
+    }
+  }
+  hits.sort((a, b) => (BigInt(b.id) > BigInt(a.id) ? 1 : -1));
+  return hits.slice(0, limit).map(m => messageFor(m, me));
+});
+
+route("DELETE", `/users/@me/mentions/${ID}`, ({ viewer, params }) => {
+  const set = db.mentionDismissals.get(viewer.user.id) ?? new Set<string>();
+  set.add(params[0] ?? "");
+  db.mentionDismissals.set(viewer.user.id, set);
+  return undefined;
+});
+
 // ---- reminders ----
 
 const timers = new Map<string, ReturnType<typeof setTimeout>>();

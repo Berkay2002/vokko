@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
-import { AtSign, Hash, Inbox as InboxIcon } from "lucide-react";
+import { Hash, Inbox as InboxIcon } from "lucide-react";
 import { channelMentionCount, dmName, isChannelUnread, useStore } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
 import { Popout } from "../ui";
 import { markChannelRead } from "./actions";
-import { ReminderList, SavedMessages } from "../media/InboxLists";
+import { MentionList, ReminderList, SavedMessages } from "../media/InboxLists";
 import { closeModal } from "./modalStore";
 import { dmPath, go, guildPath } from "./nav";
 
@@ -17,14 +17,14 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "reminders", label: "Reminders" },
 ];
 
-/** Inbox popout under the title-bar button (above the account card on a phone). Unreads and Mentions come from read states, Bookmarks and Reminders from the server. */
+/** Inbox popout under the title-bar button (above the account card on a phone). Unreads come from read states, Mentions, Bookmarks and Reminders from the server. */
 export function InboxPopout({ anchor, open, side = "bottom" }: { anchor: HTMLElement | null; open: boolean; side?: "top" | "bottom" }) {
   const [tab, setTab] = useState<Tab>("unreads");
   const channels = useStore(s => s.channels);
   const readStates = useStore(s => s.readStates);
   const guilds = useStore(s => s.guilds);
   const rows = useMemo(() => {
-    if (!open) return [];
+    if (!open || tab !== "unreads") return [];
     const state = { channels, readStates } as Parameters<typeof isChannelUnread>[0];
     const out: { channel: Channel; guildName: string | null; mentions: number }[] = [];
     for (const channel of Object.values(channels)) {
@@ -33,8 +33,7 @@ export function InboxPopout({ anchor, open, side = "bottom" }: { anchor: HTMLEle
       out.push({ channel, guildName: channel.guild_id ? (guilds[channel.guild_id]?.name ?? null) : null, mentions: channelMentionCount(state, channel.id) });
     }
     return out;
-  }, [open, channels, readStates, guilds]);
-  const list = tab === "mentions" ? rows.filter(r => r.mentions > 0) : rows;
+  }, [open, tab, channels, readStates, guilds]);
 
   return (
     <Popout anchor={anchor} open={open} onClose={closeModal} side={side} align="end" gap={side === "top" ? 8 : 4} className="inbox-popout">
@@ -50,15 +49,15 @@ export function InboxPopout({ anchor, open, side = "bottom" }: { anchor: HTMLEle
         ))}
       </div>
       <div className="inbox-body">
-        {(tab === "unreads" || tab === "mentions") && list.length === 0 && (
+        {tab === "unreads" && rows.length === 0 && (
           <div className="inbox-empty">
-            {tab === "unreads" ? <InboxIcon size={40} /> : <AtSign size={40} />}
-            <div className="inbox-empty-title">{tab === "unreads" ? "You're all caught up" : "No mentions"}</div>
-            <div className="inbox-empty-body">{tab === "unreads" ? "Channels with new messages will show up here." : "Messages that mention you will show up here."}</div>
+            <InboxIcon size={40} />
+            <div className="inbox-empty-title">You're all caught up</div>
+            <div className="inbox-empty-body">Channels with new messages will show up here.</div>
           </div>
         )}
-        {(tab === "unreads" || tab === "mentions") &&
-          list.map(({ channel, guildName, mentions }) => {
+        {tab === "unreads" &&
+          rows.map(({ channel, guildName, mentions }) => {
             const guildId = channel.guild_id;
             const name = guildId ? (channel.name ?? "") : dmName(channel);
             return (
@@ -84,6 +83,7 @@ export function InboxPopout({ anchor, open, side = "bottom" }: { anchor: HTMLEle
               </div>
             );
           })}
+        {tab === "mentions" && <MentionList onNavigate={closeModal} />}
         {tab === "bookmarks" && <SavedMessages onNavigate={closeModal} />}
         {tab === "reminders" && <ReminderList onNavigate={closeModal} />}
       </div>

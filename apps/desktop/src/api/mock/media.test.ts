@@ -53,7 +53,7 @@ function addMember(guild: string, who: string): void {
 beforeEach(() => {
   events.length = 0;
   clearReminderTimers();
-  for (const map of [db.accounts, db.channels, db.messages, db.guilds, db.invites, db.bans, db.pending, db.stickers, db.gifFavorites, db.bookmarks, db.reminders] as Map<string, unknown>[]) map.clear();
+  for (const map of [db.accounts, db.channels, db.messages, db.guilds, db.invites, db.bans, db.pending, db.stickers, db.gifFavorites, db.bookmarks, db.mentionDismissals, db.reminders] as Map<string, unknown>[]) map.clear();
   db.gifProvider = "klipy";
   for (const name of ["owner", "member", "outsider"]) ids[name] = createAccount({ username: name }).user.id;
   guildId = createGuildRecord(ids.owner!, "Media guild");
@@ -421,6 +421,28 @@ describe("bookmarks", () => {
     for (let i = 0; i < 251; i += 1) list.push(addMessage({ channel, author_id: ids.owner!, content: `m${i}`, silent: true }));
     for (const m of list.slice(0, 250)) call("member", "PUT", `/channels/${general}/messages/${m.id}/bookmark`);
     expect(errorOf(() => call("member", "PUT", `/channels/${general}/messages/${list[250]!.id}/bookmark`))).toEqual({ status: 400, code: 30090 });
+  });
+});
+
+describe("recent mentions", () => {
+  it("lists direct, role and @everyone mentions newest first, filters them and forgets dismissed ones", () => {
+    db.guilds.get(guildId)!.members.get(ids.member!)!.roles = ["77"];
+    const direct = say("owner", general, `hi <@${ids.member}>`);
+    say("owner", general, "nothing");
+    const role = say("owner", general, "<@&77> read this");
+    const everyone = say("owner", general, "@everyone meeting");
+    say("member", general, `me <@${ids.member}>`);
+    const list = (q = "") => (call("member", "GET", `/users/@me/mentions${q}`) as Message[]).map(m => m.id);
+    expect(list()).toEqual([everyone.id, role.id, direct.id]);
+    expect(list("?everyone=false&roles=false")).toEqual([direct.id]);
+    expect(list(`?before=${everyone.id}&limit=1`)).toEqual([role.id]);
+    expect(list(`?guild_id=${otherGuildId}`)).toEqual([]);
+    expect(call("member", "DELETE", `/users/@me/mentions/${role.id}`)).toBeUndefined();
+    expect(list()).toEqual([everyone.id, direct.id]);
+    expect(errorOf(() => call("member", "GET", "/users/@me/mentions?limit=0"))).toEqual({ status: 400, code: 50035 });
+    // losing the channel hides them
+    db.channels.get(general)!.permission_overwrites = [{ id: guildId, type: OverwriteType.Role, allow: "0", deny: Perm.VIEW_CHANNEL.toString() }];
+    expect(list()).toEqual([]);
   });
 });
 

@@ -8,3 +8,4 @@ export { messageStore } from '../chat/messageStore';
 export { chatToast } from '../chat/toast';
 export { Modal, Popout, Tooltip } from '../ui';
 export { AnimatedImage, AnimatedVideo } from '../ui/AnimatedMedia';
+export { Avatar } from '../chat/Avatar';

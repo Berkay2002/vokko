@@ -393,3 +393,42 @@ test('stickers and GIF links in messages: a plain URL stays text, a forward of a
   await expect(forwarded.locator('.media-gif img')).toBeVisible();
   await expect(forwarded).not.toContainText('https://');
 });
+
+test.describe('inbox mentions', () => {
+  test('lists mention messages that stay after reading, filters @everyone, jumps and removes one', async ({ page }) => {
+    await openChannel(page, 'general');
+    const general = await page.evaluate(() => (window as unknown as Win).__vokkoMock.channelIdByName('general')!);
+    const me = await page.evaluate(() => (window as unknown as { __vokko: { appStore: { getState(): { me: { id: string } | null } } } }).__vokko.appStore.getState().me!.id);
+    const stamp = Date.now().toString(36);
+    await page.evaluate(([c, id, s]) => {
+      const mock = (window as unknown as Win).__vokkoMock;
+      mock.say(c!, 'alice', `direct ping <@${id}> ${s}`);
+      mock.say(c!, 'bob', `@everyone all hands ${s}`);
+    }, [general, me, stamp]);
+    await page.locator('.chat-msg', { hasText: `all hands ${stamp}` }).waitFor(); // the open channel is read now
+
+    await page.getByRole('button', { name: 'Inbox' }).click();
+    await page.getByRole('tab', { name: 'Mentions' }).click();
+    const inbox = page.locator('.inbox-popout');
+    const rows = inbox.getByTestId('mention');
+    await expect(rows.first()).toContainText(`all hands ${stamp}`);
+    await expect(rows.nth(1)).toContainText(`direct ping`);
+    await expect(inbox.locator('.media-mention-where').first()).toContainText('#general');
+    await shot(page, 'inbox-mentions');
+
+    await inbox.getByRole('button', { name: 'Include @everyone' }).click();
+    await expect(rows.filter({ hasText: `all hands ${stamp}` })).toHaveCount(0);
+    await expect(rows.first()).toContainText(`direct ping`);
+    await inbox.getByRole('button', { name: 'Include @everyone' }).click();
+    await expect(rows.first()).toContainText(`all hands ${stamp}`);
+
+    await rows.first().getByRole('button', { name: 'Remove mention' }).click();
+    await expect(rows.filter({ hasText: `all hands ${stamp}` })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Inbox' }).click();
+    await page.getByRole('tab', { name: 'Mentions' }).click();
+    await expect(rows.first()).toContainText(`direct ping`);
+    await rows.first().getByRole('button', { name: /^Jump to message by/ }).click();
+    await expect(page.locator('.chat-msg', { hasText: `direct ping` }).last()).toBeVisible();
+  });
+});

@@ -142,6 +142,8 @@ export interface Db {
   recentBanners: Map<string, string[]>;
   /** user id -> "channel:message" -> saved_at ISO */
   bookmarks: Map<string, Map<string, string>>;
+  /** user id -> message ids removed from Inbox > Mentions */
+  mentionDismissals: Map<string, Set<string>>;
   /** reminder id -> reminder */
   reminders: Map<string, MockReminder>;
   /** What GET /gifs/* answers with; "none" = no provider configured. */
@@ -164,6 +166,7 @@ export const db: Db = {
   recentAvatars: new Map(),
   recentBanners: new Map(),
   bookmarks: new Map(),
+  mentionDismissals: new Map(),
   reminders: new Map(),
   gifProvider: "klipy",
 };
