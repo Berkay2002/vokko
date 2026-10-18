@@ -31,7 +31,7 @@ pub fn routes() -> Router<AppState> {
     Router::new().route("/bug-reports", post(create).layer(DefaultBodyLimit::max(MAX_BODY_BYTES)))
 }
 
-fn bounded(field: &str, value: &str, max: usize) -> ApiResult<()> {
+pub(crate) fn bounded(field: &str, value: &str, max: usize) -> ApiResult<()> {
     if value.chars().count() > max {
         return Err(ApiErr::invalid(field, &format!("Must be at most {max} characters.")));
     }
@@ -81,6 +81,12 @@ pub async fn sweep(state: &AppState) -> Result<u64, sqlx::Error> {
     Ok(done.rows_affected())
 }
 
+/// Deletes crash reports (routes/crash_reports.rs) older than the same retention period; returns how many went.
+pub async fn sweep_crashes(state: &AppState) -> Result<u64, sqlx::Error> {
+    let done = sqlx::query("DELETE FROM crash_reports WHERE created_at < now() - make_interval(days => $1)").bind(RETENTION_DAYS).execute(&state.db).await?;
+    Ok(done.rows_affected())
+}
+
 pub fn spawn_sweeper(state: AppState) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(SWEEP_INTERVAL);
@@ -90,6 +96,11 @@ pub fn spawn_sweeper(state: AppState) {
                 Ok(0) => {}
                 Ok(count) => tracing::info!("deleted {count} problem reports past retention"),
                 Err(error) => tracing::warn!("problem report sweep failed: {error:?}"),
+            }
+            match sweep_crashes(&state).await {
+                Ok(0) => {}
+                Ok(count) => tracing::info!("deleted {count} crash reports past retention"),
+                Err(error) => tracing::warn!("crash report sweep failed: {error:?}"),
             }
         }
     });

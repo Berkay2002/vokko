@@ -24,6 +24,7 @@ import { preloadSettings } from "./shell/Modals";
 import { installStaleChunkReload } from "./shell/staleChunks";
 import { preloadLazyModules } from "./ui/lazyModule";
 import { startNotify } from "./notify";
+import { installCrashReporter } from "./report/crashReporter";
 import { installLogCapture } from "./report/logBuffer";
 import { startThreadMuteMigration } from "./threads/muteMigration";
 import "./styles/tokens.css";
@@ -57,6 +58,7 @@ import "./soundboard";
 
 installStaleChunkReload(); // a tab left open across a redeploy reloads (or offers to) when an old chunk is gone
 installLogCapture(); // console warnings/errors feed "Report a problem" (scrubbed, kept in memory)
+installCrashReporter(); // uncaught errors and saved desktop panics go to POST /crash-reports (opt-out in Data & Privacy)
 
 // Mock mode only: expose internals to Playwright scripts and the console (no effect in real builds).
 if (MOCK) (window as unknown as { __vokko: unknown }).__vokko = { gateway, desktop, messageStore, ...rest, ...store };

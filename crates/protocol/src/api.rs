@@ -3994,6 +3994,37 @@ pub struct BugReportCreated {
     pub id: Snowflake,
 }
 
+/// What raised a crash report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrashKind {
+    /// An uncaught JS error (`window.onerror`).
+    Error,
+    /// An unhandled promise rejection.
+    UnhandledRejection,
+    /// A Rust panic in the desktop shell, sent on the next start.
+    Panic,
+}
+
+/// `POST /crash-reports`: an automatic error report (opt-out in Settings > Data & Privacy). No user id, message text or other
+/// personal data is stored; the whole body is capped at 32 KiB.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CreateCrashReportRequest {
+    pub kind: CrashKind,
+    /// Client version, at most 64 characters.
+    pub app_version: String,
+    /// Operating system and browser, at most 256 characters.
+    pub os: String,
+    /// The client route with ids replaced (`/channels/:id/:id`), at most 256 characters.
+    #[serde(default)]
+    pub route: String,
+    /// The error message, 1-1000 characters.
+    pub message: String,
+    /// Stack trace or panic location, scrubbed by the client, at most 16,000 characters.
+    #[serde(default)]
+    pub stack: String,
+}
+
 /// `PATCH /guilds/{id}/reports/{report_id}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpdateReportRequest {

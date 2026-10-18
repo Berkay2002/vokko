@@ -184,6 +184,7 @@ export const DEVICE_LOCAL: readonly PrefKey[] = [
   "streamAttenuationStrength",
   // Diagnostics
   "debugLogging",
+  "sendCrashReports",
 ];
 
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);

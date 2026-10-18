@@ -426,6 +426,18 @@ Vokko-only: Help menu (title bar and the macOS Help menu), Settings > Advanced >
 - `logs`: the client's last 500 console warning/error, uncaught error and voice/LiveKit event lines, each at most 1000 characters. The client scrubs them before storing (`apps/desktop/src/report/logBuffer.ts`: JWTs, `Bearer`/`Bot` headers, any `token`/`secret`/`password`/`signature`/`sig`/`auth*`/`api_key`/`cookie`/`session`/`credential`/`ticket` key's value, OAuth `code`/`state`, and long strings mixing letters and digits) and drops `content` fields of logged objects. The server also replaces the caller's own token wherever it appears.
 - Stored with the user id and time; deleted 30 days after creation (hourly sweep). Deleting the account deletes its reports.
 
+## Crash reports
+
+Vokko-only: the client sends uncaught JS errors, unhandled promise rejections and (on the next start) Rust panics of the desktop shell automatically, unless the user turns off Settings > Data & Privacy > "Send crash reports" (`sendCrashReports`, on by default). For the instance operator; read with psql (self-hosting.md "Crash reports").
+
+| Method | Path | Body → Response |
+|---|---|---|
+| POST | /crash-reports | `CreateCrashReportRequest` `{kind, app_version, os, route, message, stack}` → 204. Signed in (401 without a token). `kind` is `error`, `unhandled_rejection` or `panic`; `message` trimmed, 1-1000 characters; `app_version` at most 64, `os` and `route` at most 256, `stack` at most 16,000 (400 50035 on the field). The whole body is capped at 32 KiB (413 40005). Rate limit per user: 10 reports, then one a minute (429 `RateLimitError`) |
+
+- No user id is stored. The server replaces every run of 5+ digits in `route` with `:id` (the client does too) and the caller's own token anywhere in the row with `[redacted]`; the client scrubs `message` and `stack` like the problem-report log (`report/logBuffer.ts`) and never sends message text.
+- The client sends each distinct error once per session, at most 10 per session, and drops `ResizeObserver loop` and opaque `Script error.` noise.
+- Deleted 30 days after creation (the problem-report sweep).
+
 ## Apply to Join (join requests, Server Settings > Access)
 
 Discord's member verification form and guild join requests. A guild's `join_mode` (also on `Invite.guild`) is `0` Invite Only (default) or `1` Apply to Join; MANAGE_GUILD switches it through PATCH /guilds/{id} `{join_mode}` (other values → 400 50035), audit key `join_mode`.
