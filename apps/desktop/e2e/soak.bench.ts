@@ -91,7 +91,7 @@ function topSelf(profile: { nodes: { id: number; callFrame: { functionName: stri
 async function setUp(page: Page): Promise<{ voice: string; text: string }> {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.getByRole('link', { name: /^Sam's server/ }).click();
-  await page.getByRole('list', { name: 'Channels' }).waitFor();
+  await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
   const ids = await page.evaluate(() => {
     const m = (window as unknown as Win).__vokkoMock;
     return { voice: m.channelIdByName('General')!, text: m.channelIdByName('general')! };

@@ -14,6 +14,10 @@ import { compareIds, formatDivider, formatTime, sameDay } from './util';
 
 export interface MessageListHandle {
   scrollToBottom(): void;
+  /** Notes the focused message row (and its neighbours, for a delete) before an edit or delete takes the focus; clears it otherwise. */
+  rememberFocus(): void;
+  /** Focuses the remembered row, or the next then previous one when it is gone. False when no row was remembered. */
+  restoreFocus(): boolean;
 }
 
 interface Props {
@@ -51,6 +55,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   const [farFromBottom, setFarFromBottom] = useState(false);
   // Roving tabindex: the message that holds the list's one tab stop, by id so it survives new messages and pagination.
   const [activeId, setActiveId] = useState<Snowflake | null>(null);
+  const returnTo = useRef<Snowflake[] | null>(null);
 
   const rows = useMemo<Row[]>(
     () => buildRows(state, formatDivider, sameDay, chat.me.id),
@@ -66,6 +71,20 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       stick.current = true;
       const toEnd = () => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; };
       requestAnimationFrame(() => { toEnd(); requestAnimationFrame(toEnd); });
+    },
+    rememberFocus() {
+      const id = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>('.chat-msg[data-message-id]')?.dataset.messageId;
+      const i = id ? rowsRef.current.findIndex(r => r.message.id === id) : -1;
+      returnTo.current = i < 0 ? null : [i, i + 1, i - 1].flatMap(j => rowsRef.current[j]?.message.id ?? []);
+    },
+    restoreFocus() {
+      const ids = returnTo.current;
+      returnTo.current = null;
+      if (!ids) return false;
+      const index = ids.map(id => rowsRef.current.findIndex(r => r.message.id === id)).find(i => i >= 0);
+      if (index === undefined) return false;
+      focusRow(index);
+      return true;
     },
   }), []);
 

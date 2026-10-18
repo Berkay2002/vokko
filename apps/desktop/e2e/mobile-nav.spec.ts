@@ -192,7 +192,8 @@ test.describe(`${width}x${height}`, () => {
     await leaveTwice(page, 'inbox', {
       open: () => page.locator('.user-panel').getByRole('button', { name: 'Inbox' }).tap(),
       view: page.locator('.inbox-popout'),
-      button: page.locator('.user-panel').getByRole('button', { name: 'Inbox' }),
+      // a bottom sheet over the account card, closed from its grabber like the profile sheet
+      button: page.getByRole('dialog', { name: 'Inbox' }).locator('.sheet-grabber'),
       back: () => expect(page.locator('.sidebar')).toBeVisible(),
     });
     const sheet = page.getByRole('dialog', { name: 'User profile' });

@@ -462,7 +462,7 @@
   width: 100%;
   margin-bottom: 12px;
   background: var(--background-base-lowest);
-  color: var(--brand-500, #5865f2);
+  color: var(--brand-500);
 }
 
 .voice-quality-axis {
@@ -973,7 +973,7 @@
 
 /* nobody here and we are not connected: a blurple glow rising from the bottom edge */
 .voice-page.empty {
-  background: radial-gradient(ellipse 80% 55% at 50% 100%, color-mix(in srgb, var(--brand-500, #5865f2) 65%, transparent), transparent 80%), var(--background-base-lowest, #000);
+  background: radial-gradient(ellipse 80% 55% at 50% 100%, color-mix(in srgb, var(--brand-500) 65%, transparent), transparent 80%), var(--background-base-lowest, #000);
 }
 
 .voice-empty-state {
@@ -1785,4 +1785,172 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* ---- Activities shelf (ActivityShelf.tsx): 3 columns of cover cards, scrolling inside a fixed height ---- */
+.activity-shelf {
+  display: flex;
+  flex-direction: column;
+  width: min(636px, calc(100vw - 16px));
+  border: 1px solid var(--border-subtle);
+  background: var(--background-surface-high);
+}
+
+.activity-shelf-header {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 20px 56px 12px 24px;
+}
+
+.activity-shelf-title {
+  color: var(--text-strong);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.activity-shelf-subtitle {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.activity-shelf-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  color: var(--interactive-icon-default);
+}
+
+.activity-shelf-close:hover {
+  background: var(--interactive-background-hover);
+  color: var(--interactive-icon-hover);
+}
+
+.activity-shelf-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+  height: 452px;
+  max-height: calc(100dvh - 180px);
+  padding: 4px 16px 8px 24px;
+  overflow-y: auto;
+  align-content: start;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thin-thumb) transparent;
+}
+
+.shelf-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 0 0 8px;
+  border-radius: var(--radius-md);
+  color: var(--text-default);
+  text-align: left;
+}
+
+.shelf-card[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.shelf-card-cover {
+  position: relative;
+  display: block;
+  margin-bottom: 8px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  aspect-ratio: 16 / 9;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color 0.1s;
+}
+
+.shelf-card:not([aria-disabled="true"]):hover .shelf-card-cover,
+.shelf-card:focus-visible .shelf-card-cover,
+.shelf-card.current .shelf-card-cover {
+  outline-color: var(--brand-500);
+}
+
+.shelf-card:focus-visible {
+  outline: none;
+}
+
+.shelf-card-art {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  align-items: center;
+  justify-content: center;
+}
+
+.shelf-card-art.fallback {
+  background: linear-gradient(135deg, hsl(var(--activity-hue) 55% 32%), hsl(calc(var(--activity-hue) + 40) 60% 18%));
+  color: #fff;
+}
+
+.shelf-card-pin {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 3px;
+  border-radius: var(--radius-sm);
+  background: rgb(0 0 0 / 55%);
+  color: #f0b232;
+  box-sizing: content-box;
+}
+
+.shelf-card-name {
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shelf-card-sub {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.activity-shelf-footer {
+  padding: 8px 24px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.activity-shelf-credits {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.activity-shelf-credits:hover {
+  color: var(--text-default);
+}
+
+/* phone: the shelf is a bottom sheet (Popout `sheet`); two columns and the sheet scrolls instead of the grid */
+.sheet .popout-sheet.activity-shelf .activity-shelf-header {
+  padding: 0 40px 12px 0;
+}
+
+.sheet .popout-sheet.activity-shelf .activity-shelf-close {
+  display: none;
+}
+
+.sheet .popout-sheet.activity-shelf .activity-shelf-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  height: auto;
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+}
+
+.sheet .popout-sheet.activity-shelf .activity-shelf-footer {
+  padding: 8px 0 0;
 }

@@ -6,3 +6,5 @@
 .sticker-row-actions { display: flex; gap: 8px; }
 .sticker-row-delete { opacity: 1; }
 .sticker-row-error { grid-column: 1 / -1; margin: 0; }
+.sticker-file-name { font-size: 14px; font-weight: 500; color: var(--text-default); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sticker-form-actions { display: flex; gap: 8px; align-items: center; }

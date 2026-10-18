@@ -192,7 +192,7 @@ for (const [width, wraps] of [[390, true], [1100, true], [1440, false]] as const
       await openChannel(page, 'support'); // a forum channel
       const box = async (sel: string) => (await page.locator(sel).boundingBox())!;
       const search = await page.getByLabel('Search posts').boundingBox().then(b => b!);
-      const sort = await box('.forum-sort');
+      const sort = await box(width < 768 ? '.forum-sort-button' : '.forum-sort'); // phone: an icon that opens a sheet (cbbd8d57)
       const add = await box('.forum-new-button');
       await expect(page.locator('.forum-new-button')).toBeVisible();
       for (const b of [search, sort, add]) expect(b.x + b.width).toBeLessThanOrEqual(width);

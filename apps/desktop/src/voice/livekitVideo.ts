@@ -21,7 +21,8 @@ import { hideShareBar } from "../desktop/window";
 import type { VideoHandle, VideoSource } from "./mediaStore";
 import type { CameraStart, TransportCallbacks } from "./transport";
 import { openCamera, type CameraSession } from "./video/cameraSession";
-import { buildCamera, buildScreenShare, detectCodecSupport, serverTakesSvcSimulcast, viewerRequest, type CameraResolution, type EncodingPlan, type LayerQuality, type PlainPreset, type ScreenShareChoice, type StreamLayer, type ViewerQuality } from "./video/options";
+import { installHardwareH264Preference } from "./video/h264";
+import { buildCamera, buildScreenShare, detectCodecSupport, hardwareH264Profiles, serverTakesSvcSimulcast, viewerRequest, type CameraResolution, type EncodingPlan, type LayerQuality, type PlainPreset, type ScreenShareChoice, type StreamLayer, type ViewerQuality } from "./video/options";
 
 const toPresets = (layers: PlainPreset[]): VideoPreset[] => layers.map(l => new VideoPreset({ width: l.width, height: l.height, maxBitrate: l.maxBitrate, maxFramerate: l.maxFramerate }));
 
@@ -52,7 +53,9 @@ export function layersOf(pub: Pick<RemoteTrackPublication, "trackInfo">): Stream
 }
 
 // An SFU too old for VP9 / AV1 simulcast would get one layer: VP8 / H.264 simulcast instead, as on WebKit.
+// H.264 goes out in a profile the GPU encodes (h264.ts), installed before the share's first offer.
 function screenRequest(room: Room, choice: ScreenShareChoice) {
+  installHardwareH264Preference(hardwareH264Profiles);
   const support = detectCodecSupport();
   return buildScreenShare(choice, { ...support, svcSimulcast: support.svcSimulcast !== false && serverTakesSvcSimulcast(room.serverInfo?.version) });
 }

@@ -1,0 +1,11 @@
+{
+  "name": "vokko",
+  "owner": { "name": "Vokko" },
+  "plugins": [
+    {
+      "name": "vokko",
+      "source": "./claude-channel",
+      "description": "Your own Claude as a Vokko bot (Claude Code channel)."
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+Vokko channel for Claude Code
+
+This is a port of the Discord channel plugin from Anthropic's
+claude-plugins-official repository (external_plugins/discord),
+Copyright Anthropic, licensed under the Apache License, Version 2.0
+(see LICENSE). Changes: talks to Vokko's bot API with fetch + WebSocket
+instead of discord.js, state in ~/.claude/channels/vokko/, VOKKO_* settings,
+the "<owner>'s <name>" guild nickname, text-only permission prompts (Vokko
+has no message buttons) that only allowlisted users can answer, and the
+Vokko side split out into vokko.ts.

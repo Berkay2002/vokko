@@ -69,7 +69,8 @@ const ALLOWED: &[(&str, u8)] = &[
     ("/channels/{id}/webhooks", GET | POST),
     ("/invites/{code}", GET),
     ("/attachments/{id}/{key}/{filename}", GET),
-    // its application: commands, interaction responses, webhooks
+    // its application: itself (owner_id), commands, interaction responses, webhooks
+    ("/applications/@me", GET),
     ("/applications/{id}/commands", GET | PUT | POST),
     ("/applications/{id}/commands/{cmd}", GET | PATCH | DELETE),
     ("/applications/{id}/guilds/{gid}/commands", GET | PUT | POST),
