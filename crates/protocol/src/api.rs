@@ -2562,6 +2562,12 @@ pub struct PinnedMessagesPage {
 pub struct MessageSearchResponse {
     pub total_results: u64,
     pub messages: Vec<Vec<Message>>,
+    /// The threads (and forum posts) the hits in `messages` belong to, so a client that has not seen them can label and open them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threads: Vec<Channel>,
+    /// The caller's memberships among `threads`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<ThreadMember>,
 }
 
 /// `MemberSearchRequest.sort` (Discord's member-safety sort).

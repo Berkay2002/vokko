@@ -258,6 +258,12 @@ html.message-compact { --chat-gutter: 80px; }
 .chat-edit-hint button { color: var(--chat-link); font-size: 12px; }
 .chat-edit-hint button:hover { text-decoration: underline; }
 .chat-edit-error { color: var(--chat-danger); }
+.chat-edit-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 8px 0; }
+.chat-edit-actions .chat-edit-error { flex: 1 1 auto; margin-right: auto; font-size: 12px; }
+.chat-view .chat-edit-actions .btn { min-width: 72px; min-height: 40px; padding: 0 16px; border-radius: 8px; font-size: 14px; font-weight: 500; } /* tap target; beats the .chat-view button reset */
+.chat-view .chat-edit-actions .btn-primary { background: var(--chat-brand); color: var(--chat-on-brand); }
+.chat-view .chat-edit-actions .btn-secondary { background: var(--chat-hover); color: var(--chat-text); }
+.chat-view .chat-edit-actions .btn:disabled { opacity: 0.5; cursor: default; }
 
 /* reactions */
 .chat-reactions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
@@ -779,6 +785,9 @@ span.md-emoji { width: auto; height: auto; line-height: inherit; }
 
 /* Voice messages: the composer's mic, the recorder that replaces the message box, and Discord's pill player. */
 .chat-composer-btn.voice-mic { margin-right: 8px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.chat-composer-btn.chat-send { margin-right: 8px; border-radius: 50%; background: var(--chat-brand); color: var(--chat-on-brand); }
+.chat-composer-btn.chat-send:hover { background: var(--chat-brand-hover); color: var(--chat-on-brand); }
+.chat-composer-btn.chat-send:disabled { opacity: 0.4; }
 .chat-composer-btn.voice-mic.recording { color: var(--chat-on-brand); background: var(--chat-danger-bg); border-radius: 50%; }
 .voice-recorder { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 55px; padding: 0 12px; outline: none; }
 .voice-recorder .voice-recorder-cancel, .voice-recorder .voice-recorder-send { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--chat-icon); }

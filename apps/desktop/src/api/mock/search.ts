@@ -2,14 +2,14 @@
 // pagination, permission filtering and error codes as the server. Text matching is word level, like the server's `simple` tsvector:
 // every word must occur, "quoted phrases" must occur as consecutive words, -word excludes.
 
-import { ChannelType, MessageType, type MessageSearchResponse } from "../types";
+import { ChannelType, MessageType, isThreadType, type MessageSearchResponse } from "../types";
 import { compareIds } from "../snowflake";
 import { Perm, hasBit } from "../permissions";
 import { channelPermsOf } from "./access";
 import { db, sortedMessages, type MockChannel, type MockMessage } from "./db";
 import { fail, requireChannel, requireGuildMember } from "./ops";
 import { ID, route } from "./router";
-import { messageFor } from "./views";
+import { channelFor, messageFor, threadMemberOf } from "./views";
 
 const HAS_VALUES = new Set(["link", "embed", "file", "image", "video", "sound", "sticker"]);
 const MAX_LIMIT = 25;
@@ -137,7 +137,15 @@ function search(channels: MockChannel[], params: Params, viewerId: string): Mess
     return params.ascending && !byRelevance ? compareIds(a.message.id, b.message.id) : compareIds(b.message.id, a.message.id);
   });
   const page = scored.slice(params.offset, params.offset + params.limit);
-  return { total_results: scored.length, messages: page.map(({ message }) => [messageFor(message, viewerId)]) };
+  // The threads behind the page's hits (the channel list above already applied the permission filter).
+  const threadIds = new Set(page.map(({ message }) => message.channel_id));
+  const threads = channels.filter(c => threadIds.has(c.id) && isThreadType(c.type));
+  const members = threads.flatMap(t => threadMemberOf(t, viewerId) ?? []);
+  return {
+    total_results: scored.length,
+    messages: page.map(({ message }) => [messageFor(message, viewerId)]),
+    ...(threads.length > 0 ? { threads: threads.map(t => channelFor(t, viewerId)), ...(members.length > 0 ? { members } : {}) } : {}),
+  };
 }
 
 route("GET", `/guilds/${ID}/messages/search`, ({ viewer, params, query }) => {

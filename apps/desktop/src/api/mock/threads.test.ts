@@ -21,6 +21,7 @@ import {
   type FollowedChannel,
   type ForumPost,
   type Message,
+  type MessageSearchResponse,
   type ThreadListResponse,
   type ThreadMember,
   type ThreadSearchResponse,
@@ -548,5 +549,41 @@ describe("announcement channels", () => {
     expect(thread.type).toBe(ChannelType.AnnouncementThread);
     addMessage({ channel: db.channels.get(thread.id)!, author_id: ids.other!, content: "hi", silent: true });
     expect(((call("plain", "GET", `/channels/${thread.id}/thread-members`) as ThreadMember[]).map(t => t.user_id))).toContain(ids.other);
+  });
+});
+
+describe("message search", () => {
+  const found = (who: string, channelId: string, query = "needle"): MessageSearchResponse =>
+    call(who, "GET", `/channels/${channelId}/messages/search?content=${query}`) as MessageSearchResponse;
+  const guildFound = (who: string, query = "needle"): MessageSearchResponse => call(who, "GET", `/guilds/${guildId}/messages/search?content=${query}`) as MessageSearchResponse;
+
+  it("returns the threads and forum posts behind its hits, with the caller's membership, and none for channel hits", () => {
+    const starter = say("owner", general, "starter");
+    const open = startFrom("plain", general, starter.id, "open talk");
+    const closed = startThread("plain", general, { name: "closed", type: ChannelType.PrivateThread });
+    say("owner", general, "needle in the channel");
+    say("plain", open.id, "needle in a thread");
+    say("plain", closed.id, "needle in a private thread");
+    const forumPost = post("plain", "Needle post", "needle in a forum post");
+    patch("plain", open.id, { archived: true });
+
+    const plain = guildFound("plain");
+    expect(plain.total_results).toBe(4);
+    expect((plain.threads ?? []).map(t => t.id).sort()).toEqual([open.id, closed.id, forumPost.id].sort());
+    expect(plain.threads?.find(t => t.id === open.id)?.thread_metadata?.archived).toBe(true);
+    expect((plain.members ?? []).map(m => m.id).sort()).toEqual([open.id, closed.id, forumPost.id].sort());
+
+    // someone outside the private thread gets neither its hit nor the thread
+    const other = guildFound("other");
+    expect(other.total_results).toBe(3);
+    expect((other.threads ?? []).map(t => t.id)).not.toContain(closed.id);
+    expect(other.members).toBeUndefined();
+
+    // a page of channel hits only carries no thread keys
+    const channelOnly = guildFound("other", "channel");
+    expect(channelOnly.total_results).toBe(1);
+    expect(channelOnly.threads).toBeUndefined();
+    // searching inside one thread returns that thread
+    expect(found("plain", open.id).threads?.map(t => t.id)).toEqual([open.id]);
   });
 });

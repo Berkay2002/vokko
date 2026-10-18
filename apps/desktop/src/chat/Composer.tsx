@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
-import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, LayoutGrid, Lock, Pencil, Plus, Smile, Sticker, Timer, Trash2, X } from 'lucide-react';
+import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, LayoutGrid, Lock, Pencil, Plus, SendHorizontal, Smile, Sticker, Timer, Trash2, X } from 'lucide-react';
 import { Perm, channelPermissions, hasBit, memberLike } from '../api/permissions';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
@@ -22,7 +22,7 @@ import { convertEmoticons } from './emoticons';
 import { messageStore } from './messageStore';
 import { TypingIndicator } from './TypingIndicator';
 import { activeTypers } from './messageState';
-import { composerPlaceholder, isSpoilerName, stripSpoiler } from './util';
+import { composerPlaceholder, isSpoilerName, softKeyboard, stripSpoiler } from './util';
 import { CreatePollModal } from '../polls/CreatePollModal';
 import { ComposerInput, type ComposerField } from './composer/ComposerInput';
 import { useShortcut } from '../keyboard';
@@ -348,7 +348,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); const s = suggestions[selected]; if (s) apply(s); return; }
       if (e.key === 'Escape') { e.preventDefault(); setDismissed(triggerKey); return; }
     }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); return; }
+    if (e.key === 'Enter' && !e.shiftKey) { if (softKeyboard()) return; e.preventDefault(); send(); return; } // soft keyboard: Enter is a new line, the Send button sends
     if (e.key === 'Escape' && replyTo) { e.preventDefault(); onCancelReply(); return; }
   }
 
@@ -489,6 +489,8 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
         <AppLauncherPopout anchor={appsBtn} open={appsOpen} onClose={() => setAppsOpen(false)} channelId={channelId} onPick={next => setTextAt(next, next.length)} />
         </>}
         {/* Same slot while recording, so a phone's held press keeps its pointer capture. */}
+        {phone && softKeyboard() && (hasText || uploads.length > 0) && <button type="button" className="chat-composer-btn chat-send" aria-label="Send message"
+          disabled={coolingDown || !(canSend || anyUploading)} onMouseDown={e => e.preventDefault()} onClick={send}><SendHorizontal size={20} /></button>}
         {canVoice && !hasText && uploads.length === 0 && (!coolingDown || recorder.recording) && !(recorder.recording && !phone) && (phone
           ? <MicButton recording={recorder.recording} {...hold.handlers} />
           : <MicButton onClick={() => { setExpr(null); void recorder.start(); }} />)}

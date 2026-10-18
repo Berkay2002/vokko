@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownUp, ChevronLeft, ChevronRight, CornerUpRight, Folder, Hash, Loader2, SearchX, Search as SearchIcon, SlidersHorizontal } from 'lucide-react';
+import { ArrowDownUp, ChevronLeft, ChevronRight, CornerUpRight, Folder, Hash, Loader2, MessageSquareText, SearchX, Search as SearchIcon, SlidersHorizontal } from 'lucide-react';
 import type { Channel, Message } from '../api/types';
 import { Attachments } from '../chat/Attachments';
 import { Avatar } from '../chat/Avatar';
@@ -43,6 +43,7 @@ function Panel({ channel }: { channel: Channel }) {
   const [sortAnchor, setSortAnchor] = useState<HTMLElement | null>(null);
   const [sortOpen, setSortOpen] = useState(false);
   const channels = useStore(s => s.channels);
+  const threads = useStore(s => s.threads);
   const groups = useMemo(() => groupByChannel(hits), [hits]);
   useBackClose(true, () => searchActions.closePanel());
 
@@ -63,7 +64,10 @@ function Panel({ channel }: { channel: Channel }) {
   useEffect(() => clearHighlights, []);
   useEffect(() => { body.current?.scrollTo({ top: 0 }); }, [page, sort, submitted]);
 
-  const labelOf = (channelId: string): { icon: boolean; name: string; category: string | null } => {
+  const labelOf = (channelId: string): { icon: boolean; thread?: boolean; name: string; category: string | null } => {
+    const thread = threads[channelId];
+    // a thread or forum post: its title, with the channel it sits in where the category goes
+    if (thread) return { icon: true, thread: true, name: thread.name ?? 'thread', category: (thread.parent_id && channels[thread.parent_id]?.name) || null };
     const c = channels[channelId];
     if (!c) return { icon: false, name: 'Unknown channel', category: null };
     if (c.guild_id) return { icon: true, name: c.name ?? 'channel', category: (c.parent_id && channels[c.parent_id]?.name) || null };
@@ -102,8 +106,8 @@ function Panel({ channel }: { channel: Channel }) {
           const label = labelOf(group.channelId);
           return <section className="search-group" key={`${group.channelId}:${index}`} aria-label={label.name}>
             <h3 className="search-group-title">
-              {label.icon && <Hash size={20} aria-hidden="true" />}<span className="search-group-name">{label.name}</span>
-              {label.category && <span className="search-group-category"><Folder size={14} aria-hidden="true" />{label.category}</span>}
+              {label.icon && (label.thread ? <MessageSquareText size={20} aria-hidden="true" /> : <Hash size={20} aria-hidden="true" />)}<span className="search-group-name">{label.name}</span>
+              {label.category && <span className="search-group-category">{label.thread ? <Hash size={14} aria-hidden="true" /> : <Folder size={14} aria-hidden="true" />}{label.category}</span>}
             </h3>
             {group.hits.map(hit => <Hit key={hit.id} hit={hit} currentChannelId={channel.id} />)}
           </section>;
