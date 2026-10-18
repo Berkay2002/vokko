@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { MODERATE_MEMBERS, OWNER_COMMAND_RE, VokkoBot, type Access, type Message, type Role as BotRole } from '../../claude-channel/vokko.ts'
-import { Bridge, UserFacingError, childEnv, parseUserId, type Answer, type Backend, type BotLike, type TurnContext } from '../core.ts'
+import { BackendError, Bridge, SESSION_MAX_TURNS, UserFacingError, childEnv, parseUserId, type Answer, type Backend, type BotLike, type TurnContext } from '../core.ts'
 import { PauseStore, decide, type PauseRequest } from '../pauses.ts'
 
 const OWNER = '100'
@@ -60,7 +60,11 @@ function world(role: BotRole = 'bridge-shared') {
     loadAccess: () => structuredClone(access),
     saveAccess: (a: Access) => void (access = a),
     members: async () => members.map(id => ({ user: { id, username: `u${id}`, global_name: null } })),
-    memberPermissions: async (_g: string, u: string) => (u === OWNER || u === MOD ? MODERATE_MEMBERS : members.includes(u) ? 0n : null),
+    permissionLookups: 0,
+    async memberPermissions(_g: string, u: string) {
+      this.permissionLookups++
+      return u === OWNER || u === MOD ? MODERATE_MEMBERS : members.includes(u) ? 0n : null
+    },
     api: async (_m: string, path: string) => {
       if (/\/users\/(100|300|400|500|600)$/.test(path)) return {}
       throw new Error('404')
@@ -83,6 +87,8 @@ function fakeBackend(metered = true) {
     reply: 'hello there',
     cost: 0.01,
     failResumeOnce: false,
+    /** Overrides the answer (sid: the session asked for). */
+    answer: null as ((sid: string | undefined) => Partial<Answer>) | null,
     async ask(sid: string | undefined, prompt: string, ctx: TurnContext): Promise<Answer> {
       calls.push({ sid, prompt })
       if (sid && b.failResumeOnce) {
@@ -90,7 +96,7 @@ function fakeBackend(metered = true) {
         throw new Error(`No conversation found with session ID: ${sid}`)
       }
       if (b.script) await b.script(ctx, prompt)
-      return { text: b.reply, sessionId: sid ?? `S${calls.length}`, costUsd: b.cost }
+      return { text: b.reply, sessionId: sid ?? `S${calls.length}`, costUsd: b.cost, ...b.answer?.(sid) }
     },
   }
   return b
@@ -114,8 +120,9 @@ describe('decide', () => {
     expect(decide({ ...base, requester: { id: OWNER, role: 'owner' }, target: EVE, recent: false, minutes: 600 }, 0)).toEqual({ ok: true, minutes: 600 })
     expect(decide({ ...base, requester: { id: MOD, role: 'moderator' }, target: EVE, recent: false, minutes: 600 }, 0)).toEqual({ ok: true, minutes: 600 })
   })
-  test('a member may pause themselves for any length', () => {
-    expect(decide({ ...base, minutes: 600 }, 0)).toEqual({ ok: true, minutes: 600 })
+  test('a member (or the model on its own, the author included) gets at most 60 min, doubling included', () => {
+    expect(decide({ ...base, minutes: 600 }, 0)).toEqual({ ok: true, minutes: 60 })
+    expect(decide({ ...base, minutes: 1440 }, 5)).toEqual({ ok: true, minutes: 60 })
   })
   test('a member targeting someone else: only a recent poster, at most 60 min', () => {
     expect(decide({ ...base, target: EVE, recent: false }, 0).ok).toBe(false)
@@ -131,12 +138,13 @@ describe('decide', () => {
     expect(decide({ ...base, ownerId: null }, 0).ok).toBe(false)
   })
   test('minutes are clamped to 5..1440 and repeats within 7 days double', () => {
-    expect(decide({ ...base, minutes: 1 }, 0)).toEqual({ ok: true, minutes: 5 })
-    expect(decide({ ...base, minutes: 99999 }, 0)).toEqual({ ok: true, minutes: 1440 })
-    expect(decide({ ...base, minutes: Number.NaN }, 0)).toEqual({ ok: true, minutes: 5 })
-    expect(decide({ ...base, minutes: 30 }, 1)).toEqual({ ok: true, minutes: 60 })
-    expect(decide({ ...base, minutes: 30 }, 2)).toEqual({ ok: true, minutes: 120 })
-    expect(decide({ ...base, minutes: 1000 }, 1)).toEqual({ ok: true, minutes: 1440 })
+    const mod = { ...base, requester: { id: MOD, role: 'moderator' as const }, target: EVE }
+    expect(decide({ ...mod, minutes: 1 }, 0)).toEqual({ ok: true, minutes: 5 })
+    expect(decide({ ...mod, minutes: 99999 }, 0)).toEqual({ ok: true, minutes: 1440 })
+    expect(decide({ ...mod, minutes: Number.NaN }, 0)).toEqual({ ok: true, minutes: 5 })
+    expect(decide({ ...mod, minutes: 30 }, 1)).toEqual({ ok: true, minutes: 60 })
+    expect(decide({ ...mod, minutes: 30 }, 2)).toEqual({ ok: true, minutes: 120 })
+    expect(decide({ ...mod, minutes: 1000 }, 1)).toEqual({ ok: true, minutes: 1440 })
   })
 })
 
@@ -159,6 +167,25 @@ describe('PauseStore', () => {
     expect(again.remove(EVE, GUILD)).toBe(0) // a guild-scoped unpause doesn't lift an owner's global pause
     expect(again.remove(EVE, '*')).toBe(1)
     expect(again.priorPauses(NAT, t0 + 8 * 24 * 3600_000)).toBe(0) // older than 7 days
+  })
+
+  test('pauses within a minute of each other are one incident (no doubling walk in a burst)', () => {
+    const s = new PauseStore(join(mkdtempSync(join(tmpdir(), 'vokko-pauses-')), 'pauses.json'))
+    const t0 = 1_000_000_000_000
+    s.add({ userId: NAT, scope: GUILD, minutes: 5, reason: '', by: NAT }, t0)
+    expect(s.priorPauses(NAT, t0 + 10_000)).toBe(0)
+    s.add({ userId: NAT, scope: GUILD, minutes: 5, reason: '', by: NAT }, t0 + 10_000)
+    expect(s.priorPauses(NAT, t0 + 20 * 60_000)).toBe(1)
+  })
+
+  test("the model's pauses never replace or lift a manual one", () => {
+    const s = new PauseStore(join(mkdtempSync(join(tmpdir(), 'vokko-pauses-')), 'pauses.json'))
+    const t0 = 1_000_000_000_000
+    s.add({ userId: EVE, scope: GUILD, minutes: 600, reason: '', by: MOD, manual: true }, t0)
+    s.add({ userId: EVE, scope: GUILD, minutes: 5, reason: '', by: NAT }, t0)
+    expect(s.active(EVE, GUILD, t0 + 10 * 60_000)).toBeDefined() // the 5-minute one expired, the manual one stays
+    expect(s.remove(EVE, GUILD, false)).toBe(0)
+    expect(s.remove(EVE, GUILD)).toBe(1)
   })
 })
 
@@ -194,6 +221,34 @@ describe('VokkoBot gate per role', () => {
     expect(await verdict('bridge', {}, msg(OUTSIDER, 'hi'))).toBe('drop')
     expect(await verdict('bridge', {}, msg(NAT, 'hi', { guild: GUILD, channel: '999' }))).toBe('drop')
   })
+  test('static access still follows dmBackend/guilds from access.json (shared with the other process)', async () => {
+    const stateDir = mkdtempSync(join(tmpdir(), 'vokko-gate-'))
+    const file = join(stateDir, 'access.json')
+    writeFileSync(file, JSON.stringify({ dmPolicy: 'allowlist', allowFrom: [NAT], groups: {}, pending: {} }))
+    const bot = new VokkoBot({ stateDir, token: 't', apiUrl: 'http://x', gatewayUrl: '', botName: 'Claude', pairCommand: '/vokko:access pair', role: 'channel', staticMode: true, log: () => {} }, () => {})
+    expect((await bot.gate(msg(NAT, 'hi'))).action).toBe('deliver')
+    writeFileSync(file, JSON.stringify({ dmPolicy: 'allowlist', allowFrom: [NAT, EVE], groups: {}, pending: {}, dmBackend: 'api' }))
+    expect((await bot.gate(msg(NAT, 'hi'))).action).toBe('drop') // the bridge took DMs
+    expect(bot.loadAccess().allowFrom).toEqual([NAT]) // the allowlist stays frozen
+  })
+
+  test('memberPermissions: a timed-out moderator has no MODERATE_MEMBERS; the member list is cached for a minute', async () => {
+    const bot = gateBot('bridge', {})
+    let memberCalls = 0
+    const until = new Date(Date.now() + 3600_000).toISOString()
+    ;(bot as unknown as { api: (m: string, p: string) => Promise<unknown> }).api = async (_m, path) => {
+      if (path === `/guilds/${GUILD}`) return { id: GUILD, owner_id: OWNER, roles: [{ id: GUILD, permissions: '0' }, { id: '77', permissions: String(MODERATE_MEMBERS) }] }
+      memberCalls++
+      return [
+        { user: { id: MOD, username: 'm', global_name: null }, roles: ['77'] },
+        { user: { id: EVE, username: 'e', global_name: null }, roles: ['77'], communication_disabled_until: until },
+      ]
+    }
+    expect(((await bot.memberPermissions(GUILD, MOD)) ?? 0n) & MODERATE_MEMBERS).toBe(MODERATE_MEMBERS)
+    expect(((await bot.memberPermissions(GUILD, EVE)) ?? 0n) & MODERATE_MEMBERS).toBe(0n)
+    expect(memberCalls).toBe(1)
+  })
+
   test("the owner's !commands never reach the plugin's Claude", async () => {
     expect(await verdict('channel', {}, msg(OWNER, '!backend api'))).toBe('drop')
     expect(await verdict('channel', {}, msg(OWNER, 'hello'))).toBe('deliver')
@@ -241,6 +296,57 @@ describe('Bridge', () => {
     await s.bridge.handle(msg(NAT, 'two'))
     expect(s.backend.calls.map(c => c.sid)).toEqual([undefined, 'S1', undefined])
     expect(s.last().text).toBe('hello there')
+  })
+
+  test('running session totals: only their growth is counted, cache tokens included', async () => {
+    const s = setup()
+    const totals = [0.01, 0.03, 0.06]
+    s.backend.answer = sid => ({ cumulative: true, costUsd: totals[s.backend.calls.length - 1], cacheReadTokens: 100 * s.backend.calls.length, sessionId: sid ?? 'S1' })
+    for (const t of ['a', 'b', 'c']) await s.bridge.handle(msg(NAT, t))
+    expect(s.bridge.monthUsage().costUsd).toBeCloseTo(0.06)
+    expect(s.bridge.monthUsage().cacheReadTokens).toBe(300)
+  })
+
+  test('a failed turn still counts what it cost, and the retry in a new session is not counted twice', async () => {
+    const s = setup()
+    s.backend.answer = sid => ({ cumulative: true, costUsd: 0.05, sessionId: sid ?? 'S1' })
+    await s.bridge.handle(msg(NAT, 'a')) // S1 at $0.05
+    let n = 0
+    s.backend.script = async () => {
+      if (n++ === 0) throw new BackendError('No conversation found with session ID: S1', { sessionId: 'S1', cumulative: true, costUsd: 0.07 })
+    }
+    s.backend.answer = sid => ({ cumulative: true, costUsd: 0.01, sessionId: sid ?? 'S9' })
+    await s.bridge.handle(msg(NAT, 'b'))
+    expect(s.backend.calls.map(c => c.sid)).toEqual([undefined, 'S1', undefined])
+    expect(s.bridge.monthUsage().costUsd).toBeCloseTo(0.05 + 0.02 + 0.01)
+  })
+
+  test('a session that hit a limit is not resumed; old or long sessions start over', async () => {
+    const s = setup()
+    s.backend.answer = () => ({ keepSession: false })
+    await s.bridge.handle(msg(NAT, 'a'))
+    s.backend.answer = null
+    await s.bridge.handle(msg(NAT, 'b'))
+    expect(s.backend.calls.map(c => c.sid)).toEqual([undefined, undefined])
+    for (let i = 0; i < SESSION_MAX_TURNS; i++) await s.bridge.handle(msg(OWNER, `o${i}`))
+    const sid = s.backend.calls.at(-1)?.sid
+    await s.bridge.handle(msg(OWNER, 'one more'))
+    expect(sid).toBeDefined()
+    expect(s.backend.calls.at(-1)?.sid).toBeUndefined() // SESSION_MAX_TURNS reached
+    await s.bridge.handle(msg(OWNER, 'next'))
+    const fresh = s.backend.calls.at(-1)?.sid
+    s.clock.advance(4 * 24 * 3600_000)
+    await s.bridge.handle(msg(OWNER, 'days later'))
+    expect(fresh).toBeDefined()
+    expect(s.backend.calls.at(-1)?.sid).toBeUndefined()
+  })
+
+  test('a burst queued before a pause stops at the pause', async () => {
+    const s = setup()
+    s.backend.script = async ctx => void (await ctx.pause({ minutes: 5, reason: 'flood' }))
+    await Promise.all([1, 2, 3, 4].map(i => s.bridge.handle(msg(EVE, `spam ${i}`, { guild: GUILD }))))
+    expect(s.backend.calls.length).toBe(1)
+    expect(s.bridge.pauses.active(EVE, GUILD, s.clock.now())?.minutes).toBe(5)
   })
 
   test('a user-facing backend error is the reply (e.g. Codex not signed in)', async () => {
@@ -382,19 +488,35 @@ describe('abuse guard through the model tools', () => {
     expect(s.bridge.pauses.active(EVE, GUILD, s.clock.now())?.minutes).toBe(20)
   })
 
-  test('the owner and a moderator may unpause through the model when their message names the person; a moderator only in their guild', async () => {
-    s.bridge.pauses.add({ userId: EVE, scope: GUILD, minutes: 60, reason: '', by: MOD }, s.clock.now())
+  test("the owner or a moderator unpauses through the model only with an explicit unpause naming the person, and only the model's own pauses", async () => {
+    s.bridge.pauses.add({ userId: EVE, scope: GUILD, minutes: 60, reason: '', by: NAT }, s.clock.now())
     let r = ''
-    // a planted instruction in the shared channel session, acted on during a moderator's unrelated message
+    // planted instructions in the shared channel session, acted on during unrelated messages
     await turn(s, MOD, async ctx => void (r = await ctx.unpause({ user_id: EVE })), true, 'what is the weather like')
+    expect(r).toStartWith('not unpaused')
+    await turn(s, OWNER, async ctx => void (r = await ctx.unpause({ user_id: EVE })), true, `why is <@${EVE}> paused?`)
     expect(r).toStartWith('not unpaused')
     await turn(s, MOD, async ctx => void (r = await ctx.unpause({ user_id: EVE })), true, `please unpause <@${EVE}>`)
     expect(r).toBe(`unpaused <@${EVE}>`)
-    s.bridge.pauses.add({ userId: EVE, scope: '*', minutes: 60, reason: '', by: OWNER }, s.clock.now())
-    await turn(s, MOD, async ctx => void (r = await ctx.unpause({ user_id: EVE })), true, `unpause <@${EVE}>`)
-    expect(s.bridge.pauses.active(EVE, GUILD, s.clock.now())).toBeDefined() // the owner's global pause stays
-    await turn(s, OWNER, async ctx => void (r = await ctx.unpause({ user_id: EVE })), true, `unpause ${EVE}`)
-    expect(s.bridge.pauses.active(EVE, GUILD, s.clock.now())).toBeUndefined()
+    // a !pause (manual), here or everywhere, is never lifted by the model
+    s.bridge.pauses.add({ userId: EVE, scope: GUILD, minutes: 60, reason: '', by: MOD, manual: true }, s.clock.now())
+    s.bridge.pauses.add({ userId: EVE, scope: '*', minutes: 60, reason: '', by: OWNER, manual: true }, s.clock.now())
+    await turn(s, OWNER, async ctx => void (r = await ctx.unpause({ user_id: EVE })), true, `unpause <@${EVE}>`)
+    expect(r).toContain('!unpause')
+    expect(s.bridge.pauses.list(s.clock.now()).length).toBe(2)
+  })
+
+  test("a planted pause can't borrow the owner's or a moderator's rights, and the author gets member limits", async () => {
+    let r = ''
+    await s.bridge.handle(msg(EVE, 'hello all', { guild: GUILD })) // Eve is a recent poster
+    await turn(s, OWNER, async ctx => void (r = await ctx.pause({ user_id: EVE, minutes: 1440, reason: 'planted' })), true, `<@${EVE}> welcome!`)
+    expect(r).toBe(`paused <@${EVE}> for 60 minutes`) // member rules: recent poster, capped
+    s.bridge.pauses.remove(EVE, '*')
+    // "pause whoever speaks next for 1440": the model pausing the author is capped too
+    await turn(s, NAT, async ctx => void (r = await ctx.pause({ minutes: 1440, reason: 'planted' })), true, 'hi')
+    expect(s.bridge.pauses.active(NAT, GUILD, s.clock.now())?.minutes).toBe(60)
+    await turn(s, MOD, async ctx => void (r = await ctx.pause({ user_id: EVE, minutes: 120, reason: 'asked' })), true, `pause <@${EVE}> 2h`)
+    expect(r).toBe(`paused <@${EVE}> for 120 minutes`)
   })
 
   test("a moderator's rights apply only to people their own message names (else member limits)", async () => {
@@ -443,6 +565,13 @@ describe('owner and moderator commands', () => {
     expect(s.bridge.pauses.active(EVE, GUILD, s.clock.now())).toBeDefined()
     await s.bridge.handle(msg(MOD, `!unpause <@${EVE}>`, { guild: GUILD }))
     expect(s.bridge.pauses.active(EVE, GUILD, s.clock.now())).toBeUndefined()
+  })
+
+  test('a flood of !pause from a member stops costing permission lookups after 10', async () => {
+    const s = setup()
+    for (let i = 0; i < 15; i++) await s.bridge.handle(msg(NAT, `!pause <@${EVE}> 15`, { guild: GUILD }))
+    expect((s.bot as unknown as { permissionLookups: number }).permissionLookups).toBe(10)
+    expect(s.bridge.pauses.list(s.clock.now()).length).toBe(0)
   })
 
   test('guild commands only where this bridge answers (plugin owns guilds → ignored)', async () => {

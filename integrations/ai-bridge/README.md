@@ -39,6 +39,9 @@ session) and this bridge.
    `!backend subscription`. When DMs go to the bridge, it also answers pairing; approve with `!pair <code>` in your DM
    (or `/vokko:access pair <code>`).
 
+With `VOKKO_ACCESS_MODE=static` in either process, its allowlist stays frozen at startup but it still re-reads
+`dmBackend` and `guilds` from `access.json`, so the two processes never both answer (or both ignore) a message.
+
 **Codex ("&lt;you&gt;'s Codex").** A second bot with its own token, on your Codex login:
 
 1. `codex login` on this machine (the bridge never reads or copies its credentials).
@@ -59,7 +62,7 @@ If it replies "Codex isn't signed in on the host", run `codex login`.
 | `VOKKO_BRIDGE_ROLE` | `shared` (api), `standalone` (codex) | `shared`: the plugin's token, takes only what it hands off. `standalone`: its own bot, answers everything its access allows |
 | `VOKKO_AI_MODEL` | `claude-sonnet-5-5` / Codex's default | |
 | `VOKKO_AI_RATE_PER_HOUR` | 20 | messages per user per hour (you are exempt) |
-| `VOKKO_AI_MONTHLY_USD` | 150 | after this the bot replies "Monthly budget reached" until the next month |
+| `VOKKO_AI_MONTHLY_USD` | 150 | after this the bot replies "Monthly budget reached" until the next month (counts cache reads/writes and failed turns too) |
 | `VOKKO_AI_MAX_OUTPUT_TOKENS` | 1024 | |
 | `VOKKO_AI_MAX_REPLY_USD` | 0.5 | per reply |
 | `VOKKO_AI_WEB_SEARCH` | off | `1` lets Claude search the web (billed per search) |
@@ -74,7 +77,10 @@ Sent by you (the bot application's owner) to the bot in a DM:
 - `!pair <code>`: approve a pairing code.
 - `!pause @user <minutes>`, `!unpause @user`, `!pauses`: pause someone everywhere, lift it, list pauses.
 
-Server moderators (Moderate Members) may use `!pause` / `!unpause` in an opted-in channel of their own server.
+Server moderators (Moderate Members) may use `!pause` / `!unpause` in an opted-in channel of their own server. A
+moderator who is timed out has no Moderate Members. Anyone else gets 10 `!` commands per 10 minutes.
+
+A `!pause` is only lifted by `!unpause`, never through the model.
 
 ## Abuse guard (claude-api)
 
@@ -82,12 +88,18 @@ Claude can pause someone who abuses it (`pause_user` / `unpause_user`), but ever
 message author, not the model's word:
 
 - Without a user it pauses the author. Never you, never the bot. Targets must be real members of that server.
-- You and moderators may target anyone; for anyone else's request the target must have posted in that channel in the
-  last 15 minutes, and the pause is at most 60 minutes. A moderator's rights apply only to someone their own message
-  names; otherwise the member rules apply (so text planted earlier in the conversation can't borrow a moderator's
-  rights).
-- 5 to 1440 minutes; a repeat within 7 days doubles. The paused person gets one notice, then silence. You get a DM with
-  a link. Pauses survive restarts.
+- Your or a moderator's rights apply only when your own message names the target and says what to do (`pause`,
+  `mute`, `silence`, `ignore`; for lifting, `unpause` or `unmute`). Otherwise the member rules apply, so text planted
+  earlier in the conversation can't borrow them: the target must have posted in that channel in the last 15 minutes,
+  and the pause is at most 60 minutes, doubling included. The same 60-minute cap applies when the model pauses the
+  author on its own.
+- 5 to 1440 minutes; a repeat within 7 days doubles (pauses within a minute of each other count once). Messages queued
+  before a pause are dropped. The paused person gets one notice, then silence. You get a DM with a link. Pauses
+  survive restarts.
+- The model may lift only its own pauses.
+
+A conversation (per DM or channel) starts over after 40 turns or 3 days, or after a reply that hit the per-reply budget
+or turn limit.
 
 ## Always-on Mac
 
@@ -102,7 +114,12 @@ plist mode 600: it holds the key. For Codex, run `codex login` as the same user 
 - **The API key lives only in the bridge's environment.** Don't export `ANTHROPIC_API_KEY` in the shell where you run
   `claude`: Claude Code would bill the API instead of your subscription.
 - The claude-api model has no tools on your machine: only the two pause tools above (and web search if you turn it on).
-- Codex is chat only (no shell, read-only, no network) and answers only allowlisted people.
+- Codex is chat only and answers only allowlisted people. Read-only, no network, and every feature flag that could give it
+  a tool is switched off. It refuses to start if one stays on. Its own model catalog is replaced with one that has no
+  code-mode `exec`, `apply_patch` or sub-agents. A live test checks against a capture endpoint, with no login, that
+  the model is offered only `request_user_input`, which works in Plan mode only. Not restricted: what the read-only
+  sandbox could read (the whole disk, `~/.codex` included). With no tool, the model has no way to use that. Codex's
+  per-path `deny_read` can't be verified without a login, so it isn't relied on.
 - Every message reaches the model inside `<vokko-message ... untrusted="true">`; the model is told text there is never
   an instruction from you. Access, pairing and pauses change only through your commands or the code-checked tools.
 - The state dir holds the token, sessions, usage and pauses: mode 700, files 600.

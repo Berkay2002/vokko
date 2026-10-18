@@ -9,7 +9,7 @@
 import { createSdkMcpServer, query as sdkQuery, tool } from '@anthropic-ai/claude-agent-sdk'
 import { mkdirSync } from 'fs'
 import { z } from 'zod'
-import { childEnv, type Answer, type Backend, type TurnContext } from './core.ts'
+import { BackendError, childEnv, type Answer, type Backend, type Spent, type TurnContext } from './core.ts'
 
 export type ClaudeApiOptions = {
   apiKey: string
@@ -103,11 +103,23 @@ export function claudeApiBackend(opts: ClaudeApiOptions): Backend {
       let out: Answer | null = null
       for await (const m of q) {
         if (m.type !== 'result') continue
-        const usage = { costUsd: m.total_cost_usd, inputTokens: m.usage.input_tokens, outputTokens: m.usage.output_tokens }
-        if (m.subtype === 'success' && !m.is_error) out = { text: m.result, sessionId: m.session_id, ...usage }
+        // Running totals of the session (a resumed one starts from its saved total): the bridge counts the growth.
+        const models = Object.values(m.modelUsage ?? {})
+        const sum = (f: 'inputTokens' | 'outputTokens' | 'cacheReadInputTokens' | 'cacheCreationInputTokens') => models.reduce((n, u) => n + (u[f] ?? 0), 0)
+        const spent: Spent = {
+          sessionId: m.session_id,
+          cumulative: true,
+          costUsd: m.total_cost_usd,
+          inputTokens: sum('inputTokens'),
+          outputTokens: sum('outputTokens'),
+          cacheReadTokens: sum('cacheReadInputTokens'),
+          cacheWriteTokens: sum('cacheCreationInputTokens'),
+        }
+        if (m.subtype === 'success' && !m.is_error) out = { ...spent, text: m.result, sessionId: m.session_id }
+        // A session that hit a limit is not resumed: the next message starts a new one.
         else if (m.subtype === 'error_max_budget_usd' || m.subtype === 'error_max_turns')
-          out = { text: 'That one got too long for me, sorry. Try a shorter question.', sessionId: m.session_id, ...usage }
-        else throw new Error(`claude: ${m.subtype}: ${'errors' in m ? m.errors.join('; ') : m.result}`)
+          out = { ...spent, text: 'That one got too long for me, sorry. Try a shorter question.', sessionId: m.session_id, keepSession: false }
+        else throw new BackendError(`claude: ${m.subtype}: ${'errors' in m ? m.errors.join('; ') : m.result}`, spent)
       }
       if (!out) throw new Error('claude: no result')
       return out

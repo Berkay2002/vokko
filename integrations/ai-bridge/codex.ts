@@ -2,15 +2,24 @@
  * The Codex backend ("<owner>'s Codex", personal use): the TS Codex SDK on the host's own
  * `codex login`. The bridge never reads auth.json, never sets CODEX_HOME or an API key; the CLI
  * finds its login itself. Threads run read-only with no network, approvals never, in a dedicated
- * working dir. Codex here is chat only: no shell or exec tool (so it can't read the host's files
- * for whoever is chatting), and the host's MCP servers, hooks, memories and plugins are off (the
- * lean overrides Inkwell proved out, src-tauri/src/ai/codex.rs). The bridge answers only
- * allowlisted senders with it.
+ * working dir. Codex here is chat only: no shell, exec, patch or sub-agent tool (so it can't read
+ * the host's files for whoever is chatting), and the host's MCP servers, hooks, memories and plugins
+ * are off (the lean overrides Inkwell proved out, src-tauri/src/ai/codex.rs). Every feature flag
+ * that could hand the model a tool is switched off as the CLI lists them, and the backend refuses
+ * to start if one stays on. Some tools come from the model catalog, not from features (code-mode
+ * `exec` with apply_patch inside, the multi-agent tools): the backend gives the CLI its own catalog
+ * with those cleared. What the model is offered then is `request_user_input` alone (Plan mode only),
+ * checked live in the tests against a capture endpoint. The bridge answers only allowlisted senders.
+ *
+ * Not restricted: what a read-only sandbox could read (the whole disk, ~/.codex and the bot's
+ * state dir included). With no tool that runs or reads anything, the model has no way to use it;
+ * Codex 0.163's per-path deny_read lives in permission profiles that can't be checked without a
+ * login, so it isn't relied on here.
  */
 
 import { Codex, type ThreadOptions } from '@openai/codex-sdk'
 import { execFileSync } from 'child_process'
-import { mkdirSync } from 'fs'
+import { mkdirSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
@@ -43,10 +52,23 @@ export const LEAN = [
     'computer_use',
     'image_generation',
     'view_image',
+    'code_mode',
+    'code_mode_host',
+    'js_repl',
   ].map(f => `features.${f}=false`),
 ]
 
+/** Feature flags that can give the model a way to act or read beyond the chat, by name, today's and tomorrow's. */
+export const RISKY_FEATURE = /exec|shell|code_mode|repl|browser|computer|apps|plugin|skill|mcp|image|agent|patch|worktree|memor|hook|goal|tool|in_app|realtime|workspace|permission|search|file/
+
 export type McpServer = { name: string; enabled: boolean }
+export type Feature = { name: string; enabled: boolean }
+export type Listers = {
+  mcp: (overrides: string[]) => McpServer[]
+  features: (overrides: string[]) => Feature[]
+  /** The CLI's model catalog, raw JSON (`codex debug models`). */
+  models: () => string
+}
 
 /** The codex CLI behind the SDK: `codexPath`, or the npm launcher of the @openai/codex the SDK depends on. */
 function codexCommand(codexPath?: string): [string, string[]] {
@@ -56,28 +78,65 @@ function codexCommand(codexPath?: string): [string, string[]] {
   return [process.execPath, [join(dirname(pkg), 'bin', 'codex.js')]]
 }
 
-/** The MCP servers the host's Codex would start with these overrides, as the CLI itself parses its config. */
-function listMcpWithCli(codexPath: string | undefined, env: Record<string, string>, overrides: string[]): McpServer[] {
+/** The host's Codex as the CLI itself sees it with these overrides (`mcp list`, `features list`): no second TOML parser. */
+export function cliListers(codexPath: string | undefined, env: Record<string, string>): Listers {
   const [cmd, pre] = codexCommand(codexPath)
-  const out = execFileSync(cmd, [...pre, ...overrides.flatMap(o => ['-c', o]), 'mcp', 'list', '--json'], { env, encoding: 'utf8', timeout: 30_000 })
-  return (JSON.parse(out) as McpServer[]).map(s => ({ name: s.name, enabled: s.enabled }))
+  const run = (overrides: string[], args: string[]) => execFileSync(cmd, [...pre, ...overrides.flatMap(o => ['-c', o]), ...args], { env, encoding: 'utf8', timeout: 30_000 })
+  return {
+    mcp: o => (JSON.parse(run(o, ['mcp', 'list', '--json'])) as McpServer[]).map(s => ({ name: s.name, enabled: s.enabled })),
+    // "<name>   <stage>   true|false" per line; a "removed" flag does nothing (some still print true whatever the config says)
+    features: o =>
+      run(o, ['features', 'list'])
+        .split(/\r?\n/)
+        .map(l => /^(\S+)\s+(.*?)\s+(true|false)\s*$/.exec(l))
+        .filter(m => m != null && m[2] !== 'removed')
+        .map(m => ({ name: m![1], enabled: m![3] === 'true' })),
+    models: () => run([], ['debug', 'models']),
+  }
+}
+
+/** The CLI's catalog with every model's own tools cleared: no code-mode exec, no apply_patch, no sub-agents, no extras. */
+export function leanCatalog(raw: string): string {
+  const catalog = JSON.parse(raw) as { models?: Record<string, unknown>[] }
+  if (!Array.isArray(catalog.models) || catalog.models.length === 0) throw new Error('codex: empty model catalog')
+  for (const m of catalog.models) {
+    delete m.tool_mode
+    Object.assign(m, { multi_agent_version: null, apply_patch_tool_type: null, experimental_supported_tools: [], node_repl_disabled: true, supports_search_tool: false })
+  }
+  return JSON.stringify(catalog)
 }
 
 /**
- * LEAN plus `mcp_servers.<name>.enabled=false` for every server the CLI reports, then checked
- * again: refuses to start (throws) if any server would still run. Names come from the CLI's own
- * parse, so there is no second TOML parser to disagree with it.
+ * LEAN, plus `features.<name>=false` for every risky feature still on and `mcp_servers.<name>.enabled=false`
+ * for every MCP server, then checked again: refuses to start (throws) if any of them would still be on.
  */
-export function leanOverrides(list: (overrides: string[]) => McpServer[]): string[] {
-  const names = list(LEAN)
+/** Flags that only pick how another feature works: harmless while that one is off. Codex 0.163 reports unified_exec on whatever the config says. */
+const ONLY_WITH: Record<string, string> = { unified_exec: 'shell_tool', unified_exec_tty: 'shell_tool' }
+
+export function leanOverrides(list: Listers): string[] {
+  const features = list
+    .features(LEAN)
+    .filter(f => f.enabled && RISKY_FEATURE.test(f.name))
+    .map(f => f.name)
+  const withFeatures = [...LEAN, ...features.map(n => `features.${n}=false`)]
+  const servers = list
+    .mcp(withFeatures)
     .filter(s => s.enabled)
     .map(s => s.name)
-  const bad = names.find(n => !/^[A-Za-z0-9_-]+$/.test(n))
-  if (bad) throw new Error(`codex: cannot switch off the MCP server "${bad}" (unusual name); remove it from ~/.codex/config.toml or set VOKKO_CODEX_PATH to a clean codex`)
-  const overrides = [...LEAN, ...names.map(n => `mcp_servers.${n}.enabled=false`)]
-  const still = list(overrides).filter(s => s.enabled)
-  if (still.length > 0) throw new Error(`codex: MCP servers still enabled: ${still.map(s => s.name).join(', ')}`)
+  const bad = [...features, ...servers].find(n => !/^[A-Za-z0-9_.-]+$/.test(n))
+  if (bad) throw new Error(`codex: cannot switch off "${bad}" (unusual name); remove it from ~/.codex/config.toml or set VOKKO_CODEX_PATH to a clean codex`)
+  const overrides = [...withFeatures, ...servers.map(n => `mcp_servers.${n}.enabled=false`)]
+  const still = [
+    ...list.mcp(overrides).filter(s => s.enabled).map(s => `MCP server ${s.name}`),
+    ...stillOn(list.features(overrides)).map(f => `feature ${f.name}`),
+  ]
+  if (still.length > 0) throw new Error(`codex: still enabled: ${still.join(', ')}`)
   return overrides
+}
+
+function stillOn(features: Feature[]): Feature[] {
+  const on = new Set(features.filter(f => f.enabled).map(f => f.name))
+  return features.filter(f => f.enabled && RISKY_FEATURE.test(f.name) && !(ONLY_WITH[f.name] && !on.has(ONLY_WITH[f.name])))
 }
 
 function preamble(botName: string): string {
@@ -89,9 +148,9 @@ export type CodexOptions = {
   botName: string
   model?: string
   codexPath?: string
-  /** Swappable in tests: the SDK's Codex class and the CLI's MCP listing. */
+  /** Swappable in tests: the SDK's Codex class and the CLI's listings. */
   Codex?: new (o: ConstructorParameters<typeof Codex>[0]) => Pick<Codex, 'startThread' | 'resumeThread'>
-  listMcp?: (overrides: string[]) => McpServer[]
+  listers?: Listers
 }
 
 export function codexBackend(opts: CodexOptions): Backend {
@@ -99,7 +158,10 @@ export function codexBackend(opts: CodexOptions): Backend {
   // The host's own Codex home (CODEX_HOME when the host sets one), never a separate one.
   const hostHome = process.env.CODEX_HOME || undefined
   const env = childEnv(hostHome ? { CODEX_HOME: hostHome } : {})
-  const configOverrides = leanOverrides(opts.listMcp ?? (o => listMcpWithCli(opts.codexPath, env, o)))
+  const listers = opts.listers ?? cliListers(opts.codexPath, env)
+  const catalog = join(dirname(opts.workDir), 'codex-models.json')
+  writeFileSync(catalog, leanCatalog(listers.models()), { mode: 0o600 })
+  const configOverrides = [...leanOverrides(listers), `model_catalog_json=${JSON.stringify(catalog)}`]
   const Impl = opts.Codex ?? Codex
   const codex = new Impl({ codexPathOverride: opts.codexPath, env, configOverrides })
   const threadOptions: ThreadOptions = {
@@ -126,7 +188,8 @@ export function codexBackend(opts: CodexOptions): Backend {
         throw err
       }
       if (!thread.id) throw new Error('codex: no thread id')
-      return { text: turn.finalResponse, sessionId: thread.id, inputTokens: turn.usage?.input_tokens, outputTokens: turn.usage?.output_tokens }
+      const u = turn.usage
+      return { text: turn.finalResponse, sessionId: thread.id, inputTokens: u?.input_tokens, outputTokens: u?.output_tokens, cacheReadTokens: u?.cached_input_tokens }
     },
   }
 }

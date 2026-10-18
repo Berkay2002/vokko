@@ -10,7 +10,28 @@ import { join } from 'path'
 import { MODERATE_MEMBERS, ownsGuilds, safeAttName, type Message, type VokkoBot } from '../claude-channel/vokko.ts'
 import { PauseStore, RECENT_MS, decide, type Pause, type Role } from './pauses.ts'
 
-export type Answer = { text: string; sessionId: string; costUsd?: number; inputTokens?: number; outputTokens?: number }
+export type Totals = { costUsd?: number; inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number }
+const TOTALS = ['costUsd', 'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'] as const
+
+/** What a turn spent. `cumulative`: running totals of the whole session (the bridge counts the difference). */
+export type Spent = Totals & { sessionId?: string; cumulative?: boolean }
+
+export type Answer = Spent & {
+  text: string
+  sessionId: string
+  /** false: the session ran into a limit; start a new one next time. */
+  keepSession?: boolean
+}
+
+/** A backend failure that still cost something. */
+export class BackendError extends Error {
+  constructor(
+    message: string,
+    readonly spent: Spent,
+  ) {
+    super(message)
+  }
+}
 
 /** What a backend's tools may ask the bridge for. Every rule is checked here, against the real author. */
 export type TurnContext = {
@@ -45,6 +66,12 @@ export type BotLike = Pick<
 
 const SNOWFLAKE = /^\d{1,20}$/
 const GUILD_COMMAND_RE = /^\s*!(pause|unpause|pauses)\b/i
+/** Owner/moderator rights reach someone else only when their own message names that person with one of these. */
+const PAUSE_VERB = /\b(pause|mute|silence|ignore)\b/i
+const UNPAUSE_VERB = /\b(unpause|unmute)\b/i
+/** A channel's session starts over after this long or this many turns (each turn re-reads the whole history). */
+export const SESSION_MAX_AGE_MS = 3 * 24 * 60 * 60_000
+export const SESSION_MAX_TURNS = 40
 
 /** "<@123>", "<@!123>" or "123" → "123"; anything else → null. */
 export function parseUserId(s: string | undefined): string | null {
@@ -68,15 +95,21 @@ function writeJson(file: string, value: unknown): void {
 
 const attr = (s: string) => s.replace(/["<>\r\n]/g, '')
 
-type Usage = { month: string; costUsd: number; inputTokens: number; outputTokens: number }
+type Usage = { month: string } & Required<Totals>
+const NO_USAGE: Usage = { month: '', costUsd: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }
+
+type Session = { id: string; at: number; turns: number; /** The backend's running totals at the last turn. */ last?: Totals }
+
+const totalsOf = (s: Totals): Totals => Object.fromEntries(TOTALS.map(f => [f, s[f] ?? 0]))
 
 export class Bridge {
   readonly pauses: PauseStore
   private readonly sessionsFile: string
   private readonly usageFile: string
-  private readonly sessions: Record<string, string>
+  private readonly sessions: Record<string, Session>
   private usage: Usage
   private readonly hits = new Map<string, number[]>()
+  private readonly commandHits = new Map<string, number[]>()
   private readonly rateNoticed = new Map<string, number>()
   /** channel id → user id → when they last sent the bot a delivered message there. */
   private readonly recent = new Map<string, Map<string, number>>()
@@ -94,8 +127,10 @@ export class Bridge {
     this.pauses = new PauseStore(join(dir, 'pauses.json'))
     this.sessionsFile = join(dir, `sessions-${backend.name}.json`)
     this.usageFile = join(dir, `usage-${backend.name}.json`)
-    this.sessions = readJson<Record<string, string>>(this.sessionsFile, {})
-    this.usage = readJson<Usage>(this.usageFile, { month: '', costUsd: 0, inputTokens: 0, outputTokens: 0 })
+    const sessions = readJson<Record<string, Session | string>>(this.sessionsFile, {})
+    // Older files kept just the id.
+    this.sessions = Object.fromEntries(Object.entries(sessions).map(([k, v]) => [k, typeof v === 'string' ? { id: v, at: now(), turns: 0 } : v]))
+    this.usage = readJson<Usage>(this.usageFile, NO_USAGE)
   }
 
   private log(line: string): void {
@@ -107,14 +142,17 @@ export class Bridge {
   }
 
   /**
-   * The rights the current message carries against `target`. A guild channel shares one session, so the
-   * model may act on text an earlier member planted: owner/moderator rights against someone else count only
-   * when the current message itself names that person.
+   * The rights the current message carries for a model pause/unpause of `target`. A channel shares one
+   * session, so the model may act on text an earlier member planted: owner/moderator rights count only
+   * when the current message itself names that person and says pause/mute/... (`verb`). The model acting
+   * on the author themselves never gets more than member rights.
    */
-  private async rightsAgainst(msg: Message, target: string): Promise<Role> {
+  private async rightsAgainst(msg: Message, target: string, verb: RegExp): Promise<Role> {
+    if (target === msg.author.id) return 'member'
     const role = await this.roleOf(msg.author.id, msg.guild_id)
-    if (role === 'member' || target === msg.author.id) return role
-    return new RegExp(`(^|\\D)${target}(\\D|$)`).test(msg.content) ? role : 'member'
+    if (role === 'member') return role
+    const named = new RegExp(`(^|\\D)${target}(\\D|$)`).test(msg.content)
+    return named && verb.test(msg.content) ? role : 'member'
   }
 
   private async roleOf(userId: string, guildId: string | null): Promise<Role> {
@@ -141,7 +179,7 @@ export class Bridge {
 
   private month(): Usage {
     const m = new Date(this.now()).toISOString().slice(0, 7)
-    if (this.usage.month !== m) this.usage = { month: m, costUsd: 0, inputTokens: 0, outputTokens: 0 }
+    if (this.usage.month !== m) this.usage = { ...NO_USAGE, month: m }
     return this.usage
   }
 
@@ -149,25 +187,26 @@ export class Bridge {
     return this.month()
   }
 
-  private tally(a: Answer): void {
+  /** Adds what a turn spent to the month. Running totals of the channel's session count only their growth. */
+  private tally(key: string, s: Spent): void {
+    const session = this.sessions[key]
+    const same = s.cumulative === true && session != null && session.id === s.sessionId
+    // A total below the last one was reset (a new or cleared session): it counts whole.
+    const base = same && session.last && (s.costUsd ?? 0) >= (session.last.costUsd ?? 0) ? session.last : undefined
     const u = this.month()
-    u.costUsd += a.costUsd ?? 0
-    u.inputTokens += a.inputTokens ?? 0
-    u.outputTokens += a.outputTokens ?? 0
+    for (const f of TOTALS) u[f] += Math.max(0, (s[f] ?? 0) - (base?.[f] ?? 0))
     writeJson(this.usageFile, u)
+    if (same) session.last = totalsOf(s)
   }
 
-  /** Counts the message; false when the user is over the hourly limit. */
-  private rateOk(userId: string): boolean {
+  /** Counts a hit; false when `id` already has `max` within `windowMs`. */
+  private hit(map: Map<string, number[]>, id: string, max: number, windowMs: number): boolean {
     const now = this.now()
-    const recent = (this.hits.get(userId) ?? []).filter(t => now - t < 3600_000)
-    if (recent.length >= this.limits.perHour) {
-      this.hits.set(userId, recent)
-      return false
-    }
-    recent.push(now)
-    this.hits.set(userId, recent)
-    return true
+    const recent = (map.get(id) ?? []).filter(t => now - t < windowMs)
+    const ok = recent.length < max
+    if (ok) recent.push(now)
+    map.set(id, recent)
+    return ok
   }
 
   // ---- inbound ----
@@ -182,34 +221,10 @@ export class Bridge {
     const author = msg.author.id
     const allowlisted = access.allowFrom.includes(author)
     if (this.backend.allowlistedOnly && !allowlisted) return
-    const scope = msg.guild_id ?? 'dm'
-    const now = this.now()
-
-    const paused = this.pauses.active(author, scope, now)
-    if (paused) {
-      if (!paused.noticed) {
-        this.pauses.markNoticed(paused)
-        await this.say(msg, `You're paused for ${Math.ceil((paused.until - now) / 60_000)} min.`)
-      }
-      return
-    }
-
-    if (!this.isOwner(author) && !this.rateOk(author)) {
-      if ((this.rateNoticed.get(author) ?? 0) <= now) {
-        const oldest = Math.min(...(this.hits.get(author) ?? [now]))
-        this.rateNoticed.set(author, oldest + 3600_000)
-        await this.say(msg, `You've reached the limit of ${this.limits.perHour} messages an hour. Try again in ${Math.ceil((oldest + 3600_000 - now) / 60_000)} min.`)
-      }
-      return
-    }
-
-    if (this.backend.metered && this.month().costUsd >= this.limits.monthlyUsd) {
-      await this.say(msg, 'Monthly budget reached. Back next month.')
-      return
-    }
+    if (!(await this.mayAsk(msg, true))) return
 
     const seen = this.recent.get(msg.channel_id) ?? new Map<string, number>()
-    seen.set(author, now)
+    seen.set(author, this.now())
     this.recent.set(msg.channel_id, seen)
 
     const key = `${this.backend.name}:${msg.channel_id}`
@@ -217,6 +232,37 @@ export class Bridge {
     const next = prev.then(() => this.answer(msg, key, allowlisted, access.ackReaction)).catch(e => this.log(`answer failed: ${e}`))
     this.queues.set(key, next)
     await next
+  }
+
+  /**
+   * Pause, rate limit and budget. Checked when a message arrives (`count`: it counts toward the rate
+   * limit) and again when its queued turn comes, so a burst queued before a pause or before the budget
+   * ran out stops there.
+   */
+  private async mayAsk(msg: Message, count: boolean): Promise<boolean> {
+    const author = msg.author.id
+    const now = this.now()
+    const paused = this.pauses.active(author, msg.guild_id ?? 'dm', now)
+    if (paused) {
+      if (!paused.noticed) {
+        this.pauses.markNoticed(paused)
+        await this.say(msg, `You're paused for ${Math.ceil((paused.until - now) / 60_000)} min.`)
+      }
+      return false
+    }
+    if (count && !this.isOwner(author) && !this.hit(this.hits, author, this.limits.perHour, 3600_000)) {
+      if ((this.rateNoticed.get(author) ?? 0) <= now) {
+        const oldest = Math.min(...(this.hits.get(author) ?? [now]))
+        this.rateNoticed.set(author, oldest + 3600_000)
+        await this.say(msg, `You've reached the limit of ${this.limits.perHour} messages an hour. Try again in ${Math.ceil((oldest + 3600_000 - now) / 60_000)} min.`)
+      }
+      return false
+    }
+    if (this.backend.metered && this.month().costUsd >= this.limits.monthlyUsd) {
+      await this.say(msg, 'Monthly budget reached. Back next month.')
+      return false
+    }
+    return true
   }
 
   prompt(msg: Message, allowlisted: boolean): string {
@@ -238,33 +284,49 @@ export class Bridge {
   }
 
   private async answer(msg: Message, key: string, allowlisted: boolean, ackReaction?: string): Promise<void> {
+    if (!(await this.mayAsk(msg, false))) return
     const turn = { authorPaused: false }
     const ctx = this.turnContext(msg, turn)
     if (ackReaction) this.bot.react(msg.channel_id, msg.id, ackReaction).catch(() => {})
     this.bot.typing(msg.channel_id)
     const typing = setInterval(() => this.bot.typing(msg.channel_id), 8000)
+    const old = this.sessions[key]
+    if (old && (this.now() - old.at > SESSION_MAX_AGE_MS || old.turns >= SESSION_MAX_TURNS)) delete this.sessions[key]
+    const prompt = this.prompt(msg, allowlisted)
+    const ask = async (sid: string | undefined) => {
+      try {
+        return await this.backend.ask(sid, prompt, ctx)
+      } catch (err) {
+        if (err instanceof BackendError) this.tally(key, err.spent)
+        throw err
+      }
+    }
     let ans: Answer
     try {
-      const prompt = this.prompt(msg, allowlisted)
-      const sid = this.sessions[key]
+      const sid = this.sessions[key]?.id
       try {
-        ans = await this.backend.ask(sid, prompt, ctx)
+        ans = await ask(sid)
       } catch (err) {
         // A session the backend no longer has (deleted, other machine): start over once.
         if (!sid || err instanceof UserFacingError || !/session|conversation|thread|not found|no such/i.test(String(err))) throw err
         this.log(`session ${sid} for ${key} could not be resumed, starting a new one: ${err}`)
-        ans = await this.backend.ask(undefined, prompt, ctx)
+        delete this.sessions[key]
+        ans = await ask(undefined)
       }
     } catch (err) {
       this.log(`${this.backend.name} failed for ${key}: ${err}`)
+      writeJson(this.sessionsFile, this.sessions)
       if (!turn.authorPaused) await this.say(msg, err instanceof UserFacingError ? err.message : 'Sorry, something went wrong. Try again in a bit.')
       return
     } finally {
       clearInterval(typing)
     }
-    this.sessions[key] = ans.sessionId
+    this.tally(key, ans)
+    const session = this.sessions[key]
+    if (ans.keepSession === false) delete this.sessions[key]
+    else if (session?.id === ans.sessionId) session.turns++
+    else this.sessions[key] = { id: ans.sessionId, at: this.now(), turns: 1, last: ans.cumulative ? totalsOf(ans) : undefined }
     writeJson(this.sessionsFile, this.sessions)
-    this.tally(ans)
     if (turn.authorPaused) return // the pause notice was the answer
     await this.bot.reply(msg.channel_id, ans.text.trim() || '(no reply)', msg.guild_id ? msg.id : undefined)
   }
@@ -277,7 +339,7 @@ export class Bridge {
       pause: async ({ user_id, minutes, reason }) => {
         const target = user_id == null || user_id === '' ? author : parseUserId(user_id)
         if (!target) return `not paused: "${user_id}" is not a user id`
-        const role = await this.rightsAgainst(msg, target)
+        const role = await this.rightsAgainst(msg, target, PAUSE_VERB)
         const known = msg.guild_id ? ((await this.bot.members(msg.guild_id))?.some(m => m.user.id === target) ?? false) : target === author
         const last = this.recent.get(msg.channel_id)?.get(target) ?? 0
         const d = decide(
@@ -306,10 +368,11 @@ export class Bridge {
       unpause: async ({ user_id }) => {
         const target = parseUserId(user_id)
         if (!target) return `not unpaused: "${user_id}" is not a user id`
-        const role = await this.rightsAgainst(msg, target)
-        if (role === 'member') return 'not unpaused: only the owner or a moderator can lift a pause, in a message that names that person'
-        const n = this.pauses.remove(target, role === 'owner' ? '*' : (msg.guild_id ?? 'dm'))
-        return n > 0 ? `unpaused <@${target}>` : `<@${target}> was not paused here`
+        const role = await this.rightsAgainst(msg, target, UNPAUSE_VERB)
+        if (role === 'member') return 'not unpaused: only the owner or a moderator can lift a pause, in a message that says unpause/unmute and names that person'
+        // Only pauses the model set, and only here: a `!pause` is lifted with `!unpause`.
+        const n = this.pauses.remove(target, msg.guild_id ?? 'dm', false)
+        return n > 0 ? `unpaused <@${target}>` : `<@${target}> has no pause here that I can lift (a !pause needs !unpause)`
       },
     }
   }
@@ -342,7 +405,7 @@ export class Bridge {
       this.pauses.priorPauses(target, this.now()),
     )
     if (!d.ok) return `Not paused: ${d.error}.`
-    const p = this.pauses.add({ userId: target, scope, minutes: d.minutes, reason: args.slice(2).join(' ').slice(0, 300), by: msg.author.id }, this.now())
+    const p = this.pauses.add({ userId: target, scope, minutes: d.minutes, reason: args.slice(2).join(' ').slice(0, 300), by: msg.author.id, manual: true }, this.now())
     if (role !== 'owner') this.notifyOwner(this.pauseNotice(p, msg, role))
     return `Paused <@${target}> for ${d.minutes} min${scope === '*' ? ' everywhere' : ''}.`
   }
@@ -404,6 +467,8 @@ export class Bridge {
     const policy = access.groups[this.bot.gateKey(msg.channel_id)]
     if (!policy) return false
     if (policy.allowFrom?.length && !policy.allowFrom.includes(msg.author.id)) return false
+    // Each check below costs API calls: a flood of `!pause` is dropped first.
+    if (!this.isOwner(msg.author.id) && !this.hit(this.commandHits, msg.author.id, 10, 10 * 60_000)) return true
     const role = await this.roleOf(msg.author.id, guild)
     if (role === 'member') return false
     const [cmd, ...args] = msg.content.trim().split(/\s+/)
