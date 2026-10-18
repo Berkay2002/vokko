@@ -27,5 +27,5 @@ export const panel = (page: Page) => page.locator('.thread-panel');
 export async function openThreadFromPopout(page: Page, name: string): Promise<void> {
   await page.getByRole('button', { name: 'Threads', exact: true }).click();
   await page.getByRole('dialog', { name: 'Threads' }).getByRole('button', { name: new RegExp(name) }).click();
-  await panel(page).getByRole('heading', { name, level: 2 }).waitFor();
+  await panel(page).locator('.thread-panel-header').getByRole('heading', { name, level: 2 }).waitFor();
 }

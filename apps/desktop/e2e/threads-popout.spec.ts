@@ -24,7 +24,7 @@ test('joined and other active threads are listed apart; archived ones on their o
   // opening a row shows it in the panel and closes the popout
   await archived.getByRole('button', { name: /replay buffer sizing/ }).click();
   await expect(popout).toHaveCount(0);
-  await expect(panel(page).getByRole('heading', { name: 'replay buffer sizing', level: 2 })).toBeVisible();
+  await expect(panel(page).locator('.thread-panel-header').getByRole('heading', { name: 'replay buffer sizing', level: 2 })).toBeVisible();
 });
 
 test('search filters by name and sort switches between activity and creation time', async ({ page }) => {
@@ -35,7 +35,7 @@ test('search filters by name and sort switches between activity and creation tim
   const create = page.getByRole('dialog', { name: 'Create Thread' });
   await create.getByLabel('Thread name').fill('fresh talk');
   await create.getByRole('button', { name: 'Create Thread' }).click();
-  await expect(panel(page).getByRole('heading', { name: 'fresh talk', level: 2 })).toBeVisible();
+  await expect(panel(page).locator('.thread-panel-header').getByRole('heading', { name: 'fresh talk', level: 2 })).toBeVisible();
   await openThreadFromPopout(page, 'gateway docs');
   await panel(page).locator('.chat-textarea').fill('bumping this thread');
   await panel(page).locator('.chat-textarea').press('Enter');
