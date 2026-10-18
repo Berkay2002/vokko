@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { openChannel } from './threadHelpers';
 
 // Phone width (390x844, styles/responsive.css <= 767px): screens that ran off the right edge. Each test checks that what the
 // user needs is inside the window. VOKKO_SHOTS_DIR saves a screenshot per screen.
@@ -158,6 +159,26 @@ test('a tap on a message author\'s name or avatar opens the profile sheet', asyn
   await expect(sheet).toHaveCount(0);
   await row.locator('.chat-avatar-btn').tap();
   await expect(sheet).toBeVisible();
+});
+
+test('a thread and a forum post take the whole screen, split view or not', async ({ page }) => {
+  await openChannel(page, 'general');
+  const thread = page.locator('.thread-panel');
+  await page.getByRole('button', { name: 'general, details' }).tap();
+  await page.locator('.details-page').getByRole('tab', { name: 'Threads' }).tap();
+  await page.locator('.details-page').getByRole('button', { name: /gateway docs/ }).tap();
+  await expect(thread).toBeVisible();
+  expect((await thread.boundingBox())!.width).toBe(W);
+  await expect(page.locator('.channel-chat')).toBeHidden();
+  await shot(page, 'thread-390');
+  await thread.getByRole('button', { name: 'Close thread' }).tap();
+
+  await openChannel(page, 'support');
+  await page.locator('.forum-post-open').first().tap();
+  await expect(thread).toBeVisible();
+  expect((await thread.boundingBox())!.width).toBe(W);
+  await expect(page.locator('.channel-chat')).toBeHidden();
+  await shot(page, 'forum-post-390');
 });
 
 // The same screens at desktop width: the phone rules must not leak (and the members dates stay on one line).

@@ -1,10 +1,11 @@
-import { setPref, usePrefs } from "../../ui";
+import { setPref, usePhone, usePrefs } from "../../ui";
 import type { SpoilerContent } from "../../ui/prefs";
 import { Category, Page, RadioGroup, SwitchRow } from "./controls";
 
 /** Settings > Chat (Discord's "Chat" page under App Settings). Every switch is a synced pref read by src/chat. */
 export function ChatPage() {
   const p = usePrefs();
+  const phone = usePhone(); // a phone always opens a thread in place of its channel
   return (
     <Page title="Chat">
       <Category title="Display Images, Videos and Lolcats">
@@ -38,9 +39,9 @@ export function ChatPage() {
           ]}
         />
       </Category>
-      <Category title="Threads">
+      {!phone && <Category title="Threads">
         <SwitchRow label="Open threads in split view" note="Off opens a thread in place of its channel." checked={p.threadSplitView} onChange={v => setPref("threadSplitView", v)} />
-      </Category>
+      </Category>}
     </Page>
   );
 }
