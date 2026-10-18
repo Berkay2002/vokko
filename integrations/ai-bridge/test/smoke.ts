@@ -112,6 +112,7 @@ async function startBridge(limits: Limits): Promise<VokkoBot> {
   bridge.startHeartbeat() // without it the plugin would take guilds over
   bot.start(false)
   await until(async () => bot.ownerId)
+  bridge.heartbeat() // the gateway is up: vouch for it now rather than at the next tick
   return bot
 }
 

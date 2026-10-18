@@ -1,9 +1,9 @@
 // Unit checks for the security review fixes: bun test
 import { test, expect, beforeEach } from 'bun:test'
-import { mkdtempSync, writeFileSync, statSync, mkdirSync, chmodSync, rmSync, symlinkSync, existsSync } from 'fs'
+import { mkdtempSync, writeFileSync, statSync, mkdirSync, chmodSync, rmSync, symlinkSync, existsSync, readdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { VokkoBot, bridgeAlive, checkPath, type Config, type Message } from '../vokko.ts'
+import { VokkoBot, bridgeState, checkPath, type Config, type Message } from '../vokko.ts'
 
 const ME = '100', OWNER = '200', FRIEND = '300', STRANGER = '400', GROUP = '500', DM = '600'
 let calls: { url: string; init?: RequestInit }[]
@@ -161,21 +161,29 @@ test.skipIf(process.platform === 'win32')('reply reads every file before the fir
 
 // ---- fallback: the API bridge is out, this session answers its guild messages ----
 
-const beat = (dir: string, at = Date.now()) => writeFileSync(join(dir, 'bridge-state.json'), JSON.stringify({ at }))
+const EPOCH = 1420070400000
+/** A snowflake minted `ageMs` ago. */
+const snow = (n: number, ageMs = 0) => String((BigInt(Date.now() - ageMs - EPOCH) << 22n) | BigInt(n))
+const beat = (dir: string, at = Date.now(), pid: number = process.pid) => writeFileSync(join(dir, 'bridge-state.json'), JSON.stringify({ at, pid }))
 const handoff = (dir: string, id: string, channel = GROUP) => {
   mkdirSync(join(dir, 'handoff'), { recursive: true })
   writeFileSync(join(dir, 'handoff', id), JSON.stringify({ channel_id: channel }))
 }
-const settle = () => new Promise(r => setTimeout(r, 20))
+const verdicts = (dir: string) => readdirSync(join(dir, 'handoff')).filter(n => /\.(accepted|declined)$/.test(n)).sort()
+const settle = () => new Promise(r => setTimeout(r, 30))
 
-test('bridgeAlive: fresh for 90 s, then stale; missing or garbled is not alive', () => {
+test('bridgeState: none without a file, alive for 90 s with a live pid, down when stale, stopped, dead or unreadable', () => {
   const { dir } = makeBot()
-  expect(bridgeAlive(dir)).toBe(false)
+  expect(bridgeState(dir)).toBe('none')
   beat(dir, 1_000_000)
-  expect(bridgeAlive(dir, 1_000_000 + 89_000)).toBe(true)
-  expect(bridgeAlive(dir, 1_000_000 + 91_000)).toBe(false)
+  expect(bridgeState(dir, 1_000_000 + 89_000)).toBe('alive')
+  expect(bridgeState(dir, 1_000_000 + 91_000)).toBe('down')
+  beat(dir, Date.now(), 99_999_999)
+  expect(bridgeState(dir)).toBe('down')
+  writeFileSync(join(dir, 'bridge-state.json'), JSON.stringify({ stoppedAt: Date.now() }))
+  expect(bridgeState(dir)).toBe('down')
   writeFileSync(join(dir, 'bridge-state.json'), 'nope')
-  expect(bridgeAlive(dir)).toBe(false)
+  expect(bridgeState(dir)).toBe('down')
 })
 
 test('a handed-off message is answered here once, through the normal gate, and replies to its channel are allowed', async () => {
@@ -183,55 +191,81 @@ test('a handed-off message is answered here once, through the normal gate, and r
   const got: Message[] = []
   ;(bot as any).onMessage = (m: Message) => void got.push(m)
   beat(dir)
-  const m = msg('5', FRIEND)
-  expect((await bot.gate(m)).action).toBe('drop') // the bridge owns guilds while its heartbeat is fresh
+  const id = snow(5)
+  const m = msg(id, FRIEND)
+  expect(await bot.admit(m)).toBeNull() // the bridge owns guilds while it is alive
   await expect(bot.reply(GROUP, 'x')).rejects.toThrow(/not allowlisted/)
 
-  handoff(dir, '5')
-  respond = url => (url.includes('around=5') ? Response.json([m]) : Response.json({}))
+  handoff(dir, id)
+  respond = url => (url.includes(`around=${id}`) ? Response.json([m]) : Response.json({}))
   ;(bot as any).checkHandoffs()
   await settle()
-  expect(got.map(x => x.id)).toEqual(['5'])
-  expect(existsSync(join(dir, 'handoff', '5'))).toBe(false)
-  expect((await bot.gate(got[0]!)).action).toBe('deliver')
-  expect((await bot.gate(got[0]!)).action).toBe('drop') // one-shot: not answered twice
+  expect(got.map(x => x.id)).toEqual([id])
+  expect(existsSync(join(dir, 'handoff', id))).toBe(false)
+  expect(await bot.admit(got[0]!)).not.toBeNull()
+  expect(verdicts(dir)).toEqual([`${id}.accepted`])
+  expect(await bot.admit(got[0]!)).toBeNull() // one-shot: not answered twice
   ;(bot as any).checkHandoffs()
   await settle()
   expect(got.length).toBe(1)
 
   beat(dir) // the bridge is back: replies to a channel taken over still go out
+  respond = () => Response.json({ id: '9' })
   await bot.reply(GROUP, 'answer')
   expect(calls.some(c => c.url.endsWith(`/channels/${GROUP}/messages`) && c.init?.method === 'POST')).toBe(true)
 })
 
-test('the gate still applies to a handed-off message: allowFrom and opt-in; forged or odd files do nothing', async () => {
+test('the gate still applies to a handed-off message, and the bridge is told when it is refused, too old or unfetchable', async () => {
   const { bot, dir } = makeBot({ guilds: false })
   const got: Message[] = []
   ;(bot as any).onMessage = (m: Message) => void got.push(m)
   beat(dir)
-  handoff(dir, '6') // from a sender outside the channel's allowFrom
-  handoff(dir, '7', '999') // a channel that never opted in
-  handoff(dir, '8') // a bot's message
+  const [stranger, optout, bot_, old, broken] = [snow(6), snow(7), snow(8), snow(9, 61_000), snow(10)]
+  handoff(dir, stranger) // a sender outside the channel's allowFrom
+  handoff(dir, optout, '999') // a channel that never opted in
+  handoff(dir, bot_) // a bot's message
+  handoff(dir, old) // older than 60 s
+  handoff(dir, broken) // the fetch fails
   writeFileSync(join(dir, 'handoff', 'notes.txt'), 'x')
   respond = url =>
-    url.includes('around=6') ? Response.json([msg('6', STRANGER)])
-    : url.includes('around=7') ? Response.json([msg('7', FRIEND, { channel_id: '999' })])
-    : Response.json([msg('8', FRIEND, { author: { id: '77', username: 'b', global_name: null, bot: true } })])
+    url.includes(`around=${stranger}`) ? Response.json([msg(stranger, STRANGER)])
+    : url.includes(`around=${optout}`) ? Response.json([msg(optout, FRIEND, { channel_id: '999' })])
+    : url.includes(`around=${bot_}`) ? Response.json([msg(bot_, FRIEND, { author: { id: '77', username: 'b', global_name: null, bot: true } })])
+    : new Response('boom', { status: 500 })
   ;(bot as any).checkHandoffs()
   await settle()
   expect(existsSync(join(dir, 'handoff', 'notes.txt'))).toBe(true)
-  expect(got.map(x => x.id)).toEqual(['6', '7']) // the bot's was dropped before the gate
-  for (const m of got) expect((await bot.gate(m)).action).toBe('drop')
+  expect(calls.some(c => c.url.includes(`around=${old}`))).toBe(false) // too old: never fetched
+  expect(got.map(x => x.id).sort()).toEqual([optout, stranger].sort())
+  for (const m of got) expect(await bot.admit(m)).toBeNull()
+  expect(verdicts(dir)).toEqual([`${stranger}.declined`, `${optout}.declined`, `${bot_}.declined`, `${old}.declined`, `${broken}.declined`].sort())
 })
 
-test('the owner is told once when the bridge goes away and once when it is back, only while guilds belong to it', async () => {
+test('in a server channel held only as the bridge\'s fallback, reply attaches files from the inbox only', async () => {
+  const { bot, dir } = makeBot({ guilds: false })
+  beat(dir)
+  ;(bot as any).adopted.set(GROUP, Date.now() + 60_000)
+  mkdirSync(join(dir, 'inbox'))
+  writeFileSync(join(dir, 'inbox', 'in.txt'), 'x')
+  const outside = join(mkdtempSync(join(tmpdir(), 'vokko-out-')), 'secret.txt')
+  writeFileSync(outside, 'key')
+  respond = () => Response.json({ id: '9' })
+  await expect(bot.reply(GROUP, 'x', undefined, [outside])).rejects.toThrow(/only files from the inbox/)
+  await bot.reply(GROUP, 'x', undefined, [join(dir, 'inbox', 'in.txt')])
+  // where the plugin owns guilds anyway, any file may be attached, as before
+  const own = makeBot()
+  await own.bot.reply(GROUP, 'x', undefined, [outside])
+})
+
+test('the owner is told once when the bridge goes away and once when it is back, only while a bridge is there to lose', async () => {
   const { bot, dir } = makeBot({ guilds: false })
   ;(bot as any).owner_ = { id: OWNER, username: 'owner', global_name: null }
   const notices = () => calls.filter(c => c.url.endsWith(`/channels/${DM}/messages`)).map(c => JSON.parse(String(c.init?.body)).content as string)
   respond = () => Response.json({ id: '1' })
+  ;(bot as any).watchBridge() // no bridge state at all: nothing to report
   beat(dir)
   ;(bot as any).watchBridge() // first look: nothing to report
-  rmSync(join(dir, 'bridge-state.json')) // a clean stop
+  writeFileSync(join(dir, 'bridge-state.json'), JSON.stringify({ stoppedAt: Date.now() })) // a clean stop
   ;(bot as any).watchBridge()
   ;(bot as any).watchBridge()
   await settle()
@@ -243,7 +277,7 @@ test('the owner is told once when the bridge goes away and once when it is back,
   expect(notices().length).toBe(2)
   expect(notices()[1]).toContain('back')
   writeFileSync(join(dir, 'access.json'), JSON.stringify({ dmPolicy: 'pairing', allowFrom: [OWNER], groups: {}, pending: {} })) // guilds is the plugin's
-  rmSync(join(dir, 'bridge-state.json'))
+  writeFileSync(join(dir, 'bridge-state.json'), JSON.stringify({ stoppedAt: Date.now() }))
   ;(bot as any).watchBridge()
   await settle()
   expect(notices().length).toBe(2)

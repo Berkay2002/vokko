@@ -152,22 +152,46 @@ export function ownsGuilds(role: Role, access: Access, bridgeUp = true): boolean
   return role === 'bridge' || (role === 'bridge-shared') === (access.guilds === false && bridgeUp)
 }
 
-/** The shared bridge rewrites this every HEARTBEAT_MS and removes it when it stops cleanly; the plugin treats guilds as its own once it is older than BRIDGE_STALE_MS. */
+/**
+ * The shared bridge rewrites this ({at, pid}) every HEARTBEAT_MS while its gateway is connected, and writes {stoppedAt} on a
+ * clean stop. The plugin takes guilds over once the file says stopped, is older than BRIDGE_STALE_MS, or names a dead pid.
+ * No file at all: no shared bridge has run here, so `guilds: false` is honoured as it is.
+ */
 export const BRIDGE_STATE = 'bridge-state.json'
-export const HEARTBEAT_MS = 30_000
+export const HEARTBEAT_MS = 10_000
 export const BRIDGE_STALE_MS = 90_000
 /** A message the bridge passes on is a file `handoff/<message id>` (JSON: channel_id); the plugin claims it by renaming it. */
 export const HANDOFF_DIR = 'handoff'
 /** How long the plugin may still reply in a channel it took a message from, whatever the bridge state does meanwhile. */
 const ADOPT_MS = 30 * 60_000
+/** A handed-off message older than this is not answered any more. */
+const HANDOFF_MAX_AGE_MS = 60_000
 
-export function bridgeAlive(stateDir: string, now = Date.now()): boolean {
+const GUILD_EPOCH_MS = 1420070400000
+
+/** When a snowflake id was minted (Vokko uses the Discord epoch). */
+export const snowflakeMs = (id: string): number => Number(BigInt(id) >> 22n) + GUILD_EPOCH_MS
+
+export type BridgeState = 'none' | 'alive' | 'down'
+
+function pidAlive(pid: number): boolean {
   try {
-    const { at } = JSON.parse(readFileSync(join(stateDir, BRIDGE_STATE), 'utf8')) as { at?: unknown }
-    return typeof at === 'number' && now - at < BRIDGE_STALE_MS
-  } catch {
-    return false
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
   }
+}
+
+export function bridgeState(stateDir: string, now = Date.now()): BridgeState {
+  let st: { at?: unknown; pid?: unknown; stoppedAt?: unknown }
+  try {
+    st = JSON.parse(readFileSync(join(stateDir, BRIDGE_STATE), 'utf8'))
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'none' : 'down'
+  }
+  if (typeof st.stoppedAt === 'number' || typeof st.at !== 'number' || now - st.at >= BRIDGE_STALE_MS) return 'down'
+  return typeof st.pid === 'number' && !pidAlive(st.pid) ? 'down' : 'alive'
 }
 
 export const MAX_CHUNK_LIMIT = 2000
@@ -255,6 +279,8 @@ export class VokkoBot {
   private acked = true
   private stopped = false
   private backoff = 1000
+  /** The gateway is READY (not merely open): what a bridge's heartbeat vouches for. */
+  connected = false
 
   constructor(cfg: Config, private readonly onMessage: (msg: Message) => void) {
     this.cfg = cfg
@@ -324,7 +350,8 @@ export class VokkoBot {
   }
 
   // The reply tool's files param takes any path; the channel's own state (token, access.json) is never sendable.
-  assertSendable(f: string): void {
+  // inboxOnly: this session holds the channel only as a fallback for the bridge, so nothing outside the inbox may be attached.
+  assertSendable(f: string, inboxOnly = false): void {
     // macOS and Windows file systems are case-insensitive by default: compare folded paths there.
     const fold = (p: string) => (process.platform === 'linux' ? p : p.toLowerCase())
     const resolve = (p: string) => {
@@ -340,8 +367,9 @@ export class VokkoBot {
     for (const p of [fold(resolvePath(f)), real]) if (p && /^\/(proc|dev|sys)(\/|$)/.test(p)) throw new Error(`refusing to send a system pseudo-file: ${f}`)
     if (!real) return // statSync fails properly later
     const stateReal = resolve(this.cfg.stateDir)
-    if (!stateReal) return // no state dir: nothing to leak
-    const inbox = join(stateReal, 'inbox')
+    const inbox = stateReal && join(stateReal, 'inbox')
+    if (inboxOnly && !(real && inbox && real.startsWith(inbox + sep))) throw new Error(`in a server channel answered as the bridge's fallback only files from the inbox can be sent: ${f}`)
+    if (!stateReal || !inbox) return // no state dir: nothing to leak
     if (real.startsWith(stateReal + sep) && !real.startsWith(inbox + sep)) {
       throw new Error(`refusing to send channel state: ${f}`)
     }
@@ -389,7 +417,7 @@ export class VokkoBot {
       return { action: 'pair', code, isResend: false }
     }
 
-    if (!this.handed.delete(msg.id) && !this.guildsOwned(access)) return { action: 'drop' }
+    if (!this.handed.has(msg.id) && !this.guildsOwned(access)) return { action: 'drop' }
     // Keyed on channel id; threads inherit their parent's opt-in (the reply still goes to the thread).
     const policy = access.groups[this.gateKey(msg.channel_id)]
     if (!policy) return { action: 'drop' }
@@ -412,7 +440,7 @@ export class VokkoBot {
 
   /** ownsGuilds, with the bridge's heartbeat for the plugin. */
   private guildsOwned(access: Access): boolean {
-    return ownsGuilds(this.cfg.role, access, this.cfg.role !== 'channel' || bridgeAlive(this.cfg.stateDir))
+    return ownsGuilds(this.cfg.role, access, this.cfg.role !== 'channel' || bridgeState(this.cfg.stateDir) !== 'down')
   }
 
   isOwnerCommand(msg: Message): boolean {
@@ -440,6 +468,7 @@ export class VokkoBot {
   /** Handles the gate's verdict for pairing (sends the code) and returns whether the message should be delivered. */
   async admit(msg: Message): Promise<Access | null> {
     const result = await this.gate(msg)
+    if (this.handed.delete(msg.id)) this.verdict(msg.id, result.action === 'deliver' ? 'accepted' : 'declined')
     if (result.action === 'drop') return null
     if (result.action === 'pair') {
       const lead = result.isResend ? 'Still pending' : 'Pairing required'
@@ -489,7 +518,12 @@ export class VokkoBot {
       this.bridgeUp = null
       return
     }
-    const up = bridgeAlive(this.cfg.stateDir)
+    const st = bridgeState(this.cfg.stateDir)
+    if (st === 'none') {
+      this.bridgeUp = null
+      return
+    }
+    const up = st === 'alive'
     const was = this.bridgeUp
     this.bridgeUp = up
     if (was == null || was === up) return
@@ -517,14 +551,28 @@ export class VokkoBot {
         channelId = String((JSON.parse(readFileSync(taken, 'utf8')) as { channel_id?: unknown }).channel_id ?? '')
       } catch {}
       rmSync(taken, { force: true })
-      this.adopt(id, channelId).catch(err => this.cfg.log(`vokko channel: handoff ${id} failed: ${err}\n`))
+      if (Date.now() - snowflakeMs(id) > HANDOFF_MAX_AGE_MS) {
+        this.verdict(id, 'declined') // too old to answer now
+        continue
+      }
+      this.adopt(id, channelId).catch(err => {
+        this.cfg.log(`vokko channel: handoff ${id} failed: ${err}\n`)
+        this.verdict(id, 'declined')
+      })
     }
+  }
+
+  /** Tells the bridge, still waiting, what became of a message it passed on (it answers "Sorry…" for a declined one). */
+  private verdict(id: string, kind: 'accepted' | 'declined'): void {
+    try {
+      writeFileSync(join(this.handoffDir, `${id}.${kind}`), '', { mode: 0o600 })
+    } catch {}
   }
 
   /** Fetches the message by id and runs it through the normal gate (opt-in, requireMention, allowFrom) as if guilds were ours. */
   private async adopt(id: string, channelId: string): Promise<void> {
     const [msg] = await this.api<Message[]>('GET', `/channels/${snowflake(channelId, 'channel_id')}/messages?around=${snowflake(id, 'message_id')}&limit=1`)
-    if (msg?.id !== id || msg.guild_id == null || msg.author.bot || msg.author.id === this.me?.id) return
+    if (msg?.id !== id || msg.guild_id == null || msg.author.bot || msg.author.id === this.me?.id) return this.verdict(id, 'declined')
     this.handed.add(id)
     this.adopted.set(msg.channel_id, Date.now() + ADOPT_MS)
     this.onMessage(msg)
@@ -577,10 +625,12 @@ export class VokkoBot {
   async reply(chatId: string, text: string, replyTo?: string, files: string[] = []): Promise<string[]> {
     await this.allowedChannel(chatId)
     if (files.length > 10) throw new Error('Vokko allows max 10 attachments per message')
+    // A server channel the bridge owns (guilds false) is only ours as its fallback: members could steer this session into attaching files.
+    const inboxOnly = this.cfg.role === 'channel' && this.channels.get(chatId)?.type !== 1 && this.loadAccess().guilds === false
     // Read each file right after its check: a symlink swapped in while earlier uploads await is never sent.
     const blobs: Blob[] = []
     for (const f of files) {
-      this.assertSendable(f)
+      this.assertSendable(f, inboxOnly)
       const st = statSync(f)
       if (st.size > this.maxUploadBytes) throw new Error(`file too large: ${f} (${(st.size / 1024 / 1024).toFixed(1)}MB, max ${(this.maxUploadBytes / 1024 / 1024).toFixed(0)}MB)`)
       blobs.push(new Blob([readFileSync(f)]))
@@ -778,6 +828,7 @@ export class VokkoBot {
     switch (t) {
       case 'READY':
         this.me = d.user
+        this.connected = true
         this.sessionId = d.session_id
         if (typeof d.max_upload_bytes === 'number') this.maxUploadBytes = d.max_upload_bytes
         for (const ch of d.private_channels ?? []) this.cacheChannel(ch)
@@ -853,6 +904,7 @@ export class VokkoBot {
       }
     }
     ws.onclose = ev => {
+      this.connected = false
       if (this.heartbeat) clearInterval(this.heartbeat)
       this.heartbeat = null
       if (this.stopped) return
@@ -879,6 +931,7 @@ export class VokkoBot {
 
   stop(): void {
     this.stopped = true
+    this.connected = false
     this.ws?.close(1000)
   }
 }
