@@ -610,10 +610,10 @@ export class VokkoBot {
 
   private readonly memberCache = new Map<string, { at: number; list: Member[] }>()
 
-  /** The guild's members (cached for a minute), or null when they can't be read. */
-  async members(guildId: string): Promise<Member[] | null> {
+  /** The guild's members (cached for a minute unless `fresh`), or null when they can't be read. */
+  async members(guildId: string, fresh = false): Promise<Member[] | null> {
     const cached = this.memberCache.get(guildId)
-    if (cached && Date.now() - cached.at < 60_000) return cached.list
+    if (!fresh && cached && Date.now() - cached.at < 60_000) return cached.list
     try {
       const out: Member[] = []
       for (;;) {
@@ -630,9 +630,9 @@ export class VokkoBot {
     }
   }
 
-  /** Guild-level permission bits of a member (owner and ADMINISTRATOR: all), or null when they are not a member. */
+  /** Guild-level permission bits of a member (owner and ADMINISTRATOR: all), or null when they are not a member. Always read fresh: a removed role or a timeout counts at once. */
   async memberPermissions(guildId: string, userId: string): Promise<bigint | null> {
-    const [guild, members] = await Promise.all([this.api<GuildInfo>('GET', `/guilds/${snowflake(guildId)}`).catch(() => null), this.members(guildId)])
+    const [guild, members] = await Promise.all([this.api<GuildInfo>('GET', `/guilds/${snowflake(guildId)}`).catch(() => null), this.members(guildId, true)])
     const member = members?.find(m => m.user.id === userId)
     if (!guild || !member) return null
     if (guild.owner_id === userId) return ALL_PERMISSIONS

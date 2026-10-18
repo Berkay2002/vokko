@@ -232,7 +232,7 @@ describe('VokkoBot gate per role', () => {
     expect(bot.loadAccess().allowFrom).toEqual([NAT]) // the allowlist stays frozen
   })
 
-  test('memberPermissions: a timed-out moderator has no MODERATE_MEMBERS; the member list is cached for a minute', async () => {
+  test('memberPermissions: a timed-out moderator has no MODERATE_MEMBERS; permissions are read fresh, the member list is cached for a minute', async () => {
     const bot = gateBot('bridge', {})
     let memberCalls = 0
     const until = new Date(Date.now() + 3600_000).toISOString()
@@ -246,7 +246,9 @@ describe('VokkoBot gate per role', () => {
     }
     expect(((await bot.memberPermissions(GUILD, MOD)) ?? 0n) & MODERATE_MEMBERS).toBe(MODERATE_MEMBERS)
     expect(((await bot.memberPermissions(GUILD, EVE)) ?? 0n) & MODERATE_MEMBERS).toBe(0n)
-    expect(memberCalls).toBe(1)
+    expect(memberCalls).toBe(2)
+    await bot.members(GUILD)
+    expect(memberCalls).toBe(2)
   })
 
   test("the owner's !commands never reach the plugin's Claude", async () => {
