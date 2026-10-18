@@ -17,7 +17,8 @@ export type MediaConfig = { apiUrl: string; token: string }
 /** The member who asked, and the message they asked in. */
 export type Asker = { messageId: string; authorId: string; guildId: string | null; channelId: string; authorName?: string }
 
-export type Param = { type: 'string' | 'number' | 'boolean'; description: string; optional?: boolean; enum?: readonly string[] }
+// shortcut: an 'array' param holds strings only, at most maxItems; widen when a tool needs another item type.
+export type Param = { type: 'string' | 'number' | 'boolean' | 'array'; description: string; optional?: boolean; enum?: readonly string[]; maxItems?: number }
 export type MediaTool = { name: string; description: string; params: Record<string, Param> }
 
 /** The wire values the plugin hands to the model: ids from the server are digits only. */
@@ -25,6 +26,8 @@ const SNOWFLAKE = /^\d{1,20}$/
 const SPOTIFY_ID = /^[A-Za-z0-9]{22}$/
 const TITLE_ID = /^tt\d{1,10}$/
 const SPOTIFY_URI = /^spotify:(track|album|playlist):[A-Za-z0-9]{22}$/
+const SPOTIFY_TRACK_URI = /^spotify:track:[A-Za-z0-9]{22}$/
+const SPOTIFY_URIS_MAX = 50
 const SID = /^[\w.~-]{1,200}$/
 const TIMEOUT_MS = 15_000
 /** What one tool call may show the model: lists stay short so prompts stay small. */
@@ -175,7 +178,7 @@ function spotifyState(s: SpState | undefined): string {
   if (queue.length) {
     out.push(`Queue (${s.queue_len ?? queue.length}): ${queue.slice(0, LIST_MAX).map(t => `[${clean(t.qid, 20)}] ${qt(t.title, 50)} — ${names(t.artists)}`).join('; ')}`)
   }
-  if (s.left_out) out.push(`${clean(s.left_out, 6)} tracks did not fit in the queue.`)
+  if (s.left_out) out.push(`${clean(s.left_out, 6)} tracks did not fit (the queue is full or the member's limit was reached).`)
   if (s.skip_votes?.length && s.skip_needed) out.push(`Skip votes: ${s.skip_votes.length} of ${clean(s.skip_needed, 6)}.`)
   return out.join('\n')
 }
@@ -215,11 +218,16 @@ async function spotifyNow(_a: Args, c: Ctx): Promise<string> {
 }
 
 async function spotifyPlay(a: Args, c: Ctx): Promise<string> {
-  const uri = str(a, 'uri', SPOTIFY_URI)
+  const uris = a.uris
+  if (uris != null && a.uri != null) throw new MediaError('Send either "uri" or "uris", not both.')
+  if (uris != null && (!Array.isArray(uris) || uris.length < 1 || uris.length > SPOTIFY_URIS_MAX || uris.some(u => typeof u !== 'string' || !SPOTIFY_TRACK_URI.test(u)))) {
+    throw new MediaError(`"uris" must hold 1 to ${SPOTIFY_URIS_MAX} spotify:track: uris.`)
+  }
+  const what = uris != null ? { uris } : { uri: str(a, 'uri', SPOTIFY_URI) }
   const mode = a.mode == null ? 'now' : pick(a, 'mode', ['now', 'queue', 'next'] as const)
   const ch = await c.channel()
-  if (mode === 'now') return 'Started. ' + spotifyState((await c.call('PUT', `/channels/${ch}/spotify`, { uri })) as SpState)
-  const s = (await c.call('PATCH', `/channels/${ch}/spotify`, { queue_add: mode === 'next' ? { uri, next: true } : { uri } })) as SpState
+  if (mode === 'now') return 'Started. ' + spotifyState((await c.call('PUT', `/channels/${ch}/spotify`, what)) as SpState)
+  const s = (await c.call('PATCH', `/channels/${ch}/spotify`, { queue_add: mode === 'next' ? { ...what, next: true } : what })) as SpState
   return `Queued${mode === 'next' ? ' to play next' : ''}. ` + spotifyState(s)
 }
 
@@ -373,7 +381,7 @@ const impls: Impl[] = [
   { tool: { name: 'spotify_search', description: 'Search Spotify. Returns up to 10 items with the uris (or artist ids) the other Spotify tools take. A pasted open.spotify.com link works as q.', params: { q: p('string', 'Search text'), type: p('string', 'Limit to one kind', { optional: true, enum: KINDS }) } }, run: spotifySearch, on403: CONTROL_ONLY },
   { tool: { name: 'spotify_details', description: 'Tracks of an album or playlist, top tracks and albums of an artist, or one track.', params: { kind: p('string', 'What the id is', { enum: KINDS }), id: p('string', 'The 22-character Spotify id') } }, run: spotifyDetails, on403: CONTROL_ONLY },
   { tool: { name: 'spotify_now', description: 'What Spotify is playing in the asking member\'s call, with the queue.', params: {} }, run: spotifyNow, on403: CONTROL_ONLY },
-  { tool: { name: 'spotify_play', description: "Play a track, album or playlist uri in the asking member's call. mode now (default) replaces what is playing for everyone; queue adds at the end; next adds at the front.", params: { uri: p('string', 'spotify:track:…, spotify:album:… or spotify:playlist:…'), mode: p('string', 'now, queue or next', { optional: true, enum: ['now', 'queue', 'next'] }) } }, run: spotifyPlay, on403: CONTROL_ONLY },
+  { tool: { name: 'spotify_play', description: "Play a track, album or playlist uri in the asking member's call. mode now (default) replaces what is playing for everyone; queue adds at the end; next adds at the front. For several songs, pass them all in one call as uris; for a Spotify playlist or album, pass its uri.", params: { uri: p('string', 'spotify:track:…, spotify:album:… or spotify:playlist:…', { optional: true }), uris: p('array', 'Up to 50 spotify:track:… uris, all in one call (instead of uri)', { optional: true, maxItems: SPOTIFY_URIS_MAX }), mode: p('string', 'now, queue or next', { optional: true, enum: ['now', 'queue', 'next'] }) } }, run: spotifyPlay, on403: CONTROL_ONLY },
   { tool: { name: 'spotify_control', description: 'Control Spotify in the call: pause, resume, skip, previous, shuffle the queue, stop (ends it for everyone), loop (loop_mode), seek (seconds), queue_remove (qid), queue_move (qid, to), queue_clear.', params: { action: p('string', 'What to do', { enum: SP_ACTIONS }), loop_mode: p('string', 'off, track or queue (for loop)', { optional: true, enum: ['off', 'track', 'queue'] }), seconds: p('number', 'Position (for seek)', { optional: true }), qid: p('string', 'Queue entry id from spotify_now', { optional: true }), to: p('number', '0-based queue index (for queue_move)', { optional: true }) } }, run: spotifyControl, on403: CONTROL_ONLY },
   { tool: { name: 'stremio_search', description: "Find a movie or series on Cinemeta. Returns up to 10 titles with their imdb id (tt…).", params: { q: p('string', 'Title'), kind: KIND } }, run: stremioSearch, on403: LINK_FIRST },
   { tool: { name: 'stremio_details', description: 'A title\'s description and, for a series, its seasons (with season set: that season\'s episodes).', params: { kind: KIND, id: p('string', 'imdb id, tt…'), season: p('number', 'Season to list', { optional: true }) } }, run: stremioDetails, on403: LINK_FIRST },

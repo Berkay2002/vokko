@@ -2074,6 +2074,8 @@ pub struct StremioStreamList {
 pub const SPOTIFY_QUEUE_MAX: usize = 200;
 /// Queue entries one person without control may have in the Spotify queue at once; an album or playlist adds what fits.
 pub const SPOTIFY_QUEUE_PER_USER: usize = 10;
+/// Most track URIs one `uris` list may hold (`PUT` and `queue_add`).
+pub const SPOTIFY_URIS_MAX: usize = 50;
 /// Queue entries a SPOTIFY_UPDATE (and READY / `Call`) carries; `GET /channels/{id}/spotify` has all of them.
 pub const SPOTIFY_EVENT_QUEUE_MAX: usize = 50;
 
@@ -2255,15 +2257,23 @@ pub struct SpotifyUpdate {
     pub state: Option<SpotifyState>,
 }
 
-/// `PUT /channels/{id}/spotify`.
+/// `PUT /channels/{id}/spotify`: exactly one of `uri` (a track, album or playlist) and `uris` (1 to `SPOTIFY_URIS_MAX` track URIs:
+/// the first plays now, the rest go to the front of the queue).
 #[derive(Clone, Debug, Deserialize)]
 pub struct SpotifyStartRequest {
-    pub uri: String,
+    #[serde(default)]
+    pub uri: Option<String>,
+    #[serde(default)]
+    pub uris: Option<Vec<String>>,
 }
 
+/// Exactly one of `uri` and `uris` (track URIs only, at most `SPOTIFY_URIS_MAX`), as in `SpotifyStartRequest`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct SpotifyQueueAdd {
-    pub uri: String,
+    #[serde(default)]
+    pub uri: Option<String>,
+    #[serde(default)]
+    pub uris: Option<Vec<String>>,
     /// Put it at the front of the queue instead of the end.
     #[serde(default)]
     pub next: bool,

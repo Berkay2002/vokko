@@ -48,6 +48,7 @@ const PAUSE = 'mcp__vokko__pause_user'
 const UNPAUSE = 'mcp__vokko__unpause_user'
 
 const zodOf = (p: Param) => {
+  if (p.type === 'array') return (p.optional ? z.array(z.string()).max(p.maxItems ?? 50).optional() : z.array(z.string()).max(p.maxItems ?? 50)).describe(p.description)
   const t = p.type === 'string' ? (p.enum ? z.enum(p.enum as [string, ...string[]]) : z.string()) : p.type === 'number' ? z.number() : z.boolean()
   return (p.optional ? t.optional() : t).describe(p.description)
 }
