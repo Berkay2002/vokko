@@ -1,7 +1,8 @@
 // Voice in the Linux app: WebKitGTK has no WebRTC, so the room runs in Rust (src-tauri/src/native_voice, LiveKit's Rust SDK)
 // and this transport only forwards. Same policy as livekitTransport.ts (mic published while unmuted, volume 0 unsubscribes).
-// Remote cameras and screen shares play through nativeVideo.ts; publishing our own isn't there yet (no setCamera /
-// setScreenShare, so the UI hides those buttons).
+// Remote cameras and screen shares play through nativeVideo.ts. Our own are captured in Rust too (V4L2 cameras, the
+// screen through the xdg-desktop-portal on Wayland or the whole X11 screen), so the page's camera preview is closed before
+// Rust opens the device. VP8 simulcast with the layers options.ts plans; no screen-share audio; a reconnect drops them.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type { Snowflake } from "../api/types";
@@ -9,8 +10,8 @@ import type { VideoSource } from "./mediaStore";
 import { NativeVideo } from "./nativeVideo";
 import { PingSmoother } from "./ping";
 import type { ConnectionQuality, VoiceDevice, VoiceSettings } from "./reducer";
-import type { TransportCallbacks, TransportOptions, VoiceTransport } from "./transport";
-import type { ViewerQuality } from "./video/options";
+import type { CameraStart, TransportCallbacks, TransportOptions, VoiceTransport } from "./transport";
+import { buildCamera, buildScreenShare, type PlainPreset, type ScreenShareChoice, type ViewerQuality } from "./video/options";
 
 /** Events from native_voice::NativeEvent. */
 type NativeEvent =
@@ -23,7 +24,21 @@ type NativeEvent =
   | { type: "participant"; userId: Snowflake }
   | { type: "micFailed"; reason: "no_microphone" }
   | { type: "video"; userId: Snowflake; source: VideoSource; key: string | null }
-  | { type: "screenLive"; userId: Snowflake; live: boolean };
+  | { type: "screenLive"; userId: Snowflake; live: boolean }
+  | { type: "localEnded"; source: VideoSource };
+
+/** native_voice::outgoing::VideoPlan. */
+interface VideoPlan {
+  width: number;
+  height: number;
+  fps: number;
+  maxBitrate: number;
+  layers: PlainPreset[];
+  deviceId?: string;
+}
+
+// Rust encodes VP8 only, and VP8 simulcast works everywhere.
+const VP8 = { vp8: true, svcSimulcast: false };
 
 const withDefault = (list: VoiceDevice[]): VoiceDevice[] => [{ deviceId: "default", label: "Default" }, ...list];
 
@@ -91,6 +106,9 @@ export class NativeTransport implements VoiceTransport {
         return this.setVideo(event.userId, event.source, event.key);
       case "screenLive":
         return this.cb.screenLive?.(event.userId, event.live);
+      case "localEnded":
+        void this.stopLocal(event.source).then(() => this.cb.localVideoEnded?.(event.source));
+        return;
     }
   }
 
@@ -143,6 +161,49 @@ export class NativeTransport implements VoiceTransport {
 
   watchStream(userId: Snowflake, watch: boolean): void {
     void this.command("native_voice_watch", { userId, watch });
+  }
+
+  async setCamera(on: boolean, start?: CameraStart): Promise<void> {
+    // A preview capture holds the camera: Rust opens the device itself.
+    await start?.session?.stop().catch(() => undefined);
+    if (!on || !start) return on ? this.cb.localVideoEnded?.("camera") : this.stopLocal("camera");
+    const { capture, publish } = buildCamera(start.resolution, VP8);
+    // Device ids from the page's enumerateDevices are WebKit's, not V4L2 paths: Rust then takes the first camera.
+    const deviceId = start.deviceId?.startsWith("/dev/") ? start.deviceId : undefined;
+    const plan = { width: capture.width, height: capture.height, fps: capture.frameRate, maxBitrate: publish.encoding.maxBitrate, layers: publish.layers, deviceId };
+    await this.startLocal("camera", plan);
+  }
+
+  async setScreenShare(on: boolean, choice?: ScreenShareChoice): Promise<void> {
+    if (!on || !choice) return on ? this.cb.localVideoEnded?.("screen") : this.stopLocal("screen");
+    const { capture, publish } = buildScreenShare(choice, VP8);
+    const { width, height, frameRate } = capture.resolution;
+    if (await this.startLocal("screen", { width, height, fps: frameRate, maxBitrate: publish.encoding.maxBitrate, layers: publish.layers })) {
+      if (choice.audio) this.cb.screenAudioMissing?.();
+    }
+  }
+
+  /** Publishes our camera / screen share; true once it is live. The portal picker closed is not a failure. */
+  private async startLocal(source: VideoSource, plan: VideoPlan): Promise<boolean> {
+    const generation = this.generation;
+    try {
+      const key = await invoke<string | null>("native_voice_set_video", { source, plan });
+      const self = this.options?.selfId;
+      if (generation !== this.generation || !key || !self) return false;
+      this.setVideo(self, source, key);
+      return true;
+    } catch (error) {
+      if (generation !== this.generation) return false;
+      if (error === "cancelled") this.cb.localVideoEnded?.(source);
+      else this.cb.videoFailed?.(source, error === "permission_denied" || error === "not_found" ? error : "failed");
+      return false;
+    }
+  }
+
+  private async stopLocal(source: VideoSource): Promise<void> {
+    const self = this.options?.selfId;
+    if (self && this.videos.has(`${self}:${source}`)) this.setVideo(self, source, null);
+    await this.command("native_voice_set_video", { source, plan: null });
   }
 
   setViewerQuality(userId: Snowflake, source: VideoSource, quality: ViewerQuality): void {

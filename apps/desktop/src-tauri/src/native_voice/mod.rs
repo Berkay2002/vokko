@@ -6,6 +6,7 @@
 
 mod audio;
 mod gate;
+mod outgoing;
 mod video;
 
 use audio::{AudioDevice, Capture, Params, Playback, Shared};
@@ -18,6 +19,7 @@ use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::audio_stream::native::NativeAudioStream;
 use livekit::webrtc::prelude::AudioFrame;
 use livekit::webrtc::stats::RtcStats;
+use outgoing::{Kind, Outgoing, StartError, VideoPlan};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -115,6 +117,10 @@ pub enum NativeEvent {
         user_id: String,
         live: bool,
     },
+    /// Our camera / screen share capture stopped on its own (camera unplugged, the compositor's "stop sharing").
+    LocalEnded {
+        source: &'static str,
+    },
 }
 
 #[derive(Serialize)]
@@ -140,6 +146,8 @@ struct Session {
     tasks: Vec<JoinHandle<()>>,
     /// Remote microphone readers by track sid.
     readers: Arc<std::sync::Mutex<HashMap<String, JoinHandle<()>>>>,
+    /// Our camera and screen share.
+    outgoing: Vec<Outgoing>,
 }
 
 pub struct NativeVoice {
@@ -350,6 +358,7 @@ impl Session {
                 handle.abort();
             }
         }
+        self.outgoing.clear();
         shared.clear_voices();
         videos.clear();
         let _ = self.room.close().await;
@@ -449,7 +458,17 @@ async fn connect(state: &NativeVoice, url: String, token: String, init: ConnectI
             let _ = ping_events.send(NativeEvent::Ping { ms: ping_ms(&ping_room).await });
         }
     }));
-    let mut session = Session { room: room.clone(), events: events.clone(), settings: init.settings, playback: None, mic: None, leaving, tasks, readers };
+    let mut session = Session {
+        room: room.clone(),
+        events: events.clone(),
+        settings: init.settings,
+        playback: None,
+        mic: None,
+        leaving,
+        tasks,
+        readers,
+        outgoing: Vec::new(),
+    };
     session.restart_playback(&shared);
     for participant in room.remote_participants().values() {
         for publication in participant.track_publications().values() {
@@ -505,6 +524,49 @@ async fn set_user_volume(state: &NativeVoice, user_id: String, volume: f32) -> R
 }
 
 /// Runs the subscription policy again for one user's publications.
+/// Stops our camera / screen share, then starts it again with `plan` when there is one. Answers the local preview's
+/// frame key, or "cancelled" (portal picker closed), "permission_denied", "not_found", "failed".
+async fn set_video(state: &NativeVoice, kind: Kind, plan: Option<VideoPlan>) -> Result<Option<String>, String> {
+    let (room, events, old) = {
+        let mut slot = state.session.lock().await;
+        let session = slot.as_mut().ok_or("failed")?;
+        let old = session.outgoing.iter().position(|o| o.kind == kind).map(|i| session.outgoing.remove(i));
+        (session.room.clone(), session.events.clone(), old)
+    };
+    if let Some(old) = old {
+        let sid = old.publication.sid();
+        state.videos.remove(&sid.to_string());
+        drop(old);
+        let _ = room.local_participant().unpublish_track(&sid).await;
+    }
+    let Some(plan) = plan else { return Ok(None) };
+    // No session lock while the capture opens: the portal's picker waits for the user.
+    let ended = move || {
+        let _ = events.send(NativeEvent::LocalEnded { source: kind.name() });
+    };
+    let (outgoing, track) = outgoing::start(&room, kind, plan, ended).await.map_err(|error| match error {
+        StartError::Cancelled => "cancelled".to_owned(),
+        StartError::Failed(reason) => reason.to_owned(),
+    })?;
+    let sid = outgoing.publication.sid();
+    let key = sid.to_string();
+    let mut slot = state.session.lock().await;
+    match slot.as_mut() {
+        Some(session) if Arc::ptr_eq(&session.room, &room) && !session.outgoing.iter().any(|o| o.kind == kind) => {
+            state.videos.insert(key.clone(), track.rtc_track());
+            session.outgoing.push(outgoing);
+            Ok(Some(key))
+        }
+        // Left, reconnected or started twice meanwhile: this one goes.
+        _ => {
+            drop(slot);
+            drop(outgoing);
+            let _ = room.local_participant().unpublish_track(&sid).await;
+            Err("failed".into())
+        }
+    }
+}
+
 async fn reconsider(state: &NativeVoice, user_id: &str) {
     let slot = state.session.lock().await;
     let Some(session) = slot.as_ref() else { return };
@@ -625,6 +687,11 @@ pub async fn native_voice_video_quality(state: State<'_, NativeVoice>, user_id: 
 
 /// Raw bytes (an ArrayBuffer in the page): see Videos::frame.
 #[tauri::command]
+pub async fn native_voice_set_video(state: State<'_, NativeVoice>, source: Kind, plan: Option<VideoPlan>) -> Result<Option<String>, String> {
+    set_video(&state, source, plan).await
+}
+
+#[tauri::command]
 pub async fn native_voice_video_frame(state: State<'_, NativeVoice>, key: String, max_width: u32, max_height: u32) -> Result<tauri::ipc::Response, String> {
     state.videos.frame(&key, max_width, max_height).await.map(tauri::ipc::Response::new)
 }
@@ -680,6 +747,22 @@ mod tests {
                 ("undeaf", _) => set_deaf(&voice, false),
                 ("volume", user) => set_user_volume(&voice, user.to_string(), 0.0).await.unwrap(),
                 ("unvolume", user) => set_user_volume(&voice, user.to_string(), 1.0).await.unwrap(),
+                // camera=720p / screen=1080p publish with the plans options.ts makes; camera= / screen= stop.
+                (source @ ("camera" | "screen"), size) => {
+                    let layer = |w: u32, h: u32, b: u64| serde_json::json!({ "width": w, "height": h, "maxBitrate": b, "maxFramerate": 30 });
+                    let plan = match size {
+                        "720p" if source == "camera" => Some(
+                            serde_json::json!({ "width": 1280, "height": 720, "fps": 30, "maxBitrate": 1_200_000, "layers": [layer(320, 180, 150_000), layer(640, 360, 500_000)] }),
+                        ),
+                        "1080p" => Some(
+                            serde_json::json!({ "width": 1920, "height": 1080, "fps": 30, "maxBitrate": 4_000_000, "layers": [layer(640, 360, 500_000), layer(1280, 720, 2_000_000)] }),
+                        ),
+                        _ => None,
+                    };
+                    let kind = if source == "camera" { Kind::Camera } else { Kind::Screen };
+                    let plan = plan.map(|p| serde_json::from_value(p).unwrap());
+                    println!("{source}: {:?}", set_video(&voice, kind, plan).await);
+                }
                 _ => println!("unknown step {action}"),
             }
         }

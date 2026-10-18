@@ -187,9 +187,15 @@ RNNoise falls back to WebRTC's noise suppression; the soundboard and entrance so
 screen shares are received natively too: Rust decodes each subscribed track, scales it down to the tile size (`native_voice/video.rs`,
 capped at 3840x2160) and converts it to RGBA; the page pulls one frame per `native_voice_video_frame` call (an `ArrayBuffer`, so no
 queue builds up when the page is slow), paints a hidden canvas, and its `captureStream()` feeds the tile's `<video>`
-(`voice/nativeVideo.ts`). Not yet: publishing a camera or screen share, a layer list for the quality menu (only "Np" or high), and
-Watch Together streams; a browser without WebRTC still gets `webrtc_unsupported`, and the Stremio / Spotify viewer Room goes to
-`unsupported` instead of retrying.
+(`voice/nativeVideo.ts`). Our own camera and screen share are captured in Rust as well (`native_voice/outgoing.rs`) and sent as
+VP8 simulcast with the layers `video/options.ts` plans: cameras through V4L2 (MJPEG decoded with zune-jpeg, or YUYV; the page's
+preview capture is closed first, and a WebKit device id falls back to the first camera), screens through libwebrtc's desktop
+capturer: the xdg-desktop-portal ScreenCast + PipeWire path on Wayland (the portal's own picker; closing it is a cancel, not an
+error), the whole X11 screen otherwise. libwebrtc loads libpipewire, libX11 and friends itself when a capture starts, so the AppImage
+bundles nothing new; a desktop needs PipeWire and a portal backend for Wayland sharing, which GNOME and KDE ship. Not yet: screen
+share audio, a window picker on X11, resuming our camera / screen share after a reconnect, hardware encoding (H.264 over VAAPI /
+NVENC), a layer list for the quality menu (only "Np" or high), and Watch Together streams; a browser without WebRTC still gets
+`webrtc_unsupported`, and the Stremio / Spotify viewer Room goes to `unsupported` instead of retrying.
 
 Check it headless (VPS-style box, no sound card): a PulseAudio with null sinks (`speakers`, a `micfeed` sink remapped as source
 `mic`), `livekit-server --dev`-style config on loopback, a Playwright Chromium peer with a fake microphone, then
@@ -210,6 +216,14 @@ quadrant colours through the `bench_log` command. Results (Ubuntu 26.04 VPS, Xvf
 at the sender's 19-24 fps with exact colours, at +80 % of one core and +200 MB over an audio-only call (Rust decode, scale and
 convert ~15 % and ~30 MB, the rest WebKit compositing in software); a 1080p screen share shows 12-14 fps of the 15 the canvas sender
 manages, at 117 % of one core. A desktop with GPU compositing should cost less; owners: measure there, and try Wayland.
+
+Publishing check: `live_room` takes `camera=720p`, `screen=1080p`, `camera=` and `screen=` steps in `NATIVE_VOICE_SCRIPT`. On the VPS the
+kernel's `vivid` test driver stands in for a webcam (`modprobe vivid n_devs=1 node_types=0x1`: a YUYV `/dev/video0`), Xvfb plays an
+`ffplay` test pattern for the screen, and a Chromium viewer logs what it receives. Results (release build, X11 capture): a 720p camera
+arrives at 1280x720, 30 fps, VP8, colours right, at +26 % of one core and +55 MB over an audio-only call (11 %, 59 MB); a 1080p
+screen share arrives at 1920x1080, 30 fps, at +80-100 % of one core and +155 MB, nearly all of it libwebrtc's software VP8 encode
+of three layers. Stopping and starting again works. Owners: a real USB camera (MJPEG), the portal picker on GNOME and KDE Wayland
+(and cancelling it), the compositor's "stop sharing", unplugging the camera mid-call.
 
 ## Updater
 
