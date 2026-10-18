@@ -374,7 +374,12 @@ function renderBlocks(
           </div>
         );
       case 'list': {
-        const items = b.items.map((it, j) => <li key={j}>{renderInline(it, ctx, `${key}.${j}.`)}</li>);
+        const items = b.items.map((it, j) => (
+          <li key={j}>
+            {renderInline(it.c, ctx, `${key}.${j}.`)}
+            {it.sub && renderBlocks(it.sub, ctx, `${key}.${j}.s`)}
+          </li>
+        ));
         return b.ordered ? (
           <ol key={key} className="md-list" start={b.start}>
             {items}

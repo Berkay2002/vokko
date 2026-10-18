@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
-import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, Hash, LayoutGrid, Lock, Pencil, Plus, Smile, Sticker, Timer, Trash2, X } from 'lucide-react';
+import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, LayoutGrid, Lock, Pencil, Plus, Smile, Sticker, Timer, Trash2, X } from 'lucide-react';
 import { Perm, channelPermissions, hasBit, memberLike } from '../api/permissions';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
@@ -7,6 +7,8 @@ import { request, useStale, BottomSheet, Popout, Tooltip, usePhone, resolveUrl, 
 import { useMedia } from '../media/store';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
+import { ChannelTypeIcon } from './ChannelTypeIcon';
+import { mentionableChannels, userSuggestions } from './suggest';
 import { ExpressionPickerPopout, type ExpressionTab } from './ExpressionPicker';
 import { AppLauncherPopout, AppsGlyph, useCommandComposer } from '../apps/CommandComposer';
 import { useEmojiDb, pushRecentEmoji } from './emojiData';
@@ -65,6 +67,7 @@ interface Suggestion {
   image?: string;
   sticker?: StickerData;
   color?: string | null;
+  channelType?: ChannelType;
   /** names the query is ranked against: a custom emoji's name, every shortcode of a unicode one */
   names?: string[];
 }
@@ -115,6 +118,13 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     if (!pollGuild || !chat.channel || !member) return true;
     return hasBit(channelPermissions(pollGuild, memberLike(member), chat.channel), Perm.SEND_POLLS);
   }, [pollGuild, pollMembers, chat.channel, chat.me.id]);
+  // @everyone/@here are offered only in servers, to members with MENTION_EVERYONE.
+  const canMentionEveryone = useMemo(() => {
+    if (!chat.guildId) return false;
+    const member = pollMembers[chat.me.id];
+    if (!pollGuild || !chat.channel || !member) return true;
+    return hasBit(channelPermissions(pollGuild, memberLike(member), chat.channel), Perm.MENTION_EVERYONE);
+  }, [pollGuild, pollMembers, chat.channel, chat.me.id, chat.guildId]);
   // Slowmode: the server limits members to one message per rate_limit_per_user seconds; moderators are immune (like the server's check).
   const slowmode = chat.channel?.rate_limit_per_user ?? 0;
   const slowmodeImmune = useMemo(() => {
@@ -205,26 +215,23 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       };
       if (chat.guildId) for (const m of Object.values(chat.members)) add(m.user, m);
       else { add(chat.me); for (const u of chat.channel?.recipients ?? []) add(u); }
-      const list = [...people.values()]
-        .filter(p => !q || p.name.toLowerCase().includes(q) || p.username.toLowerCase().includes(q))
-        .sort((a, b) => Number(b.name.toLowerCase().startsWith(q)) - Number(a.name.toLowerCase().startsWith(q)) || a.name.localeCompare(b.name))
-        .slice(0, 10);
-      const out: Suggestion[] = list.map(p => ({
-        key: `u${p.id}`, label: p.name, hint: p.username, insert: `@${p.name}`, token: { display: `@${p.name}`, raw: `<@${p.id}>` }, lead: 'avatar', user: { id: p.id, avatar: p.avatar },
-      }));
-      if (chat.guildId) {
-        for (const r of chat.roles) {
-          if (r.id === chat.guildId || !r.mentionable || !r.name.toLowerCase().includes(q)) continue;
-          out.push({ key: `r${r.id}`, label: r.name, insert: `@${r.name}`, token: { display: `@${r.name}`, raw: `<@&${r.id}>` }, lead: 'at', color: r.color ? `#${r.color.toString(16).padStart(6, '0')}` : null });
+      const roles = chat.guildId ? chat.roles.filter(r => r.id !== chat.guildId && r.mentionable) : [];
+      return userSuggestions([...people.values()], roles, q, canMentionEveryone).map((s): Suggestion => {
+        if (s.kind === 'user') {
+          const p = s.person;
+          return { key: `u${p.id}`, label: p.name, hint: p.username, insert: `@${p.name}`, token: { display: `@${p.name}`, raw: `<@${p.id}>` }, lead: 'avatar', user: { id: p.id, avatar: p.avatar } };
         }
-        for (const special of ['everyone', 'here']) if (special.startsWith(q)) out.push({ key: special, label: `@${special}`, hint: special === 'everyone' ? 'Notify everyone in this channel' : 'Notify online members', insert: `@${special}`, lead: 'at' });
-      }
-      return out.slice(0, 12);
+        if (s.kind === 'role') {
+          const r = s.role;
+          return { key: `r${r.id}`, label: r.name, insert: `@${r.name}`, token: { display: `@${r.name}`, raw: `<@&${r.id}>` }, lead: 'at', color: r.color ? `#${r.color.toString(16).padStart(6, '0')}` : null };
+        }
+        return { key: s.name, label: `@${s.name}`, hint: s.name === 'everyone' ? 'Notify everyone in this channel' : 'Notify online members', insert: `@${s.name}`, lead: 'at' };
+      });
     }
     if (trigger.kind === 'channel') {
       if (!chat.guildId) return [];
-      return chat.channels.filter(c => c.type === ChannelType.GuildText && (c.name ?? '').toLowerCase().includes(q)).slice(0, 10)
-        .map(c => ({ key: `c${c.id}`, label: c.name ?? '', insert: `#${c.name}`, token: { display: `#${c.name}`, raw: `<#${c.id}>` }, lead: 'hash' as const }));
+      return mentionableChannels(chat.channels, q, 10)
+        .map(c => ({ key: `c${c.id}`, label: c.name ?? '', insert: `#${c.name}`, token: { display: `#${c.name}`, raw: `<#${c.id}>` }, lead: 'hash' as const, channelType: c.type }));
     }
     // Settings > Chat: ":emoji: autocomplete" and "sticker autocomplete" decide what a `:` query lists.
     const custom: Suggestion[] = options.emojiAutocomplete
@@ -242,7 +249,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
       for (const s of stickers.filter(s => s.name.toLowerCase().includes(q)).slice(0, 4)) out.push({ key: `s${s.id}`, label: s.name, hint: 'Sticker', insert: '', lead: 'sticker', sticker: s });
     }
     return out;
-  }, [trigger, triggerKey, dismissed, chat, emojiDb, emojiSections, options.emojiAutocomplete, options.stickerAutocomplete, stickers]);
+  }, [trigger, triggerKey, dismissed, chat, canMentionEveryone, emojiDb, emojiSections, options.emojiAutocomplete, options.stickerAutocomplete, stickers]);
 
   // Settings > Chat > "sticker suggestions": a single typed word that names a sticker (or one of its tags) offers it.
   const stickerHits = useMemo(() => {
@@ -485,7 +492,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
         {suggestions.map((s, i) => <div key={s.key} role="option" aria-selected={i === selected} className={`chat-autocomplete-item${i === selected ? ' selected' : ''}`}
           onMouseEnter={() => setSelected(i)} onMouseDown={e => { e.preventDefault(); apply(s); }}>
           {s.lead === 'avatar' && s.user && <Avatar user={s.user} size={24} />}
-          {s.lead === 'hash' && <Hash size={20} className="chat-autocomplete-icon" />}
+          {s.lead === 'hash' && <ChannelTypeIcon type={s.channelType ?? ChannelType.GuildText} className="chat-autocomplete-icon" />}
           {s.lead === 'at' && <AtSign size={20} className="chat-autocomplete-icon" style={s.color ? { color: s.color } : undefined} />}
           {s.lead === 'emoji' && (s.image ? <img className="chat-autocomplete-emoji emoji-autocomplete-img" src={s.image} alt="" /> : <span className="chat-autocomplete-emoji">{s.emoji}</span>)}
           {s.lead === 'sticker' && s.sticker && <img className="chat-autocomplete-sticker" src={resolveUrl(s.sticker.url)} alt="" width={24} height={24} draggable={false} />}

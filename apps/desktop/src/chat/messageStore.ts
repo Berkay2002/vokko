@@ -13,7 +13,7 @@ import {
   applyUserUpdate, normalizeMessage, updateIfPresent, upsertMessage, withLateArrivals, type ChannelState, type PendingMessage,
 } from './messageState';
 import { rememberMessage, rememberMessages } from './userCache';
-import { sameUnicodeEmoji } from './emojiData';
+import { pushRecentEmoji, recordEmojiUse, sameUnicodeEmoji } from './emojiData';
 import { newNonce } from './util';
 import { applyPollVote } from '../polls/pollState';
 
@@ -263,6 +263,7 @@ export const messageStore = {
   enqueue(channelId: Snowflake, me: User, input: SendInput): string {
     const nonce = newNonce();
     const content = input.content.trim();
+    recordEmojiUse(content); // Frequently Used counts emoji in sent messages
     const req = buildRequest(nonce, content, input);
     const message: Message = {
       id: `pending:${nonce}`, channel_id: channelId, guild_id: input.reply?.guild_id ?? null, author: me, content, timestamp: new Date().toISOString(), edited_timestamp: null,
@@ -338,6 +339,7 @@ export const messageStore = {
     const current = m.reactions.find(r => emojiKey(r.emoji) === key);
     const had = (burst ? current?.me_burst : current?.me) ?? false;
     if (burst && !had) announceBurst(messageId, key);
+    if (!had && !emoji.id) pushRecentEmoji(emoji.name); // every reaction added counts as use, quick ones included
     update(channelId, x => applyReaction(x, messageId, emoji, true, !had, burst));
     const run = chain.tail.then(async () => {
       try {

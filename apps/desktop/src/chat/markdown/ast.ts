@@ -18,7 +18,10 @@ export type Block =
   | { t: 'subtext'; c: Inline[] } // "-# " at line start
   | { t: 'codeblock'; lang: string | null; v: string } // ```lang\n...\n```
   | { t: 'quote'; c: Block[] } // "> " per line, or ">>> " swallowing the rest of the message
-  | { t: 'list'; ordered: boolean; start: number; items: Inline[][] }; // "- " / "* " / "1. " lines
+  | { t: 'list'; ordered: boolean; start: number; items: ListItem[] }; // "- " / "* " / "1. " lines
+
+/** A list item; `sub` holds the lists indented under it. */
+export interface ListItem { c: Inline[]; sub?: Block[] }
 
 export interface ParseOptions {
   /** shortcode name (no colons) -> unicode */

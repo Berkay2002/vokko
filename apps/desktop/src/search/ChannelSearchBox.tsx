@@ -3,8 +3,10 @@ import {
   AtSign, ChevronLeft, ChevronRight, File, Hash, Image as ImageIcon, Link as LinkIcon, Music, Paperclip, Pin, Search, SlidersHorizontal, StickyNote, Trash2, User as UserIcon, Video, X,
   Globe,
 } from 'lucide-react';
-import { ChannelType, type Channel, type User } from '../api/types';
+import type { Channel, User } from '../api/types';
 import { Avatar } from '../chat/Avatar';
+import { ChannelTypeIcon } from '../chat/ChannelTypeIcon';
+import { mentionableChannels } from '../chat/suggest';
 import { HAS_VALUES, isoDay, pendingKeyword, type FilterKind, type SearchFilter } from './query';
 import { Popout, displayName, useStore } from './shell';
 import { scopeOf, searchActions, searchStore } from './store';
@@ -133,9 +135,10 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
     } else if (kind === 'has') {
       HAS_VALUES.filter(v => v.startsWith(query)).forEach(v => out.push({ key: v, icon: HAS_ICONS[v], title: <b>{v}</b>, onPick: () => commit('has', v, v) }));
     } else if (kind === 'in') {
-      const texts = Object.values(channels).filter(c => c.guild_id === channel.guild_id && c.type === ChannelType.GuildText && (c.name ?? '').toLowerCase().includes(query));
-      texts.sort((a, b) => (a.id === channel.id ? -1 : b.id === channel.id ? 1 : a.position - b.position));
-      texts.slice(0, 15).forEach(c => out.push({ key: c.id, icon: <Hash size={20} />, title: <b>{c.name}</b>, onPick: () => commit('in', c.id, c.name ?? '') }));
+      // The current channel leads, the rest in sidebar order with better name matches first.
+      const inGuild = Object.values(channels).filter(c => c.guild_id === channel.guild_id)
+        .sort((a, b) => (a.id === channel.id ? -1 : b.id === channel.id ? 1 : a.position - b.position));
+      mentionableChannels(inGuild, query, 15).forEach(c => out.push({ key: c.id, icon: <ChannelTypeIcon type={c.type} />, title: <b>{c.name}</b>, onPick: () => commit('in', c.id, c.name ?? '') }));
     } else if (kind === 'pinned') {
       for (const v of ['true', 'false']) if (v.startsWith(query)) out.push({ key: v, icon: <Pin size={20} />, title: <b>{v}</b>, onPick: () => commit('pinned', v, v) });
     }
