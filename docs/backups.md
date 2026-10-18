@@ -29,44 +29,46 @@ Environment: `VOKKO_BACKUP_DIR` (required), `VOKKO_BACKUP_COMPOSE_DIR` (default 
 and the local `pg_dump`/`pg_restore` (same major version as the server or newer) are used instead; that is the mode
 `backup-test.sh` runs in.
 
-## The home server (nightly, launchd)
+## Nightly on macOS (launchd)
 
-The live stack runs from `/srv/vokko/deploy` under OrbStack; its volumes are on the internal disk, so
-backups go to the external SSD. Install once (the plist is a template in the repo, nothing installs it for you):
+Example for a macOS host running the stack from a checkout of this repo (`<repo checkout>`) with the backup directory on a different disk than
+the one holding the Docker volumes. Install once (the plist is a template in the repo, nothing installs it for you):
 
 ```sh
 mkdir -p <backup dir> && chmod 700 <backup dir>
-cp /srv/vokko/deploy/launchd/org.vokko.backup.plist ~/Library/LaunchAgents/
-$EDITOR ~/Library/LaunchAgents/org.vokko.backup.plist   # REPLACE_ME: your user name and the off-machine target
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.vokko.backup.plist
-launchctl kickstart gui/$(id -u)/org.vokko.backup        # first run now
+cp <repo checkout>/deploy/launchd/<backup plist> ~/Library/LaunchAgents/
+$EDITOR ~/Library/LaunchAgents/<backup plist>   # REPLACE_ME: your user name, paths and the off-machine target
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<backup plist>
+launchctl kickstart gui/$(id -u)/<backup label>        # first run now
 tail ~/Library/Logs/vokko-backup.log
 ```
 
-The plist ([deploy/launchd/org.vokko.backup.plist](../deploy/launchd/org.vokko.backup.plist)) runs
+The example plist in `deploy/launchd/` (label `org.vokko.vokko-backup`; copy and edit it) runs
 `tools/backup.sh` every day at 04:00 (a run missed while the Mac slept starts on wake) and logs to
-`~/Library/Logs/vokko-backup.log`. `vokko-deploy` must be on a commit that has `tools/backup.sh`. If the log shows
-`Operation not permitted` on `/srv`, give `/bin/bash` access to removable volumes (System Settings > Privacy &
+`~/Library/Logs/vokko-backup.log`. The checkout must be on a commit that has `tools/backup.sh`. If the log shows
+`Operation not permitted` on an external volume, give `/bin/bash` access to removable volumes (System Settings > Privacy &
 Security > Files and Folders, or Full Disk Access).
+
+On Linux use a systemd timer or cron entry that runs `tools/backup.sh` with the same environment.
 
 A day's backup of the current server is well under 200 MB (database ~70 MB on disk, uploads ~60 MB, before compression),
 so 11 kept sets fit easily.
 
 ## Off the machine
 
-The external SSD survives the internal disk dying, not a fire, theft or a bad `rm`. Keep a second copy elsewhere:
+A second local disk survives the first one dying, not a fire, theft or a bad `rm`. Keep a second copy elsewhere:
 
-- **The VPS** (simplest): set `VOKKO_BACKUP_OFFSITE` to `<ssh host>:backups/vokko`. The Mac's user needs a key login to
+- **The VPS** (simplest): set `VOKKO_BACKUP_OFFSITE` to `<ssh host>:backups/vokko`. The backup user needs a key login to
   that host without a passphrase (launchd has no ssh agent); use a dedicated key for it.
 - **Object storage** (Backblaze B2, Cloudflare R2, S3): `rclone sync <backup dir> remote:vokko-backups`
   from a second launchd job or by mounting the remote and pointing `VOKKO_BACKUP_OFFSITE` at it. Use an `rclone crypt`
   remote: dumps contain password hashes, emails and every message.
-- **Time Machine** to a disk that leaves the house also covers `/srv/backups` if the volume is not excluded.
+- **Time Machine** to a disk that leaves the house also covers the backup directory if its volume is not excluded.
 
 ## Restore
 
 ```sh
-cd /srv/vokko
+cd <repo checkout>
 tools/restore.sh <backup dir>/daily/<stamp> --yes
 ```
 

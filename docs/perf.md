@@ -91,7 +91,7 @@ and stops when its messages are painted (median of 5, also with 4x CPU and 20 Mb
 The message list opens at the bottom with `initialScrollTop` instead of `initialTopMostItemIndex`: react-virtuoso waits four frames
 before scrolling to an initial index and then paints one frame of the wrong rows. Jump-to-message still uses the index.
 
-| Metric (home server M4, loaded machine) | Before | After |
+| Metric (M4 desktop, loaded machine) | Before | After |
 |---|---|---|
 | Initial JS | 2,166 kB (633 kB gzip) | 1,511 kB (466 kB gzip) |
 | Cold start to first channel messages | 361 ms | 305 ms |
@@ -113,7 +113,7 @@ A trace of a 250,000 px scroll through 2,450 messages shows no main-thread task 
 - `AppShell`, `Modals`, `VoiceChannelUsers` and `VoiceChannelRow` import `StremioViewerHost`, `WatchModal` and `StremioIcon` by path:
   the feature indexes import CSS, so a barrel import kept the panels in the entry.
 
-home server M4, load average 10-44 during the runs; before = main a640f747, after = this branch; 5 interleaved runs each, medians.
+M4 desktop, load average 10-44 during the runs; before = main a640f747, after = this branch; 5 interleaved runs each, medians.
 
 | Metric | Before | After |
 |---|---|---|
@@ -182,7 +182,7 @@ ResizeObserver callback, not a frame later; the "ResizeObserver loop" errors it 
 the scroller mounts with `.settling` (hidden) until the newest row ends inside the viewport (checked after layout and once per frame,
 at most 10 frames). That hides the one frame of rows placed from estimated heights.
 
-| home server M4, loaded machine; main / branch / main run back to back | main | branch |
+| M4 desktop, loaded machine; main / branch / main run back to back | main | branch |
 |---|---|---|
 | 6 messages, reopen | 5 frames, 69-71 ms | 2 frames, 24 ms |
 | 40 messages, reopen | 5 frames, 72 ms | 3-4 frames, 34-44 ms |
