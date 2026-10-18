@@ -625,7 +625,7 @@ export interface PatchUserSettingsRequest {
 /** GET/PATCH /users/@me/guilds/{id}/privacy: `direct_messages` is false once the caller restricted DMs from this guild's members. */
 export interface GuildPrivacySettings {
   direct_messages: boolean;
-  /** "Appear offline in this server": members who share only such servers with the caller see them offline and not typing. */
+  /** "Appear offline in this server": members who share only such servers with the caller see them offline, and nobody sees them typing in such a server. */
   appear_offline: boolean;
 }
 /** 409 body of PATCH /users/@me/settings: code 40090 plus the current blob. */

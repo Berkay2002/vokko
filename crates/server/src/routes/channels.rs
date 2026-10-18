@@ -140,7 +140,7 @@ async fn leave_group(state: &AppState, row: &store::ChannelRow, target: i64) -> 
         }
     }
     state.hub.send(&[target], &GatewayEvent::ChannelDelete(channel));
-    Ok(())
+    crate::presence::announce_parted(state, target, &rest).await
 }
 
 /// Discord's slowmode ceiling: 6 hours.

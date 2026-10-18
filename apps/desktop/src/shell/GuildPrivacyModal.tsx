@@ -72,7 +72,7 @@ export function GuildPrivacyModal({ guildId }: { guildId: Snowflake }) {
       />
       <SwitchRow
         label="Appear offline in this server"
-        note="Members of this server see you as offline and don't see you typing. Friends and your other servers still see your status."
+        note="Nobody sees you typing in this server, and its members see you as offline. Members who are your friends, share another server with you or have a DM you wrote in still see your status."
         checked={settings?.appear_offline ?? false}
         disabled={settings === null}
         onChange={v => toggle("appear_offline", v)}

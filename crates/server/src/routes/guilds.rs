@@ -437,6 +437,10 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     crate::stickers::sweep_assets(&state).await;
     crate::soundboard::sweep_assets(&state).await;
     state.hub.send(&members, &GatewayEvent::GuildDelete(IdOnly { id: Snowflake::from(id) }));
+    // ponytail: two queries per member (guild size bounded by the member cap); a set-based pass if big guilds get deleted often
+    for member in &members {
+        crate::presence::announce_parted(&state, *member, &members).await?;
+    }
     for (adopter,) in adopters {
         users::publish_user(&state, adopter).await?;
     }

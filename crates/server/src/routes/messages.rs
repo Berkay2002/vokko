@@ -1051,7 +1051,7 @@ async fn typing(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
     }
     let viewers: Vec<i64> = access::channel_viewers(&state, &access.channel).await?.into_iter().filter(|viewer| *viewer != user_id).collect();
     // invisible (everywhere or to these viewers) means no typing either; the request still succeeds so nothing tells
-    let viewers = crate::presence::typing_audience(&state, user_id, viewers).await?;
+    let viewers = crate::presence::typing_audience(&state, user_id, access.channel.guild_id, viewers).await?;
     let event = GatewayEvent::TypingStart(TypingStart { channel_id: Snowflake::from(id), user_id: Snowflake::from(user_id), timestamp: now_ms() / 1000 });
     state.hub.send(&viewers, &event);
     Ok(StatusCode::NO_CONTENT)

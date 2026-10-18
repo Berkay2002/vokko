@@ -185,6 +185,7 @@ async fn a_game_and_spotify_are_shown_together_and_keep_their_fields() {
     let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;
     let (mut alice, _) = Client::connect(&w.address, &w.alice.0).await;
     owner.wait_presence(&w.alice.1, "online").await;
+    set_settings(&w.app, &w.alice.0, json!({"share_spotify": true})).await;
 
     let both = json!([
         {"name": "Factorio", "type": 0, "timestamps": {"start": 1_760_000_000_000_i64}},
@@ -409,6 +410,50 @@ async fn appearing_offline_in_one_server_hides_only_there() {
     owner.wait_presence(&w.alice.1, "dnd").await;
 }
 
+async fn dm(app: &TestApp, from: &(String, String), to: &str, content: &str) -> String {
+    let (status, channel) = app.post("/users/@me/channels", &from.0, json!({"recipient_id": to})).await;
+    assert_eq!(status, 200, "{channel}");
+    let channel = channel["id"].as_str().expect("id").to_owned();
+    let (status, body) = app.post(&format!("/channels/{channel}/messages"), &from.0, json!({"content": content})).await;
+    assert_eq!(status, 200, "{body}");
+    channel
+}
+
+#[tokio::test]
+async fn an_unanswered_dm_does_not_lift_appear_offline() {
+    let w = world().await;
+    let (mut alice, _) = Client::connect(&w.address, &w.alice.0).await;
+    let path = format!("/users/@me/guilds/{}/privacy", w.guild);
+    assert_eq!(w.app.patch(&path, &w.alice.0, json!({"appear_offline": true})).await.0, 200);
+    alice.send(json!({"op": 3, "d": {"status": "dnd"}})).await;
+
+    // sam shares only the guild with alice and DMs her: that reopens her side of the DM, but she never took part
+    let channel = dm(&w.app, &w.owner, &w.alice.1, "hi").await;
+    let (mut owner, ready) = Client::connect(&w.address, &w.owner.0).await;
+    assert_eq!(find(&ready["presences"], &w.alice.1).map(|p| p["status"].clone()), Some(json!("offline")), "still hidden after his DM");
+    typing(&w.app, &w.alice.0, &w.channel).await;
+    assert!(owner.quiet("TYPING_START", &w.alice.1, QUIET).await, "no typing in the hidden guild");
+
+    // she answers: the DM is hers too now, so he sees her, but typing in the hidden guild stays hidden
+    let (status, _) = w.app.post(&format!("/channels/{channel}/messages"), &w.alice.0, json!({"content": "hey"})).await;
+    assert_eq!(status, 200);
+    let (mut owner, ready) = Client::connect(&w.address, &w.owner.0).await;
+    assert_eq!(find(&ready["presences"], &w.alice.1).expect("alice")["status"], "dnd", "a DM she wrote in shows her");
+    typing(&w.app, &w.alice.0, &w.channel).await;
+    assert!(owner.quiet("TYPING_START", &w.alice.1, QUIET).await, "still no typing in the hidden guild");
+}
+
+#[tokio::test]
+async fn an_unanswered_dm_shares_no_presence() {
+    let w = world().await;
+    let (_alice, _) = Client::connect(&w.address, &w.alice.0).await;
+    dm(&w.app, &w.owner, &w.alice.1, "hi").await;
+    // alice leaves the only guild they shared: his DM alone must not let him track her
+    assert_eq!(w.app.delete(&format!("/users/@me/guilds/{}", w.guild), &w.alice.0).await.0, 204);
+    let (_owner, ready) = Client::connect(&w.address, &w.owner.0).await;
+    assert!(find(&ready["presences"], &w.alice.1).is_none_or(|p| p["status"] == "offline"), "no presence through an unanswered DM");
+}
+
 #[tokio::test]
 async fn activity_privacy_opt_outs_are_enforced() {
     let w = world().await;
@@ -417,6 +462,10 @@ async fn activity_privacy_opt_outs_are_enforced() {
     owner.wait_presence(&w.alice.1, "online").await;
     let game = json!({"name": "Factorio", "type": 0});
     let song = json!({"name": "Spotify", "type": 2, "details": "Song", "state": "A"});
+    // Spotify is opt-in: a track sent unasked is dropped
+    alice.send(json!({"op": 3, "d": {"status": "online", "activities": [game, song]}})).await;
+    wait_activities(&mut owner, &w.alice.1, "online", |a| a == &json!([game])).await;
+    set_settings(&w.app, &w.alice.0, json!({"share_spotify": true})).await;
     alice.send(json!({"op": 3, "d": {"status": "online", "activities": [game, song]}})).await;
     wait_activities(&mut owner, &w.alice.1, "online", |a| a.as_array().is_some_and(|list| list.len() == 2)).await;
 

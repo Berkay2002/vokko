@@ -76,7 +76,9 @@ pub async fn sharing(state: &AppState, user_id: i64) -> ApiResult<Sharing> {
     let settings = crate::routes::settings::load(state, user_id).await?.settings;
     let activity = user_settings::flag(&settings, "share_activity", true);
     let flag = |key: &str| user_settings::flag(&settings, key, activity);
-    Ok(Sharing { activity, spotify: flag("share_spotify"), typing: flag("share_typing"), mutuals: flag("share_mutuals") })
+    // Spotify is opt-in (off until the user turns it on), so a client that sends a track unasked publishes nothing
+    let spotify = activity && user_settings::flag(&settings, "share_spotify", false);
+    Ok(Sharing { activity, spotify, typing: flag("share_typing"), mutuals: flag("share_mutuals") })
 }
 
 /// The settings keys of [`Sharing`]: a change to one re-applies it (`reapply_sharing`).
@@ -97,14 +99,19 @@ const LISTENING: u8 = 2;
 
 /// A sharing setting changed: what was already shared and is no longer allowed goes away now, for everyone.
 pub async fn reapply_sharing(state: &AppState, user_id: i64) -> ApiResult<()> {
-    let Some(row) = rows(state, &[user_id]).await?.pop() else { return Ok(()) };
+    if refilter(state, user_id).await? { publish(state, user_id).await } else { Ok(()) }
+}
+
+/// Filters the stored activities with the current settings; true if that removed something.
+async fn refilter(state: &AppState, user_id: i64) -> ApiResult<bool> {
+    let Some(row) = rows(state, &[user_id]).await?.pop() else { return Ok(false) };
     let kept = sharing(state, user_id).await?.filter(row.activities.clone());
     if kept == row.activities {
-        return Ok(());
+        return Ok(false);
     }
     let encoded = serde_json::to_string(&kept).unwrap_or_else(|_| "[]".to_owned());
     sqlx::query("UPDATE presences SET activities = $2 WHERE user_id = $1").bind(user_id).bind(encoded).execute(&state.db).await?;
-    publish(state, user_id).await
+    Ok(true)
 }
 
 /// Stores a change and tells everyone who shares something with the user. `preferred` of `None` keeps the choice;
@@ -120,6 +127,7 @@ pub async fn update(
 ) -> ApiResult<()> {
     let preferred = preferred.map(|status| if status == PresenceStatus::Offline { PresenceStatus::Invisible } else { status }.as_str());
     let first = preferred.unwrap_or("online");
+    let filtered = activities.as_ref().is_some_and(|list| !list.is_empty());
     let activities = match activities {
         Some(list) if !list.is_empty() => Some(sharing(state, user_id).await?.filter(list)),
         other => other,
@@ -143,6 +151,10 @@ pub async fn update(
     .bind(encoded)
     .execute(&state.db)
     .await?;
+    // a sharing setting may have changed (and been re-applied) between the filter above and this write
+    if filtered {
+        refilter(state, user_id).await?;
+    }
     publish(state, user_id).await
 }
 
@@ -168,7 +180,8 @@ pub async fn publish(state: &AppState, user_id: i64) -> ApiResult<()> {
 
 /// The (user, viewer) pairs of `users` x `viewers` where the user appears offline to the viewer through "Appear offline in
 /// this server": the user set it in at least one guild, and the viewer shares nothing else with them (no other guild, no
-/// friendship, no open DM). Typing follows the same rule, so anything that reveals presence should check it.
+/// friendship, no open DM the user wrote in: a message reopens a DM on both sides, so receiving one must not lift the hide).
+/// Typing follows the same rule, so anything that reveals presence should check it.
 pub async fn hidden_pairs(state: &AppState, users: &[i64], viewers: &[i64]) -> ApiResult<HashSet<(i64, i64)>> {
     let hiding: Vec<(i64,)> =
         sqlx::query_as("SELECT DISTINCT user_id FROM guild_appear_offline WHERE user_id = ANY($1)").bind(users).fetch_all(&state.db).await?;
@@ -182,7 +195,8 @@ pub async fn hidden_pairs(state: &AppState, users: &[i64], viewers: &[i64]) -> A
                WHERE m1.user_id = u.id AND NOT EXISTS (SELECT 1 FROM guild_appear_offline h WHERE h.user_id = u.id AND h.guild_id = m1.guild_id)) \
          AND NOT EXISTS (SELECT 1 FROM relationships r WHERE r.user_id = u.id AND r.other_id = v.id AND r.kind = 1) \
          AND NOT EXISTS (SELECT 1 FROM channel_recipients r1 JOIN channel_recipients r2 ON r2.channel_id = r1.channel_id AND r2.user_id = v.id \
-               WHERE r1.user_id = u.id AND NOT r1.closed AND NOT r2.closed)",
+               WHERE r1.user_id = u.id AND NOT r1.closed AND NOT r2.closed \
+               AND EXISTS (SELECT 1 FROM messages m WHERE m.channel_id = r1.channel_id AND m.author_id = u.id))",
     )
     .bind(&hiding)
     .bind(viewers)
@@ -191,10 +205,16 @@ pub async fn hidden_pairs(state: &AppState, users: &[i64], viewers: &[i64]) -> A
     Ok(pairs.into_iter().collect())
 }
 
-/// Who of `viewers` may see `user_id` typing: nobody while the user is invisible, and nobody the user appears offline to.
-pub async fn typing_audience(state: &AppState, user_id: i64, viewers: Vec<i64>) -> ApiResult<Vec<i64>> {
+/// Who of `viewers` may see `user_id` typing in a channel of `guild_id`: nobody while the user is invisible or appears offline
+/// in that guild (not even viewers who see their status through something else), and nobody the user appears offline to.
+pub async fn typing_audience(state: &AppState, user_id: i64, guild_id: Option<i64>, viewers: Vec<i64>) -> ApiResult<Vec<i64>> {
     let preferred: Option<(String,)> = sqlx::query_as("SELECT preferred FROM presences WHERE user_id = $1").bind(user_id).fetch_optional(&state.db).await?;
     if preferred.is_some_and(|(preferred,)| preferred == "invisible") || !sharing(state, user_id).await?.typing {
+        return Ok(Vec::new());
+    }
+    if let Some(guild_id) = guild_id
+        && hiding_in(state, user_id, guild_id).await?
+    {
         return Ok(Vec::new());
     }
     let hidden = hidden_pairs(state, &[user_id], &viewers).await?;
@@ -235,12 +255,13 @@ pub async fn guild_presences(state: &AppState, guild_id: i64, viewer: i64) -> Ap
 
 /// Users who share something with `user_id` apart from membership of `guild_id`.
 async fn audience_without_guild(state: &AppState, user_id: i64, guild_id: i64) -> ApiResult<HashSet<i64>> {
-    let found: Vec<(i64,)> = sqlx::query_as(
+    let found: Vec<(i64,)> = sqlx::query_as(&format!(
         "SELECT m2.user_id FROM guild_members m1 JOIN guild_members m2 ON m1.guild_id = m2.guild_id WHERE m1.user_id = $1 AND m1.guild_id <> $2 \
          UNION SELECT other_id FROM relationships WHERE user_id = $1 AND kind = 1 \
          UNION SELECT r2.user_id FROM channel_recipients r1 JOIN channel_recipients r2 ON r1.channel_id = r2.channel_id \
-               WHERE r1.user_id = $1 AND NOT r1.closed AND NOT r2.closed",
-    )
+               WHERE r1.user_id = $1 AND NOT r1.closed AND NOT r2.closed AND {}",
+        events::DM_TAKEN_PART
+    ))
     .bind(user_id)
     .bind(guild_id)
     .fetch_all(&state.db)
@@ -272,8 +293,14 @@ pub async fn announce_join(state: &AppState, guild_id: i64, user_id: i64) -> Api
 /// Call after `user_id` stopped being a member of `guild_id` (leave, kick, ban, guild already updated): everyone who
 /// shares nothing with them any more sees them offline, and they see those people offline, so no stale presence stays.
 pub async fn announce_leave(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
+    announce_parted(state, user_id, &member_ids(state, guild_id, user_id).await?).await
+}
+
+/// Call after `user_id` stopped sharing a guild or group DM with `former` (already updated in the database): the same
+/// clean-up as [`announce_leave`].
+pub async fn announce_parted(state: &AppState, user_id: i64, former: &[i64]) -> ApiResult<()> {
     let still_shared: HashSet<i64> = events::user_audience(state, user_id).await?.into_iter().collect();
-    let (shared, strangers): (Vec<i64>, Vec<i64>) = member_ids(state, guild_id, user_id).await?.into_iter().partition(|id| still_shared.contains(id));
+    let (shared, strangers): (Vec<i64>, Vec<i64>) = former.iter().copied().filter(|id| *id != user_id).partition(|id| still_shared.contains(id));
     state.hub.send(&strangers, &offline(user_id));
     for id in strangers {
         state.hub.send(&[user_id], &offline(id));
