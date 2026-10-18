@@ -469,7 +469,7 @@ async fn join_as(s: &Setup, name: &str) -> (String, String) {
     (token, user["id"].as_str().expect("id").to_owned())
 }
 
-/// A moderator (MANAGE_MESSAGES) may suppress and restore another member's link previews with a flags-only edit, and nothing else.
+/// A moderator (MANAGE_MESSAGES) may suppress another member's link previews with a flags-only edit, and nothing else; restoring is the author's.
 #[tokio::test]
 async fn a_moderator_can_suppress_embeds_on_anothers_message_but_not_edit_it() {
     let s = setup().await;
@@ -498,8 +498,11 @@ async fn a_moderator_can_suppress_embeds_on_anothers_message_but_not_edit_it() {
     assert_eq!(suppressed["content"], "look https://example.com/post");
     assert_eq!(suppressed["edited_timestamp"], Value::Null);
 
-    // restore: the flag clears (the previews are fetched again in the background)
-    let (status, restored) = s.app.patch(&path, &moderator, json!({"flags": 0})).await;
+    // restoring is the author's: it unfurls under the author's EMBED_LINKS, so a moderator may not clear the flag
+    let (status, error) = s.app.patch(&path, &moderator, json!({"flags": 0})).await;
+    assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50005)));
+    // the author restores: the flag clears (the previews are fetched again in the background)
+    let (status, restored) = s.app.patch(&path, &s.member, json!({"flags": 0})).await;
     assert_eq!(status, StatusCode::OK, "{restored}");
     assert!(restored["flags"].is_null() || restored["flags"] == 0, "{restored}");
     assert_eq!(restored["edited_timestamp"], Value::Null);

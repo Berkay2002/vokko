@@ -802,12 +802,13 @@ async fn edit_message(
     let access = channel_access(&state, user_id, id).await?;
     access.require_unarchived()?;
     let row = message_in_channel(&state, id, mid).await?;
-    // Only the author edits a message, except that a moderator (MANAGE_MESSAGES in a guild channel) may suppress or restore its link
-    // previews. That is a flags-only body: any content or attachment change from someone else is refused, and the flags handling below
-    // keeps just the SUPPRESS_EMBEDS bit for everyone.
+    // Only the author edits a message, except that a moderator (MANAGE_MESSAGES in a guild channel) may suppress its link previews.
+    // That is a flags-only body that sets SUPPRESS_EMBEDS: any content or attachment change from someone else is refused, and so is
+    // clearing the flag, since restoring would unfurl under the moderator's EMBED_LINKS instead of the author's. The flags handling
+    // below keeps just the SUPPRESS_EMBEDS bit for everyone.
     if row.author_id != user_id {
-        let moderating =
-            body.content.is_none() && body.attachments.is_none() && body.flags.is_some() && !access.is_dm() && access.permissions & MANAGE_MESSAGES != 0;
+        let suppressing = body.flags.is_some_and(|flags| flags & SUPPRESS_EMBEDS != 0);
+        let moderating = body.content.is_none() && body.attachments.is_none() && suppressing && !access.is_dm() && access.permissions & MANAGE_MESSAGES != 0;
         if !moderating {
             return Err(ApiErr::not_author());
         }

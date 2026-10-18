@@ -676,8 +676,8 @@ function checkVoiceMessage(channel: MockChannel, userId: string, m: { content: s
 route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
-  // Like the server: only the author edits, except that a moderator (MANAGE_MESSAGES in a guild channel) may flip the link-preview flag.
-  const flagsOnly = body.flags !== undefined && body.content === undefined && body.attachments === undefined;
+  // Like the server: only the author edits, except that a moderator (MANAGE_MESSAGES in a guild channel) may suppress link previews (not restore them).
+  const flagsOnly = typeof body.flags === "number" && (body.flags & MessageFlags.SuppressEmbeds) !== 0 && body.content === undefined && body.attachments === undefined;
   const moderating = message.author_id !== viewer.user.id;
   if (moderating && !(flagsOnly && channel.guild_id && hasBit(channelPermsOf(channel, viewer.user.id), Perm.MANAGE_MESSAGES))) fail(403, 50005, "Cannot edit a message authored by another user");
   checkRulesAccepted(channel.guild_id, viewer.user.id);
