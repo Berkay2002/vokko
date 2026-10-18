@@ -96,7 +96,7 @@ const say = (page: Page, channelId: string, user: string, text: string) =>
 
 const probe = <T,>(page: Page, read: (p: Probe) => T) => page.evaluate(`(${read.toString()})(window.__probe)`) as Promise<T>;
 
-// localState.ts and prefs.ts are the same module instances the app uses (one URL under Vite), so tests import them from the page.
+// localState and prefs come from window.__vokko, the app's own instances (a page-side import('/src/...') gets a second copy once HMR has touched the file).
 
 test('DM from another user raises a desktop notification and a mention ping when the channel is not open', async ({ page }) => {
   await setup(page);
@@ -152,14 +152,14 @@ test('channel, category and server mute, notification levels and suppress @every
   const meId = await page.evaluate(() => (window as unknown as Win).__vokko.appStore.getState().me.id);
 
   // muted channel: nothing
-  await page.evaluate(`import('/src/shell/localState.ts').then(m => m.muteFor(${JSON.stringify(general)}, -1))`);
+  await page.evaluate(`window.__vokko.localState.muteFor(${JSON.stringify(general)}, -1)`);
   await say(page, general, 'alice', 'muted channel message');
   await page.waitForTimeout(300);
   expect(await probe(page, p => p.notes.length)).toBe(0);
-  await page.evaluate(`import('/src/shell/localState.ts').then(m => m.unmute(${JSON.stringify(general)}))`);
+  await page.evaluate(`window.__vokko.localState.unmute(${JSON.stringify(general)})`);
 
   // server level "only @mentions": plain message silent, direct mention fires
-  await page.evaluate(`import('/src/shell/localState.ts').then(m => m.setNotifyLevel(${JSON.stringify(guildId)}, 'mentions'))`);
+  await page.evaluate(`window.__vokko.localState.setNotifyLevel(${JSON.stringify(guildId)}, 'mentions')`);
   await say(page, general, 'alice', 'plain message in a mentions-only server');
   await page.waitForTimeout(300);
   expect(await probe(page, p => p.notes.length)).toBe(0);
@@ -173,13 +173,13 @@ test('channel, category and server mute, notification levels and suppress @every
   // @everyone fires, unless it is suppressed for the server
   await say(page, general, 'alice', '@everyone standup in five');
   await expect.poll(() => probe(page, p => p.notes.length)).toBe(2);
-  await page.evaluate(`import('/src/shell/localState.ts').then(m => m.toggleFlag('suppressEveryone', ${JSON.stringify(guildId)}))`);
+  await page.evaluate(`window.__vokko.localState.toggleFlag('suppressEveryone', ${JSON.stringify(guildId)})`);
   await say(page, general, 'alice', '@everyone standup in one');
   await page.waitForTimeout(300);
   expect(await probe(page, p => p.notes.length)).toBe(2);
 
   // "Nothing" silences even direct mentions
-  await page.evaluate(`import('/src/shell/localState.ts').then(m => m.setNotifyLevel(${JSON.stringify(guildId)}, 'none'))`);
+  await page.evaluate(`window.__vokko.localState.setNotifyLevel(${JSON.stringify(guildId)}, 'none')`);
   const before = await probe(page, p => p.notes.length);
   await say(page, general, 'alice', `<@${meId}> but the server says Nothing`);
   await page.waitForTimeout(300);
@@ -193,14 +193,14 @@ test('a muted channel does not light the server pill or the Inbox Unreads', asyn
   const general = (await channelNamed(page, 'general'))!;
   const guildId = (await page.evaluate(id => (window as unknown as Win).__vokko.appStore.getState().channels[id]!.guild_id, general))!;
   const railItem = page.locator(`.rail-item:has(a[href^="/channels/${guildId}"])`);
-  await page.evaluate(`import('/src/shell/localState.ts').then(m => m.muteFor(${JSON.stringify(general)}, -1))`);
+  await page.evaluate(`window.__vokko.localState.muteFor(${JSON.stringify(general)}, -1)`);
   await say(page, general, 'alice', 'muted, so no pill');
   await page.waitForTimeout(300);
   await expect(railItem).toHaveAttribute('data-state', 'idle');
   await page.getByRole('button', { name: 'Inbox' }).click();
   await expect(page.locator('.inbox-popout')).toContainText("You're all caught up");
   await page.keyboard.press('Escape');
-  await page.evaluate(`import('/src/shell/localState.ts').then(m => m.unmute(${JSON.stringify(general)}))`);
+  await page.evaluate(`window.__vokko.localState.unmute(${JSON.stringify(general)})`);
   await expect(railItem).toHaveAttribute('data-state', 'unread');
 });
 
@@ -212,7 +212,7 @@ test('do-not-disturb, desktop pref off and sounds pref off', async ({ page }) =>
   await expect.poll(() => probe(page, p => p.beeps)).toBeGreaterThan(0);
   expect(await probe(page, p => p.notes.length)).toBe(0);
   const beeps = await probe(page, p => p.beeps);
-  await page.evaluate(`import('/src/ui/prefs.ts').then(m => { m.setPref('notificationSounds', false); m.setPref('desktopNotifications', true); })`);
+  await page.evaluate(`window.__vokko.prefs.setPref('notificationSounds', false), window.__vokko.prefs.setPref('desktopNotifications', true)`);
   await say(page, dm, 'alice', 'sounds off, toast on');
   await expect.poll(() => probe(page, p => p.notes.length)).toBe(1);
   expect(await probe(page, p => p.beeps)).toBe(beeps);
@@ -237,7 +237,7 @@ test('document title and favicon show unread and mention state', async ({ page }
   expect(mention.icon).toContain('>1<');
   seen.states.push({ label: '1 mention', ...mention });
   // the unread badge pref turns the title/favicon indicator off
-  await page.evaluate(`import('/src/ui/prefs.ts').then(m => m.setPref('unreadBadge', false))`);
+  await page.evaluate(`window.__vokko.prefs.setPref('unreadBadge', false)`);
   await expect.poll(() => page.title()).toBe('Vokko | Friends');
 });
 
