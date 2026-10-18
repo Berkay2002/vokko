@@ -214,6 +214,9 @@ export function mediaEndpoint() {
     server = Bun.serve({
       port: 0,
       hostname: '127.0.0.1',
+      // A media tool call can take longer than Bun's 10 s default (each request may take 15 s, some tools make several).
+      idleTimeout: 120,
+      maxRequestBodySize: 1 << 20,
       async fetch(req) {
         const media = turns.get(/^Bearer (\S+)$/.exec(req.headers.get('authorization') ?? '')?.[1] ?? '')
         if (!media) return new Response('unauthorized', { status: 401 })
@@ -317,12 +320,13 @@ export function codexBackend(opts: CodexOptions): Backend {
       const media = endpoint && ctx.media
       // A turn with media tools runs its own CLI process: one more MCP server, its bearer only in that run's env.
       const turnMedia = media ? endpoint.open(media) : undefined
-      const runner = turnMedia
-        ? new Impl({ codexPathOverride: opts.codexPath, env: { ...env, [MEDIA_BEARER_ENV]: turnMedia.bearer }, configOverrides: [...configOverrides, ...mediaOverrides(turnMedia.url)] })
-        : codex
-      const thread = threadId ? runner.resumeThread(threadId, threadOptions) : runner.startThread(threadOptions)
+      let thread
       let turn
       try {
+        const runner = turnMedia
+          ? new Impl({ codexPathOverride: opts.codexPath, env: { ...env, [MEDIA_BEARER_ENV]: turnMedia.bearer }, configOverrides: [...configOverrides, ...mediaOverrides(turnMedia.url)] })
+          : codex
+        thread = threadId ? runner.resumeThread(threadId, threadOptions) : runner.startThread(threadOptions)
         // Codex has no system prompt option: a new thread starts with the house rules.
         turn = await thread.run(threadId ? prompt : `${preamble(opts.botName, mediaOn)}\n\n${prompt}`)
       } catch (err) {
