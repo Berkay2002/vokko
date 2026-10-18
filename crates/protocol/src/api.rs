@@ -1549,6 +1549,9 @@ pub struct MediaControl {
     /// Who added the current item (the `PUT` caller, or the queue entry's adder): they may skip it without a vote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub added_by: Option<Snowflake>,
+    /// The bot that put the current item in play for `added_by` (`X-Vokko-Acting-For`), for "via Claude"; absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_bot_id: Option<Snowflake>,
     /// Votes to skip the current item, in vote order; cleared whenever the item changes.
     #[serde(default)]
     pub skip_votes: Vec<Snowflake>,
@@ -1687,6 +1690,9 @@ pub struct StremioQueueItem {
     pub poster: Option<String>,
     pub label: String,
     pub added_by: Snowflake,
+    /// The bot that queued it for `added_by`, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_bot_id: Option<Snowflake>,
 }
 
 /// The Stremio session of a voice channel or DM call (Vokko-only, in memory). While `playing`, the expected position now is
@@ -2191,6 +2197,9 @@ pub struct SpotifyQueueEntry {
     #[serde(flatten)]
     pub track: SpotifyTrack,
     pub added_by: Snowflake,
+    /// The bot that queued it for `added_by`, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via_bot_id: Option<Snowflake>,
 }
 
 /// The Spotify session of a voice channel or DM call (Vokko-only, in memory, at most one on the whole server). While `playing`,

@@ -2,6 +2,7 @@
 //! up next, a short history, the loop mode. No state, no I/O, so every rule here is a unit test.
 use vokko_protocol::api::{SPOTIFY_QUEUE_MAX, SpotifyLoop, SpotifyTrack};
 
+use crate::acting::Actor;
 use crate::auth::random_hex;
 
 /// Tracks `previous` can walk back through.
@@ -13,11 +14,11 @@ pub const RESTART_AFTER_MS: u64 = 3000;
 pub struct Entry {
     pub qid: String,
     pub track: SpotifyTrack,
-    pub added_by: i64,
+    pub added_by: Actor,
 }
 
 impl Entry {
-    fn new(track: SpotifyTrack, added_by: i64) -> Self {
+    fn new(track: SpotifyTrack, added_by: Actor) -> Self {
         Self { qid: random_hex(8), track, added_by }
     }
 }
@@ -45,15 +46,15 @@ pub enum Back {
 pub struct Queue {
     pub current: Option<SpotifyTrack>,
     /// Who put the current track in play (it keeps its adder when a looping queue appends it again).
-    current_by: i64,
+    current_by: Actor,
     pub entries: Vec<Entry>,
     /// Played tracks with who had put them in play.
-    history: Vec<(SpotifyTrack, i64)>,
+    history: Vec<(SpotifyTrack, Actor)>,
     pub loop_mode: SpotifyLoop,
 }
 
 impl Queue {
-    pub fn current_by(&self) -> i64 {
+    pub fn current_by(&self) -> Actor {
         self.current_by
     }
 
@@ -78,7 +79,8 @@ impl Queue {
     }
 
     /// Puts `tracks` at the front (in order) or the end of the queue as far as the cap allows; returns how many did not fit.
-    pub fn add(&mut self, tracks: Vec<SpotifyTrack>, added_by: i64, front: bool) -> usize {
+    pub fn add(&mut self, tracks: Vec<SpotifyTrack>, added_by: impl Into<Actor>, front: bool) -> usize {
+        let added_by = added_by.into();
         let room = SPOTIFY_QUEUE_MAX.saturating_sub(self.entries.len());
         let left_out = tracks.len().saturating_sub(room);
         let entries = tracks.into_iter().take(room).map(|track| Entry::new(track, added_by));
@@ -91,7 +93,8 @@ impl Queue {
     }
 
     /// `first` plays now (what played goes to the history) and `rest` goes to the front of the queue. Returns how many of `rest` did not fit.
-    pub fn play_now(&mut self, first: SpotifyTrack, rest: Vec<SpotifyTrack>, added_by: i64) -> usize {
+    pub fn play_now(&mut self, first: SpotifyTrack, rest: Vec<SpotifyTrack>, added_by: impl Into<Actor>) -> usize {
+        let added_by = added_by.into();
         if let Some(current) = self.current.replace(first) {
             self.remember(current);
         }

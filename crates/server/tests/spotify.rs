@@ -386,6 +386,8 @@ struct World {
     media: Arc<FakeRoomService>,
     address: String,
     voice: String,
+    /// The guild's #general.
+    text: String,
     guild: String,
     owner: String,
     alice: String,
@@ -469,7 +471,7 @@ async fn world_with(tune: impl FnOnce(&mut SpotifyConfig), with_stremio: bool) -
         assert_eq!(app.post(&format!("/invites/{code}"), token, json!({})).await.0, StatusCode::OK);
     }
     let id = |user: &Value| user["id"].as_str().expect("id").to_owned();
-    World { app, mock, bot, media, address, voice, guild, owner, alice, alice_id: id(&alice_user), carl, carl_id: id(&carl_user), stremio: stremio_base }
+    World { app, mock, bot, media, address, voice, text, guild, owner, alice, alice_id: id(&alice_user), carl, carl_id: id(&carl_user), stremio: stremio_base }
 }
 
 async fn voice_channel(app: &TestApp, owner: &str, guild: &str) -> String {
@@ -1429,4 +1431,156 @@ async fn a_looping_queue_puts_back_tracks_above_the_quota_and_only_adding_is_ref
     }
     let (status, state) = w.patch(&w.carl, json!({"queue_add": {"uri": track_uri(22), "next": false}})).await;
     assert_eq!((status, carls(&state)), (StatusCode::OK, 10));
+}
+
+// ---- bots acting for the member who asked (docs/design/bot-control.md §9) ----
+
+impl World {
+    /// `bot` calls `path` for the author of `message` (`X-Vokko-Acting-For`).
+    async fn acting(&self, method: axum::http::Method, path: &str, bot: &str, message: &str, body: Option<Value>) -> (StatusCode, Value) {
+        self.app.send_with(method, path, Some(bot), &[("x-vokko-acting-for", message)], body).await
+    }
+}
+
+#[tokio::test]
+async fn a_bot_controls_spotify_only_for_the_member_who_asked_with_their_rights() {
+    use axum::http::Method;
+    use vokko_protocol::api::permissions::CONTROL_MEDIA;
+    let w = world().await;
+    let (bot_id, bot) = w.app.bot_in(&w.owner, &w.guild, "Claude").await;
+    let (_, other_bot) = w.app.bot_in(&w.owner, &w.guild, "Codex").await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.join(&mut alice).await;
+    let asked = w.app.say(&w.text, &w.alice, &format!("<@{bot_id}> play song 1 in our call")).await;
+
+    // Without the header a bot reads the catalog only.
+    assert_eq!(w.app.get("/spotify/search?q=song", &bot).await.0, StatusCode::OK);
+    let (status, error) = w.app.put_json(&w.path(), &bot, json!({"uri": track_uri(1)})).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(20001)), "{error}");
+    assert_eq!(w.app.get(&w.path(), &bot).await.0, StatusCode::FORBIDDEN);
+
+    // With it, the bot plays as alice: she started it and added it, via the bot.
+    let (status, state) = w.acting(Method::PUT, &w.path(), &bot, &asked, Some(json!({"uri": track_uri(1)}))).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(
+        (state["started_by"].as_str(), state["host_id"].as_str(), state["added_by"].as_str(), state["via_bot_id"].as_str()),
+        (Some(w.alice_id.as_str()), Some(w.alice_id.as_str()), Some(w.alice_id.as_str()), Some(bot_id.as_str()))
+    );
+    let (status, state) = w.acting(Method::PATCH, &w.path(), &bot, &asked, Some(json!({"queue_add": {"uri": track_uri(2), "next": false}}))).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!((state["queue"][0]["added_by"].as_str(), state["queue"][0]["via_bot_id"].as_str()), (Some(w.alice_id.as_str()), Some(bot_id.as_str())));
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &asked, None).await.0, StatusCode::OK);
+
+    // Not addressed to this bot, by a bot, from a person, too old, or a person sending the header: refused.
+    assert_eq!(w.acting(Method::GET, &w.path(), &other_bot, &asked, None).await.0, StatusCode::FORBIDDEN, "another bot");
+    let plain = w.app.say(&w.text, &w.alice, "play something").await;
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &plain, None).await.1["code"], 50013, "not addressed to the bot");
+    let own = w.app.say(&w.text, &bot, &format!("<@{bot_id}> hi")).await;
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &own, None).await.0, StatusCode::FORBIDDEN, "the bot's own message");
+    let from_bot = w.app.say(&w.text, &other_bot, &format!("<@{bot_id}> play")).await;
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &from_bot, None).await.0, StatusCode::FORBIDDEN, "another bot's message");
+    assert_eq!(w.acting(Method::GET, &w.path(), &w.carl, &asked, None).await.0, StatusCode::FORBIDDEN, "a person cannot act for someone");
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, "123", None).await.0, StatusCode::FORBIDDEN, "unknown message");
+    let old = w.app.say(&w.text, &w.alice, &format!("<@{bot_id}> skip")).await;
+    sqlx::query("UPDATE messages SET created_at = now() - interval '11 minutes' WHERE id = $1")
+        .bind(old.parse::<i64>().unwrap())
+        .execute(&w.app.state.db)
+        .await
+        .unwrap();
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &old, None).await.0, StatusCode::FORBIDDEN, "older than 10 minutes");
+
+    // carl, not in the call, gets what carl himself would get; a reply to the bot counts as asking it.
+    let reply_to = w.app.say(&w.text, &bot, "Which song?").await;
+    let (_, reply) =
+        w.app.post(&format!("/channels/{}/messages", w.text), &w.carl, json!({"content": "skip it", "message_reference": {"message_id": reply_to}})).await;
+    let carls = reply["id"].as_str().expect("id").to_owned();
+    let direct = w.patch(&w.carl, json!({"skip": true})).await;
+    let via = w.acting(Method::PATCH, &w.path(), &bot, &carls, Some(json!({"skip": true}))).await;
+    assert_eq!((via.0, via.1["code"].clone()), (direct.0, direct.1["code"].clone()), "{via:?}");
+    assert_eq!(via.0, StatusCode::FORBIDDEN);
+
+    // In the call, without CONTROL_MEDIA and not the host, carl's bot request may queue but not pause; alice's may pause.
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.join(&mut carl).await;
+    let deny = json!({"type": 0, "allow": "0", "deny": CONTROL_MEDIA.to_string()});
+    assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{}", w.voice, w.guild), &w.owner, deny).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.acting(Method::PATCH, &w.path(), &bot, &carls, Some(json!({"playing": false}))).await.0, StatusCode::FORBIDDEN);
+    let (status, state) = w.acting(Method::PATCH, &w.path(), &bot, &carls, Some(json!({"queue_add": {"uri": track_uri(3), "next": false}}))).await;
+    assert_eq!((status, state["queue"][1]["added_by"].as_str()), (StatusCode::OK, Some(w.carl_id.as_str())), "{state}");
+    assert_eq!(w.acting(Method::PATCH, &w.path(), &bot, &asked, Some(json!({"playing": false}))).await.0, StatusCode::OK, "alice hosts");
+    assert_eq!(w.acting(Method::POST, &format!("{}/listener-token", w.path()), &bot, &asked, None).await.0, StatusCode::FORBIDDEN, "not a bot route");
+
+    // One message allows 30 acting requests (alice's has had 4), then 429.
+    for _ in 4..30 {
+        assert_eq!(w.acting(Method::GET, &w.path(), &bot, &asked, None).await.0, StatusCode::OK);
+    }
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &asked, None).await.0, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn a_bot_acts_only_where_it_was_asked() {
+    use axum::http::Method;
+    let w = world().await;
+    let (bot_id, bot) = w.app.bot_in(&w.owner, &w.guild, "Claude").await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.join(&mut alice).await;
+    // alice asks in a guild the bot shares with her, for a call in another guild of hers.
+    let (elsewhere, elsewhere_text) = w.app.guild_with_channel(&w.alice).await;
+    let other_voice = voice_channel(&w.app, &w.alice, &elsewhere).await;
+    let asked = w.app.say(&w.text, &w.alice, &format!("<@{bot_id}> play")).await;
+    let path = format!("/channels/{other_voice}/spotify");
+    assert_eq!(w.acting(Method::PUT, &path, &bot, &asked, Some(json!({"uri": track_uri(1)}))).await.0, StatusCode::FORBIDDEN);
+    // A message in a channel the bot cannot see does not count either.
+    let hidden = w.app.say(&elsewhere_text, &w.alice, &format!("<@{bot_id}> play")).await;
+    assert_eq!(w.acting(Method::PUT, &w.path(), &bot, &hidden, Some(json!({"uri": track_uri(1)}))).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(w.acting(Method::PUT, &w.path(), &bot, &asked, Some(json!({"uri": track_uri(1)}))).await.0, StatusCode::OK);
+    // Nor does a DM with the bot, for a guild call.
+    let (status, dm) = w.app.post("/users/@me/channels", &bot, json!({"recipient_id": w.alice_id})).await;
+    assert_eq!(status, StatusCode::OK, "{dm}");
+    let in_dm = w.app.say(dm["id"].as_str().expect("dm id"), &w.alice, "play").await;
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &in_dm, None).await.0, StatusCode::FORBIDDEN);
+    // An edit that drops the mention, or a deleted message, no longer asks.
+    let edited = w.app.say(&w.text, &w.alice, &format!("<@{bot_id}> skip")).await;
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &edited, None).await.0, StatusCode::OK);
+    assert_eq!(w.app.patch(&format!("/channels/{}/messages/{edited}", w.text), &w.alice, json!({"content": "skip"})).await.0, StatusCode::OK);
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &edited, None).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(w.app.delete(&format!("/channels/{}/messages/{asked}", w.text), &w.alice).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &asked, None).await.0, StatusCode::FORBIDDEN);
+    // A call in a channel hidden from the bot, even in the guild it was asked in.
+    let fresh = w.app.say(&w.text, &w.alice, &format!("<@{bot_id}> what's playing?")).await;
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &fresh, None).await.0, StatusCode::OK);
+    let deny = json!({"type": 1, "allow": "0", "deny": vokko_protocol::api::permissions::VIEW_CHANNEL.to_string()});
+    assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{bot_id}", w.voice), &w.owner, deny).await.0, StatusCode::NO_CONTENT);
+    let (status, error) = w.acting(Method::GET, &w.path(), &bot, &fresh, None).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "{error}");
+    // An author who left the guild no longer lets the bot act for them.
+    assert_eq!(w.app.delete(&format!("/channels/{}/permissions/{bot_id}", w.voice), &w.owner).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &fresh, None).await.0, StatusCode::OK);
+    assert_eq!(w.app.delete(&format!("/users/@me/guilds/{}", w.guild), &w.alice).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &fresh, None).await.0, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn voice_states_say_where_a_member_is() {
+    let w = world().await;
+    let (_, bot) = w.app.bot_in(&w.owner, &w.guild, "Claude").await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.join(&mut alice).await;
+    let path = |user: &str| format!("/guilds/{}/voice-states/{user}", w.guild);
+    let (status, state) = w.app.get(&path(&w.alice_id), &bot).await;
+    assert_eq!(
+        (status, state["channel_id"].as_str(), state["user_id"].as_str()),
+        (StatusCode::OK, Some(w.voice.as_str()), Some(w.alice_id.as_str())),
+        "{state}"
+    );
+    assert_eq!(w.app.get(&path("@me"), &w.alice).await.1["channel_id"], w.voice.as_str());
+    let (status, error) = w.app.get(&path(&w.carl_id), &bot).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::NOT_FOUND, Some(10065)), "not in voice");
+    assert_eq!(w.app.get(&path("@me"), &bot).await.0, StatusCode::NOT_FOUND);
+    let (stranger, _) = w.app.register("stranger").await;
+    assert_eq!(w.app.get(&path(&w.alice_id), &stranger).await.0, StatusCode::FORBIDDEN, "not a member of the guild");
+    // A voice channel the caller cannot see hides who is in it.
+    let deny = json!({"type": 1, "allow": "0", "deny": vokko_protocol::api::permissions::VIEW_CHANNEL.to_string()});
+    assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{}", w.voice, w.carl_id), &w.owner, deny).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.app.get(&path(&w.alice_id), &w.carl).await.0, StatusCode::NOT_FOUND);
 }

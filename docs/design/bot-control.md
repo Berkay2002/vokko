@@ -265,3 +265,15 @@ through `controls()` or the vote/quota path, none is missed.
 - Done (2026-10-18): the migration (`20261017130000_control_media.sql`) is tested in `tests/guilds.rs` on rows from before it
   (@everyone gains bit 60, no other bit or role changes), next to the default @everyone bit and the role-write check (bit 60
   accepted, 61 refused).
+
+## 9. Bots acting for the member who asked (2026-10-18)
+
+The owner's Claude bot (later a Codex bot) drives Spotify and Stremio from chat ("play X in our call", "skip"). A bot is never
+in a call, so it acts **for the member who asked, with exactly that member's rights**: `X-Vokko-Acting-For: <message_id>` on
+the media routes makes the request run as the message's author (`crates/server/src/acting.rs`, the `Actor` extractor the media
+handlers take instead of `AuthUser`). Accepted only for a person's own fresh message (at most 10 minutes old by creation time)
+addressed to this bot (mention, reply to the bot, or a 1:1 DM with it) in a channel both can see; a channel request must be in
+that channel's guild (or be that DM). Every rule in this document then applies to the member: in the call, controller or not,
+quota, votes. At most 30 acting requests per message (in memory). `MediaControl.via_bot_id` and the queue entries' `via_bot_id`
+name the bot. The bot finds the member's call with `GET /guilds/{id}/voice-states/{user_id}`. Full rules: docs/api.md "Acting
+for a member".

@@ -13,6 +13,7 @@ use vokko_protocol::api::{
 
 use super::{control, unix_millis};
 use crate::access;
+use crate::acting::Actor;
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::ApiJson;
@@ -93,7 +94,7 @@ fn skipped(mut next: WatchTogetherState, now: i64) -> Option<WatchTogetherState>
     }
     next.video_id = next.queue.remove(0);
     let added_by = (!next.queue_added_by.is_empty()).then(|| next.queue_added_by.remove(0).db());
-    control::new_item(&mut next.control, added_by);
+    control::new_item(&mut next.control, added_by.map(Actor::from));
     next.title = None;
     next.playing = true;
     next.position_ms = 0;
@@ -121,7 +122,7 @@ async fn start(
             Some(current) => {
                 control::require_control(&ctx, &current.control)?;
                 let mut next = current.clone();
-                control::new_item(&mut next.control, Some(user_id));
+                control::new_item(&mut next.control, Some(Actor::from(user_id)));
                 next
             }
             None => WatchTogetherState {
@@ -133,7 +134,7 @@ async fn start(
                 started_by: Snowflake::from(user_id),
                 queue: Vec::new(),
                 queue_added_by: Vec::new(),
-                control: control::new_session(user_id, &control::room(&state, channel_id)),
+                control: control::new_session(Actor::from(user_id), &control::room(&state, channel_id)),
             },
         };
         Ok(Some(WatchTogetherState { video_id: body.video_id.clone(), title, playing: true, position_ms: 0, updated_at_ms: unix_millis(), ..next }))

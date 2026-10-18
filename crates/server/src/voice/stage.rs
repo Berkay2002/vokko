@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use vokko_protocol::api::permissions::{REQUEST_TO_SPEAK, VIEW_CHANNEL};
 use vokko_protocol::api::{
     ChannelType, CreateStageInstanceRequest, EditStageInstanceRequest, EditVoiceStateRequest, GatewayEvent, STAGE_TOPIC_MAX_CHARS, Snowflake, StageInstance,
-    StagePrivacyLevel,
+    StagePrivacyLevel, VoiceState,
 };
 
 use super::state::{self, is_stage_moderator};
@@ -25,7 +25,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/stage-instances", post(create))
         .route("/stage-instances/{channel_id}", patch(edit).get(get).delete(end))
-        .route("/guilds/{id}/voice-states/{user}", patch(edit_voice_state))
+        .route("/guilds/{id}/voice-states/{user}", patch(edit_voice_state).get(read_voice_state))
 }
 
 type Row = (i64, i64, i64, String, i16);
@@ -204,6 +204,26 @@ pub(crate) async fn end_if_live(state: &AppState, channel_id: i64) {
     if let Err(error) = end_stage(state, channel_id).await {
         tracing::warn!("stage: cannot end the stage of {channel_id}: {error:?}");
     }
+}
+
+fn unknown_voice_state() -> ApiErr {
+    ApiErr::new(StatusCode::NOT_FOUND, 10065, "Unknown Voice State")
+}
+
+/// `GET /guilds/{id}/voice-states/@me` and `/{user_id}` (Discord's Get Current / User Voice State): where someone is in voice in
+/// this guild, for its members (bots too: a bot asked to play music finds the member's call this way). Not in voice there, or
+/// in a channel the caller cannot see: 404 10065.
+async fn read_voice_state(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path((guild, target)): Path<(String, String)>,
+) -> ApiResult<Json<VoiceState>> {
+    let guild_id = parse_id(&guild).ok_or_else(ApiErr::unknown_guild)?;
+    access::guild_access(&state, user_id, guild_id).await?;
+    let target_id = if target == "@me" { user_id } else { parse_id(&target).ok_or_else(unknown_voice_state)? };
+    let entry = state.voice.get(target_id).filter(|entry| entry.guild_id == Some(guild_id)).ok_or_else(unknown_voice_state)?;
+    channel_access(&state, user_id, entry.channel_id).await.map_err(|_| unknown_voice_state())?;
+    Ok(Json(entry.to_api(false)))
 }
 
 /// `PATCH /guilds/{id}/voice-states/@me` (raise / lower hand, become a speaker, back to the audience) and `/{user_id}`

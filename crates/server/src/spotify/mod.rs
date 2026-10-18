@@ -18,7 +18,7 @@ use vokko_protocol::api::{SpotifyAlbum, SpotifyAlbumSummary, SpotifyArtist, Spot
 
 use self::bot::Bot;
 use self::webapi::{Catalog, CatalogError};
-use crate::auth::AuthUser;
+use crate::acting::Actor;
 use crate::config::SpotifyConfig;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::ApiQuery;
@@ -234,7 +234,7 @@ fn playlist_summary(playlist: SpotifyPlaylist) -> SpotifyPlaylistSummary {
     SpotifyPlaylistSummary { id: playlist.id, name: playlist.name, owner_name: playlist.owner_name, art: playlist.art }
 }
 
-async fn search(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQuery(query): ApiQuery<SearchQuery>) -> ApiResult<Json<SpotifySearchResults>> {
+async fn search(State(state): State<AppState>, Actor { user_id, .. }: Actor, ApiQuery(query): ApiQuery<SearchQuery>) -> ApiResult<Json<SpotifySearchResults>> {
     let active = active(&state)?;
     let q = query.q.trim();
     if !(1..=100).contains(&q.chars().count()) || q.chars().any(hidden_char) {
@@ -270,7 +270,7 @@ async fn search(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQ
     Ok(Json(results))
 }
 
-async fn album(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<SpotifyAlbum>> {
+async fn album(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Json<SpotifyAlbum>> {
     let active = active(&state)?;
     check_id(&id)?;
     browse_limit(&state, user_id)?;
@@ -285,7 +285,7 @@ struct PageQuery {
 
 async fn playlist(
     State(state): State<AppState>,
-    AuthUser(user_id): AuthUser,
+    Actor { user_id, .. }: Actor,
     Path(id): Path<String>,
     ApiQuery(query): ApiQuery<PageQuery>,
 ) -> ApiResult<Json<SpotifyPlaylist>> {
@@ -299,14 +299,14 @@ async fn playlist(
     Ok(Json(playlist_page(&active, &id, offset).await.map_err(catalog_error)?))
 }
 
-async fn artist(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<SpotifyArtist>> {
+async fn artist(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Json<SpotifyArtist>> {
     let active = active(&state)?;
     check_id(&id)?;
     browse_limit(&state, user_id)?;
     Ok(Json(artist_page(&active, &id).await.map_err(catalog_error)?))
 }
 
-async fn track(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<SpotifyTrack>> {
+async fn track(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Json<SpotifyTrack>> {
     let active = active(&state)?;
     check_id(&id)?;
     browse_limit(&state, user_id)?;

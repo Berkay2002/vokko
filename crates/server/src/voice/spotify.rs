@@ -21,6 +21,7 @@ use super::token::{self, Claims, VideoGrant};
 use super::watch::{CONTROL_BURST, CONTROL_PER_SECOND, require_in_voice};
 use super::{control, unix_millis, unix_now};
 use crate::access;
+use crate::acting::Actor;
 use crate::auth::{AuthUser, random_hex};
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::ApiJson;
@@ -106,7 +107,12 @@ impl Session {
                 .entries
                 .iter()
                 .take(shown)
-                .map(|entry| SpotifyQueueEntry { qid: entry.qid.clone(), track: entry.track.clone(), added_by: Snowflake::from(entry.added_by) })
+                .map(|entry| SpotifyQueueEntry {
+                    qid: entry.qid.clone(),
+                    track: entry.track.clone(),
+                    added_by: Snowflake::from(entry.added_by.user_id),
+                    via_bot_id: entry.added_by.via_bot.map(Snowflake::from),
+                })
                 .collect(),
             queue_len: self.queue.entries.len() as u32,
             can_previous: self.queue.can_previous(),
@@ -336,7 +342,7 @@ async fn announce(state: &AppState, channel_id: i64, session: Option<SpotifyStat
     state.hub.send(&viewers, &GatewayEvent::SpotifyUpdate(SpotifyUpdate { channel_id: Snowflake::from(channel_id), state: session }));
 }
 
-async fn read(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Json<SpotifyState>> {
+async fn read(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Json<SpotifyState>> {
     active(&state)?;
     let channel_id = require_in_voice(&state, user_id, &id).await?;
     let view = lock(&state.spotify.session).as_ref().filter(|session| session.channel_id == channel_id).map(|session| session.view(true));
@@ -373,12 +379,8 @@ fn uri_of(field: &str, text: &str) -> ApiResult<(Kind, String)> {
 
 // ---- routes ----
 
-async fn start(
-    State(state): State<AppState>,
-    AuthUser(user_id): AuthUser,
-    Path(id): Path<String>,
-    ApiJson(body): ApiJson<SpotifyStartRequest>,
-) -> ApiResult<Response> {
+async fn start(State(state): State<AppState>, actor: Actor, Path(id): Path<String>, ApiJson(body): ApiJson<SpotifyStartRequest>) -> ApiResult<Response> {
+    let user_id = actor.user_id;
     let active = active(&state)?;
     let ctx = control::in_voice(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
@@ -426,7 +428,7 @@ async fn start(
                 token: bot_token(&state, channel_id, &room).unwrap_or_default(),
                 room,
                 started_by: user_id,
-                control: control::new_session(user_id, &control::room(&state, channel_id)),
+                control: control::new_session(actor, &control::room(&state, channel_id)),
                 queue: Queue::default(),
                 status: SpotifyStatus::Starting,
                 error: None,
@@ -451,11 +453,11 @@ async fn start(
             return Err(ApiErr::internal());
         }
         // An album or playlist from someone without control (starting on an idle session) queues only what their quota allows.
-        let mine = session.queue.entries.iter().filter(|entry| entry.added_by == user_id).count();
+        let mine = session.queue.entries.iter().filter(|entry| entry.added_by.user_id == user_id).count();
         let allowed = control::quota(&ctx, &session.control, mine, SPOTIFY_QUEUE_PER_USER).unwrap_or(0);
         let over_quota = tracks.len().saturating_sub(allowed);
         tracks.truncate(allowed);
-        let left_out = session.queue.play_now(first, tracks, user_id) + over_quota;
+        let left_out = session.queue.play_now(first, tracks, actor) + over_quota;
         session.new_track(&state, now);
         if fresh {
             session.status = SpotifyStatus::Starting;
@@ -579,12 +581,8 @@ fn one_op(body: SpotifyPatchRequest) -> ApiResult<Op> {
     }
 }
 
-async fn control(
-    State(state): State<AppState>,
-    AuthUser(user_id): AuthUser,
-    Path(id): Path<String>,
-    ApiJson(body): ApiJson<SpotifyPatchRequest>,
-) -> ApiResult<Response> {
+async fn control(State(state): State<AppState>, actor: Actor, Path(id): Path<String>, ApiJson(body): ApiJson<SpotifyPatchRequest>) -> ApiResult<Response> {
+    let user_id = actor.user_id;
     let active = active(&state)?;
     let ctx = control::in_voice(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
@@ -648,12 +646,12 @@ async fn control(
                 session.bump(&state);
             }
             Op::Add { next, .. } => {
-                let mine = session.queue.entries.iter().filter(|entry| entry.added_by == user_id).count();
+                let mine = session.queue.entries.iter().filter(|entry| entry.added_by.user_id == user_id).count();
                 let allowed = control::quota(&ctx, &session.control, mine, SPOTIFY_QUEUE_PER_USER)?;
                 let mut tracks = added.unwrap_or_default();
                 let over_quota = tracks.len().saturating_sub(allowed);
                 tracks.truncate(allowed);
-                left_out = session.queue.add(tracks, user_id, next) + over_quota;
+                left_out = session.queue.add(tracks, actor, next) + over_quota;
                 if session.queue.current.is_none() && session.queue.advance(Leave::Skipped).is_some() {
                     session.new_track(&state, now);
                 } else {
@@ -661,7 +659,7 @@ async fn control(
                 }
             }
             Op::Remove(qid) => {
-                if session.queue.entries.iter().any(|entry| entry.qid == qid && entry.added_by != user_id) && !controller {
+                if session.queue.entries.iter().any(|entry| entry.qid == qid && entry.added_by.user_id != user_id) && !controller {
                     return Err(ApiErr::missing_permissions());
                 }
                 if !session.queue.remove(&qid) {
@@ -716,7 +714,7 @@ async fn settle(state: &AppState, active: &Active<'_>, channel_id: i64, change: 
     announce(state, channel_id, Some(change.event)).await;
 }
 
-async fn stop(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<Response> {
+async fn stop(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(id): Path<String>) -> ApiResult<Response> {
     active(&state)?;
     let ctx = control::in_voice(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;

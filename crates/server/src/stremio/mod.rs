@@ -30,6 +30,7 @@ use self::bot::Bot;
 use self::client::{Account, AccountError};
 use self::fetch::{FetchError, Fetcher};
 use self::rank::{Candidate, Source};
+use crate::acting::Actor;
 use crate::auth::AuthUser;
 use crate::config::StremioConfig;
 use crate::crypto::Secret;
@@ -382,7 +383,7 @@ struct SearchQuery {
     q: String,
 }
 
-async fn search(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQuery(query): ApiQuery<SearchQuery>) -> ApiResult<Json<Vec<StremioTitle>>> {
+async fn search(State(state): State<AppState>, Actor { user_id, .. }: Actor, ApiQuery(query): ApiQuery<SearchQuery>) -> ApiResult<Json<Vec<StremioTitle>>> {
     let active = active(&state)?;
     check_kind(&query.kind)?;
     let text = rank::clean_text(&query.q, " ", 1000);
@@ -404,7 +405,7 @@ struct BrowseQuery {
     skip: Option<u32>,
 }
 
-async fn browse(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQuery(query): ApiQuery<BrowseQuery>) -> ApiResult<Json<Vec<StremioTitle>>> {
+async fn browse(State(state): State<AppState>, Actor { user_id, .. }: Actor, ApiQuery(query): ApiQuery<BrowseQuery>) -> ApiResult<Json<Vec<StremioTitle>>> {
     let active = active(&state)?;
     check_kind(&query.kind)?;
     let genre = query.genre.as_deref().map(str::trim).filter(|genre| !genre.is_empty());
@@ -442,7 +443,7 @@ pub(crate) async fn cached_meta(state: &AppState, active: &Active<'_>, kind: &st
     Ok(meta)
 }
 
-async fn meta(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((kind, id)): Path<(String, String)>) -> ApiResult<Json<StremioMeta>> {
+async fn meta(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path((kind, id)): Path<(String, String)>) -> ApiResult<Json<StremioMeta>> {
     let active = active(&state)?;
     check_kind(&kind)?;
     if !valid_title_id(&id) {
@@ -485,7 +486,7 @@ pub(crate) async fn user_addons(state: &AppState, active: &Active<'_>, user_id: 
 
 async fn streams(
     State(state): State<AppState>,
-    AuthUser(user_id): AuthUser,
+    Actor { user_id, .. }: Actor,
     Path((kind, video_id)): Path<(String, String)>,
 ) -> ApiResult<Json<StremioStreamList>> {
     let active = active(&state)?;
