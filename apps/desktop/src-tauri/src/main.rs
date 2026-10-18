@@ -7,6 +7,7 @@ mod games;
 mod links;
 #[cfg(target_os = "macos")]
 mod macos;
+mod overlay;
 mod popups;
 mod prefs;
 mod sharebar;
@@ -196,6 +197,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .manage(links::LinkState::default())
         .manage(updates::UpdateState::new(updater_configured))
         .manage(shortcuts::ShortcutRegistry::default())
+        .manage(overlay::OverlayState::default())
         .on_window_event(|window, event| {
             if window.label() != window::MAIN_WINDOW {
                 return;
@@ -251,6 +253,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             streamer::desktop_set_capture_hidden,
             streamer::desktop_restart,
             spotify::spotify_now_playing,
+            overlay::desktop_overlay_configure,
+            overlay::desktop_overlay_set_interactive,
+            overlay::desktop_overlay_open_main,
+            overlay::desktop_overlay_set_frame,
         ])
         .build(context)?
         .run(run_event);

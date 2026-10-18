@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay-window",
+  "description": "The in-game overlay window (src-tauri/src/overlay.rs, src/overlay): it listens to and emits app events and calls the overlay commands; the main window does everything else.",
+  "windows": ["overlay"],
+  "permissions": ["core:event:default"]
+}

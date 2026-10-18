@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { UIEvent } from "react";
-import { Accessibility, Bell, Code, Gamepad2, Joystick, Keyboard, Languages, LogOut, MessageCircle, Mic, MessagesSquare, Monitor, Palette, Pencil, Plug, Radio, Search, ShieldCheck, User as UserIcon, X } from "lucide-react";
+import { Accessibility, Bell, Code, Gamepad2, Joystick, Keyboard, Languages, Layers, LogOut, MessageCircle, Mic, MessagesSquare, Monitor, Palette, Pencil, Plug, Radio, Search, ShieldCheck, User as UserIcon, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
@@ -25,6 +25,7 @@ import { blockedByUnsaved } from "./settings/unsaved";
 import { VoiceVideoPage } from "./settings/VoiceVideoPage";
 import { WindowsPage, desktopSettingsTitle } from "./settings/WindowsPage";
 import { RegisteredGamesPage } from "./settings/RegisteredGamesPage";
+import { GameOverlayPage } from "../overlay/GameOverlayPage";
 
 type NavIcon = typeof UserIcon;
 
@@ -61,6 +62,7 @@ const ALL_SECTIONS: SectionDef[] = [
   { id: "windows", label: "Windows Settings", icon: Monitor, group: "Experience", desktopOnly: true, keywords: ["startup", "tray", "minimize", "close", "autostart", "login", "open on startup"] },
   { id: "activity", label: "Activity Privacy", icon: Gamepad2, group: "Games & Apps", outline: ["What Activity I Share", "Where I Share Activity"], keywords: ["status", "games", "share", "join"] },
   { id: "games", label: "Registered Apps", icon: Joystick, group: "Games & Apps", desktopOnly: true, keywords: ["game", "app", "detection", "detected", "add", "playing", "activity", "running"] },
+  { id: "overlay", label: "Game Overlay", icon: Layers, group: "Games & Apps", desktopOnly: true, keywords: ["overlay", "in-game", "game", "fullscreen", "borderless", "voice widget", "hotkey"] },
   { id: "connections", label: "Connected Apps", icon: Plug, group: "Games & Apps", outline: ["Connections", "Authorized Apps"], keywords: ["connections", "accounts", "authorized", "integrations"] },
   { id: "developer", label: "Advanced", icon: Code, group: "Other", keywords: ["developer", "developer mode", "application test mode", "ids", "api", "copy id", "hardware acceleration", "gpu"] },
   { id: "profiles", label: "Profiles", icon: UserIcon, group: "", hidden: true },
@@ -271,6 +273,8 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
         return <ActivityPrivacyPage />;
       case "games":
         return <RegisteredGamesPage />;
+      case "overlay":
+        return <GameOverlayPage />;
       case "connections":
         return <ConnectedAppsPage onOpen={open} />;
       default:

@@ -1,0 +1,315 @@
+/* In-game overlay window. The page must stay transparent: anything painted here covers the game. No animations or transitions
+   that loop; the speaking ring is a plain border change. */
+
+:root {
+  --ov-text: #f2f3f5;
+  --ov-muted: #b5bac1;
+  --ov-pill: rgba(17, 18, 20, 0.78);
+  --ov-card: #1e1f22;
+  --ov-card-border: rgba(255, 255, 255, 0.08);
+  --ov-speaking: #23a55a;
+  --ov-danger: #f23f42;
+  --ov-accent: #5865f2;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: "Noto Sans", Inter, system-ui, sans-serif;
+  color: var(--ov-text);
+  user-select: none;
+}
+
+.ov-root {
+  position: fixed;
+  inset: 0;
+}
+
+.ov-root.interactive {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.ov-top-left {
+  top: 24px;
+  left: 24px;
+}
+.ov-top-right {
+  top: 24px;
+  right: 24px;
+  align-items: flex-end;
+}
+.ov-bottom-left {
+  bottom: 24px;
+  left: 24px;
+}
+.ov-bottom-right {
+  bottom: 24px;
+  right: 24px;
+  align-items: flex-end;
+}
+
+.ov-widget,
+.ov-toasts {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ov-root.interactive .ov-top-left,
+.ov-root.interactive .ov-top-right {
+  top: 96px;
+}
+
+.ov-members {
+  /* Sensible bound for a big call (about 13 people): the passive window is sized to this. */
+  max-height: 476px;
+  overflow: hidden;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ov-top-right .ov-members,
+.ov-bottom-right .ov-members {
+  align-items: flex-end;
+}
+
+.ov-member {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+}
+
+.ov-top-right .ov-member,
+.ov-bottom-right .ov-member {
+  flex-direction: row-reverse;
+}
+
+.ov-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  object-fit: cover;
+  background: var(--ov-pill);
+}
+
+.ov-member.speaking .ov-avatar {
+  border-color: var(--ov-speaking);
+}
+
+.ov-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--ov-pill);
+}
+
+.ov-member.speaking .ov-name {
+  color: #fff;
+}
+
+.ov-state {
+  color: var(--ov-danger);
+  flex: none;
+}
+
+.ov-self {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--ov-pill);
+  color: var(--ov-danger);
+}
+
+.ov-hint {
+  font-size: 11px;
+  color: var(--ov-muted);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(17, 18, 20, 0.5);
+  width: fit-content;
+}
+
+/* Interactive control bar, top centre. */
+.ov-bar {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 8px;
+  background: var(--ov-card);
+  border: 1px solid var(--ov-card-border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.ov-bar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.ov-bar-guild {
+  font-weight: 400;
+  color: var(--ov-muted);
+}
+
+.ov-logo {
+  width: 24px;
+  height: 24px;
+}
+
+.ov-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ov-text);
+  cursor: pointer;
+}
+
+.ov-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ov-btn.active {
+  color: var(--ov-danger);
+  background: rgba(242, 63, 66, 0.14);
+}
+
+.ov-exit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ov-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ov-exit kbd {
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+button:focus-visible {
+  outline: 2px solid #00a8fc;
+  outline-offset: 2px;
+}
+
+/* Toasts. */
+.ov-toasts {
+  gap: 8px;
+  width: 340px;
+}
+
+.ov-toast {
+  position: relative;
+  border-radius: 8px;
+  background: var(--ov-card);
+  border: 1px solid var(--ov-card-border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.ov-toast-main {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 28px 10px 10px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ov-toast-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.ov-toast-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.ov-toast-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ov-toast-body {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--ov-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.ov-toast-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--ov-muted);
+  cursor: pointer;
+}
+
+.ov-toast-close:hover {
+  color: var(--ov-text);
+  background: rgba(255, 255, 255, 0.08);
+}
