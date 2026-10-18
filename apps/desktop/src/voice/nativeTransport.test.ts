@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS } from "./reducer";
 
 const calls: { name: string; args?: Record<string, unknown> }[] = [];
 let failConnect = false;
+let videoAnswer: string | null = null;
 
 vi.mock("@tauri-apps/api/core", () => ({
   Channel: class<T> {
@@ -13,6 +14,10 @@ vi.mock("@tauri-apps/api/core", () => ({
     calls.push({ name, args });
     if (name === "native_voice_connect" && failConnect) throw new Error("refused");
     if (name === "native_voice_devices") return { input: [{ deviceId: "mic1", label: "USB mic" }], output: [] };
+    if (name === "native_voice_set_video" && args?.plan) {
+      if (videoAnswer?.startsWith("!")) throw videoAnswer.slice(1);
+      return videoAnswer;
+    }
     return undefined;
   },
 }));
@@ -46,6 +51,7 @@ describe("NativeTransport", () => {
   beforeEach(() => {
     calls.length = 0;
     failConnect = false;
+    videoAnswer = null;
   });
 
   it("connects with the known volumes and forwards room events until the room closes", async () => {
@@ -89,6 +95,50 @@ describe("NativeTransport", () => {
     ]);
     events.onmessage({ type: "closed", final: false });
     expect(cb.video).toHaveBeenLastCalledWith("3", "screen", null);
+  });
+
+  it("publishes our camera from Rust, closes the preview first, and reports failures and ends", async () => {
+    vi.stubGlobal("document", { createElement: () => ({}) });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const cb = { ...callbacks(), video: vi.fn(), localVideoEnded: vi.fn(), videoFailed: vi.fn() };
+    const t = new NativeTransport(cb);
+    await t.connect("wss://lk", "tok", { ...options(), selfId: "1" });
+    const session = { stop: vi.fn(async () => undefined) };
+    videoAnswer = "TR_cam";
+    await t.setCamera(true, { resolution: "720p", session: session as never, deviceId: "webkit-id" });
+    expect(session.stop).toHaveBeenCalled();
+    expect(calls.at(-1)).toMatchObject({ name: "native_voice_set_video", args: { source: "camera", plan: { width: 1280, height: 720, fps: 30, maxBitrate: 1_200_000, deviceId: undefined } } });
+    expect(cb.video).toHaveBeenLastCalledWith("1", "camera", expect.objectContaining({ attach: expect.any(Function) }));
+    channel().onmessage({ type: "localEnded", source: "camera" });
+    await vi.waitFor(() => expect(cb.localVideoEnded).toHaveBeenCalledWith("camera"));
+    expect(cb.video).toHaveBeenLastCalledWith("1", "camera", null);
+    expect(calls.at(-1)).toEqual({ name: "native_voice_set_video", args: { source: "camera", plan: null } });
+    videoAnswer = "!not_found";
+    await t.setCamera(true, { resolution: "720p" });
+    expect(cb.videoFailed).toHaveBeenCalledWith("camera", "not_found");
+    videoAnswer = "!cancelled";
+    await t.setScreenShare(true, { resolution: "1080p", fps: 30, audio: false });
+    expect(cb.localVideoEnded).toHaveBeenLastCalledWith("screen");
+    expect(cb.videoFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops our own tiles on a reconnect and stops our captures when the room closes", async () => {
+    vi.stubGlobal("document", { createElement: () => ({}) });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const cb = { ...callbacks(), video: vi.fn() };
+    const t = new NativeTransport(cb);
+    await t.connect("wss://lk", "tok", { ...options(), selfId: "1" });
+    videoAnswer = "TR_cam";
+    await t.setCamera(true, { resolution: "720p" });
+    await t.connect("wss://lk", "tok2", { ...options(), selfId: "1" });
+    expect(cb.video).toHaveBeenLastCalledWith("1", "camera", null);
+    calls.length = 0;
+    await t.connect("wss://lk", "tok3", { ...options(), selfId: "1" });
+    channel().onmessage({ type: "closed", final: false });
+    expect(calls.filter(c => c.name === "native_voice_set_video")).toEqual([
+      { name: "native_voice_set_video", args: { source: "camera", plan: null } },
+      { name: "native_voice_set_video", args: { source: "screen", plan: null } },
+    ]);
   });
 
   it("reports a failed connect as a retryable close, and drops events after a disconnect", async () => {

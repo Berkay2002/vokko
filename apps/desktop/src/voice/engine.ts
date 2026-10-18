@@ -217,9 +217,9 @@ export async function startCamera(session?: CameraSession | null): Promise<boole
   const prefs = getPrefs();
   const resolution = cameraResolutionFromPrefs(prefs);
   let capture = session ?? null;
-  if (!capture && transportKind !== "fake") {
+  if (!capture && transportKind !== "fake" && !nativeVoice()) {
     // No preview was open: capture here so the saved background applies before the first frame is published
-    // (the fake transport paints its own picture when it gets no capture).
+    // (the fake transport paints its own picture when it gets no capture; the native one captures in Rust).
     try {
       capture = await openCamera({ deviceId: prefs.cameraDevice || undefined, resolution });
       const background = parseBackground(prefs.videoBackground);
