@@ -38,7 +38,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "bans", label: "Bans", group: "moderation", needs: [Perm.BAN_MEMBERS] },
   { id: "reports", label: "Reports", group: "moderation", needs: [Perm.MANAGE_MESSAGES, Perm.MODERATE_MEMBERS] },
   { id: "automod", label: "AutoMod", group: "moderation" },
-  { id: "community", label: "Enable Community", group: "bottom", outline: ["Enable Community"] },
+  { id: "community", label: "Enable Community", group: "bottom" },
   { id: "template", label: "Server Template", group: "bottom", outline: ["Template Title", "Description"] },
 ];
 

@@ -7,7 +7,7 @@ import { appStore, displayName, useStore } from "../api/store";
 import { ChannelType, OverwriteType, RelationshipType } from "../api/types";
 import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
-import { createChannel, createGroupDM, createGuild, deleteGuild, joinOrApply, leaveGuild } from "./actions";
+import { addGroupRecipients, createChannel, createGroupDM, createGuild, deleteGuild, joinOrApply, leaveGuild } from "./actions";
 import { InviteModal } from "../invites/InviteModal";
 import { ApplyToJoin } from "../invites/ApplyToJoin";
 import { blockUser } from "./menus";
@@ -451,7 +451,7 @@ function NotificationSettingsModal({ scopeId, title, guild }: { scopeId: string;
   );
 }
 
-function CreateDM({ base = [] }: { base?: string[] }) {
+function CreateDM({ base = [], groupId }: { base?: string[]; groupId?: string }) {
   const friends = useStore(s => Object.values(s.relationships).filter(r => r.type === RelationshipType.Friend && !base.includes(r.id)));
   const [selected, setSelected] = useState<string[]>([]);
   const room = 9 - base.length;
@@ -476,7 +476,7 @@ function CreateDM({ base = [] }: { base?: string[] }) {
               disabled={busy || selected.length === 0}
               onClick={() => {
                 setBusy(true);
-                createGroupDM([...base, ...selected])
+                (groupId ? addGroupRecipients(groupId, selected) : createGroupDM([...base, ...selected]))
                   .then(closeModal)
                   .catch(() => setBusy(false));
               }}
@@ -620,7 +620,7 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
         />
       );
     case "createDM":
-      return <CreateDM key={id} base={spec.base} />;
+      return <CreateDM key={id} base={spec.base} groupId={spec.groupId} />;
     case "quickSwitcher":
       return <QuickSwitcher key={id} />;
     case "shortcuts":

@@ -594,6 +594,11 @@ impl Config {
             let seconds: u64 = value.trim().parse().map_err(|_| format!("VOKKO_REMINDER_POLL_SECS must be a whole number of seconds, got {value}"))?;
             config.reminder_poll = Duration::from_secs(seconds.max(1));
         }
+        // How long a DM call rings before it counts as missed (default 180); the real e2e shortens it.
+        if let Some(value) = env.get("VOKKO_CALL_RING_TIMEOUT_SECS") {
+            let seconds: u64 = value.trim().parse().map_err(|_| format!("VOKKO_CALL_RING_TIMEOUT_SECS must be a whole number of seconds, got {value}"))?;
+            config.call_ring_timeout = Duration::from_secs(seconds.max(1));
+        }
         if let Some(value) = env.get("VOKKO_CORS_ORIGINS") {
             config.cors_origins = parse_cors_origins(&value)?;
         }

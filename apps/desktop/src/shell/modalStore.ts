@@ -21,7 +21,7 @@ export type ModalSpec =
   | { type: "timeoutMember"; guildId: Snowflake; userId: Snowflake }
   | { type: "nickname"; guildId: Snowflake; userId: Snowflake }
   | { type: "notificationSettings"; scopeId: Snowflake; title: string; guild?: boolean }
-  | { type: "createDM"; /** Users already in the conversation (the new group DM keeps them). */ base?: Snowflake[] }
+  | { type: "createDM"; /** Users already in the conversation (the new group DM keeps them). */ base?: Snowflake[]; /** An existing group DM: friends are added to it instead of creating a new group. */ groupId?: Snowflake }
   | { type: "quickSwitcher" }
   | { type: "shortcuts" }
   | { type: "profile"; userId: Snowflake; guildId?: Snowflake | null }

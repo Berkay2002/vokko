@@ -63,6 +63,7 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_GIF_API_KEY` | empty | Provider API key; required when `VOKKO_GIF_PROVIDER` is not `none`. |
 | `VOKKO_GIF_BASE_URL` | provider default | Override of the provider's API origin (mirrors, tests). |
 | `VOKKO_REMINDER_POLL_SECS` | `15` | How often due message reminders are delivered. |
+| `VOKKO_CALL_RING_TIMEOUT_SECS` | `180` | How long a DM call rings before it counts as missed (the real e2e shortens it). |
 | `VOKKO_DESKTOP_LATEST_JSON` | unset (compose: `/downloads/latest.json`) | Path of the desktop updater's `latest.json`. The server reads it every 60 s and sends a new `version` to every connected client (READY `desktop_version`, DESKTOP_VERSION), so installed apps look for the update within a minute. A missing or unreadable file changes nothing. |
 | `VOKKO_TRUST_PROXY` | off | `on`/`1`/`true`/`yes`: take the client address from the last `X-Forwarded-For` entry. Only behind a proxy that sets it (the bundled Caddy does), otherwise clients can spoof their address and dodge rate limits. Uses the last `X-Forwarded-For` line, so exactly one proxy hop. |
 | `VOKKO_CORS_ORIGINS` | unset (localhost on any port) | Comma-separated exact origins allowed to call the API from a browser, e.g. `https://chat.example.com,https://web.example.com`. Scheme and host (and port if not default), no path, no `*`. When set it replaces the localhost defaults; the Tauri origins stay allowed. Bad entries stop the server at start. |

@@ -14,6 +14,7 @@ import { FullScreenSettings, useFrameLayout, type SettingsNavGroup } from "./set
 import { AuditLogPage } from "./settings/AuditLogPage";
 import { BansPage } from "./settings/BansPage";
 import { AccessPage } from "./settings/AccessPage";
+import { CommunityPage } from "./settings/CommunityPage";
 import { JoinRequestsPage } from "./settings/JoinRequestsPage";
 import { ReportsPage } from "./settings/ReportsPage";
 import { AutoModPage, SafetyPage } from "./settings/SafetyPage";
@@ -308,6 +309,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         );
       case "safety":
         return <SafetyPage guild={guild} canEdit={canManage} />;
+      case "community":
+        return <CommunityPage guild={guild} canEdit={canManage} />;
       case "access":
         return <AccessPage guild={guild} canEdit={canManage} />;
       case "automod":

@@ -265,6 +265,24 @@ route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
       fail(400, 50035, "Invalid Form Body", { rules_channel_id: { code: "CHANNEL_INVALID", message: "Must be a text channel of this server." } });
     }
   }
+  if ("public_updates_channel_id" in body && body.public_updates_channel_id !== null) {
+    const updates = typeof body.public_updates_channel_id === "string" ? db.channels.get(body.public_updates_channel_id) : undefined;
+    if (!updates || updates.guild_id !== guild.guild.id || updates.type !== ChannelType.GuildText) {
+      fail(400, 50035, "Invalid Form Body", { public_updates_channel_id: { code: "CHANNEL_INVALID", message: "Must be a text channel of this server." } });
+    }
+  }
+  const features = body.features;
+  if (features !== undefined && (!Array.isArray(features) || features.some(f => f !== "COMMUNITY"))) {
+    fail(400, 50035, "Invalid Form Body", { features: { code: "BASE_TYPE_CHOICES", message: "Only COMMUNITY can be changed." } });
+  }
+  const community = Array.isArray(features) ? features.length > 0 : (guild.guild.features ?? []).includes("COMMUNITY");
+  if (community && (features !== undefined || "rules_channel_id" in body || "public_updates_channel_id" in body || level !== undefined || filter !== undefined)) {
+    const need = (key: string, message: string) => fail(400, 50035, "Invalid Form Body", { [key]: { code: "COMMUNITY_REQUIREMENT", message } });
+    if (("rules_channel_id" in body ? body.rules_channel_id : guild.guild.rules_channel_id) == null) need("rules_channel_id", "A Community needs a rules channel.");
+    if (("public_updates_channel_id" in body ? body.public_updates_channel_id : guild.guild.public_updates_channel_id) == null) need("public_updates_channel_id", "A Community needs a community updates channel.");
+    if ((typeof level === "number" ? level : guild.guild.verification_level ?? 0) < VerificationLevel.Low) need("verification_level", "A Community needs a verification level of at least low.");
+    if ((typeof filter === "number" ? filter : guild.guild.explicit_content_filter ?? 0) !== ExplicitContentFilter.AllMembers) need("explicit_content_filter", "A Community needs the content filter on for all members.");
+  }
   if (body.join_mode !== undefined && body.join_mode !== 0 && body.join_mode !== 1) {
     fail(400, 50035, "Invalid Form Body", { join_mode: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 1)." } });
   }
@@ -274,6 +292,8 @@ route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
   if (body.join_mode !== undefined) guild.guild.join_mode = body.join_mode;
   if (body.default_message_notifications === 0 || body.default_message_notifications === 1) guild.guild.default_message_notifications = body.default_message_notifications;
   if ("rules_channel_id" in body) guild.guild.rules_channel_id = body.rules_channel_id as string | null;
+  if ("public_updates_channel_id" in body) guild.guild.public_updates_channel_id = body.public_updates_channel_id as string | null;
+  if (Array.isArray(features)) guild.guild.features = features as string[];
   if (typeof level === "number") guild.guild.verification_level = level;
   if (typeof filter === "number") guild.guild.explicit_content_filter = filter;
   if (name !== undefined) guild.guild.name = name;
@@ -449,6 +469,40 @@ route("PUT", `/channels/${ID}/voice-status`, ({ viewer, params, body }) => {
   return undefined;
 });
 
+route("PUT", `/channels/${ID}/recipients/${ID}`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const target = params[1] ?? "";
+  if (channel.type !== ChannelType.GroupDM) fail(400, 50024, "Cannot execute action on this channel type");
+  const members = (channel.participant_ids ??= []);
+  if (!db.accounts.has(target)) fail(404, 10013, "Unknown User");
+  if (members.includes(target)) return undefined;
+  if (relationship(viewer.user.id, target)?.type !== RelationshipType.Friend) fail(403, 50007, "Cannot send messages to this user");
+  if (members.length >= 10) fail(400, 30004, "Maximum number of group DM recipients reached (10)");
+  members.push(target);
+  for (const id of members) {
+    if (id === target) emit([id], "CHANNEL_CREATE", channelFor(channel, id));
+    else emit([id], "CHANNEL_RECIPIENT_ADD", { channel_id: channel.id, user: userOf(target) });
+  }
+  return undefined;
+});
+
+route("DELETE", `/channels/${ID}/recipients/${ID}`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const target = params[1] ?? "";
+  if (channel.type !== ChannelType.GroupDM) fail(400, 50024, "Cannot execute action on this channel type");
+  if (target !== viewer.user.id && channel.owner_id !== viewer.user.id) fail(403, 50013, "You lack permissions to perform that action");
+  const members = channel.participant_ids ?? [];
+  if (!members.includes(target)) return undefined;
+  if (voiceStates.get(target)?.channel_id === channel.id) setMockVoice(target, null, emit);
+  callRecipientRemoved(channel.id, target);
+  const payload = channelFor(channel, target);
+  channel.participant_ids = members.filter(id => id !== target);
+  if (channel.owner_id === target) channel.owner_id = channel.participant_ids[0] ?? null;
+  for (const id of channel.participant_ids) emit([id], "CHANNEL_RECIPIENT_REMOVE", { channel_id: channel.id, user: userOf(target) });
+  emit([target], "CHANNEL_DELETE", payload);
+  return undefined;
+});
+
 route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   if (isThreadType(channel.type)) return deleteThread(channel, viewer.user.id);
@@ -472,8 +526,9 @@ route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
   db.channels.delete(channel.id);
   db.messages.delete(channel.id);
   const owner = db.guilds.get(channel.guild_id);
-  if (owner?.guild.rules_channel_id === channel.id) {
-    owner.guild.rules_channel_id = null;
+  if (owner && (owner.guild.rules_channel_id === channel.id || owner.guild.public_updates_channel_id === channel.id)) {
+    if (owner.guild.rules_channel_id === channel.id) owner.guild.rules_channel_id = null;
+    if (owner.guild.public_updates_channel_id === channel.id) owner.guild.public_updates_channel_id = null;
     emit(owner.members.keys(), "GUILD_UPDATE", { ...owner.guild });
   }
   return payload;

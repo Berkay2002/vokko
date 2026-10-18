@@ -183,6 +183,23 @@ describe("safety and AutoMod", () => {
     expect(audit(`?action_type=${AuditLogEvent.GuildUpdate}`)[0]?.changes).toEqual([{ key: "verification_level", old_value: 0, new_value: 2 }]);
   });
 
+  it("PATCH /guilds toggles COMMUNITY only with its prerequisites", () => {
+    const bad = (body: object) => errorOf(() => call("owner", "PATCH", `/guilds/${guildId}`, body));
+    const voice = [...db.channels.values()].find(c => c.guild_id === guildId && c.type === 2)!;
+    expect(bad({ features: ["DISCOVERABLE"] }).errors).toHaveProperty("features");
+    expect(bad({ public_updates_channel_id: voice.id }).errors).toHaveProperty("public_updates_channel_id");
+    expect(bad({ features: ["COMMUNITY"] }).errors).toHaveProperty("rules_channel_id");
+    const ready = { rules_channel_id: generalId, public_updates_channel_id: generalId };
+    expect(bad({ features: ["COMMUNITY"], ...ready }).errors).toHaveProperty("verification_level");
+    expect(bad({ features: ["COMMUNITY"], ...ready, verification_level: 1 }).errors).toHaveProperty("explicit_content_filter");
+    expect(db.guilds.get(guildId)!.guild.features).toEqual([]);
+    call("owner", "PATCH", `/guilds/${guildId}`, { features: ["COMMUNITY"], ...ready, verification_level: 1, explicit_content_filter: 2 });
+    expect(db.guilds.get(guildId)!.guild).toMatchObject({ features: ["COMMUNITY"], public_updates_channel_id: generalId });
+    expect(bad({ rules_channel_id: null }).errors).toHaveProperty("rules_channel_id");
+    call("owner", "DELETE", `/channels/${generalId}`);
+    expect(db.guilds.get(guildId)!.guild.public_updates_channel_id).toBeNull();
+  });
+
   it("PATCH /guilds validates nsfw_level and rules_channel_id and clears the rules channel on delete", () => {
     const bad = (body: object) => errorOf(() => call("owner", "PATCH", `/guilds/${guildId}`, body));
     expect(bad({ nsfw_level: 1 }).errors).toHaveProperty("nsfw_level");

@@ -231,6 +231,8 @@ export interface Guild {
   nsfw_level?: NsfwLevel; // Access (MANAGE_GUILD); always sent by the server. AgeRestricted gates every channel of the server
   rules_channel_id?: Snowflake | null; // Access: the rules channel (a text channel of the guild); always sent, null when unset
   join_mode?: JoinMode; // Access: how people get in (MANAGE_GUILD); absent = InviteOnly
+  features?: string[]; // Discord feature flags; "COMMUNITY" once Community is enabled (PATCH `features` toggles only that one)
+  public_updates_channel_id?: Snowflake | null; // Community: the community updates channel (a text channel of the guild); always sent, null when unset
   default_message_notifications?: DefaultMessageNotifications; // Engagement: level for members with no per-server setting (MANAGE_GUILD); always sent, absent = AllMessages
 }
 /** Guild `default_message_notifications` (Discord's values). */
@@ -2148,6 +2150,8 @@ export interface GatewayEvents {
   CHANNEL_CREATE: Channel;
   CHANNEL_UPDATE: Channel;
   CHANNEL_DELETE: Channel;
+  CHANNEL_RECIPIENT_ADD: { channel_id: Snowflake; user: User }; // someone joined a group DM (not sent to the new member, who gets CHANNEL_CREATE)
+  CHANNEL_RECIPIENT_REMOVE: { channel_id: Snowflake; user: User }; // someone left or was removed from a group DM (the removed user gets CHANNEL_DELETE)
   GUILD_CREATE: ReadyEvent["guilds"][number] & { presences?: Presence[] }; // presences of the guild's online members (Discord-style)
   GUILD_UPDATE: Guild; // roles included, no channels/members
   GUILD_DELETE: { id: Snowflake };
