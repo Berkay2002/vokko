@@ -181,13 +181,13 @@ type Rpc = { id?: unknown; method?: unknown; params?: { protocolVersion?: unknow
  */
 export function mediaEndpoint() {
   const turns = new Map<string, MediaFn>()
-  // From MEDIA_TOOLS as they are: a param's own fields are its JSON Schema, `optional` aside.
+  // From MEDIA_TOOLS as they are: a param's own fields are its JSON Schema, `optional` aside; arrays are of strings (OpenAI requires `items`).
   const tools = MEDIA_TOOLS.map(t => ({
     name: t.name,
     description: t.description,
     inputSchema: {
       type: 'object',
-      properties: Object.fromEntries(Object.entries(t.params).map(([k, { optional: _, ...schema }]) => [k, schema])),
+      properties: Object.fromEntries(Object.entries(t.params).map(([k, { optional: _, ...schema }]) => [k, schema.type === 'array' ? { items: { type: 'string' }, ...schema } : schema])),
       required: Object.entries(t.params)
         .filter(([, p]) => !p.optional)
         .map(([k]) => k),

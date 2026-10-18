@@ -242,6 +242,7 @@ describe('codex backend (Codex SDK stubbed at the module boundary)', () => {
     expect(threads[0].inputs[0]).toContain('spotify_* and stremio_* tools')
     expect(seen[0].body.result.tools.map((t: any) => t.name)).toEqual(MEDIA_TOOLS.map(t => t.name))
     expect(seen[0].body.result.tools.find((t: any) => t.name === 'spotify_search').inputSchema).toMatchObject({ type: 'object', required: ['q'] })
+    expect(seen[0].body.result.tools.find((t: any) => t.name === 'spotify_play').inputSchema.properties.uris).toMatchObject({ type: 'array', items: { type: 'string' }, maxItems: 50 })
     expect(seen[1].body.result.content).toEqual([{ type: 'text', text: 'played for alice' }])
     expect(calls).toEqual([{ who: 'alice', name: 'spotify_search', args: { q: 'nice' } }])
     expect((await mcpCall(firstTurn, 'tools/list')).status).toBe(401) // turn over
