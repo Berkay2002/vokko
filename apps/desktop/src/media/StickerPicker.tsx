@@ -5,14 +5,13 @@ import type { Snowflake, Sticker } from '../api/types';
 import { canUseSticker, groupStickers } from './helpers';
 import { resolveStickers } from './lists';
 import { appStore, guildIconUrl, guildInitials, resolveUrl, usePrefs, useStore } from './shell';
-import { recordSticker, refreshStickers, toggleFavoriteSticker, useMedia } from './store';
+import { refreshStickers, toggleFavoriteSticker, useMedia } from './store';
 
 /**
  * Sticker tab of the expression picker: the stickers of every server the user is in, grouped under a server header (the current
  * channel's server first), searchable by name and tags. Hovering a sticker shows it larger with its name.
  */
-export function StickerPicker({ channelId, onPick: choose }: { channelId: Snowflake; onPick(sticker: Sticker): void }) {
-  const onPick = (sticker: Sticker) => { recordSticker(sticker.id); choose(sticker); };
+export function StickerPicker({ channelId, onPick }: { channelId: Snowflake; onPick(sticker: Sticker): void }) {
   const [query, setQuery] = useState('');
   const [hover, setHover] = useState<Sticker | null>(null);
   const stickers = useMedia(s => s.stickers);

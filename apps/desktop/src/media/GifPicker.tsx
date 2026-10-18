@@ -4,7 +4,7 @@ import type { Gif, GifCategories, GifCategory, GifPage, GifProvider } from '../a
 import { isFavorite } from './lists';
 import { safeMediaUrl } from './helpers';
 import { AnimatedImage, request, resolveUrl, ApiRequestError } from './shell';
-import { loadFavorites, recordGif, toggleFavorite, useMedia } from './store';
+import { loadFavorites, toggleFavorite, useMedia } from './store';
 
 type Source = { kind: 'search'; q: string } | { kind: 'trending' };
 type View = { kind: 'home' } | { kind: 'favorites' } | { kind: 'recent' } | { kind: 'trending' } | { kind: 'category'; name: string };
@@ -112,8 +112,7 @@ function Message({ title, body, action }: { title: string; body: string; action?
 }
 
 /** GIF tab of the expression picker: categories and trending, search, favourites. With provider "none" only favourites are offered. */
-export function GifPicker({ onPick: choose, pickLabel = 'Send GIF' }: { onPick(gif: Gif): void; /** What choosing a GIF does, for screen readers ("Send GIF: title"). */ pickLabel?: string }) {
-  const onPick = (gif: Gif) => { recordGif(gif); choose(gif); };
+export function GifPicker({ onPick, pickLabel = 'Send GIF' }: { onPick(gif: Gif): void; /** What choosing a GIF does, for screen readers ("Send GIF: title"). */ pickLabel?: string }) {
   const [query, setQuery] = useState('');
   const [term, setTerm] = useState('');
   const [view, setView] = useState<View>({ kind: 'home' });
@@ -178,7 +177,7 @@ export function GifPicker({ onPick: choose, pickLabel = 'Send GIF' }: { onPick(g
   } else if (view.kind === 'favorites') {
     body = filteredFavorites.length > 0 ? <GifGrid gifs={filteredFavorites} favorites={favorites} onPick={onPick} pickLabel={pickLabel} /> : <Message title="No favorite GIFs yet" body="Click the star on a GIF to keep it here." />;
   } else if (view.kind === 'recent') {
-    body = filteredRecent.length > 0 ? <GifGrid gifs={filteredRecent} favorites={favorites} onPick={onPick} pickLabel={pickLabel} /> : <Message title="No recent GIFs" body="GIFs you send will show up here." />;
+    body = filteredRecent.length > 0 ? <GifGrid gifs={filteredRecent} favorites={favorites} onPick={onPick} pickLabel={pickLabel} /> : <Message title="No recent GIFs" body="GIFs you send from the picker will show up here." />;
   } else {
     const first = favorites?.[0];
     body = <div className="media-gif-categories">

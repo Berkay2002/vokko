@@ -5,6 +5,7 @@ import { EmojiPicker, type PickedEmoji } from './EmojiPicker';
 import type { Gif, Snowflake, Sticker } from '../api/types';
 import { GifPicker } from '../media/GifPicker';
 import { StickerPicker } from '../media/StickerPicker';
+import { recordGif, recordSticker } from '../media/store';
 
 export type ExpressionTab = 'gif' | 'sticker' | 'emoji';
 
@@ -41,8 +42,8 @@ export function ExpressionPicker({ initialTab, onPickEmoji, channelId, onPickGif
       {TABS.map(t => <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>{t.label}</button>)}
     </div>
     {tab === 'emoji' ? <EmojiPicker embedded onPick={onPickEmoji} />
-      : tab === 'gif' && onPickGif ? <GifPicker onPick={onPickGif} />
-      : tab === 'sticker' && onPickSticker && channelId ? <StickerPicker channelId={channelId} onPick={onPickSticker} />
+      : tab === 'gif' && onPickGif ? <GifPicker onPick={gif => { recordGif(gif); onPickGif(gif); }} />
+      : tab === 'sticker' && onPickSticker && channelId ? <StickerPicker channelId={channelId} onPick={sticker => { recordSticker(sticker.id); onPickSticker(sticker); }} />
       : <UnavailablePanel key={tab} tab={tab} />}
   </div>;
 }
