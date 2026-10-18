@@ -99,7 +99,7 @@ const cardsIn = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('[
 
 /**
  * Arrows move through the cards as laid out: Left/Right to the previous/next card, Up/Down by a row, and past the end of Recent or
- * the grid into the next one (or back to the search box). Down in the search box goes to the first card.
+ * the grid into the next one (or back to the search box); Home/End go to the first/last card of the list. Down in the search box goes to the first card.
  */
 function gridKey(e: KeyboardEvent<HTMLElement>) {
   const active = document.activeElement as HTMLElement | null;
@@ -111,11 +111,12 @@ function gridKey(e: KeyboardEvent<HTMLElement>) {
   }
   const step = GRID_STEPS[e.key];
   const menu = active?.closest<HTMLElement>('[role="menu"]');
-  if (!step || !active || !menu) return;
+  if (!(step || e.key === "Home" || e.key === "End") || !active || !menu) return;
   const cards = cardsIn(menu);
   const at = cards.indexOf(active);
   if (at < 0) return;
   e.preventDefault();
+  if (!step) return cards[e.key === "Home" ? 0 : cards.length - 1]?.focus();
   const columns = getComputedStyle(menu).gridTemplateColumns.split(" ").length;
   const next = cards[at + step(columns)];
   if (next) return next.focus();

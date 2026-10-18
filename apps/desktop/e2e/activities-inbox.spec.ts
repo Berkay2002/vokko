@@ -76,6 +76,10 @@ test('Activities opens a picker: search on top, Watch Together, Stremio, Spotify
   await expect(cards.nth(2)).toBeFocused();
   await page.keyboard.press('ArrowUp');
   await expect(cards.nth(0)).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(cards.last()).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(cards.nth(0)).toBeFocused();
   await page.keyboard.press('ArrowUp');
   await expect(search).toBeFocused();
   await page.keyboard.press('Escape');
