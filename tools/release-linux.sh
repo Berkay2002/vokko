@@ -25,6 +25,10 @@ export WSLENV=TAURI_SIGNING_PRIVATE_KEY:TAURI_SIGNING_PRIVATE_KEY_PASSWORD:VITE_
 # -e skips the default shell, which would re-parse this script. APPIMAGE_EXTRACT_AND_RUN: WSL has no FUSE for the linuxdeploy AppImage. NO_STRIP: its bundled strip can't read current binaries.
 wsl -d "$DISTRO" --cd "~" -e bash -c "set -euo pipefail; export PATH=\$HOME/node/bin:\$HOME/.cargo/bin:\$PATH APPIMAGE_EXTRACT_AND_RUN=1 NO_STRIP=1
   command -v patchelf >/dev/null || { echo 'vokko-linux lacks patchelf + gstreamer1.0-plugins-{base,good}: see docs/desktop-release.md Linux'; exit 1; }
+  # webrtc-sys (native voice) needs clang 21+; Ubuntu 22.04's is 14, so a user-local LLVM release, for this build only.
+  [ \"\$(\$HOME/llvm21/bin/clang -dumpversion 2>/dev/null | cut -d. -f1)\" -ge 21 ] 2>/dev/null ||
+    { echo 'vokko-linux lacks clang 21 in ~/llvm21: see docs/desktop-release.md Linux'; exit 1; }
+  export CC=\$HOME/llvm21/bin/clang CXX=\$HOME/llvm21/bin/clang++
   [ -d vokko ] || git clone -q '$OUT_WSL/vokko.bundle' vokko
   cd vokko && git fetch -q '$OUT_WSL/vokko.bundle' HEAD && git checkout -q --detach FETCH_HEAD
   npm ci --no-audit --no-fund --loglevel=error

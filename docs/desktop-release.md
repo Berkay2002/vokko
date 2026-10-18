@@ -134,10 +134,21 @@ wsl --import vokko-linux E:\WSL\vokko-linux E:\WSL\jammy.rootfs.tar.gz --version
 
 Then as root in the distro: `apt-get install build-essential curl wget file git xdg-utils pkg-config libssl-dev libxdo-dev
 libwebkit2gtk-4.1-dev libsoup-3.0-dev librsvg2-dev libayatana-appindicator3-dev xz-utils patchelf gstreamer1.0-plugins-base
-gstreamer1.0-plugins-good` (patchelf and the plugins are for `bundleMediaFramework`, below), `useradd -m -s /bin/bash vokko` and
-`[user] default=vokko` in `/etc/wsl.conf`; as `vokko`: rustup (stable, clippy) and Node 22 unpacked to `~/node` (the script puts
-`~/node/bin` and `~/.cargo/bin` on PATH). Built on Ubuntu 22.04, the binary needs glibc 2.34 or newer (Debian 12, Ubuntu 22.04,
-Fedora 35 and later).
+gstreamer1.0-plugins-good libasound2-dev` (patchelf and the plugins are for `bundleMediaFramework`, below; libasound2-dev for
+cpal in native voice), `useradd -m -s /bin/bash vokko` and `[user] default=vokko` in `/etc/wsl.conf`; as `vokko`: rustup (stable,
+clippy), Node 22 unpacked to `~/node` (the script puts `~/node/bin` and `~/.cargo/bin` on PATH) and clang 21 in `~/llvm21`:
+
+```sh
+curl -fLo /tmp/llvm.tar.xz https://github.com/llvm/llvm-project/releases/download/llvmorg-21.1.8/LLVM-21.1.8-Linux-X64.tar.xz
+echo 'b3b7f2801d15d50736acea3c73982994d025b01c2f035b91ae3b49d1b575732b  /tmp/llvm.tar.xz' | sha256sum -c
+mkdir -p ~/llvm21 && tar -xJf /tmp/llvm.tar.xz -C ~/llvm21 --strip-components=1 && rm /tmp/llvm.tar.xz
+```
+
+webrtc-sys (the LiveKit SDK behind native voice) refuses GCC and any clang below 21: its prebuilt libwebrtc.a is built against
+Chromium's libc++, whose ABI only a current clang matches. The script checks `~/llvm21/bin/clang` and sets `CC`/`CXX` for its own
+build only; the distro's compilers stay as they are. Built on Ubuntu 22.04, the binary needs glibc 2.35 or newer (Ubuntu 22.04,
+Debian 12, Fedora 36 and later; `hypot@GLIBC_2.35` from libwebrtc) and libasound2, which every desktop has (the .deb depends on it,
+the AppImage leaves it to the system as AppImages do).
 Remove it all with `wsl --unregister vokko-linux` and deleting `E:\WSL`.
 
 The AppImage carries its own GStreamer plugins (`bundle.linux.appimage.bundleMediaFramework` in `tauri.conf.json`, about +12 MB).
@@ -165,16 +176,26 @@ The first update check (30 s after start) logs `failed to check for updates` and
 Run it under `dbus-run-session`: over SSH the user's session bus can hold a stuck `xdg-desktop-portal`, and GTK then waits on
 its D-Bus call for ~25 s before the window appears. Desktop sessions have a working portal, so real users don't see this.
 
-**No voice, video or screen share on Linux.** WebKitGTK builds WebRTC only as an experimental feature (`ENABLE_WEB_RTC`
-defaults to `ENABLE_EXPERIMENTAL_FEATURES` in `OptionsGTK.cmake`, off in release tarballs) and Ubuntu, Debian, Fedora and Arch
-don't turn it on. Checked on WebKitGTK 2.52.6 (Ubuntu 26.04) with `enable-webrtc` and `enable-media-stream` set: `getUserMedia`
-and `getDisplayMedia` exist, `RTCPeerConnection` is undefined. No GStreamer plugin fixes that, so the AppImage and the .deb
-can't join LiveKit (calls, screen share, Watch Together streams). `joinRefusal` (voice/engine.ts) answers
-`webrtc_unsupported` when `RTCPeerConnection` is missing against a real server, and the voice panel says to use the browser;
-the Stremio / Spotify viewer Room (stremio/viewerConnection.ts) goes to `unsupported` instead of retrying and its tile says the
-same. The mock backend (FakeTransport, FakeViewer) still works. Making it work needs our own WebKitGTK built with `-DENABLE_WEB_RTC=ON
--DUSE_GSTREAMER_WEBRTC=ON` bundled in the AppImage (plus gstreamer1.0-plugins-bad and gstreamer1.0-nice), or native LiveKit in
-the Rust backend.
+**Voice on Linux is native.** WebKitGTK builds WebRTC only as an experimental feature (`ENABLE_WEB_RTC` defaults to
+`ENABLE_EXPERIMENTAL_FEATURES` in `OptionsGTK.cmake`, off in release tarballs) and Ubuntu, Debian, Fedora and Arch don't turn it
+on: on WebKitGTK 2.52.6 `getUserMedia` and `getDisplayMedia` exist, `RTCPeerConnection` is undefined. So the Linux app runs the
+call in Rust instead (`src-tauri/src/native_voice`: the LiveKit Rust SDK, cpal's PulseAudio client, which PipeWire serves too, and
+WebRTC's echo canceller / noise suppression / AGC), behind the same `VoiceTransport` as the web (`voice/nativeTransport.ts`, picked
+when `RTCPeerConnection` is missing inside Tauri). Push-to-talk and the voice-activity gate run natively (a port of `voice/vad.ts`);
+RNNoise falls back to WebRTC's noise suppression; the soundboard and entrance sounds play in the page as before. Not yet: cameras,
+screen share and Watch Together streams (no video in the Linux app); a browser without WebRTC still gets `webrtc_unsupported`, and
+the Stremio / Spotify viewer Room goes to `unsupported` instead of retrying.
+
+Check it headless (VPS-style box, no sound card): a PulseAudio with null sinks (`speakers`, a `micfeed` sink remapped as source
+`mic`), `livekit-server --dev`-style config on loopback, a Playwright Chromium peer with a fake microphone, then
+`NATIVE_VOICE_URL=ws://… NATIVE_VOICE_TOKEN=… cargo test -p vokko-desktop live_room -- --ignored --nocapture`
+(`NATIVE_VOICE_SCRIPT="15:mute,25:unmute,30:deaf,35:undeaf"`, `NATIVE_VOICE_SETTINGS` to override voice settings). Record
+`speakers.monitor` and the peer's own output with `parec` and compare RMS: the Web Audio analyser in a headless Chromium sometimes
+reads silence while the audio plays, so measure what Chromium plays (full `chrome --headless`, not the headless shell, which has
+no audio output). Results (0.1.9 + native voice, Ubuntu 26.04 VPS): both directions at -21 to -29 dBFS for a -20 dBFS tone, mute
+and deafen give digital silence, a `kill -9` of livekit-server reconnects (`reconnecting` → `connected`) and audio resumes ~12 s
+after the server is back; about 17 % of one core and 29 MB with all processing on. Owners: try real devices (USB headset, device
+switching, Bluetooth) and a PipeWire-only desktop.
 
 ## Updater
 

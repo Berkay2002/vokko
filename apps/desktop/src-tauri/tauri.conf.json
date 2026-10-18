@@ -18,7 +18,7 @@
   "bundle": {
     "active": false,
     "icon": ["icons/icon.png", "icons/icon.ico", "icons/icon.icns"],
-    "linux": { "appimage": { "bundleMediaFramework": true } },
+    "linux": { "appimage": { "bundleMediaFramework": true }, "deb": { "depends": ["libasound2"] } },
     "macOS": { "entitlements": "Entitlements.plist" }
   },
   "plugins": {
