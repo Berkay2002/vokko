@@ -8,8 +8,8 @@ import { composer, stays } from './helpers';
 type StoreWin = { __vokko: { appStore: { getState(): { channels: Record<string, { id: string; name?: string; guild_id: string | null }> } } } };
 type MockWin = { __vokkoMock: { installEchoBot(): string; executeWebhook(channelId: string, content: string, username?: string): string } };
 
-async function openGeneral(page: Page): Promise<string> {
-  await page.goto('/channels/@me?as=sam&mockLatency=0');
+async function openGeneral(page: Page, as = 'sam'): Promise<string> {
+  await page.goto(`/channels/@me?as=${as}&mockLatency=0`);
   await page.waitForFunction(() => Object.values((window as unknown as StoreWin).__vokko.appStore.getState().channels).some(c => c.name === 'general' && c.guild_id));
   await page.evaluate(() => (window as unknown as MockWin).__vokkoMock.installEchoBot());
   const target = await page.evaluate(() => {
@@ -307,9 +307,38 @@ test("a bot's profile card offers Message but no Add Friend, while a person's st
   await page.locator('.member-row', { hasText: 'Echo' }).first().click();
   await expect(card.getByRole('button', { name: 'Message' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Add Friend' })).toHaveCount(0);
+  await expect(card.locator('.apps-tag')).toHaveText('APP');
+  await expect(card.locator('.profile-app-description')).toContainText('Repeats what you say');
   if (process.env.BOTFRIEND_SHOTS) await page.screenshot({ path: `${process.env.BOTFRIEND_SHOTS}/bot-profile-card-1440.png` });
   await page.keyboard.press('Escape');
   await expect(card).toHaveCount(0);
   await page.locator('.member-row', { hasNotText: /Echo|Sam/ }).first().click();
   await expect(card.getByRole('button', { name: 'Add Friend' })).toBeVisible();
+});
+
+test("a bot's profile card shows the APP tag and description to a member who doesn't own it", async ({ page }) => {
+  await openGeneral(page, 'alice');
+  const card = page.locator('.profile-card');
+  await page.locator('.member-row', { hasText: 'Echo' }).first().click();
+  await expect(card.locator('.profile-name .apps-tag')).toHaveText('APP');
+  await expect(card.locator('.profile-app-description')).toContainText('Repeats what you say');
+  if (process.env.VOKKO_SHOTS_DIR) {
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${process.env.VOKKO_SHOTS_DIR}/gap8-bot-card-1440.png` });
+  }
+  await page.keyboard.press('Escape');
+  await page.locator('.member-row', { hasNotText: /Echo|Alice/ }).first().click();
+  await expect(card.locator('.apps-tag')).toHaveCount(0);
+  await expect(card.locator('.profile-app-description')).toHaveCount(0);
+});
+
+test("a bot's profile card on a phone", async ({ page }) => {
+  await openGeneral(page, 'alice');
+  await page.locator('.member-row', { hasText: 'Echo' }).first().click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.profile-card .profile-app-description')).toContainText('Repeats what you say');
+  if (process.env.VOKKO_SHOTS_DIR) {
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${process.env.VOKKO_SHOTS_DIR}/gap8-bot-card-390.png` });
+  }
 });
