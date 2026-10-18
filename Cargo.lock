@@ -6308,7 +6308,7 @@ dependencies = [
 
 [[package]]
 name = "spotify-bot"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "axum",
  "futures-util",
@@ -6529,7 +6529,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "stremio-bot"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "axum",
  "futures-util",
@@ -7963,7 +7963,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vokko-cli"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "serde_json",
  "vokko-engine",
@@ -7972,7 +7972,7 @@ dependencies = [
 
 [[package]]
 name = "vokko-desktop"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "base64 0.22.1",
  "cpal",
@@ -8008,7 +8008,7 @@ dependencies = [
 
 [[package]]
 name = "vokko-engine"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "serde",
  "serde_json",
@@ -8018,7 +8018,7 @@ dependencies = [
 
 [[package]]
 name = "vokko-loadtest"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "futures-util",
  "rand 0.9.5",
@@ -8032,14 +8032,14 @@ dependencies = [
 
 [[package]]
 name = "vokko-platform"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "log",
 ]
 
 [[package]]
 name = "vokko-protocol"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "serde",
  "serde_json",
@@ -8047,7 +8047,7 @@ dependencies = [
 
 [[package]]
 name = "vokko-server"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "argon2",
  "axum",
@@ -9040,7 +9040,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "xtask"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "serde_json",
 ]
