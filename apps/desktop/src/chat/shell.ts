@@ -28,6 +28,8 @@ export function cacheUser(user: User): void { appStore.getState().cacheUsers([us
 
 /** The signed-in user's id (null before the session is ready and after sign-out), and a listener for it changing. */
 export function currentUserId(): string | null { return appStore.getState().me?.id ?? null; }
+/** Runs `cb` when the session token is dropped (sign-out, or a rejected token), even if `me` never became known. */
+export function onSessionEnd(cb: () => void): void { appStore.subscribe((s, prev) => { if (prev.token && !s.token) cb(); }); }
 export function onUserChange(cb: (id: string | null) => void): void { appStore.subscribe((s, prev) => { if (s.me?.id !== prev.me?.id) cb(s.me?.id ?? null); }); }
 
 export function useMe(): User | null { return useStore(s => s.me); }

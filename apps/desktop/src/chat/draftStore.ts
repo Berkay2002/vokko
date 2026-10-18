@@ -2,7 +2,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import type { Attachment, Snowflake } from '../api/types';
 import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, maxUploadBytes } from '../api/limits';
-import { currentUserId, onUserChange, uploadAttachment } from './shell';
+import { currentUserId, onSessionEnd, onUserChange, uploadAttachment } from './shell';
 import { uploadErrorMessage } from './util';
 import type { MentionToken } from './mentionText';
 
@@ -93,6 +93,16 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
 const listeners = new Map<Snowflake, Set<() => void>>();
 let seq = 0;
 onUserChange(switchOwner);
+// A rejected token on a fresh page load never reveals who was signed in: drop every account's saved drafts.
+onSessionEnd(() => {
+  switchOwner(null);
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k?.startsWith(draftsKey(''))) localStorage.removeItem(k);
+    }
+  } catch { /* blocked storage */ }
+});
 switchOwner(currentUserId());
 
 function emit(channelId: Snowflake): void { listeners.get(channelId)?.forEach(l => l()); }

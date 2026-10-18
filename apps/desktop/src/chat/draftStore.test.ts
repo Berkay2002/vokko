@@ -30,7 +30,10 @@ describe('draft persistence', () => {
   let data: Map<string, string>;
   beforeEach(() => {
     data = new Map<string, string>();
-    vi.stubGlobal('localStorage', { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k) });
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k),
+      get length() { return data.size; }, key: (i: number) => [...data.keys()][i] ?? null,
+    });
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -90,6 +93,14 @@ describe('draft persistence', () => {
     a.appStore.setState({ me: null });
     expect(a.getDraft('c2').text).toBe('');
     expect(data.has(a.draftsKey('u2'))).toBe(false);
+  });
+
+  it('a token dropped before the user was known still wipes the saved drafts', async () => {
+    const a = await fresh(null);
+    data.set(a.draftsKey('u1'), JSON.stringify([['c1', 'old', []]]));
+    a.appStore.setState({ token: 't' });
+    a.appStore.setState({ token: null });
+    expect([...data.keys()].filter(k => k.startsWith('vokko.drafts.'))).toEqual([]);
   });
 
   it("another tab's pagehide flush cannot write one account's drafts into the other's key", async () => {
