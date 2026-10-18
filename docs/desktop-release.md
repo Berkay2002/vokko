@@ -148,7 +148,8 @@ webrtc-sys (the LiveKit SDK behind native voice) refuses GCC and any clang below
 Chromium's libc++, whose ABI only a current clang matches. The script checks `~/llvm21/bin/clang` and sets `CC`/`CXX` for its own
 build only; the distro's compilers stay as they are. Built on Ubuntu 22.04, the binary needs glibc 2.35 or newer (Ubuntu 22.04,
 Debian 12, Fedora 36 and later; `hypot@GLIBC_2.35` from libwebrtc) and libasound2, which every desktop has (the .deb depends on it,
-the AppImage leaves it to the system as AppImages do).
+the AppImage leaves it to the system as AppImages do). Native voice costs (0.1.9): binary 22.7 → 55.2 MB, AppImage 100.6 →
+111.2 MB, clean `cargo build --release -p vokko-desktop` 131 → 196 s (8 jobs, an 8-core desktop CPU).
 Remove it all with `wsl --unregister vokko-linux` and deleting `E:\WSL`.
 
 The AppImage carries its own GStreamer plugins (`bundle.linux.appimage.bundleMediaFramework` in `tauri.conf.json`, about +12 MB).
