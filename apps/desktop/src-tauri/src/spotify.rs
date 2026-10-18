@@ -1,6 +1,6 @@
 //! What a Spotify app on this computer is playing, for the "Listening to Spotify" status. No Spotify login and no Web API (its
 //! development mode allows a handful of hand-added users): macOS asks Spotify.app through AppleScript and Spotifast through its
-//! control socket, Windows reads Spotify's system media session and Linux the MPRIS players of Spotify and the known third-party
+//! control socket, Windows reads Spotify's system media session and Spotifast's control channel, and Linux the MPRIS players of Spotify and the known third-party
 //! Spotify clients ([`CLIENTS`]). Everything is local; nothing here touches the network. Other platforms report nothing.
 //!
 //! Only music from Spotify's catalog is reported: never a podcast episode or a local file, whose title would otherwise be shown
@@ -14,9 +14,9 @@ pub struct NowPlaying {
     pub title: String,
     pub artists: Vec<String>,
     pub album: String,
-    /// `spotify:track:<id>` reduced to the 22-character id (macOS and Linux).
+    /// `spotify:track:<id>` reduced to the 22-character id (macOS, Linux and Spotifast on Windows).
     pub track_id: Option<String>,
-    /// Spotify's 40-hex image id taken from the artwork URL (macOS and Linux).
+    /// Spotify's 40-hex image id taken from the artwork URL (macOS, Linux and Spotifast on Windows).
     pub image_id: Option<String>,
     pub position_ms: i64,
     pub duration_ms: i64,
@@ -69,7 +69,6 @@ fn read() -> Option<NowPlaying> {
 /// private temporary directory, one `spotifast:nowplaying` line out and one line back.
 #[cfg(target_os = "macos")]
 fn read_spotifast() -> Option<NowPlaying> {
-    use std::io::{BufRead, BufReader, Read, Write};
     use std::os::unix::fs::MetadataExt;
     let dir = std::env::temp_dir().join("spotifast");
     // Only a directory of this user's own that nobody else can enter: with TMPDIR at /tmp another user could plant the socket.
@@ -79,23 +78,66 @@ fn read_spotifast() -> Option<NowPlaying> {
     if !owned.is_dir() || owned.uid() != me || owned.mode() & 0o777 != 0o700 {
         return None;
     }
-    let mut stream = std::os::unix::net::UnixStream::connect(dir.join("instance.sock")).ok()?;
+    let stream = std::os::unix::net::UnixStream::connect(dir.join("instance.sock")).ok()?;
     stream.set_read_timeout(Some(TIMEOUT)).ok()?;
     stream.set_write_timeout(Some(TIMEOUT)).ok()?;
-    stream.write_all(b"spotifast:nowplaying\n").ok()?;
+    ask_spotifast(stream, "")
+}
+
+/// What Spotifast plays on Windows, through the same channel as on macOS: a loopback port that answers only requests starting
+/// with the random token Spotifast writes, with the port, to `instance.key` in its own directory under this user's local app data.
+#[cfg(windows)]
+fn read_spotifast() -> Option<NowPlaying> {
+    use std::io::Read;
+    use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+    // Spotifast's state directory (`directories` for "me.paolino.spotifast"), in this user's profile and so theirs alone. A link
+    // or junction on the way could point at a key file somebody else wrote, so the directory and the file must be real ones.
+    let dir = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join(r"paolino\spotifast\data\instance");
+    let real = |path: &std::path::Path, dir: bool| std::fs::symlink_metadata(path).is_ok_and(|meta| !meta.is_symlink() && meta.is_dir() == dir);
+    let key_file = dir.join("instance.key");
+    if !real(&dir, true) || !real(&key_file, false) {
+        return None;
+    }
+    let mut key = String::new();
+    std::fs::File::open(&key_file).ok()?.take(256).read_to_string(&mut key).ok()?;
+    let (port, token) = parse_spotifast_key(&key)?;
+    let stream = TcpStream::connect_timeout(&SocketAddr::from((Ipv4Addr::LOCALHOST, port)), TIMEOUT).ok()?;
+    stream.set_read_timeout(Some(TIMEOUT)).ok()?;
+    stream.set_write_timeout(Some(TIMEOUT)).ok()?;
+    ask_spotifast(stream, &format!("{token}\n"))
+}
+
+#[cfg(windows)]
+const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Spotifast's `instance.key`: the port on one line, then the token (64 hex digits). Anything else is not Spotifast's.
+#[cfg(any(windows, test))]
+fn parse_spotifast_key(text: &str) -> Option<(u16, &str)> {
+    let mut lines = text.lines();
+    let port: u16 = lines.next()?.trim().parse().ok().filter(|&port| port != 0)?;
+    let token = lines.next()?.trim();
+    (token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit())).then_some((port, token))
+}
+
+/// Sends `spotifast:nowplaying` (after the token line Windows needs) and reads one reply line of at most 4 KiB.
+#[cfg(any(target_os = "macos", windows))]
+fn ask_spotifast(mut stream: impl std::io::Read + std::io::Write, token: &str) -> Option<NowPlaying> {
+    use std::io::{BufRead, BufReader};
+    stream.write_all(format!("{token}spotifast:nowplaying\n").as_bytes()).ok()?;
     let mut reply = String::new();
     BufReader::new(stream.take(4096)).read_line(&mut reply).ok()?;
     parse_spotifast(&reply)
 }
 
 /// Spotifast's reply: `spotifast:now ` and tab-separated state, title, artists (joined with ", "), album, position ms,
-/// duration ms, volume, shuffle, repeat, art URL, saved, device and kind (`track` or `episode`); or `spotifast:now stopped`.
-/// Without the kind (Spotifast does not send it yet) nothing is reported, since an episode's "artists" is its show. There is no
-/// track id, so the client looks the track up in the catalog, by the first of the joined artists.
-#[cfg(any(target_os = "macos", test))]
+/// duration ms, volume, shuffle, repeat, art URL, saved, device, kind (`track`, `episode`, `local` or `other`) and URI; or
+/// `spotifast:now stopped`. Only a `track` is reported: without the kind (a Spotifast from before it sent one) nothing is, since
+/// an episode's "artists" is its show. The track id comes from the URI; a reply without one leaves the client to look the track
+/// up in the catalog, by the first of the joined artists.
+#[cfg(any(target_os = "macos", windows, test))]
 fn parse_spotifast(reply: &str) -> Option<NowPlaying> {
     let fields: Vec<&str> = reply.lines().next()?.strip_prefix("spotifast:now ")?.split('\t').collect();
-    let [state, title, artists, album, position, duration, _, _, _, art, _, _, kind, ..] = fields[..] else {
+    let [state, title, artists, album, position, duration, _, _, _, art, _, _, kind, ref rest @ ..] = fields[..] else {
         return None;
     };
     if state != "playing" || kind != "track" || title.is_empty() {
@@ -103,16 +145,17 @@ fn parse_spotifast(reply: &str) -> Option<NowPlaying> {
     }
     let duration_ms: i64 = duration.parse().ok()?;
     let position_ms: i64 = position.parse().ok()?;
+    let track_id = rest.first().and_then(|uri| spotify_track_id(uri));
     Some(NowPlaying {
         title: title.to_owned(),
         artists: if artists.is_empty() { Vec::new() } else { vec![artists.to_owned()] },
         album: album.to_owned(),
-        track_id: None,
+        track_id: track_id.map(str::to_owned),
         image_id: spotify_image_id(art).map(str::to_owned),
         position_ms: if duration_ms > 0 { position_ms.min(duration_ms) } else { position_ms },
         duration_ms,
         // "Tyler, The Creator" is then looked up as "Tyler" and missed; a multi-artist track is found
-        lookup_artist: artists.split_once(", ").map(|(first, _)| first.to_owned()),
+        lookup_artist: if track_id.is_some() { None } else { artists.split_once(", ").map(|(first, _)| first.to_owned()) },
     })
 }
 
@@ -157,8 +200,14 @@ fn run(command: &mut std::process::Command, timeout: std::time::Duration) -> Opt
     child.wait_with_output().ok()
 }
 
+/// Spotify's media session, else Spotifast through its control channel (its media session cannot tell a podcast from a song).
 #[cfg(windows)]
 fn read() -> Option<NowPlaying> {
+    read_media_session().or_else(read_spotifast)
+}
+
+#[cfg(windows)]
+fn read_media_session() -> Option<NowPlaying> {
     use windows::Media::Control::{
         GlobalSystemMediaTransportControlsSession as Session, GlobalSystemMediaTransportControlsSessionManager as Manager,
         GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
@@ -389,7 +438,7 @@ fn parse_mpris(track: Mpris) -> Option<NowPlaying> {
 
 /// The 22-character track id in `spotify:track:<id>` or an address or object path ending in `/track/<id>` (a `?si=` query is
 /// dropped).
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux", test))]
 fn spotify_track_id(text: &str) -> Option<&str> {
     let id = match text.strip_prefix("spotify:track:") {
         Some(id) => id,
@@ -399,7 +448,7 @@ fn spotify_track_id(text: &str) -> Option<&str> {
 }
 
 /// Spotify's 40-hex image id in an artwork address on i.scdn.co (or open.spotify.com/image, which older Linux clients send).
-#[cfg(any(target_os = "macos", target_os = "linux", test))]
+#[cfg(any(target_os = "macos", windows, target_os = "linux", test))]
 fn spotify_image_id(url: &str) -> Option<&str> {
     let id = url.strip_prefix("https://i.scdn.co/image/").or_else(|| url.strip_prefix("https://open.spotify.com/image/"))?;
     (id.len() == 40 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))).then_some(id)
@@ -498,14 +547,23 @@ mod tests {
             lookup_artist: None,
         };
         assert_eq!(parse_spotifast(&reply), Some(expected));
-        // several artists: looked up by the first
+        // a 13-field reply (kind, no URI): several artists are looked up by the first
         let duo = parse_spotifast("spotifast:now playing\tS\tA, B\t\t1\t2\t80\toff\toff\t\tno\tDesk\ttrack").expect("track");
         assert_eq!((duo.artists, duo.lookup_artist, duo.image_id), (vec!["A, B".to_owned()], Some("A".to_owned()), None));
+        // Spotifast's 14 fields: the URI gives the track id, so no catalog lookup by artist is needed
+        let full =
+            parse_spotifast("spotifast:now playing\tS\tA, B\t\t1\t2\t80\toff\toff\t\tno\tDesk\ttrack\tspotify:track:3USxtqRwSYz57Ewm6wWRMp\n").expect("track");
+        assert_eq!((full.track_id.as_deref(), full.lookup_artist), (Some("3USxtqRwSYz57Ewm6wWRMp"), None));
+        let bad_uri = parse_spotifast("spotifast:now playing\tS\tA, B\t\t1\t2\t80\toff\toff\t\tno\tDesk\ttrack\tspotify:track:short").expect("track");
+        assert_eq!((bad_uri.track_id, bad_uri.lookup_artist.as_deref()), (None, Some("A")));
         for reply in [
-            // today's twelve-field reply has no kind, so a podcast episode cannot be told apart
+            // a reply from before Spotifast sent the kind (twelve or nine fields): a podcast episode cannot be told apart
             "spotifast:now playing\tS\tA\t\t1\t2\t80\toff\toff\t\tno\tDesk",
             "spotifast:now playing\tS\tA\t\t1\t2\t80\toff\toff",
             "spotifast:now playing\tEp\tShow\t\t1\t2\t80\toff\toff\t\tno\tDesk\tepisode",
+            "spotifast:now playing\tEp\tShow\t\t1\t2\t80\toff\toff\t\tno\tDesk\tepisode\tspotify:episode:4uLU6hMCjMI75M1A2tKUQC",
+            "spotifast:now playing\tMine\tMe\t\t1\t2\t80\toff\toff\t\tno\tDesk\tlocal\tspotify:local:Me:Album:Mine:180",
+            "spotifast:now playing\tX\tY\t\t1\t2\t80\toff\toff\t\tno\tDesk\tother\tspotify:ad:1",
             "spotifast:now paused\tS\tA\t\t1\t2\t80\toff\toff\t\tno\tDesk\ttrack",
             "spotifast:now stopped",
             "spotifast!declined",
@@ -513,6 +571,16 @@ mod tests {
             "",
         ] {
             assert_eq!(parse_spotifast(reply), None, "{reply}");
+        }
+    }
+
+    #[test]
+    fn reads_spotifasts_key_file() {
+        let token = "0123456789abcdef".repeat(4);
+        assert_eq!(parse_spotifast_key(&format!("51234\n{token}\n")), Some((51234, token.as_str())));
+        assert_eq!(parse_spotifast_key(&format!("51234\r\n{token}\r\n")), Some((51234, token.as_str())));
+        for text in [String::new(), format!("0\n{token}\n"), format!("70000\n{token}\n"), "51234\n".into(), "51234\nshort\n".into(), format!("x\n{token}")] {
+            assert_eq!(parse_spotifast_key(&text), None, "{text}");
         }
     }
 
