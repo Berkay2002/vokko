@@ -2,6 +2,9 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { gateway, type GatewayStatus } from "./gateway";
 
+/** The connection banner waits this long before appearing, and others' presences stay shown, so a quick resume never flashes either. */
+export const BANNER_GRACE_MS = 1500;
+
 export interface ConnectionState {
   status: GatewayStatus;
   /** Failed attempts since the last good connection (0 while first connecting or connected). */

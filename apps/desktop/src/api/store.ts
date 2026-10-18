@@ -5,6 +5,7 @@
 import { useRef, useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { shallow } from "zustand/shallow";
+import { BANNER_GRACE_MS } from "./connection";
 import { gateway, type GatewayStatus } from "./gateway";
 import { setMaxUploadBytes } from "./limits";
 import { go, guildPath } from "../shell/nav";
@@ -343,16 +344,25 @@ async function refreshPrivateChannels(): Promise<void> {
 }
 
 // Others' presence is unknown while the gateway is down: shown as offline until RESUMED brings the kept map back
-// (under anything replayed) or READY replaces it. The user's own presence stays.
+// (under anything replayed) or READY replaces it. Like the banner, this waits BANNER_GRACE_MS, so a blip that resumes
+// inside it changes nothing. The user's own presence stays.
 let hiddenPresences: Record<Snowflake, Presence> = {};
+let hideTimer: ReturnType<typeof setTimeout> | undefined;
 export function applyConnection(connection: GatewayStatus): void {
-  const { presences, me, connection: previous } = appStore.getState();
+  const previous = appStore.getState().connection;
   if (previous === "ready" && connection !== "ready") {
-    hiddenPresences = presences;
-    const own = me ? presences[me.id] : undefined;
-    appStore.setState({ connection, presences: own ? { [own.user_id]: own } : {} });
+    hideTimer = setTimeout(() => {
+      hideTimer = undefined;
+      const { presences, me } = appStore.getState();
+      hiddenPresences = presences;
+      const own = me ? presences[me.id] : undefined;
+      appStore.setState({ presences: own ? { [own.user_id]: own } : {} });
+    }, BANNER_GRACE_MS);
+    appStore.setState({ connection });
   } else if (previous !== "ready" && connection === "ready") {
-    appStore.setState({ connection, presences: { ...hiddenPresences, ...presences } });
+    clearTimeout(hideTimer);
+    hideTimer = undefined;
+    appStore.setState({ connection, presences: { ...hiddenPresences, ...appStore.getState().presences } });
     hiddenPresences = {};
   } else appStore.setState({ connection });
 }

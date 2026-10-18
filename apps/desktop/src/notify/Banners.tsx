@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { BellRing, Check, Download, Wrench, WifiOff, X } from "lucide-react";
-import { useConnectionState, useCountdown, type ConnectionState } from "../api/connection";
+import { BANNER_GRACE_MS, useConnectionState, useCountdown, type ConnectionState } from "../api/connection";
 import { gateway } from "../api/gateway";
 import { useStore } from "../api/store";
 import { restartToUpdate, useDesktopUpdate } from "../desktop";
@@ -10,8 +10,6 @@ import { notificationAdapter, type PermissionState } from "./desktop";
 import { startMaintenanceWatch, useMaintenance, type MaintenanceNotice } from "./maintenance";
 import "./notify.css";
 
-/** The connection banner waits this long before appearing, so a quick resume never flashes it. */
-export const BANNER_GRACE_MS = 1500;
 /** How long the green "Connected" strip stays after a banner that was shown ends. */
 export const CONNECTED_FLASH_MS = 2500;
 const DISMISSED_KEY = "vokko.notify.promptDismissed";
