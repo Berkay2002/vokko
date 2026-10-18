@@ -382,7 +382,7 @@ pub fn ffmpeg_args(p: &FfmpegPlan<'_>) -> Vec<String> {
     }
     a.extend(["-i".to_owned(), p.media_url.to_owned()]);
     let tonemap = if p.hdr { format!("{TONEMAP},") } else { String::new() };
-    let shape = format!("{tonemap}scale={}:{}:flags=bicubic,fps={},format=yuv420p", p.geo.width, p.geo.height, p.geo.fps_arg);
+    let shape = format!("{tonemap}scale={}:{}:flags=bicubic,fps={}:start_time=0,format=yuv420p", p.geo.width, p.geo.height, p.geo.fps_arg);
     // The overlay's output is 8-bit unless told otherwise; an HDR source is tonemapped after it and would lose two bits first.
     let overlay = if p.hdr { "format=yuv420p10:" } else { "" };
     match p.choice.burned {
@@ -400,7 +400,7 @@ pub fn ffmpeg_args(p: &FfmpegPlan<'_>) -> Vec<String> {
     if p.has_audio {
         let audio = p.choice.audio.map_or_else(|| "0:a:0".to_owned(), |index| format!("0:{index}"));
         a.extend(["-map".to_owned(), audio]);
-        a.extend(strings(&["-ac", "2", "-ar", "48000", "-f", "s16le"]));
+        a.extend(strings(&["-af", "aresample=async=1:first_pts=0", "-ac", "2", "-ar", "48000", "-f", "s16le"]));
         a.push(format!("tcp://127.0.0.1:{}", p.audio_port));
     }
     for (index, port) in p.text_subs {
@@ -672,7 +672,7 @@ mod tests {
         assert!(at("-re") < at("-ss") && at("-ss") < at("-i"), "-re and -ss are input options");
         assert_eq!(a[at("-i") + 1], "https://cdn.example/v.mp4");
         assert!(!a.contains(&"-headers".to_owned()), "the headers go to the downloader, not to ffmpeg");
-        assert_eq!(a[at("-vf") + 1], "scale=1280:720:flags=bicubic,fps=24/1,format=yuv420p");
+        assert_eq!(a[at("-vf") + 1], "scale=1280:720:flags=bicubic,fps=24/1:start_time=0,format=yuv420p");
         assert!(a.contains(&"tcp://127.0.0.1:5001".to_owned()) && a.contains(&"tcp://127.0.0.1:5002".to_owned()));
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "0:a:0"), "no choice: the first audio stream");
         assert!(!a.contains(&"-filter_complex".to_owned()) && !a.contains(&"-canvas_size".to_owned()) && !a.contains(&"webvtt".to_owned()));
@@ -687,7 +687,7 @@ mod tests {
         assert!(at("-canvas_size") < at("-i"), "an input option");
         assert_eq!(
             a[at("-filter_complex") + 1],
-            "[0:v:0][0:5]overlay=eof_action=pass[burned];[burned]scale=1280:720:flags=bicubic,fps=24/1,format=yuv420p[vout]"
+            "[0:v:0][0:5]overlay=eof_action=pass[burned];[burned]scale=1280:720:flags=bicubic,fps=24/1:start_time=0,format=yuv420p[vout]"
         );
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "[vout]") && !a.contains(&"-vf".to_owned()) && !a.contains(&"0:v:0".to_owned()));
         for (index, port) in [(4, 6001), (7, 6002)] {
