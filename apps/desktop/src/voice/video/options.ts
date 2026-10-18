@@ -2,6 +2,7 @@
 // Pure data in, plain objects out, so the mapping is unit-tested without livekit-client or a browser; the transport turns
 // the plain simulcast layers into VideoPreset instances.
 
+import { isDesktop } from "../../desktop/tauri";
 import { profileOf } from "./h264";
 
 export type ScreenResolution = "720p" | "1080p" | "1440p" | "source";
@@ -81,7 +82,10 @@ export interface CodecSupport {
   h264?: boolean;
   vp8?: boolean;
   /** Codecs the system reports it can encode in hardware (MediaCapabilities `powerEfficient`), once probed. */
-  hardware?: Partial<Record<VideoCodecName, boolean>>;
+  hardware?: Partial<Record<VideoCodecName, boolean>> & {
+    /** Screen shares lead with these at every size (screenCodecOrder): the Windows app, where it was measured. */
+    screens?: boolean;
+  };
   /** VP9 / AV1 can be sent as rid simulcast (Chromium 113+). False on WebKit, where LiveKit would fall back to one layer. */
   svcSimulcast?: boolean;
 }
@@ -108,6 +112,7 @@ export function codecOrder(resolution: ScreenResolution | CameraResolution, hard
  */
 export function screenCodecOrder(resolution: ScreenResolution, hardware?: CodecSupport["hardware"]): VideoCodecName[] {
   const order = codecOrder(resolution, hardware);
+  if (!hardware?.screens) return order;
   const accelerated = order.filter(codec => hardware?.[codec]);
   return [...accelerated, ...order.filter(codec => !accelerated.includes(codec))];
 }
@@ -117,10 +122,11 @@ export function pickCodec(order: readonly VideoCodecName[], support: CodecSuppor
   return order.find(codec => support[codec]) ?? "vp8";
 }
 
+/** VP8 behind everything else (an H.264 share too: not every viewer decodes H.264); H.264 behind VP9 / AV1 without VP8. */
 function backupFor(codec: VideoCodecName, support: CodecSupport): "vp8" | "h264" | false {
-  if (codec === "vp8" || codec === "h264") return false;
+  if (codec === "vp8") return false;
   if (support.vp8 !== false) return "vp8";
-  return support.h264 ? "h264" : false;
+  return codec !== "h264" && support.h264 ? "h264" : false;
 }
 
 /** Codecs the browser can send, from RTCRtpSender.getCapabilities("video") mime types. */
@@ -141,8 +147,10 @@ export function h264ProfileLevelIds(fmtpLines: readonly (string | undefined)[]):
 }
 
 /**
- * Asks MediaCapabilities which codecs the system encodes in hardware at 1080p60 (the size hardware H.264 encoders
- * promise; most stop at 30 fps above it). H.264 is asked per profile: Chromium on Windows encodes High, Main and Baseline
+ * Asks MediaCapabilities which codecs the system encodes in hardware: AV1 / VP9 / VP8 at 1440p60, H.264 at 1080p60 (the
+ * size hardware H.264 encoders promise; most stop at 30 fps above it). In the Windows app (the one measured, docs/perf.md
+ * "Game screen share") H.264 is asked per profile, and screen shares lead with hardware codecs at every size;
+ * elsewhere H.264 is one bare query at 1440p60, as before. Per profile: Chromium on Windows encodes High, Main and Baseline
  * on the GPU but Constrained Baseline in software, and a bare "video/H264" answers for the latter. The hardware H.264
  * profiles land in `hardwareH264Profiles()` (see h264.ts).
  * Fire and forget: the answer lands in `detectCodecSupport().hardware` a few milliseconds later, long before anyone
@@ -152,26 +160,34 @@ export function probeHardwareEncoders(): Promise<void> {
   hardwareProbe ??= (async () => {
     const mediaCapabilities = typeof navigator === "undefined" ? undefined : navigator.mediaCapabilities;
     if (!mediaCapabilities?.encodingInfo) return;
-    const efficient = async (contentType: string) => {
+    const windows = windowsApp();
+    const efficient = async (contentType: string, big = true) => {
+      const size = big ? { width: 2560, height: 1440, bitrate: 10_000_000 } : { width: 1920, height: 1080, bitrate: 6_000_000 };
       try {
-        const info = await mediaCapabilities.encodingInfo({ type: "webrtc", video: { contentType, width: 1920, height: 1080, framerate: 60, bitrate: 6_000_000 } });
+        const info = await mediaCapabilities.encodingInfo({ type: "webrtc", video: { contentType, ...size, framerate: 60 } });
         return info.supported && info.powerEfficient;
       } catch {
         return false;
       }
     };
     const caps = typeof RTCRtpSender !== "undefined" ? RTCRtpSender.getCapabilities?.("video")?.codecs : undefined;
-    const h264 = h264ProfileLevelIds((caps ?? []).filter(c => c.mimeType.toLowerCase() === "video/h264").map(c => c.sdpFmtpLine));
-    const [av1, vp9, vp8, ...h264Hardware] = await Promise.all([
+    const h264 = !windows ? [] : h264ProfileLevelIds((caps ?? []).filter(c => c.mimeType.toLowerCase() === "video/h264").map(c => c.sdpFmtpLine));
+    const [av1, vp9, vp8, bareH264, ...h264Hardware] = await Promise.all([
       efficient("video/AV1"),
       efficient("video/VP9"),
       efficient("video/VP8"),
-      ...h264.map(id => efficient(`video/H264;profile-level-id=${id};packetization-mode=1`)),
+      windows ? Promise.resolve(false) : efficient("video/H264"),
+      ...h264.map(id => efficient(`video/H264;profile-level-id=${id};packetization-mode=1`, false)),
     ]);
     hardwareH264 = [...new Set(h264.filter((_, i) => h264Hardware[i]).map(profileOf))];
-    hardwareEncoders = { av1, vp9, vp8, h264: hardwareH264.length > 0 };
+    hardwareEncoders = { av1, vp9, vp8, h264: bareH264 || hardwareH264.length > 0, screens: windows };
   })();
   return hardwareProbe;
+}
+
+/** The Windows desktop app (WebView2). */
+export function windowsApp(userAgent = typeof navigator === "undefined" ? "" : navigator.userAgent): boolean {
+  return isDesktop() && userAgent.includes("Windows");
 }
 
 /** The H.264 profiles (profile_idc + iop, e.g. "6400") the system encodes in hardware; empty until probed. */

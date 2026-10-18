@@ -51,6 +51,9 @@ async function rtpStats(pc: RTCRtpSender | RTCRtpReceiver | undefined, kind: "ou
 }
 
 async function publish() {
+  // In Chrome (--pub chrome) take the Windows app's codec choices too (windowsApp()); the WebView2 host already sets it.
+  const g = globalThis as { isTauri?: boolean };
+  if (!g.isTauri) g.isTauri = true;
   await probeHardwareEncoders();
   if (q.get("munge") !== "0") installHardwareH264Preference(hardwareH264Profiles);
   const support = detectCodecSupport();

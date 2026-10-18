@@ -239,11 +239,20 @@ Windows Chromium encodes Constrained Baseline with OpenH264 on the CPU (its Medi
 `PlatformH264CbpEncoding` feature, and `--enable-features` does not reach it in WebView2). Baseline 42001f, Main and High go to the
 GPU (NVIDIA H.264 Encoder MFT).
 
-The fix (client only, no server or browser-arg change): `probeHardwareEncoders` asks MediaCapabilities per H.264 profile-level-id at
-1080p60, `screenCodecOrder` puts hardware codecs first at every size, and `h264.ts` reorders the H.264 payload types of our offers so the
-hardware profiles come first (High, then Main). LiveKit then negotiates 64001f and the sender runs one NVENC session per simulcast layer.
-Viewers decode it as usual (their subscriber leg reports 42e01f; any H.264 decoder plays High). Other findings: VP9 and AV1 have no
-hardware encoder on the 3090 in WebView2 155 (libvpx / libaom), there is no H265 encoder, and hardware H.264 needs even frame sizes.
+The fix (client only, no server or browser-arg change), in the Windows app only (`windowsApp()`; macOS and the web build keep main's
+plan): `probeHardwareEncoders` asks MediaCapabilities per H.264 profile-level-id at 1080p60 (AV1 / VP9 / VP8 at 1440p60, as before),
+`screenCodecOrder` puts hardware codecs first at every size, and `h264.ts` reorders the H.264 payload types of our offers so the hardware
+profiles come first (High, then Main). LiveKit then negotiates 64001f and the sender runs one NVENC session per simulcast layer. An
+H.264 share carries a VP8 backup, encoded only while a viewer without H.264 is subscribed.
+
+Viewers: the subscriber leg is negotiated as 42e01f while the bits are High (CABAC); decoders don't care. Checked on the VPS with an x264
+High stream swapped into a Chromium publisher's encoded frames: the native Linux viewer decodes it (libwebrtc's H.264 decoder is FFmpeg),
+OpenH264 2.7's decoder (Firefox's plugin) decodes all 120 frames bit-exact with FFmpeg, and a headless Firefox without the plugin
+negotiates no H.264 and gets the VP8 backup (1280x720, every frame decoded). Safari / WebKit decode through VideoToolbox. Other findings:
+VP9 and AV1 have no hardware encoder on the 3090 in WebView2 155 (libvpx / libaom; the 1440p60 probe says so too), there is no H265
+encoder, and hardware H.264 needs even frame sizes: odd window sizes fall back to OpenH264 inside Chromium (seen here), the old CPU cost
+rather than a black tile; an encoder that fails to open (NVENC sessions all taken, 8 on current GeForce drivers) takes the same
+software fallback in Chromium's RTCVideoEncoder (not tested).
 
 | desktop GPU / desktop CPU, loaded PC (other builds running); window capture | before: VP9 x3 libvpx | after: H.264 High x3 NVENC |
 |---|---|---|
@@ -262,5 +271,7 @@ viewers saw 268p. After, viewers get the full resolution at the capture rate for
 scaling, not encoding. An earlier probe at 1080p60 where VP9 did send all layers cost ~137% of a core at ~42 fps (H.264 single-layer
 OpenH264: ~46%). The game loses ~3 fps and ~4 ms at p95 in both, so the share itself was not what made games stutter here; the CPU cost
 was. Open: the capture (WGC) delivers only ~30-35 fps of a 60 fps request while the game runs at ~77 fps on a fully busy GPU, which
-caps every codec; 720p30 after sends its top layer at 10 fps although capture runs at 28 (not explained yet). The audio sync check
-(`--sync`, whole screen + system audio) was not run: an entire-screen capture crashed the publisher's renderer earlier in testing.
+caps every codec; 720p30 after sends its top layer at 10 fps although capture runs at 28 (not explained yet). Whole screen (`--sync`,
+`--capture "Screen 1"`): H.264 NVENC at 26 fps, game 64 → 59 fps; the earlier "crash" was `--auto-select-desktop-capture-source="Entire
+screen"` matching no source on a two-monitor PC (they are "Screen 1" / "Screen 2"), so getDisplayMedia never returned. The audio sync
+offset is still unmeasured: with auto-select, WebView2 grants no system audio track.

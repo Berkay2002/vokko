@@ -24,6 +24,7 @@ const arg = (name, fallback) => {
   return i > 0 ? process.argv[i + 1] : fallback;
 };
 const flag = name => process.argv.includes(`--${name}`);
+const step = what => console.error(`[bench ${new Date().toISOString().slice(11, 19)}] ${what}`);
 const lk = arg('lk', 'livekit-server');
 const exe = path.resolve(arg('exe', '../../target/release/vokko-desktop.exe'));
 const runs = arg('runs', '720p30,1080p60,1440p60').split(',');
@@ -118,7 +119,7 @@ const frameStats = async () => {
 };
 
 // The publisher: a WebView2 host on its own user data folder, driven over CDP.
-const capture = sync ? 'Entire screen' : 'VokkoLoad';
+const capture = arg('capture', sync ? 'Screen 1' : 'VokkoLoad');
 // --pub chrome: the same page in desktop Chrome instead, for comparison.
 const host = arg('pub', '') === 'chrome'
   ? start(arg('chrome', 'C:/Program Files/Google/Chrome/Application/chrome.exe'), [`--user-data-dir=${path.join(work, 'chrome')}`, `--remote-debugging-port=${P + 4}`, `--auto-select-desktop-capture-source=${capture}`, '--no-first-run', ...arg('wvargs', '').split(' ').filter(Boolean), 'about:blank'])
@@ -131,6 +132,7 @@ const host = arg('pub', '') === 'chrome'
     VOKKO_MULTI_INSTANCE: '1',
   },
 });
+step('game up, starting the publisher');
 const { browser: wv, page: pubPage } = await connect(P + 4);
 
 const viewer = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
@@ -150,15 +152,18 @@ for (const run of runs) {
   if (codec) q.set('codec', codec);
   if (arg('munge', '')) q.set('munge', arg('munge', ''));
   if (simulcast) q.set('simulcast', simulcast);
+  step(`${run}: publishing`);
   await pubPage.goto(`${base}/share.html?${q}`);
   const pubInfo = await pubPage.evaluate(async () => {
     const b = await window.__bench;
     return b.error ? b : b.info;
   });
   if (pubInfo.error) throw new Error(`publisher: ${pubInfo.error}`);
+  step(`${run}: published (${pubInfo.plan?.codec}), starting the viewer`);
   const viewPage = await viewer.newPage();
   await viewPage.goto(`${base}/share.html?${new URLSearchParams({ role: 'view', url: `ws://127.0.0.1:${P + 1}`, token: token(`view-${run}`) })}`);
   await viewPage.evaluate(async () => (await window.__bench).info);
+  step(`${run}: viewer up, measuring`);
   await sleep(Number(arg("warm", "12")) * 1000);
   await pubPage.evaluate(async () => (await window.__bench).take());
   await viewPage.evaluate(async () => (await window.__bench).take());

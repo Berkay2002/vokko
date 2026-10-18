@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { preferHardwareH264, profileOf } from "./h264";
-import { buildScreenShare, h264ProfileLevelIds, screenCodecOrder } from "./options";
+import { buildCamera, buildScreenShare, h264ProfileLevelIds, screenCodecOrder, windowsApp } from "./options";
 
 // The video section of a WebView2 offer, trimmed: VP8, then the H.264 formats in Chromium's order (Baseline,
 // Constrained Baseline, Main, High), VP9, and RTX for one of them.
@@ -67,18 +67,40 @@ describe("screen share codec with hardware encoders", () => {
 
   it("leads with hardware H.264 at every size when VP9 is software (NVIDIA / AMD on Windows)", () => {
     for (const resolution of ["720p", "1080p", "1440p", "source"] as const) {
-      expect(screenCodecOrder(resolution, { h264: true, vp9: false, av1: false })[0]).toBe("h264");
-      expect(buildScreenShare({ resolution, fps: 60, audio: false }, { ...all, hardware: { h264: true } }).publish.codec).toBe("h264");
+      expect(screenCodecOrder(resolution, { h264: true, vp9: false, av1: false, screens: true })[0]).toBe("h264");
+      expect(buildScreenShare({ resolution, fps: 60, audio: false }, { ...all, hardware: { h264: true, screens: true } }).publish.codec).toBe("h264");
     }
-    const plan = buildScreenShare({ resolution: "1080p", fps: 60, audio: false }, { ...all, hardware: { h264: true } }).publish;
-    expect(plan.backupCodec).toBe(false);
+    const plan = buildScreenShare({ resolution: "1080p", fps: 60, audio: false }, { ...all, hardware: { h264: true, screens: true } }).publish;
+    // Viewers without an H.264 decoder get VP8 (encoded only when one subscribes).
+    expect(plan.backupCodec).toBe("vp8");
     expect(plan.scalabilityMode).toBeUndefined();
     expect(plan.degradationPreference).toBe("maintain-framerate");
   });
 
   it("keeps VP9 first without hardware encoders, and hardware VP9 / AV1 ahead of H.264 in their usual order", () => {
     expect(buildScreenShare({ resolution: "1080p", fps: 60, audio: false }, all).publish.codec).toBe("vp9");
-    expect(screenCodecOrder("1080p", { vp9: true, h264: true })).toEqual(["vp9", "h264", "av1", "vp8"]);
-    expect(screenCodecOrder("1440p", { av1: true, h264: true })).toEqual(["av1", "h264", "vp9", "vp8"]);
+    expect(screenCodecOrder("1080p", { vp9: true, h264: true, screens: true })).toEqual(["vp9", "h264", "av1", "vp8"]);
+    expect(screenCodecOrder("1440p", { av1: true, h264: true, screens: true })).toEqual(["av1", "h264", "vp9", "vp8"]);
+  });
+
+  it("keeps the usual order below 1440p outside the Windows app (macOS, the web build)", () => {
+    expect(screenCodecOrder("1080p", { h264: true })).toEqual(["vp9", "av1", "vp8", "h264"]);
+    expect(buildScreenShare({ resolution: "1080p", fps: 60, audio: false }, { ...all, hardware: { h264: true } }).publish.codec).toBe("vp9");
+  });
+
+  it("gives H.264 no H.264 backup when VP8 is missing", () => {
+    expect(buildCamera("720p", { h264: true, vp8: false }).publish).toMatchObject({ codec: "h264", backupCodec: false });
+  });
+
+  it("knows the Windows app from the Tauri global and the user agent", () => {
+    const g = globalThis as { isTauri?: boolean };
+    expect(windowsApp("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/155.0.0.0")).toBe(false);
+    g.isTauri = true;
+    try {
+      expect(windowsApp("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/155.0.0.0")).toBe(true);
+      expect(windowsApp("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15")).toBe(false);
+    } finally {
+      delete g.isTauri;
+    }
   });
 });
