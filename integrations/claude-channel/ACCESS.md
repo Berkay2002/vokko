@@ -79,6 +79,8 @@ When Claude needs approval for a tool, the prompt is sent to every allowlisted u
 /vokko:access set guilds false      # this session ignores server channels
 ```
 
+With `guilds false` this session still answers server messages when the bridge cannot: once its `bridge-state.json` says it stopped, is older than 90 s or names a dead process (no file at all means no bridge has run, and `guilds false` is honoured), and for messages the bridge passes on (files in `handoff/`) when its API fails. They go through the same gate (opt-in, `requireMention`, per-channel `allowFrom`). In those channels `reply` attaches files from the inbox only. Tools other than reply, react and edit_message still ask you; with `dmBackend api` the prompt is not sent, so they are not approved. See the bridge README for details.
+
 ## Delivery
 
 **`ackReaction`** reacts on receipt. Unicode emoji or `name:id` for a custom one. Empty string disables.

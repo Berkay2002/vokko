@@ -81,6 +81,7 @@ if (codex) {
 
 bridge = new Bridge(bot, backend, { perHour: num('VOKKO_AI_RATE_PER_HOUR', 20), monthlyUsd: num('VOKKO_AI_MONTHLY_USD', 150) })
 // A shared bridge leaves /vokko:access approvals to the plugin (one "Paired!" message, not two).
+bridge.startHeartbeat()
 bot.start(!shared)
 log(`vokko bridge: ${backend.name}, ${shared ? 'sharing the plugin token' : 'own token'}, state ${stateDir}\n`)
 
@@ -89,6 +90,7 @@ function shutdown(): void {
   if (shuttingDown) return
   shuttingDown = true
   log('vokko bridge: shutting down\n')
+  bridge?.stop()
   bot.stop()
   setTimeout(() => process.exit(0), 500)
 }

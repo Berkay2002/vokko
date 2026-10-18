@@ -1,9 +1,9 @@
-import { describe, expect, test, beforeEach } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { MODERATE_MEMBERS, OWNER_COMMAND_RE, VokkoBot, type Access, type Message, type Role as BotRole } from '../../claude-channel/vokko.ts'
-import { BackendError, Bridge, SESSION_MAX_TURNS, UserFacingError, childEnv, parseUserId, type Answer, type Backend, type BotLike, type TurnContext } from '../core.ts'
+import { MODERATE_MEMBERS, OWNER_COMMAND_RE, VokkoBot, bridgeState, type Access, type Message, type Role as BotRole } from '../../claude-channel/vokko.ts'
+import { BackendError, Bridge, COOLDOWN_MS, HANDOFFS_PER_HOUR, SESSION_MAX_TURNS, UserFacingError, childEnv, failureClass, parseUserId, type Answer, type Backend, type BotLike, type TurnContext } from '../core.ts'
 import { PauseStore, decide, type PauseRequest } from '../pauses.ts'
 import { claudeApiBackend } from '../claude-api.ts'
 
@@ -44,6 +44,7 @@ function world(role: BotRole = 'bridge-shared') {
   const bot = {
     cfg: { stateDir, token: 't', apiUrl: 'http://vokko.test', gatewayUrl: '', botName: 'Claude', pairCommand: '/vokko:access pair', role, staticMode: false, log: () => {} },
     me: { id: BOT, username: 'claude', global_name: null },
+    connected: true,
     ownerId: OWNER as string | null,
     // the real gate is tested below on VokkoBot; here "drop" stands for anything it refuses
     admit: async (m: Message) => (m.content.startsWith('drop') ? null : access),
@@ -193,14 +194,19 @@ describe('PauseStore', () => {
 // ---- the real gate: which process owns which message ----
 
 describe('VokkoBot gate per role', () => {
-  function gateBot(role: BotRole, access: Partial<Access>) {
+  /** `beat`: when the bridge last wrote its heartbeat; 'stopped': it stopped cleanly; 'dead': its pid is gone; null: no bridge has run. */
+  function gateBot(role: BotRole, access: Partial<Access>, beat: number | 'stopped' | 'dead' | null = null) {
     const stateDir = mkdtempSync(join(tmpdir(), 'vokko-gate-'))
+    if (beat != null) {
+      const state = beat === 'stopped' ? { stoppedAt: Date.now() } : beat === 'dead' ? { at: Date.now(), pid: 99_999_999 } : { at: beat, pid: process.pid }
+      writeFileSync(join(stateDir, 'bridge-state.json'), JSON.stringify(state))
+    }
     writeFileSync(join(stateDir, 'access.json'), JSON.stringify({ dmPolicy: 'allowlist', allowFrom: [OWNER, NAT], groups: { [GENERAL]: { requireMention: false, allowFrom: [] } }, pending: {}, ...access }))
     const bot = new VokkoBot({ stateDir, token: 't', apiUrl: 'http://x', gatewayUrl: '', botName: 'Claude', pairCommand: '/vokko:access pair', role, staticMode: false, log: () => {} }, () => {})
     Object.defineProperty(bot, 'ownerId', { value: OWNER })
     return bot
   }
-  const verdict = async (role: BotRole, access: Partial<Access>, m: Message) => (await gateBot(role, access).gate(m)).action
+  const verdict = async (role: BotRole, access: Partial<Access>, m: Message, beat: number | 'stopped' | 'dead' | null = Date.now()) => (await gateBot(role, access, beat).gate(m)).action
 
   test('DMs: the plugin unless dmBackend is api, a shared bridge only then, a standalone bridge always', async () => {
     const dm = msg(NAT, 'hi')
@@ -217,6 +223,17 @@ describe('VokkoBot gate per role', () => {
     expect(await verdict('channel', { guilds: false }, g)).toBe('drop')
     expect(await verdict('bridge-shared', { guilds: false }, g)).toBe('deliver')
     expect(await verdict('bridge', {}, g)).toBe('deliver')
+  })
+  test('guilds: the plugin takes over from a bridge that stopped, went stale or died; no bridge state at all means guilds false is honoured', async () => {
+    const g = msg(NAT, 'hi', { guild: GUILD })
+    expect(await verdict('channel', { guilds: false }, g, Date.now() - 80_000)).toBe('drop') // 80 s: still alive
+    expect(await verdict('channel', { guilds: false }, g, Date.now() - 100_000)).toBe('deliver') // stale
+    expect(await verdict('channel', { guilds: false }, g, 'stopped')).toBe('deliver') // stopped cleanly
+    expect(await verdict('channel', { guilds: false }, g, 'dead')).toBe('deliver') // fresh file, but the process is gone
+    expect(await verdict('channel', { guilds: false }, g, null)).toBe('drop') // no shared bridge has run here
+    expect(await verdict('channel', { guilds: false, groups: {} }, g, 'stopped')).toBe('drop') // opt-in still applies
+    expect(await verdict('bridge-shared', { guilds: false }, g, 'stopped')).toBe('deliver') // the bridge itself never doubts it is alive
+    expect(await verdict('channel', { guilds: false, dmBackend: 'api' }, msg(NAT, 'hi'), 'stopped')).toBe('drop') // DMs are unaffected
   })
   test('allowlist and opt-in still apply to a bridge', async () => {
     expect(await verdict('bridge', {}, msg(OUTSIDER, 'hi'))).toBe('drop')
@@ -709,6 +726,284 @@ describe('!model and !effort', () => {
     const s = setup()
     await s.bridge.handle(msg(OWNER, '!effort dm high'))
     expect(s.last().text).toContain('no effort setting')
+  })
+})
+
+// ---- servers fall back to the subscription when the API is out ----
+
+describe('fallback to the subscription', () => {
+  const guild = (content = 'hi', author = NAT) => msg(author, content, { guild: GUILD })
+
+  /** Stands in for the plugin: claims every handoff file the way vokko.ts does (rename) and answers with its verdict. */
+  function plugin(stateDir: string, claimed: string[], verdict: (id: string) => 'accepted' | 'declined') {
+    const dir = join(stateDir, 'handoff')
+    const t = setInterval(() => {
+      for (const id of existsSync(dir) ? readdirSync(dir) : []) {
+        if (!/^\d+$/.test(id)) continue
+        renameSync(join(dir, id), join(dir, id) + '.taken')
+        claimed.push(id)
+        writeFileSync(join(dir, `${id}.${verdict(id)}`), '')
+      }
+    }, 20)
+    return () => clearInterval(t)
+  }
+
+  const stops: (() => void)[] = []
+  function fb(role: BotRole = 'bridge-shared', limits = { perHour: 20, monthlyUsd: 150 }, withPlugin = true, verdict: (id: string) => 'accepted' | 'declined' = () => 'accepted') {
+    const s = setup(role, limits)
+    const claimed: string[] = []
+    if (withPlugin) stops.push(plugin(s.stateDir, claimed, verdict))
+    const bridge = new Bridge(s.bot as unknown as BotLike, s.backend as Backend, limits, s.clock.now, 400)
+    stops.push(() => bridge.stop())
+    return { ...s, bridge, claimed }
+  }
+  const apiDown = (b: { script: unknown }, text = 'API Error: 529 {"type":"overloaded_error"}') => void (b.script = async () => { throw new Error(text) })
+  afterEach(() => void stops.splice(0).forEach(stop => stop()))
+
+  test('an API error: the plugin gets the message once, the bridge says nothing, the cooldown skips the API, then a success hands back', async () => {
+    const f = fb()
+    apiDown(f.backend)
+    const m1 = guild('one')
+    await f.bridge.handle(m1)
+    expect(f.claimed).toEqual([m1.id])
+    expect(JSON.parse(readFileSync(join(f.stateDir, 'handoff', `${m1.id}.taken`), 'utf8'))).toEqual({ channel_id: GENERAL })
+    expect(f.sent).toEqual([])
+    expect(f.dms).toEqual([{ user: OWNER, text: expect.stringContaining('API: overloaded or down') }])
+
+    f.backend.script = null
+    const m2 = guild('two')
+    await f.bridge.handle(m2) // inside the cooldown: no API call at all
+    expect(f.backend.calls.length).toBe(1)
+    expect(f.claimed).toEqual([m1.id, m2.id])
+    expect(f.dms.length).toBe(1) // no second notice
+    await f.bridge.handle(msg(OWNER, '!backend'))
+    expect(f.last().text).toMatch(/Servers go to: subscription \(API: overloaded or down; the API is tried again in 10 min\)/)
+
+    f.clock.advance(COOLDOWN_MS + 1000)
+    await f.bridge.handle(guild('three'))
+    expect(f.backend.calls.length).toBe(2)
+    expect(f.claimed.length).toBe(2)
+    expect(f.sent.filter(x => x.text === 'hello there').length).toBe(1)
+    expect(f.dms.length).toBe(2)
+    expect(f.dms[1]!.text).toContain('back on the API')
+    await f.bridge.handle(guild('four'))
+    expect(f.dms.length).toBe(2) // and only once
+    await f.bridge.handle(msg(OWNER, '!backend'))
+    expect(f.last().text).toContain('Servers go to: api')
+  })
+
+  test('a failure after the cooldown starts a new one without a second notice', async () => {
+    const f = fb()
+    apiDown(f.backend, 'credit balance is too low')
+    await f.bridge.handle(guild('one'))
+    f.clock.advance(COOLDOWN_MS + 1000)
+    await f.bridge.handle(guild('two')) // tries the API again, fails again
+    expect(f.backend.calls.length).toBe(2)
+    expect(f.claimed.length).toBe(2)
+    expect(f.dms.length).toBe(1)
+    expect(f.dms[0]!.text).toContain('credit balance too low')
+    await f.bridge.handle(guild('three'))
+    expect(f.backend.calls.length).toBe(2)
+  })
+
+  test('an error that may be the sender at fault (a bad request) keeps the old message and does not mark the API out', async () => {
+    const f = fb()
+    apiDown(f.backend, 'API Error: 400 invalid_request_error: prompt is too long')
+    await f.bridge.handle(guild('one'))
+    expect(f.last().text).toContain('Sorry, something went wrong')
+    expect(f.claimed).toEqual([])
+    expect(f.dms).toEqual([])
+  })
+
+  test('no plugin session to take it: the sender gets the error as before, and no file is left behind', async () => {
+    const f = fb('bridge-shared', undefined, false)
+    apiDown(f.backend)
+    const m = guild('one')
+    await f.bridge.handle(m)
+    expect(f.last().text).toContain('Sorry, something went wrong')
+    expect(existsSync(join(f.stateDir, 'handoff', m.id))).toBe(false)
+  })
+
+  test('failureClass names the class and never echoes the error', () => {
+    const cases: [string, string | null][] = [
+      ['claude: success: Credit balance is too low', 'API: credit balance too low'],
+      ['claude: success: Invalid API key · Please run /login', 'API: authentication failed'],
+      ['API Error: 401 authentication_error sk-ant-secret', 'API: authentication failed'],
+      ['API Error: 529 overloaded_error', 'API: overloaded or down'],
+      ['API Error: 500 Internal server error', 'API: overloaded or down'],
+      ['TypeError: fetch failed (ECONNRESET)', 'API: unreachable'],
+      ['claude: no result', null], // anything else keeps the old error message
+      ['API Error: 400 invalid_request_error: prompt is too long', null],
+    ]
+    for (const [err, cls] of cases) expect(failureClass(new Error(err))).toBe(cls)
+    expect(failureClass(new Error('API Error: 401 sk-ant-secret'))).not.toContain('sk-ant')
+  })
+
+  test('the monthly budget reached: servers go to the plugin, DMs keep the budget message', async () => {
+    const f = fb('bridge-shared', { perHour: 20, monthlyUsd: 0.005 })
+    await f.bridge.handle(guild('one')) // costs 0.01, over the 0.005 cap
+    expect(f.last().text).toBe('hello there')
+    const m2 = guild('two')
+    await f.bridge.handle(m2)
+    expect(f.claimed).toEqual([m2.id])
+    expect(f.backend.calls.length).toBe(1)
+    expect(f.dms.length).toBe(1)
+    expect(f.dms[0]!.text).toContain('monthly budget reached')
+    await f.bridge.handle(msg(NAT, 'a dm'))
+    expect(f.last().text).toBe('Monthly budget reached. Back next month.')
+    expect(f.claimed.length).toBe(1)
+    f.clock.advance(15 * 24 * 3600_000) // next month: the budget is fresh, the next guild message tries the API
+    await f.bridge.handle(guild('three'))
+    expect(f.backend.calls.length).toBe(2)
+    expect(f.dms.length).toBe(2)
+    expect(f.dms[1]!.text).toContain('back on the API')
+  })
+
+  test('guards stay guards: a pause, the rate limit, a UserFacingError and the per-reply cap never reach the plugin', async () => {
+    const f = fb('bridge-shared', { perHour: 2, monthlyUsd: 150 })
+    f.bridge.pauses.add({ userId: EVE, scope: GUILD, minutes: 10, reason: 'spam', by: OWNER, manual: true }, f.clock.now())
+    await f.bridge.handle(guild('hi', EVE))
+    expect(f.last().text).toContain("You're paused")
+
+    f.backend.answer = () => ({ text: 'That one got too long for me, sorry.', keepSession: false }) // the per-reply cap
+    await f.bridge.handle(guild('long one'))
+    expect(f.last().text).toContain('too long')
+
+    f.backend.answer = null
+    f.backend.script = async () => {
+      throw new UserFacingError("Codex isn't signed in on the host")
+    }
+    await f.bridge.handle(guild('guarded'))
+    expect(f.last().text).toBe("Codex isn't signed in on the host")
+    f.backend.script = null
+    await f.bridge.handle(guild('over the rate limit')) // third within the hour
+    expect(f.last().text).toContain('limit of 2 messages')
+
+    expect(f.claimed).toEqual([])
+    expect(f.dms).toEqual([])
+    expect(f.backend.calls.length).toBe(2) // the paused and the rate-limited never called the API
+  })
+
+  test('a flooding user who is rate limited is not handed to the plugin while the API is out', async () => {
+    const f = fb('bridge-shared', { perHour: 1, monthlyUsd: 150 })
+    apiDown(f.backend)
+    await f.bridge.handle(guild('one'))
+    await f.bridge.handle(guild('two'))
+    expect(f.claimed.length).toBe(1)
+    expect(f.last().text).toContain('limit of 1 messages')
+  })
+
+  test('DMs are unaffected: an API error is answered with the old message, nothing is handed off or announced', async () => {
+    const f = fb()
+    apiDown(f.backend)
+    await f.bridge.handle(msg(NAT, 'a dm'))
+    expect(f.last().text).toContain('Sorry, something went wrong')
+    expect(f.claimed).toEqual([])
+    expect(f.dms).toEqual([])
+    f.backend.script = null
+    await f.bridge.handle(guild('now a server')) // the DM failure did not mark the API out
+    expect(f.last().text).toBe('hello there')
+  })
+
+  test('a bridge on its own token has no plugin to fall back to', async () => {
+    const f = fb('bridge')
+    apiDown(f.backend)
+    await f.bridge.handle(guild('one'))
+    expect(f.last().text).toContain('Sorry, something went wrong')
+    expect(f.claimed).toEqual([])
+    expect(f.dms).toEqual([])
+    f.bridge.startHeartbeat()
+    expect(existsSync(join(f.stateDir, 'bridge-state.json'))).toBe(false)
+  })
+
+  test('the heartbeat is written with the pid only while the gateway is connected; a clean stop says stopped so the plugin takes over at once', async () => {
+    const f = fb()
+    const now = f.clock.now()
+    f.bot.connected = false
+    f.bridge.startHeartbeat()
+    expect(bridgeState(f.stateDir, now)).toBe('none') // not connected: nothing vouched for
+    f.bot.connected = true
+    f.bridge.heartbeat()
+    expect(JSON.parse(readFileSync(join(f.stateDir, 'bridge-state.json'), 'utf8'))).toEqual({ at: now, pid: process.pid })
+    expect(bridgeState(f.stateDir, now + 89_000)).toBe('alive')
+    expect(bridgeState(f.stateDir, now + 91_000)).toBe('down')
+    f.bot.connected = false
+    f.clock.advance(60_000)
+    f.bridge.heartbeat() // the gateway dropped: the file is not renewed
+    expect(JSON.parse(readFileSync(join(f.stateDir, 'bridge-state.json'), 'utf8')).at).toBe(now)
+    f.bridge.stop()
+    expect(bridgeState(f.stateDir, now)).toBe('down')
+    expect(JSON.parse(readFileSync(join(f.stateDir, 'bridge-state.json'), 'utf8'))).toEqual({ stoppedAt: f.clock.now() })
+  })
+
+  test('a bridge whose heartbeat has gone stale (a machine that slept) leaves guilds to the plugin until its next write; DMs go on', async () => {
+    const f = fb()
+    f.bridge.startHeartbeat()
+    await f.bridge.handle(guild('before'))
+    expect(f.last().text).toBe('hello there')
+    f.clock.advance(91_000)
+    await f.bridge.handle(guild('after wake'))
+    expect(f.backend.calls.length).toBe(1)
+    await f.bridge.handle(msg(NAT, 'a dm'))
+    expect(f.backend.calls.length).toBe(2)
+    f.bridge.heartbeat() // first write after wake
+    await f.bridge.handle(guild('back'))
+    expect(f.backend.calls.length).toBe(3)
+  })
+
+  test('at most 30 messages an hour go to the subscription, across all servers; the rest get the old message', async () => {
+    const f = fb('bridge-shared', { perHour: 1000, monthlyUsd: 150 })
+    apiDown(f.backend)
+    for (let i = 0; i < HANDOFFS_PER_HOUR; i++) await f.bridge.handle(guild(`m${i}`, String(7000 + i)))
+    expect(f.claimed.length).toBe(HANDOFFS_PER_HOUR)
+    expect(f.sent).toEqual([])
+    await f.bridge.handle(guild('one too many', '7999'))
+    expect(f.claimed.length).toBe(HANDOFFS_PER_HOUR)
+    expect(f.last().text).toContain('Sorry, something went wrong')
+    f.clock.advance(3600_000 + 1000) // the window rolls on
+    f.backend.script = null
+    await f.bridge.handle(guild('fresh hour'))
+    expect(f.last().text).toBe('hello there')
+  }, 15000)
+
+  test('a message the plugin declines (its gate or fetch refused it) gets the old message at once', async () => {
+    const f = fb('bridge-shared', undefined, true, () => 'declined')
+    apiDown(f.backend)
+    const m = guild('one')
+    const t0 = Date.now()
+    await f.bridge.handle(m)
+    expect(f.claimed).toEqual([m.id])
+    expect(f.last().text).toContain('Sorry, something went wrong')
+    expect(Date.now() - t0).toBeLessThan(300) // not the whole wait
+    expect(readdirSync(join(f.stateDir, 'handoff')).filter(n => /^\d+\.(accepted|declined)$/.test(n))).toEqual([]) // verdicts are cleaned up
+  })
+
+  test('a turn that started before the API went out does not clear it when it succeeds (no flapping)', async () => {
+    const f = fb()
+    let release!: () => void
+    const gate = new Promise<void>(r => (release = r))
+    f.backend.script = async (_ctx, prompt) => {
+      if (prompt.includes('slow')) await gate
+      else throw new Error('API Error: 529 overloaded_error')
+    }
+    const slow = f.bridge.handle(msg(NAT, 'slow', { guild: GUILD }))
+    await new Promise(r => setTimeout(r, 50))
+    await f.bridge.handle(msg(EVE, 'fast', { guild: GUILD, channel: '902' })) // fails: the API is out
+    expect(f.dms.length).toBe(1)
+    release()
+    await slow // answered by the API, but it started before the failure
+    expect(f.sent.some(x => x.text === 'hello there')).toBe(true)
+    const calls = f.backend.calls.length
+    await f.bridge.handle(guild('next'))
+    expect(f.backend.calls.length).toBe(calls) // still out: handed off without an API call
+    expect(f.dms.length).toBe(1) // and no "back on the API" notice
+  })
+
+  test('a message the bridge gate refuses is never handed off', async () => {
+    const f = fb()
+    apiDown(f.backend)
+    await f.bridge.handle(guild('drop this one')) // the bridge gate refuses it first: nothing is handed off
+    expect(f.claimed).toEqual([])
   })
 })
 

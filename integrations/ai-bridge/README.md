@@ -42,6 +42,29 @@ session) and this bridge.
 With `VOKKO_ACCESS_MODE=static` in either process, its allowlist stays frozen at startup but it still re-reads
 `dmBackend` and `guilds` from `access.json`, so the two processes never both answer (or both ignore) a message.
 
+**When the API is out, servers fall back to your subscription.** With `guilds false`, the plugin (your Claude Code
+session) answers server messages whenever the bridge cannot, and hands them back by itself:
+
+- The bridge is not running: while its gateway is connected it rewrites `bridge-state.json` ({at, pid}) in the state dir every
+  10 s, and a clean stop writes {stoppedAt}. The plugin takes guilds over at once after a clean stop or when the pid is gone,
+  and when the file is older than 90 s; the bridge itself stops answering servers at that same age (a machine that slept).
+  No file at all means no shared bridge has run, and `guilds false` is honoured as it is.
+- The API fails for a turn that is not the sender's doing (auth or credit errors, overloaded/5xx, network, the monthly
+  budget): the bridge passes that message on instead of "Sorry, something went wrong", and for 10 minutes passes every
+  server message on without calling the API. After that the next one tries the API; a success clears it. Pauses, the
+  per-user rate limit, the per-reply cap and errors meant for the chat (`UserFacingError`) are guards and stay as they are
+  (a paused or flooding user never reaches your subscription either). DMs are unaffected.
+- A passed-on message is a file `handoff/<message id>` in the state dir. The plugin claims it by renaming it, fetches the
+  message by id and runs it through its normal gate (opt-in, requireMention, per-channel allowFrom), so it is answered
+  once, then writes `<id>.accepted` or `<id>.declined` for the bridge. If no session claims it within 5 s, or the plugin
+  declines it (gate, failed fetch, older than 60 s), the sender gets the old error message. At most 30 messages an hour,
+  across all servers, are passed on; the rest get the old message too.
+- You get a DM when servers switch to the subscription (with a short reason, e.g. "API: credit balance too low") and when
+  they switch back. `!backend` shows where servers go now.
+
+Members then reach a session with tools on your machine: anything other than reply/react/edit_message still needs your
+approval, and in those channels `reply` can attach files from the inbox only. With `dmBackend api` the plugin sends no permission prompts, so such requests are simply not approved.
+
 **Codex ("&lt;you&gt;'s Codex").** A second bot with its own token, on your Codex login:
 
 1. `codex login` on this machine (the bridge never reads or copies its credentials).

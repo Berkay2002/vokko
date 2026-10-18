@@ -5,9 +5,9 @@
  * one persisted backend session per DM or guild channel.
  */
 
-import { chmodSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'fs'
+import { chmodSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, rmSync, unlinkSync } from 'fs'
 import { join } from 'path'
-import { MODERATE_MEMBERS, ownsGuilds, safeAttName, type Message, type VokkoBot } from '../claude-channel/vokko.ts'
+import { BRIDGE_STALE_MS, BRIDGE_STATE, HANDOFF_DIR, HEARTBEAT_MS, MODERATE_MEMBERS, ownsGuilds, safeAttName, type Access, type Message, type VokkoBot } from '../claude-channel/vokko.ts'
 import { PauseStore, RECENT_MS, decide, type Pause, type Role } from './pauses.ts'
 
 export type Totals = { costUsd?: number; inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number }
@@ -89,7 +89,7 @@ export type Limits = {
 
 export type BotLike = Pick<
   VokkoBot,
-  'cfg' | 'me' | 'ownerId' | 'admit' | 'reply' | 'send' | 'dmUser' | 'typing' | 'react' | 'loadAccess' | 'saveAccess' | 'members' | 'memberPermissions' | 'api' | 'gateKey' | 'isOwnerCommand'
+  'cfg' | 'me' | 'connected' | 'ownerId' | 'admit' | 'reply' | 'send' | 'dmUser' | 'typing' | 'react' | 'loadAccess' | 'saveAccess' | 'members' | 'memberPermissions' | 'api' | 'gateKey' | 'isOwnerCommand'
 >
 
 const SNOWFLAKE = /^\d{1,20}$/
@@ -137,6 +137,23 @@ function writeJson(file: string, value: unknown): void {
   renameSync(tmp, file)
 }
 
+/** An API failure that is not the sender's doing (auth, credit, overload/5xx, network), as a short class for the owner: no secrets, no raw error text. Null: anything else (a bad request may be the sender's), which keeps the old error message. */
+export function failureClass(err: unknown): string | null {
+  const s = String(err)
+  if (/credit|billing|balance|payment/i.test(s)) return 'API: credit balance too low'
+  if (/authenticat|api[ _-]?key|unauthori[sz]ed|\b40[13]\b|oauth/i.test(s)) return 'API: authentication failed'
+  if (/overload|\b429\b|rate.?limit|\b5\d\d\b|server_error|unavailable/i.test(s)) return 'API: overloaded or down'
+  if (/fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|network|socket|timed? ?out/i.test(s)) return 'API: unreachable'
+  return null
+}
+
+/** After an API failure, guild messages go to the subscription for this long; then the next one tries the API again. */
+export const COOLDOWN_MS = 10 * 60_000
+/** At most this many messages an hour, across all servers, go to the subscription; the rest get the old error message. */
+export const HANDOFFS_PER_HOUR = 30
+const BUDGET_REASON = 'API: monthly budget reached'
+const SORRY = 'Sorry, something went wrong. Try again in a bit.'
+
 const attr = (s: string) => s.replace(/["<>\r\n]/g, '')
 
 type Usage = { month: string } & Required<Totals>
@@ -161,12 +178,21 @@ export class Bridge {
   /** channel id → user id → when they last sent the bot a delivered message there. */
   private readonly recent = new Map<string, Map<string, number>>()
   private readonly queues = new Map<string, Promise<void>>()
+  /** Set while guild messages go to the plugin instead of the API (a failed turn, or the budget); cleared by the next successful guild turn after `until`. */
+  private out: { reason: string; until: number } | null = null
+  /** Counts markOut calls: a turn that started before the latest one proves nothing about the API now. */
+  private outGen = 0
+  private beat: ReturnType<typeof setInterval> | null = null
+  private lastBeat: number | null = null
+  private readonly handoffHits = new Map<string, number[]>()
 
   constructor(
     private readonly bot: BotLike,
     private readonly backend: Backend,
     private readonly limits: Limits,
     private readonly now: () => number = Date.now,
+    /** How long a handed-off message may wait for the plugin to take it. */
+    private readonly handoffWaitMs = 5000,
   ) {
     const dir = bot.cfg.stateDir
     mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -233,6 +259,89 @@ export class Bridge {
     writeJson(this.settingsFile, this.settings)
     tune.set(sc, this.settings[sc] ?? {})
     return `${this.backend.name} ${kind} for ${sc === 'dm' ? 'DMs' : 'servers'} is now ${value}, from the next turn (running conversations keep their history; the prompt cache restarts once).`
+  }
+
+  /** Only a bridge sharing the plugin's token has a plugin to fall back to. */
+  private get fallback(): boolean {
+    return this.bot.cfg.role === 'bridge-shared'
+  }
+
+  /**
+   * Tells the plugin this bridge is alive, but only while the gateway is connected: the plugin takes guilds over once the file is
+   * older than 90 s, and this bridge stops answering guilds at the same moment (see `beating`).
+   */
+  startHeartbeat(): void {
+    if (!this.fallback) return
+    this.beat = setInterval(() => this.heartbeat(), HEARTBEAT_MS)
+    this.beat.unref()
+    this.heartbeat()
+  }
+
+  heartbeat(): void {
+    if (!this.bot.connected) return
+    try {
+      writeJson(join(this.bot.cfg.stateDir, BRIDGE_STATE), { at: this.now(), pid: process.pid })
+      this.lastBeat = this.now()
+    } catch (e) {
+      this.log(`heartbeat failed: ${e}`)
+    }
+  }
+
+  /** False once the heartbeat is as old as the plugin takes it to be (a machine that slept, a lost gateway): the plugin has the guilds then, so this bridge must not answer them too. */
+  private beating(): boolean {
+    return this.beat == null || (this.lastBeat != null && this.now() - this.lastBeat < BRIDGE_STALE_MS)
+  }
+
+  /** A clean stop says so, so the plugin takes guilds over at once. */
+  stop(): void {
+    if (this.beat) clearInterval(this.beat)
+    if (this.fallback) writeJson(join(this.bot.cfg.stateDir, BRIDGE_STATE), { stoppedAt: this.now() })
+    this.beat = null
+  }
+
+  private markOut(reason: string, until: number): void {
+    const first = this.out == null
+    this.outGen++
+    this.out = { reason, until }
+    this.log(`servers go to the subscription: ${reason}`)
+    if (first) this.notifyOwner(`Servers are now answered by your Claude Code session (subscription). ${reason}. They go back to the API by themselves once it works again.`)
+  }
+
+  /**
+   * Hands a guild message to the plugin: a file named after the message, which the plugin claims by renaming it, then answers
+   * with `<id>.accepted` or `<id>.declined` (a file beats a socket here: both processes already share this dir, and nothing is
+   * lost if one restarts). False when nobody took it in time (no Claude Code session is running) or the plugin declined it.
+   */
+  private async handOff(msg: Message): Promise<boolean> {
+    const dir = join(this.bot.cfg.stateDir, HANDOFF_DIR)
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    const file = join(dir, msg.id)
+    const [accepted, declined] = [`${file}.accepted`, `${file}.declined`]
+    writeJson(file, { channel_id: msg.channel_id })
+    try {
+      for (let waited = 0; waited < this.handoffWaitMs; waited += 50) {
+        if (existsSync(declined)) return false
+        if (existsSync(accepted)) return true
+        await new Promise(r => setTimeout(r, 50))
+      }
+      try {
+        unlinkSync(file) // still there: nobody took it
+      } catch {
+        return true // claimed, no verdict yet: assume it is being answered
+      }
+      return false
+    } finally {
+      rmSync(accepted, { force: true })
+      rmSync(declined, { force: true })
+    }
+  }
+
+  /** A guild message the API will not answer goes to the plugin; without one (or past the hourly cap), the sender hears an error as before. */
+  private async passOn(msg: Message, reason: string): Promise<void> {
+    const capped = !this.hit(this.handoffHits, 'all', HANDOFFS_PER_HOUR, 3600_000)
+    if (!capped && (await this.handOff(msg))) return
+    this.log(`message ${msg.id} not handed to the plugin (${capped ? 'hourly cap' : 'nobody took it'}; ${reason})`)
+    await this.say(msg, reason === BUDGET_REASON ? 'Monthly budget reached. Back next month.' : SORRY)
   }
 
   private log(line: string): void {
@@ -315,6 +424,7 @@ export class Bridge {
   async handle(msg: Message): Promise<void> {
     // Owner commands in DMs reach the bridge even when the plugin answers DMs.
     if (this.bot.isOwnerCommand(msg)) return this.ownerCommand(msg)
+    if (msg.guild_id != null && !this.beating()) return
     if (msg.guild_id != null && GUILD_COMMAND_RE.test(msg.content) && (await this.guildCommand(msg))) return
 
     const access = await this.bot.admit(msg)
@@ -322,7 +432,9 @@ export class Bridge {
     const author = msg.author.id
     const allowlisted = access.allowFrom.includes(author)
     if (this.backend.allowlistedOnly && !allowlisted) return
-    if (!(await this.mayAsk(msg, true))) return
+    const ok = await this.mayAsk(msg, true)
+    if (ok === false) return
+    if (ok !== true) return this.passOn(msg, ok)
 
     const seen = this.recent.get(msg.channel_id) ?? new Map<string, number>()
     seen.set(author, this.now())
@@ -338,9 +450,9 @@ export class Bridge {
   /**
    * Pause, rate limit and budget. Checked when a message arrives (`count`: it counts toward the rate
    * limit) and again when its queued turn comes, so a burst queued before a pause or before the budget
-   * ran out stops there.
+   * ran out stops there. A string: the API is out for guild messages (the reason); the caller hands the message to the plugin.
    */
-  private async mayAsk(msg: Message, count: boolean): Promise<boolean> {
+  private async mayAsk(msg: Message, count: boolean): Promise<boolean | string> {
     const author = msg.author.id
     const now = this.now()
     const paused = this.pauses.active(author, msg.guild_id ?? 'dm', now)
@@ -359,7 +471,14 @@ export class Bridge {
       }
       return false
     }
-    if (this.backend.metered && this.month().costUsd >= this.limits.monthlyUsd) {
+    const budgetHit = this.backend.metered && this.month().costUsd >= this.limits.monthlyUsd
+    if (msg.guild_id != null && this.fallback) {
+      if (budgetHit && !(this.out && now < this.out.until)) {
+        const d = new Date(now)
+        this.markOut(BUDGET_REASON, Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))
+      }
+      if (this.out && now < this.out.until) return this.out.reason
+    } else if (budgetHit) {
       await this.say(msg, 'Monthly budget reached. Back next month.')
       return false
     }
@@ -385,7 +504,10 @@ export class Bridge {
   }
 
   private async answer(msg: Message, key: string, allowlisted: boolean, ackReaction?: string): Promise<void> {
-    if (!(await this.mayAsk(msg, false))) return
+    const ok = await this.mayAsk(msg, false)
+    if (ok === false) return
+    if (ok !== true) return this.passOn(msg, ok)
+    const gen = this.outGen
     const turn = { authorPaused: false }
     const ctx = this.turnContext(msg, turn)
     if (ackReaction) this.bot.react(msg.channel_id, msg.id, ackReaction).catch(() => {})
@@ -417,12 +539,23 @@ export class Bridge {
     } catch (err) {
       this.log(`${this.backend.name} failed for ${key}: ${err}`)
       writeJson(this.sessionsFile, this.sessions)
-      if (!turn.authorPaused) await this.say(msg, err instanceof UserFacingError ? err.message : 'Sorry, something went wrong. Try again in a bit.')
+      // Not the sender's doing: the plugin answers this message and the next ones for a while.
+      const down = msg.guild_id != null && this.fallback && !(err instanceof UserFacingError) && !turn.authorPaused ? failureClass(err) : null
+      if (down) {
+        this.markOut(down, this.now() + COOLDOWN_MS)
+        return this.passOn(msg, down)
+      }
+      if (!turn.authorPaused) await this.say(msg, err instanceof UserFacingError ? err.message : SORRY)
       return
     } finally {
       clearInterval(typing)
     }
     this.tally(key, ans)
+    // Only a turn that started after the latest markOut (the probe once the cooldown is over) shows the API works again.
+    if (this.out && msg.guild_id != null && gen === this.outGen) {
+      this.out = null
+      this.notifyOwner('Servers are back on the API.')
+    }
     const session = this.sessions[key]
     if (ans.keepSession === false) delete this.sessions[key]
     else if (session?.id === ans.sessionId) session.turns++
@@ -512,6 +645,13 @@ export class Bridge {
     return `Paused <@${target}> for ${d.minutes} min${scope === '*' ? ' everywhere' : ''}.`
   }
 
+  private serversNow(access: Access): string {
+    if (access.guilds !== false) return 'subscription (guilds is on in access.json)'
+    if (!this.out) return 'api'
+    const wait = this.out.until - this.now()
+    return `subscription (${this.out.reason}; the API is tried again ${wait > 0 ? `in ${Math.ceil(wait / 60_000)} min` : 'on the next server message'})`
+  }
+
   private async ownerCommand(msg: Message): Promise<void> {
     const [cmd, ...args] = msg.content.trim().split(/\s+/)
     const role = this.bot.cfg.role
@@ -521,7 +661,7 @@ export class Bridge {
         const access = this.bot.loadAccess()
         const want = args[0]?.toLowerCase()
         if (role !== 'bridge-shared') reply = `This bridge runs on its own token: it answers every DM (${this.backend.name}).`
-        else if (!want) reply = `DMs go to: ${access.dmBackend === 'api' ? 'api' : 'subscription'}. Switch with \`!backend api\` or \`!backend subscription\`.`
+        else if (!want) reply = `DMs go to: ${access.dmBackend === 'api' ? 'api' : 'subscription'}. Servers go to: ${this.serversNow(access)}. Switch DMs with \`!backend api\` or \`!backend subscription\`.`
         else if (want !== 'api' && want !== 'subscription') reply = 'Usage: `!backend api` or `!backend subscription`'
         else if (this.bot.cfg.staticMode) reply = 'Access is static (VOKKO_ACCESS_MODE=static): edit access.json and restart.'
         else {
