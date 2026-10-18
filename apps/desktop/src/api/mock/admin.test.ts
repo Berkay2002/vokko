@@ -192,6 +192,7 @@ describe("safety and AutoMod", () => {
     expect(alert.embeds?.[0]?.fields?.find(f => f.name === "decision_outcome")?.value).toBe("blocked");
     expect(db.guilds.get(guildId)!.members.get(ids.plain!)?.communication_disabled_until).toBeTruthy();
     expect(errorOf(() => call("plain", "DELETE", `/channels/${alerts.id}/messages/${alert.id}`)).code).toBe(50013);
+    expect(errorOf(() => call("plain", "PATCH", `/channels/${alerts.id}/messages/${alert.id}`, { content: "nothing to see" })).code).toBe(50035);
     for (const type of [AuditLogEvent.AutoModerationBlockMessage, AuditLogEvent.AutoModerationFlagToChannel, AuditLogEvent.AutoModerationUserCommunicationDisabled]) {
       expect(audit(`?action_type=${type}`)).toHaveLength(1);
     }
