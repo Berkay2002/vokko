@@ -337,12 +337,27 @@ async function refreshPrivateChannels(): Promise<void> {
   }
 }
 
+// Others' presence is unknown while the gateway is down: shown as offline until RESUMED brings the kept map back
+// (under anything replayed) or READY replaces it. The user's own presence stays.
+let hiddenPresences: Record<Snowflake, Presence> = {};
+export function applyConnection(connection: GatewayStatus): void {
+  const { presences, me, connection: previous } = appStore.getState();
+  if (previous === "ready" && connection !== "ready") {
+    hiddenPresences = presences;
+    const own = me ? presences[me.id] : undefined;
+    appStore.setState({ connection, presences: own ? { [own.user_id]: own } : {} });
+  } else if (previous !== "ready" && connection === "ready") {
+    appStore.setState({ connection, presences: { ...hiddenPresences, ...presences } });
+    hiddenPresences = {};
+  } else appStore.setState({ connection });
+}
+
 let wired = false;
 export function wireStoreToGateway(): void {
   if (wired) return;
   wired = true;
   const s = () => appStore.getState();
-  gateway.onStatus(connection => appStore.setState({ connection }));
+  gateway.onStatus(applyConnection);
   gateway.on("READY", ready => s().applyReady(ready));
   gateway.on("MESSAGE_CREATE", onMessageCreate);
   gateway.on("MESSAGE_ACK", ({ channel_id, message_id }) => {

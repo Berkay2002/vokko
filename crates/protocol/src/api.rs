@@ -3313,8 +3313,6 @@ pub struct CreateInviteRequest {
 pub struct InviteMetadata {
     #[serde(flatten)]
     pub invite: Invite,
-    /// `null` when the inviter's account is gone.
-    pub inviter: Option<User>,
     pub uses: u32,
     pub max_uses: u32,
     pub max_age: u32,
@@ -3470,6 +3468,9 @@ pub struct Invite {
     pub guild: InviteGuild,
     pub channel: InviteChannel,
     pub expires_at: Option<String>,
+    /// `null` when the inviter's account is gone.
+    #[serde(default)]
+    pub inviter: Option<User>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3478,6 +3479,9 @@ pub struct InviteGuild {
     pub name: String,
     pub icon: Option<String>,
     pub member_count: u32,
+    /// Members online now (not offline or invisible); only on the `GET /invites/{code}` preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_count: Option<u32>,
     #[serde(default)]
     pub join_mode: JoinMode,
 }
@@ -5749,8 +5753,8 @@ mod tests {
     #[test]
     fn invite_and_settings_shapes_match_types_ts() {
         let invite = json!({
-            "code": "abc", "guild": {"id": "300", "name": "g", "icon": null, "member_count": 2, "join_mode": 1}, "channel": {"id": "200", "name": "general"},
-            "expires_at": "2026-10-12T10:00:00.000Z"
+            "code": "abc", "guild": {"id": "300", "name": "g", "icon": null, "member_count": 2, "presence_count": 1, "join_mode": 1}, "channel": {"id": "200", "name": "general"},
+            "expires_at": "2026-10-12T10:00:00.000Z", "inviter": null
         });
         round_trip::<Invite>(invite.clone());
         let mut metadata = invite;

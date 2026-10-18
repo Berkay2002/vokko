@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { MailX, TriangleAlert } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request, resolveUrl } from "../api/rest";
-import { guildIconUrl, guildInitials, useStore } from "../api/store";
+import { displayName, guildIconUrl, guildInitials, useStore } from "../api/store";
 import type { Invite } from "../api/types";
 import { ApplyToJoin } from "../invites/ApplyToJoin";
 import { joinGuildWithInvite } from "./actions";
@@ -13,8 +13,8 @@ import { pendingInvite } from "./pendingInvite";
 
 /**
  * `/invite/:code`: Discord's "You've been invited to join" confirmation.
- * The preview carries only the server's name, icon, member count and the invite's channel (no inviter, online count,
- * banner or badge yet). The mock previews without an account; a server that answers 401 gets the generic "locked" card.
+ * The preview carries the server's name, icon, online and member counts, the inviter and the invite's channel (no banner
+ * or badge yet). The mock previews without an account; a server that answers 401 gets the generic "locked" card.
  */
 export function InvitePage() {
   const { code = "" } = useParams();
@@ -121,7 +121,7 @@ export function InvitePage() {
     );
   }
 
-  const { guild, channel } = shown.invite;
+  const { guild, channel, inviter } = shown.invite;
   const icon = guildIconUrl(guild);
   const joined = !!memberOf[guild.id];
 
@@ -156,12 +156,19 @@ export function InvitePage() {
   return (
     <div className="auth-page">
       <div className="auth-card invite-card" role="main" aria-label="Server invite">
-        <p className="invite-eyebrow">{joined ? "You are already in" : "You've been invited to join"}</p>
+        <p className="invite-eyebrow">
+          {joined ? "You are already in" : inviter ? `${displayName(inviter)} invited you to join` : "You've been invited to join"}
+        </p>
         <span className="invite-icon">{icon ? <img src={resolveUrl(icon)} alt="" draggable={false} /> : <span>{guildInitials(guild.name)}</span>}</span>
         <h1 className="invite-name">{guild.name}</h1>
         <p className="invite-counts">
+          {guild.presence_count !== undefined && (
+            <span className="invite-count">
+              <i className="invite-dot online" /> {guild.presence_count.toLocaleString()} Online
+            </span>
+          )}
           <span className="invite-count">
-            <i className="invite-dot" /> {guild.member_count} Member{guild.member_count === 1 ? "" : "s"}
+            <i className="invite-dot" /> {guild.member_count.toLocaleString()} Member{guild.member_count === 1 ? "" : "s"}
           </span>
         </p>
         {error && (

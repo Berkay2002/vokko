@@ -165,11 +165,16 @@ function ActiveNow() {
   const channels = useStore(s => s.channels);
   const guilds = useStore(s => s.guilds);
   const voice = useVoice(s => s.states);
+  const ready = useStore(s => s.connection === "ready");
   const active = useMemo(() => activeFriends(relationships, presences, voice, channels, guilds), [relationships, presences, voice, channels, guilds]);
   return (
     <aside className="active-now" aria-label="Active Now">
       <h2>Active Now</h2>
-      {active.length === 0 ? (
+      {!ready ? (
+        <div className="active-now-empty">
+          <div className="active-now-empty-text">Reconnecting. Friends' activity shows again once you're back online.</div>
+        </div>
+      ) : active.length === 0 ? (
         <div className="active-now-empty">
           <div className="active-now-empty-title">Nothing going on yet</div>
           <div className="active-now-empty-text">Friends who jump into a voice channel or start a game will appear in this column.</div>
@@ -335,6 +340,7 @@ export function FriendsPage() {
   const [query, setQuery] = useState("");
   const relationships = useStore(s => Object.values(s.relationships));
   const presences = useStore(s => s.presences);
+  const ready = useStore(s => s.connection === "ready");
   const pendingCount = relationships.filter(r => r.type === RelationshipType.IncomingRequest).length;
 
   const rows = useMemo(() => {
@@ -431,7 +437,7 @@ export function FriendsPage() {
               <Search size={20} />
             </label>
             <div className="people-scroller">
-              {tab === "online" && (rows.online.length > 0 ? list("Online", rows.online, "friend") : noFriends ? firstSteps : empty("No one's around to hang out with right now."))}
+              {tab === "online" && (rows.online.length > 0 ? list("Online", rows.online, "friend") : noFriends ? firstSteps : empty(ready ? "No one's around to hang out with right now." : "Reconnecting. Who's online shows again once you're back."))}
               {tab === "all" && (rows.friends.length > 0 ? list("All friends", rows.friends, "friend") : noFriends ? firstSteps : empty("No friends match your search."))}
               {tab === "pending" &&
                 (rows.incoming.length + rows.outgoing.length > 0 ? (

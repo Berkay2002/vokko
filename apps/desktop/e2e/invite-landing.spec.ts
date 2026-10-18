@@ -43,7 +43,8 @@ test('a non-member sees the server card, joins, and lands in the invite channel'
   await goInApp(page, `/invite/${code}`);
 
   await expect(page.getByRole('heading', { name: "Sam's server" })).toBeVisible();
-  await expect(page.getByText("You've been invited to join")).toBeVisible();
+  await expect(page.getByText(/^\S.* invited you to join$/)).toBeVisible();
+  await expect(page.getByText(/\d+ Online/)).toBeVisible();
   await expect(page.getByText(/\d+ Members?/)).toBeVisible();
 
   await page.getByRole('button', { name: 'Accept Invite' }).click();
@@ -152,7 +153,7 @@ test('a new account keeps the invite through register and joins from the card', 
 
   await expect(page).toHaveURL(/\/invite\/vokkodev/);
   await expect(page.getByRole('heading', { name: "Sam's server" })).toBeVisible();
-  await expect(page.getByText("You've been invited to join")).toBeVisible();
+  await expect(page.getByText(/^\S.* invited you to join$/)).toBeVisible();
   await page.getByRole('button', { name: 'Accept Invite' }).click();
   await expect(page).toHaveURL(/\/channels\/\d+\/\d+$/);
   await expect(page.locator('.chat-textarea')).toBeVisible();
