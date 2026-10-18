@@ -41,7 +41,7 @@ fn guild_id(raw: &str) -> ApiResult<i64> {
     parse_id(raw).ok_or_else(ApiErr::unknown_guild)
 }
 
-fn guild_name(value: &str) -> ApiResult<String> {
+pub(crate) fn guild_name(value: &str) -> ApiResult<String> {
     let name = value.trim().to_owned();
     if !(2..=100).contains(&name.chars().count()) {
         return Err(ApiErr::invalid("name", "Must be between 2 and 100 in length."));
@@ -105,6 +105,11 @@ async fn create_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
             .execute(&mut *tx)
             .await?;
     }
+    open_new_guild(&state, tx, guild_id, user_id).await
+}
+
+/// Last step of making a guild (from scratch or a template): the creator joins as its only member, then GUILD_CREATE.
+pub(crate) async fn open_new_guild(state: &AppState, mut tx: sqlx::Transaction<'_, sqlx::Postgres>, guild_id: i64, user_id: i64) -> ApiResult<Json<Guild>> {
     sqlx::query("INSERT INTO guild_members (guild_id, user_id) VALUES ($1, $2)").bind(guild_id).bind(user_id).execute(&mut *tx).await?;
     sqlx::query("INSERT INTO read_states (user_id, channel_id) SELECT $1, id FROM channels WHERE guild_id = $2 AND kind IN (0, 2)")
         .bind(user_id)
@@ -113,7 +118,7 @@ async fn create_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
         .await?;
     tx.commit().await?;
 
-    let full = events::guild_with_state(&state, guild_id, user_id).await?;
+    let full = events::guild_with_state(state, guild_id, user_id).await?;
     let guild = full.guild.clone();
     state.hub.send(&[user_id], &GatewayEvent::GuildCreate(Box::new(full)));
     Ok(Json(guild))
