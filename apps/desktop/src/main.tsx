@@ -24,6 +24,7 @@ import { preloadSettings } from "./shell/Modals";
 import { installStaleChunkReload } from "./shell/staleChunks";
 import { preloadLazyModules } from "./ui/lazyModule";
 import { startNotify } from "./notify";
+import { wireOverlay } from "./overlay/bridge";
 import { installLogCapture } from "./report/logBuffer";
 import { startThreadMuteMigration } from "./threads/muteMigration";
 import "./styles/tokens.css";
@@ -72,6 +73,7 @@ void initDesktop(); // deep links + updater + tray unread dot; no-op outside the
 gateway.on("READY", ready => void (ready.desktop_version && desktop.noticeLatestVersion(ready.desktop_version)));
 gateway.on("DESKTOP_VERSION", ({ version }) => void desktop.noticeLatestVersion(version));
 startGameDetection(); // desktop only: detected game goes out as presence
+wireOverlay(); // desktop only: feeds the in-game overlay window
 
 const root = document.getElementById("root");
 if (root) {
