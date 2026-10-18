@@ -488,3 +488,17 @@ test('a cold history page loads the guild once, and an uncached channel refuses'
   ;(bot as any).channels.delete(GROUP)
   expect((await bot.gate(msg('90', STRANGER, { channel_id: GROUP, mentions: [{ id: ME, username: 'claude', global_name: 'Claude' }] }))).action).toBe('drop')
 })
+
+test('a gateway connection that never says hello is dropped and retried once', async () => {
+  let opens = 0
+  const server = Bun.serve({ port: 0, fetch: (req, s) => (s.upgrade(req) ? undefined : new Response('no')), websocket: { open() { opens++ }, message() {} } })
+  const { bot, logs } = makeBot()
+  ;(bot as any).cfg.gatewayUrl = `ws://localhost:${server.port}`
+  ;(bot as any).cfg.connectTimeoutMs = 150
+  bot.start(false)
+  await Bun.sleep(150 + 1000 + 450) // watchdog, the 1 s backoff, then the second socket's watchdog is still pending
+  bot.stop()
+  server.stop(true)
+  expect(opens).toBe(2)
+  expect(logs.filter(l => l.includes('reconnecting in 1s'))).toHaveLength(1)
+})
