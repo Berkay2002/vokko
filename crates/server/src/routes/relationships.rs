@@ -227,8 +227,11 @@ async fn befriend(state: &AppState, user_id: i64, other: i64) -> ApiResult<()> {
     if other == user_id {
         return Err(ApiErr::invalid("user_id", "You cannot befriend yourself."));
     }
-    if store::user(state, other).await?.is_none() {
-        return Err(ApiErr::unknown_user());
+    // Bots can't be friends (callers are already people: bots may not use relationship routes). Blocking one stays allowed.
+    match store::user(state, other).await? {
+        None => return Err(ApiErr::unknown_user()),
+        Some(user) if user.bot => return Err(ApiErr::bots_forbidden()),
+        Some(_) => {}
     }
     let current: Option<(i16,)> =
         sqlx::query_as("SELECT kind FROM relationships WHERE user_id = $1 AND other_id = $2").bind(user_id).bind(other).fetch_optional(&state.db).await?;

@@ -178,3 +178,12 @@ describe("bot roles", () => {
     expect(db.guilds.get(guildId)!.guild.roles.some(r => r.id === roleId)).toBe(false);
   });
 });
+
+describe("friend requests to bots", () => {
+  it("are refused like the server does (403 20001), blocking is allowed", () => {
+    const { app } = setupBot();
+    expect(errorOf(() => call("plain", "PUT", `/users/@me/relationships/${app.id}`, {}))).toEqual({ status: 403, code: 20001 });
+    expect(errorOf(() => call("plain", "POST", "/users/@me/relationships", { username: "Echo" }))).toEqual({ status: 403, code: 20001 });
+    expect(() => call("plain", "PUT", `/users/@me/relationships/${app.id}`, { type: 2 })).not.toThrow();
+  });
+});

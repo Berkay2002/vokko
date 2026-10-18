@@ -319,7 +319,7 @@ function relationshipItems(user: User, guildId?: Snowflake | null): MenuItem[] {
     items.push({ id: "remove-friend", label: "Remove Friend", onSelect: () => openModal({ type: "removeFriend", userId: user.id }) });
   } else if (type === RelationshipType.OutgoingRequest) {
     items.push({ id: "request-sent", label: "Friend Request Sent", disabled: true });
-  } else if (type !== RelationshipType.Blocked) {
+  } else if (type !== RelationshipType.Blocked && !user.bot) {
     items.push({ id: "add-friend", label: "Add Friend", onSelect: () => void request("PUT", `/users/@me/relationships/${user.id}`, {}) });
   }
   if (type === RelationshipType.Blocked) items.push({ id: "unblock", label: "Unblock", onSelect: () => void request("DELETE", `/users/@me/relationships/${user.id}`) });

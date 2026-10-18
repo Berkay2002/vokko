@@ -296,3 +296,16 @@ test('developer settings: create an application and see its token once', async (
   await expect(settings.getByRole('list', { name: 'Your applications' })).toContainText('Weather');
   await expect(page.getByTestId('bot-token')).toHaveCount(0);
 });
+
+test("a bot's profile card offers Message but no Add Friend, while a person's still does", async ({ page }) => {
+  await openGeneral(page);
+  const card = page.locator('.profile-card');
+  await page.locator('.member-row', { hasText: 'Echo' }).first().click();
+  await expect(card.getByRole('button', { name: 'Message' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Add Friend' })).toHaveCount(0);
+  if (process.env.BOTFRIEND_SHOTS) await page.screenshot({ path: `${process.env.BOTFRIEND_SHOTS}/bot-profile-card-1440.png` });
+  await page.keyboard.press('Escape');
+  await expect(card).toHaveCount(0);
+  await page.locator('.member-row', { hasNotText: /Echo|Sam/ }).first().click();
+  await expect(card.getByRole('button', { name: 'Add Friend' })).toBeVisible();
+});

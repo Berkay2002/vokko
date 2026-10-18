@@ -129,7 +129,7 @@ export function FullProfileModal({ userId, guildId }: { userId: Snowflake; guild
   const friendAction = (() => {
     if (relation === RelationshipType.Friend) return { label: "Remove Friend", Icon: UserCheck, run: () => openModal({ type: "removeFriend", userId }) };
     if (relation === RelationshipType.OutgoingRequest) return { label: "Friend Request Sent", Icon: UserCheck, run: undefined };
-    if (relation === RelationshipType.Blocked) return null;
+    if (relation === RelationshipType.Blocked || user.bot) return null;
     const label = relation === RelationshipType.IncomingRequest ? "Accept Friend Request" : "Add Friend";
     return { label, Icon: UserPlus, run: () => void request("PUT", `/users/@me/relationships/${userId}`, {}) };
   })();

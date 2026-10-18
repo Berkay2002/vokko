@@ -38,6 +38,23 @@ async fn friend_request_flow() {
     assert_eq!(app.post("/users/@me/relationships", &sam, json!({"username": "ghost"})).await.1["code"], 10013);
 }
 
+#[tokio::test]
+async fn bots_cannot_be_friended_but_can_be_blocked() {
+    let app = TestApp::new().await;
+    let (sam, _) = app.register("sam").await;
+    let (_, nova_user) = app.register("nova").await;
+    let nova_path = format!("/users/@me/relationships/{}", nova_user["id"].as_str().expect("id"));
+    sqlx::query("UPDATE users SET bot = TRUE WHERE username = 'nova'").execute(&app.state.db).await.expect("mark bot");
+
+    let (status, body) = app.post("/users/@me/relationships", &sam, json!({"username": "nova"})).await;
+    assert_eq!((status, &body["code"]), (StatusCode::FORBIDDEN, &json!(20001)));
+    let (status, body) = app.put(&nova_path, &sam).await;
+    assert_eq!((status, &body["code"]), (StatusCode::FORBIDDEN, &json!(20001)));
+    assert_eq!(app.get("/users/@me/relationships", &sam).await.1, json!([]));
+
+    assert_eq!(app.put_json(&nova_path, &sam, json!({"type": 2})).await.0, StatusCode::NO_CONTENT);
+}
+
 /// Makes `a` and `b` accepted friends.
 async fn befriend(app: &TestApp, a: (&str, &Value), b: (&str, &Value)) {
     let name = b.1["username"].as_str().expect("username");
