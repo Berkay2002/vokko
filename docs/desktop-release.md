@@ -70,6 +70,20 @@ Everything macOS-specific is in `src-tauri/src/macos.rs` (`#[cfg(target_os = "ma
   `desktopNotifications` defaults to off, so `needsPermissionPrompt` (notify/Banners.tsx) offers the "Enable Desktop Notifications"
   bar in the desktop shell while the pref is off; that is what turns notifications and the bounce on. A Notifications settings
   page should show the pref and, on macOS, point to System Settings, Notifications for the OS-level permission.
+- **Microphone and camera**: WKWebView only exposes `navigator.mediaDevices` (getUserMedia and getDisplayMedia) when the bundle's
+  `Info.plist` has `NSMicrophoneUsageDescription` and `NSCameraUsageDescription`; without them voice, video and screen share fail
+  with no prompt. The ad-hoc signature turns on the hardened runtime, so `Entitlements.plist` (`bundle.macOS.entitlements`) grants
+  `device.audio-input`, `device.camera` and `automation.apple-events` (the Spotify reader). Check a build with
+  `codesign -d --entitlements - Vokko.app`. The plist is merged only into the `.app`, so an unbundled dev binary never has it.
+- **Background throttling**: the main window sets `backgroundThrottling: "disabled"` (macOS 14+; ignored elsewhere). Without it
+  WebKit suspends a hidden or occluded page, so a window closed to the tray stops its timers and the gateway, and with them
+  notifications and the Dock badge.
+- **Website games**: WebKit sends no Referer and leaves `document.referrer` empty for a frame whose parent is `tauri://localhost`,
+  and Shell Shockers fails on that (`"" cannot be parsed as a URL`, stuck on its loading bar). On a `tauri:` origin `GameTile`
+  frames `<API origin>/web-game.html` instead, which loads the game in a nested iframe so the game sees an https referrer
+  (`webGameWrapper` in games/frameHost.ts). The Caddyfile serves that page without the app's `frame-ancestors 'none'`.
+  Windows (WebView2, `http://tauri.localhost`) and the browser build frame the game directly. Krunker, skribbl.io and
+  Smash Karts load either way.
 - **Debugging without screen capture** (debug builds): `VOKKO_DEBUG_DOCK=1` logs the Dock tile's badge label whenever it
   changes; the menu bar and window decoration state are logged once at startup.
 
