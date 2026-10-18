@@ -1,0 +1,71 @@
+/* Settings > Game Overlay: the corner picker (a little screen with a button per corner). */
+
+.ovs-screen {
+  position: relative;
+  width: 320px;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: var(--background-base-lowest, #111214);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.ovs-corner {
+  position: absolute;
+  width: 56px;
+  height: 32px;
+  border-radius: 4px;
+  border: 2px dashed var(--text-muted, #949ba4);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.ovs-corner:hover {
+  opacity: 1;
+}
+
+.ovs-corner.selected {
+  border-style: solid;
+  border-color: var(--brand-500, #5865f2);
+  background: color-mix(in srgb, var(--brand-500, #5865f2) 30%, transparent);
+  opacity: 1;
+}
+
+.ovs-top-left {
+  top: 10px;
+  left: 10px;
+}
+.ovs-top-right {
+  top: 10px;
+  right: 10px;
+}
+.ovs-bottom-left {
+  bottom: 10px;
+  left: 10px;
+}
+.ovs-bottom-right {
+  bottom: 10px;
+  right: 10px;
+}
+
+.ovs-off {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.16));
+  background: transparent;
+  color: var(--text-normal, #dbdee1);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ovs-off.selected {
+  background: var(--status-danger, #da373c);
+  border-color: transparent;
+  color: #fff;
+}
