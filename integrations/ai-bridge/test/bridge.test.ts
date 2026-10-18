@@ -75,6 +75,7 @@ function world(role: BotRole = 'bridge-shared') {
     policyFor: (a: Access, id: string) => a.groups[id] ?? null,
     /** Channels @everyone cannot view (the real check is tested on VokkoBot below). */
     privateChannels: new Set<string>(),
+    onReady: undefined as (() => void) | undefined,
     async publicChannel(_g: string, c: string) {
       return !this.privateChannels.has(c)
     },
@@ -313,6 +314,8 @@ describe('VokkoBot gate per role', () => {
       const fallback = gateBot('channel', { guilds: false, groups }, 'stopped', hideGeneral) as any
       await expect(fallback.allowedChannel(GENERAL)).rejects.toThrow(/not allowlisted/)
       await expect(fallback.history(GENERAL, 5)).rejects.toThrow(/not allowlisted/)
+      fallback.adopted.set(GENERAL, Date.now() + 60_000) // adopted while guilds was on, or before the channel turned private
+      await expect(fallback.allowedChannel(GENERAL)).rejects.toThrow(/not allowlisted/)
       const open = gateBot('channel', { guilds: false, groups }, 'stopped', {}) as any
       await expect(open.allowedChannel(GENERAL)).resolves.toBeUndefined()
       const own = gateBot('channel', { groups }, null, hideGeneral) as any // guilds on: the owner's choice
@@ -1115,6 +1118,17 @@ describe('fallback to the subscription', () => {
     f.bridge.stop()
     expect(bridgeState(f.stateDir, now)).toBe('down')
     expect(JSON.parse(readFileSync(join(f.stateDir, 'bridge-state.json'), 'utf8'))).toEqual({ stoppedAt: f.clock.now() })
+  })
+
+  test('the first heartbeat is written when the gateway becomes READY, not at the next tick', async () => {
+    const f = fb()
+    const now = f.clock.now()
+    f.bot.connected = false
+    f.bridge.startHeartbeat()
+    expect(bridgeState(f.stateDir, now)).toBe('none')
+    f.bot.connected = true
+    f.bot.onReady?.() // what VokkoBot does at READY
+    expect(bridgeState(f.stateDir, now)).toBe('alive')
   })
 
   test('a bridge whose heartbeat has gone stale (a machine that slept) leaves guilds to the plugin until its next write; DMs go on', async () => {

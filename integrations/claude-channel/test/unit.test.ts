@@ -299,6 +299,15 @@ test("publicChannel: @everyone's view bit decides, a thread uses its parent, a p
   expect(calls.length).toBe(before) // the cached guild state is enough
 })
 
+test('READY calls onReady once the bot counts as connected', () => {
+  const { bot } = makeBot()
+  respond = () => Response.json({})
+  const seen: boolean[] = []
+  bot.onReady = () => void seen.push(bot.connected)
+  ;(bot as any).dispatch('READY', { user: { id: ME, username: 'claude', global_name: null }, session_id: 's', guilds: [], private_channels: [] })
+  expect(seen).toEqual([true])
+})
+
 test("DMs: with a bridge set up the plugin keeps the owner's DM only; with none it keeps every allowlisted one", async () => {
   const { bot, dir } = makeBot({ allowFrom: [OWNER, FRIEND] })
   ;(bot as any).owner_ = { id: OWNER, username: 'owner', global_name: null }
@@ -329,28 +338,54 @@ test('in a server channel held only as the bridge\'s fallback, reply attaches fi
   await own.bot.reply(GROUP, 'x', undefined, [outside])
 })
 
-test('the owner is told once when the bridge goes away and once when it is back, only while a bridge is there to lose', async () => {
+test('the owner hears "down" after the bridge was away 60 s in a row and "back" once, never "back" without "down"; a restart in between keeps it', async () => {
   const { bot, dir } = makeBot({ guilds: false })
   ;(bot as any).owner_ = { id: OWNER, username: 'owner', global_name: null }
   const notices = () => calls.filter(c => c.url.endsWith(`/channels/${DM}/messages`)).map(c => JSON.parse(String(c.init?.body)).content as string)
+  const watch = (b: VokkoBot, at: number) => (b as any).watchBridge(at)
+  const stop = (d: string) => writeFileSync(join(d, 'bridge-state.json'), JSON.stringify({ stoppedAt: Date.now() }))
+  const T = Date.now()
   respond = () => Response.json({ id: '1' })
-  ;(bot as any).watchBridge() // no bridge state at all: nothing to report
+  watch(bot, T) // no bridge state at all: nothing to report
   beat(dir)
-  ;(bot as any).watchBridge() // first look: nothing to report
-  writeFileSync(join(dir, 'bridge-state.json'), JSON.stringify({ stoppedAt: Date.now() })) // a clean stop
-  ;(bot as any).watchBridge()
-  ;(bot as any).watchBridge()
+  watch(bot, T)
+  // a planned restart: down for 30 s, then alive again
+  stop(dir)
+  watch(bot, T + 10_000)
+  watch(bot, T + 30_000)
+  beat(dir, T + 40_000)
+  watch(bot, T + 40_000)
+  await settle()
+  expect(notices()).toEqual([]) // short outage: nothing, and no "back" without a "down"
+  // a long outage
+  stop(dir)
+  watch(bot, T + 50_000)
+  watch(bot, T + 100_000)
+  await settle()
+  expect(notices()).toEqual([]) // 50 s: not yet
+  watch(bot, T + 110_000)
+  watch(bot, T + 120_000)
   await settle()
   expect(notices().length).toBe(1)
   expect(notices()[0]).toContain('not running')
-  beat(dir)
-  ;(bot as any).watchBridge()
+  // the plugin restarts during the outage and the bridge comes back after
+  const next = makeBot({ guilds: false })
+  ;(next.bot as any).owner_ = { id: OWNER, username: 'owner', global_name: null }
+  writeFileSync(join(next.dir, 'bridge-down-notified.json'), JSON.stringify({ at: T })) // what the first plugin left (same state dir in real life)
+  stop(next.dir)
+  watch(next.bot, T + 130_000) // still down: no second "down"
+  beat(next.dir, T + 140_000)
+  watch(next.bot, T + 140_000)
+  watch(next.bot, T + 150_000)
   await settle()
   expect(notices().length).toBe(2)
   expect(notices()[1]).toContain('back')
-  writeFileSync(join(dir, 'access.json'), JSON.stringify({ dmPolicy: 'pairing', allowFrom: [OWNER], groups: {}, pending: {} })) // guilds is the plugin's
-  writeFileSync(join(dir, 'bridge-state.json'), JSON.stringify({ stoppedAt: Date.now() }))
-  ;(bot as any).watchBridge()
+  expect(existsSync(join(next.dir, 'bridge-down-notified.json'))).toBe(false)
+  // guilds is the plugin's: nothing is reported
+  writeFileSync(join(dir, 'access.json'), JSON.stringify({ dmPolicy: 'pairing', allowFrom: [OWNER], groups: {}, pending: {} }))
+  stop(dir)
+  watch(bot, T + 300_000)
+  watch(bot, T + 400_000)
   await settle()
   expect(notices().length).toBe(2)
 })

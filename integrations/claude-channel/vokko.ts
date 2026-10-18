@@ -12,7 +12,7 @@
  */
 
 import { randomBytes } from 'crypto'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
 import { basename, join, resolve as resolvePath, sep } from 'path'
 
 // ---- Vokko wire shapes (the subset used here; apps/desktop/src/api/types.ts is the source of truth) ----
@@ -204,6 +204,9 @@ export function ownsGuilds(role: Role, access: Access, bridgeUp = true): boolean
 export const BRIDGE_STATE = 'bridge-state.json'
 export const HEARTBEAT_MS = 10_000
 export const BRIDGE_STALE_MS = 90_000
+/** The owner hears the bridge is down only after this long, and "back" only if that notice went out (remembered in this file next to bridge-state.json). */
+const BRIDGE_DOWN_NOTICE_MS = 60_000
+const BRIDGE_DOWN_MARKER = 'bridge-down-notified.json'
 /** A message the bridge passes on is a file `handoff/<message id>` (JSON: channel_id); the plugin claims it by renaming it. */
 export const HANDOFF_DIR = 'handoff'
 /** How long the plugin may still reply in a channel it took a message from, whatever the bridge state does meanwhile. */
@@ -305,7 +308,8 @@ export class VokkoBot {
   private readonly handed = new Set<string>()
   /** channel id → until when tools may reach it (see ADOPT_MS): set when the gate delivers a message from there, so Claude only reads and writes channels someone triggered it in. */
   private readonly adopted = new Map<string, number>()
-  private bridgeUp: boolean | null = null
+  /** When the bridge was first seen down by watchBridge; null while it is up. */
+  private downSince: number | null = null
   private readonly bootAccess: Access | null
   private readonly channels = new Map<string, Channel>()
   private readonly dmByUser = new Map<string, string>()
@@ -325,6 +329,8 @@ export class VokkoBot {
   private backoff = 1000
   /** The gateway is READY (not merely open): what a bridge's heartbeat vouches for. */
   connected = false
+  /** Called at READY, after `connected` is set: a bridge writes its heartbeat then instead of waiting for the next tick. */
+  onReady?: () => void
 
   constructor(cfg: Config, private readonly onMessage: (msg: Message) => void) {
     this.cfg = cfg
@@ -632,22 +638,36 @@ export class VokkoBot {
     if (this.ownerId) this.dmUser(this.ownerId, text).catch(err => this.cfg.log(`vokko channel: owner notice failed: ${err}\n`))
   }
 
-  /** Tells the owner when the bridge goes away or comes back (only while guilds belong to it). */
-  private watchBridge(): void {
-    if (this.loadAccess().guilds !== false) {
-      this.bridgeUp = null
-      return
-    }
-    const st = bridgeState(this.cfg.stateDir)
+  /**
+   * Tells the owner when the bridge has been away for BRIDGE_DOWN_NOTICE_MS in a row (a planned restart sends nothing), and once it is back.
+   * The "down" notice is remembered in BRIDGE_DOWN_MARKER, so "back" still arrives after this plugin restarted meanwhile, and never without a "down".
+   * Only while guilds belong to the bridge.
+   */
+  private watchBridge(now = Date.now()): void {
+    const marker = join(this.cfg.stateDir, BRIDGE_DOWN_MARKER)
+    const st = this.loadAccess().guilds === false ? bridgeState(this.cfg.stateDir, now) : 'none'
     if (st === 'none') {
-      this.bridgeUp = null
+      this.downSince = null
+      rmSync(marker, { force: true })
       return
     }
-    const up = st === 'alive'
-    const was = this.bridgeUp
-    this.bridgeUp = up
-    if (was == null || was === up) return
-    this.notifyOwner(up ? 'Servers are back on the API bridge.' : 'The API bridge is not running: servers are answered by your Claude Code session (subscription) until it is back.')
+    if (st === 'alive') {
+      this.downSince = null
+      if (existsSync(marker)) {
+        rmSync(marker, { force: true })
+        this.notifyOwner('Servers are back on the API bridge.')
+      }
+      return
+    }
+    this.downSince ??= now
+    if (now - this.downSince < BRIDGE_DOWN_NOTICE_MS || existsSync(marker)) return
+    try {
+      writeFileSync(`${marker}.tmp`, JSON.stringify({ at: now }), { mode: 0o600 })
+      renameSync(`${marker}.tmp`, marker)
+    } catch (err) {
+      return this.cfg.log(`vokko channel: cannot remember the bridge-down notice: ${err}\n`) // no marker, no "back" later: say nothing now either
+    }
+    this.notifyOwner('The API bridge is not running: servers are answered by your Claude Code session (subscription) until it is back.')
   }
 
   private checkHandoffs(): void {
@@ -726,7 +746,7 @@ export class VokkoBot {
     if (ch?.type === 1) {
       const userId = ch.recipients?.find(u => u.id !== this.me?.id)?.id
       if (userId && this.dmsOwned(access, userId) && access.allowFrom.includes(userId)) return
-    } else if (ch && ((this.guildsOwned(access) && this.gateKey(id) in access.groups && (await this.publicOrOwn(access, ch.guild_id ?? '', id))) || (this.adopted.get(id) ?? 0) > Date.now())) {
+    } else if (ch && ((this.guildsOwned(access) && this.gateKey(id) in access.groups) || (this.adopted.get(id) ?? 0) > Date.now()) && (await this.publicOrOwn(access, ch.guild_id ?? '', id))) {
       // a groups entry, or a channel someone triggered Claude in: not every channel it merely sees
       return
     }
@@ -957,6 +977,7 @@ export class VokkoBot {
           void this.setNickname(g)
         }
         this.cfg.log(`vokko channel: gateway connected as ${d.user.username}\n`)
+        this.onReady?.()
         break
       case 'GUILD_CREATE':
         this.cacheGuild(d)

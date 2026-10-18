@@ -89,7 +89,7 @@ export type Limits = {
 
 export type BotLike = Pick<
   VokkoBot,
-  'cfg' | 'me' | 'connected' | 'ownerId' | 'admit' | 'reply' | 'send' | 'dmUser' | 'typing' | 'react' | 'loadAccess' | 'saveAccess' | 'members' | 'memberPermissions' | 'api' | 'policyFor' | 'publicChannel' | 'isOwnerCommand'
+  'cfg' | 'me' | 'connected' | 'ownerId' | 'admit' | 'reply' | 'send' | 'dmUser' | 'typing' | 'react' | 'loadAccess' | 'saveAccess' | 'members' | 'memberPermissions' | 'api' | 'policyFor' | 'publicChannel' | 'isOwnerCommand' | 'onReady'
 >
 
 const SNOWFLAKE = /^\d{1,20}$/
@@ -274,6 +274,7 @@ export class Bridge {
     if (!this.fallback) return
     this.beat = setInterval(() => this.heartbeat(), HEARTBEAT_MS)
     this.beat.unref()
+    this.bot.onReady = () => this.heartbeat() // the first write must not wait for the next tick: until it exists the plugin also answers non-owner DMs
     this.heartbeat()
   }
 
