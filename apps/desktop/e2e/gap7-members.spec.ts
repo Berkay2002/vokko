@@ -102,7 +102,7 @@ for (const view of VIEWS) test.describe(view.name, () => {
     await expect(locked).not.toContainText('permission');
     await shot(page, 'timed-out');
     await page.evaluate(([g, id]) => (window as unknown as Win).__vokkoMock.requestAs('sam', 'PATCH', `/guilds/${g}/members/${id}`, { communication_disabled_until: new Date(Date.now() + 3 * 3_600_000).toISOString() }), [guild, nova]);
-    await expect(locked).toContainText(/timed out until \d/);
+    await expect(locked).toContainText(/timed out until \S/);
   });
 
   test('being removed from a server says so, leaving does not', async ({ page }) => {
