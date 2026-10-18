@@ -1,0 +1,2523 @@
+{
+  "meta": {
+    "label": "base-ev 200",
+    "run": "d41954",
+    "url": "http://127.0.0.1:1474"
+  },
+  "config": {
+    "connections": 200,
+    "guild_size": 100,
+    "duration": 20,
+    "send_rate": 1.0,
+    "sender_fraction": 0.2,
+    "everyone_share": 0.2,
+    "typing_fraction": 0.3,
+    "presence_fraction": 0.5,
+    "history_fraction": 0.2,
+    "history_pages": 10,
+    "dm_fraction": 0.2,
+    "reaction_fraction": 0.1,
+    "voice_fraction": 0.1,
+    "storm_fraction": 0.5,
+    "storm_offline_ms": 2000,
+    "spoof": true,
+    "scenarios": [
+      "connect",
+      "send",
+      "typing",
+      "presence",
+      "dm",
+      "reactions",
+      "voice",
+      "history",
+      "reconnect"
+    ]
+  },
+  "scenarios": [
+    {
+      "name": "setup:register",
+      "seconds": 3.343176696,
+      "histograms": {
+        "rest:register": {
+          "count": 200,
+          "mean": 497917,
+          "p50": 547317,
+          "p95": 735549,
+          "p99": 735549,
+          "max": 811858
+        }
+      },
+      "counters": {},
+      "errors": {},
+      "derived": {
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 174.98302638471392,
+          "cpu_max": 231.74609635438088,
+          "rss_max_mib": 131.20703125
+        },
+        "postgres": {
+          "cpu_avg": 13.460232798824148,
+          "cpu_max": 21.613625566729823,
+          "rss_max_mib": 336.671875
+        },
+        "loadgen": {
+          "cpu_avg": 2.3929302753465156,
+          "cpu_max": 3.6022709277883043,
+          "rss_max_mib": 7.2734375
+        }
+      },
+      "queries": [
+        {
+          "calls": 200,
+          "total_ms": 47.056979999999974,
+          "mean_ms": 0.2352848999999998,
+          "rows": 200,
+          "query": "INSERT INTO sessions (token_hash, user_id, client_os, client_platform) VALUES ($1, $2, $3, $4)"
+        },
+        {
+          "calls": 200,
+          "total_ms": 34.74496000000001,
+          "mean_ms": 0.17372479999999998,
+          "rows": 200,
+          "query": "INSERT INTO presences (user_id, status) VALUES ($1, $2) ON CONFLICT DO NOTHING"
+        },
+        {
+          "calls": 200,
+          "total_ms": 27.447980999999974,
+          "mean_ms": 0.137239905,
+          "rows": 200,
+          "query": "INSERT INTO email_tokens (token_hash, user_id, purpose, email, expires_at) VALUES ($1, $2, $3, $4, now() + make_interval(secs => $5))"
+        },
+        {
+          "calls": 200,
+          "total_ms": 23.69090699999999,
+          "mean_ms": 0.11845453500000006,
+          "rows": 200,
+          "query": "INSERT INTO users (id, username, email, global_name, password_hash, date_of_birth) VALUES ($1, $2, $3, $4, $5, $6)"
+        },
+        {
+          "calls": 600,
+          "total_ms": 10.970103000000007,
+          "mean_ms": 0.018283505000000016,
+          "rows": 600,
+          "query": "SELECT $2 FROM ONLY \"public\".\"users\" x WHERE \"id\" OPERATOR(pg_catalog.=) $1 FOR KEY SHARE OF x"
+        },
+        {
+          "calls": 200,
+          "total_ms": 9.772044999999999,
+          "mean_ms": 0.04886022500000002,
+          "rows": 200,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 200,
+          "total_ms": 2.9926400000000006,
+          "mean_ms": 0.0149632,
+          "rows": 0,
+          "query": "DELETE FROM email_tokens WHERE user_id = $1 AND purpose = $2"
+        },
+        {
+          "calls": 200,
+          "total_ms": 0.2867479999999999,
+          "mean_ms": 0.0014337400000000006,
+          "rows": 0,
+          "query": "BEGIN"
+        },
+        {
+          "calls": 200,
+          "total_ms": 0.17347899999999994,
+          "mean_ms": 0.0008673950000000001,
+          "rows": 0,
+          "query": "COMMIT"
+        }
+      ]
+    },
+    {
+      "name": "setup:guilds",
+      "seconds": 1.856206606,
+      "histograms": {
+        "rest:accept_invite": {
+          "count": 198,
+          "mean": 522053,
+          "p50": 515899,
+          "p95": 693325,
+          "p99": 780344,
+          "max": 783539
+        },
+        "rest:create_channel": {
+          "count": 4,
+          "mean": 44656,
+          "p50": 19392,
+          "p95": 72355,
+          "p99": 72355,
+          "max": 72355
+        },
+        "rest:create_guild": {
+          "count": 2,
+          "mean": 38063,
+          "p50": 37157,
+          "p95": 39359,
+          "p99": 39359,
+          "max": 39359
+        },
+        "rest:create_invite": {
+          "count": 2,
+          "mean": 24905,
+          "p50": 23850,
+          "p95": 26326,
+          "p99": 26326,
+          "max": 26326
+        },
+        "rest:list_channels": {
+          "count": 2,
+          "mean": 10236,
+          "p50": 9261,
+          "p95": 11397,
+          "p99": 11397,
+          "max": 11397
+        }
+      },
+      "counters": {},
+      "errors": {},
+      "derived": {
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 72.78174717791708,
+          "cpu_max": 90.00284552996428,
+          "rss_max_mib": 144.7421875
+        },
+        "postgres": {
+          "cpu_avg": 123.28336766871672,
+          "cpu_max": 149.00471093294087,
+          "rss_max_mib": 444.984375
+        },
+        "loadgen": {
+          "cpu_avg": 2.97068355828233,
+          "cpu_max": 4.089663508600559,
+          "rss_max_mib": 8.42578125
+        }
+      },
+      "queries": [
+        {
+          "calls": 198,
+          "total_ms": 2121.9684780000002,
+          "mean_ms": 10.717012515151518,
+          "rows": 198,
+          "query": "UPDATE channels SET last_message_id = $2, last_activity_at = now() WHERE id = $1"
+        },
+        {
+          "calls": 198,
+          "total_ms": 1425.845982999999,
+          "mean_ms": 7.201242338383842,
+          "rows": 198,
+          "query": "UPDATE invites SET uses = uses + $2 WHERE code = $1 AND (max_uses = $3 OR uses < max_uses) AND (expires_at IS NULL OR expires_at > now())"
+        },
+        {
+          "calls": 198,
+          "total_ms": 57.913751999999995,
+          "mean_ms": 0.292493696969697,
+          "rows": 792,
+          "query": "INSERT INTO read_states (user_id, channel_id, last_message_id) SELECT $1, id, last_message_id FROM channels WHERE guild_id = $2 AND kind IN ($3 /*, ... */) ON C"
+        },
+        {
+          "calls": 198,
+          "total_ms": 56.43919800000003,
+          "mean_ms": 0.2850464545454545,
+          "rows": 198,
+          "query": "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds,"
+        },
+        {
+          "calls": 200,
+          "total_ms": 53.97588599999998,
+          "mean_ms": 0.2698794300000001,
+          "rows": 13082,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 198,
+          "total_ms": 40.803899,
+          "mean_ms": 0.206080297979798,
+          "rows": 198,
+          "query": "SELECT p.user_id, p.status, p.preferred, p.custom_status, p.activities FROM presences p JOIN guild_members m ON m.user_id = p.user_id WHERE m.guild_id = $1 AND "
+        },
+        {
+          "calls": 2420,
+          "total_ms": 35.868518999999985,
+          "mean_ms": 0.01482170206611571,
+          "rows": 2420,
+          "query": "SELECT $2 FROM ONLY \"public\".\"users\" x WHERE \"id\" OPERATOR(pg_catalog.=) $1 FOR KEY SHARE OF x"
+        },
+        {
+          "calls": 198,
+          "total_ms": 34.22614900000002,
+          "mean_ms": 0.17285933838383835,
+          "rows": 198,
+          "query": "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.tts, m.reference_message_id, m.mention_everyone, m.created_at, m.edited_at, m"
+        },
+        {
+          "calls": 198,
+          "total_ms": 30.866227000000013,
+          "mean_ms": 0.15589003535353538,
+          "rows": 198,
+          "query": "INSERT INTO guild_members (guild_id, user_id, temporary, source_invite_code, inviter_id, join_source_type) SELECT $1, $2, $3, $4, $5, $6 WHERE NOT EXISTS (SELEC"
+        },
+        {
+          "calls": 402,
+          "total_ms": 25.505312999999994,
+          "mean_ms": 0.06344605223880595,
+          "rows": 2400,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 402,
+          "total_ms": 18.444206000000015,
+          "mean_ms": 0.04588110945273628,
+          "rows": 0,
+          "query": "SELECT o.channel_id, o.target_id, o.target_type, o.allow, o.deny FROM permission_overwrites o JOIN channels c ON c.id = o.channel_id WHERE c.guild_id = $1"
+        },
+        {
+          "calls": 410,
+          "total_ms": 17.56468,
+          "mean_ms": 0.04284068292682926,
+          "rows": 26174,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1"
+        },
+        {
+          "calls": 200,
+          "total_ms": 15.067778999999996,
+          "mean_ms": 0.075338895,
+          "rows": 200,
+          "query": "SELECT i.code, i.guild_id, i.channel_id, i.inviter_id, g.name AS guild_name, g.icon_path, c.name AS channel_name, i.expires_at, i.created_at, i.uses, i.max_uses"
+        },
+        {
+          "calls": 408,
+          "total_ms": 13.966409000000006,
+          "mean_ms": 0.03423139460784313,
+          "rows": 408,
+          "query": "SELECT COALESCE(timeout_until > now(), $3) FROM guild_members WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 198,
+          "total_ms": 13.24658,
+          "mean_ms": 0.06690191919191919,
+          "rows": 198,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 398,
+          "total_ms": 12.364631999999999,
+          "mean_ms": 0.031066914572864302,
+          "rows": 398,
+          "query": "SELECT id, guild_id, name, color, hoist, position, permissions, mentionable, unicode_emoji FROM roles WHERE guild_id = ANY($1) ORDER BY position, id"
+        },
+        {
+          "calls": 212,
+          "total_ms": 11.890438000000001,
+          "mean_ms": 0.05608697169811321,
+          "rows": 0,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1 AND timeout_until > now()"
+        },
+        {
+          "calls": 620,
+          "total_ms": 10.87353399999999,
+          "mean_ms": 0.017537958064516142,
+          "rows": 620,
+          "query": "SELECT id, permissions FROM roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 200,
+          "total_ms": 10.150184999999999,
+          "mean_ms": 0.050750925,
+          "rows": 200,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 198,
+          "total_ms": 9.549187999999994,
+          "mean_ms": 0.04822822222222221,
+          "rows": 0,
+          "query": "SELECT message_id, sticker_id, name, format, asset_path FROM message_stickers WHERE message_id = ANY($1) AND NOT snapshot ORDER BY message_id, position"
+        },
+        {
+          "calls": 398,
+          "total_ms": 9.477836000000007,
+          "mean_ms": 0.023813658291457294,
+          "rows": 398,
+          "query": "SELECT id, name, icon_path, banner_path, owner_id, system_channel_id, tag, tag_badge, tag_color_primary, tag_color_secondary, theme_preset, theme_primary, theme"
+        },
+        {
+          "calls": 198,
+          "total_ms": 9.011002000000001,
+          "mean_ms": 0.04551011111111111,
+          "rows": 198,
+          "query": "INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id, channel_id) DO UPDATE SET last_messa"
+        },
+        {
+          "calls": 202,
+          "total_ms": 8.005614,
+          "mean_ms": 0.03963175247524752,
+          "rows": 202,
+          "query": "SELECT count(*) FROM guild_members WHERE guild_id = $1"
+        },
+        {
+          "calls": 596,
+          "total_ms": 7.562353000000005,
+          "mean_ms": 0.012688511744966451,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1 AND user_id = ANY($2) ORDER BY role_id"
+        },
+        {
+          "calls": 200,
+          "total_ms": 7.481149000000001,
+          "mean_ms": 0.03740574500000001,
+          "rows": 0,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 620,
+          "total_ms": 7.405692999999994,
+          "mean_ms": 0.011944666129032262,
+          "rows": 620,
+          "query": "SELECT owner_id FROM guilds WHERE id = $1"
+        },
+        {
+          "calls": 214,
+          "total_ms": 6.983640000000001,
+          "mean_ms": 0.032633831775700936,
+          "rows": 214,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 198,
+          "total_ms": 6.3191429999999995,
+          "mean_ms": 0.031914863636363644,
+          "rows": 198,
+          "query": "SELECT user_id, nick FROM guild_members WHERE guild_id = $1 AND user_id = ANY($2)"
+        },
+        {
+          "calls": 198,
+          "total_ms": 6.315404999999994,
+          "mean_ms": 0.03189598484848484,
+          "rows": 0,
+          "query": "UPDATE guild_members m SET timeout_until = t.until FROM guild_timeouts t WHERE m.guild_id = $1 AND m.user_id = $2 AND t.guild_id = $1 AND t.user_id = $2 AND t.u"
+        },
+        {
+          "calls": 198,
+          "total_ms": 5.783904999999998,
+          "mean_ms": 0.02921164141414141,
+          "rows": 198,
+          "query": "SELECT join_mode FROM guilds WHERE id = $1 FOR SHARE"
+        },
+        {
+          "calls": 200,
+          "total_ms": 5.744337999999998,
+          "mean_ms": 0.02872169,
+          "rows": 0,
+          "query": "SELECT e.id, e.name, e.animated, e.uploader_id, e.attachment_id, a.key, a.filename FROM emojis e JOIN attachments a ON a.id = e.attachment_id WHERE e.guild_id ="
+        },
+        {
+          "calls": 200,
+          "total_ms": 5.739171000000003,
+          "mean_ms": 0.028695855000000034,
+          "rows": 0,
+          "query": "SELECT id, guild_id, channel_id, topic, privacy_level FROM stage_instances WHERE guild_id = $1 ORDER BY id"
+        },
+        {
+          "calls": 208,
+          "total_ms": 4.877895999999998,
+          "mean_ms": 0.023451423076923085,
+          "rows": 208,
+          "query": "SELECT s.user_id, s.last_used_at < now() - interval $3 FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND u.bot = $2"
+        },
+        {
+          "calls": 198,
+          "total_ms": 3.873371,
+          "mean_ms": 0.01956247979797981,
+          "rows": 0,
+          "query": "SELECT r.message_id, r.emoji_name, r.emoji_id, r.user_id, r.burst, e.animated FROM reactions r LEFT JOIN emojis e ON r.emoji_id <> $2 AND e.id = r.emoji_id WHER"
+        },
+        {
+          "calls": 210,
+          "total_ms": 3.7508490000000005,
+          "mean_ms": 0.017861185714285722,
+          "rows": 0,
+          "query": "SELECT channel_id, target_id, target_type, allow, deny FROM permission_overwrites WHERE channel_id = ANY($1) ORDER BY channel_id, target_type, target_id"
+        },
+        {
+          "calls": 408,
+          "total_ms": 3.053403999999998,
+          "mean_ms": 0.007483833333333336,
+          "rows": 0,
+          "query": "SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 198,
+          "total_ms": 2.916953000000001,
+          "mean_ms": 0.014732085858585856,
+          "rows": 198,
+          "query": "SELECT system_channel_id FROM guilds WHERE id = $1"
+        },
+        {
+          "calls": 200,
+          "total_ms": 2.8942480000000015,
+          "mean_ms": 0.014471239999999998,
+          "rows": 0,
+          "query": "SELECT id, guild_id, name, description, tags, format, asset_path, creator_id FROM stickers WHERE guild_id = ANY($1) ORDER BY id"
+        },
+        {
+          "calls": 200,
+          "total_ms": 2.486786000000003,
+          "mean_ms": 0.012433929999999996,
+          "rows": 0,
+          "query": "SELECT id, guild_id, name, volume, emoji_id, emoji_name, asset_path, creator_id FROM soundboard_sounds WHERE guild_id = ANY($1) ORDER BY id"
+        },
+        {
+          "calls": 198,
+          "total_ms": 2.43271,
+          "mean_ms": 0.012286414141414138,
+          "rows": 198,
+          "query": "SELECT user_id, status, preferred, custom_status, activities FROM presences WHERE user_id = ANY($1)"
+        }
+      ]
+    },
+    {
+      "name": "connect",
+      "seconds": 2.943855894,
+      "histograms": {
+        "identify_ready": {
+          "count": 200,
+          "mean": 402100,
+          "p50": 407255,
+          "p95": 500873,
+          "p99": 508030,
+          "max": 508030
+        },
+        "size:ready_bytes": {
+          "count": 200,
+          "mean": 61629,
+          "p50": 61709,
+          "p95": 61709,
+          "p99": 61709,
+          "max": 61709
+        },
+        "ws_connect": {
+          "count": 200,
+          "mean": 29723,
+          "p50": 19392,
+          "p95": 65156,
+          "p99": 67111,
+          "max": 74590
+        }
+      },
+      "counters": {
+        "recv:presence_other": 14559
+      },
+      "errors": {},
+      "derived": {
+        "connected": 200.0,
+        "limit_hits": 0.0,
+        "requested": 200.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 44.115940614360674,
+          "cpu_max": 92.99880329139924,
+          "rss_max_mib": 195.1953125
+        },
+        "postgres": {
+          "cpu_avg": 38.60144803756559,
+          "cpu_max": 100.12873722176494,
+          "rss_max_mib": 450.9765625
+        },
+        "loadgen": {
+          "cpu_avg": 6.812020241923339,
+          "cpu_max": 14.999806982483749,
+          "rss_max_mib": 36.19921875
+        }
+      },
+      "queries": [
+        {
+          "calls": 200,
+          "total_ms": 91.29575999999994,
+          "mean_ms": 0.45647880000000024,
+          "rows": 20000,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 400,
+          "total_ms": 59.10839699999996,
+          "mean_ms": 0.14777099249999986,
+          "rows": 40000,
+          "query": "SELECT m2.user_id FROM guild_members m1 JOIN guild_members m2 ON m1.guild_id = m2.guild_id WHERE m1.user_id = $1 UNION SELECT other_id FROM relationships WHERE "
+        },
+        {
+          "calls": 400,
+          "total_ms": 35.685463,
+          "mean_ms": 0.08921365749999997,
+          "rows": 2400,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 400,
+          "total_ms": 30.130928000000026,
+          "mean_ms": 0.0753273199999999,
+          "rows": 0,
+          "query": "SELECT o.channel_id, o.target_id, o.target_type, o.allow, o.deny FROM permission_overwrites o JOIN channels c ON c.id = o.channel_id WHERE c.guild_id = $1"
+        },
+        {
+          "calls": 400,
+          "total_ms": 22.96094299999998,
+          "mean_ms": 0.0574023575,
+          "rows": 20200,
+          "query": "SELECT user_id, status, preferred, custom_status, activities FROM presences WHERE user_id = ANY($1)"
+        },
+        {
+          "calls": 200,
+          "total_ms": 15.50640199999999,
+          "mean_ms": 0.07753200999999996,
+          "rows": 0,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 400,
+          "total_ms": 13.44258099999998,
+          "mean_ms": 0.03360645249999996,
+          "rows": 400,
+          "query": "SELECT COALESCE(timeout_until > now(), FALSE) FROM guild_members WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 200,
+          "total_ms": 11.119528999999998,
+          "mean_ms": 0.055597645,
+          "rows": 200,
+          "query": "SELECT count(*) FROM guild_members WHERE guild_id = $1"
+        },
+        {
+          "calls": 200,
+          "total_ms": 10.862169999999997,
+          "mean_ms": 0.05431084999999998,
+          "rows": 200,
+          "query": "INSERT INTO presences (user_id, status, preferred, custom_status, activities) VALUES ($1, $2, $3, $4, COALESCE($8, $9)) ON CONFLICT (user_id) DO UPDATE SET pref"
+        },
+        {
+          "calls": 200,
+          "total_ms": 9.377564000000001,
+          "mean_ms": 0.04688781999999998,
+          "rows": 0,
+          "query": "SELECT c.id, c.kind, c.guild_id, c.name, c.topic, c.position, c.parent_id, c.owner_id, c.icon_path, c.last_message_id, c.archived, c.locked, c.invitable, c.auto"
+        },
+        {
+          "calls": 200,
+          "total_ms": 8.206810999999998,
+          "mean_ms": 0.041034055000000014,
+          "rows": 200,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 400,
+          "total_ms": 7.4589310000000015,
+          "mean_ms": 0.018647327499999974,
+          "rows": 400,
+          "query": "SELECT id, permissions FROM roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 200,
+          "total_ms": 7.358848999999999,
+          "mean_ms": 0.03679424499999999,
+          "rows": 200,
+          "query": "SELECT guild_id FROM guild_members WHERE user_id = $1 ORDER BY joined_at, guild_id"
+        },
+        {
+          "calls": 200,
+          "total_ms": 6.333801000000004,
+          "mean_ms": 0.031669005,
+          "rows": 200,
+          "query": "SELECT s.user_id, s.last_used_at < now() - interval '5 minutes' FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND u.bot = $2"
+        },
+        {
+          "calls": 200,
+          "total_ms": 6.006475000000002,
+          "mean_ms": 0.030032375000000004,
+          "rows": 200,
+          "query": "SELECT id, guild_id, name, color, hoist, position, permissions, mentionable, unicode_emoji FROM roles WHERE guild_id = ANY($1) ORDER BY position, id"
+        },
+        {
+          "calls": 400,
+          "total_ms": 4.817108000000001,
+          "mean_ms": 0.01204277,
+          "rows": 400,
+          "query": "SELECT owner_id FROM guilds WHERE id = $1"
+        },
+        {
+          "calls": 200,
+          "total_ms": 4.518357,
+          "mean_ms": 0.02259178500000001,
+          "rows": 800,
+          "query": "SELECT channel_id, last_message_id, mention_count FROM read_states WHERE user_id = $1 AND channel_id = ANY($2)"
+        },
+        {
+          "calls": 200,
+          "total_ms": 4.237867000000002,
+          "mean_ms": 0.021189334999999997,
+          "rows": 200,
+          "query": "SELECT id, name, icon_path, banner_path, owner_id, system_channel_id, tag, tag_badge, tag_color_primary, tag_color_secondary, theme_preset, theme_primary, theme"
+        },
+        {
+          "calls": 400,
+          "total_ms": 3.5819620000000003,
+          "mean_ms": 0.008954904999999994,
+          "rows": 0,
+          "query": "SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 200,
+          "total_ms": 3.3867029999999994,
+          "mean_ms": 0.016933515000000003,
+          "rows": 0,
+          "query": "SELECT id, guild_id, channel_id, topic, privacy_level FROM stage_instances WHERE guild_id = $1 ORDER BY id"
+        },
+        {
+          "calls": 200,
+          "total_ms": 3.212836,
+          "mean_ms": 0.016064179999999994,
+          "rows": 0,
+          "query": "SELECT channel_id, target_id, target_type, allow, deny FROM permission_overwrites WHERE channel_id = ANY($1) ORDER BY channel_id, target_type, target_id"
+        },
+        {
+          "calls": 200,
+          "total_ms": 3.1599620000000015,
+          "mean_ms": 0.01579980999999999,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1 AND user_id = ANY($2) ORDER BY role_id"
+        },
+        {
+          "calls": 200,
+          "total_ms": 2.698623000000001,
+          "mean_ms": 0.013493115000000002,
+          "rows": 0,
+          "query": "SELECT id, guild_id, name, volume, emoji_id, emoji_name, asset_path, creator_id FROM soundboard_sounds WHERE guild_id = ANY($1) ORDER BY id"
+        },
+        {
+          "calls": 200,
+          "total_ms": 2.6403010000000005,
+          "mean_ms": 0.013201505000000006,
+          "rows": 0,
+          "query": "SELECT other_id, kind FROM relationships WHERE user_id = $1 ORDER BY created_at, other_id"
+        },
+        {
+          "calls": 200,
+          "total_ms": 2.448353000000002,
+          "mean_ms": 0.012241765000000003,
+          "rows": 0,
+          "query": "SELECT id, guild_id, name, description, tags, format, asset_path, creator_id FROM stickers WHERE guild_id = ANY($1) ORDER BY id"
+        },
+        {
+          "calls": 200,
+          "total_ms": 2.3291680000000015,
+          "mean_ms": 0.011645840000000001,
+          "rows": 0,
+          "query": "SELECT e.id, e.name, e.animated, e.uploader_id, e.attachment_id, a.key, a.filename FROM emojis e JOIN attachments a ON a.id = e.attachment_id WHERE e.guild_id ="
+        },
+        {
+          "calls": 200,
+          "total_ms": 1.4988509999999997,
+          "mean_ms": 0.007494254999999999,
+          "rows": 0,
+          "query": "SELECT guild_folders, guild_positions FROM user_guild_layout WHERE user_id = $1"
+        },
+        {
+          "calls": 200,
+          "total_ms": 1.1014419999999998,
+          "mean_ms": 0.005507209999999999,
+          "rows": 0,
+          "query": "SELECT emoji_id, role_id FROM emoji_roles WHERE emoji_id = ANY($1) ORDER BY role_id"
+        }
+      ]
+    },
+    {
+      "name": "send",
+      "seconds": 23.990982445,
+      "histograms": {
+        "delivery:message": {
+          "count": 84000,
+          "mean": 32117,
+          "p50": 28478,
+          "p95": 65156,
+          "p99": 80134,
+          "max": 159276
+        },
+        "rest:send_message": {
+          "count": 840,
+          "mean": 30114,
+          "p50": 26061,
+          "p95": 61416,
+          "p99": 80134,
+          "max": 139407
+        }
+      },
+      "counters": {
+        "expected:message": 84000,
+        "recv:message": 84000,
+        "senders": 40,
+        "sent:message": 840
+      },
+      "errors": {},
+      "derived": {
+        "delivered_ratio:message": 1.0,
+        "deliveries_per_second:message": 3501.31555439934,
+        "limit_hits": 0.0,
+        "sent_per_second:message": 35.0131555439934
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 36.138546647143635,
+          "cpu_max": 45.99198042436539,
+          "rss_max_mib": 266.5390625
+        },
+        "postgres": {
+          "cpu_avg": 27.551994617949187,
+          "cpu_max": 38.9765869980498,
+          "rss_max_mib": 483.296875
+        },
+        "loadgen": {
+          "cpu_avg": 11.254218679041273,
+          "cpu_max": 16.99228343026408,
+          "rss_max_mib": 37.921875
+        }
+      },
+      "queries": [
+        {
+          "calls": 840,
+          "total_ms": 395.99394800000005,
+          "mean_ms": 0.4714213666666666,
+          "rows": 840,
+          "query": "UPDATE channels SET last_message_id = $2, last_activity_at = now() WHERE id = $1"
+        },
+        {
+          "calls": 14454,
+          "total_ms": 385.1991949999975,
+          "mean_ms": 0.026650006572575057,
+          "rows": 14454,
+          "query": "INSERT INTO read_states (user_id, channel_id, mention_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, channel_id) DO UPDATE SET mention_count = read_states.men"
+        },
+        {
+          "calls": 840,
+          "total_ms": 243.815745,
+          "mean_ms": 0.2902568392857149,
+          "rows": 840,
+          "query": "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds,"
+        },
+        {
+          "calls": 840,
+          "total_ms": 77.68795699999995,
+          "mean_ms": 0.09248566309523801,
+          "rows": 840,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 840,
+          "total_ms": 69.73991,
+          "mean_ms": 0.0830237023809522,
+          "rows": 84000,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 60.85213899999999,
+          "mean_ms": 0.07244302261904763,
+          "rows": 840,
+          "query": "SELECT s.user_id, s.last_used_at < now() - interval '5 minutes' FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND u.bot = $2"
+        },
+        {
+          "calls": 840,
+          "total_ms": 60.43207599999995,
+          "mean_ms": 0.07194294761904757,
+          "rows": 840,
+          "query": "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.tts, m.reference_message_id, m.mention_everyone, m.created_at, m.edited_at, m"
+        },
+        {
+          "calls": 840,
+          "total_ms": 59.50817900000004,
+          "mean_ms": 0.07084307023809526,
+          "rows": 0,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1 AND timeout_until > now()"
+        },
+        {
+          "calls": 1680,
+          "total_ms": 51.456996999999966,
+          "mean_ms": 0.030629164880952395,
+          "rows": 1680,
+          "query": "SELECT id, permissions FROM roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 50.73735700000003,
+          "mean_ms": 0.06040161547619049,
+          "rows": 840,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 1680,
+          "total_ms": 49.67140400000002,
+          "mean_ms": 0.029566311904761895,
+          "rows": 1680,
+          "query": "SELECT owner_id FROM guilds WHERE id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 47.896553000000004,
+          "mean_ms": 0.05701970595238096,
+          "rows": 840,
+          "query": "SELECT g.verification_level, g.owner_id, u.created_at, m.joined_at, EXISTS (SELECT $3 FROM member_roles r WHERE r.guild_id = m.guild_id AND r.user_id = m.user_i"
+        },
+        {
+          "calls": 840,
+          "total_ms": 42.02889100000003,
+          "mean_ms": 0.05003439404761906,
+          "rows": 840,
+          "query": "INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES ($1, $2, $3, 0) ON CONFLICT (user_id, channel_id) DO UPDATE SET last_messag"
+        },
+        {
+          "calls": 1680,
+          "total_ms": 39.807193999999996,
+          "mean_ms": 0.023694758333333375,
+          "rows": 1680,
+          "query": "SELECT 1 FROM ONLY \"public\".\"channels\" x WHERE \"id\" OPERATOR(pg_catalog.=) $1 FOR KEY SHARE OF x"
+        },
+        {
+          "calls": 1680,
+          "total_ms": 36.707289999999986,
+          "mean_ms": 0.021849577380952365,
+          "rows": 0,
+          "query": "SELECT target_id, target_type, allow, deny FROM permission_overwrites WHERE channel_id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 35.94284800000006,
+          "mean_ms": 0.04278910476190474,
+          "rows": 0,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 840,
+          "total_ms": 33.05695600000002,
+          "mean_ms": 0.03935351904761899,
+          "rows": 0,
+          "query": "SELECT r.message_id, r.emoji_name, r.emoji_id, r.user_id, r.burst, e.animated FROM reactions r LEFT JOIN emojis e ON r.emoji_id <> 0 AND e.id = r.emoji_id WHERE"
+        },
+        {
+          "calls": 840,
+          "total_ms": 28.401136000000015,
+          "mean_ms": 0.033810876190476256,
+          "rows": 0,
+          "query": "SELECT id, guild_id, name, creator_id, keyword_filter, allow_list, custom_message, enabled, exempt_roles, exempt_channels FROM automod_rules WHERE guild_id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 25.419713999999974,
+          "mean_ms": 0.030261564285714294,
+          "rows": 840,
+          "query": "SELECT user_id, nick FROM guild_members WHERE guild_id = $1 AND user_id = ANY($2)"
+        },
+        {
+          "calls": 840,
+          "total_ms": 24.480030000000003,
+          "mean_ms": 0.029142892857142833,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1 AND user_id = ANY($2) ORDER BY role_id"
+        },
+        {
+          "calls": 840,
+          "total_ms": 24.137146999999995,
+          "mean_ms": 0.02873469880952381,
+          "rows": 0,
+          "query": "SELECT message_id, sticker_id, name, format, asset_path FROM message_stickers WHERE message_id = ANY($1) AND NOT snapshot ORDER BY message_id, position"
+        },
+        {
+          "calls": 840,
+          "total_ms": 22.88844999999999,
+          "mean_ms": 0.02724815476190478,
+          "rows": 840,
+          "query": "SELECT COALESCE(timeout_until > now(), FALSE) FROM guild_members WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 840,
+          "total_ms": 16.53349099999999,
+          "mean_ms": 0.019682727380952364,
+          "rows": 0,
+          "query": "SELECT message_id, user_id FROM message_mentions WHERE message_id = ANY($1) ORDER BY user_id"
+        },
+        {
+          "calls": 840,
+          "total_ms": 16.44417800000002,
+          "mean_ms": 0.019576402380952405,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 16.361704999999965,
+          "mean_ms": 0.019478220238095253,
+          "rows": 0,
+          "query": "SELECT id, message_id, key, filename, content_type, size, width, height, description FROM attachments WHERE message_id = ANY($1) AND NOT snapshot ORDER BY id"
+        },
+        {
+          "calls": 840,
+          "total_ms": 15.484667,
+          "mean_ms": 0.018434127380952375,
+          "rows": 0,
+          "query": "SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 840,
+          "total_ms": 5.465856999999998,
+          "mean_ms": 0.0065069726190476185,
+          "rows": 0,
+          "query": "SELECT message_id, question, allow_multiselect, layout_type, expiry, finalized FROM polls WHERE message_id = ANY($1)"
+        },
+        {
+          "calls": 840,
+          "total_ms": 1.215466,
+          "mean_ms": 0.001446983333333334,
+          "rows": 0,
+          "query": "BEGIN"
+        },
+        {
+          "calls": 840,
+          "total_ms": 1.1960169999999986,
+          "mean_ms": 0.0014238297619047627,
+          "rows": 0,
+          "query": "COMMIT"
+        },
+        {
+          "calls": 5,
+          "total_ms": 0.132709,
+          "mean_ms": 0.026541799999999997,
+          "rows": 0,
+          "query": "SELECT message_id FROM polls WHERE NOT finalized AND expiry <= now() ORDER BY expiry LIMIT 500"
+        },
+        {
+          "calls": 2,
+          "total_ms": 0.020978,
+          "mean_ms": 0.010489,
+          "rows": 0,
+          "query": "UPDATE reminders r SET delivered_at = now() WHERE r.delivered_at IS NULL AND r.remind_at <= now() RETURNING r.id, r.user_id, r.message_id, r.channel_id, (SELECT"
+        }
+      ]
+    },
+    {
+      "name": "typing",
+      "seconds": 23.14538889,
+      "histograms": {
+        "rest:typing": {
+          "count": 1260,
+          "mean": 92004,
+          "p50": 87565,
+          "p95": 188842,
+          "p99": 200342,
+          "max": 221004
+        }
+      },
+      "counters": {
+        "expected:typing": 124740,
+        "recv:typing": 124740,
+        "typers": 60
+      },
+      "errors": {},
+      "derived": {
+        "delivered_ratio:typing": 1.0,
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 21.2137171609248,
+          "cpu_max": 107.6728133914011,
+          "rss_max_mib": 280.25
+        },
+        "postgres": {
+          "cpu_avg": 8.986666332937595,
+          "cpu_max": 30.763660968971745,
+          "rss_max_mib": 483.375
+        },
+        "loadgen": {
+          "cpu_avg": 7.085640762508488,
+          "cpu_max": 46.14549145345762,
+          "rss_max_mib": 40.2265625
+        }
+      },
+      "queries": [
+        {
+          "calls": 1260,
+          "total_ms": 81.90207799999995,
+          "mean_ms": 0.06500164920634913,
+          "rows": 0,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1 AND timeout_until > now()"
+        },
+        {
+          "calls": 1260,
+          "total_ms": 79.70141800000012,
+          "mean_ms": 0.06325509365079376,
+          "rows": 1260,
+          "query": "SELECT s.user_id, s.last_used_at < now() - interval '5 minutes' FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND u.bot = $2"
+        },
+        {
+          "calls": 1260,
+          "total_ms": 78.89029799999985,
+          "mean_ms": 0.06261134761904763,
+          "rows": 126000,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1"
+        },
+        {
+          "calls": 2520,
+          "total_ms": 50.75701799999999,
+          "mean_ms": 0.02014167380952379,
+          "rows": 2520,
+          "query": "SELECT id, permissions FROM roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 1260,
+          "total_ms": 40.177217000000034,
+          "mean_ms": 0.03188668015873013,
+          "rows": 1260,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 2520,
+          "total_ms": 33.992882,
+          "mean_ms": 0.013489238888888882,
+          "rows": 2520,
+          "query": "SELECT owner_id FROM guilds WHERE id = $1"
+        },
+        {
+          "calls": 2520,
+          "total_ms": 29.955444000000035,
+          "mean_ms": 0.01188708095238094,
+          "rows": 0,
+          "query": "SELECT target_id, target_type, allow, deny FROM permission_overwrites WHERE channel_id = $1"
+        },
+        {
+          "calls": 1260,
+          "total_ms": 24.419082000000007,
+          "mean_ms": 0.0193802238095238,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 1260,
+          "total_ms": 18.199624000000036,
+          "mean_ms": 0.01444414603174604,
+          "rows": 1260,
+          "query": "SELECT COALESCE(timeout_until > now(), FALSE) FROM guild_members WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 1260,
+          "total_ms": 11.519286000000001,
+          "mean_ms": 0.00914229047619048,
+          "rows": 0,
+          "query": "SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 5,
+          "total_ms": 0.132447,
+          "mean_ms": 0.026489400000000003,
+          "rows": 0,
+          "query": "SELECT message_id FROM polls WHERE NOT finalized AND expiry <= now() ORDER BY expiry LIMIT $1"
+        },
+        {
+          "calls": 1,
+          "total_ms": 0.01013,
+          "mean_ms": 0.01013,
+          "rows": 0,
+          "query": "UPDATE reminders r SET delivered_at = now() WHERE r.delivered_at IS NULL AND r.remind_at <= now() RETURNING r.id, r.user_id, r.message_id, r.channel_id, (SELECT"
+        }
+      ]
+    },
+    {
+      "name": "presence",
+      "seconds": 24.924642253000002,
+      "histograms": {
+        "delivery:presence": {
+          "count": 30000,
+          "mean": 10479,
+          "p50": 6891,
+          "p95": 34004,
+          "p99": 87565,
+          "max": 159890
+        }
+      },
+      "counters": {
+        "expected:presence": 30000,
+        "recv:presence_other": 10000,
+        "recv:presence_stamped": 30000,
+        "sent:presence": 300
+      },
+      "errors": {},
+      "derived": {
+        "delivered_ratio:presence": 1.0,
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 9.06732468069622,
+          "cpu_max": 16.010902303705663,
+          "rss_max_mib": 280.33984375
+        },
+        "postgres": {
+          "cpu_avg": 1.9659243776730742,
+          "cpu_max": 6.001090626208225,
+          "rss_max_mib": 500.91015625
+        },
+        "loadgen": {
+          "cpu_avg": 3.1695515476769978,
+          "cpu_max": 6.004088363889623,
+          "rss_max_mib": 40.23046875
+        }
+      },
+      "queries": [
+        {
+          "calls": 400,
+          "total_ms": 116.00279500000002,
+          "mean_ms": 0.2900069875,
+          "rows": 40000,
+          "query": "SELECT m2.user_id FROM guild_members m1 JOIN guild_members m2 ON m1.guild_id = m2.guild_id WHERE m1.user_id = $1 UNION SELECT other_id FROM relationships WHERE "
+        },
+        {
+          "calls": 400,
+          "total_ms": 39.932234000000015,
+          "mean_ms": 0.09983058500000004,
+          "rows": 400,
+          "query": "SELECT user_id, status, preferred, custom_status, activities FROM presences WHERE user_id = ANY($1)"
+        },
+        {
+          "calls": 400,
+          "total_ms": 29.271514999999976,
+          "mean_ms": 0.07317878750000001,
+          "rows": 400,
+          "query": "INSERT INTO presences (user_id, status, preferred, custom_status, activities) VALUES ($1, $2, $3, $4, COALESCE($8, $9)) ON CONFLICT (user_id) DO UPDATE SET pref"
+        },
+        {
+          "calls": 5,
+          "total_ms": 0.14429799999999998,
+          "mean_ms": 0.0288596,
+          "rows": 0,
+          "query": "SELECT message_id FROM polls WHERE NOT finalized AND expiry <= now() ORDER BY expiry LIMIT $1"
+        },
+        {
+          "calls": 1,
+          "total_ms": 0.03261,
+          "mean_ms": 0.03261,
+          "rows": 0,
+          "query": "UPDATE channels SET archived = $1, archive_timestamp = now() WHERE kind IN ($2 /*, ... */) AND NOT archived AND COALESCE(last_activity_at, created_at) + COALESC"
+        },
+        {
+          "calls": 2,
+          "total_ms": 0.024846999999999998,
+          "mean_ms": 0.012423499999999999,
+          "rows": 0,
+          "query": "UPDATE reminders r SET delivered_at = now() WHERE r.delivered_at IS NULL AND r.remind_at <= now() RETURNING r.id, r.user_id, r.message_id, r.channel_id, (SELECT"
+        }
+      ]
+    },
+    {
+      "name": "dm",
+      "seconds": 23.18160359,
+      "histograms": {
+        "delivery:dm": {
+          "count": 1680,
+          "mean": 77777,
+          "p50": 75534,
+          "p95": 121210,
+          "p99": 171499,
+          "max": 171499
+        },
+        "rest:open_dm": {
+          "count": 40,
+          "mean": 92810,
+          "p50": 92897,
+          "p95": 96540,
+          "p99": 96540,
+          "max": 96540
+        },
+        "rest:send_dm": {
+          "count": 840,
+          "mean": 77765,
+          "p50": 75534,
+          "p95": 121210,
+          "p99": 171542,
+          "max": 171542
+        }
+      },
+      "counters": {
+        "expected:dm": 1680,
+        "recv:dm": 1680,
+        "recv:other_events": 80,
+        "sent:dm": 840
+      },
+      "errors": {},
+      "derived": {
+        "delivered_ratio:dm": 1.0,
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 10.698126901058444,
+          "cpu_max": 28.774944281262567,
+          "rss_max_mib": 280.44140625
+        },
+        "postgres": {
+          "cpu_avg": 13.717759494099136,
+          "cpu_max": 51.79489970627262,
+          "rss_max_mib": 496.765625
+        },
+        "loadgen": {
+          "cpu_avg": 1.4235410795763253,
+          "cpu_max": 3.452993313751508,
+          "rss_max_mib": 40.6015625
+        }
+      },
+      "queries": [
+        {
+          "calls": 840,
+          "total_ms": 176.73423299999965,
+          "mean_ms": 0.21039789642857118,
+          "rows": 840,
+          "query": "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds,"
+        },
+        {
+          "calls": 840,
+          "total_ms": 90.98632299999998,
+          "mean_ms": 0.10831705119047619,
+          "rows": 840,
+          "query": "UPDATE channels SET last_message_id = $2, last_activity_at = now() WHERE id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 72.99209300000005,
+          "mean_ms": 0.08689534880952382,
+          "rows": 840,
+          "query": "SELECT u.bot, NOT EXISTS (SELECT $3 FROM channel_recipients o WHERE o.channel_id = $1 AND o.user_id <> $2 AND NOT EXISTS (SELECT $4 FROM guild_members a JOIN gu"
+        },
+        {
+          "calls": 960,
+          "total_ms": 70.26884299999985,
+          "mean_ms": 0.07319671145833338,
+          "rows": 960,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 880,
+          "total_ms": 54.35838699999995,
+          "mean_ms": 0.06177089431818179,
+          "rows": 880,
+          "query": "SELECT s.user_id, s.last_used_at < now() - interval '5 minutes' FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND u.bot = $2"
+        },
+        {
+          "calls": 840,
+          "total_ms": 48.86540500000001,
+          "mean_ms": 0.05817310119047619,
+          "rows": 840,
+          "query": "INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id, channel_id) DO UPDATE SET last_messa"
+        },
+        {
+          "calls": 2000,
+          "total_ms": 46.18704100000006,
+          "mean_ms": 0.023093520499999944,
+          "rows": 2000,
+          "query": "SELECT $2 FROM ONLY \"public\".\"channels\" x WHERE \"id\" OPERATOR(pg_catalog.=) $1 FOR KEY SHARE OF x"
+        },
+        {
+          "calls": 840,
+          "total_ms": 45.739130000000024,
+          "mean_ms": 0.05445134523809518,
+          "rows": 840,
+          "query": "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.tts, m.reference_message_id, m.mention_everyone, m.created_at, m.edited_at, m"
+        },
+        {
+          "calls": 960,
+          "total_ms": 34.85912400000005,
+          "mean_ms": 0.03631158749999994,
+          "rows": 960,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 840,
+          "total_ms": 34.771230999999965,
+          "mean_ms": 0.04139432261904756,
+          "rows": 840,
+          "query": "INSERT INTO read_states (user_id, channel_id, mention_count) VALUES ($1, $2, $3) ON CONFLICT (user_id, channel_id) DO UPDATE SET mention_count = read_states.men"
+        },
+        {
+          "calls": 840,
+          "total_ms": 34.09901599999999,
+          "mean_ms": 0.0405940666666667,
+          "rows": 0,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 880,
+          "total_ms": 31.268656000000007,
+          "mean_ms": 0.035532563636363645,
+          "rows": 880,
+          "query": "SELECT EXISTS (SELECT $3 FROM guild_members a JOIN guild_members b ON b.guild_id = a.guild_id AND b.user_id = $2 WHERE a.user_id = $1 AND NOT EXISTS (SELECT $4 "
+        },
+        {
+          "calls": 40,
+          "total_ms": 27.077884,
+          "mean_ms": 0.6769470999999998,
+          "rows": 80,
+          "query": "INSERT INTO channel_recipients (channel_id, user_id, closed) VALUES ($1, $2, $4), ($1, $3, $5)"
+        },
+        {
+          "calls": 840,
+          "total_ms": 22.785340000000005,
+          "mean_ms": 0.027125404761904785,
+          "rows": 0,
+          "query": "SELECT message_id, sticker_id, name, format, asset_path FROM message_stickers WHERE message_id = ANY($1) AND NOT snapshot ORDER BY message_id, position"
+        },
+        {
+          "calls": 840,
+          "total_ms": 22.23346000000002,
+          "mean_ms": 0.026468404761904766,
+          "rows": 0,
+          "query": "SELECT r.message_id, r.emoji_name, r.emoji_id, r.user_id, r.burst, e.animated FROM reactions r LEFT JOIN emojis e ON r.emoji_id <> 0 AND e.id = r.emoji_id WHERE"
+        },
+        {
+          "calls": 840,
+          "total_ms": 20.38592300000002,
+          "mean_ms": 0.024268955952380954,
+          "rows": 1680,
+          "query": "SELECT user_id FROM channel_recipients WHERE channel_id = $1"
+        },
+        {
+          "calls": 40,
+          "total_ms": 19.299104999999997,
+          "mean_ms": 0.48247762499999997,
+          "rows": 80,
+          "query": "INSERT INTO read_states (user_id, channel_id) VALUES ($1, $3), ($2, $3)"
+        },
+        {
+          "calls": 840,
+          "total_ms": 18.454746999999976,
+          "mean_ms": 0.021969936904761896,
+          "rows": 40,
+          "query": "UPDATE channel_recipients SET closed = $2 WHERE channel_id = $1 AND closed RETURNING user_id"
+        },
+        {
+          "calls": 840,
+          "total_ms": 18.265263000000004,
+          "mean_ms": 0.021744360714285708,
+          "rows": 840,
+          "query": "SELECT EXISTS (SELECT $3 FROM channel_recipients r JOIN relationships rel ON rel.kind = $4 AND ((rel.user_id = $2 AND rel.other_id = r.user_id) OR (rel.other_id"
+        },
+        {
+          "calls": 840,
+          "total_ms": 17.683854999999998,
+          "mean_ms": 0.021052208333333343,
+          "rows": 0,
+          "query": "SELECT message_id, user_id FROM message_mentions WHERE message_id = ANY($1) ORDER BY user_id"
+        },
+        {
+          "calls": 840,
+          "total_ms": 16.687630000000013,
+          "mean_ms": 0.01986622619047621,
+          "rows": 840,
+          "query": "SELECT user_id FROM channel_recipients WHERE channel_id = $1 AND user_id <> $2"
+        },
+        {
+          "calls": 840,
+          "total_ms": 15.63648100000001,
+          "mean_ms": 0.01861485833333334,
+          "rows": 0,
+          "query": "SELECT id, message_id, key, filename, content_type, size, width, height, description FROM attachments WHERE message_id = ANY($1) AND NOT snapshot ORDER BY id"
+        },
+        {
+          "calls": 880,
+          "total_ms": 8.721139999999997,
+          "mean_ms": 0.009910386363636376,
+          "rows": 880,
+          "query": "SELECT EXISTS (SELECT $3 FROM relationships WHERE user_id = $1 AND other_id = $2 AND kind = $4)"
+        },
+        {
+          "calls": 880,
+          "total_ms": 7.550033000000002,
+          "mean_ms": 0.008579582954545457,
+          "rows": 0,
+          "query": "SELECT version, settings FROM user_settings WHERE user_id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 6.0178540000000105,
+          "mean_ms": 0.007164111904761907,
+          "rows": 0,
+          "query": "SELECT message_id, question, allow_multiselect, layout_type, expiry, finalized FROM polls WHERE message_id = ANY($1)"
+        },
+        {
+          "calls": 40,
+          "total_ms": 4.531861000000001,
+          "mean_ms": 0.11329652499999998,
+          "rows": 40,
+          "query": "INSERT INTO channels (id, kind) VALUES ($1, $2)"
+        },
+        {
+          "calls": 40,
+          "total_ms": 3.05729,
+          "mean_ms": 0.07643225000000001,
+          "rows": 40,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 120,
+          "total_ms": 3.048072,
+          "mean_ms": 0.025400600000000006,
+          "rows": 120,
+          "query": "SELECT channel_id, user_id FROM channel_recipients WHERE channel_id = ANY($1) AND user_id <> $2 ORDER BY user_id"
+        },
+        {
+          "calls": 880,
+          "total_ms": 0.9133359999999991,
+          "mean_ms": 0.0010378818181818188,
+          "rows": 0,
+          "query": "COMMIT"
+        },
+        {
+          "calls": 880,
+          "total_ms": 0.5826099999999999,
+          "mean_ms": 0.0006620568181818186,
+          "rows": 0,
+          "query": "BEGIN"
+        },
+        {
+          "calls": 40,
+          "total_ms": 0.4044750000000001,
+          "mean_ms": 0.010111875,
+          "rows": 0,
+          "query": "SELECT c.id FROM channels c WHERE c.kind = $3 AND EXISTS (SELECT $4 FROM channel_recipients r WHERE r.channel_id = c.id AND r.user_id = $1) AND EXISTS (SELECT $"
+        },
+        {
+          "calls": 40,
+          "total_ms": 0.318947,
+          "mean_ms": 0.007973675,
+          "rows": 40,
+          "query": "SELECT bot FROM users WHERE id = $1"
+        },
+        {
+          "calls": 40,
+          "total_ms": 0.3139240000000001,
+          "mean_ms": 0.0078481,
+          "rows": 40,
+          "query": "SELECT EXISTS (SELECT $3 FROM relationships WHERE kind = $4 AND ((user_id = $1 AND other_id = $2) OR (user_id = $2 AND other_id = $1)))"
+        },
+        {
+          "calls": 4,
+          "total_ms": 0.08077000000000001,
+          "mean_ms": 0.020192500000000002,
+          "rows": 0,
+          "query": "SELECT message_id FROM polls WHERE NOT finalized AND expiry <= now() ORDER BY expiry LIMIT $1"
+        },
+        {
+          "calls": 1,
+          "total_ms": 0.010298,
+          "mean_ms": 0.010298,
+          "rows": 0,
+          "query": "UPDATE reminders r SET delivered_at = now() WHERE r.delivered_at IS NULL AND r.remind_at <= now() RETURNING r.id, r.user_id, r.message_id, r.channel_id, (SELECT"
+        }
+      ]
+    },
+    {
+      "name": "reactions",
+      "seconds": 23.931613446,
+      "histograms": {
+        "delivery:reaction": {
+          "count": 41000,
+          "mean": 12641,
+          "p50": 11391,
+          "p95": 22481,
+          "p99": 38272,
+          "max": 55995
+        },
+        "rest:reaction_add": {
+          "count": 410,
+          "mean": 12081,
+          "p50": 10737,
+          "p95": 21190,
+          "p99": 33014,
+          "max": 45985
+        },
+        "rest:reaction_remove": {
+          "count": 410,
+          "mean": 12374,
+          "p50": 11391,
+          "p95": 24565,
+          "p99": 34004,
+          "max": 41216
+        },
+        "rest:send_message": {
+          "count": 20,
+          "mean": 80269,
+          "p50": 82538,
+          "p95": 93619,
+          "p99": 93619,
+          "max": 93619
+        }
+      },
+      "counters": {
+        "expected:reaction": 41000,
+        "recv:reaction": 41000,
+        "recv:reaction_remove": 41000
+      },
+      "errors": {},
+      "derived": {
+        "delivered_ratio:reaction": 1.0,
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 24.90426532770748,
+          "cpu_max": 41.79158541577103,
+          "rss_max_mib": 280.62890625
+        },
+        "postgres": {
+          "cpu_avg": 11.950704502893187,
+          "cpu_max": 31.34368906182827,
+          "rss_max_mib": 502.109375
+        },
+        "loadgen": {
+          "cpu_avg": 11.49106202201268,
+          "cpu_max": 16.962085176828875,
+          "rss_max_mib": 40.6015625
+        }
+      },
+      "queries": [
+        {
+          "calls": 20,
+          "total_ms": 175.303505,
+          "mean_ms": 8.76517525,
+          "rows": 20,
+          "query": "UPDATE channels SET last_message_id = $2, last_activity_at = now() WHERE id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 65.90758500000007,
+          "mean_ms": 0.07846141071428561,
+          "rows": 840,
+          "query": "SELECT s.user_id, s.last_used_at < now() - interval '5 minutes' FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND u.bot = $2"
+        },
+        {
+          "calls": 840,
+          "total_ms": 65.81715000000007,
+          "mean_ms": 0.07835375,
+          "rows": 84000,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 58.85026600000006,
+          "mean_ms": 0.07005984047619045,
+          "rows": 840,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 410,
+          "total_ms": 55.315363999999946,
+          "mean_ms": 0.13491552195121947,
+          "rows": 410,
+          "query": "INSERT INTO reactions (message_id, user_id, emoji_name, emoji_id, burst) SELECT $1, $4, $2, $3, $5 WHERE NOT EXISTS (SELECT $6 FROM reactions WHERE message_id ="
+        },
+        {
+          "calls": 1680,
+          "total_ms": 51.362948999999986,
+          "mean_ms": 0.030573183928571435,
+          "rows": 1680,
+          "query": "SELECT id, permissions FROM roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 49.18523700000002,
+          "mean_ms": 0.058553853571428637,
+          "rows": 0,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1 AND timeout_until > now()"
+        },
+        {
+          "calls": 1680,
+          "total_ms": 37.22195099999996,
+          "mean_ms": 0.022155923214285743,
+          "rows": 0,
+          "query": "SELECT target_id, target_type, allow, deny FROM permission_overwrites WHERE channel_id = $1"
+        },
+        {
+          "calls": 1680,
+          "total_ms": 35.495198000000016,
+          "mean_ms": 0.021128094047619075,
+          "rows": 1680,
+          "query": "SELECT owner_id FROM guilds WHERE id = $1"
+        },
+        {
+          "calls": 820,
+          "total_ms": 21.859392000000003,
+          "mean_ms": 0.026657795121951235,
+          "rows": 820,
+          "query": "SELECT id FROM messages WHERE id = $1 AND channel_id = $2"
+        },
+        {
+          "calls": 840,
+          "total_ms": 20.028458,
+          "mean_ms": 0.023843402380952367,
+          "rows": 840,
+          "query": "SELECT COALESCE(timeout_until > now(), FALSE) FROM guild_members WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 410,
+          "total_ms": 19.420368000000014,
+          "mean_ms": 0.04736675121951221,
+          "rows": 410,
+          "query": "DELETE FROM reactions WHERE message_id = $1 AND user_id = $4 AND emoji_id = $3 AND ($3 <> $6 OR emoji_name = $2) AND burst = $5 RETURNING emoji_name"
+        },
+        {
+          "calls": 410,
+          "total_ms": 15.144116,
+          "mean_ms": 0.036936868292682966,
+          "rows": 410,
+          "query": "SELECT count(DISTINCT CASE WHEN emoji_id = $4 THEN emoji_name ELSE emoji_id::TEXT END), COALESCE(bool_or(emoji_id = $3 AND ($3 <> $5 OR emoji_name = $2)), $6) F"
+        },
+        {
+          "calls": 840,
+          "total_ms": 14.8865,
+          "mean_ms": 0.017722023809523816,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 840,
+          "total_ms": 11.374311999999998,
+          "mean_ms": 0.01354084761904761,
+          "rows": 0,
+          "query": "SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 450,
+          "total_ms": 10.031419999999997,
+          "mean_ms": 0.02229204444444444,
+          "rows": 450,
+          "query": "SELECT 1 FROM ONLY \"public\".\"channels\" x WHERE \"id\" OPERATOR(pg_catalog.=) $1 FOR KEY SHARE OF x"
+        },
+        {
+          "calls": 20,
+          "total_ms": 4.636308,
+          "mean_ms": 0.2318154,
+          "rows": 20,
+          "query": "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds,"
+        },
+        {
+          "calls": 20,
+          "total_ms": 3.403971,
+          "mean_ms": 0.17019854999999998,
+          "rows": 0,
+          "query": "SELECT message_id, user_id FROM message_mentions WHERE message_id = ANY($1) ORDER BY user_id"
+        },
+        {
+          "calls": 410,
+          "total_ms": 2.9686769999999982,
+          "mean_ms": 0.007240675609756097,
+          "rows": 0,
+          "query": "SELECT id, animated FROM emojis WHERE id = ANY($1)"
+        },
+        {
+          "calls": 20,
+          "total_ms": 2.407749,
+          "mean_ms": 0.12038745000000002,
+          "rows": 20,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 20,
+          "total_ms": 1.9741469999999999,
+          "mean_ms": 0.09870735000000001,
+          "rows": 0,
+          "query": "SELECT message_id, sticker_id, name, format, asset_path FROM message_stickers WHERE message_id = ANY($1) AND NOT snapshot ORDER BY message_id, position"
+        },
+        {
+          "calls": 20,
+          "total_ms": 1.479163,
+          "mean_ms": 0.07395815,
+          "rows": 20,
+          "query": "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.tts, m.reference_message_id, m.mention_everyone, m.created_at, m.edited_at, m"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.9898530000000001,
+          "mean_ms": 0.04949265,
+          "rows": 20,
+          "query": "INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES ($1, $2, $3, 0) ON CONFLICT (user_id, channel_id) DO UPDATE SET last_messag"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.7323550000000001,
+          "mean_ms": 0.036617750000000004,
+          "rows": 20,
+          "query": "SELECT g.verification_level, g.owner_id, u.created_at, m.joined_at, EXISTS (SELECT 1 FROM member_roles r WHERE r.guild_id = m.guild_id AND r.user_id = m.user_id"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.6970330000000001,
+          "mean_ms": 0.034851650000000005,
+          "rows": 0,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.47538900000000006,
+          "mean_ms": 0.02376945,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1 AND user_id = ANY($2) ORDER BY role_id"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.4013900000000001,
+          "mean_ms": 0.020069500000000004,
+          "rows": 0,
+          "query": "SELECT r.message_id, r.emoji_name, r.emoji_id, r.user_id, r.burst, e.animated FROM reactions r LEFT JOIN emojis e ON r.emoji_id <> 0 AND e.id = r.emoji_id WHERE"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.39541899999999996,
+          "mean_ms": 0.01977095,
+          "rows": 0,
+          "query": "SELECT id, guild_id, name, creator_id, keyword_filter, allow_list, custom_message, enabled, exempt_roles, exempt_channels FROM automod_rules WHERE guild_id = $1"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.35262099999999996,
+          "mean_ms": 0.01763105,
+          "rows": 20,
+          "query": "SELECT user_id, nick FROM guild_members WHERE guild_id = $1 AND user_id = ANY($2)"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.263519,
+          "mean_ms": 0.01317595,
+          "rows": 0,
+          "query": "SELECT id, message_id, key, filename, content_type, size, width, height, description FROM attachments WHERE message_id = ANY($1) AND NOT snapshot ORDER BY id"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.256609,
+          "mean_ms": 0.012830450000000002,
+          "rows": 0,
+          "query": "SELECT message_id, question, allow_multiselect, layout_type, expiry, finalized FROM polls WHERE message_id = ANY($1)"
+        },
+        {
+          "calls": 5,
+          "total_ms": 0.164418,
+          "mean_ms": 0.0328836,
+          "rows": 0,
+          "query": "SELECT message_id FROM polls WHERE NOT finalized AND expiry <= now() ORDER BY expiry LIMIT 500"
+        },
+        {
+          "calls": 2,
+          "total_ms": 0.049223,
+          "mean_ms": 0.0246115,
+          "rows": 0,
+          "query": "UPDATE reminders r SET delivered_at = now() WHERE r.delivered_at IS NULL AND r.remind_at <= now() RETURNING r.id, r.user_id, r.message_id, r.channel_id, (SELECT"
+        },
+        {
+          "calls": 1,
+          "total_ms": 0.043751000000000005,
+          "mean_ms": 0.043751000000000005,
+          "rows": 0,
+          "query": "UPDATE channels SET archived = $1, archive_timestamp = now() WHERE kind IN ($2 /*, ... */) AND NOT archived AND COALESCE(last_activity_at, created_at) + COALESC"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.012374999999999999,
+          "mean_ms": 0.0006187499999999999,
+          "rows": 0,
+          "query": "COMMIT"
+        },
+        {
+          "calls": 20,
+          "total_ms": 0.012042,
+          "mean_ms": 0.0006020999999999999,
+          "rows": 0,
+          "query": "BEGIN"
+        }
+      ]
+    },
+    {
+      "name": "voice",
+      "seconds": 25.876543213,
+      "histograms": {
+        "delivery:voice_state": {
+          "count": 13300,
+          "mean": 14915,
+          "p50": 13601,
+          "p95": 27649,
+          "p99": 41821,
+          "max": 68256
+        },
+        "voice:join_server_update": {
+          "count": 133,
+          "mean": 14618,
+          "p50": 13205,
+          "p95": 27649,
+          "p99": 35024,
+          "max": 38011
+        }
+      },
+      "counters": {
+        "expected:voice_state": 13300,
+        "recv:voice_leave": 13300,
+        "recv:voice_state": 13300,
+        "sent:voice_join": 133
+      },
+      "errors": {},
+      "derived": {
+        "delivered_ratio:voice_state": 1.0,
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 8.463257256398665,
+          "cpu_max": 13.015050839061207,
+          "rss_max_mib": 280.83984375
+        },
+        "postgres": {
+          "cpu_avg": 3.825856020015835,
+          "cpu_max": 8.005834003349086,
+          "rss_max_mib": 504.94921875
+        },
+        "loadgen": {
+          "cpu_avg": 2.9756657933456494,
+          "cpu_max": 5.003646252093179,
+          "rss_max_mib": 40.6015625
+        }
+      },
+      "queries": [
+        {
+          "calls": 532,
+          "total_ms": 25.016751999999986,
+          "mean_ms": 0.04702396992481205,
+          "rows": 532,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 266,
+          "total_ms": 19.932390999999996,
+          "mean_ms": 0.0749338007518797,
+          "rows": 26600,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1"
+        },
+        {
+          "calls": 266,
+          "total_ms": 16.785000999999994,
+          "mean_ms": 0.06310150751879698,
+          "rows": 266,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 266,
+          "total_ms": 15.040244999999999,
+          "mean_ms": 0.05654227443609022,
+          "rows": 0,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1 AND timeout_until > now()"
+        },
+        {
+          "calls": 532,
+          "total_ms": 14.92861199999998,
+          "mean_ms": 0.028061300751879688,
+          "rows": 532,
+          "query": "SELECT id, permissions FROM roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 532,
+          "total_ms": 14.894427000000011,
+          "mean_ms": 0.027997043233082716,
+          "rows": 532,
+          "query": "SELECT owner_id FROM guilds WHERE id = $1"
+        },
+        {
+          "calls": 266,
+          "total_ms": 9.173257999999997,
+          "mean_ms": 0.03448593233082708,
+          "rows": 266,
+          "query": "SELECT COALESCE(timeout_until > now(), FALSE) FROM guild_members WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 399,
+          "total_ms": 7.573024000000007,
+          "mean_ms": 0.01898001002506267,
+          "rows": 0,
+          "query": "SELECT target_id, target_type, allow, deny FROM permission_overwrites WHERE channel_id = $1"
+        },
+        {
+          "calls": 133,
+          "total_ms": 6.693345999999996,
+          "mean_ms": 0.05032590977443611,
+          "rows": 133,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 266,
+          "total_ms": 5.935324999999995,
+          "mean_ms": 0.02231325187969925,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1 AND user_id = ANY($2) ORDER BY role_id"
+        },
+        {
+          "calls": 266,
+          "total_ms": 4.863321000000002,
+          "mean_ms": 0.018283161654135342,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 266,
+          "total_ms": 4.596415,
+          "mean_ms": 0.017279755639097755,
+          "rows": 0,
+          "query": "SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 133,
+          "total_ms": 2.9407179999999995,
+          "mean_ms": 0.022110661654135343,
+          "rows": 133,
+          "query": "SELECT mute, deaf FROM guild_members WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 133,
+          "total_ms": 2.401875999999999,
+          "mean_ms": 0.018059218045112787,
+          "rows": 0,
+          "query": "SELECT sound_id, source_guild_id FROM entrance_sounds WHERE user_id = $1 AND scope_guild_id IN ($2 /*, ... */) ORDER BY scope_guild_id DESC LIMIT $3"
+        },
+        {
+          "calls": 64,
+          "total_ms": 0.6292899999999999,
+          "mean_ms": 0.009832656249999999,
+          "rows": 0,
+          "query": "DELETE FROM stage_instances WHERE channel_id = $1 RETURNING id, guild_id, channel_id, topic, privacy_level"
+        },
+        {
+          "calls": 5,
+          "total_ms": 0.151043,
+          "mean_ms": 0.030208600000000002,
+          "rows": 0,
+          "query": "SELECT message_id FROM polls WHERE NOT finalized AND expiry <= now() ORDER BY expiry LIMIT $1"
+        },
+        {
+          "calls": 2,
+          "total_ms": 0.075631,
+          "mean_ms": 0.0378155,
+          "rows": 0,
+          "query": "UPDATE channels SET voice_status = $2 WHERE id = $1 AND voice_status IS NOT NULL RETURNING guild_id"
+        },
+        {
+          "calls": 2,
+          "total_ms": 0.016471,
+          "mean_ms": 0.0082355,
+          "rows": 0,
+          "query": "UPDATE reminders r SET delivered_at = now() WHERE r.delivered_at IS NULL AND r.remind_at <= now() RETURNING r.id, r.user_id, r.message_id, r.channel_id, (SELECT"
+        }
+      ]
+    },
+    {
+      "name": "history",
+      "seconds": 0.492802475,
+      "histograms": {
+        "rest:history_page": {
+          "count": 93,
+          "mean": 62227,
+          "p50": 63258,
+          "p95": 98555,
+          "p99": 99664,
+          "max": 99664
+        }
+      },
+      "counters": {
+        "history:messages": 7004,
+        "history:pages": 93,
+        "readers": 40
+      },
+      "errors": {},
+      "derived": {
+        "limit_hits": 0.0
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 64.93371447719221,
+          "cpu_max": 64.93371447719221,
+          "rss_max_mib": 283.69921875
+        },
+        "postgres": {
+          "cpu_avg": 60.875357322367705,
+          "cpu_max": 60.875357322367705,
+          "rss_max_mib": 505.23046875
+        },
+        "loadgen": {
+          "cpu_avg": 24.35014292894708,
+          "cpu_max": 24.35014292894708,
+          "rss_max_mib": 61.94921875
+        }
+      },
+      "queries": [
+        {
+          "calls": 93,
+          "total_ms": 27.905884999999987,
+          "mean_ms": 0.3000632795698924,
+          "rows": 7004,
+          "query": "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.tts, m.reference_message_id, m.mention_everyone, m.created_at, m.edited_at, m"
+        },
+        {
+          "calls": 93,
+          "total_ms": 13.338021,
+          "mean_ms": 0.14341958064516125,
+          "rows": 2811,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 93,
+          "total_ms": 6.583345999999998,
+          "mean_ms": 0.0707886666666667,
+          "rows": 93,
+          "query": "SELECT s.user_id, s.last_used_at < now() - interval '5 minutes' FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND u.bot = $2"
+        },
+        {
+          "calls": 93,
+          "total_ms": 5.982190999999999,
+          "mean_ms": 0.06432463440860217,
+          "rows": 2811,
+          "query": "SELECT user_id, nick FROM guild_members WHERE guild_id = $1 AND user_id = ANY($2)"
+        },
+        {
+          "calls": 93,
+          "total_ms": 3.394774,
+          "mean_ms": 0.03650294623655915,
+          "rows": 0,
+          "query": "SELECT message_id, sticker_id, name, format, asset_path FROM message_stickers WHERE message_id = ANY($1) AND NOT snapshot ORDER BY message_id, position"
+        },
+        {
+          "calls": 93,
+          "total_ms": 2.745302999999999,
+          "mean_ms": 0.029519387096774184,
+          "rows": 93,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 93,
+          "total_ms": 2.566154,
+          "mean_ms": 0.02759305376344086,
+          "rows": 0,
+          "query": "SELECT message_id, question, allow_multiselect, layout_type, expiry, finalized FROM polls WHERE message_id = ANY($1)"
+        },
+        {
+          "calls": 93,
+          "total_ms": 2.5059370000000007,
+          "mean_ms": 0.026945559139784955,
+          "rows": 0,
+          "query": "SELECT message_id, user_id FROM message_mentions WHERE message_id = ANY($1) ORDER BY user_id"
+        },
+        {
+          "calls": 93,
+          "total_ms": 2.329851,
+          "mean_ms": 0.02505216129032259,
+          "rows": 0,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 93,
+          "total_ms": 1.9223909999999995,
+          "mean_ms": 0.020670870967741936,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1 AND user_id = ANY($2) ORDER BY role_id"
+        },
+        {
+          "calls": 93,
+          "total_ms": 1.5625740000000004,
+          "mean_ms": 0.01680187096774193,
+          "rows": 93,
+          "query": "SELECT id, permissions FROM roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 93,
+          "total_ms": 1.2582069999999994,
+          "mean_ms": 0.01352910752688172,
+          "rows": 0,
+          "query": "SELECT target_id, target_type, allow, deny FROM permission_overwrites WHERE channel_id = $1"
+        },
+        {
+          "calls": 93,
+          "total_ms": 1.2581130000000003,
+          "mean_ms": 0.013528096774193548,
+          "rows": 93,
+          "query": "SELECT COALESCE(timeout_until > now(), FALSE) FROM guild_members WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 93,
+          "total_ms": 1.0575,
+          "mean_ms": 0.011370967741935486,
+          "rows": 93,
+          "query": "SELECT owner_id FROM guilds WHERE id = $1"
+        },
+        {
+          "calls": 93,
+          "total_ms": 0.9057670000000001,
+          "mean_ms": 0.009739430107526889,
+          "rows": 0,
+          "query": "SELECT r.message_id, r.emoji_name, r.emoji_id, r.user_id, r.burst, e.animated FROM reactions r LEFT JOIN emojis e ON r.emoji_id <> $2 AND e.id = r.emoji_id WHER"
+        },
+        {
+          "calls": 93,
+          "total_ms": 0.8525750000000003,
+          "mean_ms": 0.009167473118279569,
+          "rows": 0,
+          "query": "SELECT id, message_id, key, filename, content_type, size, width, height, description FROM attachments WHERE message_id = ANY($1) AND NOT snapshot ORDER BY id"
+        },
+        {
+          "calls": 93,
+          "total_ms": 0.7946239999999998,
+          "mean_ms": 0.008544344086021505,
+          "rows": 0,
+          "query": "SELECT payload::text FROM ephemeral_messages WHERE channel_id = $1 AND recipient_id = $2 AND id >= $3 AND id <= $4 ORDER BY id DESC LIMIT $5"
+        },
+        {
+          "calls": 93,
+          "total_ms": 0.6474280000000003,
+          "mean_ms": 0.006961591397849464,
+          "rows": 0,
+          "query": "SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 1,
+          "total_ms": 0.020158,
+          "mean_ms": 0.020158,
+          "rows": 0,
+          "query": "SELECT message_id FROM polls WHERE NOT finalized AND expiry <= now() ORDER BY expiry LIMIT 500"
+        }
+      ]
+    },
+    {
+      "name": "reconnect",
+      "seconds": 15.9868593,
+      "histograms": {
+        "delivery:message": {
+          "count": 52000,
+          "mean": 109301,
+          "p50": 22481,
+          "p95": 803754,
+          "p99": 1838931,
+          "max": 2150704
+        },
+        "reidentify": {
+          "count": 0,
+          "mean": 0,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "rest:send_message": {
+          "count": 520,
+          "mean": 26471,
+          "p50": 21826,
+          "p95": 56204,
+          "p99": 140516,
+          "max": 164125
+        },
+        "resume": {
+          "count": 100,
+          "mean": 140608,
+          "p50": 136423,
+          "p95": 188842,
+          "p99": 194507,
+          "max": 196334
+        },
+        "ws_connect": {
+          "count": 100,
+          "mean": 3516,
+          "p50": 2924,
+          "p95": 8730,
+          "p99": 10120,
+          "max": 10472
+        }
+      },
+      "counters": {
+        "expected:message": 52000,
+        "recv:message": 52000,
+        "recv:presence_other": 20000,
+        "resumed": 100,
+        "senders": 40,
+        "sent:message": 520,
+        "storm:victims": 100
+      },
+      "errors": {},
+      "derived": {
+        "delivered_ratio:message": 1.0,
+        "deliveries_per_second:message": 3252.6713986905484,
+        "limit_hits": 0.0,
+        "sent_per_second:message": 32.526713986905484
+      },
+      "resources": {
+        "server": {
+          "cpu_avg": 31.588405955762727,
+          "cpu_max": 57.9876102512185,
+          "rss_max_mib": 295.04296875
+        },
+        "postgres": {
+          "cpu_avg": 20.26662085082599,
+          "cpu_max": 33.99828080893434,
+          "rss_max_mib": 507.68359375
+        },
+        "loadgen": {
+          "cpu_avg": 10.195861724335296,
+          "cpu_max": 18.99594128919227,
+          "rss_max_mib": 61.94921875
+        }
+      },
+      "queries": [
+        {
+          "calls": 520,
+          "total_ms": 215.03794599999995,
+          "mean_ms": 0.413534511538462,
+          "rows": 520,
+          "query": "UPDATE channels SET last_message_id = $2, last_activity_at = now() WHERE id = $1"
+        },
+        {
+          "calls": 520,
+          "total_ms": 129.77409899999998,
+          "mean_ms": 0.2495655750000002,
+          "rows": 520,
+          "query": "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds,"
+        },
+        {
+          "calls": 520,
+          "total_ms": 59.33964400000001,
+          "mean_ms": 0.11411470000000001,
+          "rows": 520,
+          "query": "SELECT u.id, u.username, u.global_name, u.avatar_path, u.banner_color, u.bio, u.bot, u.banner_path, u.pronouns, u.theme_primary, u.theme_accent, u.avatar_decora"
+        },
+        {
+          "calls": 620,
+          "total_ms": 53.75119500000002,
+          "mean_ms": 0.08669547580645162,
+          "rows": 620,
+          "query": "SELECT s.user_id, s.last_used_at < now() - interval '5 minutes' FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND u.bot = $2"
+        },
+        {
+          "calls": 520,
+          "total_ms": 44.89664699999997,
+          "mean_ms": 0.08633970576923075,
+          "rows": 520,
+          "query": "SELECT m.id, m.channel_id, c.guild_id, m.author_id, m.content, m.kind, m.pinned, m.tts, m.reference_message_id, m.mention_everyone, m.created_at, m.edited_at, m"
+        },
+        {
+          "calls": 200,
+          "total_ms": 43.26011200000003,
+          "mean_ms": 0.21630056,
+          "rows": 20000,
+          "query": "SELECT m2.user_id FROM guild_members m1 JOIN guild_members m2 ON m1.guild_id = m2.guild_id WHERE m1.user_id = $1 UNION SELECT other_id FROM relationships WHERE "
+        },
+        {
+          "calls": 520,
+          "total_ms": 37.77765500000001,
+          "mean_ms": 0.07264933653846149,
+          "rows": 52000,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1"
+        },
+        {
+          "calls": 520,
+          "total_ms": 32.52231000000005,
+          "mean_ms": 0.06254290384615387,
+          "rows": 520,
+          "query": "SELECT g.verification_level, g.owner_id, u.created_at, m.joined_at, EXISTS (SELECT 1 FROM member_roles r WHERE r.guild_id = m.guild_id AND r.user_id = m.user_id"
+        },
+        {
+          "calls": 520,
+          "total_ms": 31.397719999999985,
+          "mean_ms": 0.060380230769230846,
+          "rows": 0,
+          "query": "SELECT user_id FROM guild_members WHERE guild_id = $1 AND timeout_until > now()"
+        },
+        {
+          "calls": 520,
+          "total_ms": 31.033922999999987,
+          "mean_ms": 0.05968062115384614,
+          "rows": 520,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 520,
+          "total_ms": 31.018895999999998,
+          "mean_ms": 0.0596517230769231,
+          "rows": 0,
+          "query": "SELECT id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, auto_archive_duration, default_a"
+        },
+        {
+          "calls": 1040,
+          "total_ms": 30.478595999999996,
+          "mean_ms": 0.029306342307692333,
+          "rows": 1040,
+          "query": "SELECT id, permissions FROM roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 1040,
+          "total_ms": 24.400755999999983,
+          "mean_ms": 0.02346226538461537,
+          "rows": 1040,
+          "query": "SELECT $2 FROM ONLY \"public\".\"channels\" x WHERE \"id\" OPERATOR(pg_catalog.=) $1 FOR KEY SHARE OF x"
+        },
+        {
+          "calls": 1040,
+          "total_ms": 22.656060999999966,
+          "mean_ms": 0.021784674038461557,
+          "rows": 0,
+          "query": "SELECT target_id, target_type, allow, deny FROM permission_overwrites WHERE channel_id = $1"
+        },
+        {
+          "calls": 1040,
+          "total_ms": 22.176804,
+          "mean_ms": 0.021323850000000023,
+          "rows": 1040,
+          "query": "SELECT owner_id FROM guilds WHERE id = $1"
+        },
+        {
+          "calls": 520,
+          "total_ms": 21.105989000000008,
+          "mean_ms": 0.0405884403846154,
+          "rows": 520,
+          "query": "INSERT INTO read_states (user_id, channel_id, last_message_id, mention_count) VALUES ($1, $2, $3, $4) ON CONFLICT (user_id, channel_id) DO UPDATE SET last_messa"
+        },
+        {
+          "calls": 520,
+          "total_ms": 16.135159000000016,
+          "mean_ms": 0.031029151923076925,
+          "rows": 0,
+          "query": "SELECT id, guild_id, name, creator_id, keyword_filter, allow_list, custom_message, enabled, exempt_roles, exempt_channels FROM automod_rules WHERE guild_id = $1"
+        },
+        {
+          "calls": 520,
+          "total_ms": 15.602610999999992,
+          "mean_ms": 0.030005021153846158,
+          "rows": 0,
+          "query": "SELECT message_id, sticker_id, name, format, asset_path FROM message_stickers WHERE message_id = ANY($1) AND NOT snapshot ORDER BY message_id, position"
+        },
+        {
+          "calls": 520,
+          "total_ms": 14.493638999999998,
+          "mean_ms": 0.027872382692307685,
+          "rows": 0,
+          "query": "SELECT message_id, user_id FROM message_mentions WHERE message_id = ANY($1) ORDER BY user_id"
+        },
+        {
+          "calls": 520,
+          "total_ms": 14.450282,
+          "mean_ms": 0.02778900384615384,
+          "rows": 0,
+          "query": "SELECT id, message_id, key, filename, content_type, size, width, height, description FROM attachments WHERE message_id = ANY($1) AND NOT snapshot ORDER BY id"
+        },
+        {
+          "calls": 520,
+          "total_ms": 12.715780000000002,
+          "mean_ms": 0.024453423076923088,
+          "rows": 520,
+          "query": "SELECT COALESCE(timeout_until > now(), FALSE) FROM guild_members WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 520,
+          "total_ms": 12.60694999999999,
+          "mean_ms": 0.02424413461538464,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1"
+        },
+        {
+          "calls": 520,
+          "total_ms": 11.660851000000012,
+          "mean_ms": 0.022424713461538445,
+          "rows": 520,
+          "query": "SELECT user_id, nick FROM guild_members WHERE guild_id = $1 AND user_id = ANY($2)"
+        },
+        {
+          "calls": 520,
+          "total_ms": 11.306820000000002,
+          "mean_ms": 0.021743884615384623,
+          "rows": 0,
+          "query": "SELECT r.message_id, r.emoji_name, r.emoji_id, r.user_id, r.burst, e.animated FROM reactions r LEFT JOIN emojis e ON r.emoji_id <> 0 AND e.id = r.emoji_id WHERE"
+        },
+        {
+          "calls": 200,
+          "total_ms": 10.111550000000003,
+          "mean_ms": 0.05055774999999998,
+          "rows": 200,
+          "query": "INSERT INTO presences (user_id, status, preferred, custom_status, activities) VALUES ($1, $2, $3, $4, COALESCE($8, $9)) ON CONFLICT (user_id) DO UPDATE SET pref"
+        },
+        {
+          "calls": 200,
+          "total_ms": 10.048787999999998,
+          "mean_ms": 0.050243939999999994,
+          "rows": 200,
+          "query": "SELECT user_id, status, preferred, custom_status, activities FROM presences WHERE user_id = ANY($1)"
+        },
+        {
+          "calls": 520,
+          "total_ms": 9.6715,
+          "mean_ms": 0.018599038461538448,
+          "rows": 0,
+          "query": "SELECT user_id, role_id FROM member_roles WHERE guild_id = $1 AND user_id = ANY($2) ORDER BY role_id"
+        },
+        {
+          "calls": 520,
+          "total_ms": 7.243319999999996,
+          "mean_ms": 0.013929461538461535,
+          "rows": 0,
+          "query": "SELECT role_id FROM member_roles WHERE guild_id = $1 AND user_id = $2"
+        },
+        {
+          "calls": 520,
+          "total_ms": 3.161056,
+          "mean_ms": 0.0060789538461538456,
+          "rows": 0,
+          "query": "SELECT message_id, question, allow_multiselect, layout_type, expiry, finalized FROM polls WHERE message_id = ANY($1)"
+        },
+        {
+          "calls": 100,
+          "total_ms": 1.5636729999999994,
+          "mean_ms": 0.015636730000000005,
+          "rows": 0,
+          "query": "SELECT m.guild_id FROM guild_members m JOIN guilds g ON g.id = m.guild_id WHERE m.user_id = $1 AND m.temporary AND g.owner_id <> $1 AND NOT EXISTS (SELECT $2 FR"
+        },
+        {
+          "calls": 520,
+          "total_ms": 0.7000740000000006,
+          "mean_ms": 0.0013462961538461527,
+          "rows": 0,
+          "query": "BEGIN"
+        },
+        {
+          "calls": 520,
+          "total_ms": 0.6853410000000008,
+          "mean_ms": 0.0013179634615384619,
+          "rows": 0,
+          "query": "COMMIT"
+        },
+        {
+          "calls": 3,
+          "total_ms": 0.116927,
+          "mean_ms": 0.03897566666666667,
+          "rows": 0,
+          "query": "SELECT message_id FROM polls WHERE NOT finalized AND expiry <= now() ORDER BY expiry LIMIT 500"
+        },
+        {
+          "calls": 1,
+          "total_ms": 0.014447000000000002,
+          "mean_ms": 0.014447000000000002,
+          "rows": 0,
+          "query": "UPDATE reminders r SET delivered_at = now() WHERE r.delivered_at IS NULL AND r.remind_at <= now() RETURNING r.id, r.user_id, r.message_id, r.channel_id, (SELECT"
+        }
+      ]
+    }
+  ]
+}
