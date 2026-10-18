@@ -71,7 +71,8 @@ export function snapshotOf(guildId: string): TemplateGuild {
   };
 }
 
-function toApi(template: MockTemplate): GuildTemplate {
+/** `withDirty` only on manager routes: anyone else with the code would get a live view of whether the guild changed. */
+function toApi(template: MockTemplate, withDirty = true): GuildTemplate {
   return {
     code: template.code,
     name: template.name,
@@ -83,7 +84,7 @@ function toApi(template: MockTemplate): GuildTemplate {
     updated_at: template.updated_at,
     source_guild_id: template.guild_id,
     serialized_source_guild: template.source,
-    is_dirty: db.guilds.has(template.guild_id) ? JSON.stringify(snapshotOf(template.guild_id)) !== JSON.stringify(template.source) : null,
+    is_dirty: withDirty && db.guilds.has(template.guild_id) ? JSON.stringify(snapshotOf(template.guild_id)) !== JSON.stringify(template.source) : null,
   };
 }
 
@@ -120,7 +121,7 @@ function newCode(): string {
 route("GET", `/guilds/${ID}/templates`, ({ viewer, params }) => {
   const guildId = params[0] ?? "";
   requireGuildPerm(guildId, viewer.user.id, Perm.MANAGE_GUILD);
-  return [...templates.values()].filter(t => t.guild_id === guildId).map(toApi);
+  return [...templates.values()].filter(t => t.guild_id === guildId).map(t => toApi(t));
 });
 
 route("POST", `/guilds/${ID}/templates`, ({ viewer, params, body }) => {
@@ -155,7 +156,7 @@ route("DELETE", `/guilds/${ID}/templates/${CODE}`, ({ viewer, params }) => {
   return toApi(template);
 });
 
-route("GET", `/guilds/templates/${CODE}`, ({ params }) => toApi(live(params[0] ?? "")));
+route("GET", `/guilds/templates/${CODE}`, ({ params }) => toApi(live(params[0] ?? ""), false));
 
 route("POST", `/guilds/templates/${CODE}`, ({ viewer, params, body }) => {
   const template = live(params[0] ?? "");

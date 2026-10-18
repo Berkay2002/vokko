@@ -86,13 +86,13 @@ fn parse_source(raw: &str) -> ApiResult<TemplateGuild> {
     })
 }
 
-async fn to_api(state: &AppState, row: TemplateRow) -> ApiResult<GuildTemplate> {
+/// `is_dirty` is only worked out for managers: anyone else holding the code would get a live view of whether the guild changed.
+async fn to_api(state: &AppState, row: TemplateRow, with_dirty: bool) -> ApiResult<GuildTemplate> {
     let source = parse_source(&row.source)?;
-    // The guild is gone only if the template went with it (cascade), so a missing snapshot here means a race with a delete.
-    let current = snapshot(state, row.guild_id).await?;
+    let is_dirty = if with_dirty { Some(snapshot(state, row.guild_id).await? != source) } else { None };
     let creator = store::users(state, &[row.creator_id]).await?.remove(&row.creator_id);
     Ok(GuildTemplate {
-        is_dirty: Some(current != source),
+        is_dirty,
         code: row.code,
         name: row.name,
         description: row.description,
@@ -237,7 +237,7 @@ async fn list(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(i
         sqlx::query_as(&format!("SELECT {TEMPLATE_COLS} FROM guild_templates WHERE guild_id = $1")).bind(guild_id).fetch_all(&state.db).await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        out.push(to_api(&state, row).await?);
+        out.push(to_api(&state, row, true).await?);
     }
     Ok(Json(out))
 }
@@ -270,7 +270,7 @@ async fn create(
     if inserted.rows_affected() == 0 {
         return Err(ApiErr::conflict(30031, "A server template already exists for this server."));
     }
-    Ok(Json(to_api(&state, row_by_code(&state, &code).await?).await?))
+    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, true).await?))
 }
 
 /// `PUT`: replaces the snapshot with the guild as it is now.
@@ -278,7 +278,7 @@ async fn sync(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((
     let row = managed_row(&state, user_id, &id, &code).await?;
     let source = source_json(&snapshot(&state, row.guild_id).await?)?;
     sqlx::query("UPDATE guild_templates SET source = $2, updated_at = now() WHERE code = $1").bind(&code).bind(&source).execute(&state.db).await?;
-    Ok(Json(to_api(&state, row_by_code(&state, &code).await?).await?))
+    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, true).await?))
 }
 
 async fn update(
@@ -294,19 +294,19 @@ async fn update(
         Some(text) => clean_text(text, DESCRIPTION_MAX, "description")?,
     };
     sqlx::query("UPDATE guild_templates SET name = $2, description = $3 WHERE code = $1").bind(&code).bind(&name).bind(&description).execute(&state.db).await?;
-    Ok(Json(to_api(&state, row_by_code(&state, &code).await?).await?))
+    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, true).await?))
 }
 
 async fn remove(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, code)): Path<(String, String)>) -> ApiResult<Json<GuildTemplate>> {
     let row = managed_row(&state, user_id, &id, &code).await?;
-    let template = to_api(&state, row).await?;
+    let template = to_api(&state, row, true).await?;
     sqlx::query("DELETE FROM guild_templates WHERE code = $1").bind(&code).execute(&state.db).await?;
     Ok(Json(template))
 }
 
 /// Any signed-in user with the code may look at a template (the landing page and the Create Your Server modal).
 async fn preview(State(state): State<AppState>, _user: AuthUser, Path(code): Path<String>) -> ApiResult<Json<GuildTemplate>> {
-    Ok(Json(to_api(&state, row_by_code(&state, &code).await?).await?))
+    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, false).await?))
 }
 
 /// Discord's "Create Guild from Guild Template": a new guild owned by the caller, built from the stored snapshot (not the live source guild).

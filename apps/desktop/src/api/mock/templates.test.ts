@@ -46,7 +46,8 @@ describe("mock server templates", () => {
     expect(snapStaff.permission_overwrites).toEqual([{ id: 1, type: OverwriteType.Role, allow: "1024", deny: "0" }]);
 
     staff.topic = "changed";
-    expect(call<GuildTemplate>("stranger", "GET", `/guilds/templates/${template.code}`).is_dirty).toBe(true);
+    expect(call<GuildTemplate>("stranger", "GET", `/guilds/templates/${template.code}`).is_dirty).toBeNull();
+    expect(call<GuildTemplate[]>("owner", "GET", `/guilds/${guildId}/templates`)[0]!.is_dirty).toBe(true);
     expect(call<GuildTemplate>("owner", "PUT", `/guilds/${guildId}/templates/${template.code}`).is_dirty).toBe(false);
 
     const made = call<Guild>("stranger", "POST", `/guilds/templates/${template.code}`, { name: "Copy" });

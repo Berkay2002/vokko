@@ -75,6 +75,7 @@ async fn management_needs_manage_guild_and_anyone_signed_in_can_preview() {
     let (stranger, _) = w.app.register("teemo").await;
     let (status, seen) = w.app.get(&format!("/guilds/templates/{}", code(&template)), &stranger).await;
     assert_eq!((status, seen["name"].clone()), (StatusCode::OK, json!("Club")));
+    assert_eq!(seen["is_dirty"], Value::Null, "only managers see whether the guild changed");
     let (other_guild, _) = w.app.guild_with_channel(&stranger).await;
     let (status, error) = w.app.delete(&format!("/guilds/{other_guild}/templates/{}", code(&template)), &stranger).await;
     assert_eq!((status, error["code"].clone()), (StatusCode::NOT_FOUND, json!(10057)));
