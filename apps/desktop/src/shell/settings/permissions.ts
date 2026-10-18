@@ -60,7 +60,7 @@ const DESCRIPTIONS: Record<number, string> = {
   23: "Deafen others in voice channels.",
   24: "Move or disconnect others between voice channels.",
   48: "Set a status on voice channels.",
-  31: "Use slash commands and app menus.",
+  31: "Use slash commands and app menus, and talk to bots like Claude.",
   39: "Start activities in voice channels.",
   50: "Use apps that are not added to the server. Not used yet: Vokko has no user-installed apps.",
   32: "Ask to speak on a stage.",
