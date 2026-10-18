@@ -7,10 +7,11 @@
 import { MOCK } from "../api/config";
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
-import { appStore } from "../api/store";
+import { appStore, displayName } from "../api/store";
 import { Perm, channelPermissions, hasBit } from "../api/permissions";
 import { ChannelType, type Channel, type Snowflake } from "../api/types";
 import { playSound } from "../notify/sounds";
+import { announce } from "../ui/announce";
 import { getPrefs, usePrefs, type Prefs } from "../ui/prefs";
 import { resolveAudio } from "./audioProfile";
 import { voiceDebug } from "./debugLog";
@@ -508,6 +509,9 @@ function sync(next: VoiceModel, prev: VoiceModel): void {
     const elsewhere = (state: VoiceModel, id: Snowflake) => state.states[id]?.channel_id != null && state.states[id]?.channel_id !== state.channelId;
     if (joined.length) playSound(joined.every(id => elsewhere(prev, id)) ? "user-moved" : "user-join");
     else if (left.length) playSound(left.every(id => elsewhere(next, id)) ? "user-moved" : "user-leave");
+    const names = (ids: Snowflake[]) => ids.map(id => { const u = appStore.getState().users[id]; return u ? displayName(u) : "Someone"; }).join(", ");
+    if (joined.length) announce(`${names(joined)} joined the call`);
+    if (left.length) announce(`${names(left)} left the call`);
     // A moderator muting or deafening us.
     const me = next.meId ? next.states[next.meId] : undefined;
     const was = prev.meId ? prev.states[prev.meId] : undefined;

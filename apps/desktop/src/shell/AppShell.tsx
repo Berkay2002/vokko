@@ -28,6 +28,7 @@ import { StaleChunkBanner } from "./staleChunks";
 import { UserPanel } from "./UserPanel";
 import { StageView, toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
 import { inChatPanel, useShortcut } from "../keyboard";
+import { cycleRegion, installListKeys } from "../keyboard/regions";
 import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } from "../keyboard/navigation";
 import { getPrefs, setPref, usePrefs } from "../ui/prefs";
 import { useBackClose, usePhone } from "../ui";
@@ -258,6 +259,9 @@ export function AppShell() {
     if (!box) return false;
     box.focus();
   });
+  useShortcut("nextRegion", () => cycleRegion(1));
+  useShortcut("previousRegion", () => cycleRegion(-1));
+  useEffect(installListKeys, []);
   useShortcut("settings", () => openModal({ type: "userSettings" }));
   useShortcut("streamerMode", () => setPref("streamerMode", !getPrefs().streamerMode));
 
@@ -275,10 +279,12 @@ export function AppShell() {
       <StaleChunkBanner />
       <div className="app-body">
         <Rail />
-        <div className="sidebar" onClick={leaveListOnSameRoute}>
+        {/* Discord's names for the list column; it holds the user panel too. */}
+        <nav className="sidebar" aria-label={guild ? `${guild.name} (server)` : "Private channels"} onClick={leaveListOnSameRoute}>
           <Sidebar guild={guild} />
-        </div>
-        <div className="sidebar-resize" role="separator" aria-orientation="vertical" aria-label="Resize Sidebar" {...handlers} />
+        </nav>
+        {/* Pointer-only drag handle with nothing to say to a screen reader. */}
+        <div className="sidebar-resize" aria-hidden="true" {...handlers} />
         <div className="nav-backdrop" onClick={() => useNavDrawer.getState().close()} />
         <main className="app-main" aria-label={channel ? (channel.name ?? "Conversation") : membersPage ? "Members" : "Friends"}>
           {!channel && isHome && <FriendsPage />}

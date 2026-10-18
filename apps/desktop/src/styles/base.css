@@ -200,6 +200,7 @@ img {
   html:not(.full-motion) *::before,
   html:not(.full-motion) *::after {
     animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important; /* looping animations (spinners, shimmer) stop instead of flickering */
     transition-duration: 0.001ms !important;
   }
 }
