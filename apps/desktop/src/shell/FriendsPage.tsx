@@ -130,7 +130,7 @@ function AddFriend() {
       setResult({ ok: true, text: `Success! Your friend request to ${name} was sent.` });
       setUsername("");
     } catch (error) {
-      const message = error instanceof ApiRequestError && error.status === 404 ? "Hm, didn't work. Double check that the username is correct." : error instanceof ApiRequestError ? error.message : "Something went wrong. Try again.";
+      const message = error instanceof ApiRequestError && error.status === 404 ? "Hm, didn't work. Double check that the username is correct." : error instanceof ApiRequestError && error.code === 20001 ? "Bots can't be friends." : error instanceof ApiRequestError ? error.message : "Something went wrong. Try again.";
       setResult({ ok: false, text: message });
     } finally {
       setBusy(false);

@@ -183,7 +183,7 @@ function addRelationship(viewerId: string, otherId: string): void {
   if (viewerId === otherId) fail(400, 80007, "You cannot send yourself a friend request.");
   if (db.accounts.get(otherId)?.user.bot) fail(403, 20001, "Bots cannot use this endpoint");
   const current = relationship(viewerId, otherId)?.type;
-  if (current === RelationshipType.Friend ||current === RelationshipType.OutgoingRequest) return;
+  if (current === RelationshipType.Friend || current === RelationshipType.OutgoingRequest) return;
   if (relationship(otherId, viewerId)?.type === RelationshipType.Blocked) fail(403, 80000, "Cannot send friend request to this user");
   const accept = current === RelationshipType.IncomingRequest;
   if (!accept) assertAcceptsFriendRequest(viewerId, otherId);

@@ -184,7 +184,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             <Pin size={24} />
           </ToolbarButton>
         )}
-        {!guild && (
+        {!guild && !channel.recipients?.some(r => r.bot) && (
           <ToolbarButton label="Add Friends to DM" secondary onClick={() => openModal({ type: "createDM", base: (channel.recipients ?? []).map(r => r.id), groupId: channel.type === ChannelType.GroupDM ? channel.id : undefined })}>
             <UserPlus size={24} />
           </ToolbarButton>
