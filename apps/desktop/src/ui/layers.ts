@@ -123,7 +123,7 @@ export function restoreFocus(opener: HTMLElement | null, root: HTMLElement | nul
  * Keep Tab focus inside `container`, focus the first control on mount and restore focus to the opener on unmount. `ready` delays the
  * first focus (a popout is invisible until placed) without moving the moment the opener is taken; `initial` picks what to focus first.
  */
-export function useFocusTrap(active: boolean, container: () => HTMLElement | null, ready = true, initial?: string): void {
+export function useFocusTrap(active: boolean, container: () => HTMLElement | null, ready = true, initial?: string | null): void {
   const containerRef = useRef(container);
   containerRef.current = container;
   // Taken while rendering: by the time an effect runs, an `autoFocus` input inside has already moved focus.
@@ -140,7 +140,8 @@ export function useFocusTrap(active: boolean, container: () => HTMLElement | nul
     const root = containerRef.current();
     // An input with `autoFocus` has already taken focus by the time this effect runs: keep it.
     if (root && !root.contains(document.activeElement)) {
-      const first = root.querySelector<HTMLElement>("[data-autofocus]") ?? (initial ? root.querySelector<HTMLElement>(initial) : null) ?? root.querySelector<HTMLElement>(FOCUSABLE);
+      // `initial` null: the container itself (Discord's profile card), so a click-opened card shows no ring on its first control.
+      const first = initial === null ? root : (root.querySelector<HTMLElement>("[data-autofocus]") ?? (initial ? root.querySelector<HTMLElement>(initial) : null) ?? root.querySelector<HTMLElement>(FOCUSABLE));
       (first ?? root).focus({ preventScroll: true });
     }
     const onKey = (event: KeyboardEvent) => {

@@ -1644,7 +1644,12 @@ button.channel-header-topic:hover {
 }
 
 .profile-body {
-  padding: 48px 16px 16px;
+  padding: 60px 16px 16px; /* the avatar ring ends 52 px below the 60 px banner: the name starts 8 px under it */
+}
+
+/* Focused itself on open (focusSelf): the card is the target, not a control, so no ring. */
+.profile-card:focus-visible {
+  outline: none;
 }
 
 .profile-name {

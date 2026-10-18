@@ -61,11 +61,29 @@ test('the profile card names the sources of its Member Since dates on hover', as
   // Focus moves into the card on open; a click-opened card must not pop the In voice info tooltip by itself.
   await page.waitForTimeout(400);
   await expect(page.getByRole('tooltip')).toHaveCount(0);
+  // Discord focuses the card itself, so no control shows a ring; the name sits fully below the avatar ring.
+  await expect(card).toBeFocused();
+  const avatar = (await card.locator('.profile-avatar').boundingBox())!;
+  const name = (await card.locator('.profile-name').boundingBox())!;
+  expect(name.y).toBeGreaterThanOrEqual(avatar.y + avatar.height);
   await card.getByRole('img', { name: 'Vokko' }).hover();
   await expect(page.getByRole('tooltip', { name: 'Vokko', exact: true })).toBeVisible();
   await card.getByRole('img', { name: "Sam's server" }).hover();
   await expect(page.getByRole('tooltip', { name: "Sam's server", exact: true })).toBeVisible();
   await shot(page, 'profile-member-since');
+});
+
+test('a profile card opened with Enter takes focus on the card; Tab then reaches its controls with a ring', async ({ page }) => {
+  await openStockTalk(page);
+  await page.locator('.chat-msg:not(.grouped):not(.system)', { hasText: 'Bobby' }).last().locator('.chat-author').focus();
+  await page.keyboard.press('Enter');
+  const card = page.locator('.profile-card');
+  await expect(card).toBeFocused();
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await page.keyboard.press('Tab');
+  await expect(card.locator('.in-voice-info')).toBeFocused();
+  await expect(page.getByRole('tooltip', { name: 'Only people who can see this channel can see this' })).toBeVisible();
+  await shot(page, 'profile-member-since-keyboard');
 });
 
 for (const [label, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]] as const) {
