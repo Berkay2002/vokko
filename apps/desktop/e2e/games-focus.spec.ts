@@ -5,7 +5,7 @@ import { join } from 'node:path';
 // A website game (Krunker, its site faked by a route) that asks for pointer lock on click, in the call stage: the click locks the
 // pointer, the game keeps its keys, and the Full screen button (and a double click on the header) enters and leaves element
 // fullscreen with the game box only.
-// Run from apps/desktop: VOKKO_E2E_PORT=1470 GAMES_SHOTS=.private/.claude/artifacts/vokko-game-focus npx playwright test e2e/games-focus.spec.ts
+// Run from apps/desktop: VOKKO_E2E_PORT=1470 GAMES_SHOTS=../../.private/artifacts/vokko-game-focus npx playwright test e2e/games-focus.spec.ts
 
 const SHOTS = process.env.GAMES_SHOTS;
 

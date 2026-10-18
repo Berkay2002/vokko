@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 // Profile editor specs against the mock backend on Vite port 1442 with a fresh server, so a Vite from another worktree is never
 // reused by accident. Run from apps/desktop:
-//   $env:PLAYWRIGHT_BROWSERS_PATH='<dev dir>\ms-playwright'; npx playwright test -c e2e/profile-editor.config.ts
+//   npx playwright test -c e2e/profile-editor.config.ts
 const PORT = 1442;
 
 export default defineConfig({

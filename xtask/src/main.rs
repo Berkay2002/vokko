@@ -68,6 +68,8 @@ fn layers() -> Result<(), Box<dyn std::error::Error>> {
 
 const DENYLIST_FILE: &str = ".private/denylist.txt";
 const DENYLIST_ENV: &str = "VOKKO_PRIVACY_DENYLIST";
+/// Always checked, even without a private denylist: the owner's drive and notes paths must not return to tracked files.
+const BUILTIN_PATTERNS: [&str; 2] = [r"E:[\\/]+Dev\b", r"\.me[\\/]+projects"];
 
 /// PCRE patterns, one per line; blank lines and `#` comment lines are ignored.
 fn parse_patterns(text: &str) -> Vec<String> {
@@ -88,11 +90,8 @@ fn privacy() -> Result<(), Box<dyn std::error::Error>> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().ok_or("xtask has no parent directory")?;
     let file_text = std::fs::read_to_string(root.join(DENYLIST_FILE)).ok();
     let env_text = std::env::var(DENYLIST_ENV).ok();
-    let patterns = load_patterns(file_text.as_deref(), env_text.as_deref());
-    if patterns.is_empty() {
-        println!("Privacy guard skipped: no {DENYLIST_FILE} and no {DENYLIST_ENV}.");
-        return Ok(());
-    }
+    let mut patterns = load_patterns(file_text.as_deref(), env_text.as_deref());
+    patterns.extend(BUILTIN_PATTERNS.map(str::to_owned));
     let mut command = Command::new("git");
     command.current_dir(root).args(["grep", "-n", "-I", "-i", "-P"]);
     for pattern in &patterns {

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 // network is needed. Three people, each on their own page with their own mock: sam starts it, alice shares a room link,
 // the test replays her PUT /game/room in the other mocks (as alice), and every other tile loads the link; bob opens his
 // tile late and lands in the room too. Clearing the link reloads nobody.
-// Run from apps/desktop: VOKKO_E2E_PORT=1451 GAMES_SHOTS=.private/artifacts/games-web npx playwright test e2e/games-web.spec.ts
+// Run from apps/desktop: VOKKO_E2E_PORT=1451 GAMES_SHOTS=../../.private/artifacts/games-web npx playwright test e2e/games-web.spec.ts
 
 const SHOTS = process.env.GAMES_SHOTS;
 const SITE = 'https://krunker.io/';

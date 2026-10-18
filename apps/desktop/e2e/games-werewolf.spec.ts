@@ -4,7 +4,7 @@ import { closeAll, game, seat, shots, type Side } from './gamesTable';
 // Werewolf with five people, five pages bridged through the mock relay (e2e/gamesTable.ts). Sam starts the game, so
 // his copy is the moderator. One night (the wolf eats a villager, the seer finds the wolf, the doctor guards himself),
 // one day (everyone ready), and a vote that removes the wolf: the village wins.
-// VOKKO_SHOTS_DIR=.private/artifacts/games-cards VOKKO_E2E_PORT=1455 npx playwright test e2e/games-werewolf.spec.ts
+// VOKKO_SHOTS_DIR=../../.private/artifacts/games-cards VOKKO_E2E_PORT=1455 npx playwright test e2e/games-werewolf.spec.ts
 
 const NAMES: Record<string, string> = { sam: 'Sam', alice: 'Alice', bob: 'Bob', nova: 'Nova', carol: 'Carol' };
 

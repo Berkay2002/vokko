@@ -6,7 +6,7 @@ import { join } from 'node:path';
 // float over it and fade when idle while the subtitle stays, Space and the arrows work for the controller, and leaving full screen puts
 // the old focus back. The mock has no picture, so a canvas stream stands in for it.
 // Run from apps/desktop: STREMIO_PORT=1470 npx playwright test -c e2e/stremio.config.ts stremio-fullscreen
-const SHOTS = process.env.STREMIO_SHOTS ?? '.private/.claude/artifacts/vokko-stremio-fullscreen';
+const SHOTS = process.env.STREMIO_SHOTS ?? '../../.private/artifacts/vokko-stremio-fullscreen';
 
 type MockWin = { __vokkoMock: { channelIdByName(name: string): string | null; requestAs(user: string, method: string, path: string, body?: unknown): unknown } };
 type Stream = { sid: string; playable: boolean };
