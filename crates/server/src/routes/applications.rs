@@ -31,6 +31,7 @@ use crate::store;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/applications", get(list_applications).post(create_application))
+        .route("/applications/@me", get(current_application))
         .route("/applications/{id}", get(get_application).patch(edit_application).delete(delete_application))
         .route("/applications/{id}/bot/reset", post(reset_token))
         .route("/oauth2/authorize", get(authorize_info).post(authorize))
@@ -124,6 +125,12 @@ async fn create_application(
 
 async fn get_application(State(state): State<AppState>, HumanUser(user_id): HumanUser, Path(id): Path<String>) -> ApiResult<Json<Application>> {
     let row = owned_app(&state, user_id, app_id(&id)?).await?;
+    Ok(Json(app_api(&state, &row).await?))
+}
+
+/// The bot's own application (Discord's `GET /applications/@me`): the bot user id is the application id, so anyone else gets 404.
+async fn current_application(State(state): State<AppState>, AuthUser(user_id): AuthUser) -> ApiResult<Json<Application>> {
+    let row = app_row(&state, user_id).await?.ok_or_else(ApiErr::unknown_application)?;
     Ok(Json(app_api(&state, &row).await?))
 }
 
