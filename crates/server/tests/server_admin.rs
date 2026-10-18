@@ -473,8 +473,8 @@ async fn automod_blocks_keywords_except_for_exempt_roles() {
     });
     let (status, body) = w.app.post(&rules, &member, rule_body.clone()).await;
     assert_eq!((status, code(&body)), (StatusCode::FORBIDDEN, 50013), "MANAGE_GUILD only");
-    let (status, body) = w.app.post(&rules, &w.owner, json!({"name": "x", "event_type": 1, "trigger_type": 3, "actions": [{"type": 1}]})).await;
-    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 50035), "only keyword rules");
+    let (status, body) = w.app.post(&rules, &w.owner, json!({"name": "x", "event_type": 1, "trigger_type": 2, "actions": [{"type": 1}]})).await;
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 50035), "trigger type 2 (harmful links) does not exist");
 
     let address = w.app.serve().await;
     let mut owner_ws = Client::connect(&address, &w.owner).await;
@@ -714,4 +714,141 @@ async fn community_needs_channels_and_safety_checks() {
     assert_eq!(status, StatusCode::OK);
     let (_, guild) = w.app.get(&w.path(""), &w.owner).await;
     assert_eq!(guild["public_updates_channel_id"], Value::Null);
+}
+
+#[tokio::test]
+async fn automod_mention_spam_blocks_alerts_and_times_out() {
+    let w = World::new().await;
+    let (member, member_id) = w.member("pinger").await;
+    let rules = w.path("/auto-moderation/rules");
+    let messages = format!("/channels/{}/messages", w.channel);
+    let (status, alerts) = w.app.post(&w.path("/channels"), &w.owner, json!({"name": "mod-log", "type": 0})).await;
+    assert_eq!(status, StatusCode::OK, "{alerts}");
+    let alerts = alerts["id"].as_str().expect("id").to_owned();
+
+    let body = |limit: Value| {
+        json!({
+            "name": "Mentions", "event_type": 1, "trigger_type": 5, "trigger_metadata": {"mention_total_limit": limit},
+            "actions": [{"type": 1}, {"type": 2, "metadata": {"channel_id": alerts}}, {"type": 3, "metadata": {"duration_seconds": 60}}]
+        })
+    };
+    for bad in [json!(0), json!(51), Value::Null] {
+        let (status, rule) = w.app.post(&rules, &w.owner, body(bad.clone())).await;
+        assert_eq!((status, code(&rule)), (StatusCode::BAD_REQUEST, 50035), "limit {bad}");
+    }
+    let mut no_channel = body(json!(2));
+    no_channel["actions"][1]["metadata"]["channel_id"] = json!("12345");
+    let (status, rule) = w.app.post(&rules, &w.owner, no_channel).await;
+    assert_eq!((status, code(&rule)), (StatusCode::BAD_REQUEST, 50035), "the alert channel must be in the guild");
+    let (status, rule) = w.app.post(&rules, &w.owner, body(json!(2))).await;
+    assert_eq!(status, StatusCode::OK, "{rule}");
+    assert_eq!(rule["trigger_metadata"]["mention_total_limit"], 2);
+    assert_eq!(rule["actions"].as_array().expect("actions").len(), 3);
+    let (status, again) = w.app.post(&rules, &w.owner, body(json!(3))).await;
+    assert_eq!((status, code(&again)), (StatusCode::BAD_REQUEST, 30035), "one mention spam rule per server");
+
+    let (_, a) = w.app.register("alpha").await;
+    let (_, b) = w.app.register("bravo").await;
+    let mention = |user: &Value| format!("<@{}>", user["id"].as_str().expect("id"));
+    let two = format!("hi {} {} {}", mention(&a), mention(&b), mention(&a));
+    let (status, _) = w.app.post(&messages, &member, json!({"content": two})).await;
+    assert_eq!(status, StatusCode::OK, "a repeated mention counts once");
+    let three = format!("{two} <@&{}>", w.guild);
+    let (status, blocked) = w.app.post(&messages, &member, json!({"content": three})).await;
+    assert_eq!((status, code(&blocked)), (StatusCode::BAD_REQUEST, 200000), "{blocked}");
+
+    let (_, list) = w.app.get(&format!("/channels/{alerts}/messages"), &w.owner).await;
+    let alert = &list[0];
+    assert_eq!((alert["type"].clone(), alert["author"]["id"].clone()), (json!(24), json!(member_id)));
+    assert_eq!(alert["embeds"][0]["type"], "auto_moderation_message");
+    assert_eq!(alert["embeds"][0]["description"], three.as_str());
+    let field = |name: &str| alert["embeds"][0]["fields"].as_array().expect("fields").iter().find(|f| f["name"] == name).map(|f| f["value"].clone());
+    assert_eq!(field("rule_name"), Some(json!("Mentions")));
+    assert_eq!(field("channel_id"), Some(json!(w.channel)));
+    assert_eq!(field("decision_outcome"), Some(json!("blocked")));
+
+    let (timed_out,): (bool,) = sqlx::query_as("SELECT timeout_until > now() + interval '50 seconds' FROM guild_members WHERE user_id = $1")
+        .bind(member_id.parse::<i64>().expect("id"))
+        .fetch_one(&w.app.state.db)
+        .await
+        .expect("member");
+    assert!(timed_out, "a 60 second timeout");
+    let (status, _) = w.app.post(&messages, &member, json!({"content": "hello"})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "a timed-out member cannot send");
+    assert_eq!(w.audit("?action_type=143").await.len(), 1);
+    assert_eq!(w.audit("?action_type=144").await.len(), 1);
+    let timeouts = w.audit("?action_type=145").await;
+    assert_eq!(timeouts[0]["options"]["auto_moderation_rule_trigger_type"], "5");
+
+    // timeout only fits keyword and mention spam rules; a rule needs an action
+    let timeout = json!({"name": "s", "event_type": 1, "trigger_type": 3, "actions": [{"type": 3, "metadata": {"duration_seconds": 60}}]});
+    let (status, body) = w.app.post(&rules, &w.owner, timeout).await;
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 50035));
+    let (status, body) = w.app.post(&rules, &w.owner, json!({"name": "s", "event_type": 1, "trigger_type": 3, "actions": []})).await;
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 50035), "at least one action");
+}
+
+#[tokio::test]
+async fn automod_spam_blocks_the_third_copy_across_channels() {
+    let w = World::new().await;
+    let (member, _) = w.member("spammer").await;
+    let rules = w.path("/auto-moderation/rules");
+    let (_, other) = w.app.post(&w.path("/channels"), &w.owner, json!({"name": "other", "type": 0})).await;
+    let other = format!("/channels/{}/messages", other["id"].as_str().expect("id"));
+    let messages = format!("/channels/{}/messages", w.channel);
+    let rule = json!({"name": "Spam", "event_type": 1, "trigger_type": 3, "actions": [{"type": 1, "metadata": {"custom_message": "Slow down"}}]});
+    let (status, rule) = w.app.post(&rules, &w.owner, rule).await;
+    assert_eq!(status, StatusCode::OK, "{rule}");
+
+    let text = "Join my server at example.org";
+    let (status, first) = w.app.post(&messages, &member, json!({"content": text})).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = w.app.post(&other, &member, json!({"content": text.to_uppercase()})).await;
+    assert_eq!(status, StatusCode::OK, "the second copy passes");
+    let (status, body) = w.app.post(&messages, &member, json!({"content": format!("  {text} ")})).await;
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 200000), "the third copy within 30 s: {body}");
+    assert_eq!(body["errors"]["content"]["_errors"][0]["message"], "Slow down");
+    for _ in 0..3 {
+        let (status, _) = w.app.post(&messages, &member, json!({"content": "ok"})).await;
+        assert_eq!(status, StatusCode::OK, "short messages never count as spam");
+    }
+    let (status, _) = w.app.patch(&format!("{messages}/{}", first["id"].as_str().expect("id")), &member, json!({"content": text})).await;
+    assert_eq!(status, StatusCode::OK, "an edit is no new copy");
+    for _ in 0..3 {
+        let (status, _) = w.app.post(&messages, &w.owner, json!({"content": text})).await;
+        assert_eq!(status, StatusCode::OK, "managers are exempt");
+    }
+    let (status, body) = w.app.post(&rules, &w.owner, json!({"name": "Spam 2", "event_type": 1, "trigger_type": 3, "actions": [{"type": 1}]})).await;
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 30035), "one spam rule");
+}
+
+#[tokio::test]
+async fn automod_keyword_presets_with_allow_list() {
+    let w = World::new().await;
+    let (member, _) = w.member("talker").await;
+    let rules = w.path("/auto-moderation/rules");
+    let messages = format!("/channels/{}/messages", w.channel);
+    let rule = json!({
+        "name": "Flagged words", "event_type": 1, "trigger_type": 4,
+        "trigger_metadata": {"presets": [1, 1], "allow_list": ["bullshit"], "keyword_filter": ["ignored"]}, "actions": [{"type": 1}]
+    });
+    let (status, rule) = w.app.post(&rules, &w.owner, rule).await;
+    assert_eq!(status, StatusCode::OK, "{rule}");
+    assert_eq!(rule["trigger_metadata"], json!({"keyword_filter": [], "allow_list": ["bullshit"], "presets": [1]}));
+    let rule_id = rule["id"].as_str().expect("id").to_owned();
+
+    let (status, _) = w.app.post(&messages, &member, json!({"content": "oh SHIT"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "profanity");
+    let (status, _) = w.app.post(&messages, &member, json!({"content": "that is bullshit"})).await;
+    assert_eq!(status, StatusCode::OK, "allow list");
+    let (status, _) = w.app.post(&messages, &member, json!({"content": "check out this porn"})).await;
+    assert_eq!(status, StatusCode::OK, "sexual content is not on");
+    let (status, rule) = w.app.patch(&format!("{rules}/{rule_id}"), &w.owner, json!({"trigger_metadata": {"presets": [1, 2]}})).await;
+    assert_eq!((status, rule["trigger_metadata"]["presets"].clone()), (StatusCode::OK, json!([1, 2])));
+    let (status, _) = w.app.post(&messages, &member, json!({"content": "check out this porn"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "sexual content now on");
+    let (status, body) = w.app.patch(&format!("{rules}/{rule_id}"), &w.owner, json!({"trigger_type": 1})).await;
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 50035), "the type never changes");
+    let (status, body) = w.app.patch(&format!("{rules}/{rule_id}"), &w.owner, json!({"trigger_metadata": {"presets": [4]}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "unknown preset: {body}");
 }

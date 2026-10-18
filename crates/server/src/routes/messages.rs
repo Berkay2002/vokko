@@ -821,7 +821,7 @@ async fn edit_message(
     }
     let content_changed = content != row.content;
     if content_changed {
-        crate::safety::check_automod(&state, &access, user_id, &content).await?;
+        crate::safety::check_automod(&state, &access, user_id, &content, true).await?;
     }
     // `flags` only carries SUPPRESS_EMBEDS; omitting it keeps the current state.
     let suppress_bit = SUPPRESS_EMBEDS as i32;
