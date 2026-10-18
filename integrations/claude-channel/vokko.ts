@@ -49,7 +49,7 @@ const THREAD_TYPES = new Set([10, 11, 12])
 export type Role = 'channel' | 'bridge-shared' | 'bridge'
 
 /** Owner commands (sent by the bot application's owner in a DM) belong to the bridge, never to the plugin's Claude. */
-export const OWNER_COMMAND_RE = /^\s*!(backend|pair|pause|unpause|pauses)\b/i
+export const OWNER_COMMAND_RE = /^\s*!(backend|model|effort|pair|pause|unpause|pauses)\b/i
 
 export type Config = {
   stateDir: string

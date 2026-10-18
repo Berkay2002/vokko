@@ -12,9 +12,9 @@
 import { homedir } from 'os'
 import { join } from 'path'
 import { VokkoBot, loadConfig } from '../claude-channel/vokko.ts'
-import { Bridge, type Backend } from './core.ts'
-import { claudeApiBackend } from './claude-api.ts'
-import { codexBackend } from './codex.ts'
+import { Bridge, parseEffort, type Backend } from './core.ts'
+import { CLAUDE_EFFORTS, claudeApiBackend } from './claude-api.ts'
+import { CODEX_EFFORTS, codexBackend } from './codex.ts'
 
 const log = (line: string) => void process.stderr.write(line)
 const backendName = process.env.VOKKO_AI_BACKEND ?? 'claude-api'
@@ -26,6 +26,13 @@ if (backendName !== 'claude-api' && backendName !== 'codex') {
 const apiKey = process.env.ANTHROPIC_API_KEY ?? ''
 
 const codex = backendName === 'codex'
+let effort: string
+try {
+  effort = parseEffort(process.env.VOKKO_AI_EFFORT, codex ? CODEX_EFFORTS : CLAUDE_EFFORTS)
+} catch (e) {
+  log(`vokko bridge: ${e instanceof Error ? e.message : e}\n`)
+  process.exit(1)
+}
 const stateDir = process.env.VOKKO_STATE_DIR ?? (codex ? join(homedir(), '.vokko', 'codex') : join(homedir(), '.claude', 'channels', 'vokko'))
 const shared = (process.env.VOKKO_BRIDGE_ROLE ?? (codex ? 'standalone' : 'shared')) === 'shared'
 if (codex) process.env.VOKKO_BOT_NAME ||= 'Codex'
@@ -46,7 +53,7 @@ const bot = new VokkoBot(cfg, msg => {
 
 let backend: Backend
 if (codex) {
-  backend = codexBackend({ workDir: join(stateDir, 'codex-work'), botName: cfg.botName, model: process.env.VOKKO_AI_MODEL || undefined, codexPath: process.env.VOKKO_CODEX_PATH || undefined })
+  backend = codexBackend({ workDir: join(stateDir, 'codex-work'), botName: cfg.botName, model: process.env.VOKKO_AI_MODEL || undefined, effort, codexPath: process.env.VOKKO_CODEX_PATH || undefined })
 } else {
   if (!apiKey) {
     const inFile = process.env.ANTHROPIC_API_KEY ? ' (the one in the state dir .env is ignored)' : ''
@@ -55,7 +62,8 @@ if (codex) {
   }
   backend = claudeApiBackend({
     apiKey,
-    model: process.env.VOKKO_AI_MODEL || 'claude-sonnet-5-5',
+    model: process.env.VOKKO_AI_MODEL || 'sonnet',
+    effort,
     maxOutputTokens: num('VOKKO_AI_MAX_OUTPUT_TOKENS', 1024),
     maxReplyUsd: num('VOKKO_AI_MAX_REPLY_USD', 0.5),
     workDir: join(stateDir, 'api-work'),

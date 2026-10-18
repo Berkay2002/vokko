@@ -6,14 +6,24 @@
  * live in core.ts.
  */
 
-import { createSdkMcpServer, query as sdkQuery, tool } from '@anthropic-ai/claude-agent-sdk'
+import { createSdkMcpServer, query as sdkQuery, tool, type EffortLevel } from '@anthropic-ai/claude-agent-sdk'
 import { mkdirSync } from 'fs'
 import { z } from 'zod'
-import { BackendError, childEnv, type Answer, type Backend, type Spent, type TurnContext } from './core.ts'
+import { BackendError, UserFacingError, childEnv, type Answer, type Backend, type Spent, type TurnContext } from './core.ts'
+
+/** What the owner may pick: chat needs little reasoning, so the SDK's xhigh and max are left out. */
+export const CLAUDE_EFFORTS = ['low', 'medium', 'high'] as const satisfies readonly EffortLevel[]
+
+const MODEL_ALIASES: Record<string, string> = { sonnet: 'claude-sonnet-5-5', haiku: 'claude-haiku-5-5' }
+
+/** VOKKO_AI_MODEL: an alias or any model id, passed through. */
+export const aliasModel = (m: string): string => MODEL_ALIASES[m.trim().toLowerCase()] ?? m
 
 export type ClaudeApiOptions = {
   apiKey: string
   model: string
+  /** Default `low`. */
+  effort?: string
   maxOutputTokens: number
   /** Dedicated, empty dirs: the CLI's cwd and its CLAUDE_CONFIG_DIR (sessions are stored there). */
   workDir: string
@@ -56,9 +66,21 @@ export function claudeApiBackend(opts: ClaudeApiOptions): Backend {
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     DISABLE_AUTOUPDATER: '1',
   })
+  const cur = { model: aliasModel(opts.model), effort: opts.effort ?? 'low' }
   return {
     name: 'claude-api',
     metered: true,
+    tune: {
+      efforts: CLAUDE_EFFORTS,
+      modelHint: 'sonnet|haiku|<model id>',
+      get: () => ({ ...cur }),
+      resolveModel(input) {
+        const m = aliasModel(input)
+        if (!/^claude-[\w.[\]-]+$/.test(m)) throw new UserFacingError('Usage: `!model sonnet|haiku|claude-<model id>`')
+        return m
+      },
+      set: s => void Object.assign(cur, s),
+    },
     async ask(sessionId: string | undefined, prompt: string, ctx: TurnContext): Promise<Answer> {
       const text = (t: string) => ({ content: [{ type: 'text' as const, text: t }] })
       const server = createSdkMcpServer({
@@ -81,7 +103,8 @@ export function claudeApiBackend(opts: ClaudeApiOptions): Backend {
       const q = run({
         prompt,
         options: {
-          model: opts.model,
+          model: cur.model,
+          effort: cur.effort as EffortLevel,
           systemPrompt: systemPrompt(opts.botName, opts.ownerId()),
           // No host access: no built-in tools (WebSearch only when enabled), nothing from the host's settings or MCP config.
           tools: opts.webSearch ? ['WebSearch'] : [],

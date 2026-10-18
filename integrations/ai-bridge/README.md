@@ -8,7 +8,7 @@ Two backends:
 
 - **`claude-api`**: Claude on your Anthropic API key, through the Agent SDK. Chat only: no built-in tools, no MCP
   servers, no settings, skills or plugins from the host, its own config dir (your `claude` login is never used). Default
-  model `claude-sonnet-5-5`; set `VOKKO_AI_MODEL=claude-haiku-5-5` for the cheap mode. One conversation per DM or
+  model `claude-sonnet-5-5` at `low` effort; `!model haiku` (or `VOKKO_AI_MODEL=claude-haiku-5-5`) is the cheap mode. One conversation per DM or
   server channel, kept across restarts. Spend guards: a per-user rate limit, a cap on output tokens and on cost per reply,
   and a monthly budget.
 - **`codex`**: your own ChatGPT/Codex login on this machine, through the Codex SDK. Read-only sandbox, no network, no shell,
@@ -61,6 +61,7 @@ If it replies "Codex isn't signed in on the host", run `codex login`.
 | `VOKKO_STATE_DIR` | `~/.claude/channels/vokko` (api), `~/.vokko/codex` (codex) | token, access, sessions, usage, pauses |
 | `VOKKO_BRIDGE_ROLE` | `shared` (api), `standalone` (codex) | `shared`: the plugin's token, takes only what it hands off. `standalone`: its own bot, answers everything its access allows |
 | `VOKKO_AI_MODEL` | `claude-sonnet-5-5` / Codex's first listed model | Codex refuses to start with a model its catalog doesn't list |
+| `VOKKO_AI_EFFORT` | `low` | `low`, `medium` or `high` (Claude's `effort`, Codex's `model_reasoning_effort`). Anything else: the bridge refuses to start. `!model` / `!effort` override it |
 | `VOKKO_AI_RATE_PER_HOUR` | 20 | messages per user per hour (you are exempt) |
 | `VOKKO_AI_MONTHLY_USD` | 150 | after this the bot replies "Monthly budget reached" until the next month (counts cache reads/writes and failed turns too) |
 | `VOKKO_AI_MAX_OUTPUT_TOKENS` | 1024 | |
@@ -74,6 +75,11 @@ If it replies "Codex isn't signed in on the host", run `codex login`.
 Sent by you (the bot application's owner) to the bot in a DM:
 
 - `!backend api|subscription`: who answers your DMs (shared mode).
+- `!model sonnet|haiku|<model id>` and `!effort low|medium|high`: change the model or effort from the next turn, saved in
+  `settings-<backend>.json` in the state dir (it overrides the env and survives restarts); running conversations keep their
+  history. With no value they show the current one. Codex takes only a model its catalog lists. Not available to moderators.
+  Low is the default because chat replies need little reasoning, and effort mostly buys reasoning. Costs follow the active
+  model: the tally and per-reply cap use the cost the SDK reports.
 - `!pair <code>`: approve a pairing code.
 - `!pause @user <minutes>`, `!unpause @user`, `!pauses`: pause someone everywhere, lift it, list pauses.
 
