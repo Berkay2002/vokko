@@ -118,7 +118,8 @@
 .chat-msg { position: relative; padding: var(--message-pad-y, 2px) var(--chat-pad-right) var(--message-pad-y, 2px) var(--chat-gutter); margin-top: calc(var(--message-group-gap, 16px) + 1px); min-height: 22px; line-height: var(--chat-line-height); word-wrap: break-word; user-select: text; }
 .chat-msg.grouped { margin-top: 0; }
 .chat-day-divider + .chat-msg, .chat-new-divider + .chat-msg { margin-top: 0; }
-.chat-msg:hover, .chat-msg.editing { background: var(--chat-message-hover); }
+.chat-msg:hover, .chat-msg.editing, .chat-msg:focus-visible { background: var(--chat-message-hover); }
+.chat-msg:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; border-radius: 4px; }
 .chat-msg.mentioned { background: var(--chat-mentioned-bg); border-radius: 0 4px 4px 0; }
 /* The bar is a real 2px box: an inset box-shadow leaves hairlines along the rounded corners at fractional device pixels. */
 .chat-msg.mentioned::before, .chat-msg.replying::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--chat-mentioned-bar); pointer-events: none; }
@@ -223,7 +224,8 @@ html.message-compact { --chat-gutter: 80px; }
 
 /* hover toolbar */
 .chat-toolbar { position: absolute; right: 14px; top: -16px; z-index: 2; display: none; align-items: center; gap: 1px; padding: 2px; border: 1px solid var(--chat-edge); border-radius: 8px; background: var(--chat-surface-high); box-shadow: var(--chat-shadow-low); }
-.chat-msg:focus-within .chat-toolbar, .chat-toolbar.open { display: flex; }
+/* Keyboard focus only: a click also focuses the row (roving tabindex) and must not pin its toolbar open after the pointer leaves. */
+.chat-msg:focus-visible .chat-toolbar, .chat-msg:has(:focus-visible) .chat-toolbar, .chat-toolbar.open { display: flex; }
 @media (hover: hover) {
   .chat-msg:hover .chat-toolbar { display: flex; }
   /* Only the row under the pointer, as in Discord: focus left in another row (a closed reaction picker hands it back to its button) stays, but its toolbar hides. */

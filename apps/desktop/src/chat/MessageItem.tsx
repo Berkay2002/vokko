@@ -28,6 +28,7 @@ import { isSystemMessage, mentionsRole, type PendingMessage } from './messageSta
 import { fromDisplay, toDisplay, type MentionToken } from './mentionText';
 import { formatFullDate, formatMessageTimestamp, formatTime } from './util';
 import { isVoiceMessage } from './VoiceMessage';
+import { messageHotkey } from './messageKeys';
 
 export interface MessageItemProps {
   message: Message;
@@ -35,6 +36,8 @@ export interface MessageItemProps {
   grouped: boolean;
   editing: boolean;
   highlighted: boolean;
+  /** The list's one tab stop (roving tabindex): 0 here, -1 on every other row. */
+  tabStop: boolean;
   onStopEditing(): void;
 }
 
@@ -130,7 +133,7 @@ const OWN_TAP = 'a, button, input, textarea, video, audio, summary, [role=button
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_SLOP = 10;
 
-function MessageItemImpl({ message, pending, grouped, editing, highlighted, onStopEditing }: MessageItemProps) {
+function MessageItemImpl({ message, pending, grouped, editing, highlighted, tabStop, onStopEditing }: MessageItemProps) {
   const chat = useChat();
   const threadActions = useMessageThreadActions(message, !!pending);
   const crosspost = ((message.flags ?? 0) & MessageFlags.IsCrosspost) !== 0;
@@ -155,6 +158,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
 
   const canEdit = isMine && !system && !pending && !message.poll && !isVoiceMessage(message) && message.message_reference?.type !== 1; // a forward has no text to edit
   const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
+  const canPin = !pending && !system && (chat.isDm || chat.canManage);
 
   const quick = useMemo(() => quickReactions().slice(0, 3), []);
   const [shift, setShift] = useState(false);
@@ -183,10 +187,33 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   if (system) cls.push('system');
   if (chat.replyingId === message.id) cls.push('replying');
 
+  // Hotkeys on the focused row itself (MessageList moves the focus); keys from a link, button or the inline editor keep their meaning.
+  const onRowKey = (e: React.KeyboardEvent) => {
+    if (e.target !== e.currentTarget || editing) return;
+    const act = messageHotkey(e.nativeEvent);
+    const run = act === 'edit' ? canEdit && (() => chat.actions.edit(message))
+      : act === 'reply' ? !system && chat.canSend && (() => chat.actions.reply(message))
+      : act === 'react' ? !system && !pending && (() => setMenuPickerOpen(true))
+      : act === 'pin' ? canPin && (() => chat.actions.togglePin(message))
+      : act === 'delete' ? canDelete && (() => chat.actions.requestDelete(message, e.shiftKey))
+      // a text selection copies as usual
+      : act === 'copy' ? !!message.content && !window.getSelection()?.toString() && (() => void navigator.clipboard?.writeText(message.content))
+      : false;
+    if (!run) return;
+    e.preventDefault();
+    run();
+  };
+  const label = useMemo(() => {
+    const text = toDisplay(message.content, { user: id => chat.md.userName(id), role: id => chat.md.roleInfo(id)?.name ?? null, channel: id => chat.md.channelName(id) }).text.replace(/\s+/g, ' ').trim();
+    return [name, formatFullDate(date), text.slice(0, 300) || (message.attachments.length ? 'attachment' : '')].filter(Boolean).join(', ');
+  }, [name, date, message.content, message.attachments.length, chat.md]);
+  const focusProps = { role: 'article', tabIndex: tabStop ? 0 : -1, onKeyDown: onRowKey };
+
   if (system) {
-    return <div className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id} onContextMenu={e => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
+    return <div className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id} {...focusProps} aria-labelledby={`message-body-${message.id}`}
+      onContextMenu={e => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
       <div className="chat-msg-gutter"><span /></div>
-      <div className="chat-msg-body system">
+      <div className="chat-msg-body system" id={`message-body-${message.id}`}>
         <SystemBody message={message} name={name} />
         <Tooltip content={formatFullDate(date)}><time className="chat-timestamp inline" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>
       </div>
@@ -194,7 +221,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
     </div>;
   }
 
-  return <div ref={rowRef} className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id}
+  return <div ref={rowRef} className={cls.join(' ')} id={`message-${message.id}`} data-message-id={message.id} {...focusProps} aria-label={label}
     onMouseEnter={arm} onFocus={arm}
     onPointerDown={e => {
       touchRef.current = e.pointerType === 'touch';

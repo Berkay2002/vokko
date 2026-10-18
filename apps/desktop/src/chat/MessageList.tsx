@@ -9,6 +9,7 @@ import { ChannelStart } from './ChannelStart';
 import { MessageItem } from './MessageItem';
 import { messageStore, useChannelState } from './messageStore';
 import { buildRows, type Row } from './messageState';
+import { navIndex } from './messageKeys';
 import { compareIds, formatDivider, formatTime, sameDay } from './util';
 
 export interface MessageListHandle {
@@ -33,8 +34,8 @@ const Footer = memo(function Footer({ context }: { context?: { hasMoreAfter: boo
 });
 
 // Virtuoso puts its own wrapper divs between the scroller and the rows: they carry the list roles, so each row has a list parent.
-const List = forwardRef<HTMLDivElement, ListProps<HTMLDivElement> & { context?: unknown }>(function List({ context: _context, ...props }, ref) {
-  return <div ref={ref} {...props} role="list" />;
+const List = forwardRef<HTMLDivElement, ListProps<HTMLDivElement> & { context?: { label?: string } }>(function List({ context, ...props }, ref) {
+  return <div ref={ref} {...props} role="list" aria-label={context?.label} />;
 });
 function Item({ context: _context, item: _item, ...props }: ItemProps<Row> & { context?: unknown }) {
   return <div {...props} role="listitem" />;
@@ -48,6 +49,8 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   const [highlightId, setHighlightId] = useState<Snowflake | null>(null);
   const [seenBottom, setSeenBottom] = useState(false);
   const [farFromBottom, setFarFromBottom] = useState(false);
+  // Roving tabindex: the message that holds the list's one tab stop, by id so it survives new messages and pagination.
+  const [activeId, setActiveId] = useState<Snowflake | null>(null);
 
   const rows = useMemo<Row[]>(
     () => buildRows(state, formatDivider, sameDay, chat.me.id),
@@ -106,7 +109,47 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     onAtBottomChange(value);
   }, [onAtBottomChange]);
 
-  useEffect(() => { stick.current = true; setSeenBottom(false); setAtBottom(true); }, [channelId]);
+  useEffect(() => { stick.current = true; setSeenBottom(false); setAtBottom(true); setActiveId(null); }, [channelId]);
+
+  // Up/Down/PageUp/PageDown/Home/End on a focused message (or on the scroller, which enters at the tab stop); Escape goes back to the
+  // composer. The message's own hotkeys are in MessageItem.
+  const tabStop = (activeId && rows.some(r => r.message.id === activeId) ? activeId : rows[rows.length - 1]?.message.id) ?? null;
+  const focusRow = (index: number) => {
+    const id = rowsRef.current[index]?.message.id;
+    if (!id) return;
+    setActiveId(id);
+    virtuoso.current?.scrollIntoView({ index, behavior: 'auto' });
+    // The row may mount only after the scroll: try for a few frames.
+    let frames = 0;
+    const tryFocus = () => {
+      const el = scroller.current?.querySelector<HTMLElement>(`.chat-msg[data-message-id="${id}"]`);
+      if (el) el.focus({ preventScroll: true });
+      else if (frames++ < 10) requestAnimationFrame(tryFocus);
+    };
+    tryFocus();
+  };
+  const onListKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    gesture();
+    const t = e.target as HTMLElement;
+    const onRow = t.classList.contains('chat-msg') && !!t.dataset.messageId;
+    if (!onRow && t !== scroller.current) return;
+    if (e.key === 'Escape' && onRow && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const box = e.currentTarget.closest('.chat-view')?.querySelector<HTMLElement>('.chat-textarea');
+      if (box) { e.preventDefault(); box.focus(); }
+      return;
+    }
+    if (!onRow && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return; // the scroller keeps PageUp/PageDown/Home/End scrolling
+    const from = rows.findIndex(r => r.message.id === (onRow ? t.dataset.messageId : tabStop));
+    const page = Math.max(1, Math.floor((scroller.current?.clientHeight ?? 560) / 56));
+    const next = navIndex(e.nativeEvent, from, rows.length, page);
+    if (next === null || from < 0) return;
+    e.preventDefault();
+    focusRow(onRow ? next : from); // from the scroller, Up/Down enter the list at the tab stop
+  };
+  const onListFocus = (e: React.FocusEvent<HTMLDivElement>) => {
+    const id = (e.target as HTMLElement).classList.contains('chat-msg') ? (e.target as HTMLElement).dataset.messageId : undefined;
+    if (id) setActiveId(id);
+  };
 
   // Opening at the bottom, the first frame with rows can place them from estimated heights (newest row below the fold) before the
   // measured layout lands a frame later. The scroller mounts with .settling (hidden) and shows once the newest row ends inside the
@@ -181,9 +224,10 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   // "since 11:13" for today, else the date (the reference banner shows the time of the first unread message).
   const unreadSince = firstUnread ? (sameDay(new Date(firstUnread.timestamp), new Date()) ? formatTime(new Date(firstUnread.timestamp)) : formatDivider(new Date(firstUnread.timestamp))) : '';
 
-  return <div className="chat-list" onWheel={gesture} onTouchMove={gesture} onKeyDown={gesture} onPointerDown={() => { pointerDown.current = true; gesture(); }}>
+  const listLabel = `Messages in ${chat.channel?.name ? `#${chat.channel.name}` : 'this conversation'}`;
+  return <div className="chat-list" onWheel={gesture} onTouchMove={gesture} onKeyDown={onListKey} onFocus={onListFocus} onPointerDown={() => { pointerDown.current = true; gesture(); }}>
     {/* Gives the authors' <h3>s a level-2 parent under the channel's <h1> (axe heading-order), at any scroll position. */}
-    <h2 className="sr-only">Messages in {chat.channel?.name ? `#${chat.channel.name}` : 'this conversation'}</h2>
+    <h2 className="sr-only">{listLabel}</h2>
     {showUnread && <div className="chat-unread-bar" role="status">
       <button type="button" className="chat-unread-bar-main" onClick={() => {
         const i = rows.findIndex(r => r.message.id === firstUnread!.id);
@@ -191,13 +235,13 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       }}>{unreadCount}{state.hasMoreBefore ? '+' : ''} new message{unreadCount === 1 ? '' : 's'} since {unreadSince}</button>
       <button type="button" className="chat-unread-bar-mark" onClick={() => { const last = state.messages[state.messages.length - 1]; if (last) messageStore.markRead(channelId, last.id); setSeenBottom(true); }}>Mark As Read <CheckCheck size={18} aria-hidden="true" /></button>
     </div>}
-    <Virtuoso<Row, { hasMoreBefore: boolean; hasMoreAfter: boolean; loading: boolean }>
+    <Virtuoso<Row, { hasMoreBefore: boolean; hasMoreAfter: boolean; loading: boolean; label: string }>
       key={`${channelId}:${state.windowId}`}
       ref={virtuoso}
       className={settling ? 'chat-scroller settling' : 'chat-scroller'}
-      aria-label={`Messages in ${chat.channel?.name ? `#${chat.channel.name}` : 'this conversation'}`}
+      aria-label={listLabel}
       data={rows}
-      context={{ hasMoreBefore: state.hasMoreBefore, hasMoreAfter: state.hasMoreAfter, loading: state.loadingOlder || state.loadingNewer }}
+      context={{ hasMoreBefore: state.hasMoreBefore, hasMoreAfter: state.hasMoreAfter, loading: state.loadingOlder || state.loadingNewer, label: listLabel }}
       firstItemIndex={state.firstItemIndex}
       // Opening at the bottom: initialScrollTop (clamped to the end) paints 2 frames sooner than initialTopMostItemIndex, which waits 4
       // frames before its first scroll. Measuring in the ResizeObserver callback itself (no extra rAF) saves another frame; its
@@ -237,6 +281,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
           grouped={row.grouped}
           editing={editingId === row.message.id}
           highlighted={highlightId === row.message.id}
+          tabStop={tabStop === row.message.id}
           onStopEditing={onStopEditing}
         />
       </div>}
