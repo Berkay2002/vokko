@@ -92,7 +92,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     react: (m, emoji, burst) => { void messageStore.toggleReaction(m.channel_id, m.id, emoji, burst); },
     jumpTo: id => { void messageStore.jumpToMessage(channelId, id); },
     openLink: href => setLink(href),
-    openImage: (message, index) => setImage({ message, index }),
+    openImage: (message, index) => { setImage({ message, index }); return true; },
     viewAttachment: (message, attachment) => setAttachmentView({ message, attachment }),
     deleteAttachment: (message, attachment) => setAttachmentDelete({ message, attachment }),
     viewReactions: (m, key) => { setReactionsOf(m); setReactionsKey(key); },

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MailX, Play, Users } from 'lucide-react';
-import type { Embed, Message, Snowflake } from '../api/types';
+import { MailX, Play, Users, X } from 'lucide-react';
+import type { Attachment, Embed, Message, Snowflake } from '../api/types';
 import { AnimatedImage, AnimatedVideo, guildIconUrl, guildInitials, joinOrApply, request, resolveUrl, useGuilds } from './shell';
 import { useChat } from './ChatContext';
 import { Markdown } from './markdown';
 import { embedColor, findInviteCodes, isVideoUrl, safeHttpUrl } from './embedUtil';
 import { playerSrc } from './embedPlayers';
+import { fileNameFromUrl } from './mediaTarget';
+import { canSuppressEmbeds, embedsSuppressed } from './messageState';
+import { removeEmbeds } from './mediaActions';
 import { formatFullDate } from './util';
 import { API_ORIGIN } from '../api/config';
 
@@ -89,9 +92,21 @@ function InviteEmbed({ code, own }: { code: string; own: boolean }) {
 
 // ---- unfurled link embeds ----
 
-function Media({ url, alt, className }: { url: string | null; alt: string; className: string }) {
+function Media({ url, alt, className, onOpen }: { url: string | null; alt: string; className: string; onOpen?: () => void }) {
   if (!url) return null;
-  return <AnimatedImage kind="gif" className={className} src={resolveUrl(url)} alt={alt} loading="lazy" draggable={false} />;
+  const image = <AnimatedImage kind="gif" className={className} src={resolveUrl(url)} alt={alt} loading="lazy" draggable={false} />;
+  return onOpen
+    ? <button type="button" className={`chat-embed-media-btn${className === 'chat-embed-image' ? ' wide' : ''}`} aria-label={alt ? `Open image ${alt}` : 'Open image'} onClick={onOpen}>{image}</button>
+    : image;
+}
+
+/** The picture as the viewer's only image: a stand-in attachment, since the viewer shows a message's attachments. */
+function embedImageView(message: Message, src: string, embed: Embed, media?: { width?: number; height?: number }): Message {
+  const attachment: Attachment = {
+    id: `embed:${src}`, filename: fileNameFromUrl(src), content_type: 'image/*', size: 0, url: src,
+    width: media?.width ?? null, height: media?.height ?? null, description: embed.title,
+  };
+  return { ...message, attachments: [attachment] };
 }
 
 /** A video page's poster. Allow-listed players swap it for their iframe on click (never before); anything else opens the link. */
@@ -117,11 +132,15 @@ function VideoPoster({ href, player, poster, title, open }: {
   </a>;
 }
 
-function EmbedCard({ embed }: { embed: Embed }) {
+function EmbedCard({ embed, message }: { embed: Embed; message: Message }) {
   const chat = useChat();
   const color = embedColor(embed.color);
   const link = safeHttpUrl(embed.url);
   const open = (e: React.MouseEvent, href: string) => { e.preventDefault(); chat.actions.openLink(href); };
+  /** Enlarges a picture in the image viewer; where the surface has none, a click on the picture follows its link as before. */
+  const view = (src: string, media: { width?: number; height?: number } | undefined, fallback?: string) => (): void => {
+    if (!chat.actions.openImage(embedImageView(message, src, embed, media), 0) && fallback) chat.actions.openLink(fallback);
+  };
   const mediaUrl = (m?: { url: string; proxy_url?: string }) => safeHttpUrl(m?.proxy_url ?? m?.url);
   const iconUrl = (m?: { icon_url?: string; proxy_icon_url?: string }) => safeHttpUrl(m?.proxy_icon_url ?? m?.icon_url);
   const authorIcon = iconUrl(embed.author);
@@ -137,7 +156,8 @@ function EmbedCard({ embed }: { embed: Embed }) {
   if (embed.type === 'image') {
     const src = mediaUrl(embed.thumbnail) ?? mediaUrl(embed.image) ?? safeHttpUrl(embed.url);
     if (!src) return null;
-    return <a className="chat-embed-image-only" href={link ?? src} onClick={e => open(e, link ?? src)}><AnimatedImage kind="gif" src={resolveUrl(src)} alt={embed.title ?? 'Image'} loading="lazy" draggable={false} /></a>;
+    const show = view(src, embed.thumbnail ?? embed.image, link ?? src);
+    return <a className="chat-embed-image-only" href={link ?? src} onClick={e => { e.preventDefault(); show(); }}><AnimatedImage kind="gif" src={resolveUrl(src)} alt={embed.title ?? 'Image'} loading="lazy" draggable={false} /></a>;
   }
 
   const videoUrl = safeHttpUrl(embed.video?.url);
@@ -167,13 +187,13 @@ function EmbedCard({ embed }: { embed: Embed }) {
           </div>)}
         </div>}
       </div>
-      {thumb && !image && hasText && !showVideoPoster && <Media className="chat-embed-thumb" url={thumb} alt="" />}
+      {thumb && !image && hasText && !showVideoPoster && <Media className="chat-embed-thumb" url={thumb} alt={embed.title ?? ''} onOpen={view(thumb, embed.thumbnail)} />}
     </div>
     {inlineVideo && (embed.type === 'gifv'
       ? <AnimatedVideo className="chat-embed-video" src={resolveUrl(videoUrl)} poster={image ?? thumb ?? undefined} loop muted playsInline />
       : <video className="chat-embed-video" src={resolveUrl(videoUrl)} poster={image ?? thumb ?? undefined} controls preload="metadata" playsInline />)}
     {showVideoPoster && <VideoPoster href={link ?? videoUrl} player={playerSrc(videoUrl, inlineMedia)} poster={image ?? thumb} title={embed.title} open={open} />}
-    {!inlineVideo && !showVideoPoster && image && <Media className="chat-embed-image" url={image} alt={embed.title ?? ''} />}
+    {!inlineVideo && !showVideoPoster && image && <Media className="chat-embed-image" url={image} alt={embed.title ?? ''} onOpen={view(image, embed.image)} />}
     {(embed.footer || embed.timestamp) && <div className="chat-embed-footer">
       {footerIcon && <Media className="chat-embed-footer-icon" url={footerIcon} alt="" />}
       <span>{embed.footer?.text}{embed.footer && embed.timestamp ? ' • ' : ''}{embed.timestamp ? formatFullDate(new Date(embed.timestamp)) : ''}</span>
@@ -184,14 +204,26 @@ function EmbedCard({ embed }: { embed: Embed }) {
 export function Embeds({ message }: { message: Message }) {
   const chat = useChat();
   const { showEmbeds, hideInvites } = chat.display;
-  const embeds = showEmbeds ? message.embeds ?? [] : [];
+  // A message whose previews were removed (SUPPRESS_EMBEDS) shows no cards at all, invites included.
+  const suppressed = embedsSuppressed(message);
+  const embeds = showEmbeds && !suppressed ? message.embeds ?? [] : [];
   const found = useMemo(() => findInviteCodes(message.content, inviteHosts()), [message.content]);
   // "Show embeds" hides link previews only; invite cards stay unless streamer mode hides invites.
-  const codes = hideInvites ? [] : found;
+  const codes = hideInvites || suppressed ? [] : found;
   if (embeds.length === 0 && codes.length === 0) return null;
   const own = message.author.id === chat.me.id;
+  const removable = embeds.length > 0 && canSuppressEmbeds(message, chat.me.id, chat.canManage);
   return <div className="chat-embeds">
     {codes.map(code => <InviteEmbed key={code} code={code} own={own} />)}
-    {embeds.map((e, i) => <EmbedCard key={`${e.url ?? ''}:${i}`} embed={e} />)}
+    {embeds.map((e, i) => {
+      const card = <EmbedCard key={`${e.url ?? ''}:${i}`} embed={e} message={message} />;
+      // The X removes every preview of the message (one flag), so it says so when there are several.
+      return removable
+        ? <div key={`${e.url ?? ''}:${i}`} className="chat-embed-slot">
+          {card}
+          <button type="button" className="chat-embed-remove" aria-label={embeds.length > 1 ? 'Remove all embeds' : 'Remove embed'} onClick={() => removeEmbeds(message)}><X size={16} /></button>
+        </div>
+        : card;
+    })}
   </div>;
 }

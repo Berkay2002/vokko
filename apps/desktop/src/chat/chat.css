@@ -299,6 +299,12 @@ html.message-compact { --chat-gutter: 80px; }
 .chat-image-action:hover { background: var(--chat-hover); color: var(--chat-icon-hover); }
 .chat-image-spoiler-label { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 4px 8px; border-radius: 20px; background: var(--chat-scrim); color: var(--chat-on-brand); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
 .chat-video { max-width: 400px; max-height: 300px; border-radius: 8px; background: var(--chat-spoiler-hover); }
+.chat-video-wrap { position: relative; display: inline-block; max-width: 100%; overflow: hidden; border-radius: 8px; }
+.chat-video.spoiler { display: block; filter: blur(44px); }
+.chat-spoiler-cover { position: absolute; inset: 0; cursor: pointer; }
+.chat-file.spoiler { position: relative; cursor: pointer; text-align: left; background: var(--chat-spoiler-hidden); }
+.chat-file.spoiler:hover { background: var(--chat-spoiler-hover); }
+.chat-file-spoiler { padding: 4px 8px; border-radius: 20px; background: var(--chat-scrim); color: var(--chat-on-brand); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
 .chat-file { display: flex; align-items: center; gap: 8px; width: 432px; max-width: 100%; padding: 10px; border: 1px solid var(--chat-bg-tertiary); border-radius: 8px; background: var(--chat-input-bg); }
 .chat-file-icon { flex: none; color: var(--chat-icon); }
 .chat-file-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -352,6 +358,9 @@ html.message-compact { --chat-gutter: 80px; }
 .chat-lightbox-stage.with-thumbs { bottom: 52px; } /* the thumbnail strip sits below the image, not over it */
 .chat-lightbox-stage img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; cursor: zoom-in; transform-origin: center; transition: transform 0.15s ease-out; user-select: none; -webkit-user-select: none; }
 .chat-lightbox-stage img.zoomed { cursor: zoom-out; }
+.chat-lightbox-stage img.spoiler { filter: blur(44px); cursor: pointer; }
+.chat-lightbox-spoiler { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1; padding: 4px 8px; border-radius: 20px; background: var(--chat-scrim); color: var(--chat-on-brand); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; cursor: pointer; }
+.chat-lightbox-thumbs img.spoiler { filter: blur(6px); }
 .chat-lightbox-stage img.dragging { cursor: grabbing; transition: none; }
 @media (prefers-reduced-motion: reduce) { .chat-lightbox-stage img { transition: none; } }
 .chat-lightbox-nav { position: absolute; z-index: 2; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--background-surface-highest); color: var(--chat-icon); }
@@ -694,6 +703,13 @@ span.md-emoji { width: auto; height: auto; line-height: inherit; }
 .chat-embed-field-value { font-size: 14px; line-height: 18px; overflow-wrap: anywhere; }
 .chat-embed-thumb { flex: none; width: 80px; height: 80px; margin-top: 8px; border-radius: 4px; object-fit: cover; }
 .chat-embed-image, .chat-embed-video { display: block; width: 100%; max-height: 300px; margin-top: 16px; border-radius: 4px; object-fit: contain; background: var(--chat-bg-secondary); }
+.chat-embed-media-btn { display: block; flex: none; padding: 0; border: 0; background: none; cursor: zoom-in; }
+.chat-embed-media-btn.wide { width: 100%; }
+.chat-embed-slot { position: relative; width: fit-content; max-width: 100%; }
+.chat-embed-remove { position: absolute; top: 6px; right: 6px; z-index: 1; display: none; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--chat-surface-high); border: 1px solid var(--chat-edge); color: var(--chat-icon); }
+.chat-embed-remove:hover { color: var(--chat-danger); }
+.chat-embed-slot:hover .chat-embed-remove, .chat-embed-slot:focus-within .chat-embed-remove { display: grid; }
+@media (hover: none) { .chat-embed-remove { display: grid; } } /* no hover on a touch screen: the X is always there */
 .chat-embed-poster { position: relative; display: block; }
 .chat-embed-play { position: absolute; inset: 0; display: grid; place-items: center; color: var(--chat-on-brand); }
 .chat-embed-poster .chat-embed-play svg { box-sizing: content-box; padding: 10px; border-radius: 50%; background: rgba(0, 0, 0, 0.6); }

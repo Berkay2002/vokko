@@ -10,12 +10,14 @@ export interface MediaTarget {
 const isWeb = (url: string): boolean => /^https?:\/\//i.test(url);
 
 /**
- * The media under `el`, or null when it is plain message text (or a link that is not a web link). A picture still behind its
- * SPOILER cover is not media yet: the menu must not hand out what the cover hides.
+ * The media under `el`, or null when it is plain message text (or a link that is not a web link). Anything still behind a spoiler
+ * cover (an attachment's `.spoiler`, a `||spoiler||` that has not been clicked) is not media yet: the menu must not hand out what
+ * the cover hides, including a link's address.
  */
 export function mediaTargetFrom(el: Element | null): MediaTarget | null {
+  if (el?.closest('.spoiler, .md-spoiler[role="button"]')) return null;
   const image = el?.closest<HTMLElement>('.chat-image');
-  if (image) return image.classList.contains('spoiler') || !image.dataset.src ? null : { kind: 'image', url: image.dataset.src };
+  if (image) return image.dataset.src ? { kind: 'image', url: image.dataset.src } : null;
   const video = el?.closest<HTMLVideoElement>('video.chat-video');
   if (video?.src) return { kind: 'video', url: video.src };
   const audio = el?.closest<HTMLAudioElement>('audio.chat-audio');

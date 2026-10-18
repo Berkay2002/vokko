@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../api/types';
-import { applyReaction, buildRows, type ChannelState, emptyState, LIVE_KEEP, LIVE_MAX, mentionsRole, replaceWindow, trimOldest, upsertMessage, withLateArrivals } from './messageState';
+import { applyReaction, buildRows, canSuppressEmbeds, type ChannelState, embedsSuppressed, emptyState, LIVE_KEEP, LIVE_MAX, mentionsRole, replaceWindow, trimOldest, upsertMessage, withLateArrivals } from './messageState';
 import { sameDay } from './util';
 
 const BASE = Date.UTC(2026, 9, 10, 12, 0, 0);
@@ -133,5 +133,32 @@ describe('trimOldest (a call chat left open for hours)', () => {
   it('never trims while a jump is pending (its target could be cut away)', () => {
     const s = { ...live(LIVE_MAX + 50), focus: { messageId: '1010', token: 1 } };
     expect(trimOldest(s)).toBe(s);
+  });
+});
+
+describe('removing link previews', () => {
+  const mine = msg('1', 'me', 0);
+  const theirs = msg('2', 'them', 1);
+  const SUPPRESS = 1 << 2;
+
+  it('reads the SUPPRESS_EMBEDS flag', () => {
+    expect(embedsSuppressed(mine)).toBe(false);
+    expect(embedsSuppressed({ ...mine, flags: SUPPRESS })).toBe(true);
+    expect(embedsSuppressed({ ...mine, flags: 1 << 6 })).toBe(false);
+  });
+
+  it('the author and a moderator may; another member may not', () => {
+    expect(canSuppressEmbeds(mine, 'me', false)).toBe(true);
+    expect(canSuppressEmbeds(theirs, 'me', false)).toBe(false);
+    expect(canSuppressEmbeds(theirs, 'me', true)).toBe(true);
+    expect(canSuppressEmbeds(msg('3', 'them', 2, 19), 'me', true)).toBe(true); // a reply
+  });
+
+  it('not where the server refuses the edit: system messages, polls, forwards, voice messages, published copies', () => {
+    expect(canSuppressEmbeds(msg('3', 'me', 2, 7), 'me', true)).toBe(false); // a join notice
+    expect(canSuppressEmbeds({ ...mine, poll: {} } as unknown as Message, 'me', true)).toBe(false);
+    expect(canSuppressEmbeds({ ...mine, message_reference: { type: 1 } } as unknown as Message, 'me', true)).toBe(false);
+    expect(canSuppressEmbeds({ ...mine, flags: 1 << 13 }, 'me', true)).toBe(false);
+    expect(canSuppressEmbeds({ ...mine, flags: 1 << 1 }, 'me', true)).toBe(false);
   });
 });

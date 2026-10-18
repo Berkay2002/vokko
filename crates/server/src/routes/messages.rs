@@ -802,8 +802,15 @@ async fn edit_message(
     let access = channel_access(&state, user_id, id).await?;
     access.require_unarchived()?;
     let row = message_in_channel(&state, id, mid).await?;
+    // Only the author edits a message, except that a moderator (MANAGE_MESSAGES in a guild channel) may suppress or restore its link
+    // previews. That is a flags-only body: any content or attachment change from someone else is refused, and the flags handling below
+    // keeps just the SUPPRESS_EMBEDS bit for everyone.
     if row.author_id != user_id {
-        return Err(ApiErr::not_author());
+        let moderating =
+            body.content.is_none() && body.attachments.is_none() && body.flags.is_some() && !access.is_dm() && access.permissions & MANAGE_MESSAGES != 0;
+        if !moderating {
+            return Err(ApiErr::not_author());
+        }
     }
     // A member held by the rules gate (for example one who rejoined) cannot turn old messages into new content either.
     if let Some(guild_id) = access.channel.guild_id {

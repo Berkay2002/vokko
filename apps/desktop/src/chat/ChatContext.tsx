@@ -72,7 +72,8 @@ export interface ChatActions {
   react(m: Message, emoji: { id: string | null; name: string }, burst?: boolean): void;
   jumpTo(messageId: Snowflake): void;
   openLink(href: string): void;
-  openImage(message: Message, index: number): void;
+  /** Opens the image viewer; false on a surface that has none (the caller falls back to the link). */
+  openImage(message: Message, index: number): boolean;
   /** Pencil on a sent image: the "Modify Attachment" dialog (read-only, the contract can't change sent attachments). */
   viewAttachment(message: Message, attachment: Attachment): void;
   /** Trash on a sent image: asks, then removes the attachment from the message. */

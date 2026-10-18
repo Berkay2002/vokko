@@ -441,3 +441,91 @@ async fn concurrent_sends_keep_the_newest_last_message() {
         sqlx::query_as("SELECT last_message_id FROM channels WHERE id = $1").bind(channel).fetch_one(&s.app.state.db).await.expect("channel");
     assert_eq!(last, Some(newest));
 }
+
+/// Gives `user` a role carrying `permissions` in `guild`.
+async fn give_role(app: &TestApp, guild: &str, user: &str, permissions: u64) {
+    let role = app.state.ids.next();
+    sqlx::query("INSERT INTO roles (id, guild_id, name, position, permissions) VALUES ($1, $2, 'mod', 1, $3)")
+        .bind(role)
+        .bind(guild.parse::<i64>().expect("guild id"))
+        .bind(permissions as i64)
+        .execute(&app.state.db)
+        .await
+        .expect("insert role");
+    sqlx::query("INSERT INTO member_roles (guild_id, user_id, role_id) VALUES ($1, $2, $3)")
+        .bind(guild.parse::<i64>().expect("guild id"))
+        .bind(user.parse::<i64>().expect("user id"))
+        .bind(role)
+        .execute(&app.state.db)
+        .await
+        .expect("assign role");
+}
+
+/// Registers `name` and joins them to the guild's general channel.
+async fn join_as(s: &Setup, name: &str) -> (String, String) {
+    let (token, user) = s.app.register(name).await;
+    let (_, invite) = s.app.post(&format!("/channels/{}/invites", s.channel), &s.owner, json!({})).await;
+    s.app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &token, json!({})).await;
+    (token, user["id"].as_str().expect("id").to_owned())
+}
+
+/// A moderator (MANAGE_MESSAGES) may suppress and restore another member's link previews with a flags-only edit, and nothing else.
+#[tokio::test]
+async fn a_moderator_can_suppress_embeds_on_anothers_message_but_not_edit_it() {
+    let s = setup().await;
+    let (moderator, moderator_id) = join_as(&s, "moddy").await;
+    give_role(&s.app, &s.guild, &moderator_id, vokko_protocol::api::permissions::MANAGE_MESSAGES).await;
+    let (plain, _) = join_as(&s, "carol").await;
+
+    let message = send(&s, &s.member, "look https://example.com/post").await;
+    let mid = message["id"].as_str().expect("id");
+    let path = format!("/channels/{}/messages/{mid}", s.channel);
+    let embeds = json!([{"type": "link", "url": "https://example.com/post", "title": "A post"}]);
+    sqlx::query("UPDATE messages SET embeds = $2::jsonb WHERE id = $1")
+        .bind(mid.parse::<i64>().expect("message id"))
+        .bind(embeds.to_string())
+        .execute(&s.app.state.db)
+        .await
+        .expect("embeds");
+    let (_, listed) = s.app.get(&format!("/channels/{}/messages?limit=1", s.channel), &s.member).await;
+    assert_eq!(listed[0]["embeds"].as_array().map(Vec::len), Some(1), "the seeded preview is there");
+
+    // suppress: the previews go, the flag is set, and it is not shown as an edit
+    let (status, suppressed) = s.app.patch(&path, &moderator, json!({"flags": 4})).await;
+    assert_eq!(status, StatusCode::OK, "{suppressed}");
+    assert_eq!(suppressed["flags"], 4);
+    assert!(suppressed["embeds"].as_array().is_none_or(Vec::is_empty), "{suppressed}");
+    assert_eq!(suppressed["content"], "look https://example.com/post");
+    assert_eq!(suppressed["edited_timestamp"], Value::Null);
+
+    // restore: the flag clears (the previews are fetched again in the background)
+    let (status, restored) = s.app.patch(&path, &moderator, json!({"flags": 0})).await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert!(restored["flags"].is_null() || restored["flags"] == 0, "{restored}");
+    assert_eq!(restored["edited_timestamp"], Value::Null);
+
+    // but not content, attachments, or a body without flags
+    for body in [json!({"content": "hijack"}), json!({"content": "hijack", "flags": 4}), json!({"attachments": []}), json!({})] {
+        let (status, error) = s.app.patch(&path, &moderator, body.clone()).await;
+        assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50005)), "{body}");
+    }
+    let (_, after) = s.app.get(&format!("/channels/{}/messages?limit=1", s.channel), &s.member).await;
+    assert_eq!(after[0]["content"], "look https://example.com/post");
+
+    // a member without MANAGE_MESSAGES cannot, a stranger cannot, and the author still can
+    let (status, error) = s.app.patch(&path, &plain, json!({"flags": 4})).await;
+    assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50005)));
+    assert_eq!(s.app.patch(&path, &s.outsider, json!({"flags": 4})).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(s.app.patch(&path, &s.member, json!({"flags": 4})).await.0, StatusCode::OK);
+}
+
+/// A DM has no moderators: the other person's flags edit fails like any edit of someone else's message.
+#[tokio::test]
+async fn nobody_can_suppress_embeds_on_the_other_persons_dm() {
+    let s = setup().await;
+    let (_, dm) = s.app.post("/users/@me/channels", &s.member, json!({"recipient_id": s.owner_id})).await;
+    let dm_id = dm["id"].as_str().expect("dm id");
+    let (_, message) = s.app.post(&format!("/channels/{dm_id}/messages"), &s.member, json!({"content": "hi"})).await;
+    let (status, error) = s.app.patch(&format!("/channels/{dm_id}/messages/{}", message["id"].as_str().expect("id")), &s.owner, json!({"flags": 4})).await;
+    assert_eq!((status, &error["code"]), (StatusCode::FORBIDDEN, &json!(50005)));
+}

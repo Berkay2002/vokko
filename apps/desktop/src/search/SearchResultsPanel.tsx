@@ -27,7 +27,7 @@ export function SearchResultsPanel({ channel }: { channel: Channel }) {
   const [link, setLink] = useState<string | null>(null);
   // Links ask first ("Leaving Vokko"), like in the chat.
   const actions = useMemo<ChatActions>(() => ({
-    reply() {}, edit() {}, requestDelete() {}, togglePin() {}, react() {}, openImage() {}, viewAttachment() {}, deleteAttachment() {}, viewReactions() {},
+    reply() {}, edit() {}, requestDelete() {}, togglePin() {}, react() {}, openImage() { return false; }, viewAttachment() {}, deleteAttachment() {}, viewReactions() {},
     jumpTo() {},
     openLink: setLink,
   }), []);

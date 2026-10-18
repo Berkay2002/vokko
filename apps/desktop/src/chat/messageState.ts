@@ -1,5 +1,5 @@
 // Pure state transitions for one channel's message window. No React, no I/O: unit-tested in messageState.test.ts.
-import { MessageType } from '../api/types';
+import { MessageFlags, MessageReferenceType, MessageType } from '../api/types';
 import type { CreateMessageRequest, Message, Reaction, ReactionEmoji, Snowflake, User } from '../api/types';
 import { compareIds } from './util';
 
@@ -269,6 +269,20 @@ export const GROUP_WINDOW_MS = 7 * 60 * 1000;
 
 const SYSTEM_TYPES = new Set<number>([MessageType.RecipientAdd, MessageType.RecipientRemove, MessageType.ChannelNameChange, MessageType.ChannelPinnedMessage, MessageType.UserJoin, MessageType.ThreadCreated, MessageType.Call, MessageType.PollResult, MessageType.AutoModerationAction]);
 export const isSystemMessage = (m: Message): boolean => SYSTEM_TYPES.has(m.type);
+
+/** The message's link previews are switched off (SUPPRESS_EMBEDS). */
+export const embedsSuppressed = (m: Message): boolean => ((m.flags ?? 0) & MessageFlags.SuppressEmbeds) !== 0;
+
+/**
+ * Whether this person may remove a message's link previews: its author, or a moderator (the server lets MANAGE_MESSAGES do a flags-only
+ * edit), and only where the server edits the message at all: not a system message, poll, forward, voice message or published copy.
+ */
+export function canSuppressEmbeds(m: Message, meId: Snowflake, canManage: boolean): boolean {
+  if (m.author.id !== meId && !canManage) return false;
+  if (m.type !== MessageType.Default && m.type !== MessageType.Reply) return false;
+  const flags = m.flags ?? 0;
+  return !m.poll && m.message_reference?.type !== MessageReferenceType.Forward && (flags & (MessageFlags.IsVoiceMessage | MessageFlags.IsCrosspost)) === 0;
+}
 
 /**
  * True when the raw content has an `<@&id>` mention of one of `roleIds`. The row highlight reads the content, the unread counter uses `mention_roles`

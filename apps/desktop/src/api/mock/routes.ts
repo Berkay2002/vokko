@@ -676,7 +676,10 @@ function checkVoiceMessage(channel: MockChannel, userId: string, m: { content: s
 route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
-  if (message.author_id !== viewer.user.id) fail(403, 50005, "Cannot edit a message authored by another user");
+  // Like the server: only the author edits, except that a moderator (MANAGE_MESSAGES in a guild channel) may flip the link-preview flag.
+  const flagsOnly = body.flags !== undefined && body.content === undefined && body.attachments === undefined;
+  const moderating = message.author_id !== viewer.user.id;
+  if (moderating && !(flagsOnly && channel.guild_id && hasBit(channelPermsOf(channel, viewer.user.id), Perm.MANAGE_MESSAGES))) fail(403, 50005, "Cannot edit a message authored by another user");
   checkRulesAccepted(channel.guild_id, viewer.user.id);
 // The AutoMod alert carries the flagged member as author; like the server, system messages can't be edited.
   if (message.type === MessageType.AutoModerationAction) fail(400, 50035, "Invalid Form Body", { message_id: { code: "BASE_TYPE_INVALID", message: "Cannot edit a system message." } });
@@ -693,9 +696,16 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   }
   if (content === "" && attachments.length === 0) fail(400, 50006, "Cannot send an empty message");
   if (content !== message.content) checkAutomod(channel, viewer.user.id, content, true);
+  // `flags` only carries SUPPRESS_EMBEDS (the other bits keep their value); suppressing drops the link previews.
+  if (typeof body.flags === "number") {
+    const flags = ((message.flags ?? 0) & ~MessageFlags.SuppressEmbeds) | (body.flags & MessageFlags.SuppressEmbeds);
+    if (flags) message.flags = flags; else delete message.flags;
+    if ((flags & MessageFlags.SuppressEmbeds) !== 0) message.embeds = [];
+  }
+  // A flags-only edit is not an edit as far as the timestamp goes.
+  if (content !== message.content || attachments.length !== message.attachments.length) message.edited_timestamp = new Date().toISOString();
   message.content = content;
   message.attachments = attachments;
-  message.edited_timestamp = new Date().toISOString();
   message.mention_ids = [...new Set([...content.matchAll(/<@!?(\d+)>/g)].map(m => m[1] ?? "").filter(id => db.accounts.has(id)))];
   message.mention_everyone = /(^|\s)@(everyone|here)\b/.test(content) && hasBit(channelPermsOf(channel, viewer.user.id), Perm.MENTION_EVERYONE);
   for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));

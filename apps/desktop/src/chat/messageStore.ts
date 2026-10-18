@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from 'react';
 import { ApiRequestError, RateLimitedError, SLOWMODE_CODE } from '../api/errors';
 import { startCooldown } from './slowmode';
-import { MessageType } from '../api/types';
+import { MessageFlags, MessageType } from '../api/types';
 import { ReactionType } from '../api/types';
 import { announceBurst } from '../perks/SuperReactions';
 import type { CreateMessageRequest, EditMessageRequest, Message, MessageReactionEvent, PendingAttachmentMeta, ReactionEmoji, Snowflake, StickerItem, User } from '../api/types';
@@ -331,6 +331,13 @@ export const messageStore = {
   async edit(channelId: Snowflake, messageId: Snowflake, content: string): Promise<void> {
     const body: EditMessageRequest = { content };
     const m = await request<Message>('PATCH', `/channels/${channelId}/messages/${messageId}`, body);
+    update(channelId, s => updateIfPresent(s, m));
+  },
+
+  /** Switches off the message's link previews: the server keeps just the SUPPRESS_EMBEDS bit and drops the cards. */
+  async suppressEmbeds(channelId: Snowflake, message: Message): Promise<void> {
+    const body: EditMessageRequest = { flags: (message.flags ?? 0) | MessageFlags.SuppressEmbeds };
+    const m = await request<Message>('PATCH', `/channels/${channelId}/messages/${message.id}`, body);
     update(channelId, s => updateIfPresent(s, m));
   },
 
