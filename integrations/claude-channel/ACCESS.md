@@ -79,14 +79,14 @@ When Claude needs approval for a tool, the prompt is sent to every allowlisted u
 
 ## Sharing the token with a bridge
 
-`dmBackend` (`subscription` default, or `api`) and `guilds` (default `true`) let a separate bridge process on the same bot token take over part of the traffic. Vokko accepts several gateway sessions per bot token and sends each of them every event, so both see all messages; these settings decide which one answers.
+`dmBackend` (`subscription` default, or `api`) and `guilds` (default `true`) let a separate bridge process on the same bot token take over part of the traffic. Vokko accepts several gateway sessions per bot token and sends each of them every event, so both see all messages; these settings decide which one answers. Once a bridge has run here, DMs from anyone but the bot's owner are the bridge's whatever `dmBackend` says, so only the owner's DMs share this session (and its permission prompts).
 
 ```
 /vokko:access set dmBackend api     # this session ignores DMs (and sends no permission prompts there)
 /vokko:access set guilds false      # this session ignores server channels
 ```
 
-With `guilds false` this session still answers server messages when the bridge cannot: once its `bridge-state.json` says it stopped, is older than 90 s or names a dead process (no file at all means no bridge has run, and `guilds false` is honoured), and for messages the bridge passes on (files in `handoff/`) when its API fails. They go through the same gate (opt-in, `requireMention`, per-channel `allowFrom`). In those channels `reply` attaches files from the inbox only. Tools other than reply, react and edit_message still ask you; with `dmBackend api` the prompt is not sent, so they are not approved. See the bridge README for details.
+With `guilds false` this session still answers server messages when the bridge cannot: once its `bridge-state.json` says it stopped, is older than 90 s or names a dead process (no file at all means no bridge has run, and `guilds false` is honoured), and for messages the bridge passes on (files in `handoff/`) when its API fails. They go through the same gate (opt-in, `requireMention`, per-channel `allowFrom`), and only in channels @everyone can view (a thread follows its parent, a private thread never counts, a failed lookup counts as private): this session is one conversation for everything it answers, so what it hears in a private channel must not come out elsewhere. In those channels `reply` attaches files from the inbox only. Tools other than reply, react and edit_message still ask you; with `dmBackend api` the prompt is not sent, so they are not approved. See the bridge README for details.
 
 ## Delivery
 

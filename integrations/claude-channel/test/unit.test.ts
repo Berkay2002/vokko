@@ -259,6 +259,60 @@ test('the gate still applies to a handed-off message, and the bridge is told whe
   expect(verdicts(dir)).toEqual([`${stranger}.declined`, `${optout}.declined`, `${bot_}.declined`, `${old}.declined`, `${broken}.declined`].sort())
 })
 
+test('a handed-off message from a channel @everyone cannot view is declined; a public one and a thread of the private one are handled by the same rule', async () => {
+  const { bot, dir } = makeBot({ guilds: false })
+  const got: Message[] = []
+  ;(bot as any).onMessage = (m: Message) => void got.push(m)
+  beat(dir)
+  const cache = (ch: object) => (bot as any).cacheChannel(ch)
+  cache({ id: GROUP, type: 0, guild_id: '1', permission_overwrites: [{ id: '1', type: 0, allow: '0', deny: String(VIEW_CHANNEL) }, { id: FRIEND, type: 1, allow: String(VIEW_CHANNEL), deny: '0' }] })
+  cache({ id: '501', type: 11, guild_id: '1', parent_id: GROUP, permission_overwrites: [] }) // a thread under the private channel
+  cache({ id: '502', type: 0, guild_id: '1', permission_overwrites: [] })
+  ;(bot as any).saveAccess({ ...(bot as any).loadAccess(), groups: { [GROUP]: { requireMention: false, allowFrom: [FRIEND] }, '502': { requireMention: false, allowFrom: [FRIEND] } } })
+  const [priv, thread, pub] = [snow(21), snow(22), snow(23)]
+  handoff(dir, priv)
+  handoff(dir, thread, '501')
+  handoff(dir, pub, '502')
+  respond = url =>
+    url.includes(`around=${priv}`) ? Response.json([msg(priv, FRIEND)])
+    : url.includes(`around=${thread}`) ? Response.json([msg(thread, FRIEND, { channel_id: '501' })])
+    : Response.json([msg(pub, FRIEND, { channel_id: '502' })])
+  const before = calls.length
+  ;(bot as any).checkHandoffs()
+  await settle()
+  for (const m of got) await bot.admit(m)
+  expect(verdicts(dir)).toEqual([`${priv}.declined`, `${thread}.declined`, `${pub}.accepted`].sort())
+  expect(calls.slice(before).every(c => c.url.includes('around='))).toBe(true) // the permission check made no request of its own
+  await expect(bot.reply('501', 'x')).rejects.toThrow(/not allowlisted/) // and the thread was not adopted
+})
+
+test("publicChannel: @everyone's view bit decides, a thread uses its parent, a private thread or an unknown channel is private", async () => {
+  const { bot } = makeBot()
+  const cache = (ch: object) => (bot as any).cacheChannel(ch)
+  cache({ id: '510', type: 0, guild_id: '1', permission_overwrites: [{ id: '1', type: 0, allow: '0', deny: String(VIEW_CHANNEL) }] })
+  cache({ id: '511', type: 11, guild_id: '1', parent_id: '510' })
+  cache({ id: '512', type: 11, guild_id: '1', parent_id: GROUP })
+  cache({ id: '513', type: 12, guild_id: '1', parent_id: GROUP })
+  const before = calls.length
+  expect([await bot.publicChannel('1', GROUP), await bot.publicChannel('1', '512')]).toEqual([true, true])
+  expect([await bot.publicChannel('1', '510'), await bot.publicChannel('1', '511'), await bot.publicChannel('1', '513'), await bot.publicChannel('1', '999')]).toEqual([false, false, false, false])
+  expect(calls.length).toBe(before) // the cached guild state is enough
+})
+
+test("DMs: with a bridge set up the plugin keeps the owner's DM only; with none it keeps every allowlisted one", async () => {
+  const { bot, dir } = makeBot({ allowFrom: [OWNER, FRIEND] })
+  ;(bot as any).owner_ = { id: OWNER, username: 'owner', global_name: null }
+  const cache = (ch: object) => (bot as any).cacheChannel(ch)
+  cache({ id: '610', type: 1, recipients: [bot.me, { id: FRIEND, username: 'friend', global_name: null }] })
+  const access = (bot as any).loadAccess()
+  expect(bot.dmsOwned(access, FRIEND)).toBe(true) // no bridge-state.json yet
+  await expect(bot.allowedChannel('610')).resolves.toBeUndefined()
+  beat(dir)
+  expect([bot.dmsOwned(access, OWNER), bot.dmsOwned(access, FRIEND)]).toEqual([true, false])
+  await expect(bot.allowedChannel('610')).rejects.toThrow(/not allowlisted/)
+  await expect(bot.allowedChannel(DM)).resolves.toBeUndefined()
+})
+
 test('in a server channel held only as the bridge\'s fallback, reply attaches files from the inbox only', async () => {
   const { bot, dir } = makeBot({ guilds: false })
   beat(dir)

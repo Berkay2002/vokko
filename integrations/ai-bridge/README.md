@@ -59,6 +59,10 @@ session) answers server messages whenever the bridge cannot, and hands them back
   once, then writes `<id>.accepted` or `<id>.declined` for the bridge. If no session claims it within 5 s, or the plugin
   declines it (gate, failed fetch, older than 60 s), the sender gets the old error message. At most 30 messages an hour,
   across all servers, are passed on; the rest get the old message too.
+- Only channels @everyone can view are passed on (thread: its parent; a private thread never; a failed lookup counts as private).
+  The subscription session is one conversation for everything it answers, so a private channel's messages get the old
+  message instead. For the same reason only the owner's DMs ever go to it: with a bridge set up, other paired people's
+  DMs are answered here by their own per-DM session whatever `dmBackend` says (a plugin with no bridge keeps everyone's).
 - You get a DM when servers switch to the subscription (with a short reason, e.g. "API: credit balance too low") and when
   they switch back. `!backend` shows where servers go now.
 

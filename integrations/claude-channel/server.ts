@@ -60,7 +60,7 @@ const mcp = new Server(
   },
 )
 
-// Permission prompts go to every allowlisted DM (never to guild channels: only paired people may answer).
+// Permission prompts go to every allowlisted DM this session answers, i.e. the owner's (never to guild channels: only paired people may answer).
 // Vokko has no message buttons, so the prompt asks for the "yes <id>" / "no <id>" text reply.
 mcp.setNotificationHandler(
   z.object({
@@ -77,8 +77,8 @@ mcp.setNotificationHandler(
     }
     const text = `🔐 Permission: ${tool_name}\n${description}\n\`\`\`\n${preview.slice(0, 1500)}\n\`\`\`\nReply \`yes ${request_id}\` or \`no ${request_id}\``
     const access = bot.loadAccess()
-    if (access.dmBackend === 'api') return // DMs belong to the bridge: a "yes <id>" reply would never reach this session
     for (const userId of access.allowFrom) {
+      if (!bot.dmsOwned(access, userId)) continue // that DM belongs to the bridge: a "yes <id>" reply would never reach this session
       bot.dmUser(userId, text).catch(e => log(`permission_request send to ${userId} failed: ${e}\n`))
     }
   },

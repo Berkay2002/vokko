@@ -180,9 +180,12 @@ function defaultAccess(): Access {
   return { dmPolicy: 'pairing', allowFrom: [], groups: {}, pending: {} }
 }
 
-/** Whether this process answers DMs: the plugin unless dmBackend is "api", a shared bridge only then. */
-export function ownsDms(role: Role, access: Access): boolean {
-  return role === 'bridge' || (role === 'bridge-shared') === (access.dmBackend === 'api')
+/**
+ * Whether this process answers a DM: the plugin unless dmBackend is "api" or the sender is not the owner, a shared bridge only then.
+ * The plugin is one conversation for everything it answers, so only the owner's DMs share it. `bridgeRan` false (no shared bridge was ever set up): the plugin keeps everyone's.
+ */
+export function ownsDms(role: Role, access: Access, fromOwner = true, bridgeRan = true): boolean {
+  return role === 'bridge' || (role === 'bridge-shared') === (access.dmBackend === 'api' || (!fromOwner && bridgeRan))
 }
 
 /**
@@ -434,7 +437,7 @@ export class VokkoBot {
     const senderId = msg.author.id
 
     if (msg.guild_id == null) {
-      if (!ownsDms(this.cfg.role, access)) return { action: 'drop' } // the other process answers DMs, pairing included
+      if (!this.dmsOwned(access, senderId)) return { action: 'drop' } // the other process answers DMs, pairing included
       if (this.cfg.role === 'channel' && this.isOwnerCommand(msg)) return { action: 'drop' } // a bridge's command
       if (access.allowFrom.includes(senderId)) return { action: 'deliver', access }
       if (access.dmPolicy === 'allowlist') return { action: 'drop' }
@@ -467,6 +470,8 @@ export class VokkoBot {
     if ((policy.requireMention ?? true) && !this.isMentioned(msg, access.mentionPatterns)) return { action: 'drop' }
     // Last, because it may cost API calls: the owner always may; everyone else needs Use Application Commands in this channel.
     if (senderId !== this.ownerId && !((await this.bitsIn(msg.guild_id, msg.channel_id, senderId)) & USE_APPLICATION_COMMANDS)) return { action: 'drop' }
+    // The plugin answering for a bridge that is out (a handoff, or its heartbeat gone): this session is one conversation, so only channels everyone can see.
+    if (this.cfg.role === 'channel' && access.guilds === false && !(await this.publicChannel(msg.guild_id, msg.channel_id))) return { action: 'drop' }
     // A channel the bot answers by default, not by a groups entry: only where it can write too (not a read-only channel).
     if (!access.groups[this.gateKey(msg.channel_id)] && this.me && !((await this.bitsIn(msg.guild_id, msg.channel_id, this.me.id)) & SEND_MESSAGES)) return { action: 'drop' }
     this.adopted.set(msg.channel_id, Date.now() + ADOPT_MS)
@@ -526,6 +531,26 @@ export class VokkoBot {
     this.ownerUser()
       .then(u => u && this.dmUser(u.id, text))
       .catch(err => this.cfg.log(`vokko channel: could not tell the owner that pairing is full: ${err}\n`))
+  }
+
+  /** Whether @everyone can view the channel (a thread follows its parent; a private thread never counts). A failed lookup says no. */
+  async publicChannel(guildId: string, channelId: string): Promise<boolean> {
+    if (this.channels.get(channelId)?.type === 12) return false
+    try {
+      const channel = this.channels.get(this.gateKey(channelId))
+      const st = channel && (await this.loadGuildState(guildId))
+      // Nobody's id and no roles: exactly @everyone.
+      return st != null && (channelBits(st.guild, { user: { id: '', username: '', global_name: null }, roles: [] }, channel!.permission_overwrites) & VIEW_CHANNEL) !== 0n
+    } catch (err) {
+      this.cfg.log(`vokko channel: cannot read permissions in guild ${guildId}: ${err}
+`)
+      return false
+    }
+  }
+
+  /** ownsDms for this sender; a plugin with no bridge set up keeps everyone's DMs. */
+  dmsOwned(access: Access, userId: string): boolean {
+    return ownsDms(this.cfg.role, access, userId === this.ownerId, this.cfg.role !== 'channel' || bridgeState(this.cfg.stateDir) !== 'none')
   }
 
   /** ownsGuilds, with the bridge's heartbeat for the plugin. */
@@ -695,7 +720,7 @@ export class VokkoBot {
     const ch = this.channels.get(id)
     if (ch?.type === 1) {
       const userId = ch.recipients?.find(u => u.id !== this.me?.id)?.id
-      if (ownsDms(this.cfg.role, access) && userId && access.allowFrom.includes(userId)) return
+      if (userId && this.dmsOwned(access, userId) && access.allowFrom.includes(userId)) return
     } else if (ch && ((this.guildsOwned(access) && this.gateKey(id) in access.groups) || (this.adopted.get(id) ?? 0) > Date.now())) {
       // a groups entry, or a channel someone triggered Claude in: not every channel it merely sees
       return

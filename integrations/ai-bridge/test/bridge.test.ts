@@ -73,6 +73,11 @@ function world(role: BotRole = 'bridge-shared') {
       throw new Error('404')
     },
     policyFor: (a: Access, id: string) => a.groups[id] ?? null,
+    /** Channels @everyone cannot view (the real check is tested on VokkoBot below). */
+    privateChannels: new Set<string>(),
+    async publicChannel(_g: string, c: string) {
+      return !this.privateChannels.has(c)
+    },
     isOwnerCommand: (m: Message) => m.guild_id == null && m.author.id === OWNER && OWNER_COMMAND_RE.test(m.content),
   }
   return { bot, sent, dms, stateDir, access: () => access, setAccess: (a: Access) => void (access = a) }
@@ -222,13 +227,33 @@ describe('VokkoBot gate per role', () => {
   }
   const verdict = async (role: BotRole, access: Partial<Access>, m: Message, beat: number | 'stopped' | 'dead' | null = Date.now(), server: Server = {}) => (await gateBot(role, access, beat, server).gate(m)).action
 
-  test('DMs: the plugin unless dmBackend is api, a shared bridge only then, a standalone bridge always', async () => {
-    const dm = msg(NAT, 'hi')
+  test('DMs: the plugin for the owner unless dmBackend is api, a shared bridge only then, a standalone bridge always', async () => {
+    const dm = msg(OWNER, 'hi')
     expect(await verdict('channel', {}, dm)).toBe('deliver')
     expect(await verdict('bridge-shared', {}, dm)).toBe('drop')
     expect(await verdict('channel', { dmBackend: 'api' }, dm)).toBe('drop')
     expect(await verdict('bridge-shared', { dmBackend: 'api' }, dm)).toBe('deliver')
     expect(await verdict('bridge', {}, dm)).toBe('deliver')
+  })
+  test("DMs from anyone but the owner are the bridge's whatever dmBackend says, unless no bridge was ever set up", async () => {
+    const dm = msg(NAT, 'hi')
+    for (const dmBackend of [undefined, 'subscription', 'api'] as const) {
+      expect(await verdict('channel', { dmBackend }, dm)).toBe('drop')
+      expect(await verdict('bridge-shared', { dmBackend }, dm)).toBe('deliver')
+    }
+    expect(await verdict('bridge', {}, dm)).toBe('deliver')
+    expect(await verdict('channel', {}, dm, null)).toBe('deliver') // no bridge-state.json: a plugin on its own keeps everyone's DMs
+    expect(await verdict('channel', {}, dm, 'stopped')).toBe('drop') // a bridge that stopped is still not this session's business
+  })
+  test("the plugin's tools reach the owner's DM only, not a paired friend's", async () => {
+    const bot = gateBot('channel', { allowFrom: [OWNER, NAT] }, Date.now()) as any
+    bot.cacheChannel({ id: DM_OWNER, type: 1, recipients: [bot.me, { id: OWNER, username: 'o', global_name: null }] })
+    bot.cacheChannel({ id: DM_NAT, type: 1, recipients: [bot.me, { id: NAT, username: 'n', global_name: null }] })
+    await expect(bot.allowedChannel(DM_OWNER)).resolves.toBeUndefined()
+    await expect(bot.allowedChannel(DM_NAT)).rejects.toThrow(/not allowlisted/)
+    const shared = gateBot('bridge-shared', { allowFrom: [OWNER, NAT], dmBackend: 'subscription' }, Date.now()) as any // the bridge answers friends through the same check
+    shared.cacheChannel({ id: DM_NAT, type: 1, recipients: [shared.me, { id: NAT, username: 'n', global_name: null }] })
+    await expect(shared.allowedChannel(DM_NAT)).resolves.toBeUndefined()
   })
   test('guilds: the plugin unless guilds is false, a shared bridge only then', async () => {
     const g = msg(NAT, 'hi', { guild: GUILD })
@@ -248,6 +273,54 @@ describe('VokkoBot gate per role', () => {
     expect(await verdict('channel', { guilds: false, groups: {} }, g, 'stopped')).toBe('drop') // opt-in still applies
     expect(await verdict('bridge-shared', { guilds: false }, g, 'stopped')).toBe('deliver') // the bridge itself never doubts it is alive
     expect(await verdict('channel', { guilds: false, dmBackend: 'api' }, msg(NAT, 'hi'), 'stopped')).toBe('drop') // DMs are unaffected
+  })
+  describe('the plugin answering for a bridge that is out: public channels only', () => {
+    const ask = (channel: string) => ({ ...msg(NAT, 'hi', { guild: GUILD, channel }), mentions: [{ id: BOT, username: 'claude', global_name: null }] })
+    const ow = (id: string, type: number, allow: bigint, deny: bigint) => ({ id, type, allow: String(allow), deny: String(deny) })
+    const APPS = VIEW_CHANNEL | SEND_MESSAGES | USE_APPLICATION_COMMANDS
+    /** GENERAL hidden from @everyone but shown to NAT's role. */
+    const hidden: Server = {
+      roles: [{ id: GUILD, permissions: String(APPS) }, { id: 'R', permissions: String(APPS) }],
+      memberRoles: { [NAT]: ['R'] },
+      overwrites: [ow(GUILD, 0, 0n, VIEW_CHANNEL), ow('R', 0, VIEW_CHANNEL, 0n)],
+    }
+    const run = async (role: BotRole, access: Partial<Access>, m: Message, beat: number | 'stopped' | null, server: Server, threads = false) => {
+      const bot = gateBot(role, { groups: { [GENERAL]: { requireMention: false, allowFrom: [] }, [OTHER]: { requireMention: false, allowFrom: [] } }, ...access }, beat, server) as any
+      if (threads) {
+        bot.cacheChannel({ id: '950', type: 11, guild_id: GUILD, parent_id: GENERAL, permission_overwrites: [] })
+        bot.cacheChannel({ id: '951', type: 12, guild_id: GUILD, parent_id: OTHER, permission_overwrites: [] }) // private thread, public parent
+      }
+      return (await bot.gate(m)).action
+    }
+    test('a public channel is handed over; a channel @everyone cannot view is declined, even for a member who can', async () => {
+      expect(await run('channel', { guilds: false }, ask(GENERAL), 'stopped', {})).toBe('deliver')
+      expect(await run('channel', { guilds: false }, ask(GENERAL), 'stopped', hidden)).toBe('drop')
+    })
+    test('a thread follows its parent; a private thread never counts', async () => {
+      expect(await run('channel', { guilds: false }, ask('950'), 'stopped', {}, true)).toBe('deliver')
+      expect(await run('channel', { guilds: false }, ask('950'), 'stopped', hidden, true)).toBe('drop')
+      expect(await run('channel', { guilds: false }, ask('951'), 'stopped', {}, true)).toBe('drop')
+    })
+    test('a bridge whose heartbeat went stale is the same fallback; guilds on, a bridge, or the bridge-shared role are not touched', async () => {
+      expect(await run('channel', { guilds: false }, ask(GENERAL), Date.now() - 100_000, hidden)).toBe('drop')
+      expect(await run('channel', {}, ask(GENERAL), null, hidden)).toBe('deliver') // the owner chose guilds on
+      expect(await run('bridge-shared', { guilds: false }, ask(GENERAL), Date.now(), hidden)).toBe('deliver')
+      expect(await run('bridge', {}, ask(GENERAL), null, hidden)).toBe('deliver')
+    })
+    test('@everyone with ADMINISTRATOR sees everything; a failed permission lookup counts as private', async () => {
+      const admin: Server = { roles: [{ id: GUILD, permissions: String(1n << 3n) }], overwrites: [ow(GUILD, 0, 0n, VIEW_CHANNEL)] }
+      expect(await run('channel', { guilds: false }, ask(GENERAL), 'stopped', admin)).toBe('deliver')
+      const bot = gateBot('channel', { guilds: false }, 'stopped') as any
+      const origFetch = globalThis.fetch
+      globalThis.fetch = (async () => new Response('boom', { status: 500 })) as unknown as typeof fetch
+      try {
+        bot.guildState.clear() // nothing cached: the lookup goes to the server and fails
+        expect(await bot.publicChannel(GUILD, GENERAL)).toBe(false)
+        expect(await bot.publicChannel(GUILD, '999')).toBe(false) // a channel it never saw
+      } finally {
+        globalThis.fetch = origFetch
+      }
+    })
   })
   describe('who may talk to Claude in a server channel', () => {
     const ask = (author: string, where: { channel?: string } = {}, extra: Partial<Message> = {}) => ({ ...msg(author, 'hi', { guild: GUILD, ...where }), mentions: [{ id: BOT, username: 'claude', global_name: null }], ...extra })
@@ -343,7 +416,7 @@ describe('VokkoBot gate per role', () => {
   test("the owner's !commands never reach the plugin's Claude", async () => {
     expect(await verdict('channel', {}, msg(OWNER, '!backend api'))).toBe('drop')
     expect(await verdict('channel', {}, msg(OWNER, 'hello'))).toBe('deliver')
-    expect(await verdict('channel', {}, msg(NAT, '!backend api'))).toBe('deliver') // only the owner's
+    expect(await verdict('channel', {}, msg(NAT, '!backend api'), null)).toBe('deliver') // only the owner's (no bridge here: the plugin keeps NAT's DMs)
   })
 })
 
@@ -893,6 +966,32 @@ describe('fallback to the subscription', () => {
     await f.bridge.handle(m)
     expect(f.last().text).toContain('Sorry, something went wrong')
     expect(existsSync(join(f.stateDir, 'handoff', m.id))).toBe(false)
+  })
+
+  test('a private channel is not offered to the plugin: the old message, no file, no cap used; public channels still are', async () => {
+    const f = fb()
+    f.bot.privateChannels.add(OTHER)
+    apiDown(f.backend)
+    const m = msg(NAT, 'secret', { guild: GUILD, channel: OTHER })
+    await f.bridge.handle(m)
+    expect(f.claimed).toEqual([])
+    expect(f.last()).toMatchObject({ channel: OTHER, text: expect.stringContaining('Sorry, something went wrong') })
+    expect(existsSync(join(f.stateDir, 'handoff', m.id))).toBe(false)
+    const open = guild('open')
+    await f.bridge.handle(open) // the API is marked out now: this one goes to the plugin
+    expect(f.claimed).toEqual([open.id])
+    const again = msg(NAT, 'secret again', { guild: GUILD, channel: OTHER })
+    await f.bridge.handle(again) // still inside the cooldown: private stays private
+    expect(f.claimed).toEqual([open.id])
+    expect(f.last().text).toContain('Sorry, something went wrong')
+  })
+
+  test('over the monthly budget a private channel hears the budget message and is not handed off', async () => {
+    const f = fb('bridge-shared', { perHour: 20, monthlyUsd: 0 })
+    f.bot.privateChannels.add(OTHER)
+    await f.bridge.handle(msg(NAT, 'hi', { guild: GUILD, channel: OTHER }))
+    expect(f.claimed).toEqual([])
+    expect(f.last().text).toBe('Monthly budget reached. Back next month.')
   })
 
   test('failureClass names the class and never echoes the error', () => {

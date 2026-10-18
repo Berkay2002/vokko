@@ -89,7 +89,7 @@ export type Limits = {
 
 export type BotLike = Pick<
   VokkoBot,
-  'cfg' | 'me' | 'connected' | 'ownerId' | 'admit' | 'reply' | 'send' | 'dmUser' | 'typing' | 'react' | 'loadAccess' | 'saveAccess' | 'members' | 'memberPermissions' | 'api' | 'policyFor' | 'isOwnerCommand'
+  'cfg' | 'me' | 'connected' | 'ownerId' | 'admit' | 'reply' | 'send' | 'dmUser' | 'typing' | 'react' | 'loadAccess' | 'saveAccess' | 'members' | 'memberPermissions' | 'api' | 'policyFor' | 'publicChannel' | 'isOwnerCommand'
 >
 
 const SNOWFLAKE = /^\d{1,20}$/
@@ -336,11 +336,12 @@ export class Bridge {
     }
   }
 
-  /** A guild message the API will not answer goes to the plugin; without one (or past the hourly cap), the sender hears an error as before. */
+  /** A guild message the API will not answer goes to the plugin if everyone can see its channel (the plugin is one conversation for all it answers); without one (or past the hourly cap, or in a private channel), the sender hears an error as before. */
   private async passOn(msg: Message, reason: string): Promise<void> {
-    const capped = !this.hit(this.handoffHits, 'all', HANDOFFS_PER_HOUR, 3600_000)
-    if (!capped && (await this.handOff(msg))) return
-    this.log(`message ${msg.id} not handed to the plugin (${capped ? 'hourly cap' : 'nobody took it'}; ${reason})`)
+    const open = msg.guild_id != null && (await this.bot.publicChannel(msg.guild_id, msg.channel_id))
+    const capped = open && !this.hit(this.handoffHits, 'all', HANDOFFS_PER_HOUR, 3600_000)
+    if (open && !capped && (await this.handOff(msg))) return
+    this.log(`message ${msg.id} not handed to the plugin (${!open ? 'private channel' : capped ? 'hourly cap' : 'nobody took it'}; ${reason})`)
     await this.say(msg, reason === BUDGET_REASON ? 'Monthly budget reached. Back next month.' : SORRY)
   }
 
