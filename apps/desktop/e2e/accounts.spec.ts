@@ -10,6 +10,14 @@ test('register: Discord fields, live username check, strength meter, date of bir
   await page.evaluate(() => (window as unknown as Hooks).__vokkoMockAccounts.instance({ terms: 'I agree to the house rules.', terms_url: 'https://example.test/terms' }));
   await goInApp(page, '/register');
 
+  // an empty form flags every required field at once, before any request; a malformed email is caught the same way
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.locator('.field-label-error')).toHaveText([' - Required.', ' - Required.', ' - Required.', ' - Required.']);
+  await expect(page.getByText('You need to agree to the terms.')).toBeVisible();
+  await page.getByLabel('Email').fill('not-an-email');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByText('Not a well formed email address.')).toBeVisible();
+
   await page.getByLabel('Email').fill('newbie@example.test');
   await page.getByLabel('Display name').fill('New Bie');
 
