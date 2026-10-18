@@ -6,7 +6,9 @@ const PORT = 1504;
 
 export default defineConfig({
   testDir: '.',
-  testMatch: /notify-settings\.spec\.ts$/,
+  // Default: only this spec. NOTIFY_SETTINGS_ALL=1 runs every mock-backed spec on port 1504 (regression pass, with file arguments).
+  testMatch: process.env.NOTIFY_SETTINGS_ALL ? /\.spec\.ts$/ : /notify-settings\.spec\.ts$/,
+  testIgnore: [/real(\..+)?\.spec\.ts$/],
   timeout: 60_000,
   fullyParallel: false,
   workers: 1,

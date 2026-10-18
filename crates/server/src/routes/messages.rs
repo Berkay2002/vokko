@@ -306,30 +306,28 @@ async fn insert_message_stored(
     // Everyone whose unread-mention counter goes up. Names and replies always count; @everyone / @here and role mentions only for
     // members who did not switch on "Suppress @everyone and @here" / "Suppress All Role @mentions" for this guild.
     let mut notify: HashSet<i64> = mentioned.iter().copied().collect();
-    let by_role = !draft.mentions.roles.is_empty();
-    if let Some(guild_id) = channel.guild_id
-        && (draft.mentions.everyone || by_role)
-    {
-        let suppressed: Vec<(i64, bool, bool)> = sqlx::query_as(
-            "SELECT user_id, COALESCE((settings->>'suppress_everyone')::boolean, FALSE), COALESCE((settings->>'suppress_roles')::boolean, FALSE) \
-             FROM user_guild_settings WHERE guild_id = $1 AND (settings->>'suppress_everyone' = 'true' OR settings->>'suppress_roles' = 'true')",
-        )
-        .bind(guild_id)
-        .fetch_all(&state.db)
-        .await?;
-        let quiet = |pick: fn(&(i64, bool, bool)) -> bool| -> HashSet<i64> { suppressed.iter().filter(|row| pick(row)).map(|row| row.0).collect() };
-        if by_role {
-            let holders: Vec<(i64,)> = sqlx::query_as("SELECT DISTINCT user_id FROM member_roles WHERE guild_id = $1 AND role_id = ANY($2)")
-                .bind(guild_id)
-                .bind(&draft.mentions.roles)
-                .fetch_all(&state.db)
-                .await?;
-            let no_roles = quiet(|row| row.2);
-            notify.extend(holders.into_iter().map(|(id,)| id).filter(|id| !no_roles.contains(id)));
+    if let Some(guild_id) = channel.guild_id {
+        if !draft.mentions.roles.is_empty() {
+            // Joined on (user_id, guild_id), the settings table's key.
+            let holders: Vec<(i64,)> = sqlx::query_as(
+                "SELECT DISTINCT mr.user_id FROM member_roles mr LEFT JOIN user_guild_settings s ON s.user_id = mr.user_id AND s.guild_id = mr.guild_id \
+                 WHERE mr.guild_id = $1 AND mr.role_id = ANY($2) AND COALESCE((s.settings->>'suppress_roles')::boolean, FALSE) = FALSE",
+            )
+            .bind(guild_id)
+            .bind(&draft.mentions.roles)
+            .fetch_all(&state.db)
+            .await?;
+            notify.extend(holders.into_iter().map(|(id,)| id));
         }
         if draft.mentions.everyone {
-            let no_everyone = quiet(|row| row.1);
-            notify.extend(viewers.iter().copied().filter(|id| !no_everyone.contains(id)));
+            let quiet: Vec<(i64,)> =
+                sqlx::query_as("SELECT user_id FROM user_guild_settings WHERE guild_id = $1 AND user_id = ANY($2) AND settings->>'suppress_everyone' = 'true'")
+                    .bind(guild_id)
+                    .bind(&viewers)
+                    .fetch_all(&state.db)
+                    .await?;
+            let quiet: HashSet<i64> = quiet.into_iter().map(|(id,)| id).collect();
+            notify.extend(viewers.iter().copied().filter(|id| !quiet.contains(id)));
         }
     }
     if channel.is_dm() && draft.kind != MessageType::ChannelPinnedMessage {

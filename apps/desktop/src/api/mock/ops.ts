@@ -248,6 +248,9 @@ export function addMessage(input: NewMessage): MockMessage {
   const referenced = input.reference_id && !input.reference_channel_id ? sortedMessages(channel.id).find(m => m.id === input.reference_id) : undefined;
   const mentions = parseMentions(input.content, referenced?.author_id ?? null);
   if (input.allowEveryone === false) mentions.everyone = false;
+  // Like the server: only roles of this guild that are mentionable (or the author may mention everyone) count; @everyone itself is not a role.
+  const guildRoles = channel.guild_id ? (db.guilds.get(channel.guild_id)?.guild.roles ?? []) : [];
+  mentions.roles = mentions.roles.filter(id => id !== channel.guild_id && guildRoles.some(role => role.id === id && (role.mentionable || input.allowEveryone !== false)));
   const ms = input.timestamp ?? Date.now();
   const message: MockMessage = {
     id: input.id ?? nextId(ms),

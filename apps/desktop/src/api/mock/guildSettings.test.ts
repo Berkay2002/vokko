@@ -33,7 +33,9 @@ describe("mock user guild settings", () => {
     const other = createAccount({ username: "sup-other" }).user.id;
     const guildId = createGuildRecord(me, "Suppress guild");
     const guild = db.guilds.get(guildId)!;
-    guild.members.set(other, { nick: null, roles: ["900"], joined_at: new Date().toISOString() });
+    guild.members.set(other, { nick: null, roles: ["900", "901"], joined_at: new Date().toISOString() });
+    const role = (id: string, mentionable: boolean) => ({ id, name: `r${id}`, color: 0, hoist: false, position: 1, permissions: "0", mentionable });
+    guild.guild.roles.push(role("900", true), role("901", false));
     const channel = [...db.channels.values()].find(c => c.guild_id === guildId && c.name === "general")!;
     const say = (content: string) => addMessage({ channel, author_id: me, content });
     const counter = () => db.accounts.get(other)!.readStates.get(channel.id)?.mention_count ?? 0;
@@ -51,5 +53,11 @@ describe("mock user guild settings", () => {
     expect(counter()).toBe(2);
     say(`<@&900> @everyone <@${other}>`);
     expect(counter()).toBe(3);
+    // A role that is not mentionable only counts when the author may mention everyone (the server's rule); suppression is off for this check.
+    patch({ suppress_roles: false });
+    addMessage({ channel, author_id: me, content: "<@&901>", allowEveryone: false });
+    expect(counter()).toBe(3);
+    say("<@&901>");
+    expect(counter()).toBe(4);
   });
 });

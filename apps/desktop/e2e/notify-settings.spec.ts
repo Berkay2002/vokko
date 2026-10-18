@@ -48,6 +48,18 @@ test('server notification settings: the server default is the checked choice, ti
   await start(page);
   const guildId = await page.evaluate(() => Object.values((window as unknown as Win).__vokko.appStore.getState().guilds)[0]!.id);
 
+  /** Desktop: the rail's right-click menu has the same radios as the dialog; exactly `label` is checked (a phone has no right-click on the rail). */
+  const ctxLevel = async (label: string, name: string) => {
+    if (phone(page)) return;
+    await page.getByRole('navigation', { name: 'Servers sidebar' }).getByRole('link', { name: /Sam's server/ }).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Notification Settings' }).hover();
+    for (const level of ['All Messages', '@Mentions + Unreads', 'Only @mentions', 'Nothing']) {
+      await expect(page.getByRole('menuitemcheckbox', { name: level })).toHaveAttribute('aria-checked', level === label ? 'true' : 'false');
+    }
+    await shot(page, name);
+    await page.keyboard.press('Escape');
+  };
+
   // The dropdown's submenu: nothing chosen yet, so the server's default ("All Messages") is the checked radio.
   let menu = await openServerMenu(page);
   await menu.getByRole('menuitem', { name: 'Notification Settings' }).click();
@@ -59,9 +71,11 @@ test('server notification settings: the server default is the checked choice, ti
   await shot(page, 'notify-modal-default-all');
   await page.keyboard.press('Escape');
   await expect(dialog).toBeHidden();
+  await ctxLevel('All Messages', 'notify-menu-default-all');
 
   // A server whose Default Notification Settings say "Only @mentions" shows that one checked instead.
   await page.evaluate(id => (window as unknown as Win).__vokko.appStore.setState(s => ({ guilds: { ...s.guilds, [id]: { ...s.guilds[id], default_message_notifications: 1 } } })), guildId);
+  await ctxLevel('Only @mentions', 'notify-menu-default-mentions');
   menu = await openServerMenu(page);
   await menu.getByRole('menuitem', { name: 'Notification Settings' }).click();
   await expect(dialog.getByRole('radio', { name: 'Only @mentions' })).toBeChecked();
@@ -73,14 +87,7 @@ test('server notification settings: the server default is the checked choice, ti
   await expect(dialog.getByRole('radio', { name: 'Nothing' })).toBeChecked();
   await page.keyboard.press('Escape');
 
-  // The right-click menu of the server in the rail shows the same choice.
-  const rail = phone(page) ? page.locator('.guild-header-name-button') : page.getByRole('navigation', { name: 'Servers sidebar' }).getByRole('link', { name: /Sam's server/ });
-  if (!phone(page)) {
-    await rail.click({ button: 'right' });
-    await page.getByRole('menuitem', { name: 'Notification Settings' }).hover();
-    await expect(page.getByRole('menuitemcheckbox', { name: 'Nothing' })).toHaveAttribute('aria-checked', 'true');
-    await shot(page, 'notify-menu-nothing');
-  }
+  await ctxLevel('Nothing', 'notify-menu-nothing');
 });
 
 test('suppress @everyone and role mentions keep them out of the badge and the tab title', async ({ page }) => {
@@ -133,11 +140,17 @@ test('suppress @everyone and role mentions keep them out of the badge and the ta
 });
 
 test('the member menu Profile item opens the full profile', async ({ page }) => {
-  test.skip(phone(page), 'the member list is a desktop panel; the phone path is the author tap (profile card, group D)');
   await openChannel(page, 'general');
-  const row = page.locator('.member-list .member-row').filter({ hasText: 'alice' }).first();
-  await row.click({ button: 'right' });
-  await page.getByRole('menuitem', { name: 'Profile', exact: true }).click();
+  if (phone(page)) {
+    // No member panel on a phone: the Members page of the channel list has a "More actions" menu per member.
+    await page.getByRole('button', { name: 'Show Channels' }).click();
+    await page.getByRole('link', { name: 'Members', exact: true }).click();
+    await page.getByRole('table', { name: 'Server members' }).getByRole('button', { name: /^More actions for/ }).first().click({ timeout: 5000 });
+  } else {
+    await page.locator('.member-list .member-row').filter({ hasText: 'alice' }).first().click({ button: 'right' });
+  }
+  // The phone's bottom sheet keeps animating, so Playwright never sees its rows as stable.
+  await page.getByRole('menuitem', { name: 'Profile', exact: true }).click({ force: phone(page) });
   const dialog = page.getByRole('dialog').filter({ has: page.locator('.full-profile') });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText(/Mutual Friends?/).first()).toBeVisible();
