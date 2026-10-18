@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiRequestError } from '../api/errors';
 import { usePrefs } from '../ui/prefs';
-import { MAX_UPLOAD_BYTES } from '../api/limits';
+import { MAX_UPLOAD_BYTES, maxUploadBytes, setMaxUploadBytes } from '../api/limits';
 import { formatFullDate, formatMessageTimestamp, formatTime, uploadErrorMessage } from './util';
 
 describe('upload limit', () => {
@@ -60,5 +60,21 @@ describe('formatMessageTimestamp', () => {
     } finally {
       usePrefs.setState({ timeFormat: 'auto' });
     }
+  });
+});
+
+describe('server-driven upload limit', () => {
+  it('READY max_upload_bytes replaces the 500 MiB default, never above it', () => {
+    const e = new ApiRequestError(413, { code: 40005, message: 'Request entity too large' });
+    setMaxUploadBytes(95 * 1024 * 1024);
+    try {
+      expect(maxUploadBytes()).toBe(95 * 1024 * 1024);
+      expect(uploadErrorMessage(e, 96 * 1024 * 1024)).toBe('This file is larger than the limit of 95 MiB per file.');
+      setMaxUploadBytes(4096 * 1024 * 1024);
+      expect(maxUploadBytes()).toBe(MAX_UPLOAD_BYTES);
+    } finally {
+      setMaxUploadBytes(undefined);
+    }
+    expect(maxUploadBytes()).toBe(MAX_UPLOAD_BYTES);
   });
 });

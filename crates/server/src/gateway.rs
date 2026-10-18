@@ -420,6 +420,7 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
         user_guild_settings,
         media: voice::media_config(&state.config),
         desktop_version: crate::desktop_version::current(state),
+        max_upload_bytes: state.config.max_upload_bytes as u64,
     })
 }
 

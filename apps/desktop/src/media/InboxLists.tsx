@@ -1,12 +1,12 @@
-// Content of the Inbox tabs "Bookmarks" (saved messages) and "Reminders". The shell's Inbox popout mounts these.
+// Content of the Inbox tabs "Mentions", "Bookmarks" (saved messages) and "Reminders". The shell's Inbox popout mounts these.
 
-import { useEffect } from 'react';
-import { Bell, Bookmark, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AtSign, Bell, Bookmark, Check, X } from 'lucide-react';
 import type { Message } from '../api/types';
 import { messageSnippet } from './helpers';
 import { jumpToMessage } from './jump';
 import { sortReminders } from './lists';
-import { dmName, useStore } from './shell';
+import { Avatar, dmName, request, useStore } from './shell';
 import { dismissReminder, loadBookmarks, loadReminders, removeBookmarkOf, useMedia } from './store';
 
 /** "#general · Sam's server" / "Direct message with alice" for a message, from what the client knows. */
@@ -78,4 +78,88 @@ export function ReminderList({ onNavigate }: { onNavigate(): void }) {
       <button type="button" className="media-icon-btn" aria-label={due ? 'Dismiss reminder' : 'Cancel reminder'} title={due ? 'Dismiss' : 'Cancel reminder'} onClick={() => void dismissReminder(r.id)}><X size={16} /></button>
     </div>;
   })}</>;
+}
+
+const MENTIONS_PAGE = 25;
+
+interface MentionFilters { thisServer: boolean; everyone: boolean; roles: boolean }
+
+function mentionsPath(filters: MentionFilters, guildId: string | null, before?: string): string {
+  const params = new URLSearchParams({ limit: String(MENTIONS_PAGE), everyone: String(filters.everyone), roles: String(filters.roles) });
+  if (filters.thisServer && guildId) params.set('guild_id', guildId);
+  if (before) params.set('before', before);
+  return `/users/@me/mentions?${params}`;
+}
+
+function MentionRow({ message, showWhere, onNavigate, onRemove }: { message: Message; showWhere: boolean; onNavigate(): void; onRemove(): void }) {
+  const where = useWhere(message);
+  return <>
+    {showWhere && <div className="media-mention-where">{where}</div>}
+    <div className="inbox-row media-inbox-row" data-testid="mention">
+      <button type="button" className="inbox-row-main" aria-label={`Jump to message by ${nameOf(message)}`} onClick={() => { onNavigate(); void jumpToMessage(message.channel_id, message.id, message.guild_id); }}>
+        <span className="inbox-row-icon"><Avatar user={message.author} size={32} guildId={message.guild_id} /></span>
+        <span className="inbox-row-text">
+          <span className="inbox-row-name">{nameOf(message)} <span className="inbox-row-sub">{whenFormat.format(new Date(message.timestamp))}</span></span>
+          <span className="media-inbox-snippet">{messageSnippet(message)}</span>
+        </span>
+      </button>
+      <button type="button" className="media-icon-btn" aria-label="Remove mention" title="Remove" onClick={onRemove}><X size={16} /></button>
+    </div>
+  </>;
+}
+
+/** Inbox > Mentions: recent messages that mention you (GET /users/@me/mentions). They stay after the channel is read; X removes one. */
+export function MentionList({ onNavigate }: { onNavigate(): void }) {
+  // The server being viewed (/channels/{guild}/...), read once per mount: the popout remounts the tab each time it opens.
+  const [guildId] = useState(() => /^\/channels\/(\d+)/.exec(window.location.pathname)?.[1] ?? null);
+  const [filters, setFilters] = useState<MentionFilters>({ thisServer: false, everyone: true, roles: true });
+  const [items, setItems] = useState<Message[] | null>(null);
+  const [more, setMore] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const scopeGuild = filters.thisServer ? guildId : null;
+
+  useEffect(() => {
+    let live = true;
+    setItems(null);
+    setFailed(false);
+    request<Message[]>('GET', mentionsPath(filters, guildId)).then(
+      list => { if (live) { setItems(list); setMore(list.length === MENTIONS_PAGE); } },
+      () => { if (live) { setItems([]); setFailed(true); } },
+    );
+    return () => { live = false; };
+  }, [scopeGuild, filters.everyone, filters.roles]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadMore = () => {
+    const last = items?.at(-1);
+    if (!last) return;
+    void request<Message[]>('GET', mentionsPath(filters, guildId, last.id)).then(list => {
+      setItems(current => [...(current ?? []), ...list]);
+      setMore(list.length === MENTIONS_PAGE);
+    }, () => setMore(false));
+  };
+  const remove = (id: string) => {
+    setItems(current => current?.filter(m => m.id !== id) ?? null);
+    void request('DELETE', `/users/@me/mentions/${id}`).catch(() => undefined);
+  };
+  const toggle = (key: keyof MentionFilters, label: string) => (
+    <button type="button" className="media-mention-filter" aria-pressed={filters[key]} onClick={() => setFilters(f => ({ ...f, [key]: !f[key] }))}>
+      {filters[key] && <Check size={14} />}{label}
+    </button>
+  );
+
+  return <>
+    <div className="media-mention-filters" role="group" aria-label="Mention filters">
+      {guildId && toggle('thisServer', 'This server only')}
+      {toggle('everyone', 'Include @everyone')}
+      {toggle('roles', 'Include role mentions')}
+    </div>
+    {items === null && <div className="inbox-empty" role="status"><AtSign size={40} /><div className="inbox-empty-title">Loading mentions…</div></div>}
+    {items?.length === 0 && <div className="inbox-empty">
+      <AtSign size={40} />
+      <div className="inbox-empty-title">{failed ? 'Couldn’t load mentions' : 'No recent mentions'}</div>
+      <div className="inbox-empty-body">{failed ? 'Check your connection and open the tab again.' : 'Messages that mention you will show up here.'}</div>
+    </div>}
+    {items?.map((m, i) => <MentionRow key={m.id} message={m} showWhere={items[i - 1]?.channel_id !== m.channel_id} onNavigate={onNavigate} onRemove={() => remove(m.id)} />)}
+    {more && <button type="button" className="btn btn-secondary btn-sm media-mention-more" onClick={loadMore}>Load more</button>}
+  </>;
 }

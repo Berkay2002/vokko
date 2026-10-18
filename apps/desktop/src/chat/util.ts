@@ -1,5 +1,5 @@
 import { ApiRequestError } from '../api/errors';
-import { MAX_UPLOAD_BYTES } from '../api/limits';
+import { formatUploadLimit, maxUploadBytes } from '../api/limits';
 import type { Snowflake } from '../api/types';
 import { timeFormatPref } from './shell';
 
@@ -32,10 +32,11 @@ export function chatLocale(): string {
 /** Text for a failed upload. 413 / code 40005 names the server's per-file limit instead of the bare "Request entity too large". */
 export function uploadErrorMessage(e: unknown, fileSize?: number): string {
   if (e instanceof ApiRequestError && (e.status === 413 || e.code === 40005)) {
-    const limit = `${MAX_UPLOAD_BYTES / (1024 * 1024)} MiB`;
-    if (fileSize !== undefined && fileSize > MAX_UPLOAD_BYTES) return `This file is larger than the limit of ${limit} per file.`;
+    const max = maxUploadBytes();
+    const limit = formatUploadLimit(max);
+    if (fileSize !== undefined && fileSize > max) return `This file is larger than the limit of ${limit} per file.`;
     if (/pending uploads/i.test(e.message)) return `The server refused this upload because your pending uploads are over its size quota. Send or remove some first.`;
-    // under 500 MiB but still too large: a self-hosted server with a lower VOKKO_MAX_UPLOAD_MB
+    // under the limit READY gave but still refused: the limit changed since, or a proxy in front (Cloudflare: 100 MB) is lower
     return `This file is larger than this server's upload limit (at most ${limit} per file).`;
   }
   return e instanceof Error ? e.message : 'Upload failed';

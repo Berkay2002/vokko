@@ -22,6 +22,7 @@ mod interactions;
 pub mod invites;
 pub mod join_requests;
 mod member_search;
+mod mentions;
 pub mod messages;
 pub mod moderation;
 mod onboarding;
@@ -62,6 +63,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(emojis::routes())
         .merge(polls::routes())
         .merge(search::routes())
+        .merge(mentions::routes())
         .merge(scheduled_events::routes())
         .merge(onboarding::routes())
         .merge(suggestions::routes())

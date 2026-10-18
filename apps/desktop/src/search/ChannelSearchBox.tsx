@@ -7,7 +7,7 @@ import type { Channel, User } from '../api/types';
 import { Avatar } from '../chat/Avatar';
 import { ChannelTypeIcon } from '../chat/ChannelTypeIcon';
 import { mentionableChannels } from '../chat/suggest';
-import { HAS_VALUES, isoDay, pendingKeyword, type FilterKind, type SearchFilter } from './query';
+import { HAS_VALUES, dateLabel, isoDay, pendingKeyword, resolveTyped, type FilterKind, type SearchFilter, type TypedContext } from './query';
 import { Popout, displayName, useStore } from './shell';
 import { scopeOf, searchActions, searchStore } from './store';
 
@@ -25,11 +25,6 @@ interface Option {
 const HAS_ICONS: Record<string, ReactNode> = {
   image: <ImageIcon size={20} />, video: <Video size={20} />, link: <LinkIcon size={20} />, file: <File size={20} />,
   embed: <Globe size={20} />, sound: <Music size={20} />, sticker: <StickyNote size={20} />,
-};
-
-const dateLabel = (iso: string): string => {
-  const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
 function Calendar({ onPick }: { onPick(iso: string): void }) {
@@ -114,6 +109,19 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
     }
     return list;
   }, [channel, members, me]);
+  const inChannels = useMemo(() => mentionableChannels(Object.values(channels).filter(c => c.guild_id === channel.guild_id), '', Infinity), [channels, channel.guild_id]);
+
+  /** Turns complete typed or pasted `kind:value` tokens into chips; returns whether any did. */
+  const applyTyped = (value: string, all: boolean): boolean => {
+    const ctx: TypedContext = {
+      users: people.map(p => ({ id: p.user.id, name: p.name, username: p.user.username })),
+      channels: channel.guild_id ? inChannels.map(c => ({ id: c.id, name: c.name ?? '' })) : [],
+    };
+    const typed = resolveTyped(value, ctx, all);
+    for (const filter of typed.filters) searchActions.addFilter(filter);
+    searchActions.setText(typed.text);
+    return typed.filters.length > 0;
+  };
 
   const options: Option[] = useMemo(() => {
     const out: Option[] = [];
@@ -136,15 +144,14 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
       HAS_VALUES.filter(v => v.startsWith(query)).forEach(v => out.push({ key: v, icon: HAS_ICONS[v], title: <b>{v}</b>, onPick: () => commit('has', v, v) }));
     } else if (kind === 'in') {
       // The current channel leads, the rest in sidebar order with better name matches first.
-      const inGuild = Object.values(channels).filter(c => c.guild_id === channel.guild_id)
-        .sort((a, b) => (a.id === channel.id ? -1 : b.id === channel.id ? 1 : a.position - b.position));
+      const inGuild = [...inChannels].sort((a, b) => (a.id === channel.id ? -1 : b.id === channel.id ? 1 : a.position - b.position));
       mentionableChannels(inGuild, query, 15).forEach(c => out.push({ key: c.id, icon: <ChannelTypeIcon type={c.type} />, title: <b>{c.name}</b>, onPick: () => commit('in', c.id, c.name ?? '') }));
     } else if (kind === 'pinned') {
       for (const v of ['true', 'false']) if (v.startsWith(query)) out.push({ key: v, icon: <Pin size={20} />, title: <b>{v}</b>, onPick: () => commit('pinned', v, v) });
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keyword, query, people, channels, channel.id, channel.guild_id]);
+  }, [keyword, query, people, inChannels, channel.id]);
 
   const rootRows: Option[] = [
     { key: 'from', icon: <UserIcon size={20} />, title: 'From a specific user', hint: 'from: user', onPick: () => startKeyword('from') },
@@ -186,9 +193,11 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
       setCursor(c => (c + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (!open && !listMode) { submit(); return; }
-      if (listMode) { rows[cursor]?.onPick(); return; }
-      if (dateMode) return;
+      // An exact typed value (`from:alice`) wins over the highlighted suggestion; an unknown one is searched as text, like Discord.
+      if (keyword && applyTyped(text, true)) return;
+      if (listMode && open && rows[cursor]) { rows[cursor].onPick(); return; }
+      if (dateMode && open) return;
+      applyTyped(text, true);
       submit();
     } else if (e.key === 'Backspace' && text === '' && filters.length > 0) {
       searchActions.removeFilter(filters.length - 1);
@@ -209,7 +218,7 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
     {mine && filters.map((f, i) => <FilterChip key={`${f.kind}:${f.value}`} filter={f} onRemove={() => searchActions.removeFilter(i)} />)}
     <input ref={input} className="header-search-input" placeholder={placeholder} aria-label="Search" role="combobox" aria-expanded={open} aria-autocomplete="list" value={text}
       autoComplete="off" spellCheck={false}
-      onChange={e => { searchActions.setText(e.target.value); setOpen(true); }}
+      onChange={e => { if (!/\s$/.test(e.target.value) || !applyTyped(e.target.value, false)) searchActions.setText(e.target.value); setOpen(true); }}
       onFocus={() => setOpen(true)} onClick={() => setOpen(true)} onKeyDown={onKeyDown} />
     {hasContent
       ? <button type="button" className="search-box-clear" aria-label="Clear search" onMouseDown={e => e.preventDefault()} onClick={() => { searchActions.clear(); input.current?.focus(); }}><X size={16} /></button>

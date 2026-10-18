@@ -2130,6 +2130,7 @@ export interface ReadyEvent {
   user_guild_settings?: UserGuildSettings[]; // saved notification settings per guild (guild_id null = DMs); absent = none
   media?: InstanceMediaConfig; // always sent by the server; absent = voice unavailable
   desktop_version?: string; // latest desktop release the server knows of (its downloads' latest.json); absent = not configured
+  max_upload_bytes?: number; // largest attachment this server accepts (VOKKO_MAX_UPLOAD_MB); always sent by the server, absent in old fixtures = 500 MiB
 }
 
 export enum RelationshipType {

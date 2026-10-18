@@ -166,3 +166,27 @@ test('axe: suggestions popout and results panel have no violations besides the k
   for (const v of [...popout, ...results]) if (v.id === 'color-contrast') info.annotations.push({ type: 'known-issue', description: `A11Y-07 muted text tokens [${v.nodes.length} node(s)]` });
   expect(unexpected).toEqual([]);
 });
+
+test('typed or pasted from:alice becomes a chip on space and Enter, an unknown user stays text', async ({ page }) => {
+  await openStockTalk(page);
+  await box(page).click();
+  await box(page).pressSequentially('from:alice ');
+  await expect(page.locator('.search-chip[data-kind="from"]')).toContainText('Alice');
+  await expect(box(page)).toHaveValue('');
+  await box(page).press('Backspace');
+  await expect(page.locator('.search-chip')).toHaveCount(0);
+
+  // pasted in one go, then Enter
+  await box(page).fill('from:alice charts');
+  await box(page).press('Enter');
+  await expect(page.locator('.search-chip[data-kind="from"]')).toContainText('Alice');
+  await expect(panel(page).locator('.search-panel-count')).toHaveText('1 result');
+  await expect(hits(page).first()).toContainText('three charts from the weekend scan');
+  if (process.env.VOKKO_SHOTS) await page.screenshot({ path: `${process.env.VOKKO_SHOTS}/search-typed-filter.png` });
+
+  await page.getByRole('button', { name: 'Clear search' }).click();
+  await box(page).fill('from:nosuchuser charts');
+  await box(page).press('Enter');
+  await expect(page.locator('.search-chip')).toHaveCount(0);
+  await expect(box(page)).toHaveValue('from:nosuchuser charts');
+});

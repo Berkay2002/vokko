@@ -60,6 +60,74 @@ export function dateRange(kind: 'before' | 'during' | 'after', iso: string): { m
   return { min_id: justBefore(start), max_id: timestampToSnowflake(nextStart, 0) };
 }
 
+/** Who and where typed filters can name: users by username or display name, channels by name. */
+export interface TypedContext {
+  users: readonly { id: string; name: string; username: string }[];
+  channels: readonly { id: string; name: string }[];
+  now?: Date;
+}
+
+/** A chip's label for a `YYYY-MM-DD` day. */
+export function dateLabel(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+function resolveDate(value: string, now: Date): string | null {
+  if (value === 'today') return isoDay(now);
+  if (value === 'yesterday') return isoDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(value);
+  if (!match) return null;
+  const month = Number(match[2]) - 1;
+  const date = new Date(Number(match[1]), month, Number(match[3]));
+  return date.getMonth() === month ? isoDay(date) : null;
+}
+
+/** The chip a complete `kind:value` token stands for, or null when the value names nothing (it then stays search text, as in Discord). */
+export function resolveToken(kind: FilterKind, value: string, ctx: TypedContext): SearchFilter | null {
+  const v = value.toLowerCase();
+  switch (kind) {
+    case 'from':
+    case 'mentions': {
+      const name = v.replace(/^@/, '');
+      const user = ctx.users.find(u => u.username.toLowerCase() === name) ?? ctx.users.find(u => u.name.toLowerCase() === name);
+      return user ? { kind, value: user.id, label: user.name } : null;
+    }
+    case 'in': {
+      const name = v.replace(/^#/, '');
+      const channel = ctx.channels.find(c => c.name.toLowerCase() === name);
+      return channel ? { kind, value: channel.id, label: channel.name } : null;
+    }
+    case 'has': return (HAS_VALUES as readonly string[]).includes(v) ? { kind, value: v, label: v } : null;
+    case 'pinned': return v === 'true' || v === 'false' ? { kind, value: v, label: v } : null;
+    default: {
+      const iso = resolveDate(v, ctx.now ?? new Date());
+      return iso ? { kind, value: iso, label: dateLabel(iso) } : null;
+    }
+  }
+}
+
+/**
+ * Typed or pasted `from:alice docs`: every complete filter token that resolves becomes a chip and leaves the text.
+ * Without `all`, a last token not yet followed by whitespace is still being typed and stays. Quoted phrases are never filters.
+ */
+export function resolveTyped(text: string, ctx: TypedContext, all: boolean): { text: string; filters: SearchFilter[] } {
+  const filters: SearchFilter[] = [];
+  const kept: string[] = [];
+  const tokens = [...text.matchAll(/"[^"]*"?|\S+/g)];
+  tokens.forEach((match, i) => {
+    const token = match[0];
+    const typing = !all && i === tokens.length - 1 && match.index + token.length === text.length;
+    const parts = typing ? null : /^(from|mentions|has|in|before|during|after|pinned):(.+)$/i.exec(token);
+    const filter = parts ? resolveToken((parts[1] ?? '').toLowerCase() as FilterKind, parts[2] ?? '', ctx) : null;
+    if (filter) filters.push(filter);
+    else kept.push(token);
+  });
+  if (filters.length === 0) return { text, filters };
+  const rest = kept.join(' ');
+  return { text: rest && /\s$/.test(text) ? `${rest} ` : rest, filters };
+}
+
 export interface BuildOptions {
   sort: SearchSort;
   page: number;

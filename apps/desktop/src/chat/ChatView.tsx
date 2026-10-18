@@ -13,7 +13,8 @@ import { ReactionsModal } from './ReactionsModal';
 import { Markdown } from './markdown';
 import { Avatar } from './Avatar';
 import { ServerTag } from './ServerTag';
-import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, addFiles, onUploadNotice } from './draftStore';
+import { MAX_ATTACHMENTS, addFiles, onUploadNotice } from './draftStore';
+import { formatUploadLimit, maxUploadBytes } from '../api/limits';
 import { messageStore, useChannelState } from './messageStore';
 import { compareIds, formatMessageTimestamp, isShiftDown } from './util';
 import { PinConfirmDialog } from './PinConfirmDialog';
@@ -51,7 +52,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
 
   const [notice, setNotice] = useState<{ title: string; body: string } | null>(null);
   useEffect(() => onUploadNotice(n => setNotice(n.kind === 'too-large'
-    ? { title: 'Your files are too powerful', body: `Max file size is ${MAX_UPLOAD_BYTES / (1024 * 1024)} MiB. Please upload something smaller.` }
+    ? { title: 'Your files are too powerful', body: `Max file size is ${formatUploadLimit(maxUploadBytes())}. Please upload something smaller.` }
     : { title: 'Too many uploads', body: `You can only upload ${MAX_ATTACHMENTS} files at a time.` })), []);
 
   // Open the channel once per mount; the read pointer is captured at that moment for the "new" divider.

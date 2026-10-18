@@ -9,6 +9,6 @@ export { GifPicker } from './GifPicker';
 export { StickerPicker } from './StickerPicker';
 export { ForwardedBlock, GifMessage, StickerItems, gifMessageMedia } from './MessageParts';
 export { ReminderMenu } from './ReminderMenu';
-export { ReminderList, SavedMessages } from './InboxLists';
+export { MentionList, ReminderList, SavedMessages } from './InboxLists';
 export { MediaHost } from './MediaHost';
 export { openForward, toggleBookmark, useIsBookmarked } from './store';
