@@ -44,12 +44,14 @@ pub fn height_for(width: u32) -> u32 {
 }
 
 /// The width that makes a window `height` high 16:9.
+#[cfg_attr(not(windows), allow(dead_code))] // used by the Windows WM_SIZING hook
 pub fn width_for(height: u32) -> u32 {
     (height.saturating_mul(16) + 4) / 9
 }
 
 /// A window rectangle in screen pixels (the Win32 RECT), as a window being dragged by an edge reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub struct Box4 {
     pub left: i32,
     pub top: i32,
@@ -59,6 +61,7 @@ pub struct Box4 {
 
 /// The edge or corner the user drags (Win32 WMSZ_*).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub enum Edge {
     Left,
     Right,
@@ -72,6 +75,7 @@ pub enum Edge {
 
 /// The rectangle a drag by `edge` is corrected to while it happens (so the window never flickers through wrong shapes): the dragged
 /// dimension is kept and the other follows, growing from the side the user is not holding. A corner follows the width.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn fit_edge(edge: Edge, r: Box4) -> Box4 {
     let width = u32::try_from(r.right - r.left).unwrap_or(0);
     let height = u32::try_from(r.bottom - r.top).unwrap_or(0);
