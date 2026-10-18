@@ -5,8 +5,9 @@
 use livekit::prelude::*;
 use livekit::track::VideoQuality;
 use livekit::webrtc::native::yuv_helper;
+use livekit::webrtc::prelude::RtcVideoTrack;
 use livekit::webrtc::prelude::VideoBuffer;
-use livekit::webrtc::video_stream::native::NativeVideoStream;
+use livekit::webrtc::video_stream::native::{NativeVideoStream, NativeVideoStreamOptions};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -87,12 +88,16 @@ impl Videos {
 
     pub fn add(&self, track: &RemoteVideoTrack) -> String {
         let sid = track.sid().to_string();
-        // The default queue is one frame: the newest replaces an unread one.
-        let stream = NativeVideoStream::new(track.rtc_track());
-        if let Ok(mut streams) = self.streams.lock() {
-            streams.insert(sid.clone(), Arc::new(tokio::sync::Mutex::new(stream)));
-        }
+        self.insert(sid.clone(), track.rtc_track());
         sid
+    }
+
+    pub fn insert(&self, sid: String, track: RtcVideoTrack) {
+        // A one-frame queue keeps only the newest frame: a page that pulls slower than the sender drops frames, never lags.
+        let stream = NativeVideoStream::with_options(track, NativeVideoStreamOptions { queue_size_frames: Some(1) });
+        if let Ok(mut streams) = self.streams.lock() {
+            streams.insert(sid, Arc::new(tokio::sync::Mutex::new(stream)));
+        }
     }
 
     pub fn remove(&self, sid: &str) -> bool {
@@ -145,7 +150,7 @@ impl Videos {
 }
 
 /// The largest size within the limits with the frame's aspect ratio, even (I420 halves chroma) and never upscaled.
-fn fit(width: u32, height: u32, max_width: u32, max_height: u32) -> (u32, u32) {
+pub(super) fn fit(width: u32, height: u32, max_width: u32, max_height: u32) -> (u32, u32) {
     let scale = [(max_width, width), (max_height, height)]
         .iter()
         .filter(|(max, _)| *max > 0)
@@ -160,7 +165,37 @@ fn fit(width: u32, height: u32, max_width: u32, max_height: u32) -> (u32, u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::fit;
+    use super::{Videos, fit};
+    use livekit::prelude::*;
+    use livekit::webrtc::prelude::{I420Buffer, RtcVideoSource, VideoFrame, VideoResolution, VideoRotation};
+    use livekit::webrtc::video_source::native::NativeVideoSource;
+
+    #[test]
+    fn slow_puller_gets_the_newest_frame() {
+        // The source starts a keepalive task, so it needs a runtime.
+        tauri::async_runtime::block_on(newest_frame());
+    }
+
+    async fn newest_frame() {
+        let source = NativeVideoSource::new(VideoResolution { width: 64, height: 64 }, false);
+        let track = LocalVideoTrack::create_video_track("test", RtcVideoSource::Native(source.clone()));
+        let videos = Videos::default();
+        videos.insert("t".into(), track.rtc_track());
+        // Five frames before the page pulls: widths 16, 18, ..., 24 tell them apart.
+        for i in 0..5u32 {
+            let frame = VideoFrame {
+                rotation: VideoRotation::VideoRotation0,
+                timestamp_us: i64::from(i) * 33_000,
+                frame_metadata: None,
+                buffer: I420Buffer::new(16 + 2 * i, 16),
+            };
+            source.capture_frame(&frame);
+        }
+        let pulled = videos.frame("t", 0, 0).await.unwrap();
+        assert_eq!(u32::from_le_bytes([pulled[0], pulled[1], pulled[2], pulled[3]]), 24);
+        // Nothing else was queued behind it.
+        assert!(videos.frame("t", 0, 0).await.unwrap().is_empty());
+    }
 
     #[test]
     fn fit_scales_down_only() {
