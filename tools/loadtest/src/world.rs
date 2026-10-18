@@ -14,9 +14,12 @@ use crate::stats::Shared;
 pub const PASSWORD: &str = "loadtest-pass-1";
 
 pub struct Guild {
+    pub id: String,
     /// Indexes into `World::users`.
     pub members: Vec<usize>,
     pub channels: Vec<String>,
+    /// The default "General" voice channel.
+    pub voice: Option<String>,
 }
 
 pub struct World {
@@ -86,17 +89,21 @@ impl World {
                 let created = api.call("create_guild", Method::POST, "/guilds", Some(owner), Some(json!({"name": format!("lt-{run_id}-{number}")}))).await;
                 let guild_id = created.map_err(|failure| format!("create guild: {failure}"))?.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
                 let listed = api.call("list_channels", Method::GET, &format!("/guilds/{guild_id}/channels"), Some(owner), None).await;
-                let mut channels: Vec<String> = listed
-                    .map_err(|failure| format!("list channels: {failure}"))?
-                    .as_array()
-                    .map(|all| {
-                        all.iter()
-                            .filter(|channel| channel.get("type").and_then(Value::as_u64) == Some(0))
-                            .filter_map(|c| c.get("id").and_then(Value::as_str))
-                            .map(str::to_owned)
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let listed = listed.map_err(|failure| format!("list channels: {failure}"))?;
+                let of_type = |kind: u64| -> Vec<String> {
+                    listed
+                        .as_array()
+                        .map(|all| {
+                            all.iter()
+                                .filter(|channel| channel.get("type").and_then(Value::as_u64) == Some(kind))
+                                .filter_map(|c| c.get("id").and_then(Value::as_str))
+                                .map(str::to_owned)
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                };
+                let mut channels = of_type(0);
+                let voice = of_type(2).into_iter().next();
                 for name in ["lt-a", "lt-b"] {
                     let extra = api
                         .call("create_channel", Method::POST, &format!("/guilds/{guild_id}/channels"), Some(owner), Some(json!({"name": name, "type": 0})))
@@ -116,7 +123,7 @@ impl World {
                 if let Some(Err(failure)) = joins.into_iter().find(Result::is_err) {
                     return Err(format!("accept invite: {failure}"));
                 }
-                Ok::<Guild, String>(Guild { members, channels })
+                Ok::<Guild, String>(Guild { id: guild_id, members, channels, voice })
             }
         })
         .await;

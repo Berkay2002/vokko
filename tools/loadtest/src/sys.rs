@@ -36,17 +36,20 @@ pub struct Resources {
     pub loadgen: Option<Usage>,
 }
 
+/// `None`: no Postgres sampling; `Some(None)`: every postgres process; `Some(Some(pid))`: that postmaster and its children.
+type PostgresScope = Option<Option<u32>>;
+
 pub struct Sampler {
     samples: Arc<Mutex<Vec<Sample>>>,
     server_pid: Option<u32>,
-    postgres: bool,
+    postgres: PostgresScope,
 }
 
-fn sample_now(server_pid: Option<u32>, postgres: bool) -> Sample {
+fn sample_now(server_pid: Option<u32>, postgres: PostgresScope) -> Sample {
     Sample {
         at: Instant::now(),
         server: server_pid.and_then(read_process),
-        postgres: if postgres { read_postgres() } else { None },
+        postgres: postgres.and_then(read_postgres),
         loadgen: read_process(std::process::id()),
     }
 }
@@ -69,14 +72,21 @@ fn parse_stat_ticks(stat: &str) -> Option<u64> {
     Some(fields.get(11)?.parse::<u64>().ok()? + fields.get(12)?.parse::<u64>().ok()?)
 }
 
-/// Sum over every process whose command is `postgres` (postmaster, backends, background workers).
-fn read_postgres() -> Option<Reading> {
+fn parent_pid(pid: u32) -> Option<u32> {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    status.lines().find_map(|line| line.strip_prefix("PPid:"))?.trim().parse().ok()
+}
+
+/// Sum over every process whose command is `postgres` (postmaster, backends, background workers), or only over `root` and
+/// its children when given (another cluster on the same machine is not counted).
+fn read_postgres(root: Option<u32>) -> Option<Reading> {
     let mut total = Reading::default();
     let mut found = false;
     for entry in std::fs::read_dir("/proc").ok()?.flatten() {
         let Some(pid) = entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()) else { continue };
         let Ok(comm) = std::fs::read_to_string(format!("/proc/{pid}/comm")) else { continue };
         if comm.trim() == "postgres"
+            && root.is_none_or(|root| pid == root || parent_pid(pid) == Some(root))
             && let Some(reading) = read_process(pid)
         {
             total.ticks += reading.ticks;
@@ -103,7 +113,7 @@ fn usage(samples: &[Sample], pick: impl Fn(&Sample) -> Option<Reading>) -> Optio
 }
 
 impl Sampler {
-    pub fn start(server_pid: Option<u32>, postgres: bool) -> Self {
+    pub fn start(server_pid: Option<u32>, postgres: PostgresScope) -> Self {
         let samples = Arc::new(Mutex::new(Vec::new()));
         let sink = samples.clone();
         tokio::spawn(async move {
@@ -133,6 +143,56 @@ impl Sampler {
     }
 }
 
+/// One row of `pg_stat_statements`.
+#[derive(Clone, Debug, Serialize)]
+pub struct QueryStat {
+    pub calls: u64,
+    pub total_ms: f64,
+    pub mean_ms: f64,
+    pub rows: u64,
+    pub query: String,
+}
+
+fn psql(url: &str, sql: &str) -> Result<String, String> {
+    let output = std::process::Command::new("psql").args([url, "-XAtq", "-F", "\t", "-c", sql]).output().map_err(|error| format!("psql: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("psql: {}", String::from_utf8_lossy(&output.stderr).trim()));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Creates the extension (the server must have `shared_preload_libraries = 'pg_stat_statements'`) and starts from zero.
+pub fn pg_prepare(url: &str) -> Result<(), String> {
+    psql(url, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")?;
+    psql(url, "SELECT pg_stat_statements_reset()").map(|_| ())
+}
+
+pub fn pg_reset(url: &str) {
+    let _ = psql(url, "SELECT pg_stat_statements_reset()");
+}
+
+/// The `limit` statements with the most total execution time since the last reset.
+pub fn pg_top(url: &str, limit: usize) -> Vec<QueryStat> {
+    let sql = format!(
+        "SELECT calls, total_exec_time, mean_exec_time, rows, regexp_replace(query, '\\s+', ' ', 'g') FROM pg_stat_statements \
+         WHERE query NOT ILIKE '%pg_stat_statements%' ORDER BY total_exec_time DESC LIMIT {limit}"
+    );
+    psql(url, &sql).map(|text| parse_query_stats(&text)).unwrap_or_default()
+}
+
+fn parse_query_stats(text: &str) -> Vec<QueryStat> {
+    text.lines()
+        .filter_map(|line| {
+            let mut fields = line.splitn(5, '\t');
+            let calls = fields.next()?.parse().ok()?;
+            let total_ms = fields.next()?.parse().ok()?;
+            let mean_ms = fields.next()?.parse().ok()?;
+            let rows = fields.next()?.parse().ok()?;
+            Some(QueryStat { calls, total_ms, mean_ms, rows, query: fields.next()?.chars().take(160).collect() })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +202,14 @@ mod tests {
         let line = "1234 (my (odd) cmd) S 1 1234 1234 0 -1 4194304 100 0 0 0 250 50 0 0 20 0 1 0 1000 1000 100 18446744073709551615";
         assert_eq!(parse_stat_ticks(line), Some(300));
         assert_eq!(parse_stat_ticks("garbage"), None);
+    }
+
+    #[test]
+    fn query_stats_parse_from_psql_rows() {
+        let rows = parse_query_stats("12\t3.5\t0.29\t12\tSELECT a FROM b WHERE c = $1\nbad line\n");
+        assert_eq!(rows.len(), 1);
+        assert_eq!((rows[0].calls, rows[0].rows), (12, 12));
+        assert_eq!(rows[0].query, "SELECT a FROM b WHERE c = $1");
     }
 
     #[test]

@@ -32,8 +32,8 @@ fn leaders(world: &World, fraction: f64) -> Vec<(usize, usize)> {
 }
 
 /// Message sends with fan-out: each sender posts `rate` messages per second into random channels of its guild. The content
-/// carries the send time, so every receiver measures its own delivery latency.
-pub async fn send(world: &World, fraction: f64, rate: f64, duration: Duration) {
+/// carries the send time, so every receiver measures its own delivery latency. `everyone` of them mention @everyone.
+pub async fn send(world: &World, fraction: f64, rate: f64, everyone: f64, duration: Duration) {
     let rate = rate.clamp(0.05, MAX_SEND_RATE);
     let metrics = world.shared.m();
     let mut senders = JoinSet::new();
@@ -53,7 +53,8 @@ pub async fn send(world: &World, fraction: f64, rate: f64, duration: Duration) {
                 let (api, user, shared) = (api.clone(), user.clone(), shared.clone());
                 let path = format!("/channels/{}/messages", pick(&channels));
                 requests.spawn(async move {
-                    let content = format!("lt {} {}", shared.now_us(), user.index);
+                    let mention = if rand::random::<f64>() < everyone { " @everyone" } else { "" };
+                    let content = format!("lt {} {}{mention}", shared.now_us(), user.index);
                     if api.call("send_message", Method::POST, &path, Some(&user), Some(json!({"content": content}))).await.is_ok() {
                         shared.m().add("sent:message", 1);
                         shared.m().add("expected:message", audience);
@@ -159,6 +160,104 @@ pub async fn history(world: &World, fraction: f64, pages: usize) {
     world.shared.m().add("readers", readers.len() as u64);
 }
 
+/// Direct messages: every chosen user opens a DM with the next member of its guild and posts `rate` messages per second into
+/// it (content `dm <send time>`), so each message reaches the two recipients.
+pub async fn dm(world: &World, fraction: f64, rate: f64, duration: Duration) {
+    let rate = rate.clamp(0.05, MAX_SEND_RATE);
+    let end = tokio::time::Instant::now() + duration;
+    let mut senders = JoinSet::new();
+    for (number, member) in leaders(world, fraction) {
+        let guild = &world.guilds[number];
+        let Some(position) = guild.members.iter().position(|index| *index == member) else { continue };
+        let partner = guild.members[(position + 1) % guild.members.len()];
+        if partner == member {
+            continue;
+        }
+        let audience = [member, partner].iter().filter(|index| world.conns[**index].is_some()).count() as u64;
+        let (api, shared, user, recipient) = (world.api.clone(), world.shared.clone(), world.users[member].clone(), world.users[partner].id.clone());
+        senders.spawn(async move {
+            let opened = api.call("open_dm", Method::POST, "/users/@me/channels", Some(&user), Some(json!({"recipient_id": recipient}))).await;
+            let Some(channel) = opened.ok().and_then(|channel| channel.get("id").and_then(Value::as_str).map(str::to_owned)) else { return };
+            let path = format!("/channels/{channel}/messages");
+            let mut ticker = tokio::time::interval(Duration::from_secs_f64(1.0 / rate));
+            tokio::time::sleep(Duration::from_secs_f64(rand::random::<f64>() / rate)).await;
+            while tokio::time::Instant::now() < end {
+                ticker.tick().await;
+                let content = format!("dm {} {}", shared.now_us(), user.index);
+                if api.call("send_dm", Method::POST, &path, Some(&user), Some(json!({"content": content}))).await.is_ok() {
+                    shared.m().add("sent:dm", 1);
+                    shared.m().add("expected:dm", audience);
+                }
+            }
+        });
+    }
+    while senders.join_next().await.is_some() {}
+    tokio::time::sleep(DRAIN).await;
+}
+
+/// Reactions: every reactor posts one message, then adds and removes a reaction on it once per second. The add is stamped by
+/// message id, so every channel viewer times its MESSAGE_REACTION_ADD.
+pub async fn reactions(world: &World, fraction: f64, duration: Duration) {
+    // thumbs up, percent-encoded for the path
+    const EMOJI: &str = "%F0%9F%91%8D";
+    let end = tokio::time::Instant::now() + duration;
+    let mut tasks = JoinSet::new();
+    for (number, member) in leaders(world, fraction) {
+        let guild = &world.guilds[number];
+        let audience = world.connected(guild) as u64;
+        let (api, shared, user, channel) = (world.api.clone(), world.shared.clone(), world.users[member].clone(), guild.channels[0].clone());
+        tasks.spawn(async move {
+            let posted =
+                api.call("send_message", Method::POST, &format!("/channels/{channel}/messages"), Some(&user), Some(json!({"content": "react here"}))).await;
+            let Some(message) = posted.ok().and_then(|message| message.get("id").and_then(Value::as_str).map(str::to_owned)) else { return };
+            let path = format!("/channels/{channel}/messages/{message}/reactions/{EMOJI}/@me");
+            tokio::time::sleep(Duration::from_secs_f64(rand::random::<f64>())).await;
+            let mut ticker = tokio::time::interval(Duration::from_secs(1));
+            while tokio::time::Instant::now() < end {
+                ticker.tick().await;
+                shared.stamp(format!("r:{message}"));
+                if api.call("reaction_add", Method::PUT, &path, Some(&user), None).await.is_ok() {
+                    shared.m().add("expected:reaction", audience);
+                }
+                tokio::time::sleep(Duration::from_millis(400)).await;
+                let _ = api.call("reaction_remove", Method::DELETE, &path, Some(&user), None).await;
+            }
+        });
+    }
+    while tasks.join_next().await.is_some() {}
+    tokio::time::sleep(DRAIN).await;
+}
+
+/// Voice state churn: every voice user joins its guild's voice channel (op 4), stays 2 s, leaves, and repeats. The join is
+/// stamped by user id; the joiner times op 4 to VOICE_SERVER_UPDATE, everyone in the guild times the VOICE_STATE_UPDATE.
+/// Needs a server with LiveKit configured (any URL: tokens are signed locally, the client never dials LiveKit here).
+pub async fn voice(world: &World, fraction: f64, duration: Duration) {
+    let end = tokio::time::Instant::now() + duration;
+    let mut tasks = JoinSet::new();
+    for (number, member) in leaders(world, fraction) {
+        let guild = &world.guilds[number];
+        let (Some(channel), Some(conn)) = (guild.voice.clone(), world.conns[member].as_ref()) else { continue };
+        let audience = world.connected(guild) as u64;
+        let (tx, shared, user_id, guild_id) = (conn.tx.clone(), world.shared.clone(), world.users[member].id.clone(), guild.id.clone());
+        tasks.spawn(async move {
+            tokio::time::sleep(Duration::from_secs_f64(rand::random::<f64>() * 3.0)).await;
+            while tokio::time::Instant::now() < end {
+                shared.stamp(format!("v:{user_id}"));
+                if tx.send(Cmd::Voice { guild_id: guild_id.clone(), channel_id: Some(channel.clone()) }).is_err() {
+                    return;
+                }
+                shared.m().add("sent:voice_join", 1);
+                shared.m().add("expected:voice_state", audience);
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                let _ = tx.send(Cmd::Voice { guild_id: guild_id.clone(), channel_id: None });
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        });
+    }
+    while tasks.join_next().await.is_some() {}
+    tokio::time::sleep(DRAIN).await;
+}
+
 /// Every victim is accounted for once it is back (Resume or re-Identify) or gave up (`storm:failed`); a victim that never returns must not
 /// keep the loop waiting for its full 60 s limit.
 fn storm_settled(back: u64, failed: u64, victims: usize) -> bool {
@@ -172,7 +271,7 @@ pub async fn reconnect(world: &World, args: &Args) {
     let victims: Vec<usize> =
         (0..world.users.len()).filter(|index| world.conns[*index].is_some()).take(((world.users.len() as f64) * args.storm_fraction).ceil() as usize).collect();
     let offline = Duration::from_millis(args.storm_offline_ms);
-    let load = send(world, args.sender_fraction, args.send_rate, offline + Duration::from_secs(10));
+    let load = send(world, args.sender_fraction, args.send_rate, 0.0, offline + Duration::from_secs(10));
     let storm = async {
         tokio::time::sleep(Duration::from_secs(2)).await;
         for index in &victims {
