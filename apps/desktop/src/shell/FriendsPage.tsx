@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { NavToggle } from "./NavToggle";
 import { siSpotify } from "simple-icons";
 import { BrandIcon } from "../ui/BrandIcon";
@@ -23,8 +23,9 @@ import { openProfile } from "./profileStore";
 import { go, guildPath } from "./nav";
 import { callUser } from "../calls/engine";
 import { openModal } from "./modalStore";
+import { EmptyState } from "./EmptyState";
+import { useFriendsTab, type FriendsTab as Tab } from "./friendsTab";
 
-type Tab = "online" | "all" | "pending" | "suggestions" | "blocked" | "add";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "online", label: "Online" },
@@ -328,7 +329,9 @@ function VoiceDetails({ channel }: { channel: Channel }) {
 }
 
 export function FriendsPage() {
-  const [tab, setTab] = useState<Tab>("online");
+  const tab = useFriendsTab(s => s.tab);
+  const setTab = useFriendsTab(s => s.setTab);
+  const noGuilds = useStore(s => s.guildOrder.length === 0);
   const [query, setQuery] = useState("");
   const relationships = useStore(s => Object.values(s.relationships));
   const presences = useStore(s => s.presences);
@@ -360,19 +363,24 @@ export function FriendsPage() {
       </section>
     );
 
-  const empty = (text: string) => (
-    <div className="people-empty">
-      <svg width="96" height="72" viewBox="0 0 96 72" fill="none" aria-hidden="true">
-        <rect x="6" y="10" width="54" height="36" rx="12" fill="var(--background-mod-subtle)" />
-        <path d="M18 46l-6 12 16-12z" fill="var(--background-mod-subtle)" />
-        <rect x="36" y="26" width="54" height="36" rx="12" fill="var(--background-mod-normal)" />
-        <path d="M78 62l6 8-16-8z" fill="var(--background-mod-normal)" />
-        <circle cx="52" cy="44" r="3" fill="var(--interactive-icon-default)" />
-        <circle cx="63" cy="44" r="3" fill="var(--interactive-icon-default)" />
-        <circle cx="74" cy="44" r="3" fill="var(--interactive-icon-default)" />
-      </svg>
-      <span>{text}</span>
-    </div>
+  const noFriends = !relationships.some(r => r.type === RelationshipType.Friend);
+  const addFriend = (
+    <button type="button" className="btn" onClick={() => setTab("add")}>
+      Add Friend
+    </button>
+  );
+  const empty = (text: string, actions?: ReactNode) => <EmptyState text={text}>{actions}</EmptyState>;
+  // A brand-new account: no friends anywhere, so Online and All both point at Add Friend, and at a first server when there is none.
+  const firstSteps = empty(
+    noGuilds ? "No friends or servers yet. Add a friend by their username, or start a server and invite people." : "No friends yet. Add someone by their username to start talking.",
+    <>
+      {addFriend}
+      {noGuilds && (
+        <button type="button" className="btn btn-secondary" onClick={() => openModal({ type: "createServer" })}>
+          Create or Join a Server
+        </button>
+      )}
+    </>,
   );
 
   return (
@@ -423,8 +431,8 @@ export function FriendsPage() {
               <Search size={20} />
             </label>
             <div className="people-scroller">
-              {tab === "online" && (rows.online.length > 0 ? list("Online", rows.online, "friend") : empty("No one's around to hang out with right now."))}
-              {tab === "all" && (rows.friends.length > 0 ? list("All friends", rows.friends, "friend") : empty("You don't have any friends yet. Use Add Friend to send a request."))}
+              {tab === "online" && (rows.online.length > 0 ? list("Online", rows.online, "friend") : noFriends ? firstSteps : empty("No one's around to hang out with right now."))}
+              {tab === "all" && (rows.friends.length > 0 ? list("All friends", rows.friends, "friend") : noFriends ? firstSteps : empty("No friends match your search."))}
               {tab === "pending" &&
                 (rows.incoming.length + rows.outgoing.length > 0 ? (
                   <>
@@ -432,7 +440,7 @@ export function FriendsPage() {
                     {list("Outgoing", rows.outgoing, "outgoing")}
                   </>
                 ) : (
-                  empty("There are no pending friend requests. Click Add Friend to send requests.")
+                  empty("There are no pending friend requests.", addFriend)
                 ))}
               {tab === "blocked" && (rows.blocked.length > 0 ? list("Blocked", rows.blocked, "blocked") : empty("You haven't blocked anyone."))}
             </div>

@@ -311,3 +311,34 @@ test('Log In shows a busy button while a slow request runs, same size, label sti
   expect(await button.boundingBox()).toEqual(before);
   await expect(page).toHaveURL(/\/channels\/@me/);
 });
+
+test('a brand-new account gets a next step: Add Friend, a first server, placeholder DM rows', async ({ page }) => {
+  await page.goto('/login?mockLatency=0');
+  await mockReady(page);
+  await goInApp(page, '/register');
+  await page.getByLabel('Email').fill('fresh@example.test');
+  await page.getByLabel('Username').fill('fresh');
+  await page.getByLabel('Password').fill('Plain-word-longer-9');
+  await page.getByLabel('Month').selectOption('5');
+  await page.getByLabel('Day').selectOption('10');
+  await page.getByLabel('Year').selectOption('1995');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page).toHaveURL(/\/channels\/@me/);
+
+  const main = page.getByRole('main', { name: 'Friends' });
+  await expect(main.getByText('No friends or servers yet.', { exact: false })).toBeVisible();
+  await expect(page.locator('.dm-placeholder')).toHaveCount(6);
+  await main.getByRole('tab', { name: 'All' }).click();
+  await expect(main.getByRole('button', { name: 'Create or Join a Server' })).toBeVisible();
+  await main.getByRole('button', { name: 'Create or Join a Server' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Create DM with nobody to add says so and leads to Add Friend
+  await page.getByRole('button', { name: 'Create DM' }).click();
+  const pick = page.getByRole('dialog', { name: 'Select Friends' });
+  await expect(pick.getByText("You don't have any friends to add yet.")).toBeVisible();
+  await pick.getByRole('button', { name: 'Add Friend' }).click();
+  await expect(pick).toHaveCount(0);
+  await expect(main.getByRole('heading', { name: 'Add Friend' })).toBeVisible();
+});

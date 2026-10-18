@@ -24,6 +24,8 @@ import { ShortcutsModal } from "./ShortcutsModal";
 import { TopicModal } from "./TopicModal";
 import { RadioGroup, SwitchRow, Toggle } from "./settings/controls";
 import { SERVER_TEMPLATES, type ServerTemplate } from "./templates";
+import { EmptyState } from "./EmptyState";
+import { openAddFriend } from "./friendsTab";
 import { CameraPreviewModal, ChannelStatusModal, ScreenSharePickerModal } from "../voice";
 import { WatchModal } from "../watch/WatchModal";
 import { GameCreditsModal } from "../games/GameCredits";
@@ -463,28 +465,48 @@ function CreateDM({ base = [] }: { base?: string[] }) {
       onClose={closeModal}
       title={base.length > 0 ? "Add Friends to DM" : "Select Friends"}
       footer={
-        <>
-          <button type="button" className="btn btn-link" onClick={closeModal}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busy || selected.length === 0}
-            onClick={() => {
-              setBusy(true);
-              createGroupDM([...base, ...selected])
-                .then(closeModal)
-                .catch(() => setBusy(false));
-            }}
-          >
-            {selected.length + base.length > 1 ? "Create Group DM" : "Create DM"}
-          </button>
-        </>
+        friends.length > 0 && (
+          <>
+            <button type="button" className="btn btn-link" onClick={closeModal}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || selected.length === 0}
+              onClick={() => {
+                setBusy(true);
+                createGroupDM([...base, ...selected])
+                  .then(closeModal)
+                  .catch(() => setBusy(false));
+              }}
+            >
+              {selected.length + base.length > 1 ? "Create Group DM" : "Create DM"}
+            </button>
+          </>
+        )
       }
     >
-      <p className="modal-subtle">You can add {Math.max(0, room - selected.length)} more friends.</p>
-      <input className="input" placeholder="Type the username of a friend" value={query} autoFocus onChange={e => setQuery(e.target.value)} />
+      {friends.length === 0 ? (
+        // nobody to pick: say so and lead to Add Friend, like Discord
+        <EmptyState text="You don't have any friends to add yet." className="pick-empty-state">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              closeModal();
+              openAddFriend();
+            }}
+          >
+            Add Friend
+          </button>
+        </EmptyState>
+      ) : (
+        <>
+          <p className="modal-subtle">You can add {Math.max(0, room - selected.length)} more friends.</p>
+          <input className="input" placeholder="Type the username of a friend" value={query} autoFocus onChange={e => setQuery(e.target.value)} />
+        </>
+      )}
       <ul className="pick-list">
         {shown.map(r => (
           <li key={r.id}>
@@ -496,7 +518,7 @@ function CreateDM({ base = [] }: { base?: string[] }) {
             </button>
           </li>
         ))}
-        {shown.length === 0 && <li className="pick-empty">No friends found.</li>}
+        {friends.length > 0 && shown.length === 0 && <li className="pick-empty">No friends found.</li>}
       </ul>
     </Modal>
   );
