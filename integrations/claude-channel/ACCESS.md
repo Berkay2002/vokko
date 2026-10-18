@@ -42,6 +42,7 @@ In a server the bot is in, it answers (when @mentioned) in every text and announ
 
 - **Channels:** deny the bot's role View Channel (or Send Messages) in a channel's Permissions tab and it stays out.
 - **People:** a member may talk to Claude in a channel when they have **Use Application Commands** there (roles and channel overwrites resolve as for any permission). Turn it off for @everyone in Roles and give it to one role, or deny it in a single channel. The bot's owner always may. Guilds created before 2026-10-11 may lack the bit on @everyone; turn it on in Roles.
+- The tools (`reply`, `fetch_messages`, `react`, `edit_message`) reach only channels with a `groups` entry and channels where someone has just triggered the bot (30 min), not every channel it can see.
 - The roles and members are read from the server and cached for 30 s (role and member events clear the cache); if they can't be read, the message is ignored.
 
 A `groups` entry overrides the default for its channel: `--no-mention` and `--allow` still work, and it also opts in channels the bot cannot otherwise answer in. The Use Application Commands rule applies to it too. Opt a channel in by its **channel** ID (right-click the channel → Copy ID with Developer Mode on).

@@ -300,7 +300,7 @@ export class VokkoBot {
   private readonly handoffDir: string
   /** Message ids taken over from the bridge: the gate lets each through once, as if the plugin owned guilds. */
   private readonly handed = new Set<string>()
-  /** channel id → until when replies there are allowed (see ADOPT_MS). */
+  /** channel id → until when tools may reach it (see ADOPT_MS): set when the gate delivers a message from there, so Claude only reads and writes channels someone triggered it in. */
   private readonly adopted = new Map<string, number>()
   private bridgeUp: boolean | null = null
   private readonly bootAccess: Access | null
@@ -469,6 +469,7 @@ export class VokkoBot {
     if (senderId !== this.ownerId && !((await this.bitsIn(msg.guild_id, msg.channel_id, senderId)) & USE_APPLICATION_COMMANDS)) return { action: 'drop' }
     // A channel the bot answers by default, not by a groups entry: only where it can write too (not a read-only channel).
     if (!access.groups[this.gateKey(msg.channel_id)] && this.me && !((await this.bitsIn(msg.guild_id, msg.channel_id, this.me.id)) & SEND_MESSAGES)) return { action: 'drop' }
+    this.adopted.set(msg.channel_id, Date.now() + ADOPT_MS)
     return { action: 'deliver', access }
   }
 
@@ -480,20 +481,35 @@ export class VokkoBot {
   }
 
   private readonly guildState = new Map<string, { at: number; guild: GuildInfo; members: Member[] }>()
+  private readonly guildLoads = new Map<string, Promise<{ at: number; guild: GuildInfo; members: Member[] } | null>>()
+
+  /** The guild's cached roles and members; concurrent callers (a history page) share one load. */
+  private loadGuildState(guildId: string) {
+    const st = this.guildState.get(guildId)
+    if (st && Date.now() - st.at <= GUILD_STATE_MS) return Promise.resolve(st)
+    let load = this.guildLoads.get(guildId)
+    if (!load) {
+      load = (async () => {
+        const [guild, members] = await Promise.all([this.api<GuildInfo>('GET', `/guilds/${snowflake(guildId)}`), this.members(guildId, true)])
+        if (!members || !Array.isArray(guild.roles)) return null
+        const fresh = { at: Date.now(), guild, members }
+        this.guildState.set(guildId, fresh)
+        return fresh
+      })().finally(() => this.guildLoads.delete(guildId))
+      this.guildLoads.set(guildId, load)
+    }
+    return load
+  }
 
   /** The user's bits in the channel (0n when they are not a member or anything can't be read: a failed lookup refuses). Roles and members are cached for 30 s, overwrites come from the channel cache. */
   private async bitsIn(guildId: string | null, channelId: string, userId: string): Promise<bigint> {
     if (!guildId) return 0n
     try {
-      let st = this.guildState.get(guildId)
-      if (!st || Date.now() - st.at > GUILD_STATE_MS) {
-        const [guild, members] = await Promise.all([this.api<GuildInfo>('GET', `/guilds/${snowflake(guildId)}`), this.members(guildId, true)])
-        if (!members || !Array.isArray(guild.roles)) return 0n
-        st = { at: Date.now(), guild, members }
-        this.guildState.set(guildId, st)
-      }
-      const member = st.members.find(m => m.user.id === userId)
-      return member ? channelBits(st.guild, member, this.channels.get(this.gateKey(channelId))?.permission_overwrites) : 0n
+      const channel = this.channels.get(this.gateKey(channelId))
+      if (!channel) return 0n // overwrites unknown: refuse rather than guess none
+      const st = await this.loadGuildState(guildId)
+      const member = st?.members.find(m => m.user.id === userId)
+      return st && member ? channelBits(st.guild, member, channel.permission_overwrites) : 0n
     } catch (err) {
       this.cfg.log(`vokko channel: cannot read permissions in guild ${guildId}: ${err}
 `)
@@ -648,7 +664,6 @@ export class VokkoBot {
     const [msg] = await this.api<Message[]>('GET', `/channels/${snowflake(channelId, 'channel_id')}/messages?around=${snowflake(id, 'message_id')}&limit=1`)
     if (msg?.id !== id || msg.guild_id == null || msg.author.bot || msg.author.id === this.me?.id) return this.verdict(id, 'declined')
     this.handed.add(id)
-    this.adopted.set(msg.channel_id, Date.now() + ADOPT_MS)
     this.onMessage(msg)
   }
 
@@ -681,7 +696,8 @@ export class VokkoBot {
     if (ch?.type === 1) {
       const userId = ch.recipients?.find(u => u.id !== this.me?.id)?.id
       if (ownsDms(this.cfg.role, access) && userId && access.allowFrom.includes(userId)) return
-    } else if (ch && (this.guildsOwned(access) || (this.adopted.get(id) ?? 0) > Date.now()) && this.policyFor(access, id)) {
+    } else if (ch && ((this.guildsOwned(access) && this.gateKey(id) in access.groups) || (this.adopted.get(id) ?? 0) > Date.now())) {
+      // a groups entry, or a channel someone triggered Claude in: not every channel it merely sees
       return
     }
     throw new Error(`channel ${id} is not allowlisted — add via ${this.cfg.pairCommand.replace(/ pair$/, '')}`)

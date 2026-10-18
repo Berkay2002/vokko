@@ -352,3 +352,36 @@ test('the bit is read from the server, cached for 30 s, and dropped by role and 
   down = true
   expect(await verdict()).toBe('drop') // API down: refused, not guessed
 })
+
+test('tools reach only a groups channel or one Claude was triggered in, not every channel it can see', async () => {
+  const { bot } = makeBot({ groups: {} })
+  ;(bot as any).cacheChannel({ id: '501', type: 0, guild_id: '1' })
+  ;(bot as any).cacheChannel({ id: '502', type: 0, guild_id: '1' })
+  await expect(bot.history('501', 5)).rejects.toThrow(/not allowlisted/) // visible, but nobody triggered Claude there
+  await expect(bot.reply('501', 'hi')).rejects.toThrow(/not allowlisted/)
+  await expect(bot.message('501', '5')).rejects.toThrow(/not allowlisted/)
+  expect((await bot.gate(ask(STRANGER))).action).toBe('deliver') // a member with the bit mentions it in 501
+  expect(await bot.history('501', 5)).toEqual([])
+  await expect(bot.history('502', 5)).rejects.toThrow(/not allowlisted/) // still only the channel it was triggered in
+  await expect(bot.reply('502', 'hi')).rejects.toThrow(/not allowlisted/)
+  expect((await bot.gate({ ...ask(STRANGER), id: '78', mentions: [] })).action).toBe('drop') // no mention, no trigger
+  await expect(bot.history('502', 5)).rejects.toThrow(/not allowlisted/)
+})
+
+test('a cold history page loads the guild once, and an uncached channel refuses', async () => {
+  const { bot } = makeBot({ groups: { [GROUP]: { requireMention: true, allowFrom: [] } } })
+  ;(bot as any).guildState.clear()
+  const msgs = [FRIEND, STRANGER, OWNER, '701', '702'].map((a, i) => msg(String(10 + i), a))
+  respond = url =>
+    url.includes('/messages')
+      ? Response.json(msgs)
+      : url.endsWith('/guilds/1')
+        ? Response.json(guildJson([{ id: '1', permissions: String(VIEW_CHANNEL | SEND_MESSAGES | USE_APPLICATION_COMMANDS) }]))
+        : Response.json([memberJson(ME), memberJson(FRIEND), memberJson(STRANGER), memberJson('701')])
+  expect((await bot.history(GROUP, 10)).map(m => m.id)).toEqual(['13', '11', '10']) // OWNER and 702 are not in the member list
+  expect(calls.filter(c => c.url.endsWith('/guilds/1')).length).toBe(1)
+  expect(calls.filter(c => c.url.includes('/guilds/1/members')).length).toBe(1)
+  // a channel missing from the cache has unknown overwrites: refuse, whatever the roles say
+  ;(bot as any).channels.delete(GROUP)
+  expect((await bot.gate(msg('90', STRANGER, { channel_id: GROUP, mentions: [{ id: ME, username: 'claude', global_name: 'Claude' }] }))).action).toBe('drop')
+})
