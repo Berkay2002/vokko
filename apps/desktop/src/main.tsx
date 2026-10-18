@@ -21,6 +21,7 @@ import * as store from "./api/store";
 import { messageStore } from "./chat/messageStore";
 import { preloadHighlighter } from "./chat/markdown";
 import { preloadSettings } from "./shell/Modals";
+import { installStaleChunkReload } from "./shell/staleChunks";
 import { preloadLazyModules } from "./ui/lazyModule";
 import { startNotify } from "./notify";
 import { installLogCapture } from "./report/logBuffer";
@@ -54,6 +55,7 @@ import "./voice";
 import "./calls";
 import "./soundboard";
 
+installStaleChunkReload(); // a tab left open across a redeploy reloads (or offers to) when an old chunk is gone
 installLogCapture(); // console warnings/errors feed "Report a problem" (scrubbed, kept in memory)
 
 // Mock mode only: expose internals to Playwright scripts and the console (no effect in real builds).
