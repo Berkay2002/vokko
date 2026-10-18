@@ -248,7 +248,60 @@ test('someone else starts it: the line shows outside the call, the tile when we 
   await expect(page.locator('.voice-tile.stremio')).toHaveCount(0);
 });
 
-test('continue watching: the row, an episode resumed at its offset, a film, and the next episode after a finished one', async ({ page }) => {
+test('the Stremio bars and the call bar fade out while the mouse is idle and come back on movement', async ({ page }) => {
+  test.skip(MOBILE, 'desktop flow');
+  await openGuild(page);
+  const channelId = await general(page);
+  const path = `/channels/${channelId}/stremio`;
+  await as(page, 'alice', 'PUT', path, { sid: await sidFor(page, 'alice', '/stremio/streams/movie/tt0113277') });
+  await page.getByRole('button', { name: 'General voice channel' }).click();
+  const tile = call(page).locator('.voice-tile.stremio');
+  await expect(tile).toHaveAttribute('data-status', 'playing', { timeout: 10_000 });
+  const bars = [tile.locator('.stremio-head'), tile.locator('.stremio-bar'), call(page).locator('.voice-bar')];
+  const shown = async (opacity: string) => { for (const bar of bars) await expect(bar).toHaveCSS('opacity', opacity); };
+
+  await page.mouse.move(600, 300);
+  await shown('1');
+  await shot(page, '10-bars-shown.png');
+  await expect(call(page)).not.toHaveAttribute('data-idle', '');
+  // Idle after 3 s: the bars are gone and the cursor with them; a move brings them back.
+  await expect(call(page)).toHaveAttribute('data-idle', '', { timeout: 6000 });
+  await shown('0');
+  await expect(tile).toHaveCSS('cursor', 'none');
+  await shot(page, '10-bars-idle.png');
+  await page.mouse.move(640, 320);
+  await expect(call(page)).not.toHaveAttribute('data-idle', '');
+  await shown('1');
+
+  // Over a bar they stay, also when the pointer was already there as playback (re)started: Pause, Play, and the mouse stays put.
+  await tile.getByRole('button', { name: 'Pause', exact: true }).click();
+  await expect(tile).toHaveAttribute('data-playing', 'false');
+  await tile.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(tile).toHaveAttribute('data-playing', 'true');
+  await page.waitForTimeout(3600);
+  await expect(call(page)).not.toHaveAttribute('data-idle', '');
+  await shown('1');
+
+  // An open picker keeps them (the Up next panel), and they go again once it is closed and the mouse is away.
+  await tile.getByRole('button', { name: /^Up next/ }).click();
+  await expect(tile.locator('.stremio-queue')).toBeVisible();
+  await page.mouse.move(600, 300);
+  await page.waitForTimeout(3600);
+  await expect(call(page)).not.toHaveAttribute('data-idle', '');
+  await tile.getByRole('button', { name: /^Up next/ }).click();
+  await page.mouse.move(610, 300);
+  await expect(call(page)).toHaveAttribute('data-idle', '', { timeout: 6000 });
+  await page.mouse.move(600, 300);
+
+  // Paused they stay.
+  await as(page, 'alice', 'PATCH', path, { playing: false });
+  await expect(tile).toHaveAttribute('data-playing', 'false');
+  await page.waitForTimeout(3600);
+  await expect(call(page)).not.toHaveAttribute('data-idle', '');
+  await shown('1');
+});
+
+test('continue watching:the row, an episode resumed at its offset, a film, and the next episode after a finished one', async ({ page }) => {
   await openGuild(page);
   await page.getByRole('button', { name: 'General voice channel' }).click();
   if (MOBILE) await page.getByRole('button', { name: 'Join Voice', exact: true }).click();
