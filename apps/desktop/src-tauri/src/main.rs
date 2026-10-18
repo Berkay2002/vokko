@@ -253,6 +253,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             overlay::desktop_overlay_configure,
             overlay::desktop_overlay_set_interactive,
             overlay::desktop_overlay_open_main,
+            overlay::desktop_overlay_set_frame,
         ])
         .build(context)?
         .run(run_event);

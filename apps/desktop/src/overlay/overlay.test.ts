@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Channel, User, VoiceState } from "../api/types";
 import { initialVoiceModel } from "../voice/reducer";
 import { overlayActive, overlayState } from "./bridge";
+import { frameFor } from "./Overlay";
 import { DEFAULT_OVERLAY, sanitizeOverlay } from "./settings";
 
 const user = (id: string, name: string): User => ({ id, username: name, global_name: null, avatar: null }) as unknown as User;
@@ -80,5 +81,16 @@ describe("overlay settings", () => {
       hotkey: "Ctrl+F9",
       enabled: false,
     });
+  });
+});
+
+describe("overlay frame", () => {
+  const screen = { width: 2048, height: 576 };
+  it("covers the content and its shadow, inside the screen", () => {
+    expect(frameFor([], screen)).toBeNull();
+    // Widget top-left, a toast bottom-right: one box spanning both.
+    expect(frameFor([{ x: 24, y: 24, width: 120.4, height: 100 }], screen)).toEqual({ x: 0, y: 0, width: 177, height: 156 });
+    expect(frameFor([{ x: 24, y: 24, width: 120, height: 100 }, { x: 1684, y: 452, width: 340, height: 100 }], screen)).toEqual({ x: 0, y: 0, width: 2048, height: 576 });
+    expect(frameFor([{ x: 1684, y: 452, width: 340, height: 100 }], screen)).toEqual({ x: 1652, y: 420, width: 396, height: 156 });
   });
 });

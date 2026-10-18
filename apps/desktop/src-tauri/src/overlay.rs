@@ -37,6 +37,30 @@ pub struct Rect {
     pub bottom: i32,
 }
 
+/// Where the passive window sits inside its monitor, in physical pixels from the monitor's top-left: just the widget and the toasts,
+/// so the GPU keeps a surface the size of the content rather than of the whole monitor. The page measures it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct Frame {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// The window rectangle on `monitor`: the frame while passive (kept inside the monitor), the whole monitor while interactive or
+/// before the page has measured.
+pub fn place(monitor: Rect, frame: Option<Frame>, interactive: bool) -> Rect {
+    let Some(frame) = frame.filter(|_| !interactive) else {
+        return monitor;
+    };
+    let (width, height) = (monitor.right - monitor.left, monitor.bottom - monitor.top);
+    let x = frame.x.clamp(0, width - 1);
+    let y = frame.y.clamp(0, height - 1);
+    let left = monitor.left + x;
+    let top = monitor.top + y;
+    Rect { left, top, right: left + frame.width.clamp(1, width - x), bottom: top + frame.height.clamp(1, height - y) }
+}
+
 /// Whether a window covers its whole monitor: a fullscreen or borderless-fullscreen game (or video, or browser in F11).
 pub fn covers(window: Rect, monitor: Rect) -> bool {
     window.left <= monitor.left && window.top <= monitor.top && window.right >= monitor.right && window.bottom >= monitor.bottom
@@ -45,7 +69,8 @@ pub fn covers(window: Rect, monitor: Rect) -> bool {
 /// The foreground window as the watcher sees it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Foreground {
-    /// The overlay itself (interactive mode): keep whatever shows.
+    /// The overlay itself. Interactive mode never asks (it keeps its place); a passive overlay in front means Windows activated it
+    /// (the game closed under it), and it hides so it can't hold the foreground.
     Overlay,
     /// Another Vokko window, the desktop or the taskbar: never a game.
     Ignored {
@@ -58,12 +83,12 @@ pub enum Foreground {
 }
 
 /// The monitor the overlay should cover, or None to hide it. `shown` is where it is now.
-pub fn target(config: &OverlayConfig, foreground: Option<Foreground>, shown: Option<Rect>) -> Option<Rect> {
+pub fn target(config: &OverlayConfig, foreground: Option<Foreground>) -> Option<Rect> {
     if !config.enabled || !config.active {
         return None;
     }
     match foreground? {
-        Foreground::Overlay => shown,
+        Foreground::Overlay => None,
         Foreground::Ignored { .. } => None,
         Foreground::Other { monitor, fullscreen } => (fullscreen || config.always).then_some(monitor),
     }
@@ -105,6 +130,15 @@ pub fn desktop_overlay_open_main(app: tauri::AppHandle, state: tauri::State<'_, 
     crate::window::show_main(&app);
 }
 
+/// The page measured its content: the passive window shrinks to `frame` (None: the whole monitor).
+#[tauri::command]
+pub fn desktop_overlay_set_frame(app: tauri::AppHandle, state: tauri::State<'_, OverlayState>, frame: Option<Frame>) {
+    #[cfg(windows)]
+    state.set_frame(&app, frame);
+    #[cfg(not(windows))]
+    let _ = (app, state, frame);
+}
+
 #[cfg(windows)]
 mod imp {
     use std::str::FromStr;
@@ -115,7 +149,7 @@ mod imp {
     use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
-    use super::{INTERACTIVE_EVENT, OVERLAY_WINDOW, OverlayConfig, Rect, target};
+    use super::{Frame, INTERACTIVE_EVENT, OVERLAY_WINDOW, OverlayConfig, Rect, place, target};
     use crate::prefs::PrefsStore;
 
     /// How often the foreground window is checked: a few Win32 calls, no process walk.
@@ -126,6 +160,7 @@ mod imp {
         Interactive(bool),
         Toggle,
         OpenMain,
+        Frame(Option<Frame>),
     }
 
     /// Channel into the watcher thread, which owns the window and the hotkey. Started on the first configure.
@@ -167,6 +202,12 @@ mod imp {
             self.send(app, Msg::Interactive(on));
         }
 
+        pub fn set_frame(&self, app: &AppHandle, frame: Option<Frame>) {
+            if self.tx.lock().map(|tx| tx.is_some()).unwrap_or(false) {
+                self.send(app, Msg::Frame(frame));
+            }
+        }
+
         pub fn open_main(&self, app: &AppHandle) {
             if self.tx.lock().map(|tx| tx.is_none()).unwrap_or(true) {
                 crate::window::show_main(app);
@@ -181,6 +222,9 @@ mod imp {
         config: OverlayConfig,
         /// Monitor the overlay covers while it shows.
         shown: Option<Rect>,
+        /// The page's last measured content (the passive window) and where the window actually is.
+        frame: Option<Frame>,
+        placed: Option<Rect>,
         interactive: bool,
         /// The window that was in front when interactive mode began; it gets the focus back.
         game: Option<win::Hwnd>,
@@ -189,7 +233,7 @@ mod imp {
 
     impl Watcher {
         fn new(app: AppHandle) -> Self {
-            Self { app, config: OverlayConfig::default(), shown: None, interactive: false, game: None, hotkey: None }
+            Self { app, config: OverlayConfig::default(), shown: None, frame: None, placed: None, interactive: false, game: None, hotkey: None }
         }
 
         fn run(mut self, rx: &Receiver<Msg>) {
@@ -206,6 +250,10 @@ mod imp {
                     }
                     Ok(Msg::Interactive(on)) => self.set_interactive(on),
                     Ok(Msg::Toggle) => self.set_interactive(!self.interactive),
+                    Ok(Msg::Frame(frame)) => {
+                        self.frame = frame;
+                        self.place();
+                    }
                     Ok(Msg::OpenMain) => {
                         // Vokko takes the focus, not the game.
                         self.game = None;
@@ -230,11 +278,14 @@ mod imp {
                     self.unregister_hotkey();
                     let _ = window.destroy();
                     self.shown = None;
+                    // A new page starts unmeasured.
+                    self.frame = None;
+                    self.placed = None;
                 }
                 return;
             }
             let foreground = win::foreground(self.overlay_hwnd());
-            let next = if self.interactive { self.shown } else { target(&self.config, foreground, self.shown) };
+            let next = if self.interactive { self.shown } else { target(&self.config, foreground) };
             if next == self.shown {
                 return;
             }
@@ -248,9 +299,28 @@ mod imp {
             let Some(hwnd) = self.overlay_hwnd().or_else(|| self.create()) else {
                 return;
             };
-            win::show_over(hwnd, rect);
             self.shown = Some(rect);
+            self.placed = None;
+            self.place_on(hwnd);
             self.register_hotkey();
+        }
+
+        /// Moves and sizes the shown window to the frame (passive) or the monitor (interactive). Never activates it.
+        fn place(&mut self) {
+            if let Some(hwnd) = self.overlay_hwnd() {
+                self.place_on(hwnd);
+            }
+        }
+
+        fn place_on(&mut self, hwnd: win::Hwnd) {
+            let Some(monitor) = self.shown else {
+                return;
+            };
+            let rect = place(monitor, self.frame, self.interactive);
+            if self.placed != Some(rect) {
+                win::show_over(hwnd, rect);
+                self.placed = Some(rect);
+            }
         }
 
         fn hide(&mut self) {
@@ -259,6 +329,7 @@ mod imp {
                 win::hide(hwnd);
             }
             self.shown = None;
+            self.placed = None;
             self.unregister_hotkey();
         }
 
@@ -307,16 +378,25 @@ mod imp {
             self.interactive = on;
             if on {
                 self.game = win::foreground_hwnd().filter(|&fg| fg != hwnd);
+                // Not layered any more, then the whole monitor (backdrop, control bar), then the focus.
                 win::set_passive(hwnd, false);
+                self.place_on(hwnd);
                 win::focus(hwnd);
+                // And the page itself: WebView2 keeps its own focus, which can be stale after Windows activated the passive window.
+                if let Some(window) = self.app.get_webview_window(OVERLAY_WINDOW) {
+                    let _ = window.as_ref().set_focus();
+                }
             } else {
-                win::set_passive(hwnd, true);
-                // Hand the keyboard back to the game (only if the overlay still has it: the user may have clicked elsewhere).
+                // Hand the keyboard back to the game first, while the overlay still owns the foreground (Windows refuses
+                // SetForegroundWindow otherwise and activates whatever is next). Only if the overlay still has it: the user may
+                // have clicked elsewhere.
                 if win::foreground_hwnd() == Some(hwnd)
                     && let Some(game) = self.game.take()
                 {
                     win::focus(game);
                 }
+                self.place_on(hwnd);
+                win::set_passive(hwnd, true);
             }
             if let Err(error) = self.app.emit_to(OVERLAY_WINDOW, INTERACTIVE_EVENT, on) {
                 log::warn!("cannot emit {INTERACTIVE_EVENT}: {error}");
@@ -354,9 +434,9 @@ mod imp {
         use windows::Win32::Foundation::{HWND, RECT};
         use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
         use windows::Win32::UI::WindowsAndMessaging::{
-            GWL_EXSTYLE, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, HWND_TOPMOST, IsIconic, IsZoomed,
-            SW_HIDE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowLongPtrW,
-            SetWindowPos, ShowWindow, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+            GWL_EXSTYLE, GWL_STYLE, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, HWND_TOPMOST, IsIconic,
+            IsZoomed, SW_HIDE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetForegroundWindow, SetWindowLongPtrW,
+            SetWindowPos, ShowWindow, WS_DISABLED, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
         };
 
         use super::super::{Foreground, Rect, covers};
@@ -435,21 +515,26 @@ mod imp {
                 let passive_bits = (WS_EX_TRANSPARENT.0 | WS_EX_LAYERED.0 | WS_EX_NOACTIVATE.0) as isize;
                 style = if passive { style | passive_bits } else { style & !passive_bits };
                 SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style);
+                // Disabled too: NOACTIVATE alone doesn't stop Windows from activating the topmost overlay when the game window
+                // closes, and a passively activated WebView2 then misses the next interactive mode's clicks and keys.
+                let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+                let style = if passive { style | WS_DISABLED.0 as isize } else { style & !(WS_DISABLED.0 as isize) };
+                SetWindowLongPtrW(hwnd, GWL_STYLE, style);
                 let _ = SetWindowPos(hwnd, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
             }
         }
 
-        /// Shows the overlay over `monitor`, topmost, without activating it.
-        pub fn show_over(hwnd: Hwnd, monitor: Rect) {
+        /// Shows the overlay at `rect`, topmost, without activating it.
+        pub fn show_over(hwnd: Hwnd, rect: Rect) {
             // SAFETY: positions our own window.
             unsafe {
                 let _ = SetWindowPos(
                     hwnd.get(),
                     Some(HWND_TOPMOST),
-                    monitor.left,
-                    monitor.top,
-                    monitor.right - monitor.left,
-                    monitor.bottom - monitor.top,
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
                     SWP_NOACTIVATE | SWP_SHOWWINDOW,
                 );
             }
@@ -497,25 +582,37 @@ mod tests {
     fn shows_only_over_a_fullscreen_window_unless_always() {
         let game = Some(Foreground::Other { monitor: SCREEN, fullscreen: true });
         let browser = Some(Foreground::Other { monitor: SCREEN, fullscreen: false });
-        assert_eq!(target(&config(), game, None), Some(SCREEN));
-        assert_eq!(target(&config(), browser, None), None);
-        assert_eq!(target(&OverlayConfig { always: true, ..config() }, browser, None), Some(SCREEN));
+        assert_eq!(target(&config(), game), Some(SCREEN));
+        assert_eq!(target(&config(), browser), None);
+        assert_eq!(target(&OverlayConfig { always: true, ..config() }, browser), Some(SCREEN));
         // Vokko itself, the desktop or nothing in front: hidden even when "always".
-        assert_eq!(target(&OverlayConfig { always: true, ..config() }, Some(Foreground::Ignored { monitor: SCREEN }), None), None);
-        assert_eq!(target(&config(), None, Some(SCREEN)), None);
+        assert_eq!(target(&OverlayConfig { always: true, ..config() }, Some(Foreground::Ignored { monitor: SCREEN })), None);
+        assert_eq!(target(&config(), None), None);
     }
 
     #[test]
     fn hidden_when_off_or_nothing_to_show() {
         let game = Some(Foreground::Other { monitor: SCREEN, fullscreen: true });
-        assert_eq!(target(&OverlayConfig { enabled: false, ..config() }, game, None), None);
-        assert_eq!(target(&OverlayConfig { active: false, ..config() }, game, None), None);
+        assert_eq!(target(&OverlayConfig { enabled: false, ..config() }, game), None);
+        assert_eq!(target(&OverlayConfig { active: false, ..config() }, game), None);
     }
 
     #[test]
-    fn the_overlay_in_front_keeps_its_place() {
-        assert_eq!(target(&config(), Some(Foreground::Overlay), Some(SCREEN)), Some(SCREEN));
-        assert_eq!(target(&config(), Some(Foreground::Overlay), None), None);
+    fn a_passive_overlay_in_front_hides() {
+        assert_eq!(target(&config(), Some(Foreground::Overlay)), None);
+    }
+
+    #[test]
+    fn the_passive_window_is_the_frame_inside_its_monitor() {
+        let right = Rect { left: 2560, top: 0, right: 5120, bottom: 1440 };
+        let frame = Frame { x: 0, y: 0, width: 300, height: 200 };
+        assert_eq!(place(SCREEN, Some(frame), false), Rect { left: 0, top: 0, right: 300, bottom: 200 });
+        // Relative to the monitor, and cut at its edges.
+        assert_eq!(place(right, Some(Frame { x: 2400, ..frame }), false), Rect { left: 4960, top: 0, right: 5120, bottom: 200 });
+        assert_eq!(place(SCREEN, Some(Frame { x: -50, y: 9000, ..frame }), false), Rect { left: 0, top: 1439, right: 300, bottom: 1440 });
+        // Interactive or unmeasured: the whole monitor.
+        assert_eq!(place(SCREEN, Some(frame), true), SCREEN);
+        assert_eq!(place(SCREEN, None, false), SCREEN);
     }
 
     #[test]

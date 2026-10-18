@@ -67,6 +67,9 @@ body,
 }
 
 .ov-members {
+  /* Sensible bound for a big call (about 13 people): the passive window is sized to this. */
+  max-height: 476px;
+  overflow: hidden;
   list-style: none;
   margin: 0;
   padding: 0;

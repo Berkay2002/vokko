@@ -2,11 +2,35 @@ import { Headphones, HeadphoneOff, Mic, MicOff, X } from "lucide-react";
 import logo from "../../../../assets/brand/vokko-icon.svg";
 import type { OverlayAction, OverlayMember, OverlayState, OverlayToast } from "./protocol";
 
+/** A rectangle in CSS pixels from the monitor's top-left. */
+export interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Room left around the content for the toasts' shadow. */
+const FRAME_PAD = 32;
+
+/** The part of the monitor the passive window must cover: the union of the content boxes plus their shadow, inside the screen and
+ * snapped to whole pixels. Null when there is nothing to cover. */
+export function frameFor(boxes: Box[], screen: { width: number; height: number }): Box | null {
+  if (!boxes.length) return null;
+  const x = Math.max(0, Math.floor(Math.min(...boxes.map(b => b.x)) - FRAME_PAD));
+  const y = Math.max(0, Math.floor(Math.min(...boxes.map(b => b.y)) - FRAME_PAD));
+  const right = Math.min(screen.width, Math.ceil(Math.max(...boxes.map(b => b.x + b.width)) + FRAME_PAD));
+  const bottom = Math.min(screen.height, Math.ceil(Math.max(...boxes.map(b => b.y + b.height)) + FRAME_PAD));
+  return { x, y, width: right - x, height: bottom - y };
+}
+
 export interface OverlayProps {
   state: OverlayState | null;
   interactive: boolean;
   onAction(action: OverlayAction): void;
   onExit(): void;
+  /** Passive window shrunk to its content: the page is laid out as if it still covered the monitor, shifted by the frame. */
+  frame?: Box | null;
 }
 
 function Member({ member }: { member: OverlayMember }) {
@@ -44,12 +68,13 @@ function Toast({ toast, interactive, onAction }: { toast: OverlayToast; interact
 
 /** The overlay page: the voice widget in its corner, toasts in theirs, and the control bar while interactive. No timers or animation
  * loops: it re-renders only when the main window sends a new state. */
-export function Overlay({ state, interactive, onAction, onExit }: OverlayProps) {
+export function Overlay({ state, interactive, onAction, onExit, frame }: OverlayProps) {
   if (!state) return null;
   const { view, call } = state;
   const widgetStyle = { opacity: interactive ? 1 : view.opacity / 100 };
+  const rootStyle = frame && !interactive ? { left: -frame.x, top: -frame.y, width: window.screen.width, height: window.screen.height, right: "auto", bottom: "auto" } : undefined;
   return (
-    <div className={`ov-root${interactive ? " interactive" : ""}`} data-testid="overlay-root">
+    <div className={`ov-root${interactive ? " interactive" : ""}`} style={rootStyle} data-testid="overlay-root">
       {interactive && (
         <div className="ov-bar" role="toolbar" aria-label="Overlay controls">
           <div className="ov-bar-title">
