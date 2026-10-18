@@ -35,7 +35,9 @@ function DmRow({ channel }: { channel: Channel }) {
   const first = recipients[0];
   const playing = useShownActivity(group ? null : first?.id);
   // Subtitle under a 1:1 DM's name: "Playing X" (the main activity), else "In voice" while they sit in a voice channel we can see, else their custom status.
-  const inVoice = useVoice(s => !group && !!first && !!s.states[first.id]?.channel_id);
+  // Voice states are not cleared while the gateway reconnects (presences are, see applyConnection): hide the line until READY/RESUMED, like Discord.
+  const live = useStore(s => s.connection === "ready");
+  const inVoice = useVoice(s => live && !group && !!first && !!s.states[first.id]?.channel_id);
   const status = useStore(s => (!group && first ? (s.presences[first.id]?.status ?? "offline") : null));
   const custom = useStore(s => (!group && first ? s.presences[first.id]?.custom_status : null));
   const name = dmName(channel);
