@@ -142,6 +142,9 @@ test('phone: the Activities picker is a full-height bottom sheet with one column
   const sheet = page.locator('.sheet', { has: page.getByRole('menu', { name: 'Activities' }) });
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole('searchbox', { name: 'Search activities' })).toBeVisible();
+  // No soft keyboard on open: focus is on the sheet, not the search box.
+  await expect(sheet.getByRole('searchbox', { name: 'Search activities' })).not.toBeFocused();
+  await expect(sheet).toBeFocused();
   const box = (await sheet.boundingBox())!;
   expect(box.height).toBeGreaterThan(800);
   await expect.poll(async () => { const m = (await sheet.boundingBox())!; return m.y + m.height; }).toBeLessThanOrEqual(844); // after its slide-in
