@@ -16,7 +16,7 @@ No signing keys, endpoints or secrets are committed; releases supply them at bui
 | Global shortcuts registry (nothing registered by default) | `shortcuts.rs`, `tauri-plugin-global-shortcut` | `registerShortcut`, `unregisterShortcut`, `listShortcuts`, `onShortcut` |
 | Window controls: undecorated window off macOS, minimize/maximize/close drawn in the title bar | `window.rs` (`use_custom_controls`, `desktop_window_chrome`) | `useWindowChrome()`, `minimizeWindow()`, `toggleMaximizeWindow()`, `closeWindow()` (`windowControls.ts`) |
 | Running programs for game detection (names and start times only) | `games.rs` (`desktop_list_processes`, `sysinfo`) | `listProcesses()`, `matchGame()` (`games.ts`, list in `detectableGames.json`) |
-| Notifications | `tauri-plugin-notification`, capability `notification:default` | `src/notify/desktop.ts` invokes the plugin commands |
+| Notifications | `tauri-plugin-notification`, capability `notification:default`; clicks in `notifications.rs` | `src/notify/desktop.ts` invokes the plugin commands |
 
 `initDesktop()` (called from `src/main.tsx`) starts deep-link delivery and the updater loop. `isDesktop()` tells a settings page
 whether to show the desktop-only options at all.
@@ -38,6 +38,22 @@ start-minimized are decided before the webview loads.
 - Links that arrive before the webview loads (cold start, second-instance argv) queue in Rust and are handed over by
   `desktop_take_pending_links`, which the JS adapter calls once after subscribing.
 - Test without an installer: `vokko-desktop.exe "vokko://invite/abc123"` (starts the app with the link, or forwards it to the running one).
+- Debug builds also accept `vokko-dev://`, so a test bundle can register a scheme the installed app never receives. On macOS (the
+  link arrives as an Apple Event, never argv), build it with its own identifier:
+  `echo '{"identifier":"app.vokko.desktop.dev","productName":"Vokko Dev","bundle":{"active":true,"targets":["app"],"macOS":{"signingIdentity":"-"}},"plugins":{"deep-link":{"desktop":{"schemes":["vokko-dev"]}}}}' > /tmp/dev.json`,
+  `npx tauri build --debug --config /tmp/dev.json`. Start it with its own data dir (`VOKKO_CONFIG_DIR=/tmp/vokko-dev
+  "<bundle>/Contents/MacOS/vokko-desktop"`; the default dir is shared with the installed app), then `open "vokko-dev://invite/abc123"`. Remove the bundle afterwards
+  (`lsregister -u <path to Vokko Dev.app>`, then delete it) so Launch Services forgets the scheme.
+
+### Notification clicks
+
+`notifications.rs` registers a `tauri-plugin-notification` action handler. With one in place the plugin waits on each shown
+notification (macOS and Windows: a thread per notification until it is clicked or dismissed; Linux: one D-Bus listener), and a
+click on the body (`tap`) brings the window forward and emits `desktop-notification-click` with the notification id. The webview
+gives every notification a fresh id and keeps the newest 100 click handlers (`createClickRouter` in `notify/desktop.ts`), so the
+click opens the channel or message the notification was about. On Windows a click only counts while the toast is on screen, not
+from the Action Center (plugin limit). macOS attributes notifications of a `tauri dev` binary to Terminal, so test clicks with a
+bundled build.
 - The SPA routes `/invite/:code` to the invite page.
 
 ### Global shortcuts
@@ -60,6 +76,10 @@ Everything macOS-specific is in `src-tauri/src/macos.rs` (`#[cfg(target_os = "ma
   have no menu accelerator on purpose: the webview handles them and a menu key equivalent would swallow them.
 - **Dock badge**: `notify/badge.ts` sets the tile label to mentions plus unread DM conversations (`dockBadgeLabel`: "99+" past 99,
   cleared at 0), through `Window.setBadgeLabel` (permissions in `capabilities/macos.json`, macOS only). The same summary feeds the tray dot, and it follows the "unread badge" preference.
+  A read on another device arrives as `MESSAGE_ACK`; like the server, the store resets a channel's mention count only when the ack
+  reaches the newest message it knows (`api/readAck.test.ts`).
+- **Menu bar icon**: a template image (`icons/tray-template.png`, the Vokko mark in black, 44 px for 22 pt), so AppKit tints it for
+  light and dark menu bars. It ignores the picked app icon; the unread dot is cut out of the mark (`overlay_template_dot`).
 - **Dock bounce**: `notify/controller.ts` asks for an informational bounce (`desktop_request_attention`) when `shouldBounce`
   holds: the message is a mention or DM, it would raise an OS notification (DND, mutes, "nothing" level, desktop notifications off
   and streamer mode all apply) and the window is not focused.

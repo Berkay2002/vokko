@@ -364,9 +364,14 @@ export function wireStoreToGateway(): void {
   gateway.onStatus(applyConnection);
   gateway.on("READY", ready => s().applyReady(ready));
   gateway.on("MESSAGE_CREATE", onMessageCreate);
+  // Also how a read on another device reaches this one (and its Dock badge). Like the server, the mention counter only
+  // resets once the ack has caught up with the newest message: a stale ack must not hide a mention that arrived after it.
   gateway.on("MESSAGE_ACK", ({ channel_id, message_id }) => {
-    const read = s().readStates[channel_id];
-    s().setReadState({ channel_id, last_message_id: maxId(read?.last_message_id, message_id), mention_count: 0 });
+    const state = s();
+    const read = state.readStates[channel_id];
+    const newest = (state.channels[channel_id] ?? state.threads[channel_id])?.last_message_id;
+    const caughtUp = !newest || compareIds(message_id, newest) >= 0;
+    state.setReadState({ channel_id, last_message_id: maxId(read?.last_message_id, message_id), mention_count: caughtUp ? 0 : (read?.mention_count ?? 0) });
   });
   gateway.on("TYPING_START", ({ channel_id, user_id }) => {
     if (user_id === s().me?.id) return;
