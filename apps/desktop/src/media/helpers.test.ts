@@ -5,7 +5,7 @@ import {
   MAX_FORWARD_DESTINATIONS, canUseSticker, forwardDestinations, gifMessageMedia, groupStickers, isGifOnlyMessage, looksLikeDirectGif, messageSnippet, parseCustomReminder, presetReminderTime, REMINDER_PRESETS, reminderPresetLabel,
   safeMediaUrl, stickerMatches, toDatetimeLocal, toggleDestination,
 } from './helpers';
-import { addFavorite, dropNotice, isBookmarked, purgeBookmarks, purgeReminders, pushNotice, removeBookmark, removeFavorite, removeReminder, reminderOf, sortReminders, upsertBookmark, upsertReminder } from './lists';
+import { addFavorite, dropNotice, pushRecent, resolveStickers, toggleId, isBookmarked, purgeBookmarks, purgeReminders, pushNotice, removeBookmark, removeFavorite, removeReminder, reminderOf, sortReminders, upsertBookmark, upsertReminder } from './lists';
 
 const user = (id: string, name = id): User => ({ id, username: name, global_name: null, avatar: null, banner_color: null, bio: null, bot: false });
 
@@ -292,5 +292,26 @@ describe('list transitions', () => {
     list = addFavorite(list, gif('a'));
     expect(list.map(g => g.id)).toEqual(['a', 'b']);
     expect(removeFavorite(list, 'a').map(g => g.id)).toEqual(['b']);
+  });
+});
+
+describe('recents and sticker favourites', () => {
+  const sticker = (id: string): Sticker => ({ id, guild_id: 'g', name: id, description: null, tags: id, format_type: StickerFormat.PNG, url: `/s/${id}`, available: true });
+
+  it('pushRecent puts the newest first, moves a repeat up and keeps the newest max', () => {
+    expect(pushRecent(['a', 'b', 'c'], 'c')).toEqual(['c', 'a', 'b']);
+    expect(pushRecent(['a', 'b', 'c'], 'd', 3)).toEqual(['d', 'a', 'b']);
+    expect(pushRecent([{ id: 'x', n: 1 }, { id: 'y', n: 2 }], { id: 'y', n: 3 }).map(g => g.n)).toEqual([3, 1]);
+  });
+
+  it('toggleId appends, removes, and leaves a full list alone', () => {
+    expect(toggleId(['a'], 'b')).toEqual(['a', 'b']);
+    expect(toggleId(['a', 'b'], 'a')).toEqual(['b']);
+    expect(toggleId(['a', 'b'], 'c', 2)).toEqual(['a', 'b']);
+  });
+
+  it('resolveStickers keeps the id order and drops stickers that are gone', () => {
+    const all = { g: [sticker('1'), sticker('2')], h: [sticker('3')] };
+    expect(resolveStickers(['3', 'gone', '1'], all).map(s => s.id)).toEqual(['3', '1']);
   });
 });

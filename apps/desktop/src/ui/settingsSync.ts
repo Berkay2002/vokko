@@ -81,6 +81,7 @@ syncPref("showReactions");
 syncPref("convertEmoticons");
 syncPref("emojiAutocomplete");
 syncPref("emojiFavorites", value => Array.isArray(value) && value.every(item => typeof item === "string"));
+syncPref("stickerFavorites", value => Array.isArray(value) && value.every(item => typeof item === "string"));
 syncPref("stickerSuggestions");
 syncPref("stickerAutocomplete");
 syncPref("previewMarkdown");

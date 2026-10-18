@@ -4536,6 +4536,8 @@ pub mod user_settings {
         ("keybinds", Kind::Keybinds),
         // Emoji picker favourites: unicode glyphs and custom `<:name:id>` markup (the client caps the list at 100)
         ("emoji_favorites", Kind::StringList { max_items: 100, max_chars: 64 }),
+        // Sticker picker favourites: sticker ids, in the order they were added (the client caps the list at 100)
+        ("sticker_favorites", Kind::StringList { max_items: 100, max_chars: 32 }),
         // Streamer mode
         ("streamer_mode", Kind::Bool),
         ("streamer_auto_enable", Kind::Bool),
@@ -6103,6 +6105,10 @@ mod tests {
         assert!(validate("nope", &json!(true)).is_err());
         assert!(validate("font_size", &json!(30)).is_err());
         assert!(validate("disabled_sounds", &json!(["message", "message"])).is_err());
+        let ids = |count: usize| json!((0..count).map(|i| (1000 + i).to_string()).collect::<Vec<_>>());
+        assert!(validate("sticker_favorites", &ids(100)).is_ok());
+        assert!(validate("sticker_favorites", &ids(101)).is_err());
+        assert!(validate("sticker_favorites", &json!(["7", "7"])).is_err());
         assert!(validate("keybinds", &json!([{"action": "a", "keys": "Ctrl+K", "global": true}])).is_ok());
         assert!(validate("keybinds", &json!([{"action": "a", "keys": "Ctrl+K", "extra": 1}])).is_err());
     }

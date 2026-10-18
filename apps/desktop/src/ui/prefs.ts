@@ -118,6 +118,8 @@ export interface Prefs {
   keybinds: KeybindPref[];
   // Emoji picker favourites: unicode glyphs and custom `<:name:id>` markup, in the order they were added (chat/emojiData.ts)
   emojiFavorites: string[];
+  // Sticker picker favourites: sticker ids, in the order they were added (media/store.ts)
+  stickerFavorites: string[];
   // Advanced
   /** Adds "Copy ID" to context menus. */
   developerMode: boolean;
@@ -241,6 +243,7 @@ export const DEFAULT_PREFS: Prefs = {
   taskbarFlash: true,
   keybinds: [],
   emojiFavorites: [],
+  stickerFavorites: [],
   developerMode: false,
   dmsFromServerMembers: true,
   sendCrashReports: true,
