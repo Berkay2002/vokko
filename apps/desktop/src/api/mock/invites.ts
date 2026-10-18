@@ -35,19 +35,19 @@ function previewOf(invite: MockInvite): Invite {
   const guild = db.guilds.get(invite.guild_id);
   const channel = db.channels.get(invite.channel_id);
   if (!guild || !channel) fail(404, 10006, "Unknown Invite");
+  const inviterId = invite.inviter_id ?? guild.guild.owner_id;
   return {
     code: invite.code,
     guild: { id: guild.guild.id, name: guild.guild.name, icon: guild.guild.icon, member_count: guild.members.size, join_mode: guild.guild.join_mode ?? 0 },
     channel: { id: channel.id, name: channel.name },
     expires_at: invite.expires_at,
+    inviter: db.accounts.has(inviterId) ? userOf(inviterId) : null,
   };
 }
 
 function metadataOf(invite: MockInvite): InviteMetadata {
-  const inviterId = invite.inviter_id ?? db.guilds.get(invite.guild_id)?.guild.owner_id;
   return {
     ...previewOf(invite),
-    inviter: inviterId && db.accounts.has(inviterId) ? userOf(inviterId) : null,
     uses: invite.uses ?? 0,
     max_uses: invite.max_uses ?? 0,
     max_age: invite.max_age ?? 0,
@@ -128,7 +128,12 @@ route("GET", `/guilds/${ID}/invites`, ({ viewer, params }) => {
   return [...db.invites.values()].filter(i => i.guild_id === guildId && db.channels.has(i.channel_id) && isLive(i)).sort(byAge).map(metadataOf);
 });
 
-route("GET", `/invites/${CODE}`, ({ params }) => previewOf(liveInvite(params[0] ?? "")));
+route("GET", `/invites/${CODE}`, ({ params }) => {
+  const invite = previewOf(liveInvite(params[0] ?? ""));
+  const members = [...(db.guilds.get(invite.guild.id)?.members.keys() ?? [])];
+  const online = members.filter(id => (db.accounts.get(id)?.presence.status ?? "offline") !== "offline").length;
+  return { ...invite, guild: { ...invite.guild, presence_count: online } };
+});
 
 /** Adds the user the way an invite accept does (join source, onboarding flag, GUILD_CREATE/GUILD_MEMBER_ADD, join message); a request approval passes consume=false. */
 export function joinViaInvite(guild: MockGuild, userId: string, invite: MockInvite | undefined, consume: boolean): void {

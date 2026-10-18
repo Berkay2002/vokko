@@ -1993,6 +1993,7 @@ export interface InviteGuild {
   name: string;
   icon: string | null;
   member_count: number;
+  presence_count?: number; // members online now; only on the GET /invites/{code} preview
   join_mode?: JoinMode; // Apply to Join: a non-member must apply instead of accepting
 }
 export interface InviteChannel {
@@ -2005,10 +2006,10 @@ export interface Invite {
   guild: InviteGuild;
   channel: InviteChannel;
   expires_at: ISO8601 | null;
+  inviter: User | null; // null when the inviter's account is gone
 }
 /** POST /channels/{id}/invites, GET /channels/{id}/invites, GET /guilds/{id}/invites, DELETE /invites/{code}, INVITE_CREATE. */
 export interface InviteMetadata extends Invite {
-  inviter: User | null; // null when the inviter's account is gone
   uses: number;
   max_uses: number; // 0 = no limit
   max_age: number; // seconds, 0 = never
