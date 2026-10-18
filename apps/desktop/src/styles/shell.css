@@ -2220,6 +2220,11 @@ img.active-card-art {
   font-weight: 500;
 }
 
+/* The wrapper's border shows focus, success and error; a ring on the input inside it doubles up. */
+.add-friend-input input:focus-visible {
+  outline: none;
+}
+
 .add-friend-result {
   font-size: 14px !important;
 }
