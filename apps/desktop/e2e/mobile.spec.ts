@@ -488,3 +488,41 @@ test.describe('menus as sheets', () => {
     expect(s.y + s.height).toBe(844);
   });
 });
+
+test.describe('emoji favourites and reactors by touch', () => {
+  const SHOTS = process.env.SHOTS;
+
+  test('a long press on a picker emoji favourites it without inserting it', async ({ page }) => {
+    await openStockTalk(page);
+    await page.getByRole('button', { name: 'Select emoji' }).tap();
+    const picker = page.getByRole('tabpanel', { name: 'Emoji picker' });
+    await picker.getByRole('textbox', { name: 'Search emoji' }).fill('rocket');
+    const cell = picker.getByRole('button', { name: 'rocket', exact: true });
+    const b = (await cell.boundingBox())!;
+    await longPress(page, b.x + b.width / 2, b.y + b.height / 2);
+    await page.getByRole('menuitem', { name: 'Favorite emoji' }).tap();
+    await expect(composer(page)).toHaveAttribute('data-empty', 'true');
+    await picker.getByRole('button', { name: 'Clear search' }).tap();
+    await expect(picker.locator('[data-cat="favorites"] .chat-emoji-cell')).toHaveText(['🚀']);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/emoji-favorites-390.png` });
+  });
+
+  test('a long press on a reaction lists who reacted with that emoji and does not toggle it', async ({ page }) => {
+    await openStockTalk(page);
+    const p = await visibleRow(page, 0);
+    await longPress(page, p.x, p.y);
+    await page.waitForTimeout(400);
+    await page.getByRole('group', { name: 'Quick reactions' }).getByRole('button').first().tap();
+    const pill = page.locator('.chat-reaction.me').first();
+    await expect(pill).toBeVisible();
+    const glyph = (await pill.getAttribute('aria-label'))!.split(' ')[1]!;
+    const b = (await pill.boundingBox())!;
+    await longPress(page, b.x + b.width / 2, b.y + b.height / 2);
+    const modal = page.locator('.chat-reactions-modal');
+    await expect(modal).toBeVisible();
+    await expect(modal.getByRole('tab', { selected: true })).toContainText(glyph);
+    await expect(modal.locator('.chat-reactions-user')).not.toHaveCount(0);
+    await expect(pill).toHaveClass(/\bme\b/);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/reactors-390.png` });
+  });
+});

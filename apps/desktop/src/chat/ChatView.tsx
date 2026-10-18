@@ -40,6 +40,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
   const [link, setLink] = useState<string | null>(null);
   const [image, setImage] = useState<ImageView | null>(null);
   const [reactionsOf, setReactionsOf] = useState<Message | null>(null);
+  const [reactionsKey, setReactionsKey] = useState<string | undefined>();
   const [attachmentView, setAttachmentView] = useState<{ message: Message; attachment: Attachment } | null>(null);
   const [attachmentDelete, setAttachmentDelete] = useState<{ message: Message; attachment: Attachment } | null>(null);
   const [focusToken, setFocusToken] = useState(0);
@@ -92,7 +93,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
     openImage: (message, index) => setImage({ message, index }),
     viewAttachment: (message, attachment) => setAttachmentView({ message, attachment }),
     deleteAttachment: (message, attachment) => setAttachmentDelete({ message, attachment }),
-    viewReactions: m => setReactionsOf(m),
+    viewReactions: (m, key) => { setReactionsOf(m); setReactionsKey(key); },
   }), [channelId, requestDelete, applyPin]);
 
   const stopEditing = useCallback(() => { setEditingId(null); setFocusToken(n => n + 1); }, []);
@@ -115,7 +116,7 @@ export function ChatView({ channelId }: { channelId: Snowflake }) {
       footer={<button type="button" className="chat-btn primary" onClick={() => setNotice(null)}>Okay</button>}>
       <p className="chat-modal-text">{notice?.body}</p>
     </Modal>
-    <ReactionsModal message={reactionsOf} onClose={() => setReactionsOf(null)} />
+    <ReactionsModal message={reactionsOf} initialKey={reactionsKey} onClose={() => setReactionsOf(null)} />
     <ModifyAttachmentModal readOnly onSave={() => undefined} onClose={() => setAttachmentView(null)}
       target={attachmentView ? { details: { filename: attachmentView.attachment.filename, description: attachmentView.attachment.description ?? '' }, thumbUrl: resolveUrl(attachmentView.attachment.url) } : null} />
     <DeleteAttachmentModal open={!!attachmentDelete} onClose={() => setAttachmentDelete(null)} onConfirm={() => {

@@ -339,7 +339,7 @@ export const messageStore = {
     const current = m.reactions.find(r => emojiKey(r.emoji) === key);
     const had = (burst ? current?.me_burst : current?.me) ?? false;
     if (burst && !had) announceBurst(messageId, key);
-    if (!had && !emoji.id) pushRecentEmoji(emoji.name); // every reaction added counts as use, quick ones included
+    if (!had) pushRecentEmoji(emoji.id ? `<${emoji.animated ? 'a' : ''}:${emoji.name}:${emoji.id}>` : emoji.name); // every reaction added counts as use, quick and custom ones included
     update(channelId, x => applyReaction(x, messageId, emoji, true, !had, burst));
     const run = chain.tail.then(async () => {
       try {

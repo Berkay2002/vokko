@@ -1,5 +1,6 @@
 // The emoji picker's custom emoji parts (CMP-004): one section per server (current server first) and a server icon per section in
 // the category rail. EmojiPicker renders these between "Frequently Used" and the unicode categories.
+import type { MouseEvent } from 'react';
 import type { GuildEmoji, Snowflake } from '../api/types';
 import { useStore } from '../api/store';
 import { GuildRailIcon } from './CustomEmoji';
@@ -16,8 +17,11 @@ export function usePickerSections(reactionChannelId?: Snowflake): EmojiSection[]
   return useReactionSections(reactionChannelId, useUsableSections(current));
 }
 
-export function CustomEmojiCell({ emoji, onPick, onHover }: { emoji: GuildEmoji; onPick: (e: CustomPick) => void; onHover: (h: CustomHover) => void }) {
-  return <button type="button" className="chat-emoji-cell emoji-custom-cell" aria-label={`:${emoji.name}:`} data-emoji-name={emoji.name}
+/** `onMenu`: right-click / long-press (the picker's Favorite / Unfavorite). */
+export type CustomMenu = (emoji: GuildEmoji) => (ev: MouseEvent) => void;
+
+export function CustomEmojiCell({ emoji, onPick, onHover, onMenu }: { emoji: GuildEmoji; onPick: (e: CustomPick) => void; onHover: (h: CustomHover) => void; onMenu?: CustomMenu }) {
+  return <button type="button" className="chat-emoji-cell emoji-custom-cell" aria-label={`:${emoji.name}:`} data-emoji-name={emoji.name} data-long-press={onMenu ? '' : undefined} onContextMenu={onMenu?.(emoji)}
     onMouseEnter={() => onHover({ src: emoji.url, label: `:${emoji.name}:` })} onFocus={() => onHover({ src: emoji.url, label: `:${emoji.name}:` })}
     onClick={() => onPick({ id: emoji.id, name: emoji.name, animated: emoji.animated })}>
     <img src={emoji.url} alt="" draggable={false} loading="lazy" />
@@ -32,20 +36,20 @@ export function CustomEmojiRail({ sections, active, onJump }: { sections: EmojiS
   </>;
 }
 
-export function CustomEmojiSections({ sections, onPick, onHover }: { sections: EmojiSection[]; onPick: (e: CustomPick) => void; onHover: (h: CustomHover) => void }) {
+export function CustomEmojiSections({ sections, onPick, onHover, onMenu }: { sections: EmojiSection[]; onPick: (e: CustomPick) => void; onHover: (h: CustomHover) => void; onMenu?: CustomMenu }) {
   return <>
     {sections.map(s => <section key={s.guild.id} data-cat={sectionKey(s.guild.id)} aria-label={s.guild.name}>
       <h3 className="chat-emoji-heading emoji-guild-heading"><GuildRailIcon guild={s.guild} size={16} />{s.guild.name}</h3>
-      <div className="chat-emoji-grid">{s.emojis.map(e => <CustomEmojiCell key={e.id} emoji={e} onPick={onPick} onHover={onHover} />)}</div>
+      <div className="chat-emoji-grid">{s.emojis.map(e => <CustomEmojiCell key={e.id} emoji={e} onPick={onPick} onHover={onHover} onMenu={onMenu} />)}</div>
     </section>)}
   </>;
 }
 
 /** Custom emoji matching the picker's search box (shown before the unicode results). */
-export function CustomSearchResults({ sections, query, onPick, onHover }: { sections: EmojiSection[]; query: string; onPick: (e: CustomPick) => void; onHover: (h: CustomHover) => void }) {
+export function CustomSearchResults({ sections, query, onPick, onHover, onMenu }: { sections: EmojiSection[]; query: string; onPick: (e: CustomPick) => void; onHover: (h: CustomHover) => void; onMenu?: CustomMenu }) {
   const hits = searchCustomEmoji(sections, query, 48);
   if (hits.length === 0) return null;
-  return <div className="chat-emoji-grid emoji-custom-results">{hits.map(h => <CustomEmojiCell key={h.emoji.id} emoji={h.emoji} onPick={onPick} onHover={onHover} />)}</div>;
+  return <div className="chat-emoji-grid emoji-custom-results">{hits.map(h => <CustomEmojiCell key={h.emoji.id} emoji={h.emoji} onPick={onPick} onHover={onHover} onMenu={onMenu} />)}</div>;
 }
 
 export function hasCustomResults(sections: EmojiSection[], query: string): boolean {
