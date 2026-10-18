@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Bell, BellOff, ChevronRight, Hash, Lock, Megaphone, MessageCircle, MessagesSquare, Phone, Pin, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
+import { Bell, BellOff, ChevronRight, Hash, Lock, Megaphone, MessageCircle, MessagesSquare, Phone, Pin, Radio, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
 import { useVoiceUi } from "../voice";
 import { useShortcut } from "../keyboard";
 import { dmName, useStore } from "../api/store";
@@ -98,6 +98,8 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
               <Lock size={24} className="channel-header-icon" />
             ) : voice ? (
               <Volume2 size={24} className="channel-header-icon" />
+            ) : channel.type === ChannelType.GuildStage ? (
+              <Radio size={24} className="channel-header-icon" />
             ) : announcement ? (
               <Megaphone size={24} className="channel-header-icon" />
             ) : forum ? (
