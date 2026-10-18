@@ -37,7 +37,7 @@ vi.mock('./engine', () => ({ dismissVideoError: () => undefined, joinVoiceChanne
 vi.mock('./VoiceChatPanel', () => ({ VoiceChatPanel: () => null }));
 vi.mock('./SoundboardPopout', () => ({ SoundboardPopout: () => null }));
 vi.mock('./deviceMenus', () => ({ useDeviceMenus: () => ({ micItems: () => [] }) }));
-vi.mock('./videoControls', () => ({ openCameraOptions: () => undefined, toggleCamera: () => undefined, toggleScreenShare: () => undefined }));
+vi.mock('./videoControls', () => ({ openCameraOptions: () => undefined, toggleCamera: () => undefined, toggleScreenShare: () => undefined, canShareScreen: () => true }));
 
 const { VoiceChannelPage, stageTiles } = await import('./VoiceChannelPage');
 
