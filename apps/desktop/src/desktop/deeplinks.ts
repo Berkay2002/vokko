@@ -3,6 +3,8 @@ import { call, isDesktop, onDesktopEvent } from "./tauri";
 /** A parsed `vokko://` link. Mirrors `links::DeepLink` in src-tauri; `url` is always the full original URL. */
 export type DeepLink =
   | { kind: "invite"; code: string; url: string }
+  /** `vokko://template/<code>`: opens the server template page. */
+  | { kind: "template"; code: string; url: string }
   /** `vokko://auth/callback?code=…&state=…`, the OAuth redirect back from the system browser. Parse the query from `url`. */
   | { kind: "auth"; url: string };
 
@@ -14,11 +16,12 @@ const MAX_BACKLOG = 8;
 
 /** Where an invite link goes in the SPA when no listener claimed it. */
 export const invitePath = (code: string): string => `/invite/${code}`;
+export const templatePath = (code: string): string => `/template/${code}`;
 
 /** Default routing for invites: push the SPA path and let react-router (BrowserRouter listens to popstate) pick it up. */
 export function routeDeepLink(link: DeepLink): void {
-  if (typeof window === "undefined" || link.kind !== "invite") return;
-  const path = invitePath(link.code);
+  if (typeof window === "undefined" || link.kind === "auth") return;
+  const path = link.kind === "invite" ? invitePath(link.code) : templatePath(link.code);
   if (window.location.pathname === path) return;
   window.history.pushState({}, "", path);
   window.dispatchEvent(new PopStateEvent("popstate"));
@@ -41,7 +44,7 @@ function deliver(link: DeepLink): void {
     for (const listener of targets) listener.handler(link);
     return;
   }
-  if (link.kind === "invite") routeDeepLink(link);
+  if (link.kind !== "auth") routeDeepLink(link);
   else backlog = [...backlog, link].slice(-MAX_BACKLOG);
 }
 

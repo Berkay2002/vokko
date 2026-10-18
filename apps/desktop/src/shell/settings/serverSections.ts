@@ -39,7 +39,7 @@ export const SECTIONS: SectionDef[] = [
   { id: "reports", label: "Reports", group: "moderation", needs: [Perm.MANAGE_MESSAGES, Perm.MODERATE_MEMBERS] },
   { id: "automod", label: "AutoMod", group: "moderation" },
   { id: "community", label: "Enable Community", group: "bottom" },
-  { id: "template", label: "Server Template", group: "bottom", outline: ["Template Title", "Description"] },
+  { id: "template", label: "Server Template", group: "bottom" },
 ];
 
 /** Sections the viewer may open (rail context menu "Server Settings" submenu). */

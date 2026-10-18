@@ -2758,6 +2758,91 @@ pub struct CreateGuildRequest {
     pub icon_attachment_id: Option<Snowflake>,
 }
 
+/// Discord's guild template: a snapshot of a guild's settings, roles and channels that anyone with the code can make a new guild from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GuildTemplate {
+    pub code: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub usage_count: u32,
+    pub creator_id: Snowflake,
+    /// `null` once the creator's account is gone.
+    pub creator: Option<User>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub source_guild_id: Snowflake,
+    pub serialized_source_guild: TemplateGuild,
+    /// True when the source guild changed since the template was created or last synced.
+    pub is_dirty: Option<bool>,
+}
+
+/// `serialized_source_guild`. Ids are template-local numbers (Discord's shape): roles count from 0 (`@everyone`), channels from 1.
+/// Never carries messages, members, emoji, bans, webhooks or invites.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TemplateGuild {
+    pub name: String,
+    pub verification_level: VerificationLevel,
+    pub default_message_notifications: DefaultMessageNotifications,
+    pub explicit_content_filter: ExplicitContentFilter,
+    pub system_channel_id: Option<u32>,
+    /// Lowest first; `@everyone` is id 0.
+    pub roles: Vec<TemplateRole>,
+    pub channels: Vec<TemplateChannel>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TemplateRole {
+    pub id: u32,
+    pub name: String,
+    pub permissions: String,
+    pub color: u32,
+    pub hoist: bool,
+    pub mentionable: bool,
+    pub unicode_emoji: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TemplateChannel {
+    pub id: u32,
+    #[serde(rename = "type")]
+    pub kind: ChannelType,
+    pub name: String,
+    pub position: i32,
+    pub topic: Option<String>,
+    pub bitrate: Option<u32>,
+    pub user_limit: Option<u32>,
+    pub nsfw: bool,
+    pub rate_limit_per_user: u32,
+    pub parent_id: Option<u32>,
+    /// Role overwrites only (`id` is a template role id); member overwrites are not part of a template.
+    pub permission_overwrites: Vec<TemplateOverwrite>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TemplateOverwrite {
+    pub id: u32,
+    #[serde(rename = "type")]
+    pub kind: OverwriteType,
+    pub allow: String,
+    pub deny: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct CreateTemplateRequest {
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct UpdateTemplateRequest {
+    #[serde(default)]
+    pub name: Option<String>,
+    /// `null` clears it.
+    #[serde(default, deserialize_with = "double_option")]
+    pub description: Option<Option<String>>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct UpdateGuildRequest {
     #[serde(default)]

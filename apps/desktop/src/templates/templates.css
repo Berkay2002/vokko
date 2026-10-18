@@ -1,0 +1,230 @@
+/* Server templates: the settings page, the /template/:code landing card and the channel preview. */
+.tpl-intro {
+  margin: 0 0 16px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.tpl-copies {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  background: var(--background-base-lower);
+}
+
+.tpl-copies-title {
+  margin-bottom: 8px;
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tpl-copies ul,
+.tpl-preview ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tpl-copies li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  color: var(--text-default);
+  font-size: 14px;
+}
+
+.tpl-yes {
+  color: var(--status-positive-background);
+}
+
+.tpl-no {
+  color: var(--status-danger);
+}
+
+.tpl-description {
+  resize: vertical;
+  min-height: 72px;
+}
+
+.tpl-loading {
+  height: 160px;
+  border-radius: var(--radius-md);
+  background: var(--background-mod-subtle);
+}
+
+.tpl-unsynced {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 16px 0 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-sm);
+  background: var(--background-feedback-warning);
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.tpl-unsynced span {
+  flex: 1;
+}
+
+.tpl-unsynced .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.tpl-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Landing card: form on the left, what the template makes on the right. */
+.auth-card.tpl-card {
+  display: flex;
+  width: 820px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.tpl-card-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 32px;
+  text-align: center;
+}
+
+.tpl-card-form .invite-icon {
+  align-self: center;
+}
+
+.tpl-card-form .field-label {
+  margin-top: 20px;
+  text-align: left;
+}
+
+.tpl-meta {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.tpl-card-preview {
+  width: 300px;
+  flex: none;
+  max-height: 560px;
+  overflow-y: auto;
+  padding: 16px 8px;
+  background: var(--background-base-lower);
+}
+
+.tpl-preview-title {
+  padding: 0 8px 12px;
+  border-bottom: 1px solid var(--background-mod-normal);
+  margin-bottom: 8px;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tpl-category {
+  margin-top: 16px;
+}
+
+.tpl-category-name {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px 4px 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.tpl-channel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--channel-icon);
+  font-size: 16px;
+}
+
+.tpl-channel span {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tpl-roles {
+  margin-top: 20px;
+}
+
+.tpl-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  color: var(--text-default);
+  font-size: 14px;
+}
+
+.tpl-role-dot {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--channel-icon);
+}
+
+.tpl-modal-preview {
+  max-height: 220px;
+  overflow-y: auto;
+  margin-top: 12px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--background-base-lower);
+}
+
+@media (max-width: 720px) {
+  .tpl-copies {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-card.tpl-card {
+    flex-direction: column;
+  }
+
+  .tpl-card-form {
+    padding: 24px 16px;
+  }
+
+  .tpl-card-preview {
+    width: auto;
+    max-height: none;
+  }
+
+  .tpl-unsynced {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

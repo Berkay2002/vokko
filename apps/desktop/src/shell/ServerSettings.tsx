@@ -32,6 +32,7 @@ import { EmojiSettingsPage } from "../emoji/EmojiSettingsPage";
 import { StickerSettingsPage } from "../media/StickerSettingsPage";
 import { InviteList } from "../invites/InviteList";
 import { GamesSettings } from "../games/GamesSettings";
+import { TemplateSettingsPage } from "../templates/TemplateSettingsPage";
 
 const GROUP_TITLES: Record<SectionDef["group"], string> = {
   top: "",
@@ -339,6 +340,8 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
         return <SoundboardSettingsPage guildId={guildId} />;
       case "activities":
         return <GamesSettings guildId={guildId} canEdit={canManage} />;
+      case "template":
+        return <TemplateSettingsPage guildId={guildId} canEdit={canManage} />;
       default:
         return <NotYet section={active} />;
     }

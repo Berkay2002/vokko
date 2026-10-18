@@ -38,6 +38,7 @@ pub mod settings;
 mod soundboard;
 mod stickers;
 mod suggestions;
+mod templates;
 mod threads;
 pub mod users;
 mod webhooks;
@@ -56,6 +57,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(channels::routes())
         .merge(overwrites::routes())
         .merge(invites::routes())
+        .merge(templates::routes())
         .merge(join_requests::routes())
         .merge(relationships::routes())
         .merge(messages::routes())

@@ -222,6 +222,25 @@ General rules:
 - **Listing and revoking.** `GET /guilds/{id}/invites` needs MANAGE_GUILD, `GET /channels/{id}/invites` MANAGE_CHANNELS on that channel; `DELETE /invites/{code}` either of the two. Lists are oldest first, live invites only, with `inviter`, `uses` and `created_at`. INVITE_CREATE / INVITE_DELETE go to guild members who could list the invite (MANAGE_GUILD, or MANAGE_CHANNELS on its channel); an invite that expires or is used up sends nothing.
 - **Guild layout (server folders).** `guild_folders`: up to 100 `{id, name, color, guild_ids}`, `id` chosen by the client (snowflake string, unique), `name` 1-32 chars or null (blank → null), `color` RGB int or null, `guild_ids` 1-200 with no guild in two folders and at most 1000 guild ids across all folders. `guild_positions`: up to 1000 guild ids, no duplicates, the rail order (guilds missing from it follow in join order; a folder sits where its first guild is). Guild ids are not checked against membership (stale ones are ignored by the client). Invalid → 400 50035 and nothing changes. READY carries `guild_layout`; PATCH sends GUILD_LAYOUT_UPDATE (the full layout) to all of the user's sessions.
 
+## Server templates
+
+Discord's guild templates: a stored snapshot of a guild's settings, roles and channels that anyone signed in with the code can make a new guild from. One template per guild.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | /guilds/{id}/templates | `GuildTemplate[]` (zero or one). MANAGE_GUILD |
+| POST | /guilds/{id}/templates | body `{name, description?}` (name 1-100, description up to 120, blank → null) → `GuildTemplate` with a fresh snapshot. MANAGE_GUILD. A second template → 400 30031 |
+| PUT | /guilds/{id}/templates/{code} | sync: replaces the snapshot with the guild as it is now, bumps `updated_at` → `GuildTemplate`. MANAGE_GUILD |
+| PATCH | /guilds/{id}/templates/{code} | body `{name?, description?}` (`null` description clears it) → `GuildTemplate`; the snapshot is unchanged. MANAGE_GUILD |
+| DELETE | /guilds/{id}/templates/{code} | → the deleted `GuildTemplate`. MANAGE_GUILD |
+| GET | /guilds/templates/{code} | any signed-in user → `GuildTemplate` |
+| POST | /guilds/templates/{code} | body `{name, icon_attachment_id?}` (same rules as `POST /guilds`) → `Guild`: a new guild owned by the caller, built from the stored snapshot, GUILD_CREATE to the caller; `usage_count` + 1 |
+
+- **Shape.** `GuildTemplate {code (12 chars), name, description, usage_count, creator_id, creator (User or null), created_at, updated_at, source_guild_id, serialized_source_guild, is_dirty}`. Unknown code, or a code of another guild under `/guilds/{id}/templates/{code}` → 404 10057.
+- **Snapshot.** `serialized_source_guild {name, verification_level, default_message_notifications, explicit_content_filter, system_channel_id, roles, channels}`. Ids are template-local numbers like Discord's: roles `0..n` with `@everyone` = 0, lowest first (`{id, name, permissions, color, hoist, mentionable, unicode_emoji}`); channels from 1, categories first (`{id, type, name, position, topic, bitrate, user_limit, nsfw, rate_limit_per_user, parent_id, permission_overwrites}`). Only text, voice, category, announcement, stage and forum channels; never threads. Only role overwrites are kept (`{id: template role id, type: 0, allow, deny}`). Never carries messages, members, emoji, stickers, bans, webhooks, invites, the icon or banner. Vokko has no AFK channel or timeout, so the snapshot has no AFK fields.
+- **is_dirty.** Computed on read: true when a snapshot of the guild taken now differs from the stored one (any change to a copied field, role or channel). Messages and members never make it dirty. Only the manager routes fill it in; `GET /guilds/templates/{code}` returns `null`, so a code holder cannot watch the guild for changes.
+- **Create from template.** Every template id becomes a new snowflake (`@everyone` gets the new guild's id), parents, overwrites and the system channel are remapped. The creator is the only member and has no roles. Changes to the source guild after the last sync are not copied.
+
 ## Community features (scheduled events, onboarding, friend suggestions)
 
 Scheduled events (Discord shape; permissions CREATE_EVENTS 1<<44 and MANAGE_EVENTS 1<<33, CREATE_EVENTS is in the default @everyone set):

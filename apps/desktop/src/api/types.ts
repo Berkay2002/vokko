@@ -2019,6 +2019,60 @@ export interface InviteChannel {
   name: string | null;
 }
 /** GET /invites/{code} (preview). */
+/** Discord's guild template (docs/api.md "Server templates"). One per guild; anyone with the code can make a new guild from it. */
+export interface GuildTemplate {
+  code: string;
+  name: string;
+  description: string | null;
+  usage_count: number;
+  creator_id: Snowflake;
+  /** null once the creator's account is gone. */
+  creator: User | null;
+  created_at: string;
+  updated_at: string;
+  source_guild_id: Snowflake;
+  serialized_source_guild: TemplateGuild;
+  /** True when the source guild changed since the template was created or last synced. */
+  is_dirty: boolean | null;
+}
+
+/** The snapshot. Ids are template-local numbers: roles count from 0 (@everyone), channels from 1. */
+export interface TemplateGuild {
+  name: string;
+  verification_level: VerificationLevel;
+  default_message_notifications: DefaultMessageNotifications;
+  explicit_content_filter: ExplicitContentFilter;
+  system_channel_id: number | null;
+  /** Lowest first; @everyone is id 0. */
+  roles: TemplateRole[];
+  channels: TemplateChannel[];
+}
+
+export interface TemplateRole {
+  id: number;
+  name: string;
+  permissions: string;
+  color: number;
+  hoist: boolean;
+  mentionable: boolean;
+  unicode_emoji: string | null;
+}
+
+export interface TemplateChannel {
+  id: number;
+  type: ChannelType;
+  name: string;
+  position: number;
+  topic: string | null;
+  bitrate: number | null;
+  user_limit: number | null;
+  nsfw: boolean;
+  rate_limit_per_user: number;
+  parent_id: number | null;
+  /** Role overwrites only; `id` is a template role id. */
+  permission_overwrites: { id: number; type: OverwriteType; allow: string; deny: string }[];
+}
+
 export interface Invite {
   code: string;
   guild: InviteGuild;
