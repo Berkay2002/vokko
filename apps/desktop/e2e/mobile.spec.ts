@@ -6,6 +6,8 @@ import { composer } from './helpers';
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
 
+const shot = async (page: Page, name: string) => { if (process.env.VOKKO_SHOTS_DIR) await page.screenshot({ path: `${process.env.VOKKO_SHOTS_DIR}/${name}.png` }); };
+
 /** The page itself must not scroll sideways (clipped overflow inside a container is checked per screen where it matters). */
 async function noHorizontalScroll(page: Page): Promise<void> {
   const over = await page.evaluate(() => document.scrollingElement!.scrollWidth - window.innerWidth);
@@ -267,6 +269,22 @@ test.describe('voice', () => {
     await chat.getByRole('button', { name: 'Close Chat' }).tap();
     await expect(chat).toHaveCount(0);
     await expect(bar).toBeVisible();
+  });
+
+  test('no screen share where the browser has none (phones); soundboard names fit their tiles', async ({ page }) => {
+    // iOS Safari and Android Chrome have no getDisplayMedia
+    await page.addInitScript(() => { if (navigator.mediaDevices) Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', { value: undefined }); });
+    await openStockTalk(page);
+    await join(page);
+    const bar = page.locator('.voice-bar');
+    await expect(bar.getByRole('button', { name: 'Soundboard' })).toBeVisible();
+    await expect(bar.getByRole('button', { name: 'Share your screen' })).toHaveCount(0);
+    await shot(page, 'call-no-share-390');
+    await bar.getByRole('button', { name: 'Soundboard' }).tap();
+    const name = page.locator('.sb-tile-name', { hasText: 'Doorbell' });
+    await expect(name).toBeVisible();
+    expect(await name.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+    await shot(page, 'soundboard-390');
   });
 
   test('the call view keeps a 40px+ disconnect button on a 360px phone', async ({ page }) => {

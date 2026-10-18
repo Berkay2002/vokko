@@ -57,6 +57,12 @@ test('play from the popout: everyone in the channel (you included) plays it, you
   await expect(popout.getByRole('region', { name: "Sam's server" }).getByRole('button', { name: 'Play Victory' })).toBeVisible();
   await expect(popout.getByRole('region', { name: 'Default Sounds' }).getByRole('button', { name: 'Play Chime' })).toBeVisible();
 
+  // At rest the name has the whole tile (the preview and star only take room on hover), and the full name is the tooltip.
+  const doorbell = popout.locator('.sb-tile-name', { hasText: 'Doorbell' });
+  await expect(doorbell).toHaveAttribute('title', 'Doorbell');
+  expect(await doorbell.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  if (process.env.VOKKO_SHOTS_DIR) await popout.screenshot({ path: `${process.env.VOKKO_SHOTS_DIR}/soundboard-1440.png` });
+
   // Search narrows every section.
   await popout.getByRole('textbox', { name: 'Find the perfect sound' }).fill('door');
   await expect(popout.locator('.sb-tile')).toHaveCount(1);
