@@ -12,7 +12,7 @@ import { Avatar } from "../shell/Avatar";
 import { userContextItems } from "../shell/menus";
 import { openModal } from "../shell/modalStore";
 import { usePermissions } from "../shell/usePermissions";
-import { hasOpenLayer, Tooltip, useContextMenu, usePrefs, type MenuItem } from "../ui";
+import { hasOpenLayer, Tooltip, useContextMenu, usePrefs } from "../ui";
 import { useDeviceMenus } from "./deviceMenus";
 import { GRID_GAP, gridLayout } from "./gridLayout";
 import { dismissVideoError, joinVoiceChannel, leaveVoice, setViewerQuality, toggleSelfMute, watchStream } from "./engine";
@@ -24,9 +24,10 @@ import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
 import { useVoiceUi } from "./uiStore";
 import { VoiceChatPanel } from "./VoiceChatPanel";
 import { WatchTile } from "../watch";
-import { openStremioPanel, StremioIcon, StremioPanel, StremioTile, STREMIO_TILE_ID, useStremioPanel } from "../stremio";
-import { openSpotifyPanel, SpotifyIcon, SpotifyPanel, SpotifyTile, SPOTIFY_TILE_ID, useSpotifyPanel } from "../spotify";
-import { GAME_TILE_ID, GameTile, useGameMenuItems } from "../games";
+import { StremioPanel, StremioTile, STREMIO_TILE_ID, useStremioPanel } from "../stremio";
+import { SpotifyPanel, SpotifyTile, SPOTIFY_TILE_ID, useSpotifyPanel } from "../spotify";
+import { GAME_TILE_ID, GameTile } from "../games";
+import { ActivityShelf } from "./ActivityShelf";
 import { openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
 import { isViewerQuality, nearestChoice, viewerChoices, viewerQualityLabel, type ViewerQuality } from "./video/options";
 import "./video/video.css";
@@ -244,20 +245,13 @@ export function BarButton({ label, tooltip, active, danger, disabled, onClick, b
   );
 }
 
-/** The Activities menu (call bar button and the alone card's Choose Activity): Watch Together, Stremio and the games. */
-function useActivityItems(channel: Channel): MenuItem[] {
-  const watching = useVoice(s => !!s.watch[channel.id]);
-  const games = useGameMenuItems(channel);
-  return [
-    { id: "watch-together", label: "Watch Together (YouTube)", icon: <MonitorPlay size={18} />, iconStart: true, sub: "Watch a YouTube video in sync", onSelect: () => (watching ? useVoiceUi.getState().setFocusedTile(WATCH_TILE_ID) : openModal({ type: "watchTogether", channelId: channel.id })) },
-    { id: "stremio", label: "Stremio", icon: <StremioIcon size={18} />, iconStart: true, sub: "Play a movie or episode from your Stremio", onSelect: openStremioPanel },
-    { id: "spotify", label: "Spotify", icon: <SpotifyIcon size={18} />, iconStart: true, sub: "Play music for everyone in the call", onSelect: openSpotifyPanel },
-    ...(games.length > 0 ? [{ type: "separator" as const }, ...games] : []),
-  ];
+/** Watch Together from the call bar or the shelf: focus the running session, else start one. */
+function watchTogether(channel: Channel, watching: boolean): void {
+  if (watching) useVoiceUi.getState().setFocusedTile(WATCH_TILE_ID);
+  else openModal({ type: "watchTogether", channelId: channel.id });
 }
 
 function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject<HTMLElement | null> }) {
-  const activityItems = useActivityItems(channel);
   const muted = useVoice(s => s.selfMute);
   const deafened = useVoice(s => s.selfDeaf);
   const cameraOn = useMedia(s => s.cameraOn);
@@ -270,6 +264,8 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
   const chatOpen = useVoiceUi(s => s.chatOpen);
   const [boardAnchor, setBoardAnchor] = useState<HTMLElement | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [shelfAnchor, setShelfAnchor] = useState<HTMLElement | null>(null);
+  const [shelfOpen, setShelfOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const below = (e: React.MouseEvent<HTMLElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -306,14 +302,15 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
           label="Watch Together"
           tooltip={watching ? "Show Watch Together" : "Watch YouTube Together"}
           active={watching}
-          onClick={() => (watching ? useVoiceUi.getState().setFocusedTile(WATCH_TILE_ID) : openModal({ type: "watchTogether", channelId: channel.id }))}
+          onClick={() => watchTogether(channel, watching)}
         >
           <MonitorPlay size={20} />
         </BarButton>
         <BarButton
           label="Activities"
-          active={stremioOpen || spotifyOpen}
-          onClick={e => menu.open(below(e), activityItems)}
+          active={shelfOpen || stremioOpen || spotifyOpen}
+          buttonRef={setShelfAnchor}
+          onClick={() => setShelfOpen(o => !o)}
         >
           <LayoutGrid size={20} />
         </BarButton>
@@ -350,6 +347,7 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
         </BarButton>
       </div>
       <SoundboardPopout anchor={boardAnchor} open={boardOpen} onClose={() => setBoardOpen(false)} />
+      <ActivityShelf channel={channel} anchor={shelfAnchor} open={shelfOpen} onClose={() => setShelfOpen(false)} onWatchTogether={() => watchTogether(channel, watching)} />
     </div>
   );
 }
@@ -369,8 +367,9 @@ function VideoError() {
 
 function AloneCard({ channel }: { channel: Channel }) {
   const { can } = usePermissions(channel.guild_id, channel.id);
-  const activityItems = useActivityItems(channel);
-  const menu = useContextMenu();
+  const watching = useVoice(s => !!s.watch[channel.id]);
+  const [shelfAnchor, setShelfAnchor] = useState<HTMLElement | null>(null);
+  const [shelfOpen, setShelfOpen] = useState(false);
   return (
     <div className="voice-alone">
       <div className="voice-alone-art" aria-hidden="true">
@@ -383,17 +382,11 @@ function AloneCard({ channel }: { channel: Channel }) {
         <button type="button" className="voice-alone-button" disabled={!can(Perm.CREATE_INSTANT_INVITE)} onClick={() => openModal({ type: "invite", channelId: channel.id })}>
           <UserPlus size={18} /> Invite to Voice
         </button>
-        <button
-          type="button"
-          className="voice-alone-button"
-          onClick={e => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, activityItems);
-          }}
-        >
+        <button ref={setShelfAnchor} type="button" className="voice-alone-button" aria-expanded={shelfOpen} onClick={() => setShelfOpen(o => !o)}>
           <LayoutGrid size={18} /> Choose Activity
         </button>
       </div>
+      <ActivityShelf channel={channel} anchor={shelfAnchor} open={shelfOpen} onClose={() => setShelfOpen(false)} onWatchTogether={() => watchTogether(channel, watching)} />
     </div>
   );
 }

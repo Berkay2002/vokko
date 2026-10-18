@@ -131,9 +131,9 @@ test('alone in the channel shows the invite / activity card', async ({ page }) =
   await row(page, 'AFK').click();
   await expect(card(page).getByRole('status')).toHaveText('Voice Connected');
   await expect(call(page).getByRole('button', { name: 'Invite to Voice' })).toBeVisible();
-  // Choose Activity opens the same menu as the call bar's Activities button.
+  // Choose Activity opens the same shelf as the call bar's Activities button.
   await call(page).getByRole('button', { name: 'Choose Activity' }).click();
-  await expect(page.getByRole('menu')).toContainText('Watch Together (YouTube)');
+  await expect(page.getByRole('menu', { name: 'Activities' }).getByRole('menuitem').first()).toContainText('Watch Together');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu')).toHaveCount(0);
   await call(page).getByRole('button', { name: 'Invite to Voice' }).click();

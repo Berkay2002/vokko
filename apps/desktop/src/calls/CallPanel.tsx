@@ -1,20 +1,21 @@
 // The call area above a DM chat: who is in the call, who is being rung, and the call bar. Split out of the startup bundle with the
 // voice channel page whose tiles and bar buttons it uses (CallUi.tsx mounts it through lazyModule).
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { BellRing, Headphones, HeadphoneOff, LayoutGrid, Mic, MicOff, MonitorPlay, MonitorUp, Phone, PhoneOff, Video, VideoOff } from "lucide-react";
 import { useStore } from "../api/store";
 import { ChannelType, type Channel, type Snowflake, type User } from "../api/types";
 import { Avatar } from "../shell/Avatar";
-import { Tooltip, useContextMenu } from "../ui";
+import { Tooltip } from "../ui";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
 import { BarButton, Tile, useStageTiles } from "../voice/VoiceChannelPage";
 import { openModal } from "../shell/modalStore";
 import { WatchTile } from "../watch";
-import { GameTile, useGameMenuItems } from "../games";
-import { openStremioPanel, StremioIcon, StremioPanel, StremioTile, useStremioPanel } from "../stremio";
-import { openSpotifyPanel, SpotifyIcon, SpotifyPanel, SpotifyTile, useSpotifyPanel } from "../spotify";
+import { GameTile } from "../games";
+import { ActivityShelf } from "../voice/ActivityShelf";
+import { StremioPanel, StremioTile, useStremioPanel } from "../stremio";
+import { SpotifyPanel, SpotifyTile, useSpotifyPanel } from "../spotify";
 import { toggleSelfDeaf, toggleSelfMute } from "../voice/engine";
 import { useMedia } from "../voice/mediaStore";
 import { toggleCamera, toggleScreenShare } from "../voice/videoControls";
@@ -61,8 +62,8 @@ export function CallPanel({ channel }: { channel: Channel }) {
   const watching = useVoice(s => !!s.watch[channel.id]);
   const stremioOpen = useStremioPanel(s => s.open);
   const spotifyOpen = useSpotifyPanel(s => s.open);
-  const gameItems = useGameMenuItems(channel);
-  const menu = useContextMenu();
+  const [shelfAnchor, setShelfAnchor] = useState<HTMLElement | null>(null);
+  const [shelfOpen, setShelfOpen] = useState(false);
   const tiles = useStageTiles(states, channel.id);
   const inside = useMemo(() => new Set(states.map(s => s.user_id)), [states]);
   const ringing = useUsers(ringingIds, channel);
@@ -119,20 +120,13 @@ export function CallPanel({ channel }: { channel: Channel }) {
             </BarButton>
             <BarButton
               label="Activities"
-              active={stremioOpen || spotifyOpen}
-              onClick={e => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                menu.open({ clientX: rect.left, clientY: rect.top - 4 }, [
-                  { id: "watch-together", label: "Watch Together (YouTube)", icon: <MonitorPlay size={18} />, iconStart: true, sub: "Watch a YouTube video in sync", onSelect: () => (watching ? undefined : openModal({ type: "watchTogether", channelId: channel.id })) },
-                  { id: "stremio", label: "Stremio", icon: <StremioIcon size={18} />, iconStart: true, sub: "Play a movie or episode from your Stremio", onSelect: openStremioPanel },
-                  { id: "spotify", label: "Spotify", icon: <SpotifyIcon size={18} />, iconStart: true, sub: "Play music for everyone in the call", onSelect: openSpotifyPanel },
-                  { type: "separator" },
-                  ...gameItems,
-                ]);
-              }}
+              active={shelfOpen || stremioOpen || spotifyOpen}
+              buttonRef={setShelfAnchor}
+              onClick={() => setShelfOpen(o => !o)}
             >
               <LayoutGrid size={20} />
             </BarButton>
+            <ActivityShelf channel={channel} anchor={shelfAnchor} open={shelfOpen} onClose={() => setShelfOpen(false)} onWatchTogether={() => (watching ? undefined : openModal({ type: "watchTogether", channelId: channel.id }))} />
             {channel.type === ChannelType.GroupDM && (
               <BarButton label="Ring Everyone" onClick={() => void ringCall(channel.id)}>
                 <BellRing size={20} />
