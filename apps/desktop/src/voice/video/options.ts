@@ -2,6 +2,8 @@
 // Pure data in, plain objects out, so the mapping is unit-tested without livekit-client or a browser; the transport turns
 // the plain simulcast layers into VideoPreset instances.
 
+import { profileOf } from "./h264";
+
 export type ScreenResolution = "720p" | "1080p" | "1440p" | "source";
 export type ScreenFps = 15 | 30 | 60;
 export type StreamContent = "motion" | "detail";
@@ -99,6 +101,17 @@ export function codecOrder(resolution: ScreenResolution | CameraResolution, hard
   return [...accelerated, ...normal.filter(codec => !accelerated.includes(codec))];
 }
 
+/**
+ * Screen shares put the codecs the system encodes in hardware first at every size, not only the largest: a share is
+ * mostly a game, and a software encode of a 60 fps game takes CPU from it (docs/perf.md "Game screen share": VP9 is
+ * three libvpx encoders, about 1.4 cores at 1080p60 on a desktop CPU, while NVENC H.264 takes almost none).
+ */
+export function screenCodecOrder(resolution: ScreenResolution, hardware?: CodecSupport["hardware"]): VideoCodecName[] {
+  const order = codecOrder(resolution, hardware);
+  const accelerated = order.filter(codec => hardware?.[codec]);
+  return [...accelerated, ...order.filter(codec => !accelerated.includes(codec))];
+}
+
 /** First supported codec in `order`; VP8 when nothing is known (the one every WebRTC browser must implement). */
 export function pickCodec(order: readonly VideoCodecName[], support: CodecSupport): VideoCodecName {
   return order.find(codec => support[codec]) ?? "vp8";
@@ -118,10 +131,20 @@ export function codecSupportFrom(mimeTypes: readonly string[] | null | undefined
 }
 
 let hardwareEncoders: CodecSupport["hardware"];
+let hardwareH264: string[] = [];
 let hardwareProbe: Promise<void> | null = null;
 
+/** profile-level-ids of the H.264 formats in `fmtpLines` (RTCRtpSender capabilities), each once. */
+export function h264ProfileLevelIds(fmtpLines: readonly (string | undefined)[]): string[] {
+  const ids = fmtpLines.flatMap(line => /profile-level-id=([0-9a-f]{6})/i.exec(line ?? "")?.[1].toLowerCase() ?? []);
+  return [...new Set(ids)];
+}
+
 /**
- * Asks MediaCapabilities which codecs the system encodes in hardware at the top stream size (2560x1440, 60 fps).
+ * Asks MediaCapabilities which codecs the system encodes in hardware at 1080p60 (the size hardware H.264 encoders
+ * promise; most stop at 30 fps above it). H.264 is asked per profile: Chromium on Windows encodes High, Main and Baseline
+ * on the GPU but Constrained Baseline in software, and a bare "video/H264" answers for the latter. The hardware H.264
+ * profiles land in `hardwareH264Profiles()` (see h264.ts).
  * Fire and forget: the answer lands in `detectCodecSupport().hardware` a few milliseconds later, long before anyone
  * opens Go Live; until then (and where MediaCapabilities has no WebRTC support) nothing is assumed accelerated.
  */
@@ -129,24 +152,31 @@ export function probeHardwareEncoders(): Promise<void> {
   hardwareProbe ??= (async () => {
     const mediaCapabilities = typeof navigator === "undefined" ? undefined : navigator.mediaCapabilities;
     if (!mediaCapabilities?.encodingInfo) return;
-    const types: Record<VideoCodecName, string> = { av1: "video/AV1", vp9: "video/VP9", h264: "video/H264", vp8: "video/VP8" };
-    const found: Partial<Record<VideoCodecName, boolean>> = {};
-    await Promise.all(
-      (Object.keys(types) as VideoCodecName[]).map(async codec => {
-        try {
-          const info = await mediaCapabilities.encodingInfo({
-            type: "webrtc",
-            video: { contentType: types[codec], width: 2560, height: 1440, framerate: 60, bitrate: 10_000_000 },
-          });
-          found[codec] = info.supported && info.powerEfficient;
-        } catch {
-          found[codec] = false;
-        }
-      }),
-    );
-    hardwareEncoders = found;
+    const efficient = async (contentType: string) => {
+      try {
+        const info = await mediaCapabilities.encodingInfo({ type: "webrtc", video: { contentType, width: 1920, height: 1080, framerate: 60, bitrate: 6_000_000 } });
+        return info.supported && info.powerEfficient;
+      } catch {
+        return false;
+      }
+    };
+    const caps = typeof RTCRtpSender !== "undefined" ? RTCRtpSender.getCapabilities?.("video")?.codecs : undefined;
+    const h264 = h264ProfileLevelIds((caps ?? []).filter(c => c.mimeType.toLowerCase() === "video/h264").map(c => c.sdpFmtpLine));
+    const [av1, vp9, vp8, ...h264Hardware] = await Promise.all([
+      efficient("video/AV1"),
+      efficient("video/VP9"),
+      efficient("video/VP8"),
+      ...h264.map(id => efficient(`video/H264;profile-level-id=${id};packetization-mode=1`)),
+    ]);
+    hardwareH264 = [...new Set(h264.filter((_, i) => h264Hardware[i]).map(profileOf))];
+    hardwareEncoders = { av1, vp9, vp8, h264: hardwareH264.length > 0 };
   })();
   return hardwareProbe;
+}
+
+/** The H.264 profiles (profile_idc + iop, e.g. "6400") the system encodes in hardware; empty until probed. */
+export function hardwareH264Profiles(): readonly string[] {
+  return hardwareH264;
 }
 
 /** Reads what this browser can encode. Unknown (no WebRTC, SSR, tests): VP8 only. */
@@ -212,7 +242,7 @@ export function buildScreenShare(choice: ScreenShareChoice, support: CodecSuppor
   const content = contentHintOf(choice);
   // VP9 / AV1 screen shares go out as rid simulcast with L1T3 per layer. As one SVC stream LiveKit would force a single
   // spatial layer (and contentHint "motion"), so where that simulcast is unavailable VP8 / H.264 take over.
-  const order = codecOrder(choice.resolution, support.hardware).filter(c => support.svcSimulcast !== false || (c !== "vp9" && c !== "av1"));
+  const order = screenCodecOrder(choice.resolution, support.hardware).filter(c => support.svcSimulcast !== false || (c !== "vp9" && c !== "av1"));
   const codec = pickCodec(order, support);
   const svc = codec === "vp9" || codec === "av1";
   const bitrate = SCREEN_BITRATE[choice.resolution][choice.fps];
