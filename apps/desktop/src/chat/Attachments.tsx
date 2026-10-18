@@ -9,6 +9,8 @@ import { AnimatedImage, Tooltip, resolveUrl, useShowImageDescriptions } from './
 import { openForward } from '../media/store';
 import { formatBytes, formatFullDate, formatMessageTimestamp, isSpoilerName } from './util';
 import { VoicePlayer, isVoiceMessage } from './VoiceMessage';
+import { TextPreview } from './TextPreview';
+import { isTextPreviewable } from './textAttachment';
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
 const isVideo = (a: Attachment): boolean => !!a.content_type?.startsWith('video/');
@@ -129,7 +131,8 @@ export function Attachments({ message }: { message: Message }) {
   </div>;
 }
 
-export function FileCard({ attachment }: { attachment: Attachment }) {
+export function FileCard({ attachment, plain }: { attachment: Attachment; plain?: boolean }) {
+  if (!plain && isTextPreviewable(attachment)) return <TextPreview attachment={attachment}><FileCard attachment={attachment} plain /></TextPreview>;
   const Icon = fileIcon(attachment);
   const audio = isAudio(attachment);
   return <div className={`chat-file${audio ? ' audio' : ''}`}>
