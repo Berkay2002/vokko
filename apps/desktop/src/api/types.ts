@@ -2027,6 +2027,46 @@ export interface InviteMetadata extends Invite {
   created_at: ISO8601;
 }
 
+// ---- Notification settings (GET/PATCH /users/@me/guilds/{guild.id|@me}/settings, READY user_guild_settings, USER_GUILD_SETTINGS_UPDATE) ----
+
+/** 0 all, 1 only @mentions, 2 nothing, 3 the guild's default (guild) / follow the parent (channel override). */
+export type MessageNotificationLevel = 0 | 1 | 2 | 3;
+/** `flags` bit: with level 1, unread messages still show the unread dot ("@Mentions + Unreads"). */
+export const UNREADS_ONLY_MENTIONS = 1 << 11;
+
+export interface ChannelOverride {
+  channel_id: Snowflake;
+  muted: boolean;
+  mute_config: MuteConfig | null; // null (or a null end_time) while muted = forever
+  message_notifications: MessageNotificationLevel;
+  flags: number;
+  collapsed: boolean;
+}
+
+export interface UserGuildSettings {
+  guild_id: Snowflake | null;
+  muted: boolean;
+  mute_config: MuteConfig | null;
+  message_notifications: MessageNotificationLevel;
+  flags: number;
+  suppress_everyone: boolean;
+  suppress_roles: boolean;
+  hide_muted_channels: boolean;
+  channel_overrides: ChannelOverride[];
+}
+
+/** Only sent keys change; `channel_overrides` is keyed by channel id and merges per channel. */
+export interface UpdateUserGuildSettingsRequest {
+  muted?: boolean;
+  mute_config?: MuteConfig | null;
+  message_notifications?: MessageNotificationLevel;
+  flags?: number;
+  suppress_everyone?: boolean;
+  suppress_roles?: boolean;
+  hide_muted_channels?: boolean;
+  channel_overrides?: Record<Snowflake, Partial<Omit<ChannelOverride, "channel_id">>>;
+}
+
 // ---- Guild layout: server folders and rail order (GET/PATCH /users/@me/guild-layout, READY guild_layout, GUILD_LAYOUT_UPDATE) ----
 export interface GuildFolder {
   id: Snowflake; // chosen by the client, unique among the user's folders
@@ -2079,6 +2119,7 @@ export interface ReadyEvent {
   read_states: ReadState[];
   relationships: Relationship[];
   guild_layout: GuildLayout;
+  user_guild_settings?: UserGuildSettings[]; // saved notification settings per guild (guild_id null = DMs); absent = none
   media?: InstanceMediaConfig; // always sent by the server; absent = voice unavailable
   desktop_version?: string; // latest desktop release the server knows of (its downloads' latest.json); absent = not configured
 }
@@ -2182,6 +2223,7 @@ export interface GatewayEvents {
   INVITE_CREATE: InviteMetadata; // to members who can list it: MANAGE_GUILD, or MANAGE_CHANNELS on the invite's channel
   INVITE_DELETE: { code: string; guild_id: Snowflake; channel_id: Snowflake }; // same audience; revoked (not on expiry or last use)
   GUILD_LAYOUT_UPDATE: GuildLayout; // the user's own sessions only
+  USER_GUILD_SETTINGS_UPDATE: UserGuildSettings; // the user's own sessions only
   DESKTOP_VERSION: { version: string }; // every session, when the server sees a new desktop release (same value as READY desktop_version)
 }
 

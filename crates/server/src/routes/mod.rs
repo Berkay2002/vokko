@@ -15,6 +15,7 @@ mod forums;
 mod gifs;
 pub mod guild_layout;
 pub mod guild_privacy;
+pub mod guild_settings;
 mod guilds;
 mod interactions;
 pub mod invites;
@@ -45,6 +46,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(crate::account::routes())
         .merge(users::routes())
         .merge(guild_layout::routes())
+        .merge(guild_settings::routes())
         .merge(guilds::routes())
         .merge(guild_privacy::routes())
         .merge(moderation::routes())

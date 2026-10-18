@@ -13,6 +13,7 @@ import { watchFor } from "./watch";
 import { stremioFor } from "./stremio";
 import { spotifyFor } from "./spotify";
 import { gamesFor } from "./games";
+import { guildSettingsFor } from "./guildSettings";
 
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
   const guild = m.guild_id ? db.guilds.get(m.guild_id) : undefined;
@@ -206,6 +207,7 @@ export function readyFor(viewerId: string, sessionId: string): ReadyEvent {
     read_states: readStatesFor(account, guilds, privateChannels),
     relationships: relationshipsFor(viewerId).filter(r => r.type !== RelationshipType.Blocked || true),
     guild_layout: account.guildLayout ?? { guild_folders: [], guild_positions: [] },
+    user_guild_settings: guildSettingsFor(viewerId),
     media: { voice_enabled: true, voice_bitrate_ceiling: 128000, screenshare_qualities: ["720p30"], video_enabled: false },
   };
 }

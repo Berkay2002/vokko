@@ -4,14 +4,15 @@ import type { Snowflake } from "../api/types";
 import { chatLocale, formatTime } from "../chat/util";
 
 /**
- * Per-device notification/visibility choices the backend has no field for yet (channel/server mute, notification level,
- * Hide Muted Channels). Persisted in localStorage under `vokko.local`; ids are guild, category or channel snowflakes.
+ * Notification/visibility choices (channel/server mute, notification level, suppress flags, Hide Muted Channels). The account's
+ * copy is the server's user guild settings (notify/guildSettingsSync.ts keeps both in step); this is the local cache, persisted in
+ * localStorage under `vokko.local`. Ids are guild, category, channel or DM snowflakes (old builds also kept thread ids here).
  */
 
 export type NotifyLevel = "default" | "all" | "unreads-mentions" | "mentions" | "none";
 
 /** -1 means "until I turn it back on". */
-const FOREVER = -1;
+export const FOREVER = -1;
 
 export const MUTE_DURATIONS: { id: string; label: string; ms: number }[] = [
   { id: "15m", label: "For 15 Minutes", ms: 15 * 60_000 },
@@ -29,7 +30,7 @@ export const NOTIFY_LABELS: Record<Exclude<NotifyLevel, "default">, string> = {
   none: "Nothing",
 };
 
-interface LocalState {
+export interface LocalState {
   /** Expiry timestamp in ms, or -1 for forever. */
   mutedUntil: Record<Snowflake, number>;
   notify: Record<Snowflake, NotifyLevel>;
