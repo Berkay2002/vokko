@@ -157,7 +157,8 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, tabS
   const gif = system ? null : gifMessageMedia(message);
 
   const canEdit = isMine && !system && !pending && !message.poll && !isVoiceMessage(message) && message.message_reference?.type !== 1; // a forward has no text to edit
-  const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
+  // An AutoMod alert names the flagged member as its author; only moderators remove it.
+  const canDelete = !pending && ((isMine && message.type !== MessageType.AutoModerationAction) || chat.canManage) && message.type !== MessageType.RecipientAdd;
   const canPin = !pending && !system && (chat.isDm || chat.canManage);
 
   const quick = useMemo(() => quickReactions().slice(0, 3), []);

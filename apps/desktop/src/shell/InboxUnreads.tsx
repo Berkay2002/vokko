@@ -4,8 +4,10 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Check, CheckCheck, Inbox as InboxIcon } from "lucide-react";
 import { compareIds } from "../api/snowflake";
-import { channelMentionCount, displayName, dmName, isChannelUnread, useStore } from "../api/store";
+import { channelMentionCount, displayName, dmName, isChannelUnread, isThreadQuiet, joinedThreads, useStore } from "../api/store";
 import { ChannelType, type Channel, type Message, type Snowflake } from "../api/types";
+import { goToThread } from "../threads/threadUi";
+import { isThreadUnread } from "../threads/util";
 import { ChannelTypeIcon } from "../chat/ChannelTypeIcon";
 import { messageSnippet } from "../media/helpers";
 import { jumpToMessage } from "../media/jump";
@@ -18,6 +20,8 @@ import { dmPath, go, guildPath } from "./nav";
 /** Channel cards shown at once; the rest are counted (each card is one request). */
 export const MAX_CARDS = 20;
 
+const isThread = (c: Channel): boolean => c.type === ChannelType.PublicThread || c.type === ChannelType.PrivateThread || c.type === ChannelType.AnnouncementThread;
+
 export interface UnreadRow {
   channel: Channel;
   mentions: number;
@@ -27,12 +31,15 @@ type ReadView = Parameters<typeof isChannelUnread>[0];
 
 /**
  * Unread channels you can open, newest activity first. Categories never count; voice channels do (their text chat). A muted
- * channel (or one in a muted category) is quiet here, as in its channel row; its mentions live on the Mentions tab.
+ * channel (or one in a muted category) is quiet here, as in its channel row; its mentions live on the Mentions tab. Joined threads
+ * are rows too, quiet under the same rules plus their own mute and their parent's.
  */
 export function unreadRows(state: ReadView, muted: (id: Snowflake) => boolean = () => false): UnreadRow[] {
-  return Object.values(state.channels)
+  const channels = Object.values(state.channels)
     .filter(c => c.type !== ChannelType.GuildCategory && isChannelUnread(state, c.id))
-    .filter(c => !(muted(c.id) || (c.parent_id != null && muted(c.parent_id))))
+    .filter(c => !(muted(c.id) || (c.parent_id != null && muted(c.parent_id))));
+  const threads = joinedThreads(state).filter(t => isThreadUnread(t, state.readStates[t.id]) && !isThreadQuiet(state, t, muted));
+  return [...channels, ...threads]
     .map(channel => ({ channel, mentions: channelMentionCount(state, channel.id) }))
     .sort((a, b) => compareIds(b.channel.last_message_id as Snowflake, a.channel.last_message_id as Snowflake));
 }
@@ -61,7 +68,10 @@ function when(iso: string): string {
 function UnreadCard({ channel, mentions, onNavigate }: UnreadRow & { onNavigate(): void }) {
   const guildId = channel.guild_id ?? null;
   const guild = useStore(s => (guildId ? s.guilds[guildId] : undefined));
-  const category = useStore(s => (channel.parent_id ? s.channels[channel.parent_id]?.name : undefined));
+  const thread = isThread(channel);
+  const parentName = useStore(s => (channel.parent_id ? s.channels[channel.parent_id]?.name : undefined));
+  // A thread's sub line names its channel ("in #parent"); a channel's names its category.
+  const category = thread ? (parentName ? `in #${parentName}` : undefined) : parentName;
   const readId = useStore(s => s.readStates[channel.id]?.last_message_id);
   const members = useStore(s => (guildId ? s.members[guildId] : undefined));
   const page = usePreview(channel.id);
@@ -70,7 +80,8 @@ function UnreadCard({ channel, mentions, onNavigate }: UnreadRow & { onNavigate(
   const sub = guild ? [guild.name, category].filter(Boolean).join(" › ") : channel.type === ChannelType.GroupDM ? "Group DM" : "Direct Message";
   const open = () => {
     onNavigate();
-    go(guildId ? guildPath(guildId, channel.id) : dmPath(channel.id));
+    if (thread) goToThread(channel);
+    else go(guildId ? guildPath(guildId, channel.id) : dmPath(channel.id));
   };
   const recipient = channel.recipients?.[0];
   return (
@@ -120,10 +131,11 @@ function UnreadCard({ channel, mentions, onNavigate }: UnreadRow & { onNavigate(
 
 export function UnreadList({ onNavigate }: { onNavigate(): void }) {
   const channels = useStore(s => s.channels);
+  const threads = useStore(s => s.threads);
   const readStates = useStore(s => s.readStates);
   const mutedUntil = useMutedUntil();
   const [pending, setPending] = useState(false);
-  const rows = useMemo(() => unreadRows({ channels, readStates } as ReadView, mutedTest({ mutedUntil })), [channels, readStates, mutedUntil]);
+  const rows = useMemo(() => unreadRows({ channels, threads, readStates } as ReadView, mutedTest({ mutedUntil })), [channels, threads, readStates, mutedUntil]);
   if (rows.length === 0) {
     return (
       <div className="inbox-empty">

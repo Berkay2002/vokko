@@ -5,7 +5,7 @@ import { closeCommunityModal, openEvents, useCommunityModal } from "./communityM
 import { InterestedButton, JoinEventButton, useEventPlace } from "./EventCard";
 import { errorText } from "./errors";
 import { describeRecurrence, formatEventRange, statusLabel } from "./eventUtil";
-import { Avatar, Modal, Perm, appStore, displayName, request, resolveUrl, useStore, usePermissions } from "./shell";
+import { Avatar, Modal, Perm, appStore, displayName, request, resolveUrl, useChatLocale, useStore, usePermissions } from "./shell";
 import { deleteEvent, editEvent, useCommunity } from "./store";
 
 const AVATARS_SHOWN = 12;
@@ -86,6 +86,7 @@ type Confirm = "cancel" | "delete" | null;
 /** Details of one event: when, where, who is interested, and for people with permission start / end / edit / cancel / delete. */
 export function EventDetail({ guildId, eventId, from }: { guildId: Snowflake; eventId: Snowflake; from?: "events" }) {
   const { event, missing, set } = useEvent(guildId, eventId);
+  const locale = useChatLocale();
   const { can } = usePermissions(guildId);
   const meId = useStore(s => s.me?.id);
   const [error, setError] = useState<string | null>(null);
@@ -136,7 +137,7 @@ export function EventDetail({ guildId, eventId, from }: { guildId: Snowflake; ev
       <div className="cm-detail-body">
         <div className={`cm-event-when${live ? " live" : ""}${finished ? " finished" : ""}`}>
           <CalendarDays size={16} aria-hidden="true" />
-          <span>{finished || live ? `${statusLabel(event.status)} · ` : ""}{formatEventRange(event)}</span>
+          <span>{finished || live ? `${statusLabel(event.status)} · ` : ""}{formatEventRange(event, undefined, locale)}</span>
         </div>
         <h2 id="cm-detail-title" className="cm-detail-title">
           {event.name}

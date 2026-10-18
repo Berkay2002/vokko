@@ -199,7 +199,7 @@ export const createCrashReport = (body: CreateCrashReportRequest): Promise<void>
 export const reportMessage = (channelId: Snowflake, messageId: Snowflake, body: CreateReportRequest): Promise<Report> => request("POST", `/channels/${channelId}/messages/${messageId}/report`, body);
 export const reportMember = (guildId: Snowflake, userId: Snowflake, body: CreateReportRequest): Promise<Report> => request("POST", `/guilds/${guildId}/members/${userId}/report`, body);
 export const getGuildPrivacy = (guildId: Snowflake): Promise<GuildPrivacySettings> => request("GET", `/users/@me/guilds/${guildId}/privacy`);
-export const updateGuildPrivacy = (guildId: Snowflake, body: GuildPrivacySettings): Promise<GuildPrivacySettings> => request("PATCH", `/users/@me/guilds/${guildId}/privacy`, body);
+export const updateGuildPrivacy = (guildId: Snowflake, body: Partial<GuildPrivacySettings>): Promise<GuildPrivacySettings> => request("PATCH", `/users/@me/guilds/${guildId}/privacy`, body);
 export const joinThread = (threadId: Snowflake): Promise<void> => request("PUT", `/channels/${threadId}/thread-members/@me`);
 export const leaveThread = (threadId: Snowflake): Promise<void> => request("DELETE", `/channels/${threadId}/thread-members/@me`);
 export const addThreadMember = (threadId: Snowflake, userId: Snowflake): Promise<void> => request("PUT", `/channels/${threadId}/thread-members/${userId}`);

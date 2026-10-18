@@ -167,6 +167,13 @@
 .chat-system-text b, .chat-system-text .chat-system-name { color: var(--chat-text-strong); font-weight: 500; }
 .chat-system-text .chat-system-link, .chat-system-text .chat-system-link-static { color: var(--chat-text-strong); font-weight: 600; }
 .chat-system-text .chat-system-link:hover, .chat-system-text .chat-system-name:hover { text-decoration: underline; }
+/* AutoMod alert (type 24): the flagged message sits in a card under the line. */
+.chat-system-icon.automod { color: var(--chat-text-muted); }
+.chat-system-text.automod-alert { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.automod-alert-card { display: flex; flex-direction: column; gap: 4px; max-width: 520px; padding: 10px 12px; border-radius: 8px; border-left: 4px solid var(--status-danger, #da373c); background: var(--background-secondary, rgba(0, 0, 0, 0.2)); }
+.automod-alert-author { color: var(--chat-text-strong); font-weight: 600; }
+.automod-alert-content { margin: 0; color: var(--chat-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.automod-alert-rule { font-size: 12px; line-height: 16px; }
 
 /* reply preview */
 .chat-reply { position: relative; display: flex; align-items: center; gap: 4px; margin-left: calc(16px - var(--chat-gutter)); padding-left: calc(var(--chat-gutter) - 16px); height: 20px; margin-bottom: 2px; font-size: 14px; line-height: 18px; color: var(--chat-text-muted); white-space: nowrap; user-select: none; cursor: pointer; }

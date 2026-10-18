@@ -41,14 +41,14 @@ describe("installStaleChunkReload", () => {
     expect(Number(sessionStorage.getItem("vokko.chunkReloadAt"))).toBeGreaterThan(0);
   });
 
-  it("holds back the reload while a draft is unsent", async () => {
+  it("reloads with typed text in a draft: it is saved and comes back", async () => {
     core.isTauri.mockReturnValue(false);
     const drafts = await import("../chat/draftStore");
     const { installStaleChunkReload } = await import("./staleChunks");
     drafts.setDraftText("1", "half a sentence");
     installStaleChunkReload();
     window.dispatchEvent(new Event("vite:preloadError"));
-    expect(reload).not.toHaveBeenCalled();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
   it("does nothing in the desktop app", async () => {

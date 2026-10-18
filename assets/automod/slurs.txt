@@ -1,0 +1,24 @@
+# Slurs (preset 3). Hateful terms aimed at a group; the list is short and errs towards words with no harmless reading.
+nigger*
+nigga*
+faggot*
+fag
+fags
+dyke
+dykes
+tranny
+trannies
+kike
+kikes
+chink
+chinks
+spic
+spics
+wetback*
+gook
+gooks
+raghead*
+towelhead*
+retard
+retards
+retarded

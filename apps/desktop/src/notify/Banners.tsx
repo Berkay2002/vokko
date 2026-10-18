@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { BellRing, Check, Download, Wrench, WifiOff, X } from "lucide-react";
 import { useConnectionState, useCountdown, type ConnectionState } from "../api/connection";
 import { gateway } from "../api/gateway";
-import { useStore } from "../api/store";
+import { BANNER_GRACE_MS, useStore } from "../api/store";
+import { flushDrafts } from "../chat/draftStore";
+import { formatDateTime } from "../chat/util";
 import { restartToUpdate, useDesktopUpdate } from "../desktop";
 import { setPref, usePrefs } from "../ui/prefs";
 import { ConnectionStatusModal } from "./ConnectionStatus";
@@ -10,8 +12,6 @@ import { notificationAdapter, type PermissionState } from "./desktop";
 import { startMaintenanceWatch, useMaintenance, type MaintenanceNotice } from "./maintenance";
 import "./notify.css";
 
-/** The connection banner waits this long before appearing, so a quick resume never flashes it. */
-export const BANNER_GRACE_MS = 1500;
 /** How long the green "Connected" strip stays after a banner that was shown ends. */
 export const CONNECTED_FLASH_MS = 2500;
 const DISMISSED_KEY = "vokko.notify.promptDismissed";
@@ -86,7 +86,7 @@ function ConnectedFlash() {
 function MaintenanceBar({ notice, onDismiss }: { notice: MaintenanceNotice; onDismiss(): void }) {
   const starts = notice.startsAt ? new Date(notice.startsAt) : null;
   const scheduled = starts !== null && !Number.isNaN(starts.getTime()) && starts.getTime() > Date.now();
-  const when = scheduled && starts ? ` Starts ${starts.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.` : "";
+  const when = scheduled && starts ? ` Starts ${formatDateTime(starts)}.` : "";
   return (
     <div className="notify-banner notify-banner-warning" role="region" aria-label="Maintenance" data-testid="maintenance-banner">
       <Wrench size={16} aria-hidden />
@@ -123,6 +123,7 @@ function UpdateBar({ version }: { version: string }) {
     setBusy(true);
     setFailed(false);
     try {
+      flushDrafts();
       await restartToUpdate();
     } catch {
       setFailed(true);

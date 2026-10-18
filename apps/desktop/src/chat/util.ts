@@ -1,6 +1,6 @@
 import { ApiRequestError } from '../api/errors';
 import { formatUploadLimit, maxUploadBytes } from '../api/limits';
-import type { Snowflake } from '../api/types';
+import { ChannelType, type Channel, type Snowflake, type User } from '../api/types';
 import { timeFormatPref } from './shell';
 
 const DISCORD_EPOCH = 1420070400000n;
@@ -62,6 +62,12 @@ export function formatTime(d: Date, locale = chatLocale()): string {
   const cycle = h12.resolvedOptions().hourCycle;
   return (cycle === 'h23' || cycle === 'h24' ? fmt(locale, 'time24', { hour: '2-digit', minute: '2-digit' }) : h12).format(d);
 }
+/** "Tue, Oct 20, 6:00 PM" / "Tue, Oct 20, 18:00": a short date with the clock, honouring Settings > Language & Time like formatTime. */
+export const formatDateTime = (d: Date, locale = chatLocale()): string => {
+  const choice = timeFormatPref();
+  const hourCycle = choice === '12' ? 'h12' : choice === '24' ? 'h23' : undefined;
+  return fmt(locale, `datetime${choice}`, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hourCycle }).format(d);
+};
 export const formatShortDate = (d: Date, locale = chatLocale()): string => fmt(locale, 'short', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 export const formatFullDate = (d: Date, locale = chatLocale()): string => {
   const choice = timeFormatPref();
@@ -137,3 +143,12 @@ export const SPOILER_PREFIX = 'SPOILER_';
 export const isSpoilerName = (filename: string): boolean => filename.startsWith(SPOILER_PREFIX);
 export const stripSpoiler = (filename: string): string => (isSpoilerName(filename) ? filename.slice(SPOILER_PREFIX.length) : filename);
 export const withSpoiler = (filename: string, spoiler: boolean): string => (spoiler ? SPOILER_PREFIX + stripSpoiler(filename) : stripSpoiler(filename));
+
+/** The composer's placeholder: "Message @alice" in a 1:1 DM, "Message <group name>" (or its members' names) in a group DM, else "Message #general" (voice channels without the #). */
+export function composerPlaceholder(channel: Channel | undefined, nameOf: (user: User) => string): string {
+  if (!channel) return 'Message ';
+  const recipients = channel.recipients ?? [];
+  if (channel.type === ChannelType.DM) return `Message @${recipients[0] ? nameOf(recipients[0]) : ''}`;
+  if (channel.type === ChannelType.GroupDM) return `Message ${channel.name || recipients.map(u => nameOf(u)).join(', ')}`;
+  return `Message ${channel.type === ChannelType.GuildVoice ? channel.name ?? '' : `#${channel.name ?? ''}`}`;
+}

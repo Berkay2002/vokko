@@ -1,18 +1,19 @@
 // Full-screen channel settings: Overview + Permissions + Invites (channel invite list) + Integrations (webhooks, src/apps).
 import { useMemo, useRef, useState } from "react";
-import { Eye, Hash, Lock, Trash2, Volume2 } from "lucide-react";
+import { Eye, Hash, Lock, Radio, Trash2, Volume2 } from "lucide-react";
 import { toggleWrap } from "../chat/composer/edit";
 import { ApiRequestError } from "../api/errors";
 import { Perm } from "../api/permissions";
 import { request } from "../api/rest";
 import { appStore, useStore } from "../api/store";
-import { ChannelType, type Channel, type Snowflake } from "../api/types";
+import { ChannelType, STAGE_TOPIC_MAX_CHARS, type Channel, type Snowflake } from "../api/types";
 import { ForumSettingsPage } from "../forum/ForumSettings";
 import { isPrivateChannel } from "./channelPrivacy";
 import { closeModal, openModal } from "./modalStore";
 import { ChannelPermissionsPage } from "./settings/ChannelPermissions";
 import { Category, Divider, Field, Page, RadioGroup, Select, Slider, Unavailable } from "./settings/controls";
-import { useVoiceUi } from "../voice";
+import { useVoice, useVoiceUi } from "../voice";
+import { editStageTopic, isStageModeratorBits } from "../voice/moderation";
 import { FullScreenSettings, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { SaveBar } from "./settings/SaveBar";
 import { blockedByUnsaved } from "./settings/unsaved";
@@ -53,6 +54,7 @@ function LockedSelect({ label, value }: { label: string; value: string }) {
 function OverviewPage({ channel, editable }: { channel: Channel; editable: boolean }) {
   const category = channel.type === ChannelType.GuildCategory;
   const voice = channel.type === ChannelType.GuildVoice;
+  const stage = channel.type === ChannelType.GuildStage;
   const [name, setName] = useState(channel.name ?? "");
   const [topic, setTopic] = useState(channel.topic ?? "");
   const topicRef = useRef<HTMLTextAreaElement>(null);
@@ -61,6 +63,15 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const [saved, setSaved] = useState(false);
   const slug = channelNameFor(channel.type, name);
   const nextTopic = topic.trim() || null;
+  // A stage's topic belongs to its live stage (STAGE_INSTANCE), not to the channel.
+  const liveStage = useVoice(s => s.stages[channel.id]);
+  // null until edited, so a stage that starts or changes its topic while this page is open doesn't look like an unsaved edit.
+  const [stageDraft, setStageDraft] = useState<string | null>(null);
+  const stageTopic = stageDraft ?? liveStage?.topic ?? "";
+  const stageTopicDirty = !!liveStage && stageDraft !== null && !!stageDraft.trim() && stageDraft.trim() !== liveStage.topic;
+  // The server wants the stage moderator set (Manage Channels + Mute + Move Members) to edit a live stage, more than Manage Channels.
+  const stageModerator = isStageModeratorBits(usePermissions(channel.guild_id, channel.id).bits);
+  const hasTopic = !category && !stage;
   const ceiling = useVoiceUi(s => s.bitrateCeiling);
   const savedBitrate = Math.round((channel.bitrate ?? 64000) / 1000);
   const savedLimit = channel.user_limit ?? 0;
@@ -70,7 +81,8 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const slowmodeSupported = channel.type === ChannelType.GuildText || voice;
   const savedSlowmode = channel.rate_limit_per_user ?? 0;
   const [slowmode, setSlowmode] = useState(savedSlowmode);
-  const dirty = slug !== (channel.name ?? "") || (!category && nextTopic !== (channel.topic ?? null)) || voiceDirty || slowmode !== savedSlowmode;
+  const channelDirty = slug !== (channel.name ?? "") || (hasTopic && nextTopic !== (channel.topic ?? null)) || voiceDirty || slowmode !== savedSlowmode;
+  const dirty = channelDirty || stageTopicDirty;
 
   const formatTopic = (marker: string) => {
     const box = topicRef.current;
@@ -88,18 +100,36 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const reset = () => {
     setName(channel.name ?? "");
     setTopic(channel.topic ?? "");
+    setStageDraft(null);
     setBitrateKbps(savedBitrate);
     setUserLimit(savedLimit);
     setSlowmode(savedSlowmode);
     setError(null);
   };
-  const save = () => {
+  // The channel PATCH and the live stage's topic are separate requests: each runs only if its own fields changed, and a failure of one
+  // keeps the other's result (a stage that ended before Save, or a missing moderator permission, must not undo a rename).
+  const save = async () => {
     if (!slug) return;
     setBusy(true);
     setError(null);
     const voiceBody = voice ? { bitrate: bitrateKbps * 1000, user_limit: userLimit } : {};
     const slowmodeBody = slowmodeSupported ? { rate_limit_per_user: slowmode } : {};
-    request<Channel>("PATCH", `/channels/${channel.id}`, { name: slug, ...(category ? {} : { topic: nextTopic }), ...voiceBody, ...slowmodeBody })
+    let failure: unknown = null;
+    if (stageTopicDirty) {
+      try {
+        await editStageTopic(channel.id, stageTopic);
+        setStageDraft(null);
+      } catch (e) {
+        failure = e;
+      }
+    }
+    if (!channelDirty) {
+      if (failure) setError(errorText(failure));
+      else setSaved(true);
+      setBusy(false);
+      return;
+    }
+    await request<Channel>("PATCH", `/channels/${channel.id}`, { name: slug, ...(hasTopic ? { topic: nextTopic } : {}), ...voiceBody, ...slowmodeBody })
       .then(updated => {
         appStore.getState().upsertChannel(updated);
         setName(updated.name ?? slug);
@@ -109,10 +139,13 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
           setBitrateKbps(Math.round((updated.bitrate ?? 64000) / 1000));
           setUserLimit(updated.user_limit ?? 0);
         }
-        setSaved(true);
+        if (!failure) setSaved(true);
       })
-      .catch(e => setError(errorText(e)))
-      .finally(() => setBusy(false));
+      .catch(e => (failure = e))
+      .finally(() => {
+        if (failure) setError(errorText(failure));
+        setBusy(false);
+      });
   };
 
   return (
@@ -120,7 +153,7 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
       {!editable && <Unavailable>You need the Manage Channel permission to edit this {category ? "category" : "channel"}.</Unavailable>}
       <Field label={category ? "Category Name" : "Channel Name"}>
         <div className="input-prefixed">
-          {!category && (voice ? <Volume2 size={16} /> : <Hash size={16} />)}
+          {!category && (voice ? <Volume2 size={16} /> : stage ? <Radio size={16} /> : <Hash size={16} />)}
           <input
             className="input"
             aria-label={category ? "Category name" : "Channel name"}
@@ -134,7 +167,22 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
           />
         </div>
       </Field>
-      {!category && (
+      {stage && (
+        <Field label="Stage Topic" note={!liveStage ? "Shown while the stage is live. Start the stage from its channel to set one." : stageModerator ? undefined : "Editing a live stage needs Manage Channels, Mute Members and Move Members."}>
+          <input
+            className="input"
+            aria-label="Stage topic"
+            value={stageTopic}
+            maxLength={STAGE_TOPIC_MAX_CHARS}
+            disabled={!editable || !stageModerator || !liveStage}
+            onChange={e => {
+              setSaved(false);
+              setStageDraft(e.target.value);
+            }}
+          />
+        </Field>
+      )}
+      {hasTopic && (
         <Field label="Channel Topic">
           <div className="cs-rich">
             <div className="cs-rich-toolbar" role="toolbar" aria-label="Topic formatting">
@@ -190,7 +238,7 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
               />
             </Field>
           )}
-          <Field label="Content Visibility" note="Not available yet.">
+          {!stage && <Field label="Content Visibility" note="Not available yet.">
             <RadioGroup<string>
               name="Content visibility"
               value="default"
@@ -202,8 +250,8 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
               ]}
               onChange={() => undefined}
             />
-          </Field>
-          {!voice && (
+          </Field>}
+          {!voice && !stage && (
             <Field label="Hide After Inactivity" note="Not available yet.">
               <LockedSelect label="Hide after inactivity" value="3 Days" />
             </Field>
@@ -269,7 +317,10 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
   const { can } = usePermissions(channel?.guild_id, channelId);
   const isCategory = channel?.type === ChannelType.GuildCategory;
   const isForum = channel?.type === ChannelType.GuildForum;
-  const sections = isCategory ? SECTIONS.filter(s => s.id === "overview" || s.id === "permissions") : SECTIONS.filter(s => s.id !== "forum" || isForum);
+  const isStage = channel?.type === ChannelType.GuildStage;
+  const sections = isCategory
+    ? SECTIONS.filter(s => s.id === "overview" || s.id === "permissions")
+    : SECTIONS.filter(s => (s.id !== "forum" || isForum) && !(isStage && s.id === "integrations")); // webhooks can't post into a stage
   const initial = sections.some(s => s.id === section) ? (section as SectionId) : "overview";
   const [current, setCurrent] = useState<SectionId>(initial);
   const privateChannel = useMemo(() => isPrivateChannel(channel, channel?.guild_id), [channel]);
@@ -302,7 +353,7 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
     channel.name
   ) : (
     <span className="cs-header-name">
-      {privateChannel ? <Lock size={12} aria-hidden="true" /> : channel.type === ChannelType.GuildVoice ? <Volume2 size={12} aria-hidden="true" /> : <Hash size={12} aria-hidden="true" />}
+      {privateChannel ? <Lock size={12} aria-hidden="true" /> : channel.type === ChannelType.GuildVoice ? <Volume2 size={12} aria-hidden="true" /> : isStage ? <Radio size={12} aria-hidden="true" /> : <Hash size={12} aria-hidden="true" />}
       <span>{channel.name}</span>
     </span>
   );

@@ -1,5 +1,6 @@
-// Pure helpers of the scheduled-events UI: labels, time text, recurrence text, form validation. No React, no store.
+// Pure helpers of the scheduled-events UI: labels, time text, recurrence text, form validation. No React; the clock comes from chat/util (the 12/24-hour setting).
 
+import { formatTime } from "../chat/util";
 import { RecurrenceFrequency, ScheduledEventEntityType, ScheduledEventStatus, type GuildScheduledEvent, type ScheduledEventRecurrenceRule } from "../api/types";
 
 export const NAME_MAX = 100;
@@ -10,7 +11,7 @@ const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Satur
 
 const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
-const clock = (date: Date, locale?: string) => date.toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
+const clock = (date: Date, locale?: string) => formatTime(date, locale);
 
 /** "Today at 6:00 PM", "Tomorrow at 6:00 PM" or "Tue, Oct 20 at 6:00 PM" (with the year when it is not this year). */
 export function formatEventStart(iso: string, now: Date = new Date(), locale?: string): string {

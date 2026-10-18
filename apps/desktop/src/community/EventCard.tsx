@@ -3,7 +3,7 @@ import { CalendarDays, MapPin, Star, Users, Volume2 } from "lucide-react";
 import { ScheduledEventEntityType, ScheduledEventStatus, type GuildScheduledEvent } from "../api/types";
 import { errorText } from "./errors";
 import { formatEventRange, joinLabel, statusLabel } from "./eventUtil";
-import { appStore, go, guildPath, joinVoiceChannel, resolveUrl, useStore } from "./shell";
+import { appStore, go, guildPath, joinVoiceChannel, resolveUrl, useChatLocale, useStore } from "./shell";
 import { setInterested } from "./store";
 
 /** Where the event happens: the place for external events, else the voice channel's name. */
@@ -60,6 +60,7 @@ export function JoinEventButton({ event, onJoined }: { event: GuildScheduledEven
 /** One row of the events list. The topic opens the details (and stretches over the card); Interested toggles without opening. */
 export function EventCard({ event, onOpen, onError, onJoined }: { event: GuildScheduledEvent; onOpen(): void; onError?: (message: string) => void; onJoined?: () => void }) {
   const place = useEventPlace(event);
+  const locale = useChatLocale();
   const live = event.status === ScheduledEventStatus.Active;
   const cover = event.image ? resolveUrl(event.image) : null;
   return (
@@ -68,7 +69,7 @@ export function EventCard({ event, onOpen, onError, onJoined }: { event: GuildSc
         <div className="cm-event-main">
           <div className={`cm-event-when${live ? " live" : ""}`}>
             <CalendarDays size={16} aria-hidden="true" />
-            <span>{live ? statusLabel(event.status) : formatEventRange(event)}</span>
+            <span>{live ? statusLabel(event.status) : formatEventRange(event, undefined, locale)}</span>
           </div>
           <h3 className="cm-event-name">
             <button type="button" className="cm-event-open" onClick={onOpen}>

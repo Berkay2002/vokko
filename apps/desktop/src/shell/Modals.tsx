@@ -3,11 +3,12 @@ import { BookOpen, Camera, MessagesSquare, Check, ChevronRight, Copy, Gamepad2, 
 import { logout } from "../api/auth";
 import { ApiRequestError } from "../api/errors";
 import { request, uploadAttachment } from "../api/rest";
-import { appStore, displayName, useStore } from "../api/store";
+import { appStore, displayName, dmName, useStore } from "../api/store";
 import { ChannelType, OverwriteType, RelationshipType, type GuildTemplate } from "../api/types";
 import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
-import { addGroupRecipients, createChannel, createGroupDM, createGuild, createGuildFromTemplate, deleteGuild, joinOrApply, leaveGuild } from "./actions";
+import { addGroupRecipients, closeDirectMessage, createChannel, createGroupDM, createGuild, createGuildFromTemplate, deleteGuild, joinOrApply, leaveGuild } from "./actions";
+import { EditGroupModal } from "./GroupDm";
 import { getTemplate, templateCode } from "../templates/api";
 import { TemplatePreview } from "../templates/TemplatePreview";
 import { InviteModal } from "../invites/InviteModal";
@@ -675,6 +676,22 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
       return <CreateChannelModal key={id} guildId={spec.guildId} parentId={spec.parentId} channelType={spec.channelType} />;
     case "leaveServer":
       return <Confirm key={id} title={`Leave '${guilds[spec.guildId]?.name ?? "server"}'`} body={`Are you sure you want to leave ${guilds[spec.guildId]?.name ?? "this server"}? You won't be able to rejoin this server unless you are re-invited.`} action="Leave Server" danger onConfirm={() => leaveGuild(spec.guildId)} />;
+    case "leaveGroup": {
+      const channel = channels[spec.channelId];
+      const name = channel ? dmName(channel) : "this group";
+      return (
+        <Confirm
+          key={id}
+          title={`Leave '${name}'`}
+          body={<>Are you sure you want to leave <b>{name}</b>? You won&apos;t be able to rejoin this group unless you are re-invited.</>}
+          action="Leave Group"
+          danger
+          onConfirm={() => closeDirectMessage(spec.channelId)}
+        />
+      );
+    }
+    case "editGroup":
+      return <EditGroupModal key={id} channelId={spec.channelId} />;
     case "deleteServer":
       return <Confirm key={id} title={`Delete '${guilds[spec.guildId]?.name ?? "server"}'`} body={`Are you sure you want to delete ${guilds[spec.guildId]?.name ?? "this server"}? This action cannot be undone.`} action="Delete Server" danger requireText={guilds[spec.guildId]?.name ?? ""} onConfirm={() => deleteGuild(spec.guildId)} />;
     case "deleteChannel":

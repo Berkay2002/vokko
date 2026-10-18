@@ -3,7 +3,7 @@ import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, LayoutGrid, Lock, Pencil
 import { Perm, channelPermissions, hasBit, memberLike } from '../api/permissions';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
-import { request, useStale, BottomSheet, Popout, Tooltip, usePhone, resolveUrl, useComposerOptions, useConvertEmoticons, useGuild, useGuildMembers, useLegacyChatInput } from './shell';
+import { request, sharesTyping, useStale, BottomSheet, Popout, Tooltip, usePhone, resolveUrl, useComposerOptions, useConvertEmoticons, useGuild, useGuildMembers, useLegacyChatInput } from './shell';
 import { useMedia } from '../media/store';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
@@ -22,7 +22,7 @@ import { convertEmoticons } from './emoticons';
 import { messageStore } from './messageStore';
 import { TypingIndicator } from './TypingIndicator';
 import { activeTypers } from './messageState';
-import { isSpoilerName, stripSpoiler } from './util';
+import { composerPlaceholder, isSpoilerName, stripSpoiler } from './util';
 import { CreatePollModal } from '../polls/CreatePollModal';
 import { ComposerInput, type ComposerField } from './composer/ComposerInput';
 import { useShortcut } from '../keyboard';
@@ -47,6 +47,8 @@ function postTyping(channelId: Snowflake): void {
 }
 
 function notifyTyping(channelId: Snowflake, myId: Snowflake): void {
+  // the server drops it anyway; not sending saves the request
+  if (!sharesTyping(myId)) return;
   const now = Date.now();
   const since = now - (lastTyping.get(channelId) ?? 0);
   if (since < TYPING_INTERVAL_MS || typingTimers.has(channelId)) return;
@@ -169,8 +171,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   // Stickers this channel can take without extra permission checks: the server's own, or everything in DMs.
   const stickers = useMemo(() => (chat.guildId ? allStickers[chat.guildId] ?? [] : Object.values(allStickers).flat()), [allStickers, chat.guildId]);
   const { text, uploads } = draft;
-  const name = chat.channel?.name ? (chat.channel.type === ChannelType.GuildVoice ? chat.channel.name : `#${chat.channel.name}`) :chat.channel?.recipients?.map(u => chat.nameOf(u)).join(', ') ?? '';
-  const placeholder = chat.isDm ? `Message @${chat.channel?.recipients?.[0] ? chat.nameOf(chat.channel.recipients[0]) : ''}` : `Message ${name}`;
+  const placeholder = composerPlaceholder(chat.channel, u => chat.nameOf(u));
 
   useEffect(() => { area.current?.focus(); }, [channelId, focusToken]);
 

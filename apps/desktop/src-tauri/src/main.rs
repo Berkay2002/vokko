@@ -20,6 +20,7 @@ mod streamer;
 mod tray;
 mod updates;
 mod window;
+mod window_state;
 
 use prefs::{AUTOSTART_ARG, DesktopPrefs, PrefsPatch, PrefsStore};
 use std::sync::Mutex;
@@ -78,7 +79,8 @@ fn create_main_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>>
     } else {
         builder.additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu --disable-gpu-compositing")
     };
-    builder.build()?;
+    let window = builder.build()?;
+    window_state::restore(&window, &app.state::<window_state::WindowStateStore>());
     Ok(())
 }
 
@@ -154,6 +156,10 @@ fn debug_popup_tray_menu(app: &AppHandle) {
 }
 
 fn run_event(app: &AppHandle, event: tauri::RunEvent) {
+    // Tray Quit and Cmd+Q end here, with the window possibly hidden or gone: the geometry tracked so far is what gets saved.
+    if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
+        app.state::<window_state::WindowStateStore>().save();
+    }
     #[cfg(target_os = "macos")]
     macos::on_run_event(app, &event);
     #[cfg(not(target_os = "macos"))]
@@ -201,7 +207,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     builder
         .manage(Mutex::new(Session::demo()?))
-        .manage(PrefsStore::load(config_dir.map(|dir| dir.join("desktop.json"))))
+        .manage(PrefsStore::load(config_dir.as_ref().map(|dir| dir.join("desktop.json"))))
+        .manage(window_state::WindowStateStore::load(config_dir.map(|dir| dir.join("window.json"))))
         .manage(tray::TrayState::default())
         .manage(links::LinkState::default())
         .manage(updates::UpdateState::new(updater_configured))
@@ -212,8 +219,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return;
             }
             match event {
+                WindowEvent::Moved(_) => {
+                    if let Some(webview) = window.app_handle().get_webview_window(window::MAIN_WINDOW) {
+                        window_state::track(&webview, &window.app_handle().state::<window_state::WindowStateStore>());
+                    }
+                }
                 WindowEvent::CloseRequested { api, .. } => {
                     let app = window.app_handle();
+                    app.state::<window_state::WindowStateStore>().save();
                     if app.state::<PrefsStore>().get().close_to_tray && app.state::<tray::TrayState>().present() {
                         api.prevent_close();
                         if let Err(error) = window.hide() {
@@ -225,9 +238,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                #[cfg(windows)]
                 WindowEvent::Resized(_) | WindowEvent::Focused(true) => {
                     if let Some(webview) = window.app_handle().get_webview_window(window::MAIN_WINDOW) {
+                        if matches!(event, WindowEvent::Resized(_)) {
+                            window_state::track(&webview, &window.app_handle().state::<window_state::WindowStateStore>());
+                        }
+                        #[cfg(windows)]
                         window::set_memory_low(&webview, webview.is_minimized().unwrap_or(false));
                     }
                 }

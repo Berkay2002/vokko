@@ -366,3 +366,44 @@
   font-size: 14px;
   color: var(--text-default);
 }
+
+/* phone (<= 767px): the role/member list stacks above the permission list (as chips), so the tri-state switches keep the full width */
+@media (max-width: 767px) {
+  .cs-perm-editor {
+    flex-direction: column;
+  }
+
+  .cs-targets {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    gap: 4px;
+    width: 100%;
+  }
+
+  .cs-targets-head {
+    flex: 1 0 100%;
+  }
+
+  .cs-targets > .cs-target {
+    width: auto;
+    max-width: 100%;
+    background: var(--background-surface-high);
+  }
+
+  .cs-targets > .cs-target.selected {
+    background: var(--interactive-background-selected);
+  }
+
+  .cs-picker {
+    width: min(240px, calc(100vw - 48px));
+  }
+
+  .cs-perms-head {
+    flex-wrap: wrap;
+  }
+
+  .cs-perm-label {
+    min-width: 0;
+  }
+}

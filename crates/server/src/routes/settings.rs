@@ -74,6 +74,7 @@ async fn patch_settings(State(state): State<AppState>, AuthUser(user_id): AuthUs
         sqlx::query_as("SELECT version, settings FROM user_settings WHERE user_id = $1 FOR UPDATE").bind(user_id).fetch_one(&mut *tx).await?;
     let version = version.max(0) as u64;
     let mut settings = as_map(current);
+    let sharing_changed = crate::presence::SHARING_KEYS.iter().any(|key| body.settings.contains_key(*key));
     if body.version != version {
         tx.rollback().await?;
         let conflict = UserSettingsConflict { code: VERSION_CONFLICT, message: "Settings version conflict".to_owned(), version, settings };
@@ -100,6 +101,9 @@ async fn patch_settings(State(state): State<AppState>, AuthUser(user_id): AuthUs
     tx.commit().await?;
     let saved = UserSettings { version: next, settings: as_map(blob) };
     state.hub.send(&[user_id], &GatewayEvent::UserSettingsUpdate(Box::new(saved.clone())));
+    if sharing_changed {
+        crate::presence::reapply_sharing(&state, user_id).await?;
+    }
     Ok(Json(saved).into_response())
 }
 

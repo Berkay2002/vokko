@@ -123,6 +123,8 @@ numeric_enum!(MessageType {
     ChatInputCommand = 20,
     ThreadStarterMessage = 21,
     ContextMenuCommand = 23,
+    /// Posted by AutoMod to a rule's alert channel; author = the member, data in an `auto_moderation_message` embed.
+    AutoModerationAction = 24,
     PollResult = 46,
 });
 
@@ -985,6 +987,9 @@ pub enum EmbedType {
     /// Only on a `PollResult` message; the data is in `fields` (see `poll_result_fields`).
     #[serde(rename = "poll_result")]
     PollResult,
+    /// Only on an `AutoModerationAction` message: `description` is the member's content, `fields` name the rule (see docs/api.md).
+    #[serde(rename = "auto_moderation_message")]
+    AutoModerationMessage,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2972,6 +2977,9 @@ pub struct UpdateChannelRequest {
     /// Slowmode seconds (0..=21600); guild text and voice channels only (MANAGE_CHANNELS).
     #[serde(default)]
     pub rate_limit_per_user: Option<u32>,
+    /// Group DMs only: an uploaded PNG/JPEG/GIF/WebP becomes the group icon; `null` removes it.
+    #[serde(default, deserialize_with = "double_option")]
+    pub icon_attachment_id: Option<Option<Snowflake>>,
     // ---- threads ----
     #[serde(default)]
     pub archived: Option<bool>,
@@ -3259,6 +3267,8 @@ numeric_enum!(
         AutoModerationRuleUpdate = 141,
         AutoModerationRuleDelete = 142,
         AutoModerationBlockMessage = 143,
+        AutoModerationFlagToChannel = 144,
+        AutoModerationUserCommunicationDisabled = 145,
         OnboardingPromptCreate = 163,
         OnboardingPromptUpdate = 164,
         OnboardingPromptDelete = 165,
@@ -3351,25 +3361,38 @@ pub struct AuditLog {
     pub users: Vec<User>,
 }
 
-numeric_enum!(AutoModerationTriggerType { Keyword = 1 });
+numeric_enum!(AutoModerationTriggerType { Keyword = 1, Spam = 3, KeywordPreset = 4, MentionSpam = 5 });
 numeric_enum!(AutoModerationEventType { MessageSend = 1 });
-numeric_enum!(AutoModerationActionType { BlockMessage = 1 });
+numeric_enum!(AutoModerationActionType { BlockMessage = 1, SendAlertMessage = 2, Timeout = 3 });
+numeric_enum!(AutoModerationKeywordPresetType { Profanity = 1, SexualContent = 2, Slurs = 3 });
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AutoModerationTriggerMetadata {
     /// Up to 1000 keywords of at most 60 characters; `*` at the start or end matches a prefix / suffix / substring.
     #[serde(default)]
     pub keyword_filter: Vec<String>,
-    /// Words that never trigger the rule (same syntax), up to 100.
+    /// Words that never trigger the rule (same syntax), up to 100 (1000 on a keyword preset rule).
     #[serde(default)]
     pub allow_list: Vec<String>,
+    /// KEYWORD_PRESET: the built-in word lists the rule uses.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub presets: Vec<AutoModerationKeywordPresetType>,
+    /// MENTION_SPAM: the most unique user + role mentions a message may hold (1-50).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mention_total_limit: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct AutoModerationActionMetadata {
-    /// Shown to the blocked author (at most 150 characters).
+    /// BLOCK_MESSAGE: shown to the blocked author (at most 150 characters).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_message: Option<String>,
+    /// SEND_ALERT_MESSAGE: the guild text channel the alert goes to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<Snowflake>,
+    /// TIMEOUT: seconds, 1 to 2419200 (four weeks).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3952,11 +3975,22 @@ pub struct FriendSuggestionsResponse {
     pub suggestions: Vec<FriendSuggestion>,
 }
 
-/// Body and response of `GET` / `PATCH /users/@me/guilds/{id}/privacy`: whether members of that guild who are not friends may
-/// DM the caller (Discord's `restricted_guilds`, inverted).
+/// Response of `GET` / `PATCH /users/@me/guilds/{id}/privacy`: whether members of that guild who are not friends may DM the
+/// caller (Discord's `restricted_guilds`, inverted), and whether the caller appears offline to that guild's members.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GuildPrivacySettings {
     pub direct_messages: bool,
+    #[serde(default)]
+    pub appear_offline: bool,
+}
+
+/// Body of `PATCH /users/@me/guilds/{id}/privacy`: only sent keys change.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UpdateGuildPrivacyRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_messages: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appear_offline: Option<bool>,
 }
 
 /// Body and response of `PATCH /users/@me/friend-suggestion-settings`.
@@ -4500,6 +4534,11 @@ pub mod user_settings {
         ("friend_requests_everyone", Kind::Bool),
         ("friend_requests_mutual_friends", Kind::Bool),
         ("friend_requests_mutual_guilds", Kind::Bool),
+        // Activity privacy (server-enforced; unset ones follow `share_activity`, see the server's `presence::sharing`)
+        ("share_activity", Kind::Bool),
+        ("share_spotify", Kind::Bool),
+        ("share_typing", Kind::Bool),
+        ("share_mutuals", Kind::Bool),
     ];
 
     pub fn kind(key: &str) -> Option<Kind> {
@@ -6140,6 +6179,13 @@ mod tests {
         round_trip::<AutoModerationRule>(rule.clone());
         let parsed: AutoModerationRule = serde_json::from_value(rule).expect("rule");
         assert_eq!(GatewayEvent::AutoModerationRuleDelete(parsed).name(), "AUTO_MODERATION_RULE_DELETE");
+        round_trip::<AutoModerationRule>(json!({
+            "id": "951", "guild_id": "300", "name": "Mentions", "creator_id": "100", "event_type": 1, "trigger_type": 5,
+            "trigger_metadata": {"keyword_filter": [], "allow_list": [], "mention_total_limit": 5},
+            "actions": [{"type": 2, "metadata": {"channel_id": "302"}}, {"type": 3, "metadata": {"duration_seconds": 60}}],
+            "enabled": true, "exempt_roles": [], "exempt_channels": []
+        }));
+        round_trip::<AutoModerationTriggerMetadata>(json!({"keyword_filter": [], "allow_list": ["a"], "presets": [1, 3]}));
         let patch: AutoModerationRuleRequest = serde_json::from_value(json!({"enabled": false})).expect("patch");
         assert!(patch.name.is_none() && patch.enabled == Some(false));
         let bulk = GatewayEvent::MessageDeleteBulk(MessageDeleteBulk {

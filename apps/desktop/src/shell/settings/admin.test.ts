@@ -24,6 +24,9 @@ describe("audit log wording", () => {
     expect(describeAuditEntry(entry(AuditLogEvent.AutoModerationBlockMessage, { user_id: "2", options: { channel_id: "50", auto_moderation_rule_name: "Words" } }), lookup)).toBe(
       "AutoMod blocked a message by spammer in #general (Words)",
     );
+    expect(describeAuditEntry(entry(AuditLogEvent.AutoModerationUserCommunicationDisabled, { user_id: "2", options: { channel_id: "50", auto_moderation_rule_name: "Pings" } }), lookup)).toBe(
+      "AutoMod timed out spammer for a message in #general (Pings)",
+    );
     expect(describeAuditEntry(entry(AuditLogEvent.RoleDelete, { changes: [{ key: "name", old_value: "gone" }] }), lookup)).toBe("sam deleted the role gone");
   });
 

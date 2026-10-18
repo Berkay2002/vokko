@@ -4,24 +4,33 @@ import { useEffect, useState } from 'react';
 import { AtSign, Bell, Bookmark, Check, X } from 'lucide-react';
 import type { Message } from '../api/types';
 import { messageSnippet } from './helpers';
+import { formatDateTime } from '../chat/util';
 import { jumpToMessage } from './jump';
 import { sortReminders } from './lists';
+import { channelOrThread, type AppState } from '../api/store';
 import { Avatar, dmName, request, useStore } from './shell';
 import { dismissReminder, dropMention, loadBookmarks, loadReminders, removeBookmarkOf, useMedia } from './store';
 
-/** "#general · Sam's server" / "Direct message with alice" for a message, from what the client knows. */
-export function useWhere(message: Pick<Message, 'channel_id' | 'guild_id'> | null): string {
-  const channel = useStore(s => (message ? s.channels[message.channel_id] : undefined));
-  const guildName = useStore(s => (message?.guild_id ? s.guilds[message.guild_id]?.name : undefined));
-  if (!message) return '';
+/** "#general · Sam's server" / "gateway docs, in #general · Sam's server" (a thread) / "Direct message with alice" for a message, from what the client knows. */
+export function whereText(s: Pick<AppState, 'channels' | 'threads' | 'guilds'>, message: Pick<Message, 'channel_id' | 'guild_id'>): string {
+  const channel = channelOrThread(s, message.channel_id);
   if (!channel) return message.guild_id ? 'A channel you can no longer see' : 'Direct message';
-  if (channel.guild_id) return `#${channel.name ?? 'channel'}${guildName ? ` · ${guildName}` : ''}`;
+  const guildName = message.guild_id ? s.guilds[message.guild_id]?.name : undefined;
+  const guild = guildName ? ` · ${guildName}` : '';
+  if (!s.channels[channel.id]) {
+    const parent = channel.parent_id ? s.channels[channel.parent_id] : undefined;
+    return `${channel.name ?? 'thread'}${parent ? `, in #${parent.name ?? 'channel'}` : ''}${guild}`;
+  }
+  if (channel.guild_id) return `#${channel.name ?? 'channel'}${guild}`;
   return `Direct message with ${dmName(channel)}`;
+}
+
+export function useWhere(message: Pick<Message, 'channel_id' | 'guild_id'> | null): string {
+  return useStore(s => (message ? whereText(s, message) : ''));
 }
 
 const nameOf = (m: Message): string => m.author.global_name || m.author.username;
 
-const whenFormat = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 function BookmarkRow({ message, onNavigate, onRemove }: { message: Message; onNavigate(): void; onRemove(): void }) {
   const where = useWhere(message);
@@ -72,7 +81,7 @@ export function ReminderList({ onNavigate }: { onNavigate(): void }) {
         <span className="inbox-row-text">
           <span className="inbox-row-name">{r.message ? nameOf(r.message) : 'Message no longer available'}</span>
           {r.message && <span className="media-inbox-snippet">{messageSnippet(r.message)}</span>}
-          <span className={`inbox-row-sub${due ? ' media-due' : ''}`}>{due ? 'Reminder is due' : `Reminds you ${whenFormat.format(new Date(r.remind_at))}`}</span>
+          <span className={`inbox-row-sub${due ? ' media-due' : ''}`}>{due ? 'Reminder is due' : `Reminds you ${formatDateTime(new Date(r.remind_at))}`}</span>
         </span>
       </button>
       <button type="button" className="media-icon-btn" aria-label={due ? 'Dismiss reminder' : 'Cancel reminder'} title={due ? 'Dismiss' : 'Cancel reminder'} onClick={() => void dismissReminder(r.id)}><X size={16} /></button>
@@ -99,7 +108,7 @@ function MentionRow({ message, showWhere, onNavigate, onRemove }: { message: Mes
       <button type="button" className="inbox-row-main" aria-label={`Jump to message by ${nameOf(message)}`} onClick={() => { onNavigate(); void jumpToMessage(message.channel_id, message.id, message.guild_id); }}>
         <span className="inbox-row-icon"><Avatar user={message.author} size={32} guildId={message.guild_id} /></span>
         <span className="inbox-row-text">
-          <span className="inbox-row-name">{nameOf(message)} <span className="inbox-row-sub">{whenFormat.format(new Date(message.timestamp))}</span></span>
+          <span className="inbox-row-name">{nameOf(message)} <span className="inbox-row-sub">{formatDateTime(new Date(message.timestamp))}</span></span>
           <span className="media-inbox-snippet">{messageSnippet(message)}</span>
         </span>
       </button>

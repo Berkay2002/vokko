@@ -10,7 +10,7 @@ import { emojiShortcodeLabel, frequentEmoji, quickReactions, useEmojiDb } from '
 import { messageStore } from './messageStore';
 import { isSystemMessage, type PendingMessage } from './messageState';
 import { toDisplay } from './mentionText';
-import { BottomSheet, isDeveloperMode, openModal, useLayer, useOutsideClose, usePhone } from './shell';
+import { BottomSheet, isDeveloperMode, messageLink, openModal, useLayer, useOutsideClose, usePhone } from './shell';
 import { comingSoon } from './toast';
 import { ReminderMenu } from '../media/ReminderMenu';
 import { openForward, toggleBookmark, useIsBookmarked } from '../media/store';
@@ -76,7 +76,8 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
   const isMine = message.author.id === chat.me.id;
   const system = isSystemMessage(message);
   const canEdit = isMine && !system && !pending && !message.poll && !isVoiceMessage(message) && message.message_reference?.type !== 1; // a forward has no text to edit
-  const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
+  // An AutoMod alert names the flagged member as its author; only moderators remove it.
+  const canDelete = !pending && ((isMine && message.type !== MessageType.AutoModerationAction) || chat.canManage) && message.type !== MessageType.RecipientAdd;
   const canPin = !pending && !system && (chat.isDm || chat.canManage);
   const bookmarked = useIsBookmarked(message.channel_id, message.id);
   const quick = useMemo(() => quickReactions().slice(0, 4), []);
@@ -123,7 +124,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     if (!pending) out.push({ id: 'mark-unread', label: 'Mark Unread', icon: <MailOpen size={ICON} />, onSelect: () => messageStore.markUnread(message.channel_id, message.id) });
     out.push({
       id: 'copy-link', label: 'Copy Message Link', icon: <Link2 size={ICON} />,
-      onSelect: () => void navigator.clipboard?.writeText(`${window.location.origin}/channels/${chat.guildId ?? '@me'}/${message.channel_id}/${message.id}`),
+      onSelect: () => void navigator.clipboard?.writeText(messageLink(chat.guildId, message.channel_id, message.id)),
     });
     if (message.content) {
       out.push({

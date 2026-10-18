@@ -311,11 +311,14 @@ pub async fn remove_temporary_memberships(state: &AppState, user_id: i64) -> Api
 async fn preview(State(state): State<AppState>, _caller: Option<AuthUser>, Path(code): Path<String>) -> ApiResult<Json<Invite>> {
     let row = live_row(&state, &code).await?;
     let member_count = store::member_count(&state, row.guild_id).await?;
-    let (online,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM guild_members m JOIN presences p ON p.user_id = m.user_id WHERE m.guild_id = $1 AND p.status <> 'offline'")
-            .bind(row.guild_id)
-            .fetch_one(&state.db)
-            .await?;
+    // members appearing offline in this guild are not counted (the viewer may be anonymous, so no per-viewer view)
+    let (online,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM guild_members m JOIN presences p ON p.user_id = m.user_id WHERE m.guild_id = $1 AND p.status <> 'offline' \
+         AND NOT EXISTS (SELECT 1 FROM guild_appear_offline h WHERE h.user_id = m.user_id AND h.guild_id = m.guild_id)",
+    )
+    .bind(row.guild_id)
+    .fetch_one(&state.db)
+    .await?;
     let inviter = store::users(&state, &[row.inviter_id]).await?.remove(&row.inviter_id);
     let mut invite = preview_of(&state, &row, member_count, inviter);
     invite.guild.presence_count = Some(online.max(0) as u32);

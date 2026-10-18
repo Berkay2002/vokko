@@ -12,11 +12,13 @@ use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::events;
 use crate::extract::{ApiJson, parse_id};
+use crate::media;
 use crate::routes::auth::clean_text;
 use crate::routes::forums;
 use crate::routes::guilds::channel_name;
 use crate::routes::overwrites;
 use crate::routes::threads as threads_routes;
+use crate::routes::users::{ImageKind, image_path_on};
 use crate::state::AppState;
 use crate::store;
 use crate::threads;
@@ -26,9 +28,6 @@ pub fn routes() -> Router<AppState> {
         .route("/channels/{id}", patch(update_channel).delete(delete_channel))
         .route("/channels/{id}/recipients/{user_id}", put(add_recipient).delete(remove_recipient))
 }
-
-/// A group DM holds at most this many people (Discord's cap).
-const GROUP_DM_MAX: i64 = 10;
 
 async fn group_access(state: &AppState, user_id: i64, id: &str) -> ApiResult<access::ChannelAccess> {
     let access = channel_access(state, user_id, channel_id(id)?).await?;
@@ -77,8 +76,9 @@ async fn add_recipient(State(state): State<AppState>, AuthUser(user_id): AuthUse
         return Err(ApiErr::missing_access());
     }
     let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM channel_recipients WHERE channel_id = $1").bind(channel_id).fetch_one(&mut *tx).await?;
-    if count >= GROUP_DM_MAX {
-        return Err(ApiErr::conflict(30004, &format!("Maximum number of group DM recipients reached ({GROUP_DM_MAX})")));
+    let max = state.config.group_dm_max;
+    if count >= max {
+        return Err(ApiErr::conflict(30004, &format!("Maximum number of group DM recipients reached ({max})")));
     }
     let added = sqlx::query("INSERT INTO channel_recipients (channel_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
         .bind(channel_id)
@@ -142,7 +142,7 @@ async fn leave_group(state: &AppState, row: &store::ChannelRow, target: i64) -> 
         }
     }
     state.hub.send(&[target], &GatewayEvent::ChannelDelete(channel));
-    Ok(())
+    crate::presence::announce_parted(state, target, &rest).await
 }
 
 /// Discord's slowmode ceiling: 6 hours.
@@ -164,6 +164,9 @@ async fn update_channel(
     let kind = access.channel.channel_type();
     if body.nsfw.is_some() && !matches!(kind, ChannelType::GuildText | ChannelType::GuildAnnouncement | ChannelType::GuildForum | ChannelType::GuildVoice) {
         return Err(ApiErr::invalid("nsfw", "Only text, announcement, forum and voice channels can be age-restricted."));
+    }
+    if body.icon_attachment_id.is_some() && kind != ChannelType::GroupDm {
+        return Err(ApiErr::missing_permissions());
     }
     if kind.is_thread() {
         return threads_routes::edit_thread(&state, user_id, access, body).await;
@@ -251,6 +254,18 @@ async fn update_channel(
     {
         return Err(ApiErr::invalid("parent_id", "Must be a category of this guild."));
     }
+    // Claimed like a guild icon, in the same transaction as the writes. ponytail: a replaced icon stays claimed (as guild icons do);
+    // release it like guild banners if leftover uploads ever matter.
+    if let Some(icon) = body.icon_attachment_id {
+        let path = match icon {
+            Some(upload) => {
+                media::lock_own_uploads(&mut tx, &[upload.db()], user_id).await?;
+                Some(image_path_on(&mut tx, upload.db(), user_id, ImageKind::Avatar, "icon_attachment_id", false).await?)
+            }
+            None => None,
+        };
+        sqlx::query("UPDATE channels SET icon_path = $2 WHERE id = $1").bind(id).bind(path).execute(&mut *tx).await?;
+    }
     if let Some(name) = name {
         sqlx::query("UPDATE channels SET name = $2 WHERE id = $1").bind(id).bind((!name.is_empty()).then_some(name)).execute(&mut *tx).await?;
     }
@@ -312,6 +327,13 @@ async fn delete_channel(
         // Closing a DM hides it for this user only; leaving a group DM removes the user.
         if access.channel.channel_type() == ChannelType::Dm {
             sqlx::query("UPDATE channel_recipients SET closed = TRUE WHERE channel_id = $1 AND user_id = $2").bind(id).bind(user_id).execute(&state.db).await?;
+            // a closed DM shares no presence any more
+            let peers: Vec<i64> = sqlx::query_scalar("SELECT user_id FROM channel_recipients WHERE channel_id = $1 AND user_id <> $2")
+                .bind(id)
+                .bind(user_id)
+                .fetch_all(&state.db)
+                .await?;
+            crate::presence::announce_parted(&state, user_id, &peers).await?;
         } else {
             leave_group(&state, &access.channel, user_id).await?;
             return Ok(Json(channel));

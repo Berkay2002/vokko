@@ -249,6 +249,56 @@ test('My Account: rows stay inside the window; Keybinds is left out like on Disc
   await shot(page, 'my-account-390');
 });
 
+test('channel permissions: the role list stacks above the permissions and every tri-state switch is on screen', async ({ page }) => {
+  await openStockTalk(page);
+  await page.getByRole('button', { name: 'Show Channels' }).tap();
+  await page.locator('a.channel-row[aria-current="page"]').getByRole('button', { name: 'Edit Channel' }).tap();
+  const dialog = page.getByRole('dialog', { name: /Channel Settings/ });
+  await dialog.getByRole('button', { name: 'Permissions', exact: true }).tap();
+  await dialog.getByRole('button', { name: 'Advanced Permissions' }).tap();
+  const targets = dialog.locator('.cs-targets');
+  const perms = dialog.locator('.cs-perms');
+  await expect(perms.locator('.cs-tri').first()).toBeVisible();
+  expect((await perms.boundingBox())!.y).toBeGreaterThan((await targets.boundingBox())!.y);
+  expect((await perms.boundingBox())!.width).toBeGreaterThan(300);
+  for (const t of await perms.locator('.cs-tri').all()) await inside(t);
+  for (const r of await perms.locator('.cs-perm-row').all()) await inside(r);
+  await shot(page, 'channel-permissions-390');
+});
+
+test('server settings Roles: the editor is full width with a Back to the list, its permission switches on screen', async ({ page }) => {
+  const dialog = await serverSettings(page, 'Roles');
+  await dialog.locator('.ss-role-row.ss-role-draggable').first().tap();
+  const editor = dialog.locator('.ss-roles-editor');
+  await expect(editor).toBeVisible();
+  expect((await editor.boundingBox())!.width).toBeGreaterThan(330);
+  await expect(dialog.locator('.ss-aside-row').first()).toBeHidden();
+  await inside(dialog.getByRole('button', { name: 'Back', exact: true }));
+  await editor.getByRole('tab', { name: 'Permissions' }).tap();
+  const rows = editor.getByRole('tabpanel').locator('.switch-row');
+  await expect(rows.first()).toBeVisible();
+  for (const r of (await rows.all()).slice(0, 12)) await inside(r);
+  for (const sw of await editor.locator('.switch').all()) await inside(sw);
+  await shot(page, 'role-editor-390');
+  await dialog.getByRole('button', { name: 'Back', exact: true }).tap();
+  await expect(dialog.locator('.ss-role-list')).toBeVisible();
+});
+
+test('Accessibility: the preview scrolls with the page, inline rows stack, sliders label only their ends', async ({ page }) => {
+  await home(page);
+  await page.getByRole('button', { name: 'User Settings' }).first().tap();
+  const settings = page.getByRole('dialog', { name: 'User Settings' });
+  await settings.getByRole('button', { name: 'Accessibility', exact: true }).tap();
+  await expect(settings.locator('.a11y-preview')).toBeVisible();
+  expect(await settings.locator('.a11y-sticky').evaluate(el => getComputedStyle(el).position)).toBe('static');
+  for (const l of await settings.locator('.a11y-field .field-label').all()) expect((await l.boundingBox())!.width).toBeGreaterThanOrEqual(120);
+  for (const el of await settings.locator('.a11y-field, .a11y-field-control, .ms').all()) await inside(el);
+  const slider = settings.locator('.ms').first();
+  await slider.scrollIntoViewIfNeeded();
+  expect(await slider.locator('.ms-label:visible').count()).toBeLessThanOrEqual(3);
+  await shot(page, 'accessibility-390');
+});
+
 // The same screens at desktop width: the phone rules must not leak (and the members dates stay on one line).
 test.describe('desktop 1440', () => {
   test.use({ viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
@@ -280,5 +330,28 @@ test.describe('desktop 1440', () => {
     await dialog.getByRole('button', { name: 'Invites', exact: true }).click();
     await expect(dialog.locator('.invite-table thead')).toBeVisible();
     await shot(page, 'server-settings-invites-1440');
+  });
+
+  test('channel permissions and the role editor keep their side-by-side panes', async ({ page }) => {
+    await page.goto('/channels/@me?as=sam&mockLatency=0');
+    await page.getByRole('link', { name: /^Sam's server/ }).click();
+    await page.locator('.chat-msg').first().waitFor();
+    await page.locator('a.channel-row[aria-current="page"]').hover();
+    await page.locator('a.channel-row[aria-current="page"]').getByRole('button', { name: 'Edit Channel' }).click();
+    const channel = page.getByRole('dialog', { name: /Channel Settings/ });
+    await channel.getByRole('button', { name: 'Permissions', exact: true }).click();
+    await channel.getByRole('button', { name: 'Advanced Permissions' }).click();
+    const targets = (await channel.locator('.cs-targets').boundingBox())!;
+    const perms = (await channel.locator('.cs-perms').boundingBox())!;
+    expect(perms.x).toBeGreaterThan(targets.x + targets.width - 1);
+    await shot(page, 'channel-permissions-1440');
+    await page.keyboard.press('Escape');
+    await page.locator('.guild-header-name-button').click();
+    await page.getByRole('menuitem', { name: 'Server Settings' }).click();
+    const server = page.getByRole('dialog', { name: /Server Settings/ });
+    await server.getByRole('button', { name: 'Roles', exact: true }).click();
+    await server.locator('.ss-role-row.ss-role-draggable').first().click();
+    await expect(server.locator('.ss-aside-row').first()).toBeVisible();
+    await shot(page, 'role-editor-1440');
   });
 });

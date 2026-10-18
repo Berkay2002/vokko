@@ -6,7 +6,8 @@ import { isDmRefused } from "../api/errors";
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
 import { compareIds } from "../api/snowflake";
-import { appStore, isChannelUnread, type AppState } from "../api/store";
+import { appStore, channelOrThread, isChannelUnread, joinedThreads, type AppState } from "../api/store";
+import { isThreadUnread } from "../threads/util";
 import { isDesktop } from "../desktop";
 import { ChannelType, GatewayOp, type Activity, type Channel, type Guild, type PermissionOverwrite, type PresenceStatus, type Snowflake } from "../api/types";
 import { isApplyRequired } from "./inviteView";
@@ -132,6 +133,17 @@ export async function addGroupRecipients(channelId: Snowflake, userIds: Snowflak
   for (const id of userIds) await request<void>("PUT", `/channels/${channelId}/recipients/${id}`);
 }
 
+/** The group owner removes someone (or anyone removes themselves, which is leaving). */
+export async function removeGroupRecipient(channelId: Snowflake, userId: Snowflake): Promise<void> {
+  await request<void>("DELETE", `/channels/${channelId}/recipients/${userId}`);
+}
+
+/** Renames a group DM and/or sets (an upload id) or clears (null) its icon. */
+export async function editGroup(channelId: Snowflake, body: { name?: string; icon_attachment_id?: Snowflake | null }): Promise<void> {
+  appStore.getState().upsertChannel(await request<Channel>("PATCH", `/channels/${channelId}`, body));
+}
+
+/** Closes a 1:1 DM; for a group DM this leaves the group (callers confirm first: "leaveGroup" modal). */
 export async function closeDirectMessage(channelId: Snowflake): Promise<void> {
   await request<Channel>("DELETE", `/channels/${channelId}`);
   appStore.getState().removeChannel(channelId);
@@ -140,7 +152,7 @@ export async function closeDirectMessage(channelId: Snowflake): Promise<void> {
 
 /** Mark a channel read up to its last message. */
 export async function markChannelRead(channelId: Snowflake): Promise<void> {
-  const channel = appStore.getState().channels[channelId];
+  const channel = channelOrThread(appStore.getState(), channelId);
   if (!channel?.last_message_id) return;
   await request<void>("POST", `/channels/${channelId}/messages/${channel.last_message_id}/ack`);
 }
@@ -157,7 +169,10 @@ export async function markGuildsRead(guildIds: readonly Snowflake[]): Promise<vo
     .filter(c => c.guild_id != null && wanted.has(c.guild_id) && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement || c.type === ChannelType.GuildVoice))
     .filter(c => c.last_message_id && isChannelUnread(state, c.id))
     .map(c => ({ channel_id: c.id, message_id: c.last_message_id as Snowflake }));
-  await markChannelsRead(ids);
+  const threads = joinedThreads(state)
+    .filter(t => t.guild_id != null && wanted.has(t.guild_id) && isThreadUnread(t, state.readStates[t.id]))
+    .map(t => ({ channel_id: t.id, message_id: t.last_message_id as Snowflake }));
+  await markChannelsRead([...ids, ...threads]);
 }
 
 /**

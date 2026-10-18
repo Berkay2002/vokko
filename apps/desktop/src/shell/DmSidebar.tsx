@@ -14,6 +14,7 @@ import { ActivityLine, useShownActivity } from "./ActivityLine";
 import { dmContextItems } from "./menus";
 import { openModal } from "./modalStore";
 import { channelSlots } from "./slots";
+import { GroupIcon } from "./GroupDm";
 
 const STATUS_LABEL: Record<PresenceStatus, string> = { online: "online", idle: "idle", dnd: "do not disturb", invisible: "offline", offline: "offline" };
 
@@ -61,7 +62,9 @@ function DmRow({ channel }: { channel: Channel }) {
         onContextMenu={e => menu.open(e, dmContextItems(channel, { anchor: e.currentTarget }))}
       >
         {!group && <Nameplate id={first?.nameplate} />}
-        {group || !first ? (
+        {group && channel.icon ? (
+          <GroupIcon channel={channel} size={32} />
+        ) : group || !first ? (
           <span className="dm-group-avatar">
             {recipients.slice(0, 2).map((r, i) => (
               <Avatar key={r.id} user={r} size={24} className={`dm-group-avatar-${i}`} />
@@ -89,8 +92,13 @@ function DmRow({ channel }: { channel: Channel }) {
         </span>
         {channelSlots.DmBadge && <channelSlots.DmBadge channelId={channel.id} />}
       </NavLink>
-      <Tooltip content="Close DM" side="top">
-        <button type="button" className="dm-close" aria-label="Close DM" onClick={() => void closeDirectMessage(channel.id)}>
+      <Tooltip content={group ? "Leave Group" : "Close DM"} side="top">
+        <button
+          type="button"
+          className="dm-close"
+          aria-label={group ? "Leave Group" : "Close DM"}
+          onClick={() => (group ? openModal({ type: "leaveGroup", channelId: channel.id }) : void closeDirectMessage(channel.id))}
+        >
           <X size={16} />
         </button>
       </Tooltip>

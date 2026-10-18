@@ -142,17 +142,8 @@
   color: var(--interactive-icon-default);
 }
 
-.details-people {
-  margin: 0;
-  padding: 8px 16px;
-  list-style: none;
-}
-
-.details-people li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 48px;
+.details-row.danger {
+  color: var(--text-danger);
 }
 
 /* the panels inside were sized for a side column or a popout: here they take the page width */

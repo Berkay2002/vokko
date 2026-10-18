@@ -10,7 +10,7 @@ export { request, uploadAttachment, resolveUrl, ApiRequestError } from '../api/r
 export { gateway } from '../api/gateway';
 export { displayName, roleColor, roleIcon, avatarUrl, dmName, guildIconUrl, guildInitials } from '../api/store';
 export { markGuildRead, joinGuildWithInvite, joinOrApply, copyText } from '../shell/actions';
-export { go, guildPath } from '../shell/nav';
+export { go, guildPath, messageLink, messagePathOf } from '../shell/nav';
 export { openModal, closeModal } from '../shell/modalStore';
 export { openProfile } from '../shell/profileStore';
 /** The user context menu's items, loaded on use: a static import of shell/menus from the chat area loops back into it. */
@@ -26,7 +26,19 @@ const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
 /** Puts a user into the shared store (the profile card only opens for users the store holds). */
 export function cacheUser(user: User): void { appStore.getState().cacheUsers([user]); }
 
+/** The signed-in user's id (null before the session is ready and after sign-out), and a listener for it changing. */
+export function currentUserId(): string | null { return appStore.getState().me?.id ?? null; }
+/** Runs `cb` when the session token is dropped (sign-out, or a rejected token), even if `me` never became known. */
+export function onSessionEnd(cb: () => void): void { appStore.subscribe((s, prev) => { if (prev.token && !s.token) cb(); }); }
+export function onUserChange(cb: (id: string | null) => void): void { appStore.subscribe((s, prev) => { if (s.me?.id !== prev.me?.id) cb(s.me?.id ?? null); }); }
+
 export function useMe(): User | null { return useStore(s => s.me); }
+
+/** Whether others may see `myId` typing: not while invisible, nor with "Show when I'm typing" (or Share my activity) off. */
+export function sharesTyping(myId: Snowflake): boolean {
+  const prefs = getPrefs();
+  return appStore.getState().presences[myId]?.status !== 'invisible' && prefs.shareActivity && prefs.shareTyping;
+}
 /** The startup cache is on screen and the gateway is not ready yet: nothing can be sent. */
 export function useStale(): boolean { return useStore(s => s.stale); }
 export function useChannel(channelId: Snowflake): Channel | undefined { return useStore(s => s.channels[channelId] ?? s.threads[channelId]); }

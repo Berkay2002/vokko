@@ -9,6 +9,8 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 COPY apps/desktop apps/desktop
 # The logo is imported from the repo-level brand folder.
 COPY assets/brand assets/brand
+# The AutoMod preset word lists, imported ?raw by the mock backend in the client bundle.
+COPY assets/automod assets/automod
 # Without this the bundle runs on the in-memory mock backend.
 ARG VITE_VOKKO_API
 RUN test -n "$VITE_VOKKO_API" || (echo "VITE_VOKKO_API is required" && exit 1)
