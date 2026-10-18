@@ -78,6 +78,9 @@ pub async fn publish(room: &Room, geo: &Geometry, d: &Desired, cfg: &Config) -> 
         100,
     );
     let local = room.local_participant();
+    // The SDK panics on an empty custom list when simulcast is on, so a source with no smaller layer publishes a single stream.
+    let layers: Vec<VideoPreset> =
+        plan::simulcast_layers(geo, d.bitrate, cfg.simulcast).into_iter().map(|(w, h, bitrate)| VideoPreset::new(w, h, bitrate, geo.fps)).collect();
     let video_track = LocalVideoTrack::create_video_track("Stremio", RtcVideoSource::Native(video.clone()));
     let video_pub = local
         .publish_track(
@@ -89,9 +92,9 @@ pub async fn publish(room: &Room, geo: &Geometry, d: &Desired, cfg: &Config) -> 
                     Codec::H264 => VideoCodec::H264,
                 },
                 video_encoding: Some(VideoEncoding { max_bitrate: u64::from(d.bitrate) * 1000, max_framerate: geo.fps }),
-                simulcast: cfg.simulcast,
+                simulcast: !layers.is_empty(),
                 // The SDK's screenshare defaults are a 3 fps low layer and dropping frames under load; a film wants full motion.
-                simulcast_layers: Some(vec![VideoPreset::new(geo.width / 4 * 2, geo.height / 4 * 2, u64::from(d.bitrate) * 1000 / 4, geo.fps)]),
+                simulcast_layers: Some(layers),
                 degradation_preference: Some(DegradationPreference::MaintainFramerate),
                 video_encoder: match cfg.encoder {
                     Encoder::Auto => VideoEncoderBackend::Auto,

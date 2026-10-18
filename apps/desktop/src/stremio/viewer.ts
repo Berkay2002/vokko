@@ -5,6 +5,7 @@
 import { ConnectionState, RemoteAudioTrack, Room, RoomEvent, Track, type RemoteTrack, type RemoteTrackPublication, type RemoteParticipant } from "livekit-client";
 import type { VideoHandle } from "../voice/mediaStore";
 import { isMockEndpoint } from "../voice/transport";
+import { applyPlayoutBuffer } from "./playout";
 import { receiveCue } from "./subtitles";
 import { parseVideoStats, type VideoStats } from "./viewerStats";
 
@@ -16,6 +17,8 @@ export interface ViewerCallbacks {
   video(handle: VideoHandle | null): void;
   /** The browser holds back sound until the user interacts with the page. */
   audioBlocked(blocked: boolean): void;
+  /** How far the picture now trails the bot's position (the playout buffer in ms), 0 when there is none; text cues are shifted by it. */
+  playoutDelay(ms: number): void;
 }
 
 export interface Viewer {
@@ -36,7 +39,7 @@ class LiveKitViewer implements Viewer {
   private videoTrack: RemoteTrack | null = null;
   private elements: HTMLMediaElement[] = [];
 
-  constructor(private readonly cb: ViewerCallbacks) {}
+  constructor(private readonly cb: ViewerCallbacks, private readonly buffered: boolean) {}
 
   async connect(url: string, token: string, botIdentity: string): Promise<void> {
     const mine = (participant: RemoteParticipant) => participant.identity === botIdentity;
@@ -45,10 +48,12 @@ class LiveKitViewer implements Viewer {
         if (!mine(participant)) return;
         if (track.kind === Track.Kind.Video && pub.source === Track.Source.ScreenShare) {
           this.videoTrack = track;
+          this.cb.playoutDelay(this.buffer(track.receiver));
           this.cb.video({ attach: el => void track.attach(el), detach: el => void track.detach(el) });
         } else if (track.kind === Track.Kind.Audio && pub.source === Track.Source.ScreenShareAudio && track instanceof RemoteAudioTrack) {
           this.audio = track;
           track.setVolume(this.volume);
+          this.buffer(track.receiver);
           const el = track.attach();
           el.hidden = true;
           document.body.append(el);
@@ -60,6 +65,7 @@ class LiveKitViewer implements Viewer {
         if (track.kind === Track.Kind.Video) {
           track.detach();
           if (track === this.videoTrack) this.videoTrack = null;
+          this.cb.playoutDelay(0);
           this.cb.video(null);
         } else if (track === this.audio) {
           this.dropAudio();
@@ -91,8 +97,14 @@ class LiveKitViewer implements Viewer {
 
   disconnect(): void {
     this.dropAudio();
+    this.cb.playoutDelay(0);
     this.cb.video(null);
     void this.room.disconnect();
+  }
+
+  /** The delay in ms now applied to the track's receiver; 0 for a Room that plays music, or where the browser cannot buffer. */
+  private buffer(receiver: object | undefined): number {
+    return this.buffered ? applyPlayoutBuffer(receiver) : 0;
   }
 
   private dropAudio(): void {
@@ -146,4 +158,5 @@ export class FakeViewer implements Viewer {
   }
 }
 
-export const createViewer = (url: string, cb: ViewerCallbacks): Viewer => (isMockEndpoint(url) ? new FakeViewer(cb) : new LiveKitViewer(cb));
+/** `buffered`: hold the picture and sound back (a film). Music in the same Room keeps its low latency. */
+export const createViewer = (url: string, cb: ViewerCallbacks, buffered = false): Viewer => (isMockEndpoint(url) ? new FakeViewer(cb) : new LiveKitViewer(cb, buffered));

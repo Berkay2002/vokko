@@ -13,9 +13,11 @@ export interface ViewerSlot {
   room: RoomState;
   video: VideoHandle | null;
   blocked: boolean;
+  /** The playout buffer in ms the picture trails the bot by; 0 when there is none. */
+  delayMs: number;
 }
 
-export const IDLE_SLOT: ViewerSlot = { room: "connecting", video: null, blocked: false };
+export const IDLE_SLOT: ViewerSlot = { room: "connecting", video: null, blocked: false, delayMs: 0 };
 
 const VOLUME_KEY = "vokko.stremio.volume";
 
@@ -78,7 +80,7 @@ export function syncViewer(target: { channelId: Snowflake; bot: string; kind: Me
   const publish = (patch: Partial<ViewerSlot>) => {
     if (active === mine) useViewerStore.setState(s => ({ channelId: target.channelId, slot: { ...(s.channelId === target.channelId ? s.slot : IDLE_SLOT), ...patch } }));
   };
-  mine.connection = new ViewerConnection(target.channelId, target.bot, target.kind, output, { room: room => publish({ room }), video: video => publish({ video }), blocked: blocked => publish({ blocked }) });
+  mine.connection = new ViewerConnection(target.channelId, target.bot, target.kind, output, { room: room => publish({ room }), video: video => publish({ video }), blocked: blocked => publish({ blocked }), delay: delayMs => publish({ delayMs }) });
 }
 
 export function setViewerOutput(volume: number): void {
