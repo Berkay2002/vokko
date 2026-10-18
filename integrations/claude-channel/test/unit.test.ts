@@ -22,7 +22,7 @@ function makeBot(access: object = {}): { bot: VokkoBot; logs: string[]; dir: str
   const dir = mkdtempSync(join(tmpdir(), 'vokko-unit-'))
   writeFileSync(join(dir, 'access.json'), JSON.stringify({ dmPolicy: 'pairing', allowFrom: [OWNER], groups: { [GROUP]: { requireMention: false, allowFrom: [FRIEND] } }, pending: {}, ...access }))
   const logs: string[] = []
-  const cfg: Config = { stateDir: dir, token: 'SECRET', apiUrl: 'http://vokko.test', gatewayUrl: 'ws://vokko.test/gateway', botName: 'Claude', pairCommand: '/vokko:access pair', staticMode: false, log: l => void logs.push(l) }
+  const cfg: Config = { stateDir: dir, token: 'SECRET', apiUrl: 'http://vokko.test', gatewayUrl: 'ws://vokko.test/gateway', botName: 'Claude', pairCommand: '/vokko:access pair', role: 'channel', staticMode: false, log: l => void logs.push(l) }
   const bot = new VokkoBot(cfg, () => {})
   bot.me = { id: ME, username: 'claude', global_name: 'Claude', bot: true }
   const cache = (ch: object) => (bot as any).cacheChannel(ch)

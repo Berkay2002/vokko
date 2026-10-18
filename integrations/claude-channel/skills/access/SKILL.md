@@ -125,6 +125,13 @@ Validate types:
 
 Read, set the key, write, confirm.
 
+### `dm-backend <subscription|api>`
+
+Shorthand for `set dmBackend <value>`. `api` hands DMs (pairing included) to
+the vokko-ai-bridge running on the same bot token (`integrations/ai-bridge`);
+`subscription` brings them back to this session. The owner can also send
+`!backend api|subscription` to the bot in a DM.
+
 ---
 
 ## Implementation notes
