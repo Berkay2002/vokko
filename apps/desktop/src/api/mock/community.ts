@@ -137,7 +137,9 @@ function checkEntity(guildId: string, viewerId: string, r: Resolved, checkChanne
     if (!r.channel_id && requireChannelPick) invalid("channel_id", "Voice events need a voice channel.");
     if (checkChannel && r.channel_id) {
       const channel = db.channels.get(r.channel_id);
-      if (!channel || channel.guild_id !== guildId || channel.type !== ChannelType.GuildVoice) invalid("channel_id", "Must be a voice channel of this guild.");
+      const stage = r.entity_type === ScheduledEventEntityType.StageInstance;
+      if (!channel || channel.guild_id !== guildId || channel.type !== (stage ? ChannelType.GuildStage : ChannelType.GuildVoice))
+        invalid("channel_id", stage ? "Must be a stage channel of this guild." : "Must be a voice channel of this guild.");
       requireChannel(channel!.id, viewerId);
       if (!hasBit(channelPermsOf(channel!, viewerId), Perm.CONNECT)) fail(403, 50013, "Missing Permissions");
     }
