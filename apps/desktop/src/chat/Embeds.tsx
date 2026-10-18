@@ -5,6 +5,7 @@ import { AnimatedImage, AnimatedVideo, guildIconUrl, guildInitials, joinOrApply,
 import { useChat } from './ChatContext';
 import { Markdown } from './markdown';
 import { embedColor, findInviteCodes, isVideoUrl, safeHttpUrl } from './embedUtil';
+import { playerSrc } from './embedPlayers';
 import { formatFullDate } from './util';
 import { API_ORIGIN } from '../api/config';
 
@@ -93,6 +94,29 @@ function Media({ url, alt, className }: { url: string | null; alt: string; class
   return <AnimatedImage kind="gif" className={className} src={resolveUrl(url)} alt={alt} loading="lazy" draggable={false} />;
 }
 
+/** A video page's poster. Allow-listed players swap it for their iframe on click (never before); anything else opens the link. */
+function VideoPoster({ href, player, poster, title, open }: {
+  href: string; player: string | null; poster: string | null; title?: string; open: (e: React.MouseEvent, href: string) => void;
+}) {
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  if (player && size) {
+    return <iframe className="chat-embed-player" src={player} title={title ?? 'Embedded video'} style={size}
+      sandbox="allow-scripts allow-same-origin allow-presentation" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+      referrerPolicy="strict-origin-when-cross-origin" allowFullScreen />;
+  }
+  const click = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!player) { open(e, href); return; }
+    e.preventDefault();
+    // The poster's own box; without a poster image, a 16:9 box as wide as the embed.
+    const box = (e.currentTarget.querySelector('.chat-embed-image') ?? e.currentTarget).getBoundingClientRect();
+    setSize(box.height >= 90 ? { width: box.width, height: box.height } : { width: box.width, height: Math.round(box.width * 9 / 16) });
+  };
+  return <a className="chat-embed-poster" href={href} onClick={click} aria-label={player ? 'Play video' : 'Open video'}>
+    {poster && <Media className="chat-embed-image" url={poster} alt="" />}
+    <span className="chat-embed-play"><Play size={28} /></span>
+  </a>;
+}
+
 function EmbedCard({ embed }: { embed: Embed }) {
   const chat = useChat();
   const color = embedColor(embed.color);
@@ -143,15 +167,12 @@ function EmbedCard({ embed }: { embed: Embed }) {
           </div>)}
         </div>}
       </div>
-      {thumb && !image && hasText && <Media className="chat-embed-thumb" url={thumb} alt="" />}
+      {thumb && !image && hasText && !showVideoPoster && <Media className="chat-embed-thumb" url={thumb} alt="" />}
     </div>
     {inlineVideo && (embed.type === 'gifv'
       ? <AnimatedVideo className="chat-embed-video" src={resolveUrl(videoUrl)} poster={image ?? thumb ?? undefined} loop muted playsInline />
       : <video className="chat-embed-video" src={resolveUrl(videoUrl)} poster={image ?? thumb ?? undefined} controls preload="metadata" playsInline />)}
-    {showVideoPoster && <a className="chat-embed-poster" href={link ?? videoUrl} onClick={e => open(e, link ?? videoUrl)} aria-label="Open video">
-      {(image ?? thumb) && <Media className="chat-embed-image" url={image ?? thumb} alt="" />}
-      <span className="chat-embed-play"><Play size={28} /></span>
-    </a>}
+    {showVideoPoster && <VideoPoster href={link ?? videoUrl} player={playerSrc(videoUrl, inlineMedia)} poster={image ?? thumb} title={embed.title} open={open} />}
     {!inlineVideo && !showVideoPoster && image && <Media className="chat-embed-image" url={image} alt={embed.title ?? ''} />}
     {(embed.footer || embed.timestamp) && <div className="chat-embed-footer">
       {footerIcon && <Media className="chat-embed-footer-icon" url={footerIcon} alt="" />}
