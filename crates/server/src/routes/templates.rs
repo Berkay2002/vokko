@@ -1,17 +1,17 @@
 //! Guild templates (Discord's): one per guild, a snapshot of settings, roles and channels that anyone with the code can make a new guild from.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::routing::{get, put};
-use vokko_protocol::api::permissions::MANAGE_GUILD;
+use vokko_protocol::api::permissions::{MANAGE_GUILD, VIEW_CHANNEL};
 use vokko_protocol::api::{
     ChannelType, CreateGuildRequest, CreateTemplateRequest, DefaultMessageNotifications, ExplicitContentFilter, Guild, GuildTemplate, OverwriteType, Snowflake,
     TemplateChannel, TemplateGuild, TemplateOverwrite, TemplateRole, UpdateTemplateRequest, VerificationLevel,
 };
 
-use crate::access::guild_access;
+use crate::access::{guild_access, guild_channels_with_permissions};
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, parse_id};
@@ -86,10 +86,14 @@ fn parse_source(raw: &str) -> ApiResult<TemplateGuild> {
     })
 }
 
-/// `is_dirty` is only worked out for managers: anyone else holding the code would get a live view of whether the guild changed.
-async fn to_api(state: &AppState, row: TemplateRow, with_dirty: bool) -> ApiResult<GuildTemplate> {
+/// `is_dirty` is only worked out for managers (`dirty_for`, compared with the guild as that manager sees it): anyone else holding the
+/// code would get a live view of whether the guild changed.
+async fn to_api(state: &AppState, row: TemplateRow, dirty_for: Option<i64>) -> ApiResult<GuildTemplate> {
     let source = parse_source(&row.source)?;
-    let is_dirty = if with_dirty { Some(snapshot(state, row.guild_id).await? != source) } else { None };
+    let is_dirty = match dirty_for {
+        Some(viewer) => Some(snapshot(state, row.guild_id, viewer).await? != source),
+        None => None,
+    };
     let creator = store::users(state, &[row.creator_id]).await?.remove(&row.creator_id);
     Ok(GuildTemplate {
         is_dirty,
@@ -140,8 +144,9 @@ struct ChannelSnap {
     parent_id: Option<i64>,
 }
 
-/// The guild as a template sees it now. Deterministic (same guild state, same value), so `is_dirty` is a plain comparison.
-async fn snapshot(state: &AppState, guild_id: i64) -> ApiResult<TemplateGuild> {
+/// The guild as a template made by `viewer` sees it now: only channels they can view (a category also when it holds one of those),
+/// since anyone with the code can read the snapshot. Deterministic (same guild state, same value), so `is_dirty` is a plain comparison.
+async fn snapshot(state: &AppState, guild_id: i64, viewer: i64) -> ApiResult<TemplateGuild> {
     let guild: GuildSettings =
         sqlx::query_as("SELECT name, verification_level, default_message_notifications, explicit_content_filter, system_channel_id FROM guilds WHERE id = $1")
             .bind(guild_id)
@@ -156,7 +161,7 @@ async fn snapshot(state: &AppState, guild_id: i64) -> ApiResult<TemplateGuild> {
     .fetch_all(&state.db)
     .await?;
     // Categories first, so a guild made from the template inserts every parent before its children.
-    let channels: Vec<ChannelSnap> = sqlx::query_as(
+    let mut channels: Vec<ChannelSnap> = sqlx::query_as(
         "SELECT id, kind, name, position, topic, bitrate, user_limit, nsfw, rate_limit_per_user, parent_id FROM channels \
          WHERE guild_id = $1 AND kind = ANY($2) ORDER BY (kind <> 4), position, id",
     )
@@ -164,6 +169,14 @@ async fn snapshot(state: &AppState, guild_id: i64) -> ApiResult<TemplateGuild> {
     .bind(&TEMPLATE_KINDS[..])
     .fetch_all(&state.db)
     .await?;
+    let visible: HashSet<i64> = guild_channels_with_permissions(state, viewer, guild_id)
+        .await?
+        .into_iter()
+        .filter(|(_, permissions)| permissions & VIEW_CHANNEL != 0)
+        .map(|(row, _)| row.id)
+        .collect();
+    let holding: HashSet<i64> = channels.iter().filter(|channel| visible.contains(&channel.id)).filter_map(|channel| channel.parent_id).collect();
+    channels.retain(|channel| visible.contains(&channel.id) || (channel.kind == 4 && holding.contains(&channel.id)));
     let overwrites: Vec<(i64, i64, i64, i64)> = sqlx::query_as(
         "SELECT o.channel_id, o.target_id, o.allow, o.deny FROM permission_overwrites o JOIN channels c ON c.id = o.channel_id \
          WHERE c.guild_id = $1 AND o.target_type = 0",
@@ -237,7 +250,7 @@ async fn list(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(i
         sqlx::query_as(&format!("SELECT {TEMPLATE_COLS} FROM guild_templates WHERE guild_id = $1")).bind(guild_id).fetch_all(&state.db).await?;
     let mut out = Vec::with_capacity(rows.len());
     for row in rows {
-        out.push(to_api(&state, row, true).await?);
+        out.push(to_api(&state, row, Some(user_id)).await?);
     }
     Ok(Json(out))
 }
@@ -252,7 +265,7 @@ async fn create(
     guild_access(&state, user_id, guild_id).await?.require(MANAGE_GUILD)?;
     let name = template_name(&body.name)?;
     let description = clean_text(body.description, DESCRIPTION_MAX, "description")?;
-    let source = source_json(&snapshot(&state, guild_id).await?)?;
+    let source = source_json(&snapshot(&state, guild_id, user_id).await?)?;
     // Twelve characters like Discord's template codes.
     let code = format!("{}{}", invite_code(), &invite_code()[..4]);
     let inserted = sqlx::query(
@@ -270,15 +283,15 @@ async fn create(
     if inserted.rows_affected() == 0 {
         return Err(ApiErr::conflict(30031, "A server template already exists for this server."));
     }
-    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, true).await?))
+    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, Some(user_id)).await?))
 }
 
 /// `PUT`: replaces the snapshot with the guild as it is now.
 async fn sync(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, code)): Path<(String, String)>) -> ApiResult<Json<GuildTemplate>> {
     let row = managed_row(&state, user_id, &id, &code).await?;
-    let source = source_json(&snapshot(&state, row.guild_id).await?)?;
+    let source = source_json(&snapshot(&state, row.guild_id, user_id).await?)?;
     sqlx::query("UPDATE guild_templates SET source = $2, updated_at = now() WHERE code = $1").bind(&code).bind(&source).execute(&state.db).await?;
-    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, true).await?))
+    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, Some(user_id)).await?))
 }
 
 async fn update(
@@ -294,19 +307,19 @@ async fn update(
         Some(text) => clean_text(text, DESCRIPTION_MAX, "description")?,
     };
     sqlx::query("UPDATE guild_templates SET name = $2, description = $3 WHERE code = $1").bind(&code).bind(&name).bind(&description).execute(&state.db).await?;
-    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, true).await?))
+    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, Some(user_id)).await?))
 }
 
 async fn remove(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, code)): Path<(String, String)>) -> ApiResult<Json<GuildTemplate>> {
     let row = managed_row(&state, user_id, &id, &code).await?;
-    let template = to_api(&state, row, true).await?;
+    let template = to_api(&state, row, Some(user_id)).await?;
     sqlx::query("DELETE FROM guild_templates WHERE code = $1").bind(&code).execute(&state.db).await?;
     Ok(Json(template))
 }
 
 /// Any signed-in user with the code may look at a template (the landing page and the Create Your Server modal).
 async fn preview(State(state): State<AppState>, _user: AuthUser, Path(code): Path<String>) -> ApiResult<Json<GuildTemplate>> {
-    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, false).await?))
+    Ok(Json(to_api(&state, row_by_code(&state, &code).await?, None).await?))
 }
 
 /// Discord's "Create Guild from Guild Template": a new guild owned by the caller, built from the stored snapshot (not the live source guild).

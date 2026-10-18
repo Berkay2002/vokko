@@ -279,7 +279,9 @@ export function AppShell() {
       <TitleBar />
       <StaleChunkBanner />
       <VerifyEmailNotice />
-      <div className="app-body">
+      {/* Phone list page: the chat behind it is hidden, so the rail and list are the page's main content and need its h1. */}
+      <div className="app-body" role={narrow && navOpen ? "main" : undefined} aria-label={narrow && navOpen ? (guild?.name ?? "Direct Messages") : undefined}>
+        {narrow && navOpen && <h1 className="sr-only">{guild?.name ?? "Direct Messages"}</h1>}
         <Rail />
         {/* Discord's names for the list column; it holds the user panel too. */}
         <nav className="sidebar" aria-label={guild ? `${guild.name} (server)` : "Private channels"} onClick={leaveListOnSameRoute}>

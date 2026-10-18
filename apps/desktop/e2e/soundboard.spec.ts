@@ -24,7 +24,7 @@ const effects = async (page: Page) => (await plays(page)).filter(p => p.kind ===
 async function joinGeneral(page: Page): Promise<void> {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.getByRole('link', { name: /^Sam's server/ }).click();
-  await page.getByRole('list', { name: 'Channels' }).waitFor();
+  await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
   await page.getByRole('button', { name: 'General voice channel' }).click();
   await expect(card(page).getByRole('status')).toHaveText('Voice Connected');
 }

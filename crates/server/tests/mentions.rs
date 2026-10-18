@@ -2,9 +2,15 @@
 //! Inbox > Mentions: GET /users/@me/mentions (filters, paging, permission filtering) and DELETE /users/@me/mentions/{id}.
 mod common;
 
+use std::time::Duration;
+
 use axum::http::StatusCode;
 use common::TestApp;
+use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
+use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 const VIEW_CHANNEL: u64 = 1 << 10;
 
@@ -73,4 +79,53 @@ async fn lists_direct_role_and_everyone_mentions_newest_first() {
     }
     let (status, _) = app.get("/users/@me/mentions", "bad-token").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+async fn identify(address: &str, token: &str) -> Ws {
+    let (mut ws, _) = connect_async(format!("ws://{address}/gateway")).await.expect("websocket connects");
+    ws.send(Message::Text(json!({"op": 2, "d": {"token": token}}).to_string().into())).await.expect("identify");
+    next_named(&mut ws, "READY", common::WAIT).await.expect("READY");
+    ws
+}
+
+/// The data of the next dispatch named `name` within `window`, skipping others.
+async fn next_named(ws: &mut Ws, name: &str, window: Duration) -> Option<Value> {
+    let deadline = tokio::time::Instant::now() + window;
+    while let Ok(Some(Ok(message))) = tokio::time::timeout_at(deadline, ws.next()).await {
+        if let Message::Text(text) = message {
+            let frame: Value = serde_json::from_str(&text).expect("json");
+            if frame["op"] == 0 && frame["t"] == name {
+                return Some(frame["d"].clone());
+            }
+        }
+    }
+    None
+}
+
+#[tokio::test]
+async fn dismissing_tells_the_users_other_sessions() {
+    let app = TestApp::new().await;
+    let (owner, _) = app.register("sam").await;
+    let (member, member_user) = app.register("alice").await;
+    let member_id = member_user["id"].as_str().expect("id").to_owned();
+    let (_, general) = app.guild_with_channel(&owner).await;
+    let (_, invite) = app.post(&format!("/channels/{general}/invites"), &owner, json!({})).await;
+    app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &member, json!({})).await;
+    let mention = say(&app, &owner, &general, &format!("hi <@{member_id}>")).await;
+
+    let address = app.serve().await;
+    let mut other_device = identify(&address, &member).await;
+    let mut owner_ws = identify(&address, &owner).await;
+    let (status, _) = app.delete(&format!("/users/@me/mentions/{mention}"), &member).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let event = next_named(&mut other_device, "RECENT_MENTION_DELETE", common::WAIT).await.expect("event");
+    assert_eq!(event, json!({"message_id": mention}));
+    assert!(next_named(&mut owner_ws, "RECENT_MENTION_DELETE", Duration::from_millis(300)).await.is_none(), "only the dismisser hears it");
+
+    // Unknown ids are echoed the same way, so the event is no existence oracle.
+    app.delete("/users/@me/mentions/999", &member).await;
+    let event = next_named(&mut other_device, "RECENT_MENTION_DELETE", common::WAIT).await.expect("event");
+    assert_eq!(event, json!({"message_id": "999"}));
 }

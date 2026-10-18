@@ -65,7 +65,7 @@ async function joinAsMember(page: Page): Promise<string> {
   await page.route(/^https:\/\/(i\.scdn\.co|images\.metahub\.space)\//, route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#456"/></svg>' }));
   await page.goto('/channels/@me?as=carol&mockLatency=0');
   await page.getByRole('link', { name: /^Sam's server/ }).click();
-  await page.getByRole('list', { name: 'Channels' }).waitFor();
+  await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
   const general = await page.evaluate(() => (window as unknown as MockWin).__vokkoMock.channelIdByName('General') ?? '');
   const guildId = await page.evaluate(id => (window as unknown as StoreWin).__vokko.appStore.getState().channels[id]!.guild_id!, general);
   const everyone = await page.evaluate(id => (window as unknown as StoreWin).__vokko.appStore.getState().guilds[id]!.roles.find(r => r.id === id)!, guildId);

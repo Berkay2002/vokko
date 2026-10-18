@@ -344,9 +344,11 @@ route("GET", "/users/@me/mentions", ({ viewer, query }) => {
 });
 
 route("DELETE", `/users/@me/mentions/${ID}`, ({ viewer, params }) => {
+  const id = params[0] ?? "";
   const set = db.mentionDismissals.get(viewer.user.id) ?? new Set<string>();
-  set.add(params[0] ?? "");
+  set.add(id);
   db.mentionDismissals.set(viewer.user.id, set);
+  emit([viewer.user.id], "RECENT_MENTION_DELETE", { message_id: id });
   return undefined;
 });
 

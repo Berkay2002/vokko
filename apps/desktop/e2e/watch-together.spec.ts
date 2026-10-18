@@ -46,7 +46,7 @@ async function openGuild(page: Page): Promise<void> {
   await page.route('**/youtube-embed.html', route => route.fulfill({ contentType: 'text/html', body: FAKE_PLAYER }));
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.getByRole('link', { name: /^Sam's server/ }).click();
-  await page.getByRole('list', { name: 'Channels' }).waitFor();
+  await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
   await page.locator('.sidebar-scroller').evaluate(el => { el.scrollTop = el.scrollHeight; });
 }
 
