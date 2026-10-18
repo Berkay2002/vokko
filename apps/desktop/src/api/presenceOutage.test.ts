@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BANNER_GRACE_MS } from "./connection";
-import { appStore, applyConnection } from "./store";
+import { appStore, applyConnection, BANNER_GRACE_MS } from "./store";
 import type { Presence, User } from "./types";
 
 const presence = (user_id: string, status: Presence["status"] = "online"): Presence => ({ user_id, status, custom_status: null, activities: [] });

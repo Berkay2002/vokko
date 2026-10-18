@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { BellRing, Check, Download, Wrench, WifiOff, X } from "lucide-react";
-import { BANNER_GRACE_MS, useConnectionState, useCountdown, type ConnectionState } from "../api/connection";
+import { useConnectionState, useCountdown, type ConnectionState } from "../api/connection";
 import { gateway } from "../api/gateway";
-import { useStore } from "../api/store";
+import { BANNER_GRACE_MS, useStore } from "../api/store";
 import { restartToUpdate, useDesktopUpdate } from "../desktop";
 import { setPref, usePrefs } from "../ui/prefs";
 import { ConnectionStatusModal } from "./ConnectionStatus";

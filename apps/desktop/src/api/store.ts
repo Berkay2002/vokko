@@ -5,7 +5,6 @@
 import { useRef, useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { shallow } from "zustand/shallow";
-import { BANNER_GRACE_MS } from "./connection";
 import { gateway, type GatewayStatus } from "./gateway";
 import { setMaxUploadBytes } from "./limits";
 import { go, guildPath } from "../shell/nav";
@@ -342,6 +341,9 @@ async function refreshPrivateChannels(): Promise<void> {
     /* next READY will fix it */
   }
 }
+
+/** The connection banner waits this long before appearing, and others' presences stay shown, so a quick resume never flashes either. */
+export const BANNER_GRACE_MS = 1500;
 
 // Others' presence is unknown while the gateway is down: shown as offline until RESUMED brings the kept map back
 // (under anything replayed) or READY replaces it. Like the banner, this waits BANNER_GRACE_MS, so a blip that resumes
