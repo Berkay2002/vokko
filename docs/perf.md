@@ -164,3 +164,29 @@ had not been written yet) and 5 with it.
 - FCP moves for the same reason: the first paint is now the full channel, not the Splash.
 - The old path also renders Home on the way to the server, so it ends with about 65 MB more WebView2 memory.
 - On a slower link the gain grows with the round trip, because the cached path does not wait for the network at all.
+
+## Channel open, frame by frame (perf-3)
+
+`npx playwright test -c e2e/perf.config.ts channel-open` (`e2e/channel-open.perf.bench.ts`): after every painted frame from the click
+on a channel link, it checks whether the newest message sits at the bottom of the list. It reports frames and ms to the first correct
+frame, frames that showed rows in the wrong place, and whether the bottom held for the next 30 frames. Channels with 6 messages, 40
+(one page) and `#firehose`; cold = first open, warm = median of 9 reopens.
+
+The revert in 7146388e (back to `initialTopMostItemIndex`) was not a list bug: the system-messages spec right-clicked the third
+rendered row, which sits above the viewport, so Playwright scrolled the list up. On main a late height change pulled it back down. With
+`initialScrollTop` the layout was already settled, so the scroll stuck. The spec now right-clicks a row that is on screen. A new test in
+messages.spec checks that the list stays at the bottom after a dialog opens and closes.
+
+What changed in `MessageList`: it opens with `initialScrollTop` again, `skipAnimationFrameInResizeObserver` (rows are measured in the
+ResizeObserver callback, not a frame later; the "ResizeObserver loop" errors it logs are benign and the crash reporter ignores them), and
+the scroller mounts with `.settling` (hidden) until the newest row ends inside the viewport (checked after layout and once per frame,
+at most 10 frames). That hides the one frame of rows placed from estimated heights.
+
+| home server M4, loaded machine; main / branch / main run back to back | main | branch |
+|---|---|---|
+| 6 messages, reopen | 5 frames, 69-71 ms | 2 frames, 24 ms |
+| 40 messages, reopen | 5 frames, 72 ms | 3-4 frames, 34-44 ms |
+| #firehose, reopen | 5 frames, 70-72 ms | 3-4 frames, 39-42 ms |
+| First open (all three) | 7-8 frames, 100-136 ms | 4-6 frames, 65-83 ms |
+| Frames with rows in the wrong place | 0 | 0 |
+| #firehose: newest row stays put for 30 frames after opening | 4-5 of 9 reopens | 9 of 9 |

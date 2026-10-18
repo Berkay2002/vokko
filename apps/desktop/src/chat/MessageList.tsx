@@ -108,6 +108,39 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
 
   useEffect(() => { stick.current = true; setSeenBottom(false); setAtBottom(true); }, [channelId]);
 
+  // Opening at the bottom, the first frame with rows can place them from estimated heights (newest row below the fold) before the
+  // measured layout lands a frame later. The scroller mounts with .settling (hidden) and shows once the newest row ends inside the
+  // viewport, at most 10 frames. The class is removed on the element, so it stays fixed for the mount. No unmount cleanup: StrictMode's
+  // effect replay would cancel the check and leave the list hidden; the check stops by itself.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const settling = useMemo(() => !state.focus, [channelId, state.windowId]);
+  const unsettle = useRef<() => void>(() => {});
+  const settle = useCallback((el: HTMLElement) => {
+    unsettle.current();
+    let frames = 0;
+    let raf = 0;
+    const done = () => { cancelAnimationFrame(raf); ro.disconnect(); el.classList.remove('settling'); };
+    const ok = () => {
+      const items = el.querySelectorAll('[data-index]');
+      const last = items[items.length - 1];
+      // data-index counts from the window's first row, not from firstItemIndex.
+      return !!last && Number(last.getAttribute('data-index')) === rowsRef.current.length - 1 && last.getBoundingClientRect().bottom <= el.getBoundingClientRect().bottom + 1;
+    };
+    // Checked after layout (ResizeObserver, before paint) and once per frame as the fallback that gives up after 10.
+    const ro = new ResizeObserver(() => { if (ok()) done(); });
+    for (const box of [el.firstElementChild, el.querySelector('[data-testid="virtuoso-item-list"]')]) if (box) ro.observe(box, { box: 'border-box' }); // the list moves rows with padding
+    const tick = () => { if (ok() || frames++ >= 10) done(); else raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick);
+    unsettle.current = () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, []);
+  // Virtuoso calls this with null and the node again whenever the callback changes, hence stable, and settle once per node.
+  const settled = useRef<HTMLElement | null>(null);
+  const scrollerRef = useCallback((el: HTMLElement | Window | null) => {
+    const node = el instanceof HTMLElement ? el : null;
+    if (node && node !== settled.current && node.classList.contains('settling')) { settled.current = node; settle(node); }
+    scroller.current = node;
+  }, [settle]);
+
   // Screen readers hear messages from others that arrive in the open channel. Not role=log on the list: Virtuoso mounts and unmounts
   // rows while scrolling, and a log would read each of them out again.
   const lastSeen = useRef<string | null>(null);
@@ -161,21 +194,23 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     <Virtuoso<Row, { hasMoreBefore: boolean; hasMoreAfter: boolean; loading: boolean }>
       key={`${channelId}:${state.windowId}`}
       ref={virtuoso}
-      className="chat-scroller"
+      className={settling ? 'chat-scroller settling' : 'chat-scroller'}
       aria-label={`Messages in ${chat.channel?.name ? `#${chat.channel.name}` : 'this conversation'}`}
       data={rows}
       context={{ hasMoreBefore: state.hasMoreBefore, hasMoreAfter: state.hasMoreAfter, loading: state.loadingOlder || state.loadingNewer }}
       firstItemIndex={state.firstItemIndex}
-      // Not initialScrollTop: 1e9 (fbf7286a, ~2 frames sooner): the list then lost the bottom on the next layout change (a pin dialog
-      // opening left it "viewing older messages" and hid the new pin row, system-messages.spec).
-      initialTopMostItemIndex={{ index: initialIndex, align: state.focus ? 'center' : 'end' }}
+      // Opening at the bottom: initialScrollTop (clamped to the end) paints 2 frames sooner than initialTopMostItemIndex, which waits 4
+      // frames before its first scroll. Measuring in the ResizeObserver callback itself (no extra rAF) saves another frame; its
+      // "ResizeObserver loop" errors are benign and the crash reporter ignores them.
+      {...(state.focus ? { initialTopMostItemIndex: { index: initialIndex, align: 'center' as const } } : { initialScrollTop: 1e9 })}
+      skipAnimationFrameInResizeObserver
       alignToBottom
       defaultItemHeight={56}
       increaseViewportBy={{ top: 600, bottom: 400 }}
       atBottomThreshold={160}
       atBottomStateChange={onBottom}
       onScroll={e => { const el = e.currentTarget; setFarFromBottom(el.scrollHeight - el.scrollTop - el.clientHeight > el.clientHeight); }}
-      scrollerRef={el => { scroller.current = el instanceof HTMLElement ? el : null; }}
+      scrollerRef={scrollerRef}
       totalListHeightChanged={() => {
         if (!stick.current || state.hasMoreAfter) return;
         // Item sizes are measured after layout, so scroll again once the new height has settled.
