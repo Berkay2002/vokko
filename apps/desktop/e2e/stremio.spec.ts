@@ -273,11 +273,27 @@ test('the Stremio bars and the call bar fade out while the mouse is idle and com
   await expect(call(page)).not.toHaveAttribute('data-idle', '');
   await shown('1');
 
-  // Over a bar they stay; paused they stay.
-  await tile.locator('.stremio-bar').hover();
+  // Over a bar they stay, also when the pointer was already there as playback (re)started: Pause, Play, and the mouse stays put.
+  await tile.getByRole('button', { name: 'Pause', exact: true }).click();
+  await expect(tile).toHaveAttribute('data-playing', 'false');
+  await tile.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(tile).toHaveAttribute('data-playing', 'true');
   await page.waitForTimeout(3600);
   await expect(call(page)).not.toHaveAttribute('data-idle', '');
+  await shown('1');
+
+  // An open picker keeps them (the Up next panel), and they go again once it is closed and the mouse is away.
+  await tile.getByRole('button', { name: /^Up next/ }).click();
+  await expect(tile.locator('.stremio-queue')).toBeVisible();
   await page.mouse.move(600, 300);
+  await page.waitForTimeout(3600);
+  await expect(call(page)).not.toHaveAttribute('data-idle', '');
+  await tile.getByRole('button', { name: /^Up next/ }).click();
+  await page.mouse.move(610, 300);
+  await expect(call(page)).toHaveAttribute('data-idle', '', { timeout: 6000 });
+  await page.mouse.move(600, 300);
+
+  // Paused they stay.
   await as(page, 'alice', 'PATCH', path, { playing: false });
   await expect(tile).toHaveAttribute('data-playing', 'false');
   await page.waitForTimeout(3600);

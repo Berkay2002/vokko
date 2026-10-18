@@ -11,7 +11,10 @@ export const IDLE_HIDE_MS = 3000;
 
 /** The bars: the pointer over one, or keyboard focus inside one, keeps everything shown. */
 const BARS = ".stremio-bar, .stremio-notice, .voice-bar, .dm-call-bar";
-const OPEN_IN_BARS = BARS.split(", ").map(b => `${b} [aria-expanded="true"]`).join(", ");
+const inBars = (suffix: string) => BARS.split(", ").map(b => b + suffix).join(", ");
+const OPEN_IN_BARS = inBars(' [aria-expanded="true"]');
+/** A pointer that was already resting on a bar when the picture started playing never moved, so it is asked for. */
+const HOVERED_BARS = inBars(":hover");
 
 interface IdleHideOptions {
   /** True for a target inside a bar. */
@@ -57,6 +60,7 @@ export function bindIdleHide(stage: EventTarget, { isBar, held, set, ms = IDLE_H
   stage.addEventListener("pointerenter", move);
   stage.addEventListener("pointerleave", leave);
   stage.addEventListener("keydown", wake);
+  stage.addEventListener("focusin", wake);
   arm();
   return () => {
     clearTimeout(timer);
@@ -65,6 +69,7 @@ export function bindIdleHide(stage: EventTarget, { isBar, held, set, ms = IDLE_H
     stage.removeEventListener("pointerenter", move);
     stage.removeEventListener("pointerleave", leave);
     stage.removeEventListener("keydown", wake);
+    stage.removeEventListener("focusin", wake);
     set(false);
   };
 }
@@ -90,7 +95,7 @@ export function useIdleHide(stage: RefObject<HTMLElement | null>, channelId: Sno
     if (!el || !active) return;
     return bindIdleHide(el, {
       isBar: t => t instanceof Element && !!t.closest(BARS),
-      held: () => hasOpenLayer() || !!el.querySelector(`.stremio-queue, [role="menu"], ${OPEN_IN_BARS}`) || !!document.querySelector('[role="dialog"], [role="menu"]') || focusInBar(el),
+      held: () => hasOpenLayer() || !!el.querySelector(HOVERED_BARS) || !!el.querySelector(`.stremio-queue, [role="menu"], ${OPEN_IN_BARS}`) || !!document.querySelector('[role="dialog"], [role="menu"]') || focusInBar(el),
       set: idle => el.toggleAttribute("data-idle", idle),
     });
   }, [stage, active]);

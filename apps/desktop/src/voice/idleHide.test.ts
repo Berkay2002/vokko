@@ -33,6 +33,9 @@ describe("call stage auto-hide", () => {
     expect(state.idle).toBe(false);
     wait(IDLE_HIDE_MS - 1);
     expect(state.idle).toBe(false);
+    wait(1);
+    fire("focusin");
+    expect(state.idle).toBe(false);
   });
 
   it("a pointermove at the same position does not count as movement", () => {
