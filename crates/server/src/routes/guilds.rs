@@ -176,14 +176,14 @@ async fn update_guild(
             return Err(ApiErr::invalid("public_updates_channel_id", "Must be a text channel of this guild."));
         }
     }
-    // Only COMMUNITY is client-toggled; the list says whether it is on.
+    // Only COMMUNITY is client-toggled; the list says whether it is on. The server's own VOKKO_SPOTIFY may be sent back unchanged.
     let community = match &body.features {
         None => before.features.iter().any(|f| f == "COMMUNITY"),
         Some(list) => {
-            if list.iter().any(|f| f != "COMMUNITY") {
+            if list.iter().any(|f| f != "COMMUNITY" && f != crate::spotify::FEATURE) {
                 return Err(ApiErr::invalid("features", "Only COMMUNITY can be changed."));
             }
-            !list.is_empty()
+            list.iter().any(|f| f == "COMMUNITY")
         }
     };
     // Like Discord: a Community needs rules and updates channels, a verification level of at least low and the content filter on for everyone.

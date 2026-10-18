@@ -450,6 +450,7 @@ pub async fn announce_new_member(state: &AppState, guild_id: i64, user_id: i64) 
         state.hub.send(&others, &GatewayEvent::GuildMemberAdd(GuildMemberAdd { member, guild_id: Snowflake::from(guild_id) }));
     }
     presence::announce_join(state, guild_id, user_id).await?;
+    crate::spotify::membership_changed(state, guild_id, user_id).await;
     if let Err(error) = post_join_message(state, guild_id, user_id).await {
         tracing::warn!("join message failed: {error:?}");
     }

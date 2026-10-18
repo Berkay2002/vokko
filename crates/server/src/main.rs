@@ -41,6 +41,7 @@ async fn serve(state: AppState) -> Result<(), String> {
     vokko_server::desktop_version::spawn(state.clone());
     vokko_server::voice::spawn_tasks(state.clone());
     vokko_server::voice::stremio::spawn_tasks(state.clone());
+    vokko_server::spotify::check_owner(&state).await;
     vokko_server::voice::spotify::spawn_tasks(state.clone());
     vokko_server::threads::spawn_sweeper(state.clone());
     vokko_server::apps::spawn_sweeper(state.clone());

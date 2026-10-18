@@ -147,6 +147,9 @@ pub struct SpotifyConfig {
     pub bot_media_url: String,
     /// The house account's country (`VOKKO_SPOTIFY_MARKET`), so catalog results are playable for it.
     pub market: String,
+    /// The Vokko user whose Spotify account the house account is (`VOKKO_SPOTIFY_OWNER_ID`): Spotify plays only in their guilds
+    /// and in DM calls they are in. `None` = nowhere (fail closed).
+    pub owner_id: Option<i64>,
     /// A session paused this long stops (`VOKKO_SPOTIFY_IDLE_MIN`).
     pub pause_timeout: Duration,
     /// Spotify's Web API and token endpoints (tests point them at a mock).
@@ -186,6 +189,7 @@ impl SpotifyConfig {
             media_api_key,
             media_api_secret: crate::crypto::Secret::new(media_api_secret),
             market: "SE".to_owned(),
+            owner_id: None,
             pause_timeout: Duration::from_secs(15 * 60),
             api_url: "https://api.spotify.com".to_owned(),
             accounts_url: "https://accounts.spotify.com".to_owned(),
@@ -237,6 +241,10 @@ pub fn parse_spotify(env: &DotEnv) -> Result<Option<SpotifyConfig>, String> {
             return Err(format!("VOKKO_SPOTIFY_MARKET must be a two-letter country code, got {market}"));
         }
         config.market = market;
+    }
+    if let Some(value) = env.get("VOKKO_SPOTIFY_OWNER_ID").filter(|value| !value.trim().is_empty()) {
+        let id = value.trim().parse::<i64>().ok().filter(|id| *id > 0);
+        config.owner_id = Some(id.ok_or_else(|| format!("VOKKO_SPOTIFY_OWNER_ID must be a Vokko user id, got {value}"))?);
     }
     if let Some(value) = env.get("VOKKO_SPOTIFY_IDLE_MIN").filter(|value| !value.trim().is_empty()) {
         let minutes: u64 = value
@@ -861,6 +869,8 @@ mod tests {
         assert_eq!(with(("VOKKO_SPOTIFY_MARKET", "de")).expect("valid").expect("on").market, "DE");
         assert!(with(("VOKKO_SPOTIFY_MARKET", "SWE")).is_err());
         assert!(with(("VOKKO_SPOTIFY_IDLE_MIN", "0")).is_err());
+        assert_eq!(with(("VOKKO_SPOTIFY_OWNER_ID", " 42 ")).expect("valid").expect("on").owner_id, Some(42));
+        assert!(with(("VOKKO_SPOTIFY_OWNER_ID", "sam")).is_err() && with(("VOKKO_SPOTIFY_OWNER_ID", "-1")).is_err());
         assert_eq!(with(("VOKKO_SPOTIFY_IDLE_MIN", "3")).expect("valid").expect("on").pause_timeout, std::time::Duration::from_secs(180));
         let mut short = all.to_vec();
         short[3] = ("VOKKO_SPOTIFY_BOT_SECRET", "short");

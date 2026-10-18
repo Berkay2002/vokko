@@ -10,9 +10,11 @@ import { BUILTIN_PREFIX } from "../games/builtin";
 import { GameIcon, useGameActivities } from "../games";
 import { openModal } from "../shell/modalStore";
 import { openSpotifyPanel, SpotifyIcon } from "../spotify";
+import { spotifyAvailable } from "../spotify/availability";
 import { openStremioPanel, StremioIcon } from "../stremio";
 import { Modal, usePhone } from "../ui";
 import { filterActivities, loadRecent, orderRecent, pushRecent, saveRecent, type Searchable } from "./activityPicker";
+import { useChannelVoiceStates } from "./store";
 
 /** Built-in games and pinned activities with cover art in public/activities/<slug>.webp (Vokko's own, made with Codex image generation). */
 const ART = new Set(["watch-together", "sketch", "chess", "four-in-a-row", "codewords", "telephone", "trivia", "whos-the-spy", "same-wave", "crazy-eights", "werewolf", "betrayal", "shellshockers", "smashkarts", "skribbl", "codenames", "krunker"]);
@@ -127,6 +129,9 @@ function gridKey(e: KeyboardEvent<HTMLElement>) {
 export function ActivityShelf({ channel, open, onClose, onWatchTogether, onGame }: { channel: Channel; open: boolean; onClose: () => void; onWatchTogether: () => void; onGame?: () => void }) {
   const games = useGameActivities(channel);
   const userId = useStore(s => s.me?.id ?? null);
+  const features = useStore(s => (channel.guild_id ? s.guilds?.[channel.guild_id]?.features : undefined));
+  const inCall = useChannelVoiceStates(channel.id);
+  const spotify = spotifyAvailable({ dm: !channel.guild_id, features, inCall: inCall.map(v => v.user_id) });
   // A phone or a touch screen would pop up the soft keyboard for the search box, so the dialog takes focus instead.
   const touch = usePhone() || (typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches);
   const [query, setQuery] = useState("");
@@ -143,7 +148,7 @@ export function ActivityShelf({ channel, open, onClose, onWatchTogether, onGame 
   const items: Item[] = [
     { id: "watch-together", name: "Watch Together", description: "YouTube in sync", sub: "Everyone in the call", pinned: true, art: <Cover id="watch-together" hue={0}><MonitorPlay size={40} /></Cover>, onSelect: onWatchTogether },
     { id: "stremio", name: "Stremio", description: "Movies and episodes", sub: "Everyone in the call", pinned: true, art: <Cover id="stremio" hue={265}><StremioIcon size={44} /></Cover>, onSelect: openStremioPanel },
-    { id: "spotify", name: "Spotify", description: "Music for everyone", sub: "Everyone in the call", pinned: true, art: <Cover id="spotify" hue={140}><SpotifyIcon size={44} /></Cover>, onSelect: openSpotifyPanel },
+    ...(spotify ? [{ id: "spotify", name: "Spotify", description: "Music for everyone", sub: "Everyone in the call", pinned: true, art: <Cover id="spotify" hue={140}><SpotifyIcon size={44} /></Cover>, onSelect: openSpotifyPanel }] : []),
     ...games.map(({ game, sub, current, disabled, onSelect }): Item => ({
       id: game.id,
       name: game.name,

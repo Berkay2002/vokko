@@ -257,6 +257,7 @@ pub async fn announce_removal(state: &AppState, guild_id: i64, user_id: i64, rem
         state.hub.send(&remaining, &GatewayEvent::GuildRoleDelete(GuildRoleDelete { guild_id: Snowflake::from(guild_id), role_id: Snowflake::from(role_id) }));
     }
     crate::presence::announce_leave(state, guild_id, user_id).await?;
+    crate::spotify::membership_changed(state, guild_id, user_id).await;
     Ok(())
 }
 

@@ -7,6 +7,7 @@ import { create } from "zustand";
 import { shallow } from "zustand/shallow";
 import { gateway, type GatewayStatus } from "./gateway";
 import { setMaxUploadBytes } from "./limits";
+import { setSpotifyOwner } from "../spotify/availability";
 import { go, guildPath } from "../shell/nav";
 import { channelPermissions, hasBit, Perm } from "./permissions";
 import { listActiveThreads, request, resolveUrl } from "./rest";
@@ -389,7 +390,7 @@ export function wireStoreToGateway(): void {
   wired = true;
   const s = () => appStore.getState();
   gateway.onStatus(applyConnection);
-  gateway.on("READY", ready => { setMaxUploadBytes(ready.max_upload_bytes); s().applyReady(ready); });
+  gateway.on("READY", ready => { setMaxUploadBytes(ready.max_upload_bytes); setSpotifyOwner(ready.spotify_owner_id); s().applyReady(ready); });
   gateway.on("MESSAGE_CREATE", onMessageCreate);
   // Also how a read on another device reaches this one (and its Dock badge). Like the server, the mention counter only
   // resets once the ack has caught up with the newest message: a stale ack must not hide a mention that arrived after it.
