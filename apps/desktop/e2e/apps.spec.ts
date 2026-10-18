@@ -261,6 +261,10 @@ test('server integrations: create a webhook, post through it, remove the bot', a
   await page.getByRole('menuitem', { name: 'Server Settings' }).click();
   await page.getByRole('button', { name: 'Integrations', exact: true }).click();
   await expect(page.getByRole('list', { name: 'Bots' })).toContainText('Echo');
+  await expect(page.getByRole('list', { name: 'Bots' })).toContainText('Who can talk to Echo: members with Use Application Commands');
+  await page.getByRole('list', { name: 'Bots' }).getByRole('button', { name: 'Roles' }).click(); // the line links to Roles
+  await expect(page.getByRole('heading', { name: 'Roles', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Integrations', exact: true }).click();
   await page.getByRole('button', { name: 'New Webhook' }).click();
   const hooks = page.getByRole('list', { name: 'Webhooks' });
   await expect(hooks).toContainText('New Webhook');

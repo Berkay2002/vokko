@@ -76,6 +76,9 @@
 .apps-card-head.static { cursor: default; }
 .apps-card-title { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
 .apps-card-name { font-weight: 600; color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apps-card-access { margin: 0; padding: 0 16px 12px 60px; font-size: 12px; line-height: 16px; color: var(--text-muted); }
+.apps-link { padding: 0; border: 0; background: none; font: inherit; color: var(--text-link); cursor: pointer; }
+.apps-link:hover { text-decoration: underline; }
 .apps-card-sub { font-size: 13px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .apps-card-body { padding: 0 16px 16px; border-top: 1px solid var(--border-subtle); padding-top: 16px; }
 .apps-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }

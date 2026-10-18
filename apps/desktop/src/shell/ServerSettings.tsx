@@ -316,7 +316,7 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
       case "reports":
         return <ReportsPage guild={guild} />;
       case "integrations":
-        return <IntegrationsPage guild={guild} canManageGuild={canManage} canManageWebhooks={owner || perms.can(Perm.MANAGE_WEBHOOKS)} />;
+        return <IntegrationsPage guild={guild} canManageGuild={canManage} canManageWebhooks={owner || perms.can(Perm.MANAGE_WEBHOOKS)} onOpenRoles={visibleSections.some(s => s.id === "roles") ? () => !blockedByUnsaved() && setCurrent("roles") : undefined} />;
       case "emoji":
         return <EmojiSettingsPage guildId={guildId} canEdit={owner || perms.can(Perm.MANAGE_GUILD_EXPRESSIONS)} channels={channels} />;
       case "stickers":

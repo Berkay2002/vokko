@@ -89,7 +89,7 @@ export type Limits = {
 
 export type BotLike = Pick<
   VokkoBot,
-  'cfg' | 'me' | 'connected' | 'ownerId' | 'admit' | 'reply' | 'send' | 'dmUser' | 'typing' | 'react' | 'loadAccess' | 'saveAccess' | 'members' | 'memberPermissions' | 'api' | 'gateKey' | 'isOwnerCommand'
+  'cfg' | 'me' | 'connected' | 'ownerId' | 'admit' | 'reply' | 'send' | 'dmUser' | 'typing' | 'react' | 'loadAccess' | 'saveAccess' | 'members' | 'memberPermissions' | 'api' | 'policyFor' | 'isOwnerCommand'
 >
 
 const SNOWFLAKE = /^\d{1,20}$/
@@ -712,7 +712,7 @@ export class Bridge {
     const access = this.bot.loadAccess()
     // Same ownership, opt-in and per-channel allowFrom as the gate, minus requireMention.
     if (!ownsGuilds(this.bot.cfg.role, access)) return false
-    const policy = access.groups[this.bot.gateKey(msg.channel_id)]
+    const policy = this.bot.policyFor(access, msg.channel_id)
     if (!policy) return false
     if (policy.allowFrom?.length && !policy.allowFrom.includes(msg.author.id)) return false
     // Each check below costs API calls: a flood of `!pause` is dropped first.

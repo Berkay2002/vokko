@@ -55,7 +55,7 @@ session) answers server messages whenever the bridge cannot, and hands them back
   per-user rate limit, the per-reply cap and errors meant for the chat (`UserFacingError`) are guards and stay as they are
   (a paused or flooding user never reaches your subscription either). DMs are unaffected.
 - A passed-on message is a file `handoff/<message id>` in the state dir. The plugin claims it by renaming it, fetches the
-  message by id and runs it through its normal gate (opt-in, requireMention, per-channel allowFrom), so it is answered
+  message by id and runs it through its normal gate (channel policy, requireMention, per-channel allowFrom, Use Application Commands), so it is answered
   once, then writes `<id>.accepted` or `<id>.declined` for the bridge. If no session claims it within 5 s, or the plugin
   declines it (gate, failed fetch, older than 60 s), the sender gets the old error message. At most 30 messages an hour,
   across all servers, are passed on; the rest get the old message too.
@@ -110,7 +110,7 @@ Sent by you (the bot application's owner) to the bot in a DM:
 - `!pair <code>`: approve a pairing code.
 - `!pause @user <minutes>`, `!unpause @user`, `!pauses`: pause someone everywhere, lift it, list pauses.
 
-Server moderators (Moderate Members) may use `!pause` / `!unpause` in an opted-in channel of their own server. A
+Server moderators (Moderate Members) may use `!pause` / `!unpause` in a channel the bridge answers in (every channel the bot can see, see the plugin's ACCESS.md). A
 moderator who is timed out has no Moderate Members. Anyone else gets 10 `!` commands per 10 minutes.
 
 A `!pause` is only lifted by `!unpause`, never through the model.

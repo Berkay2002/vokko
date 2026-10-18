@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { MODERATE_MEMBERS, OWNER_COMMAND_RE, VokkoBot, bridgeState, type Access, type Message, type Role as BotRole } from '../../claude-channel/vokko.ts'
+import { MODERATE_MEMBERS, OWNER_COMMAND_RE, SEND_MESSAGES, USE_APPLICATION_COMMANDS, VIEW_CHANNEL, VokkoBot, bridgeState, type Access, type Message, type Role as BotRole } from '../../claude-channel/vokko.ts'
 import { BackendError, Bridge, COOLDOWN_MS, HANDOFFS_PER_HOUR, SESSION_MAX_TURNS, UserFacingError, childEnv, failureClass, parseUserId, type Answer, type Backend, type BotLike, type TurnContext } from '../core.ts'
 import { PauseStore, decide, type PauseRequest } from '../pauses.ts'
 import { claudeApiBackend } from '../claude-api.ts'
@@ -15,6 +15,7 @@ const EVE = '500'
 const OUTSIDER = '600'
 const GUILD = '900'
 const GENERAL = '901'
+const OTHER = '902'
 const DM_NAT = '801'
 const DM_OWNER = '802'
 
@@ -71,7 +72,7 @@ function world(role: BotRole = 'bridge-shared') {
       if (/\/users\/(100|300|400|500|600)$/.test(path)) return {}
       throw new Error('404')
     },
-    gateKey: (id: string) => id,
+    policyFor: (a: Access, id: string) => a.groups[id] ?? null,
     isOwnerCommand: (m: Message) => m.guild_id == null && m.author.id === OWNER && OWNER_COMMAND_RE.test(m.content),
   }
   return { bot, sent, dms, stateDir, access: () => access, setAccess: (a: Access) => void (access = a) }
@@ -193,9 +194,11 @@ describe('PauseStore', () => {
 
 // ---- the real gate: which process owns which message ----
 
+type Server = { roles?: { id: string; permissions: string }[]; overwrites?: object[]; memberRoles?: Record<string, string[]> }
+
 describe('VokkoBot gate per role', () => {
   /** `beat`: when the bridge last wrote its heartbeat; 'stopped': it stopped cleanly; 'dead': its pid is gone; null: no bridge has run. */
-  function gateBot(role: BotRole, access: Partial<Access>, beat: number | 'stopped' | 'dead' | null = null) {
+  function gateBot(role: BotRole, access: Partial<Access>, beat: number | 'stopped' | 'dead' | null = null, server: Server = {}) {
     const stateDir = mkdtempSync(join(tmpdir(), 'vokko-gate-'))
     if (beat != null) {
       const state = beat === 'stopped' ? { stoppedAt: Date.now() } : beat === 'dead' ? { at: Date.now(), pid: 99_999_999 } : { at: beat, pid: process.pid }
@@ -204,9 +207,20 @@ describe('VokkoBot gate per role', () => {
     writeFileSync(join(stateDir, 'access.json'), JSON.stringify({ dmPolicy: 'allowlist', allowFrom: [OWNER, NAT], groups: { [GENERAL]: { requireMention: false, allowFrom: [] } }, pending: {}, ...access }))
     const bot = new VokkoBot({ stateDir, token: 't', apiUrl: 'http://x', gatewayUrl: '', botName: 'Claude', pairCommand: '/vokko:access pair', role, staticMode: false, log: () => {} }, () => {})
     Object.defineProperty(bot, 'ownerId', { value: OWNER })
+    bot.me = { id: BOT, username: 'claude', global_name: null }
+    seedGuild(bot, server)
     return bot
   }
-  const verdict = async (role: BotRole, access: Partial<Access>, m: Message, beat: number | 'stopped' | 'dead' | null = Date.now()) => (await gateBot(role, access, beat).gate(m)).action
+  /** What the server says about GUILD and its channels: @everyone may use apps unless `everyone` says otherwise. */
+  function seedGuild(bot: VokkoBot, access: Server) {
+    const b = bot as any
+    b.cacheChannel({ id: GENERAL, type: 0, guild_id: GUILD, permission_overwrites: access.overwrites ?? [] })
+    b.cacheChannel({ id: OTHER, type: 0, guild_id: GUILD, permission_overwrites: access.overwrites ?? [] })
+    const everyone = { id: GUILD, permissions: String(VIEW_CHANNEL | SEND_MESSAGES | USE_APPLICATION_COMMANDS) }
+    const members = [OWNER, BOT, MOD, NAT, EVE, OUTSIDER].map(id => ({ user: { id, username: `u${id}`, global_name: null }, roles: access.memberRoles?.[id] ?? [] }))
+    b.guildState.set(GUILD, { at: Date.now() + 3_600_000, guild: { id: GUILD, owner_id: '1', roles: access.roles ?? [everyone] }, members })
+  }
+  const verdict = async (role: BotRole, access: Partial<Access>, m: Message, beat: number | 'stopped' | 'dead' | null = Date.now(), server: Server = {}) => (await gateBot(role, access, beat, server).gate(m)).action
 
   test('DMs: the plugin unless dmBackend is api, a shared bridge only then, a standalone bridge always', async () => {
     const dm = msg(NAT, 'hi')
@@ -234,6 +248,63 @@ describe('VokkoBot gate per role', () => {
     expect(await verdict('channel', { guilds: false, groups: {} }, g, 'stopped')).toBe('drop') // opt-in still applies
     expect(await verdict('bridge-shared', { guilds: false }, g, 'stopped')).toBe('deliver') // the bridge itself never doubts it is alive
     expect(await verdict('channel', { guilds: false, dmBackend: 'api' }, msg(NAT, 'hi'), 'stopped')).toBe('drop') // DMs are unaffected
+  })
+  describe('who may talk to Claude in a server channel', () => {
+    const ask = (author: string, where: { channel?: string } = {}, extra: Partial<Message> = {}) => ({ ...msg(author, 'hi', { guild: GUILD, ...where }), mentions: [{ id: BOT, username: 'claude', global_name: null }], ...extra })
+    const NONE = String(VIEW_CHANNEL | SEND_MESSAGES) // @everyone without Use Application Commands
+    const noApps = [{ id: GUILD, permissions: NONE }]
+    const ow = (id: string, type: number, allow: bigint, deny: bigint) => ({ id, type, allow: String(allow), deny: String(deny) })
+    const v = (m: Message, groups: Access['groups'], server: Server = {}) => verdict('bridge', { groups }, m, Date.now(), server)
+
+    test('no groups entry: every channel it can see answers a mention from a member with the bit, and nothing else', async () => {
+      expect(await v(ask(EVE, { channel: OTHER }), {})).toBe('deliver')
+      expect(await v({ ...ask(EVE, { channel: OTHER }), mentions: [] }, {})).toBe('drop') // still only when mentioned
+      expect(await v(ask(EVE, { channel: '999' }), {})).toBe('drop') // a channel it has not seen
+    })
+    test('a member without Use Application Commands is ignored; the owner always may', async () => {
+      expect(await v(ask(EVE, { channel: OTHER }), {}, { roles: noApps })).toBe('drop')
+      expect(await v(ask(OWNER, { channel: OTHER }), {}, { roles: noApps })).toBe('deliver')
+      expect(await v(ask(EVE, { channel: OTHER }), {}, { roles: noApps, memberRoles: { [EVE]: ['7'] } })).toBe('drop') // an unknown role adds nothing
+      expect(await v(ask(EVE, { channel: OTHER }), {}, { roles: [...noApps, { id: '7', permissions: String(USE_APPLICATION_COMMANDS) }], memberRoles: { [EVE]: ['7'] } })).toBe('deliver') // a role grants it
+      expect(await v(ask(NAT, { channel: OTHER }), {}, { roles: [...noApps, { id: '7', permissions: String(USE_APPLICATION_COMMANDS) }], memberRoles: { [EVE]: ['7'] } })).toBe('drop') // others do not get it
+      expect(await v(ask(OUTSIDER, { channel: OTHER }), {}, { roles: noApps.map(r => ({ ...r, permissions: String(1n << 3n) })), memberRoles: {} })).toBe('deliver') // ADMINISTRATOR is every bit (@everyone here)
+    })
+    test('a channel overwrite denying the bit silences the channel; an allow for a role opens it again', async () => {
+      const deny = [ow(GUILD, 0, 0n, USE_APPLICATION_COMMANDS)]
+      expect(await v(ask(EVE, { channel: OTHER }), {}, { overwrites: deny })).toBe('drop')
+      expect(await v(ask(OWNER, { channel: OTHER }), {}, { overwrites: deny })).toBe('deliver')
+      const roleAllow = [...deny, ow('7', 0, USE_APPLICATION_COMMANDS, 0n)]
+      expect(await v(ask(EVE, { channel: OTHER }), {}, { overwrites: roleAllow, memberRoles: { [EVE]: ['7'] } })).toBe('deliver')
+      expect(await v(ask(NAT, { channel: OTHER }), {}, { overwrites: roleAllow, memberRoles: { [EVE]: ['7'] } })).toBe('drop')
+      expect(await v(ask(EVE, { channel: OTHER }), {}, { overwrites: [...roleAllow, ow(EVE, 1, 0n, USE_APPLICATION_COMMANDS)], memberRoles: { [EVE]: ['7'] } })).toBe('drop') // the member overwrite wins
+    })
+    test('a groups entry overrides requireMention and allowFrom, but not the permission', async () => {
+      const open = { [OTHER]: { requireMention: false, allowFrom: [] } }
+      expect(await v({ ...ask(EVE, { channel: OTHER }), mentions: [] }, open)).toBe('deliver')
+      expect(await v({ ...ask(EVE, { channel: OTHER }), mentions: [] }, open, { roles: noApps })).toBe('drop')
+      const only = { [OTHER]: { requireMention: false, allowFrom: [EVE] } }
+      expect(await v(ask(NAT, { channel: OTHER }), only)).toBe('drop')
+      expect(await v(ask(EVE, { channel: OTHER }), only)).toBe('deliver')
+    })
+    test('a default channel needs the bot to be able to write; a hidden channel (CHANNEL_DELETE) and a thread of a voice channel are out', async () => {
+      const readOnly = [ow(GUILD, 0, 0n, SEND_MESSAGES)]
+      expect(await v(ask(EVE, { channel: OTHER }), {}, { overwrites: readOnly })).toBe('drop')
+      expect(await v(ask(EVE, { channel: OTHER }), { [OTHER]: { requireMention: true, allowFrom: [] } }, { overwrites: readOnly })).toBe('deliver') // opted in by hand
+      const bot = gateBot('bridge', { groups: {} })
+      bot.me = { id: BOT, username: 'claude', global_name: null }
+      expect((await bot.gate(ask(EVE, { channel: OTHER }))).action).toBe('deliver')
+      ;(bot as any).dispatch('CHANNEL_DELETE', { id: OTHER })
+      expect((await bot.gate(ask(EVE, { channel: OTHER }))).action).toBe('drop')
+      ;(bot as any).cacheChannel({ id: '950', type: 2, guild_id: GUILD })
+      ;(bot as any).cacheChannel({ id: '951', type: 11, guild_id: GUILD, parent_id: '950' })
+      ;(bot as any).cacheChannel({ id: '952', type: 11, guild_id: GUILD, parent_id: GENERAL })
+      expect((await bot.gate(ask(EVE, { channel: '951' }))).action).toBe('drop')
+      expect((await bot.gate(ask(EVE, { channel: '952' }))).action).toBe('deliver') // a thread follows its parent
+    })
+    test('DMs are unchanged', async () => {
+      expect(await verdict('bridge', { groups: {} }, msg(NAT, 'hi'), Date.now(), { roles: noApps })).toBe('deliver')
+      expect(await verdict('bridge', { groups: {} }, msg(OUTSIDER, 'hi'), Date.now(), { roles: noApps })).toBe('drop')
+    })
   })
   test('allowlist and opt-in still apply to a bridge', async () => {
     expect(await verdict('bridge', {}, msg(OUTSIDER, 'hi'))).toBe('drop')

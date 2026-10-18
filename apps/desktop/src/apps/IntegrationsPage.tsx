@@ -235,7 +235,7 @@ export function WebhooksSection({ guildId, channelId }: { guildId: Snowflake; ch
 }
 
 /** Bots added to the server, with who added them and Remove. */
-function BotsSection({ guild }: { guild: Guild }) {
+function BotsSection({ guild, onOpenRoles }: { guild: Guild; onOpenRoles?: () => void }) {
   const [rows, setRows] = useState<GuildIntegration[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<GuildIntegration | null>(null);
@@ -281,6 +281,17 @@ function BotsSection({ guild }: { guild: Guild }) {
                     <Bot size={14} aria-hidden="true" /> Remove
                   </button>
                 </div>
+                <p className="apps-card-access">
+                  Who can talk to {row.name}: members with Use Application Commands, set in{" "}
+                  {onOpenRoles ? (
+                    <button type="button" className="apps-link" onClick={onOpenRoles}>
+                      Roles
+                    </button>
+                  ) : (
+                    "Roles"
+                  )}{" "}
+                  or channel Permissions.
+                </p>
               </li>
             );
           })}
@@ -324,11 +335,11 @@ function BotsSection({ guild }: { guild: Guild }) {
   );
 }
 
-export function IntegrationsPage({ guild, canManageGuild, canManageWebhooks }: { guild: Guild; canManageGuild: boolean; canManageWebhooks: boolean }) {
+export function IntegrationsPage({ guild, canManageGuild, canManageWebhooks, onOpenRoles }: { guild: Guild; canManageGuild: boolean; canManageWebhooks: boolean; onOpenRoles?: () => void }) {
   return (
     <Page title="Integrations">
       {canManageWebhooks && <WebhooksSection guildId={guild.id} />}
-      {canManageGuild && <BotsSection guild={guild} />}
+      {canManageGuild && <BotsSection guild={guild} onOpenRoles={onOpenRoles} />}
     </Page>
   );
 }
