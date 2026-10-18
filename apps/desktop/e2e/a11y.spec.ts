@@ -20,8 +20,6 @@ type Known = Record<string, string>;
 
 // Findings shared by several screens.
 const CONTRAST: Known = { 'color-contrast': 'A11Y-07 muted text tokens (--text-muted, --chat-text-muted, group titles) are below 4.5:1' };
-const REGION: Known = { region: 'A11Y-12 sidebar list and resize handle sit outside any landmark' };
-const HEADINGS: Known = { 'heading-order': 'A11Y-20 message author names are <h3> directly under the page <h1>' };
 const OVERLAY_MAIN: Known = { 'landmark-no-duplicate-main': 'A11Y-13 settings overlay renders a second <main> while the app shell behind it stays in the a11y tree' };
 
 test.beforeEach(async ({ page }) => {
@@ -71,18 +69,18 @@ test.describe('axe: main screens', () => {
   test('friends / home', async ({ page }, info) => {
     await page.goto('/channels/@me?as=sam&mockLatency=0');
     await page.getByRole('heading', { name: /friends/i }).first().waitFor();
-    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION });
+    expectOnlyKnown(info, await scan(page), { ...CONTRAST });
   });
 
   test('DM chat', async ({ page }, info) => {
     await openDm(page);
-    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...HEADINGS });
+    expectOnlyKnown(info, await scan(page), { ...CONTRAST });
   });
 
   test('guild channel with member list', async ({ page }, info) => {
     await openGuild(page);
     await expect(page.getByRole('complementary', { name: 'Members' })).toBeVisible();
-    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...HEADINGS });
+    expectOnlyKnown(info, await scan(page), { ...CONTRAST });
   });
 
   test('message context menu', async ({ page }, info) => {
@@ -124,9 +122,6 @@ test.describe('axe: main screens', () => {
     await expect(page.getByRole('button', { name: 'Leave voice channel' })).toBeVisible();
     expectOnlyKnown(info, await scan(page), {
       ...CONTRAST,
-      ...REGION,
-      'nested-interactive': 'A11Y-21 the selected voice channel row is a role=button that contains its action buttons (src/voice, vokko-call-perf)',
-      'target-size': 'A11Y-22 the voice channel status line button is under 24px tall (src/voice, vokko-call-perf)',
     });
   });
 
@@ -223,7 +218,7 @@ test.describe('keyboard: tab order and focus rings', () => {
     const stops = regions.map(r => firstStop[r]);
     expect(stops.every(n => n !== undefined), JSON.stringify(firstStop)).toBe(true);
     expect([...stops].sort((a, b) => a - b), `regions in DOM order: ${JSON.stringify(firstStop)}`).toEqual(stops);
-    // A11Y-14: no skip link and no roving focus, so the composer is this many Tab presses away.
+    // A11Y-14: the composer is this many Tab presses away; F6 and the list arrow keys are the shortcuts (a11y-keys.spec.ts).
     info.annotations.push({ type: 'known-issue', description: `A11Y-14 composer textarea is Tab stop #${composerStop} (rail, channel list and header are all individual stops)` });
   });
 
@@ -526,7 +521,6 @@ test.describe('screen-reader structure', () => {
   });
 
   test('only one h1 per screen', async ({ page }) => {
-    test.fail(true, 'A11Y-20: the channel title and the channel-start intro are both <h1>, and message author names are <h3> with no <h2> above them');
     await openGuild(page);
     expect(await page.locator('h1').count()).toBe(1);
   });
