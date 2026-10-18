@@ -1787,60 +1787,132 @@
   gap: 6px;
 }
 
-/* ---- Activities shelf (ActivityShelf.tsx): 3 columns of cover cards, scrolling inside a fixed height ---- */
-.activity-shelf {
-  display: flex;
-  flex-direction: column;
-  width: min(636px, calc(100vw - 16px));
-  border: 1px solid var(--border-subtle);
+/* ---- Activities picker (ActivityShelf.tsx): a fixed-height modal, search on top, Recent row and a 2-column card grid that scroll inside ---- */
+.modal.activity-shelf {
+  width: min(520px, calc(100vw - 32px));
+  height: min(720px, calc(100dvh - 48px));
   background: var(--background-surface-high);
 }
 
-.activity-shelf-header {
-  position: relative;
+.modal.activity-shelf .modal-header {
+  justify-content: flex-start;
+  padding: 20px 56px 12px 24px;
+  text-align: left;
+}
+
+.modal.activity-shelf .modal-title {
+  font-size: 20px;
+  line-height: 24px;
+}
+
+.modal.activity-shelf .modal-content {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 20px 56px 12px 24px;
+  padding: 0;
 }
 
-.activity-shelf-title {
-  color: var(--text-strong);
-  font-size: 20px;
+.modal.activity-shelf .modal-footer {
+  justify-content: flex-start;
+  padding: 8px 24px 16px;
+  border-top: 1px solid var(--border-subtle);
+  background: transparent;
+}
+
+.activity-picker {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.activity-search {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin: 0 24px 12px;
+  padding: 0 10px;
+  height: 36px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--background-base-lowest);
+  color: var(--text-muted);
+}
+
+.activity-search:focus-within {
+  border-color: var(--brand-500);
+}
+
+.activity-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  color: var(--text-default);
+  font-size: 14px;
+  outline: none;
+}
+
+.activity-picker-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 0 16px 8px 24px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thin-thumb) transparent;
+}
+
+.activity-section {
+  margin: 4px 0 8px;
+  color: var(--text-muted);
+  font-size: 12px;
   font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
-.activity-shelf-subtitle {
+.activity-recent {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 56px);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.shelf-recent {
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color 0.1s;
+}
+
+.shelf-recent[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.shelf-recent:not([aria-disabled="true"]):hover,
+.shelf-recent:focus-visible {
+  outline-color: var(--brand-500);
+}
+
+.shelf-recent:focus-visible {
+  outline: 2px solid var(--brand-500);
+}
+
+.activity-empty {
+  padding: 24px 0;
   color: var(--text-muted);
   font-size: 14px;
-}
-
-.activity-shelf-close {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  display: flex;
-  padding: 4px;
-  border-radius: var(--radius-sm);
-  color: var(--interactive-icon-default);
-}
-
-.activity-shelf-close:hover {
-  background: var(--interactive-background-hover);
-  color: var(--interactive-icon-hover);
+  text-align: center;
 }
 
 .activity-shelf-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 12px;
-  height: 452px;
-  max-height: calc(100dvh - 180px);
-  padding: 4px 16px 8px 24px;
-  overflow-y: auto;
   align-content: start;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thin-thumb) transparent;
 }
 
 .shelf-card {
@@ -1905,23 +1977,28 @@
   box-sizing: content-box;
 }
 
-.shelf-card-name {
+.shelf-card-name,
+.shelf-card-desc,
+.shelf-card-sub {
   overflow: hidden;
-  color: var(--text-strong);
-  font-size: 16px;
-  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.shelf-card-sub {
-  color: var(--text-muted);
-  font-size: 14px;
+.shelf-card-name {
+  color: var(--text-strong);
+  font-size: 15px;
+  font-weight: 600;
 }
 
-.activity-shelf-footer {
-  padding: 8px 24px 16px;
-  border-top: 1px solid var(--border-subtle);
+.shelf-card-desc {
+  color: var(--text-default);
+  font-size: 13px;
+}
+
+.shelf-card-sub {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .activity-shelf-credits {
@@ -1934,23 +2011,36 @@
   color: var(--text-default);
 }
 
-/* phone: the shelf is a bottom sheet (Popout `sheet`); two columns and the sheet scrolls instead of the grid */
-.sheet .popout-sheet.activity-shelf .activity-shelf-header {
-  padding: 0 40px 12px 0;
-}
-
-.sheet .popout-sheet.activity-shelf .activity-shelf-close {
-  display: none;
-}
-
-.sheet .popout-sheet.activity-shelf .activity-shelf-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  height: auto;
+/* phone: a full-height bottom sheet (Modal `sheet`; the class lands on .sheet), one column, the list scrolls under a pinned search */
+.sheet.activity-shelf {
+  height: calc(100dvh - env(safe-area-inset-top, 0px) - 8px);
   max-height: none;
-  padding: 0;
-  overflow: visible;
 }
 
-.sheet .popout-sheet.activity-shelf .activity-shelf-footer {
-  padding: 8px 0 0;
+.sheet.activity-shelf .sheet-body {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.sheet.activity-shelf .sheet-title {
+  flex: none;
+}
+
+.sheet.activity-shelf .activity-search {
+  margin: 8px 0;
+}
+
+.sheet.activity-shelf .activity-picker-scroll {
+  padding: 0;
+}
+
+.sheet.activity-shelf .activity-shelf-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.sheet.activity-shelf .sheet-footer {
+  flex: none;
+  padding: 8px 0 calc(12px + env(safe-area-inset-bottom, 0px));
 }

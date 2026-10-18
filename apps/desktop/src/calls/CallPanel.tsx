@@ -62,7 +62,6 @@ export function CallPanel({ channel }: { channel: Channel }) {
   const watching = useVoice(s => !!s.watch[channel.id]);
   const stremioOpen = useStremioPanel(s => s.open);
   const spotifyOpen = useSpotifyPanel(s => s.open);
-  const [shelfAnchor, setShelfAnchor] = useState<HTMLElement | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const tiles = useStageTiles(states, channel.id);
   const inside = useMemo(() => new Set(states.map(s => s.user_id)), [states]);
@@ -123,12 +122,11 @@ export function CallPanel({ channel }: { channel: Channel }) {
             <BarButton
               label="Activities"
               active={shelfOpen || stremioOpen || spotifyOpen}
-              buttonRef={setShelfAnchor}
               onClick={() => setShelfOpen(o => !o)}
             >
               <LayoutGrid size={20} />
             </BarButton>
-            <ActivityShelf channel={channel} anchor={shelfAnchor} open={shelfOpen} onClose={() => setShelfOpen(false)} onWatchTogether={() => (watching ? undefined : openModal({ type: "watchTogether", channelId: channel.id }))} />
+            <ActivityShelf channel={channel} open={shelfOpen} onClose={() => setShelfOpen(false)} onWatchTogether={() => (watching ? undefined : openModal({ type: "watchTogether", channelId: channel.id }))} />
             {channel.type === ChannelType.GroupDM && (
               <BarButton label="Ring Everyone" onClick={() => void ringCall(channel.id)}>
                 <BellRing size={20} />

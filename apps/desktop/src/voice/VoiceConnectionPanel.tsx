@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router";
 import { AudioLines, Bug, LayoutGrid, Lock, Monitor, MonitorUp, MonitorX, Music, PhoneOff, Signal, SignalHigh, SignalLow, SignalMedium, Upload, Video, VideoOff, X } from "lucide-react";
 import { dmName, useStore } from "../api/store";
 import { formatTime } from "../chat/util";
@@ -10,6 +11,7 @@ import { dismissVoiceError, leaveVoice, stopCamera, stopScreenShare } from "./en
 import { useMedia } from "./mediaStore";
 import { canShareScreen, toggleCamera, toggleScreenShare } from "./videoControls";
 import type { ConnectionQuality, VoiceErrorReason, VoiceStatus } from "./reducer";
+import { ActivityShelf } from "./ActivityShelf";
 import { SoundboardPopout } from "./SoundboardPopout";
 import { useVoice } from "./store";
 import { useVoiceUi, type PingSample } from "./uiStore";
@@ -188,6 +190,9 @@ export function VoiceConnectionPanel() {
   const [qualityOpen, setQualityOpen] = useState(false);
   const [boardAnchor, setBoardAnchor] = useState<HTMLElement | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [shelfOpen, setShelfOpen] = useState(false);
+  const watching = useVoice(s => !!(channelId && s.watch[channelId]));
+  const navigate = useNavigate();
 
   // Moved back to the audience: the grant no longer allows camera or screen, and their buttons are gone, so stop capturing.
   useEffect(() => {
@@ -203,6 +208,8 @@ export function VoiceConnectionPanel() {
   }, [error]);
 
   if (!channelId && !error) return null;
+  // A game's tile only shows on the call's page, so starting one from the panel takes you there.
+  const goToCall = () => channel && void navigate(`/channels/${channel.guild_id ?? "@me"}/${channel.id}`);
   const inCall = channelId !== null;
   const label = inCall ? (status === "connected" && cameraOn ? "Video Connected" : STATUS_LABEL[status]) : STATUS_LABEL.disconnected;
   const tone = !inCall ? "error" : status === "connected" ? `ok q-${quality}` : status === "reconnecting" ? "warn" : "pending";
@@ -268,8 +275,8 @@ export function VoiceConnectionPanel() {
               )}
             </>
           )}
-          <Tooltip content="Activities aren't available yet" side="top">
-            <button type="button" className="voice-panel-wide" aria-label="Start An Activity" aria-disabled="true">
+          <Tooltip content="Start An Activity" side="top">
+            <button type="button" className={`voice-panel-wide${shelfOpen ? " active" : ""}`} aria-label="Start An Activity" aria-haspopup="dialog" aria-expanded={shelfOpen} onClick={() => setShelfOpen(o => !o)}>
               <LayoutGrid size={20} />
             </button>
           </Tooltip>
@@ -290,6 +297,15 @@ export function VoiceConnectionPanel() {
         </div>
       )}
       <ConnectionPopout anchor={qualityAnchor} open={qualityOpen && inCall} onClose={() => setQualityOpen(false)} />
+      {inCall && channel && (
+        <ActivityShelf
+          channel={channel}
+          open={shelfOpen}
+          onClose={() => setShelfOpen(false)}
+          onWatchTogether={() => (watching ? goToCall() : openModal({ type: "watchTogether", channelId: channel.id }))}
+          onGame={goToCall}
+        />
+      )}
       <SoundboardPopout anchor={boardAnchor} open={boardOpen && inCall} onClose={() => setBoardOpen(false)} />
     </section>
   );

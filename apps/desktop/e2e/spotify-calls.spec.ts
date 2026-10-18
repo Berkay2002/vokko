@@ -43,9 +43,9 @@ const shot = (page: Page, name: string) => (mkdirSync(SHOTS, { recursive: true }
 
 async function openSpotify(page: Page, screenshot?: string): Promise<void> {
   await call(page).getByRole('button', { name: 'Activities' }).click();
-  await expect(page.getByRole('menuitem', { name: /Spotify/ })).toBeVisible();
+  await expect(page.getByRole('menu', { name: 'Activities' }).getByRole('menuitem', { name: /Spotify/ })).toBeVisible();
   if (screenshot) await shot(page, screenshot);
-  await page.getByRole('menuitem', { name: /Spotify/ }).click();
+  await page.getByRole('menu', { name: 'Activities' }).getByRole('menuitem', { name: /Spotify/ }).click();
   await expect(panel(page)).toBeVisible();
 }
 
