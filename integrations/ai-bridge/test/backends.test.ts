@@ -165,21 +165,21 @@ describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => 
 })
 
 describe('codex backend (Codex SDK stubbed at the module boundary)', () => {
-  function stubbed(run: (input: string) => Promise<any>, model?: string, effort?: string) {
+  function stubbed(run: (input: string, codexOpts: any) => Promise<any>, model?: string, effort?: string, extra: { media?: boolean; listers?: Partial<Listers> } = {}) {
     const made: any[] = []
     const threads: { kind: string; id?: string; options: any; inputs: string[] }[] = []
     class FakeCodex {
-      constructor(o: any) {
+      constructor(readonly o: any) {
         made.push(o)
       }
       startThread(options: any) {
-        return thread('start', undefined, options)
+        return thread('start', undefined, options, this.o)
       }
       resumeThread(id: string, options: any) {
-        return thread('resume', id, options)
+        return thread('resume', id, options, this.o)
       }
     }
-    function thread(kind: string, id: string | undefined, options: any): any {
+    function thread(kind: string, id: string | undefined, options: any, codexOpts: any): any {
       const t = { kind, id, options, inputs: [] as string[] }
       threads.push(t)
       return {
@@ -188,20 +188,88 @@ describe('codex backend (Codex SDK stubbed at the module boundary)', () => {
         },
         run: async (input: string) => {
           t.inputs.push(input)
-          const r = await run(input)
+          const r = await run(input, codexOpts)
           t.id ??= 'thread-1'
           return r
         },
       }
     }
     const listers: Listers = {
-      mcp: o => [{ name: 'github', enabled: !o.includes('mcp_servers.github.enabled=false') }],
+      mcp: o => [
+        { name: 'github', enabled: !o.includes('mcp_servers.github.enabled=false') },
+        ...(o.some(x => x.startsWith('mcp_servers.vokko_media.url=')) ? [{ name: 'vokko_media', enabled: true }] : []),
+      ],
       features: o => [{ name: 'code_mode_host', enabled: !o.includes('features.code_mode_host=false') }],
       models: () => JSON.stringify({ models: [{ slug: 'm', tool_mode: 'code_mode_only', multi_agent_version: 'v2', apply_patch_tool_type: 'freeform', experimental_supported_tools: ['clock'] }] }),
+      ...extra.listers,
     }
-    const backend = codexBackend({ workDir: join(dir(), 'work'), botName: 'Codex', Codex: FakeCodex as any, listers, model, effort })
+    const backend = codexBackend({ workDir: join(dir(), 'work'), botName: 'Codex', Codex: FakeCodex as any, listers, model, effort, media: extra.media })
     return { backend, made, threads }
   }
+
+  /** One JSON-RPC call to a turn's media endpoint, as the codex CLI would make it. */
+  async function mcpCall(codexOpts: any, method: string, params: object = {}): Promise<{ status: number; body: any }> {
+    const url = JSON.parse(codexOpts.configOverrides.find((o: string) => o.startsWith('mcp_servers.vokko_media.url=')).split('=').slice(1).join('='))
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${codexOpts.env.VOKKO_MEDIA_BEARER}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    })
+    return { status: res.status, body: await res.json().catch(() => null) }
+  }
+
+  test('media tools: each turn gets its own endpoint, bound to that turn\'s asker, refused after the turn', async () => {
+    const calls: { who: string; name: string; args: object }[] = []
+    const asked = (who: string): TurnContext => ({ ...ctx, media: async (name, args) => (calls.push({ who, name, args }), `played for ${who}`) })
+    let firstTurn: any
+    const seen: any[] = []
+    const { backend, made, threads } = stubbed(async (_input, o) => {
+      // During the turn: the CLI (here, this fetch) lists the tools and calls one; the earlier turn's bearer is dead.
+      seen.push(await mcpCall(o, 'tools/list'), await mcpCall(o, 'tools/call', { name: 'spotify_search', arguments: { q: 'nice' } }))
+      if (firstTurn) seen.push(await mcpCall(firstTurn, 'tools/list'))
+      else expect((await mcpCall(o, 'resources/list')).body.error.code).toBe(-32601) // nothing for Codex's resource readers
+      firstTurn ??= o
+      return { finalResponse: 'ok', items: [] }
+    })
+    await backend.ask(undefined, 'play something nice', asked('alice'))
+    const o = made[1]
+    expect(made[0].configOverrides.some((x: string) => x.includes('vokko_media'))).toBe(false) // the shared runner has no MCP server
+    expect(made[0].env.VOKKO_MEDIA_BEARER).toBeUndefined()
+    expect(o.configOverrides).toEqual(expect.arrayContaining(['mcp_servers.github.enabled=false', 'features.shell_tool=false', 'mcp_servers.vokko_media.enabled=true', 'mcp_servers.vokko_media.default_tools_approval_mode="approve"']))
+    expect(o.configOverrides).toContain(`mcp_servers.vokko_media.enabled_tools=${JSON.stringify(MEDIA_TOOLS.map(t => t.name))}`)
+    expect(o.env.VOKKO_MEDIA_BEARER).toMatch(/^[\w-]{43}$/)
+    expect(JSON.stringify(o)).not.toContain('VOKKO_BOT_TOKEN')
+    expect(threads[0].inputs[0]).toContain('spotify_* and stremio_* tools')
+    expect(seen[0].body.result.tools.map((t: any) => t.name)).toEqual(MEDIA_TOOLS.map(t => t.name))
+    expect(seen[0].body.result.tools.find((t: any) => t.name === 'spotify_search').inputSchema).toMatchObject({ type: 'object', required: ['q'] })
+    expect(seen[1].body.result.content).toEqual([{ type: 'text', text: 'played for alice' }])
+    expect(calls).toEqual([{ who: 'alice', name: 'spotify_search', args: { q: 'nice' } }])
+    expect((await mcpCall(firstTurn, 'tools/list')).status).toBe(401) // turn over
+    await backend.ask('thread-1', 'and for me', asked('bob'))
+    expect(made[2].env.VOKKO_MEDIA_BEARER).not.toBe(o.env.VOKKO_MEDIA_BEARER)
+    expect(seen[4].status).toBe(401) // the first turn's URL and bearer can't reach the second turn
+    expect(calls.map(c => c.who)).toEqual(['alice', 'bob'])
+  })
+
+  test('media off (VOKKO_AI_MEDIA=off) or no hook: no MCP server, no extra runner, no media rules', async () => {
+    for (const [label, s, c] of [
+      ['option off', stubbed(async () => ({ finalResponse: '', items: [] }), undefined, undefined, { media: false }), { ...ctx, media: async () => 'x' }],
+      ['no hook', stubbed(async () => ({ finalResponse: '', items: [] })), ctx],
+    ] as const) {
+      await s.backend.ask(undefined, 'x', c)
+      expect([label, s.made.length]).toEqual([label, 1])
+      expect(s.made[0].configOverrides.some((x: string) => x.includes('vokko_media'))).toBe(false)
+      if (label === 'option off') expect(s.threads[0].inputs[0]).not.toContain('Spotify')
+    }
+  })
+
+  test('media on: refuses to start when the host has a vokko_media server or another server stays on next to it', () => {
+    const run = async () => ({})
+    expect(() => stubbed(run, undefined, undefined, { listers: { mcp: () => [{ name: 'vokko_media', enabled: false }] } })).toThrow('already has an MCP server named vokko_media')
+    const sticky = (o: string[]) => [{ name: 'vokko_media', enabled: true }, { name: 'sneaky', enabled: o.some(x => x.includes('vokko_media')) }].filter(s => s.enabled || !o.some(x => x.includes('vokko_media')))
+    expect(() => stubbed(run, undefined, undefined, { listers: { mcp: o => (o.some(x => x.includes('vokko_media')) ? sticky(o) : []) } })).toThrow('not only vokko_media')
+    expect(stubbed(run, undefined, undefined, { media: false, listers: { mcp: () => [{ name: 'vokko_media', enabled: false }] } }).backend).toBeDefined()
+  })
 
   test('a model the catalog does not list: refuses to start; no model: the catalog\'s first', () => {
     expect(() => stubbed(async () => ({}), 'gpt-unknown')).toThrow('not in the CLI\'s model catalog')
@@ -283,17 +351,17 @@ describe('codex backend (Codex SDK stubbed at the module boundary)', () => {
     expect(listers.mcp(overrides).filter(m => m.enabled)).toEqual([])
   }, 60_000)
 
-  test('live, no login needed: the real SDK and CLI offer the model no tool but request_user_input (Plan mode only)', async () => {
+  /** The real SDK and CLI for one turn, the model provider pointed at a local capture endpoint (no login involved). */
+  async function captured(c: TurnContext, respond: (n: number) => Response | null = () => null): Promise<any[]> {
     const bodies: any[] = []
     const server = Bun.serve({
       port: 0,
       hostname: '127.0.0.1',
       async fetch(req) {
         bodies.push(await req.json().catch(() => null))
-        return Response.json({ error: { message: 'capture only', type: 'invalid_request_error' } }, { status: 400 })
+        return respond(bodies.length) ?? Response.json({ error: { message: 'capture only', type: 'invalid_request_error' } }, { status: 400 })
       },
     })
-    // The real Codex class, pointed at this capture endpoint instead of OpenAI (no login involved).
     class Captured extends Codex {
       constructor(o: any) {
         super({
@@ -309,14 +377,40 @@ describe('codex backend (Codex SDK stubbed at the module boundary)', () => {
     }
     try {
       const backend = codexBackend({ workDir: join(dir(), 'work'), botName: 'Codex', Codex: Captured as any })
-      await backend.ask(undefined, 'hi', ctx).catch(() => {})
+      await backend.ask(undefined, 'hi', c).catch(() => {})
     } finally {
       server.stop(true)
     }
+    return bodies.filter(b => b?.input)
+  }
+  const offeredIn = (body: any): string[] => {
     const names = (tools: any[], pre = ''): string[] => tools.flatMap(t => (t.type === 'namespace' ? names(t.tools ?? [], `${pre}${t.name}.`) : [`${pre}${t.name ?? t.type}`]))
-    const body = bodies.find(b => b?.input)
+    return names([...(body.tools ?? []), ...body.input.filter((i: any) => i.type === 'additional_tools').flatMap((i: any) => i.tools)])
+  }
+  const sse = (events: object[]) => new Response(events.map(e => `event: ${(e as { type: string }).type}\ndata: ${JSON.stringify(e)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } })
+
+  test('live, no login needed: the real SDK and CLI offer the model no tool but request_user_input (Plan mode only)', async () => {
+    const [body] = await captured(ctx)
     expect(body).toBeDefined()
-    const offered = names([...(body.tools ?? []), ...body.input.filter((i: any) => i.type === 'additional_tools').flatMap((i: any) => i.tools)])
-    expect(offered).toEqual(['functions.request_user_input'])
+    expect(offeredIn(body)).toEqual(['functions.request_user_input'])
+  }, 120_000)
+
+  test('live, no login needed: with the media hook, the model gets the media tools too (and Codex\'s MCP resource readers), and a call reaches ctx.media', async () => {
+    const calls: [string, object][] = []
+    const bodies = await captured({ ...ctx, media: async (name, args) => (calls.push([name, args]), 'Nothing is playing (test).') }, n =>
+      // The "model" asks for spotify_now once, then the capture ends the turn.
+      n === 1
+        ? sse([
+            { type: 'response.created', response: { id: 'r1' } },
+            { type: 'response.output_item.done', output_index: 0, item: { type: 'function_call', id: 'fc1', call_id: 'c1', namespace: 'mcp__vokko_media', name: 'spotify_now', arguments: '{}' } },
+            { type: 'response.completed', response: { id: 'r1', usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } } },
+          ])
+        : null,
+    )
+    // list/read_mcp_resource(s) come with any MCP server; the only one is ours, which has no resources (method not found).
+    const resources = ['functions.list_mcp_resources', 'functions.list_mcp_resource_templates', 'functions.read_mcp_resource']
+    expect(offeredIn(bodies[0]).sort()).toEqual([...resources, 'functions.request_user_input', ...MEDIA_TOOLS.map(t => `mcp__vokko_media.${t.name}`)].sort())
+    expect(calls).toEqual([['spotify_now', {}]])
+    expect(JSON.stringify(bodies[1]?.input)).toContain('Nothing is playing (test).')
   }, 120_000)
 })
