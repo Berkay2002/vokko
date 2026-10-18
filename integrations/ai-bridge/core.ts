@@ -44,8 +44,8 @@ export type TurnContext = {
   media?(name: string, args: Record<string, unknown>): Promise<string>
 }
 
-/** Media tool calls one reply may make (the per-reply cost cap and maxTurns stop it too). */
-export const MEDIA_CALLS_PER_TURN = 12
+/** Media tool calls one reply may make. A call makes up to 3 requests and the server allows 30 acting requests per message, so 10 fits (the per-reply cost cap and maxTurns stop it too). */
+export const MEDIA_CALLS_PER_TURN = 10
 
 export const SCOPES = ['dm', 'server'] as const
 export type Scope = (typeof SCOPES)[number]

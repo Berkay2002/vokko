@@ -167,7 +167,7 @@ episode; queue and resume work), `stremio_control`, `stremio_now`, `stremio_cont
 
 - Each tool takes the `message_id` of the Vokko message that asked and acts **as that member**: the request carries
   `X-Vokko-Acting-For: <message_id>`, so the server applies their voice call, their Control Media right and their own Stremio
-  account and addons. The plugin refuses ids it did not deliver in the last 10 minutes; no tool takes a channel id.
+  account and addons. The plugin accepts only the newest message it delivered in each channel (an older id is refused: "no longer the latest in this channel"), and every result starts with "Acting for <name> in <channel>". No tool takes a channel id.
 - They act in a call, so they are **not auto-allowed**: your permission relay asks (`yes <id>` / `no <id>`) like for other
   tools. To skip the prompt, add them to `permissions.allow` in `~/claude-vokko/.claude/settings.json` (next to the deny
   rules above), by exact name: `mcp__plugin_vokko_vokko__spotify_search`, `…spotify_details`, `…spotify_now`, `…spotify_play`,

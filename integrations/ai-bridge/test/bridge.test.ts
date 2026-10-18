@@ -1099,7 +1099,9 @@ describe('Spotify and Stremio tools (media.ts) inside a turn', () => {
   beforeEach(() => {
     fetched = []
     globalThis.fetch = (async (url: string, init: RequestInit) => {
-      fetched.push({ url: String(url), acting: (init.headers as Record<string, string>)['X-Vokko-Acting-For'] })
+      const acting = (init.headers as Record<string, string>)['X-Vokko-Acting-For']
+      if (!acting && /\/channels\/\d+$/.test(String(url))) return Response.json({ type: 1 }) // the channel-name lookup for the "Acting for" line
+      fetched.push({ url: String(url), acting })
       return Response.json({ track: { uri: 'spotify:track:' + 'a'.repeat(22), title: 'Song', artists: ['Band'], duration_ms: 1000 }, playing: true, position_ms: 0 })
     }) as unknown as typeof fetch
   })
@@ -1114,7 +1116,8 @@ describe('Spotify and Stremio tools (media.ts) inside a turn', () => {
     const m = msg(NAT, 'what is playing?')
     await s.bridge.handle(m)
     expect(fetched).toEqual([{ url: `http://vokko.test/api/v1/channels/${DM_NAT}/spotify`, acting: m.id }])
-    expect(result).toContain('Playing: Song — Band')
+    expect(result).toMatch(/^Acting for ".+" in a DM\.\n/)
+    expect(result).toContain('Playing: "Song" — "Band"')
   })
 
   test('a paused person never reaches the tools: the turn is not asked at all', async () => {
