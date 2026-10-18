@@ -1,7 +1,10 @@
 //! What a Spotify app on this computer is playing, for the "Listening to Spotify" status. No Spotify login and no Web API (its
 //! development mode allows a handful of hand-added users): macOS asks Spotify.app through AppleScript and Spotifast through its
-//! control socket, Windows reads the system media sessions and Linux the MPRIS players of Spotify and the known third-party
+//! control socket, Windows reads Spotify's system media session and Linux the MPRIS players of Spotify and the known third-party
 //! Spotify clients ([`CLIENTS`]). Everything is local; nothing here touches the network. Other platforms report nothing.
+//!
+//! Only music from Spotify's catalog is reported: never a podcast episode or a local file, whose title would otherwise be shown
+//! (and sent to the catalog search). A source that cannot tell them apart is left out.
 
 use serde::Serialize;
 
@@ -17,29 +20,29 @@ pub struct NowPlaying {
     pub image_id: Option<String>,
     pub position_ms: i64,
     pub duration_ms: i64,
+    /// The artist to look the track up by in the catalog when it is not `artists[0]`: Spotifast joins several with ", ".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lookup_artist: Option<String>,
 }
 
-/// Apps that play Spotify's catalog, by the lowercase name they publish their media session or MPRIS player under (an
-/// unpackaged Windows app's session is named after its exe), `_` read as `-`: Spotify, Spotifast, ncspot, spotify-qt, Psst
-/// (psst-gui), spotify-player and spotifyd. Exact names only, so a browser playing open.spotify.com never counts.
-#[cfg(any(windows, target_os = "linux", test))]
+/// MPRIS players that play Spotify's catalog, by the lowercase name they publish under (`_` read as `-`): Spotify, Spotifast,
+/// ncspot, spotify-qt, Psst (psst-gui), spotify-player and spotifyd. Exact names only, so a browser playing open.spotify.com
+/// never counts.
+#[cfg(any(target_os = "linux", test))]
 const CLIENTS: &[&str] = &["spotify", "spotifast", "ncspot", "spotify-qt", "psst", "psst-gui", "spotify-player", "spotifyd"];
 
-#[cfg(any(windows, target_os = "linux", test))]
+#[cfg(any(target_os = "linux", test))]
 fn is_client(name: &str) -> bool {
     CLIENTS.contains(&name.trim().to_lowercase().replace('_', "-").as_str())
 }
 
-/// Whether a Windows media session's SourceAppUserModelId is a Spotify client: the Microsoft Store Spotify app, or an
-/// unpackaged one by exe (Spotify.exe, spotifast.exe, ...).
+/// Whether a Windows media session's SourceAppUserModelId is Spotify's: the Microsoft Store app or Spotify.exe, exactly. The
+/// third-party clients (Spotifast's `spotifast.exe`, Psst, ncspot, spotify-qt, spotify-player) are left out: their sessions say
+/// nothing that tells a podcast episode or a local file from a song.
 #[cfg(any(windows, test))]
 fn is_spotify_session(aumid: &str) -> bool {
     let aumid = aumid.to_lowercase();
-    if aumid == "spotifyab.spotifymusic_zpdnekdrzrea0!spotify" {
-        return true;
-    }
-    let exe = aumid.rsplit(['\\', '/']).next().unwrap_or_default();
-    is_client(exe.strip_suffix(".exe").unwrap_or(exe))
+    aumid == "spotifyab.spotifymusic_zpdnekdrzrea0!spotify" || aumid.rsplit(['\\', '/']).next() == Some("spotify.exe")
 }
 
 /// Whether an MPRIS player is a Spotify client, by the first part of its bus name after `org.mpris.MediaPlayer2.` (spotifyd adds
@@ -63,29 +66,39 @@ fn read() -> Option<NowPlaying> {
 }
 
 /// What Spotifast plays, through the control channel its `spotifast now-playing --raw` command uses: a socket in the user's
-/// private temporary directory that only they can open, one `spotifast:nowplaying` line out and one line back.
+/// private temporary directory, one `spotifast:nowplaying` line out and one line back.
 #[cfg(target_os = "macos")]
 fn read_spotifast() -> Option<NowPlaying> {
-    use std::io::{Read, Write};
-    let mut stream = std::os::unix::net::UnixStream::connect(std::env::temp_dir().join("spotifast").join("instance.sock")).ok()?;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::os::unix::fs::MetadataExt;
+    let dir = std::env::temp_dir().join("spotifast");
+    // Only a directory of this user's own that nobody else can enter: with TMPDIR at /tmp another user could plant the socket.
+    // std has no getuid, and the home directory is this user's.
+    let me = std::fs::metadata(std::env::var_os("HOME")?).ok()?.uid();
+    let owned = std::fs::symlink_metadata(&dir).ok()?;
+    if !owned.is_dir() || owned.uid() != me || owned.mode() & 0o777 != 0o700 {
+        return None;
+    }
+    let mut stream = std::os::unix::net::UnixStream::connect(dir.join("instance.sock")).ok()?;
     stream.set_read_timeout(Some(TIMEOUT)).ok()?;
     stream.set_write_timeout(Some(TIMEOUT)).ok()?;
     stream.write_all(b"spotifast:nowplaying\n").ok()?;
     let mut reply = String::new();
-    stream.take(64 * 1024).read_to_string(&mut reply).ok()?;
+    BufReader::new(stream.take(4096)).read_line(&mut reply).ok()?;
     parse_spotifast(&reply)
 }
 
 /// Spotifast's reply: `spotifast:now ` and tab-separated state, title, artists (joined with ", "), album, position ms,
-/// duration ms, volume, shuffle, repeat, art URL, saved and device; or `spotifast:now stopped`. It carries no track id (the
-/// client's catalog lookup finds it) and no podcast flag.
+/// duration ms, volume, shuffle, repeat, art URL, saved, device and kind (`track` or `episode`); or `spotifast:now stopped`.
+/// Without the kind (Spotifast does not send it yet) nothing is reported, since an episode's "artists" is its show. There is no
+/// track id, so the client looks the track up in the catalog, by the first of the joined artists.
 #[cfg(any(target_os = "macos", test))]
 fn parse_spotifast(reply: &str) -> Option<NowPlaying> {
     let fields: Vec<&str> = reply.lines().next()?.strip_prefix("spotifast:now ")?.split('\t').collect();
-    let [state, title, artists, album, position, duration, ..] = fields[..] else {
+    let [state, title, artists, album, position, duration, _, _, _, art, _, _, kind, ..] = fields[..] else {
         return None;
     };
-    if state != "playing" || title.is_empty() {
+    if state != "playing" || kind != "track" || title.is_empty() {
         return None;
     }
     let duration_ms: i64 = duration.parse().ok()?;
@@ -95,9 +108,11 @@ fn parse_spotifast(reply: &str) -> Option<NowPlaying> {
         artists: if artists.is_empty() { Vec::new() } else { vec![artists.to_owned()] },
         album: album.to_owned(),
         track_id: None,
-        image_id: fields.get(9).and_then(|art| spotify_image_id(art)).map(str::to_owned),
+        image_id: spotify_image_id(art).map(str::to_owned),
         position_ms: if duration_ms > 0 { position_ms.min(duration_ms) } else { position_ms },
         duration_ms,
+        // "Tyler, The Creator" is then looked up as "Tyler" and missed; a multi-artist track is found
+        lookup_artist: artists.split_once(", ").map(|(first, _)| first.to_owned()),
     })
 }
 
@@ -183,8 +198,7 @@ fn read() -> Option<NowPlaying> {
     use std::collections::HashMap;
     use zbus::blocking::{Connection, Proxy, fdo::DBusProxy, proxy::Builder};
     use zbus::{proxy::CacheProperties, zvariant::OwnedValue};
-    // A hung player must not block the poll thread: every call gives up after 2 s.
-    let bus = zbus::blocking::connection::Builder::session().ok()?.method_timeout(std::time::Duration::from_secs(2)).build().ok()?;
+    let bus = session_bus()?;
     let proxy = |bus: &Connection, name: &str, interface: &'static str| -> Option<Proxy<'static>> {
         Builder::new(bus)
             .destination(name.to_owned())
@@ -197,7 +211,14 @@ fn read() -> Option<NowPlaying> {
             .build()
             .ok()
     };
-    for name in DBusProxy::new(&bus).ok()?.list_names().ok()? {
+    let Some(names) = DBusProxy::new(&bus).ok().and_then(|dbus| dbus.list_names().ok()) else {
+        // a bus that stopped answering is dropped, and the next poll connects again
+        if let Ok(mut cached) = BUS.lock() {
+            *cached = None;
+        }
+        return None;
+    };
+    for name in names {
         let name = name.as_str();
         if !name.starts_with("org.mpris.MediaPlayer2.") {
             continue;
@@ -218,6 +239,40 @@ fn read() -> Option<NowPlaying> {
         }
     }
     None
+}
+
+/// The session bus connection, kept between polls.
+#[cfg(target_os = "linux")]
+static BUS: std::sync::Mutex<Option<zbus::blocking::Connection>> = std::sync::Mutex::new(None);
+
+/// The kept session bus, or a new connection. Connecting has no timeout of its own, so it runs on a thread of its own that the
+/// poll waits 2 s for (a late connection is kept for the next poll); at most one such thread runs. Calls on the connection give
+/// up after 2 s, so a hung player cannot block the poll thread either.
+#[cfg(target_os = "linux")]
+fn session_bus() -> Option<zbus::blocking::Connection> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+    static CONNECTING: AtomicBool = AtomicBool::new(false);
+    if let Some(bus) = BUS.lock().ok()?.clone() {
+        return Some(bus);
+    }
+    if CONNECTING.swap(true, Ordering::AcqRel) {
+        return None;
+    }
+    let (sent, answer) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().name("mpris-connect".into()).spawn(move || {
+        let bus = zbus::blocking::connection::Builder::session().and_then(|builder| builder.method_timeout(Duration::from_secs(2)).build()).ok();
+        if let (Some(bus), Ok(mut cached)) = (&bus, BUS.lock()) {
+            *cached = Some(bus.clone());
+        }
+        CONNECTING.store(false, Ordering::Release);
+        let _ = sent.send(bus);
+    });
+    if spawned.is_err() {
+        CONNECTING.store(false, Ordering::Release);
+        return None;
+    }
+    answer.recv_timeout(Duration::from_secs(2)).ok().flatten()
 }
 
 /// Spotify's own Linux client has long reported Position 0 all through a track, which would move the activity's start every
@@ -305,16 +360,18 @@ struct Mpris {
     art_url: String,
 }
 
-/// The track an MPRIS player plays, `None` for an ad, a podcast episode or no title. The Spotify id comes from `xesam:url`
-/// (`spotify:track:<id>` from Spotifast, `https://open.spotify.com/track/<id>` from Spotify and others) or `mpris:trackid`
-/// (`spotify:track:<id>`, `/com/spotify/track/<id>`).
+/// The track an MPRIS player plays: only a Spotify catalog track, so `None` for an ad, a podcast episode, a local file, no title
+/// or no Spotify track id. The id comes from `xesam:url` (`spotify:track:<id>` from Spotifast,
+/// `https://open.spotify.com/track/<id>` from Spotify and others) or `mpris:trackid` (`spotify:track:<id>`,
+/// `/com/spotify/track/<id>`).
 #[cfg(any(target_os = "linux", test))]
 fn parse_mpris(track: Mpris) -> Option<NowPlaying> {
     let ids = [track.url.as_str(), track.trackid.as_str()];
-    let not_music = ["spotify:ad:", "spotify:episode:", "/ad/", "/episode/"];
-    if track.title.is_empty() || ids.iter().any(|id| not_music.iter().any(|kind| id.contains(kind))) {
+    let not_music = ["spotify:ad:", "spotify:episode:", "spotify:local:", "/ad/", "/episode/", "/local/"];
+    if track.title.is_empty() || ids.iter().any(|id| id.starts_with("file:") || not_music.iter().any(|kind| id.contains(kind))) {
         return None;
     }
+    let track_id = ids.into_iter().find_map(spotify_track_id)?.to_owned();
     let ms = |us: i64| us.max(0) / 1000;
     let duration_ms = ms(track.length_us);
     let position_ms = ms(track.position_us);
@@ -322,10 +379,11 @@ fn parse_mpris(track: Mpris) -> Option<NowPlaying> {
         title: track.title,
         artists: track.artists,
         album: track.album,
-        track_id: ids.into_iter().find_map(spotify_track_id).map(str::to_owned),
+        track_id: Some(track_id),
         image_id: spotify_image_id(&track.art_url).map(str::to_owned),
         position_ms: if duration_ms > 0 { position_ms.min(duration_ms) } else { position_ms },
         duration_ms,
+        lookup_artist: None,
     })
 }
 
@@ -359,8 +417,9 @@ fn parse_applescript(output: &str) -> Option<NowPlaying> {
     let [title, artist, album, id, artwork, duration, position] = fields[..] else {
         return None;
     };
-    // Ads (`spotify:ad:…`) and podcast episodes are not music; local files have no Spotify id.
-    if title.is_empty() || id.starts_with("spotify:ad") || id.starts_with("spotify:episode") {
+    // Ads (`spotify:ad:…`) and podcast episodes are not music, and a local file (`spotify:local:…`) is not in the catalog: its
+    // title would go to the catalog search and pick up another track's id and art.
+    if title.is_empty() || ["spotify:ad", "spotify:episode", "spotify:local"].iter().any(|kind| id.starts_with(kind)) {
         return None;
     }
     let track_id = id.strip_prefix("spotify:track:").filter(|id| id.len() == 22 && id.bytes().all(|b| b.is_ascii_alphanumeric()));
@@ -372,6 +431,7 @@ fn parse_applescript(output: &str) -> Option<NowPlaying> {
         image_id: spotify_image_id(artwork).map(str::to_owned),
         position_ms: position.trim().parse().ok()?,
         duration_ms: duration.trim().parse().ok()?,
+        lookup_artist: None,
     })
 }
 
@@ -405,18 +465,18 @@ mod tests {
             image_id: Some(IMAGE.into()),
             position_ms: 12_345,
             duration_ms: 215_000,
+            lookup_artist: None,
         };
         assert_eq!(parse_applescript(&line), Some(expected));
     }
 
     #[test]
-    fn drops_ads_podcasts_and_garbage_and_keeps_local_files_without_ids() {
+    fn drops_ads_podcasts_local_files_and_garbage() {
         assert_eq!(parse_applescript(""), None);
         assert_eq!(parse_applescript("a\u{1f}b"), None);
         assert_eq!(parse_applescript("Ad\u{1f}Spotify\u{1f}\u{1f}spotify:ad:1\u{1f}\u{1f}30000\u{1f}0"), None);
         assert_eq!(parse_applescript("Ep\u{1f}Show\u{1f}\u{1f}spotify:episode:4uLU6hMCjMI75M1A2tKUQC\u{1f}\u{1f}30000\u{1f}0"), None);
-        let local = parse_applescript("Mine\u{1f}Me\u{1f}\u{1f}spotify:local:x\u{1f}\u{1f}1000\u{1f}5").expect("local file");
-        assert_eq!((local.track_id, local.image_id), (None, None));
+        assert_eq!(parse_applescript("Mine\u{1f}Me\u{1f}\u{1f}spotify:local:Me:Album:Mine:180\u{1f}\u{1f}1000\u{1f}5"), None);
         let bad_art =
             parse_applescript("S\u{1f}A\u{1f}\u{1f}spotify:track:4uLU6hMCjMI75M1A2tKUQC\u{1f}https://evil.example/x.png\u{1f}1000\u{1f}5").expect("track");
         assert_eq!(bad_art.image_id, None);
@@ -424,8 +484,9 @@ mod tests {
 
     #[test]
     fn parses_spotifasts_control_reply() {
-        let reply =
-            format!("spotifast:now playing\tHeat Waves\tGlass Animals\tDreamland\t12345\t238805\t80\toff\toff\thttps://i.scdn.co/image/{IMAGE}\tyes\tDesk\n");
+        let reply = format!(
+            "spotifast:now playing\tHeat Waves\tGlass Animals\tDreamland\t12345\t238805\t80\toff\toff\thttps://i.scdn.co/image/{IMAGE}\tyes\tDesk\ttrack\n"
+        );
         let expected = NowPlaying {
             title: "Heat Waves".into(),
             artists: vec!["Glass Animals".into()],
@@ -434,27 +495,47 @@ mod tests {
             image_id: Some(IMAGE.into()),
             position_ms: 12_345,
             duration_ms: 238_805,
+            lookup_artist: None,
         };
         assert_eq!(parse_spotifast(&reply), Some(expected));
-        // the older nine-field reply has no art
-        let old = parse_spotifast("spotifast:now playing\tS\tA\t\t1\t2\t80\toff\toff").expect("track");
-        assert_eq!((old.image_id, old.position_ms), (None, 1));
-        for reply in ["spotifast:now stopped", "spotifast:now paused\tS\tA\t\t1\t2\t80\toff\toff", "spotifast!declined", "other:now playing\tS\tA\t\t1\t2", ""]
-        {
+        // several artists: looked up by the first
+        let duo = parse_spotifast("spotifast:now playing\tS\tA, B\t\t1\t2\t80\toff\toff\t\tno\tDesk\ttrack").expect("track");
+        assert_eq!((duo.artists, duo.lookup_artist, duo.image_id), (vec!["A, B".to_owned()], Some("A".to_owned()), None));
+        for reply in [
+            // today's twelve-field reply has no kind, so a podcast episode cannot be told apart
+            "spotifast:now playing\tS\tA\t\t1\t2\t80\toff\toff\t\tno\tDesk",
+            "spotifast:now playing\tS\tA\t\t1\t2\t80\toff\toff",
+            "spotifast:now playing\tEp\tShow\t\t1\t2\t80\toff\toff\t\tno\tDesk\tepisode",
+            "spotifast:now paused\tS\tA\t\t1\t2\t80\toff\toff\t\tno\tDesk\ttrack",
+            "spotifast:now stopped",
+            "spotifast!declined",
+            "other:now playing\tS\tA\t\t1\t2",
+            "",
+        ] {
             assert_eq!(parse_spotifast(reply), None, "{reply}");
         }
     }
 
     #[test]
-    fn windows_sessions_match_spotify_clients_by_exact_name() {
-        // Spotifast's session as Windows reports it (an unpackaged souvlaki app is named after its exe), and Spotify's.
-        for aumid in ["spotifast.exe", "Spotify.exe", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "psst-gui.exe", "spotify_player.exe", "ncspot.exe"] {
+    fn windows_sessions_match_spotify_only() {
+        for aumid in ["Spotify.exe", "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", r"C:\Users\me\AppData\Roaming\Spotify\Spotify.exe"] {
             assert!(is_spotify_session(aumid), "{aumid}");
         }
-        assert!(is_spotify_session(r"C:\Program Files\Spotifast\spotifast.exe"));
-        for aumid in
-            ["chrome.exe", "msedge.exe", "308046B0AF4A39CB", "Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic", "spotify-web.exe", "Foo!Spotify", ""]
-        {
+        // third-party clients (no episode signal), browsers and other players
+        for aumid in [
+            "spotifast.exe",
+            r"C:\Program Files\Spotifast\spotifast.exe",
+            "psst-gui.exe",
+            "spotify_player.exe",
+            "ncspot.exe",
+            "chrome.exe",
+            "msedge.exe",
+            "308046B0AF4A39CB",
+            "Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic",
+            "spotify-web.exe",
+            "Foo!Spotify",
+            "",
+        ] {
             assert!(!is_spotify_session(aumid), "{aumid}");
         }
     }
@@ -494,6 +575,7 @@ mod tests {
             image_id: Some(IMAGE.into()),
             position_ms: 12_345,
             duration_ms: 238_805,
+            lookup_artist: None,
         };
         assert_eq!(parse_mpris(spotifast), Some(expected));
         // Spotify's Linux client: an open.spotify.com address and a /com/spotify object path.
@@ -516,16 +598,23 @@ mod tests {
         assert_eq!(parse_mpris(Mpris { title: "Ad".into(), trackid: "/com/spotify/ad/abc".into(), ..Mpris::default() }), None);
         assert_eq!(parse_mpris(Mpris { title: "Ep".into(), url: "spotify:episode:4uLU6hMCjMI75M1A2tKUQC".into(), ..Mpris::default() }), None);
         assert_eq!(parse_mpris(Mpris { title: "Ep".into(), url: "https://open.spotify.com/episode/4uLU6hMCjMI75M1A2tKUQC".into(), ..Mpris::default() }), None);
-        let odd = parse_mpris(Mpris {
-            title: "Mine".into(),
-            trackid: "spotify:track:short".into(),
-            url: "file:///home/me/x.mp3".into(),
+        // local files, a bad id and no id: nothing to show from the catalog
+        let id = "spotify:track:3USxtqRwSYz57Ewm6wWRMp".to_owned();
+        assert_eq!(parse_mpris(Mpris { title: "Mine".into(), trackid: "spotify:local:Me:Album:Mine:180".into(), ..Mpris::default() }), None);
+        assert_eq!(parse_mpris(Mpris { title: "Mine".into(), trackid: "/com/spotify/local/abc".into(), ..Mpris::default() }), None);
+        assert_eq!(parse_mpris(Mpris { title: "Mine".into(), url: "file:///home/me/x.mp3".into(), trackid: id.clone(), ..Mpris::default() }), None);
+        assert_eq!(parse_mpris(Mpris { title: "Mine".into(), trackid: "spotify:track:short".into(), ..Mpris::default() }), None);
+        assert_eq!(parse_mpris(Mpris { title: "Mine".into(), ..Mpris::default() }), None);
+        // the position is kept within the length, and art that is not Spotify's is dropped
+        let late = parse_mpris(Mpris {
+            title: "S".into(),
+            trackid: id,
             art_url: "file:///home/me/.cache/art.jpg".into(),
             length_us: 1_000_000,
             position_us: 5_000_000,
             ..Mpris::default()
         })
-        .expect("local file");
-        assert_eq!((odd.track_id, odd.image_id, odd.position_ms), (None, None, 1_000));
+        .expect("track");
+        assert_eq!((late.position_ms, late.image_id), (1_000, None));
     }
 }
