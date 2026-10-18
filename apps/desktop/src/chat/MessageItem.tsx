@@ -15,6 +15,7 @@ import { Embeds } from './Embeds';
 import { Reactions } from './Reactions';
 import { EmojiPickerPopout } from './EmojiPicker';
 import { MessageMenu } from './MessageMenu';
+import { mediaTargetFrom, type MediaTarget } from './mediaTarget';
 import { ForwardedBlock, GifMessage, StickerItems, gifMessageMedia } from '../media/MessageParts';
 import { openForward } from '../media/store';
 import { ThreadChip } from '../threads/ThreadChip';
@@ -142,7 +143,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, tabS
   const chat = useChat();
   const threadActions = useMessageThreadActions(message, !!pending);
   const crosspost = ((message.flags ?? 0) & MessageFlags.IsCrosspost) !== 0;
-  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number; media?: MediaTarget | null } | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [menuPickerOpen, setMenuPickerOpen] = useState(false);
   const addBtn = useRef<HTMLButtonElement>(null);
@@ -178,7 +179,8 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, tabS
   const touchRef = useRef(false);
   const press = useRef<{ x: number; y: number; timer: number; fired: boolean } | null>(null);
   const stopPress = () => { if (press.current) window.clearTimeout(press.current.timer); };
-  const ownTap = (target: EventTarget) => { const hit = (target as Element).closest(OWN_TAP); return !!hit && rowRef.current !== hit && !!rowRef.current?.contains(hit); };
+  // a picture or a web link acts on a tap but still takes a long press (their menu has Copy Image, Save Image, Open Link, Copy Link)
+  const ownTap = (target: EventTarget) => { const hit = (target as Element).closest(OWN_TAP); const kind = hit ? mediaTargetFrom(hit)?.kind : undefined; return !!hit && kind !== 'image' && kind !== 'link' && rowRef.current !== hit && !!rowRef.current?.contains(hit); };
   const showToolbar = !pending && !editing && !ephemeral && (armed || pickerOpen);
   const cls = ['chat-msg'];
   if (grouped) cls.push('grouped');
@@ -234,15 +236,22 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, tabS
       press.current = null;
       if (!touchRef.current || pending || ephemeral || editing || ownTap(e.target)) return;
       const { clientX: x, clientY: y } = e;
+      const media = mediaTargetFrom(e.target as Element);
       stopPress();
-      press.current = { x, y, fired: false, timer: window.setTimeout(() => { if (press.current) { press.current.fired = true; arm(); setMenuAt({ x, y }); } }, LONG_PRESS_MS) };
+      press.current = { x, y, fired: false, timer: window.setTimeout(() => { if (press.current) { press.current.fired = true; arm(); setMenuAt({ x, y, media }); } }, LONG_PRESS_MS) };
     }}
     onPointerMove={e => { if (press.current && Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y) > LONG_PRESS_SLOP) stopPress(); }}
     onPointerUp={stopPress} onPointerCancel={stopPress}
     // the mousedown that follows a touch would close the menu the long press just opened (the menu closes on outside mousedown)
     onTouchEnd={e => { if (press.current?.fired && e.cancelable) e.preventDefault(); }}
     onMouseMove={e => { arm(); if (e.shiftKey !== shift) setShift(e.shiftKey); }} onMouseLeave={() => shift && setShift(false)}
-    onContextMenu={e => { if (pending || ephemeral || e.target instanceof HTMLAnchorElement) return; e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}>
+    onContextMenu={e => {
+      if (pending || ephemeral) return;
+      const media = mediaTargetFrom(e.target as Element);
+      if (!media && (e.target as Element).closest('a')) return; // a link that is not a web link keeps the system menu
+      e.preventDefault();
+      setMenuAt({ x: e.clientX, y: e.clientY, media });
+    }}>
     {!grouped && <ReplyPreview message={message} />}
     {!grouped && <InteractionHeader message={message} guildId={chat.guildId} />}
     <div className="chat-msg-gutter">
