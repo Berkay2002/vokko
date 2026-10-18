@@ -76,6 +76,7 @@ if (codex) {
     botName: cfg.botName,
     ownerId: () => bot.ownerId,
     webSearch: process.env.VOKKO_AI_WEB_SEARCH === '1',
+    media: process.env.VOKKO_AI_MEDIA !== 'off',
   })
 }
 

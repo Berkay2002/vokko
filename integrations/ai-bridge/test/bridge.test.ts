@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSy
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { MODERATE_MEMBERS, OWNER_COMMAND_RE, SEND_MESSAGES, USE_APPLICATION_COMMANDS, VIEW_CHANNEL, VokkoBot, bridgeState, type Access, type Message, type Role as BotRole } from '../../claude-channel/vokko.ts'
-import { BackendError, Bridge, COOLDOWN_MS, HANDOFFS_PER_HOUR, SESSION_MAX_TURNS, UserFacingError, childEnv, failureClass, parseUserId, type Answer, type Backend, type BotLike, type TurnContext } from '../core.ts'
+import { BackendError, Bridge, COOLDOWN_MS, HANDOFFS_PER_HOUR, MEDIA_CALLS_PER_TURN, SESSION_MAX_TURNS, UserFacingError, childEnv, failureClass, parseUserId, type Answer, type Backend, type BotLike, type TurnContext } from '../core.ts'
 import { PauseStore, decide, type PauseRequest } from '../pauses.ts'
 import { claudeApiBackend } from '../claude-api.ts'
 
@@ -1214,5 +1214,77 @@ describe('helpers', () => {
   test('childEnv keeps what a program needs and drops keys, tokens and config dirs', () => {
     const env = childEnv({ X: '1' }, { PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'k', OPENAI_API_KEY: 'o', VOKKO_BOT_TOKEN: 't', CLAUDE_CONFIG_DIR: '/c', CODEX_HOME: '/x', LC_ALL: 'C' })
     expect(env).toEqual({ PATH: '/bin', HOME: '/h', LC_ALL: 'C', X: '1' })
+  })
+})
+
+describe('Spotify and Stremio tools (media.ts) inside a turn', () => {
+  const realFetch = globalThis.fetch
+  let fetched: { url: string; acting: string | undefined }[]
+  beforeEach(() => {
+    fetched = []
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      const acting = (init.headers as Record<string, string>)['X-Vokko-Acting-For']
+      if (!acting && /\/channels\/\d+$/.test(String(url))) return Response.json({ type: 1 }) // the channel-name lookup for the "Acting for" line
+      fetched.push({ url: String(url), acting })
+      return Response.json({ track: { uri: 'spotify:track:' + 'a'.repeat(22), title: 'Song', artists: ['Band'], duration_ms: 1000 }, playing: true, position_ms: 0 })
+    }) as unknown as typeof fetch
+  })
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  test('a tool call acts for the message being answered: its id on the request, its DM channel as the call', async () => {
+    const s = setup()
+    let result = ''
+    s.backend.script = async ctx => void (result = await ctx.media!('spotify_now', { channel_id: '1', message_id: '2' }))
+    const m = msg(NAT, 'what is playing?')
+    await s.bridge.handle(m)
+    expect(fetched).toEqual([{ url: `http://vokko.test/api/v1/channels/${DM_NAT}/spotify`, acting: m.id }])
+    expect(result).toMatch(/^Acting for ".+" in a DM\.\n/)
+    expect(result).toContain('Playing: "Song" — "Band"')
+  })
+
+  test('a paused person never reaches the tools: the turn is not asked at all', async () => {
+    const s = setup()
+    s.bridge.pauses.add({ userId: NAT, scope: '*', minutes: 30, reason: 'owner', by: OWNER, manual: true }, s.clock.now())
+    s.backend.script = async ctx => void (await ctx.media!('spotify_now', {}))
+    await s.bridge.handle(msg(NAT, 'play something'))
+    expect(s.backend.calls).toHaveLength(0)
+    expect(fetched).toEqual([])
+  })
+
+  test('a pause the model sets on the author mid-turn stops the tools after it', async () => {
+    const s = setup()
+    let result = ''
+    s.backend.script = async ctx => {
+      await ctx.pause({ minutes: 5, reason: 'flood' })
+      result = await ctx.media!('spotify_now', {})
+    }
+    await s.bridge.handle(msg(NAT, 'play 1000 songs'))
+    expect(result).toBe('Not available: this person is paused.')
+    expect(fetched).toEqual([])
+  })
+
+  test('the monthly budget stops the tools, and a message past it is not asked at all', async () => {
+    const s = setup('bridge-shared', { perHour: 20, monthlyUsd: 0.01 })
+    let result = ''
+    s.backend.script = async ctx => void (result = await ctx.media!('spotify_now', {}))
+    await s.bridge.handle(msg(NAT, 'one')) // spends 0.01
+    await s.bridge.handle(msg(NAT, 'two'))
+    expect(s.backend.calls).toHaveLength(1)
+    expect(fetched).toHaveLength(1)
+    const ctx = s.bridge.turnContext(msg(NAT, 'three'), { authorPaused: false })
+    expect(await ctx.media!('spotify_now', {})).toBe('Not available: the monthly budget is used up.')
+    expect(fetched).toHaveLength(1)
+    expect(result).toContain('Playing')
+  })
+
+  test('one reply makes at most MEDIA_CALLS_PER_TURN tool calls', async () => {
+    const s = setup()
+    const ctx = s.bridge.turnContext(msg(NAT, 'loop'), { authorPaused: false })
+    const results: string[] = []
+    for (let i = 0; i < MEDIA_CALLS_PER_TURN + 1; i++) results.push(await ctx.media!('spotify_now', {}))
+    expect(fetched).toHaveLength(MEDIA_CALLS_PER_TURN)
+    expect(results.at(-1)).toContain('Too many music/movie requests')
   })
 })

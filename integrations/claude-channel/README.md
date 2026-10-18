@@ -157,6 +157,27 @@ Long sessions fill up the context: Claude Code compacts automatically, or run `/
 | `fetch_messages` | Recent history, oldest first, up to 100. Lines carry message IDs; `+Natt` marks attachments. Vokko's search isn't open to bots, so this is the only lookback. In a channel opted in with `--allow`, other senders are left out. |
 | `download_attachment` | Save a message's attachments to `~/.claude/channels/vokko/inbox/` and return the paths. |
 
+### Music and movies
+
+Claude can drive Vokko's Spotify and Stremio bots from chat, in the call the asking member is in (or the DM call, in a DM):
+`spotify_search`, `spotify_details`, `spotify_now`, `spotify_play` (now, queue or next), `spotify_control` (pause, resume,
+skip, previous, shuffle, loop, seek, queue edits, stop) and `stremio_search`, `stremio_details` (seasons and episodes),
+`stremio_streams`, `stremio_play` (the first ranked playable stream unless asked otherwise; a series needs season and
+episode; queue and resume work), `stremio_control`, `stremio_now`, `stremio_continue`.
+
+- Each tool takes the `message_id` of the Vokko message that asked and acts **as that member**: the request carries
+  `X-Vokko-Acting-For: <message_id>`, so the server applies their voice call, their Control Media right and their own Stremio
+  account and addons. The plugin accepts only the single newest message it delivered, in any channel (anything older, or from another channel, is refused: "no longer the latest"), and every result starts with "Acting for <name> in <channel>". No tool takes a channel id.
+- They act in a call, so they are **not auto-allowed**: your permission relay asks (`yes <id>` / `no <id>`) like for other
+  tools. To skip the prompt, add them to `permissions.allow` in `~/claude-vokko/.claude/settings.json` (next to the deny
+  rules above), by exact name: `mcp__plugin_vokko_vokko__spotify_search`, `…spotify_details`, `…spotify_now`, `…spotify_play`,
+  `…spotify_control`, `…stremio_search`, `…stremio_details`, `…stremio_streams`, `…stremio_play`, `…stremio_control`,
+  `…stremio_now`, `…stremio_continue` (the prefix is `mcp__plugin_<plugin>_<server>__`; confirm it in `/permissions`).
+  Allowing them lets every allowlisted member start music and movies through your bot, within their own rights in the call.
+  With `dmBackend api` the plugin sends no permission prompts, so such calls are simply not approved there.
+- The server must have Spotify/Stremio configured and the member must be in a call (and have linked Stremio): otherwise the
+  tool answers with a short sentence ("You need to be in a voice call first.", "Link your Stremio account in Vokko first").
+
 Inbound messages show a typing indicator while Claude works. Attachments are listed (name, type, size) but only downloaded when Claude asks.
 
 ## Development

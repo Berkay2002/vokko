@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { MEDIA_TOOLS } from '../../claude-channel/media.ts'
 import { CLAUDE_EFFORTS, claudeApiBackend } from '../claude-api.ts'
 import { CODEX_EFFORTS, LEAN, NOT_SIGNED_IN, cliListers, codexBackend, leanOverrides, type Listers } from '../codex.ts'
 import { BackendError, UserFacingError, childEnv, parseEffort, type TurnContext } from '../core.ts'
@@ -12,7 +13,7 @@ const dmCtx: TurnContext = { ...ctx, scope: 'dm' }
 const dir = () => mkdtempSync(join(tmpdir(), 'vokko-backend-'))
 
 describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => {
-  function stubbed(results: object[], extra: { model?: string; effort?: string; dmModel?: string; dmEffort?: string } = {}) {
+  function stubbed(results: object[], extra: { model?: string; effort?: string; dmModel?: string; dmEffort?: string; media?: boolean } = {}) {
     const seen: { prompt: string; options: any }[] = []
     const query = ((p: { prompt: string; options: any }) => {
       seen.push(p)
@@ -77,6 +78,26 @@ describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => 
     expect(o.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS).toBe('777')
     expect(o.env.SOME_HOST_SECRET).toBeUndefined()
     expect(o.systemPrompt).toContain('pause_user')
+  })
+
+  test('Spotify and Stremio tools: offered (and allowed by name) only with the bridge hook and VOKKO_AI_MEDIA not off', async () => {
+    const withMedia: TurnContext = { ...ctx, media: async () => 'ok' }
+    const on = stubbed([ok])
+    await on.backend.ask(undefined, 'x', withMedia)
+    const o = on.seen[0].options
+    const names = MEDIA_TOOLS.map(t => `mcp__vokko__${t.name}`)
+    expect(names).toContain('mcp__vokko__spotify_play')
+    expect(names).toContain('mcp__vokko__stremio_play')
+    expect(o.allowedTools).toEqual(['mcp__vokko__pause_user', 'mcp__vokko__unpause_user', ...names])
+    expect(o.tools).toEqual([]) // still no built-in tools
+    for (const n of names) expect(await o.canUseTool(n, {}, {})).toMatchObject({ behavior: 'allow' })
+    expect(await o.canUseTool('mcp__vokko__spotify_wipe', {}, {})).toMatchObject({ behavior: 'deny' })
+    expect(o.systemPrompt).toContain('confirm with the member first')
+    for (const [label, s, c] of [['option off', stubbed([ok], { media: false }), withMedia], ['no hook', stubbed([ok]), ctx]] as const) {
+      await s.backend.ask(undefined, 'x', c)
+      expect([label, s.seen[0].options.allowedTools]).toEqual([label, ['mcp__vokko__pause_user', 'mcp__vokko__unpause_user']])
+      expect(s.seen[0].options.systemPrompt).not.toContain('Spotify')
+    }
   })
 
   test('effort and model: aliases, per turn, and only values the SDK accepts', async () => {
