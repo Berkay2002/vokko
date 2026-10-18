@@ -31,7 +31,7 @@ impl Client {
     async fn connect(address: &str, token: &str) -> Self {
         let (ws, _) = connect_async(format!("ws://{address}/gateway")).await.expect("websocket connects");
         let mut client = Self { ws };
-        client.recv(Duration::from_secs(5)).await.expect("hello");
+        client.recv(common::WAIT).await.expect("hello");
         client.ws.send(Message::Text(json!({"op": 2, "d": {"token": token}}).to_string().into())).await.expect("identify");
         client.wait_for("READY").await;
         client
@@ -50,7 +50,7 @@ impl Client {
 
     async fn wait_for(&mut self, name: &str) -> Value {
         loop {
-            let frame = self.recv(Duration::from_secs(5)).await.unwrap_or_else(|| panic!("timed out waiting for {name}"));
+            let frame = self.recv(common::WAIT).await.unwrap_or_else(|| panic!("timed out waiting for {name}"));
             if frame["op"] == 0 && frame["t"] == name {
                 return frame["d"].clone();
             }

@@ -31,7 +31,7 @@ impl Client {
 
     async fn next(&mut self) -> Value {
         loop {
-            match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await {
+            match tokio::time::timeout(common::WAIT, self.ws.next()).await {
                 Ok(Some(Ok(Message::Text(text)))) => return serde_json::from_str(&text).expect("json frame"),
                 Ok(Some(Ok(_))) => continue,
                 other => panic!("gateway ended or timed out: {other:?}"),

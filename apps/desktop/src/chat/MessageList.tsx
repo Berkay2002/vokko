@@ -2,6 +2,7 @@ import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo,
 import { Virtuoso, type ItemProps, type ListProps, type VirtuosoHandle } from 'react-virtuoso';
 import { CheckCheck, Loader2 } from 'lucide-react';
 import type { Snowflake } from '../api/types';
+import { announce } from '../ui/announce';
 import { useChat } from './ChatContext';
 import { scrollBehavior } from './shell';
 import { ChannelStart } from './ChannelStart';
@@ -107,6 +108,20 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
 
   useEffect(() => { stick.current = true; setSeenBottom(false); setAtBottom(true); }, [channelId]);
 
+  // Screen readers hear messages from others that arrive in the open channel. Not role=log on the list: Virtuoso mounts and unmounts
+  // rows while scrolling, and a log would read each of them out again.
+  const lastSeen = useRef<string | null>(null);
+  const newest = state.messages[state.messages.length - 1];
+  useEffect(() => {
+    const key = newest ? `${channelId}:${newest.id}` : null;
+    const prev = lastSeen.current;
+    lastSeen.current = key;
+    if (!newest || !prev || prev === key || !prev.startsWith(`${channelId}:`) || state.hasMoreAfter || newest.author.id === chat.me.id) return;
+    if (compareIds(newest.id, prev.slice(channelId.length + 1)) <= 0) return; // older history loaded, or the newest was deleted
+    announce(`${chat.nameOf(newest.author, newest.member)}: ${newest.content.slice(0, 200) || 'sent an attachment'}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelId, newest?.id]);
+
   const unreadCount = useMemo(() => {
     if (!state.lastReadAtOpen) return 0;
     return state.messages.filter(m => compareIds(m.id, state.lastReadAtOpen!) > 0 && m.author.id !== chat.me.id).length;
@@ -145,6 +160,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       key={`${channelId}:${state.windowId}`}
       ref={virtuoso}
       className="chat-scroller"
+      aria-label={`Messages in ${chat.channel?.name ? `#${chat.channel.name}` : 'this conversation'}`}
       data={rows}
       context={{ hasMoreBefore: state.hasMoreBefore, hasMoreAfter: state.hasMoreAfter, loading: state.loadingOlder || state.loadingNewer }}
       firstItemIndex={state.firstItemIndex}

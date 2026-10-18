@@ -634,9 +634,11 @@ async fn forgot_password_does_not_wait_for_the_mail_server() {
             .await;
     // registering sends a verification mail through the slow server too; that is fine here
     app.register("patient").await;
-    let started = std::time::Instant::now();
     assert_eq!(app.send(Method::POST, "/auth/forgot", None, Some(json!({"login": "patient"}))).await.0, StatusCode::NO_CONTENT);
-    assert!(started.elapsed() < std::time::Duration::from_millis(700), "answered after {:?}", started.elapsed());
+    // The mail is sent last, after the lookups: still unsent means the answer did not wait for it (a wall-clock bound
+    // would also count the lookups, slow on a busy database).
+    let sent = app.state.accounts.mailer.sent();
+    assert!(!sent.iter().any(|mail| mail.body.contains("/reset#token=")), "answered after the mail went out");
     app.mailed_token_soon("patient@example.test", "reset").await;
     // a second request inside the cooldown sends nothing new
     let before = app.state.accounts.mailer.sent().len();

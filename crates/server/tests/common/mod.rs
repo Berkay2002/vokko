@@ -14,6 +14,10 @@ use tower::ServiceExt;
 use vokko_server::config::DotEnv;
 use vokko_server::{AppState, Config};
 
+/// How long a test waits for something that should happen (a gateway frame, a background task) before failing. Generous:
+/// a busy machine or a remote test database can take seconds, and a passing test never waits this long.
+pub const WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub struct TestApp {
     pub state: AppState,
     pub router: Router,
@@ -166,10 +170,11 @@ impl TestApp {
         mail.body[start..].chars().take_while(char::is_ascii_hexdigit).collect()
     }
 
-    /// Like `mailed_token`, for mails sent in the background (password reset): waits up to 5 s.
+    /// Like `mailed_token`, for mails sent in the background (password reset): waits up to `WAIT`.
     pub async fn mailed_token_soon(&self, to: &str, page: &str) -> String {
         let marker = format!("/{page}#token=");
-        for _ in 0..100 {
+        let deadline = tokio::time::Instant::now() + WAIT;
+        while tokio::time::Instant::now() < deadline {
             if self.state.accounts.mailer.sent().iter().any(|mail| mail.to == to && mail.body.contains(&marker)) {
                 return self.mailed_token(to, page);
             }

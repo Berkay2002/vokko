@@ -135,3 +135,9 @@ route("POST", "/bug-reports", ({ body }) => {
   if (Array.from(description).length > BUG_REPORT_DESCRIPTION_MAX) invalid("description", "BASE_TYPE_MAX_LENGTH", `Must be at most ${BUG_REPORT_DESCRIPTION_MAX} characters.`);
   return { id: nextId() };
 });
+
+// Crash reports (POST /crash-reports): the mock checks the message and keeps nothing.
+route("POST", "/crash-reports", ({ body }) => {
+  if ((str(body.message) ?? "").trim() === "") invalid("message", "BASE_TYPE_REQUIRED", "Must not be empty.");
+  return undefined;
+});

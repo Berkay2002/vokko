@@ -42,7 +42,7 @@ impl Client {
 
     async fn wait_for(&mut self, name: &str) -> Value {
         loop {
-            let next = tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await.unwrap_or_else(|_| panic!("timed out waiting for {name}"));
+            let next = tokio::time::timeout(common::WAIT, self.ws.next()).await.unwrap_or_else(|_| panic!("timed out waiting for {name}"));
             let Some(Ok(Message::Text(text))) = next else { continue };
             let frame: Value = serde_json::from_str(&text).expect("json frame");
             if frame["op"] == 0 && frame["t"] == name {
@@ -395,6 +395,7 @@ async fn the_relay_is_rate_limited() {
     alice_ws.voice(Some(&w.voice)).await;
     carl_ws.voice(Some(&w.voice)).await;
     assert_eq!(w.app.put_json(&path, &w.alice, json!({"game_id": "builtin:sketch"})).await.0, StatusCode::OK);
+    w.app.state.limiter.freeze_clock(); // a slow burst would refill as it goes
     let codes = burst(&w, &path, json!({"data": 1})).await;
     assert!(codes.contains(&StatusCode::NO_CONTENT), "{codes:?}");
     assert!(codes.contains(&StatusCode::TOO_MANY_REQUESTS), "a burst past 40 is limited: {codes:?}");
@@ -405,6 +406,7 @@ async fn the_relay_is_rate_limited() {
     let (mut alice_ws, _) = Client::identify(&w.address, &w.alice).await;
     alice_ws.voice(Some(&w.voice)).await;
     assert_eq!(w.app.put_json(&path, &w.alice, json!({"game_id": "builtin:sketch"})).await.0, StatusCode::OK);
+    w.app.state.limiter.freeze_clock();
     let codes = burst(&w, &path, json!({"data": "x".repeat(4095)})).await;
     assert!(codes.contains(&StatusCode::BAD_REQUEST), "{codes:?}");
     assert!(codes.contains(&StatusCode::TOO_MANY_REQUESTS), "oversized sends are limited: {codes:?}");

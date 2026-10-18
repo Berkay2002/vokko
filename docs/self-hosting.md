@@ -368,6 +368,22 @@ SELECT logs FROM bug_reports WHERE id = <id>;  -- the reference the user was sho
 Rows are deleted 30 days after they were sent, and each user keeps at most their 20 newest reports. Treat the logs as private: the client removes tokens and message text, but
 log lines can still name channels, servers and users.
 
+## Crash reports
+
+Clients send uncaught errors and desktop panics to the `crash_reports` table (docs/api.md "Crash reports"; users can turn it off
+in Settings > Data & Privacy). Rows hold no user id or message text. Read them with psql:
+
+```sql
+-- what is breaking most this week, per version
+SELECT kind, app_version, left(message, 120) AS message, count(*) AS n, max(created_at) AS last_seen
+FROM crash_reports WHERE created_at > now() - interval '7 days'
+GROUP BY 1, 2, 3 ORDER BY n DESC LIMIT 30;
+
+SELECT created_at, os, route, stack FROM crash_reports WHERE message LIKE 'TypeError: %' ORDER BY created_at DESC LIMIT 5;
+```
+
+Rows are deleted 30 days after they were sent.
+
 ## Not production-ready yet
 
 - Only the Postgres service in `deploy/docker-compose.yml` has a healthcheck; the server service has none. `GET /healthz` (see above) is the check to point one at.

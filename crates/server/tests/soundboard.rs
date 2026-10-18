@@ -45,7 +45,7 @@ impl Client {
 
     async fn wait_for(&mut self, name: &str) -> Value {
         loop {
-            let next = tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await;
+            let next = tokio::time::timeout(common::WAIT, self.ws.next()).await;
             match next {
                 Ok(Some(Ok(Message::Text(text)))) => {
                     let frame: Value = serde_json::from_str(&text).expect("json frame");

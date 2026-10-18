@@ -32,7 +32,7 @@ impl Client {
 
     async fn next(&mut self) -> Value {
         loop {
-            match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await {
+            match tokio::time::timeout(common::WAIT, self.ws.next()).await {
                 Ok(Some(Ok(Message::Text(text)))) => return serde_json::from_str(&text).expect("json frame"),
                 Ok(Some(Ok(_))) => continue,
                 other => panic!("gateway ended or timed out: {other:?}"),
@@ -291,6 +291,61 @@ async fn temporary_members_leave_with_their_last_connection_unless_given_a_role(
     drop(alice_again);
     assert!(owner.silent_for("GUILD_MEMBER_REMOVE", Duration::from_millis(500)).await);
     assert_eq!(w.member_count().await, 3);
+}
+
+#[tokio::test]
+async fn user_guild_settings_round_trip_through_rest_ready_and_events() {
+    let w = world().await;
+    let address = w.app.serve().await;
+    let path = format!("/users/@me/guilds/{}/settings", w.guild);
+    let (_, empty) = w.app.get(&path, &w.owner).await;
+    assert_eq!((empty["guild_id"].clone(), empty["message_notifications"].clone(), empty["channel_overrides"].clone()), (json!(w.guild), json!(3), json!([])));
+    let (_, ready) = Client::identify(&address, &w.owner).await;
+    assert_eq!(ready["user_guild_settings"], Value::Null, "omitted when nothing is saved");
+
+    let (mut session, _) = Client::identify(&address, &w.owner).await;
+    let body = json!({
+        "muted": true, "mute_config": {"end_time": "2099-01-01T00:00:00Z"}, "message_notifications": 1, "flags": 2048, "suppress_everyone": true,
+        "channel_overrides": {w.general.as_str(): {"muted": true, "mute_config": null, "message_notifications": 2}}
+    });
+    let (status, saved) = w.app.patch(&path, &w.owner, body).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["mute_config"], json!({"end_time": "2099-01-01T00:00:00Z"}));
+    assert_eq!(
+        saved["channel_overrides"],
+        json!([{"channel_id": w.general, "muted": true, "mute_config": null, "message_notifications": 2, "flags": 0, "collapsed": false}])
+    );
+    assert_eq!(session.wait_for("USER_GUILD_SETTINGS_UPDATE").await, saved);
+
+    // Overrides merge per channel; one back at the defaults is dropped; unmuting clears the mute config.
+    let (_, other) = w.app.post(&format!("/guilds/{}/channels", w.guild), &w.owner, json!({"name": "other", "type": 0})).await;
+    let other = other["id"].as_str().expect("id").to_owned();
+    let (_, merged) = w.app.patch(&path, &w.owner, json!({"muted": false, "channel_overrides": {other.as_str(): {"message_notifications": 0}}})).await;
+    assert_eq!((merged["muted"].clone(), merged["mute_config"].clone(), merged["suppress_everyone"].clone()), (json!(false), Value::Null, json!(true)));
+    assert_eq!(merged["channel_overrides"].as_array().expect("overrides").len(), 2);
+    let (_, dropped) = w.app.patch(&path, &w.owner, json!({"channel_overrides": {w.general.as_str(): {"muted": false, "message_notifications": 3}}})).await;
+    assert_eq!(dropped["channel_overrides"].as_array().map(|o| o.iter().map(|e| e["channel_id"].clone()).collect::<Vec<_>>()), Some(vec![json!(other)]));
+
+    // DMs live under @me; READY carries every saved entry.
+    let (status, dms) = w.app.patch("/users/@me/guilds/@me/settings", &w.owner, json!({"suppress_roles": true})).await;
+    assert_eq!((status, dms["guild_id"].clone()), (StatusCode::OK, Value::Null));
+    let (_, ready) = Client::identify(&address, &w.owner).await;
+    assert_eq!(ready["user_guild_settings"], json!([dms, dropped]));
+
+    // Per user; non-members get 404; invalid input changes nothing.
+    let (alice, _) = w.app.register("alice").await;
+    assert_eq!(w.app.patch(&path, &alice, json!({"muted": true})).await.0, StatusCode::NOT_FOUND);
+    for bad in [
+        json!({"message_notifications": 4}),
+        json!({"flags": 1}),
+        json!({"mute_config": {"end_time": "soon"}}),
+        json!({"channel_overrides": {"5": {"message_notifications": 9}}}),
+    ] {
+        assert_eq!(w.app.patch(&path, &w.owner, bad).await.0, StatusCode::BAD_REQUEST);
+    }
+    let too_many: serde_json::Map<String, Value> = (1..=501).map(|id| (id.to_string(), json!({"muted": true}))).collect();
+    assert_eq!(w.app.patch(&path, &w.owner, json!({"channel_overrides": too_many})).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(w.app.get(&path, &w.owner).await.1, dropped);
 }
 
 #[tokio::test]

@@ -375,6 +375,7 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
     }
 
     let guild_layout = crate::routes::guild_layout::load(state, user_id).await?;
+    let user_guild_settings = crate::routes::guild_settings::all(state, user_id).await?;
     Ok(ReadyEvent {
         v: 1,
         user,
@@ -385,6 +386,7 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
         read_states,
         relationships,
         guild_layout,
+        user_guild_settings,
         media: voice::media_config(&state.config),
         desktop_version: crate::desktop_version::current(state),
     })

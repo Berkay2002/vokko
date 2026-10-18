@@ -2,11 +2,13 @@
 
 mod appicon;
 mod appinfo;
+mod crash;
 mod games;
 mod links;
 #[cfg(target_os = "macos")]
 mod macos;
 mod notifications;
+mod overlay;
 mod popups;
 mod prefs;
 mod sharebar;
@@ -165,6 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         eprintln!("Vokko: {error}");
     }
+    crash::install(config_dir.clone());
     log::info!("starting Vokko local scaffold");
 
     let context = tauri::generate_context!();
@@ -196,6 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .manage(links::LinkState::default())
         .manage(updates::UpdateState::new(updater_configured))
         .manage(shortcuts::ShortcutRegistry::default())
+        .manage(overlay::OverlayState::default())
         .on_window_event(|window, event| {
             if window.label() != window::MAIN_WINDOW {
                 return;
@@ -231,6 +235,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             desktop_autostart_status,
             desktop_autostart_set,
             desktop_set_unread,
+            crash::desktop_take_crash,
             window::desktop_window_chrome,
             games::desktop_list_processes,
             appinfo::desktop_app_info,
@@ -250,6 +255,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             streamer::desktop_set_capture_hidden,
             streamer::desktop_restart,
             spotify::spotify_now_playing,
+            overlay::desktop_overlay_configure,
+            overlay::desktop_overlay_set_interactive,
+            overlay::desktop_overlay_open_main,
+            overlay::desktop_overlay_set_frame,
         ])
         .build(context)?
         .run(run_event);

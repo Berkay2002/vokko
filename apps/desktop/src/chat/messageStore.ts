@@ -1,7 +1,8 @@
 // Per-channel message store: fetches pages over REST, applies gateway events, owns optimistic sends. Lives outside React;
 // components subscribe with useChannelState().
 import { useSyncExternalStore } from 'react';
-import { ApiRequestError } from '../api/errors';
+import { ApiRequestError, RateLimitedError, SLOWMODE_CODE } from '../api/errors';
+import { startCooldown } from './slowmode';
 import { MessageType } from '../api/types';
 import { ReactionType } from '../api/types';
 import { announceBurst } from '../perks/SuperReactions';
@@ -290,6 +291,7 @@ export const messageStore = {
     } catch (e) {
       const error = e instanceof Error ? e.message : 'Failed to send';
       const errorCode = e instanceof ApiRequestError ? e.code : undefined;
+      if (e instanceof RateLimitedError && e.code === SLOWMODE_CODE) startCooldown(channelId, e.retryAfter * 1000);
       update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'failed', error, errorCode } : x)) }));
     }
   },
@@ -398,19 +400,28 @@ export const messageStore = {
   },
 
   getState(channelId: Snowflake): ChannelState { return states.get(channelId) ?? EMPTY; },
+
+  subscribe(channelId: Snowflake, cb: Listener): () => void {
+    let set = listeners.get(channelId);
+    if (!set) { set = new Set(); listeners.set(channelId, set); }
+    const target = set;
+    target.add(cb);
+    return () => { target.delete(cb); };
+  },
+
+  /** Startup cache (cache/startupCache.ts): a channel's saved newest page, shown before READY; READY refetches it like any loaded channel. */
+  seed(channelId: Snowflake, page: Message[]): void {
+    bindGateway();
+    if (states.has(channelId)) return;
+    const messages = page.map(normalizeMessage);
+    rememberMessages(messages);
+    states.set(channelId, replaceWindow(emptyState(), messages, { hasMoreBefore: messages.length >= PAGE_SIZE, hasMoreAfter: false }));
+    touched.set(channelId, Date.now());
+  },
 };
 
 export function useChannelState(channelId: Snowflake): ChannelState {
-  return useSyncExternalStore(
-    cb => {
-      let set = listeners.get(channelId);
-      if (!set) { set = new Set(); listeners.set(channelId, set); }
-      const target = set;
-      target.add(cb);
-      return () => { target.delete(cb); };
-    },
-    () => states.get(channelId) ?? EMPTY,
-  );
+  return useSyncExternalStore(cb => messageStore.subscribe(channelId, cb), () => states.get(channelId) ?? EMPTY);
 }
 
 export type { ChannelState, PendingMessage };

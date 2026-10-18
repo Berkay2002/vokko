@@ -7,6 +7,7 @@ import type {
   Channel,
   ChannelFollower,
   CreateBugReportRequest,
+  CreateCrashReportRequest,
   BugReportCreated,
   CreateReportRequest,
   EditChannelRequest,
@@ -69,15 +70,17 @@ function rateLimited(response: Response, text: string): RateLimitedError {
   let retryAfter = Number(response.headers.get("Retry-After"));
   let global = false;
   let message: string | undefined;
+  let code: number | undefined;
   try {
-    const parsed = JSON.parse(text) as { retry_after?: number; global?: boolean; message?: string };
+    const parsed = JSON.parse(text) as { retry_after?: number; global?: boolean; message?: string; code?: number };
     if (typeof parsed.retry_after === "number") retryAfter = parsed.retry_after;
     global = parsed.global === true;
     message = parsed.message;
+    if (typeof parsed.code === "number") code = parsed.code;
   } catch {
     /* header only */
   }
-  return new RateLimitedError(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 1, global, message);
+  return new RateLimitedError(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 1, global, message, code);
 }
 
 export interface RequestOptions {
@@ -192,6 +195,7 @@ export const startThreadFromMessage = (channelId: Snowflake, messageId: Snowflak
 export const startThread = (channelId: Snowflake, body: StartThreadRequest): Promise<Channel> => request("POST", `/channels/${channelId}/threads`, body);
 export const startForumPost = (forumId: Snowflake, body: StartForumPostRequest): Promise<ForumPost> => request("POST", `/channels/${forumId}/threads`, body);
 export const createBugReport = (body: CreateBugReportRequest): Promise<BugReportCreated> => request("POST", "/bug-reports", body);
+export const createCrashReport = (body: CreateCrashReportRequest): Promise<void> => request("POST", "/crash-reports", body);
 export const reportMessage = (channelId: Snowflake, messageId: Snowflake, body: CreateReportRequest): Promise<Report> => request("POST", `/channels/${channelId}/messages/${messageId}/report`, body);
 export const reportMember = (guildId: Snowflake, userId: Snowflake, body: CreateReportRequest): Promise<Report> => request("POST", `/guilds/${guildId}/members/${userId}/report`, body);
 export const getGuildPrivacy = (guildId: Snowflake): Promise<GuildPrivacySettings> => request("GET", `/users/@me/guilds/${guildId}/privacy`);

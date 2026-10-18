@@ -31,7 +31,7 @@ impl Client {
 
     async fn recv(&mut self) -> Value {
         loop {
-            match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await {
+            match tokio::time::timeout(common::WAIT, self.ws.next()).await {
                 Ok(Some(Ok(Message::Text(text)))) => return serde_json::from_str(&text).expect("json frame"),
                 Ok(Some(Ok(_))) => continue,
                 Ok(_) => panic!("gateway closed"),
@@ -220,7 +220,7 @@ async fn app_icons_on_activities_must_exist_on_the_server() {
 
     // a malformed one closes the connection like any other invalid activity (4002)
     alice.send(json!({"op": 3, "d": {"status": "online", "activities": [{"name": "X", "type": 0, "assets": {"large_image": "app:nothex"}}]}})).await;
-    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+    let closed = tokio::time::timeout(common::WAIT, async {
         loop {
             match alice.ws.next().await {
                 Some(Ok(Message::Close(frame))) => return frame.map(|f| u16::from(f.code)),
