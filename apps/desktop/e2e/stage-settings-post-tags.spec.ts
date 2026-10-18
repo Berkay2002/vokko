@@ -1,8 +1,11 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { openChannel, panel } from './threadHelpers';
 
 // Stage channels get their own settings page (no text-channel topic, no "Not available yet" rows) with the live stage's topic
 // (editStageTopic), the header shows the stage icon, and a forum post's tags can be edited after posting (Edit Post).
+
+const SHOTS = process.env.VOKKO_SHOTS_DIR;
+const shot = async (page: Page, name: string) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png` }); };
 
 type MockWin = { __vokkoMock: { channelIdByName(name: string): string | null } };
 
@@ -30,6 +33,7 @@ test('stage settings: stage topic instead of the channel topic, the header has t
   await expect(dialog.getByRole('button', { name: 'Integrations', exact: true })).toHaveCount(0);
   await expect(dialog.getByLabel('Channel topic')).toHaveCount(0);
   await expect(dialog.getByText('Not available yet')).toHaveCount(0);
+  await shot(page, 'stage-settings-1440');
   await dialog.getByLabel('Stage topic').fill('Monday AMA');
   await page.getByRole('button', { name: 'Save Changes' }).click();
   await expect(dialog.getByText('Saved.')).toBeVisible();
@@ -44,9 +48,27 @@ test('a post\'s tags can be changed in Post Settings', async ({ page }) => {
   await panel(page).getByRole('button', { name: 'Post Settings' }).click();
   const dialog = page.getByRole('dialog', { name: 'Edit Post' });
   const tags = dialog.getByRole('group', { name: 'Tags' });
+  await shot(page, 'edit-post-1440');
   await tags.getByRole('button', { name: 'Docs' }).click();
   await expect(tags.getByRole('button', { name: 'Docs' })).toHaveAttribute('aria-pressed', 'true');
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(card.locator('.forum-tag', { hasText: 'Docs' })).toBeVisible();
+});
+
+test.describe('phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  test('Edit Post at 390 keeps the tags inside the window', async ({ page }) => {
+    await openChannel(page, 'support');
+    await page.locator('.forum-post', { hasText: 'Idea: show joined threads' }).tap();
+    await panel(page).getByRole('button', { name: 'Thread actions' }).tap();
+    await page.getByRole('dialog', { name: 'Menu' }).getByRole('menuitem', { name: 'Edit Post' }).tap();
+    const dialog = page.getByRole('dialog', { name: 'Edit Post' });
+    for (const t of await dialog.getByRole('group', { name: 'Tags' }).getByRole('button').all()) {
+      const b = (await t.boundingBox())!;
+      expect(b.x + b.width).toBeLessThanOrEqual(391);
+    }
+    await shot(page, 'edit-post-390');
+  });
 });

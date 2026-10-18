@@ -65,8 +65,10 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const nextTopic = topic.trim() || null;
   // A stage's topic belongs to its live stage (STAGE_INSTANCE), not to the channel.
   const liveStage = useVoice(s => s.stages[channel.id]);
-  const [stageTopic, setStageTopic] = useState(liveStage?.topic ?? "");
-  const stageTopicDirty = !!liveStage && stageTopic.trim() !== liveStage.topic;
+  // null until edited, so a stage that starts or changes its topic while this page is open doesn't look like an unsaved edit.
+  const [stageDraft, setStageDraft] = useState<string | null>(null);
+  const stageTopic = stageDraft ?? liveStage?.topic ?? "";
+  const stageTopicDirty = !!liveStage && stageDraft !== null && !!stageDraft.trim() && stageDraft.trim() !== liveStage.topic;
   const hasTopic = !category && !stage;
   const ceiling = useVoiceUi(s => s.bitrateCeiling);
   const savedBitrate = Math.round((channel.bitrate ?? 64000) / 1000);
@@ -95,7 +97,7 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const reset = () => {
     setName(channel.name ?? "");
     setTopic(channel.topic ?? "");
-    setStageTopic(liveStage?.topic ?? "");
+    setStageDraft(null);
     setBitrateKbps(savedBitrate);
     setUserLimit(savedLimit);
     setSlowmode(savedSlowmode);
@@ -109,7 +111,8 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
     const slowmodeBody = slowmodeSupported ? { rate_limit_per_user: slowmode } : {};
     request<Channel>("PATCH", `/channels/${channel.id}`, { name: slug, ...(hasTopic ? { topic: nextTopic } : {}), ...voiceBody, ...slowmodeBody })
       .then(async updated => {
-        if (stageTopicDirty && stageTopic.trim()) await editStageTopic(channel.id, stageTopic);
+        if (stageTopicDirty) await editStageTopic(channel.id, stageTopic);
+        setStageDraft(null);
         appStore.getState().upsertChannel(updated);
         setName(updated.name ?? slug);
         setTopic(updated.topic ?? "");
@@ -153,7 +156,7 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
             disabled={!editable || !liveStage}
             onChange={e => {
               setSaved(false);
-              setStageTopic(e.target.value);
+              setStageDraft(e.target.value);
             }}
           />
         </Field>

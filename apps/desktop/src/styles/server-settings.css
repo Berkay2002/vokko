@@ -1375,12 +1375,4 @@
   .ss-roles-aside .ss-aside-row {
     display: none;
   }
-
-  .ss-tabs {
-    overflow-x: auto;
-  }
-
-  .ss-tab {
-    white-space: nowrap;
-  }
 }
