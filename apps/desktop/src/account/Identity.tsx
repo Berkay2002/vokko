@@ -133,11 +133,14 @@ function VerificationNotice({ text }: { text: ReactNode }) {
 
 export function AccountIdentity({ me }: { me: User }) {
   const info = accountStore(s => s.info);
+  const failed = accountStore(s => s.error !== null);
+  const ready = appStore(s => s.connection === "ready");
   const [reveal, setReveal] = useState(false);
   const [dialog, setDialog] = useState<"username" | "email" | null>(null);
+  // reload when the gateway comes back; a drop alone keeps what is already shown
   useEffect(() => {
-    void loadAccount();
-  }, [me.id]);
+    if (ready || !accountStore.getState().info) void loadAccount();
+  }, [me.id, ready]);
   const hasPassword = info?.has_password ?? true;
   return (
     <>
@@ -156,6 +159,13 @@ export function AccountIdentity({ me }: { me: User }) {
               <span className="personal-info">{reveal ? info.email : maskEmail(info.email)}</span>
               <button type="button" className="acct-reveal" onClick={() => setReveal(r => !r)}>
                 {reveal ? "Hide" : "Reveal"}
+              </button>
+            </>
+          ) : failed ? (
+            <>
+              <span className="field-error">Couldn't load your email.</span>
+              <button type="button" className="acct-reveal" onClick={() => void loadAccount()}>
+                Retry
               </button>
             </>
           ) : (
