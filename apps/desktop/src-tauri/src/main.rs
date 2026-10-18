@@ -6,6 +6,7 @@ mod games;
 mod links;
 #[cfg(target_os = "macos")]
 mod macos;
+mod notifications;
 mod popups;
 mod prefs;
 mod sharebar;
@@ -107,6 +108,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     });
 
     window::use_custom_controls(&handle);
+    notifications::install(&handle);
 
     let autostarted = std::env::args().any(|arg| arg == AUTOSTART_ARG);
     let stay_hidden = autostarted && handle.state::<PrefsStore>().get().start_minimized && handle.state::<tray::TrayState>().present();
