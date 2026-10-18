@@ -36,6 +36,8 @@ export const BINDINGS = [
     text: "composer",
   },
   { id: "createServer", group: "Navigation", label: "Create or join a server", keys: ["Mod+Shift+N"] },
+  { id: "nextRegion", group: "Navigation", label: "Move to the next area (servers, channels, chat, members)", keys: ["F6"] },
+  { id: "previousRegion", group: "Navigation", label: "Move to the previous area", keys: ["Shift+F6"] },
   { id: "markChannelRead", group: "Unreads", label: "Mark channel as read", keys: ["Escape"], text: "composer" },
   { id: "markServerRead", group: "Unreads", label: "Mark server as read", keys: ["Shift+Escape"], text: "composer" },
   { id: "oldestUnread", group: "Unreads", label: "Jump to oldest unread message", keys: ["Shift+PageUp"], text: "composer" },

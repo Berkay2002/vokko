@@ -1250,6 +1250,7 @@
 }
 
 .channel-row:hover .channel-actions,
+.channel-row:focus-within .channel-actions,
 .channel-row.selected .channel-actions {
   display: flex;
 }

@@ -149,6 +149,8 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   const unreadSince = firstUnread ? (sameDay(new Date(firstUnread.timestamp), new Date()) ? formatTime(new Date(firstUnread.timestamp)) : formatDivider(new Date(firstUnread.timestamp))) : '';
 
   return <div className="chat-list" onWheel={gesture} onTouchMove={gesture} onKeyDown={gesture} onPointerDown={() => { pointerDown.current = true; gesture(); }}>
+    {/* Gives the authors' <h3>s a level-2 parent under the channel's <h1> (axe heading-order), at any scroll position. */}
+    <h2 className="sr-only">Messages in {chat.channel?.name ? `#${chat.channel.name}` : 'this conversation'}</h2>
     {showUnread && <div className="chat-unread-bar" role="status">
       <button type="button" className="chat-unread-bar-main" onClick={() => {
         const i = rows.findIndex(r => r.message.id === firstUnread!.id);

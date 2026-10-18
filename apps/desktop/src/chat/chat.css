@@ -93,8 +93,9 @@
 @keyframes chat-spin { to { transform: rotate(360deg); } }
 
 .chat-start { padding: 16px 16px 8px; margin-bottom: 8px; }
-.chat-start h1 { margin: 8px 0 0; font-size: 32px; font-weight: 700; line-height: 40px; color: var(--chat-text-strong); }
 .chat-start h2 { margin: 0; font-size: 24px; font-weight: 500; color: var(--chat-text-strong); line-height: 30px; }
+.chat-start .chat-start-title { margin: 8px 0 0; font-size: 32px; font-weight: 700; line-height: 40px; }
+.chat-start .chat-start-sub { margin: 0; font-size: 24px; font-weight: 500; color: var(--chat-text-strong); line-height: 30px; }
 .chat-start p { margin: 8px 0 0; font-size: 16px; line-height: 20px; color: var(--chat-text-muted); }
 .chat-start-icon { width: 68px; height: 68px; border-radius: 50%; background: var(--background-accent); color: var(--chat-on-brand); display: grid; place-items: center; }
 .chat-start-avatar { border-radius: 50%; }

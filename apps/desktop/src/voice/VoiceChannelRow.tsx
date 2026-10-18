@@ -66,18 +66,28 @@ export function VoiceChannelRow({ channel, guild }: { channel: Channel; guild: G
     <li className="channel-row-wrap">
       <div
         className={className}
-        role="button"
-        tabIndex={0}
-        aria-label={`${name} voice channel`}
         onClick={e => !(e.target as HTMLElement).closest(".channel-actions, .voice-status-line") && open()}
-        onKeyDown={e => e.key === "Enter" && e.target === e.currentTarget && open()}
         onContextMenu={e => menu.open(e, channelContextItems(channel, guild))}
       >
-        {isPrivateChannel(channel, guild.id) ? <Lock size={20} className="channel-icon" /> : <Volume2 size={20} className="channel-icon" />}
-        <span className="channel-name">{name}</span>
-        <VoiceChannelBadge channel={channel} />
-        {mentions > 0 ? <span className="count-badge">{mentions}</span> : null}
-        {inVoice && <ElapsedTimer channelId={channel.id} />}
+        {/* Only the name part is the button: the action and status buttons beside it can't sit inside one (axe nested-interactive). */}
+        <span
+          className="voice-row-main"
+          role="button"
+          tabIndex={0}
+          aria-label={`${name} voice channel`}
+          onKeyDown={e => {
+            if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+              e.preventDefault();
+              open();
+            }
+          }}
+        >
+          {isPrivateChannel(channel, guild.id) ? <Lock size={20} className="channel-icon" /> : <Volume2 size={20} className="channel-icon" />}
+          <span className="channel-name">{name}</span>
+          <VoiceChannelBadge channel={channel} />
+          {mentions > 0 ? <span className="count-badge">{mentions}</span> : null}
+          {inVoice && <ElapsedTimer channelId={channel.id} />}
+        </span>
         <span className="channel-actions" onClick={stop}>
           <Tooltip content="Open Chat" side="top">
             <button
