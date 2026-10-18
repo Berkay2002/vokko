@@ -2,7 +2,7 @@
 
 Status: proposal, October 2026. Nothing here is built. It copies the Stremio bot as built (docs/design/stremio-bot.md, where
 section 12 overrides the earlier sections): one in-memory session per voice channel or DM call, `PUT|PATCH|DELETE` on the
-channel, one gateway event, a native bot on the home server that publishes into the self-hosted media LiveKit, and listeners on a
+channel, one gateway event, a native bot on the host that publishes into the self-hosted media LiveKit, and listeners on a
 second, subscribe-only `Room`.
 
 Goal: someone in a call opens a Spotify side panel (search, results, album, playlist and artist pages, the queue), picks a track,
@@ -107,7 +107,7 @@ Spotify reuses the call-level media Room owner; it does not add a third `Room` (
 
 ### 2.1 Process layout: a new crate `tools/spotify-bot`
 
-A separate binary, native on the home server under launchd (`org.vokko.spotify-bot`, `127.0.0.1:8721`, log
+A separate binary, native on the host under launchd (`org.vokko.vokko-spotify-bot`, `127.0.0.1:8721`, log
 `~/Library/Logs/vokko-spotify-bot.log`), like the Stremio bot. Reasons: stremio-bot is being edited by two workers, so a mode
 inside it would collide; librespot brings a large dependency tree that the Stremio bot should not carry; and a crash in one bot
 does not take the other down. It copies about 150 lines from stremio-bot (`api.rs` bearer auth and `secrets_match`,
@@ -142,10 +142,10 @@ the owner and people who share a guild with them. The owner leaving the guild or
 
 ### 2.4 Auth and secrets
 
-- **Playback credentials** reach the home server once: the owner runs `spotify-bot login` on the home server. It uses `librespot-oauth`
-  with Spotify's desktop client id, scope `streaming` and `http://127.0.0.1:8898/login` (over SSH: `ssh -L 8898:127.0.0.1:8898 buildhost`
-  and open the printed URL on the PC). It connects once with `store_credentials: true`, which writes librespot's
-  `credentials.json` (mode 600) to `~/.config/vokko/spotify-bot/`, outside external-disk because launchd agents cannot read external-disk (TCC),
+- **Playback credentials** reach the host once: the owner runs `spotify-bot login` on the host. It uses `librespot-oauth`
+  with Spotify's desktop client id, scope `streaming` and `http://127.0.0.1:8898/login` (over SSH: `ssh -L 8898:127.0.0.1:8898 <host>`
+  and open the printed URL on your own computer). It connects once with `store_credentials: true`, which writes librespot's
+  `credentials.json` (mode 600) to `~/.config/vokko/spotify-bot/`, outside external volumes because launchd agents cannot read them (TCC),
   the same reason the media LiveKit config lives in `~/.config/vokko/`. The bot refuses to start if the file is group- or
   world-readable. If Spotify rejects the stored credentials, the bot reports `auth` and the owner runs `login` again.
 - **Search and metadata use client credentials** from a new developer app the owner registers ("Vokko catalog"), held by the
@@ -402,7 +402,7 @@ Then three workers, by file ownership, against the frozen §4:
    and `voice/calls.rs` hooks, `crates/protocol/src/api.rs`, `docs/api.md`, `crates/server/tests/spotify.rs`. Writes the protocol
    types and `docs/api.md` first so the other two can start. Coordinate the `voice/stremio.rs` lines with the two Stremio workers.
 2. **Bot:** `tools/spotify-bot/**` (start from the Phase 0 crate: `login.rs`, `pump.rs`, `resample.rs`, `build.rs`; replace the
-   `tone`/`play`/`meta` spike commands with the HTTP API and §4.3), `deploy/launchd/org.vokko.spotify-bot.plist`,
+   `tone`/`play`/`meta` spike commands with the HTTP API and §4.3), an example plist in `deploy/launchd/`,
    `deploy/.env.example`, a "Spotify in calls" section in `docs/self-hosting.md`. Tests against a stub server.
 3. **Desktop:** `apps/desktop/src/spotify/**`, the Activities entry in `voice/VoiceChannelPage.tsx`, `voice/VoiceChannelRow.tsx`,
    `voice/reducer.ts` and the voice store for SPOTIFY_UPDATE, the `kind` in the call-level viewer owner, `activity/index.ts` (presence

@@ -7,7 +7,7 @@ the channel, one gateway event, a big tile in the call grid.
 Goal: someone in a call opens a Stremio panel, picks a movie or episode and a stream, and a participant named **Stremio**
 joins the LiveKit room and publishes video and audio. Everyone watches its tile. Anyone in the call can pause, resume,
 seek and stop, and there is a small Up next queue. Each user links their own Stremio account once. Playback uses the
-invoking user's installed addons (TorBox debrid), so every stream is a direct HTTPS file. No torrent client runs on the home server.
+invoking user's installed addons (TorBox debrid), so every stream is a direct HTTPS file. No torrent client runs on the host.
 
 Sources are cited inline. **[verified]** means checked against source or a live request. **[unverified]** means inferred,
 to be confirmed in Phase 0.
@@ -352,16 +352,16 @@ Report numbers, then lock the choice.
 **Legal and operational note.** The bot does not download or seed torrents. It only reads files over HTTPS from the user's own debrid account
 (TorBox), which the user pays for and configured in their own Stremio. Whether the content may be watched is the linking user's
 responsibility under their TorBox terms and local law. Vokko stores no media: it re-encodes in memory for the people in a private call and
-keeps nothing on disk. Operators of public servers should leave `VOKKO_STREMIO=off`. The feature is meant for small invite-only servers like this one.
+keeps nothing on disk. Operators of public servers should leave `VOKKO_STREMIO=off`. The feature is meant for small invite-only servers.
 
-## 12. Decision (2026-10-14): movie video on a self-hosted LiveKit on the home server, voice stays on LiveKit Cloud
+## 12. Decision (2026-10-14): movie video on a self-hosted LiveKit on the host, voice stays on LiveKit Cloud
 
 The owner chose a split, which replaces the Cloud-only parts above (§2 bot joins "the same LiveKit backend as the room", §11 #1 and #2):
 
-- **Media LiveKit:** `livekit-server` runs **natively on the home server host** (Homebrew `livekit`, a launchd agent, config in
+- **Media LiveKit:** `livekit-server` runs **natively on the macOS host** (Homebrew `livekit`, a launchd agent, config in
   `deploy/media-livekit.yaml`), separate from the Cloud project. Signalling goes through `wss://live.vokko.example.com` (a DNS-only record to the home
-  IP, Caddy or livekit's own TLS; decided in the bot phase), and media through router port forwards on the the home router (one UDP port with
-  `rtc.udp_port` mux, plus TCP 7881 as fallback). The home line is ~850 Mbit/s up, so bandwidth is not a concern. Router and DNS changes are made last,
+  IP, Caddy or livekit's own TLS; decided in the bot phase), and media through router port forwards on the home router (one UDP port with
+  `rtc.udp_port` mux, plus TCP 7881 as fallback). The home line had ample upload bandwidth, so bandwidth was not a concern. Router and DNS changes are made last,
   with the owner's go-ahead.
 - **Bot:** also **native on the macOS host** (launchd), not docker: no libwebrtc-in-docker risk, and libwebrtc can use VideoToolbox on macOS.
   The server (docker) reaches it at `http://host.internal:<port>` (OrbStack) with the bearer secret; the bot reaches the server at `http://127.0.0.1:8710`.

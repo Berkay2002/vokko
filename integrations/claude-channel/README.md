@@ -1,6 +1,6 @@
 # Claude for Vokko
 
-Your own Claude inside Vokko. A bot account you create forwards your messages into a Claude Code session on your machine, and Claude answers through the bot: in a server it shows as **"&lt;You&gt;'s Claude"** (for example "Carol's Claude"), in DMs just **"Claude"**.
+Your own Claude inside Vokko. A bot account you create forwards your messages into a Claude Code session on your machine, and Claude answers through the bot: in a server it shows as **"&lt;You&gt;'s Claude"** (for example "Sam's Claude"), in DMs just **"Claude"**.
 
 This is a [Claude Code channel](https://code.claude.com/docs/en/channels): an MCP server that Claude Code starts and that pushes chat messages into the session. It is a port of Anthropic's Discord channel plugin (Apache-2.0, see `NOTICE`) to Vokko's bot API, with the same access model: DM pairing codes, an allowlist of user IDs, server channels opted in one by one, and mention gating.
 
@@ -54,7 +54,7 @@ VOKKO_API_URL=https://your.vokko.server   # server root, no /api/v1
 VOKKO_BOT_TOKEN=...
 # optional
 VOKKO_BOT_NAME=Claude          # nickname suffix: "<owner>'s <name>"
-VOKKO_OWNER_NAME=Carol        # default: your display name, read from the server
+VOKKO_OWNER_NAME=Sam          # default: your display name, read from the server
 VOKKO_GATEWAY_URL=wss://...    # default: <VOKKO_API_URL as ws(s)>/gateway
 ```
 
@@ -96,7 +96,7 @@ The bot then answers when you @mention it or reply to it there. See [ACCESS.md](
 
 ## Run it on an always-on machine (macOS)
 
-A home server that is always on is a good home for your bot: Claude only answers while the session runs.
+An always-on Mac is a good home for your bot: Claude only answers while the session runs.
 
 **Use a dedicated working directory.** Claude acts in the directory it was started in. Don't start it in your home folder or a repo, and never next to a live server's data:
 
@@ -121,7 +121,7 @@ mkdir -p ~/claude-vokko && cd ~/claude-vokko
 }
 ```
 
-If the Mac also runs a live service (a Vokko server, bots, a database), deny its folders and data too (for example `"Read(/srv/vokko/**)"`, `"Edit(/srv/**)"`), and don't add `Bash(*)` allow rules.
+If the Mac also runs a live service (a Vokko server, bots, a database), deny its folders and data too (for example `"Read(<path to the server checkout>/**)"`, `"Edit(<path to its data volume>/**)"`), and don't add `Bash(*)` allow rules.
 
 **Keep it running in tmux,** restarting when it exits:
 
