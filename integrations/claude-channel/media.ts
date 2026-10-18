@@ -166,13 +166,13 @@ const trackLine = (t: Track): string => `${clean(t.title)} — ${names(t.artists
 function spotifyState(s: SpState | undefined): string {
   if (!s?.track) return 'Nothing is playing.'
   const pos = s.playing && s.updated_at_ms ? Number(s.position_ms) + Math.max(0, Date.now() - s.updated_at_ms) : Number(s.position_ms)
-  const out = [`${s.playing ? 'Playing' : 'Paused'}: ${clean(s.track.title)} — ${names(s.track.artists)} at ${mmss(pos)}/${mmss(s.track.duration_ms)}${s.loop && s.loop !== 'off' ? `, loop ${s.loop}` : ''}.`]
+  const out = [`${s.playing ? 'Playing' : 'Paused'}: ${clean(s.track.title)} — ${names(s.track.artists)} at ${mmss(pos)}/${mmss(s.track.duration_ms)}${s.loop && s.loop !== 'off' ? `, loop ${clean(s.loop, 10)}` : ''}.`]
   const queue = list<Track & { qid?: unknown }>(s.queue)
   if (queue.length) {
     out.push(`Queue (${s.queue_len ?? queue.length}): ${queue.slice(0, LIST_MAX).map(t => `[${clean(t.qid, 20)}] ${clean(t.title, 50)} — ${names(t.artists)}`).join('; ')}`)
   }
-  if (s.left_out) out.push(`${s.left_out} tracks did not fit in the queue.`)
-  if (s.skip_votes?.length && s.skip_needed) out.push(`Skip votes: ${s.skip_votes.length} of ${s.skip_needed}.`)
+  if (s.left_out) out.push(`${clean(s.left_out, 6)} tracks did not fit in the queue.`)
+  if (s.skip_votes?.length && s.skip_needed) out.push(`Skip votes: ${s.skip_votes.length} of ${clean(s.skip_needed, 6)}.`)
   return out.join('\n')
 }
 
@@ -186,9 +186,9 @@ async function spotifySearch(a: Args, c: Ctx): Promise<string> {
   const per = kind ? LIST_MAX : 4
   const out: string[] = []
   for (const t of list<Track>(r?.tracks).slice(0, per)) out.push(`track: ${trackLine(t)}`)
-  for (const x of list<Named>(r?.albums).slice(0, per)) out.push(`album: ${clean(x.name)} — ${names(x.artists)}${x.year ? ` (${x.year})` : ''} spotify:album:${clean(x.id, 22)}`)
+  for (const x of list<Named>(r?.albums).slice(0, per)) out.push(`album: ${clean(x.name)} — ${names(x.artists)}${x.year ? ` (${clean(x.year, 6)})` : ''} spotify:album:${clean(x.id, 22)}`)
   for (const x of list<Named>(r?.artists).slice(0, per)) out.push(`artist: ${clean(x.name)} (id ${clean(x.id, 22)})`)
-  for (const x of list<Named>(r?.playlists).slice(0, per)) out.push(`playlist: ${clean(x.name)} by ${clean(x.owner_name, 30)}${x.total ? `, ${x.total} tracks` : ''} spotify:playlist:${clean(x.id, 22)}`)
+  for (const x of list<Named>(r?.playlists).slice(0, per)) out.push(`playlist: ${clean(x.name)} by ${clean(x.owner_name, 30)}${x.total ? `, ${clean(x.total, 6)} tracks` : ''} spotify:playlist:${clean(x.id, 22)}`)
   return out.join('\n') || 'No results.'
 }
 
@@ -201,8 +201,8 @@ async function spotifyDetails(a: Args, c: Ctx): Promise<string> {
   const head =
     kind === 'artist'
       ? `${clean(r?.name)} — top tracks:`
-      : `${clean(r?.name)} — ${kind === 'album' ? names(r?.artists) : `by ${clean(r?.owner_name, 30)}`}, ${r?.total ?? list(r?.tracks).length} tracks (first ${tracks.length}):`
-  const albums = kind === 'artist' ? [`Albums:`, ...list<Named>(r?.albums).slice(0, 5).map(x => `- ${clean(x.name)}${x.year ? ` (${x.year})` : ''} spotify:album:${clean(x.id, 22)}`)] : []
+      : `${clean(r?.name)} — ${kind === 'album' ? names(r?.artists) : `by ${clean(r?.owner_name, 30)}`}, ${clean(r?.total ?? list(r?.tracks).length, 6)} tracks (first ${tracks.length}):`
+  const albums = kind === 'artist' ? [`Albums:`, ...list<Named>(r?.albums).slice(0, 5).map(x => `- ${clean(x.name)}${x.year ? ` (${clean(x.year, 6)})` : ''} spotify:album:${clean(x.id, 22)}`)] : []
   return [head, ...tracks, ...albums].join('\n')
 }
 
@@ -225,9 +225,8 @@ async function spotifyControl(a: Args, c: Ctx): Promise<string> {
   if (action === 'loop') body = { loop: pick(a, 'loop_mode', ['off', 'track', 'queue'] as const) }
   else if (action === 'seek') body = { position_ms: (int(a, 'seconds', 0, 86_400) ?? bad('seconds')) * 1000 }
   else if (action === 'queue_remove' || action === 'queue_move') {
-    const qid = str(a, 'qid', /^[\w-]{1,40}$/)
-    const id = /^\d+$/.test(qid) ? Number(qid) : qid
-    body = action === 'queue_remove' ? { queue_remove: id } : { queue_move: { qid: id, to: int(a, 'to', 0, 1000) ?? bad('to') } }
+    const qid = str(a, 'qid', /^[\w.:~-]{1,60}$/) // a string on the wire (types.ts SpotifyQueueEntry), passed back as given
+    body = action === 'queue_remove' ? { queue_remove: qid } : { queue_move: { qid, to: int(a, 'to', 0, 1000) ?? bad('to') } }
   }
   const url = `/channels/${await c.channel()}/spotify`
   if (action === 'stop') {
@@ -274,22 +273,22 @@ function videoId(a: Args): { kind: (typeof TYPES)[number]; id: string; videoId: 
 async function stremioSearch(a: Args, c: Ctx): Promise<string> {
   const kind = pick(a, 'kind', TYPES)
   const r = list<StTitle>(await c.call('GET', `/stremio/search${q({ type: kind, q: str(a, 'q') })}`, undefined, LINK_FIRST))
-  return r.slice(0, LIST_MAX).map(t => `${clean(t.name)}${t.year ? ` (${t.year})` : ''} — ${kind} ${clean(t.id, 14)}`).join('\n') || 'No results.'
+  return r.slice(0, LIST_MAX).map(t => `${clean(t.name)}${t.year ? ` (${clean(t.year, 6)})` : ''} — ${kind} ${clean(t.id, 14)}`).join('\n') || 'No results.'
 }
 
 async function stremioDetails(a: Args, c: Ctx): Promise<string> {
   const kind = pick(a, 'kind', TYPES)
   const id = str(a, 'id', TITLE_ID)
   const m = (await c.call('GET', `/stremio/meta/${kind}/${id}`, undefined, LINK_FIRST)) as { name?: string; year?: number | string; runtime?: string; description?: string; videos?: { season?: number; episode?: number; name?: string }[] } | undefined
-  const out = [`${clean(m?.name)}${m?.year ? ` (${m.year})` : ''}${m?.runtime ? `, ${clean(m.runtime, 20)}` : ''}. ${clean(m?.description, 300)}`]
+  const out = [`${clean(m?.name)}${m?.year ? ` (${clean(m.year, 6)})` : ''}${m?.runtime ? `, ${clean(m.runtime, 20)}` : ''}. ${clean(m?.description, 300)}`]
   if (kind === 'series') {
     const seasons = new Map<number, number>()
     for (const v of list<{ season?: number }>(m?.videos)) seasons.set(Number(v.season) || 0, (seasons.get(Number(v.season) || 0) ?? 0) + 1)
     const want = int(a, 'season', 0, 9999)
-    if (want === undefined) out.push('Seasons: ' + ([...seasons].sort((x, y) => x[0] - y[0]).map(([s, n]) => `${s === 0 ? 'Specials' : 'S' + s}: ${n} eps`).join(', ') || 'unknown'))
+    if (want === undefined) out.push('Seasons: ' + ([...seasons].sort((x, y) => x[0] - y[0]).map(([s, n]) => `${s === 0 ? 'Specials' : 'S' + clean(s, 6)}: ${n} eps`).join(', ') || 'unknown'))
     else {
       const eps = list<{ season?: number; episode?: number; name?: string }>(m?.videos).filter(v => Number(v.season) === want)
-      out.push(`Season ${want}, ${eps.length} episodes (first ${Math.min(eps.length, LIST_MAX)}): ` + eps.slice(0, LIST_MAX).map(v => `${v.episode} ${clean(v.name, 40)}`).join('; '))
+      out.push(`Season ${want}, ${eps.length} episodes (first ${Math.min(eps.length, LIST_MAX)}): ` + eps.slice(0, LIST_MAX).map(v => `${clean(v.episode, 6)} ${clean(v.name, 40)}`).join('; '))
     }
   }
   return out.join('\n')
@@ -355,7 +354,7 @@ async function stremioContinue(_a: Args, c: Ctx): Promise<string> {
   return (
     r
       .slice(0, LIST_MAX)
-      .map(x => `${clean(x.name)} — ${x.type} ${clean(x.id, 14)}${x.type === 'series' && x.season != null ? ` S${x.season}E${x.episode}` : ''}${x.position_ms ? `, stopped at ${mmss(x.position_ms)}/${mmss(x.duration_ms)} (position_s ${Math.floor(Number(x.position_ms) / 1000)})` : ', next up'}`)
+      .map(x => `${clean(x.name)} — ${clean(x.type, 10)} ${clean(x.id, 14)}${x.type === 'series' && x.season != null ? ` S${clean(x.season, 6)}E${clean(x.episode, 6)}` : ''}${x.position_ms ? `, stopped at ${mmss(x.position_ms)}/${mmss(x.duration_ms)} (position_s ${Math.floor(Number(x.position_ms) / 1000)})` : ', next up'}`)
       .join('\n') || 'Nothing to continue.'
   )
 }

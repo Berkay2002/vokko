@@ -169,9 +169,12 @@ episode; queue and resume work), `stremio_control`, `stremio_now`, `stremio_cont
   `X-Vokko-Acting-For: <message_id>`, so the server applies their voice call, their Control Media right and their own Stremio
   account and addons. The plugin refuses ids it did not deliver in the last 10 minutes; no tool takes a channel id.
 - They act in a call, so they are **not auto-allowed**: your permission relay asks (`yes <id>` / `no <id>`) like for other
-  tools. To skip the prompt, allow them in the project's `.claude/settings.json`, e.g. `"mcp__plugin_vokko_vokko__spotify_*"`
-  (check the exact prefix in `/permissions`). With `dmBackend api` the plugin sends no prompts, so such calls are simply not
-  approved there.
+  tools. To skip the prompt, add them to `permissions.allow` in `~/claude-vokko/.claude/settings.json` (next to the deny
+  rules above), by exact name: `mcp__plugin_vokko_vokko__spotify_search`, `…spotify_details`, `…spotify_now`, `…spotify_play`,
+  `…spotify_control`, `…stremio_search`, `…stremio_details`, `…stremio_streams`, `…stremio_play`, `…stremio_control`,
+  `…stremio_now`, `…stremio_continue` (the prefix is `mcp__plugin_<plugin>_<server>__`; confirm it in `/permissions`).
+  Allowing them lets every allowlisted member start music and movies through your bot, within their own rights in the call.
+  With `dmBackend api` the plugin sends no permission prompts, so such calls are simply not approved there.
 - The server must have Spotify/Stremio configured and the member must be in a call (and have linked Stremio): otherwise the
   tool answers with a short sentence ("You need to be in a voice call first.", "Link your Stremio account in Vokko first").
 
