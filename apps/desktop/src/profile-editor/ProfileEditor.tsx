@@ -106,34 +106,37 @@ function EditorBody({ me, scope, onScope }: { me: User; scope: Scope; onScope(ne
     <div className={`pe-layer${closing ? " closing" : ""}`}>
       <div className="pe-backdrop" onClick={requestClose} />
       <div ref={root} className={`pe${collapsed ? " collapsed" : ""}`} role="dialog" aria-modal="true" aria-label="Edit Profile" tabIndex={-1}>
-        {collapsed ? (
-          <button type="button" className="pe-expand pe-icon-btn" aria-label="Expand sidebar" onClick={() => setCollapsed(false)}>
-            <ChevronsRight size={20} />
-          </button>
-        ) : (
-          <LeftColumn
-            user={me}
-            scope={scope}
-            guilds={guilds}
-            draft={draft}
-            look={look}
-            setDraft={setDraft}
-            setExtra={setExtra}
-            uploadChannel={uploadChannel}
-            openTile={openTile}
-            setOpenTile={setOpenTile}
-            onScope={next => {
-              if (blockedByUnsaved()) return;
-              setOpenTile(null);
-              onScope(next);
-            }}
-            onCollapse={() => setCollapsed(true)}
-          />
-        )}
-        <main className="pe-middle">
-          <CardPreview user={me} member={member} guildName={guildName} scope={scope} draft={draft} look={look} setDraft={setDraft} uploadChannel={uploadChannel} onOpenTile={openTileFromCard} />
-        </main>
-        <RightColumn user={me} scope={scope} draft={draft} setDraft={setDraft} uploadChannel={uploadChannel} />
+        {/* No box on a desktop (display: contents); on a phone the one column that scrolls under the fixed save bar. */}
+        <div className="pe-scroll">
+          {collapsed ? (
+            <button type="button" className="pe-expand pe-icon-btn" aria-label="Expand sidebar" onClick={() => setCollapsed(false)}>
+              <ChevronsRight size={20} />
+            </button>
+          ) : (
+            <LeftColumn
+              user={me}
+              scope={scope}
+              guilds={guilds}
+              draft={draft}
+              look={look}
+              setDraft={setDraft}
+              setExtra={setExtra}
+              uploadChannel={uploadChannel}
+              openTile={openTile}
+              setOpenTile={setOpenTile}
+              onScope={next => {
+                if (blockedByUnsaved()) return;
+                setOpenTile(null);
+                onScope(next);
+              }}
+              onCollapse={() => setCollapsed(true)}
+            />
+          )}
+          <main className="pe-middle">
+            <CardPreview user={me} member={member} guildName={guildName} scope={scope} draft={draft} look={look} setDraft={setDraft} uploadChannel={uploadChannel} onOpenTile={openTileFromCard} />
+          </main>
+          <RightColumn user={me} scope={scope} draft={draft} setDraft={setDraft} uploadChannel={uploadChannel} />
+        </div>
         <button type="button" className="pe-close" aria-label="Close" onClick={requestClose}>
           <X size={20} />
         </button>

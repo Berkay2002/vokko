@@ -207,11 +207,14 @@ export function loadStoredStatus(): { status: SelectableStatus; custom: string }
   }
 }
 
-export function setOwnStatus(status: SelectableStatus, custom: string): void {
-  try {
-    localStorage.setItem(STATUS_KEY, JSON.stringify({ status, custom }));
-  } catch {
-    /* ignore */
+/** `persist: false` is the automatic Idle (shell/idle.ts): sent and shown, but the stored choice stays what the user picked. */
+export function setOwnStatus(status: SelectableStatus, custom: string, persist = true): void {
+  if (persist) {
+    try {
+      localStorage.setItem(STATUS_KEY, JSON.stringify({ status, custom }));
+    } catch {
+      /* ignore */
+    }
   }
   const wire: PresenceStatus = status === "invisible" ? "offline" : status;
   // Op 3 keeps every field it leaves out. Only the desktop app detects games, so only it sends `activities` (with every

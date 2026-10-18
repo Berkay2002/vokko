@@ -16,6 +16,7 @@ import { loadMockBackend } from "./api/mockBackend";
 import * as desktop from "./desktop";
 import { initDesktop } from "./desktop";
 import { startGameDetection } from "./activity";
+import { startIdlePresence } from "./shell/idle";
 import { gateway } from "./api/gateway";
 import * as rest from "./api/rest";
 import * as store from "./api/store";
@@ -88,6 +89,7 @@ void initDesktop(); // deep links + updater + tray unread dot; no-op outside the
 gateway.on("READY", ready => void (ready.desktop_version && desktop.noticeLatestVersion(ready.desktop_version)));
 gateway.on("DESKTOP_VERSION", ({ version }) => void desktop.noticeLatestVersion(version));
 startGameDetection(); // desktop only: detected game goes out as presence
+startIdlePresence(); // 10 minutes without input: Online becomes Idle
 wireOverlay(); // desktop only: feeds the in-game overlay window
 
 const root = document.getElementById("root");

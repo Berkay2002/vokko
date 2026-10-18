@@ -70,6 +70,7 @@ test('recent avatars list the last uploads newest first and set one again', asyn
   const urls: string[] = [];
   for (const [index, data] of PNGS.entries()) {
     await editor.getByTestId('pe-file-avatar').setInputFiles({ name: `a${index}.png`, mimeType: 'image/png', buffer: Buffer.from(data, 'base64') });
+    await page.getByRole('dialog', { name: 'Edit Image' }).getByRole('button', { name: 'Apply' }).click();
     await save(editor);
     urls.push((await avatar(page)) ?? '');
   }

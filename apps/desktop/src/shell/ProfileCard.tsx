@@ -166,6 +166,16 @@ export function ProfileCardHost() {
                 )}
               </p>
             </section>
+            <button
+              type="button"
+              className="btn btn-secondary btn-wide profile-full"
+              onClick={() => {
+                close();
+                openModal({ type: "profile", userId: user.id, guildId });
+              }}
+            >
+              View Full Profile
+            </button>
           </div>
         </>
       )}
