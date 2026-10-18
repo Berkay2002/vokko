@@ -121,23 +121,23 @@ test.describe('sticker picker', () => {
     const stickers = picker(page).getByRole('tabpanel', { name: 'Stickers' });
     const group = stickers.getByRole('region', { name: "Sam's server" });
     await expect(group).toBeVisible();
-    await expect(group.getByRole('button')).toHaveCount(3);
+    await expect(group.locator('.media-sticker-cell')).toHaveCount(3);
     await shot(page, 'sticker-picker');
 
     // hover preview names the sticker
-    await group.getByRole('button', { name: 'party' }).hover();
+    await group.getByRole('button', { name: 'party', exact: true }).hover();
     await expect(stickers.locator('.media-sticker-preview')).toContainText('party');
     await shot(page, 'sticker-hover');
 
     // search by tag
     await stickers.getByRole('textbox', { name: 'Search stickers' }).fill('approve');
-    await expect(group.getByRole('button')).toHaveCount(1);
-    await expect(group.getByRole('button', { name: 'thumbs-up' })).toBeVisible();
+    await expect(group.locator('.media-sticker-cell')).toHaveCount(1);
+    await expect(group.getByRole('button', { name: 'thumbs-up', exact: true })).toBeVisible();
     await stickers.getByRole('textbox', { name: 'Search stickers' }).fill('zzzz');
     await expect(stickers.getByText('No stickers found')).toBeVisible();
     await stickers.getByRole('textbox', { name: 'Search stickers' }).fill('wave');
 
-    await group.getByRole('button', { name: 'wave' }).click();
+    await group.getByRole('button', { name: 'wave', exact: true }).click();
     await expect(picker(page)).toHaveCount(0);
     const sent = page.locator('.chat-msg', { has: page.locator('img.media-sticker') }).last();
     const img = sent.locator('img.media-sticker');
@@ -151,7 +151,7 @@ test.describe('sticker picker', () => {
   test('a sticker can be sent in a DM', async ({ page }) => {
     await openDm(page);
     await page.getByRole('button', { name: 'Open sticker picker' }).click();
-    await picker(page).getByRole('button', { name: 'party' }).click();
+    await picker(page).getByRole('button', { name: 'party', exact: true }).click();
     await expect(page.locator('img.media-sticker[alt="Sticker: party"]')).toBeVisible();
   });
 });
