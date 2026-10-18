@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { ROVING_ITEMS, rovingKey, useFocusTrap, useLayer, useOutsideClose } from "./layers";
+import { useBackClose } from "./backHistory";
 import { BottomSheet, usePhone } from "./BottomSheet";
 import { placeNear, type Align, type Side } from "./position";
 
@@ -41,6 +42,7 @@ export function Popout({ anchor, open, onClose, side = "bottom", align = "center
   const phone = usePhone();
   const asSheet = !!sheet && phone;
   const layer = useLayer(open && !asSheet, onClose);
+  useBackClose(open && !asSheet, onClose);
   useOutsideClose(open && !asSheet, () => [box.current, resolve(anchor)], onClose, layer.isTop);
   // Focus moves in only once placed: the box is visibility:hidden until then and cannot take focus.
   useFocusTrap(open && trapFocus && !asSheet, () => box.current, pos !== null, SEARCH_FIELD);

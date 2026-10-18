@@ -3,5 +3,5 @@ export { request } from '../api/rest';
 export { appStore, useStore, displayName, dmName, roleColor } from '../api/store';
 export { go, guildPath, dmPath } from '../shell/nav';
 export { NARROW_QUERY } from '../shell/navDrawer';
-export { Popout, Tooltip, useLayer } from '../ui';
+export { Popout, Tooltip, useBackClose, useLayer } from '../ui';
 export { messageStore } from '../chat/messageStore';

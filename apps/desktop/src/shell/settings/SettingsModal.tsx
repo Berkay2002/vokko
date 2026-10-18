@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComponentType, ReactNode, RefObject, UIEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, X } from "lucide-react";
-import { useFocusTrap, useInertApp, useLayer } from "../../ui";
+import { useBackClose, useFocusTrap, useInertApp, useLayer } from "../../ui";
 import { blockedByUnsaved } from "./unsaved";
 
 /**
@@ -59,6 +59,9 @@ export function SettingsModal({ label, title, side, onClose, children, scrollRef
   useEffect(() => () => window.clearTimeout(timer.current), []);
   useLayer(true, requestClose);
   useInertApp(true);
+  useBackClose(true, requestClose);
+  // phone: back from a page returns to the section list first
+  useBackClose(pane === "page" && window.matchMedia("(max-width: 485px)").matches, () => setPane("nav"));
   useFocusTrap(true, () => root.current);
 
   return createPortal(
@@ -66,6 +69,9 @@ export function SettingsModal({ label, title, side, onClose, children, scrollRef
       <div className="sm-backdrop" onClick={requestClose} />
       <div ref={root} className="sm" role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} data-pane={pane}>
         <nav className="sm-side" aria-label={`${label} sections`} onClick={e => (e.target as HTMLElement).closest(".sm-item, .sm-sub") && setPane("page")}>
+          <button type="button" className="sm-nav-close" aria-label="Close" onClick={requestClose}>
+            <X size={20} />
+          </button>
           {side}
         </nav>
         <div className="sm-main">

@@ -52,6 +52,7 @@
 }
 
 .sm-back,
+.sm-nav-close,
 .fss-back,
 .fss-nav-close {
   display: none;
@@ -250,6 +251,7 @@
   }
 
   .sm-side {
+    position: relative;
     flex: 1 0 100%;
     width: 100%;
     border-right: 0;
@@ -310,6 +312,7 @@
     width: 100%;
   }
 
+  .sm-nav-close,
   .fss-back,
   .fss-nav-close {
     position: absolute;
@@ -328,6 +331,7 @@
     left: 8px;
   }
 
+  .sm-nav-close,
   .fss-nav-close {
     right: 8px;
   }
