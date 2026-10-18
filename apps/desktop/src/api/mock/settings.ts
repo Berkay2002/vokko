@@ -72,6 +72,10 @@ export const SETTINGS_KEYS: ReadonlyMap<string, Kind> = new Map<string, Kind>([
   ["friend_requests_everyone", BOOL],
   ["friend_requests_mutual_friends", BOOL],
   ["friend_requests_mutual_guilds", BOOL],
+  ["share_activity", BOOL],
+  ["share_spotify", BOOL],
+  ["share_typing", BOOL],
+  ["share_mutuals", BOOL],
 ]);
 
 const chars = (text: string): number => [...text].length;
@@ -146,6 +150,20 @@ const isFriend = (a: string, b: string): boolean => relationship(a, b)?.type ===
 
 /** Per-user guild ids whose members may not DM that user (GET/PATCH /users/@me/guilds/{id}/privacy). */
 const restrictedGuilds = new Map<string, Set<string>>();
+/** Per-user guild ids where that user appears offline (the mock only stores it; presence is not filtered). */
+const offlineGuilds = new Map<string, Set<string>>();
+
+const guildPrivacy = (userId: string, guildId: string) => ({
+  direct_messages: !restrictedGuilds.get(userId)?.has(guildId),
+  appear_offline: !!offlineGuilds.get(userId)?.has(guildId),
+});
+
+function toggle(sets: Map<string, Set<string>>, userId: string, guildId: string, on: boolean): void {
+  const set = sets.get(userId) ?? new Set<string>();
+  if (on) set.add(guildId);
+  else set.delete(guildId);
+  sets.set(userId, set);
+}
 
 /**
  * 403 50007 unless `sender` is a friend of `target`, or `target` accepts DMs from server members (global setting, default on)
@@ -195,17 +213,17 @@ function memberGuild(guildId: string, userId: string): string {
 
 route("GET", `/users/@me/guilds/${ID}/privacy`, ({ viewer, params }) => {
   const guildId = memberGuild(params[0] ?? "", viewer.user.id);
-  return { direct_messages: !restrictedGuilds.get(viewer.user.id)?.has(guildId) };
+  return guildPrivacy(viewer.user.id, guildId);
 });
 
 route("PATCH", `/users/@me/guilds/${ID}/privacy`, ({ viewer, params, body }) => {
-  if (typeof body.direct_messages !== "boolean") fail(400, 50035, "Invalid Form Body", { direct_messages: { _errors: [{ code: "BASE_TYPE_BOOLEAN", message: "Expected a boolean." }] } });
+  for (const key of ["direct_messages", "appear_offline"] as const) {
+    if (body[key] !== undefined && typeof body[key] !== "boolean") fail(400, 50035, "Invalid Form Body", { [key]: { _errors: [{ code: "BASE_TYPE_BOOLEAN", message: "Expected a boolean." }] } });
+  }
   const guildId = memberGuild(params[0] ?? "", viewer.user.id);
-  const set = restrictedGuilds.get(viewer.user.id) ?? new Set<string>();
-  if (body.direct_messages) set.delete(guildId);
-  else set.add(guildId);
-  restrictedGuilds.set(viewer.user.id, set);
-  return { direct_messages: body.direct_messages };
+  if (typeof body.direct_messages === "boolean") toggle(restrictedGuilds, viewer.user.id, guildId, !body.direct_messages);
+  if (typeof body.appear_offline === "boolean") toggle(offlineGuilds, viewer.user.id, guildId, body.appear_offline);
+  return guildPrivacy(viewer.user.id, guildId);
 });
 
 route("GET", "/users/@me/export", ({ viewer }) => {

@@ -33,6 +33,8 @@ const registry = new Map<PrefKey, string>();
 /** Extra checks for values whose type alone is not enough (enums the client must know). */
 const validators = new Map<PrefKey, (value: unknown) => boolean>();
 const codecs = new Map<PrefKey, Codec>();
+/** Prefs sent even when they equal the default, for a server default that differs from the client's. */
+const explicit = new Set<PrefKey>();
 
 /** camelCase pref name → snake_case wire key ("use24hTime" → "use_24h_time"). */
 export function wireKey(key: string): string {
@@ -123,6 +125,12 @@ syncPref("messageRequests");
 syncPref("friendRequestsEveryone");
 syncPref("friendRequestsMutualFriends");
 syncPref("friendRequestsMutualGuilds");
+// Activity privacy. Spotify is opt-in here but follows share_activity on the server, so its "off" is always sent.
+syncPref("shareActivity");
+syncPref("shareSpotify");
+explicit.add("shareSpotify");
+syncPref("shareTyping");
+syncPref("shareMutuals");
 
 /**
  * Prefs that stay on this device on purpose. Hardware and per-machine choices (devices, volumes, processing that depends on the
@@ -214,7 +222,7 @@ export function prefFromBlob(key: PrefKey, settings: UserSettingsData): Prefs[Pr
 
 /** Wire value of a pref: `null` (remove the key) when it equals the default, so the blob only holds what the user changed. */
 export function wireValue(key: PrefKey, value: unknown): unknown {
-  if (same(value, DEFAULT_PREFS[key])) return null;
+  if (!explicit.has(key) && same(value, DEFAULT_PREFS[key])) return null;
   const codec = codecs.get(key);
   return codec ? codec.toWire(value) : value;
 }

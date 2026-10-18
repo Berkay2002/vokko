@@ -191,26 +191,35 @@ export function ContentSocialPage({ onOpen }: { onOpen: Open }) {
 }
 
 export function ActivityPrivacyPage() {
+  const p = usePrefs();
   const guilds = useStore(s => s.guilds);
   const order = useStore(s => s.guildOrder);
   const [query, setQuery] = useState("");
   const list = order.map(id => guilds[id]).filter((g): g is NonNullable<typeof g> => !!g && g.name.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <Page title="Activity Privacy">
-      {isDesktop() ? (
-        <InfoBanner>Games are detected by the desktop app. Only “Share my activity” and “Show Spotify as my status” can be changed so far; the rest is laid out for later.</InfoBanner>
-      ) : (
-        <InfoBanner>Game and activity status comes from the desktop app. These settings are laid out for it, and cannot be changed in the browser.</InfoBanner>
-      )}
+      <InfoBanner>
+        These switches are saved to your account and enforced by the server: what you turn off is not sent to anyone, and what was already shown is withdrawn.
+        {isDesktop() ? "" : " Games and Spotify are detected by the desktop app."}
+      </InfoBanner>
       <Category title="What Activity I Share">
-        {isDesktop() ? (
-          <>
-            <ShareActivitySwitch />
-            <SpotifyStatusSwitch />
-          </>
-        ) : (
-          <SwitchRow label="Share my activity" note="Share information about the games you play and the apps you use." checked={false} disabled onChange={noop} />
-        )}
+        <ShareActivitySwitch />
+        {isDesktop() && <SpotifyStatusSwitch disabled={!p.shareActivity} />}
+        <SwitchRow
+          label="Show when I'm typing"
+          note="Let others see “… is typing” while you write a message. Off: nobody sees you typing, anywhere."
+          checked={p.shareActivity && p.shareTyping}
+          disabled={!p.shareActivity}
+          onChange={v => setPref("shareTyping", v)}
+        />
+        <SwitchRow
+          label="Show mutual servers and friends on my profile"
+          note="Let people who open your profile see which servers and friends you have in common."
+          checked={p.shareActivity && p.shareMutuals}
+          disabled={!p.shareActivity}
+          onChange={v => setPref("shareMutuals", v)}
+        />
+        {!p.shareActivity && <p className="sm-sub-note">Share my activity is off, so everything above is hidden too.</p>}
         <SwitchRow label="Share when I go online" note="Let friends get a push notification when you go online." checked={false} disabled onChange={noop} />
       </Category>
       <Category title="Where I Share Activity">

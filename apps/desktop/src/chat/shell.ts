@@ -27,6 +27,12 @@ const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
 export function cacheUser(user: User): void { appStore.getState().cacheUsers([user]); }
 
 export function useMe(): User | null { return useStore(s => s.me); }
+
+/** Whether others may see `myId` typing: not while invisible, nor with "Show when I'm typing" (or Share my activity) off. */
+export function sharesTyping(myId: Snowflake): boolean {
+  const prefs = getPrefs();
+  return appStore.getState().presences[myId]?.status !== 'invisible' && prefs.shareActivity && prefs.shareTyping;
+}
 /** The startup cache is on screen and the gateway is not ready yet: nothing can be sent. */
 export function useStale(): boolean { return useStore(s => s.stale); }
 export function useChannel(channelId: Snowflake): Channel | undefined { return useStore(s => s.channels[channelId] ?? s.threads[channelId]); }
