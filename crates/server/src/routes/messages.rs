@@ -912,6 +912,11 @@ async fn delete_message(
         guild_id: access.channel.guild_id.map(Snowflake::from),
     });
     state.hub.send(&viewers, &event);
+    // the DM may no longer be one both wrote in, so it may no longer share presence (events::DM_TAKEN_PART)
+    if access.channel.channel_type() == vokko_protocol::api::ChannelType::Dm {
+        let peers: Vec<i64> = viewers.iter().copied().filter(|viewer| *viewer != row.author_id).collect();
+        crate::presence::announce_parted(&state, row.author_id, &peers).await?;
+    }
     // Discord logs deletions of someone else's message only.
     if let Some(guild_id) = access.channel.guild_id
         && row.author_id != user_id

@@ -310,6 +310,13 @@ async fn delete_channel(
         // Closing a DM hides it for this user only; leaving a group DM removes the user.
         if access.channel.channel_type() == ChannelType::Dm {
             sqlx::query("UPDATE channel_recipients SET closed = TRUE WHERE channel_id = $1 AND user_id = $2").bind(id).bind(user_id).execute(&state.db).await?;
+            // a closed DM shares no presence any more
+            let peers: Vec<i64> = sqlx::query_scalar("SELECT user_id FROM channel_recipients WHERE channel_id = $1 AND user_id <> $2")
+                .bind(id)
+                .bind(user_id)
+                .fetch_all(&state.db)
+                .await?;
+            crate::presence::announce_parted(&state, user_id, &peers).await?;
         } else {
             leave_group(&state, &access.channel, user_id).await?;
             return Ok(Json(channel));

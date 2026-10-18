@@ -301,7 +301,7 @@ async fn block(state: &AppState, user_id: i64, other: i64) -> ApiResult<()> {
         state.hub.send(&[other], &GatewayEvent::RelationshipRemove(IdOnly { id: Snowflake::from(user_id) }));
     }
     if mine.is_some_and(|(kind,)| kind == RelationshipType::Friend.as_u8() as i16) {
-        crate::presence::hide_where_hidden(state, user_id, other).await?;
+        crate::presence::announce_parted(state, user_id, &[other]).await?;
     }
     Ok(())
 }
@@ -363,7 +363,7 @@ async fn remove_relationship(State(state): State<AppState>, AuthUser(user_id): A
     }
     // only an ended friendship changes what the two share (anything else would tell a stranger about the setting)
     if mine.is_some_and(|(kind,)| kind == RelationshipType::Friend.as_u8() as i16) {
-        crate::presence::hide_where_hidden(&state, user_id, other).await?;
+        crate::presence::announce_parted(&state, user_id, &[other]).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }

@@ -444,6 +444,31 @@ async fn an_unanswered_dm_does_not_lift_appear_offline() {
 }
 
 #[tokio::test]
+async fn deleting_a_guild_shows_offline_to_whoever_shares_nothing_else() {
+    let w = world().await;
+    // bob joins too and is alice's friend, so the two still share something after the guild goes
+    w.app.post(&format!("/invites/{}", w.invite), &w.bob.0, json!({})).await;
+    befriend(&w.app, &w.alice, &w.bob).await;
+    let (mut alice, _) = Client::connect(&w.address, &w.alice.0).await;
+    let (mut bob, _) = Client::connect(&w.address, &w.bob.0).await;
+    let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;
+    alice.wait_presence(&w.owner.1, "online").await;
+    bob.wait_presence(&w.owner.1, "online").await;
+
+    assert_eq!(w.app.delete(&format!("/guilds/{}", w.guild), &w.owner.0).await.0, 204);
+    alice.wait_presence(&w.owner.1, "offline").await;
+    let mut gone = std::collections::HashSet::new();
+    while gone.len() < 2 {
+        let data = owner.wait_for("PRESENCE_UPDATE").await;
+        if data["status"] == "offline" {
+            gone.insert(data["user_id"].as_str().expect("id").to_owned());
+        }
+    }
+    assert_eq!(gone, [w.alice.1.clone(), w.bob.1.clone()].into(), "the owner sees both offline");
+    assert!(bob.only_presence(&w.alice.1, "online", QUIET).await, "a friend keeps seeing her");
+}
+
+#[tokio::test]
 async fn an_unanswered_dm_shares_no_presence() {
     let w = world().await;
     let (_alice, _) = Client::connect(&w.address, &w.alice.0).await;

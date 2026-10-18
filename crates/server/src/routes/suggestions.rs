@@ -72,7 +72,7 @@ async fn list(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQue
          SELECT e.id, CASE WHEN e.mutuals AND EXISTS (SELECT 1 FROM context x WHERE x.other = e.id) THEN COALESCE(m.friends, 0) ELSE 0 END AS visible, \
                 e.mutuals \
          FROM eligible e LEFT JOIN shared s ON s.other = e.id LEFT JOIN mutual m ON m.other = e.id \
-         WHERE s.other IS NOT NULL OR m.other IS NOT NULL \
+         WHERE s.other IS NOT NULL OR (m.other IS NOT NULL AND e.mutuals) \
          ORDER BY visible DESC, CASE WHEN e.mutuals THEN COALESCE(s.guilds, 0) ELSE 0 END DESC, e.id LIMIT $2",
     )
     .bind(user_id)

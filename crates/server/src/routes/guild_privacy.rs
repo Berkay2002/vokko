@@ -91,6 +91,8 @@ async fn update_privacy(
         };
         if sqlx::query(query).bind(user_id).bind(guild).execute(&state.db).await?.rows_affected() > 0 {
             // the guild's members now get the new view (offline, or the real status again)
+            // ponytail: a publish of the user's that read hidden_pairs before this write can land after this frame and show the
+            // real status until the next update; serialize publishes per user (a presences row lock) if that ever matters
             crate::presence::publish(&state, user_id).await?;
         }
     }

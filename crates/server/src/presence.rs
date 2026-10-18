@@ -253,10 +253,12 @@ pub async fn guild_presences(state: &AppState, guild_id: i64, viewer: i64) -> Ap
     Ok(rows.iter().map(|row| row.view(viewer, hidden.contains(&(row.user_id, viewer)))).filter(|presence| presence.status != PresenceStatus::Offline).collect())
 }
 
-/// Users who share something with `user_id` apart from membership of `guild_id`.
+/// Users who see `user_id`'s presence through something apart from membership of `guild_id` (guilds where the user appears
+/// offline do not count).
 async fn audience_without_guild(state: &AppState, user_id: i64, guild_id: i64) -> ApiResult<HashSet<i64>> {
     let found: Vec<(i64,)> = sqlx::query_as(&format!(
         "SELECT m2.user_id FROM guild_members m1 JOIN guild_members m2 ON m1.guild_id = m2.guild_id WHERE m1.user_id = $1 AND m1.guild_id <> $2 \
+               AND NOT EXISTS (SELECT 1 FROM guild_appear_offline h WHERE h.user_id = $1 AND h.guild_id = m1.guild_id) \
          UNION SELECT other_id FROM relationships WHERE user_id = $1 AND kind = 1 \
          UNION SELECT r2.user_id FROM channel_recipients r1 JOIN channel_recipients r2 ON r1.channel_id = r2.channel_id \
                WHERE r1.user_id = $1 AND NOT r1.closed AND NOT r2.closed AND {}",
@@ -296,8 +298,8 @@ pub async fn announce_leave(state: &AppState, guild_id: i64, user_id: i64) -> Ap
     announce_parted(state, user_id, &member_ids(state, guild_id, user_id).await?).await
 }
 
-/// Call after `user_id` stopped sharing a guild or group DM with `former` (already updated in the database): the same
-/// clean-up as [`announce_leave`].
+/// Call after `user_id` stopped sharing something with `former` (a guild or group DM, a friendship, a DM closed or no longer
+/// written in by both; already updated in the database): the same clean-up as [`announce_leave`].
 pub async fn announce_parted(state: &AppState, user_id: i64, former: &[i64]) -> ApiResult<()> {
     let still_shared: HashSet<i64> = events::user_audience(state, user_id).await?.into_iter().collect();
     let (shared, strangers): (Vec<i64>, Vec<i64>) = former.iter().copied().filter(|id| *id != user_id).partition(|id| still_shared.contains(id));
@@ -318,11 +320,34 @@ fn offline(id: i64) -> GatewayEvent {
     GatewayEvent::PresenceUpdate(Presence { user_id: Snowflake::from(id), status: PresenceStatus::Offline, custom_status: None, activities: Vec::new() })
 }
 
-/// Call after `a` and `b` stopped sharing something (a guild, a friendship): whoever of the two now appears offline to the
-/// other through "Appear offline in this server" is shown offline, so no stale presence stays.
-pub async fn hide_where_hidden(state: &AppState, a: i64, b: i64) -> ApiResult<()> {
-    for (user, viewer) in hidden_pairs(state, &[a, b], &[a, b]).await? {
-        state.hub.send(&[viewer], &offline(user));
+/// Call after `members` lost a guild they shared (deleted, rows already gone): every visible member is shown offline to
+/// each other member who now shares nothing with them, or only guilds where they appear offline. Set-based, so a big
+/// guild costs a few queries, and frames only for members who are not offline already.
+pub async fn guild_deleted(state: &AppState, members: &[i64]) -> ApiResult<()> {
+    let visible: Vec<i64> =
+        sqlx::query_scalar("SELECT user_id FROM presences WHERE user_id = ANY($1) AND status <> 'offline'").bind(members).fetch_all(&state.db).await?;
+    if visible.is_empty() {
+        return Ok(());
+    }
+    // the pairs (visible user, member) that still share something: user_audience restricted to these sets
+    let shared: Vec<(i64, i64)> = sqlx::query_as(&format!(
+        "SELECT m1.user_id, m2.user_id FROM guild_members m1 JOIN guild_members m2 ON m2.guild_id = m1.guild_id \
+               WHERE m1.user_id = ANY($1) AND m2.user_id = ANY($2) \
+         UNION SELECT user_id, other_id FROM relationships WHERE kind = 1 AND user_id = ANY($1) AND other_id = ANY($2) \
+         UNION SELECT r1.user_id, r2.user_id FROM channel_recipients r1 JOIN channel_recipients r2 ON r1.channel_id = r2.channel_id \
+               WHERE r1.user_id = ANY($1) AND r2.user_id = ANY($2) AND NOT r1.closed AND NOT r2.closed AND {}",
+        events::DM_TAKEN_PART
+    ))
+    .bind(&visible)
+    .bind(members)
+    .fetch_all(&state.db)
+    .await?;
+    let shared: HashSet<(i64, i64)> = shared.into_iter().collect();
+    let hidden = hidden_pairs(state, &visible, members).await?;
+    for user in visible {
+        let viewers: Vec<i64> =
+            members.iter().copied().filter(|viewer| *viewer != user && (!shared.contains(&(user, *viewer)) || hidden.contains(&(user, *viewer)))).collect();
+        state.hub.send(&viewers, &offline(user));
     }
     Ok(())
 }
