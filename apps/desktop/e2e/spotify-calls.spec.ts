@@ -9,7 +9,7 @@ import { join } from 'node:path';
 // Run from apps/desktop: npx playwright test -c e2e/spotify-calls.config.ts
 
 const MOBILE = !!process.env.SPOTIFY_MOBILE;
-const SHOTS = process.env.SPOTIFY_SHOTS ?? `/srv/vokko/.claude/artifacts/spotify-desktop${MOBILE ? '/mobile' : ''}`;
+const SHOTS = process.env.SPOTIFY_SHOTS ?? `../../.private/artifacts/spotify-desktop${MOBILE ? '/mobile' : ''}`;
 
 // SPOTIFY_MOBILE=1 runs only the phone-width test (the last one) to take the mobile screenshots.
 if (MOBILE) test.use({ viewport: { width: 390, height: 844 } });

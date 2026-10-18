@@ -4,7 +4,7 @@ import path from 'node:path';
 // Sketch between two people: two pages, each its own mock backend, signed in as sam and alice in General (Bob leaves).
 // The test bridges the relay: `__vokkoMock.gameRelay` hands every send in one page to Playwright, which replays it in the
 // other page's mock as the same user (`requestAs` POST /game/messages). Both pages share seeded user ids, so app ids match.
-// VOKKO_SHOTS_DIR=/srv/vokko/.claude/artifacts/games-host VOKKO_E2E_PORT=1453 npx playwright test e2e/games-sketch.shots.spec.ts
+// VOKKO_SHOTS_DIR=../../.private/artifacts/games-host VOKKO_E2E_PORT=1453 npx playwright test e2e/games-sketch.shots.spec.ts
 const dir = process.env.VOKKO_SHOTS_DIR;
 test.skip(!dir, 'set VOKKO_SHOTS_DIR to capture screenshots');
 

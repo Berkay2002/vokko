@@ -8,7 +8,7 @@ import { join } from 'node:path';
 // needs two votes.
 // Run from apps/desktop: npx playwright test -c e2e/bot-control.config.ts
 
-const SHOTS = process.env.BOTCTL_SHOTS ?? '/srv/vokko/.claude/artifacts/bot-control';
+const SHOTS = process.env.BOTCTL_SHOTS ?? '../../.private/artifacts/bot-control';
 const VIDEO = 'dQw4w9WgXcQ';
 const QUEUED = ['aaaaaaaaaaa', 'bbbbbbbbbbb', 'ccccccccccc'];
 const CONTROL_MEDIA = 1n << 60n;
