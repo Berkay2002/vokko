@@ -48,6 +48,8 @@ const PRESENCE_UPDATES: usize = 5;
 const PRESENCE_WINDOW: Duration = Duration::from_secs(60);
 /// Most queued frames written per socket flush.
 const WRITE_BATCH: usize = 64;
+/// A batch stops growing once it holds this many bytes (it may pass it by one frame).
+const WRITE_BATCH_BYTES: usize = 256 * 1024;
 /// Voice state updates (op 4, mute toggles included) allowed per session per window.
 const VOICE_UPDATES: usize = 30;
 const VOICE_WINDOW: Duration = Duration::from_secs(60);
@@ -78,6 +80,19 @@ fn frame(op: GatewayOp, data: Value) -> Message {
     Message::Text(serde_json::to_string(&payload).unwrap_or_default().into())
 }
 
+/// `first` plus what is already queued, up to `WRITE_BATCH` frames or about `WRITE_BATCH_BYTES`: the whole batch shares one
+/// write timeout, so a burst of large frames must not turn a slow but healthy client into a timed-out one.
+fn take_batch(first: String, queue: &mut tokio::sync::mpsc::Receiver<String>) -> Vec<String> {
+    let mut bytes = first.len();
+    let mut batch = vec![first];
+    while batch.len() < WRITE_BATCH && bytes < WRITE_BATCH_BYTES {
+        let Ok(text) = queue.try_recv() else { break };
+        bytes += text.len();
+        batch.push(text);
+    }
+    batch
+}
+
 /// The socket's write half; no write may block the task for longer than `limit`.
 struct Writer {
     sink: Sink,
@@ -93,11 +108,7 @@ impl Writer {
     /// Writes `first` plus whatever else is already queued (up to `WRITE_BATCH` frames) and flushes once, so a burst of events
     /// costs one socket write instead of one per frame.
     async fn send_queued(&mut self, first: String, queue: &mut tokio::sync::mpsc::Receiver<String>) -> bool {
-        let mut batch = vec![first];
-        while batch.len() < WRITE_BATCH {
-            let Ok(text) = queue.try_recv() else { break };
-            batch.push(text);
-        }
+        let batch = take_batch(first, queue);
         let sink = &mut self.sink;
         let write = async move {
             for text in batch {
@@ -423,5 +434,22 @@ mod tests {
         assert!(allowance.allow(start) && allowance.allow(start + Duration::from_secs(1)));
         assert!(!allowance.allow(start + Duration::from_secs(2)));
         assert!(allowance.allow(start + Duration::from_secs(61)), "the first one left the window");
+    }
+
+    #[test]
+    fn a_write_batch_is_capped_by_frames_and_by_bytes() {
+        let (sender, mut queue) = tokio::sync::mpsc::channel(256);
+        for _ in 0..100 {
+            let _ = sender.try_send("x".to_owned());
+        }
+        assert_eq!(take_batch("x".to_owned(), &mut queue).len(), WRITE_BATCH);
+        while queue.try_recv().is_ok() {}
+        let large = "x".repeat(100 * 1024);
+        for _ in 0..10 {
+            let _ = sender.try_send(large.clone());
+        }
+        // 100 + 100 + 100 KiB passes the 256 KiB cap: the rest waits for the next write.
+        assert_eq!(take_batch(large.clone(), &mut queue).len(), 3);
+        assert_eq!(queue.len(), 8);
     }
 }
