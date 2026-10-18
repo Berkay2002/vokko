@@ -7,7 +7,7 @@ import { fetchInstance } from "./api";
 import { DateOfBirth, EMPTY_DATE, isoDate, type DateParts } from "./DateOfBirth";
 import { PasswordMeter } from "./PasswordMeter";
 import { registerProblems } from "./registerRules";
-import { Field, Frame, fieldErrors } from "./ui";
+import { Field, Frame, SubmitButton, fieldErrors } from "./ui";
 import { UsernameHint, useUsernameCheck } from "./useUsernameCheck";
 import { OAuthButtons } from "./OAuthButtons";
 
@@ -111,9 +111,7 @@ export function RegisterPage() {
           </label>
         )}
         {errors.consent && <p className="field-error">{errors.consent}</p>}
-        <button type="submit" className="btn btn-wide" disabled={busy}>
-          Continue
-        </button>
+        <SubmitButton busy={busy}>Continue</SubmitButton>
       </form>
       <OAuthButtons />
     </Frame>

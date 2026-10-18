@@ -4,7 +4,7 @@ import { acceptLogin, mfaLogin } from "../api/auth";
 import { request } from "../api/rest";
 import type { LoginResponse, MfaRequiredResponse } from "../api/types";
 import { PasswordMeter } from "./PasswordMeter";
-import { Field, Frame, fieldErrors, tokenFromHash } from "./ui";
+import { Field, Frame, SubmitButton, fieldErrors, tokenFromHash } from "./ui";
 
 /** `/reset#token=...` from the reset mail: choose a new password, then signed in (or the two-factor step). */
 export function ResetPage() {
@@ -59,9 +59,7 @@ export function ResetPage() {
             <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" autoFocus />
           </Field>
         )}
-        <button type="submit" className="btn btn-wide" disabled={busy}>
-          {ticket ? "Log In" : "Change Password"}
-        </button>
+        <SubmitButton busy={busy}>{ticket ? "Log In" : "Change Password"}</SubmitButton>
       </form>
     </Frame>
   );

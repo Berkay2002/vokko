@@ -52,6 +52,22 @@ export function Frame({ title, subtitle, children, footer }: { title: string; su
   );
 }
 
+/** A form's wide submit button. While `busy` it keeps its size and shows pulsing dots in place of the label (still read out). */
+export function SubmitButton({ busy, disabled, children }: { busy: boolean; disabled?: boolean; children: ReactNode }) {
+  return (
+    <button type="submit" className="btn btn-wide auth-submit" disabled={busy || disabled} aria-busy={busy}>
+      <span className={busy ? "auth-submit-label hidden" : "auth-submit-label"}>{children}</span>
+      {busy && (
+        <span className="auth-dots" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </span>
+      )}
+    </button>
+  );
+}
+
 /** The token of a `#token=...` link (kept in the fragment so it never reaches server logs). */
 export function tokenFromHash(hash: string): string {
   return new URLSearchParams(hash.replace(/^#/, "")).get("token") ?? "";

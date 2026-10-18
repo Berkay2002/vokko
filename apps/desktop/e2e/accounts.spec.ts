@@ -299,3 +299,15 @@ test('OAuth: Continue with GitHub signs up, then Sign-in Methods keeps the last 
   await page.getByRole('button', { name: 'User Settings' }).click();
   await expect(settings.locator('.sm-row', { hasText: 'Username' })).toContainText('octocat');
 });
+
+test('Log In shows a busy button while a slow request runs, same size, label still its name', async ({ page }) => {
+  await page.goto('/login?mockLatency=1500');
+  await mockReady(page);
+  const button = page.getByRole('button', { name: 'Log In' });
+  const before = await button.boundingBox();
+  await button.click();
+  await expect(button).toHaveAttribute('aria-busy', 'true');
+  await expect(button.locator('.auth-dots')).toBeVisible();
+  expect(await button.boundingBox()).toEqual(before);
+  await expect(page).toHaveURL(/\/channels\/@me/);
+});
