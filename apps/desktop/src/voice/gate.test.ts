@@ -19,12 +19,16 @@ interface FakeTrack {
   stopped: boolean;
   clone(): FakeTrack;
   stop(): void;
+  addEventListener(type: "ended", listener: () => void): void;
+  /** The device went away. */
+  end(): void;
 }
 
 let edges: [FakeNode, FakeNode][];
 let sources: FakeNode[];
 let clones: FakeTrack[];
 let amplitude: number;
+let ended: [FakeTrack, () => void][];
 
 const track = (name: string): FakeTrack => ({
   name,
@@ -37,6 +41,12 @@ const track = (name: string): FakeTrack => ({
   },
   stop() {
     this.stopped = true;
+  },
+  addEventListener(_type, listener) {
+    ended.push([this, listener]);
+  },
+  end() {
+    ended.filter(([t]) => t === this).forEach(([, l]) => l());
   },
 });
 
@@ -84,6 +94,7 @@ beforeEach(() => {
   sources = [];
   clones = [];
   amplitude = 0;
+  ended = [];
   vi.stubGlobal("AudioWorkletNode", class {});
   vi.stubGlobal("MediaStream", class { constructor(public tracks: FakeTrack[]) {} });
 });
@@ -146,6 +157,18 @@ describe("GateProcessor: muted", () => {
     gate.setMuted(false);
     vi.advanceTimersByTime(3000);
     expect(heard).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops listening when the mic is unplugged while muted (the clone ends)", async () => {
+    const heard = vi.fn();
+    const gate = new GateProcessor(settings, true, () => {}, heard);
+    await gate.init(options(track("raw")));
+    clones[0]!.end();
+    expect(clones[0]?.stopped).toBe(true);
+    amplitude = 0.3;
+    vi.advanceTimersByTime(3000);
+    expect(heard).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1); // only the chain's own level poll is left, not the clone's
   });
 
   it("sets the published gain to zero on mute", async () => {

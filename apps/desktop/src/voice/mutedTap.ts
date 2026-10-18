@@ -16,6 +16,7 @@ export class MutedTap {
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
     this.source.connect(analyser); // the analyser has no output
+    this.clone.addEventListener("ended", () => this.stop()); // the mic was unplugged: nothing left to listen to
     const buffer = new Float32Array(analyser.fftSize);
     this.poll = setInterval(() => {
       analyser.getFloatTimeDomainData(buffer);
