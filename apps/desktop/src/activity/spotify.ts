@@ -1,4 +1,4 @@
-import { ApiRequestError } from "../api/rest";
+import { ApiRequestError, RateLimitedError } from "../api/rest";
 import type { Activity, SpotifySearchResults, SpotifyTrack } from "../api/types";
 import type { NowPlaying } from "../desktop/spotify";
 import { search } from "../spotify/api";
@@ -27,7 +27,9 @@ export function spotifyActivity(track: NowPlaying | null | undefined, now: numbe
 /** Whether two polls describe the same moment of the same track, so nothing needs resending (a seek or restart moves `start`). */
 export function sameSpotifyMoment(a: Activity | null, b: Activity | null): boolean {
   if (!a || !b) return a === b;
-  return a.details === b.details && a.state === b.state && a.sync_id === b.sync_id && Math.abs((a.timestamps?.start ?? 0) - (b.timestamps?.start ?? 0)) < 3000;
+  return a.details === b.details && a.state === b.state && a.sync_id === b.sync_id &&
+    a.assets?.large_image === b.assets?.large_image &&
+    Math.abs((a.timestamps?.start ?? 0) - (b.timestamps?.start ?? 0)) < 3000;
 }
 
 /** Whether the local Spotify app plays what a Spotify session in a call plays (docs/design/spotify-bot.md section 9.6): then the
@@ -56,26 +58,45 @@ export function matchTrack(title: string, artist: string, results: SpotifyTrack[
   return { sync_id: id, ...(hit.art && /^[0-9a-f]{40}$/.test(hit.art) ? { image: hit.art } : {}) };
 }
 
-/** Lookups this session by title and artist, hits and misses alike: a track is asked about once. */
+/** Definite answers (a 200, match or not) and lookups in flight, by title and artist: a track is asked about once while it answers. */
 const lookups = new Map<string, Promise<CatalogMatch | null>>();
-/** Set by 404 10000: the server has no Spotify catalog, so nothing is asked again this session. */
-let catalogOff = false;
+/** Failed lookups (offline, 5xx, 429, ...) by title and artist: failures in a row, and when the track may be asked about again. */
+const failures = new Map<string, { count: number; until: number }>();
+/** Waits after the 1st, 2nd and 3rd+ failure in a row for one track. */
+export const LOOKUP_BACKOFF_MS = [30_000, 120_000, 600_000];
+/** How long a 404 10000 (the server has no Spotify catalog) stops all lookups. */
+export const CATALOG_OFF_MS = 5 * 60_000;
+let catalogOffUntil = 0;
 
-/** Finds the catalog track for a title and its first artist through the server; null on no match or any failure (429, offline, ...). */
+/** Finds the catalog track for a title and its first artist through the server; null on no match or any failure (429, offline, ...).
+ * Failures are not kept: the track is asked about again after a backoff, or after the server's Retry-After when that is longer. */
 export function lookUpTrack(title: string, artist: string, find = (q: string) => search(q, "track")): Promise<CatalogMatch | null> {
   const key = `${cleanName(title).toLowerCase()}\n${cleanName(artist).toLowerCase()}`;
   const known = lookups.get(key);
   if (known) return known;
-  if (catalogOff) return Promise.resolve(null);
+  const now = Date.now();
+  if (now < catalogOffUntil || now < (failures.get(key)?.until ?? 0)) return Promise.resolve(null);
   const quoted = (text: string) => `"${cleanName(text).replace(/"/g, " ")}"`;
   const q = `track:${quoted(title)} artist:${quoted(artist)}`;
   const pending =
     q.length > 100
       ? Promise.resolve(null)
       : find(q).then(
-          (found: SpotifySearchResults) => matchTrack(title, artist, found.tracks),
+          (found: SpotifySearchResults) => {
+            failures.delete(key);
+            return matchTrack(title, artist, found.tracks);
+          },
           (error: unknown) => {
-            if (error instanceof ApiRequestError && error.status === 404 && error.api.code === 10000) catalogOff = true;
+            lookups.delete(key);
+            const at = Date.now();
+            if (error instanceof ApiRequestError && error.status === 404 && error.api.code === 10000) {
+              catalogOffUntil = at + CATALOG_OFF_MS;
+              return null;
+            }
+            const count = (failures.get(key)?.count ?? 0) + 1;
+            const backoff = LOOKUP_BACKOFF_MS[Math.min(count, LOOKUP_BACKOFF_MS.length) - 1] ?? 0;
+            const asked = error instanceof RateLimitedError ? error.retryAfter * 1000 : 0;
+            failures.set(key, { count, until: at + Math.max(backoff, asked) });
             return null;
           },
         );
@@ -92,5 +113,6 @@ export function withCatalog(activity: Activity, match: CatalogMatch | null): Act
 /** Forgets this session's lookups (tests). */
 export function resetTrackLookups(): void {
   lookups.clear();
-  catalogOff = false;
+  failures.clear();
+  catalogOffUntil = 0;
 }
