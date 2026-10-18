@@ -58,6 +58,7 @@ Read by `vokko-server` from the environment (a `.env.dev` file found from the wo
 | `VOKKO_S3_PRESIGN_TTL_SECS` | `300` | Lifetime of presigned URLs (1-604800). |
 | `VOKKO_PUBLIC_URL` | `http://<bind>` | Origin used in absolute attachment URLs. Set it to what clients type. |
 | `VOKKO_MAX_UPLOAD_MB` | `500` | Per-file upload limit in MiB (whole number, at least 1). Values above 500 (Nitro's limit) are lowered to 500. |
+| `VOKKO_GROUP_DM_MAX` | `10` | Most people in one group DM, the creator included (whole number, kept within 2..100). |
 | `VOKKO_UNFURL` | on | `off`/`0`/`false`/`no` disables link previews (no outbound requests at all). |
 | `VOKKO_GIF_PROVIDER` | `none` | `klipy`, `giphy`, `tenor` or `none`. The server proxies GIF search/trending/categories so the key never reaches clients; with `none` the GIF picker shows each user's favourites only. Needs outbound HTTPS to the provider. |
 | `VOKKO_GIF_API_KEY` | empty | Provider API key; required when `VOKKO_GIF_PROVIDER` is not `none`. |

@@ -148,6 +148,24 @@ async fn a_group_holds_at_most_ten_people() {
     assert_eq!(app.put(&path(&channel, &members[9]), &alice.token).await.0, StatusCode::NO_CONTENT);
 }
 
+#[tokio::test]
+async fn an_instance_may_raise_the_group_size() {
+    let app = TestApp::with_config(|config| config.group_dm_max = 12).await;
+    let alice = user(&app, "alice").await;
+    let mut members = Vec::new();
+    for index in 0..12 {
+        let member = user(&app, &format!("member{index}")).await;
+        befriend(&app, &alice, &member).await;
+        members.push(member);
+    }
+    // 11 others fit at creation (12 people), the next add is refused.
+    let channel = group(&app, &alice, &members[..11].iter().collect::<Vec<_>>()).await;
+    let (status, body) = app.put(&path(&channel, &members[11]), &alice.token).await;
+    assert_eq!((status, body["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(30004)), "{body}");
+    let (status, _) = app.post("/users/@me/channels", &alice.token, json!({"recipient_ids": members.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "12 others are too many");
+}
+
 /// Runs alice's PUT of dana while the test holds the group's row lock, applies `change` (SQL on the channel) once the PUT waits on
 /// that lock, then releases it: the PUT sees a group that changed after its first checks.
 async fn put_racing(app: &TestApp, change: &[&str]) -> (StatusCode, Value) {

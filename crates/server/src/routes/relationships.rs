@@ -80,8 +80,9 @@ async fn create_dm(State(state): State<AppState>, AuthUser(user_id): AuthUser, A
     if ids.len() == 1 {
         return one_to_one(&state, user_id, ids[0]).await;
     }
-    if !(2..=9).contains(&ids.len()) {
-        return Err(ApiErr::invalid("recipient_ids", "A group DM needs between 2 and 9 other people."));
+    let most = usize::try_from(state.config.group_dm_max - 1).unwrap_or(0);
+    if !(2..=most).contains(&ids.len()) {
+        return Err(ApiErr::invalid("recipient_ids", &format!("A group DM needs between 2 and {most} other people.")));
     }
     let known = store::users(&state, &ids).await?;
     if known.len() != ids.len() {
@@ -299,6 +300,9 @@ async fn block(state: &AppState, user_id: i64, other: i64) -> ApiResult<()> {
     if theirs.rows_affected() > 0 {
         state.hub.send(&[other], &GatewayEvent::RelationshipRemove(IdOnly { id: Snowflake::from(user_id) }));
     }
+    if mine.is_some_and(|(kind,)| kind == RelationshipType::Friend.as_u8() as i16) {
+        crate::presence::hide_where_hidden(state, user_id, other).await?;
+    }
     Ok(())
 }
 
@@ -356,6 +360,10 @@ async fn remove_relationship(State(state): State<AppState>, AuthUser(user_id): A
     }
     if theirs > 0 {
         state.hub.send(&[other], &GatewayEvent::RelationshipRemove(IdOnly { id: Snowflake::from(user_id) }));
+    }
+    // only an ended friendship changes what the two share (anything else would tell a stranger about the setting)
+    if mine.is_some_and(|(kind,)| kind == RelationshipType::Friend.as_u8() as i16) {
+        crate::presence::hide_where_hidden(&state, user_id, other).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }

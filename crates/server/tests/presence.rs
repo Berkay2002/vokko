@@ -83,6 +83,7 @@ struct World {
     address: String,
     guild: String,
     invite: String,
+    channel: String,
     owner: (String, String),
     alice: (String, String),
     bob: (String, String),
@@ -99,7 +100,7 @@ async fn world() -> World {
     let invite = invite["code"].as_str().expect("code").to_owned();
     app.post(&format!("/invites/{invite}"), &alice_token, json!({})).await;
     let id = |user: &Value| user["id"].as_str().expect("id").to_owned();
-    World { address, guild, invite, owner: (owner_token, id(&owner)), alice: (alice_token, id(&alice)), bob: (bob_token, id(&bob)), app }
+    World { address, guild, invite, channel, owner: (owner_token, id(&owner)), alice: (alice_token, id(&alice)), bob: (bob_token, id(&bob)), app }
 }
 
 #[tokio::test]
@@ -313,4 +314,138 @@ async fn joining_and_leaving_announces_presence_to_new_strangers() {
     assert_eq!(status, 204);
     owner.wait_presence(&w.bob.1, "offline").await;
     bob.wait_presence(&w.owner.1, "offline").await;
+}
+
+impl Client {
+    /// True if no `name` event about `user_id` arrives within `window`.
+    async fn quiet(&mut self, name: &str, user_id: &str, window: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + window;
+        while let Ok(next) = tokio::time::timeout_at(deadline, self.ws.next()).await {
+            if let Some(Ok(Message::Text(text))) = next {
+                let frame: Value = serde_json::from_str(&text).expect("json");
+                if frame["t"] == name && frame["d"]["user_id"] == user_id {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+const QUIET: Duration = Duration::from_millis(600);
+
+async fn typing(app: &TestApp, token: &str, channel: &str) {
+    assert_eq!(app.post(&format!("/channels/{channel}/typing"), token, json!({})).await.0, 204, "typing always succeeds");
+}
+
+async fn befriend(app: &TestApp, a: &(String, String), b: &(String, String)) {
+    assert_eq!(app.put(&format!("/users/@me/relationships/{}", b.1), &a.0).await.0, 204);
+    assert_eq!(app.put(&format!("/users/@me/relationships/{}", a.1), &b.0).await.0, 204);
+}
+
+async fn set_settings(app: &TestApp, token: &str, settings: Value) {
+    let (_, current) = app.get("/users/@me/settings", token).await;
+    let (status, body) = app.patch("/users/@me/settings", token, json!({"version": current["version"], "settings": settings})).await;
+    assert_eq!(status, 200, "{body}");
+}
+
+#[tokio::test]
+async fn an_invisible_user_types_unseen() {
+    let w = world().await;
+    let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;
+    let (mut alice, _) = Client::connect(&w.address, &w.alice.0).await;
+    owner.wait_presence(&w.alice.1, "online").await;
+    typing(&w.app, &w.alice.0, &w.channel).await;
+    assert_eq!(owner.wait_for("TYPING_START").await["user_id"], w.alice.1.as_str());
+
+    alice.send(json!({"op": 3, "d": {"status": "invisible"}})).await;
+    owner.wait_presence(&w.alice.1, "offline").await;
+    typing(&w.app, &w.alice.0, &w.channel).await;
+    assert!(owner.quiet("TYPING_START", &w.alice.1, QUIET).await, "no typing from an invisible user");
+}
+
+#[tokio::test]
+async fn appearing_offline_in_one_server_hides_only_there() {
+    let w = world().await;
+    // guild B is bob's and alice joins it; carl is alice's friend and shares no guild
+    let (carl_token, carl) = w.app.register("carl").await;
+    let carl = (carl_token, carl["id"].as_str().expect("id").to_owned());
+    befriend(&w.app, &w.alice, &carl).await;
+    let (_, channel_b) = w.app.guild_with_channel(&w.bob.0).await;
+    let (_, invite) = w.app.post(&format!("/channels/{channel_b}/invites"), &w.bob.0, json!({})).await;
+    w.app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &w.alice.0, json!({})).await;
+
+    let (mut alice, _) = Client::connect(&w.address, &w.alice.0).await;
+    let (mut owner, ready) = Client::connect(&w.address, &w.owner.0).await;
+    assert_eq!(find(&ready["presences"], &w.alice.1).expect("alice")["status"], "online");
+    let (mut bob, _) = Client::connect(&w.address, &w.bob.0).await;
+    let (mut friend, _) = Client::connect(&w.address, &carl.0).await;
+
+    let path = format!("/users/@me/guilds/{}/privacy", w.guild);
+    let (status, body) = w.app.patch(&path, &w.alice.0, json!({"appear_offline": true})).await;
+    assert_eq!((status.as_u16(), body), (200, json!({"direct_messages": true, "appear_offline": true})));
+    owner.wait_presence(&w.alice.1, "offline").await;
+    assert!(bob.only_presence(&w.alice.1, "online", QUIET).await, "guild B still sees her online");
+    assert!(friend.only_presence(&w.alice.1, "online", QUIET).await, "a friend still sees her online");
+
+    // a status change reaches B and the friend, not A
+    alice.send(json!({"op": 3, "d": {"status": "dnd"}})).await;
+    bob.wait_presence(&w.alice.1, "dnd").await;
+    friend.wait_presence(&w.alice.1, "dnd").await;
+    assert!(owner.only_presence(&w.alice.1, "offline", QUIET).await);
+    let (_, ready) = Client::connect(&w.address, &w.owner.0).await;
+    assert_eq!(find(&ready["presences"], &w.alice.1).expect("alice")["status"], "offline", "a fresh READY in A");
+    let (_, ready) = Client::connect(&w.address, &carl.0).await;
+    assert_eq!(find(&ready["presences"], &w.alice.1).expect("alice")["status"], "dnd", "a fresh READY of the friend");
+
+    // typing: hidden in A, shown in B
+    typing(&w.app, &w.alice.0, &w.channel).await;
+    assert!(owner.quiet("TYPING_START", &w.alice.1, QUIET).await, "no typing in A");
+    typing(&w.app, &w.alice.0, &channel_b).await;
+    assert_eq!(bob.wait_for("TYPING_START").await["user_id"], w.alice.1.as_str());
+
+    // turned off: A sees her again
+    w.app.patch(&path, &w.alice.0, json!({"appear_offline": false})).await;
+    owner.wait_presence(&w.alice.1, "dnd").await;
+}
+
+#[tokio::test]
+async fn activity_privacy_opt_outs_are_enforced() {
+    let w = world().await;
+    let (mut owner, _) = Client::connect(&w.address, &w.owner.0).await;
+    let (mut alice, _) = Client::connect(&w.address, &w.alice.0).await;
+    owner.wait_presence(&w.alice.1, "online").await;
+    let game = json!({"name": "Factorio", "type": 0});
+    let song = json!({"name": "Spotify", "type": 2, "details": "Song", "state": "A"});
+    alice.send(json!({"op": 3, "d": {"status": "online", "activities": [game, song]}})).await;
+    wait_activities(&mut owner, &w.alice.1, "online", |a| a.as_array().is_some_and(|list| list.len() == 2)).await;
+
+    // Spotify off: the track goes now, the game stays, and a later update cannot bring it back
+    set_settings(&w.app, &w.alice.0, json!({"share_spotify": false})).await;
+    wait_activities(&mut owner, &w.alice.1, "online", |a| a == &json!([game])).await;
+    alice.send(json!({"op": 3, "d": {"status": "dnd", "activities": [game, song]}})).await;
+    wait_activities(&mut owner, &w.alice.1, "dnd", |a| a == &json!([game])).await;
+
+    // all activity off: everything goes, and typing too (it follows the general choice while unset)
+    set_settings(&w.app, &w.alice.0, json!({"share_activity": false})).await;
+    wait_activities(&mut owner, &w.alice.1, "dnd", |a| a.is_null()).await;
+    typing(&w.app, &w.alice.0, &w.channel).await;
+    assert!(owner.quiet("TYPING_START", &w.alice.1, QUIET).await, "typing follows share_activity");
+
+    // typing on by itself again, then off by itself
+    set_settings(&w.app, &w.alice.0, json!({"share_typing": true})).await;
+    typing(&w.app, &w.alice.0, &w.channel).await;
+    assert_eq!(owner.wait_for("TYPING_START").await["user_id"], w.alice.1.as_str());
+    set_settings(&w.app, &w.alice.0, json!({"share_typing": false, "share_activity": true})).await;
+    typing(&w.app, &w.alice.0, &w.channel).await;
+    assert!(owner.quiet("TYPING_START", &w.alice.1, QUIET).await, "typing off on its own");
+
+    // mutual servers and friends on the profile
+    let profile = format!("/users/{}/profile", w.alice.1);
+    assert_eq!(w.app.get(&profile, &w.owner.0).await.1["mutual_guilds"].as_array().map(Vec::len), Some(1));
+    set_settings(&w.app, &w.alice.0, json!({"share_mutuals": false})).await;
+    let (_, seen) = w.app.get(&profile, &w.owner.0).await;
+    assert_eq!((seen["mutual_guilds"].clone(), seen["mutual_friends_count"].clone()), (json!([]), json!(0)));
+    let theirs = w.app.get(&format!("/users/{}/profile", w.owner.1), &w.alice.0).await.1;
+    assert_eq!(theirs["mutual_guilds"].as_array().map(Vec::len), Some(1), "her view of others is unchanged");
 }

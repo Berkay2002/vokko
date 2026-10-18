@@ -90,16 +90,17 @@ async fn list(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQue
     for (other, guild, nick) in shared {
         guilds.entry(other).or_default().push(MutualGuild { id: Snowflake::from(guild), nick });
     }
-    let suggestions = ranked
-        .into_iter()
-        .filter_map(|(id, visible)| {
-            Some(FriendSuggestion {
-                user: users.get(&id)?.clone(),
-                mutual_guilds: guilds.remove(&id).unwrap_or_default(),
-                mutual_friends_count: u32::try_from(visible).unwrap_or(0),
-            })
-        })
-        .collect();
+    let mut suggestions = Vec::new();
+    for (id, visible) in ranked {
+        let Some(user) = users.get(&id) else { continue };
+        // the profile's "share mutuals" opt-out holds here too
+        let show = crate::presence::sharing(&state, id).await?.mutuals;
+        suggestions.push(FriendSuggestion {
+            user: user.clone(),
+            mutual_guilds: if show { guilds.remove(&id).unwrap_or_default() } else { Vec::new() },
+            mutual_friends_count: if show { u32::try_from(visible).unwrap_or(0) } else { 0 },
+        });
+    }
     Ok(Json(FriendSuggestionsResponse { enabled: true, suggestions }))
 }
 
