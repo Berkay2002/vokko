@@ -63,6 +63,8 @@ struct Mock {
     requests: Mutex<Vec<String>>,
     tokens: AtomicUsize,
     limited: AtomicBool,
+    /// How many of the next token requests stall past the client's timeout before one is answered.
+    stalls: AtomicUsize,
 }
 
 impl Mock {
@@ -90,6 +92,9 @@ async fn record(State(mock): State<Arc<Mock>>, request: AxumRequest, next: Next)
 
 async fn token_endpoint(State(mock): State<Arc<Mock>>) -> Json<Value> {
     mock.tokens.fetch_add(1, Ordering::SeqCst);
+    if mock.stalls.try_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1)).is_ok() {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
     Json(json!({"access_token": "ACCESS-TOKEN-SECRET", "expires_in": 3600}))
 }
 
@@ -669,6 +674,22 @@ async fn browsing_reduces_the_catalog_and_only_ever_asks_for_allow_listed_paths(
         assert!(request.authorized && request.method == "GET");
     }
     assert!(!paths.iter().any(|path| path == "/authorize" || path.contains("recently-played") || path.contains("player")), "{paths:?}");
+}
+
+#[tokio::test]
+async fn one_stalled_token_request_is_tried_again_and_two_make_the_catalog_unavailable() {
+    let quick = |config: &mut SpotifyConfig| config.request_timeout = Duration::from_millis(300);
+    let w = world_with(quick, false).await;
+    w.mock.stalls.store(1, Ordering::SeqCst);
+    assert_eq!(w.app.get("/spotify/search?q=daft", &w.alice).await.0, StatusCode::OK, "the second token request answered");
+    assert_eq!(w.mock.tokens.load(Ordering::SeqCst), 2);
+
+    let w = world_with(quick, false).await;
+    w.mock.stalls.store(2, Ordering::SeqCst);
+    let (status, body) = w.app.get("/spotify/search?q=daft", &w.alice).await;
+    assert_eq!((status, body["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(40033)), "both token requests stalled: {body}");
+    assert_eq!(w.mock.tokens.load(Ordering::SeqCst), 2, "never more than one extra attempt");
+    assert_eq!(w.mock.catalog_calls(), 0);
 }
 
 #[tokio::test]
