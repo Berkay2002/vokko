@@ -63,9 +63,13 @@ test('werewolf: roles in private, a night, a day, a vote, the village wins', asy
   for (const s of sides) await expect(f(s).locator('#phase')).toHaveText('Vote 1');
   await expect(f(victim).getByRole('button', { name: /^Vote for/ })).toHaveCount(0);
   await f(wolf).getByRole('button', { name: `Vote for ${name(seer)}` }).click();
+  // Marks list voters in the order the moderator got the votes. Each vote is relayed from its own page, so the doctor's
+  // could overtake the seer's: wait for the seer's to land first.
+  const wolfMarks = f(villager).getByRole('button', { name: `Vote for ${name(wolf)}` }).locator('.marks');
   await f(seer).getByRole('button', { name: `Vote for ${name(wolf)}` }).click();
+  await expect(wolfMarks).toHaveText(new RegExp(`^${name(seer)}\\w*$`));
   await f(doctor).getByRole('button', { name: `Vote for ${name(wolf)}` }).click();
-  await expect(f(villager).getByRole('button', { name: `Vote for ${name(wolf)}` }).locator('.marks')).toHaveText(new RegExp(`^${name(seer)}\\w*, ${name(doctor)}\\w*$`));
+  await expect(wolfMarks).toHaveText(new RegExp(`^${name(seer)}\\w*, ${name(doctor)}\\w*$`));
   await shots(villager.page, 'werewolf-vote');
   await f(villager).getByRole('button', { name: `Vote for ${name(wolf)}` }).click();
 
