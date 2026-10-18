@@ -31,11 +31,16 @@ export type Message = {
   referenced_message: Message | null
   webhook_id?: string
 }
-type Channel = { id: string; type: number; guild_id?: string | null; parent_id?: string | null; recipients?: User[] }
+type Overwrite = { id: string; type: number; allow: string; deny: string } // type 0: role (or @everyone, id = guild id), 1: member
+type Channel = { id: string; type: number; guild_id?: string | null; parent_id?: string | null; recipients?: User[]; permission_overwrites?: Overwrite[] }
 type Member = { user: User; nick?: string | null; roles?: string[]; communication_disabled_until?: string | null }
 type GuildInfo = { id: string; owner_id: string; roles: { id: string; permissions: string }[] }
 
 export const ADMINISTRATOR = 1n << 3n
+export const VIEW_CHANNEL = 1n << 10n
+export const SEND_MESSAGES = 1n << 11n
+/** Discord's "use apps" permission: what lets a member talk to Claude in a channel. */
+export const USE_APPLICATION_COMMANDS = 1n << 31n
 export const MODERATE_MEMBERS = 1n << 40n
 /** What a timed-out member keeps (VIEW_CHANNEL | READ_MESSAGE_HISTORY), as in crates/server/src/access.rs. */
 const TIMEOUT_ALLOWED = (1n << 10n) | (1n << 16n)
@@ -43,6 +48,42 @@ const ALL_PERMISSIONS = (1n << 64n) - 1n
 type Guild = { id: string; channels?: Channel[]; threads?: Channel[]; members?: Member[] }
 
 const THREAD_TYPES = new Set([10, 11, 12])
+/** Server channels the bot answers in without a groups entry (text, announcement; their threads follow the parent). Not voice, forum or category. */
+const DEFAULT_CHANNEL_TYPES = new Set([0, 5])
+/** How long the guild's roles and members stay cached for permission checks (gateway events drop them sooner). */
+const GUILD_STATE_MS = 30_000
+const DEFAULT_POLICY: GroupPolicy = { requireMention: true, allowFrom: [] }
+
+type GuildMember = { guild: GuildInfo; member: Member }
+
+/** Guild-wide bits of a member: all for the guild owner and ADMINISTRATOR, else @everyone plus their roles. */
+function baseBits(guild: GuildInfo, member: Member): bigint {
+  if (guild.owner_id === member.user.id) return ALL_PERMISSIONS
+  const roles = new Map(guild.roles.map(r => [r.id, BigInt(r.permissions)]))
+  let bits = roles.get(guild.id) ?? 0n // @everyone
+  for (const id of member.roles ?? []) bits |= roles.get(id) ?? 0n
+  return bits & ADMINISTRATOR ? ALL_PERMISSIONS : bits
+}
+
+/** The member's bits in a channel, as crates/server/src/access.rs resolves them: base, @everyone overwrite, role overwrites (denies, then allows), member overwrite, no VIEW_CHANNEL = nothing, timeout clamp. */
+export function channelBits(guild: GuildInfo, member: Member, overwrites: Overwrite[] = [], now = Date.now()): bigint {
+  const base = baseBits(guild, member)
+  if (base === ALL_PERMISSIONS) return base
+  const apply = (bits: bigint, o: Overwrite | undefined) => (o ? (bits & ~BigInt(o.deny)) | BigInt(o.allow) : bits)
+  let bits = apply(base, overwrites.find(o => o.type === 0 && o.id === guild.id))
+  let allow = 0n, deny = 0n
+  for (const o of overwrites) {
+    if (o.type === 0 && o.id !== guild.id && member.roles?.includes(o.id)) {
+      allow |= BigInt(o.allow)
+      deny |= BigInt(o.deny)
+    }
+  }
+  bits = ((bits & ~deny) | allow)
+  bits = apply(bits, overwrites.find(o => o.type === 1 && o.id === member.user.id)) & ~ADMINISTRATOR
+  if (!(bits & VIEW_CHANNEL)) return 0n
+  const timedOut = member.communication_disabled_until != null && Date.parse(member.communication_disabled_until) > now
+  return timedOut ? bits & TIMEOUT_ALLOWED : bits
+}
 
 // ---- config and state files ----
 
@@ -419,12 +460,45 @@ export class VokkoBot {
 
     if (!this.handed.has(msg.id) && !this.guildsOwned(access)) return { action: 'drop' }
     // Keyed on channel id; threads inherit their parent's opt-in (the reply still goes to the thread).
-    const policy = access.groups[this.gateKey(msg.channel_id)]
+    const policy = this.policyFor(access, msg.channel_id)
     if (!policy) return { action: 'drop' }
     const groupAllowFrom = policy.allowFrom ?? []
     if (groupAllowFrom.length > 0 && !groupAllowFrom.includes(senderId)) return { action: 'drop' }
     if ((policy.requireMention ?? true) && !this.isMentioned(msg, access.mentionPatterns)) return { action: 'drop' }
+    // Last, because it may cost API calls: the owner always may; everyone else needs Use Application Commands in this channel.
+    if (senderId !== this.ownerId && !((await this.bitsIn(msg.guild_id, msg.channel_id, senderId)) & USE_APPLICATION_COMMANDS)) return { action: 'drop' }
+    // A channel the bot answers by default, not by a groups entry: only where it can write too (not a read-only channel).
+    if (!access.groups[this.gateKey(msg.channel_id)] && this.me && !((await this.bitsIn(msg.guild_id, msg.channel_id, this.me.id)) & SEND_MESSAGES)) return { action: 'drop' }
     return { action: 'deliver', access }
+  }
+
+  /** What the bot does in a server channel: its groups entry, else (any channel it can see, text or announcement, threads via their parent) mention-only for everyone. Null: it stays out. */
+  policyFor(access: Access, channelId: string): GroupPolicy | null {
+    const key = this.gateKey(channelId)
+    const ch = this.channels.get(key)
+    return access.groups[key] ?? (ch?.guild_id && DEFAULT_CHANNEL_TYPES.has(ch.type) ? DEFAULT_POLICY : null)
+  }
+
+  private readonly guildState = new Map<string, { at: number; guild: GuildInfo; members: Member[] }>()
+
+  /** The user's bits in the channel (0n when they are not a member or anything can't be read: a failed lookup refuses). Roles and members are cached for 30 s, overwrites come from the channel cache. */
+  private async bitsIn(guildId: string | null, channelId: string, userId: string): Promise<bigint> {
+    if (!guildId) return 0n
+    try {
+      let st = this.guildState.get(guildId)
+      if (!st || Date.now() - st.at > GUILD_STATE_MS) {
+        const [guild, members] = await Promise.all([this.api<GuildInfo>('GET', `/guilds/${snowflake(guildId)}`), this.members(guildId, true)])
+        if (!members || !Array.isArray(guild.roles)) return 0n
+        st = { at: Date.now(), guild, members }
+        this.guildState.set(guildId, st)
+      }
+      const member = st.members.find(m => m.user.id === userId)
+      return member ? channelBits(st.guild, member, this.channels.get(this.gateKey(channelId))?.permission_overwrites) : 0n
+    } catch (err) {
+      this.cfg.log(`vokko channel: cannot read permissions in guild ${guildId}: ${err}
+`)
+      return 0n
+    }
   }
 
   // Three accounts can hold every pairing slot for an hour: say so, at most once an hour.
@@ -607,7 +681,7 @@ export class VokkoBot {
     if (ch?.type === 1) {
       const userId = ch.recipients?.find(u => u.id !== this.me?.id)?.id
       if (ownsDms(this.cfg.role, access) && userId && access.allowFrom.includes(userId)) return
-    } else if (ch && (this.guildsOwned(access) || (this.adopted.get(id) ?? 0) > Date.now()) && this.gateKey(id) in access.groups) {
+    } else if (ch && (this.guildsOwned(access) || (this.adopted.get(id) ?? 0) > Date.now()) && this.policyFor(access, id)) {
       return
     }
     throw new Error(`channel ${id} is not allowlisted — add via ${this.cfg.pairCommand.replace(/ pair$/, '')}`)
@@ -678,7 +752,7 @@ export class VokkoBot {
     if (authorId === this.me?.id) return true
     const ch = this.channels.get(chatId)
     if (ch?.type === 1) return true // a DM: the other side passed allowedChannel
-    const allow = this.loadAccess().groups[this.gateKey(chatId)]?.allowFrom ?? []
+    const allow = this.policyFor(this.loadAccess(), chatId)?.allowFrom ?? []
     return allow.length === 0 || allow.includes(authorId)
   }
 
@@ -771,11 +845,8 @@ export class VokkoBot {
     const [guild, members] = await Promise.all([this.api<GuildInfo>('GET', `/guilds/${snowflake(guildId)}`).catch(() => null), this.members(guildId, true)])
     const member = members?.find(m => m.user.id === userId)
     if (!guild || !member) return null
-    if (guild.owner_id === userId) return ALL_PERMISSIONS
-    const roles = new Map(guild.roles.map(r => [r.id, BigInt(r.permissions)]))
-    let bits = roles.get(guild.id) ?? 0n // @everyone
-    for (const id of member.roles ?? []) bits |= roles.get(id) ?? 0n
-    if (bits & ADMINISTRATOR) return ALL_PERMISSIONS
+    const bits = baseBits(guild, member)
+    if (bits === ALL_PERMISSIONS) return bits
     const timedOut = member.communication_disabled_until != null && Date.parse(member.communication_disabled_until) > Date.now()
     return timedOut ? bits & TIMEOUT_ALLOWED : bits
   }
@@ -842,6 +913,21 @@ export class VokkoBot {
       case 'GUILD_CREATE':
         this.cacheGuild(d)
         void this.setNickname(d)
+        break
+      case 'GUILD_UPDATE':
+      case 'GUILD_MEMBER_ADD':
+      case 'GUILD_MEMBER_UPDATE':
+      case 'GUILD_MEMBER_REMOVE':
+      case 'GUILD_ROLE_CREATE':
+      case 'GUILD_ROLE_UPDATE':
+      case 'GUILD_ROLE_DELETE':
+        // roles or members changed: the next permission check reads them again
+        this.guildState.delete(d.guild_id ?? d.id)
+        break
+      case 'CHANNEL_DELETE':
+      case 'THREAD_DELETE':
+        // also what the server sends when the channel is hidden from the bot
+        this.channels.delete(d.id)
         break
       case 'CHANNEL_CREATE':
       case 'CHANNEL_UPDATE':

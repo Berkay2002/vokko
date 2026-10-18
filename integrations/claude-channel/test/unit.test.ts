@@ -3,7 +3,7 @@ import { test, expect, beforeEach } from 'bun:test'
 import { mkdtempSync, writeFileSync, statSync, mkdirSync, chmodSync, rmSync, symlinkSync, existsSync, readdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { VokkoBot, bridgeState, checkPath, type Config, type Message } from '../vokko.ts'
+import { SEND_MESSAGES, USE_APPLICATION_COMMANDS, VIEW_CHANNEL, VokkoBot, bridgeState, channelBits, checkPath, type Config, type Message } from '../vokko.ts'
 
 const ME = '100', OWNER = '200', FRIEND = '300', STRANGER = '400', GROUP = '500', DM = '600'
 let calls: { url: string; init?: RequestInit }[]
@@ -28,6 +28,9 @@ function makeBot(access: object = {}): { bot: VokkoBot; logs: string[]; dir: str
   const cache = (ch: object) => (bot as any).cacheChannel(ch)
   cache({ id: GROUP, type: 0, guild_id: '1' })
   cache({ id: DM, type: 1, recipients: [bot.me, { id: OWNER, username: 'owner', global_name: null }] })
+  // the server's view of guild 1: @everyone may use apps (the permission data is cached for 30 s, so no request goes out)
+  const members = [ME, OWNER, FRIEND, STRANGER].map(id => ({ user: { id, username: `u${id}`, global_name: null }, roles: [] }))
+  ;(bot as any).guildState.set('1', { at: Date.now() + 3_600_000, guild: { id: '1', owner_id: '1', roles: [{ id: '1', permissions: String(VIEW_CHANNEL | SEND_MESSAGES | USE_APPLICATION_COMMANDS) }] }, members })
   return { bot, logs, dir }
 }
 
@@ -281,4 +284,56 @@ test('the owner is told once when the bridge goes away and once when it is back,
   ;(bot as any).watchBridge()
   await settle()
   expect(notices().length).toBe(2)
+})
+
+// ---- who may talk to Claude in a server ----
+
+const EVERYONE = String(VIEW_CHANNEL | SEND_MESSAGES)
+const guildJson = (roles: { id: string; permissions: string }[]) => ({ id: '1', owner_id: '1', roles })
+const memberJson = (id: string, roles: string[] = []) => ({ user: { id, username: `u${id}`, global_name: null }, roles })
+const ask = (author: string) => msg('77', author, { mentions: [{ id: ME, username: 'claude', global_name: 'Claude' }], channel_id: '501' })
+
+test('channelBits resolves like the server: @everyone, role denies before allows, member last, no view = nothing, timeout clamp, admin', () => {
+  const guild = { id: '1', owner_id: '2', roles: [{ id: '1', permissions: EVERYONE }, { id: '7', permissions: String(USE_APPLICATION_COMMANDS) }, { id: '8', permissions: String(1n << 3n) }] }
+  const m = (roles: string[], until?: string) => ({ ...memberJson('5', roles), communication_disabled_until: until })
+  const ow = (id: string, type: number, allow: bigint, deny: bigint) => ({ id, type, allow: String(allow), deny: String(deny) })
+  expect(channelBits(guild, m([])) & USE_APPLICATION_COMMANDS).toBe(0n)
+  expect(channelBits(guild, m(['7'])) & USE_APPLICATION_COMMANDS).toBe(USE_APPLICATION_COMMANDS)
+  expect(channelBits(guild, m(['7']), [ow('7', 0, 0n, USE_APPLICATION_COMMANDS)]) & USE_APPLICATION_COMMANDS).toBe(0n)
+  expect(channelBits(guild, m(['7']), [ow('1', 0, 0n, USE_APPLICATION_COMMANDS), ow('7', 0, USE_APPLICATION_COMMANDS, 0n)]) & USE_APPLICATION_COMMANDS).toBe(USE_APPLICATION_COMMANDS) // the role allow beats the @everyone deny
+  expect(channelBits(guild, m(['7']), [ow('1', 0, 0n, VIEW_CHANNEL)])).toBe(0n) // cannot see the channel: nothing
+  expect(channelBits(guild, m(['7'], new Date(Date.now() + 60_000).toISOString())) & USE_APPLICATION_COMMANDS).toBe(0n) // timed out
+  expect(channelBits(guild, m(['8']), [ow('1', 0, 0n, VIEW_CHANNEL)]) & USE_APPLICATION_COMMANDS).toBe(USE_APPLICATION_COMMANDS) // ADMINISTRATOR
+  expect(channelBits(guild, { ...m([]), user: { id: '2', username: 'o', global_name: null } }, [ow('1', 0, 0n, VIEW_CHANNEL)]) & USE_APPLICATION_COMMANDS).toBe(USE_APPLICATION_COMMANDS) // the guild owner
+})
+
+test('the bit is read from the server, cached for 30 s, and dropped by role and member events; a failed lookup refuses', async () => {
+  const { bot } = makeBot({ groups: { '501': { requireMention: true, allowFrom: [] } } })
+  ;(bot as any).guildState.clear()
+  ;(bot as any).cacheChannel({ id: '501', type: 0, guild_id: '1' })
+  let roles = [{ id: '1', permissions: EVERYONE }, { id: '7', permissions: String(USE_APPLICATION_COMMANDS) }]
+  let memberRoles: string[] = ['7']
+  let down = false
+  respond = url => {
+    if (down) return new Response('boom', { status: 500 })
+    return url.endsWith('/guilds/1') ? Response.json(guildJson(roles)) : url.includes('/guilds/1/members') ? Response.json([memberJson(ME), memberJson(STRANGER, memberRoles)]) : Response.json([])
+  }
+  const verdict = async () => (await bot.gate(ask(STRANGER))).action
+  expect(await verdict()).toBe('deliver')
+  const fetched = calls.length
+  memberRoles = []
+  expect(await verdict()).toBe('deliver') // still the cached answer
+  expect(calls.length).toBe(fetched)
+  ;(bot as any).dispatch('GUILD_MEMBER_UPDATE', { guild_id: '1', user: { id: STRANGER }, roles: [] })
+  expect(await verdict()).toBe('drop') // the event dropped the cache
+  memberRoles = ['7']
+  ;(bot as any).dispatch('GUILD_MEMBER_UPDATE', { guild_id: '1' })
+  expect(await verdict()).toBe('deliver')
+  roles = [{ id: '1', permissions: EVERYONE }]
+  ;(bot as any).guildState.get('1').at = Date.now() - 31_000 // no event: the 30 s expiry
+  expect(await verdict()).toBe('drop')
+  ;(bot as any).dispatch('GUILD_ROLE_UPDATE', { guild_id: '1', role: {} })
+  roles = [{ id: '1', permissions: String(VIEW_CHANNEL | SEND_MESSAGES | USE_APPLICATION_COMMANDS) }]
+  down = true
+  expect(await verdict()).toBe('drop') // API down: refused, not guessed
 })

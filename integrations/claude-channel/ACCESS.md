@@ -38,7 +38,13 @@ IDs are permanent snowflakes; usernames change. Pairing captures the ID automati
 
 ## Server channels
 
-Off by default. Opt each channel in by its **channel** ID (right-click the channel → Copy ID with Developer Mode on). Threads inherit their parent channel's opt-in.
+In a server the bot is in, it answers (when @mentioned) in every text and announcement channel it can see and can write in; threads follow their parent. Nothing to configure. Control it with Vokko's own permissions:
+
+- **Channels:** deny the bot's role View Channel (or Send Messages) in a channel's Permissions tab and it stays out.
+- **People:** a member may talk to Claude in a channel when they have **Use Application Commands** there (roles and channel overwrites resolve as for any permission). Turn it off for @everyone in Roles and give it to one role, or deny it in a single channel. The bot's owner always may. Guilds created before 2026-10-11 may lack the bit on @everyone; turn it on in Roles.
+- The roles and members are read from the server and cached for 30 s (role and member events clear the cache); if they can't be read, the message is ignored.
+
+A `groups` entry overrides the default for its channel: `--no-mention` and `--allow` still work, and it also opts in channels the bot cannot otherwise answer in. The Use Application Commands rule applies to it too. Opt a channel in by its **channel** ID (right-click the channel → Copy ID with Developer Mode on).
 
 ```
 /vokko:access group add 1234567890123456741
@@ -52,7 +58,7 @@ With the default `requireMention: true`, the bot responds only when @mentioned o
 /vokko:access group rm 1234567890123456741
 ```
 
-Anyone who can trigger the bot in an opted-in channel steers your Claude Code session. Use `--allow` with your own ID unless you really mean to share it.
+Anyone who can trigger the bot in a server channel steers your Claude Code session. Take Use Application Commands away from @everyone (and give it to a trusted role) unless you really mean to share it.
 
 ## Mention detection
 
