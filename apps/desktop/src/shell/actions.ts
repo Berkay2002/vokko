@@ -168,6 +168,9 @@ export function setOwnStatus(status: SelectableStatus, custom: string): void {
   const presence: { status: PresenceStatus; custom_status: string | null; activities?: Activity[] } = { status: wire, custom_status: custom.trim() || null };
   if (isDesktop()) presence.activities = getOwnActivities();
   gateway.send(GatewayOp.PresenceUpdate, presence);
+  // Show it at once (user panel dot and status line) instead of waiting for the PRESENCE_UPDATE echo, which never comes while reconnecting.
+  const { me, presences } = appStore.getState();
+  if (me) appStore.setState({ presences: { ...presences, [me.id]: { ...presences[me.id], user_id: me.id, status: wire, custom_status: presence.custom_status } } });
 }
 
 /** Sends the stored status again, e.g. after the detected game changed. */
