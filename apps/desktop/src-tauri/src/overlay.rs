@@ -9,6 +9,9 @@
 //! macOS and Linux: the commands are accepted and do nothing. A macOS version needs an NSPanel at screen-saver level that joins all
 //! Spaces; games in their own fullscreen Space are the hard part.
 
+// The geometry helpers are only called by the Windows backend (and the tests).
+#![cfg_attr(not(windows), allow(dead_code))]
+
 use serde::Deserialize;
 
 pub const OVERLAY_WINDOW: &str = "overlay";
@@ -100,7 +103,7 @@ pub use imp::OverlayState;
 /// Off Windows there is no overlay yet; the commands are accepted and ignored.
 #[cfg(not(windows))]
 #[derive(Default)]
-pub struct OverlayState;
+pub struct OverlayState {}
 
 #[tauri::command]
 pub fn desktop_overlay_configure(app: tauri::AppHandle, state: tauri::State<'_, OverlayState>, config: OverlayConfig) {
