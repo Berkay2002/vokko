@@ -17,6 +17,7 @@ import {
   type RemoteParticipant,
   type RemoteTrack,
   type RemoteTrackPublication,
+  type TrackPublishOptions,
 } from "livekit-client";
 import type { Snowflake } from "../api/types";
 import { resolveDeviceId, withDeviceFallback } from "./devices";
@@ -38,6 +39,11 @@ const QUALITY: Record<string, ConnectionQuality> = {
   [LkQuality.Poor]: "poor",
   [LkQuality.Lost]: "lost",
 };
+
+/** The microphone publish: the channel bitrate is its max (Opus, mono); a DM call keeps livekit-client's default preset. */
+export function micPublishOptions(bitrate: number | undefined): TrackPublishOptions {
+  return bitrate && bitrate > 0 ? { source: Track.Source.Microphone, audioPreset: { maxBitrate: bitrate } } : { source: Track.Source.Microphone };
+}
 
 function toDevices(list: MediaDeviceInfo[]): VoiceDevice[] {
   const out: VoiceDevice[] = [{ deviceId: "default", label: "Default" }];
@@ -419,7 +425,7 @@ export class LiveKitTransport implements VoiceTransport {
       }
       if (this.room !== room) return;
       if (this.selfMute && !track.isMuted) await track.mute();
-      await room.localParticipant.publishTrack(track, { source: Track.Source.Microphone });
+      await room.localParticipant.publishTrack(track, micPublishOptions(this.options?.audioBitrate));
       track = null; // owned by the room now
       this.enforceMute(room);
     } catch (error) {

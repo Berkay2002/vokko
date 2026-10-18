@@ -74,19 +74,19 @@ fn reaction_event(user_id: i64, channel_id: i64, message_id: i64, emoji: Reactio
         emoji,
         kind,
         burst: kind == ReactionType::Burst,
+        message_author_id: None,
     }
 }
 
-async fn locate(state: &AppState, user_id: i64, channel: &str, message: &str) -> ApiResult<(access::ChannelAccess, i64)> {
+/// The channel access and the message's `(id, author_id)`.
+async fn locate(state: &AppState, user_id: i64, channel: &str, message: &str) -> ApiResult<(access::ChannelAccess, (i64, i64))> {
     let channel_id = parse_id(channel).ok_or_else(ApiErr::unknown_channel)?;
     let message_id = parse_id(message).ok_or_else(ApiErr::unknown_message)?;
     let access = channel_access(state, user_id, channel_id).await?;
     let found: Option<(i64,)> =
-        sqlx::query_as("SELECT id FROM messages WHERE id = $1 AND channel_id = $2").bind(message_id).bind(channel_id).fetch_optional(&state.db).await?;
-    if found.is_none() {
-        return Err(ApiErr::unknown_message());
-    }
-    Ok((access, message_id))
+        sqlx::query_as("SELECT author_id FROM messages WHERE id = $1 AND channel_id = $2").bind(message_id).bind(channel_id).fetch_optional(&state.db).await?;
+    let (author_id,) = found.ok_or_else(ApiErr::unknown_message)?;
+    Ok((access, (message_id, author_id)))
 }
 
 async fn add_reaction(
@@ -97,7 +97,7 @@ async fn add_reaction(
 ) -> ApiResult<StatusCode> {
     let mut emoji = parse_emoji(&emoji)?;
     let kind = reaction_type(query.kind)?;
-    let (access, message_id) = locate(&state, user_id, &id, &mid).await?;
+    let (access, (message_id, author_id)) = locate(&state, user_id, &id, &mid).await?;
     access.require(READ_MESSAGE_HISTORY)?;
     access.require(ADD_REACTIONS)?;
     access.require_unarchived()?;
@@ -141,7 +141,8 @@ async fn add_reaction(
     .await?;
     if inserted.rows_affected() > 0 {
         let viewers = access::channel_viewers(&state, &access.channel).await?;
-        let event = reaction_event(user_id, access.channel.id, message_id, emoji, kind);
+        let event =
+            MessageReaction { message_author_id: Some(Snowflake::from(author_id)), ..reaction_event(user_id, access.channel.id, message_id, emoji, kind) };
         state.hub.send(&viewers, &GatewayEvent::MessageReactionAdd(event));
     }
     Ok(StatusCode::NO_CONTENT)
@@ -155,7 +156,7 @@ async fn remove_reaction(
 ) -> ApiResult<StatusCode> {
     let mut emoji = parse_emoji(&emoji)?;
     let kind = reaction_type(query.kind)?;
-    let (access, message_id) = locate(&state, user_id, &id, &mid).await?;
+    let (access, (message_id, _)) = locate(&state, user_id, &id, &mid).await?;
     let emoji_id = emoji.id.map(Snowflake::db).unwrap_or(0);
     let removed: Vec<(String,)> =
         sqlx::query_as(&format!("DELETE FROM reactions WHERE message_id = $1 AND user_id = $4 AND {SAME_EMOJI} AND burst = $5 RETURNING emoji_name"))
@@ -192,7 +193,7 @@ async fn list_reactors(
 ) -> ApiResult<Json<Vec<User>>> {
     let emoji = parse_emoji(&emoji)?;
     let kind = reaction_type(query.kind)?;
-    let (access, message_id) = locate(&state, user_id, &id, &mid).await?;
+    let (access, (message_id, _)) = locate(&state, user_id, &id, &mid).await?;
     access.require(READ_MESSAGE_HISTORY)?;
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let rows: Vec<(i64,)> = sqlx::query_as(&format!(

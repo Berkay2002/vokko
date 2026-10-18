@@ -159,6 +159,8 @@ async fn reaction_events_carry_the_type() {
     assert_eq!(w.app.put(&format!("{base}?type=1"), &w.owner).await.0, 204);
     let add = alice.wait_for("MESSAGE_REACTION_ADD").await;
     assert_eq!((add["type"].clone(), add["burst"].clone(), add["emoji"]["name"].clone()), (json!(1), json!(true), json!("🎉")));
+    // The message author rides along on adds (reaction notifications), not on removes.
+    assert_eq!(add["message_author_id"], sent["author"]["id"]);
     assert_eq!(w.app.put(&base, &w.owner).await.0, 204);
     let add = alice.wait_for("MESSAGE_REACTION_ADD").await;
     assert_eq!((add["type"].clone(), add["burst"].clone()), (json!(0), json!(false)));
@@ -166,6 +168,7 @@ async fn reaction_events_carry_the_type() {
     assert_eq!(w.app.delete(&format!("{base}?type=1"), &w.owner).await.0, 204);
     let removed = alice.wait_for("MESSAGE_REACTION_REMOVE").await;
     assert_eq!((removed["type"].clone(), removed["burst"].clone()), (json!(1), json!(true)));
+    assert!(removed.get("message_author_id").is_none());
     // deleting a burst that is not there sends nothing
     assert_eq!(w.app.delete(&format!("{base}?type=1"), &w.owner).await.0, 204);
     assert!(alice.silent_for("MESSAGE_REACTION_REMOVE", Duration::from_millis(300)).await);

@@ -4,12 +4,12 @@ import { ApiRequestError } from "../api/errors";
 import { Perm } from "../api/permissions";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore, useStore } from "../api/store";
-import { ChannelType, type Channel, type Guild } from "../api/types";
+import { ChannelType, DefaultMessageNotifications, type Channel, type Guild } from "../api/types";
 import { OnboardingSettings } from "../community/OnboardingSettings";
 import { GuildIcon } from "./Avatar";
 import { firstTextChannel } from "./channels";
 import { closeModal, openModal } from "./modalStore";
-import { Category, Field, Page, Select, Unavailable } from "./settings/controls";
+import { Category, Field, Page, RadioGroup, Select, Unavailable } from "./settings/controls";
 import { FullScreenSettings, useFrameLayout, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { AuditLogPage } from "./settings/AuditLogPage";
 import { BansPage } from "./settings/BansPage";
@@ -43,7 +43,7 @@ const GROUP_TITLES: Record<SectionDef["group"], string> = {
 
 const GROUP_ORDER: SectionDef["group"][] = ["top", "expression", "people", "apps", "moderation", "bottom"];
 
-const ENGAGEMENT_OUTLINE = ["Channel Summaries", "Activity Feed Settings", "Default Notification Settings", "Inactive", "Server Widget"];
+const ENGAGEMENT_OUTLINE = ["Channel Summaries", "Activity Feed Settings", "Inactive", "Server Widget"];
 
 function errorText(error: unknown): string {
   return error instanceof ApiRequestError ? error.message : "Something went wrong. Try again.";
@@ -208,6 +208,16 @@ function EngagementPage({ guild, owner, channels }: { guild: Guild; owner: boole
       <Category title="System Messages Channel">
         <Select<string> label="System Messages Channel" value={value} options={options} disabled={!owner || busy} onChange={setValue} />
         {saved && !dirty && <p className="settings-saved">Saved.</p>}
+      </Category>
+      <Category title="Default Notification Settings">
+        <p className="settings-note">Members who have not set their own notification settings for this server get this.</p>
+        <RadioGroup<"0" | "1">
+          name="Default notification settings"
+          value={guild.default_message_notifications === DefaultMessageNotifications.OnlyMentions ? "1" : "0"}
+          options={[{ value: "0", label: "All Messages" }, { value: "1", label: "Only @mentions" }]}
+          disabled={!owner || busy}
+          onChange={next => void patch({ default_message_notifications: Number(next) })}
+        />
       </Category>
       {ENGAGEMENT_OUTLINE.map(title => (
         <Category key={title} title={title}>

@@ -222,6 +222,9 @@ async fn update_guild(
     if let Some(mode) = body.join_mode {
         sqlx::query("UPDATE guilds SET join_mode = $2 WHERE id = $1").bind(id).bind(mode.as_u8() as i16).execute(&mut *tx).await?;
     }
+    if let Some(level) = body.default_message_notifications {
+        sqlx::query("UPDATE guilds SET default_message_notifications = $2 WHERE id = $1").bind(id).bind(level.as_u8() as i16).execute(&mut *tx).await?;
+    }
     if let Some(level) = body.verification_level {
         sqlx::query("UPDATE guilds SET verification_level = $2 WHERE id = $1").bind(id).bind(level.as_u8() as i16).execute(&mut *tx).await?;
     }
@@ -275,6 +278,7 @@ async fn update_guild(
         .change("rules_channel_id", before.rules_channel_id, guild.rules_channel_id)
         .change("nsfw_level", before.nsfw_level.as_u8(), guild.nsfw_level.as_u8())
         .change("join_mode", before.join_mode.as_u8(), guild.join_mode.as_u8())
+        .change("default_message_notifications", before.default_message_notifications.as_u8(), guild.default_message_notifications.as_u8())
         .change("verification_level", before.verification_level.as_u8(), guild.verification_level.as_u8())
         .change("explicit_content_filter", before.explicit_content_filter.as_u8(), guild.explicit_content_filter.as_u8())
         .change("tag", before.tag.as_ref().map(|tag| &tag.tag), guild.tag.as_ref().map(|tag| &tag.tag));

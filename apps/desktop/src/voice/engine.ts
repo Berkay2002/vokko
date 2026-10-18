@@ -377,7 +377,7 @@ async function connect(endpoint: string, token: string): Promise<void> {
     const channelId = getVoice().channelId;
     const resume = mediaChannel !== null && mediaChannel === channelId;
     mediaChannel = channelId;
-    await t.connect(endpoint, token, { ...transportOptions(getVoice()), resume });
+    await t.connect(endpoint, token, { ...transportOptions(getVoice()), resume, audioBitrate: getVoice().server?.bitrate });
     if (activeToken !== token) return;
     // Every connect starts the transport from scratch (a new room forgets what we watch), but the media store keeps the
     // Watch Stream and quality choices across a reconnect: hand them back, or a watched stream shows only its avatar.
@@ -599,7 +599,7 @@ export function wireVoice(): void {
   gateway.on("GUILD_DELETE", ({ id }) => dispatch({ type: "guildDelete", guildId: id }));
   gateway.on("VOICE_STATE_UPDATE", state => dispatch({ type: "voiceStateUpdate", state }));
   gateway.on("VOICE_SERVER_UPDATE", d =>
-    dispatch({ type: "voiceServerUpdate", guildId: d.guild_id, channelId: d.channel_id, endpoint: d.endpoint, token: d.token, sessionId: d.session_id }),
+    dispatch({ type: "voiceServerUpdate", guildId: d.guild_id, channelId: d.channel_id, endpoint: d.endpoint, token: d.token, sessionId: d.session_id, bitrate: d.bitrate }),
   );
   gateway.on("VOICE_CONNECT_FAILED", d => dispatch({ type: "connectFailed", guildId: d.guild_id, channelId: d.channel_id, reason: d.reason }));
   gateway.on("VOICE_CHANNEL_STATUS_UPDATE", d => dispatch({ type: "channelStatus", channelId: d.id, status: d.status }));

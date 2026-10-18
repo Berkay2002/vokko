@@ -3,7 +3,7 @@
 
 import { gateway } from "../api/gateway";
 import { avatarUrl, appStore, displayName, dmName } from "../api/store";
-import { ChannelType, RelationshipType, type Message, type Snowflake } from "../api/types";
+import { ChannelType, RelationshipType, type Message, type MessageReactionEvent, type Snowflake } from "../api/types";
 import { messageStore } from "../chat/messageStore";
 import { dmPath, go, guildPath } from "../shell/nav";
 import { useLocalState } from "../shell/localState";
@@ -11,7 +11,7 @@ import { getPrefs, usePrefs } from "../ui/prefs";
 import { applyUnread, pageLabel, summarizeUnread } from "./badge";
 import { requestAttention } from "../desktop/attention";
 import { IS_MAC } from "../desktop/tauri";
-import { decide, shouldBounce, withThreadMember, type NotifyInput } from "./decide";
+import { decide, decideReaction, guildDefaultLevel, shouldBounce, withThreadMember, type NotifyInput, type ReactionNotifyInput } from "./decide";
 import { flashTaskbar, notificationAdapter } from "./desktop";
 import { playSound, wireAudioUnlock } from "./sounds";
 import { notificationTitle, plainBody } from "./text";
@@ -30,38 +30,58 @@ function windowFocused(): boolean {
   return document.visibilityState === "visible" && document.hasFocus();
 }
 
-export function buildInput(message: Message, now = Date.now()): NotifyInput | null {
+/** Where a channel sits for the notification rules: DM kind, settings scopes and the viewer's state. */
+function channelContext(channelId: Snowflake, guildHint: Snowflake | null | undefined, now: number) {
   const state = appStore.getState();
   const meId = state.me?.id;
   if (!meId) return null;
-  const channel = state.channels[message.channel_id];
+  const channel = state.channels[channelId];
   // A thread message follows the thread, then its parent channel and that channel's category.
-  const thread = channel ? undefined : state.threads[message.channel_id];
+  const thread = channel ? undefined : state.threads[channelId];
   const parent = thread?.parent_id ? state.channels[thread.parent_id] : undefined;
   // A DM we have not seen yet: the store is fetching it. Treat it as a 1:1 DM (it can only be addressed to me).
-  const guildId = channel?.guild_id ?? thread?.guild_id ?? message.guild_id;
-  const dm = guildId ? null : channel?.type === ChannelType.GroupDM ? "group" : "dm";
-  const scopes: Snowflake[] = [message.channel_id];
+  const guildId = channel?.guild_id ?? thread?.guild_id ?? guildHint;
+  const dm: NotifyInput["dm"] = guildId ? null : channel?.type === ChannelType.GroupDM ? "group" : "dm";
+  const scopes: Snowflake[] = [channelId];
   if (parent) scopes.push(parent.id);
   const category = (parent ?? channel)?.parent_id;
   if (category) scopes.push(category);
   if (guildId) scopes.push(guildId);
   const local = thread ? withThreadMember(useLocalState.getState(), thread.id, thread.member) : useLocalState.getState();
-  const prefs = getPrefs();
   return {
-    message,
     meId,
-    myRoleIds: guildId ? (state.members[guildId]?.[meId]?.roles ?? []) : [],
+    guildId: guildId ?? null,
     dm,
-    friend: state.relationships[message.author.id]?.type === RelationshipType.Friend,
     scopes,
+    guildDefault: guildDefaultLevel(guildId ? state.guilds[guildId]?.default_message_notifications : undefined),
     local,
-    prefs,
+    prefs: getPrefs(),
     status: state.presences[meId]?.status,
     focused: windowFocused(),
-    viewing: state.route.channelId === message.channel_id,
+    viewing: state.route.channelId === channelId,
     now,
   };
+}
+
+export function buildInput(message: Message, now = Date.now()): NotifyInput | null {
+  const context = channelContext(message.channel_id, message.guild_id, now);
+  if (!context) return null;
+  const { guildId, ...rest } = context;
+  const state = appStore.getState();
+  return {
+    ...rest,
+    message,
+    myRoleIds: guildId ? (state.members[guildId]?.[context.meId]?.roles ?? []) : [],
+    friend: state.relationships[message.author.id]?.type === RelationshipType.Friend,
+  };
+}
+
+export function buildReactionInput(reaction: MessageReactionEvent, now = Date.now()): ReactionNotifyInput | null {
+  const context = channelContext(reaction.channel_id, null, now);
+  if (!context) return null;
+  const { guildId: _guildId, ...rest } = context;
+  void _guildId;
+  return { ...rest, reaction, pref: getPrefs().reactionNotifications };
 }
 
 /** Navigates to the message's channel and scrolls to it once the channel has loaded. */
@@ -123,6 +143,37 @@ async function onMessage(message: Message): Promise<void> {
   if (decision.desktop && (await notificationAdapter().permission()) === "granted") show(message);
 }
 
+async function onReaction(reaction: MessageReactionEvent): Promise<void> {
+  // A replay after a reconnect may carry old reactions: nothing pings in the replay window.
+  if (Date.now() < replayUntil) return;
+  const input = buildReactionInput(reaction);
+  if (!input) return;
+  const decision = decideReaction(input);
+  if (!decision.kind) return;
+  if (decision.sound) playSound("message");
+  if (!decision.desktop || (await notificationAdapter().permission()) !== "granted") return;
+  const state = appStore.getState();
+  const dmChannel = state.channels[reaction.channel_id];
+  const channel = dmChannel ?? state.threads[reaction.channel_id];
+  const guildId = channel?.guild_id ?? null;
+  const guild = guildId ? state.guilds[guildId] : undefined;
+  const user = state.users[reaction.user_id];
+  const name = user ? displayName(user, guildId ? state.members[guildId]?.[user.id] : null) : "Someone";
+  const emoji = reaction.emoji.id ? `:${reaction.emoji.name}:` : reaction.emoji.name;
+  notificationAdapter().show({
+    title: notificationTitle({
+      authorName: name,
+      channelName: guildId ? (channel?.name ?? "channel") : dmChannel ? dmName(dmChannel) : name,
+      guildName: guild?.name ?? null,
+      group: channel?.type === ChannelType.GroupDM,
+    }),
+    body: `Reacted ${emoji} to your message`,
+    icon: user ? avatarUrl(user) : undefined,
+    tag: `reaction:${reaction.message_id}`,
+    onClick: () => openMessage(reaction.channel_id, guildId, reaction.message_id),
+  });
+}
+
 function refreshUnread(): void {
   const state = appStore.getState();
   applyUnread(summarizeUnread(state, useLocalState.getState(), Date.now()), getPrefs().unreadBadge, pageLabel(state));
@@ -136,6 +187,7 @@ export function startNotify(): void {
   started = true;
   wireAudioUnlock();
   gateway.on("MESSAGE_CREATE", message => void onMessage(message));
+  gateway.on("MESSAGE_REACTION_ADD", reaction => void onReaction(reaction));
   let previous = gateway.status;
   gateway.onStatus(status => {
     if (status === "ready" && previous !== "ready") replayUntil = Date.now() + REPLAY_WINDOW_MS;

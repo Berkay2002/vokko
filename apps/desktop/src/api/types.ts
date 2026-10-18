@@ -230,6 +230,12 @@ export interface Guild {
   nsfw_level?: NsfwLevel; // Access (MANAGE_GUILD); always sent by the server. AgeRestricted gates every channel of the server
   rules_channel_id?: Snowflake | null; // Access: the rules channel (a text channel of the guild); always sent, null when unset
   join_mode?: JoinMode; // Access: how people get in (MANAGE_GUILD); absent = InviteOnly
+  default_message_notifications?: DefaultMessageNotifications; // Engagement: level for members with no per-server setting (MANAGE_GUILD); always sent, absent = AllMessages
+}
+/** Guild `default_message_notifications` (Discord's values). */
+export enum DefaultMessageNotifications {
+  AllMessages = 0,
+  OnlyMentions = 1,
 }
 /** docs/api.md "Apply to Join": with ApplyToJoin nobody becomes a member (invite accept included) without an approved request. */
 export enum JoinMode {
@@ -1542,6 +1548,7 @@ export interface MessageReactionEvent {
   emoji: ReactionEmoji;
   type: ReactionType;
   burst: boolean; // type === Burst
+  message_author_id?: Snowflake; // MESSAGE_REACTION_ADD only: author of the reacted message
 }
 
 export interface EditUserRequest {
@@ -2132,7 +2139,7 @@ export interface GatewayEvents {
   REMINDER_DELETE: { id: Snowflake };
   USER_SETTINGS_UPDATE: UserSettings; // the full blob after a change, to every session of that user (the one that saved it included)
   VOICE_STATE_UPDATE: VoiceState; // to everyone who can see the channel
-  VOICE_SERVER_UPDATE: { guild_id: Snowflake | null; channel_id: Snowflake; endpoint: string; token: string; session_id: string }; // requesting session only; session_id = the VoiceState.session_id this token is for
+  VOICE_SERVER_UPDATE: { guild_id: Snowflake | null; channel_id: Snowflake; endpoint: string; token: string; session_id: string; bitrate?: number }; // requesting session only; session_id = the VoiceState.session_id this token is for; bitrate = guild voice/stage channel's max mic bitrate (bps), absent in DM calls
   VOICE_CONNECT_FAILED: { guild_id: Snowflake | null; channel_id: Snowflake; reason: VoiceConnectFailure }; // Vokko-only, requesting session only
   VOICE_CHANNEL_STATUS_UPDATE: { id: Snowflake; guild_id: Snowflake; status: string | null }; // to viewers of the channel; cleared (null) when the channel empties
   WATCH_TOGETHER_UPDATE: WatchTogetherUpdate; // to viewers of the channel on every change; state null = ended (also when the last person leaves voice); a joiner gets the running session after VOICE_SERVER_UPDATE

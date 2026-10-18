@@ -79,7 +79,8 @@ export interface VoiceModel {
   serverSessionId: string | null;
   /** Set when op 4 (join / move / reconnect) is sent and its answer has not arrived yet. */
   pendingJoin: boolean;
-  server: { endpoint: string; token: string } | null;
+  /** `bitrate`: the channel's max microphone bitrate in bps (VOICE_SERVER_UPDATE; absent in DM calls). */
+  server: { endpoint: string; token: string; bitrate?: number } | null;
   status: VoiceStatus;
   error: VoiceError | null;
   /** Users currently speaking in our call (remote from the SFU, self from the local gate). */
@@ -156,7 +157,7 @@ export type VoiceAction =
   | { type: "guildCreate"; guild: GuildVoiceEntry }
   | { type: "guildDelete"; guildId: Snowflake }
   | { type: "voiceStateUpdate"; state: VoiceState }
-  | { type: "voiceServerUpdate"; guildId: Snowflake | null; channelId: Snowflake; endpoint: string; token: string; sessionId: string }
+  | { type: "voiceServerUpdate"; guildId: Snowflake | null; channelId: Snowflake; endpoint: string; token: string; sessionId: string; bitrate?: number }
   | { type: "connectFailed"; guildId: Snowflake | null; channelId: Snowflake; reason: VoiceConnectFailure }
   | { type: "join"; guildId: Snowflake | null; channelId: Snowflake }
   | { type: "leave"; error?: VoiceError | null }
@@ -379,7 +380,7 @@ export function voiceReducer(model: VoiceModel, action: VoiceAction): VoiceModel
       const reconnecting = model.status === "reconnecting";
       const next: VoiceModel = {
         ...model,
-        server: { endpoint: action.endpoint, token: action.token },
+        server: { endpoint: action.endpoint, token: action.token, bitrate: action.bitrate },
         serverSessionId: action.sessionId,
         status: reconnecting ? "reconnecting" : "connecting",
       };

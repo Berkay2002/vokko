@@ -270,6 +270,7 @@ route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
   if (name !== undefined && (name.length < 2 || name.length > 100)) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 2 and 100 in length." } });
   if (nsfwLevel !== undefined) guild.guild.nsfw_level = nsfwLevel;
   if (body.join_mode !== undefined) guild.guild.join_mode = body.join_mode;
+  if (body.default_message_notifications === 0 || body.default_message_notifications === 1) guild.guild.default_message_notifications = body.default_message_notifications;
   if ("rules_channel_id" in body) guild.guild.rules_channel_id = body.rules_channel_id as string | null;
   if (typeof level === "number") guild.guild.verification_level = level;
   if (typeof filter === "number") guild.guild.explicit_content_filter = filter;
@@ -629,7 +630,7 @@ route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, 
   const list = burst ? (reaction.burst_ids ??= []) : reaction.user_ids;
   if (!list.includes(viewer.user.id)) {
     list.push(viewer.user.id);
-    emit(channelAudience(channel), "MESSAGE_REACTION_ADD", reactionEvent(viewer.user.id, channel.id, message.id, emoji, burst));
+    emit(channelAudience(channel), "MESSAGE_REACTION_ADD", { ...reactionEvent(viewer.user.id, channel.id, message.id, emoji, burst), message_author_id: message.author_id });
   }
   return undefined;
 });

@@ -47,6 +47,8 @@ export interface TransportOptions {
   viewerQuality?(userId: Snowflake, source: VideoSource): ViewerQuality;
   /** A reconnect into the same call: publish again the camera / screen share the previous connection had (never new ones). */
   resume?: boolean;
+  /** Max microphone bitrate in bps: the voice channel's bitrate (VOICE_SERVER_UPDATE); absent = livekit-client's default. */
+  audioBitrate?: number;
 }
 
 export interface CameraStart {

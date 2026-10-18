@@ -7,7 +7,7 @@ import { setTrayUnread } from "../desktop/tray";
 import { dmName, type AppState } from "../api/store";
 import { ChannelType } from "../api/types";
 import { compareIds } from "../api/snowflake";
-import { effectiveLevel, isMutedAt, type NotifyLocalState } from "./decide";
+import { effectiveLevel, guildDefaultLevel, isMutedAt, type NotifyLocalState } from "./decide";
 
 export interface UnreadSummary {
   /** Total unread @mentions in channels that are not muted. */
@@ -19,7 +19,7 @@ export interface UnreadSummary {
 }
 
 /** Counts what the user should be told about. Muted channels, categories and servers contribute nothing. */
-export function summarizeUnread(state: Pick<AppState, "channels" | "readStates">, local: NotifyLocalState, now: number): UnreadSummary {
+export function summarizeUnread(state: Pick<AppState, "channels" | "readStates"> & Partial<Pick<AppState, "guilds">>, local: NotifyLocalState, now: number): UnreadSummary {
   let mentions = 0;
   let unread = false;
   let dms = 0;
@@ -27,7 +27,7 @@ export function summarizeUnread(state: Pick<AppState, "channels" | "readStates">
     if (channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildCategory) continue;
     const scopes = [channel.id, channel.parent_id, channel.guild_id].filter((id): id is string => !!id);
     if (scopes.some(id => isMutedAt(local, id, now))) continue;
-    const level = effectiveLevel(local, scopes);
+    const level = effectiveLevel(local, scopes, guildDefaultLevel(channel.guild_id ? state.guilds?.[channel.guild_id]?.default_message_notifications : undefined));
     if (level === "none") continue;
     const read = state.readStates[channel.id];
     mentions += read?.mention_count ?? 0;
