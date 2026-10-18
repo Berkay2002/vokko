@@ -7,11 +7,12 @@ import { CLAUDE_EFFORTS, claudeApiBackend } from '../claude-api.ts'
 import { CODEX_EFFORTS, LEAN, NOT_SIGNED_IN, cliListers, codexBackend, leanOverrides, type Listers } from '../codex.ts'
 import { BackendError, UserFacingError, childEnv, parseEffort, type TurnContext } from '../core.ts'
 
-const ctx: TurnContext = { pause: async () => 'paused', unpause: async () => 'unpaused' }
+const ctx: TurnContext = { scope: 'server', pause: async () => 'paused', unpause: async () => 'unpaused' }
+const dmCtx: TurnContext = { ...ctx, scope: 'dm' }
 const dir = () => mkdtempSync(join(tmpdir(), 'vokko-backend-'))
 
 describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => {
-  function stubbed(results: object[], extra: { model?: string; effort?: string } = {}) {
+  function stubbed(results: object[], extra: { model?: string; effort?: string; dmModel?: string; dmEffort?: string } = {}) {
     const seen: { prompt: string; options: any }[] = []
     const query = ((p: { prompt: string; options: any }) => {
       seen.push(p)
@@ -82,12 +83,23 @@ describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => 
     const { backend, seen } = stubbed([ok], { model: 'haiku', effort: 'medium' })
     await backend.ask(undefined, 'x', ctx)
     expect(seen[0].options).toMatchObject({ model: 'claude-haiku-5-5', effort: 'medium' })
-    backend.tune!.set({ model: backend.tune!.resolveModel('SONNET'), effort: 'high' })
+    backend.tune!.set('server', { model: backend.tune!.resolveModel('SONNET'), effort: 'high' })
     await backend.ask('sess-1', 'x', ctx) // a resumed session reads them too
     expect(seen[1].options).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'high', resume: 'sess-1' })
     expect(backend.tune!.resolveModel('claude-opus-5-5')).toBe('claude-opus-5-5')
     expect(() => backend.tune!.resolveModel('gpt-5')).toThrow(UserFacingError)
     expect(CLAUDE_EFFORTS).toEqual(['low', 'medium', 'high'])
+  })
+
+  test('DM turns use the DM model and effort, which follow the server values until set apart', async () => {
+    const same = stubbed([ok], { model: 'haiku', effort: 'medium' })
+    await same.backend.ask(undefined, 'x', dmCtx)
+    expect(same.seen[0].options).toMatchObject({ model: 'claude-haiku-5-5', effort: 'medium' })
+    const apart = stubbed([ok], { effort: 'medium', dmModel: 'haiku', dmEffort: 'high' })
+    await apart.backend.ask(undefined, 'x', dmCtx)
+    await apart.backend.ask(undefined, 'x', ctx)
+    expect(apart.seen[0].options).toMatchObject({ model: 'claude-haiku-5-5', effort: 'high' })
+    expect(apart.seen[1].options).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'medium' })
   })
 
   test('VOKKO_AI_EFFORT: unset is low, a listed value passes, anything else is refused with the choices', () => {
@@ -168,9 +180,11 @@ describe('codex backend (Codex SDK stubbed at the module boundary)', () => {
     const e = stubbed(run, undefined, 'high')
     await e.backend.ask(undefined, 'a', ctx)
     expect(e.threads[0].options.modelReasoningEffort).toBe('high')
-    e.backend.tune!.set({ effort: 'medium' })
+    e.backend.tune!.set('server', { effort: 'medium' })
     await e.backend.ask('thread-1', 'b', ctx)
     expect(e.threads[1]).toMatchObject({ kind: 'resume', options: { model: 'm', modelReasoningEffort: 'medium' } })
+    await e.backend.ask('thread-1', 'c', dmCtx) // DMs keep their own effort
+    expect(e.threads[2].options.modelReasoningEffort).toBe('high')
     expect(e.backend.tune!.resolveModel(' m ')).toBe('m')
     expect(() => e.backend.tune!.resolveModel('sonnet')).toThrow(/doesn't list "sonnet".*Listed: m/)
   })

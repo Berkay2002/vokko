@@ -23,7 +23,7 @@ import { mkdirSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
-import { UserFacingError, childEnv, type Answer, type Backend } from './core.ts'
+import { UserFacingError, childEnv, type Answer, type Backend, type Scope, type Setting } from './core.ts'
 
 /** What the owner may pick (Codex's model_reasoning_effort): chat needs little reasoning. */
 export const CODEX_EFFORTS = ['low', 'medium', 'high'] as const satisfies readonly ModelReasoningEffort[]
@@ -152,6 +152,9 @@ export type CodexOptions = {
   model?: string
   /** Default `low`. */
   effort?: string
+  /** DMs: their own model and effort, the server values when unset. */
+  dmModel?: string
+  dmEffort?: string
   codexPath?: string
   /** Swappable in tests: the SDK's Codex class and the CLI's listings. */
   Codex?: new (o: ConstructorParameters<typeof Codex>[0]) => Pick<Codex, 'startThread' | 'resumeThread'>
@@ -170,12 +173,15 @@ export function codexBackend(opts: CodexOptions): Backend {
   // A model the catalog doesn't list would run on the CLI's fallback settings (apply_patch and all): pick one it lists.
   const listed = (JSON.parse(lean) as { models: { slug: string; priority?: number; visibility?: string }[] }).models
   const model = opts.model ?? [...listed].filter(m => m.visibility !== 'hide').sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))[0]?.slug
-  if (!model || !listed.some(m => m.slug === model))
-    throw new Error(`codex: model "${model}" is not in the CLI's model catalog (${listed.map(m => m.slug).join(', ')}); set VOKKO_AI_MODEL to one of them`)
+  const dmModel = opts.dmModel ?? model
+  for (const [m, env] of [[model, 'VOKKO_AI_MODEL'], [dmModel, 'VOKKO_AI_DM_MODEL']] as const)
+    if (!m || !listed.some(l => l.slug === m))
+      throw new Error(`codex: model "${m}" is not in the CLI's model catalog (${listed.map(l => l.slug).join(', ')}); set ${env} to one of them`)
   const configOverrides = [...leanOverrides(listers), `model_catalog_json=${JSON.stringify(catalog)}`]
   const Impl = opts.Codex ?? Codex
   const codex = new Impl({ codexPathOverride: opts.codexPath, env, configOverrides })
-  const cur = { model, effort: opts.effort ?? 'low' }
+  const server: Setting = { model: model!, effort: opts.effort ?? 'low' }
+  const cur: Record<Scope, Setting> = { server, dm: { model: dmModel!, effort: opts.dmEffort ?? server.effort } }
   return {
     name: 'codex',
     metered: false,
@@ -183,15 +189,15 @@ export function codexBackend(opts: CodexOptions): Backend {
     tune: {
       efforts: CODEX_EFFORTS,
       modelHint: '<model id>',
-      get: () => ({ ...cur }),
+      get: scope => ({ ...cur[scope] }),
       resolveModel(input) {
         const m = input.trim()
         if (!listed.some(l => l.slug === m)) throw new UserFacingError(`Codex's model catalog doesn't list "${m}". Listed: ${listed.map(l => l.slug).join(', ')}`)
         return m
       },
-      set: s => void Object.assign(cur, s),
+      set: (scope, s) => void Object.assign(cur[scope], s),
     },
-    async ask(threadId, prompt): Promise<Answer> {
+    async ask(threadId, prompt, ctx): Promise<Answer> {
       // Read per turn, so a changed model or effort reaches resumed threads too.
       const threadOptions: ThreadOptions = {
         workingDirectory: opts.workDir,
@@ -200,8 +206,8 @@ export function codexBackend(opts: CodexOptions): Backend {
         networkAccessEnabled: false,
         webSearchMode: 'disabled',
         approvalPolicy: 'never',
-        model: cur.model,
-        modelReasoningEffort: cur.effort as ModelReasoningEffort,
+        model: cur[ctx.scope].model,
+        modelReasoningEffort: cur[ctx.scope].effort as ModelReasoningEffort,
       }
       const thread = threadId ? codex.resumeThread(threadId, threadOptions) : codex.startThread(threadOptions)
       let turn

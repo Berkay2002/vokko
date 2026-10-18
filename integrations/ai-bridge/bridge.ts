@@ -27,8 +27,11 @@ const apiKey = process.env.ANTHROPIC_API_KEY ?? ''
 
 const codex = backendName === 'codex'
 let effort: string
+let dmEffort: string
 try {
-  effort = parseEffort(process.env.VOKKO_AI_EFFORT, codex ? CODEX_EFFORTS : CLAUDE_EFFORTS)
+  const allowed = codex ? CODEX_EFFORTS : CLAUDE_EFFORTS
+  effort = parseEffort(process.env.VOKKO_AI_EFFORT, allowed)
+  dmEffort = parseEffort(process.env.VOKKO_AI_DM_EFFORT, allowed, effort, 'VOKKO_AI_DM_EFFORT')
 } catch (e) {
   log(`vokko bridge: ${e instanceof Error ? e.message : e}\n`)
   process.exit(1)
@@ -53,7 +56,7 @@ const bot = new VokkoBot(cfg, msg => {
 
 let backend: Backend
 if (codex) {
-  backend = codexBackend({ workDir: join(stateDir, 'codex-work'), botName: cfg.botName, model: process.env.VOKKO_AI_MODEL || undefined, effort, codexPath: process.env.VOKKO_CODEX_PATH || undefined })
+  backend = codexBackend({ workDir: join(stateDir, 'codex-work'), botName: cfg.botName, model: process.env.VOKKO_AI_MODEL || undefined, effort, dmModel: process.env.VOKKO_AI_DM_MODEL || undefined, dmEffort, codexPath: process.env.VOKKO_CODEX_PATH || undefined })
 } else {
   if (!apiKey) {
     const inFile = process.env.ANTHROPIC_API_KEY ? ' (the one in the state dir .env is ignored)' : ''
@@ -64,6 +67,8 @@ if (codex) {
     apiKey,
     model: process.env.VOKKO_AI_MODEL || 'sonnet',
     effort,
+    dmModel: process.env.VOKKO_AI_DM_MODEL || undefined,
+    dmEffort,
     maxOutputTokens: num('VOKKO_AI_MAX_OUTPUT_TOKENS', 1024),
     maxReplyUsd: num('VOKKO_AI_MAX_REPLY_USD', 0.5),
     workDir: join(stateDir, 'api-work'),
