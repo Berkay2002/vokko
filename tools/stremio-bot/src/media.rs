@@ -176,8 +176,12 @@ impl Published {
 
 #[derive(Default)]
 struct Counters {
-    /// Frames read from ffmpeg (shown or dropped): the video's media time.
+    /// Frames read from ffmpeg into the queue.
+    video_read: AtomicU64,
+    /// Frames taken from the queue (shown or dropped): the video's media time.
     video_frames: AtomicU64,
+    /// Frames waiting in the queue.
+    queue_depth: AtomicU64,
     video_sent: AtomicU64,
     video_dropped: AtomicU64,
     audio_samples: AtomicU64,
@@ -403,20 +407,21 @@ impl Pipeline {
         self.child.wait().await
     }
 
-    /// Lets the readers drain what ffmpeg already wrote.
+    /// Lets the readers drain what ffmpeg already wrote. ffmpeg runs ahead of the output now, so at its end the audio socket is full
+    /// (about 1.2 s on macOS) and the picture follows that sound out.
     pub async fn drain(&mut self) {
         for mut task in self.tasks.drain(..) {
-            if tokio::time::timeout(Duration::from_secs(3), &mut task).await.is_err() {
+            if tokio::time::timeout(Duration::from_secs(5), &mut task).await.is_err() {
                 task.abort();
             }
         }
     }
 
-    /// The 5 s stats line: frames read from ffmpeg and frames sent per second, frames dropped to keep up with the sound, and how far the
-    /// sound is ahead of the picture.
+    /// The 5 s stats line: frames read from ffmpeg and frames sent per second, the frames queued between the two, frames dropped to keep
+    /// up with the sound, and how far the sound is ahead of the picture.
     pub fn log_stats(&self, channel_id: &str) {
         let c = &self.counters;
-        let (read, sent) = (c.video_frames.load(Ordering::Relaxed), c.video_sent.load(Ordering::Relaxed));
+        let (read, sent) = (c.video_read.load(Ordering::Relaxed), c.video_sent.load(Ordering::Relaxed));
         let now = Instant::now();
         let last = c.last_stats.lock().unwrap_or_else(|e| e.into_inner()).replace((read, sent, now));
         let Some((read0, sent0, then)) = last else { return };
@@ -426,6 +431,7 @@ impl Pipeline {
             channel_id,
             read_fps = rate(read, read0),
             sent_fps = rate(sent, sent0),
+            queued = c.queue_depth.load(Ordering::Relaxed),
             dropped = c.video_dropped.load(Ordering::Relaxed),
             av_offset_ms = c.av_offset_ms.load(Ordering::Relaxed),
             "video pacing"
@@ -505,6 +511,15 @@ struct Video {
     has_audio: bool,
 }
 
+/// Frames read ahead of the pacer, so ffmpeg's bursts and hiccups are absorbed here and not by a socket that holds about one 1080p
+/// frame: at most `QUEUE_SECS` of film and `QUEUE_BYTES` of memory (16 frames at 1080p, 36 at 720p). ffmpeg runs ahead until it is full.
+const QUEUE_SECS: f64 = 2.0;
+const QUEUE_BYTES: usize = 48 << 20;
+
+fn queue_frames(frame_bytes: usize, fps: f64) -> usize {
+    ((QUEUE_SECS * fps) as usize).min(QUEUE_BYTES / frame_bytes.max(1)).max(2)
+}
+
 async fn video_loop<S: Sink>(
     listener: TcpListener,
     video: Video,
@@ -513,15 +528,44 @@ async fn video_loop<S: Sink>(
     primed: impl Future<Output = ()>,
     first: impl FnOnce(),
 ) {
-    let Some(mut stream) = accept(listener).await else { return };
-    // ffmpeg blocks on its output until we read: the first frame goes out once a few seconds of film are buffered
+    let Some(stream) = accept(listener).await else { return };
+    let (tx, rx) = mpsc::channel(queue_frames(video.frame_bytes, video.fps));
+    // one task for both, so stopping the pipeline (pause, seek, retrack) drops the reader and its queue with it
+    tokio::join!(read_frames(stream, video.frame_bytes, tx, counters.clone()), pace_frames(rx, video, sink, counters, primed, first));
+}
+
+/// Reads whole frames from ffmpeg into the queue until either side is gone. While the queue is full it does not read, which holds
+/// ffmpeg back.
+async fn read_frames(mut stream: impl AsyncRead + Unpin, frame_bytes: usize, queue: mpsc::Sender<Vec<u8>>, counters: Arc<Counters>) {
+    loop {
+        let mut raw = vec![0u8; frame_bytes];
+        if stream.read_exact(&mut raw).await.is_err() {
+            return;
+        }
+        counters.video_read.fetch_add(1, Ordering::Relaxed);
+        if queue.send(raw).await.is_err() {
+            return;
+        }
+        counters.queue_depth.store((queue.max_capacity() - queue.capacity()) as u64, Ordering::Relaxed);
+    }
+}
+
+async fn pace_frames<S: Sink>(
+    mut queue: mpsc::Receiver<Vec<u8>>,
+    video: Video,
+    sink: Arc<S>,
+    counters: Arc<Counters>,
+    primed: impl Future<Output = ()>,
+    first: impl FnOnce(),
+) {
+    // the first frame goes out once a few seconds of film are buffered
     primed.await;
     let started = Instant::now();
-    let mut raw = vec![0u8; video.frame_bytes];
     let mut first = Some(first);
     let interval = Duration::from_secs_f64(1.0 / video.fps);
     let mut next: Option<Instant> = None;
-    while stream.read_exact(&mut raw).await.is_ok() {
+    while let Some(raw) = queue.recv().await {
+        counters.queue_depth.store(queue.len() as u64, Ordering::Relaxed);
         let index = counters.video_frames.fetch_add(1, Ordering::Relaxed);
         let frame_ms = index as f64 * 1000.0 / video.fps;
         let due = loop {
@@ -729,6 +773,40 @@ mod tests {
         assert_eq!(pace(heard, 115.0, ms(310), Duration::from_millis(40)), Pace::Show(ms(315)));
     }
 
+    #[test]
+    fn the_queue_is_sized_in_frames_and_bytes() {
+        assert_eq!(queue_frames(1920 * 1080 * 3 / 2, 24.0), 16);
+        assert_eq!(queue_frames(1280 * 720 * 3 / 2, 24.0), 36);
+        assert_eq!(queue_frames(320 * 180 * 3 / 2, 24.0), 48, "two seconds of a small picture");
+        assert_eq!(queue_frames(4096 * 2160 * 3 / 2, 30.0), 3);
+    }
+
+    #[tokio::test]
+    async fn the_queue_holds_ffmpeg_back_keeps_order_and_goes_with_the_run() {
+        let frames: Vec<u8> = (0..10u8).flat_map(|i| [i; 4]).collect();
+        let counters = Arc::new(Counters::default());
+        let (tx, mut rx) = mpsc::channel(3);
+        let reader = tokio::spawn(read_frames(std::io::Cursor::new(frames), 4, tx, counters.clone()));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // three queued and the fourth read but waiting: the rest stays with ffmpeg
+        assert_eq!((rx.len(), counters.video_read.load(Ordering::Relaxed)), (3, 4));
+        for i in 0..10u8 {
+            assert_eq!(rx.recv().await, Some(vec![i; 4]));
+        }
+        assert_eq!(rx.recv().await, None, "ffmpeg's end ends the queue");
+        assert!(reader.await.is_ok());
+
+        // a stop (pause, seek) drops the queue: the reader ends although ffmpeg's socket is still open
+        let (mut ffmpeg, socket) = tokio::io::duplex(1024);
+        tokio::io::AsyncWriteExt::write_all(&mut ffmpeg, &[7; 40]).await.expect("write");
+        let (tx, rx) = mpsc::channel(3);
+        let reader = tokio::spawn(read_frames(socket, 4, tx, Arc::new(Counters::default())));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(rx);
+        assert!(tokio::time::timeout(Duration::from_secs(1), reader).await.is_ok(), "the reader goes with its queue");
+        drop(ffmpeg);
+    }
+
     fn have_ffmpeg() -> bool {
         std::process::Command::new("ffmpeg").arg("-version").output().is_ok_and(|o| o.status.success())
     }
@@ -749,6 +827,8 @@ mod tests {
         flashes: Vec<Instant>,
         beeps: Vec<Instant>,
         white: bool,
+        /// When the run was stopped.
+        end: Option<Instant>,
     }
 
     const W: u32 = 320;
@@ -851,6 +931,7 @@ mod tests {
             }));
         }
         tokio::time::sleep(Duration::from_secs(secs)).await;
+        sink.0.lock().unwrap_or_else(|e| e.into_inner()).end = Some(Instant::now());
         let _ = child.kill().await;
         for t in tasks {
             t.abort();
@@ -859,8 +940,9 @@ mod tests {
     }
 
     /// A film with what made the live stream stutter (two audio tracks, four sparse subrip tracks, a seek) and a white frame with a beep
-    /// every 3 s. The picture and its sound go out within 40 ms of each other at the start, after a seek and after a pause and resume,
-    /// and when the sound keeps running dry (the picture waits for it instead of drifting ahead).
+    /// every 3 s. From the first frame on, at the start, after a seek and after a pause and resume, every second sends about 24 frames
+    /// (24 fps) and the picture and its sound go out within 40 ms of each other; when the sound keeps running dry the picture waits for
+    /// it instead of drifting ahead.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn picture_and_sound_go_out_together_after_start_seek_and_resume() {
         if !have_ffmpeg() {
@@ -875,12 +957,13 @@ mod tests {
         make.args(["-f", "lavfi", "-i", "aevalsrc='if(lt(mod(t,3),0.01),0.8*sin(2*PI*1000*t),0)':s=48000"]);
         make.args(["-f", "lavfi", "-i", "sine=frequency=220:sample_rate=48000"]);
         for k in 0..4u32 {
-            // a cue every 6 to 25 s, at different times per track
-            let mut t = 3 + k * 3;
+            // a cue every 6 to 25 s, at the same times in every track (translations share timing). ffmpeg's -re stalled the whole read
+            // when all of them had a cue just ahead of the clock.
+            let mut t = 3u32;
             let mut cues = String::new();
-            for n in 0..12u32 {
-                cues += &format!("{}\n00:{:02}:{:02},000 --> 00:{:02}:{:02},500\nline {n}\n\n", n + 1, t / 60, t % 60, (t + 1) / 60, (t + 1) % 60);
-                t += 6 + (n * 7 + k * 5) % 20;
+            for n in 0..13u32 {
+                cues += &format!("{}\n00:{:02}:{:02},000 --> 00:{:02}:{:02},500\nline {n} {k}\n\n", n + 1, t / 60, t % 60, (t + 1) / 60, (t + 1) % 60);
+                t += 6 + (n * 7) % 20;
             }
             let srt = dir.join(format!("{k}.srt"));
             std::fs::write(&srt, cues).expect("srt");
@@ -894,8 +977,10 @@ mod tests {
         let film = film.to_string_lossy().into_owned();
 
         // the first start, a seek, and a resume after a pause (each a new ffmpeg run, as in the session)
-        for (what, start_ms, stall_every) in [("start", 71_250, 0), ("seek", 150_500, 0), ("resume", 100_500, 0), ("sound stalls", 120_500, 70)] {
-            let rec = play(&film, start_ms, 9, stall_every).await;
+        for (what, start_ms, secs, stall_every) in
+            [("start", 71_250, 40, 0), ("seek", 150_500, 9, 0), ("resume", 100_500, 9, 0), ("sound stalls", 120_500, 9, 70)]
+        {
+            let rec = play(&film, start_ms, secs, stall_every).await;
             assert!(
                 rec.flashes.len() >= 2 && rec.beeps.len() >= 2,
                 "{what}: {} flashes, {} beeps, {} frames",
@@ -911,8 +996,20 @@ mod tests {
                     if nearest > f { (nearest - f).as_millis() as i64 } else { -((f - nearest).as_millis() as i64) }
                 })
                 .collect();
-            eprintln!("{what}: sound minus picture {offsets:?} ms");
+            // frames sent in each whole second from the first one to the end of the run (a stall at the end counts too)
+            let first = rec.frames[0];
+            let mut per_second = vec![0u32; (rec.end.expect("stopped") - first).as_secs() as usize];
+            for f in &rec.frames {
+                if let Some(n) = per_second.get_mut((*f - first).as_secs() as usize) {
+                    *n += 1;
+                }
+            }
+            eprintln!("{what}: sound minus picture {offsets:?} ms, frames per second {per_second:?}");
             assert!(offsets.iter().all(|o| o.abs() <= 40), "{what}: sound minus picture {offsets:?} ms");
+            // 24 fps measures 23 to 25; the slack is for a busy machine, a stall shows 0 to 5
+            if stall_every == 0 {
+                assert!(per_second.len() >= 5 && per_second.iter().all(|n| (20..=28).contains(n)), "{what}: frames per second {per_second:?}");
+            }
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
