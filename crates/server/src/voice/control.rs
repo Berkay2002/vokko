@@ -61,7 +61,9 @@ impl Room {
         self.inside.is_empty()
     }
 
-    /// People in the call who can hear it (neither self- nor server-deafened).
+    /// People in the call who can hear it (neither self- nor server-deafened). Deliberately not everyone in the call: a deafened
+    /// person cannot vote (their vote goes), so counting them would let an AFK, deafened majority block every skip. A controller
+    /// can always skip, and undeafening puts someone back in the count.
     fn listeners(&self) -> impl Iterator<Item = i64> + '_ {
         self.inside.iter().filter(|entry| !entry.self_deaf && !entry.deaf).map(|entry| entry.user_id)
     }
@@ -164,6 +166,50 @@ mod tests {
         assert_eq!(quota(&ctx(7, 0), &control, 50, 3).ok(), Some(usize::MAX));
         assert_eq!(quota(&ctx(8, 0), &control, 1, 3).ok(), Some(2));
         assert!(quota(&ctx(8, 0), &control, 3, 3).is_err());
+    }
+
+    fn entry(user_id: i64, self_deaf: bool, deaf: bool) -> VoiceEntry {
+        VoiceEntry {
+            guild_id: Some(1),
+            channel_id: 1,
+            backend: 0,
+            user_id,
+            session_id: String::new(),
+            token_nonce: String::new(),
+            issued_at: std::time::Instant::now(),
+            gateway_session: None,
+            self_mute: self_deaf,
+            self_deaf,
+            self_video: false,
+            self_stream: false,
+            suppress: false,
+            permissions: 0,
+            stage: false,
+            mute: deaf,
+            deaf,
+            request_to_speak: None,
+            connected: true,
+            connected_at: time::OffsetDateTime::UNIX_EPOCH,
+            unbound_since: None,
+        }
+    }
+
+    #[test]
+    fn deafened_people_neither_count_nor_vote() {
+        // host 7 and listener 8 can hear it; 9 is self-deafened and 10 server-deafened
+        let room = Room { inside: vec![entry(7, false, false), entry(8, false, false), entry(9, true, false), entry(10, false, true)] };
+        let mut control = new_session(7, &room);
+        assert_eq!(control.skip_needed, 1, "two listeners");
+        assert!(!skip_request(&mut control, &ctx(9, 0), true, None, &room), "a deafened vote does not count");
+        assert!(control.skip_votes.is_empty(), "and is dropped");
+        assert!(!skip_request(&mut control, &ctx(10, 0), true, None, &room));
+        assert!(skip_request(&mut control, &ctx(8, 0), true, None, &room), "one of two listeners skips");
+        // undeafened, 9 and 10 count again: 4 listeners need 2 votes
+        let room = Room { inside: vec![entry(7, false, false), entry(8, false, false), entry(9, false, false), entry(10, false, false)] };
+        let mut control = new_session(7, &room);
+        assert_eq!(control.skip_needed, 2);
+        assert!(!skip_request(&mut control, &ctx(8, 0), true, None, &room));
+        assert!(skip_request(&mut control, &ctx(9, 0), true, None, &room));
     }
 
     #[test]

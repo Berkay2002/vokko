@@ -12,6 +12,7 @@
 //! for all viewers, not once per viewer.
 use std::collections::HashMap;
 use std::future::Future;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
@@ -35,6 +36,9 @@ const MAX_REDIRECTS: usize = 3;
 const MAX_URL_LEN: usize = 2048;
 /// Server-wide cap on downloads in flight (each holds up to `MAX_BYTES` in memory).
 const MAX_DOWNLOADS: usize = 16;
+/// Downloads one client address (`ratelimit::address_key`) may have in flight; more wait their turn. One caller pointing signed
+/// URLs at a slow host it runs would otherwise hold every server-wide slot (each for up to `TIMEOUT`) and nobody's images load.
+const MAX_PER_ADDRESS: usize = 2;
 pub const CACHE_MAX_BYTES: u64 = 512 * 1024 * 1024;
 pub const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
@@ -102,7 +106,40 @@ pub struct EmbedMediaProxy {
     client: Option<reqwest::Client>,
     allow_private: bool,
     downloads: tokio::sync::Semaphore,
+    per_address: AddressSlots,
     cache: Cache,
+}
+
+/// Per-address download slots; an address's entry exists while something holds or waits for one of its slots.
+#[derive(Default)]
+struct AddressSlots(Mutex<HashMap<IpAddr, Arc<tokio::sync::Semaphore>>>);
+
+/// One download slot of an address; released (and the address forgotten once nobody else uses it) on drop.
+struct AddressSlot<'a> {
+    slots: &'a AddressSlots,
+    address: IpAddr,
+    semaphore: Arc<tokio::sync::Semaphore>,
+    permit: Option<tokio::sync::OwnedSemaphorePermit>,
+}
+
+impl AddressSlots {
+    async fn acquire(&self, address: IpAddr) -> Option<AddressSlot<'_>> {
+        let semaphore = lock(&self.0).entry(address).or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(MAX_PER_ADDRESS))).clone();
+        let mut slot = AddressSlot { slots: self, address, semaphore: semaphore.clone(), permit: None };
+        slot.permit = Some(semaphore.acquire_owned().await.ok()?);
+        Some(slot)
+    }
+}
+
+impl Drop for AddressSlot<'_> {
+    fn drop(&mut self) {
+        let mut map = lock(&self.slots.0);
+        self.permit = None;
+        // the map's copy and ours: nobody else holds or waits for this address
+        if Arc::strong_count(&self.semaphore) == 2 {
+            map.remove(&self.address);
+        }
+    }
 }
 
 fn bad_gateway() -> ApiErr {
@@ -126,19 +163,29 @@ impl EmbedMediaProxy {
             .user_agent(crate::unfurl::USER_AGENT)
             .build()
             .ok();
-        Self { client, allow_private, downloads: tokio::sync::Semaphore::new(MAX_DOWNLOADS), cache: Cache::open(cache_dir, CACHE_MAX_BYTES) }
+        Self {
+            client,
+            allow_private,
+            downloads: tokio::sync::Semaphore::new(MAX_DOWNLOADS),
+            per_address: AddressSlots::default(),
+            cache: Cache::open(cache_dir, CACHE_MAX_BYTES),
+        }
     }
 
-    /// The image from the cache, or fetched (once, however many requests ask at the same time) and cached.
-    pub async fn get(&self, url: Url) -> ApiResult<Served> {
+    /// The image from the cache, or fetched (once, however many requests ask at the same time) and cached. A miss first waits
+    /// (up to `TIMEOUT`) for one of `caller`'s `MAX_PER_ADDRESS` slots; cache hits and joining a download already under way
+    /// do not.
+    pub async fn get(&self, url: Url, caller: IpAddr) -> ApiResult<Served> {
         let key = url.to_string();
+        let admit = async { tokio::time::timeout(TIMEOUT, self.per_address.acquire(crate::ratelimit::address_key(caller))).await.ok().flatten() };
         self.cache
-            .get_or_fetch(&key, || async { self.fetch(url).await.ok().map(|(content_type, bytes)| (content_type, Bytes::from(bytes))) })
+            .get_or_fetch(&key, admit, || async { self.fetch(url).await.ok().map(|(content_type, bytes)| (content_type, Bytes::from(bytes))) })
             .await
             .ok_or_else(bad_gateway)
     }
 
-    /// The image's content type (from its bytes) and bytes. Any refusal or upstream failure is a 502.
+    /// The image's content type (from its bytes) and bytes. Any refusal or upstream failure is a 502. The wait for a server-wide
+    /// slot counts towards the same `TIMEOUT` as the download.
     pub async fn fetch(&self, url: Url) -> ApiResult<(&'static str, Vec<u8>)> {
         let client = self.client.as_ref().ok_or_else(bad_gateway)?;
         tokio::time::timeout(TIMEOUT, async {
@@ -241,12 +288,30 @@ impl Cache {
         Self { dir, max_bytes, index: Mutex::new(index), inflight: Mutex::default() }
     }
 
-    async fn get_or_fetch<F: Future<Output = Option<Image>>>(&self, url: &str, fetch: impl FnOnce() -> F) -> Option<Served> {
+    /// Only a miss that starts the download awaits `admit` (the caller's own download slot, held until this returns), and it
+    /// does so before the download is shared: whoever joins one already under way neither takes a slot of theirs nor waits on
+    /// someone else's.
+    async fn get_or_fetch<G, F: Future<Output = Option<Image>>>(
+        &self,
+        url: &str,
+        admit: impl Future<Output = Option<G>>,
+        fetch: impl FnOnce() -> F,
+    ) -> Option<Served> {
         let key = cache_key(url);
         if let Some(hit) = self.read(&key).await {
             return Some(hit);
         }
-        let cell = lock(&self.inflight).entry(key.clone()).or_default().clone();
+        let joined = lock(&self.inflight).get(&key).cloned();
+        let (cell, _admitted) = match joined {
+            Some(cell) => (cell, None),
+            None => {
+                let admitted = admit.await?;
+                let mut inflight = lock(&self.inflight);
+                // someone may have started it while this caller waited for a slot
+                let started = inflight.contains_key(&key);
+                (inflight.entry(key.clone()).or_default().clone(), (!started).then_some(admitted))
+            }
+        };
         // it may have been cached between the read above and taking the cell
         let served = match self.read(&key).await {
             Some(hit) => Some(hit),
@@ -357,7 +422,7 @@ mod tests {
 
     async fn get(cache: &Cache, url: &str, fetches: &AtomicUsize, len: usize) -> Option<Image> {
         let served = cache
-            .get_or_fetch(url, || async {
+            .get_or_fetch(url, async { Some(()) }, || async {
                 fetches.fetch_add(1, Ordering::SeqCst);
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 Some(("image/png", png(len)))
@@ -366,6 +431,47 @@ mod tests {
         let bytes = axum::body::to_bytes(served.body, usize::MAX).await.expect("body");
         assert_eq!(served.length, bytes.len() as u64);
         Some((served.content_type, bytes))
+    }
+
+    #[tokio::test]
+    async fn one_address_holds_at_most_two_download_slots() {
+        let slots = AddressSlots::default();
+        let (a, b): (IpAddr, IpAddr) = ("203.0.113.7".parse().expect("ip"), "198.51.100.1".parse().expect("ip"));
+        let first = slots.acquire(a).await.expect("first");
+        let second = slots.acquire(a).await.expect("second");
+        let third = tokio::time::timeout(Duration::from_millis(50), slots.acquire(a)).await;
+        assert!(third.is_err(), "a third waits");
+        assert!(slots.acquire(b).await.is_some(), "other addresses do not wait");
+        drop(first);
+        assert!(tokio::time::timeout(Duration::from_millis(50), slots.acquire(a)).await.is_ok(), "a finished download frees its slot");
+        drop(second);
+        assert!(lock(&slots.0).is_empty(), "addresses nobody uses are forgotten");
+    }
+
+    #[tokio::test]
+    async fn a_caller_waiting_for_a_slot_does_not_hold_up_others_for_the_same_image() {
+        let dir = dir("admit");
+        let cache = Cache::open(dir.clone(), CACHE_MAX_BYTES);
+        let fetches = AtomicUsize::new(0);
+        // the first caller's slots are all busy: their miss waits outside the shared download
+        let stuck = cache.get_or_fetch("https://example.com/a.png", std::future::pending::<Option<()>>(), || async { Some(("image/png", png(1))) });
+        let other = tokio::time::timeout(Duration::from_secs(1), get(&cache, "https://example.com/a.png", &fetches, 100));
+        tokio::select! {
+            _ = stuck => panic!("never admitted"),
+            served = other => assert_eq!(served.expect("not held up"), Some(("image/png", png(100)))),
+        }
+        assert_eq!(fetches.load(Ordering::SeqCst), 1);
+        // and one with no free slot still joins a download someone else started
+        let joiner = async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            cache.get_or_fetch("https://example.com/b.png", std::future::pending::<Option<()>>(), || async { None }).await
+        };
+        let both = async { tokio::join!(get(&cache, "https://example.com/b.png", &fetches, 100), joiner) };
+        let (started, joined) = tokio::time::timeout(Duration::from_secs(1), both).await.expect("the joiner takes no slot");
+        assert_eq!(started, Some(("image/png", png(100))));
+        assert_eq!(joined.map(|served| served.length), Some(100));
+        assert_eq!(fetches.load(Ordering::SeqCst), 2);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]

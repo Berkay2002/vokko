@@ -97,6 +97,8 @@ No vote-to-stop: skipping the last item already ends the session, so "vote to sk
   no longer current is a no-op (200, current state).
 - **Who counts:** listeners = people connected to the channel's voice who are not deafened (self or server). Bots never count
   (the Stremio and Spotify bots are in the media room, not in voice state). A voter who leaves or deafens loses their vote.
+  Deafened people are left out on purpose: they cannot vote, so counting them would let an AFK, deafened majority block every
+  skip. The flip side, one listener among deafened people can skip alone, is accepted: a deafened viewer who wants a say undeafens.
 - **Threshold:** `skip_needed = max(1, ceil(listeners / 2))`, so 2 people → 1, 3 → 2, 4 → 2, 10 → 5. Half, rounded up, is
   what common music bots use; a controller can always skip.
 - **Expiry:** votes belong to the current item. They are cleared whenever the item changes (skip, end, PUT, previous, loop

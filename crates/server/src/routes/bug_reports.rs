@@ -23,6 +23,8 @@ const MAX_OS_CHARS: usize = 256;
 const BURST: f64 = 3.0;
 const PER_SECOND: f64 = 1.0 / 600.0;
 const RETENTION_DAYS: i32 = 30;
+/// Reports kept per user (at most about 5 MiB); a new one past that deletes the oldest.
+pub const MAX_PER_USER: i64 = 20;
 const SWEEP_INTERVAL: Duration = Duration::from_secs(3600);
 
 pub fn routes() -> Router<AppState> {
@@ -63,6 +65,11 @@ async fn create(
         .bind(body.app_version.replace('\0', ""))
         .bind(body.os.replace('\0', ""))
         .bind(logs)
+        .execute(&state.db)
+        .await?;
+    sqlx::query("DELETE FROM bug_reports WHERE user_id = $1 AND id < (SELECT id FROM bug_reports WHERE user_id = $1 ORDER BY id DESC OFFSET $2 LIMIT 1)")
+        .bind(user_id)
+        .bind(MAX_PER_USER - 1)
         .execute(&state.db)
         .await?;
     Ok(Json(BugReportCreated { id: Snowflake::from(id) }))

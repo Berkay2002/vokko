@@ -4,7 +4,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post, put};
 use serde::Deserialize;
-use vokko_protocol::api::permissions::{READ_MESSAGE_HISTORY, VIEW_CHANNEL};
+use vokko_protocol::api::permissions::{ADMINISTRATOR, READ_MESSAGE_HISTORY, VIEW_CHANNEL};
 use vokko_protocol::api::{GatewayEvent, Message, PollAnswerVotersResponse, PollVote, Snowflake};
 
 use crate::access::{self, ChannelAccess, channel_access};
@@ -59,6 +59,13 @@ async fn vote_target(state: &AppState, user_id: i64, id: &str, mid: &str, answer
     access.require_unarchived()?;
     if poll_author.is_none() {
         return Err(ApiErr::unknown_message());
+    }
+    // A timeout keeps view and history, which is all a vote needs above: refuse it the way a message send is refused.
+    if let Some(guild_id) = access.channel.guild_id {
+        let guild = access::guild_access(state, user_id, guild_id).await?;
+        if guild.timed_out && guild.owner_id != user_id && guild.permissions & ADMINISTRATOR == 0 {
+            return Err(ApiErr::missing_permissions());
+        }
     }
     Ok((access, message_id, answer))
 }

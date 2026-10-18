@@ -80,3 +80,28 @@ async fn the_sweep_deletes_reports_older_than_30_days() {
     let left: Vec<(i64,)> = sqlx::query_as("SELECT id FROM bug_reports").fetch_all(&app.state.db).await.expect("rows");
     assert_eq!(left, vec![(fresh["id"].as_str().expect("id").parse::<i64>().expect("id"),)]);
 }
+
+#[tokio::test]
+async fn a_user_keeps_only_the_newest_reports() {
+    let app = TestApp::new().await;
+    let (token, user) = app.register("caitlyn").await;
+    let user_id: i64 = user["id"].as_str().expect("id").parse().expect("snowflake");
+    let max = vokko_server::routes::bug_reports::MAX_PER_USER;
+    for id in 1..=max {
+        sqlx::query("INSERT INTO bug_reports (id, user_id, description, app_version, os, logs) VALUES ($1, $2, 'old', '1', 'x', '')")
+            .bind(id)
+            .bind(user_id)
+            .execute(&app.state.db)
+            .await
+            .expect("insert");
+    }
+    let (other, _) = app.register("vi").await;
+    assert_eq!(app.post("/bug-reports", &other, report("")).await.0, StatusCode::OK);
+    assert_eq!(app.post("/bug-reports", &token, report("")).await.0, StatusCode::OK);
+    let ids: Vec<(i64,)> =
+        sqlx::query_as("SELECT id FROM bug_reports WHERE user_id = $1 ORDER BY id").bind(user_id).fetch_all(&app.state.db).await.expect("ids");
+    assert_eq!(ids.len() as i64, max, "the oldest went");
+    assert_eq!(ids[0].0, 2);
+    let (others,): (i64,) = sqlx::query_as("SELECT count(*) FROM bug_reports WHERE user_id <> $1").bind(user_id).fetch_one(&app.state.db).await.expect("count");
+    assert_eq!(others, 1, "other users' reports are untouched");
+}
