@@ -34,7 +34,8 @@ import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } fr
 import { getPrefs, setPref, usePrefs } from "../ui/prefs";
 import { useBackClose, usePhone } from "../ui";
 import { markChannelRead, markGuildRead } from "./actions";
-import { openMessage } from "../notify/controller";
+import { jumpWhenReady } from "../notify/controller";
+import { dmPath, guildPath } from "./nav";
 import { firstTextChannel } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
 import { NARROW_QUERY, useNavDrawer } from "./navDrawer";
@@ -157,8 +158,11 @@ export function AppShell() {
   // /channels/:guildId/:channelId/:messageId (a copied message link): open the channel at that message, then drop the id from the URL.
   const linkedMessageId = params.messageId;
   useEffect(() => {
-    if (linkedMessageId && channelId) openMessage(channelId, guildId, linkedMessageId, true);
-  }, [linkedMessageId, channelId, guildId]);
+    if (!linkedMessageId || !channelId) return;
+    // The shell's own navigate: the imperative go() is momentarily unbound while the route that mounted this effect is committing.
+    void navigate(guildId ? guildPath(guildId, channelId) : dmPath(channelId), { replace: true });
+    jumpWhenReady(channelId, linkedMessageId);
+  }, [linkedMessageId, channelId, guildId, navigate]);
 
   // At 1000px and below the side panels start hidden and the toggle works on a per-visit state; the stored choice is for wide windows.
   const compact = useMediaQuery(COMPACT_QUERY);
