@@ -214,13 +214,13 @@ export function startNotify(): void {
   });
 
   // Recompute the badge only when the inputs it reads actually changed (the store also churns on typing and presence).
-  let { channels, readStates, route, guilds, me } = appStore.getState();
+  let { channels, threads, readStates, route, guilds, me } = appStore.getState();
   let mutedUntil = useLocalState.getState().mutedUntil;
   let notify = useLocalState.getState().notify;
   let badgePref = getPrefs().unreadBadge;
   appStore.subscribe(s => {
-    if (s.channels === channels && s.readStates === readStates && s.route === route && s.guilds === guilds && s.me === me) return;
-    ({ channels, readStates, route, guilds, me } = s);
+    if (s.channels === channels && s.threads === threads && s.readStates === readStates && s.route === route && s.guilds === guilds && s.me === me) return;
+    ({ channels, threads, readStates, route, guilds, me } = s);
     refreshUnread();
   });
   useLocalState.subscribe(s => {
