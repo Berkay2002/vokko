@@ -79,7 +79,8 @@ Sent by you (the bot application's owner) to the bot in a DM:
   `settings-<backend>.json` in the state dir (it overrides the env and survives restarts); running conversations keep their
   history. With no value they show the current one. Codex takes only a model its catalog lists. Not available to moderators.
   Low is the default because chat replies need little reasoning, and effort mostly buys reasoning. Costs follow the active
-  model: the tally and per-reply cap use the cost the SDK reports.
+  model: the tally and per-reply cap use the cost the SDK reports. Changing the model or effort invalidates the prompt cache,
+  so the first turn after it pays full input price once.
 - `!pair <code>`: approve a pairing code.
 - `!pause @user <minutes>`, `!unpause @user`, `!pauses`: pause someone everywhere, lift it, list pauses.
 
