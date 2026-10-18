@@ -21,20 +21,22 @@ export interface ModalProps {
   labelledBy?: string;
   /** At phone widths show as a BottomSheet (title row, content, footer) instead of a centered dialog. */
   sheet?: boolean;
+  /** Focus the dialog itself on open instead of its first control or `data-autofocus` field. */
+  focusSelf?: boolean;
 }
 
 /** Centered dialog with backdrop, Escape / backdrop close, focus trap and focus restore. */
-export function Modal({ open, onClose, title, children, footer, className, hideClose, persistent, labelledBy, sheet }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, className, hideClose, persistent, labelledBy, sheet, focusSelf }: ModalProps) {
   const dialog = useRef<HTMLDivElement>(null);
   const phone = usePhone();
   const asSheet = !!sheet && phone;
   const layer = useLayer(open && !asSheet, onClose);
-  useFocusTrap(open && !asSheet, () => dialog.current);
+  useFocusTrap(open && !asSheet, () => dialog.current, true, focusSelf ? null : undefined);
   useBackClose(open && !asSheet && !persistent, onClose);
   if (!open) return null;
   if (asSheet) {
     return (
-      <BottomSheet open onClose={onClose} label={typeof title === "string" ? title : "Dialog"} className={className}>
+      <BottomSheet open onClose={onClose} label={typeof title === "string" ? title : "Dialog"} className={className} focusSelf={focusSelf}>
         {title !== undefined && <h2 className="sheet-title">{title}</h2>}
         {children}
         {footer && <div className="sheet-footer">{footer}</div>}

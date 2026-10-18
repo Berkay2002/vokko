@@ -11,7 +11,7 @@ import { GameIcon, useGameActivities } from "../games";
 import { openModal } from "../shell/modalStore";
 import { openSpotifyPanel, SpotifyIcon } from "../spotify";
 import { openStremioPanel, StremioIcon } from "../stremio";
-import { Modal } from "../ui";
+import { Modal, usePhone } from "../ui";
 import { filterActivities, loadRecent, orderRecent, pushRecent, saveRecent, type Searchable } from "./activityPicker";
 
 /** Built-in games and pinned activities with cover art in public/activities/<slug>.webp (Vokko's own, made with Codex image generation). */
@@ -127,6 +127,8 @@ function gridKey(e: KeyboardEvent<HTMLElement>) {
 export function ActivityShelf({ channel, open, onClose, onWatchTogether, onGame }: { channel: Channel; open: boolean; onClose: () => void; onWatchTogether: () => void; onGame?: () => void }) {
   const games = useGameActivities(channel);
   const userId = useStore(s => s.me?.id ?? null);
+  // A phone or a touch screen would pop up the soft keyboard for the search box, so the dialog takes focus instead.
+  const touch = usePhone() || (typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches);
   const [query, setQuery] = useState("");
   const [recent, setRecent] = useState<string[]>([]);
   // Reload on every open (and per account); a launch closes the picker, so state never goes stale while it is open.
@@ -172,6 +174,7 @@ export function ActivityShelf({ channel, open, onClose, onWatchTogether, onGame 
       onClose={onClose}
       title="Activities"
       sheet
+      focusSelf={touch}
       className="activity-shelf"
       footer={
         <button

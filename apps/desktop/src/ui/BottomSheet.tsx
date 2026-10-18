@@ -29,6 +29,8 @@ export interface BottomSheetProps {
   /** Docked under the composer instead of over a dimmed page: the chat shifts up so the composer stays visible (emoji/GIF/sticker pickers). Taps outside close it, except on `anchor`. */
   dock?: boolean;
   anchor?: HTMLElement | null | RefObject<HTMLElement | null>;
+  /** Focus the sheet itself on open instead of its first control (no soft keyboard for a search box). */
+  focusSelf?: boolean;
   children: ReactNode;
 }
 
@@ -38,13 +40,13 @@ const resolve = (anchor: BottomSheetProps["anchor"]): HTMLElement | null => (!an
 const GUARD_MS = 350;
 
 /** The one bottom sheet: rounded top corners, grabber (drag or tap down to close), backdrop, safe-area padding, 90dvh max with scrolling. */
-export function BottomSheet({ open, onClose, label, className, dock, anchor, children }: BottomSheetProps) {
+export function BottomSheet({ open, onClose, label, className, dock, anchor, focusSelf, children }: BottomSheetProps) {
   const box = useRef<HTMLDivElement>(null);
   const openedAt = useRef(0);
   const startY = useRef<number | null>(null);
   const layer = useLayer(open, onClose);
   useBackClose(open, onClose);
-  useFocusTrap(open && !dock, () => box.current);
+  useFocusTrap(open && !dock, () => box.current, true, focusSelf ? null : undefined);
   useOutsideClose(open && !!dock, () => [box.current, resolve(anchor)], onClose, layer.isTop);
 
   useEffect(() => {
