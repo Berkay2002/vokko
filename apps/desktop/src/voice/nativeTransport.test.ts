@@ -70,6 +70,27 @@ describe("NativeTransport", () => {
     expect(cb.speaking).toHaveBeenCalledTimes(1);
   });
 
+  it("reports remote videos and drops them when the room closes", async () => {
+    vi.stubGlobal("document", { createElement: () => ({}) }); // a canvas without captureStream: warns, never paints
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const cb = { ...callbacks(), video: vi.fn(), screenLive: vi.fn() };
+    const t = new NativeTransport(cb);
+    await t.connect("wss://lk", "tok", options());
+    const events = channel();
+    events.onmessage({ type: "video", userId: "3", source: "screen", key: "TR_1" });
+    events.onmessage({ type: "screenLive", userId: "3", live: true });
+    expect(cb.video).toHaveBeenLastCalledWith("3", "screen", expect.objectContaining({ attach: expect.any(Function) }));
+    expect(cb.screenLive).toHaveBeenCalledWith("3", true);
+    t.watchStream("3", true);
+    t.setViewerQuality("3", "screen", "720p");
+    expect(calls.slice(-2)).toEqual([
+      { name: "native_voice_watch", args: { userId: "3", watch: true } },
+      { name: "native_voice_video_quality", args: { userId: "3", source: "screen", quality: "720p" } },
+    ]);
+    events.onmessage({ type: "closed", final: false });
+    expect(cb.video).toHaveBeenLastCalledWith("3", "screen", null);
+  });
+
   it("reports a failed connect as a retryable close, and drops events after a disconnect", async () => {
     const cb = callbacks();
     const t = new NativeTransport(cb);

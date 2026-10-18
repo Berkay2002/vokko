@@ -2,9 +2,11 @@
 //! The page's `NativeTransport` (src/voice/nativeTransport.ts) drives one room here through the `native_voice_*` commands and
 //! hears back through the Channel it passes to `native_voice_connect`. Same policy as livekitTransport.ts: the microphone is
 //! published only while not self-muted, remote microphones are subscribed unless their volume is 0, media bots are ignored.
+//! Remote video: see video.rs.
 
 mod audio;
 mod gate;
+mod video;
 
 use audio::{AudioDevice, Capture, Params, Playback, Shared};
 use futures_util::StreamExt;
@@ -25,6 +27,7 @@ use tauri::State;
 use tauri::async_runtime::JoinHandle;
 use tauri::ipc::Channel;
 use tokio::sync::Mutex;
+use video::Videos;
 
 const PING_EVERY: Duration = Duration::from_secs(2);
 
@@ -101,6 +104,17 @@ pub enum NativeEvent {
     MicFailed {
         reason: &'static str,
     },
+    /// A remote camera / screen share can be pulled with native_voice_video_frame(key), or went away (key null).
+    Video {
+        user_id: String,
+        source: &'static str,
+        key: Option<String>,
+    },
+    /// A remote screen share is published and not muted, or no longer.
+    ScreenLive {
+        user_id: String,
+        live: bool,
+    },
 }
 
 #[derive(Serialize)]
@@ -130,6 +144,7 @@ struct Session {
 
 pub struct NativeVoice {
     shared: Arc<Shared>,
+    videos: Arc<Videos>,
     session: Mutex<Option<Session>>,
 }
 
@@ -143,7 +158,7 @@ impl Default for NativeVoice {
             noise_suppression: true,
             auto_gain_control: true,
         };
-        Self { shared: Arc::new(Shared::new(params)), session: Mutex::new(None) }
+        Self { shared: Arc::new(Shared::new(params)), videos: Arc::default(), session: Mutex::new(None) }
     }
 }
 
@@ -151,10 +166,11 @@ fn is_media_identity(identity: &str) -> bool {
     identity.starts_with("bot:") || identity.starts_with("viewer:")
 }
 
-/// Subscription policy for one remote publication: microphones unless the user's volume is 0 (saves egress, as on the web).
-fn consider(shared: &Shared, publication: &RemoteTrackPublication, participant: &RemoteParticipant) {
+/// Subscription policy for one remote publication: microphones unless the user's volume is 0 (saves egress, as on the web),
+/// cameras and watched screen shares per video.rs.
+fn consider(shared: &Shared, videos: &Videos, publication: &RemoteTrackPublication, participant: &RemoteParticipant) {
     let identity = participant.identity().to_string();
-    if is_media_identity(&identity) || publication.kind() != TrackKind::Audio || publication.source() != TrackSource::Microphone {
+    if is_media_identity(&identity) || videos.consider(publication, &identity) || publication.source() != TrackSource::Microphone {
         return;
     }
     let wanted = shared.volume(&identity) > 0.0;
@@ -209,11 +225,17 @@ fn stop_reader(shared: &Shared, readers: &std::sync::Mutex<HashMap<String, JoinH
     shared.drop_voice(sid);
 }
 
+fn screen_live(publication: &RemoteTrackPublication, participant: &RemoteParticipant, live: bool) -> Option<NativeEvent> {
+    let user_id = participant.identity().to_string();
+    (publication.source() == TrackSource::Screenshare && !is_media_identity(&user_id)).then_some(NativeEvent::ScreenLive { user_id, live })
+}
+
 /// Room events → page events and subscriptions. Ends with the room.
 async fn room_loop(
     room: Arc<Room>,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
     shared: Arc<Shared>,
+    videos: Arc<Videos>,
     events: Channel<NativeEvent>,
     leaving: Arc<AtomicBool>,
     readers: Arc<std::sync::Mutex<HashMap<String, JoinHandle<()>>>>,
@@ -232,15 +254,43 @@ async fn room_loop(
                     send(NativeEvent::Participant { user_id: identity });
                 }
             }
-            RoomEvent::TrackPublished { publication, participant } => consider(&shared, &publication, &participant),
+            RoomEvent::TrackPublished { publication, participant } => {
+                consider(&shared, &videos, &publication, &participant);
+                if !publication.is_muted()
+                    && let Some(event) = screen_live(&publication, &participant, true)
+                {
+                    send(event);
+                }
+            }
+            RoomEvent::TrackMuted { publication: TrackPublication::Remote(publication), participant: Participant::Remote(participant) }
+            | RoomEvent::TrackUnmuted { publication: TrackPublication::Remote(publication), participant: Participant::Remote(participant) } => {
+                if let Some(event) = screen_live(&publication, &participant, !publication.is_muted()) {
+                    send(event);
+                }
+            }
             RoomEvent::TrackSubscribed { track: RemoteTrack::Audio(track), publication, participant } => {
                 let identity = participant.identity().to_string();
-                if publication.source() == TrackSource::Microphone && !is_media_identity(&identity) {
+                let source = publication.source();
+                if (source == TrackSource::Microphone || source == TrackSource::ScreenshareAudio) && !is_media_identity(&identity) {
                     start_reader(shared.clone(), &readers, track, identity);
                 }
             }
-            RoomEvent::TrackUnsubscribed { publication, .. } | RoomEvent::TrackUnpublished { publication, .. } => {
-                stop_reader(&shared, &readers, &publication.sid().to_string())
+            RoomEvent::TrackSubscribed { track: RemoteTrack::Video(track), publication, participant } => {
+                let user_id = participant.identity().to_string();
+                if let Some(source) = video::source_name(publication.source())
+                    && !is_media_identity(&user_id)
+                {
+                    let key = videos.add(&track);
+                    videos.apply_quality(&publication, &user_id);
+                    send(NativeEvent::Video { user_id, source, key: Some(key) });
+                }
+            }
+            RoomEvent::TrackUnsubscribed { publication, participant, .. } => drop_track(&shared, &videos, &readers, &publication, &participant, &send),
+            RoomEvent::TrackUnpublished { publication, participant } => {
+                drop_track(&shared, &videos, &readers, &publication, &participant, &send);
+                if let Some(event) = screen_live(&publication, &participant, false) {
+                    send(event);
+                }
             }
             RoomEvent::ActiveSpeakersChanged { speakers } => {
                 let user_ids =
@@ -268,8 +318,25 @@ async fn room_loop(
     }
 }
 
+fn drop_track(
+    shared: &Shared,
+    videos: &Videos,
+    readers: &std::sync::Mutex<HashMap<String, JoinHandle<()>>>,
+    publication: &RemoteTrackPublication,
+    participant: &RemoteParticipant,
+    send: &impl Fn(NativeEvent),
+) {
+    let sid = publication.sid().to_string();
+    stop_reader(shared, readers, &sid);
+    if videos.remove(&sid)
+        && let Some(source) = video::source_name(publication.source())
+    {
+        send(NativeEvent::Video { user_id: participant.identity().to_string(), source, key: None });
+    }
+}
+
 impl Session {
-    async fn close(mut self, shared: &Shared) {
+    async fn close(mut self, shared: &Shared, videos: &Videos) {
         self.leaving.store(true, Ordering::Relaxed);
         if let Some(mic) = self.mic.take() {
             mic.pump.abort();
@@ -284,6 +351,7 @@ impl Session {
             }
         }
         shared.clear_voices();
+        videos.clear();
         let _ = self.room.close().await;
     }
 
@@ -351,7 +419,7 @@ async fn connect(state: &NativeVoice, url: String, token: String, init: ConnectI
     let shared = state.shared.clone();
     let mut slot = state.session.lock().await;
     if let Some(old) = slot.take() {
-        old.close(&shared).await;
+        old.close(&shared, &state.videos).await;
     }
     shared.muted.store(init.self_mute, Ordering::Relaxed);
     shared.deaf.store(init.self_deaf, Ordering::Relaxed);
@@ -370,7 +438,9 @@ async fn connect(state: &NativeVoice, url: String, token: String, init: ConnectI
     let room = Arc::new(room);
     let leaving = Arc::new(AtomicBool::new(false));
     let readers = Arc::new(std::sync::Mutex::new(HashMap::new()));
-    let mut tasks = vec![tauri::async_runtime::spawn(room_loop(room.clone(), rx, shared.clone(), events.clone(), leaving.clone(), readers.clone()))];
+    let videos = state.videos.clone();
+    let mut tasks =
+        vec![tauri::async_runtime::spawn(room_loop(room.clone(), rx, shared.clone(), videos.clone(), events.clone(), leaving.clone(), readers.clone()))];
     let ping_room = room.clone();
     let ping_events = events.clone();
     tasks.push(tauri::async_runtime::spawn(async move {
@@ -383,7 +453,12 @@ async fn connect(state: &NativeVoice, url: String, token: String, init: ConnectI
     session.restart_playback(&shared);
     for participant in room.remote_participants().values() {
         for publication in participant.track_publications().values() {
-            consider(&shared, publication, participant);
+            consider(&shared, &videos, publication, participant);
+            if !publication.is_muted()
+                && let Some(event) = screen_live(publication, participant, true)
+            {
+                let _ = events.send(event);
+            }
         }
     }
     let _ = events.send(NativeEvent::Status { status: "connected" });
@@ -394,7 +469,7 @@ async fn connect(state: &NativeVoice, url: String, token: String, init: ConnectI
 
 async fn disconnect(state: &NativeVoice) -> Result<(), String> {
     if let Some(session) = state.session.lock().await.take() {
-        session.close(&state.shared).await;
+        session.close(&state.shared, &state.videos).await;
     }
     Ok(())
 }
@@ -425,14 +500,29 @@ async fn set_user_volume(state: &NativeVoice, user_id: String, volume: f32) -> R
     if let Ok(mut volumes) = state.shared.volumes.lock() {
         volumes.insert(user_id.clone(), volume.clamp(0.0, 2.0));
     }
+    reconsider(state, &user_id).await;
+    Ok(())
+}
+
+/// Runs the subscription policy again for one user's publications.
+async fn reconsider(state: &NativeVoice, user_id: &str) {
     let slot = state.session.lock().await;
-    let Some(session) = slot.as_ref() else { return Ok(()) };
+    let Some(session) = slot.as_ref() else { return };
     if let Some(participant) = session.room.remote_participants().values().find(|p| p.identity().as_str() == user_id) {
         for publication in participant.track_publications().values() {
-            consider(&state.shared, publication, participant);
+            consider(&state.shared, &state.videos, publication, participant);
         }
     }
-    Ok(())
+}
+
+async fn watch_stream(state: &NativeVoice, user_id: String, watch: bool) {
+    state.videos.set_watching(&user_id, watch);
+    reconsider(state, &user_id).await;
+}
+
+async fn set_video_quality(state: &NativeVoice, user_id: String, source: String, quality: String) {
+    state.videos.set_quality(&user_id, &source, quality);
+    reconsider(state, &user_id).await;
 }
 
 async fn apply_settings(state: &NativeVoice, settings: VoiceSettings) -> Result<(), String> {
@@ -521,12 +611,46 @@ pub async fn native_voice_devices() -> Result<DeviceLists, String> {
     devices().await
 }
 
+#[tauri::command]
+pub async fn native_voice_watch(state: State<'_, NativeVoice>, user_id: String, watch: bool) -> Result<(), String> {
+    watch_stream(&state, user_id, watch).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn native_voice_video_quality(state: State<'_, NativeVoice>, user_id: String, source: String, quality: String) -> Result<(), String> {
+    set_video_quality(&state, user_id, source, quality).await;
+    Ok(())
+}
+
+/// Raw bytes (an ArrayBuffer in the page): see Videos::frame.
+#[tauri::command]
+pub async fn native_voice_video_frame(state: State<'_, NativeVoice>, key: String, max_width: u32, max_height: u32) -> Result<tauri::ipc::Response, String> {
+    state.videos.frame(&key, max_width, max_height).await.map(tauri::ipc::Response::new)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tauri::Manager;
 
     /// Live check against a LiveKit server (the VPS harness, docs/desktop-release.md): `NATIVE_VOICE_URL`, `NATIVE_VOICE_TOKEN`,
     /// optional `NATIVE_VOICE_SCRIPT` = "secs:action,..." (mute, unmute, deaf, undeaf, vol0, vol1:<user>) and `NATIVE_VOICE_SECS`.
+    /// Default settings, with `NATIVE_VOICE_SETTINGS` (a JSON object of VoiceSettings fields) on top.
+    fn test_init() -> ConnectInit {
+        let mut settings = serde_json::json!({
+            "inputMode": "vad", "pttReleaseMs": 20, "vadThresholdDb": -60, "vadAuto": false, "inputDeviceId": "default",
+            "outputDeviceId": "default", "echoCancellation": true, "noiseSuppression": true, "autoGainControl": false,
+            "inputGain": 1, "rnnoise": false, "outputGain": 1, "duck": 1
+        });
+        if let Ok(extra) = std::env::var("NATIVE_VOICE_SETTINGS") {
+            let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&extra).unwrap();
+            settings.as_object_mut().unwrap().extend(extra);
+        }
+        let settings: VoiceSettings = serde_json::from_value(settings).unwrap();
+        ConnectInit { self_mute: false, self_deaf: false, settings, volumes: HashMap::new() }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs a LiveKit server and a PulseAudio server"]
     async fn live_room() {
@@ -540,19 +664,7 @@ mod tests {
             }
             Ok(())
         });
-        let mut settings = serde_json::json!({
-            "inputMode": "vad", "pttReleaseMs": 20, "vadThresholdDb": -60, "vadAuto": false, "inputDeviceId": "default",
-            "outputDeviceId": "default", "echoCancellation": true, "noiseSuppression": true, "autoGainControl": false,
-            "inputGain": 1, "rnnoise": false, "outputGain": 1, "duck": 1
-        });
-        // NATIVE_VOICE_SETTINGS: a JSON object of VoiceSettings fields to override.
-        if let Ok(extra) = std::env::var("NATIVE_VOICE_SETTINGS") {
-            let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&extra).unwrap();
-            settings.as_object_mut().unwrap().extend(extra);
-        }
-        let settings: VoiceSettings = serde_json::from_value(settings).unwrap();
-        let init = ConnectInit { self_mute: false, self_deaf: false, settings, volumes: HashMap::new() };
-        connect(&voice, url, token, init, events).await.unwrap();
+        connect(&voice, url, token, test_init(), events).await.unwrap();
         println!("connected");
         let mut steps: Vec<(u64, String)> =
             script.split(',').filter_map(|step| step.split_once(':').map(|(t, a)| (t.parse().unwrap_or(0), a.to_string()))).collect();
@@ -574,5 +686,66 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(secs).saturating_sub(started.elapsed())).await;
         disconnect(&voice).await.unwrap();
         println!("done");
+    }
+
+    #[tauri::command]
+    fn bench_log(line: String) {
+        println!("page {line}");
+    }
+
+    /// Remote videos announced since the last call, as (key, source): the page polls, so none is lost while it loads.
+    static BENCH_KEYS: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+
+    #[tauri::command]
+    fn bench_keys() -> Vec<(String, String)> {
+        BENCH_KEYS.lock().map(|mut keys| std::mem::take(&mut *keys)).unwrap_or_default()
+    }
+
+    /// Remote video in a real WebKitGTK webview (an X server, e.g. Xvfb): joins like live_room, watches every screen share,
+    /// and hands each remote video's key to the page (bench_keys) at `NATIVE_VIDEO_PAGE` (the base URL of a server with bench.html, loaded as the dev URL), which
+    /// pulls frames with native_voice_video_frame and logs through bench_log. Runs `NATIVE_VOICE_SECS`, then exits.
+    #[test]
+    #[ignore = "needs a LiveKit server, a PulseAudio server, an X display and a page server"]
+    fn live_video_page() {
+        let (Ok(url), Ok(token), Ok(page)) = (std::env::var("NATIVE_VOICE_URL"), std::env::var("NATIVE_VOICE_TOKEN"), std::env::var("NATIVE_VIDEO_PAGE"))
+        else {
+            return;
+        };
+        let secs: u64 = std::env::var("NATIVE_VOICE_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(30);
+        let mut context: tauri::Context<tauri::Wry> = tauri::generate_context!();
+        context.config_mut().build.dev_url = Some(page.parse().unwrap());
+        let app = tauri::Builder::default()
+            .any_thread()
+            .manage(NativeVoice::default())
+            .invoke_handler(tauri::generate_handler![native_voice_video_frame, bench_log, bench_keys])
+            .build(context)
+            .unwrap();
+        tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::App("bench.html".into())).inner_size(1920.0, 1080.0).build().unwrap();
+        let handle = app.handle().clone();
+        tauri::async_runtime::spawn(async move {
+            let watch_handle = handle.clone();
+            let events = Channel::new(move |body| {
+                let tauri::ipc::InvokeResponseBody::Json(json) = body else { return Ok(()) };
+                println!("event {json}");
+                let event: serde_json::Value = serde_json::from_str(&json).unwrap_or_default();
+                match (event["type"].as_str(), event["key"].as_str(), event["userId"].as_str()) {
+                    (Some("video"), Some(key), _) => BENCH_KEYS.lock().unwrap().push((key.to_string(), event["source"].as_str().unwrap_or("").to_string())),
+                    (Some("screenLive"), _, Some(user)) if event["live"] == true => {
+                        let (handle, user) = (watch_handle.clone(), user.to_string());
+                        tauri::async_runtime::spawn(async move { watch_stream(&handle.state::<NativeVoice>(), user, true).await });
+                    }
+                    _ => {}
+                }
+                Ok(())
+            });
+            let state = handle.state::<NativeVoice>();
+            connect(&state, url, token, test_init(), events).await.unwrap();
+            println!("connected");
+            tokio::time::sleep(Duration::from_secs(secs)).await;
+            disconnect(&state).await.unwrap();
+            println!("done");
+            handle.exit(0);
+        });
+        app.run_return(|_, _| {});
     }
 }
