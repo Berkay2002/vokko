@@ -100,3 +100,30 @@ before scrolling to an initial index and then paints one frame of the wrong rows
 | Message scroll frames > 50 ms (30,000 px) | 4 | 1 |
 
 A trace of a 250,000 px scroll through 2,450 messages shows no main-thread task over 50 ms.
+
+## Round 3 (2026-10-18): voice page, DM call stage and perk art out of the startup bundle
+
+- `ui/lazyModule.ts`: a module loaded on first use (`use()` returns null until it arrives) and warmed at idle after the first paint
+  with the settings screens (`preloadLazyModules()` in main.tsx). A failed fetch is retried on the next mount.
+- The voice channel page (with the Stremio, Spotify, Watch Together and game tiles and panels) loads through
+  `voice/LazyVoiceChannelPage.tsx`, which shows the page's empty stage until it is in. The DM call stage moved to `calls/CallPanel.tsx`;
+  `CallUi.tsx` mounts it the same way, with the bare `.dm-call` section as the placeholder.
+- Perk art (avatar decorations, nameplate scenes, profile frames and scenes, ~118 kB) loads the same way. It overlays the avatar, row or
+  card, so nothing moves when it appears; a nameplate shows its gradient at once.
+- `AppShell`, `Modals`, `VoiceChannelUsers` and `VoiceChannelRow` import `StremioViewerHost`, `WatchModal` and `StremioIcon` by path:
+  the feature indexes import CSS, so a barrel import kept the panels in the entry.
+
+home server M4, load average 10-44 during the runs; before = main a640f747, after = this branch; 5 interleaved runs each, medians.
+
+| Metric | Before | After |
+|---|---|---|
+| Initial JS | 1,518 kB (469 kB gzip) | 1,309 kB (414 kB gzip) |
+| Initial CSS | 567 kB (97 kB gzip) | 538 kB (91 kB gzip) |
+| Cold start to first channel messages | 290 ms | 290 ms |
+| Cold start, 4x CPU and 20 Mbit/s | 1,285 ms (FCP 696 ms) | 1,223 ms (FCP 676 ms) |
+| Boot with `?seed=big` | 186 ms | 168 ms |
+| Cold open of #firehose / warm switch | 128 / 65 ms | 133 / 68 ms |
+
+Unthrottled timings are within run-to-run noise on a local mock backend; the smaller entry matters on slow networks and CPUs.
+Left in the entry and under 20 kB each: `VoiceConnectionPanel` (8 kB, shows on join), `StageView` (5 kB, shares a file with the
+sidebar's live pill) and the event wizard (12 kB).
