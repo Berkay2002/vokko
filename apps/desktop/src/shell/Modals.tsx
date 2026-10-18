@@ -20,6 +20,7 @@ import { DmRefusedModal } from "./DmRefusedModal";
 import { ReportModal } from "./ReportModal";
 import { ReportProblemModal } from "./ReportProblemModal";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
+import { guildDefaultLevel } from "../notify/decide";
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
 import { closeModal, openModal, useModals, type ModalSpec } from "./modalStore";
 import { QuickSwitcher } from "./QuickSwitcher";
@@ -540,15 +541,16 @@ function NotificationSettingsModal({ scopeId, title, guild }: { scopeId: string;
   const level = useLocalState(s => s.notify[scopeId] ?? "default");
   const everyone = useLocalState(s => !!s.suppressEveryone[scopeId]);
   const roles = useLocalState(s => !!s.suppressRoles[scopeId]);
+  const serverDefault = useStore(s => guildDefaultLevel(s.guilds[scopeId]?.default_message_notifications));
   const options = (Object.keys(NOTIFY_LABELS) as Exclude<NotifyLevel, "default">[]).map(value => ({ value, label: NOTIFY_LABELS[value] }));
   return (
     <Modal open onClose={closeModal} title="Notification Settings" className="modal-compact">
       <p className="modal-subtle">{title}</p>
-      <div className="field-label">Server notification settings</div>
-      <RadioGroup<NotifyLevel> name="Notification level" value={level === "default" && guild ? "all" : level} options={guild ? options : [{ value: "default", label: "Use Server Default" }, ...options]} onChange={next => setNotifyLevel(scopeId, next)} />
+      <div className="field-label">{guild ? "Server" : "Channel"} notification settings</div>
+      <RadioGroup<NotifyLevel> name="Notification level" value={level === "default" && guild ? serverDefault : level} options={guild ? options : [{ value: "default", label: "Use Server Default" }, ...options]} onChange={next => setNotifyLevel(scopeId, next)} />
       <SwitchRow label="Suppress @everyone and @here" checked={everyone} onChange={() => toggleFlag("suppressEveryone", scopeId)} />
       <SwitchRow label="Suppress All Role @mentions" checked={roles} onChange={() => toggleFlag("suppressRoles", scopeId)} />
-      <p className="modal-subtle">These choices are saved on this device.</p>
+      <p className="modal-subtle">These choices follow your account on all your devices.</p>
     </Modal>
   );
 }

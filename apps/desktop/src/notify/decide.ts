@@ -107,6 +107,21 @@ export function mentionsMyRole(content: string, roleIds: readonly Snowflake[]): 
   return false;
 }
 
+/** How a message mentions me: by name, by @everyone / @here (unless suppressed on a scope) or by one of my roles (likewise). One rule for sounds, popups and the unread mention counters. */
+export function mentionKinds(
+  message: Pick<Message, "mentions" | "mention_everyone" | "content">,
+  meId: Snowflake,
+  myRoleIds: readonly Snowflake[],
+  scopes: readonly Snowflake[],
+  local: Pick<NotifyLocalState, "suppressEveryone" | "suppressRoles">,
+): { direct: boolean; everyone: boolean; role: boolean } {
+  return {
+    direct: message.mentions.some(user => user.id === meId),
+    everyone: message.mention_everyone && !scopes.some(id => local.suppressEveryone[id]),
+    role: mentionsMyRole(message.content, myRoleIds) && !scopes.some(id => local.suppressRoles[id]),
+  };
+}
+
 export function decide(input: NotifyInput): NotifyDecision {
   const { message, meId, local, prefs } = input;
   if (message.author.id === meId) return NONE("own");
@@ -118,9 +133,7 @@ export function decide(input: NotifyInput): NotifyDecision {
   const level = effectiveLevel(local, input.scopes, input.guildDefault);
   if (level === "none") return NONE("level-none");
 
-  const direct = message.mentions.some(user => user.id === meId);
-  const everyone = message.mention_everyone && !input.scopes.some(id => local.suppressEveryone[id]);
-  const role = mentionsMyRole(message.content, input.myRoleIds) && !input.scopes.some(id => local.suppressRoles[id]);
+  const { direct, everyone, role } = mentionKinds(message, meId, input.myRoleIds, input.scopes, local);
   const mentioned = direct || everyone || role;
   // A 1:1 DM is addressed to me by definition; in a group DM or a guild the channel level decides.
   const addressed = mentioned || input.dm === "dm";

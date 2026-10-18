@@ -303,19 +303,36 @@ async fn insert_message_stored(
             mentioned.push(replied);
         }
     }
-    // Everyone whose unread-mention counter goes up.
+    // Everyone whose unread-mention counter goes up. Names and replies always count; @everyone / @here and role mentions only for
+    // members who did not switch on "Suppress @everyone and @here" / "Suppress All Role @mentions" for this guild.
     let mut notify: HashSet<i64> = mentioned.iter().copied().collect();
-    if !draft.mentions.roles.is_empty()
-        && let Some(guild_id) = channel.guild_id
+    let by_role = !draft.mentions.roles.is_empty();
+    if let Some(guild_id) = channel.guild_id
+        && (draft.mentions.everyone || by_role)
     {
-        let rows: Vec<(i64,)> = sqlx::query_as("SELECT DISTINCT user_id FROM member_roles WHERE guild_id = $1 AND role_id = ANY($2)")
-            .bind(guild_id)
-            .bind(&draft.mentions.roles)
-            .fetch_all(&state.db)
-            .await?;
-        notify.extend(rows.into_iter().map(|(id,)| id));
+        let suppressed: Vec<(i64, bool, bool)> = sqlx::query_as(
+            "SELECT user_id, COALESCE((settings->>'suppress_everyone')::boolean, FALSE), COALESCE((settings->>'suppress_roles')::boolean, FALSE) \
+             FROM user_guild_settings WHERE guild_id = $1 AND (settings->>'suppress_everyone' = 'true' OR settings->>'suppress_roles' = 'true')",
+        )
+        .bind(guild_id)
+        .fetch_all(&state.db)
+        .await?;
+        let quiet = |pick: fn(&(i64, bool, bool)) -> bool| -> HashSet<i64> { suppressed.iter().filter(|row| pick(row)).map(|row| row.0).collect() };
+        if by_role {
+            let holders: Vec<(i64,)> = sqlx::query_as("SELECT DISTINCT user_id FROM member_roles WHERE guild_id = $1 AND role_id = ANY($2)")
+                .bind(guild_id)
+                .bind(&draft.mentions.roles)
+                .fetch_all(&state.db)
+                .await?;
+            let no_roles = quiet(|row| row.2);
+            notify.extend(holders.into_iter().map(|(id,)| id).filter(|id| !no_roles.contains(id)));
+        }
+        if draft.mentions.everyone {
+            let no_everyone = quiet(|row| row.1);
+            notify.extend(viewers.iter().copied().filter(|id| !no_everyone.contains(id)));
+        }
     }
-    if draft.mentions.everyone || (channel.is_dm() && draft.kind != MessageType::ChannelPinnedMessage) {
+    if channel.is_dm() && draft.kind != MessageType::ChannelPinnedMessage {
         notify.extend(viewers.iter().copied());
     }
     notify.remove(&author_id);

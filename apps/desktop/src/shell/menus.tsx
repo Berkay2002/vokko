@@ -10,6 +10,7 @@ import { ChannelType, RelationshipType, ThreadMemberFlags, type Channel, type Gu
 import type { MenuItem } from "../ui";
 import { openCreateEvent } from "../community/communityModals";
 import { closeDirectMessage, copyText, markChannelRead, markGuildRead, openDirectMessage, removeGroupRecipient } from "./actions";
+import { guildDefaultLevel } from "../notify/decide";
 import { isMutedAt, mutedTest, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setNotifyLevel, toggleFlag, unmute, untilLabel, useLocalState, type NotifyLevel } from "./localState";
 import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
@@ -75,9 +76,10 @@ export function muteItem(id: Snowflake, label: string): MenuItem {
   return { id: "mute", label: `Mute ${label}`, children: MUTE_DURATIONS.map(d => ({ id: d.id, label: d.label, onSelect: () => muteFor(id, d.ms) })) };
 }
 
-export function notificationItem(id: Snowflake, opts: { guild?: boolean; defaultLabel?: string } = {}): MenuItem {
+export function notificationItem(id: Snowflake, opts: { guild?: boolean; defaultLabel?: string; guildDefault?: Exclude<NotifyLevel, "default"> } = {}): MenuItem {
   const current: NotifyLevel = local().notify[id] ?? "default";
-  const radio = (level: Exclude<NotifyLevel, "default">): MenuItem => ({ id: level, label: NOTIFY_LABELS[level], checked: current === level, onSelect: () => setNotifyLevel(id, level) });
+  // A server has no "default" radio: while nothing is chosen, the level its Default Notification Settings give is the one checked.
+  const radio = (level: Exclude<NotifyLevel, "default">): MenuItem => ({ id: level, label: NOTIFY_LABELS[level], checked: current === level || (opts.guild === true && current === "default" && level === (opts.guildDefault ?? "all")), onSelect: () => setNotifyLevel(id, level) });
   const children: MenuItem[] = [];
   if (!opts.guild) children.push({ id: "default", label: opts.defaultLabel ?? "Use Server Default", checked: current === "default", onSelect: () => setNotifyLevel(id, "default") });
   children.push(radio("all"), radio("unreads-mentions"), radio("mentions"), radio("none"));
@@ -140,7 +142,7 @@ export function guildContextItems(guild: Guild): MenuItem[] {
   return groups(
     [{ id: "mark-read", label: "Mark As Read", disabled: !unread, onSelect: () => void markGuildRead(guild.id).catch(() => undefined) }],
     can(Perm.CREATE_INSTANT_INVITE) ? [{ id: "invite", label: "Invite to Server", disabled: !invite, onSelect: () => invite && openModal({ type: "invite", channelId: invite }) }] : [],
-    [muteItem(guild.id, "Server"), notificationItem(guild.id, { guild: true }), hideMutedItem(guild)],
+    [muteItem(guild.id, "Server"), notificationItem(guild.id, { guild: true, guildDefault: guildDefaultLevel(guild.default_message_notifications) }), hideMutedItem(guild)],
     [
       ...(canOpenSettings(can)
         ? [
@@ -344,7 +346,6 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
   const member = options.guildId ? state.members[options.guildId]?.[user.id] : undefined;
   const roles = guild && member ? guild.roles.filter(r => member.roles.includes(r.id) && r.id !== guild.id).sort((a, b) => b.position - a.position) : [];
   const name = displayName(user, member);
-  const anchor = options.anchor;
 
   // Moderation rights, hidden (not disabled) when the viewer lacks them.
   const viewer = guild ? viewerPerms(guild).actor : undefined;
@@ -380,7 +381,7 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
 
   return groups(
     [
-      { id: "profile", label: "Profile", disabled: !anchor, onSelect: () => anchor && openProfile(anchor, user.id, options.guildId ?? null) },
+      { id: "profile", label: "Profile", onSelect: () => openModal({ type: "profile", userId: user.id, guildId: options.guildId ?? null }) },
       options.onMention ? { id: "mention", label: "Mention", onSelect: () => options.onMention?.(user) } : unavailable("mention", "Mention"),
       ...(isMe ? [] : [{ id: "message", label: "Message", onSelect: () => void openDirectMessage(user.id) } satisfies MenuItem, { id: "call", label: "Start a Call", onSelect: () => void callUser(user.id) } satisfies MenuItem]),
     ],
