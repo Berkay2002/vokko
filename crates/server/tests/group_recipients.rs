@@ -291,6 +291,10 @@ async fn upload(app: &TestApp, user: &User, channel: &str, filename: &str, conte
     attachment["id"].as_str().expect("id").to_owned()
 }
 
+async fn upload_rows(app: &TestApp, id: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM attachments WHERE id = $1").bind(id.parse::<i64>().expect("id")).fetch_one(&app.state.db).await.expect("count")
+}
+
 const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0, 0, 0, 4, 0, 0, 0, 4, 8, 6, 0, 0, 0, 0, 0, 0, 0];
 
 #[tokio::test]
@@ -321,10 +325,21 @@ async fn a_recipient_sets_and_clears_the_group_icon() {
     let event = carl_ws.wait_until("CHANNEL_UPDATE", |c| c["id"] == channel.as_str() && c["icon"].is_string()).await;
     assert_eq!(event["name"], "Crew");
 
+    // Replacing the icon releases the old upload; setting the same one again releases nothing.
+    let (status, body) = app.patch(&channel_path, &bob.token, json!({"icon_attachment_id": icon})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(upload_rows(&app, &icon).await, 1);
+    let second = upload(&app, &bob, &channel, "second.png", "image/png", PNG).await;
+    let (status, body) = app.patch(&channel_path, &bob.token, json!({"icon_attachment_id": second})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(upload_rows(&app, &icon).await, 0, "the replaced icon is released");
+    assert_eq!(upload_rows(&app, &second).await, 1);
+
     let (status, cleared) = app.patch(&channel_path, &alice.token, json!({"icon_attachment_id": null})).await;
     assert_eq!(status, StatusCode::OK, "{cleared}");
     assert!(cleared["icon"].is_null(), "{cleared}");
     carl_ws.wait_until("CHANNEL_UPDATE", |c| c["id"] == channel.as_str() && c["icon"].is_null()).await;
+    assert_eq!(upload_rows(&app, &second).await, 0, "the cleared icon is released");
 
     // A 1:1 DM has no icon.
     let (status, dm) = app.post("/users/@me/channels", &alice.token, json!({"recipient_id": bob.id})).await;
@@ -332,4 +347,23 @@ async fn a_recipient_sets_and_clears_the_group_icon() {
     let mine = upload(&app, &alice, &channel, "m.png", "image/png", PNG).await;
     let (status, _) = app.patch(&format!("/channels/{}", dm["id"].as_str().expect("id")), &alice.token, json!({"icon_attachment_id": mine})).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn the_last_member_leaving_releases_the_group_icon() {
+    let app = TestApp::new().await;
+    let (alice, bob, carl) = (user(&app, "alice").await, user(&app, "bob").await, user(&app, "carl").await);
+    for other in [&bob, &carl] {
+        befriend(&app, &alice, other).await;
+    }
+    let channel = group(&app, &alice, &[&bob, &carl]).await;
+    let icon = upload(&app, &alice, &channel, "icon.png", "image/png", PNG).await;
+    let (status, body) = app.patch(&format!("/channels/{channel}"), &alice.token, json!({"icon_attachment_id": icon})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for leaver in [&bob, &carl] {
+        assert_eq!(app.delete(&path(&channel, leaver), &leaver.token).await.0, StatusCode::NO_CONTENT);
+    }
+    assert_eq!(upload_rows(&app, &icon).await, 1, "still shown while someone is in the group");
+    assert_eq!(app.delete(&path(&channel, &alice), &alice.token).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(upload_rows(&app, &icon).await, 0, "the deleted group's icon is released");
 }

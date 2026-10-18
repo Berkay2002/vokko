@@ -2,7 +2,8 @@
 // the event (or fall back to the REST response) so navigation after "create" lands on a known entity.
 
 import { getOwnActivities } from "../activity/own";
-import { isDmRefused } from "../api/errors";
+import { ApiRequestError, isDmRefused } from "../api/errors";
+import { chatToast } from "../chat/toast";
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
 import { compareIds } from "../api/snowflake";
@@ -133,9 +134,13 @@ export async function addGroupRecipients(channelId: Snowflake, userIds: Snowflak
   for (const id of userIds) await request<void>("PUT", `/channels/${channelId}/recipients/${id}`);
 }
 
-/** The group owner removes someone (or anyone removes themselves, which is leaving). */
+/** The group owner removes someone (or anyone removes themselves, which is leaving). Callers fire and forget, so a failure is toasted here. */
 export async function removeGroupRecipient(channelId: Snowflake, userId: Snowflake): Promise<void> {
-  await request<void>("DELETE", `/channels/${channelId}/recipients/${userId}`);
+  try {
+    await request<void>("DELETE", `/channels/${channelId}/recipients/${userId}`);
+  } catch (error) {
+    chatToast(error instanceof ApiRequestError && error.status === 403 ? "You don't have permission to remove that person." : "Couldn't remove them from the group. Try again.");
+  }
 }
 
 /** Renames a group DM and/or sets (an upload id) or clears (null) its icon. */
