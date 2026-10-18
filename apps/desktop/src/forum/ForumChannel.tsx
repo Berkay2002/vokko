@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { LayoutGrid, List, Loader2, MessagesSquare, Plus, Search } from "lucide-react";
+import { ArrowDownUp, LayoutGrid, List, Loader2, MessagesSquare, Plus, Search } from "lucide-react";
 import { Perm } from "../api/permissions";
 import { useStore } from "../api/store";
 import { ForumLayout, ForumSortOrder, type Channel } from "../api/types";
 import { Select } from "../shell/settings/controls";
 import { usePermissions } from "../shell/usePermissions";
+import { useContextMenu, usePhone } from "../ui";
 import { openThread, useOpenThread } from "../threads/threadUi";
 import { ForumPostCard, TagChip } from "./ForumPostCard";
 import { NewPostForm } from "./NewPostForm";
@@ -49,6 +50,8 @@ export function ForumChannel({ channel }: { channel: Channel }) {
   const posts = useForumPosts(channel.id, { text, tags, sort });
   const available = useStore(s => s.channels[channel.id]?.available_tags) ?? channel.available_tags ?? [];
   const filtering = text.trim() !== "" || tags.length > 0;
+  const phone = usePhone();
+  const menu = useContextMenu();
 
   // Defaults of a freshly opened forum (the page stays mounted when the shell switches between two forums).
   useEffect(() => {
@@ -80,9 +83,21 @@ export function ForumChannel({ channel }: { channel: Channel }) {
             <input value={text} placeholder="Search posts" aria-label="Search posts" onChange={e => setText(e.target.value)} />
             <Search size={16} aria-hidden="true" />
           </label>
-          <div className="forum-sort">
-            <Select<ForumQuery["sort"]> label="Sort posts" value={sort} options={SORTS.map(s => ({ value: s.value, label: s.label }))} onChange={setSort} />
-          </div>
+          {phone ? (
+            // the select's label did not fit next to the layout and New Post buttons ("Recent Acti..."): an icon that opens a sheet
+            <button
+              type="button"
+              className="toolbar-button forum-sort-button"
+              aria-label="Sort posts"
+              onClick={e => menu.open(e, SORTS.map(s => ({ id: s.value, label: s.label, checked: sort === s.value, onSelect: () => setSort(s.value) })))}
+            >
+              <ArrowDownUp size={20} />
+            </button>
+          ) : (
+            <div className="forum-sort">
+              <Select<ForumQuery["sort"]> label="Sort posts" value={sort} options={SORTS.map(s => ({ value: s.value, label: s.label }))} onChange={setSort} />
+            </div>
+          )}
           <div className="forum-layouts" role="group" aria-label="Layout">
             <button type="button" className={`toolbar-button${layout === "list" ? " active" : ""}`} aria-label="List view" aria-pressed={layout === "list"} onClick={() => chooseLayout("list")}>
               <List size={20} />

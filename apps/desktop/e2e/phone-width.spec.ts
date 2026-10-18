@@ -181,6 +181,40 @@ test('a thread and a forum post take the whole screen, split view or not', async
   await shot(page, 'forum-post-390');
 });
 
+test('a thread\'s header replaces the channel\'s: back, name, overflow; the forum sort is an icon with a sheet', async ({ page }) => {
+  await openChannel(page, 'general');
+  const thread = page.locator('.thread-panel');
+  await page.getByRole('button', { name: 'general, details' }).tap();
+  await page.locator('.details-page').getByRole('tab', { name: 'Threads' }).tap();
+  await page.locator('.details-page').getByRole('button', { name: /gateway docs/ }).tap();
+  await expect(page.locator('.channel-header')).toBeHidden();
+  const header = thread.locator('.thread-panel-header');
+  await expect(header.getByRole('heading', { name: 'gateway docs' })).toBeVisible();
+  await expect(header.getByRole('button')).toHaveCount(2); // back and overflow (Sam already joined)
+  await inside(header.getByRole('button', { name: 'Thread actions' }));
+  await header.getByRole('button', { name: 'Thread actions' }).tap();
+  const sheet = page.getByRole('dialog', { name: 'Menu' });
+  await expect(sheet.getByRole('menuitem', { name: 'Notification Settings' })).toBeVisible();
+  await page.waitForTimeout(400); // the sheet's slide-in
+  await shot(page, 'thread-menu-390');
+  await sheet.getByRole('menuitem', { name: 'Pinned Messages' }).tap();
+  await expect(page.getByRole('dialog', { name: 'Pinned Messages' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await header.getByRole('button', { name: 'Close thread' }).tap();
+  await expect(thread).toHaveCount(0);
+  await expect(page.locator('.channel-header')).toBeVisible();
+
+  await openChannel(page, 'support');
+  await expect(page.locator('.forum-sort')).toHaveCount(0);
+  const sortBtn = page.getByRole('button', { name: 'Sort posts' });
+  await inside(sortBtn);
+  await shot(page, 'forum-390');
+  await sortBtn.tap();
+  await page.getByRole('menuitemcheckbox', { name: 'Date Posted' }).tap();
+  await sortBtn.tap();
+  await expect(page.getByRole('menuitemcheckbox', { name: 'Date Posted' })).toHaveAttribute('aria-checked', 'true');
+});
+
 // The same screens at desktop width: the phone rules must not leak (and the members dates stay on one line).
 test.describe('desktop 1440', () => {
   test.use({ viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
