@@ -148,6 +148,56 @@ async fn a_group_holds_at_most_ten_people() {
     assert_eq!(app.put(&path(&channel, &members[9]), &alice.token).await.0, StatusCode::NO_CONTENT);
 }
 
+/// Runs alice's PUT of dana while the test holds the group's row lock, applies `change` (SQL on the channel) once the PUT waits on
+/// that lock, then releases it: the PUT sees a group that changed after its first checks.
+async fn put_racing(app: &TestApp, change: &[&str]) -> (StatusCode, Value) {
+    let (alice, dana, erin, finn) = (user(app, "alice").await, user(app, "dana").await, user(app, "erin").await, user(app, "finn").await);
+    for other in [&dana, &erin, &finn] {
+        befriend(app, &alice, other).await;
+    }
+    let channel = group(app, &alice, &[&erin, &finn]).await;
+    let id: i64 = channel.parse().expect("id");
+    let mut lock = app.state.db.begin().await.expect("tx");
+    sqlx::query("SELECT 1 FROM channels WHERE id = $1 FOR UPDATE").bind(id).execute(&mut *lock).await.expect("lock");
+    let racer = async {
+        for attempt in 0.. {
+            assert!(attempt < 500, "the PUT never waited on the group's row lock");
+            let (waiting,): (bool,) = sqlx::query_as(
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FOR UPDATE%')",
+            )
+            .fetch_one(&app.state.db)
+            .await
+            .expect("activity");
+            if waiting {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        for statement in change {
+            sqlx::query(statement).bind(id).bind(alice.id.parse::<i64>().expect("id")).execute(&mut *lock).await.expect("change");
+        }
+        lock.commit().await.expect("commit");
+    };
+    let target = path(&channel, &dana);
+    let (result, ()) = tokio::join!(app.put(&target, &alice.token), racer);
+    result
+}
+
+#[tokio::test]
+async fn a_caller_removed_while_adding_is_refused() {
+    let app = TestApp::new().await;
+    let (status, body) = put_racing(&app, &["DELETE FROM channel_recipients WHERE channel_id = $1 AND user_id = $2"]).await;
+    assert_eq!((status, body["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50001)), "{body}");
+}
+
+#[tokio::test]
+async fn adding_to_a_group_that_just_emptied_is_unknown_channel() {
+    let app = TestApp::new().await;
+    let (status, body) =
+        put_racing(&app, &["DELETE FROM channel_recipients WHERE channel_id = $1 AND user_id <> $2", "DELETE FROM channels WHERE id = $1 AND $2 <> 0"]).await;
+    assert_eq!((status, body["code"].as_u64()), (StatusCode::NOT_FOUND, Some(10003)), "{body}");
+}
+
 #[tokio::test]
 async fn leaving_a_group_leaves_its_call_and_voice_room() {
     let rooms = FakeRoomService::new();

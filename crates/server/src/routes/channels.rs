@@ -63,7 +63,19 @@ async fn add_recipient(State(state): State<AppState>, AuthUser(user_id): AuthUse
     }
     // The channel row serializes concurrent adds, so the cap holds.
     let mut tx = state.db.begin().await?;
-    sqlx::query("SELECT 1 FROM channels WHERE id = $1 FOR UPDATE").bind(channel_id).execute(&mut *tx).await?;
+    // A group that just emptied is gone (unknown channel); a caller removed since group_access may no longer add anyone.
+    let locked: Option<i64> = sqlx::query_scalar("SELECT id FROM channels WHERE id = $1 FOR UPDATE").bind(channel_id).fetch_optional(&mut *tx).await?;
+    if locked.is_none() {
+        return Err(ApiErr::unknown_channel());
+    }
+    let (still_member,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM channel_recipients WHERE channel_id = $1 AND user_id = $2)")
+        .bind(channel_id)
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+    if !still_member {
+        return Err(ApiErr::missing_access());
+    }
     let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM channel_recipients WHERE channel_id = $1").bind(channel_id).fetch_one(&mut *tx).await?;
     if count >= GROUP_DM_MAX {
         return Err(ApiErr::conflict(30004, &format!("Maximum number of group DM recipients reached ({GROUP_DM_MAX})")));
@@ -308,6 +320,17 @@ async fn delete_channel(
         return Ok(Json(channel));
     }
     access.require(MANAGE_CHANNELS)?;
+    // Like Discord: a Community's rules and updates channels can't be deleted while Community is on (400 50074).
+    // Checked before the delete, not under a guild row lock: a PATCH enabling Community in between is still cleared by the foreign key.
+    let (required,): (bool,) =
+        sqlx::query_as("SELECT EXISTS (SELECT 1 FROM guilds WHERE id = $1 AND community AND $2 IN (rules_channel_id, public_updates_channel_id))")
+            .bind(access.channel.guild_id)
+            .bind(id)
+            .fetch_one(&state.db)
+            .await?;
+    if required {
+        return Err(ApiErr::conflict(50074, "Cannot delete a channel required for Community guilds"));
+    }
     // The threads of a channel go with it, each announced before the channel itself.
     threads::delete_children(&state, id).await?;
     let viewers = access::channel_viewers(&state, &access.channel).await?;

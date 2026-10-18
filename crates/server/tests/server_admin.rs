@@ -673,11 +673,16 @@ async fn community_needs_channels_and_safety_checks() {
     let (status, guild) = w.app.patch(&w.path(""), &w.owner, json!({"name": "Renamed"})).await;
     assert_eq!((status, guild["features"].clone()), (StatusCode::OK, json!(["COMMUNITY"])));
 
-    // Deleting the updates channel clears it; disabling keeps the channels.
+    // While on, the rules and updates channels can't be deleted (Discord's 50074).
+    for channel in [&rules, &updates] {
+        let (status, error) = w.app.delete(&format!("/channels/{}", channel["id"].as_str().expect("id")), &w.owner).await;
+        assert_eq!((status, code(&error)), (StatusCode::BAD_REQUEST, 50074), "{error}");
+    }
+    // Disabling keeps the channels; then deleting the updates channel clears it.
+    let (status, guild) = w.app.patch(&w.path(""), &w.owner, json!({"features": []})).await;
+    assert_eq!((status, guild["features"].clone(), guild["rules_channel_id"].clone()), (StatusCode::OK, json!([]), rules["id"].clone()));
     let (status, _) = w.app.delete(&format!("/channels/{}", updates["id"].as_str().expect("id")), &w.owner).await;
     assert_eq!(status, StatusCode::OK);
     let (_, guild) = w.app.get(&w.path(""), &w.owner).await;
     assert_eq!(guild["public_updates_channel_id"], Value::Null);
-    let (status, guild) = w.app.patch(&w.path(""), &w.owner, json!({"features": []})).await;
-    assert_eq!((status, guild["features"].clone(), guild["rules_channel_id"].clone()), (StatusCode::OK, json!([]), rules["id"].clone()));
 }
