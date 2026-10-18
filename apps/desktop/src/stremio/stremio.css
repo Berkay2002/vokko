@@ -71,6 +71,37 @@
   background: linear-gradient(transparent, rgb(0 0 0 / 0.75));
 }
 
+/* Auto-hide while the picture plays (voice/idleHide.ts sets data-idle on the call stage): the title, the bar and the call bar fade
+   out, the cursor goes with them. Opacity only, so nothing moves. */
+.stremio-head,
+.stremio-bar,
+.voice-bar,
+.dm-call-bar {
+  transition: opacity 200ms;
+}
+
+[data-idle] .stremio-head,
+[data-idle] .stremio-bar,
+[data-idle] .voice-bar,
+[data-idle] .dm-call-bar {
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-idle] .voice-tile.stremio,
+[data-idle] .voice-tile.stremio * {
+  cursor: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stremio-head,
+  .stremio-bar,
+  .voice-bar,
+  .dm-call-bar {
+    transition: none;
+  }
+}
+
 .stremio-seek {
   width: 100%;
   margin: 0;

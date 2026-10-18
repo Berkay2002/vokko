@@ -29,6 +29,7 @@ import { StremioPanel, StremioTile, STREMIO_TILE_ID, useStremioPanel } from "../
 import { SpotifyPanel, SpotifyTile, SPOTIFY_TILE_ID, useSpotifyPanel } from "../spotify";
 import { GAME_TILE_ID, GameTile } from "../games";
 import { ActivityShelf } from "./ActivityShelf";
+import { useIdleHide } from "./idleHide";
 import { canShareScreen, openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
 import { isViewerQuality, nearestChoice, viewerChoices, viewerQualityLabel, type ViewerQuality } from "./video/options";
 import "./video/video.css";
@@ -534,6 +535,7 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
   const empty = !connected && states.length === 0;
   const focusedId = useVoiceUi(s => s.focusedTile);
   const focused = multiple && focusedId ? tiles.find(t => t.id === focusedId) : undefined;
+  useIdleHide(page, channel.id);
 
   // One-shot request from outside the stage ("Watch Stream" in the channel list): focus that stream's tile once it is on this call's stage.
   const focusStream = useVoiceUi(s => s.focusStream);

@@ -1,7 +1,7 @@
 // The call area above a DM chat: who is in the call, who is being rung, and the call bar. Split out of the startup bundle with the
 // voice channel page whose tiles and bar buttons it uses (CallUi.tsx mounts it through lazyModule).
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { BellRing, Headphones, HeadphoneOff, LayoutGrid, Mic, MicOff, MonitorPlay, MonitorUp, Phone, PhoneOff, Video, VideoOff } from "lucide-react";
 import { useStore } from "../api/store";
@@ -19,6 +19,7 @@ import { SpotifyPanel, SpotifyTile, useSpotifyPanel } from "../spotify";
 import { toggleSelfDeaf, toggleSelfMute } from "../voice/engine";
 import { useMedia } from "../voice/mediaStore";
 import { canShareScreen, toggleCamera, toggleScreenShare } from "../voice/videoControls";
+import { useIdleHide } from "../voice/idleHide";
 import { hangUp, ringCall, startCall } from "./engine";
 import { outgoingRinging, useCalls } from "./store";
 
@@ -64,6 +65,8 @@ export function CallPanel({ channel }: { channel: Channel }) {
   const spotifyOpen = useSpotifyPanel(s => s.open);
   const [shelfOpen, setShelfOpen] = useState(false);
   const tiles = useStageTiles(states, channel.id);
+  const section = useRef<HTMLElement>(null);
+  useIdleHide(section, channel.id);
   const inside = useMemo(() => new Set(states.map(s => s.user_id)), [states]);
   const ringing = useUsers(ringingIds, channel);
   const absentIds = useMemo(
@@ -74,7 +77,7 @@ export function CallPanel({ channel }: { channel: Channel }) {
   if (!call && !here) return null;
   const connecting = here && status !== "connected";
   return (
-    <section className="dm-call" aria-label="Call">
+    <section ref={section} className="dm-call" aria-label="Call">
       <div className="dm-call-stage">
         {tiles.map(t => (
           <div key={t.id} className={`dm-call-tile${t.watch ? " watch" : ""}${t.stremio ? " stremio" : ""}${t.spotify ? " spotify" : ""}`}>
