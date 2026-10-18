@@ -5,13 +5,13 @@ vi.mock('../api/rest', async orig => ({ ...(await orig<typeof import('../api/res
 
 import { appStore } from '../api/store';
 import { ChannelType, type Channel, type Message, type ReadState } from '../api/types';
-import { markChannelsRead } from './actions';
+import { markChannelsRead, markGuildsRead } from './actions';
 import { unreadPreview, unreadRows } from './InboxUnreads';
 import { clearPreviews, loadPreview, previewCreate, previewDrop, previewOf } from './inboxPreviews';
 
 const channel = (id: string, last: string | null, extra: Partial<Channel> = {}) => ({ id, guild_id: '1', type: ChannelType.GuildText, last_message_id: last, name: id, ...extra }) as unknown as Channel;
 const read = (channel_id: string, last_message_id: string | null, mention_count = 0): ReadState => ({ channel_id, last_message_id, mention_count }) as ReadState;
-const view = (channels: Channel[], reads: ReadState[]) => ({ channels: Object.fromEntries(channels.map(c => [c.id, c])), readStates: Object.fromEntries(reads.map(r => [r.channel_id, r])) }) as never;
+const view = (channels: Channel[], reads: ReadState[], threads: Channel[] = []) => ({ channels: Object.fromEntries(channels.map(c => [c.id, c])), threads: Object.fromEntries(threads.map(c => [c.id, c])), readStates: Object.fromEntries(reads.map(r => [r.channel_id, r])) }) as never;
 
 describe('unreadRows (Inbox > Unreads)', () => {
   it('lists unread channels newest first, skipping read ones and categories, keeping voice text chats', () => {
@@ -35,6 +35,28 @@ describe('unreadRows (Inbox > Unreads)', () => {
       channel('13', '130'),
     ], [read('12', '1', 1)]), id => muted.has(id));
     expect(rows.map(r => r.channel.id)).toEqual(['13']);
+  });
+});
+
+describe('unreadRows with threads', () => {
+  const member = { id: 't', user_id: 'me', join_timestamp: '', flags: 0, muted: false, mute_config: null };
+  const thread = (id: string, last: string, extra: Partial<Channel> = {}) => channel(id, last, { type: ChannelType.PublicThread, parent_id: '10', member, ...extra } as Partial<Channel>);
+
+  it('lists an unread joined thread among the channels by newest activity', () => {
+    const rows = unreadRows(view([channel('10', '100', { type: ChannelType.GuildText })], [read('10', '100'), read('20', '150', 1)], [thread('20', '300')]));
+    expect(rows.map(r => r.channel.id)).toEqual(['20']);
+    expect(rows[0]?.mentions).toBe(1);
+  });
+
+  it('hides a thread under a muted channel, category or its own mute, and one with no read state', () => {
+    const threads = [thread('20', '300')];
+    const channels = [channel('10', '100', { parent_id: 'cat' })];
+    const reads = [read('10', '100'), read('20', '150')];
+    expect(unreadRows(view(channels, reads, threads), id => id === '10')).toEqual([]);
+    expect(unreadRows(view(channels, reads, threads), id => id === 'cat')).toEqual([]);
+    expect(unreadRows(view(channels, reads, [thread('20', '300', { member: { ...member, muted: true, mute_config: { end_time: null } } } as Partial<Channel>)]))).toEqual([]);
+    expect(unreadRows(view(channels, [read('10', '100')], threads))).toEqual([]);
+    expect(unreadRows(view(channels, reads, threads)).map(r => r.channel.id)).toEqual(['20']);
   });
 });
 
@@ -62,6 +84,19 @@ describe('markChannelsRead (Mark All as Read)', () => {
     appStore.setState(view([], [read('10', '100')]));
     await markChannelsRead([{ channel_id: '10', message_id: '100' }]);
     expect(requestMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('markGuildsRead (Mark Server as Read)', () => {
+  beforeEach(() => { requestMock.mockReset(); requestMock.mockResolvedValue(undefined); });
+
+  it('acks the unread channels and the unread joined threads of the server, not archived or read ones', async () => {
+    const member = { id: 't', user_id: 'me', join_timestamp: '', flags: 0, muted: false, mute_config: null };
+    const thread = (id: string, last: string, extra: Partial<Channel> = {}) => channel(id, last, { type: ChannelType.PublicThread, parent_id: '10', member, ...extra } as Partial<Channel>);
+    const state = view([channel('10', '100')], [read('10', '90'), read('20', '150'), read('21', '400'), read('22', '150')], [thread('20', '300'), thread('21', '400'), thread('22', '300', { thread_metadata: { archived: true } } as Partial<Channel>)]);
+    appStore.setState(state);
+    await markGuildsRead(['1']);
+    expect(requestMock).toHaveBeenCalledWith('POST', '/read-states/ack-bulk', { read_states: [{ channel_id: '10', message_id: '100' }, { channel_id: '20', message_id: '300' }] });
   });
 });
 
