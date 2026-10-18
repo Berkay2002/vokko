@@ -20,7 +20,7 @@ import {
   type EventForm,
   type RepeatChoice,
 } from "./eventUtil";
-import { Modal, request, resolveUrl, uploadAttachment, useStore } from "./shell";
+import { Modal, request, resolveUrl, uploadAttachment, useChatLocale, useStore } from "./shell";
 import { createEvent, editEvent } from "./store";
 import { pickUploadChannel } from "./uploadChannel";
 import type { Attachment } from "../api/types";
@@ -210,11 +210,12 @@ function WizardBody({ guildId, event, rooms, uploadChannel, from }: { guildId: S
   };
 
   const channelName = (id: string) => channels[id]?.name ?? "voice channel";
+  const locale = useChatLocale();
   const preview = useMemo(() => {
     const start = fromInputs(form.startDate, form.startTime);
     const end = fromInputs(form.endDate, form.endTime);
-    return start ? formatEventRange({ scheduled_start_time: start.toISOString(), scheduled_end_time: end?.toISOString() ?? null }) : "";
-  }, [form.startDate, form.startTime, form.endDate, form.endTime]);
+    return start ? formatEventRange({ scheduled_start_time: start.toISOString(), scheduled_end_time: end?.toISOString() ?? null }, undefined, locale) : "";
+  }, [form.startDate, form.startTime, form.endDate, form.endTime, locale]);
 
   const title = editing ? "Edit Event" : "Create Event";
   const show = (key: keyof typeof errors) => (touched ? errors[key] : undefined);

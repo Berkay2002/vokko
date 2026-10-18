@@ -10,7 +10,7 @@ import { emojiShortcodeLabel, frequentEmoji, quickReactions, useEmojiDb } from '
 import { messageStore } from './messageStore';
 import { isSystemMessage, type PendingMessage } from './messageState';
 import { toDisplay } from './mentionText';
-import { BottomSheet, isDeveloperMode, openModal, useLayer, useOutsideClose, usePhone } from './shell';
+import { BottomSheet, isDeveloperMode, messageLink, openModal, useLayer, useOutsideClose, usePhone } from './shell';
 import { comingSoon } from './toast';
 import { ReminderMenu } from '../media/ReminderMenu';
 import { openForward, toggleBookmark, useIsBookmarked } from '../media/store';
@@ -123,7 +123,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     if (!pending) out.push({ id: 'mark-unread', label: 'Mark Unread', icon: <MailOpen size={ICON} />, onSelect: () => messageStore.markUnread(message.channel_id, message.id) });
     out.push({
       id: 'copy-link', label: 'Copy Message Link', icon: <Link2 size={ICON} />,
-      onSelect: () => void navigator.clipboard?.writeText(`${window.location.origin}/channels/${chat.guildId ?? '@me'}/${message.channel_id}/${message.id}`),
+      onSelect: () => void navigator.clipboard?.writeText(messageLink(chat.guildId, message.channel_id, message.id)),
     });
     if (message.content) {
       out.push({

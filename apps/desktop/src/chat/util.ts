@@ -62,6 +62,12 @@ export function formatTime(d: Date, locale = chatLocale()): string {
   const cycle = h12.resolvedOptions().hourCycle;
   return (cycle === 'h23' || cycle === 'h24' ? fmt(locale, 'time24', { hour: '2-digit', minute: '2-digit' }) : h12).format(d);
 }
+/** "Tue, Oct 20, 6:00 PM" / "Tue, Oct 20, 18:00": a short date with the clock, honouring Settings > Language & Time like formatTime. */
+export const formatDateTime = (d: Date, locale = chatLocale()): string => {
+  const choice = timeFormatPref();
+  const hourCycle = choice === '12' ? 'h12' : choice === '24' ? 'h23' : undefined;
+  return fmt(locale, `datetime${choice}`, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hourCycle }).format(d);
+};
 export const formatShortDate = (d: Date, locale = chatLocale()): string => fmt(locale, 'short', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 export const formatFullDate = (d: Date, locale = chatLocale()): string => {
   const choice = timeFormatPref();

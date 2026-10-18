@@ -3,6 +3,8 @@ import { BellRing, Check, Download, Wrench, WifiOff, X } from "lucide-react";
 import { useConnectionState, useCountdown, type ConnectionState } from "../api/connection";
 import { gateway } from "../api/gateway";
 import { useStore } from "../api/store";
+import { flushDrafts } from "../chat/draftStore";
+import { formatDateTime } from "../chat/util";
 import { restartToUpdate, useDesktopUpdate } from "../desktop";
 import { setPref, usePrefs } from "../ui/prefs";
 import { ConnectionStatusModal } from "./ConnectionStatus";
@@ -86,7 +88,7 @@ function ConnectedFlash() {
 function MaintenanceBar({ notice, onDismiss }: { notice: MaintenanceNotice; onDismiss(): void }) {
   const starts = notice.startsAt ? new Date(notice.startsAt) : null;
   const scheduled = starts !== null && !Number.isNaN(starts.getTime()) && starts.getTime() > Date.now();
-  const when = scheduled && starts ? ` Starts ${starts.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.` : "";
+  const when = scheduled && starts ? ` Starts ${formatDateTime(starts)}.` : "";
   return (
     <div className="notify-banner notify-banner-warning" role="region" aria-label="Maintenance" data-testid="maintenance-banner">
       <Wrench size={16} aria-hidden />
@@ -123,6 +125,7 @@ function UpdateBar({ version }: { version: string }) {
     setBusy(true);
     setFailed(false);
     try {
+      flushDrafts();
       await restartToUpdate();
     } catch {
       setFailed(true);

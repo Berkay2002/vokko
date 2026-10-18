@@ -34,6 +34,7 @@ import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } fr
 import { getPrefs, setPref, usePrefs } from "../ui/prefs";
 import { useBackClose, usePhone } from "../ui";
 import { markChannelRead, markGuildRead } from "./actions";
+import { openMessage } from "../notify/controller";
 import { firstTextChannel } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
 import { NARROW_QUERY, useNavDrawer } from "./navDrawer";
@@ -152,6 +153,12 @@ export function AppShell() {
   useEffect(() => {
     appStore.getState().setRoute({ guildId, channelId });
   }, [guildId, channelId]);
+
+  // /channels/:guildId/:channelId/:messageId (a copied message link): open the channel at that message, then drop the id from the URL.
+  const linkedMessageId = params.messageId;
+  useEffect(() => {
+    if (linkedMessageId && channelId) openMessage(channelId, guildId, linkedMessageId, true);
+  }, [linkedMessageId, channelId, guildId]);
 
   // At 1000px and below the side panels start hidden and the toggle works on a per-visit state; the stored choice is for wide windows.
   const compact = useMediaQuery(COMPACT_QUERY);

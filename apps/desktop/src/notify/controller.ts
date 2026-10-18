@@ -85,9 +85,9 @@ export function buildReactionInput(reaction: MessageReactionEvent, now = Date.no
   return { ...rest, reaction, pref: getPrefs().reactionNotifications };
 }
 
-/** Navigates to the message's channel and scrolls to it once the channel has loaded. */
-export function openMessage(channelId: Snowflake, guildId: Snowflake | null, messageId: Snowflake): void {
-  go(guildId ? guildPath(guildId, channelId) : dmPath(channelId));
+/** Navigates to the message's channel and scrolls to it once the channel has loaded. `replace` swaps the current history entry (a message link's URL). */
+export function openMessage(channelId: Snowflake, guildId: Snowflake | null, messageId: Snowflake, replace = false): void {
+  go(guildId ? guildPath(guildId, channelId) : dmPath(channelId), { replace });
   const started = Date.now();
   const poll = () => {
     const there = appStore.getState().route.channelId === channelId;

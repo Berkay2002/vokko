@@ -1,5 +1,6 @@
 // REST calls for applications, commands, interactions, integrations and webhooks (docs/api.md "Apps").
 import { request } from "../api/rest";
+import { inviteOrigin } from "../invites/api";
 import type {
   Application,
   ApplicationCommandIndex,
@@ -42,5 +43,5 @@ export const deleteWebhook = (id: Snowflake): Promise<void> => request("DELETE",
 
 /** The "Add to server" link of an application, opened by the in-app authorize page. */
 export function inviteUrl(app: Pick<Application, "id" | "install_params">): string {
-  return `${window.location.origin}/oauth2/authorize?client_id=${app.id}&permissions=${app.install_params.permissions}&scope=bot%20applications.commands`;
+  return `${inviteOrigin()}/oauth2/authorize?client_id=${app.id}&permissions=${app.install_params.permissions}&scope=bot%20applications.commands`;
 }

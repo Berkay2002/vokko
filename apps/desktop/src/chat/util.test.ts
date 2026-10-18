@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiRequestError } from '../api/errors';
 import { usePrefs } from '../ui/prefs';
 import { MAX_UPLOAD_BYTES, maxUploadBytes, setMaxUploadBytes } from '../api/limits';
-import { formatFullDate, formatMessageTimestamp, formatTime, uploadErrorMessage } from './util';
+import { formatDateTime, formatFullDate, formatMessageTimestamp, formatTime, uploadErrorMessage } from './util';
 
 describe('upload limit', () => {
   it('is 500 MiB, the Nitro limit and the server default', () => {
@@ -57,6 +57,9 @@ describe('formatMessageTimestamp', () => {
       usePrefs.setState({ timeFormat: '12' });
       expect(formatTime(older, 'sv-SE')).toMatch(/^9:24\s?(PM|em)/i);
       expect(formatFullDate(older, 'sv-SE')).toMatch(/9:24/);
+      expect(formatDateTime(older, 'sv-SE')).toMatch(/9:24\s?(PM|em)/i);
+      usePrefs.setState({ timeFormat: '24' });
+      expect(formatDateTime(older, 'en-US')).toMatch(/Oct 9, 21:24$/);
     } finally {
       usePrefs.setState({ timeFormat: 'auto' });
     }

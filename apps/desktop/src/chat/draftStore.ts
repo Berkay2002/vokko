@@ -2,7 +2,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import type { Attachment, Snowflake } from '../api/types';
 import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, maxUploadBytes } from '../api/limits';
-import { uploadAttachment } from './shell';
+import { onSignOut, uploadAttachment } from './shell';
 import { uploadErrorMessage } from './util';
 import type { MentionToken } from './mentionText';
 
@@ -31,14 +31,56 @@ export interface Draft {
 }
 
 const EMPTY: Draft = { text: '', tokens: [], uploads: [] };
-const drafts = new Map<Snowflake, Draft>();
+
+// Text and tokens (not uploads) survive a reload or restart in localStorage, newest last.
+export const DRAFTS_KEY = 'vokko.drafts';
+export const MAX_SAVED_DRAFTS = 50;
+export const MAX_SAVED_TEXT = 4000;
+const SAVE_DELAY_MS = 500;
+
+function loadDrafts(): Map<Snowflake, Draft> {
+  const out = new Map<Snowflake, Draft>();
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(DRAFTS_KEY) ?? '[]');
+    if (!Array.isArray(saved)) return out;
+    for (const e of saved as Array<[Snowflake, string, MentionToken[]]>) {
+      if (Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'string' && e[1] !== '') {
+        out.set(e[0], { text: e[1].slice(0, MAX_SAVED_TEXT), tokens: Array.isArray(e[2]) ? e[2] : [], uploads: [] });
+      }
+    }
+  } catch { /* no storage or a corrupt entry: start empty */ }
+  return out;
+}
+
+const drafts = loadDrafts();
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Writes the drafts now (also on pagehide and before "Restart to Update", where the debounce would lose the last keystrokes). */
+export function flushDrafts(): void {
+  clearTimeout(saveTimer);
+  saveTimer = undefined;
+  const entries = [...drafts].filter(([, d]) => d.text !== '').slice(-MAX_SAVED_DRAFTS).map(([id, d]) => [id, d.text.slice(0, MAX_SAVED_TEXT), d.tokens]);
+  try {
+    if (entries.length === 0) localStorage.removeItem(DRAFTS_KEY); else localStorage.setItem(DRAFTS_KEY, JSON.stringify(entries));
+  } catch { /* storage full or blocked: the draft stays in memory */ }
+}
+const saveSoon = (): void => {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushDrafts, SAVE_DELAY_MS);
+};
+if (typeof window !== 'undefined') window.addEventListener('pagehide', flushDrafts);
+// Drafts belong to the account that typed them: the next sign-in on this machine starts clean.
+onSignOut(() => { drafts.clear(); flushDrafts(); });
+
 const listeners = new Map<Snowflake, Set<() => void>>();
 let seq = 0;
 
 function emit(channelId: Snowflake): void { listeners.get(channelId)?.forEach(l => l()); }
 function patch(channelId: Snowflake, fn: (d: Draft) => Draft): void {
   const next = fn(drafts.get(channelId) ?? EMPTY);
-  if (next.text === '' && next.uploads.length === 0) drafts.delete(channelId); else drafts.set(channelId, next);
+  drafts.delete(channelId); // re-inserted last, so Map order is recency
+  if (next.text !== '' || next.uploads.length > 0) drafts.set(channelId, next);
+  saveSoon();
   emit(channelId);
 }
 
@@ -63,8 +105,8 @@ export function useDraft(channelId: Snowflake): Draft {
 
 export function getDraft(channelId: Snowflake): Draft { return drafts.get(channelId) ?? EMPTY; }
 
-/** True when any channel holds typed text or uploads (empty drafts are dropped from the map). */
-export function hasUnsentDraft(): boolean { return drafts.size > 0; }
+/** True when a channel holds uploads, which a reload loses (typed text is restored from storage). */
+export function hasUnsentDraft(): boolean { return [...drafts.values()].some(d => d.uploads.length > 0); }
 
 export function setDraftText(channelId: Snowflake, text: string, tokens?: MentionToken[]): void {
   patch(channelId, d => ({ ...d, text, tokens: tokens ?? d.tokens }));
@@ -126,5 +168,6 @@ export function removeUpload(channelId: Snowflake, localId: string): void {
 export function clearDraft(channelId: Snowflake): void {
   for (const u of getDraft(channelId).uploads) if (u.previewUrl) URL.revokeObjectURL(u.previewUrl);
   drafts.delete(channelId);
+  flushDrafts(); // a sent message must not come back if the app quits within the debounce
   emit(channelId);
 }

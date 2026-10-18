@@ -10,7 +10,7 @@ export { request, uploadAttachment, resolveUrl, ApiRequestError } from '../api/r
 export { gateway } from '../api/gateway';
 export { displayName, roleColor, roleIcon, avatarUrl, dmName, guildIconUrl, guildInitials } from '../api/store';
 export { markGuildRead, joinGuildWithInvite, joinOrApply, copyText } from '../shell/actions';
-export { go, guildPath } from '../shell/nav';
+export { go, guildPath, messageLink } from '../shell/nav';
 export { openModal, closeModal } from '../shell/modalStore';
 export { openProfile } from '../shell/profileStore';
 /** The user context menu's items, loaded on use: a static import of shell/menus from the chat area loops back into it. */
@@ -25,6 +25,9 @@ const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
 
 /** Puts a user into the shared store (the profile card only opens for users the store holds). */
 export function cacheUser(user: User): void { appStore.getState().cacheUsers([user]); }
+
+/** Runs `cb` when the session ends (the token goes from set to none). */
+export function onSignOut(cb: () => void): void { appStore.subscribe((s, prev) => { if (prev.token && !s.token) cb(); }); }
 
 export function useMe(): User | null { return useStore(s => s.me); }
 /** The startup cache is on screen and the gateway is not ready yet: nothing can be sent. */

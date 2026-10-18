@@ -11,12 +11,14 @@ const MAX_CODE_LEN: usize = 64;
 const MAX_URL_LEN: usize = 4096;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum DeepLink {
     /// `vokko://invite/<code>`
     Invite { code: String, url: String },
     /// `vokko://template/<code>`: a server template link.
     Template { code: String, url: String },
+    /// `vokko://channels/<guild or @me>/<channel>/<message>`, or the same path on an `https://` URL (a copied message link).
+    Message { guild_id: String, channel_id: String, message_id: String, url: String },
     /// `vokko://auth/callback?code=…&state=…`: the OAuth redirect back from the system browser. The web side
     /// parses the query itself, so the full URL is passed through untouched.
     Auth { url: String },
@@ -29,6 +31,12 @@ pub fn parse(url: &str) -> Option<DeepLink> {
         return None;
     }
     let (scheme, rest) = url.split_once("://")?;
+    if scheme.eq_ignore_ascii_case("https") {
+        // No OS hands us https links today; this serves anything that forwards a copied message link (argv, a future universal link).
+        let path = rest.split(['?', '#']).next().unwrap_or_default();
+        let mut parts = path.split('/').filter(|part| !part.is_empty()).skip(1);
+        return (parts.next()? == "channels").then(|| message(&mut parts, url)).flatten();
+    }
     // Debug builds also take `vokko-dev://`, so a test build can register a scheme the installed app never receives.
     if !(scheme.eq_ignore_ascii_case("vokko") || cfg!(debug_assertions) && scheme.eq_ignore_ascii_case("vokko-dev")) {
         return None;
@@ -43,12 +51,22 @@ pub fn parse(url: &str) -> Option<DeepLink> {
             let (code, url) = (code.to_owned(), url.to_owned());
             valid.then(|| if kind == "invite" { DeepLink::Invite { code, url } } else { DeepLink::Template { code, url } })
         }
+        "channels" => message(&mut parts, url),
         "auth" => {
             let is_callback = parts.next().is_some_and(|segment| segment.eq_ignore_ascii_case("callback")) && parts.next().is_none();
             is_callback.then(|| DeepLink::Auth { url: url.to_owned() })
         }
         _ => None,
     }
+}
+
+/// `<guild or @me>/<channel>/<message>`: ids are snowflakes, so a bounded run of digits.
+fn message<'a>(parts: &mut impl Iterator<Item = &'a str>, url: &str) -> Option<DeepLink> {
+    let id = |part: &str| (!part.is_empty() && part.len() <= 20 && part.bytes().all(|b| b.is_ascii_digit())).then(|| part.to_owned());
+    let guild = parts.next()?;
+    let guild_id = if guild == "@me" { guild.to_owned() } else { id(guild)? };
+    let (channel_id, message_id) = (id(parts.next()?)?, id(parts.next()?)?);
+    parts.next().is_none().then(|| DeepLink::Message { guild_id, channel_id, message_id, url: url.to_owned() })
 }
 
 #[derive(Default)]
@@ -134,6 +152,18 @@ mod tests {
     }
 
     #[test]
+    fn parses_message_links() {
+        let link = |url: &str| Some(DeepLink::Message { guild_id: "1".into(), channel_id: "22".into(), message_id: "333".into(), url: url.into() });
+        assert_eq!(parse("vokko://channels/1/22/333"), link("vokko://channels/1/22/333"));
+        assert_eq!(parse("https://vokko.example.com/channels/1/22/333?x=1"), link("https://vokko.example.com/channels/1/22/333?x=1"));
+        let dm =
+            Some(DeepLink::Message { guild_id: "@me".into(), channel_id: "22".into(), message_id: "333".into(), url: "vokko://channels/@me/22/333".into() });
+        assert_eq!(parse("vokko://channels/@me/22/333"), dm);
+        let json = serde_json::to_value(parse("vokko://channels/1/22/333")).unwrap_or_default();
+        assert_eq!(json["guildId"], "1");
+    }
+
+    #[test]
     fn parses_the_auth_callback_with_its_full_url() {
         let url = "vokko://auth/callback?code=a1%2Fb&state=xyz";
         assert_eq!(parse(url), Some(DeepLink::Auth { url: url.into() }));
@@ -147,6 +177,10 @@ mod tests {
         assert_eq!(parse("vokko://invite/a%20b"), None);
         assert_eq!(parse("vokko://invite/a.b"), None);
         assert_eq!(parse("vokko://channels/1/2"), None);
+        assert_eq!(parse("vokko://channels/1/2/3/4"), None);
+        assert_eq!(parse("vokko://channels/x/2/3"), None);
+        assert_eq!(parse("https://host/invite/abc"), None);
+        assert_eq!(parse("https://host/channels/1/2"), None);
         assert_eq!(parse("vokko://auth"), None);
         assert_eq!(parse("vokko://auth/other?code=1"), None);
         assert_eq!(parse("vokko://auth/callback/extra"), None);
