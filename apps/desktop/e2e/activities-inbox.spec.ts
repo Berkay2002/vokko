@@ -112,10 +112,11 @@ test.describe('Inbox > Unreads', () => {
     await expect(page).toHaveURL(/\/channels\/@me\/\d+/);
   });
 
-  test('phone: the unread cards fit the window', async ({ page }) => {
+  test('phone: the Inbox is a bottom sheet and the unread cards fit the window', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/channels/@me?as=sam&mockLatency=0');
     await page.locator('.user-panel').getByRole('button', { name: 'Inbox' }).click();
+    await expect(page.getByRole('dialog', { name: 'Inbox' })).toHaveClass(/\bsheet\b/);
     const card = page.locator('.inbox-popout').getByTestId('inbox-unread').first();
     await expect(card).toBeVisible();
     const box = (await card.boundingBox())!;

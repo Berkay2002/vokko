@@ -14,11 +14,11 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "reminders", label: "Reminders" },
 ];
 
-/** Inbox popout under the title-bar button (above the account card on a phone). Unreads come from read states, Mentions, Bookmarks and Reminders from the server. */
+/** Inbox popout under the title-bar button (a bottom sheet on a phone, opened from the account card). Unreads come from read states, Mentions, Bookmarks and Reminders from the server. */
 export function InboxPopout({ anchor, open, side = "bottom" }: { anchor: HTMLElement | null; open: boolean; side?: "top" | "bottom" }) {
   const [tab, setTab] = useState<Tab>("unreads");
   return (
-    <Popout anchor={anchor} open={open} onClose={closeModal} side={side} align="end" gap={side === "top" ? 8 : 4} className="inbox-popout">
+    <Popout anchor={anchor} open={open} onClose={closeModal} side={side} align="end" gap={side === "top" ? 8 : 4} className="inbox-popout" sheet="Inbox">
       <div className="inbox-header">
         <InboxIcon size={20} />
         <span className="inbox-title">Inbox</span>
