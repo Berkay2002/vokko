@@ -265,6 +265,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             native_voice::native_voice_apply_settings,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_devices,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_watch,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_video_quality,
+            #[cfg(target_os = "linux")]
+            native_voice::native_voice_video_frame,
             links::desktop_take_pending_links,
             updates::desktop_update_status,
             updates::desktop_update_check,

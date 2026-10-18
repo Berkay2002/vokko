@@ -183,9 +183,13 @@ on: on WebKitGTK 2.52.6 `getUserMedia` and `getDisplayMedia` exist, `RTCPeerConn
 call in Rust instead (`src-tauri/src/native_voice`: the LiveKit Rust SDK, cpal's PulseAudio client, which PipeWire serves too, and
 WebRTC's echo canceller / noise suppression / AGC), behind the same `VoiceTransport` as the web (`voice/nativeTransport.ts`, picked
 when `RTCPeerConnection` is missing inside Tauri). Push-to-talk and the voice-activity gate run natively (a port of `voice/vad.ts`);
-RNNoise falls back to WebRTC's noise suppression; the soundboard and entrance sounds play in the page as before. Not yet: cameras,
-screen share and Watch Together streams (no video in the Linux app); a browser without WebRTC still gets `webrtc_unsupported`, and
-the Stremio / Spotify viewer Room goes to `unsupported` instead of retrying.
+RNNoise falls back to WebRTC's noise suppression; the soundboard and entrance sounds play in the page as before. Remote cameras and
+screen shares are received natively too: Rust decodes each subscribed track, scales it down to the tile size (`native_voice/video.rs`,
+capped at 3840x2160) and converts it to RGBA; the page pulls one frame per `native_voice_video_frame` call (an `ArrayBuffer`, so no
+queue builds up when the page is slow), paints a hidden canvas, and its `captureStream()` feeds the tile's `<video>`
+(`voice/nativeVideo.ts`). Not yet: publishing a camera or screen share, a layer list for the quality menu (only "Np" or high), and
+Watch Together streams; a browser without WebRTC still gets `webrtc_unsupported`, and the Stremio / Spotify viewer Room goes to
+`unsupported` instead of retrying.
 
 Check it headless (VPS-style box, no sound card): a PulseAudio with null sinks (`speakers`, a `micfeed` sink remapped as source
 `mic`), `livekit-server --dev`-style config on loopback, a Playwright Chromium peer with a fake microphone, then
@@ -197,6 +201,15 @@ no audio output). Results (0.1.9 + native voice, Ubuntu 26.04 VPS): both directi
 and deafen give digital silence, a `kill -9` of livekit-server reconnects (`reconnecting` → `connected`) and audio resumes ~12 s
 after the server is back; about 17 % of one core and 29 MB with all processing on. Owners: try real devices (USB headset, device
 switching, Bluetooth) and a PipeWire-only desktop.
+
+Video check: a Chromium peer publishes an animated canvas with red, green, blue and white quadrants as a camera or screen share, and
+`NATIVE_VIDEO_PAGE=http://127.0.0.1:<port>/ cargo test -p vokko-desktop live_video_page -- --ignored --nocapture` (same URL/token
+variables, `DISPLAY` on an Xvfb with `NO_AT_BRIDGE=1 GTK_A11Y=none`, or GTK waits ~30 s for the a11y bus) opens a WebKitGTK window
+on `bench.html` from that server. The page plays every announced video through `NativeVideo` and logs painted/shown fps and the
+quadrant colours through the `bench_log` command. Results (Ubuntu 26.04 VPS, Xvfb with software GL, debug build): a 720p camera shows
+at the sender's 19-24 fps with exact colours, at +80 % of one core and +200 MB over an audio-only call (Rust decode, scale and
+convert ~15 % and ~30 MB, the rest WebKit compositing in software); a 1080p screen share shows 12-14 fps of the 15 the canvas sender
+manages, at 117 % of one core. A desktop with GPU compositing should cost less; owners: measure there, and try Wayland.
 
 ## Updater
 
