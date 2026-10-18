@@ -9,25 +9,30 @@ function watchDesktopDownloads(): void {
   void onDesktopEvent<{ success: boolean }>('desktop-download', ({ success }) => chatToast(success ? 'Saved to your Downloads folder.' : 'The download failed.'));
 }
 
+const copyLinkInstead = (url: string, why: string): void => {
+  void navigator.clipboard?.writeText(url).then(() => chatToast(`${why} The link was copied instead.`), () => chatToast(why));
+};
+
 /**
  * Saves a file. The file is fetched first and saved from a blob URL: the `download` attribute is ignored for a file on another
- * origin (the API), where a plain link would navigate away instead. When the fetch is refused the link opens in a new tab.
+ * origin (the API), where a plain link would navigate away instead, and the desktop shell only saves blobs the app made itself.
+ * When the fetch is refused the link is copied instead (a link clicked after the await has lost the user gesture).
  */
 export async function saveMedia(url: string, filename: string): Promise<void> {
   watchDesktopDownloads();
-  const link = document.createElement('a');
-  link.download = filename;
+  let href: string;
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(String(res.status));
-    link.href = URL.createObjectURL(await res.blob());
+    href = URL.createObjectURL(await res.blob());
   } catch {
-    link.href = url;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
+    return copyLinkInstead(url, 'The file could not be downloaded.');
   }
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = href;
   link.click();
-  if (link.href.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+  setTimeout(() => URL.revokeObjectURL(href), 60_000);
 }
 
 /** Re-encodes any picture the browser can decode as PNG, the one image type every clipboard accepts. */
@@ -45,10 +50,6 @@ async function toPng(blob: Blob): Promise<Blob> {
 /** Whether this webview can put a picture on the clipboard (WebKitGTK and old WebViews cannot). */
 const canCopyImages = (): boolean =>
   typeof ClipboardItem !== 'undefined' && !!navigator.clipboard?.write && (ClipboardItem as unknown as { supports?(type: string): boolean }).supports?.('image/png') !== false;
-
-const copyLinkInstead = (url: string, why: string): void => {
-  void navigator.clipboard?.writeText(url).then(() => chatToast(`${why} The link was copied instead.`), () => chatToast(`${why}`));
-};
 
 /**
  * Copy Image. The ClipboardItem is built synchronously from the click (WebKit drops the user gesture across an await) with the
