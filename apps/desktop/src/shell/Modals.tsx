@@ -199,7 +199,20 @@ function CreateServer() {
 
   if (step === "choose")
     return (
-      <Modal open onClose={closeModal} title="Create Your Server" className="modal-create-server">
+      <Modal
+        open
+        onClose={closeModal}
+        title="Create Your Server"
+        className="modal-create-server"
+        footer={
+          <div className="create-server-join">
+            <div className="create-server-join-heading">Have an invite already?</div>
+            <button type="button" className="btn btn-secondary btn-wide" onClick={() => setStep("join")}>
+              Join a Server
+            </button>
+          </div>
+        }
+      >
         <p className="modal-text center">Your server is where you and your friends hang out. Make yours and start talking.</p>
         <button
           type="button"
@@ -215,7 +228,7 @@ function CreateServer() {
           <span>Create My Own</span>
           <ChevronRight size={20} />
         </button>
-        <div className="modal-subheading">Start from a template</div>
+        <div className="modal-section-label">Start from a template</div>
         {SERVER_TEMPLATES.map(t => {
           const Icon = TEMPLATE_ICONS[t.id] ?? Hash;
           return (
@@ -225,7 +238,7 @@ function CreateServer() {
               className="choice-row"
               onClick={() => {
                 setTemplate(t);
-                setStep("customize");
+                setStep("purpose");
               }}
             >
               <span className="choice-icon">
@@ -236,10 +249,6 @@ function CreateServer() {
             </button>
           );
         })}
-        <div className="modal-subheading">Have an invite already?</div>
-        <button type="button" className="btn btn-secondary btn-wide" onClick={() => setStep("join")}>
-          Join a Server
-        </button>
       </Modal>
     );
 
@@ -286,7 +295,7 @@ function CreateServer() {
         title="Customize Your Server"
         footer={
           <>
-            <button type="button" className="btn btn-link footer-back" onClick={() => setStep(template ? "choose" : "purpose")}>
+            <button type="button" className="btn btn-link footer-back" onClick={() => setStep("purpose")}>
               Back
             </button>
             <button type="button" className="btn btn-primary" disabled={busy || uploading || name.trim().length < 2} onClick={() => run(() => createGuild(name.trim(), icon?.id, template))}>
@@ -332,8 +341,14 @@ function CreateServer() {
       <label className="field-label" htmlFor="invite-code">
         Invite link <span className="required">*</span>
       </label>
-      <input id="invite-code" className="input" value={code} placeholder="hTKzmak or https://vokko.example.com/invite/hTKzmak" autoFocus onChange={e => setCode(e.target.value)} onKeyDown={e => e.key === "Enter" && code.trim() && run(() => joinOrApply(code))} />
+      <input id="invite-code" className="input" value={code} placeholder="https://vokko.example.com/invite/hTKzmak" autoFocus onChange={e => setCode(e.target.value)} onKeyDown={e => e.key === "Enter" && code.trim() && run(() => joinOrApply(code))} />
       {error && <p className="field-error">{error}</p>}
+      <div className="invite-examples">
+        <div className="field-label">Invites should look like</div>
+        <p>hTKzmak</p>
+        <p>https://vokko.example.com/invite/hTKzmak</p>
+        <p>https://vokko.example.com/invite/cool-people</p>
+      </div>
     </Modal>
   );
 }
