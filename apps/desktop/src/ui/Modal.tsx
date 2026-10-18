@@ -2,6 +2,7 @@ import { useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { BottomSheet, usePhone } from "./BottomSheet";
+import { useBackClose } from "./backHistory";
 import { useFocusTrap, useLayer } from "./layers";
 
 export interface ModalProps {
@@ -29,6 +30,7 @@ export function Modal({ open, onClose, title, children, footer, className, hideC
   const asSheet = !!sheet && phone;
   const layer = useLayer(open && !asSheet, onClose);
   useFocusTrap(open && !asSheet, () => dialog.current);
+  useBackClose(open && !asSheet && !persistent, onClose);
   if (!open) return null;
   if (asSheet) {
     return (

@@ -1,7 +1,7 @@
 import { createContext, Fragment, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronLeft, X } from "lucide-react";
-import { useFocusTrap, useInertApp, useLayer } from "../../ui";
+import { useBackClose, useFocusTrap, useInertApp, useLayer } from "../../ui";
 
 /** Full-screen settings layer shared by server, channel and category settings (styles in src/styles/server-settings.css). */
 
@@ -62,6 +62,8 @@ export function FullScreenSettings({
   const [pane, setPane] = useState<"nav" | "page">(() => (window.matchMedia("(max-width: 485px)").matches ? "nav" : "page"));
   useLayer(true, onClose);
   useInertApp(true);
+  useBackClose(true, onClose);
+  useBackClose(pane === "page" && window.matchMedia("(max-width: 485px)").matches, () => setPane("nav"));
   useFocusTrap(true, () => root.current);
 
   return createPortal(

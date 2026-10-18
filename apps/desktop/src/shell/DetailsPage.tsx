@@ -6,7 +6,7 @@ import { ChannelType, type Channel } from "../api/types";
 import { PinnedMessages } from "../chat/PinnedMessages";
 import { ThreadsPopout } from "../threads/ThreadsPopout";
 import { hasThreadsType } from "../threads/util";
-import { useContextMenu } from "../ui";
+import { useBackClose, useContextMenu } from "../ui";
 import { Avatar } from "./Avatar";
 import { DmProfilePanel } from "./DmProfilePanel";
 import { isPrivateChannel } from "./channelPrivacy";
@@ -41,6 +41,7 @@ function typeLabel(channel: Channel): string {
  * hold: the member list (or the DM profile), pinned messages, threads, notification settings and the channel menu.
  */
 export function DetailsPage({ channel, onClose }: { channel: Channel; onClose(): void }) {
+  useBackClose(true, onClose);
   const guild = useStore(s => (channel.guild_id ? s.guilds[channel.guild_id] : undefined));
   const { can } = usePermissions(channel.guild_id, channel.id);
   const muted = useIsMuted(channel.id);
