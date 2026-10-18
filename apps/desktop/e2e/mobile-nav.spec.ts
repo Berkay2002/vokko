@@ -207,6 +207,8 @@ test.describe(`${width}x${height}`, () => {
     await page.waitForTimeout(400);
     await sheet.getByRole('menuitem', { name: 'Edit Profile' }).tap();
     const settings = page.getByRole('dialog', { name: 'User Settings' });
+    await expect(settings.getByRole('tab', { name: 'User Profile' })).toBeVisible(); // the Profiles page, not the section list
+    await page.goBack(); // Profiles page -> section list
     const editor = page.getByRole('dialog', { name: 'Edit Profile' });
     await leaveTwice(page, 'profile-editor', {
       open: () => settings.getByRole('button', { name: 'Edit Profiles' }).tap(),
@@ -214,7 +216,6 @@ test.describe(`${width}x${height}`, () => {
       button: editor.locator('.pe-close'),
       back: () => expect(settings.getByRole('button', { name: 'Edit Profiles' })).toBeVisible(),
     });
-    await page.goBack(); // Profiles page -> section list
     await page.goBack(); // section list -> closed
     await expect(settings).toHaveCount(0);
     await expect(page.locator('.sidebar')).toBeVisible();

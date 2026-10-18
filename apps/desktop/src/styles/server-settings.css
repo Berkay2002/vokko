@@ -225,8 +225,23 @@
 }
 
 .ss-preview-banner {
-  height: 60px;
-  background: var(--brand-500);
+  height: 100px;
+  background: var(--brand-500) center / cover no-repeat;
+}
+
+.ss-banner-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.ss-banner-thumb {
+  flex: none;
+  width: 160px;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  background: var(--background-surface-high) center / cover no-repeat;
 }
 
 .ss-preview-icon {
