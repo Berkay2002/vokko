@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { snowflakeToTimestamp } from '../api/snowflake';
-import { addFilter, buildSearchParams, dateRange, groupByChannel, highlightTerms, pageButtons, pendingKeyword, termPattern, type SearchFilter } from './query';
+import { addFilter, buildSearchParams, dateRange, groupByChannel, highlightTerms, pageButtons, pendingKeyword, resolveTyped, termPattern, type SearchFilter } from './query';
 import type { Message } from '../api/types';
 
 const chip = (kind: SearchFilter['kind'], value: string): SearchFilter => ({ kind, value, label: value });
@@ -91,5 +91,38 @@ describe('paging and grouping', () => {
     const hit = (id: string, channel: string) => ({ id, channel_id: channel }) as Message;
     const groups = groupByChannel([hit('1', 'a'), hit('2', 'a'), hit('3', 'b'), hit('4', 'a')]);
     expect(groups.map(g => `${g.channelId}:${g.hits.length}`)).toEqual(['a:2', 'b:1', 'a:1']);
+  });
+});
+
+describe('resolveTyped', () => {
+  const ctx = {
+    users: [{ id: '1', name: 'Alice', username: 'alice' }, { id: '2', name: 'Bobby B', username: 'bob' }],
+    channels: [{ id: '9', name: 'announcements' }],
+    now: new Date(2026, 9, 18),
+  };
+  const kinds = (filters: SearchFilter[]) => filters.map(f => `${f.kind}:${f.value}`);
+
+  it('turns a pasted from:alice docs into a chip and the rest stays text', () => {
+    const typed = resolveTyped('from:alice docs', ctx, true);
+    expect(kinds(typed.filters)).toEqual(['from:1']);
+    expect(typed.text).toBe('docs');
+  });
+  it('waits for the space while a token is still being typed', () => {
+    expect(resolveTyped('docs from:alice', ctx, false)).toEqual({ text: 'docs from:alice', filters: [] });
+    const typed = resolveTyped('docs from:alice ', ctx, false);
+    expect(kinds(typed.filters)).toEqual(['from:1']);
+    expect(typed.text).toBe('docs ');
+    expect(resolveTyped('from:alice ', ctx, false).text).toBe('');
+  });
+  it('resolves users by username or display name, channels, has, pinned and dates', () => {
+    const typed = resolveTyped('mentions:@BOB in:#Announcements has:image pinned:true before:2026-10-05 after:yesterday x', ctx, true);
+    expect(kinds(typed.filters)).toEqual(['mentions:2', 'in:9', 'has:image', 'pinned:true', 'before:2026-10-05', 'after:2026-10-17']);
+    expect(typed.filters[0]?.label).toBe('Bobby B');
+    expect(typed.text).toBe('x');
+    expect(kinds(resolveTyped('from:Alice during:today', ctx, true).filters)).toEqual(['from:1', 'during:2026-10-18']);
+  });
+  it('keeps unknown values, bad dates, unknown keywords and quoted phrases as text', () => {
+    const text = 'from:nosuch has:pdf before:2026-02-30 foo:bar "from:alice" in:general';
+    expect(resolveTyped(text, ctx, true)).toEqual({ text, filters: [] });
   });
 });
