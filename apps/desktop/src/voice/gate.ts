@@ -4,6 +4,7 @@
 
 import type { AudioProcessorOptions, Track, TrackProcessor } from "livekit-client";
 import { InputChain } from "./inputChain";
+import { MutedTap } from "./mutedTap";
 import { MutedTalkDetector, VadGate } from "./vad";
 import type { VoiceSettings } from "./reducer";
 
@@ -20,8 +21,10 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
   private openNow = false;
   private muted: boolean;
   private readonly talk = new MutedTalkDetector();
-  /** The raw track is disabled while muted (LiveKit), so the chain listens to a clone that stays live: its level feeds the "you are muted" hint, and the gate keeps nothing audible. */
-  private tap: MediaStreamTrack | null = null;
+  /** The raw track: the published chain reads it, and LiveKit disables it on mute, so mute means silence whatever the gate does. */
+  private raw: MediaStreamTrack | null = null;
+  /** While muted only: a live clone for the "you are muted" hint. Never connected to the output. */
+  private tap: MutedTap | null = null;
 
   constructor(
     settings: VoiceSettings,
@@ -40,9 +43,8 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
   async init(opts: AudioProcessorOptions): Promise<void> {
     const ctx = opts.audioContext;
     this.ctx = ctx;
-    this.tap = opts.track.clone();
-    this.tap.enabled = true;
-    const source = ctx.createMediaStreamSource(new MediaStream([this.tap]));
+    this.raw = opts.track;
+    const source = ctx.createMediaStreamSource(new MediaStream([opts.track]));
     const gain = ctx.createGain();
     gain.gain.value = 0;
     const dest = ctx.createMediaStreamDestination();
@@ -55,6 +57,7 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
     chain.output.connect(gain).connect(dest);
     this.nodes = { chain, gain, dest };
     this.processedTrack = dest.stream.getAudioTracks()[0];
+    this.syncTap();
   }
 
   async restart(opts: AudioProcessorOptions): Promise<void> {
@@ -69,8 +72,8 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
       gain.disconnect();
       dest.stream.getTracks().forEach(t => t.stop());
     }
-    this.tap?.stop();
-    this.tap = null;
+    this.pauseTap();
+    this.raw = null;
     this.nodes = null;
     this.processedTrack = undefined;
     this.set(false);
@@ -84,12 +87,28 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
     this.muted = muted;
     this.talk.reset();
     this.gate.setForcedClosed(muted);
-    // The chain listens to a live clone, so muting must silence the published path itself: no ramp.
+    // Belt and braces: the disabled raw track already means silence; this also cuts the gate ramp at once.
     if (muted && this.nodes) {
       this.nodes.gain.gain.cancelScheduledValues(0);
       this.nodes.gain.gain.value = 0;
     }
     this.set(this.gate.open);
+    this.syncTap();
+  }
+
+  /** Releases the hint's clone. The transport calls this before anything that re-captures the mic (device switch, restart). */
+  pauseTap(): void {
+    this.tap?.stop();
+    this.tap = null;
+  }
+
+  private syncTap(): void {
+    if (!this.muted) return this.pauseTap();
+    if (this.tap || !this.ctx || !this.raw || !this.nodes) return;
+    this.tap = new MutedTap(this.ctx, this.raw, db => {
+      this.gate.push(db); // forced closed: only keeps the noise floor of the auto threshold
+      if (this.talk.push(db, this.gate.effectiveThresholdDb)) this.onMutedSpeech?.();
+    });
   }
 
   configure(settings: VoiceSettings): void {
@@ -103,8 +122,8 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
   }
 
   private frame(levelDb: number): void {
+    if (this.muted) return; // the raw track is disabled: the clone's level (syncTap) drives the floor and the hint
     this.set(this.gate.push(levelDb));
-    if (this.muted && this.talk.push(levelDb, this.gate.effectiveThresholdDb)) this.onMutedSpeech?.();
   }
 
   private set(open: boolean): void {

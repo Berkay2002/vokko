@@ -14,7 +14,7 @@ const ACTIONS: [string, () => void][] = [
   ["togglecamera", toggleCamera],
 ];
 
-type Sentinel = { release(): Promise<void> };
+type Sentinel = { release(): Promise<void>; addEventListener?(type: "release", listener: () => void): void };
 
 let lock: Sentinel | null = null;
 let requesting = false;
@@ -27,8 +27,13 @@ async function holdScreen(): Promise<void> {
   requesting = true;
   try {
     const sentinel = await navigator.wakeLock.request("screen");
-    if (active) lock = sentinel;
-    else void sentinel.release().catch(() => undefined);
+    if (active) {
+      lock = sentinel;
+      // The browser drops the lock when the page is hidden: forget it so the next visibilitychange takes a new one.
+      sentinel.addEventListener?.("release", () => {
+        if (lock === sentinel) lock = null;
+      });
+    } else void sentinel.release().catch(() => undefined);
   } catch {
     // Denied (low battery, no user activation): the screen just sleeps as before.
   } finally {
@@ -72,7 +77,7 @@ export function wireCallSession(): void {
       active = true;
       const channel = appStore.getState().channels[next.channelId as string];
       const guild = channel?.guild_id ? appStore.getState().guilds[channel.guild_id] : undefined;
-      setMediaSession(true, (channel && !channel.guild_id ? dmName(channel) : channel?.name) ?? "Voice call", guild?.name ?? "Vokko");
+      if (onPhone()) setMediaSession(true, (channel && !channel.guild_id ? dmName(channel) : channel?.name) ?? "Voice call", guild?.name ?? "Vokko");
       void holdScreen();
     } else if (!inCall && active) {
       active = false;
