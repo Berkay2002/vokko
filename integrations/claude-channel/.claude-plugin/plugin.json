@@ -1,0 +1,7 @@
+{
+  "name": "vokko",
+  "description": "Vokko channel for Claude Code: your own Claude as a Vokko bot (\"<you>'s Claude\" in servers, \"Claude\" in DMs), with pairing, allowlists and per-channel opt-in. Manage access via /vokko:access.",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "keywords": ["vokko", "messaging", "channel", "mcp"]
+}

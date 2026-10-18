@@ -1,0 +1,625 @@
+/**
+ * The Vokko side of the channel, kept apart from the MCP glue in server.ts so
+ * another assistant backend can reuse it: bot login (REST + gateway), the
+ * access.json allowlist with DM pairing, per-channel guild opt-in with
+ * requireMention, the "<owner>'s <Name>" guild nickname, and the outbound
+ * calls (reply, react, edit, history, attachments).
+ *
+ * Ported from Anthropic's Discord channel plugin (Apache-2.0, see NOTICE).
+ * Vokko's bot API is Discord-shaped but not Discord-identical (gateway at
+ * /gateway without ?v=, READY carries full guilds, no /gateway/bot), so this
+ * talks to it directly with fetch + WebSocket instead of discord.js.
+ */
+
+import { randomBytes } from 'crypto'
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
+import { basename, join, sep } from 'path'
+
+// ---- Vokko wire shapes (the subset used here; apps/desktop/src/api/types.ts is the source of truth) ----
+
+export type User = { id: string; username: string; global_name: string | null; bot?: boolean }
+export type Attachment = { id: string; filename: string; content_type: string | null; size: number; url: string }
+export type Message = {
+  id: string
+  channel_id: string
+  guild_id: string | null
+  author: User
+  content: string
+  timestamp: string
+  mentions: User[]
+  attachments: Attachment[]
+  referenced_message: Message | null
+  webhook_id?: string
+}
+type Channel = { id: string; type: number; guild_id?: string | null; parent_id?: string | null; recipients?: User[] }
+type Member = { user: User; nick?: string | null }
+type Guild = { id: string; channels?: Channel[]; threads?: Channel[]; members?: Member[] }
+
+const THREAD_TYPES = new Set([10, 11, 12])
+
+// ---- config and state files ----
+
+export type Config = {
+  stateDir: string
+  token: string
+  /** Server root, e.g. https://vokko.example.com (REST lives under /api/v1). */
+  apiUrl: string
+  gatewayUrl: string
+  /** The assistant's name: guild nickname "<owner>'s <botName>", and the name used in pairing replies. */
+  botName: string
+  /** Overrides the owner's display name read from GET /applications/@me. */
+  ownerName?: string
+  /** Shown in pairing replies, e.g. "/vokko:access pair". */
+  pairCommand: string
+  /** Access snapshotted at boot, never written (pairing downgraded to allowlist). */
+  staticMode: boolean
+  log: (line: string) => void
+}
+
+/** Loads <stateDir>/.env into process.env (the real environment wins) and builds the config. */
+export function loadConfig(stateDir: string, pairCommand: string, log: (line: string) => void): Config {
+  const envFile = join(stateDir, '.env')
+  try {
+    // The token is a credential: lock it to the owner. No-op on Windows (would need ACLs).
+    chmodSync(envFile, 0o600)
+    for (const line of readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^(\w+)=(.*)$/)
+      if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2]
+    }
+  } catch {}
+  const token = process.env.VOKKO_BOT_TOKEN ?? ''
+  const apiUrl = (process.env.VOKKO_API_URL ?? '').replace(/\/+$/, '')
+  if (!token || !apiUrl) {
+    log(`vokko channel: VOKKO_BOT_TOKEN and VOKKO_API_URL required\n  set in ${envFile}\n  format: VOKKO_BOT_TOKEN=...  VOKKO_API_URL=https://your.vokko.server\n`)
+    process.exit(1)
+  }
+  return {
+    stateDir,
+    token,
+    apiUrl,
+    gatewayUrl: process.env.VOKKO_GATEWAY_URL ?? `${apiUrl.replace(/^http/, 'ws')}/gateway`,
+    botName: process.env.VOKKO_BOT_NAME || 'Claude',
+    ownerName: process.env.VOKKO_OWNER_NAME || undefined,
+    pairCommand,
+    staticMode: process.env.VOKKO_ACCESS_MODE === 'static',
+    log,
+  }
+}
+
+type PendingEntry = {
+  senderId: string
+  chatId: string // DM channel id: where to send the approval confirm
+  createdAt: number
+  expiresAt: number
+  replies: number
+}
+
+type GroupPolicy = { requireMention: boolean; allowFrom: string[] }
+
+export type Access = {
+  dmPolicy: 'pairing' | 'allowlist' | 'disabled'
+  allowFrom: string[]
+  /** Keyed on channel id, not guild id. One entry per guild channel. */
+  groups: Record<string, GroupPolicy>
+  pending: Record<string, PendingEntry>
+  mentionPatterns?: string[]
+  /** Emoji to react with on receipt. Empty string disables. Unicode or name:id. */
+  ackReaction?: string
+  /** Which chunks quote-reply when reply_to is passed. Default: 'first'. */
+  replyToMode?: 'off' | 'first' | 'all'
+  /** Max chars per outbound message before splitting. Default and cap: 2000. */
+  textChunkLimit?: number
+  chunkMode?: 'length' | 'newline'
+  /** Who answers DMs: this Claude Code session ('subscription', default) or a separate bridge on the same token ('api'): then DMs are ignored here. */
+  dmBackend?: 'subscription' | 'api'
+  /** false: guild messages are ignored here (a separate bridge on the same token owns them). Default true. */
+  guilds?: boolean
+}
+
+function defaultAccess(): Access {
+  return { dmPolicy: 'pairing', allowFrom: [], groups: {}, pending: {} }
+}
+
+export const MAX_CHUNK_LIMIT = 2000
+
+export type GateResult = { action: 'deliver'; access: Access } | { action: 'drop' } | { action: 'pair'; code: string; isResend: boolean }
+
+/** Splits text at the limit, preferring paragraph, then line, then word boundaries in 'newline' mode. */
+export function chunk(text: string, limit: number, mode: 'length' | 'newline'): string[] {
+  if (text.length <= limit) return [text]
+  const out: string[] = []
+  let rest = text
+  while (rest.length > limit) {
+    let cut = limit
+    if (mode === 'newline') {
+      const para = rest.lastIndexOf('\n\n', limit)
+      const line = rest.lastIndexOf('\n', limit)
+      const space = rest.lastIndexOf(' ', limit)
+      cut = para > limit / 2 ? para : line > limit / 2 ? line : space > 0 ? space : limit
+    }
+    out.push(rest.slice(0, cut))
+    rest = rest.slice(cut).replace(/^\n+/, '')
+  }
+  if (rest) out.push(rest)
+  return out
+}
+
+/** "<owner>'s <name>", cut to Vokko's 32-character nickname limit by shortening the owner part. */
+export function nickname(owner: string, botName: string): string {
+  const suffix = `'s ${botName}`
+  return [...owner].slice(0, Math.max(1, 32 - [...suffix].length)).join('').trimEnd() + suffix
+}
+
+// Attachment names are uploader-controlled and land inside [...] annotations and newline-joined tool results.
+export function safeAttName(att: Attachment): string {
+  return (att.filename || att.id).replace(/[\[\]\r\n;]/g, '_')
+}
+
+export class VokkoBot {
+  readonly cfg: Config
+  me: User | null = null
+  maxUploadBytes = 25 * 1024 * 1024
+  private readonly accessFile: string
+  private readonly approvedDir: string
+  private readonly inboxDir: string
+  private readonly bootAccess: Access | null
+  private readonly channels = new Map<string, Channel>()
+  private readonly dmByUser = new Map<string, string>()
+  private ownerName: string | null = null
+  private ws: WebSocket | null = null
+  private seq: number | null = null
+  private sessionId: string | null = null
+  private heartbeat: ReturnType<typeof setInterval> | null = null
+  private acked = true
+  private stopped = false
+  private backoff = 1000
+
+  constructor(cfg: Config, private readonly onMessage: (msg: Message) => void) {
+    this.cfg = cfg
+    this.accessFile = join(cfg.stateDir, 'access.json')
+    this.approvedDir = join(cfg.stateDir, 'approved')
+    this.inboxDir = join(cfg.stateDir, 'inbox')
+    // In static mode pairing would hand out codes that can never be approved, so it is downgraded to allowlist.
+    this.bootAccess = cfg.staticMode
+      ? (() => {
+          const a = this.readAccessFile()
+          if (a.dmPolicy === 'pairing') {
+            cfg.log('vokko channel: static mode — dmPolicy "pairing" downgraded to "allowlist"\n')
+            a.dmPolicy = 'allowlist'
+          }
+          a.pending = {}
+          return a
+        })()
+      : null
+  }
+
+  // ---- access.json ----
+
+  private readAccessFile(): Access {
+    try {
+      const parsed = JSON.parse(readFileSync(this.accessFile, 'utf8')) as Partial<Access>
+      return {
+        dmPolicy: parsed.dmPolicy ?? 'pairing',
+        allowFrom: parsed.allowFrom ?? [],
+        groups: parsed.groups ?? {},
+        pending: parsed.pending ?? {},
+        mentionPatterns: parsed.mentionPatterns,
+        ackReaction: parsed.ackReaction,
+        replyToMode: parsed.replyToMode,
+        textChunkLimit: parsed.textChunkLimit,
+        chunkMode: parsed.chunkMode,
+        dmBackend: parsed.dmBackend,
+        guilds: parsed.guilds,
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return defaultAccess()
+      try {
+        renameSync(this.accessFile, `${this.accessFile}.corrupt-${Date.now()}`)
+      } catch {}
+      this.cfg.log('vokko channel: access.json is corrupt, moved aside. Starting fresh.\n')
+      return defaultAccess()
+    }
+  }
+
+  loadAccess(): Access {
+    return this.bootAccess ?? this.readAccessFile()
+  }
+
+  private saveAccess(a: Access): void {
+    if (this.cfg.staticMode) return
+    mkdirSync(this.cfg.stateDir, { recursive: true, mode: 0o700 })
+    const tmp = this.accessFile + '.tmp'
+    writeFileSync(tmp, JSON.stringify(a, null, 2) + '\n', { mode: 0o600 })
+    renameSync(tmp, this.accessFile)
+  }
+
+  // The reply tool's files param takes any path; the channel's own state (token, access.json) is never sendable.
+  assertSendable(f: string): void {
+    // macOS and Windows file systems are case-insensitive by default: compare folded paths there.
+    const fold = (p: string) => (process.platform === 'linux' ? p : p.toLowerCase())
+    let real: string, stateReal: string
+    try {
+      real = fold(realpathSync.native(f))
+      stateReal = fold(realpathSync.native(this.cfg.stateDir))
+    } catch {
+      return // statSync fails properly later; or the state dir is absent and there is nothing to leak
+    }
+    const inbox = join(stateReal, 'inbox')
+    if (real.startsWith(stateReal + sep) && !real.startsWith(inbox + sep)) {
+      throw new Error(`refusing to send channel state: ${f}`)
+    }
+  }
+
+  // ---- inbound gate ----
+
+  async gate(msg: Message): Promise<GateResult> {
+    const access = this.loadAccess()
+    const now = Date.now()
+    let pruned = false
+    for (const [code, p] of Object.entries(access.pending)) {
+      if (p.expiresAt < now) {
+        delete access.pending[code]
+        pruned = true
+      }
+    }
+    if (pruned) this.saveAccess(access)
+
+    if (access.dmPolicy === 'disabled') return { action: 'drop' }
+    const senderId = msg.author.id
+
+    if (msg.guild_id == null) {
+      if (access.dmBackend === 'api') return { action: 'drop' } // the bridge answers DMs, pairing included
+      if (access.allowFrom.includes(senderId)) return { action: 'deliver', access }
+      if (access.dmPolicy === 'allowlist') return { action: 'drop' }
+      for (const [code, p] of Object.entries(access.pending)) {
+        if (p.senderId === senderId) {
+          // Reply twice max (initial + one reminder), then go silent.
+          if ((p.replies ?? 1) >= 2) return { action: 'drop' }
+          p.replies = (p.replies ?? 1) + 1
+          this.saveAccess(access)
+          return { action: 'pair', code, isResend: true }
+        }
+      }
+      // Cap pending at 3. Extra attempts are silently dropped.
+      if (Object.keys(access.pending).length >= 3) return { action: 'drop' }
+      const code = randomBytes(3).toString('hex')
+      access.pending[code] = { senderId, chatId: msg.channel_id, createdAt: now, expiresAt: now + 60 * 60 * 1000, replies: 1 }
+      this.saveAccess(access)
+      return { action: 'pair', code, isResend: false }
+    }
+
+    if (access.guilds === false) return { action: 'drop' }
+    // Keyed on channel id; threads inherit their parent's opt-in (the reply still goes to the thread).
+    const policy = access.groups[this.gateKey(msg.channel_id)]
+    if (!policy) return { action: 'drop' }
+    const groupAllowFrom = policy.allowFrom ?? []
+    if (groupAllowFrom.length > 0 && !groupAllowFrom.includes(senderId)) return { action: 'drop' }
+    if ((policy.requireMention ?? true) && !this.isMentioned(msg, access.mentionPatterns)) return { action: 'drop' }
+    return { action: 'deliver', access }
+  }
+
+  private gateKey(channelId: string): string {
+    const ch = this.channels.get(channelId)
+    return ch && THREAD_TYPES.has(ch.type) && ch.parent_id ? ch.parent_id : channelId
+  }
+
+  private isMentioned(msg: Message, extraPatterns?: string[]): boolean {
+    const me = this.me?.id
+    if (me && msg.mentions.some(u => u.id === me)) return true
+    // A reply to one of our messages counts as a mention (Vokko sends the referenced message inline).
+    if (me && msg.referenced_message?.author.id === me) return true
+    for (const pat of extraPatterns ?? []) {
+      try {
+        if (new RegExp(pat, 'i').test(msg.content)) return true
+      } catch {}
+    }
+    return false
+  }
+
+  /** Handles the gate's verdict for pairing (sends the code) and returns whether the message should be delivered. */
+  async admit(msg: Message): Promise<Access | null> {
+    const result = await this.gate(msg)
+    if (result.action === 'drop') return null
+    if (result.action === 'pair') {
+      const lead = result.isResend ? 'Still pending' : 'Pairing required'
+      try {
+        await this.send(msg.channel_id, `${lead} — run in ${this.cfg.botName}'s terminal:\n\n${this.cfg.pairCommand} ${result.code}`, msg.id)
+      } catch (err) {
+        this.cfg.log(`vokko channel: failed to send pairing code: ${err}\n`)
+      }
+      return null
+    }
+    return result.access
+  }
+
+  // The access skill drops approved/<senderId> (contents: the DM channel id) when it pairs someone.
+  private checkApprovals(): void {
+    let files: string[]
+    try {
+      files = readdirSync(this.approvedDir)
+    } catch {
+      return
+    }
+    for (const senderId of files) {
+      const file = join(this.approvedDir, senderId)
+      let dmChannelId = ''
+      try {
+        dmChannelId = readFileSync(file, 'utf8').trim()
+      } catch {}
+      rmSync(file, { force: true }) // removed either way: never loop on a broken send
+      if (!dmChannelId) continue
+      this.send(dmChannelId, `Paired! Say hi to ${this.cfg.botName}.`).catch(err => this.cfg.log(`vokko channel: failed to send approval confirm: ${err}\n`))
+    }
+  }
+
+  // ---- REST ----
+
+  async api<T>(method: string, path: string, body?: unknown): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      const form = body instanceof FormData
+      const res = await fetch(`${this.cfg.apiUrl}/api/v1${path}`, {
+        method,
+        headers: { Authorization: `Bot ${this.cfg.token}`, ...(body !== undefined && !form ? { 'Content-Type': 'application/json' } : {}) },
+        body: body === undefined ? undefined : form ? body : JSON.stringify(body),
+      })
+      if (res.status === 429 && attempt < 3) {
+        await new Promise(r => setTimeout(r, Math.min(10, Number(res.headers.get('retry-after')) || 1) * 1000))
+        continue
+      }
+      if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${await res.text()}`)
+      return (res.status === 204 ? undefined : await res.json()) as T
+    }
+  }
+
+  // ---- outbound gate: tools reach only chats the inbound gate would deliver from ----
+
+  async allowedChannel(id: string): Promise<void> {
+    const access = this.loadAccess()
+    const ch = this.channels.get(id)
+    if (ch?.type === 1) {
+      const userId = ch.recipients?.find(u => u.id !== this.me?.id)?.id
+      if (access.dmBackend !== 'api' && userId && access.allowFrom.includes(userId)) return
+    } else if (ch && access.guilds !== false && this.gateKey(id) in access.groups) {
+      return
+    }
+    throw new Error(`channel ${id} is not allowlisted — add via ${this.cfg.pairCommand.replace(/ pair$/, '')}`)
+  }
+
+  async send(channelId: string, content: string, replyTo?: string, attachmentIds: string[] = []): Promise<Message> {
+    return this.api<Message>('POST', `/channels/${channelId}/messages`, {
+      content,
+      ...(replyTo ? { message_reference: { message_id: replyTo } } : {}),
+      ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+    })
+  }
+
+  /** Sends text (chunked per access.json) with files on the first chunk; returns the sent ids. */
+  async reply(chatId: string, text: string, replyTo?: string, files: string[] = []): Promise<string[]> {
+    await this.allowedChannel(chatId)
+    if (files.length > 10) throw new Error('Vokko allows max 10 attachments per message')
+    for (const f of files) {
+      this.assertSendable(f)
+      const st = statSync(f)
+      if (st.size > this.maxUploadBytes) throw new Error(`file too large: ${f} (${(st.size / 1024 / 1024).toFixed(1)}MB, max ${(this.maxUploadBytes / 1024 / 1024).toFixed(0)}MB)`)
+    }
+    const access = this.loadAccess()
+    const limit = Math.max(1, Math.min(access.textChunkLimit ?? MAX_CHUNK_LIMIT, MAX_CHUNK_LIMIT))
+    const replyMode = access.replyToMode ?? 'first'
+    const chunks = chunk(text, limit, access.chunkMode ?? 'length')
+    const sentIds: string[] = []
+    try {
+      const uploaded: string[] = []
+      for (const f of files) {
+        const form = new FormData()
+        form.append('file', new Blob([readFileSync(f)]), basename(f))
+        uploaded.push((await this.api<Attachment>('POST', `/channels/${chatId}/attachments`, form)).id)
+      }
+      for (let i = 0; i < chunks.length; i++) {
+        const quote = replyTo != null && replyMode !== 'off' && (replyMode === 'all' || i === 0)
+        const sent = await this.send(chatId, chunks[i], quote ? replyTo : undefined, i === 0 ? uploaded : [])
+        sentIds.push(sent.id)
+      }
+    } catch (err) {
+      throw new Error(`reply failed after ${sentIds.length} of ${chunks.length} chunk(s) sent: ${err instanceof Error ? err.message : err}`)
+    }
+    return sentIds
+  }
+
+  async react(chatId: string, messageId: string, emoji: string): Promise<void> {
+    await this.allowedChannel(chatId)
+    // custom emoji may come as <:name:id> or <a:name:id>; Vokko takes name:id
+    const e = emoji.replace(/^<a?:([^:>]+):(\d+)>$/, '$1:$2')
+    await this.api('PUT', `/channels/${chatId}/messages/${messageId}/reactions/${encodeURIComponent(e)}/@me`)
+  }
+
+  async edit(chatId: string, messageId: string, text: string): Promise<Message> {
+    await this.allowedChannel(chatId)
+    return this.api<Message>('PATCH', `/channels/${chatId}/messages/${messageId}`, { content: text })
+  }
+
+  /** Newest `limit` messages, oldest first. */
+  async history(chatId: string, limit: number): Promise<Message[]> {
+    await this.allowedChannel(chatId)
+    const msgs = await this.api<Message[]>('GET', `/channels/${chatId}/messages?limit=${Math.max(1, Math.min(limit, 100))}`)
+    return msgs.reverse()
+  }
+
+  async message(chatId: string, messageId: string): Promise<Message> {
+    await this.allowedChannel(chatId)
+    const [msg] = await this.api<Message[]>('GET', `/channels/${chatId}/messages?around=${messageId}&limit=1`)
+    if (msg?.id !== messageId) throw new Error(`message ${messageId} not found`)
+    return msg
+  }
+
+  /** Saves an attachment into <stateDir>/inbox and returns its path. */
+  async download(att: Attachment): Promise<string> {
+    if (att.size > this.maxUploadBytes) throw new Error(`attachment too large: ${(att.size / 1024 / 1024).toFixed(1)}MB`)
+    // The token only goes to our own server, never to wherever an attachment URL might point.
+    const own = new URL(att.url).origin === new URL(this.cfg.apiUrl).origin
+    const res = await fetch(att.url, own ? { headers: { Authorization: `Bot ${this.cfg.token}` } } : {})
+    if (!res.ok) throw new Error(`download ${att.id}: ${res.status}`)
+    const buf = Buffer.from(await res.arrayBuffer())
+    const rawExt = att.filename.includes('.') ? att.filename.slice(att.filename.lastIndexOf('.') + 1) : 'bin'
+    const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '') || 'bin'
+    const path = join(this.inboxDir, `${Date.now()}-${att.id}.${ext}`)
+    mkdirSync(this.inboxDir, { recursive: true })
+    writeFileSync(path, buf)
+    return path
+  }
+
+  /** Sends a DM to an allowlisted user (opens the DM channel if needed). */
+  async dmUser(userId: string, text: string): Promise<void> {
+    let chatId = this.dmByUser.get(userId)
+    if (!chatId) {
+      const ch = await this.api<Channel>('POST', '/users/@me/channels', { recipient_id: userId })
+      this.cacheChannel(ch)
+      chatId = ch.id
+    }
+    for (const part of chunk(text, MAX_CHUNK_LIMIT, 'newline')) await this.send(chatId, part)
+  }
+
+  typing(chatId: string): void {
+    this.api('POST', `/channels/${chatId}/typing`).catch(() => {})
+  }
+
+  // ---- nickname ----
+
+  private async owner(): Promise<string | null> {
+    if (this.cfg.ownerName) return this.cfg.ownerName
+    if (this.ownerName) return this.ownerName
+    try {
+      const app = await this.api<{ owner_id: string }>('GET', '/applications/@me')
+      const owner = await this.api<User>('GET', `/users/${app.owner_id}`)
+      this.ownerName = owner.global_name || owner.username
+    } catch (err) {
+      this.cfg.log(`vokko channel: cannot read the application owner (set VOKKO_OWNER_NAME): ${err}\n`)
+    }
+    return this.ownerName
+  }
+
+  private async setNickname(guild: Guild): Promise<void> {
+    const owner = await this.owner()
+    if (!owner || !this.me) return
+    const nick = nickname(owner, this.cfg.botName)
+    if (guild.members?.find(m => m.user.id === this.me?.id)?.nick === nick) return
+    try {
+      await this.api('PATCH', `/guilds/${guild.id}/members/@me`, { nick })
+    } catch (err) {
+      this.cfg.log(`vokko channel: could not set nickname in guild ${guild.id} (needs CHANGE_NICKNAME): ${err}\n`)
+    }
+  }
+
+  // ---- gateway ----
+
+  private cacheChannel(ch: Channel): void {
+    this.channels.set(ch.id, ch)
+    const other = ch.type === 1 ? ch.recipients?.find(u => u.id !== this.me?.id) : undefined
+    if (other) this.dmByUser.set(other.id, ch.id)
+  }
+
+  private cacheGuild(g: Guild): void {
+    for (const ch of [...(g.channels ?? []), ...(g.threads ?? [])]) this.cacheChannel({ ...ch, guild_id: g.id })
+  }
+
+  private dispatch(t: string, d: any): void {
+    switch (t) {
+      case 'READY':
+        this.me = d.user
+        this.sessionId = d.session_id
+        if (typeof d.max_upload_bytes === 'number') this.maxUploadBytes = d.max_upload_bytes
+        for (const ch of d.private_channels ?? []) this.cacheChannel(ch)
+        for (const g of d.guilds ?? []) {
+          this.cacheGuild(g)
+          void this.setNickname(g)
+        }
+        this.cfg.log(`vokko channel: gateway connected as ${d.user.username}\n`)
+        break
+      case 'GUILD_CREATE':
+        this.cacheGuild(d)
+        void this.setNickname(d)
+        break
+      case 'CHANNEL_CREATE':
+      case 'CHANNEL_UPDATE':
+      case 'THREAD_CREATE':
+      case 'THREAD_UPDATE':
+        this.cacheChannel(d)
+        break
+      case 'MESSAGE_CREATE': {
+        const msg = d as Message
+        if (msg.author.bot || msg.webhook_id || msg.author.id === this.me?.id) return
+        // a DM channel we have not seen yet (opened by the other side)
+        if (msg.guild_id == null && !this.channels.has(msg.channel_id)) this.cacheChannel({ id: msg.channel_id, type: 1, recipients: [msg.author] })
+        this.onMessage(msg)
+        break
+      }
+    }
+  }
+
+  private sendWs(op: number, d: unknown): void {
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ op, d }))
+  }
+
+  private connect(): void {
+    const ws = new WebSocket(this.cfg.gatewayUrl)
+    this.ws = ws
+    ws.onmessage = ev => {
+      const p = JSON.parse(String(ev.data)) as { op: number; d: any; s?: number | null; t?: string | null }
+      if (p.s != null) this.seq = p.s
+      switch (p.op) {
+        case 0:
+          this.backoff = 1000
+          this.dispatch(p.t ?? '', p.d)
+          break
+        case 10:
+          if (this.heartbeat) clearInterval(this.heartbeat)
+          this.acked = true
+          this.heartbeat = setInterval(() => {
+            // no ack since the last beat: the connection is a zombie, reconnect
+            if (!this.acked) return ws.close(4000)
+            this.acked = false
+            this.sendWs(1, this.seq)
+          }, p.d.heartbeat_interval)
+          if (this.sessionId && this.seq != null) this.sendWs(6, { token: `Bot ${this.cfg.token}`, session_id: this.sessionId, seq: this.seq })
+          else this.sendWs(2, { token: `Bot ${this.cfg.token}` })
+          break
+        case 11:
+          this.acked = true
+          break
+        case 1:
+          this.sendWs(1, this.seq)
+          break
+        case 7:
+          ws.close(4000)
+          break
+        case 9:
+          this.sessionId = null
+          this.seq = null
+          this.sendWs(2, { token: `Bot ${this.cfg.token}` })
+          break
+      }
+    }
+    ws.onclose = ev => {
+      if (this.heartbeat) clearInterval(this.heartbeat)
+      this.heartbeat = null
+      if (this.stopped) return
+      if (ev.code === 4004) {
+        this.cfg.log('vokko channel: login failed (bad bot token)\n')
+        process.exit(1)
+      }
+      this.cfg.log(`vokko channel: gateway closed (${ev.code}), reconnecting in ${this.backoff / 1000}s\n`)
+      setTimeout(() => this.connect(), this.backoff)
+      this.backoff = Math.min(this.backoff * 2, 60_000)
+    }
+    ws.onerror = () => {} // onclose follows and reconnects
+  }
+
+  start(): void {
+    this.connect()
+    if (!this.cfg.staticMode) setInterval(() => this.checkApprovals(), 5000).unref()
+  }
+
+  stop(): void {
+    this.stopped = true
+    this.ws?.close(1000)
+  }
+}
