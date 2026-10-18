@@ -287,11 +287,22 @@ async fn invisible_reads_offline_to_others_and_survives_reconnects() {
     assert_eq!((seen["status"].as_str(), seen["custom_status"].is_null()), (Some("offline"), true));
     drop(bob_owner.ws.close(None).await);
 
-    // reconnecting keeps her invisible: nobody ever sees her online
+    // reconnecting keeps her invisible, and others get no frame at all: a truly offline user sends none either
     drop(alice);
-    let (_alice, ready) = Client::connect(&w.address, &w.alice.0).await;
+    assert!(owner.quiet("PRESENCE_UPDATE", &w.alice.1, QUIET).await, "her disconnect is not announced");
+    let (mut alice, ready) = Client::connect(&w.address, &w.alice.0).await;
     assert_eq!(find(&ready["presences"], &w.alice.1).expect("own presence")["status"], "invisible");
-    assert!(owner.only_presence(&w.alice.1, "offline", Duration::from_millis(600)).await, "invisible user never appears online");
+    assert!(owner.quiet("PRESENCE_UPDATE", &w.alice.1, QUIET).await, "her connect is not announced");
+
+    // a game while invisible reaches her own sessions only
+    let game = json!([{"name": "Factorio", "type": 0}]);
+    alice.send(json!({"op": 3, "d": {"status": "invisible", "activities": game}})).await;
+    wait_activities(&mut alice, &w.alice.1, "invisible", |a| a == &game).await;
+    assert!(owner.quiet("PRESENCE_UPDATE", &w.alice.1, QUIET).await, "her game is not announced");
+
+    // coming back is announced
+    alice.send(json!({"op": 3, "d": {"status": "online"}})).await;
+    wait_activities(&mut owner, &w.alice.1, "online", |a| a == &game).await;
 }
 
 #[tokio::test]
@@ -393,7 +404,7 @@ async fn appearing_offline_in_one_server_hides_only_there() {
     alice.send(json!({"op": 3, "d": {"status": "dnd"}})).await;
     bob.wait_presence(&w.alice.1, "dnd").await;
     friend.wait_presence(&w.alice.1, "dnd").await;
-    assert!(owner.only_presence(&w.alice.1, "offline", QUIET).await);
+    assert!(owner.quiet("PRESENCE_UPDATE", &w.alice.1, QUIET).await, "A gets no frame at all");
     let (_, ready) = Client::connect(&w.address, &w.owner.0).await;
     assert_eq!(find(&ready["presences"], &w.alice.1).expect("alice")["status"], "offline", "a fresh READY in A");
     let (_, ready) = Client::connect(&w.address, &carl.0).await;
