@@ -4,7 +4,8 @@ import { create } from 'zustand';
 import type { Channel, Message, MessageSearchResponse } from '../api/types';
 import { rememberMessages } from '../chat/userCache';
 import { addFilter, buildSearchParams, highlightTerms, type SearchFilter, type SearchSort } from './query';
-import { appStore, closeThread, request, useStore } from './shell';
+import { rememberHitThreads } from './hitThreads';
+import { closeThread, request, useStore } from './shell';
 
 export type SearchStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -152,8 +153,7 @@ async function run(): Promise<void> {
     if (mine !== ticket) return;
     const hits = result.messages.map(group => group[0]).filter((m): m is Message => !!m);
     rememberMessages(hits);
-    // Threads and forum posts are not in the store until opened: the hits' own come with the response, so the panel can name them and Jump can open them.
-    for (const thread of result.threads ?? []) appStore.getState().upsertThread({ ...thread, member: result.members?.find(m => m.id === thread.id) ?? thread.member });
+    rememberHitThreads(result);
     searchStore.setState({ status: 'ready', total: result.total_results, hits, terms: highlightTerms(s.submitted.text) });
   } catch {
     if (mine !== ticket) return;
