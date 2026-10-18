@@ -75,7 +75,8 @@ export interface ChatActions {
   viewAttachment(message: Message, attachment: Attachment): void;
   /** Trash on a sent image: asks, then removes the attachment from the message. */
   deleteAttachment(message: Message, attachment: Attachment): void;
-  viewReactions(m: Message): void;
+  /** `emojiKey`: the tab to open on (a long-pressed reaction on a phone). */
+  viewReactions(m: Message, emojiKey?: string): void;
 }
 
 const Ctx = createContext<ChatContextValue | null>(null);

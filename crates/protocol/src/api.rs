@@ -4479,6 +4479,8 @@ pub mod user_settings {
         ("disabled_sounds", Kind::StringList { max_items: 32, max_chars: 32 }),
         // Keybinds
         ("keybinds", Kind::Keybinds),
+        // Emoji picker favourites: unicode glyphs and custom `<:name:id>` markup (the client caps the list at 100)
+        ("emoji_favorites", Kind::StringList { max_items: 100, max_chars: 64 }),
         // Streamer mode
         ("streamer_mode", Kind::Bool),
         ("streamer_auto_enable", Kind::Bool),

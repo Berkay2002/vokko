@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react';
-import { Clock, Dog, Flag, Hand, Lightbulb, Pizza, Plane, Search, Smile, Star, Trophy, Hash, X } from 'lucide-react';
-import { BottomSheet, Popout, scrollBehavior, useContextMenu, usePhone } from './shell';
+import { Clock, Copy, Dog, Flag, Hand, Lightbulb, Pizza, Plane, Search, Smile, Star, Trophy, Hash, X } from 'lucide-react';
+import { BottomSheet, copyText, Popout, scrollBehavior, useContextMenu, usePhone } from './shell';
 import { SuperReactToggle } from '../perks/SuperReactions';
-import { getFavoriteEmoji, getRecentEmoji, getSkinTone, pushRecentEmoji, sameUnicodeEmoji, setSkinTone, toggleFavoriteEmoji, useEmojiDb, type EmojiEntry } from './emojiData';
-import { CustomEmojiRail, CustomEmojiSections, CustomSearchResults, hasCustomResults, usePickerSections, type CustomHover, type CustomPick } from '../emoji/PickerSections';
+import { customEmojiId, getFavoriteEmoji, getRecentEmoji, getSkinTone, isFavoriteEmoji, setSkinTone, toggleFavoriteEmoji, useEmojiDb, type EmojiEntry } from './emojiData';
+import { CustomEmojiCell, CustomEmojiRail, CustomEmojiSections, CustomSearchResults, hasCustomResults, usePickerSections, type CustomHover, type CustomMenu, type CustomPick } from '../emoji/PickerSections';
+import { emojiMarkup } from '../emoji/store';
+import { usePrefs } from '../ui/prefs';
 
 /** Unicode (`id` null) or a server's custom emoji. */
 export interface PickedEmoji { id: string | null; name: string; animated?: boolean }
@@ -39,14 +41,23 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
   const [burst, setBurst] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const recent = useMemo(() => getRecentEmoji(), []);
-  const [favorites, setFavorites] = useState(getFavoriteEmoji);
+  const recentAll = useMemo(() => getRecentEmoji(), []);
+  useEffect(() => { getFavoriteEmoji(); }, []); // moves favourites saved before they synced into the prefs, once
+  const favoritesAll = usePrefs(s => s.emojiFavorites);
+  // Custom entries show only while usable here (a server left, a reaction channel that refuses them).
+  const customById = useMemo(() => new Map(sections.flatMap(s => s.emojis.map(e => [e.id, e] as const))), [sections]);
+  const usable = (list: string[]) => list.filter(e => { const id = customEmojiId(e); return !id || customById.has(id); });
+  const recent = usable(recentAll);
+  const favorites = usable(favoritesAll);
   const menu = useContextMenu();
-  // Right-click on a unicode emoji: Favorite / Unfavorite, as in Discord's picker. Custom emoji have no favourites yet.
+  // Right-click (a long press on touch): Favorite / Unfavorite and Copy, as in Discord's picker. Custom emoji copy as their markup.
   const favoriteMenu = (ch: string) => (ev: MouseEvent) => {
-    const isFav = favorites.some(f => sameUnicodeEmoji(f, ch));
-    menu.open(ev, [{ id: 'favorite', label: isFav ? 'Unfavorite' : 'Favorite', icon: <Star size={16} />, onSelect: () => setFavorites(toggleFavoriteEmoji(ch)) }]);
+    menu.open(ev, [
+      { id: 'favorite', label: isFavoriteEmoji(favoritesAll, ch) ? 'Unfavorite emoji' : 'Favorite emoji', icon: <Star size={16} />, onSelect: () => toggleFavoriteEmoji(ch) },
+      { id: 'copy', label: 'Copy emoji', icon: <Copy size={16} />, onSelect: () => copyText(ch) },
+    ]);
   };
+  const customMenu: CustomMenu = e => favoriteMenu(emojiMarkup(e));
 
   useEffect(() => { if (autoFocus) input.current?.focus(); }, [autoFocus]);
 
@@ -55,8 +66,8 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
   const pickCustom = (e: CustomPick) => onPick(e, superReactions && burst);
   const hoverCustom = (h: CustomHover) => setHover({ emoji: '', label: h.label, src: h.src });
 
+  // Not counted here: a sent message or an added reaction counts it (messageStore), so a picked emoji is not counted twice.
   function pick(emoji: string) {
-    pushRecentEmoji(emoji);
     onPick({ id: null, name: emoji }, superReactions && burst);
   }
 
@@ -76,9 +87,14 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
 
   const cell = (e: EmojiEntry) => {
     const ch = variant(e, tone);
-    return <button key={e.order} type="button" className="chat-emoji-cell" aria-label={e.label} onMouseEnter={() => setHover({ emoji: ch, label: e.shortcodes[0] ? `:${e.shortcodes[0]}:` : e.label })} onClick={() => pick(ch)} onContextMenu={favoriteMenu(ch)}>{ch}</button>;
+    return <button key={e.order} type="button" className="chat-emoji-cell" aria-label={e.label} onMouseEnter={() => setHover({ emoji: ch, label: e.shortcodes[0] ? `:${e.shortcodes[0]}:` : e.label })} onClick={() => pick(ch)} data-long-press="" onContextMenu={favoriteMenu(ch)}>{ch}</button>;
   };
-  const plainCell = (ch: string) => <button key={ch} type="button" className="chat-emoji-cell" onMouseEnter={() => setHover({ emoji: ch, label: '' })} onClick={() => pick(ch)} onContextMenu={favoriteMenu(ch)}>{ch}</button>;
+  /** A Favorites / Frequently Used entry: a glyph, or a custom emoji's markup (already checked usable). */
+  const plainCell = (ch: string) => {
+    const custom = customById.get(customEmojiId(ch) ?? '');
+    if (custom) return <CustomEmojiCell key={ch} emoji={custom} onPick={pickCustom} onHover={hoverCustom} onMenu={customMenu} />;
+    return <button key={ch} type="button" className="chat-emoji-cell" onMouseEnter={() => setHover({ emoji: ch, label: '' })} onClick={() => pick(ch)} data-long-press="" onContextMenu={favoriteMenu(ch)}>{ch}</button>;
+  };
 
   return <div className={`chat-emoji-picker${embedded ? ' embedded' : ''}`} role={embedded ? 'tabpanel' : 'dialog'} aria-label="Emoji picker">
     <div className="chat-emoji-top">
@@ -106,15 +122,15 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
       <div className="chat-emoji-scroll" ref={scroller} onScroll={onScroll}>
         {!db && <div className="chat-emoji-empty">Loading…</div>}
         {db && results && (results.length || hasCustomResults(sections, query)
-          ? <section><h3 className="chat-emoji-heading">Search Results</h3><CustomSearchResults sections={sections} query={query} onPick={pickCustom} onHover={hoverCustom} /><div className="chat-emoji-grid">{results.map(cell)}</div></section>
+          ? <section><h3 className="chat-emoji-heading">Search Results</h3><CustomSearchResults sections={sections} query={query} onPick={pickCustom} onHover={hoverCustom} onMenu={customMenu} /><div className="chat-emoji-grid">{results.map(cell)}</div></section>
           : <div className="chat-emoji-empty">No emoji match your search.</div>)}
         {db && !results && <>
-          {favorites.length > 0 && <section data-cat="favorites"><h3 className="chat-emoji-heading">Favorites</h3><div className="chat-emoji-grid">{favorites.map(plainCell)}</div></section>}
-          <section data-cat="recent"><h3 className="chat-emoji-heading">Frequently Used</h3>
+          {favorites.length > 0 && <section data-cat="favorites"><h3 className="chat-emoji-heading emoji-guild-heading"><Star size={16} aria-hidden="true" />Favorites</h3><div className="chat-emoji-grid">{favorites.map(plainCell)}</div></section>}
+          <section data-cat="recent"><h3 className="chat-emoji-heading emoji-guild-heading"><Clock size={16} aria-hidden="true" />Frequently Used</h3>
             {recent.length === 0 ? <div className="chat-emoji-none">Emoji you use will show up here.</div> :
               <div className="chat-emoji-grid">{recent.map(plainCell)}</div>}
           </section>
-          <CustomEmojiSections sections={sections} onPick={pickCustom} onHover={hoverCustom} />
+          <CustomEmojiSections sections={sections} onPick={pickCustom} onHover={hoverCustom} onMenu={customMenu} />
           {db.categories.map(c => <section key={c.id} data-cat={c.id}><h3 className="chat-emoji-heading">{c.label}</h3><div className="chat-emoji-grid">{c.emoji.map(cell)}</div></section>)}
         </>}
       </div>

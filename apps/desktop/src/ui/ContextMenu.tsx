@@ -305,7 +305,8 @@ function MenuSheet({ items, title, onClose }: { items: MenuItem[]; title: string
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_SLOP = 10;
-/** Where a held finger does not become a context menu: text entry, and message rows (they have their own press, see chat/MessageItem.tsx). */
+/** Where a held finger does not become a context menu: text entry, and message rows (they have their own press, see chat/MessageItem.tsx).
+ * `[data-long-press]` opts an element back in (emoji picker cells in a sheet, reaction pills in a message). */
 const NO_LONG_PRESS = "input, textarea, [contenteditable], .chat-msg, .sheet";
 
 /** Mount once near the app root. */
@@ -323,7 +324,8 @@ export function ContextMenuHost() {
     const stop = () => window.clearTimeout(timer);
     const onDown = (event: PointerEvent) => {
       stop();
-      if (event.pointerType !== "touch" || !(event.target instanceof Element) || event.target.closest(NO_LONG_PRESS)) return;
+      if (event.pointerType !== "touch" || !(event.target instanceof Element)) return;
+      if (!event.target.closest("[data-long-press]") && event.target.closest(NO_LONG_PRESS)) return;
       at = { x: event.clientX, y: event.clientY };
       const target = event.target;
       timer = window.setTimeout(() => {

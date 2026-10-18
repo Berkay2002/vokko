@@ -15,14 +15,14 @@ function EmojiFace({ reaction }: { reaction: Reaction }) {
 }
 
 /** "View Reactions": one tab per emoji, listing the users who reacted (GET .../reactions/{emoji}). */
-export function ReactionsModal({ message, onClose }: { message: Message | null; onClose: () => void }) {
+export function ReactionsModal({ message, initialKey, onClose }: { message: Message | null; initialKey?: string; onClose: () => void }) {
   const chat = useChat();
   const reactions = message?.reactions ?? [];
   const [selected, setSelected] = useState<string | null>(null);
   const [cache, setCache] = useState<Record<string, Loaded>>({});
   const messageId = message?.id;
 
-  useEffect(() => { setSelected(null); setCache({}); }, [messageId]);
+  useEffect(() => { setSelected(initialKey ?? null); setCache({}); }, [messageId, initialKey]);
 
   const active = reactions.find(r => emojiKey(r.emoji) === selected) ?? reactions[0];
   const key = active ? emojiKey(active.emoji) : null;

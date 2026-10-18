@@ -116,6 +116,8 @@ export interface Prefs {
   taskbarFlash: boolean;
   // Keybinds: user binds; empty = the built-in defaults (src/ui/keybinds.ts)
   keybinds: KeybindPref[];
+  // Emoji picker favourites: unicode glyphs and custom `<:name:id>` markup, in the order they were added (chat/emojiData.ts)
+  emojiFavorites: string[];
   // Advanced
   /** Adds "Copy ID" to context menus. */
   developerMode: boolean;
@@ -230,6 +232,7 @@ export const DEFAULT_PREFS: Prefs = {
   reactionNotifications: "all",
   taskbarFlash: true,
   keybinds: [],
+  emojiFavorites: [],
   developerMode: false,
   dmsFromServerMembers: true,
   sendCrashReports: true,

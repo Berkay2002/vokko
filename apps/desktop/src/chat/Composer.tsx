@@ -11,7 +11,7 @@ import { ChannelTypeIcon } from './ChannelTypeIcon';
 import { mentionableChannels, userSuggestions } from './suggest';
 import { ExpressionPickerPopout, type ExpressionTab } from './ExpressionPicker';
 import { AppLauncherPopout, AppsGlyph, useCommandComposer } from '../apps/CommandComposer';
-import { useEmojiDb, pushRecentEmoji } from './emojiData';
+import { frecencyRank, useEmojiDb } from './emojiData';
 import { emojiMarkup, searchCustomEmoji } from '../emoji/store';
 import { usePickerSections } from '../emoji/PickerSections';
 import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, updateUpload, useDraft } from './draftStore';
@@ -235,16 +235,17 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     }
     // Settings > Chat: ":emoji: autocomplete" and "sticker autocomplete" decide what a `:` query lists.
     const custom: Suggestion[] = options.emojiAutocomplete
-      ? searchCustomEmoji(emojiSections, q, 10).map(({ emoji, guild }) => ({
+      ? searchCustomEmoji(emojiSections, q, 40).map(({ emoji, guild }) => ({
         key: `x${emoji.id}`, label: `:${emoji.name}:`, hint: guild.name, insert: emojiMarkup(emoji), lead: 'emoji' as const, image: emoji.url, names: [emoji.name],
       }))
       : [];
     const unicode: Suggestion[] = options.emojiAutocomplete && emojiDb
-      ? emojiDb.search(q, 10).map(e => ({ key: `e${e.order}`, label: `:${e.shortcodes[0] ?? e.label}:`, insert: e.emoji, lead: 'emoji' as const, emoji: e.emoji, names: e.shortcodes.length ? e.shortcodes : [e.label] }))
+      ? emojiDb.search(q, 40).map(e => ({ key: `e${e.order}`, label: `:${e.shortcodes[0] ?? e.label}:`, insert: e.emoji, lead: 'emoji' as const, emoji: e.emoji, names: e.shortcodes.length ? e.shortcodes : [e.label] }))
       : [];
-    // Exact names first, then prefix matches (on any shortcode), then the rest (so `:smile` leads with 😄, not :vokko_smile:); custom before unicode within a rank.
+    // Exact names first, then prefix matches (on any shortcode), then the rest (so `:smile` leads with 😄, not :vokko_smile:); within a rank Frequently Used order, then custom before unicode.
     const rank = (s: Suggestion) => Math.min(2, ...(s.names ?? []).map(n => { const name = n.toLowerCase(); return name === q ? 0 : name.startsWith(q) ? 1 : 2; }));
-    const out: Suggestion[] = [...custom, ...unicode].map((s, i) => ({ s, i, r: rank(s) })).sort((a, b) => a.r - b.r || a.i - b.i).map(x => x.s).slice(0, 10);
+    const used = frecencyRank();
+    const out: Suggestion[] = [...custom, ...unicode].map((s, i) => ({ s, i, r: rank(s), u: used(s.emoji ?? s.insert) })).sort((a, b) => a.r - b.r || a.u - b.u || a.i - b.i).map(x => x.s).slice(0, 10);
     if (options.stickerAutocomplete) {
       for (const s of stickers.filter(s => s.name.toLowerCase().includes(q)).slice(0, 4)) out.push({ key: `s${s.id}`, label: s.name, hint: 'Sticker', insert: '', lead: 'sticker', sticker: s });
     }
@@ -271,7 +272,6 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     const insert = s.insert + (s.lead === 'emoji' ? ' ' : ' ');
     const next = text.slice(0, trigger.start) + insert + text.slice(end);
     if (s.token) addDraftToken(channelId, s.token);
-    if (s.emoji) pushRecentEmoji(s.emoji);
     setTextAt(next, trigger.start + insert.length);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trigger, caret, text, channelId]);

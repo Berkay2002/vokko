@@ -102,6 +102,36 @@ test('Frequently Used counts sent emoji and quick reactions; right-click Favorit
   await expect(picker.locator('[data-cat="favorites"]')).toHaveCount(0);
 });
 
+test('Frequently Used ranks by use count, includes custom emoji, and leads the : autocomplete; custom emoji can be favourites', async ({ page }) => {
+  await openChannel(page, 'random');
+  const box = composer(page);
+  for (let i = 0; i < 3; i++) await send(page, `turtle ${i} 🐢`);
+  await box.fill(':ship_it');
+  await expect(rows(page).first()).toContainText(':ship_it:');
+  await box.press('Tab');
+  await box.press('Enter');
+  await expect(page.locator('.chat-msg').last().locator('img[alt=":ship_it:"]')).toBeVisible();
+  await send(page, 'cat 😺');
+
+  // used twice as much as anything else: first, though sent earlier
+  await page.locator('.chat-composer').getByRole('button', { name: /emoji/i }).last().click();
+  const picker = page.getByRole('dialog', { name: 'Emoji picker' }).or(page.getByRole('tabpanel', { name: 'Emoji picker' }));
+  const recent = picker.locator('[data-cat="recent"] .chat-emoji-cell');
+  await expect(recent.first()).toHaveText('🐢');
+  const custom = picker.locator('[data-cat="recent"] .emoji-custom-cell[data-emoji-name="ship_it"]');
+  await expect(custom).toHaveCount(1);
+  await custom.click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Copy emoji' })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Favorite emoji' }).click();
+  await expect(picker.locator('[data-cat="favorites"] .emoji-custom-cell[data-emoji-name="ship_it"]')).toHaveCount(1);
+  await shot(page, 'emoji-frecency');
+  await page.keyboard.press('Escape');
+
+  // a used emoji leads its match rank in the : autocomplete
+  await box.fill(':smi');
+  await expect(rows(page).first()).toContainText(':smiley_cat:');
+});
+
 test.describe('phone width', () => {
   test.use({ viewport: { width: 390, height: 844 } });
   test('code, nested lists and # autocomplete fit', async ({ page }) => {

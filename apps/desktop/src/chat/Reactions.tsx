@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type MouseEvent } from 'react';
 import { SmilePlus } from 'lucide-react';
 import type { Message, Reaction, ReactionEmoji, User } from '../api/types';
-import { AnimatedImage, request, Tooltip } from './shell';
+import { AnimatedImage, request, Tooltip, usePhone } from './shell';
 import { useChat } from './ChatContext';
 import { emojiKey } from './messageState';
 import { EmojiPickerPopout } from './EmojiPicker';
@@ -48,6 +48,7 @@ function ReactionPills({ message, reaction }: { message: Message; reaction: Reac
   const { channel, canExternal } = useCanUseExternalEmoji(message.channel_id);
   const tip = who ? <SplitReactors burst={who.burst} normal={who.normal} /> : 'Loading…';
   const { burst, normal } = reaction.count_details;
+  const phone = usePhone();
   const emojiId = reaction.emoji.id;
   const emoji = emojiNode(reaction.emoji, emojiId ? customUrl(emojiId) : null);
   // adding a reaction the server would refuse here (removing your own is always allowed)
@@ -56,7 +57,9 @@ function ReactionPills({ message, reaction }: { message: Message; reaction: Reac
     if (!mine && emojiId && externalEmojiBlocked(findEmoji(emojiId)?.guildId, channel, canExternal)) chatToast("You can't add emoji from other servers in this channel.");
     else chat.actions.react(message, reaction.emoji, isBurst);
   };
-  return <>
+  // Phone: a long press on a pill lists who reacted (the reactions sheet on this emoji); desktop right-click keeps the message menu.
+  const showWho = (e: MouseEvent) => { e.preventDefault(); e.stopPropagation(); chat.actions.viewReactions(message, emojiKey(reaction.emoji)); };
+  return <span style={{ display: 'contents' }} data-long-press={phone ? '' : undefined} onContextMenu={phone ? showWho : undefined}>
     {burst > 0 && <Tooltip content={tip} side="top">
       <BurstPill messageId={message.id} emojiKey={emojiKey(reaction.emoji)} reaction={reaction} emoji={emoji} label={`${burst} super ${reaction.emoji.name}`} onHover={load}
         onClick={() => toggle(true)} />
@@ -68,7 +71,7 @@ function ReactionPills({ message, reaction }: { message: Message; reaction: Reac
         <span className="chat-reaction-count">{normal}</span>
       </button>
     </Tooltip>}
-  </>;
+  </span>;
 }
 
 export function Reactions({ message }: { message: Message }) {
