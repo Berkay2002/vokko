@@ -58,3 +58,5 @@ tokio.workspace = true
 futures-util.workspace = true
 linuxvideo = "0.3.5"
 zune-jpeg = "0.4"
+# MPRIS players for the Spotify status (src/spotify.rs): the zbus that tauri's notification and single-instance plugins already build.
+zbus = "5"
