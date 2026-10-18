@@ -100,7 +100,8 @@ async fn asker(state: &AppState, bot: i64, message_id: i64, target: Option<i64>)
     }
     if let Some(target) = target.filter(|target| *target != channel_id) {
         let target_guild = store::channel_row(state, target).await?.and_then(|row| row.guild_id);
-        if guild_id.is_none() || target_guild != guild_id {
+        // The bot must see the channel it acts on too, or it could read a hidden call's queue into the channel it was asked in.
+        if guild_id.is_none() || target_guild != guild_id || access::channel_access(state, bot, target).await.is_err() {
             return Err(ApiErr::missing_permissions());
         }
     }

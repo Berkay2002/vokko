@@ -1534,6 +1534,30 @@ async fn a_bot_acts_only_where_it_was_asked() {
     let hidden = w.app.say(&elsewhere_text, &w.alice, &format!("<@{bot_id}> play")).await;
     assert_eq!(w.acting(Method::PUT, &w.path(), &bot, &hidden, Some(json!({"uri": track_uri(1)}))).await.0, StatusCode::FORBIDDEN);
     assert_eq!(w.acting(Method::PUT, &w.path(), &bot, &asked, Some(json!({"uri": track_uri(1)}))).await.0, StatusCode::OK);
+    // Nor does a DM with the bot, for a guild call.
+    let (status, dm) = w.app.post("/users/@me/channels", &bot, json!({"recipient_id": w.alice_id})).await;
+    assert_eq!(status, StatusCode::OK, "{dm}");
+    let in_dm = w.app.say(dm["id"].as_str().expect("dm id"), &w.alice, "play").await;
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &in_dm, None).await.0, StatusCode::FORBIDDEN);
+    // An edit that drops the mention, or a deleted message, no longer asks.
+    let edited = w.app.say(&w.text, &w.alice, &format!("<@{bot_id}> skip")).await;
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &edited, None).await.0, StatusCode::OK);
+    assert_eq!(w.app.patch(&format!("/channels/{}/messages/{edited}", w.text), &w.alice, json!({"content": "skip"})).await.0, StatusCode::OK);
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &edited, None).await.0, StatusCode::FORBIDDEN);
+    assert_eq!(w.app.delete(&format!("/channels/{}/messages/{asked}", w.text), &w.alice).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &asked, None).await.0, StatusCode::FORBIDDEN);
+    // A call in a channel hidden from the bot, even in the guild it was asked in.
+    let fresh = w.app.say(&w.text, &w.alice, &format!("<@{bot_id}> what's playing?")).await;
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &fresh, None).await.0, StatusCode::OK);
+    let deny = json!({"type": 1, "allow": "0", "deny": vokko_protocol::api::permissions::VIEW_CHANNEL.to_string()});
+    assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{bot_id}", w.voice), &w.owner, deny).await.0, StatusCode::NO_CONTENT);
+    let (status, error) = w.acting(Method::GET, &w.path(), &bot, &fresh, None).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::FORBIDDEN, Some(50013)), "{error}");
+    // An author who left the guild no longer lets the bot act for them.
+    assert_eq!(w.app.delete(&format!("/channels/{}/permissions/{bot_id}", w.voice), &w.owner).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &fresh, None).await.0, StatusCode::OK);
+    assert_eq!(w.app.delete(&format!("/users/@me/guilds/{}", w.guild), &w.alice).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &fresh, None).await.0, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
