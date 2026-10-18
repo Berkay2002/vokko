@@ -38,6 +38,11 @@ pub const MAX_CONTENT_CHARS: usize = 2000;
 const MAX_FILENAME_CHARS: usize = 255;
 const MAX_DESCRIPTION_CHARS: usize = 1024;
 const MAX_PINS: i64 = 250;
+/// Discord's voice-message limits: 20 minutes, a waveform of at most 256 one-byte samples.
+const MAX_VOICE_SECS: f64 = 1200.0;
+const MAX_WAVEFORM_SAMPLES: usize = 256;
+/// What MediaRecorder writes: opus in ogg (Firefox) or webm (Chromium), AAC in mp4 (Safari / WKWebView).
+const VOICE_CONTENT_TYPES: [&str; 4] = ["audio/ogg", "audio/webm", "audio/mp4", "audio/aac"];
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -151,11 +156,13 @@ pub struct DraftAttachment {
     pub id: i64,
     pub filename: Option<String>,
     pub description: Option<String>,
+    /// Voice messages only: (duration_secs, waveform), validated by `voice_meta`.
+    pub voice: Option<(f64, String)>,
 }
 
 impl DraftAttachment {
     pub fn plain(id: i64) -> Self {
-        Self { id, filename: None, description: None }
+        Self { id, filename: None, description: None, voice: None }
     }
 
     /// Validates a `CreateMessageRequest.attachments` entry: 1-255 character filename (then cleaned like an upload name),
@@ -175,7 +182,24 @@ impl DraftAttachment {
             Some(text) if !text.trim().is_empty() => Some(text.trim().to_owned()),
             _ => None,
         };
-        Ok(Self { id: meta.id.db(), filename, description })
+        Ok(Self { id: meta.id.db(), filename, description, voice: None })
+    }
+}
+
+/// A voice message's `duration_secs` (0 < s <= 1200) and `waveform` (base64 of 1-256 bytes); both are required.
+fn voice_meta(meta: Option<&PendingAttachmentMeta>) -> ApiResult<(f64, String)> {
+    use base64::Engine;
+    let missing = || ApiErr::invalid("attachments", "A voice message needs duration_secs and waveform.");
+    let meta = meta.ok_or_else(missing)?;
+    let (Some(duration), Some(waveform)) = (meta.duration_secs, meta.waveform.as_deref()) else { return Err(missing()) };
+    if !duration.is_finite() || duration <= 0.0 || duration > MAX_VOICE_SECS {
+        return Err(ApiErr::invalid("attachments", "duration_secs must be between 0 and 1200."));
+    }
+    // checked before decoding so a huge string is never decoded; 256 bytes are 344 base64 characters
+    let samples = if waveform.len() > MAX_WAVEFORM_SAMPLES.div_ceil(3) * 4 { None } else { base64::engine::general_purpose::STANDARD.decode(waveform).ok() };
+    match samples {
+        Some(bytes) if !bytes.is_empty() && bytes.len() <= MAX_WAVEFORM_SAMPLES => Ok((duration, waveform.to_owned())),
+        _ => Err(ApiErr::invalid("attachments", "waveform must be base64 of 1 to 256 samples.")),
     }
 }
 
@@ -392,10 +416,15 @@ async fn insert_message_stored(
         let ids: Vec<i64> = draft.attachments.iter().map(|attachment| attachment.id).collect();
         let filenames: Vec<Option<String>> = draft.attachments.iter().map(|attachment| attachment.filename.clone()).collect();
         let descriptions: Vec<Option<String>> = draft.attachments.iter().map(|attachment| attachment.description.clone()).collect();
+        let durations: Vec<Option<f64>> = draft.attachments.iter().map(|attachment| attachment.voice.as_ref().map(|voice| voice.0)).collect();
+        let waveforms: Vec<Option<String>> = draft.attachments.iter().map(|attachment| attachment.voice.as_ref().map(|voice| voice.1.clone())).collect();
         // locked first in one statement by ascending id: the UPDATE below would lock them in whatever order its join visits them
         crate::media::lock_own_uploads(&mut tx, &ids, author_id).await?;
         let claimed = sqlx::query(
-            "UPDATE attachments a SET message_id = $1, filename = COALESCE(m.filename, a.filename), description = m.description              FROM UNNEST($2::bigint[], $3::text[], $4::text[]) AS m(id, filename, description)              WHERE a.id = m.id AND a.channel_id = $5 AND a.uploader_id = $6 AND a.message_id IS NULL AND a.claimed_at IS NULL",
+            "UPDATE attachments a SET message_id = $1, filename = COALESCE(m.filename, a.filename), description = m.description, \
+             duration_secs = m.duration_secs, waveform = m.waveform \
+             FROM UNNEST($2::bigint[], $3::text[], $4::text[], $7::float8[], $8::text[]) AS m(id, filename, description, duration_secs, waveform) \
+             WHERE a.id = m.id AND a.channel_id = $5 AND a.uploader_id = $6 AND a.message_id IS NULL AND a.claimed_at IS NULL",
         )
         .bind(message_id)
         .bind(&ids)
@@ -403,6 +432,8 @@ async fn insert_message_stored(
         .bind(&descriptions)
         .bind(channel.id)
         .bind(author_id)
+        .bind(&durations)
+        .bind(&waveforms)
         .execute(&mut *tx)
         .await?;
         if claimed.rows_affected() != draft.attachments.len() as u64 {
@@ -575,7 +606,7 @@ async fn create_message(
         require_dm_open(&state, id, user_id).await?;
     }
     // `attachments` (rename / alt text per id) wins over the plain `attachment_ids` list.
-    let (attachments, attachments_field): (Vec<DraftAttachment>, &str) = match &body.attachments {
+    let (mut attachments, attachments_field): (Vec<DraftAttachment>, &str) = match &body.attachments {
         Some(list) => (list.iter().map(DraftAttachment::from_meta).collect::<ApiResult<_>>()?, "attachments"),
         None => (body.attachment_ids.unwrap_or_default().into_iter().map(|id| DraftAttachment::plain(id.db())).collect(), "attachment_ids"),
     };
@@ -596,6 +627,20 @@ async fn create_message(
         if !body.content.as_deref().unwrap_or("").is_empty() || !sticker_ids.is_empty() || body.poll.is_some() {
             return Err(ApiErr::invalid("flags", "A voice message cannot carry content, stickers or a poll."));
         }
+        let voice = voice_meta(body.attachments.as_ref().and_then(|list| list.first()))?;
+        let upload = attachments.first_mut().ok_or_else(|| ApiErr::invalid(attachments_field, "A voice message has exactly one audio attachment."))?;
+        let content_type: Option<(Option<String>,)> = sqlx::query_as("SELECT content_type FROM attachments WHERE id = $1 AND uploader_id = $2")
+            .bind(upload.id)
+            .bind(user_id)
+            .fetch_optional(&state.db)
+            .await?;
+        // An unknown id falls through to the claim below, which reports it like any other attachment.
+        if let Some((content_type,)) = content_type
+            && !VOICE_CONTENT_TYPES.contains(&content_type.as_deref().unwrap_or(""))
+        {
+            return Err(ApiErr::invalid(attachments_field, "A voice message must be ogg/opus, webm/opus or mp4/aac audio."));
+        }
+        upload.voice = Some(voice);
     }
     let forwarding = body.message_reference.as_ref().is_some_and(|reference| reference.kind == Some(MessageReferenceType::Forward));
     if forwarding && (!body.content.as_deref().unwrap_or("").trim().is_empty() || !attachments.is_empty() || !sticker_ids.is_empty()) {
@@ -754,6 +799,9 @@ async fn edit_message(
     }
     if row.forward_message_id.is_some() {
         return Err(ApiErr::invalid("message_id", "Cannot edit a forwarded message."));
+    }
+    if row.flags & IS_VOICE_MESSAGE as i32 != 0 {
+        return Err(ApiErr::invalid("message_id", "Cannot edit a voice message."));
     }
     let existing: Vec<(i64,)> =
         sqlx::query_as("SELECT id FROM attachments WHERE message_id = $1 AND NOT snapshot ORDER BY id").bind(mid).fetch_all(&state.db).await?;

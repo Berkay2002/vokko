@@ -27,6 +27,7 @@ import { messageStore } from './messageStore';
 import { isSystemMessage, mentionsRole, type PendingMessage } from './messageState';
 import { fromDisplay, toDisplay, type MentionToken } from './mentionText';
 import { formatFullDate, formatMessageTimestamp, formatTime } from './util';
+import { isVoiceMessage } from './VoiceMessage';
 
 export interface MessageItemProps {
   message: Message;
@@ -152,7 +153,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const failed = pending?.state === 'failed';
   const gif = system ? null : gifMessageMedia(message);
 
-  const canEdit = isMine && !system && !pending && !message.poll && message.message_reference?.type !== 1; // a forward has no text to edit
+  const canEdit = isMine && !system && !pending && !message.poll && !isVoiceMessage(message) && message.message_reference?.type !== 1; // a forward has no text to edit
   const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
 
   const quick = useMemo(() => quickReactions().slice(0, 3), []);

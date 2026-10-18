@@ -1,6 +1,6 @@
 // Mock REST router: every route of docs/api.md that the UI uses, with the same status codes and error codes.
 
-import { AuditLogEvent, ChannelType, ExplicitContentFilter, JoinSourceType, MessageType, ReactionType, RelationshipType, VerificationLevel, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
+import { AuditLogEvent, ChannelType, ExplicitContentFilter, JoinSourceType, MessageFlags, MessageType, ReactionType, RelationshipType, VerificationLevel, isThreadType, type Attachment, type Channel, type Guild, type GuildMember, type Message, type ReactionEmoji, type Relationship, type User } from "../types";
 import { compareIds } from "../snowflake";
 import { Perm, hasBit } from "../permissions";
 import { channelPermsOf } from "./access";
@@ -610,6 +610,8 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   if (body.poll !== undefined && (forwarding || stickers.length > 0)) fail(400, 50035, "Invalid Form Body", { poll: { code: "BASE_TYPE_BAD_LENGTH", message: "A poll message cannot carry stickers or be a forward." } });
   const poll = body.poll !== undefined ? parsePoll(body.poll) : null;
   if (forwarding && (content !== "" || attachments.length > 0 || stickers.length > 0)) fail(400, 50035, "Invalid Form Body", { message_reference: { code: "FORWARD_HAS_CONTENT", message: "A forward cannot carry content, attachments or stickers." } });
+  const voice = ((Number(body.flags) || 0) & MessageFlags.IsVoiceMessage) !== 0;
+  if (voice) checkVoiceMessage(channel, viewer.user.id, { content, attachments, metas, stickers: stickers.length, poll: body.poll !== undefined });
   if (content === "" && attachments.length === 0 && stickers.length === 0 && !forwarding && !poll) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
   const forward = forwarding ? buildForward(viewer.user.id, reference, channel) : undefined;
   if (reference?.message_id && !forwarding) requireMessage(channel.id, reference.message_id);
@@ -631,9 +633,30 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
     allowEveryone: hasBit(channelPermsOf(channel, viewer.user.id), Perm.MENTION_EVERYONE),
     // Without SEND_TTS_MESSAGES the flag is dropped and the message is still sent (the server does the same).
     tts: body.tts === true && hasBit(channelPermsOf(channel, viewer.user.id), Perm.SEND_TTS_MESSAGES),
+    ...(voice ? { flags: MessageFlags.IsVoiceMessage } : {}),
   });
   return messageFor(message, viewer.user.id);
 });
+
+const VOICE_TYPES = ["audio/ogg", "audio/webm", "audio/mp4", "audio/aac"];
+
+/** The server's voice-message rules (docs/api.md "Voice messages"); fills the attachment's duration_secs and waveform. */
+function checkVoiceMessage(channel: MockChannel, userId: string, m: { content: string; attachments: Attachment[]; metas: Record<string, unknown>[]; stickers: number; poll: boolean }): void {
+  requireChannelPerm(channel, userId, Perm.SEND_VOICE_MESSAGES);
+  const invalid = (field: string, message: string): never => fail(400, 50035, "Invalid Form Body", { [field]: { code: "VOICE_MESSAGE_INVALID", message } });
+  const [attachment] = m.attachments;
+  if (m.attachments.length !== 1 || !attachment) invalid("attachments", "A voice message has exactly one audio attachment.");
+  if (m.content !== "" || m.stickers > 0 || m.poll) invalid("flags", "A voice message cannot carry content, stickers or a poll.");
+  const meta = m.metas[0] ?? {};
+  const duration = typeof meta.duration_secs === "number" ? meta.duration_secs : NaN;
+  const waveform = str(meta.waveform) ?? "";
+  if (!(duration > 0 && duration <= 1200)) invalid("attachments", "duration_secs must be between 0 and 1200.");
+  let samples = 0;
+  try { samples = waveform.length <= 344 ? atob(waveform).length : 0; } catch { samples = 0; }
+  if (samples < 1 || samples > 256) invalid("attachments", "waveform must be base64 of 1 to 256 samples.");
+  if (!VOICE_TYPES.includes((attachment!.content_type ?? "").split(";")[0]!.trim())) invalid("attachments", "A voice message must be ogg/opus, webm/opus or mp4/aac audio.");
+  m.attachments[0] = { ...attachment!, duration_secs: duration, waveform };
+}
 
 route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
@@ -641,6 +664,7 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   if (message.author_id !== viewer.user.id) fail(403, 50005, "Cannot edit a message authored by another user");
   assertThreadOpen(channel);
   if (isPoll(message.id)) fail(400, 520003, "Cannot edit a poll message");
+  if (((message.flags ?? 0) & MessageFlags.IsVoiceMessage) !== 0) fail(400, 50035, "Invalid Form Body", { message_id: { code: "VOICE_MESSAGE_EDIT", message: "Cannot edit a voice message." } });
   // `content` is optional now; `attachments` lists the ones to keep (omitted = unchanged, can only remove).
   const content = (str(body.content) ?? message.content).trim();
   if (content.length > 2000) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_MAX_LENGTH", message: "Must be 2000 or fewer in length." } });

@@ -19,6 +19,7 @@ import { useMessageThreadActions } from '../threads/useMessageActions';
 import { MessageAppsMenu } from '../apps/menus';
 import { canEndPoll, endPollNow } from '../polls/usePollActions';
 import { rovingKey } from '../ui';
+import { isVoiceMessage } from './VoiceMessage';
 
 export interface MessageMenuTarget {
   message: Message;
@@ -74,7 +75,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
 
   const isMine = message.author.id === chat.me.id;
   const system = isSystemMessage(message);
-  const canEdit = isMine && !system && !pending && !message.poll && message.message_reference?.type !== 1; // a forward has no text to edit
+  const canEdit = isMine && !system && !pending && !message.poll && !isVoiceMessage(message) && message.message_reference?.type !== 1; // a forward has no text to edit
   const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
   const canPin = !pending && !system && (chat.isDm || chat.canManage);
   const bookmarked = useIsBookmarked(message.channel_id, message.id);

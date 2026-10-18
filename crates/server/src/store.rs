@@ -618,6 +618,8 @@ struct AttachmentRow {
     width: Option<i32>,
     height: Option<i32>,
     description: Option<String>,
+    duration_secs: Option<f64>,
+    waveform: Option<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -640,6 +642,8 @@ pub fn attachment_api(
         width: width.map(|value| value.max(0) as u32),
         height: height.map(|value| value.max(0) as u32),
         description: None,
+        duration_secs: None,
+        waveform: None,
     }
 }
 
@@ -708,7 +712,7 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
     let mention_rows: Vec<(i64, i64)> =
         sqlx::query_as("SELECT message_id, user_id FROM message_mentions WHERE message_id = ANY($1) ORDER BY user_id").bind(&ids).fetch_all(&state.db).await?;
     let attachment_rows: Vec<AttachmentRow> = sqlx::query_as(
-        "SELECT id, message_id, key, filename, content_type, size, width, height, description FROM attachments WHERE message_id = ANY($1) AND NOT snapshot ORDER BY id",
+        "SELECT id, message_id, key, filename, content_type, size, width, height, description, duration_secs, waveform FROM attachments WHERE message_id = ANY($1) AND NOT snapshot ORDER BY id",
     )
     .bind(&ids)
     .fetch_all(&state.db)
@@ -744,6 +748,8 @@ async fn load_flat(state: &AppState, rows: &[MessageRow], viewer: Option<i64>) -
         let Some(key) = row.key else { continue };
         let mut attachment = attachment_api(state, row.id, &key, row.filename, row.content_type, row.size, row.width, row.height);
         attachment.description = row.description;
+        attachment.duration_secs = row.duration_secs;
+        attachment.waveform = row.waveform;
         attachments.entry(row.message_id).or_default().push(attachment);
     }
     let mut stickers: HashMap<i64, Vec<StickerItem>> = HashMap::new();

@@ -965,6 +965,12 @@ pub struct Attachment {
     /// Alt text, up to 1024 characters. A filename starting with `SPOILER_` marks a spoiler.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Voice messages only: length of the recording in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_secs: Option<f64>,
+    /// Voice messages only: base64 of up to 256 one-byte amplitude samples (0-255), Discord's shape.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2503,6 +2509,12 @@ pub struct PendingAttachmentMeta {
     /// Alt text, up to 1024 characters; empty clears.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Required on a voice message (`IS_VOICE_MESSAGE`): 0 < seconds <= 1200. Ignored otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_secs: Option<f64>,
+    /// Required on a voice message: base64 of 1-256 amplitude bytes. Ignored otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waveform: Option<String>,
 }
 
 /// Which mentions of a new message actually ping. Omitted entirely = everything is parsed and the replied-to author is pinged.
