@@ -1,7 +1,7 @@
 import { call } from "./tauri";
 
 /** What Spotify or a known Spotify client (Spotifast, ...) on this computer is playing, catalog music only (read locally:
- * AppleScript or Spotifast's control socket on macOS, Spotify's media session on Windows, MPRIS on Linux). */
+ * AppleScript or Spotifast's control socket on macOS, Spotify's media session or Spotifast's control channel on Windows, MPRIS on Linux). */
 export interface NowPlaying {
   title: string;
   artists: string[];
