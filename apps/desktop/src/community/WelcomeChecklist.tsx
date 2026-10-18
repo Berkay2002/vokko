@@ -1,14 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, ChevronRight, Circle, Puzzle, SendHorizontal, UserPlus, Wand2, X } from "lucide-react";
 import { snowflakeToTimestamp } from "../api/snowflake";
 import type { Snowflake } from "../api/types";
-import { useCommunityModal } from "./communityModals";
+import { listIntegrations } from "../apps/api";
 import { Modal, openModal, useStore } from "./shell";
-import { isNewServerOwner, useWelcome, useWelcomeProgress, type WelcomeProgress } from "./welcome";
+import { isNewServerOwner, useWelcome, useWelcomeProgress, welcomeSteps, type WelcomeProgress } from "./welcome";
 
 /**
  * The "get your server going" card at the start of a new server's first channel: invite friends, add an icon, say hello, add an
- * app (a placeholder for now). Steps tick themselves when the server shows they are done; the owner can hide the card.
+ * app. Steps tick themselves when the server shows they are done; the owner can hide the card.
  */
 export function WelcomeChecklist({ guildId, channelId, sentFirstMessage }: { guildId: Snowflake; channelId: Snowflake; sentFirstMessage: boolean }) {
   const guild = useStore(s => s.guilds[guildId]);
@@ -16,15 +16,30 @@ export function WelcomeChecklist({ guildId, channelId, sentFirstMessage }: { gui
   const memberCount = useStore(s => s.memberCounts[guildId] ?? Object.keys(s.members[guildId] ?? {}).length);
   const progress = useWelcomeProgress(guildId);
   const [confirmHide, setConfirmHide] = useState(false);
+  const [apps, setApps] = useState<number | null>(null);
+  const offered = !!guild && isNewServerOwner(snowflakeToTimestamp(guild.id), guild.owner_id, meId) && !progress.dismissed;
+  // A bot joining adds a member, so the member count doubles as the refresh signal (like Server Settings > Integrations).
+  useEffect(() => {
+    if (!offered) return;
+    let live = true;
+    listIntegrations(guildId).then(
+      rows => live && setApps(rows.length),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [offered, guildId, memberCount]);
   if (!guild || !isNewServerOwner(snowflakeToTimestamp(guild.id), guild.owner_id, meId) || progress.dismissed) return null;
 
   const mark = (change: WelcomeProgress) => useWelcome.getState().mark(guildId, change);
+  const done = welcomeSteps(progress, { memberCount, icon: guild.icon, sentFirstMessage, apps });
   const tasks = [
     {
       id: "invite",
       label: "Invite your friends",
       icon: UserPlus,
-      done: !!progress.invited || memberCount > 1,
+      done: done.invite,
       run: () => {
         mark({ invited: true });
         openModal({ type: "invite", channelId });
@@ -34,25 +49,22 @@ export function WelcomeChecklist({ guildId, channelId, sentFirstMessage }: { gui
       id: "personalize",
       label: "Personalize your server with an icon",
       icon: Wand2,
-      done: !!progress.personalized || !!guild.icon,
-      run: () => {
-        mark({ personalized: true });
-        openModal({ type: "serverSettings", guildId, section: "profile" });
-      },
+      done: done.personalize,
+      run: () => openModal({ type: "serverSettings", guildId, section: "profile" }),
     },
     {
       id: "message",
       label: "Send your first message",
       icon: SendHorizontal,
-      done: sentFirstMessage,
+      done: done.message,
       run: () => document.querySelector<HTMLElement>(".chat-textarea")?.focus(),
     },
     {
       id: "app",
       label: "Add your first app",
       icon: Puzzle,
-      done: !!progress.app,
-      run: () => useCommunityModal.getState().open({ type: "app", guildId }),
+      done: done.app,
+      run: () => openModal({ type: "serverSettings", guildId, section: "integrations" }),
     },
   ];
   const doneCount = tasks.filter(t => t.done).length;
@@ -108,30 +120,5 @@ export function WelcomeChecklist({ guildId, channelId, sentFirstMessage }: { gui
         <p className="modal-text">It won&apos;t come back for this server.</p>
       </Modal>
     </section>
-  );
-}
-
-/** Placeholder dialog behind "Add your first app": there is no app directory yet. */
-export function AppPlaceholderModal({ onClose, guildId }: { onClose(): void; guildId: Snowflake }) {
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Apps are coming"
-      footer={
-        <button
-          type="button"
-          className="btn"
-          onClick={() => {
-            useWelcome.getState().mark(guildId, { app: true });
-            onClose();
-          }}
-        >
-          Got it
-        </button>
-      }
-    >
-      <p className="modal-text">Vokko doesn&apos;t have an app directory yet. When it does, this is where you will add bots and integrations to your server.</p>
-    </Modal>
   );
 }

@@ -4,9 +4,25 @@ import type { Snowflake } from "../api/types";
 
 export interface WelcomeProgress {
   invited?: boolean;
-  personalized?: boolean;
-  app?: boolean;
   dismissed?: boolean;
+}
+
+/** What the server shows about each checklist step. Only "invite" counts the click: the others need the real thing. */
+export interface WelcomeFacts {
+  memberCount: number;
+  icon: string | null;
+  sentFirstMessage: boolean;
+  /** Bots added to the server (GET /guilds/{id}/integrations); null while unknown. */
+  apps: number | null;
+}
+
+export function welcomeSteps(progress: WelcomeProgress, facts: WelcomeFacts): Record<"invite" | "personalize" | "message" | "app", boolean> {
+  return {
+    invite: !!progress.invited || facts.memberCount > 1,
+    personalize: !!facts.icon,
+    message: facts.sentFirstMessage,
+    app: (facts.apps ?? 0) > 0,
+  };
 }
 
 const KEY = (guildId: Snowflake) => `vokko.welcome.${guildId}`;
