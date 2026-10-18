@@ -6,7 +6,7 @@ import { join } from 'node:path';
 // three audio tracks, two text subtitles and one picture subtitle, and publishes a cue every 5 s of media time per text track.
 // Alice starts the session; we join, then switch audio, pick subtitles and turn them off.
 // Run from apps/desktop: npx playwright test -c e2e/stremio-tracks.config.ts
-const SHOTS = process.env.STREMIO_SHOTS ?? '/srv/vokko/.claude/artifacts/stremio-tracks';
+const SHOTS = process.env.STREMIO_SHOTS ?? '../../.private/artifacts/stremio-tracks';
 
 type MockWin = { __vokkoMock: { channelIdByName(name: string): string | null; requestAs(user: string, method: string, path: string, body?: unknown): unknown } };
 type Stream = { sid: string; playable: boolean };

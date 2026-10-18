@@ -219,7 +219,7 @@ export interface Role {
 export interface Guild {
   id: Snowflake;
   name: string;
-  icon: string | null; // null → client renders initials ("Sam's server" → "Rs")
+  icon: string | null; // null → client renders initials ("Sam's server" → "Ss")
   owner_id: Snowflake;
   roles: Role[];
   system_channel_id: Snowflake | null;

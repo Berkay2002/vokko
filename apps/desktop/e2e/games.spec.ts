@@ -7,7 +7,7 @@ import { join } from 'node:path';
 // Alice and Bob are seeded in General and have no gateway session, so the mock lets the first of them answer pings.
 // Run from apps/desktop: VOKKO_E2E_PORT=1453 npx playwright test e2e/games.spec.ts
 
-const SHOTS = process.env.GAMES_SHOTS ?? '/srv/vokko/.claude/artifacts/games-host';
+const SHOTS = process.env.GAMES_SHOTS ?? '../../.private/artifacts/games-host';
 const shot = (name: string) => join(SHOTS, name);
 
 type StoreWin = { __vokko: { appStore: { getState(): { channels: Record<string, { id: string; name?: string; guild_id: string | null }> } } } };
