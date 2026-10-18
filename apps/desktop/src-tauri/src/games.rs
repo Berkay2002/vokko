@@ -30,13 +30,20 @@ fn is_system_path(path: &str) -> bool {
     SYSTEM_PREFIXES.iter().any(|prefix| normalized.starts_with(prefix))
 }
 
+/// The executable's file name when its path is readable, else the OS process name. Linux reports the name cut to 15 bytes
+/// (`/proc/<pid>/comm`), which would hide every game with a longer file name.
+fn process_name(name: &std::ffi::OsStr, exe: Option<&std::path::Path>) -> String {
+    let name = exe.and_then(std::path::Path::file_name).unwrap_or(name);
+    name.to_string_lossy().trim().to_owned()
+}
+
 fn collect() -> Vec<RunningProcess> {
     let mut system = System::new();
     system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet));
     let mut found: BTreeMap<String, RunningProcess> = BTreeMap::new();
     let own_pid = std::process::id();
     for process in system.processes().values() {
-        let name = process.name().to_string_lossy().trim().to_owned();
+        let name = process_name(process.name(), process.exe());
         if name.is_empty() {
             continue;
         }
@@ -67,7 +74,7 @@ pub fn running_exe_path(name: &str) -> Option<std::path::PathBuf> {
     system
         .processes()
         .values()
-        .find(|process| process.name().to_string_lossy().eq_ignore_ascii_case(name.trim()))
+        .find(|process| process_name(process.name(), process.exe()).eq_ignore_ascii_case(name.trim()))
         .and_then(|process| process.exe().map(std::path::Path::to_path_buf))
 }
 
@@ -98,6 +105,13 @@ mod tests {
         assert!(is_system_path("/usr/bin/zsh"));
         assert!(!is_system_path(r"C:\Program Files (x86)\Steam\steamapps\common\Game\game.exe"));
         assert!(!is_system_path(r"E:\Games\Windows\game.exe"));
+    }
+
+    #[test]
+    fn the_exe_file_name_wins_over_the_cut_process_name() {
+        let exe = std::path::Path::new("/home/me/games/SuperLongGameName.x86_64");
+        assert_eq!(process_name("SuperLongGameNa".as_ref(), Some(exe)), "SuperLongGameName.x86_64");
+        assert_eq!(process_name("eldenring.exe".as_ref(), None), "eldenring.exe");
     }
 
     #[test]
