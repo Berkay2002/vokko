@@ -35,27 +35,33 @@ export class BackendError extends Error {
 
 /** What a backend's tools may ask the bridge for. Every rule is checked here, against the real author. */
 export type TurnContext = {
+  /** Where the message came from: DMs and servers have their own model and effort. */
+  scope: Scope
   pause(args: { user_id?: string; minutes: number; reason: string }): Promise<string>
   unpause(args: { user_id: string }): Promise<string>
 }
 
-/** The owner-adjustable knobs of a backend (!model, !effort). The next turn reads them; a running session keeps its history. */
+export const SCOPES = ['dm', 'server'] as const
+export type Scope = (typeof SCOPES)[number]
+export type Setting = { model: string; effort: string }
+
+/** The owner-adjustable knobs of a backend (!model, !effort), per scope. The next turn reads them; a running session keeps its history. */
 export type Tune = {
   /** Effort values the SDK accepts and the owner may pick. */
   efforts: readonly string[]
   /** What `!model` accepts, for the usage line. */
   modelHint: string
-  get(): { model: string; effort: string }
+  get(scope: Scope): Setting
   /** The model id for what the owner typed (an alias or an id); throws UserFacingError when the backend refuses it. */
   resolveModel(input: string): string
-  set(s: { model?: string; effort?: string }): void
+  set(scope: Scope, s: Partial<Setting>): void
 }
 
-/** VOKKO_AI_EFFORT: one of `allowed`, or `fallback` when unset. Throws a message fit for the log. */
-export function parseEffort(raw: string | undefined, allowed: readonly string[], fallback = 'low'): string {
+/** VOKKO_AI_EFFORT (`name`): one of `allowed`, or `fallback` when unset. Throws a message fit for the log. */
+export function parseEffort(raw: string | undefined, allowed: readonly string[], fallback = 'low', name = 'VOKKO_AI_EFFORT'): string {
   const v = (raw ?? '').trim().toLowerCase()
   if (!v) return fallback
-  if (!allowed.includes(v)) throw new Error(`VOKKO_AI_EFFORT must be one of ${allowed.join(', ')}, not ${raw}`)
+  if (!allowed.includes(v)) throw new Error(`${name} must be one of ${allowed.join(', ')}, not ${raw}`)
   return v
 }
 
@@ -145,8 +151,8 @@ export class Bridge {
   private readonly sessionsFile: string
   private readonly usageFile: string
   private readonly settingsFile: string
-  /** The owner's !model / !effort choices that are in force; they override the env defaults. */
-  private settings: { model?: string; effort?: string } = {}
+  /** The owner's !model / !effort choices that are in force, per scope; they override the env defaults. */
+  private settings: Partial<Record<Scope, Partial<Setting>>> = {}
   private readonly sessions: Record<string, Session>
   private usage: Usage
   private readonly hits = new Map<string, number[]>()
@@ -176,47 +182,57 @@ export class Bridge {
     this.restoreSettings()
   }
 
-  /** Re-applies the saved choices; one that is no longer valid (a model gone from the catalog) is logged and skipped. */
+  /** Re-applies the saved choices; one that is no longer valid (a model gone from the catalog) is logged and skipped. A flat file (before DMs and servers were split) counts for both scopes. */
   private restoreSettings(): void {
     const tune = this.backend.tune
     if (!tune) return
-    const saved = readJson<{ model?: string; effort?: string }>(this.settingsFile, {})
-    if (typeof saved.model === 'string') {
-      try {
-        this.settings.model = tune.resolveModel(saved.model)
-      } catch (e) {
-        this.log(`saved model ${saved.model} ignored: ${e instanceof Error ? e.message : e}`)
+    type Saved = Partial<Setting> & Partial<Record<Scope, Partial<Setting>>>
+    const file = readJson<Saved>(this.settingsFile, {})
+    const flat = typeof file.model === 'string' || typeof file.effort === 'string'
+    for (const scope of SCOPES) {
+      const saved = (flat ? file : file[scope]) ?? {}
+      const mine: Partial<Setting> = {}
+      if (typeof saved.model === 'string') {
+        try {
+          mine.model = tune.resolveModel(saved.model)
+        } catch (e) {
+          this.log(`saved ${scope} model ${saved.model} ignored: ${e instanceof Error ? e.message : e}`)
+        }
       }
+      if (typeof saved.effort === 'string') {
+        if (tune.efforts.includes(saved.effort)) mine.effort = saved.effort
+        else this.log(`saved ${scope} effort ${saved.effort} ignored: not one of ${tune.efforts.join(', ')}`)
+      }
+      this.settings[scope] = mine
+      tune.set(scope, mine)
     }
-    if (typeof saved.effort === 'string') {
-      if (tune.efforts.includes(saved.effort)) this.settings.effort = saved.effort
-      else this.log(`saved effort ${saved.effort} ignored: not one of ${tune.efforts.join(', ')}`)
-    }
-    tune.set(this.settings)
   }
 
-  /** `!model` / `!effort` with or without a value. */
-  private tuneCommand(kind: 'model' | 'effort', arg: string | undefined): string {
+  /** `!model` / `!effort`: no argument shows both scopes, `dm|server <value>` sets one. A value without a scope never writes. */
+  private tuneCommand(kind: 'model' | 'effort', args: string[]): string {
     const tune = this.backend.tune
     if (!tune) return `This backend has no ${kind} setting.`
-    const now = tune.get()
     const options = kind === 'model' ? tune.modelHint : tune.efforts.join('|')
-    if (!arg) return `${this.backend.name} ${kind}: ${now[kind]}. Switch with \`!${kind} ${options}\`.`
+    const usage = `Usage: \`!${kind} dm|server ${options}\``
+    if (args.length === 0) return `${this.backend.name} ${kind}: DMs ${tune.get('dm')[kind]}, servers ${tune.get('server')[kind]}. ${usage}`
+    const scope = args[0].toLowerCase()
+    if (args.length !== 2 || !(SCOPES as readonly string[]).includes(scope)) return usage
     let value: string
     if (kind === 'model') {
       try {
-        value = tune.resolveModel(arg)
+        value = tune.resolveModel(args[1])
       } catch (e) {
         return e instanceof Error ? e.message : String(e)
       }
     } else {
-      value = arg.toLowerCase()
-      if (!tune.efforts.includes(value)) return `Usage: \`!effort ${options}\``
+      value = args[1].toLowerCase()
+      if (!tune.efforts.includes(value)) return usage
     }
-    this.settings = { ...this.settings, [kind]: value }
+    const sc = scope as Scope
+    this.settings = { ...this.settings, [sc]: { ...this.settings[sc], [kind]: value } }
     writeJson(this.settingsFile, this.settings)
-    tune.set(this.settings)
-    return `${this.backend.name} ${kind} is now ${value}, from the next turn (running conversations keep their history).`
+    tune.set(sc, this.settings[sc] ?? {})
+    return `${this.backend.name} ${kind} for ${sc === 'dm' ? 'DMs' : 'servers'} is now ${value}, from the next turn (running conversations keep their history; the prompt cache restarts once).`
   }
 
   private log(line: string): void {
@@ -421,6 +437,7 @@ export class Bridge {
   turnContext(msg: Message, turn: { authorPaused: boolean }): TurnContext {
     const author = msg.author.id
     return {
+      scope: msg.guild_id == null ? 'dm' : 'server',
       pause: async ({ user_id, minutes, reason }) => {
         const target = user_id == null || user_id === '' ? author : parseUserId(user_id)
         if (!target) return `not paused: "${user_id}" is not a user id`
@@ -514,10 +531,10 @@ export class Bridge {
         break
       }
       case '!model':
-        reply = this.tuneCommand('model', args[0])
+        reply = this.tuneCommand('model', args)
         break
       case '!effort':
-        reply = this.tuneCommand('effort', args[0])
+        reply = this.tuneCommand('effort', args)
         break
       case '!pair': {
         const access = this.bot.loadAccess()

@@ -60,8 +60,10 @@ If it replies "Codex isn't signed in on the host", run `codex login`.
 | `ANTHROPIC_API_KEY` | | claude-api only, from the process environment |
 | `VOKKO_STATE_DIR` | `~/.claude/channels/vokko` (api), `~/.vokko/codex` (codex) | token, access, sessions, usage, pauses |
 | `VOKKO_BRIDGE_ROLE` | `shared` (api), `standalone` (codex) | `shared`: the plugin's token, takes only what it hands off. `standalone`: its own bot, answers everything its access allows |
-| `VOKKO_AI_MODEL` | `claude-sonnet-5-5` / Codex's first listed model | Codex refuses to start with a model its catalog doesn't list |
-| `VOKKO_AI_EFFORT` | `low` | `low`, `medium` or `high` (Claude's `effort`, Codex's `model_reasoning_effort`). Anything else: the bridge refuses to start. `!model` / `!effort` override it |
+| `VOKKO_AI_MODEL` | `claude-sonnet-5-5` / Codex's first listed model | The server value (guild channels). Codex refuses to start with a model its catalog doesn't list |
+| `VOKKO_AI_DM_MODEL` | `VOKKO_AI_MODEL` | Model for DMs |
+| `VOKKO_AI_EFFORT` | `low` | `low`, `medium` or `high` (Claude's `effort`, Codex's `model_reasoning_effort`). Anything else: the bridge refuses to start. The server value (guild channels); `!model` / `!effort` override it |
+| `VOKKO_AI_DM_EFFORT` | `VOKKO_AI_EFFORT` | Effort for DMs, same values |
 | `VOKKO_AI_RATE_PER_HOUR` | 20 | messages per user per hour (you are exempt) |
 | `VOKKO_AI_MONTHLY_USD` | 150 | after this the bot replies "Monthly budget reached" until the next month (counts cache reads/writes and failed turns too) |
 | `VOKKO_AI_MAX_OUTPUT_TOKENS` | 1024 | |
@@ -75,9 +77,10 @@ If it replies "Codex isn't signed in on the host", run `codex login`.
 Sent by you (the bot application's owner) to the bot in a DM:
 
 - `!backend api|subscription`: who answers your DMs (shared mode).
-- `!model sonnet|haiku|<model id>` and `!effort low|medium|high`: change the model or effort from the next turn, saved in
-  `settings-<backend>.json` in the state dir (it overrides the env and survives restarts); running conversations keep their
-  history. With no value they show the current one. Codex takes only a model its catalog lists. Not available to moderators.
+- `!model dm|server sonnet|haiku|<model id>` and `!effort dm|server low|medium|high`: change the model or effort for DMs or
+  for servers (they are separate, never synced) from the next turn, saved in `settings-<backend>.json` in the state dir
+  (it overrides the env and survives restarts); running conversations keep their history. With no argument they show both
+  scopes; a value without `dm` or `server` gets a usage line and changes nothing. Codex takes only a model its catalog lists. Not available to moderators.
   Low is the default because chat replies need little reasoning, and effort mostly buys reasoning. Costs follow the active
   model: the tally and per-reply cap use the cost the SDK reports. Changing the model or effort invalidates the prompt cache,
   so the first turn after it pays full input price once.

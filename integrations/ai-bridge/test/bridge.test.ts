@@ -615,12 +615,12 @@ describe('owner and moderator commands', () => {
 
 describe('!model and !effort', () => {
   const OK = { type: 'result', subtype: 'success', is_error: false, result: 'hi', session_id: 'S1', total_cost_usd: 0.01, modelUsage: {} }
-  function tuned(w = world(), opts: { model?: string; effort?: string } = {}) {
+  function tuned(w = world(), opts: { model?: string; effort?: string; dmModel?: string; dmEffort?: string } = {}) {
     const seen: any[] = []
     const query = ((p: { options: any }) => {
       seen.push(p.options)
       return (async function* () {
-        yield OK
+        yield { ...OK, session_id: `S${seen.length}` }
       })()
     }) as any
     const backend = claudeApiBackend({ apiKey: 'k', model: 'sonnet', maxOutputTokens: 100, workDir: join(w.stateDir, 'w'), configDir: join(w.stateDir, 'c'), botName: 'Claude', ownerId: () => OWNER, webSearch: false, maxReplyUsd: 0.5, query, ...opts })
@@ -628,54 +628,86 @@ describe('!model and !effort', () => {
     return { ...w, backend, bridge, seen, last: () => w.sent[w.sent.length - 1] }
   }
   const file = (w: { stateDir: string }) => join(w.stateDir, 'settings-claude-api.json')
+  const inServer = (author: string, content: string) => msg(author, content, { guild: GUILD })
 
-  test('defaults reach the SDK; the owner changes both, the next turn uses them, and a restart keeps them', async () => {
+  test('defaults reach the SDK; the owner changes each scope, the next turn uses it, and a restart keeps it', async () => {
     const s = tuned()
     await s.bridge.handle(msg(NAT, 'hi'))
     expect(s.seen[0]).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'low' })
     await s.bridge.handle(msg(OWNER, '!model'))
-    expect(s.last().text).toContain('model: claude-sonnet-5-5')
-    await s.bridge.handle(msg(OWNER, '!model haiku'))
-    expect(s.last().text).toContain('model is now claude-haiku-5-5')
-    await s.bridge.handle(msg(OWNER, '!effort HIGH'))
-    expect(s.last().text).toContain('effort is now high')
+    expect(s.last().text).toContain('DMs claude-sonnet-5-5, servers claude-sonnet-5-5')
+    await s.bridge.handle(msg(OWNER, '!model dm haiku'))
+    expect(s.last().text).toContain('model for DMs is now claude-haiku-5-5')
+    await s.bridge.handle(msg(OWNER, '!effort Server HIGH'))
+    expect(s.last().text).toContain('effort for servers is now high')
     await s.bridge.handle(msg(OWNER, '!effort'))
-    expect(s.last().text).toContain('effort: high')
-    await s.bridge.handle(msg(NAT, 'again'))
-    expect(s.seen[1]).toMatchObject({ model: 'claude-haiku-5-5', effort: 'high', resume: 'S1' })
-    expect(JSON.parse(readFileSync(file(s), 'utf8'))).toEqual({ model: 'claude-haiku-5-5', effort: 'high' })
+    expect(s.last().text).toContain('DMs low, servers high')
+    await s.bridge.handle(msg(NAT, 'again')) // a DM
+    expect(s.seen[1]).toMatchObject({ model: 'claude-haiku-5-5', effort: 'low', resume: 'S1' })
+    expect(JSON.parse(readFileSync(file(s), 'utf8'))).toEqual({ dm: { model: 'claude-haiku-5-5' }, server: { effort: 'high' } })
     if (process.platform !== 'win32') expect(statSync(file(s)).mode & 0o777).toBe(0o600)
 
-    // a restart: new backend from the env defaults, the saved choice overrides them
+    // a restart: new backend from the env defaults, the saved choices override them
     const again = tuned(s, { model: 'claude-sonnet-5-5', effort: 'low' })
-    await again.bridge.handle(msg(NAT, 'back'))
-    expect(again.seen[0]).toMatchObject({ model: 'claude-haiku-5-5', effort: 'high' })
+    await again.bridge.handle(msg(NAT, 'dm'))
+    await again.bridge.handle(inServer(EVE, 'server'))
+    expect(again.seen[0]).toMatchObject({ model: 'claude-haiku-5-5', effort: 'low' })
+    expect(again.seen[1]).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'high' })
   })
 
-  test('refused: a bad value changes nothing; so do non-owners and moderators', async () => {
+  test('DMs and servers are separate: env values, per-turn scope, and neither command touches the other', async () => {
+    const s = tuned(world(), { effort: 'medium', dmModel: 'haiku', dmEffort: 'low' })
+    expect(s.backend.tune!.get('dm')).toEqual({ model: 'claude-haiku-5-5', effort: 'low' })
+    expect(s.backend.tune!.get('server')).toEqual({ model: 'claude-sonnet-5-5', effort: 'medium' })
+    await s.bridge.handle(msg(NAT, 'dm'))
+    await s.bridge.handle(inServer(EVE, 'server'))
+    expect(s.seen[0]).toMatchObject({ model: 'claude-haiku-5-5', effort: 'low' })
+    expect(s.seen[1]).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'medium' })
+    await s.bridge.handle(msg(OWNER, '!effort dm high'))
+    expect(s.backend.tune!.get('dm').effort).toBe('high')
+    expect(s.backend.tune!.get('server').effort).toBe('medium')
+    await s.bridge.handle(msg(OWNER, '!model server claude-opus-5-5'))
+    expect(s.backend.tune!.get('server').model).toBe('claude-opus-5-5')
+    expect(s.backend.tune!.get('dm').model).toBe('claude-haiku-5-5')
+  })
+
+  test('the old flat settings file counts for both scopes', () => {
+    const w = world()
+    writeFileSync(file(w), JSON.stringify({ model: 'claude-haiku-5-5', effort: 'high' }))
+    const s = tuned(w)
+    expect(s.backend.tune!.get('dm')).toEqual({ model: 'claude-haiku-5-5', effort: 'high' })
+    expect(s.backend.tune!.get('server')).toEqual({ model: 'claude-haiku-5-5', effort: 'high' })
+  })
+
+  test('refused: a value without a scope or a bad value changes nothing; so do non-owners and moderators', async () => {
     const s = tuned()
-    for (const bad of ['!effort xhigh', '!effort max', '!effort turbo', '!model gpt-5', '!model ../x']) {
+    for (const bad of ['!effort high', '!model haiku', '!effort dm', '!effort dm xhigh', '!effort server max', '!effort dm turbo', '!effort both high', '!model dm gpt-5', '!model server ../x', '!effort dm high now']) {
       await s.bridge.handle(msg(OWNER, bad))
       expect(s.last().text).toMatch(/Usage/)
+      expect(s.last().text).not.toContain('is now')
     }
+    await s.bridge.handle(msg(OWNER, '!effort high'))
+    expect(s.last().text).toContain('Usage: `!effort dm|server low|medium|high`')
     expect(existsSync(file(s))).toBe(false)
-    await s.bridge.handle(msg(NAT, '!model haiku')) // a member's DM is an ordinary message
-    await s.bridge.handle(msg(MOD, '!effort high', { guild: GUILD }))
-    await s.bridge.handle(msg(MOD, '!model haiku', { guild: GUILD }))
+    await s.bridge.handle(msg(NAT, '!model dm haiku')) // a member's DM is an ordinary message
+    await s.bridge.handle(inServer(MOD, '!effort server high'))
+    await s.bridge.handle(inServer(MOD, '!model dm haiku'))
     expect(existsSync(file(s))).toBe(false)
-    expect(s.backend.tune!.get()).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' })
+    expect(s.backend.tune!.get('dm')).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' })
+    expect(s.backend.tune!.get('server')).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' })
   })
 
   test('a saved value that is no longer valid is skipped at startup, the env default stands', () => {
     const w = world()
-    writeFileSync(file(w), JSON.stringify({ model: 'gpt-5', effort: 'max' }))
+    writeFileSync(file(w), JSON.stringify({ dm: { model: 'gpt-5', effort: 'max' }, server: { effort: 'high' } }))
     const s = tuned(w, { effort: 'medium' })
-    expect(s.backend.tune!.get()).toEqual({ model: 'claude-sonnet-5-5', effort: 'medium' })
+    expect(s.backend.tune!.get('dm')).toEqual({ model: 'claude-sonnet-5-5', effort: 'medium' })
+    expect(s.backend.tune!.get('server')).toEqual({ model: 'claude-sonnet-5-5', effort: 'high' })
   })
 
   test('a backend without the knobs says so', async () => {
     const s = setup()
-    await s.bridge.handle(msg(OWNER, '!effort high'))
+    await s.bridge.handle(msg(OWNER, '!effort dm high'))
     expect(s.last().text).toContain('no effort setting')
   })
 })
