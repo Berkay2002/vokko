@@ -1,9 +1,11 @@
 import { useEffect } from "react";
+import { Code } from "lucide-react";
 import { COMMUNITY_THEME_CARDS, FONT_SIZES, GRADIENT_THEME_CARDS, THEMES, previewThemeChoice, resetPrefs, setPref, usePrefs } from "../../ui";
 import { AppIconSection } from "../../appicon/AppIconSection";
 import { GROUP_GAPS, SPACING_PRESETS, setMessageSpacing } from "../../ui/prefs";
 import type { MessageDisplay, MessageSpacing, ThemeCard } from "../../ui/prefs";
-import { Category, Divider, Field, Page, RadioGroup, Select, Slider, SwitchRow, Unavailable } from "./controls";
+import { Category, Divider, Field, Page, RadioGroup, Select, Slider, SwitchRow } from "./controls";
+import { RelatedSetting } from "./smControls";
 
 const DEFAULT_GAP = SPACING_PRESETS.balanced.gap;
 
@@ -32,7 +34,7 @@ function previewProps(id: ThemeCard["id"]) {
   };
 }
 
-export function AppearancePage() {
+export function AppearancePage({ onOpen }: { onOpen(section: string): void }) {
   const theme = usePrefs(s => s.theme);
   const messageDisplay = usePrefs(s => s.messageDisplay);
   const fontSize = usePrefs(s => s.fontSize);
@@ -192,7 +194,7 @@ export function AppearancePage() {
       </Category>
 
       <Category title="Advanced">
-        <Unavailable>Hardware acceleration and developer mode are not available in this build.</Unavailable>
+        <RelatedSetting icon={Code} label="Advanced" note="Developer mode and hardware acceleration." onClick={() => onOpen("developer")} />
       </Category>
 
       <Divider />

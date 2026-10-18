@@ -71,7 +71,13 @@ export function SignInMethods() {
             value={
               <span className="acct-provider">
                 <ProviderIcon kind={row.kind} />
-                {link ? `Linked${link.email ? ` as ${link.email}` : ""}` : <span className="sm-muted">Not linked</span>}
+                {link ? (
+                  <span>
+                    Linked{link.email && <> as <span className="personal-info">{link.email}</span></>}
+                  </span>
+                ) : (
+                  <span className="sm-muted">Not linked</span>
+                )}
               </span>
             }
           >

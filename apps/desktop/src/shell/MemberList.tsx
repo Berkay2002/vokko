@@ -1,7 +1,7 @@
 import { forwardRef, memo, useMemo } from "react";
 import { Virtuoso, type ItemProps, type ListProps } from "react-virtuoso";
 import { compareIds } from "../api/snowflake";
-import { displayName, roleColor, useStore } from "../api/store";
+import { displayName, roleColor, roleIcon, useStore } from "../api/store";
 import type { GuildMember, Role, Snowflake } from "../api/types";
 import { useContextMenu } from "../ui";
 import { useCustomColor } from "../ui/useCustomColor";
@@ -20,6 +20,7 @@ const collator = new Intl.Collator(undefined, { sensitivity: "base" });
 const MemberRow = memo(function MemberRow({ member, guildId, offline }: { member: GuildMember; guildId: Snowflake; offline: boolean }) {
   const menu = useContextMenu();
   const color = useCustomColor(useStore(() => roleColor(guildId, member)));
+  const icon = useStore(() => roleIcon(guildId, member));
   const custom = useStore(s => s.presences[member.user.id]?.custom_status);
   const playing = useShownActivity(member.user.id);
   return (
@@ -34,6 +35,7 @@ const MemberRow = memo(function MemberRow({ member, guildId, offline }: { member
       <span className="member-text">
         <span className="member-name" style={color ? { color } : undefined}>
           <StyledName styles={member.user.display_name_styles}>{displayName(member.user, member)}</StyledName>
+          {icon && <span className="role-icon" role="img" aria-label={icon.name} title={icon.name}>{icon.unicode_emoji}</span>}
           <TagChip tag={member.user.primary_guild} />
           <TimeoutBadge until={member.communication_disabled_until} />
         </span>

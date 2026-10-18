@@ -336,12 +336,12 @@
   margin-top: 4px;
 }
 
-.sm-side-links button {
+.sm-side-links a {
   color: inherit;
   font-size: inherit;
 }
 
-.sm-side-links button:hover {
+.sm-side-links a:hover {
   color: var(--text-default);
   text-decoration: underline;
 }

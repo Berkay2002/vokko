@@ -313,3 +313,31 @@ test('Hide Muted Channels brings a channel back when its timed mute lapses, with
   await page.clock.fastForward('16:00');
   await expect(row(page, 'memes')).toHaveCount(1);
 });
+
+test('channel topic toolbar wraps the selection in markdown and a second click unwraps it', async ({ page }) => {
+  await openChannel(page, 'general');
+  await row(page, 'random').hover();
+  await row(page, 'random').getByRole('button', { name: 'Edit Channel' }).click();
+  const topic = page.getByRole('textbox', { name: 'Channel topic' });
+  await topic.fill('read the rules');
+  await topic.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(9, 14));
+  const toolbar = page.getByRole('toolbar', { name: 'Topic formatting' });
+  await toolbar.getByRole('button', { name: 'Bold' }).click();
+  await expect(topic).toHaveValue('read the **rules**');
+  await toolbar.getByRole('button', { name: 'Spoiler' }).click();
+  await expect(topic).toHaveValue('read the **||rules||**');
+  await toolbar.getByRole('button', { name: 'Spoiler' }).click();
+  await toolbar.getByRole('button', { name: 'Bold' }).click();
+  await expect(topic).toHaveValue('read the rules');
+});
+
+test('the rules channel (Server Settings > Access) gets the rules icon in the channel list', async ({ page }) => {
+  await openChannel(page, 'general');
+  await expect(list(page).getByRole('img', { name: 'Rules channel' })).toHaveCount(0);
+  await page.evaluate(() => {
+    const store = (window as unknown as Win).__vokko.appStore;
+    const random = Object.values(store.getState().channels).find(c => c.name === 'random' && c.guild_id)!;
+    store.setState(s => ({ guilds: { ...s.guilds, [random.guild_id!]: { ...s.guilds[random.guild_id!]!, rules_channel_id: random.id } } }));
+  });
+  await expect(row(page, 'random').getByRole('img', { name: 'Rules channel' })).toBeVisible();
+});

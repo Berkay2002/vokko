@@ -12,6 +12,7 @@ import { useVoice } from "../voice/store";
 import { buildSections, soundKey } from "./helpers";
 import { stopPreview } from "./playback";
 import { loadDefaults, previewSound, sendSound, setSoundboardVolume, toggleFavorite, useSoundboard } from "./store";
+import { usePrefs } from "../ui/prefs";
 
 function SoundTile({ sound, disabled, favorite, onError }: { sound: SoundboardSound; disabled: boolean; favorite: boolean; onError(text: string | null): void }) {
   const [sent, setSent] = useState(false);
@@ -67,7 +68,8 @@ export function SoundboardPanel() {
   const deafened = useVoice(s => s.selfDeaf);
   const guilds = useStore(s => s.guilds);
   const guildOrder = useStore(s => s.guildOrder);
-  const { guildSounds, defaults, favorites, volume } = useSoundboard();
+  const { guildSounds, defaults, favorites } = useSoundboard();
+  const volume = usePrefs(s => s.soundboardVolume);
   const perms = usePermissions(voiceGuildId);
   const canAdd = perms.can(Perm.CREATE_GUILD_EXPRESSIONS) || perms.can(Perm.MANAGE_GUILD_EXPRESSIONS);
 

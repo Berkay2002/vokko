@@ -616,6 +616,17 @@ export function roleColor(guildId: Snowflake | null | undefined, member: { roles
   return best ? `#${best.color.toString(16).padStart(6, "0")}` : null;
 }
 
+/** The highest role with an icon (`unicode_emoji`), shown next to the name like Discord's role icon; null when none has one. */
+export function roleIcon(guildId: Snowflake | null | undefined, member: { roles: Snowflake[] } | null | undefined): Role | null {
+  if (!guildId || !member) return null;
+  let best: Role | null = null;
+  for (const role of appStore.getState().guilds[guildId]?.roles ?? []) {
+    if (!role.unicode_emoji || !member.roles.includes(role.id)) continue;
+    if (!best || role.position > best.position) best = role;
+  }
+  return best;
+}
+
 const DEFAULT_AVATAR_COLORS = ["#5865f2", "#6d7380", "#3ba55d", "#e0a23a", "#c45bd0", "#e5484d"];
 const avatarCache = new Map<number, string>();
 

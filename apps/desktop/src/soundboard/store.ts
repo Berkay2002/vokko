@@ -1,6 +1,6 @@
-// Soundboard state: every joined server's sounds, the default sounds, your entrance sounds, favourites and the "Soundboard
-// volume" setting (both local), and the effect flashes on speaking rings. Fed by gateway events; plays clips on
-// VOICE_CHANNEL_EFFECT_SEND.
+// Soundboard state: every joined server's sounds, the default sounds, your entrance sounds, local favourites, and the
+// effect flashes on speaking rings. Fed by gateway events; plays clips on VOICE_CHANNEL_EFFECT_SEND. "Soundboard volume"
+// is the synced `soundboardVolume` pref.
 
 import { create } from "zustand";
 import { MOCK } from "../api/config";
@@ -9,6 +9,7 @@ import { gateway } from "../api/gateway";
 import { request, uploadAttachment } from "../api/rest";
 import { appStore } from "../api/store";
 import type { CreateSoundboardSoundRequest, EditSoundboardSoundRequest, EntranceSound, EntranceSounds, Snowflake, SoundboardSound, SoundboardSoundList } from "../api/types";
+import { getPrefs, setPref } from "../ui/prefs";
 import { voiceStore } from "../voice/store";
 import { effectiveVolume, soundKey } from "./helpers";
 import { playEffect, playLog, playPreview } from "./playback";
@@ -32,32 +33,32 @@ export interface SoundboardState {
   entrance: EntranceSound[] | null;
   /** `soundKey`s, most recent first. */
   favorites: string[];
-  /** "Soundboard volume", 0..100 %. */
-  volume: number;
   /** user id → the effect flashing on their tile. */
   effects: Record<Snowflake, SoundEffect>;
 }
 
 interface Persisted {
   favorites: string[];
-  volume: number;
 }
 
 function load(): Persisted {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<Persisted>;
-    return {
-      favorites: Array.isArray(raw.favorites) ? raw.favorites.filter((k): k is string => typeof k === "string").slice(0, 200) : [],
-      volume: typeof raw.volume === "number" && raw.volume >= 0 && raw.volume <= 100 ? raw.volume : 100,
-    };
+    const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<Persisted> & { volume?: unknown };
+    const favorites = Array.isArray(raw.favorites) ? raw.favorites.filter((k): k is string => typeof k === "string").slice(0, 200) : [];
+    // the volume used to live here: move it to the pref once, then drop it
+    if ("volume" in raw) {
+      if (typeof raw.volume === "number" && raw.volume >= 0 && raw.volume <= 100 && getPrefs().soundboardVolume === 100) setPref("soundboardVolume", raw.volume);
+      save({ favorites });
+    }
+    return { favorites };
   } catch {
-    return { favorites: [], volume: 100 };
+    return { favorites: [] };
   }
 }
 
 function save(state: Persisted): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify({ favorites: state.favorites, volume: state.volume }));
+    localStorage.setItem(KEY, JSON.stringify({ favorites: state.favorites }));
   } catch {
     /* storage unavailable: the setting still applies for this session */
   }
@@ -72,8 +73,7 @@ const errorText = (e: unknown, fallback: string): string => (e instanceof ApiReq
 // ---- local settings ----
 
 export function setSoundboardVolume(volume: number): void {
-  set({ volume: Math.min(100, Math.max(0, Math.round(volume))) });
-  save(get());
+  setPref("soundboardVolume", Math.min(100, Math.max(0, Math.round(volume))));
 }
 
 export function toggleFavorite(sound: SoundboardSound): void {
@@ -139,7 +139,7 @@ export async function sendSound(sound: SoundboardSound): Promise<string | null> 
 }
 
 /** Hover / button preview: only you hear it, at the same volume the channel would. */
-export const previewSound = (sound: SoundboardSound): void => playPreview(sound.url, effectiveVolume(sound.volume, get().volume));
+export const previewSound = (sound: SoundboardSound): void => playPreview(sound.url, effectiveVolume(sound.volume, getPrefs().soundboardVolume));
 
 let serial = 0;
 function flash(userId: Snowflake, emoji: string | null, entrance: boolean): void {
@@ -228,7 +228,7 @@ export function wireSoundboard(): void {
     if (voice.channelId !== effect.channel_id) return;
     flash(effect.user_id, effect.emoji?.name ?? null, !!effect.entrance);
     // Deafened: you hear nothing, soundboard included.
-    if (!voice.selfDeaf) playEffect(effect.sound_url, effectiveVolume(effect.sound_volume, get().volume));
+    if (!voice.selfDeaf) playEffect(effect.sound_url, effectiveVolume(effect.sound_volume, getPrefs().soundboardVolume));
   });
   if (MOCK && typeof window !== "undefined") (window as unknown as { __vokkoSoundboard: { plays: typeof playLog } }).__vokkoSoundboard = { plays: playLog };
 }
