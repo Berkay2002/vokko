@@ -33,8 +33,9 @@ export function plainBody(message: Pick<Message, "content" | "attachments" | "em
   return "";
 }
 
-/** "alice" in a DM, "alice (#general, Vokko Lab)" in a server, "alice (Movie night)" in a group DM. */
-export function notificationTitle(ctx: Pick<TextContext, "authorName" | "channelName" | "guildName" | "group">): string {
+/** "alice" in a DM, "alice (#general, Vokko Lab)" in a server, "alice (gateway docs, in #general, Vokko Lab)" in a thread (`thread` is its name, `channelName` the parent's), "alice (Movie night)" in a group DM. */
+export function notificationTitle(ctx: Pick<TextContext, "authorName" | "channelName" | "guildName" | "group"> & { thread?: string | undefined }): string {
+  if (ctx.guildName && ctx.thread) return `${ctx.authorName} (${ctx.thread}, in #${ctx.channelName}, ${ctx.guildName})`;
   if (ctx.guildName) return `${ctx.authorName} (#${ctx.channelName}, ${ctx.guildName})`;
   if (ctx.group) return `${ctx.authorName} (${ctx.channelName})`;
   return ctx.authorName;

@@ -348,7 +348,7 @@ export interface EmbedMedia {
   height?: number;
 }
 export interface Embed {
-  type: "rich" | "link" | "image" | "video" | "article" | "gifv" | "poll_result"; // poll_result: only on a MessageType.PollResult message, data in `fields`
+  type: "rich" | "link" | "image" | "video" | "article" | "gifv" | "poll_result" | "auto_moderation_message"; // poll_result: only on a MessageType.PollResult message, data in `fields`; auto_moderation_message: only on MessageType.AutoModerationAction
   title?: string;
   description?: string;
   url?: string;
@@ -420,6 +420,7 @@ export enum MessageType {
   ThreadStarterMessage = 21, // first message of a thread started from a message; message_reference points at the original, referenced_message is filled
   ChatInputCommand = 20, // response to a slash command (interaction_metadata says who used which command)
   ContextMenuCommand = 23, // response to a User/Message command
+  AutoModerationAction = 24, // AutoMod alert in a rule's alert channel; author = the member, embeds[0] is an "auto_moderation_message" embed (description = their content)
   PollResult = 46, // posted once when a poll ends, by the poll's author; message_reference = the poll message, embeds[0] is a "poll_result" embed (PollResultField)
 }
 export enum MessageFlags {
@@ -625,6 +626,8 @@ export interface PatchUserSettingsRequest {
 /** GET/PATCH /users/@me/guilds/{id}/privacy: `direct_messages` is false once the caller restricted DMs from this guild's members. */
 export interface GuildPrivacySettings {
   direct_messages: boolean;
+  /** "Appear offline in this server": members who share only such servers with the caller see them offline, and nobody sees them typing in such a server. */
+  appear_offline: boolean;
 }
 /** 409 body of PATCH /users/@me/settings: code 40090 plus the current blob. */
 export interface UserSettingsConflict extends ApiError, UserSettings {}
@@ -1866,6 +1869,8 @@ export enum AuditLogEvent {
   AutoModerationRuleUpdate = 141,
   AutoModerationRuleDelete = 142,
   AutoModerationBlockMessage = 143,
+  AutoModerationFlagToChannel = 144,
+  AutoModerationUserCommunicationDisabled = 145,
   OnboardingPromptCreate = 163,
   OnboardingPromptUpdate = 164,
   OnboardingPromptDelete = 165,
@@ -1917,20 +1922,36 @@ export interface AuditLog {
 
 export enum AutoModerationTriggerType {
   Keyword = 1,
+  Spam = 3, // the same text (10+ chars) for the third time within 30 s anywhere in the guild
+  KeywordPreset = 4,
+  MentionSpam = 5,
+}
+export enum AutoModerationKeywordPresetType {
+  Profanity = 1,
+  SexualContent = 2,
+  Slurs = 3,
 }
 export enum AutoModerationEventType {
   MessageSend = 1,
 }
 export enum AutoModerationActionType {
   BlockMessage = 1,
+  SendAlertMessage = 2,
+  Timeout = 3, // keyword and mention spam rules only
 }
 export interface AutoModerationTriggerMetadata {
-  keyword_filter: string[]; // max 1000, each ≤60 chars; "*" at the start/end = prefix / suffix / substring match
-  allow_list: string[]; // max 100, same syntax
+  keyword_filter: string[]; // keyword rules: max 1000, each ≤60 chars; "*" at the start/end = prefix / suffix / substring match
+  allow_list: string[]; // keyword (max 100) and keyword preset (max 1000) rules, same syntax
+  presets?: AutoModerationKeywordPresetType[]; // keyword preset rules
+  mention_total_limit?: number; // mention spam rules: 1-50 unique user + role mentions
 }
 export interface AutoModerationAction {
   type: AutoModerationActionType;
-  metadata?: { custom_message?: string }; // ≤150 chars, shown to the blocked author
+  metadata?: {
+    custom_message?: string; // BlockMessage: ≤150 chars, shown to the blocked author
+    channel_id?: Snowflake; // SendAlertMessage: a text channel of the guild
+    duration_seconds?: number; // Timeout: 1-2419200
+  };
 }
 export interface AutoModerationRule {
   id: Snowflake;
@@ -1981,6 +2002,8 @@ export interface EditChannelRequest {
   // ---- voice channels (MANAGE_CHANNELS) ----
   bitrate?: number; // 8000..guild max (else 400 50035)
   user_limit?: number; // 0..99
+  // ---- group DMs (any recipient) ----
+  icon_attachment_id?: Snowflake | null; // an own PNG/JPEG/GIF/WebP upload (<= 10 MiB) becomes the group icon; null removes it
 }
 export interface CreateChannelRequest {
   name: string;

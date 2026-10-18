@@ -506,3 +506,33 @@ html.ui-zoomed body {
   height: calc(100vh / var(--ui-zoom, 1));
   height: calc(100dvh / var(--ui-zoom, 1));
 }
+
+/* ---- phone (<= 499px): the preview scrolls away and is compact, inline rows stack, sliders label only their ends ---- */
+@media (max-width: 499px) {
+  .a11y-sticky {
+    position: static;
+    margin-bottom: 16px;
+    padding-top: 0;
+  }
+
+  .a11y-preview-side {
+    display: none;
+  }
+
+  .a11y-preview {
+    padding-right: 8px;
+    overflow-wrap: anywhere;
+  }
+
+  .a11y-field-inline {
+    display: block;
+  }
+
+  .a11y-field-inline > .a11y-field-control {
+    margin-top: 8px;
+  }
+
+  .ms-label:not(.first, .last, .active) {
+    display: none;
+  }
+}

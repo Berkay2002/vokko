@@ -34,10 +34,39 @@ export function lastActivityMs(thread: Channel): number {
 
 export const messageCountLabel = (count: number | undefined): string => `${count ?? 0} ${count === 1 ? "Message" : "Messages"}`;
 
-/** A one-line plain-text preview of message content (mentions and markdown stay as typed; nothing is parsed or rendered as HTML). */
-export function previewText(content: string, max = 140): string {
-  const flat = content.replace(/\s+/g, " ").trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+const ESCAPED = 0xe000;
+
+export interface PreviewNames {
+  user?(id: string): string | null | undefined;
+  role?(id: string): string | null | undefined;
+  channel?(id: string): string | null | undefined;
+}
+
+/**
+ * A one-line plain-text preview of message content: markdown markers stripped, `<@id>` / `<@&id>` / `<#id>` / `<:name:id>` turned into
+ * @name / @role / #name / :name:, spoilers hidden, then cut at `max`. Nothing is parsed or rendered as HTML. Unresolved ids read "@user", "@role", "#channel".
+ */
+export function plainPreview(content: string, max = 140, names: PreviewNames = {}): string {
+  const flat = content
+    // Backslash-escaped markers stay literal: parked in the private use area, restored at the end.
+    .replace(/\\([*_~|`\\])/g, (_, c: string) => String.fromCharCode(ESCAPED + c.charCodeAt(0)))
+    .replace(/```(?:[\w+-]*\n)?([\s\S]*?)```/g, "$1")
+    // Before mentions are resolved: a name containing "||" must not close the spoiler early.
+    .replace(/\|\|[\s\S]+?\|\|/g, "[spoiler]")
+    .replace(/<(@&|@!?|#)(\d+)>/g, (_, kind: string, id: string) => (kind === "@&" ? `@${names.role?.(id) ?? "role"}` : kind === "#" ? `#${names.channel?.(id) ?? "channel"}` : `@${names.user?.(id) ?? "user"}`))
+    .replace(/<a?:(\w+):\d+>/g, ":$1:")
+    .replace(/<(https?:\/\/[^>\s]+)>/g, "$1")
+    .replace(/\[([^\]\n]+)\]\([^)\s]+(?:\s+"[^"]*")?\)/g, "$1")
+    .replace(/^\s{0,3}(?:#{1,3}|-#)\s+/gm, "")
+    .replace(/^\s{0,3}>{1,3}\s?/gm, "")
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/(\*\*|__|~~)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/(?<![\w*])\*(?=\S)([^*\n]*?\S)\*(?![\w*])/g, "$1")
+    .replace(/(?<!\w)_(?=\S)([^_\n]*?\S)_(?!\w)/g, "$1")
+    .replace(/\s+/g, " ")
+    .replace(/[\ue000-\ue0ff]/g, c => String.fromCharCode(c.charCodeAt(0) - ESCAPED))
+    .trim();
+  return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
 }
 
 export type ThreadSort = "activity" | "created";

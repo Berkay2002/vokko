@@ -148,6 +148,24 @@ async fn a_group_holds_at_most_ten_people() {
     assert_eq!(app.put(&path(&channel, &members[9]), &alice.token).await.0, StatusCode::NO_CONTENT);
 }
 
+#[tokio::test]
+async fn an_instance_may_raise_the_group_size() {
+    let app = TestApp::with_config(|config| config.group_dm_max = 12).await;
+    let alice = user(&app, "alice").await;
+    let mut members = Vec::new();
+    for index in 0..12 {
+        let member = user(&app, &format!("member{index}")).await;
+        befriend(&app, &alice, &member).await;
+        members.push(member);
+    }
+    // 11 others fit at creation (12 people), the next add is refused.
+    let channel = group(&app, &alice, &members[..11].iter().collect::<Vec<_>>()).await;
+    let (status, body) = app.put(&path(&channel, &members[11]), &alice.token).await;
+    assert_eq!((status, body["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(30004)), "{body}");
+    let (status, _) = app.post("/users/@me/channels", &alice.token, json!({"recipient_ids": members.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "12 others are too many");
+}
+
 /// Runs alice's PUT of dana while the test holds the group's row lock, applies `change` (SQL on the channel) once the PUT waits on
 /// that lock, then releases it: the PUT sees a group that changed after its first checks.
 async fn put_racing(app: &TestApp, change: &[&str]) -> (StatusCode, Value) {
@@ -258,4 +276,60 @@ async fn the_owner_leaving_hands_the_group_to_a_remaining_recipient() {
     assert_eq!(app.put(&path(&channel, &alice), &owner.token).await.0, StatusCode::NO_CONTENT);
     assert_eq!(app.delete(&path(&channel, other), &alice.token).await.0, StatusCode::FORBIDDEN);
     assert_eq!(app.delete(&path(&channel, other), &owner.token).await.0, StatusCode::NO_CONTENT);
+}
+
+/// Uploads `data` to `channel` as `filename` and returns the attachment id.
+async fn upload(app: &TestApp, user: &User, channel: &str, filename: &str, content_type: &str, data: &[u8]) -> String {
+    let boundary = "vokkoboundary7MA4YWxkTrZu0gW";
+    let mut body =
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n").into_bytes();
+    body.extend_from_slice(data);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let (status, attachment) =
+        app.post_bytes(&format!("/channels/{channel}/attachments"), Some(&user.token), &format!("multipart/form-data; boundary={boundary}"), body).await;
+    assert_eq!(status, StatusCode::OK, "{attachment}");
+    attachment["id"].as_str().expect("id").to_owned()
+}
+
+const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0, 0, 0, 4, 0, 0, 0, 4, 8, 6, 0, 0, 0, 0, 0, 0, 0];
+
+#[tokio::test]
+async fn a_recipient_sets_and_clears_the_group_icon() {
+    let app = TestApp::new().await;
+    let address = app.serve().await;
+    let (alice, bob, carl) = (user(&app, "alice").await, user(&app, "bob").await, user(&app, "carl").await);
+    for other in [&bob, &carl] {
+        befriend(&app, &alice, other).await;
+    }
+    let channel = group(&app, &alice, &[&bob, &carl]).await;
+    let mut carl_ws = Client::identify(&address, &carl.token).await;
+    let channel_path = format!("/channels/{channel}");
+
+    // Only the caller's own image uploads: someone else's upload and a non-image are refused.
+    let bobs = upload(&app, &bob, &channel, "b.png", "image/png", PNG).await;
+    let (status, body) = app.patch(&channel_path, &alice.token, json!({"icon_attachment_id": bobs})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let text = upload(&app, &alice, &channel, "a.txt", "text/plain", b"hello").await;
+    let (status, body) = app.patch(&channel_path, &alice.token, json!({"icon_attachment_id": text})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    // Any recipient (not just the owner) sets it; everyone gets CHANNEL_UPDATE.
+    let icon = upload(&app, &bob, &channel, "icon.png", "image/png", PNG).await;
+    let (status, updated) = app.patch(&channel_path, &bob.token, json!({"icon_attachment_id": icon, "name": "Crew"})).await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert!(updated["icon"].is_string(), "{updated}");
+    let event = carl_ws.wait_until("CHANNEL_UPDATE", |c| c["id"] == channel.as_str() && c["icon"].is_string()).await;
+    assert_eq!(event["name"], "Crew");
+
+    let (status, cleared) = app.patch(&channel_path, &alice.token, json!({"icon_attachment_id": null})).await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert!(cleared["icon"].is_null(), "{cleared}");
+    carl_ws.wait_until("CHANNEL_UPDATE", |c| c["id"] == channel.as_str() && c["icon"].is_null()).await;
+
+    // A 1:1 DM has no icon.
+    let (status, dm) = app.post("/users/@me/channels", &alice.token, json!({"recipient_id": bob.id})).await;
+    assert_eq!(status, StatusCode::OK, "{dm}");
+    let mine = upload(&app, &alice, &channel, "m.png", "image/png", PNG).await;
+    let (status, _) = app.patch(&format!("/channels/{}", dm["id"].as_str().expect("id")), &alice.token, json!({"icon_attachment_id": mine})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }

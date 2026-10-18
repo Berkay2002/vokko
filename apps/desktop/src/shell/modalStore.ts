@@ -10,6 +10,8 @@ export type ModalSpec =
   | { type: "applyToJoin"; code: string }
   | { type: "createChannel"; guildId: Snowflake; parentId?: Snowflake | null; channelType?: ChannelType }
   | { type: "leaveServer"; guildId: Snowflake }
+  | { type: "leaveGroup"; channelId: Snowflake }
+  | { type: "editGroup"; channelId: Snowflake }
   | { type: "deleteServer"; guildId: Snowflake }
   | { type: "deleteChannel"; channelId: Snowflake }
   | { type: "serverSettings"; guildId: Snowflake; section?: string }
@@ -45,7 +47,7 @@ export type ModalSpec =
 const SETTINGS_TYPES = new Set<ModalSpec["type"]>(["serverSettings", "channelSettings", "editChannel", "userSettings"]);
 /** Settings frames whose save bar is wired to the unsaved guard. */
 const GUARDED_TYPES = new Set<ModalSpec["type"]>(["userSettings", "channelSettings", "editChannel", "serverSettings"]);
-const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "invite", "createChannel", "logout", "removeFriend", "blockUser", "report", "reportProblem", "guildPrivacy", "dmRefused", "channelTopic", "quickSwitcher", "shortcuts", "voiceStatus", "watchTogether", "gameCredits", "cameraPreview", "screenShare", "profileEditor"]);
+const DIALOG_TYPES = new Set<ModalSpec["type"]>(["kickMember", "banMember", "timeoutMember", "nickname", "deleteServer", "deleteChannel", "leaveServer", "leaveGroup", "editGroup", "invite", "createChannel", "logout", "removeFriend", "blockUser", "report", "reportProblem", "guildPrivacy", "dmRefused", "channelTopic", "quickSwitcher", "shortcuts", "voiceStatus", "watchTogether", "gameCredits", "cameraPreview", "screenShare", "profileEditor"]);
 
 interface ModalStore {
   modal: ModalSpec | null;

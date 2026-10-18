@@ -1,17 +1,16 @@
 import { BellOff, MessageSquareText } from "lucide-react";
 import { useStore } from "../api/store";
 import type { Channel } from "../api/types";
-import { go, guildPath } from "../shell/nav";
 import { useContextMenu } from "../ui";
 import { threadBellItems, useThreadMuted } from "./mute";
 import { isThreadUnread, lastActivityMs } from "./util";
-import { openThread, useThreadUi } from "./threadUi";
+import { goToThread, useThreadUi } from "./threadUi";
 import "./threads.css";
 
 const MAX_ROWS = 8;
 
 /** One joined thread under its channel: strong name and a mention badge while unread, dimmed with a bell-off icon while muted (the channel row's rules). */
-function ThreadLink({ thread, channel, guildId }: { thread: Channel; channel: Channel; guildId: string }) {
+function ThreadLink({ thread }: { thread: Channel }) {
   const selected = useThreadUi(s => s.openId === thread.id);
   const muted = useThreadMuted(thread);
   const unread = useStore(s => isThreadUnread(thread, s.readStates[thread.id])) && !muted;
@@ -21,10 +20,7 @@ function ThreadLink({ thread, channel, guildId }: { thread: Channel; channel: Ch
     <button
       type="button"
       className={`thread-row-link${selected ? " selected" : ""}${unread ? " unread" : ""}${muted ? " muted" : ""}`}
-      onClick={() => {
-        go(guildPath(guildId, channel.id));
-        openThread(thread);
-      }}
+      onClick={() => goToThread(thread)}
       onContextMenu={e => menu.open(e, threadBellItems(thread))}
     >
       <MessageSquareText size={16} aria-hidden="true" />
@@ -39,13 +35,12 @@ function ThreadLink({ thread, channel, guildId }: { thread: Channel; channel: Ch
 export function ChannelThreads({ channel }: { channel: Channel }) {
   const joined = useStore(s => Object.values(s.threads).filter(t => t.parent_id === channel.id && t.member && !t.thread_metadata?.archived));
   if (joined.length === 0 || !channel.guild_id) return null;
-  const guildId = channel.guild_id;
   const rows = [...joined].sort((a, b) => lastActivityMs(b) - lastActivityMs(a)).slice(0, MAX_ROWS);
   return (
     <ul className="thread-rows" aria-label={`Threads in ${channel.name ?? "channel"}`}>
       {rows.map(thread => (
         <li key={thread.id}>
-          <ThreadLink thread={thread} channel={channel} guildId={guildId} />
+          <ThreadLink thread={thread} />
         </li>
       ))}
     </ul>

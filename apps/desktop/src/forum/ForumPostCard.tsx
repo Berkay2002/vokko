@@ -7,7 +7,8 @@ import { chatToast } from "../chat/toast";
 import { Avatar } from "../shell/Avatar";
 import { useContextMenu } from "../ui";
 import { threadBellItems, useThreadMuted } from "../threads/mute";
-import { isPinned, isThreadUnread, lastActivityMs, previewText, timeAgo, topReaction } from "../threads/util";
+import { isPinned, isThreadUnread, lastActivityMs, timeAgo, topReaction } from "../threads/util";
+import { messagePreview } from "../threads/preview";
 import "./forum.css";
 
 export function TagChip({ tag, selected, onClick }: { tag: ForumTag; selected?: boolean; onClick?: () => void }) {
@@ -87,7 +88,7 @@ export function ForumPostCard({ thread, first, forum, layout, selected, onOpen }
   const muted = useThreadMuted(thread);
   const menu = useContextMenu();
   const unread = useStore(s => isThreadUnread(thread, s.readStates[thread.id])) && !muted;
-  const text = first ? previewText(first.content || (first.attachments.length > 0 ? "Sent an attachment" : ""), layout === "gallery" ? 120 : 240) : "";
+  const text = first ? messagePreview({ ...first, content: first.content || (first.attachments.length > 0 ? "Sent an attachment" : "") }, layout === "gallery" ? 120 : 240) : "";
   return (
     <article className={`forum-post ${layout}${selected ? " selected" : ""}${archived ? " archived" : ""}${unread ? " unread" : ""}${muted ? " muted" : ""}`} aria-label={thread.name ?? undefined} onContextMenu={e => menu.open(e, threadBellItems(thread))}>
       {layout === "gallery" && (

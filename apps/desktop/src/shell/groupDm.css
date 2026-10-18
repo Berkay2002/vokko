@@ -1,0 +1,77 @@
+/* Group DM member list (shares .member-row with the server member list) and the Edit Group dialog. */
+.group-member {
+  position: relative;
+}
+
+.group-owner {
+  display: inline-flex;
+  margin-left: 4px;
+  vertical-align: -2px;
+  color: var(--status-warning);
+}
+
+.group-member-remove {
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--interactive-icon-default);
+  transform: translateY(-50%);
+}
+
+.group-member:hover .group-member-remove,
+.group-member-remove:focus-visible {
+  display: flex;
+}
+
+.group-member-remove:hover {
+  color: var(--interactive-text-hover);
+  background: var(--background-mod-subtle);
+}
+
+/* Touch screens have no hover: the owner's remove button stays visible. */
+@media (hover: none) {
+  .group-member-remove {
+    display: flex;
+  }
+}
+
+.group-members-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: calc(100% - 32px);
+  margin: 16px 16px 8px;
+}
+
+.edit-group-remove {
+  display: block;
+  margin: -12px auto 16px;
+  font-size: 12px;
+}
+
+.group-icon {
+  flex: none;
+  border-radius: 50%;
+}
+
+/* The header name of a group DM opens Edit Group. */
+.channel-header-name-edit {
+  max-width: 100%;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.channel-header-name-edit:hover {
+  text-decoration: underline;
+}

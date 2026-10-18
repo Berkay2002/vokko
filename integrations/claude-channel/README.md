@@ -92,6 +92,8 @@ Your next DM reaches Claude.
 
 The bot then answers when you @mention it or reply to it there. See [ACCESS.md](./ACCESS.md) for everything else.
 
+**Friends in servers on your API key (optional).** Servers can be answered by [vokko-ai-bridge](../ai-bridge/README.md) on the same bot token instead: a chat-only Claude on an Anthropic API key with spend limits, no tools on your machine. `/vokko:access set guilds false` hands servers to it, and `/vokko:access dm-backend api|subscription` picks who answers your DMs.
+
 ## Run it on an always-on machine (macOS)
 
 A home server that is always on is a good home for your bot: Claude only answers while the session runs.

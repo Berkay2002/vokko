@@ -2,6 +2,7 @@ import { ArrowRightFromLine, PenLine, Pin, UserMinus, UserPlus } from 'lucide-re
 import { ChannelType, MessageType } from '../api/types';
 import type { Message, User } from '../api/types';
 import { CallNotice } from '../calls/CallNotice';
+import { AutoModAlert } from './AutoModAlert';
 import { runShortcut } from '../keyboard/dispatch';
 import { PollResultNotice } from '../polls/PollResultNotice';
 import { ThreadCreatedNotice } from '../threads/ThreadNotice';
@@ -35,7 +36,7 @@ function PersonName({ user, name }: { user: User | undefined; name: string }) {
   return <button type="button" className="chat-system-name" onClick={e => { cacheUser(user); openProfile(e.currentTarget, user.id, chat.guildId); }}>{name}</button>;
 }
 
-/** Body of a system row: icon in the gutter and the muted line. The server posts call (3), pin (6), join (7), thread created (18) and poll result (46); 1, 2 and 4 are group-DM rows it does not send yet. */
+/** Body of a system row: icon in the gutter and the muted line. The server posts call (3), pin (6), join (7), thread created (18), AutoMod alert (24) and poll result (46); 1, 2 and 4 are group-DM rows it does not send yet. */
 export function SystemBody({ message, name }: { message: Message; name: string }) {
   const chat = useChat();
   const first = message.mentions[0];
@@ -63,6 +64,8 @@ export function SystemBody({ message, name }: { message: Message; name: string }
       return <CallNotice message={message} name={name} />;
     case MessageType.PollResult:
       return <PollResultNotice message={message} name={name} />;
+    case MessageType.AutoModerationAction:
+      return <AutoModAlert message={message} name={name} />;
     default:
       return <span className="chat-system-text">{message.content}</span>;
   }

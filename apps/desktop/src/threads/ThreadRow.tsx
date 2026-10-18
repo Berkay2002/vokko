@@ -6,7 +6,8 @@ import type { Channel, Message } from "../api/types";
 import { MessageType } from "../api/types";
 import { useContextMenu } from "../ui";
 import { threadBellItems, useThreadMuted } from "./mute";
-import { isPinned, lastActivityMs, messageCountLabel, previewText, timeAgo } from "./util";
+import { isPinned, lastActivityMs, messageCountLabel, timeAgo } from "./util";
+import { messagePreview } from "./preview";
 
 const previews = new Map<string, Message | null>();
 
@@ -43,7 +44,7 @@ export function ThreadRow({ thread, onOpen }: { thread: Channel; onOpen(thread: 
   const guildId = thread.guild_id;
   const members = useStore(s => (guildId ? s.members[guildId] : undefined));
   const author = last ? displayName(last.author, members?.[last.author.id]) : null;
-  const text = last ? previewText(last.type === MessageType.ThreadStarterMessage ? (last.referenced_message?.content ?? "") : last.content || (last.attachments.length > 0 ? "Sent an attachment" : "")) : "";
+  const text = last ? messagePreview(last.type === MessageType.ThreadStarterMessage ? (last.referenced_message ?? { content: "", mentions: [] }) : { ...last, content: last.content || (last.attachments.length > 0 ? "Sent an attachment" : "") }) : "";
   const archived = thread.thread_metadata?.archived === true;
   const muted = useThreadMuted(thread);
   const menu = useContextMenu();

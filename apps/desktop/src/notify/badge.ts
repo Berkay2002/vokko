@@ -4,10 +4,11 @@ import { isTauri } from "@tauri-apps/api/core";
 import iconSvg from "../../../../assets/brand/vokko-icon.svg?raw";
 import { IS_MAC } from "../desktop/tauri";
 import { setTrayUnread } from "../desktop/tray";
-import { dmName, type AppState } from "../api/store";
+import { dmName, joinedThreads, type AppState } from "../api/store";
 import { ChannelType } from "../api/types";
 import { compareIds } from "../api/snowflake";
-import { effectiveLevel, guildDefaultLevel, isMutedAt, type NotifyLocalState } from "./decide";
+import { isThreadUnread } from "../threads/util";
+import { effectiveLevel, guildDefaultLevel, isMutedAt, withThreadMember, type NotifyLocalState } from "./decide";
 
 export interface UnreadSummary {
   /** Total unread @mentions in channels that are not muted. */
@@ -18,11 +19,21 @@ export interface UnreadSummary {
   dms: number;
 }
 
-/** Counts what the user should be told about. Muted channels, categories and servers contribute nothing. */
-export function summarizeUnread(state: Pick<AppState, "channels" | "readStates"> & Partial<Pick<AppState, "guilds">>, local: NotifyLocalState, now: number): UnreadSummary {
+/** Counts what the user should be told about. Muted channels, categories and servers contribute nothing; joined threads count like their channel, plus their own mute and level. */
+export function summarizeUnread(state: Pick<AppState, "channels" | "readStates"> & Partial<Pick<AppState, "guilds" | "threads">>, local: NotifyLocalState, now: number): UnreadSummary {
   let mentions = 0;
   let unread = false;
   let dms = 0;
+  for (const thread of joinedThreads({ threads: state.threads ?? {} })) {
+    const overlaid = withThreadMember(local, thread.id, thread.member);
+    const parent = thread.parent_id ? state.channels[thread.parent_id] : undefined;
+    const scopes = [thread.id, thread.parent_id, parent?.parent_id, thread.guild_id].filter((id): id is string => !!id);
+    if (scopes.some(id => isMutedAt(overlaid, id, now))) continue;
+    const level = effectiveLevel(overlaid, scopes, guildDefaultLevel(thread.guild_id ? state.guilds?.[thread.guild_id]?.default_message_notifications : undefined));
+    if (level === "none") continue;
+    mentions += state.readStates[thread.id]?.mention_count ?? 0;
+    if (!unread && (level === "all" || level === "unreads-mentions") && isThreadUnread(thread, state.readStates[thread.id])) unread = true;
+  }
   for (const channel of Object.values(state.channels)) {
     if (channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildCategory) continue;
     const scopes = [channel.id, channel.parent_id, channel.guild_id].filter((id): id is string => !!id);

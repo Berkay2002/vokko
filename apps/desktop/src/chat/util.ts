@@ -1,6 +1,6 @@
 import { ApiRequestError } from '../api/errors';
 import { formatUploadLimit, maxUploadBytes } from '../api/limits';
-import type { Snowflake } from '../api/types';
+import { ChannelType, type Channel, type Snowflake, type User } from '../api/types';
 import { timeFormatPref } from './shell';
 
 const DISCORD_EPOCH = 1420070400000n;
@@ -143,3 +143,12 @@ export const SPOILER_PREFIX = 'SPOILER_';
 export const isSpoilerName = (filename: string): boolean => filename.startsWith(SPOILER_PREFIX);
 export const stripSpoiler = (filename: string): string => (isSpoilerName(filename) ? filename.slice(SPOILER_PREFIX.length) : filename);
 export const withSpoiler = (filename: string, spoiler: boolean): string => (spoiler ? SPOILER_PREFIX + stripSpoiler(filename) : stripSpoiler(filename));
+
+/** The composer's placeholder: "Message @alice" in a 1:1 DM, "Message <group name>" (or its members' names) in a group DM, else "Message #general" (voice channels without the #). */
+export function composerPlaceholder(channel: Channel | undefined, nameOf: (user: User) => string): string {
+  if (!channel) return 'Message ';
+  const recipients = channel.recipients ?? [];
+  if (channel.type === ChannelType.DM) return `Message @${recipients[0] ? nameOf(recipients[0]) : ''}`;
+  if (channel.type === ChannelType.GroupDM) return `Message ${channel.name || recipients.map(u => nameOf(u)).join(', ')}`;
+  return `Message ${channel.type === ChannelType.GuildVoice ? channel.name ?? '' : `#${channel.name ?? ''}`}`;
+}

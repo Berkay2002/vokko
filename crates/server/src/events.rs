@@ -59,18 +59,24 @@ pub async fn dispatch_channel(state: &AppState, row: &ChannelRow, make: fn(Chann
     Ok(())
 }
 
+/// SQL condition on two `channel_recipients` rows `r1`, `r2` of one channel: a group DM, or a 1:1 DM both of them wrote in.
+pub const DM_TAKEN_PART: &str = "(EXISTS (SELECT 1 FROM channels c WHERE c.id = r1.channel_id AND c.kind <> 1) \
+     OR (EXISTS (SELECT 1 FROM messages m WHERE m.channel_id = r1.channel_id AND m.author_id = r1.user_id) \
+         AND EXISTS (SELECT 1 FROM messages m WHERE m.channel_id = r1.channel_id AND m.author_id = r2.user_id)))";
+
 /// The symmetric "who shares presence with `user_id`" set, used for both directions (who receives this user's
 /// PRESENCE_UPDATE / USER_UPDATE, and whose presences go into this user's READY): the user, members of shared guilds,
-/// accepted friends (kind 1) and peers of DMs that are open on BOTH sides. Pending requests, blocks and DMs the other
-/// side never opened (closed row) do not count, so an unsolicited DM cannot be used to track someone's presence.
+/// accepted friends (kind 1) and peers of DMs that are open on BOTH sides and, for a 1:1 DM, that both wrote in. Pending
+/// requests, blocks and DMs the other side never opened (closed row) or never answered do not count (a message reopens the
+/// DM on both sides), so an unsolicited DM cannot be used to track someone's presence.
 pub async fn user_audience(state: &AppState, user_id: i64) -> ApiResult<Vec<i64>> {
-    let rows: Vec<(i64,)> = sqlx::query_as(
+    let rows: Vec<(i64,)> = sqlx::query_as(&format!(
         "SELECT m2.user_id FROM guild_members m1 JOIN guild_members m2 ON m1.guild_id = m2.guild_id WHERE m1.user_id = $1 \
          UNION SELECT other_id FROM relationships WHERE user_id = $1 AND kind = 1 \
          UNION SELECT r2.user_id FROM channel_recipients r1 JOIN channel_recipients r2 ON r1.channel_id = r2.channel_id \
-               WHERE r1.user_id = $1 AND NOT r1.closed AND NOT r2.closed \
+               WHERE r1.user_id = $1 AND NOT r1.closed AND NOT r2.closed AND {DM_TAKEN_PART} \
          UNION SELECT $1",
-    )
+    ))
     .bind(user_id)
     .fetch_all(&state.db)
     .await?;

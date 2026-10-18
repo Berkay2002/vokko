@@ -40,6 +40,31 @@ describe("summarizeUnread", () => {
   });
 });
 
+describe("threads", () => {
+  const member = { id: "t", user_id: "me", join_timestamp: "", flags: 0, muted: false, mute_config: null };
+  const thread = (patch: Partial<Channel> = {}): Channel => channel("t", { type: ChannelType.PublicThread, parent_id: "a", last_message_id: "50", member, ...patch } as Partial<Channel>);
+  const base = { channels: { a: channel("a", { last_message_id: "1" }) }, readStates: { a: read("a", "1"), t: read("t", "10", 3) } };
+
+  it("counts a joined thread's mentions and unread dot", () => {
+    expect(summarizeUnread({ ...base, threads: { t: thread() } }, local(), NOW)).toEqual({ mentions: 3, unread: true, dms: 0 });
+  });
+
+  it("is quiet for a thread under a muted channel or category, with its own mute or level 'Nothing', or not joined", () => {
+    const run = (t: Channel, l = local()) => summarizeUnread({ ...base, channels: { a: channel("a", { parent_id: "cat", last_message_id: "1" }) }, threads: { t } }, l, NOW);
+    const quiet = { mentions: 0, unread: false, dms: 0 };
+    expect(run(thread(), local({ mutedUntil: { a: -1 } }))).toEqual(quiet);
+    expect(run(thread(), local({ mutedUntil: { cat: -1 } }))).toEqual(quiet);
+    expect(run(thread({ member: { ...member, muted: true, mute_config: { end_time: null } } } as Partial<Channel>))).toEqual(quiet);
+    expect(run(thread({ member: { ...member, flags: 1 << 3 } } as Partial<Channel>))).toEqual(quiet);
+    expect(run(thread({ member: undefined }))).toEqual(quiet);
+  });
+
+  it("'only mentions' on the thread keeps the count but drops the dot", () => {
+    const onlyMentions = thread({ member: { ...member, flags: 1 << 2 } } as Partial<Channel>);
+    expect(summarizeUnread({ ...base, threads: { t: onlyMentions } }, local(), NOW)).toEqual({ mentions: 3, unread: false, dms: 0 });
+  });
+});
+
 describe("Dock badge", () => {
   const dm = (id: string, patch: Partial<Channel> = {}) => channel(id, { type: ChannelType.DM, guild_id: undefined, ...patch });
 
@@ -115,6 +140,7 @@ describe("notification text", () => {
 
   it("titles name the channel and server for guild messages", () => {
     expect(notificationTitle({ authorName: "alice", channelName: "general", guildName: "Lab", group: false })).toBe("alice (#general, Lab)");
+    expect(notificationTitle({ authorName: "alice", channelName: "general", guildName: "Lab", group: false, thread: "gateway docs" })).toBe("alice (gateway docs, in #general, Lab)");
     expect(notificationTitle({ authorName: "alice", channelName: "Movie night", guildName: null, group: true })).toBe("alice (Movie night)");
     expect(notificationTitle({ authorName: "alice", channelName: "alice", guildName: null, group: false })).toBe("alice");
   });

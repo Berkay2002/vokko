@@ -345,12 +345,18 @@ async fn presence_is_only_shared_with_accepted_relationships() {
     assert!(!audience(sam_id).await.contains(&alice_id));
     assert!(!audience(alice_id).await.contains(&sam_id));
 
-    // the first message opens it on both sides (sent while they share a guild, since strangers may not DM)
+    // the first message opens it on both sides (sent while they share a guild, since strangers may not DM), but only an
+    // answered DM shares presence
     let (guild, channel) = app.guild_with_channel(&alice).await;
     let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &alice, json!({})).await;
     app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &sam, json!({})).await;
-    let (status, _) = app.post(&format!("/channels/{}/messages", dm["id"].as_str().expect("id")), &sam, json!({"content": "hi"})).await;
-    assert_eq!(status, StatusCode::OK);
+    let messages = format!("/channels/{}/messages", dm["id"].as_str().expect("id"));
+    assert_eq!(app.post(&messages, &sam, json!({"content": "hi"})).await.0, StatusCode::OK);
+    assert_eq!(app.delete(&format!("/users/@me/guilds/{guild}"), &sam).await.0, StatusCode::NO_CONTENT);
+    assert!(!audience(sam_id).await.contains(&alice_id), "an unanswered DM shares nothing");
+    assert!(!audience(alice_id).await.contains(&sam_id));
+    app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &sam, json!({})).await;
+    assert_eq!(app.post(&messages, &alice, json!({"content": "hey"})).await.0, StatusCode::OK);
     assert_eq!(app.delete(&format!("/users/@me/guilds/{guild}"), &sam).await.0, StatusCode::NO_CONTENT);
     assert!(audience(sam_id).await.contains(&alice_id));
     assert!(audience(alice_id).await.contains(&sam_id));

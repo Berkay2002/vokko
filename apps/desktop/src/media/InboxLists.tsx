@@ -7,17 +7,26 @@ import { messageSnippet } from './helpers';
 import { formatDateTime } from '../chat/util';
 import { jumpToMessage } from './jump';
 import { sortReminders } from './lists';
+import { channelOrThread, type AppState } from '../api/store';
 import { Avatar, dmName, request, useStore } from './shell';
 import { dismissReminder, dropMention, loadBookmarks, loadReminders, removeBookmarkOf, useMedia } from './store';
 
-/** "#general · Sam's server" / "Direct message with alice" for a message, from what the client knows. */
-export function useWhere(message: Pick<Message, 'channel_id' | 'guild_id'> | null): string {
-  const channel = useStore(s => (message ? s.channels[message.channel_id] : undefined));
-  const guildName = useStore(s => (message?.guild_id ? s.guilds[message.guild_id]?.name : undefined));
-  if (!message) return '';
+/** "#general · Sam's server" / "gateway docs, in #general · Sam's server" (a thread) / "Direct message with alice" for a message, from what the client knows. */
+export function whereText(s: Pick<AppState, 'channels' | 'threads' | 'guilds'>, message: Pick<Message, 'channel_id' | 'guild_id'>): string {
+  const channel = channelOrThread(s, message.channel_id);
   if (!channel) return message.guild_id ? 'A channel you can no longer see' : 'Direct message';
-  if (channel.guild_id) return `#${channel.name ?? 'channel'}${guildName ? ` · ${guildName}` : ''}`;
+  const guildName = message.guild_id ? s.guilds[message.guild_id]?.name : undefined;
+  const guild = guildName ? ` · ${guildName}` : '';
+  if (!s.channels[channel.id]) {
+    const parent = channel.parent_id ? s.channels[channel.parent_id] : undefined;
+    return `${channel.name ?? 'thread'}${parent ? `, in #${parent.name ?? 'channel'}` : ''}${guild}`;
+  }
+  if (channel.guild_id) return `#${channel.name ?? 'channel'}${guild}`;
   return `Direct message with ${dmName(channel)}`;
+}
+
+export function useWhere(message: Pick<Message, 'channel_id' | 'guild_id'> | null): string {
+  return useStore(s => (message ? whereText(s, message) : ''));
 }
 
 const nameOf = (m: Message): string => m.author.global_name || m.author.username;

@@ -9,7 +9,7 @@ import { Perm, basePermissions, canEditRole, canModerate, channelPermissions, ha
 import { ChannelType, RelationshipType, ThreadMemberFlags, type Channel, type Guild, type Snowflake, type ThreadMember, type UpdateThreadMemberRequest, type User } from "../api/types";
 import type { MenuItem } from "../ui";
 import { openCreateEvent } from "../community/communityModals";
-import { closeDirectMessage, copyText, markChannelRead, markGuildRead, openDirectMessage } from "./actions";
+import { closeDirectMessage, copyText, markChannelRead, markGuildRead, openDirectMessage, removeGroupRecipient } from "./actions";
 import { isMutedAt, mutedTest, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setNotifyLevel, toggleFlag, unmute, untilLabel, useLocalState, type NotifyLevel } from "./localState";
 import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
@@ -425,7 +425,7 @@ export function dmContextItems(channel: Channel, options: { anchor?: HTMLElement
   const name = other ? displayName(other) : (channel.name ?? "Conversation");
   return groups(
     [{ id: "mark-read", label: "Mark As Read", disabled: !unread, onSelect: () => void markChannelRead(channel.id) }],
-    [{ id: "close", label: group ? "Leave Group" : "Close DM", danger: group, onSelect: () => void closeDirectMessage(channel.id) }],
+    [{ id: "close", label: group ? "Leave Group" : "Close DM", danger: group, onSelect: () => (group ? openModal({ type: "leaveGroup", channelId: channel.id }) : void closeDirectMessage(channel.id)) }],
     other
       ? [
           { id: "profile", label: "Profile", disabled: !options.anchor, onSelect: () => options.anchor && openProfile(options.anchor, other.id, null) },
@@ -436,4 +436,16 @@ export function dmContextItems(channel: Channel, options: { anchor?: HTMLElement
     [muteItem(channel.id, group ? "Conversation" : name)],
     devOnly([...(other ? [{ id: "copy-user-id", label: "Copy User ID", onSelect: copy(other.id) } satisfies MenuItem] : []), { id: "copy-id", label: "Copy Channel ID", onSelect: copy(channel.id) }]),
   );
+}
+
+/** A row of a group DM's member list: Leave Group on yourself, Remove From Group for the owner on others, then the usual user items. */
+export function groupMemberItems(channel: Channel, user: User, anchor: HTMLElement | null): MenuItem[] {
+  const me = appStore.getState().me?.id;
+  const group: MenuItem[] =
+    user.id === me
+      ? [{ id: "leave-group", label: "Leave Group", danger: true, onSelect: () => openModal({ type: "leaveGroup", channelId: channel.id }) }]
+      : channel.owner_id === me
+        ? [{ id: "remove-from-group", label: "Remove From Group", danger: true, onSelect: () => void removeGroupRecipient(channel.id, user.id) }]
+        : [];
+  return groups(group, userContextItems(user, { anchor }));
 }

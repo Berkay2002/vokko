@@ -130,6 +130,14 @@ export interface Prefs {
   friendRequestsEveryone: boolean;
   friendRequestsMutualFriends: boolean;
   friendRequestsMutualGuilds: boolean;
+  // Activity Privacy (server-enforced; typing and mutuals follow shareActivity while left on, see presence::sharing)
+  /** "Share my activity": games and apps, and the default of every other activity switch. */
+  shareActivity: boolean;
+  /** "Show Spotify as my status" (off until turned on). */
+  shareSpotify: boolean;
+  shareTyping: boolean;
+  /** Mutual servers and friends on the profile others open. */
+  shareMutuals: boolean;
   // Voice & video (visual: the app has no voice transport yet)
   inputDevice: string;
   outputDevice: string;
@@ -240,6 +248,10 @@ export const DEFAULT_PREFS: Prefs = {
   friendRequestsEveryone: true,
   friendRequestsMutualFriends: true,
   friendRequestsMutualGuilds: true,
+  shareActivity: true,
+  shareSpotify: false,
+  shareTyping: true,
+  shareMutuals: true,
   inputDevice: "default",
   outputDevice: "default",
   cameraDevice: "default",

@@ -11,6 +11,7 @@ import { go, guildPath } from "../shell/nav";
 import { channelPermissions, hasBit, Perm } from "./permissions";
 import { listActiveThreads, request, resolveUrl } from "./rest";
 import { compareIds, maxId } from "./snowflake";
+import { isThreadUnread } from "../threads/util";
 import {
   ChannelType,
   MessageFlags,
@@ -342,17 +343,29 @@ async function refreshPrivateChannels(): Promise<void> {
   }
 }
 
+/** The connection banner waits this long before appearing, and others' presences stay shown, so a quick resume never flashes either. */
+export const BANNER_GRACE_MS = 1500;
+
 // Others' presence is unknown while the gateway is down: shown as offline until RESUMED brings the kept map back
-// (under anything replayed) or READY replaces it. The user's own presence stays.
+// (under anything replayed) or READY replaces it. Like the banner, this waits BANNER_GRACE_MS, so a blip that resumes
+// inside it changes nothing. The user's own presence stays.
 let hiddenPresences: Record<Snowflake, Presence> = {};
+let hideTimer: ReturnType<typeof setTimeout> | undefined;
 export function applyConnection(connection: GatewayStatus): void {
-  const { presences, me, connection: previous } = appStore.getState();
+  const previous = appStore.getState().connection;
   if (previous === "ready" && connection !== "ready") {
-    hiddenPresences = presences;
-    const own = me ? presences[me.id] : undefined;
-    appStore.setState({ connection, presences: own ? { [own.user_id]: own } : {} });
+    hideTimer = setTimeout(() => {
+      hideTimer = undefined;
+      const { presences, me } = appStore.getState();
+      hiddenPresences = presences;
+      const own = me ? presences[me.id] : undefined;
+      appStore.setState({ presences: own ? { [own.user_id]: own } : {} });
+    }, BANNER_GRACE_MS);
+    appStore.setState({ connection });
   } else if (previous !== "ready" && connection === "ready") {
-    appStore.setState({ connection, presences: { ...hiddenPresences, ...presences } });
+    clearTimeout(hideTimer);
+    hideTimer = undefined;
+    appStore.setState({ connection, presences: { ...hiddenPresences, ...appStore.getState().presences } });
     hiddenPresences = {};
   } else appStore.setState({ connection });
 }
@@ -543,7 +556,7 @@ export function refreshActiveThreads(guildId: Snowflake): void {
           for (const thread of threads) next[thread.id] = state.threads[thread.id]?.member && !thread.member ? { ...thread, member: state.threads[thread.id]!.member } : thread;
           appStore.setState({ threads: next });
         })
-        .catch(() => undefined);
+        .catch(error => console.warn("active threads refetch failed", error));
     }, 150),
   );
 }
@@ -722,7 +735,28 @@ export function channelMentionCount(s: AppState, channelId: Snowflake): number {
   return s.readStates[channelId]?.mention_count ?? 0;
 }
 
-/** `isMuted` (a channel or category id): muted channels drop out of the unread half, their mentions still count (as in Discord). */
+/** A channel, DM or thread by id (threads are not in `channels`). */
+export function channelOrThread(s: Pick<AppState, "channels" | "threads">, id: Snowflake): Channel | undefined {
+  return s.channels[id] ?? s.threads[id];
+}
+
+/** Threads that take part in unread state: active ones the viewer joined (archived ones and ones only looked at have no read state worth a dot). */
+export function joinedThreads(s: Pick<AppState, "threads">): Channel[] {
+  return Object.values(s.threads).filter(t => t.member && !t.thread_metadata?.archived);
+}
+
+/**
+ * Muted like a channel row: the thread's own member mute (a timed one lapses at its end), then `isMuted` on the thread, its parent
+ * channel and that channel's category.
+ */
+export function isThreadQuiet(s: Pick<AppState, "channels">, thread: Channel, isMuted: (id: Snowflake) => boolean = () => false): boolean {
+  const end = thread.member?.mute_config?.end_time;
+  if (thread.member?.muted && (!end || Date.parse(end) > Date.now())) return true;
+  const parent = thread.parent_id ? s.channels[thread.parent_id] : undefined;
+  return [thread.id, thread.parent_id, parent?.parent_id].some(id => id != null && isMuted(id));
+}
+
+/** `isMuted` (a channel or category id): muted channels drop out of the unread half, their mentions still count (as in Discord). Joined threads count like channels, muted through their member, parent channel or category. */
 export function guildUnread(s: AppState, guildId: Snowflake, isMuted?: (id: Snowflake) => boolean): { unread: boolean; mentions: number } {
   let unread = false;
   let mentions = 0;
@@ -730,6 +764,11 @@ export function guildUnread(s: AppState, guildId: Snowflake, isMuted?: (id: Snow
     if (channel.guild_id !== guildId) continue;
     if (!unread && isChannelUnread(s, channel.id) && !(isMuted && (isMuted(channel.id) || (channel.parent_id != null && isMuted(channel.parent_id))))) unread = true;
     mentions += channelMentionCount(s, channel.id);
+  }
+  for (const thread of joinedThreads(s)) {
+    if (thread.guild_id !== guildId) continue;
+    if (!unread && isThreadUnread(thread, s.readStates[thread.id]) && !isThreadQuiet(s, thread, isMuted)) unread = true;
+    mentions += channelMentionCount(s, thread.id);
   }
   return { unread, mentions };
 }

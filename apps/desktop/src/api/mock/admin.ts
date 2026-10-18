@@ -1,7 +1,7 @@
-// Server admin routes of docs/api.md: audit log, prune, role member counts, AutoMod keyword rules, and the send checks
+// Server admin routes of docs/api.md: audit log, prune, role member counts, AutoMod rules, and the send checks
 // (verification level + AutoMod) that the message routes call. Registered by import side effect from routes.ts.
 
-import { findKeyword } from "../automod";
+import { PRESET_WORDS, findKeyword, mentionCount } from "../automod";
 import { Perm, hasBit, outranks } from "../permissions";
 import { snowflakeToTimestamp } from "../snowflake";
 import {
@@ -9,18 +9,25 @@ import {
   AutoModerationActionType,
   AutoModerationEventType,
   AutoModerationTriggerType,
+  ChannelType,
+  MessageType,
   VerificationLevel,
   isThreadType,
   type AuditEntryInfo,
   type AuditLogChange,
   type AuditLogEntry,
+  type AutoModerationAction,
+  type AutoModerationKeywordPresetType,
   type AutoModerationRule,
+  type AutoModerationTriggerMetadata,
+  type Embed,
   type User,
 } from "../types";
 import { guildPermsOf } from "./access";
 import { accountState, instance } from "./accounts";
 import { db, nextId, sortedMessages, userOf, type MockChannel, type MockGuild } from "./db";
-import { MISSING_PERMISSIONS, fail, requireGuildMember } from "./ops";
+import { memberJson } from "./moderation";
+import { MISSING_PERMISSIONS, addMessage, fail, requireGuildMember } from "./ops";
 import { ID, currentAuditReason, route, str } from "./router";
 import { emit } from "./socket";
 
@@ -35,6 +42,7 @@ const automodRules = new Map<string, AutoModerationRule[]>();
 export function resetAdmin(): void {
   auditLog.clear();
   automodRules.clear();
+  alertsSent.clear();
 }
 
 const membersWith = (guild: MockGuild, bit: bigint): string[] => [...guild.members.keys()].filter(id => hasBit(guildPermsOf(guild.guild.id, id), bit));
@@ -199,23 +207,80 @@ function cleanList(raw: unknown, max: number, field: string): string[] {
   return out;
 }
 
+const KEYWORD_RULE_LIMIT = 6;
+const MAX_TIMEOUT_SECONDS = 2_419_200;
+const SPAM_REPEATS = 3;
+const SPAM_WINDOW_MS = 30_000;
+const SPAM_MIN_CHARS = 10;
+const ALERT_INTERVAL_MS = 60_000;
+
+/** The trigger metadata a rule of `type` keeps (docs/api.md "AutoMod"); keys its type does not use are dropped. */
+function cleanTrigger(type: AutoModerationTriggerType, raw: Record<string, unknown>): AutoModerationTriggerMetadata {
+  const T = AutoModerationTriggerType;
+  const meta: AutoModerationTriggerMetadata = {
+    keyword_filter: type === T.Keyword ? cleanList(raw.keyword_filter, 1000, "trigger_metadata.keyword_filter") : [],
+    allow_list: type === T.Keyword || type === T.KeywordPreset ? cleanList(raw.allow_list, type === T.Keyword ? 100 : 1000, "trigger_metadata.allow_list") : [],
+  };
+  if (type === T.KeywordPreset) {
+    const presets = Array.isArray(raw.presets) ? raw.presets : [];
+    if (presets.some(p => p !== 1 && p !== 2 && p !== 3)) invalid("trigger_metadata.presets", "Unknown preset.");
+    const unique = [...new Set(presets as AutoModerationKeywordPresetType[])].sort((a, b) => a - b);
+    if (unique.length === 0) invalid("trigger_metadata.presets", "Choose at least one category.");
+    meta.presets = unique;
+  }
+  if (type === T.MentionSpam) {
+    const limit = raw.mention_total_limit;
+    if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 50) invalid("trigger_metadata.mention_total_limit", "Must be between 1 and 50.");
+    meta.mention_total_limit = limit as number;
+  }
+  return meta;
+}
+
+function cleanActions(guild: MockGuild, type: AutoModerationTriggerType, raw: unknown): AutoModerationAction[] {
+  const list = Array.isArray(raw) ? (raw as { type?: unknown; metadata?: Record<string, unknown> }[]) : [];
+  if (list.length === 0) invalid("actions", "At least one action is required.");
+  const out: AutoModerationAction[] = [];
+  for (const action of list) {
+    if (out.some(a => a.type === action.type)) invalid("actions", "Each action type may appear once.");
+    const meta = action.metadata ?? {};
+    switch (action.type) {
+      case AutoModerationActionType.BlockMessage: {
+        const message = str(meta.custom_message)?.trim();
+        if (message && message.length > 150) invalid("actions", "The custom message must be 150 or fewer in length.");
+        out.push({ type: AutoModerationActionType.BlockMessage, ...(message ? { metadata: { custom_message: message } } : {}) });
+        break;
+      }
+      case AutoModerationActionType.SendAlertMessage: {
+        const channel = db.channels.get(str(meta.channel_id) ?? "");
+        if (!channel || channel.guild_id !== guild.guild.id || (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement)) {
+          invalid("actions", "The alert channel must be a text channel of this server.");
+        }
+        out.push({ type: AutoModerationActionType.SendAlertMessage, metadata: { channel_id: channel?.id ?? "" } });
+        break;
+      }
+      case AutoModerationActionType.Timeout: {
+        if (type !== AutoModerationTriggerType.Keyword && type !== AutoModerationTriggerType.MentionSpam) invalid("actions", "Only keyword and mention spam rules can time members out.");
+        const seconds = meta.duration_seconds;
+        if (typeof seconds !== "number" || !Number.isInteger(seconds) || seconds < 1 || seconds > MAX_TIMEOUT_SECONDS) invalid("actions", "A timeout lasts 1 second to 4 weeks.");
+        out.push({ type: AutoModerationActionType.Timeout, metadata: { duration_seconds: seconds as number } });
+        break;
+      }
+      default:
+        invalid("actions", "Unknown action type.");
+    }
+  }
+  // The server stores actions per type and lists them in type order.
+  return out.sort((a, b) => a.type - b.type);
+}
+
 function applyRuleBody(guild: MockGuild, rule: AutoModerationRule, body: Record<string, unknown>): void {
   if ("name" in body) {
     const name = (str(body.name) ?? "").trim();
     if (name.length < 1 || name.length > 100) invalid("name", "Must be between 1 and 100 in length.");
     rule.name = name;
   }
-  if (body.trigger_metadata && typeof body.trigger_metadata === "object") {
-    const meta = body.trigger_metadata as { keyword_filter?: unknown; allow_list?: unknown };
-    rule.trigger_metadata = { keyword_filter: cleanList(meta.keyword_filter, 1000, "trigger_metadata.keyword_filter"), allow_list: cleanList(meta.allow_list, 100, "trigger_metadata.allow_list") };
-  }
-  if ("actions" in body) {
-    const actions = body.actions as { type?: unknown; metadata?: { custom_message?: unknown } }[] | undefined;
-    if (!Array.isArray(actions) || actions.length !== 1 || actions[0]?.type !== AutoModerationActionType.BlockMessage) invalid("actions", "Exactly one BLOCK_MESSAGE action is supported.");
-    const message = str(actions?.[0]?.metadata?.custom_message)?.trim();
-    if (message && message.length > 150) invalid("actions", "The custom message must be 150 or fewer in length.");
-    rule.actions = [{ type: AutoModerationActionType.BlockMessage, ...(message ? { metadata: { custom_message: message } } : {}) }];
-  }
+  if (body.trigger_metadata && typeof body.trigger_metadata === "object") rule.trigger_metadata = cleanTrigger(rule.trigger_type, body.trigger_metadata as Record<string, unknown>);
+  if ("actions" in body) rule.actions = cleanActions(guild, rule.trigger_type, body.actions);
   if ("enabled" in body) rule.enabled = body.enabled === true;
   if ("exempt_roles" in body) {
     const ids = Array.isArray(body.exempt_roles) ? [...new Set(body.exempt_roles.filter((v): v is string => typeof v === "string"))] : [];
@@ -247,29 +312,35 @@ route("GET", `/guilds/${ID}/auto-moderation/rules/${ID}`, ({ viewer, params }) =
   return rulesOf(params[0] ?? "").find(r => r.id === params[1]) ?? fail(404, 10066, "Unknown auto moderation rule");
 });
 
+const TRIGGER_TYPES: readonly number[] = [AutoModerationTriggerType.Keyword, AutoModerationTriggerType.Spam, AutoModerationTriggerType.KeywordPreset, AutoModerationTriggerType.MentionSpam];
+
 route("POST", `/guilds/${ID}/auto-moderation/rules`, ({ viewer, params, body }) => {
   const guildId = params[0] ?? "";
   const guild = requireManager(guildId, viewer.user.id);
   if (body.event_type !== AutoModerationEventType.MessageSend) invalid("event_type", "Only MESSAGE_SEND is supported.");
-  if (body.trigger_type !== AutoModerationTriggerType.Keyword) invalid("trigger_type", "Only KEYWORD rules are supported.");
+  if (typeof body.trigger_type !== "number" || !TRIGGER_TYPES.includes(body.trigger_type)) invalid("trigger_type", "Unknown trigger type.");
+  const type = body.trigger_type as AutoModerationTriggerType;
   if (!("actions" in body)) invalid("actions", "Required.");
   if (!("name" in body)) invalid("name", "Required.");
-  const list = rulesOf(guildId);
-  if (list.length >= 6) fail(400, 30035, "Maximum number of keyword rules reached (6)");
   const rule: AutoModerationRule = {
     id: nextId(),
     guild_id: guildId,
     name: "",
     creator_id: viewer.user.id,
     event_type: AutoModerationEventType.MessageSend,
-    trigger_type: AutoModerationTriggerType.Keyword,
+    trigger_type: type,
     trigger_metadata: { keyword_filter: [], allow_list: [] },
-    actions: [{ type: AutoModerationActionType.BlockMessage }],
+    actions: [],
     enabled: true,
     exempt_roles: [],
     exempt_channels: [],
   };
+  if (!body.trigger_metadata) rule.trigger_metadata = cleanTrigger(type, {});
   applyRuleBody(guild, rule, body);
+  // Like the server: the body is validated before the per-type limit.
+  const list = rulesOf(guildId);
+  const max = type === AutoModerationTriggerType.Keyword ? KEYWORD_RULE_LIMIT : 1;
+  if (list.filter(r => r.trigger_type === type).length >= max) fail(400, 30035, `Maximum number of rules of this type reached (${max})`);
   list.push(rule);
   emitRule(guild, "AUTO_MODERATION_RULE_CREATE", rule);
   recordAudit(guildId, viewer.user.id, AuditLogEvent.AutoModerationRuleCreate, rule.id, { changes: ruleChanges(null, rule) });
@@ -280,7 +351,7 @@ route("PATCH", `/guilds/${ID}/auto-moderation/rules/${ID}`, ({ viewer, params, b
   const guildId = params[0] ?? "";
   const guild = requireManager(guildId, viewer.user.id);
   const rule = rulesOf(guildId).find(r => r.id === params[1]) ?? fail(404, 10066, "Unknown auto moderation rule");
-  if ("trigger_type" in body && body.trigger_type !== AutoModerationTriggerType.Keyword) invalid("trigger_type", "The trigger type cannot change.");
+  if ("trigger_type" in body && body.trigger_type !== rule.trigger_type) invalid("trigger_type", "The trigger type cannot change.");
   const before = structuredClone(rule);
   const draft = structuredClone(rule);
   applyRuleBody(guild, draft, body);
@@ -321,8 +392,60 @@ export function checkSend(channel: MockChannel, userId: string, content: string)
   checkAutomod(channel, userId, content);
 }
 
-/** 400 200000 when an enabled keyword rule matches and the author is not exempt; records audit entry 143. */
-export function checkAutomod(channel: MockChannel, userId: string, content: string): void {
+const alertsSent = new Map<string, { at: number; heldBack: number }>();
+
+/** One alert per rule and member a minute, like the server: the count of the ones held back since the last alert, or null to hold this one back. */
+function alertSlot(ruleId: string, userId: string): number | null {
+  const key = `${ruleId}:${userId}`;
+  const now = Date.now();
+  const last = alertsSent.get(key);
+  if (last && now - last.at < ALERT_INTERVAL_MS) {
+    last.heldBack += 1;
+    return null;
+  }
+  alertsSent.set(key, { at: now, heldBack: 0 });
+  return last?.heldBack ?? 0;
+}
+
+/** SPAM: the same text (10+ chars, case-insensitive) from one member for the third time within 30 s anywhere in the guild. */
+function isRepeatSpam(guildId: string, userId: string, content: string): boolean {
+  const text = content.trim().toLowerCase();
+  if ([...text].length < SPAM_MIN_CHARS) return false;
+  const since = Date.now() - SPAM_WINDOW_MS;
+  let copies = 0;
+  for (const channel of db.channels.values()) {
+    if (channel.guild_id !== guildId) continue;
+    copies += sortedMessages(channel.id).filter(m => m.author_id === userId && Date.parse(m.timestamp) > since && m.content.trim().toLowerCase() === text).length;
+  }
+  return copies + 1 >= SPAM_REPEATS;
+}
+
+/** `[keyword]` when the rule fires on `content` (`[null]` for spam and mention rules), otherwise null. */
+function ruleHit(guildId: string, userId: string, rule: AutoModerationRule, content: string, edit: boolean): [string | null] | null {
+  const meta = rule.trigger_metadata;
+  switch (rule.trigger_type) {
+    case AutoModerationTriggerType.Keyword: {
+      const word = findKeyword(content, meta.keyword_filter, meta.allow_list);
+      return word ? [word] : null;
+    }
+    case AutoModerationTriggerType.KeywordPreset: {
+      for (const preset of meta.presets ?? []) {
+        const word = findKeyword(content, PRESET_WORDS[preset] ?? [], meta.allow_list);
+        if (word) return [word];
+      }
+      return null;
+    }
+    case AutoModerationTriggerType.MentionSpam:
+      return mentionCount(content) > (meta.mention_total_limit ?? Infinity) ? [null] : null;
+    case AutoModerationTriggerType.Spam:
+      return !edit && isRepeatSpam(guildId, userId, content) ? [null] : null;
+    default:
+      return null;
+  }
+}
+
+/** Runs every enabled rule on a new (`edit` false) or edited message: alerts and timeouts run, and a blocking rule fails the send with 400 200000. */
+export function checkAutomod(channel: MockChannel, userId: string, content: string, edit = false): void {
   if (!channel.guild_id || !content.trim()) return;
   const guild = db.guilds.get(channel.guild_id);
   const record = guild?.members.get(userId);
@@ -330,15 +453,58 @@ export function checkAutomod(channel: MockChannel, userId: string, content: stri
   const bits = guildPermsOf(guild.guild.id, userId);
   if (hasBit(bits, Perm.MANAGE_GUILD) || hasBit(bits, Perm.ADMINISTRATOR)) return;
   const channels = [channel.id, isThreadType(channel.type) ? channel.parent_id : null].filter((id): id is string => !!id);
-  for (const rule of rulesOf(guild.guild.id)) {
-    if (!rule.enabled) continue;
-    if (rule.exempt_roles.some(id => record.roles.includes(id)) || channels.some(id => rule.exempt_channels.includes(id))) continue;
-    if (!findKeyword(content, rule.trigger_metadata.keyword_filter, rule.trigger_metadata.allow_list)) continue;
-    recordAudit(guild.guild.id, userId, AuditLogEvent.AutoModerationBlockMessage, userId, {
-      options: { channel_id: channel.id, auto_moderation_rule_name: rule.name, auto_moderation_rule_trigger_type: String(AutoModerationTriggerType.Keyword) },
-      reason: null,
+  let blocked: { message: string | undefined } | null = null;
+  const hits = rulesOf(guild.guild.id)
+    .filter(rule => rule.enabled && !rule.exempt_roles.some(id => record.roles.includes(id)) && !channels.some(id => rule.exempt_channels.includes(id)))
+    .flatMap(rule => {
+      const hit = ruleHit(guild.guild.id, userId, rule, content, edit);
+      return hit ? [{ rule, hit }] : [];
     });
-    const custom = rule.actions[0]?.metadata?.custom_message;
+  const blocking = hits.some(({ rule }) => rule.actions.some(a => a.type === AutoModerationActionType.BlockMessage));
+  for (const { rule, hit } of hits) {
+    const options = { channel_id: channel.id, auto_moderation_rule_name: rule.name, auto_moderation_rule_trigger_type: String(rule.trigger_type) };
+    const action = (type: AutoModerationActionType) => rule.actions.find(a => a.type === type);
+    const block = action(AutoModerationActionType.BlockMessage);
+    const timeout = action(AutoModerationActionType.Timeout)?.metadata?.duration_seconds;
+    const alert = db.channels.get(action(AutoModerationActionType.SendAlertMessage)?.metadata?.channel_id ?? "");
+    // Only blocked messages' alerts are throttled; a flagged message stays up and always gets one (as on the server).
+    const heldBack = !alert ? null : blocking ? alertSlot(rule.id, userId) : 0;
+    if (alert && heldBack !== null) {
+      const fields: NonNullable<Embed["fields"]> = [
+        { name: "rule_name", value: rule.name },
+        { name: "channel_id", value: channel.id },
+        { name: "decision_outcome", value: block ? "blocked" : "flagged" },
+        ...(hit[0] ? [{ name: "keyword", value: hit[0] }] : []),
+        ...(timeout ? [{ name: "timeout_duration", value: String(timeout) }] : []),
+        ...(heldBack > 0 ? [{ name: "alerts_held_back", value: String(heldBack) }] : []),
+      ];
+      addMessage({
+        channel: alert,
+        author_id: userId,
+        content: "",
+        type: MessageType.AutoModerationAction,
+        allowEveryone: false,
+        extra: { embeds: [{ type: "auto_moderation_message", description: content, fields }] },
+      });
+      recordAudit(guild.guild.id, userId, AuditLogEvent.AutoModerationFlagToChannel, userId, { options, reason: null });
+    }
+    if (timeout) {
+      const until = new Date(Math.max(Date.now() + timeout * 1000, Date.parse(record.communication_disabled_until ?? "") || 0)).toISOString();
+      record.communication_disabled_until = until;
+      emit(guild.members.keys(), "GUILD_MEMBER_UPDATE", { guild_id: guild.guild.id, ...memberJson(guild, userId) });
+      recordAudit(guild.guild.id, userId, AuditLogEvent.AutoModerationUserCommunicationDisabled, userId, {
+        options,
+        reason: null,
+        changes: [change("communication_disabled_until", null, until)],
+      });
+    }
+    if (block) {
+      recordAudit(guild.guild.id, userId, AuditLogEvent.AutoModerationBlockMessage, userId, { options, reason: null });
+      blocked ??= { message: block.metadata?.custom_message };
+    }
+  }
+  if (blocked) {
+    const custom = blocked.message;
     fail(400, 200000, "Message was blocked by automatic moderation", custom ? { content: { _errors: [{ code: "AUTOMOD_BLOCKED", message: custom }] } } : undefined);
   }
 }

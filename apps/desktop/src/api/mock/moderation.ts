@@ -30,7 +30,7 @@ function memberRecord(guild: MockGuild, userId: string): MemberRecord {
   return guild.members.get(userId) ?? fail(404, 10007, "Unknown Member");
 }
 
-function memberJson(guild: MockGuild, userId: string): GuildMember {
+export function memberJson(guild: MockGuild, userId: string): GuildMember {
   const record = memberRecord(guild, userId);
   return {
     user: userOf(userId),

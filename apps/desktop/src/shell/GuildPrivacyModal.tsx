@@ -1,9 +1,10 @@
-// Privacy Settings of one server (GLD-012): whether other members of this server may start or continue a DM with the viewer.
+// Privacy Settings of one server (GLD-012): whether other members of this server may start or continue a DM with the viewer, and
+// whether the viewer appears offline to them.
 import { useEffect, useRef, useState } from "react";
 import { ApiRequestError } from "../api/errors";
 import { getGuildPrivacy, updateGuildPrivacy } from "../api/rest";
 import { useStore } from "../api/store";
-import type { Snowflake } from "../api/types";
+import type { GuildPrivacySettings, Snowflake } from "../api/types";
 import { Modal, usePrefs } from "../ui";
 import { closeModal } from "./modalStore";
 import { SwitchRow } from "./settings/controls";
@@ -13,21 +14,21 @@ const errorText = (e: unknown): string => (e instanceof ApiRequestError ? e.mess
 export function GuildPrivacyModal({ guildId }: { guildId: Snowflake }) {
   const name = useStore(s => s.guilds[guildId]?.name);
   // null while loading
-  const [allow, setAllow] = useState<boolean | null>(null);
+  const [settings, setSettings] = useState<GuildPrivacySettings | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const globalOn = usePrefs(p => p.dmsFromServerMembers);
   const requestSeq = useRef(0);
   // Last value the server confirmed.
-  const confirmed = useRef<boolean | null>(null);
+  const confirmed = useRef<GuildPrivacySettings | null>(null);
 
   useEffect(() => {
     let live = true;
     getGuildPrivacy(guildId)
       .then(p => {
         if (!live) return;
-        confirmed.current = p.direct_messages;
-        setAllow(p.direct_messages);
+        confirmed.current = p;
+        setSettings(p);
       })
       .catch(e => live && setError(errorText(e)));
     return () => {
@@ -35,18 +36,18 @@ export function GuildPrivacyModal({ guildId }: { guildId: Snowflake }) {
     };
   }, [guildId]);
 
-  const toggle = (next: boolean) => {
+  const toggle = (key: keyof GuildPrivacySettings, next: boolean) => {
     const seq = ++requestSeq.current;
-    setAllow(next);
+    setSettings(s => (s ? { ...s, [key]: next } : s));
     setError(null);
-    updateGuildPrivacy(guildId, { direct_messages: next })
+    updateGuildPrivacy(guildId, { [key]: next })
       .then(p => {
-        confirmed.current = p.direct_messages;
-        if (seq === requestSeq.current) setAllow(p.direct_messages);
+        confirmed.current = p;
+        if (seq === requestSeq.current) setSettings(p);
       })
       .catch(e => {
         if (seq !== requestSeq.current) return;
-        setAllow(confirmed.current);
+        setSettings(confirmed.current);
         setError(errorText(e));
       });
   };
@@ -62,8 +63,21 @@ export function GuildPrivacyModal({ guildId }: { guildId: Snowflake }) {
         </button>
       }
     >
-      <SwitchRow label="Direct Messages" note="Allow direct messages from other members in this server." checked={globalOn && (allow ?? true)} disabled={allow === null || !globalOn} onChange={toggle} />
-      <p className="settings-field-note">This setting is applied to this server only. Friends can always message you.</p>
+      <SwitchRow
+        label="Direct Messages"
+        note="Allow direct messages from other members in this server."
+        checked={globalOn && (settings?.direct_messages ?? true)}
+        disabled={settings === null || !globalOn}
+        onChange={v => toggle("direct_messages", v)}
+      />
+      <SwitchRow
+        label="Appear offline in this server"
+        note="Nobody sees you typing in this server, and its members see you as offline. Members who are your friends, share another server with you or have a DM you wrote in still see your status."
+        checked={settings?.appear_offline ?? false}
+        disabled={settings === null}
+        onChange={v => toggle("appear_offline", v)}
+      />
+      <p className="settings-field-note">These settings apply to this server only. Friends can always message you.</p>
       {!globalOn && <p className="settings-field-note">Direct messages from server members are turned off for all servers in Privacy &amp; Safety.</p>}
       {error && (
         <p className="field-error" role="alert">

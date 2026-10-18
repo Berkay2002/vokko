@@ -267,7 +267,7 @@ export interface Row {
 
 export const GROUP_WINDOW_MS = 7 * 60 * 1000;
 
-const SYSTEM_TYPES = new Set<number>([MessageType.RecipientAdd, MessageType.RecipientRemove, MessageType.ChannelNameChange, MessageType.ChannelPinnedMessage, MessageType.UserJoin, MessageType.ThreadCreated, MessageType.Call, MessageType.PollResult]);
+const SYSTEM_TYPES = new Set<number>([MessageType.RecipientAdd, MessageType.RecipientRemove, MessageType.ChannelNameChange, MessageType.ChannelPinnedMessage, MessageType.UserJoin, MessageType.ThreadCreated, MessageType.Call, MessageType.PollResult, MessageType.AutoModerationAction]);
 export const isSystemMessage = (m: Message): boolean => SYSTEM_TYPES.has(m.type);
 
 /**

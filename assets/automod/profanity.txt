@@ -1,0 +1,24 @@
+# Profanity (preset 1). Common English swearing.
+fuck*
+*fucker*
+motherfuck*
+shit
+shits
+shitty
+shithead*
+bullshit*
+bitch*
+bastard*
+asshole*
+arsehole*
+dickhead*
+cunt*
+twat*
+wanker*
+prick
+pricks
+douchebag*
+jackass*
+goddamn*
+piss off
+pissed off

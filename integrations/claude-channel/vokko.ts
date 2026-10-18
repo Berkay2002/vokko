@@ -32,12 +32,24 @@ export type Message = {
   webhook_id?: string
 }
 type Channel = { id: string; type: number; guild_id?: string | null; parent_id?: string | null; recipients?: User[] }
-type Member = { user: User; nick?: string | null }
+type Member = { user: User; nick?: string | null; roles?: string[]; communication_disabled_until?: string | null }
+type GuildInfo = { id: string; owner_id: string; roles: { id: string; permissions: string }[] }
+
+export const ADMINISTRATOR = 1n << 3n
+export const MODERATE_MEMBERS = 1n << 40n
+/** What a timed-out member keeps (VIEW_CHANNEL | READ_MESSAGE_HISTORY), as in crates/server/src/access.rs. */
+const TIMEOUT_ALLOWED = (1n << 10n) | (1n << 16n)
+const ALL_PERMISSIONS = (1n << 64n) - 1n
 type Guild = { id: string; channels?: Channel[]; threads?: Channel[]; members?: Member[] }
 
 const THREAD_TYPES = new Set([10, 11, 12])
 
 // ---- config and state files ----
+
+export type Role = 'channel' | 'bridge-shared' | 'bridge'
+
+/** Owner commands (sent by the bot application's owner in a DM) belong to the bridge, never to the plugin's Claude. */
+export const OWNER_COMMAND_RE = /^\s*!(backend|pair|pause|unpause|pauses)\b/i
 
 export type Config = {
   stateDir: string
@@ -51,13 +63,19 @@ export type Config = {
   ownerName?: string
   /** Shown in pairing replies, e.g. "/vokko:access pair". */
   pairCommand: string
+  /**
+   * Which inbound messages this process owns. 'channel': the Claude Code plugin (all, minus what dmBackend/guilds
+   * hand to a bridge). 'bridge-shared': a bridge on the plugin's token and state dir (exactly what the plugin hands
+   * off). 'bridge': a bridge with its own token and state dir (all).
+   */
+  role: Role
   /** Access snapshotted at boot, never written (pairing downgraded to allowlist). */
   staticMode: boolean
   log: (line: string) => void
 }
 
 /** Loads <stateDir>/.env into process.env (the real environment wins) and builds the config. */
-export function loadConfig(stateDir: string, pairCommand: string, log: (line: string) => void): Config {
+export function loadConfig(stateDir: string, pairCommand: string, log: (line: string) => void, role: Role = 'channel'): Config {
   const envFile = join(stateDir, '.env')
   try {
     // The token is a credential: lock it to the owner. No-op on Windows (would need ACLs).
@@ -81,6 +99,7 @@ export function loadConfig(stateDir: string, pairCommand: string, log: (line: st
     botName: process.env.VOKKO_BOT_NAME || 'Claude',
     ownerName: process.env.VOKKO_OWNER_NAME || undefined,
     pairCommand,
+    role,
     staticMode: process.env.VOKKO_ACCESS_MODE === 'static',
     log,
   }
@@ -118,6 +137,16 @@ export type Access = {
 
 function defaultAccess(): Access {
   return { dmPolicy: 'pairing', allowFrom: [], groups: {}, pending: {} }
+}
+
+/** Whether this process answers DMs: the plugin unless dmBackend is "api", a shared bridge only then. */
+export function ownsDms(role: Role, access: Access): boolean {
+  return role === 'bridge' || (role === 'bridge-shared') === (access.dmBackend === 'api')
+}
+
+/** Whether this process answers guild messages: the plugin unless guilds is false, a shared bridge only then. */
+export function ownsGuilds(role: Role, access: Access): boolean {
+  return role === 'bridge' || (role === 'bridge-shared') === (access.guilds === false)
 }
 
 export const MAX_CHUNK_LIMIT = 2000
@@ -186,6 +215,10 @@ export class VokkoBot {
   private readonly channels = new Map<string, Channel>()
   private readonly dmByUser = new Map<string, string>()
   private owner_: User | null = null
+  /** The bot application's owner (GET /applications/@me), read at READY. */
+  get ownerId(): string | null {
+    return this.owner_?.id ?? null
+  }
   private pairingFullAt = -Infinity
   private inboxLocked = false
   private ws: WebSocket | null = null
@@ -244,10 +277,17 @@ export class VokkoBot {
   }
 
   loadAccess(): Access {
-    return this.bootAccess ?? this.readAccessFile()
+    if (!this.bootAccess) return this.readAccessFile()
+    // Static access stays frozen, except who answers what: dmBackend and guilds are shared with the other process on this token.
+    try {
+      const { dmBackend, guilds } = JSON.parse(readFileSync(this.accessFile, 'utf8')) as Partial<Access>
+      return { ...this.bootAccess, dmBackend, guilds }
+    } catch {
+      return this.bootAccess
+    }
   }
 
-  private saveAccess(a: Access): void {
+  saveAccess(a: Access): void {
     if (this.cfg.staticMode) return
     mkdirSync(this.cfg.stateDir, { recursive: true, mode: 0o700 })
     const tmp = this.accessFile + '.tmp'
@@ -297,7 +337,8 @@ export class VokkoBot {
     const senderId = msg.author.id
 
     if (msg.guild_id == null) {
-      if (access.dmBackend === 'api') return { action: 'drop' } // the bridge answers DMs, pairing included
+      if (!ownsDms(this.cfg.role, access)) return { action: 'drop' } // the other process answers DMs, pairing included
+      if (this.cfg.role === 'channel' && this.isOwnerCommand(msg)) return { action: 'drop' } // a bridge's command
       if (access.allowFrom.includes(senderId)) return { action: 'deliver', access }
       if (access.dmPolicy === 'allowlist') return { action: 'drop' }
       for (const [code, p] of Object.entries(access.pending)) {
@@ -320,7 +361,7 @@ export class VokkoBot {
       return { action: 'pair', code, isResend: false }
     }
 
-    if (access.guilds === false) return { action: 'drop' }
+    if (!ownsGuilds(this.cfg.role, access)) return { action: 'drop' }
     // Keyed on channel id; threads inherit their parent's opt-in (the reply still goes to the thread).
     const policy = access.groups[this.gateKey(msg.channel_id)]
     if (!policy) return { action: 'drop' }
@@ -341,7 +382,11 @@ export class VokkoBot {
       .catch(err => this.cfg.log(`vokko channel: could not tell the owner that pairing is full: ${err}\n`))
   }
 
-  private gateKey(channelId: string): string {
+  isOwnerCommand(msg: Message): boolean {
+    return msg.guild_id == null && this.ownerId != null && msg.author.id === this.ownerId && OWNER_COMMAND_RE.test(msg.content)
+  }
+
+  gateKey(channelId: string): string {
     const ch = this.channels.get(channelId)
     return ch && THREAD_TYPES.has(ch.type) && ch.parent_id ? ch.parent_id : channelId
   }
@@ -365,8 +410,12 @@ export class VokkoBot {
     if (result.action === 'drop') return null
     if (result.action === 'pair') {
       const lead = result.isResend ? 'Still pending' : 'Pairing required'
+      const how =
+        this.cfg.role === 'channel'
+          ? `run in ${this.cfg.botName}'s terminal:\n\n${this.cfg.pairCommand} ${result.code}`
+          : `the bot's owner approves it by sending me \`!pair ${result.code}\`${this.cfg.role === 'bridge-shared' ? ` (or ${this.cfg.pairCommand} ${result.code} in their terminal)` : ''}.`
       try {
-        await this.send(msg.channel_id, `${lead} — run in ${this.cfg.botName}'s terminal:\n\n${this.cfg.pairCommand} ${result.code}`, msg.id)
+        await this.send(msg.channel_id, `${lead} — ${how}`, msg.id)
       } catch (err) {
         this.cfg.log(`vokko channel: failed to send pairing code: ${err}\n`)
       }
@@ -423,8 +472,8 @@ export class VokkoBot {
     const ch = this.channels.get(id)
     if (ch?.type === 1) {
       const userId = ch.recipients?.find(u => u.id !== this.me?.id)?.id
-      if (access.dmBackend !== 'api' && userId && access.allowFrom.includes(userId)) return
-    } else if (ch && access.guilds !== false && this.gateKey(id) in access.groups) {
+      if (ownsDms(this.cfg.role, access) && userId && access.allowFrom.includes(userId)) return
+    } else if (ch && ownsGuilds(this.cfg.role, access) && this.gateKey(id) in access.groups) {
       return
     }
     throw new Error(`channel ${id} is not allowlisted — add via ${this.cfg.pairCommand.replace(/ pair$/, '')}`)
@@ -557,6 +606,44 @@ export class VokkoBot {
     this.api('POST', `/channels/${chatId}/typing`).catch(() => {})
   }
 
+  // ---- guild members (pause targets and moderator checks) ----
+
+  private readonly memberCache = new Map<string, { at: number; list: Member[] }>()
+
+  /** The guild's members (cached for a minute unless `fresh`), or null when they can't be read. */
+  async members(guildId: string, fresh = false): Promise<Member[] | null> {
+    const cached = this.memberCache.get(guildId)
+    if (!fresh && cached && Date.now() - cached.at < 60_000) return cached.list
+    try {
+      const out: Member[] = []
+      for (;;) {
+        const after = out.length > 0 ? `&after=${out[out.length - 1].user.id}` : ''
+        const page = await this.api<Member[]>('GET', `/guilds/${snowflake(guildId)}/members?limit=1000${after}`)
+        out.push(...page)
+        if (page.length < 1000) break
+      }
+      this.memberCache.set(guildId, { at: Date.now(), list: out })
+      return out
+    } catch (err) {
+      this.cfg.log(`vokko channel: cannot list members of guild ${guildId}: ${err}\n`)
+      return null
+    }
+  }
+
+  /** Guild-level permission bits of a member (owner and ADMINISTRATOR: all), or null when they are not a member. Always read fresh: a removed role or a timeout counts at once. */
+  async memberPermissions(guildId: string, userId: string): Promise<bigint | null> {
+    const [guild, members] = await Promise.all([this.api<GuildInfo>('GET', `/guilds/${snowflake(guildId)}`).catch(() => null), this.members(guildId, true)])
+    const member = members?.find(m => m.user.id === userId)
+    if (!guild || !member) return null
+    if (guild.owner_id === userId) return ALL_PERMISSIONS
+    const roles = new Map(guild.roles.map(r => [r.id, BigInt(r.permissions)]))
+    let bits = roles.get(guild.id) ?? 0n // @everyone
+    for (const id of member.roles ?? []) bits |= roles.get(id) ?? 0n
+    if (bits & ADMINISTRATOR) return ALL_PERMISSIONS
+    const timedOut = member.communication_disabled_until != null && Date.parse(member.communication_disabled_until) > Date.now()
+    return timedOut ? bits & TIMEOUT_ALLOWED : bits
+  }
+
   // ---- nickname ----
 
   private async ownerUser(): Promise<User | null> {
@@ -608,6 +695,7 @@ export class VokkoBot {
         this.sessionId = d.session_id
         if (typeof d.max_upload_bytes === 'number') this.maxUploadBytes = d.max_upload_bytes
         for (const ch of d.private_channels ?? []) this.cacheChannel(ch)
+        void this.ownerUser()
         for (const g of d.guilds ?? []) {
           this.cacheGuild(g)
           void this.setNickname(g)
@@ -693,9 +781,10 @@ export class VokkoBot {
     ws.onerror = () => {} // onclose follows and reconnects
   }
 
-  start(): void {
+  /** approvals: poll approved/ for /vokko:access pairings (the plugin does; a shared bridge leaves it to the plugin). */
+  start(approvals = true): void {
     this.connect()
-    if (!this.cfg.staticMode) setInterval(() => this.checkApprovals(), 5000).unref()
+    if (approvals && !this.cfg.staticMode) setInterval(() => this.checkApprovals(), 5000).unref()
   }
 
   stop(): void {

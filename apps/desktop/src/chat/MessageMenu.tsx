@@ -76,7 +76,8 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
   const isMine = message.author.id === chat.me.id;
   const system = isSystemMessage(message);
   const canEdit = isMine && !system && !pending && !message.poll && !isVoiceMessage(message) && message.message_reference?.type !== 1; // a forward has no text to edit
-  const canDelete = !pending && (isMine || chat.canManage) && message.type !== MessageType.RecipientAdd;
+  // An AutoMod alert names the flagged member as its author; only moderators remove it.
+  const canDelete = !pending && ((isMine && message.type !== MessageType.AutoModerationAction) || chat.canManage) && message.type !== MessageType.RecipientAdd;
   const canPin = !pending && !system && (chat.isDm || chat.canManage);
   const bookmarked = useIsBookmarked(message.channel_id, message.id);
   const quick = useMemo(() => quickReactions().slice(0, 4), []);
