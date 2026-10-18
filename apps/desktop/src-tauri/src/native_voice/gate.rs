@@ -31,11 +31,6 @@ impl VadGate {
         Self { options, open: false, remaining_ms: 0.0, key_held: false, floor_db: -70.0, forced_closed: false }
     }
 
-    #[cfg(test)]
-    pub fn is_open(&self) -> bool {
-        self.open
-    }
-
     fn threshold_db(&self) -> f64 {
         if self.options.auto { (self.floor_db + AUTO_MARGIN_DB).min(0.0) } else { self.options.threshold_db }
     }
