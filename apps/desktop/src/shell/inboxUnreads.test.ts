@@ -7,6 +7,7 @@ import { appStore } from '../api/store';
 import { ChannelType, type Channel, type Message, type ReadState } from '../api/types';
 import { markChannelsRead } from './actions';
 import { unreadPreview, unreadRows } from './InboxUnreads';
+import { clearPreviews, loadPreview, previewCreate, previewDrop, previewOf } from './inboxPreviews';
 
 const channel = (id: string, last: string | null, extra: Partial<Channel> = {}) => ({ id, guild_id: '1', type: ChannelType.GuildText, last_message_id: last, name: id, ...extra }) as unknown as Channel;
 const read = (channel_id: string, last_message_id: string | null, mention_count = 0): ReadState => ({ channel_id, last_message_id, mention_count }) as ReadState;
@@ -50,16 +51,58 @@ describe('unreadPreview', () => {
 describe('markChannelsRead (Mark All as Read)', () => {
   beforeEach(() => { requestMock.mockReset(); requestMock.mockResolvedValue(undefined); });
 
-  it('bulk-acks only the listed channels that are unread', async () => {
-    appStore.setState(view([channel('10', '100'), channel('11', '110'), channel('12', '120')], [read('11', '110')]));
-    await markChannelsRead(['10', '11', 'gone']);
+  it('acks the shown message ids, skipping channels already read that far', async () => {
+    appStore.setState(view([], [read('11', '110'), read('12', '90')]));
+    await markChannelsRead([{ channel_id: '10', message_id: '100' }, { channel_id: '11', message_id: '110' }, { channel_id: '12', message_id: '120' }]);
     expect(requestMock).toHaveBeenCalledTimes(1);
-    expect(requestMock).toHaveBeenCalledWith('POST', '/read-states/ack-bulk', { read_states: [{ channel_id: '10', message_id: '100' }] });
+    expect(requestMock).toHaveBeenCalledWith('POST', '/read-states/ack-bulk', { read_states: [{ channel_id: '10', message_id: '100' }, { channel_id: '12', message_id: '120' }] });
   });
 
   it('sends nothing when every channel is read', async () => {
-    appStore.setState(view([channel('10', '100')], [read('10', '100')]));
-    await markChannelsRead(['10']);
+    appStore.setState(view([], [read('10', '100')]));
+    await markChannelsRead([{ channel_id: '10', message_id: '100' }]);
     expect(requestMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('inboxPreviews (one request per channel, then gateway events)', () => {
+  const msg = (id: string, channel_id = '10') => ({ id, channel_id }) as Message;
+  const settle = () => new Promise(r => setTimeout(r, 0));
+  beforeEach(() => { requestMock.mockReset(); clearPreviews(); });
+
+  it('fetches a channel once and keeps it current from new messages', async () => {
+    requestMock.mockResolvedValue([msg('30'), msg('20'), msg('10')]);
+    loadPreview('10');
+    loadPreview('10');
+    await settle();
+    loadPreview('10');
+    previewCreate(msg('40'));
+    previewCreate(msg('40'));
+    previewCreate(msg('99', 'other'));
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(previewOf('10')?.map(m => m.id)).toEqual(['40', '30', '20']);
+    expect(previewOf('other')).toBeUndefined();
+  });
+
+  it('drops a channel when a message it holds is edited or deleted, and refetches on the next load', async () => {
+    requestMock.mockResolvedValue([msg('30'), msg('20')]);
+    loadPreview('10');
+    await settle();
+    previewDrop('10', ['5']);
+    expect(previewOf('10')).toBeDefined();
+    previewDrop('10', ['20']);
+    expect(previewOf('10')).toBeUndefined();
+    loadPreview('10');
+    await settle();
+    expect(requestMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears everything on sign-out', async () => {
+    requestMock.mockResolvedValue([msg('30')]);
+    appStore.setState({ token: 't' } as never);
+    loadPreview('10');
+    await settle();
+    appStore.setState({ token: null } as never);
+    expect(previewOf('10')).toBeUndefined();
   });
 });

@@ -44,10 +44,16 @@ test('Activities opens a shelf of cards: Watch Together, Stremio, Spotify first,
   expect(box.y + box.height).toBeLessThanOrEqual(900);
   await shot(page, 'activities-shelf');
 
-  // Arrow keys move between cards; Escape closes; a card runs the old menu's handler and closes the shelf.
+  // Arrow keys follow the 3-column grid; Escape closes; a card runs the old menu's handler and closes the shelf.
   await cards.nth(0).focus();
-  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
   await expect(cards.nth(1)).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(cards.nth(4)).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(cards.nth(3)).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(cards.nth(0)).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(shelf).toHaveCount(0);
   await call(page).getByRole('button', { name: 'Activities', exact: true }).click();

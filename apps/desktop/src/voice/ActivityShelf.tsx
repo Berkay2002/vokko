@@ -1,7 +1,7 @@
 // The call's Activities shelf (call bar button, the alone card's Choose Activity and DM calls): a grid of cards with Watch Together,
 // Stremio and Spotify pinned first, then the games. It scrolls inside a fixed height; on a phone it is a bottom sheet.
 
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { MonitorPlay, Pin, X } from "lucide-react";
 import type { Channel } from "../api/types";
 import { BUILTIN_PREFIX } from "../games/builtin";
@@ -61,6 +61,20 @@ function Card({ name, sub, art, pinned, disabled, current, onSelect, onClose }: 
   );
 }
 
+const GRID_STEPS: Record<string, (columns: number) => number> = { ArrowLeft: () => -1, ArrowRight: () => 1, ArrowUp: c => -c, ArrowDown: c => c };
+
+/** Arrows move through the grid as laid out: Left/Right to the previous/next card, Up/Down by a row. Home/End go to Popout. */
+function gridKey(e: KeyboardEvent<HTMLDivElement>) {
+  const step = GRID_STEPS[e.key];
+  if (!step) return;
+  const cards = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  const at = cards.indexOf(document.activeElement as HTMLElement);
+  if (at < 0) return;
+  e.preventDefault();
+  const columns = getComputedStyle(e.currentTarget).gridTemplateColumns.split(" ").length;
+  cards[at + step(columns)]?.focus();
+}
+
 export function ActivityShelf({ channel, anchor, open, onClose, onWatchTogether }: { channel: Channel; anchor: HTMLElement | null; open: boolean; onClose: () => void; onWatchTogether: () => void }) {
   const games = useGameActivities(channel);
   return (
@@ -72,7 +86,7 @@ export function ActivityShelf({ channel, anchor, open, onClose, onWatchTogether 
           <X size={20} />
         </button>
       </div>
-      <div className="activity-shelf-grid" role="menu" aria-label="Activities">
+      <div className="activity-shelf-grid" role="menu" aria-label="Activities" onKeyDown={gridKey}>
         <Card pinned name="Watch Together" sub="YouTube in sync" art={<Cover id="watch-together" hue={0}><MonitorPlay size={40} /></Cover>} onSelect={onWatchTogether} onClose={onClose} />
         <Card pinned name="Stremio" sub="Movies and episodes" art={<Cover id="stremio" hue={265}><StremioIcon size={44} /></Cover>} onSelect={openStremioPanel} onClose={onClose} />
         <Card pinned name="Spotify" sub="Music for everyone" art={<Cover id="spotify" hue={140}><SpotifyIcon size={44} /></Cover>} onSelect={openSpotifyPanel} onClose={onClose} />

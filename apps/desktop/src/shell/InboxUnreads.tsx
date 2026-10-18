@@ -1,9 +1,8 @@
 // Inbox > Unreads: one card per unread channel (newest activity first) with its newest unread messages, a check to mark it read,
-// and "Mark All as Read" on top. Previews are one cached request per channel and last_message_id.
+// and "Mark All as Read" on top. Previews come from inboxPreviews (one request per channel, then gateway events).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Check, CheckCheck, Inbox as InboxIcon } from "lucide-react";
-import { request } from "../api/rest";
 import { compareIds } from "../api/snowflake";
 import { channelMentionCount, displayName, dmName, isChannelUnread, useStore } from "../api/store";
 import { ChannelType, type Channel, type Message, type Snowflake } from "../api/types";
@@ -12,11 +11,10 @@ import { messageSnippet } from "../media/helpers";
 import { jumpToMessage } from "../media/jump";
 import { markChannelRead, markChannelsRead } from "./actions";
 import { Avatar, GuildIcon } from "./Avatar";
+import { loadPreview, previewOf, subscribePreviews } from "./inboxPreviews";
 import { mutedTest, useMutedUntil } from "./localState";
 import { dmPath, go, guildPath } from "./nav";
 
-/** How many unread messages a card previews. */
-export const PREVIEW_COUNT = 3;
 /** Channel cards shown at once; the rest are counted (each card is one request). */
 export const MAX_CARDS = 20;
 
@@ -44,29 +42,12 @@ export function unreadPreview(page: Message[], readId: Snowflake | null | undefi
   return page.filter(m => !readId || compareIds(m.id, readId) > 0).reverse();
 }
 
-const previews = new Map<string, Message[]>();
-
-function usePreview(channel: Channel): Message[] | null {
-  const key = `${channel.id}:${channel.last_message_id ?? ""}`;
-  const [page, setPage] = useState<Message[] | null>(() => previews.get(key) ?? null);
+function usePreview(channelId: Snowflake): Message[] | null {
+  const page = useSyncExternalStore(subscribePreviews, () => previewOf(channelId));
   useEffect(() => {
-    const hit = previews.get(key);
-    if (hit) {
-      setPage(hit);
-      return;
-    }
-    let live = true;
-    request<Message[]>("GET", `/channels/${channel.id}/messages?limit=${PREVIEW_COUNT}`)
-      .then(list => {
-        previews.set(key, list);
-        if (live) setPage(list);
-      })
-      .catch(() => live && setPage([]));
-    return () => {
-      live = false;
-    };
-  }, [key, channel.id]);
-  return page;
+    if (!page) loadPreview(channelId);
+  }, [channelId, page]);
+  return page ?? null;
 }
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
@@ -83,7 +64,7 @@ function UnreadCard({ channel, mentions, onNavigate }: UnreadRow & { onNavigate(
   const category = useStore(s => (channel.parent_id ? s.channels[channel.parent_id]?.name : undefined));
   const readId = useStore(s => s.readStates[channel.id]?.last_message_id);
   const members = useStore(s => (guildId ? s.members[guildId] : undefined));
-  const page = usePreview(channel);
+  const page = usePreview(channel.id);
   const messages = page ? unreadPreview(page, readId) : null;
   const name = guildId ? (channel.name ?? "") : dmName(channel);
   const sub = guild ? [guild.name, category].filter(Boolean).join(" › ") : channel.type === ChannelType.GroupDM ? "Group DM" : "Direct Message";
@@ -106,7 +87,7 @@ function UnreadCard({ channel, mentions, onNavigate }: UnreadRow & { onNavigate(
           </span>
           {mentions > 0 && <span className="inbox-row-badge" aria-label={`${mentions} mentions`}>{mentions}</span>}
         </button>
-        <button type="button" className="inbox-unread-check" aria-label={`Mark ${name} as read`} title="Mark as Read" onClick={() => void markChannelRead(channel.id)}>
+        <button type="button" className="inbox-unread-check" aria-label={`Mark ${name} as read`} title="Mark as Read" onClick={() => void markChannelRead(channel.id).catch(() => undefined)}>
           <Check size={18} />
         </button>
       </div>
@@ -141,6 +122,7 @@ export function UnreadList({ onNavigate }: { onNavigate(): void }) {
   const channels = useStore(s => s.channels);
   const readStates = useStore(s => s.readStates);
   const mutedUntil = useMutedUntil();
+  const [pending, setPending] = useState(false);
   const rows = useMemo(() => unreadRows({ channels, readStates } as ReadView, mutedTest({ mutedUntil })), [channels, readStates, mutedUntil]);
   if (rows.length === 0) {
     return (
@@ -152,11 +134,18 @@ export function UnreadList({ onNavigate }: { onNavigate(): void }) {
     );
   }
   const hidden = rows.length - MAX_CARDS;
+  // Every listed channel, the "N more" too (as Discord does), acked up to the message this render showed.
+  const markAll = () => {
+    setPending(true);
+    markChannelsRead(rows.map(r => ({ channel_id: r.channel.id, message_id: r.channel.last_message_id as Snowflake })))
+      .catch(() => undefined)
+      .finally(() => setPending(false));
+  };
   return (
     <>
       <div className="inbox-unread-bar">
         <span className="inbox-row-sub">{rows.length === 1 ? "1 channel with new messages" : `${rows.length} channels with new messages`}</span>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void markChannelsRead(rows.map(r => r.channel.id))}>
+        <button type="button" className="btn btn-secondary btn-sm" disabled={pending} onClick={markAll}>
           <CheckCheck size={16} /> Mark All as Read
         </button>
       </div>
