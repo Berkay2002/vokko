@@ -43,12 +43,13 @@
 		header /assets/* Cache-Control "public, max-age=31536000, immutable"
 		# Not every file_server MIME table maps .webmanifest; browsers want the manifest type.
 		header /manifest.webmanifest Content-Type application/manifest+json
-		# The web app's CSP, matching the packaged app's (release.production.json). frame-src https: because admins add game
+		# The web app's CSP, matching the packaged app's (apps/desktop/release.production.json). VOKKO_MEDIA_LIVEKIT_HOST is the
+		# media LiveKit's public host (deploy/.env.example). frame-src https: because admins add game
 		# origins at runtime (docs/design/games-host.md section 7). Not on pages other pages frame: the Watch Together embed
 		# (loads YouTube's script, framed by the desktop app), the website game frame (framed by the macOS/Linux app, frames the
 		# game) and the built-in games (framed by the app, carry their own rules).
 		@app not path /youtube-embed.html /web-game.html /games/*
-		header @app Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; frame-src 'self' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.scdn.co https://images.metahub.space https://live.metahub.space https://episodes.metahub.space https://m.media-amazon.com; media-src 'self' blob:; connect-src 'self' https://*.livekit.cloud wss://*.livekit.cloud https://live.vokko.example.com wss://live.vokko.example.com; frame-ancestors 'none'"
+		header @app Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; frame-src 'self' https:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.scdn.co https://images.metahub.space https://live.metahub.space https://episodes.metahub.space https://m.media-amazon.com; media-src 'self' blob:; connect-src 'self' https://*.livekit.cloud wss://*.livekit.cloud https://{$VOKKO_MEDIA_LIVEKIT_HOST:live.vokko.example.com} wss://{$VOKKO_MEDIA_LIVEKIT_HOST:live.vokko.example.com}; frame-ancestors 'none'"
 		# Website game frame: only the desktop apps may frame it (it only obeys their postMessage anyway).
 		header /web-game.html Content-Security-Policy "frame-ancestors tauri://localhost http://tauri.localhost https://tauri.localhost"
 		# Built-in games: sandboxed (opaque origin even when opened directly), framed only by the app, no network.

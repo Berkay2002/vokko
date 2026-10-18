@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restore a backup made by tools/backup.sh: REPLACES the database and the uploads. Docs: docs/backups.md.
 #
-#   tools/restore.sh <backup dir>/daily/20261018-040000 --yes
+#   tools/restore.sh /srv/backups/vokko/daily/20261018-040000 --yes
 #
 # Uses the same environment as backup.sh (VOKKO_BACKUP_COMPOSE_DIR, VOKKO_BACKUP_DATA_VOLUME, or
 # VOKKO_BACKUP_DATABASE_URL + VOKKO_BACKUP_DATA_DIR). With compose it stops the server, restores, and starts it again.

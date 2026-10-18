@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Desktop release: bumps the version, builds signed Windows (here), Linux (WSL distro vokko-linux, tools/release-linux.sh) and
-# macOS (on buildhost) bundles, uploads them to
-# https://vokko.example.com/downloads/ and publishes latest.json last, which is what installed apps poll (docs/desktop-release.md).
+# macOS (on a Mac over ssh) bundles, uploads them to <server>/downloads/ (served from the Mac's ~/$DOWNLOADS) and publishes
+# latest.json last, which is what installed apps poll (docs/desktop-release.md).
 # Run from Git Bash on the Windows PC, on a clean main:  tools/release-desktop.sh 0.1.2 "What changed"
 # Dry run (builds all three at the current version; no bump, commit, push, upload or latest.json):  tools/release-desktop.sh --dry-run
-# Needs ~/.vokko/updater.key(.password) on both machines and `ssh buildhost` without a password.
+# Needs ~/.vokko/updater.key(.password) on both machines, `ssh $VOKKO_RELEASE_MAC_HOST` without a password, and the deployment's
+# Tauri overlay apps/desktop/release.production.json (gitignored; start from release.production.example.json). Its updater
+# endpoint names the server, which is also the API the apps are built against.
+# Environment (exported, or in ~/.vokko/release.env, which is sourced when present):
+#   VOKKO_RELEASE_MAC_HOST   required: ssh host of the Mac that builds macOS and serves the downloads
+#   VOKKO_RELEASE_MAC_REPO   required: the checkout on that Mac the macOS build runs in
+#   VOKKO_RELEASE_TARGET     cargo target dir for the Windows build (default: target/release-desktop in this checkout)
 set -euo pipefail
 
 # The body is a function called on the last line, so bash has parsed all of it before the `git pull` below can change this
@@ -12,8 +18,10 @@ set -euo pipefail
 main() {
   local args=("$@") DRY=
   [ "${1:-}" = --dry-run ] && { DRY=1; shift; }
-  API=https://vokko.example.com
-  MAC_REPO=/srv/vokko
+  # shellcheck disable=SC1091 # the owner's own settings, outside the repo
+  if [ -f "$HOME/.vokko/release.env" ]; then . "$HOME/.vokko/release.env"; fi
+  MAC=${VOKKO_RELEASE_MAC_HOST:?set VOKKO_RELEASE_MAC_HOST to the ssh host of the Mac that builds macOS (or put it in ~/.vokko/release.env)}
+  MAC_REPO=${VOKKO_RELEASE_MAC_REPO:?set VOKKO_RELEASE_MAC_REPO to the vokko checkout on that Mac (or put it in ~/.vokko/release.env)}
   DOWNLOADS=.local/share/vokko/downloads
   ROOT=$(git rev-parse --show-toplevel)
   cd "$ROOT"
@@ -25,12 +33,20 @@ main() {
     VOKKO_RELEASE_PULLED=1 exec bash "$ROOT/tools/release-desktop.sh" "${args[@]}"
   fi
 
+  CONFIG=$ROOT/apps/desktop/release.production.json
+  [ -f "$CONFIG" ] || {
+    echo "missing $CONFIG: copy apps/desktop/release.production.example.json there and set your server, CSP hosts and updater key" >&2
+    exit 1
+  }
+  API=$(node -e 'console.log(new URL(require(process.argv[1]).plugins.updater.endpoints[0]).origin)' "$CONFIG")
+  case $API in https://*.example.com | https://example.com) echo "$CONFIG still points at $API" >&2; exit 1 ;; esac
+
   if [ -n "$DRY" ]; then
     local current
     current=$(node -p 'require("./apps/desktop/src-tauri/tauri.conf.json").version')
     VERSION=${1:-$current}
     [ "$VERSION" = "$current" ] || { echo "a dry run builds the current version $current, not $VERSION"; exit 1; }
-    # buildhost builds origin/main, so it has to be what is checked out here.
+    # The Mac builds origin/main, so it has to be what is checked out here.
     [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "main and origin/main differ"; exit 1; }
   else
     VERSION=${1:?usage: release-desktop.sh <version> [notes] | --dry-run}
@@ -49,19 +65,21 @@ main() {
 
   export TAURI_SIGNING_PRIVATE_KEY="$HOME/.vokko/updater.key"
   TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$(cat "$HOME/.vokko/updater.key.password")
-  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD VITE_VOKKO_API=$API CARGO_TARGET_DIR=${VOKKO_RELEASE_TARGET:-E:/cargo-target/vokko-release}
+  export TAURI_SIGNING_PRIVATE_KEY_PASSWORD VITE_VOKKO_API=$API CARGO_TARGET_DIR=${VOKKO_RELEASE_TARGET:-$ROOT/target/release-desktop}
 
-  echo "== macOS build (buildhost, background)"
-  ssh -n -o BatchMode=yes buildhost "export PATH=/opt/homebrew/bin:/usr/local/bin:\$HOME/.cargo/bin:\$PATH
+  echo "== macOS build ($MAC, background)"
+  # The overlay is not in git, so the Mac gets this one next to the checkout rather than in it (a checkout would not keep it).
+  ssh -o BatchMode=yes "$MAC" "cat > /tmp/vokko-release.production.json" <"$CONFIG"
+  ssh -n -o BatchMode=yes "$MAC" "export PATH=/opt/homebrew/bin:/usr/local/bin:\$HOME/.cargo/bin:\$PATH
     set -e; cd $MAC_REPO && git fetch -q origin && git checkout -q --detach origin/main && npm ci --no-audit --no-fund --loglevel=error
     export TAURI_SIGNING_PRIVATE_KEY=\$HOME/.vokko/updater.key TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\$(cat \$HOME/.vokko/updater.key.password) VITE_VOKKO_API=$API
     rm -rf target/release/bundle/macos target/release/bundle/dmg
-    cd apps/desktop && npx tauri build --config release.production.json --bundles app,dmg > /tmp/vokko-macbuild.log 2>&1" &
+    cd apps/desktop && npx tauri build --config /tmp/vokko-release.production.json --bundles app,dmg > /tmp/vokko-macbuild.log 2>&1" &
   local MAC_PID=$!
 
   echo "== Windows build"
   npm ci --no-audit --no-fund --loglevel=error
-  (cd apps/desktop && npx tauri build --config release.production.json > "${TMPDIR:-/tmp}/vokko-winbuild.log" 2>&1) ||
+  (cd apps/desktop && npx tauri build --config "$CONFIG" >"${TMPDIR:-/tmp}/vokko-winbuild.log" 2>&1) ||
     { tail -20 "${TMPDIR:-/tmp}/vokko-winbuild.log"; exit 1; }
   WIN=$CARGO_TARGET_DIR/release/bundle/nsis/Vokko_${VERSION}_x64-setup.exe
   test -f "$WIN.sig"
@@ -71,8 +89,8 @@ main() {
   tools/release-linux.sh "$VERSION" "$LINUX"
   APPIMAGE=Vokko_${VERSION}_amd64.AppImage DEB=Vokko_${VERSION}_amd64.deb
 
-  wait $MAC_PID || { ssh -n buildhost 'tail -20 /tmp/vokko-macbuild.log'; exit 1; }
-  MAC_SIG=$(ssh -n -o BatchMode=yes buildhost "test -f $MAC_REPO/target/release/bundle/dmg/Vokko_${VERSION}_aarch64.dmg &&
+  wait $MAC_PID || { ssh -n "$MAC" 'tail -20 /tmp/vokko-macbuild.log'; exit 1; }
+  MAC_SIG=$(ssh -n -o BatchMode=yes "$MAC" "test -f $MAC_REPO/target/release/bundle/dmg/Vokko_${VERSION}_aarch64.dmg &&
     cat $MAC_REPO/target/release/bundle/macos/Vokko.app.tar.gz.sig")
 
   local MANIFEST=$CARGO_TARGET_DIR/latest.json
@@ -86,13 +104,13 @@ process.stdout.write(JSON.stringify({ version, notes, pub_date: new Date().toISO
 } }, null, 2));' "$VERSION" "$NOTES" "$(cat "$WIN.sig")" "$MAC_SIG" "$(cat "$LINUX/$APPIMAGE.sig")" "$API/downloads" >"$MANIFEST"
   if [ -n "$DRY" ]; then
     check_manifest "$MANIFEST" offline
-    echo "dry run of $VERSION done: $WIN, $LINUX, buildhost:$MAC_REPO/target/release/bundle, $MANIFEST"
+    echo "dry run of $VERSION done: $WIN, $LINUX, $MAC:$MAC_REPO/target/release/bundle, $MANIFEST"
     return
   fi
 
   echo "== upload"
-  scp -q -o BatchMode=yes "$WIN" "$LINUX/$APPIMAGE" "$LINUX/$DEB" buildhost:$DOWNLOADS/
-  ssh -n -o BatchMode=yes buildhost "set -e; cd $DOWNLOADS
+  scp -q -o BatchMode=yes "$WIN" "$LINUX/$APPIMAGE" "$LINUX/$DEB" "$MAC:$DOWNLOADS/"
+  ssh -n -o BatchMode=yes "$MAC" "set -e; cd $DOWNLOADS
     cp $MAC_REPO/target/release/bundle/macos/Vokko.app.tar.gz Vokko_${VERSION}_aarch64.app.tar.gz
     cp $MAC_REPO/target/release/bundle/dmg/Vokko_${VERSION}_aarch64.dmg .Vokko-mac.dmg.new && mv -f .Vokko-mac.dmg.new Vokko-mac.dmg
     cp Vokko_${VERSION}_x64-setup.exe .Vokko-windows-setup.exe.new && mv -f .Vokko-windows-setup.exe.new Vokko-windows-setup.exe
@@ -102,7 +120,7 @@ process.stdout.write(JSON.stringify({ version, notes, pub_date: new Date().toISO
 
   # Published last, and only once every url it names answers: an app that sees the new version can always download it.
   check_manifest "$MANIFEST"
-  ssh -o BatchMode=yes buildhost "cat > $DOWNLOADS/.latest.json.new && mv -f $DOWNLOADS/.latest.json.new $DOWNLOADS/latest.json" <"$MANIFEST"
+  ssh -o BatchMode=yes "$MAC" "cat > $DOWNLOADS/.latest.json.new && mv -f $DOWNLOADS/.latest.json.new $DOWNLOADS/latest.json" <"$MANIFEST"
   curl -fsS "$API/downloads/latest.json" >"$MANIFEST.served"
   check_manifest "$MANIFEST.served"
   echo "released $VERSION"

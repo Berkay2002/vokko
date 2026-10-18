@@ -9,8 +9,9 @@ import { Modal } from "../ui";
 import { Avatar } from "./Avatar";
 import { addGroupRecipients, closeDirectMessage, createChannel, createGroupDM, createGuild, createGuildFromTemplate, deleteGuild, joinOrApply, leaveGuild } from "./actions";
 import { EditGroupModal } from "./GroupDm";
-import { getTemplate, templateCode } from "../templates/api";
+import { getTemplate, templateCode, templateLink } from "../templates/api";
 import { TemplatePreview } from "../templates/TemplatePreview";
+import { inviteLink } from "../invites/api";
 import { InviteModal } from "../invites/InviteModal";
 import { ApplyToJoin } from "../invites/ApplyToJoin";
 import { blockUser, firstTextChannelId } from "./menus";
@@ -358,7 +359,7 @@ function CreateServer() {
           id="template-code"
           className="input"
           value={templateInput}
-          placeholder="https://vokko.example.com/template/hgM48av5Q69A"
+          placeholder={templateLink("hgM48av5Q69A")}
           autoFocus
           onChange={e => (setTemplateInput(e.target.value), setRemote(null))}
           onKeyDown={e => e.key === "Enter" && templateCode(templateInput) && !busy && lookUp()}
@@ -430,13 +431,13 @@ function CreateServer() {
       <label className="field-label" htmlFor="invite-code">
         Invite link <span className="required">*</span>
       </label>
-      <input id="invite-code" className="input" value={code} placeholder="https://vokko.example.com/invite/hTKzmak" autoFocus onChange={e => setCode(e.target.value)} onKeyDown={e => e.key === "Enter" && code.trim() && run(() => joinOrApply(code))} />
+      <input id="invite-code" className="input" value={code} placeholder={inviteLink("hTKzmak")} autoFocus onChange={e => setCode(e.target.value)} onKeyDown={e => e.key === "Enter" && code.trim() && run(() => joinOrApply(code))} />
       {error && <p className="field-error">{error}</p>}
       <div className="invite-examples">
         <div className="field-label">Invites should look like</div>
         <p>hTKzmak</p>
-        <p>https://vokko.example.com/invite/hTKzmak</p>
-        <p>https://vokko.example.com/invite/cool-people</p>
+        <p>{inviteLink("hTKzmak")}</p>
+        <p>{inviteLink("cool-people")}</p>
       </div>
     </Modal>
   );

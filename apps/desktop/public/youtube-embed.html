@@ -22,14 +22,12 @@
  * Here -> parent:                 {source:"vokko-embed", event:"ready"}  {event:"state", state:"playing|paused|buffering|ended|cued|unstarted"}
  *                                 {event:"time", seconds, duration}  {event:"meta", title}  {event:"error", code}
  *
- * Only these parent origins are listened to (and answered): the Tauri app, the web client, and, when this page itself is served
- * from localhost / 127.0.0.1 (the dev server), that same origin.
+ * Only these parent origins are listened to (and answered): the Tauri app and this page's own origin, which is the web client
+ * (the server hosts both, src/watch/embed.ts) or, on localhost / 127.0.0.1, the dev server.
  */
 (function () {
   "use strict";
-  var ALLOWED = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "https://vokko.example.com"];
-  var LOCAL = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-  if (LOCAL) ALLOWED.push(location.origin);
+  var ALLOWED = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", location.origin];
 
   var parentOrigin = null; // set by the first accepted message; replies go only there
   var player = null;

@@ -103,7 +103,7 @@ pub struct StremioConfig {
     pub media_url: String,
     pub media_api_key: String,
     pub media_api_secret: crate::crypto::Secret,
-    /// Signalling URL the native bot connects to (`VOKKO_MEDIA_LIVEKIT_BOT_URL`): the home server reaches its own LiveKit locally,
+    /// Signalling URL the native bot connects to (`VOKKO_MEDIA_LIVEKIT_BOT_URL`): a bot on the LiveKit host reaches it locally,
     /// `ws://127.0.0.1:7880`, instead of going out through the tunnel. Defaults to `media_url`.
     pub bot_media_url: String,
     /// Where the native bot listens, as the server (in docker) reaches it: `http://host.internal:8720`.
