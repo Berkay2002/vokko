@@ -1248,7 +1248,6 @@
 
 .channel-actions {
   display: none;
-  gap: 4px;
 }
 
 .channel-row:hover .channel-actions,
@@ -1258,7 +1257,10 @@
 
 .channel-action {
   display: flex;
-  margin-left: 4px;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px; /* WCAG 2.2 target size; the same 8px between icons as the old gap + margin */
+  min-height: 24px;
   color: var(--interactive-icon-default);
 }
 

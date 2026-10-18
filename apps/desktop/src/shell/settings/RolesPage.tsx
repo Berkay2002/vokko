@@ -608,6 +608,7 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
         })}
         {visible.length === 0 && <p className="settings-todo">No roles match your search.</p>}
         {everyone && (
+          <div role="listitem">
           <button type="button" className="ss-role-row ss-role-default" onClick={() => setSelected(everyone.id)}>
             <div className="ss-role-row-text">
               <span className="ss-role-row-name">Default Permissions (@everyone)</span>
@@ -615,6 +616,7 @@ export function RolesPage({ guild, members }: { guild: Guild; members: Record<st
             </div>
             <ChevronRight size={18} aria-hidden="true" />
           </button>
+          </div>
         )}
       </div>
     </Page>
