@@ -186,6 +186,26 @@ async fn account_info_and_username_change() {
 }
 
 #[tokio::test]
+async fn wrong_current_passwords_are_counted_per_account() {
+    let app = TestApp::new().await;
+    let (token, _) = app.register("guesser").await;
+    let wrong = json!({"username": "guessed2", "password": "wrong password"});
+    for _ in 0..9 {
+        assert_eq!(app.patch("/users/@me/account", &token, wrong.clone()).await.0, StatusCode::BAD_REQUEST);
+    }
+    // a right password does not count, and the wrong ones so far still do
+    let (status, done) = app.patch("/users/@me/account", &token, json!({"username": "guessed", "password": "correct horse battery"})).await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(app.patch("/users/@me/account", &token, wrong.clone()).await.0, StatusCode::BAD_REQUEST);
+    // the 11th wrong one is refused, whichever route it comes through, and so is the right password until the window passes
+    assert_eq!(app.patch("/users/@me/account", &token, wrong.clone()).await.0, StatusCode::TOO_MANY_REQUESTS);
+    let (status, _) = app.send(Method::POST, "/users/@me/disable", Some(&token), Some(json!({"password": "wrong password"}))).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    let (status, _) = app.patch("/users/@me/account", &token, json!({"username": "guessed2", "password": "correct horse battery"})).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
 async fn email_change_waits_for_the_new_address_to_be_verified() {
     let app = TestApp::new().await;
     let (token, _) = app.register("mover").await;

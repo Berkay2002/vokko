@@ -618,6 +618,7 @@ Security rules (review of PR #10):
 - Pre-hijack: linking a new provider and enabling two-factor need a verified email (400 50035 `email`). A password reset of an account whose email was not verified yet also removes every linked provider, because the reset proves the inbox and the links may belong to whoever created the account.
 - Password changes and resets cancel a pending email change (the pending address and its verification links); a change requested in the same call is kept.
 - Failed second-factor codes are counted per account across tickets and routes: 10 failures in 15 minutes, then 429 until the window passes.
+- Wrong current passwords (the `password` of the identity check, on every route above and OAuth link) are counted per account the same way, apart from codes: 10 in 15 minutes, then 429 "Too many wrong passwords." until the window passes, even for the right password. A right password does not count; a missing one is refused without counting.
 - `/auth/forgot` does its work after answering, so known and unknown logins take the same time.
 - Invalid `VOKKO_SMTP_*` settings stop the server at start; mail goes to the log only when `VOKKO_SMTP_HOST` is unset.
 
