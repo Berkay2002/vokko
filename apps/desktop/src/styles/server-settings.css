@@ -1123,28 +1123,231 @@
   color: var(--text-muted);
 }
 
-.ss-automod-rule {
+/* AutoMod: one card per rule type; the open rule expands into Discord's numbered steps. */
+.am-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.am-card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 12px;
+  padding: 16px;
   background: var(--background-base-low);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 
-.ss-automod-rule .ss-member-text {
+.am-card-icon,
+.am-action-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--background-mod-subtle);
+  color: var(--text-default);
+}
+
+.am-card-text,
+.am-action-text {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
-.ss-automod-rule .switch-row {
+.am-card-title,
+.am-action-label {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.am-card-desc,
+.am-action-note {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.am-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.am-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--background-mod-subtle);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.am-card .switch-row {
   flex: none;
   padding: 0;
   border: 0;
 }
 
-.ss-automod-rule .switch-row-text {
+.am-card .switch-row-text {
   display: none;
+}
+
+.am-editor {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
+}
+
+.am-editor-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.am-editor-head .settings-field {
+  flex: 1;
+  margin: 0;
+}
+
+.am-editor-head .switch-row {
+  padding-bottom: 6px;
+}
+
+.am-step {
+  display: flex;
+  gap: 12px;
+}
+
+.am-step-n {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--background-brand);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.am-step-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.am-step-title {
+  margin: 2px 0 0;
+  color: var(--text-strong);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.am-limit,
+.am-action,
+.am-preset {
+  padding: 12px;
+  background: var(--background-surface-high);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.am-limit,
+.am-preset,
+.am-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.am-action-row {
+  cursor: pointer;
+}
+
+.am-action.on {
+  border-color: var(--brand-500, var(--border-normal));
+}
+
+.am-action-extra {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.am-checkbox {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  accent-color: var(--background-brand);
+}
+
+.am-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.am-stepper {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.am-stepper .input {
+  width: 56px;
+  text-align: center;
+}
+
+.am-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .am-card {
+    flex-wrap: wrap;
+  }
+
+  .am-card-text {
+    flex-basis: calc(100% - 52px);
+  }
+
+  .am-limit {
+    flex-wrap: wrap;
+  }
+
+  .am-limit .am-action-text {
+    flex-basis: calc(100% - 32px);
+  }
+
+  .am-step {
+    gap: 8px;
+  }
+
+  .am-editor-head {
+    flex-wrap: wrap;
+  }
 }
 
 .ss-role-icon-row {
