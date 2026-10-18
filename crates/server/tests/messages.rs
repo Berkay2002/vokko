@@ -419,3 +419,25 @@ async fn tts_needs_send_tts_messages() {
     assert_eq!(status, StatusCode::OK, "{in_dm}");
     assert_eq!(in_dm["tts"], true);
 }
+
+/// Plain sends no longer hold the channel row for their whole transaction and @everyone sends batch their read-state bumps:
+/// concurrent sends of both kinds must neither deadlock nor leave `last_message_id` behind the newest message.
+#[tokio::test]
+async fn concurrent_sends_keep_the_newest_last_message() {
+    let s = setup().await;
+    let path = format!("/channels/{}/messages", s.channel);
+    let sends = (0..24).map(|n| {
+        let (token, content) = if n % 2 == 0 { (&s.owner, format!("plain {n}")) } else { (&s.member, format!("@everyone {n}")) };
+        let (app, path) = (&s.app, &path);
+        async move { app.post(path, token, json!({"content": content})).await }
+    });
+    let mut newest: i64 = 0;
+    for (status, message) in futures_util::future::join_all(sends).await {
+        assert_eq!(status, StatusCode::OK, "{message}");
+        newest = newest.max(message["id"].as_str().expect("id").parse().expect("snowflake"));
+    }
+    let channel: i64 = s.channel.parse().expect("snowflake");
+    let (last,): (Option<i64>,) =
+        sqlx::query_as("SELECT last_message_id FROM channels WHERE id = $1").bind(channel).fetch_one(&s.app.state.db).await.expect("channel");
+    assert_eq!(last, Some(newest));
+}
