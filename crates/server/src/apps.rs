@@ -8,7 +8,8 @@ use sqlx::{FromRow, Postgres, Transaction};
 use vokko_protocol::api::permissions::{ALL, USE_APPLICATION_COMMANDS};
 use vokko_protocol::api::{
     AllowedMentions, Application, ApplicationCommand, ApplicationCommandOption, ApplicationCommandOptionType, ApplicationCommandRequest,
-    ApplicationCommandType, ChannelType, CommandIndexApplication, Embed, GatewayEvent, InstallParams, Message, MessageDelete, Snowflake, User,
+    ApplicationCommandType, ChannelType, CommandIndexApplication, Component, ComponentType, Embed, GatewayEvent, InstallParams, Message, MessageDelete,
+    Snowflake, User,
 };
 
 use crate::access::{ChannelAccess, DM_PERMISSIONS};
@@ -89,6 +90,116 @@ pub fn validate_body(content: Option<&str>, embeds: Option<&Vec<Embed>>, allow_e
         return Err(ApiErr::empty_message());
     }
     Ok((content, embeds))
+}
+
+const MAX_ROWS: usize = 5;
+const MAX_BUTTONS_PER_ROW: usize = 5;
+const MAX_SELECT_OPTIONS: usize = 25;
+const MAX_CUSTOM_ID: usize = 100;
+const MAX_BUTTON_LABEL: usize = 80;
+const MAX_OPTION_TEXT: usize = 100;
+const MAX_PLACEHOLDER: usize = 150;
+
+/// Buttons and selects of a bot message in Discord's limits: up to 5 action rows of up to 5 buttons, or one string select alone in
+/// its row; `custom_id` 1-100 characters and unique in the message; style 5 (link) needs an https `url` and no `custom_id`, the
+/// others a `custom_id` and no `url`; a select picks exactly one option (min and max are 1).
+pub fn validate_components(components: &[Component]) -> ApiResult<Vec<Component>> {
+    let bad = |path: &str, message: &str| ApiErr::invalid(&format!("components.{path}"), message);
+    let length = |path: &str, text: &str, min: usize, max: usize| {
+        let count = text.chars().count();
+        if count < min || count > max { Err(bad(path, &format!("Must be between {min} and {max} in length."))) } else { Ok(()) }
+    };
+    if components.len() > MAX_ROWS {
+        return Err(bad("", "Must be 5 or fewer in length."));
+    }
+    let mut seen = HashSet::new();
+    let mut cleaned = Vec::new();
+    for (row_index, row) in components.iter().enumerate() {
+        let row_path = row_index.to_string();
+        let Some(children) = row.components.as_ref().filter(|_| row.kind == ComponentType::ActionRow) else {
+            return Err(bad(&row_path, "Top-level components must be action rows."));
+        };
+        if children.is_empty() || children.len() > MAX_BUTTONS_PER_ROW {
+            return Err(bad(&row_path, "An action row holds 1 to 5 components."));
+        }
+        let mut cleaned_children = Vec::new();
+        for (index, child) in children.iter().enumerate() {
+            let path = format!("{row_index}.components.{index}");
+            let mut child = child.clone();
+            child.components = None;
+            let id = child.custom_id.clone();
+            match child.kind {
+                ComponentType::ActionRow => return Err(bad(&path, "Action rows cannot be nested.")),
+                ComponentType::Button => {
+                    let style = child.style.filter(|style| (1..=5).contains(style)).ok_or_else(|| bad(&path, "style must be 1 to 5."))?;
+                    if child.label.as_deref().is_none_or(|label| label.trim().is_empty()) && child.emoji.is_none() {
+                        return Err(bad(&path, "A button needs a label or an emoji."));
+                    }
+                    length(&path, child.label.as_deref().unwrap_or(""), 0, MAX_BUTTON_LABEL)?;
+                    if style == 5 {
+                        let https = child.url.as_deref().is_some_and(|url| url.len() <= 2048 && url.trim().to_ascii_lowercase().starts_with("https://"));
+                        if !https || id.is_some() {
+                            return Err(bad(&path, "A link button needs an https url and no custom_id."));
+                        }
+                    } else if child.url.is_some() || id.is_none() {
+                        return Err(bad(&path, "A button needs a custom_id and no url."));
+                    }
+                    child.options = None;
+                    child.placeholder = None;
+                    child.min_values = None;
+                    child.max_values = None;
+                }
+                ComponentType::StringSelect => {
+                    if children.len() != 1 {
+                        return Err(bad(&path, "A select menu fills its row alone."));
+                    }
+                    let Some(options) = child.options.as_ref().filter(|options| (1..=MAX_SELECT_OPTIONS).contains(&options.len())) else {
+                        return Err(bad(&path, "A select menu has 1 to 25 options."));
+                    };
+                    let mut values = HashSet::new();
+                    for option in options {
+                        length(&path, &option.label, 1, MAX_OPTION_TEXT)?;
+                        length(&path, &option.value, 1, MAX_OPTION_TEXT)?;
+                        length(&path, option.description.as_deref().unwrap_or(""), 0, MAX_OPTION_TEXT)?;
+                        if !values.insert(option.value.as_str()) {
+                            return Err(bad(&path, "Option values must be unique."));
+                        }
+                    }
+                    length(&path, child.placeholder.as_deref().unwrap_or(""), 0, MAX_PLACEHOLDER)?;
+                    if id.is_none() || child.url.is_some() || child.min_values.is_some_and(|min| min != 1) || child.max_values.is_some_and(|max| max != 1) {
+                        return Err(bad(&path, "A select menu needs a custom_id and picks exactly one option (min_values and max_values 1)."));
+                    }
+                    child.style = None;
+                    child.label = None;
+                    child.min_values = Some(1);
+                    child.max_values = Some(1);
+                }
+            }
+            if let Some(id) = id {
+                length(&path, &id, 1, MAX_CUSTOM_ID)?;
+                if !seen.insert(id) {
+                    return Err(bad(&path, "custom_id must be unique in the message."));
+                }
+            }
+            cleaned_children.push(child);
+        }
+        cleaned.push(Component { components: Some(cleaned_children), ..row.clone() });
+    }
+    Ok(cleaned)
+}
+
+/// `validate_components` for a bot's own message: members cannot send components.
+pub async fn bot_components(state: &AppState, user_id: i64, components: &[Component]) -> ApiResult<Vec<Component>> {
+    let bot: Option<(bool,)> = sqlx::query_as("SELECT bot FROM users WHERE id = $1").bind(user_id).fetch_optional(&state.db).await?;
+    if !bot.is_some_and(|(bot,)| bot) {
+        return Err(ApiErr::invalid("components", "Only applications can send components."));
+    }
+    validate_components(components)
+}
+
+/// The button or select with this `custom_id` in a message's rows.
+pub fn find_component<'a>(components: &'a [Component], custom_id: &str) -> Option<&'a Component> {
+    components.iter().flat_map(|row| row.components.iter().flatten()).find(|component| component.custom_id.as_deref() == Some(custom_id))
 }
 
 const MAX_EMBED_TITLE: usize = 256;

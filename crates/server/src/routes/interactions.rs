@@ -10,14 +10,17 @@ use sqlx::FromRow;
 use time::OffsetDateTime;
 use vokko_protocol::api::message_flags::{EPHEMERAL, LOADING};
 use vokko_protocol::api::{
-    ApplicationCommandOption, ApplicationCommandOptionType, ApplicationCommandType, AutocompleteResponse, GatewayEvent, Interaction, InteractionCallbackType,
-    InteractionCreated, InteractionData, InteractionDataOption, InteractionFailure, InteractionResolved, InteractionResponse, InteractionType,
-    InvokeInteractionRequest, Message, MessageDelete, MessageInteractionMetadata, MessageType, ResolvedChannel, ResolvedMember, Snowflake,
+    ApplicationCommandOption, ApplicationCommandOptionType, ApplicationCommandType, AutocompleteResponse, ComponentType, GatewayEvent, Interaction,
+    InteractionCallbackType, InteractionCreated, InteractionData, InteractionDataOption, InteractionFailure, InteractionResolved, InteractionResponse,
+    InteractionType, InvokeInteractionRequest, Message, MessageDelete, MessageInteractionMetadata, MessageType, ResolvedChannel, ResolvedMember, Snowflake,
     WebhookMessageRequest,
 };
 
 use crate::access::{self, channel_access};
-use crate::apps::{self, CALLBACK_WINDOW, COMMAND_COLS, CommandRow, MessageIdentity, TOKEN_LIFETIME_SECS, option_id, resolve_app_mentions, validate_body};
+use crate::apps::{
+    self, CALLBACK_WINDOW, COMMAND_COLS, CommandRow, MessageIdentity, TOKEN_LIFETIME_SECS, find_component, option_id, resolve_app_mentions, validate_body,
+    validate_components,
+};
 use crate::auth::{HumanUser, hash_token, random_hex};
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::{ApiJson, parse_id};
@@ -203,19 +206,23 @@ async fn invoke(
     let autocomplete = match body.kind {
         InteractionType::ApplicationCommand => false,
         InteractionType::ApplicationCommandAutocomplete => true,
-        InteractionType::Ping => return Err(ApiErr::invalid("type", "Must be 2 or 4.")),
+        InteractionType::MessageComponent => return invoke_component(state, user_id, body).await,
+        InteractionType::Ping => return Err(ApiErr::invalid("type", "Must be 2, 3 or 4.")),
     };
     if let Err(retry_after) = state.limiter.check_key("interactions", user_id, 5.0, 1.0) {
         return Err(ApiErr::rate_limited(retry_after));
     }
+    let (Some(data_id), Some(data_kind)) = (body.data.id, body.data.kind) else {
+        return Err(ApiErr::invalid("data", "id and type are required."));
+    };
     let channel_id = body.channel_id.db();
     let access = channel_access(&state, user_id, channel_id).await?;
     let (_, commands) = apps::usable_commands(&state, user_id, &access).await?;
-    let command = commands.into_iter().find(|command| command.id == body.data.id.db() && command.application_id == body.application_id.db());
+    let command = commands.into_iter().find(|command| command.id == data_id.db() && command.application_id == body.application_id.db());
     let Some(command) = command else {
         // A command that exists but may not be used here is a permission problem, anything else is unknown.
         let exists: Option<CommandRow> = sqlx::query_as(&format!("SELECT {COMMAND_COLS} FROM application_commands WHERE id = $1 AND application_id = $2"))
-            .bind(body.data.id.db())
+            .bind(data_id.db())
             .bind(body.application_id.db())
             .fetch_optional(&state.db)
             .await?;
@@ -234,7 +241,7 @@ async fn invoke(
         return Err(if visible_scope { ApiErr::missing_permissions() } else { ApiErr::unknown_command() });
     };
     let kind = command.kind();
-    if body.data.kind != kind {
+    if data_kind != kind {
         return Err(ApiErr::invalid("data.type", "Does not match the command."));
     }
     if autocomplete && kind != ApplicationCommandType::ChatInput {
@@ -287,13 +294,14 @@ async fn invoke(
         application_id: Snowflake::from(command.application_id),
         kind: body.kind,
         data: InteractionData {
-            id: Snowflake::from(command.id),
-            name: command.name.clone(),
-            kind,
+            id: Some(Snowflake::from(command.id)),
+            name: Some(command.name.clone()),
+            kind: Some(kind),
             guild_id: command.guild_id.map(Snowflake::from),
             options: (!options.is_empty()).then_some(options),
             resolved: (resolved != InteractionResolved::default()).then_some(resolved),
             target_id: target.map(|(_, id)| Snowflake::from(id)),
+            ..InteractionData::default()
         },
         guild_id: guild_id.map(Snowflake::from),
         channel_id: Snowflake::from(channel_id),
@@ -302,26 +310,114 @@ async fn invoke(
         token,
         app_permissions: app_permissions.to_string(),
         version: 1,
+        message: None,
     };
     state.hub.send(&[command.application_id], &GatewayEvent::InteractionCreate(Box::new(interaction)));
     if !autocomplete {
-        let (watcher, app) = (state.clone(), command.application_id);
-        let nonce = body.nonce.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(CALLBACK_WINDOW).await;
-            let answered: Option<(bool,)> =
-                sqlx::query_as("SELECT responded FROM interactions WHERE id = $1").bind(id).fetch_optional(&watcher.db).await.ok().flatten();
-            if answered.is_none_or(|(responded,)| !responded) {
-                let event = GatewayEvent::InteractionFailure(InteractionFailure {
-                    id: Snowflake::from(id),
-                    nonce,
-                    channel_id: Snowflake::from(channel_id),
-                    application_id: Snowflake::from(app),
-                });
-                watcher.hub.send(&[user_id], &event);
-            }
-        });
+        watch_answer(&state, id, command.application_id, user_id, channel_id, body.nonce.clone());
     }
+    Ok(Json(InteractionCreated { id: Snowflake::from(id), nonce: body.nonce }))
+}
+
+/// Tells the user (INTERACTION_FAILURE) when the bot has not answered within the callback window.
+fn watch_answer(state: &AppState, id: i64, application_id: i64, user_id: i64, channel_id: i64, nonce: Option<String>) {
+    let watcher = state.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(CALLBACK_WINDOW).await;
+        let answered: Option<(bool,)> =
+            sqlx::query_as("SELECT responded FROM interactions WHERE id = $1").bind(id).fetch_optional(&watcher.db).await.ok().flatten();
+        if answered.is_none_or(|(responded,)| !responded) {
+            let event = GatewayEvent::InteractionFailure(InteractionFailure {
+                id: Snowflake::from(id),
+                nonce,
+                channel_id: Snowflake::from(channel_id),
+                application_id: Snowflake::from(application_id),
+            });
+            watcher.hub.send(&[user_id], &event);
+        }
+    });
+}
+
+/// A click on a button or a choice in a select menu: relayed to the message's application like a command.
+async fn invoke_component(state: AppState, user_id: i64, body: InvokeInteractionRequest) -> ApiResult<Json<InteractionCreated>> {
+    let required = |field: &str| ApiErr::invalid(field, "This field is required.");
+    let custom_id = body.data.custom_id.clone().ok_or_else(|| required("data.custom_id"))?;
+    let component_type = body.data.component_type.ok_or_else(|| required("data.component_type"))?;
+    let message_id = body.message_id.ok_or_else(|| required("message_id"))?.db();
+    if let Err(retry_after) = state.limiter.check_key("interactions", user_id, 5.0, 1.0) {
+        return Err(ApiErr::rate_limited(retry_after));
+    }
+    let (channel_id, application_id) = (body.channel_id.db(), body.application_id.db());
+    let access = channel_access(&state, user_id, channel_id).await?;
+    // The message is a channel message, or an ephemeral one of this user.
+    let message = match apps::ephemeral(&state, message_id).await? {
+        Some((message, recipient)) => (recipient == user_id).then_some(message),
+        None => store::message_view(&state, message_id, Some(user_id)).await?.map(|view| view.message),
+    };
+    let message = message.filter(|message| message.channel_id.db() == channel_id).ok_or_else(ApiErr::unknown_message)?;
+    if message.application_id.unwrap_or(message.author.id).db() != application_id {
+        return Err(ApiErr::invalid("application_id", "Does not match the message."));
+    }
+    let component = find_component(&message.components, &custom_id).ok_or_else(|| ApiErr::invalid("data.custom_id", "Unknown component."))?;
+    if component.kind != component_type {
+        return Err(ApiErr::invalid("data.component_type", "Does not match the component."));
+    }
+    if component.disabled == Some(true) {
+        return Err(ApiErr::invalid("data.custom_id", "This component is disabled."));
+    }
+    let values = body.data.values.clone().unwrap_or_default();
+    let fits = match component_type {
+        ComponentType::StringSelect => values.len() == 1 && component.options.iter().flatten().any(|option| option.value == values[0]),
+        _ => values.is_empty(),
+    };
+    if !fits {
+        return Err(ApiErr::invalid("data.values", "Pick exactly one of the options (none for a button)."));
+    }
+    let id = state.ids.next();
+    let token = random_hex(32);
+    sqlx::query(
+        "INSERT INTO interactions (id, application_id, token_hash, kind, user_id, channel_id, guild_id, command_name, command_type, target_id, nonce, custom_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, '', 1, $8, $9, $10)",
+    )
+    .bind(id)
+    .bind(application_id)
+    .bind(hash_token(&token))
+    .bind(InteractionType::MessageComponent.as_u8() as i16)
+    .bind(user_id)
+    .bind(channel_id)
+    .bind(access.channel.guild_id)
+    .bind(message_id)
+    .bind(&body.nonce)
+    .bind(&custom_id)
+    .execute(&state.db)
+    .await?;
+    let user = store::user(&state, user_id).await?.ok_or_else(ApiErr::unauthorized)?;
+    let member = match access.channel.guild_id {
+        Some(guild_id) => store::member(&state, guild_id, user_id).await?,
+        None => None,
+    };
+    let app_permissions = access::channel_access(&state, application_id, channel_id).await.map_or(0, |bot| bot.permissions);
+    let interaction = Interaction {
+        id: Snowflake::from(id),
+        application_id: Snowflake::from(application_id),
+        kind: InteractionType::MessageComponent,
+        data: InteractionData {
+            custom_id: Some(custom_id),
+            component_type: Some(component_type),
+            values: (component_type == ComponentType::StringSelect).then_some(values),
+            ..InteractionData::default()
+        },
+        guild_id: access.channel.guild_id.map(Snowflake::from),
+        channel_id: Snowflake::from(channel_id),
+        member,
+        user,
+        token,
+        app_permissions: app_permissions.to_string(),
+        version: 1,
+        message: Some(Box::new(message)),
+    };
+    state.hub.send(&[application_id], &GatewayEvent::InteractionCreate(Box::new(interaction)));
+    watch_answer(&state, id, application_id, user_id, channel_id, body.nonce.clone());
     Ok(Json(InteractionCreated { id: Snowflake::from(id), nonce: body.nonce }))
 }
 
@@ -366,9 +462,12 @@ fn metadata(row: &InteractionRow, user: vokko_protocol::api::User, target_user: 
 /// who ran the command when `flags` has EPHEMERAL. `original` = the callback response (type 20/23 with interaction metadata).
 async fn post_message(state: &AppState, row: &InteractionRow, request: &WebhookMessageRequest, original: bool, loading: bool) -> ApiResult<Message> {
     let channel = store::channel_row(state, row.channel_id).await?.ok_or_else(ApiErr::unknown_channel)?;
-    let (content, embeds) = validate_body(request.content.as_deref(), request.embeds.as_ref(), loading)?;
+    let components = request.components.as_deref().map(validate_components).transpose()?.unwrap_or_default();
+    let (content, embeds) = validate_body(request.content.as_deref(), request.embeds.as_ref(), loading || !components.is_empty())?;
     let ephemeral = request.flags.unwrap_or(0) & EPHEMERAL != 0;
     let flags = (if ephemeral { EPHEMERAL } else { 0 }) | (if loading { LOADING } else { 0 });
+    // The reply to a click is a plain message: it ran no command, so it has no "used /command" line.
+    let original = original && row.kind != InteractionType::MessageComponent.as_u8() as i16;
     let kind = match (original, row.command_type()) {
         (false, _) => MessageType::Default,
         (true, ApplicationCommandType::ChatInput) => MessageType::ChatInputCommand,
@@ -401,6 +500,7 @@ async fn post_message(state: &AppState, row: &InteractionRow, request: &WebhookM
             mention_everyone: false,
             attachments: Vec::new(),
             embeds,
+            components,
             reactions: Vec::new(),
             pinned: false,
             tts: false,
@@ -430,6 +530,7 @@ async fn post_message(state: &AppState, row: &InteractionRow, request: &WebhookM
     let extras = Extras {
         flags: flags as i32,
         embeds: (!embeds.is_empty()).then(|| serde_json::to_string(&embeds)).transpose().map_err(|_| ApiErr::internal())?,
+        components: (!components.is_empty()).then(|| serde_json::to_string(&components)).transpose().map_err(|_| ApiErr::internal())?,
         identity: Some(identity),
         ..Extras::default()
     };
@@ -447,9 +548,12 @@ async fn callback(
     let id = parse_id(&id).ok_or_else(ApiErr::unknown_interaction)?;
     let row = interaction_by_token(&state, id, &token).await?;
     let autocomplete = row.kind == InteractionType::ApplicationCommandAutocomplete.as_u8() as i16;
+    let component = row.kind == InteractionType::MessageComponent.as_u8() as i16;
     let allowed = match body.kind {
         InteractionCallbackType::ApplicationCommandAutocompleteResult => autocomplete,
-        _ => !autocomplete,
+        InteractionCallbackType::DeferredUpdateMessage | InteractionCallbackType::UpdateMessage => component,
+        InteractionCallbackType::DeferredChannelMessageWithSource => !autocomplete && !component,
+        InteractionCallbackType::ChannelMessageWithSource => !autocomplete,
     };
     if !allowed {
         return Err(ApiErr::invalid("type", "This response type does not fit the interaction."));
@@ -461,8 +565,12 @@ async fn callback(
         if choices.len() > 25 {
             return Err(ApiErr::invalid("data.choices", "Must be 25 or fewer in length."));
         }
-    } else {
-        validate_body(data.content.as_deref(), data.embeds.as_ref(), body.kind == InteractionCallbackType::DeferredChannelMessageWithSource)?;
+    } else if body.kind != InteractionCallbackType::DeferredUpdateMessage {
+        let components = data.components.as_deref().map(validate_components).transpose()?;
+        let deferred = body.kind == InteractionCallbackType::DeferredChannelMessageWithSource;
+        // An update keeps what it leaves out, so it may be empty; so may a message that carries components.
+        let may_be_empty = deferred || body.kind == InteractionCallbackType::UpdateMessage || components.is_some_and(|components| !components.is_empty());
+        validate_body(data.content.as_deref(), data.embeds.as_ref(), may_be_empty)?;
     }
     let window = CALLBACK_WINDOW.as_secs_f64();
     let claimed = sqlx::query("UPDATE interactions SET responded = TRUE WHERE id = $1 AND NOT responded AND created_at > now() - make_interval(secs => $2)")
@@ -482,11 +590,37 @@ async fn callback(
             });
             state.hub.send(&[row.user_id], &event);
         }
+        InteractionCallbackType::DeferredUpdateMessage | InteractionCallbackType::UpdateMessage => {
+            // The response is the clicked message: @original names it from now on.
+            let clicked = row.target_id.ok_or_else(ApiErr::unknown_message)?;
+            let ephemeral = apps::ephemeral(&state, clicked).await?.is_some();
+            if body.kind == InteractionCallbackType::UpdateMessage {
+                let request = WebhookMessageRequest {
+                    content: data.content,
+                    embeds: data.embeds,
+                    components: data.components,
+                    allowed_mentions: data.allowed_mentions,
+                    ..WebhookMessageRequest::default()
+                };
+                let shown = InteractionRow { original_message_id: Some(clicked), original_ephemeral: ephemeral, ..row.clone() };
+                if let Err(error) = edit_message(&state, &shown, "@original", &request).await {
+                    sqlx::query("UPDATE interactions SET responded = FALSE WHERE id = $1").bind(row.id).execute(&state.db).await?;
+                    return Err(error);
+                }
+            }
+            sqlx::query("UPDATE interactions SET original_message_id = $2, original_ephemeral = $3 WHERE id = $1")
+                .bind(row.id)
+                .bind(clicked)
+                .bind(ephemeral)
+                .execute(&state.db)
+                .await?;
+        }
         kind => {
             let loading = kind == InteractionCallbackType::DeferredChannelMessageWithSource;
             let request = WebhookMessageRequest {
                 content: if loading { None } else { data.content },
                 embeds: if loading { None } else { data.embeds },
+                components: if loading { None } else { data.components },
                 flags: data.flags,
                 allowed_mentions: data.allowed_mentions,
                 username: None,
@@ -511,6 +645,15 @@ async fn callback(
                 .execute(&state.db)
                 .await?;
         }
+    }
+    if component {
+        let event = InteractionFailure {
+            id: Snowflake::from(row.id),
+            nonce: row.nonce.clone(),
+            channel_id: Snowflake::from(row.channel_id),
+            application_id: Snowflake::from(row.application_id),
+        };
+        state.hub.send(&[row.user_id], &GatewayEvent::InteractionSuccess(event));
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -537,7 +680,7 @@ async fn target_message(state: &AppState, row: &InteractionRow, mid: &str) -> Ap
         }
         return Err(ApiErr::unknown_message());
     }
-    let found: Option<(i64,)> = sqlx::query_as("SELECT id FROM messages WHERE id = $1 AND channel_id = $2 AND application_id = $3")
+    let found: Option<(i64,)> = sqlx::query_as("SELECT id FROM messages WHERE id = $1 AND channel_id = $2 AND (application_id = $3 OR author_id = $3)")
         .bind(id)
         .bind(row.channel_id)
         .bind(row.application_id)
@@ -563,7 +706,10 @@ pub async fn edit_message(state: &AppState, row: &InteractionRow, mid: &str, bod
         let was_loading = message.flags.unwrap_or(0) & LOADING != 0;
         let content = body.content.clone().unwrap_or_else(|| message.content.clone());
         let embeds = body.embeds.clone().unwrap_or_else(|| message.embeds.clone());
-        let (content, embeds) = validate_body(Some(&content), Some(&embeds), false)?;
+        if let Some(components) = &body.components {
+            message.components = validate_components(components)?;
+        }
+        let (content, embeds) = validate_body(Some(&content), Some(&embeds), !message.components.is_empty())?;
         let mentions = resolve_app_mentions(state, &channel, &content, body.allowed_mentions.as_ref(), Some(row.application_id)).await?;
         let mentioned = store::users(state, &mentions.users).await?;
         message.mentions = mentions.users.iter().filter_map(|id| mentioned.get(id).cloned()).collect();
@@ -587,12 +733,19 @@ pub async fn edit_stored(state: &AppState, channel: &ChannelRow, id: i64, body: 
     let was_loading = current.flags.unwrap_or(0) & LOADING != 0;
     let content = body.content.clone().unwrap_or_else(|| current.content.clone());
     let embeds = body.embeds.clone().unwrap_or_else(|| current.embeds.clone());
-    let (content, embeds) = validate_body(Some(&content), Some(&embeds), false)?;
+    // Only applications send components; a plain webhook's buttons would have nobody to answer them.
+    let components = match &body.components {
+        Some(components) if bot.is_none() && !components.is_empty() => return Err(ApiErr::invalid("components", "Webhooks cannot send components.")),
+        Some(components) => Some(validate_components(components)?),
+        None => None,
+    };
+    let has_components = components.as_ref().map_or(!current.components.is_empty(), |components| !components.is_empty());
+    let (content, embeds) = validate_body(Some(&content), Some(&embeds), has_components)?;
     let mentions = resolve_app_mentions(state, channel, &content, body.allowed_mentions.as_ref(), bot).await?;
     let mut tx = state.db.begin().await?;
     sqlx::query(
         "UPDATE messages SET content = $2, embeds = $3::jsonb, flags = flags & ~$4::int, mention_everyone = $5, \
-         edited_at = CASE WHEN $6 THEN edited_at ELSE now() END WHERE id = $1",
+         edited_at = CASE WHEN $6 THEN edited_at ELSE now() END, components = COALESCE($7::jsonb, components) WHERE id = $1",
     )
     .bind(id)
     .bind(&content)
@@ -600,6 +753,7 @@ pub async fn edit_stored(state: &AppState, channel: &ChannelRow, id: i64, body: 
     .bind(LOADING as i32)
     .bind(mentions.everyone)
     .bind(was_loading)
+    .bind(components.as_ref().map(serde_json::to_string).transpose().map_err(|_| ApiErr::internal())?)
     .execute(&mut *tx)
     .await?;
     sqlx::query("DELETE FROM message_mentions WHERE message_id = $1").bind(id).execute(&mut *tx).await?;

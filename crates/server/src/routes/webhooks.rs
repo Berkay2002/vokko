@@ -287,6 +287,9 @@ async fn execute(
     }
     let channel = store::channel_row(&state, row.channel_id).await?.ok_or_else(ApiErr::unknown_webhook)?;
     let (content, embeds) = validate_body(body.content.as_deref(), body.embeds.as_ref(), false)?;
+    if body.components.as_ref().is_some_and(|components| !components.is_empty()) {
+        return Err(ApiErr::invalid("components", "Webhooks cannot send components."));
+    }
     let name = match body.username.as_deref() {
         Some(username) => webhook_name(username, "username")?,
         None => row.name.clone(),

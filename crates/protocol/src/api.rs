@@ -1227,6 +1227,9 @@ pub struct Message {
     pub attachments: Vec<Attachment>,
     #[serde(default)]
     pub embeds: Vec<Embed>,
+    /// Buttons and selects of an application's message (action rows); absent = none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<Component>,
     pub reactions: Vec<Reaction>,
     pub pinned: bool,
     /// Sent with the `SEND_TTS_MESSAGES` permission and meant to be read aloud; always serialized (absent = false when reading).
@@ -2524,6 +2527,9 @@ pub struct CreateMessageRequest {
     /// `message_flags`: only `IS_VOICE_MESSAGE` is read (needs `SEND_VOICE_MESSAGES`, one attachment, no content); other bits are ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flags: Option<u32>,
+    /// Bots only: buttons and selects (see `Component`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub components: Option<Vec<Component>>,
 }
 
 /// One pending upload referenced by `CreateMessageRequest.attachments`.
@@ -2710,6 +2716,9 @@ pub struct EditMessageRequest {
     /// The attachments to keep: omitted = unchanged, the others are removed (and their files deleted). Cannot add.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<IdOnly>>,
+    /// Bots only, on their own messages: omitted = unchanged, an empty list removes them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub components: Option<Vec<Component>>,
 }
 
 /// `PATCH /users/@me`. Only the keys that are present change; `null` clears (an empty string clears the text fields too).
@@ -4856,8 +4865,68 @@ pub struct IdOnly {
 
 numeric_enum!(ApplicationCommandType { ChatInput = 1, User = 2, Message = 3 });
 numeric_enum!(ApplicationCommandOptionType { String = 3, Integer = 4, Boolean = 5, User = 6, Channel = 7, Role = 8, Number = 10 });
-numeric_enum!(InteractionType { Ping = 1, ApplicationCommand = 2, ApplicationCommandAutocomplete = 4 });
-numeric_enum!(InteractionCallbackType { ChannelMessageWithSource = 4, DeferredChannelMessageWithSource = 5, ApplicationCommandAutocompleteResult = 8 });
+numeric_enum!(InteractionType { Ping = 1, ApplicationCommand = 2, MessageComponent = 3, ApplicationCommandAutocomplete = 4 });
+numeric_enum!(InteractionCallbackType {
+    ChannelMessageWithSource = 4,
+    DeferredChannelMessageWithSource = 5,
+    DeferredUpdateMessage = 6,
+    UpdateMessage = 7,
+    ApplicationCommandAutocompleteResult = 8
+});
+numeric_enum!(ComponentType { ActionRow = 1, Button = 2, StringSelect = 3 });
+
+/// The emoji of a button or select option: a unicode `name`, or a custom emoji `id` (+ `name`, `animated`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComponentEmoji {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Snowflake>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animated: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SelectOption {
+    pub label: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<ComponentEmoji>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<bool>,
+}
+
+/// One message component, Discord's shape: an action row (`components`), a button (`style` 1-4 with `custom_id`, 5 with `url`) or a
+/// string select (`options`). One flat struct; `crate::apps::validate_components` on the server decides which fields fit which type.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Component {
+    #[serde(rename = "type")]
+    pub kind: ComponentType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji: Option<ComponentEmoji>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Vec<SelectOption>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_values: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_values: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub components: Option<Vec<Component>>,
+}
 numeric_enum!(WebhookType { Incoming = 1, ChannelFollower = 2, Application = 3 });
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -5065,12 +5134,22 @@ pub struct InteractionResolved {
     pub messages: Option<std::collections::BTreeMap<Snowflake, Message>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct InteractionData {
-    pub id: Snowflake,
-    pub name: String,
-    #[serde(rename = "type")]
-    pub kind: ApplicationCommandType,
+    /// Command interactions: the command; absent on a component click.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Snowflake>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ApplicationCommandType>,
+    /// Component clicks (type 3): which component, and the chosen option values of a select.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component_type: Option<ComponentType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guild_id: Option<Snowflake>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5097,15 +5176,27 @@ pub struct Interaction {
     pub token: String,
     pub app_permissions: String,
     pub version: u8,
+    /// Component clicks: the message the component sits on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<Box<Message>>,
 }
 
 /// `data` of `POST /interactions`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InvokeInteractionData {
-    pub id: Snowflake,
-    pub name: String,
-    #[serde(rename = "type")]
-    pub kind: ApplicationCommandType,
+    /// Commands (type 2, 4): the command. Component clicks (type 3) send `custom_id`, `component_type` and `values` instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<Snowflake>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ApplicationCommandType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component_type: Option<ComponentType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub options: Option<Vec<InteractionDataOption>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5118,6 +5209,9 @@ pub struct InvokeInteractionRequest {
     pub kind: InteractionType,
     pub application_id: Snowflake,
     pub channel_id: Snowflake,
+    /// Component clicks: the message holding the component.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<Snowflake>,
     pub data: InvokeInteractionData,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nonce: Option<String>,
@@ -5135,6 +5229,9 @@ pub struct InteractionCallbackData {
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embeds: Option<Vec<Embed>>,
+    /// Omitted = unchanged (type 7); an empty list removes them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub components: Option<Vec<Component>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flags: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5158,6 +5255,8 @@ pub struct WebhookMessageRequest {
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embeds: Option<Vec<Embed>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub components: Option<Vec<Component>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flags: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -5332,6 +5431,8 @@ pub enum GatewayEvent {
     ThreadMembersUpdate(ThreadMembersUpdate),
     InteractionCreate(Box<Interaction>),
     InteractionFailure(InteractionFailure),
+    /// A component click was answered (any callback type); same payload as the failure.
+    InteractionSuccess(InteractionFailure),
     AutocompleteResponse(AutocompleteResponse),
     WebhooksUpdate(WebhooksUpdate),
     CallCreate(Box<Call>),
@@ -5429,6 +5530,7 @@ impl GatewayEvent {
             Self::ThreadMembersUpdate(_) => "THREAD_MEMBERS_UPDATE",
             Self::InteractionCreate(_) => "INTERACTION_CREATE",
             Self::InteractionFailure(_) => "INTERACTION_FAILURE",
+            Self::InteractionSuccess(_) => "INTERACTION_SUCCESS",
             Self::AutocompleteResponse(_) => "APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE",
             Self::WebhooksUpdate(_) => "WEBHOOKS_UPDATE",
             Self::CallCreate(_) => "CALL_CREATE",
@@ -5508,7 +5610,7 @@ impl GatewayEvent {
             Self::ThreadMemberUpdate(value) => serde_json::to_value(value),
             Self::ThreadMembersUpdate(value) => serde_json::to_value(value),
             Self::InteractionCreate(value) => serde_json::to_value(value),
-            Self::InteractionFailure(value) => serde_json::to_value(value),
+            Self::InteractionFailure(value) | Self::InteractionSuccess(value) => serde_json::to_value(value),
             Self::AutocompleteResponse(value) => serde_json::to_value(value),
             Self::WebhooksUpdate(value) => serde_json::to_value(value),
             Self::CallCreate(value) => serde_json::to_value(value),
@@ -6601,6 +6703,22 @@ mod tests {
         }))
         .expect("invoke");
         assert_eq!((invoke.kind, invoke.data.options.map(|options| options[0].value.clone())), (InteractionType::ApplicationCommand, Some(json!(6))));
+        let click: InvokeInteractionRequest = serde_json::from_value(json!({
+            "type": 3, "application_id": "700", "channel_id": "200", "message_id": "801", "data": {"custom_id": "pick", "component_type": 3, "values": ["a"]}
+        }))
+        .expect("click");
+        assert_eq!(
+            (click.kind, click.data.component_type, click.data.values),
+            (InteractionType::MessageComponent, Some(ComponentType::StringSelect), Some(vec!["a".to_owned()]))
+        );
+        let update: InteractionResponse = serde_json::from_value(
+            json!({"type": 7, "data": {"components": [{"type": 1, "components": [{"type": 2, "style": 5, "label": "Docs", "url": "https://example.com"}]}]}}),
+        )
+        .expect("update");
+        assert_eq!(update.kind, InteractionCallbackType::UpdateMessage);
+        round_trip::<Component>(
+            json!({"type": 3, "custom_id": "pick", "placeholder": "Choose", "options": [{"label": "A", "value": "a", "default": true}], "min_values": 1, "max_values": 1}),
+        );
         round_trip::<InteractionCreated>(json!({"id": "800", "nonce": null}));
         let response: InteractionResponse = serde_json::from_value(json!({"type": 4, "data": {"content": "hi", "flags": 64}})).expect("response");
         assert_eq!(
