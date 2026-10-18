@@ -111,7 +111,7 @@ test.describe('tables', () => {
   });
 });
 
-test('account card: the avatar stays inside the pill, the Inbox opens above the card without covering it', async ({ page }) => {
+test('account card: the avatar stays inside the pill, the Inbox opens as a bottom sheet', async ({ page }) => {
   await home(page);
   const panel = page.locator('.user-panel');
   const card = (await panel.boundingBox())!;
@@ -122,10 +122,9 @@ test('account card: the avatar stays inside the pill, the Inbox opens above the 
   await panel.getByRole('button', { name: 'Inbox' }).tap();
   const inbox = page.locator('.inbox-popout');
   await expect(inbox).toBeVisible();
-  const b = (await inbox.boundingBox())!;
+  // Like every other menu at phone width it is a bottom sheet (sheet.css), not a popout anchored to the card.
+  await expect(page.getByRole('dialog', { name: 'Inbox' })).toHaveClass(/\bsheet\b/);
   await inside(inbox);
-  expect(b.y).toBeGreaterThanOrEqual(0);
-  expect(b.y + b.height).toBeLessThanOrEqual(card.y);
   await shot(page, 'inbox-390');
   await page.keyboard.press('Escape');
   await shot(page, 'home-dm-list-390');

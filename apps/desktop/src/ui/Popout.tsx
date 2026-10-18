@@ -63,7 +63,13 @@ export function Popout({ anchor, open, onClose, side = "bottom", align = "center
     };
     place();
     window.addEventListener("resize", place);
-    return () => window.removeEventListener("resize", place);
+    // Content that loads after opening (Inbox previews) changes the height: a popout above its anchor must move up with it.
+    const grow = typeof ResizeObserver === "undefined" || !box.current ? null : new ResizeObserver(place);
+    if (box.current) grow?.observe(box.current);
+    return () => {
+      window.removeEventListener("resize", place);
+      grow?.disconnect();
+    };
   }, [open, anchor, side, align, gap, children]);
 
   if (!open) return null;

@@ -5,6 +5,7 @@ import { getOwnActivities } from "../activity/own";
 import { isDmRefused } from "../api/errors";
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
+import { compareIds } from "../api/snowflake";
 import { appStore, isChannelUnread, type AppState } from "../api/store";
 import { isDesktop } from "../desktop";
 import { ChannelType, GatewayOp, type Activity, type Channel, type Guild, type PermissionOverwrite, type PresenceStatus, type Snowflake } from "../api/types";
@@ -152,9 +153,23 @@ export function markGuildRead(guildId: Snowflake): Promise<void> {
 export async function markGuildsRead(guildIds: readonly Snowflake[]): Promise<void> {
   const state = appStore.getState();
   const wanted = new Set(guildIds);
-  const read_states = Object.values(state.channels)
-    .filter(c => c.guild_id != null && wanted.has(c.guild_id) && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement || c.type === ChannelType.GuildVoice) && c.last_message_id && isChannelUnread(state, c.id))
+  const ids = Object.values(state.channels)
+    .filter(c => c.guild_id != null && wanted.has(c.guild_id) && (c.type === ChannelType.GuildText || c.type === ChannelType.GuildAnnouncement || c.type === ChannelType.GuildVoice))
+    .filter(c => c.last_message_id && isChannelUnread(state, c.id))
     .map(c => ({ channel_id: c.id, message_id: c.last_message_id as Snowflake }));
+  await markChannelsRead(ids);
+}
+
+/**
+ * Ack each channel up to the given message, skipping ones already read that far, in bulk acks of 100. Callers pass the ids
+ * they showed, so a message arriving after the click stays unread (Inbox > Unreads "Mark All as Read").
+ */
+export async function markChannelsRead(acks: readonly { channel_id: Snowflake; message_id: Snowflake }[]): Promise<void> {
+  const reads = appStore.getState().readStates;
+  const read_states = acks.filter(a => {
+    const at = reads[a.channel_id]?.last_message_id;
+    return !at || compareIds(a.message_id, at) > 0;
+  });
   for (let i = 0; i < read_states.length; i += 100) await request<void>("POST", "/read-states/ack-bulk", { read_states: read_states.slice(i, i + 100) });
 }
 
