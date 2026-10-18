@@ -340,6 +340,18 @@ async fn insert_message_stored(
         notify.clear();
     }
     notify.retain(|user| viewers.contains(user));
+    if !notify.is_empty() {
+        // Whoever blocked the author gets no unread-mention bump (the clients already stay quiet); one query for the whole set.
+        let recipients: Vec<i64> = notify.iter().copied().collect();
+        let blockers: Vec<(i64,)> = sqlx::query_as("SELECT user_id FROM relationships WHERE kind = 2 AND other_id = $1 AND user_id = ANY($2)")
+            .bind(author_id)
+            .bind(&recipients)
+            .fetch_all(&state.db)
+            .await?;
+        for (blocker,) in blockers {
+            notify.remove(&blocker);
+        }
+    }
 
     let mut tx = state.db.begin().await?;
     let snapshot_json = match &draft.forward {
