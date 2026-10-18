@@ -3,7 +3,7 @@
 // ticking clock for elapsed timers.
 // (The channel status text is server state now: `useVoice(s => s.channelStatus[id])`, set with `setVoiceChannelStatus`.)
 
-import { useEffect, useState } from "react";
+import { useNow } from "../shell/ActivityLine";
 import { create } from "zustand";
 import { gateway } from "../api/gateway";
 import type { Snowflake } from "../api/types";
@@ -101,13 +101,7 @@ if (typeof window !== "undefined") {
 
 /** Seconds since `since` (ISO string), re-rendering once a second. 0 when there is no start time. */
 export function useElapsedSeconds(since: string | null | undefined): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!since) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [since]);
+  const now = useNow(1000, !!since);
   const start = since ? Date.parse(since) : NaN;
   return Number.isFinite(start) ? Math.max(0, Math.floor((now - start) / 1000)) : 0;
 }
