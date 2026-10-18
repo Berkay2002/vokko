@@ -13,7 +13,7 @@ import { closeModal, openModal } from "./modalStore";
 import { ChannelPermissionsPage } from "./settings/ChannelPermissions";
 import { Category, Divider, Field, Page, RadioGroup, Select, Slider, Unavailable } from "./settings/controls";
 import { useVoice, useVoiceUi } from "../voice";
-import { editStageTopic } from "../voice/moderation";
+import { editStageTopic, isStageModeratorBits } from "../voice/moderation";
 import { FullScreenSettings, type SettingsNavGroup } from "./settings/FullScreenSettings";
 import { SaveBar } from "./settings/SaveBar";
 import { blockedByUnsaved } from "./settings/unsaved";
@@ -69,6 +69,8 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const [stageDraft, setStageDraft] = useState<string | null>(null);
   const stageTopic = stageDraft ?? liveStage?.topic ?? "";
   const stageTopicDirty = !!liveStage && stageDraft !== null && !!stageDraft.trim() && stageDraft.trim() !== liveStage.topic;
+  // The server wants the stage moderator set (Manage Channels + Mute + Move Members) to edit a live stage, more than Manage Channels.
+  const stageModerator = isStageModeratorBits(usePermissions(channel.guild_id, channel.id).bits);
   const hasTopic = !category && !stage;
   const ceiling = useVoiceUi(s => s.bitrateCeiling);
   const savedBitrate = Math.round((channel.bitrate ?? 64000) / 1000);
@@ -79,7 +81,8 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const slowmodeSupported = channel.type === ChannelType.GuildText || voice;
   const savedSlowmode = channel.rate_limit_per_user ?? 0;
   const [slowmode, setSlowmode] = useState(savedSlowmode);
-  const dirty = slug !== (channel.name ?? "") || (hasTopic && nextTopic !== (channel.topic ?? null)) || stageTopicDirty || voiceDirty || slowmode !== savedSlowmode;
+  const channelDirty = slug !== (channel.name ?? "") || (hasTopic && nextTopic !== (channel.topic ?? null)) || voiceDirty || slowmode !== savedSlowmode;
+  const dirty = channelDirty || stageTopicDirty;
 
   const formatTopic = (marker: string) => {
     const box = topicRef.current;
@@ -103,16 +106,31 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
     setSlowmode(savedSlowmode);
     setError(null);
   };
-  const save = () => {
+  // The channel PATCH and the live stage's topic are separate requests: each runs only if its own fields changed, and a failure of one
+  // keeps the other's result (a stage that ended before Save, or a missing moderator permission, must not undo a rename).
+  const save = async () => {
     if (!slug) return;
     setBusy(true);
     setError(null);
     const voiceBody = voice ? { bitrate: bitrateKbps * 1000, user_limit: userLimit } : {};
     const slowmodeBody = slowmodeSupported ? { rate_limit_per_user: slowmode } : {};
-    request<Channel>("PATCH", `/channels/${channel.id}`, { name: slug, ...(hasTopic ? { topic: nextTopic } : {}), ...voiceBody, ...slowmodeBody })
-      .then(async updated => {
-        if (stageTopicDirty) await editStageTopic(channel.id, stageTopic);
+    let failure: unknown = null;
+    if (stageTopicDirty) {
+      try {
+        await editStageTopic(channel.id, stageTopic);
         setStageDraft(null);
+      } catch (e) {
+        failure = e;
+      }
+    }
+    if (!channelDirty) {
+      if (failure) setError(errorText(failure));
+      else setSaved(true);
+      setBusy(false);
+      return;
+    }
+    await request<Channel>("PATCH", `/channels/${channel.id}`, { name: slug, ...(hasTopic ? { topic: nextTopic } : {}), ...voiceBody, ...slowmodeBody })
+      .then(updated => {
         appStore.getState().upsertChannel(updated);
         setName(updated.name ?? slug);
         setTopic(updated.topic ?? "");
@@ -121,10 +139,13 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
           setBitrateKbps(Math.round((updated.bitrate ?? 64000) / 1000));
           setUserLimit(updated.user_limit ?? 0);
         }
-        setSaved(true);
+        if (!failure) setSaved(true);
       })
-      .catch(e => setError(errorText(e)))
-      .finally(() => setBusy(false));
+      .catch(e => (failure = e))
+      .finally(() => {
+        if (failure) setError(errorText(failure));
+        setBusy(false);
+      });
   };
 
   return (
@@ -147,13 +168,13 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
         </div>
       </Field>
       {stage && (
-        <Field label="Stage Topic" note={liveStage ? undefined : "Shown while the stage is live. Start the stage from its channel to set one."}>
+        <Field label="Stage Topic" note={!liveStage ? "Shown while the stage is live. Start the stage from its channel to set one." : stageModerator ? undefined : "Editing a live stage needs Manage Channels, Mute Members and Move Members."}>
           <input
             className="input"
             aria-label="Stage topic"
             value={stageTopic}
             maxLength={STAGE_TOPIC_MAX_CHARS}
-            disabled={!editable || !liveStage}
+            disabled={!editable || !stageModerator || !liveStage}
             onChange={e => {
               setSaved(false);
               setStageDraft(e.target.value);

@@ -107,7 +107,7 @@ export function EditThreadModal({ thread, onClose }: { thread: Channel; onClose(
   const [error, setError] = useState<string | null>(null);
   const trimmed = name.trim();
   const dirty = trimmed !== thread.name || duration !== String(thread.thread_metadata?.auto_archive_duration) || tagsDirty;
-  const tagsOk = !requireTag || tags.length > 0;
+  const tagsOk = !requireTag || !tagsDirty || tags.length > 0; // the server checks it only when tags are sent
 
   async function save() {
     if (!trimmed || !tagsOk || busy) return;
@@ -150,7 +150,7 @@ export function EditThreadModal({ thread, onClose }: { thread: Channel; onClose(
           <div className="field-label thread-modal-label">{requireTag ? "Tags (at least one required)" : "Tags"}</div>
           <div className="forum-new-tags" role="group" aria-label="Tags">
             {available.map(tag => {
-              const locked = tag.moderated && !canModerateTags && !savedTags.includes(tag.id);
+              const locked = tag.moderated && !canModerateTags; // the server refuses adding or removing one without Manage Threads
               return (
                 <span key={tag.id} className={locked ? "forum-tag-wrap disabled" : "forum-tag-wrap"} title={locked ? "Only moderators can use this tag" : undefined}>
                   <TagChip tag={tag} selected={tags.includes(tag.id)} onClick={locked ? () => undefined : () => toggleTag(tag.id)} />
