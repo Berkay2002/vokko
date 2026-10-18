@@ -271,7 +271,7 @@ describe("onboarding", () => {
   it("only editors with MANAGE_GUILD and MANAGE_ROLES configure, roles must be below them", () => {
     expect(errorOf(() => call("alice", "PUT", `/guilds/${guildId}/onboarding`, { enabled: true })).code).toBe(50013);
     const { config } = configure();
-    expect(call<GuildOnboarding>("alice", "GET", `/guilds/${guildId}/onboarding`)).toEqual(config);
+    expect(call<GuildOnboarding>("alice", "GET", `/guilds/${guildId}/onboarding`)).toEqual({ ...config, rules_pending: false });
     const editor = { id: "9300", name: "editor", color: 0, hoist: false, position: 1, permissions: (Perm.MANAGE_GUILD | Perm.MANAGE_ROLES).toString(), mentionable: false };
     const high = { id: "9301", name: "high", color: 0, hoist: false, position: 5, permissions: "0", mentionable: false };
     db.guilds.get(guildId)!.guild.roles.push(editor, high);
@@ -315,6 +315,37 @@ describe("onboarding", () => {
     expect(errorOf(answer([games], true)).code).toBe(50035);
     join("dana");
     expect(call<GuildMember[]>("owner", "GET", `/guilds/${guildId}/members`).find(m => m.user.id === ids.dana)!.flags).toBeUndefined();
+  });
+
+  it("holds members who joined after the rules back from messages and reactions until they accept (150010)", () => {
+    const { config } = configure();
+    const games = config.prompts[0]!.options[0]!.id;
+    const posted = call<{ id: string }>("owner", "POST", `/channels/${generalId}/messages`, { content: "hello" });
+    const send = (who: string) => () => call(who, "POST", `/channels/${generalId}/messages`, { content: "hi" });
+    const react = (who: string) => () => call(who, "PUT", `/channels/${generalId}/messages/${posted.id}/reactions/${encodeURIComponent("👍")}/@me`);
+    const pending = (who: string) => call<GuildOnboarding>(who, "GET", `/guilds/${guildId}/onboarding`).rules_pending;
+
+    join("carl");
+    expect(pending("carl")).toBe(true);
+    expect(errorOf(send("carl"))).toEqual({ status: 403, code: 150010 });
+    expect(errorOf(react("carl"))).toEqual({ status: 403, code: 150010 });
+    // alice and bob joined before the rules existed, the owner owns the guild: none of them are held
+    for (const who of ["alice", "bob", "owner"]) {
+      expect(pending(who)).toBe(false);
+      send(who)();
+    }
+    react("alice")();
+
+    call("carl", "PUT", `/guilds/${guildId}/onboarding-responses`, { option_ids: [games], rules_accepted: true });
+    expect(pending("carl")).toBe(false);
+    send("carl")();
+    react("carl")();
+
+    // clearing the rules lifts the hold for members who have not accepted
+    join("dana");
+    expect(errorOf(send("dana")).code).toBe(150010);
+    call("owner", "PUT", `/guilds/${guildId}/onboarding`, { rules: null });
+    send("dana")();
   });
 
   it("only takes back roles that onboarding added, even when the options changed", () => {

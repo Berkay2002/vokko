@@ -14,7 +14,7 @@ import { applyGuildPerks, applyUserPerks, dropTagOnLeave, memberProfileFields, p
 import { ID, route, routes, str, withAuditReason } from "./router";
 import { change, checkAutomod, checkSend, recordAudit } from "./admin";
 import { emit } from "./socket";
-import { onboardingStartedFor, eventsChannelRemoved } from "./community";
+import { checkRulesAccepted, onboardingStartedFor, eventsChannelRemoved } from "./community";
 import { flagsField } from "./memberFlags";
 import { setMockVoice, setVoiceChannelStatus, voiceStates } from "./voice";
 import { callRecipientRemoved } from "./calls";
@@ -342,14 +342,16 @@ route("GET", `/guilds/${ID}/channels`, ({ viewer, params }) => {
   return [...db.channels.values()].filter(c => c.guild_id === guildId && !isThreadType(c.type) && canAccess(c, viewer.user.id)).map(c => channelFor(c, viewer.user.id));
 });
 
+// Same rule as the server's `channel_name` (routes/guilds.rs) and the client's `channelNameFor` (shell/channels.ts).
+const channelNameFor = (type: number, name: string): string => (type === ChannelType.GuildText || type === ChannelType.GuildAnnouncement || type === ChannelType.GuildForum ? name.trim().toLowerCase().replace(/\s+/g, "-") : name.trim());
+
 route("POST", `/guilds/${ID}/channels`, ({ viewer, params, body }) => {
   const guildId = params[0] ?? "";
   requireGuildPerm(guildId, viewer.user.id, Perm.MANAGE_CHANNELS);
   const type = body.type;
   const creatable = [ChannelType.GuildText, ChannelType.GuildVoice, ChannelType.GuildCategory, ChannelType.GuildAnnouncement, ChannelType.GuildStage, ChannelType.GuildForum];
   if (typeof type !== "number" || !creatable.includes(type)) fail(400, 50035, "Invalid Form Body", { type: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 2, 4, 5, 13, 15)." } });
-  // The server keeps names as sent; the client slugs text-like ones (shell/channels.ts).
-  const name = (str(body.name) ?? "").trim();
+  const name = channelNameFor(type, str(body.name) ?? "");
   if (name.length < 1 || name.length > 100) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 1 and 100 in length." } });
   const parent = str(body.parent_id) ?? null;
   if (parent && db.channels.get(parent)?.guild_id !== guildId) fail(400, 50035, "Invalid Form Body", { parent_id: { code: "INVALID", message: "Unknown category" } });
@@ -431,7 +433,7 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   const snapshot = { ...channel };
   applyChannelFields(channel, body);
   if (typeof body.name === "string") {
-    channel.name = body.name.trim() || channel.name;
+    channel.name = channelNameFor(channel.type, body.name) || channel.name;
   }
   if ("topic" in body) channel.topic = str(body.topic)?.trim() || null;
   if (typeof body.position === "number") channel.position = body.position;
@@ -617,6 +619,7 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   if (content === "" && attachments.length === 0 && stickers.length === 0 && !forwarding && !poll) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
   const forward = forwarding ? buildForward(viewer.user.id, reference, channel) : undefined;
   if (reference?.message_id && !forwarding) requireMessage(channel.id, reference.message_id);
+  checkRulesAccepted(channel.guild_id, viewer.user.id);
   checkSend(channel, viewer.user.id, content);
   for (const id of ids) db.pending.delete(id);
   // A poll is registered under the message's id first, so MESSAGE_CREATE already carries it.
@@ -726,6 +729,7 @@ route("PUT", `/channels/${ID}/messages/${ID}/reactions/([^/]+)/@me`, ({ viewer, 
   requireChannelPerm(channel, viewer.user.id, Perm.ADD_REACTIONS);
   assertThreadOpen(channel);
   assertDmOpen(channel, viewer.user.id);
+  checkRulesAccepted(channel.guild_id, viewer.user.id);
   const emoji = resolveReactionEmoji(channel, viewer.user.id, parsed);
   let reaction = message.reactions.find(r => sameEmoji(r.emoji, emoji));
   if (!reaction) {

@@ -566,10 +566,16 @@ select.input {
   margin: 0;
 }
 
+/* Answer tiles in columns like Discord's question card; the hint line spans the row. */
 .cm-options {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 8px;
+}
+
+.cm-options > .cm-muted {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .cm-option {
@@ -846,4 +852,15 @@ select.input {
     gap: 8px;
     font-size: 13px;
   }
+}
+
+.cm-chroles-prompt + .cm-chroles-prompt {
+  margin-top: 24px;
+}
+
+.cm-chroles-title {
+  margin: 0 0 8px;
+  color: var(--text-header);
+  font-size: 16px;
+  font-weight: 600;
 }

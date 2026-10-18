@@ -3870,6 +3870,9 @@ pub struct GuildOnboarding {
     pub enabled: bool,
     pub mode: OnboardingMode,
     pub rules: Option<OnboardingRules>,
+    /// Only on `GET /guilds/{id}/onboarding`: the caller is held until they accept the rules (they cannot send messages or react yet).
+    #[serde(default)]
+    pub rules_pending: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -5821,7 +5824,7 @@ mod tests {
         round_trip::<OnboardingPrompt>(prompt.clone());
         round_trip::<GuildOnboarding>(json!({
             "guild_id": "300", "prompts": [prompt], "default_channel_ids": ["200"], "enabled": true, "mode": 1,
-            "rules": {"description": null, "items": ["Be kind"]}
+            "rules": {"description": null, "items": ["Be kind"]}, "rules_pending": false
         }));
         round_trip::<OnboardingResponses>(json!({"option_ids": ["7"]}));
         round_trip::<FriendSuggestionsResponse>(json!({

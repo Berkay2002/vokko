@@ -447,17 +447,7 @@ async fn edit(
         && row.entity_type() != ScheduledEventEntityType::External
     {
         match row.channel_id {
-            Some(channel) => {
-                let channel_access = access::channel_access(&state, user_id, channel).await?;
-                channel_access.require(CONNECT)?;
-                // Starting a stage event opens the stage, which takes the same permissions as opening it by hand.
-                if status == ScheduledEventStatus::Active
-                    && row.entity_type() == ScheduledEventEntityType::StageInstance
-                    && !crate::voice::state::is_stage_moderator(channel_access.permissions)
-                {
-                    return Err(ApiErr::missing_permissions());
-                }
-            }
+            Some(channel) => access::channel_access(&state, user_id, channel).await?.require(CONNECT)?,
             None if status == ScheduledEventStatus::Active => return Err(ApiErr::invalid("channel_id", "Pick a voice channel before starting this event.")),
             None => {}
         }
@@ -523,6 +513,14 @@ async fn edit(
     };
     let entity_touched = body.entity_type.is_some() || body.channel_id.is_some();
     fields.validate(&state, user_id, guild, entity_touched, entity_touched).await?;
+    // Starting or completing a stage event opens or ends its stage, which takes the same permissions as doing that by hand. This looks
+    // at the channel the event will have after this edit, not the one it has now.
+    if let (Some(ScheduledEventStatus::Active | ScheduledEventStatus::Completed), ScheduledEventEntityType::StageInstance, Some(channel)) =
+        (new_status, fields.entity_type, fields.channel_id)
+        && !crate::voice::state::is_stage_moderator(access::channel_access(&state, user_id, channel).await?.permissions)
+    {
+        return Err(ApiErr::missing_permissions());
+    }
     // The claim and the update commit together: a failing update leaves the upload unclaimed. The event row is locked first, so two
     // edits replacing the cover take turns and each releases the cover it actually replaced.
     let mut tx = state.db.begin().await?;

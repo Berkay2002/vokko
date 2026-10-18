@@ -466,3 +466,64 @@ async fn onboarding_never_hands_out_a_bots_role() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(roles_of(&w.member_json(&moderator_id).await), vec![editor]);
 }
+
+#[tokio::test]
+async fn members_who_joined_after_the_rules_cannot_talk_or_react_until_they_accept() {
+    let w = World::new().await;
+    let (early, _) = w.member("early").await;
+    let send = |token: String, text: &'static str| {
+        let (app, channel) = (&w.app, w.general.clone());
+        async move { app.post(&format!("/channels/{channel}/messages"), &token, json!({"content": text})).await }
+    };
+    let react = |token: String, message: String| {
+        let (app, channel) = (&w.app, w.general.clone());
+        async move { app.put(&format!("/channels/{channel}/messages/{message}/reactions/%F0%9F%91%8D/@me"), &token).await }
+    };
+    let (_, owners) = send(w.owner.clone(), "welcome").await;
+    let message = owners["id"].as_str().expect("message id").to_owned();
+
+    // onboarding on without rules: a member who joins now is not held
+    let (status, config) = w.app.send(axum::http::Method::PUT, &w.path("/onboarding"), Some(&w.owner), Some(json!({"enabled": true}))).await;
+    assert_eq!(status, StatusCode::OK, "{config}");
+    let (before_rules, _) = w.member("before").await;
+    assert_eq!(send(before_rules.clone(), "hi").await.0, StatusCode::OK);
+
+    // the rules appear: earlier members, started or not, keep talking
+    let with_rules = json!({"enabled": true, "rules": {"description": "Be kind", "items": ["No spam"]}});
+    let (status, config) = w.app.send(axum::http::Method::PUT, &w.path("/onboarding"), Some(&w.owner), Some(with_rules.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{config}");
+    assert_eq!(send(early.clone(), "still here").await.0, StatusCode::OK);
+    assert_eq!(send(before_rules.clone(), "me too").await.0, StatusCode::OK, "joined before the rules existed");
+    // saving the rules again does not move the date
+    assert_eq!(w.app.send(axum::http::Method::PUT, &w.path("/onboarding"), Some(&w.owner), Some(with_rules)).await.0, StatusCode::OK);
+    assert_eq!(send(before_rules.clone(), "and again").await.0, StatusCode::OK);
+
+    // a member who joins now is held until they accept
+    let (late, _) = w.member("late").await;
+    let (status, error) = send(late.clone(), "hello?").await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(150010)), "{error}");
+    let (status, error) = react(late.clone(), message.clone()).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(150010)), "{error}");
+    let pending = |token: String| {
+        let (app, path) = (&w.app, w.path("/onboarding"));
+        async move { app.get(&path, &token).await.1["rules_pending"].clone() }
+    };
+    assert_eq!(pending(late.clone()).await, json!(true));
+    assert_eq!((pending(early.clone()).await, pending(w.owner.clone()).await), (json!(false), json!(false)));
+    // reading and the owner are not affected, and the onboarding answers themselves are open
+    assert_eq!(w.app.get(&format!("/channels/{}/messages", w.general), &late).await.0, StatusCode::OK);
+    assert_eq!(send(w.owner.clone(), "owner talks").await.0, StatusCode::OK);
+    let (status, body) = w.app.put_json(&w.path("/onboarding-responses"), &late, json!({"option_ids": [], "rules_accepted": true})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(pending(late.clone()).await, json!(false));
+    assert_eq!(send(late.clone(), "thanks").await.0, StatusCode::OK);
+    assert_eq!(react(late, message.clone()).await.0, StatusCode::NO_CONTENT);
+
+    // administrators are exempt
+    let admin_role = w.role("admins", vokko_protocol::api::permissions::ADMINISTRATOR).await;
+    let (admin, admin_id) = w.member("admin").await;
+    assert_eq!(send(admin.clone(), "blocked").await.0, StatusCode::FORBIDDEN);
+    let (status, _) = w.app.patch(&w.path(&format!("/members/{admin_id}")), &w.owner, json!({"roles": [admin_role]})).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(send(admin, "allowed").await.0, StatusCode::OK);
+}

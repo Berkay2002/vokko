@@ -237,6 +237,60 @@ test('"Do this later" parks the onboarding until the page reloads', async ({ pag
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
+test('a member who has not accepted the rules sees the rules bar instead of the composer; Review Rules reopens the flow', async ({ page }) => {
+  await openStockTalk(page);
+  const seeded = await page.evaluate(() => (window as unknown as Win).__vokkoMock.seedOnboardingGuild('alice'));
+  await page.evaluate(code => (window as unknown as Win).__vokko.request('POST', `/invites/${code}`), seeded.inviteCode);
+  await goTo(page, `/channels/${seeded.guildId}/${seeded.channels.general}`);
+  await page.getByRole('dialog', { name: 'Welcome to Pixel Pals' }).getByRole('button', { name: 'Do this later' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  const bar = page.locator('.chat-composer-rules');
+  await expect(bar).toContainText('Accept the server rules to talk here');
+  await expect(page.getByRole('textbox')).toHaveCount(0);
+
+  // the server refuses a send in the meantime
+  const refused = await page.evaluate(
+    ([channel]) => (window as unknown as Win).__vokko.request('POST', `/channels/${channel}/messages`, { content: 'hi' }).then(() => 'sent', (e: { code?: number }) => e.code),
+    [seeded.channels.general] as const,
+  );
+  expect(refused).toBe(150010);
+
+  await bar.getByRole('button', { name: 'Review Rules' }).click();
+  const flow = page.getByRole('dialog', { name: 'Welcome to Pixel Pals' });
+  await flow.getByRole('button', { name: 'Get started' }).click();
+  await page.getByRole('dialog', { name: 'What are you here for?' }).getByRole('checkbox', { name: /Games/ }).click();
+  await page.getByRole('dialog', { name: 'What are you here for?' }).getByRole('button', { name: 'Continue' }).click();
+  const rules = page.getByRole('dialog', { name: 'Server rules' });
+  await rules.getByRole('checkbox', { name: /agree/ }).check();
+  await rules.getByRole('button', { name: 'Finish' }).click();
+
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('.chat-composer-rules')).toHaveCount(0);
+  await expect(page.getByRole('textbox').first()).toBeVisible();
+});
+
+test('the Channels & Roles row lets a member who finished onboarding change their answers', async ({ page }) => {
+  await openStockTalk(page);
+  const seeded = await page.evaluate(() => (window as unknown as Win).__vokkoMock.seedOnboardingGuild('alice'));
+  await page.evaluate(code => (window as unknown as Win).__vokko.request('POST', `/invites/${code}`), seeded.inviteCode);
+  await goTo(page, `/channels/${seeded.guildId}/${seeded.channels.general}`);
+  const flow = page.getByRole('dialog', { name: 'Welcome to Pixel Pals' });
+  await flow.getByRole('button', { name: 'Get started' }).click();
+  await page.getByRole('dialog', { name: 'What are you here for?' }).getByRole('checkbox', { name: /Games/ }).click();
+  await page.getByRole('dialog', { name: 'What are you here for?' }).getByRole('button', { name: 'Continue' }).click();
+  const rules = page.getByRole('dialog', { name: 'Server rules' });
+  await rules.getByRole('checkbox', { name: /agree/ }).check();
+  await rules.getByRole('button', { name: 'Finish' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  await page.locator('button.cm-quicklink', { hasText: 'Channels & Roles' }).click();
+  const modal = page.getByRole('dialog', { name: 'Channels & Roles' });
+  await expect(modal.getByRole('checkbox', { name: /Games/ })).toHaveAttribute('aria-checked', 'true');
+  await modal.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
 test('the owner sets up onboarding in server settings', async ({ page }) => {
   await openStockTalk(page);
   const guildId = new URL(page.url()).pathname.split('/')[2]!;

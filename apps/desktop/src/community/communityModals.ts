@@ -5,7 +5,8 @@ import type { Snowflake } from "../api/types";
 export type CommunityModal =
   | { type: "events"; guildId: Snowflake }
   | { type: "wizard"; guildId: Snowflake; /** Present when editing. */ eventId?: Snowflake; /** Where Back / close returns to. */ from?: "events" | "detail" }
-  | { type: "detail"; guildId: Snowflake; eventId: Snowflake; from?: "events" };
+  | { type: "detail"; guildId: Snowflake; eventId: Snowflake; from?: "events" }
+  | { type: "channelsAndRoles"; guildId: Snowflake };
 
 interface Store {
   modal: CommunityModal | null;

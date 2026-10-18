@@ -14,6 +14,11 @@ const bump = () => {
   listeners.forEach(fn => fn());
 };
 
+/** Brings the flow back after "Do this later" (the composer's rules bar and "Channels & Roles" use it). */
+export function resumeOnboarding(guildId: Snowflake): void {
+  if (postponed.delete(guildId)) bump();
+}
+
 /** Shows the onboarding flow over the app while the viewer is in a guild where it started for them and they have not finished. */
 export function OnboardingGate() {
   const guildId = useStore(s => s.route.guildId);
@@ -45,7 +50,7 @@ function OptionCard({ option, selected, single, onToggle }: { option: Onboarding
   );
 }
 
-function PromptStep({ prompt, answers, onToggle }: { prompt: OnboardingPrompt; answers: ReadonlySet<Snowflake>; onToggle(optionId: Snowflake): void }) {
+export function PromptStep({ prompt, answers, onToggle }: { prompt: OnboardingPrompt; answers: ReadonlySet<Snowflake>; onToggle(optionId: Snowflake): void }) {
   return (
     <div role={prompt.single_select ? "radiogroup" : "group"} aria-label={prompt.title} className="cm-options">
       <p className="cm-muted">{prompt.single_select ? "Pick one." : "Pick as many as you like."}{prompt.required ? " This one is required." : ""}</p>
@@ -145,6 +150,12 @@ export function OnboardingFlow({ guildId, onLater }: { guildId: Snowflake; onLat
                 : "You're all set to join in."}
             </p>
           </div>
+        )}
+        {step.kind === "prompt" && (
+          <p className="cm-muted cm-question-meta">
+            Question {steps.filter(s => s.kind === "prompt").indexOf(step) + 1} of {steps.filter(s => s.kind === "prompt").length}
+            {step.prompt.required ? " · Required" : ""}
+          </p>
         )}
         {step.kind === "prompt" && <PromptStep prompt={step.prompt} answers={answers} onToggle={id => setAnswers(current => toggleAnswer(step.prompt, current, id))} />}
         {step.kind === "rules" && config.rules && (

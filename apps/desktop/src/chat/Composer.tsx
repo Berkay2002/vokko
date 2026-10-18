@@ -16,6 +16,7 @@ import { emojiMarkup, searchCustomEmoji } from '../emoji/store';
 import { usePickerSections } from '../emoji/PickerSections';
 import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, updateUpload, useDraft } from './draftStore';
 import { ModifyAttachmentModal } from './AttachmentModals';
+import { resumeOnboarding, useRulesPending } from '../community';
 import { fromDisplay, type MentionToken } from './mentionText';
 import { convertEmoticons } from './emoticons';
 import { messageStore } from './messageStore';
@@ -98,6 +99,7 @@ export interface ComposerProps {
 
 export function Composer({ channelId, replyTo, mentionReply, onToggleMention, onCancelReply, onSent, onEditLast, focusToken }: ComposerProps) {
   const chat = useChat();
+  const rulesPending = useRulesPending(chat.guildId);
   const stale = useStale();
   const draft = useDraft(channelId);
   const area = useRef<ComposerField>(null);
@@ -390,6 +392,16 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
   if (stale) return <div className="chat-composer" ref={root}>
     <div className="chat-composer-box chat-composer-locked" role="status">
       <span>Connecting… You can send messages once Vokko is back online.</span>
+    </div>
+  </div>;
+
+  // The server refuses sends and reactions until the rules are accepted (403 150010); the bar takes the composer place.
+  if (rulesPending && chat.guildId) return <div className="chat-composer" ref={root}>
+    <TypingIndicator channelId={channelId} />
+    <div className="chat-composer-box chat-composer-locked chat-composer-rules" role="note">
+      <Lock size={20} aria-hidden="true" />
+      <span>Accept the server rules to talk here</span>
+      <button type="button" className="btn btn-sm" onClick={() => resumeOnboarding(chat.guildId!)}>Review Rules</button>
     </div>
   </div>;
 

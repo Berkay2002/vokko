@@ -37,8 +37,35 @@ pub fn routes() -> Router<AppState> {
 /// Verification level and AutoMod for a new message by `user_id` in a guild channel. DMs pass.
 pub async fn check_send(state: &AppState, access: &ChannelAccess, user_id: i64, content: &str) -> ApiResult<()> {
     let Some(guild_id) = access.channel.guild_id else { return Ok(()) };
+    check_rules_accepted(state, guild_id, user_id).await?;
     check_verification(state, guild_id, user_id).await?;
     check_automod(state, access, user_id, content).await
+}
+
+/// 403 150010 while the member still has to accept the guild's rules, see `rules_pending`.
+pub async fn check_rules_accepted(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<()> {
+    if rules_pending(state, guild_id, user_id).await? { Err(ApiErr::rules_not_accepted()) } else { Ok(()) }
+}
+
+/// The member is held by the rules gate: onboarding on, a rules screen set, `STARTED_ONBOARDING` without `COMPLETED_ONBOARDING`, and they
+/// joined after the rules appeared (`rules_since`), so turning rules on never locks out earlier members. The owner, administrators and
+/// bots are exempt.
+pub async fn rules_pending(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<bool> {
+    use vokko_protocol::api::member_flags::{COMPLETED_ONBOARDING, STARTED_ONBOARDING};
+    let held: Option<(bool, bool, bool)> = sqlx::query_as(
+        "SELECT g.owner_id = m.user_id, u.bot, \
+         COALESCE(o.enabled AND o.rules IS NOT NULL AND m.joined_at >= o.rules_since AND m.flags & $3 <> 0 AND m.flags & $4 = 0, FALSE) \
+         FROM guild_members m JOIN guilds g ON g.id = m.guild_id JOIN users u ON u.id = m.user_id \
+         LEFT JOIN guild_onboarding o ON o.guild_id = m.guild_id WHERE m.guild_id = $1 AND m.user_id = $2",
+    )
+    .bind(guild_id)
+    .bind(user_id)
+    .bind(STARTED_ONBOARDING as i32)
+    .bind(COMPLETED_ONBOARDING as i32)
+    .fetch_optional(&state.db)
+    .await?;
+    let Some((owner, bot, true)) = held else { return Ok(false) };
+    Ok(!(owner || bot || guild_access(state, user_id, guild_id).await?.permissions & ADMINISTRATOR != 0))
 }
 
 /// 403 50009 when the guild's verification level is above what the member meets. Roles, administrators and the owner bypass it.

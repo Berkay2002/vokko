@@ -101,6 +101,9 @@ async fn add_reaction(
     access.require(READ_MESSAGE_HISTORY)?;
     access.require(ADD_REACTIONS)?;
     access.require_unarchived()?;
+    if let Some(guild_id) = access.channel.guild_id {
+        crate::safety::check_rules_accepted(&state, guild_id, user_id).await?;
+    }
     // A reaction reaches the other side of a 1:1 DM like a message does: blocks and their DM privacy apply.
     if access.channel.channel_type() == vokko_protocol::api::ChannelType::Dm {
         crate::routes::messages::require_dm_open(&state, access.channel.id, user_id).await?;
