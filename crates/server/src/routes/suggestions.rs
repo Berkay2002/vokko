@@ -48,10 +48,14 @@ async fn list(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQue
     // `relationships` holds both directions, so one lookup on (caller, candidate) also finds people who blocked the caller.
     // `visible` is the profile's mutual friend count (users::mutual_friend_ids): candidates have no relationship with the
     // caller, so its context is a shared guild of any size or a DM with a message, and friendships never coexist with a block.
-    // Ranking by it keeps hidden counts out of the order.
-    let ranked: Vec<(i64, i64)> = sqlx::query_as(
+    // Ranking by it keeps hidden counts out of the order. `mutuals` is the candidate's share_mutuals (presence::sharing: unset
+    // follows share_activity, default on); off, neither mutual friends nor shared guilds rank them.
+    let ranked: Vec<(i64, i64, bool)> = sqlx::query_as(
         "WITH eligible AS ( \
-             SELECT u.id FROM users u WHERE u.id <> $1 AND NOT u.bot AND u.friend_suggestions \
+             SELECT u.id, COALESCE((SELECT CASE WHEN jsonb_typeof(st.settings->'share_mutuals') = 'boolean' THEN (st.settings->>'share_mutuals')::boolean \
+                                               WHEN jsonb_typeof(st.settings->'share_activity') = 'boolean' THEN (st.settings->>'share_activity')::boolean END \
+                                    FROM user_settings st WHERE st.user_id = u.id), TRUE) AS mutuals \
+             FROM users u WHERE u.id <> $1 AND NOT u.bot AND u.friend_suggestions \
                AND NOT EXISTS (SELECT 1 FROM relationships r WHERE (r.user_id = $1 AND r.other_id = u.id) OR (r.user_id = u.id AND r.other_id = $1)) \
                AND NOT EXISTS (SELECT 1 FROM friend_suggestion_dismissals d WHERE d.user_id = $1 AND d.other_id = u.id) \
          ), shared AS ( \
@@ -65,17 +69,18 @@ async fn list(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQue
              UNION SELECT d.user_id FROM channel_recipients c JOIN channel_recipients d ON d.channel_id = c.channel_id \
                    JOIN channels ch ON ch.id = c.channel_id AND ch.last_message_id IS NOT NULL WHERE c.user_id = $1 \
          ) \
-         SELECT e.id, CASE WHEN EXISTS (SELECT 1 FROM context x WHERE x.other = e.id) THEN COALESCE(m.friends, 0) ELSE 0 END AS visible \
+         SELECT e.id, CASE WHEN e.mutuals AND EXISTS (SELECT 1 FROM context x WHERE x.other = e.id) THEN COALESCE(m.friends, 0) ELSE 0 END AS visible, \
+                e.mutuals \
          FROM eligible e LEFT JOIN shared s ON s.other = e.id LEFT JOIN mutual m ON m.other = e.id \
-         WHERE s.other IS NOT NULL OR m.other IS NOT NULL \
-         ORDER BY visible DESC, COALESCE(s.guilds, 0) DESC, e.id LIMIT $2",
+         WHERE s.other IS NOT NULL OR (m.other IS NOT NULL AND e.mutuals) \
+         ORDER BY visible DESC, CASE WHEN e.mutuals THEN COALESCE(s.guilds, 0) ELSE 0 END DESC, e.id LIMIT $2",
     )
     .bind(user_id)
     .bind(limit)
     .bind(SMALL_GUILD_MEMBERS)
     .fetch_all(&state.db)
     .await?;
-    let ids: Vec<i64> = ranked.iter().map(|(id, _)| *id).collect();
+    let ids: Vec<i64> = ranked.iter().map(|(id, _, _)| *id).collect();
     let users = store::users(&state, &ids).await?;
     let shared: Vec<(i64, i64, Option<String>)> = sqlx::query_as(
         "SELECT b.user_id, a.guild_id, b.nick FROM guild_members a JOIN guild_members b ON b.guild_id = a.guild_id \
@@ -90,16 +95,16 @@ async fn list(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQue
     for (other, guild, nick) in shared {
         guilds.entry(other).or_default().push(MutualGuild { id: Snowflake::from(guild), nick });
     }
-    let suggestions = ranked
-        .into_iter()
-        .filter_map(|(id, visible)| {
-            Some(FriendSuggestion {
-                user: users.get(&id)?.clone(),
-                mutual_guilds: guilds.remove(&id).unwrap_or_default(),
-                mutual_friends_count: u32::try_from(visible).unwrap_or(0),
-            })
-        })
-        .collect();
+    let mut suggestions = Vec::new();
+    for (id, visible, show) in ranked {
+        let Some(user) = users.get(&id) else { continue };
+        // the profile's "share mutuals" opt-out holds here too
+        suggestions.push(FriendSuggestion {
+            user: user.clone(),
+            mutual_guilds: if show { guilds.remove(&id).unwrap_or_default() } else { Vec::new() },
+            mutual_friends_count: if show { u32::try_from(visible).unwrap_or(0) } else { 0 },
+        });
+    }
     Ok(Json(FriendSuggestionsResponse { enabled: true, suggestions }))
 }
 

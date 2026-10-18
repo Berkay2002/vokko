@@ -912,6 +912,11 @@ async fn delete_message(
         guild_id: access.channel.guild_id.map(Snowflake::from),
     });
     state.hub.send(&viewers, &event);
+    // the DM may no longer be one both wrote in, so it may no longer share presence (events::DM_TAKEN_PART)
+    if access.channel.channel_type() == vokko_protocol::api::ChannelType::Dm {
+        let peers: Vec<i64> = viewers.iter().copied().filter(|viewer| *viewer != row.author_id).collect();
+        crate::presence::announce_parted(&state, row.author_id, &peers).await?;
+    }
     // Discord logs deletions of someone else's message only.
     if let Some(guild_id) = access.channel.guild_id
         && row.author_id != user_id
@@ -1050,6 +1055,8 @@ async fn typing(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path
         require_dm_open(&state, id, user_id).await?;
     }
     let viewers: Vec<i64> = access::channel_viewers(&state, &access.channel).await?.into_iter().filter(|viewer| *viewer != user_id).collect();
+    // invisible (everywhere or to these viewers) means no typing either; the request still succeeds so nothing tells
+    let viewers = crate::presence::typing_audience(&state, user_id, access.channel.guild_id, viewers).await?;
     let event = GatewayEvent::TypingStart(TypingStart { channel_id: Snowflake::from(id), user_id: Snowflake::from(user_id), timestamp: now_ms() / 1000 });
     state.hub.send(&viewers, &event);
     Ok(StatusCode::NO_CONTENT)

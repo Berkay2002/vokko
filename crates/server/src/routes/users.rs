@@ -577,7 +577,7 @@ struct ProfileQuery {
 /// DM or group DM that has a message (opening a DM alone stores it closed on the other side, who never saw it). Friends that
 /// the caller blocks or that block the caller are left out. Never more of `id`'s friends than the caller's own.
 async fn mutual_friend_ids(state: &AppState, viewer: i64, id: i64) -> ApiResult<Vec<i64>> {
-    if viewer == id {
+    if viewer == id || !crate::presence::sharing(state, id).await?.mutuals {
         return Ok(Vec::new());
     }
     let rows: Vec<(i64,)> = sqlx::query_as(
@@ -630,9 +630,10 @@ async fn get_profile(
         Some(guild_id) if guilds.iter().any(|(shared, _)| *shared == guild_id) => store::member(&state, guild_id, id).await?,
         _ => None,
     };
+    let show_guilds = viewer == id || crate::presence::sharing(&state, id).await?.mutuals;
     Ok(Json(UserProfile {
         user,
-        mutual_guilds: guilds.into_iter().map(|(guild_id, nick)| MutualGuild { id: Snowflake::from(guild_id), nick }).collect(),
+        mutual_guilds: guilds.into_iter().filter(|_| show_guilds).map(|(guild_id, nick)| MutualGuild { id: Snowflake::from(guild_id), nick }).collect(),
         mutual_friends_count: u32::try_from(friends).unwrap_or(u32::MAX),
         guild_member,
     }))

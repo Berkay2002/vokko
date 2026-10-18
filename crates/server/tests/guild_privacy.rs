@@ -25,7 +25,7 @@ async fn join(app: &TestApp, owner: &Person, channel: &str, who: &Person) {
 
 async fn set_dms(app: &TestApp, who: &Person, guild: &str, allowed: bool) {
     let (status, body) = app.patch(&format!("/users/@me/guilds/{guild}/privacy"), &who.token, json!({"direct_messages": allowed})).await;
-    assert_eq!((status, body), (StatusCode::OK, json!({"direct_messages": allowed})));
+    assert_eq!((status, body), (StatusCode::OK, json!({"direct_messages": allowed, "appear_offline": false})));
 }
 
 async fn open_dm(app: &TestApp, from: &Person, to: &Person) -> (StatusCode, Value) {
@@ -48,12 +48,12 @@ async fn the_setting_round_trips_for_members_only() {
     let (guild, _) = app.guild_with_channel(&ann.token).await;
     let path = format!("/users/@me/guilds/{guild}/privacy");
 
-    assert_eq!(app.get(&path, &ann.token).await, (StatusCode::OK, json!({"direct_messages": true})));
+    assert_eq!(app.get(&path, &ann.token).await, (StatusCode::OK, json!({"direct_messages": true, "appear_offline": false})));
     set_dms(&app, &ann, &guild, false).await;
-    assert_eq!(app.get(&path, &ann.token).await.1, json!({"direct_messages": false}));
+    assert_eq!(app.get(&path, &ann.token).await.1, json!({"direct_messages": false, "appear_offline": false}));
     set_dms(&app, &ann, &guild, false).await; // idempotent
     set_dms(&app, &ann, &guild, true).await;
-    assert_eq!(app.get(&path, &ann.token).await.1, json!({"direct_messages": true}));
+    assert_eq!(app.get(&path, &ann.token).await.1, json!({"direct_messages": true, "appear_offline": false}));
 
     // Not a member, or no such guild: 404 Unknown Guild.
     for (path, token) in

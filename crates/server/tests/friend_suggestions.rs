@@ -75,6 +75,21 @@ async fn mutual_friends_rank_above_shared_guilds() {
 }
 
 #[tokio::test]
+async fn share_mutuals_off_hides_a_mutual_friend_only_link() {
+    let app = TestApp::new().await;
+    let ann = person(&app, "ann").await;
+    let cat = person(&app, "cat").await;
+    let dan = person(&app, "dan").await;
+    befriend(&app, &ann, &dan).await;
+    befriend(&app, &dan, &cat).await;
+    assert_eq!(suggested(&app, &ann).await, vec!["cat"]);
+    let (_, current) = app.get("/users/@me/settings", &cat.token).await;
+    let body = json!({"version": current["version"], "settings": {"share_mutuals": false}});
+    assert_eq!(app.patch("/users/@me/settings", &cat.token, body).await.0, StatusCode::OK);
+    assert!(suggested(&app, &ann).await.is_empty(), "the mutual friend was the only link, and cat does not share mutuals");
+}
+
+#[tokio::test]
 async fn suggestion_counts_match_the_profile_once_there_is_context() {
     let app = TestApp::new().await;
     let ann = person(&app, "ann").await;

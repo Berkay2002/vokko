@@ -3,7 +3,7 @@ import { AtSign, ChartBarBig, CircleAlert, Eye, FileUp, LayoutGrid, Lock, Pencil
 import { Perm, channelPermissions, hasBit, memberLike } from '../api/permissions';
 import { ChannelType } from '../api/types';
 import type { Gif, Message, Snowflake, Sticker as StickerData } from '../api/types';
-import { request, useStale, BottomSheet, Popout, Tooltip, usePhone, resolveUrl, useComposerOptions, useConvertEmoticons, useGuild, useGuildMembers, useLegacyChatInput } from './shell';
+import { request, sharesTyping, useStale, BottomSheet, Popout, Tooltip, usePhone, resolveUrl, useComposerOptions, useConvertEmoticons, useGuild, useGuildMembers, useLegacyChatInput } from './shell';
 import { useMedia } from '../media/store';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
@@ -46,6 +46,8 @@ function postTyping(channelId: Snowflake): void {
 }
 
 function notifyTyping(channelId: Snowflake, myId: Snowflake): void {
+  // the server drops it anyway; not sending saves the request
+  if (!sharesTyping(myId)) return;
   const now = Date.now();
   const since = now - (lastTyping.get(channelId) ?? 0);
   if (since < TYPING_INTERVAL_MS || typingTimers.has(channelId)) return;

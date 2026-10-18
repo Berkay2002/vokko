@@ -23,6 +23,7 @@ import { cleanName } from "./format";
 import { setOwnActivities } from "./own";
 import { lookUpTrack, playsInCall, sameSpotifyMoment, spotifyActivity, withCatalog } from "./spotify";
 import { voiceStore } from "../voice/store";
+import { getPrefs, setPref, usePrefs } from "../ui/prefs";
 
 // Game detection and the user's own activity. The desktop shell lists running executables; this store matches them against
 // the shipped list and the games the user added, and keeps the signed-in user's presence activities in step.
@@ -63,10 +64,23 @@ interface ActivityState {
   assets: Record<string, string>;
 }
 
+// The two switches are account-synced prefs now; a choice made before that (stored on this device) is carried over once.
+function migrateFlag(key: string, pref: "shareActivity" | "shareSpotify"): void {
+  const stored = loadFlag(key, getPrefs()[pref]);
+  if (stored !== getPrefs()[pref]) setPref(pref, stored);
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* nothing stored */
+  }
+}
+migrateFlag(SHARE_KEY, "shareActivity");
+migrateFlag(SPOTIFY_KEY, "shareSpotify");
+
 export const useActivity = create<ActivityState>(() => ({
-  share: loadFlag(SHARE_KEY, true),
+  share: getPrefs().shareActivity,
   // opt-in: what someone listens to never goes out until they turn it on
-  spotify: loadFlag(SPOTIFY_KEY, false),
+  spotify: getPrefs().shareSpotify,
   registered: loadRegisteredGames(),
   running: null,
   detected: null,
@@ -101,21 +115,19 @@ export function activitiesFor(
 /** The tracks the call Spotify sessions this client knows of are playing. */
 const callTracks = (): SpotifyTrack[] => Object.values(voiceStore.getState().spotify).flatMap(s => (s.playing && s.track ? [s.track] : []));
 
-function saveFlag(key: string, on: boolean): void {
-  try {
-    localStorage.setItem(key, on ? "1" : "0");
-  } catch {
-    /* kept for this session only */
-  }
-}
+// another device (or Activity Privacy) changing the synced switches
+usePrefs.subscribe(prefs => {
+  const { share, spotify } = useActivity.getState();
+  if (prefs.shareActivity !== share || prefs.shareSpotify !== spotify) useActivity.setState({ share: prefs.shareActivity, spotify: prefs.shareSpotify });
+});
 
 export function setShareActivity(on: boolean): void {
-  saveFlag(SHARE_KEY, on);
+  setPref("shareActivity", on);
   useActivity.setState({ share: on });
 }
 
 export function setShowSpotify(on: boolean): void {
-  saveFlag(SPOTIFY_KEY, on);
+  setPref("shareSpotify", on);
   useActivity.setState({ spotify: on });
 }
 

@@ -3949,11 +3949,22 @@ pub struct FriendSuggestionsResponse {
     pub suggestions: Vec<FriendSuggestion>,
 }
 
-/// Body and response of `GET` / `PATCH /users/@me/guilds/{id}/privacy`: whether members of that guild who are not friends may
-/// DM the caller (Discord's `restricted_guilds`, inverted).
+/// Response of `GET` / `PATCH /users/@me/guilds/{id}/privacy`: whether members of that guild who are not friends may DM the
+/// caller (Discord's `restricted_guilds`, inverted), and whether the caller appears offline to that guild's members.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GuildPrivacySettings {
     pub direct_messages: bool,
+    #[serde(default)]
+    pub appear_offline: bool,
+}
+
+/// Body of `PATCH /users/@me/guilds/{id}/privacy`: only sent keys change.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UpdateGuildPrivacyRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_messages: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub appear_offline: Option<bool>,
 }
 
 /// Body and response of `PATCH /users/@me/friend-suggestion-settings`.
@@ -4497,6 +4508,11 @@ pub mod user_settings {
         ("friend_requests_everyone", Kind::Bool),
         ("friend_requests_mutual_friends", Kind::Bool),
         ("friend_requests_mutual_guilds", Kind::Bool),
+        // Activity privacy (server-enforced; unset ones follow `share_activity`, see the server's `presence::sharing`)
+        ("share_activity", Kind::Bool),
+        ("share_spotify", Kind::Bool),
+        ("share_typing", Kind::Bool),
+        ("share_mutuals", Kind::Bool),
     ];
 
     pub fn kind(key: &str) -> Option<Kind> {

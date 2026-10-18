@@ -437,6 +437,10 @@ async fn delete_guild(State(state): State<AppState>, AuthUser(user_id): AuthUser
     crate::stickers::sweep_assets(&state).await;
     crate::soundboard::sweep_assets(&state).await;
     state.hub.send(&members, &GatewayEvent::GuildDelete(IdOnly { id: Snowflake::from(id) }));
+    // the guild is gone either way: a failed presence clean-up is logged, not returned
+    if let Err(error) = crate::presence::guild_deleted(&state, &members).await {
+        tracing::warn!("presence clean-up after deleting guild {id} failed: {error:?}");
+    }
     for (adopter,) in adopters {
         users::publish_user(&state, adopter).await?;
     }

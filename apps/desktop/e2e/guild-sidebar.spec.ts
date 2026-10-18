@@ -288,15 +288,22 @@ test('guild Privacy Settings: Direct Messages switch persists per server (GLD-01
   };
   let dialog = await open();
   await expect(dialog.getByText('Allow direct messages from other members in this server.')).toBeVisible();
-  await expect(dialog.getByText('This setting is applied to this server only. Friends can always message you.')).toBeVisible();
+  await expect(dialog.getByText('These settings apply to this server only. Friends can always message you.')).toBeVisible();
   const toggle = dialog.getByRole('switch', { name: 'Direct Messages' });
   await expect(toggle).toBeEnabled();
   await expect(toggle).toBeChecked();
   await toggle.click();
   await expect(toggle).not.toBeChecked();
+  // Appear offline in this server: off by default, kept per server
+  const offline = dialog.getByRole('switch', { name: 'Appear offline in this server' });
+  await expect(offline).not.toBeChecked();
+  await offline.click();
+  await expect(offline).toBeChecked();
+  await shot(page, '10-guild-privacy');
   await page.keyboard.press('Escape');
   dialog = await open();
   await expect(dialog.getByRole('switch', { name: 'Direct Messages' })).not.toBeChecked();
+  await expect(dialog.getByRole('switch', { name: 'Appear offline in this server' })).toBeChecked();
 });
 
 test('Hide Muted Channels brings a channel back when its timed mute lapses, without another update', async ({ page }) => {

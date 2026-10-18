@@ -68,6 +68,8 @@ pub struct Config {
     pub call_ring_timeout: Duration,
     /// Stickers per guild (one owner-editable block instead of boost levels).
     pub max_stickers_per_guild: usize,
+    /// Most recipients a group DM may hold (`VOKKO_GROUP_DM_MAX`, default 10 like Discord, kept within 2..=100).
+    pub group_dm_max: i64,
     /// GIF proxy: provider, API key and an optional override of the provider's API origin.
     pub gif: GifConfig,
     /// How often due reminders are looked for.
@@ -478,6 +480,8 @@ pub fn parse_connect_timeout(value: &str) -> Result<Duration, String> {
 pub const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
 /// Default and ceiling of `VOKKO_MAX_UPLOAD_MB`: Discord Nitro's per-file limit, free for everyone. A self-host may set it lower.
 pub const DEFAULT_MAX_UPLOAD_MB: usize = 500;
+/// Default of `VOKKO_GROUP_DM_MAX`: Discord's group DM cap.
+pub const DEFAULT_GROUP_DM_MAX: i64 = 10;
 /// Total size of one user's pending (not attached, not avatar/icon) uploads, raised to the per-file limit when that is larger.
 pub const MAX_PENDING_BYTES_PER_USER: i64 = 100 * 1024 * 1024;
 /// Pending uploads older than this are deleted by the cleanup task, which runs every `CLEANUP_INTERVAL`.
@@ -573,6 +577,9 @@ impl Config {
         if let Some(value) = env.get("VOKKO_MAX_UPLOAD_MB") {
             config.max_upload_bytes = parse_max_upload_mb(&value)?;
         }
+        if let Some(value) = env.get("VOKKO_GROUP_DM_MAX") {
+            config.group_dm_max = parse_group_dm_max(&value)?;
+        }
         // `VOKKO_TRUST_PROXY=on` behind a reverse proxy that appends the client address to X-Forwarded-For.
         config.trust_proxy = env.get("VOKKO_TRUST_PROXY").is_some_and(|value| matches!(value.to_ascii_lowercase().as_str(), "on" | "1" | "true" | "yes"));
         if let Some(value) = env.get("VOKKO_GIF_PROVIDER") {
@@ -659,6 +666,7 @@ impl Config {
             max_preauth_per_ip: 16,
             trust_proxy: false,
             max_stickers_per_guild: 60,
+            group_dm_max: DEFAULT_GROUP_DM_MAX,
             gif: GifConfig { provider: vokko_protocol::api::GifProvider::None, api_key: String::new(), base_url: None },
             reminder_poll: Duration::from_secs(15),
             stremio: None,
@@ -705,9 +713,15 @@ fn parse_max_upload_mb(value: &str) -> Result<usize, String> {
     Ok(megabytes.min(DEFAULT_MAX_UPLOAD_MB) * 1024 * 1024)
 }
 
+/// `VOKKO_GROUP_DM_MAX`: a whole number, clamped to 2..=100.
+fn parse_group_dm_max(value: &str) -> Result<i64, String> {
+    let max: i64 = value.trim().parse().map_err(|_| format!("VOKKO_GROUP_DM_MAX must be a whole number, got {value}"))?;
+    Ok(max.clamp(2, 100))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{DotEnv, parse_cors_origins, parse_livekit, parse_max_upload_mb};
+    use super::{DotEnv, parse_cors_origins, parse_group_dm_max, parse_livekit, parse_max_upload_mb};
 
     #[test]
     fn upload_limit_is_the_lower_of_the_setting_and_the_nitro_limit() {
@@ -717,6 +731,15 @@ mod tests {
         assert_eq!(parse_max_upload_mb("4096"), Ok(500 * 1024 * 1024));
         assert!(parse_max_upload_mb("0").is_err());
         assert!(parse_max_upload_mb("1.5").is_err());
+    }
+
+    #[test]
+    fn group_dm_max_defaults_to_10_and_is_clamped() {
+        assert_eq!(super::Config::new(String::new(), String::new(), "d".into(), String::new()).group_dm_max, 10);
+        assert_eq!(parse_group_dm_max(" 25 "), Ok(25));
+        assert_eq!(parse_group_dm_max("1"), Ok(2));
+        assert_eq!(parse_group_dm_max("5000"), Ok(100));
+        assert!(parse_group_dm_max("ten").is_err());
     }
 
     #[test]

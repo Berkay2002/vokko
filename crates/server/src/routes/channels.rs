@@ -27,9 +27,6 @@ pub fn routes() -> Router<AppState> {
         .route("/channels/{id}/recipients/{user_id}", put(add_recipient).delete(remove_recipient))
 }
 
-/// A group DM holds at most this many people (Discord's cap).
-const GROUP_DM_MAX: i64 = 10;
-
 async fn group_access(state: &AppState, user_id: i64, id: &str) -> ApiResult<access::ChannelAccess> {
     let access = channel_access(state, user_id, channel_id(id)?).await?;
     if access.channel.channel_type() != ChannelType::GroupDm {
@@ -77,8 +74,9 @@ async fn add_recipient(State(state): State<AppState>, AuthUser(user_id): AuthUse
         return Err(ApiErr::missing_access());
     }
     let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM channel_recipients WHERE channel_id = $1").bind(channel_id).fetch_one(&mut *tx).await?;
-    if count >= GROUP_DM_MAX {
-        return Err(ApiErr::conflict(30004, &format!("Maximum number of group DM recipients reached ({GROUP_DM_MAX})")));
+    let max = state.config.group_dm_max;
+    if count >= max {
+        return Err(ApiErr::conflict(30004, &format!("Maximum number of group DM recipients reached ({max})")));
     }
     let added = sqlx::query("INSERT INTO channel_recipients (channel_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
         .bind(channel_id)
@@ -142,7 +140,7 @@ async fn leave_group(state: &AppState, row: &store::ChannelRow, target: i64) -> 
         }
     }
     state.hub.send(&[target], &GatewayEvent::ChannelDelete(channel));
-    Ok(())
+    crate::presence::announce_parted(state, target, &rest).await
 }
 
 /// Discord's slowmode ceiling: 6 hours.
@@ -312,6 +310,13 @@ async fn delete_channel(
         // Closing a DM hides it for this user only; leaving a group DM removes the user.
         if access.channel.channel_type() == ChannelType::Dm {
             sqlx::query("UPDATE channel_recipients SET closed = TRUE WHERE channel_id = $1 AND user_id = $2").bind(id).bind(user_id).execute(&state.db).await?;
+            // a closed DM shares no presence any more
+            let peers: Vec<i64> = sqlx::query_scalar("SELECT user_id FROM channel_recipients WHERE channel_id = $1 AND user_id <> $2")
+                .bind(id)
+                .bind(user_id)
+                .fetch_all(&state.db)
+                .await?;
+            crate::presence::announce_parted(&state, user_id, &peers).await?;
         } else {
             leave_group(&state, &access.channel, user_id).await?;
             return Ok(Json(channel));
