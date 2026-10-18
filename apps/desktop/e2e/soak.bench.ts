@@ -15,6 +15,7 @@ const OUT = path.join('perf-results');
 
 type Win = {
   __vokko: { messageStore: { getState(id: string): { messages: unknown[] } } };
+  __vokkoPerf: { stats: Record<string, { commits: number; ms: number }>; reset(): void };
   __vokkoMock: {
     channelIdByName(name: string): string | null;
     voice(user: string, channelId: string | null, opts?: { selfMute?: boolean; selfVideo?: boolean; selfStream?: boolean }): void;
@@ -36,6 +37,9 @@ interface Sample {
   rendererCpuPct: number;
   ramMB: number;
   rendererRamMB: number;
+  /** React commits and render ms in the last minute, per <Measure> area ("app" = everything). */
+  commits: Record<string, number>;
+  renderMs: Record<string, number>;
 }
 
 const round = (n: number, d = 1) => Math.round(n * 10 ** d) / 10 ** d;
@@ -145,6 +149,7 @@ test('soak: an hour in a call with a stream, cameras, speaking and chat', async 
 
   const samples: Sample[] = [];
   let profileTop: ReturnType<typeof topSelf> = [];
+  await page.evaluate(() => (window as unknown as Win).__vokkoPerf.reset());
   let last = { at: Date.now(), cpu: new Map((await processes()).map(p => [p.id, p.cpuTime])) };
 
   const sample = async (minute: number) => {
@@ -160,10 +165,14 @@ test('soak: an hour in a call with a stream, cameras, speaking and chat', async 
     const raw = await metrics(cdp);
     await cdp.send('HeapProfiler.collectGarbage');
     const gc = await metrics(cdp);
-    const page_ = await page.evaluate(voice => ({
-      videos: document.querySelectorAll('video').length,
-      callMessages: (window as unknown as Win).__vokko.messageStore.getState(voice).messages.length,
-    }), ids.voice);
+    const page_ = await page.evaluate(voice => {
+      const w = window as unknown as Win;
+      const stats = w.__vokkoPerf.stats;
+      const commits = Object.fromEntries(Object.entries(stats).map(([k, v]) => [k, v.commits]));
+      const renderMs = Object.fromEntries(Object.entries(stats).map(([k, v]) => [k, Math.round(v.ms)]));
+      w.__vokkoPerf.reset();
+      return { videos: document.querySelectorAll('video').length, callMessages: w.__vokko.messageStore.getState(voice).messages.length, commits, renderMs };
+    }, ids.voice);
     const s: Sample = {
       minute,
       heapMB: round((raw.JSHeapUsedSize ?? 0) / MB),

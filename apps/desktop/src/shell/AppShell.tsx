@@ -311,7 +311,9 @@ export function AppShell() {
                         <Messages key={channel.id} channelId={channel.id} />
                       </>
                     ) : (
-                      <VoiceChannelPage key={channel.id} channel={channel} />
+                      <Measure id="call">
+                        <VoiceChannelPage key={channel.id} channel={channel} />
+                      </Measure>
                     )}
                   </AgeGate>
                 </div>
