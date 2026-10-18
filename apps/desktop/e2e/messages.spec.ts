@@ -116,6 +116,26 @@ test('server tag shows next to the author and opens a popout', async ({ page }) 
   await expect(page.locator('.chat-tag-popout')).toHaveCount(0);
 });
 
+test('only the row under the pointer has a toolbar after a wheel scroll, even with focus left in another row', async ({ page }) => {
+  await openStockTalk(page);
+  const shown = page.getByRole('toolbar', { name: 'Message actions' }).filter({ visible: true });
+  await page.mouse.move(700, 600);
+  await expect(shown).toHaveCount(1);
+  // closing the reaction picker hands focus back to the toolbar's Add Reaction button
+  await shown.getByRole('button', { name: 'Add Reaction' }).click();
+  await expect(page.getByRole('dialog', { name: 'Emoji picker' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(shown.getByRole('button', { name: 'Add Reaction' })).toBeFocused();
+  // the list scrolls under the still pointer
+  for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -150);
+  await expect.poll(() => page.evaluate(() => {
+    const hovered = document.querySelector('.chat-msg:hover');
+    return !!hovered && hovered !== document.querySelector('.chat-msg:focus-within');
+  })).toBe(true);
+  await expect(shown).toHaveCount(1);
+  await expect(page.locator('.chat-msg:hover').getByRole('toolbar', { name: 'Message actions' })).toBeVisible();
+});
+
 test.describe('lightbox', () => {
   test('single image: author, actions, Escape closes', async ({ page }) => {
     await openStockTalk(page);
