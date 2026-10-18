@@ -146,7 +146,7 @@ export function createGuildRecord(ownerId: string, name: string, iconUrl: string
   const general = nextId();
   const generalVoice = nextId();
   db.guilds.set(id, {
-    guild: { id, name, icon: iconUrl, owner_id: ownerId, roles, system_channel_id: general, nsfw_level: 0, rules_channel_id: null },
+    guild: { id, name, icon: iconUrl, owner_id: ownerId, roles, system_channel_id: general, nsfw_level: 0, rules_channel_id: null, features: [], public_updates_channel_id: null },
     members: new Map([[ownerId, { nick: null, roles: [], joined_at: new Date().toISOString() }]]),
   });
   const base = { guild_id: id, topic: null, last_message_id: null };

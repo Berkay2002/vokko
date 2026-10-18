@@ -8,8 +8,8 @@ use axum::routing::{delete, get};
 use serde::Deserialize;
 use vokko_protocol::api::permissions::{DEFAULT_EVERYONE, MANAGE_CHANNELS, MANAGE_GUILD, MANAGE_ROLES, VIEW_CHANNEL};
 use vokko_protocol::api::{
-    AuditLogEvent, Channel, ChannelType, CreateChannelRequest, CreateGuildRequest, GatewayEvent, Guild, GuildMember, GuildTag, GuildTheme, IdOnly,
-    ModifyChannelPosition, NsfwLevel, Snowflake, UpdateGuildRequest,
+    AuditLogEvent, Channel, ChannelType, CreateChannelRequest, CreateGuildRequest, ExplicitContentFilter, GatewayEvent, Guild, GuildMember, GuildTag,
+    GuildTheme, IdOnly, ModifyChannelPosition, NsfwLevel, Snowflake, UpdateGuildRequest, VerificationLevel,
 };
 
 use crate::access::{self, ChannelAccess, guild_access};
@@ -161,6 +161,46 @@ async fn update_guild(
             return Err(ApiErr::invalid("rules_channel_id", "Must be a text channel of this guild."));
         }
     }
+    if let Some(Some(channel)) = body.public_updates_channel_id {
+        let found: Option<(i64,)> = sqlx::query_as("SELECT id FROM channels WHERE id = $1 AND guild_id = $2 AND kind = 0")
+            .bind(channel.db())
+            .bind(id)
+            .fetch_optional(&state.db)
+            .await?;
+        if found.is_none() {
+            return Err(ApiErr::invalid("public_updates_channel_id", "Must be a text channel of this guild."));
+        }
+    }
+    // Only COMMUNITY is client-toggled; the list says whether it is on.
+    let community = match &body.features {
+        None => before.features.iter().any(|f| f == "COMMUNITY"),
+        Some(list) => {
+            if list.iter().any(|f| f != "COMMUNITY") {
+                return Err(ApiErr::invalid("features", "Only COMMUNITY can be changed."));
+            }
+            !list.is_empty()
+        }
+    };
+    // Like Discord: a Community needs rules and updates channels, a verification level of at least low and the content filter on for everyone.
+    let touched = body.features.is_some()
+        || body.rules_channel_id.is_some()
+        || body.public_updates_channel_id.is_some()
+        || body.verification_level.is_some()
+        || body.explicit_content_filter.is_some();
+    if community && touched {
+        if body.rules_channel_id.unwrap_or(before.rules_channel_id).is_none() {
+            return Err(ApiErr::invalid("rules_channel_id", "A Community needs a rules channel."));
+        }
+        if body.public_updates_channel_id.unwrap_or(before.public_updates_channel_id).is_none() {
+            return Err(ApiErr::invalid("public_updates_channel_id", "A Community needs a community updates channel."));
+        }
+        if body.verification_level.unwrap_or(before.verification_level) == VerificationLevel::None {
+            return Err(ApiErr::invalid("verification_level", "A Community needs a verification level of at least low."));
+        }
+        if body.explicit_content_filter.unwrap_or(before.explicit_content_filter) != ExplicitContentFilter::AllMembers {
+            return Err(ApiErr::invalid("explicit_content_filter", "A Community needs the content filter on for all members."));
+        }
+    }
     // Explicit and Safe are Discord's staff-set ratings; owners only switch the age restriction on or off.
     if matches!(body.nsfw_level, Some(NsfwLevel::Explicit | NsfwLevel::Safe)) {
         return Err(ApiErr::invalid("nsfw_level", "Must be 0 (default) or 3 (age-restricted)."));
@@ -215,6 +255,12 @@ async fn update_guild(
     }
     if let Some(channel) = body.rules_channel_id {
         sqlx::query("UPDATE guilds SET rules_channel_id = $2 WHERE id = $1").bind(id).bind(channel.map(|c| c.db())).execute(&mut *tx).await?;
+    }
+    if let Some(channel) = body.public_updates_channel_id {
+        sqlx::query("UPDATE guilds SET public_updates_channel_id = $2 WHERE id = $1").bind(id).bind(channel.map(|c| c.db())).execute(&mut *tx).await?;
+    }
+    if body.features.is_some() {
+        sqlx::query("UPDATE guilds SET community = $2 WHERE id = $1").bind(id).bind(community).execute(&mut *tx).await?;
     }
     if let Some(level) = body.nsfw_level {
         sqlx::query("UPDATE guilds SET nsfw_level = $2 WHERE id = $1").bind(id).bind(level.as_u8() as i16).execute(&mut *tx).await?;
@@ -276,6 +322,8 @@ async fn update_guild(
         .change("banner", &before.banner, &guild.banner)
         .change("system_channel_id", before.system_channel_id, guild.system_channel_id)
         .change("rules_channel_id", before.rules_channel_id, guild.rules_channel_id)
+        .change("public_updates_channel_id", before.public_updates_channel_id, guild.public_updates_channel_id)
+        .change("features", &before.features, &guild.features)
         .change("nsfw_level", before.nsfw_level.as_u8(), guild.nsfw_level.as_u8())
         .change("join_mode", before.join_mode.as_u8(), guild.join_mode.as_u8())
         .change("default_message_notifications", before.default_message_notifications.as_u8(), guild.default_message_notifications.as_u8())

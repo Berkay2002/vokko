@@ -826,6 +826,12 @@ pub struct Guild {
     /// Engagement: the notification level of members who set none for the server (MANAGE_GUILD edits it); always sent.
     #[serde(default)]
     pub default_message_notifications: DefaultMessageNotifications,
+    /// Discord's feature flags; `COMMUNITY` once Community is enabled (MANAGE_GUILD toggles that one through `features`).
+    #[serde(default)]
+    pub features: Vec<String>,
+    /// Community: the text channel for Vokko's community updates; always sent, `null` when unset.
+    #[serde(default)]
+    pub public_updates_channel_id: Option<Snowflake>,
 }
 
 numeric_enum!(
@@ -2765,6 +2771,12 @@ pub struct UpdateGuildRequest {
     /// 0 all messages, 1 only mentions (anything else is 400 50035).
     #[serde(default)]
     pub default_message_notifications: Option<DefaultMessageNotifications>,
+    /// Only `COMMUNITY` may be present; the list sets whether Community is on (any other entry is 400 50035).
+    #[serde(default)]
+    pub features: Option<Vec<String>>,
+    /// A text channel of this guild; `null` clears it.
+    #[serde(default, deserialize_with = "double_option")]
+    pub public_updates_channel_id: Option<Option<Snowflake>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -5389,12 +5401,12 @@ mod tests {
         let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false, "unicode_emoji": null});
         round_trip::<Role>(role.clone());
         round_trip::<Guild>(
-            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0}),
+            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0, "features": [], "public_updates_channel_id": null}),
         );
         round_trip::<Guild>(json!({
             "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null,
             "tag": {"tag": "VKO", "badge": "bolt", "color_primary": 5793266, "color_secondary": 3878800}, "theme": {"preset": null, "primary": 1, "accent": 2},
-            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201", "join_mode": 1, "default_message_notifications": 1
+            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201", "join_mode": 1, "default_message_notifications": 1, "features": ["COMMUNITY"], "public_updates_channel_id": "202"
         }));
         round_trip::<GuildMember>(
             json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}),
@@ -5580,7 +5592,7 @@ mod tests {
 
     #[test]
     fn ready_and_flattened_guild_events() {
-        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0});
+        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0, "features": [], "public_updates_channel_id": null});
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
@@ -5825,7 +5837,7 @@ mod tests {
         round_trip::<ReactionEmoji>(json!({"id": "700", "name": "blob_wave", "animated": true}));
         round_trip::<ReactionEmoji>(json!({"id": null, "name": "👍"}));
         let guild = json!({
-            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0,
+            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0, "features": [], "public_updates_channel_id": null,
             "channels": [], "members": [], "member_count": 0, "stickers": [], "emojis": [emoji.clone()], "voice_states": []
         });
         round_trip::<GuildWithState>(guild);
@@ -6041,7 +6053,7 @@ mod tests {
         assert!(serde_json::from_value::<UpdateGuildRequest>(json!({"default_message_notifications": 2})).is_err());
         round_trip::<Guild>(json!({
             "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null,
-            "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 1
+            "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 1, "features": [], "public_updates_channel_id": null
         }));
     }
 

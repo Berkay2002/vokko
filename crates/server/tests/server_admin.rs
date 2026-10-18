@@ -624,3 +624,60 @@ async fn access_settings_age_restriction_and_rules_channel() {
     let (_, guild) = w.app.get(&w.path(""), &w.owner).await;
     assert_eq!(guild["rules_channel_id"], Value::Null);
 }
+
+#[tokio::test]
+async fn community_needs_channels_and_safety_checks() {
+    let w = World::new().await;
+    let (member, _) = w.member("plain").await;
+    let (_, guild) = w.app.get(&w.path(""), &w.owner).await;
+    assert_eq!((guild["features"].clone(), guild["public_updates_channel_id"].clone()), (json!([]), Value::Null));
+    let (_, rules) = w.app.post(&w.path("/channels"), &w.owner, json!({"name": "rules", "type": 0})).await;
+    let (_, updates) = w.app.post(&w.path("/channels"), &w.owner, json!({"name": "updates", "type": 0})).await;
+    let (_, voice) = w.app.post(&w.path("/channels"), &w.owner, json!({"name": "Lounge", "type": 2})).await;
+
+    let (status, _) = w.app.patch(&w.path(""), &member, json!({"features": ["COMMUNITY"]})).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "needs MANAGE_GUILD");
+    // Other features are not client-settable, the updates channel must be a text channel, and each missing prerequisite is named.
+    for (body, field) in [
+        (json!({"features": ["DISCOVERABLE"]}), "features"),
+        (json!({"public_updates_channel_id": voice["id"]}), "public_updates_channel_id"),
+        (json!({"features": ["COMMUNITY"]}), "rules_channel_id"),
+        (json!({"features": ["COMMUNITY"], "rules_channel_id": rules["id"]}), "public_updates_channel_id"),
+        (json!({"features": ["COMMUNITY"], "rules_channel_id": rules["id"], "public_updates_channel_id": updates["id"]}), "verification_level"),
+        (
+            json!({"features": ["COMMUNITY"], "rules_channel_id": rules["id"], "public_updates_channel_id": updates["id"], "verification_level": 1}),
+            "explicit_content_filter",
+        ),
+    ] {
+        let (status, error) = w.app.patch(&w.path(""), &w.owner, body.clone()).await;
+        assert_eq!((status, code(&error)), (StatusCode::BAD_REQUEST, 50035), "{body}: {error}");
+        assert!(error["errors"][field].is_object(), "{body}: {error}");
+    }
+    let (_, guild) = w.app.get(&w.path(""), &w.owner).await;
+    assert_eq!((guild["features"].clone(), guild["rules_channel_id"].clone()), (json!([]), Value::Null), "a refused request changes nothing");
+
+    let address = w.app.serve().await;
+    let mut member_ws = Client::connect(&address, &member).await;
+    let enable = json!({"features": ["COMMUNITY"], "rules_channel_id": rules["id"], "public_updates_channel_id": updates["id"], "verification_level": 1, "explicit_content_filter": 2});
+    let (status, guild) = w.app.patch(&w.path(""), &w.owner, enable).await;
+    assert_eq!((status, guild["features"].clone(), guild["public_updates_channel_id"].clone()), (StatusCode::OK, json!(["COMMUNITY"]), updates["id"].clone()));
+    assert_eq!(member_ws.wait_for("GUILD_UPDATE").await["features"], json!(["COMMUNITY"]));
+    let changes = &w.audit("?action_type=1").await[0]["changes"];
+    assert!(changes.as_array().expect("changes").iter().any(|c| c["key"] == "features"), "{changes}");
+
+    // While on, the prerequisites can't be taken away; unrelated edits are fine.
+    let (status, _) = w.app.patch(&w.path(""), &w.owner, json!({"rules_channel_id": null})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = w.app.patch(&w.path(""), &w.owner, json!({"explicit_content_filter": 0})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, guild) = w.app.patch(&w.path(""), &w.owner, json!({"name": "Renamed"})).await;
+    assert_eq!((status, guild["features"].clone()), (StatusCode::OK, json!(["COMMUNITY"])));
+
+    // Deleting the updates channel clears it; disabling keeps the channels.
+    let (status, _) = w.app.delete(&format!("/channels/{}", updates["id"].as_str().expect("id")), &w.owner).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, guild) = w.app.get(&w.path(""), &w.owner).await;
+    assert_eq!(guild["public_updates_channel_id"], Value::Null);
+    let (status, guild) = w.app.patch(&w.path(""), &w.owner, json!({"features": []})).await;
+    assert_eq!((status, guild["features"].clone(), guild["rules_channel_id"].clone()), (StatusCode::OK, json!([]), rules["id"].clone()));
+}

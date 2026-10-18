@@ -233,8 +233,9 @@ async fn delete_channel(
     tx.commit().await?;
     // Members learn of a cleared system or rules channel through GUILD_UPDATE, after the CHANNEL_DELETE below.
     let cleared: Option<(i64,)> = sqlx::query_as(
-        "UPDATE guilds SET system_channel_id = NULLIF(system_channel_id, $2), rules_channel_id = NULLIF(rules_channel_id, $2) \
-         WHERE id = $1 AND (system_channel_id = $2 OR rules_channel_id = $2) RETURNING id",
+        "UPDATE guilds SET system_channel_id = NULLIF(system_channel_id, $2), rules_channel_id = NULLIF(rules_channel_id, $2), \
+         public_updates_channel_id = NULLIF(public_updates_channel_id, $2) \
+         WHERE id = $1 AND (system_channel_id = $2 OR rules_channel_id = $2 OR public_updates_channel_id = $2) RETURNING id",
     )
     .bind(guild_id)
     .bind(id)
