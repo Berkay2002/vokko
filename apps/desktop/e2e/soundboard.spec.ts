@@ -24,7 +24,7 @@ const effects = async (page: Page) => (await plays(page)).filter(p => p.kind ===
 async function joinGeneral(page: Page): Promise<void> {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.getByRole('link', { name: /^Sam's server/ }).click();
-  await page.getByRole('list', { name: 'Channels' }).waitFor();
+  await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
   await page.getByRole('button', { name: 'General voice channel' }).click();
   await expect(card(page).getByRole('status')).toHaveText('Voice Connected');
 }
@@ -56,6 +56,12 @@ test('play from the popout: everyone in the channel (you included) plays it, you
   const popout = page.locator('.voice-soundboard');
   await expect(popout.getByRole('region', { name: "Sam's server" }).getByRole('button', { name: 'Play Victory' })).toBeVisible();
   await expect(popout.getByRole('region', { name: 'Default Sounds' }).getByRole('button', { name: 'Play Chime' })).toBeVisible();
+
+  // At rest the name has the whole tile (the preview and star only take room on hover), and the full name is the tooltip.
+  const doorbell = popout.locator('.sb-tile-name', { hasText: 'Doorbell' });
+  await expect(doorbell).toHaveAttribute('title', 'Doorbell');
+  expect(await doorbell.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  if (process.env.VOKKO_SHOTS_DIR) await popout.screenshot({ path: `${process.env.VOKKO_SHOTS_DIR}/soundboard-1440.png` });
 
   // Search narrows every section.
   await popout.getByRole('textbox', { name: 'Find the perfect sound' }).fill('door');

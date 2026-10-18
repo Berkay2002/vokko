@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { useStore } from "../api/store";
+import { appStore, useStore } from "../api/store";
+import { loadAccount } from "../account/api";
 import { verifyEmail } from "./api";
 import { Frame, fieldErrors, tokenFromHash } from "./ui";
 
@@ -18,7 +19,11 @@ export function VerifyPage() {
       return;
     }
     verifyEmail(token).then(
-      () => setState({ status: "done" }),
+      () => {
+        setState({ status: "done" });
+        // the "verify your email" notice bar reads this
+        if (appStore.getState().token) void loadAccount();
+      },
       error => {
         const errors = fieldErrors(error);
         setState({ status: "failed", message: errors.token ?? errors.email ?? errors._ });

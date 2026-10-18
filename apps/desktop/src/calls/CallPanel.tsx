@@ -18,7 +18,7 @@ import { StremioPanel, StremioTile, useStremioPanel } from "../stremio";
 import { SpotifyPanel, SpotifyTile, useSpotifyPanel } from "../spotify";
 import { toggleSelfDeaf, toggleSelfMute } from "../voice/engine";
 import { useMedia } from "../voice/mediaStore";
-import { toggleCamera, toggleScreenShare } from "../voice/videoControls";
+import { canShareScreen, toggleCamera, toggleScreenShare } from "../voice/videoControls";
 import { hangUp, ringCall, startCall } from "./engine";
 import { outgoingRinging, useCalls } from "./store";
 
@@ -112,9 +112,11 @@ export function CallPanel({ channel }: { channel: Channel }) {
             <BarButton label={cameraOn ? "Turn off camera" : "Turn on camera"} tooltip={cameraOn ? "Turn Off Camera" : "Turn On Camera"} active={cameraOn} onClick={toggleCamera}>
               {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
             </BarButton>
-            <BarButton label={screenOn ? "Stop streaming" : "Share your screen"} tooltip={screenOn ? "Stop Streaming" : "Share Your Screen"} active={screenOn} onClick={toggleScreenShare}>
-              <MonitorUp size={20} />
-            </BarButton>
+            {(screenOn || canShareScreen()) && (
+              <BarButton label={screenOn ? "Stop streaming" : "Share your screen"} tooltip={screenOn ? "Stop Streaming" : "Share Your Screen"} active={screenOn} onClick={toggleScreenShare}>
+                <MonitorUp size={20} />
+              </BarButton>
+            )}
             <BarButton label="Watch Together" tooltip="Watch YouTube Together" active={watching} onClick={() => (watching ? undefined : openModal({ type: "watchTogether", channelId: channel.id }))}>
               <MonitorPlay size={20} />
             </BarButton>

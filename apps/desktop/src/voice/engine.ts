@@ -51,7 +51,7 @@ const defaultFactory: TransportFactory = async (kind, cb) => {
 let factory: TransportFactory = defaultFactory;
 
 /** The Linux app: WebKitGTK has no WebRTC, so the room runs in the Rust shell (voice/nativeTransport.ts). */
-const nativeVoice = (): boolean => typeof RTCPeerConnection === "undefined" && isDesktop();
+export const nativeVoice = (): boolean => typeof RTCPeerConnection === "undefined" && isDesktop();
 
 /** Tests: build transports with `make` instead of FakeTransport / LiveKitTransport (null restores the default). */
 export function setTransportFactory(make: TransportFactory | null): void {
@@ -217,9 +217,9 @@ export async function startCamera(session?: CameraSession | null): Promise<boole
   const prefs = getPrefs();
   const resolution = cameraResolutionFromPrefs(prefs);
   let capture = session ?? null;
-  if (!capture && transportKind !== "fake") {
+  if (!capture && transportKind !== "fake" && !nativeVoice()) {
     // No preview was open: capture here so the saved background applies before the first frame is published
-    // (the fake transport paints its own picture when it gets no capture).
+    // (the fake transport paints its own picture when it gets no capture; the native one captures in Rust).
     try {
       capture = await openCamera({ deviceId: prefs.cameraDevice || undefined, resolution });
       const background = parseBackground(prefs.videoBackground);

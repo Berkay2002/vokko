@@ -133,7 +133,8 @@ export async function refreshSpotify(): Promise<void> {
   try {
     const playing = await readNowPlaying();
     let next = spotifyActivity(playing, Date.now());
-    // Windows gives no track id or art: the server's catalog search fills them in, once per track (macOS already has them).
+    // Windows gives no track id or art: the server's catalog search fills them in, once per track (a failed lookup is retried on a
+    // later poll, and the changed sync_id and art go out then); macOS already has them.
     const artist = cleanName(playing?.artists[0] ?? "");
     if (next?.details && !next.sync_id && artist) next = withCatalog(next, await lookUpTrack(next.details, artist));
     const now = useActivity.getState();

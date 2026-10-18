@@ -5,7 +5,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::{delete, get};
 use serde::Deserialize;
-use vokko_protocol::api::{Message, Snowflake};
+use vokko_protocol::api::{GatewayEvent, Message, RecentMentionDelete, Snowflake};
 
 use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
@@ -67,6 +67,8 @@ async fn list(State(state): State<AppState>, AuthUser(user_id): AuthUser, ApiQue
 }
 
 /// Removes a message from the caller's recent mentions. Always 204 (an unknown id too), so the answer says nothing about other channels.
+/// Every call is echoed as RECENT_MENTION_DELETE to the caller's sessions so their other devices drop the row (unknown ids too, so the
+/// event says nothing either).
 async fn dismiss(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(id): Path<String>) -> ApiResult<StatusCode> {
     let message_id = parse_id(&id).ok_or_else(ApiErr::unknown_message)?;
     sqlx::query("INSERT INTO mention_dismissals (user_id, message_id) SELECT $1, id FROM messages WHERE id = $2 ON CONFLICT DO NOTHING")
@@ -74,5 +76,7 @@ async fn dismiss(State(state): State<AppState>, AuthUser(user_id): AuthUser, Pat
         .bind(message_id)
         .execute(&state.db)
         .await?;
+    let event = GatewayEvent::RecentMentionDelete(RecentMentionDelete { message_id: Snowflake::from(message_id) });
+    state.hub.send(&[user_id], &event);
     Ok(StatusCode::NO_CONTENT)
 }

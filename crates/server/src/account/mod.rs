@@ -87,6 +87,7 @@ async fn instance(State(state): State<AppState>) -> Json<InstanceInfo> {
         min_age: config.min_age,
         terms: config.terms(),
         terms_url: config.terms_url.clone(),
+        email_verification: state.accounts.mailer.delivers(),
     })
 }
 

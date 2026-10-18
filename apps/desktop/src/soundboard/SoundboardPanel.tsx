@@ -33,7 +33,9 @@ function SoundTile({ sound, disabled, favorite, onError }: { sound: SoundboardSo
             {sound.emoji_name}
           </span>
         )}
-        <span className="sb-tile-name">{sound.name}</span>
+        <span className="sb-tile-name" title={sound.name}>
+          {sound.name}
+        </span>
       </button>
       <button
         type="button"

@@ -1,13 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type { RunningProcess } from "../desktop/games";
+import type { NowPlaying } from "../desktop/spotify";
+import { ApiRequestError } from "../api/errors";
 
-const mocks = vi.hoisted(() => ({ processes: [] as RunningProcess[], resend: vi.fn() }));
+const mocks = vi.hoisted(() => ({ processes: [] as RunningProcess[], resend: vi.fn(), playing: null as NowPlaying | null, search: vi.fn() }));
 const fakeApp = vi.hoisted(() => ({ store: null as unknown }));
 
 vi.mock("../desktop", () => ({ isDesktop: () => true }));
 vi.mock("../desktop/games", async importOriginal => ({ ...(await importOriginal<typeof import("../desktop/games")>()), listProcesses: async () => mocks.processes }));
 vi.mock("../shell/actions", () => ({ resendOwnStatus: mocks.resend }));
+vi.mock("../desktop/spotify", () => ({ readNowPlaying: async () => mocks.playing }));
+vi.mock("../spotify/api", () => ({ search: mocks.search }));
 // Only `connection` matters here; the real gateway drives it in activity.reconnect.test.ts.
 vi.mock("../api/store", async () => {
   const { create: make } = await import("zustand");
@@ -16,7 +20,8 @@ vi.mock("../api/store", async () => {
   return { appStore: store };
 });
 
-import { activitiesFor, addRegisteredGame, removeRegisteredGame, setShareActivity, startGameDetection, useActivity } from "./index";
+import { activitiesFor, addRegisteredGame, refreshSpotify, removeRegisteredGame, setShareActivity, startGameDetection, useActivity } from "./index";
+import { resetTrackLookups } from "./spotify";
 import { formatClock, formatPlaytime, playingActivity } from "./format";
 import { getOwnActivities } from "./own";
 
@@ -145,6 +150,41 @@ describe("presence sync", () => {
       await tick(15_000);
     }
     expect(mocks.resend.mock.calls.length).toBeLessThanOrEqual(5);
+  });
+});
+
+describe("Spotify on Windows", () => {
+  afterEach(() => {
+    mocks.playing = null;
+    mocks.search.mockReset();
+    resetTrackLookups();
+    useActivity.setState({ spotify: false, listening: null });
+  });
+
+  it("shows the album art once a catalog lookup that failed succeeds on a later poll", async () => {
+    const IMAGE = "ab67616d00001e02e0f5c2a1b3d4e5f60718293a";
+    mocks.playing = { title: "One More Time", artists: ["Daft Punk"], album: "Discovery", track_id: null, image_id: null, position_ms: 0, duration_ms: 320_000 };
+    mocks.search.mockRejectedValueOnce(new ApiRequestError(502, { code: 0, message: "Bad Gateway" }));
+    mocks.search.mockResolvedValue({ tracks: [{ uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC", title: "One More Time", artists: ["Daft Punk"], art: IMAGE, duration_ms: 320_000, explicit: false }], albums: [], artists: [], playlists: [] });
+    useActivity.setState({ spotify: true, listening: null });
+
+    await refreshSpotify();
+    const first = useActivity.getState().listening;
+    expect(first).toMatchObject({ details: "One More Time", state: "Daft Punk" });
+    expect(first?.assets).toBeUndefined();
+
+    // the next polls of the same moment, inside the backoff: nothing asked, nothing changed
+    vi.advanceTimersByTime(5_000);
+    mocks.playing = { ...mocks.playing, position_ms: 5_000 };
+    await refreshSpotify();
+    expect(mocks.search).toHaveBeenCalledTimes(1);
+    expect(useActivity.getState().listening).toBe(first);
+
+    vi.advanceTimersByTime(25_000);
+    mocks.playing = { ...mocks.playing, position_ms: 30_000 };
+    await refreshSpotify();
+    expect(mocks.search).toHaveBeenCalledTimes(2);
+    expect(useActivity.getState().listening).toMatchObject({ sync_id: "4uLU6hMCjMI75M1A2tKUQC", assets: { large_image: `spotify:${IMAGE}` } });
   });
 });
 

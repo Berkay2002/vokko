@@ -25,6 +25,7 @@ import { ServerRail } from "./ServerRail";
 import { NativeMenuBridge } from "./NativeMenuBridge";
 import { TitleBar } from "./TitleBar";
 import { StaleChunkBanner } from "./staleChunks";
+import { VerifyEmailNotice } from "../account/VerifyEmailNotice";
 import { UserPanel } from "./UserPanel";
 import { StageView, toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
 import { inChatPanel, useShortcut } from "../keyboard";
@@ -277,7 +278,10 @@ export function AppShell() {
       <NativeMenuBridge />
       <TitleBar />
       <StaleChunkBanner />
-      <div className="app-body">
+      <VerifyEmailNotice />
+      {/* Phone list page: the chat behind it is hidden, so the rail and list are the page's main content and need its h1. */}
+      <div className="app-body" role={narrow && navOpen ? "main" : undefined} aria-label={narrow && navOpen ? (guild?.name ?? "Direct Messages") : undefined}>
+        {narrow && navOpen && <h1 className="sr-only">{guild?.name ?? "Direct Messages"}</h1>}
         <Rail />
         {/* Discord's names for the list column; it holds the user panel too. */}
         <nav className="sidebar" aria-label={guild ? `${guild.name} (server)` : "Private channels"} onClick={leaveListOnSameRoute}>
@@ -311,7 +315,9 @@ export function AppShell() {
                         <Messages key={channel.id} channelId={channel.id} />
                       </>
                     ) : (
-                      <VoiceChannelPage key={channel.id} channel={channel} />
+                      <Measure id="call">
+                        <VoiceChannelPage key={channel.id} channel={channel} />
+                      </Measure>
                     )}
                   </AgeGate>
                 </div>

@@ -30,7 +30,7 @@ async function openGuild(page: Page): Promise<void> {
   await page.route(/^https:\/\/(images|episodes)\.metahub\.space\/|^https:\/\/m\.media-amazon\.com\//, route => route.fulfill({ contentType: 'image/svg+xml', body: poster(route.request().url()) }));
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.getByRole('link', { name: /^Sam's server/ }).click();
-  await page.getByRole('list', { name: 'Channels' }).waitFor();
+  await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
   await page.locator('.sidebar-scroller').evaluate(el => { el.scrollTop = el.scrollHeight; });
 }
 

@@ -5,6 +5,7 @@
 // stop, votes to skip, and may queue up to WATCH_TOGETHER_QUEUE_PER_USER videos and take their own back out.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNow } from "../shell/ActivityLine";
 import { ListVideo, Maximize2, Minimize2, Pause, Play, SkipForward, Square, Tv, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import { WATCH_TOGETHER_QUEUE_PER_USER, type Snowflake, type WatchTogetherState } from "../api/types";
@@ -33,15 +34,6 @@ function readVolume(): number {
   } catch {
     return 60;
   }
-}
-
-function useNow(everyMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), everyMs);
-    return () => clearInterval(id);
-  }, [everyMs]);
-  return now;
 }
 
 /** Wires the iframe player to the shared state. */

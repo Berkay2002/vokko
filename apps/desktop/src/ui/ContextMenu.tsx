@@ -412,9 +412,16 @@ export function ContextMenuHost() {
   useEffect(() => {
     if (!open || phone) return;
     const close = () => hide();
-    // A long menu scrolls inside itself (.context-menu max-height); only a scroll elsewhere moves its anchor.
+    // A long menu scrolls inside itself (.context-menu max-height); only a scroll elsewhere moves its anchor. A pane beside the
+    // anchor scrolling (a call chat following new messages under a menu on a stream tile) leaves it where it was.
     const onScroll = (event: Event) => {
-      if (!(event.target instanceof Element && event.target.closest(".context-menu"))) hide();
+      const target = event.target;
+      if (target instanceof Element) {
+        if (target.closest(".context-menu")) return;
+        const r = target.getBoundingClientRect();
+        if (x < r.left || x > r.right || y < r.top || y > r.bottom) return;
+      }
+      hide();
     };
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
@@ -424,7 +431,7 @@ export function ContextMenuHost() {
       window.removeEventListener("blur", close);
       document.removeEventListener("scroll", onScroll, true);
     };
-  }, [open, hide, phone]);
+  }, [open, hide, phone, x, y]);
   if (!open) return null;
   if (phone) return <MenuSheet key={`${x}:${y}`} items={items} title={title} onClose={hide} />;
   return createPortal(

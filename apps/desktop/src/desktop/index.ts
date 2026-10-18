@@ -4,7 +4,7 @@ import { initStreamerMode } from "./streamer";
 import { initUpdater } from "./updater";
 import { isDesktop } from "./tauri";
 
-export { isDesktop } from "./tauri";
+export { isDesktop, nativeVoice } from "./tauri";
 export { DEFAULT_DESKTOP_PREFS, getDesktopPrefs, setDesktopPrefs, type DesktopPrefs } from "./prefs";
 export { getAutostart, setAutostart } from "./autostart";
 export { setTrayUnread } from "./tray";

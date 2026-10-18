@@ -32,7 +32,7 @@ export function accountState(userId: string): AccountState {
 }
 
 /** Instance settings; tests change them through `__vokkoMockAccounts.instance()`. */
-export const instance: InstanceInfo = { registration: "open", min_age: 13, terms: null, terms_url: null };
+export const instance: InstanceInfo = { registration: "open", min_age: 13, terms: null, terms_url: null, email_verification: true };
 
 export interface MockMail {
   to: string;

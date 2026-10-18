@@ -25,7 +25,7 @@ describe('unreadRows (Inbox > Unreads)', () => {
     expect(rows[0]?.mentions).toBe(2);
   });
 
-  it('drops a muted channel or one in a muted category unless it has mentions', () => {
+  it('drops a muted channel or one in a muted category, mentions or not', () => {
     const muted = new Set(['10', 'cat']);
     const rows = unreadRows(view([
       channel('10', '100'),
@@ -33,7 +33,7 @@ describe('unreadRows (Inbox > Unreads)', () => {
       channel('12', '120', { parent_id: 'cat' }),
       channel('13', '130'),
     ], [read('12', '1', 1)]), id => muted.has(id));
-    expect(rows.map(r => r.channel.id)).toEqual(['13', '12']);
+    expect(rows.map(r => r.channel.id)).toEqual(['13']);
   });
 });
 

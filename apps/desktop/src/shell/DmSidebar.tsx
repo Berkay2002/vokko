@@ -122,7 +122,7 @@ export function DmSidebar() {
           </div>
         </nav>
         <div className="dm-section-header">
-          <span>Direct Messages</span>
+          <span role="heading" aria-level={2}>Direct Messages</span>
           <Tooltip content="Create DM" side="top">
             <button type="button" className="dm-create" aria-label="Create DM" onClick={() => openModal({ type: "createDM" })}>
               <Plus size={16} />

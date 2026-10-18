@@ -7,7 +7,7 @@ import { messageSnippet } from './helpers';
 import { jumpToMessage } from './jump';
 import { sortReminders } from './lists';
 import { Avatar, dmName, request, useStore } from './shell';
-import { dismissReminder, loadBookmarks, loadReminders, removeBookmarkOf, useMedia } from './store';
+import { dismissReminder, dropMention, loadBookmarks, loadReminders, removeBookmarkOf, useMedia } from './store';
 
 /** "#general · Sam's server" / "Direct message with alice" for a message, from what the client knows. */
 export function useWhere(message: Pick<Message, 'channel_id' | 'guild_id'> | null): string {
@@ -113,7 +113,9 @@ export function MentionList({ onNavigate }: { onNavigate(): void }) {
   // The server being viewed (/channels/{guild}/...), read once per mount: the popout remounts the tab each time it opens.
   const [guildId] = useState(() => /^\/channels\/(\d+)/.exec(window.location.pathname)?.[1] ?? null);
   const [filters, setFilters] = useState<MentionFilters>({ thisServer: false, everyone: true, roles: true });
-  const [items, setItems] = useState<Message[] | null>(null);
+  const items = useMedia(s => s.mentions);
+  const setItems = (next: Message[] | null | ((current: Message[] | null) => Message[])) =>
+    useMedia.setState(s => ({ mentions: typeof next === 'function' ? next(s.mentions) : next }));
   const [more, setMore] = useState(false);
   const [failed, setFailed] = useState(false);
   const scopeGuild = filters.thisServer ? guildId : null;
@@ -138,7 +140,7 @@ export function MentionList({ onNavigate }: { onNavigate(): void }) {
     }, () => setMore(false));
   };
   const remove = (id: string) => {
-    setItems(current => current?.filter(m => m.id !== id) ?? null);
+    dropMention(id);
     void request('DELETE', `/users/@me/mentions/${id}`).catch(() => undefined);
   };
   const toggle = (key: keyof MentionFilters, label: string) => (

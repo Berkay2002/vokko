@@ -46,6 +46,11 @@ test('register: Discord fields, live username check, strength meter, date of bir
   await page.getByLabel('Year').selectOption('1995');
   await page.getByRole('button', { name: 'Continue', exact: true }).click();
   await expect(page).toHaveURL(/\/channels\/@me/);
+  // the new account is asked to verify, in Discord's notice bar
+  const notice = page.getByRole('status').filter({ hasText: 'Please check your email' });
+  await expect(notice).toBeVisible();
+  await notice.getByRole('button', { name: 'Resend' }).click();
+  await expect(notice).toContainText('we sent a new one');
 
   const mail = await lastMail(page, 'newbie@example.test');
   expect(mail.subject).toBe('Verify your email address');
@@ -57,6 +62,7 @@ test('register: Discord fields, live username check, strength meter, date of bir
   // links are single use
   await page.getByRole('link', { name: 'Continue to Vokko' }).click();
   await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible();
+  await expect(notice).toHaveCount(0);
   await goInApp(page, `${link.pathname}${link.hash}`);
   await expect(page.getByRole('heading', { name: 'Verification failed' })).toBeVisible();
 });

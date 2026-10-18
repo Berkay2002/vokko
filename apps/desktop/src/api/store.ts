@@ -722,12 +722,13 @@ export function channelMentionCount(s: AppState, channelId: Snowflake): number {
   return s.readStates[channelId]?.mention_count ?? 0;
 }
 
-export function guildUnread(s: AppState, guildId: Snowflake): { unread: boolean; mentions: number } {
+/** `isMuted` (a channel or category id): muted channels drop out of the unread half, their mentions still count (as in Discord). */
+export function guildUnread(s: AppState, guildId: Snowflake, isMuted?: (id: Snowflake) => boolean): { unread: boolean; mentions: number } {
   let unread = false;
   let mentions = 0;
   for (const channel of Object.values(s.channels)) {
     if (channel.guild_id !== guildId) continue;
-    if (isChannelUnread(s, channel.id)) unread = true;
+    if (!unread && isChannelUnread(s, channel.id) && !(isMuted && (isMuted(channel.id) || (channel.parent_id != null && isMuted(channel.parent_id))))) unread = true;
     mentions += channelMentionCount(s, channel.id);
   }
   return { unread, mentions };

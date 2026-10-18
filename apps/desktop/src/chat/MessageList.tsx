@@ -101,12 +101,22 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     window.addEventListener('pointerup', up);
     return () => window.removeEventListener('pointerup', up);
   }, []);
+  // A trim remounts the list (new windowId): only while it follows the bottom, and never under an edit draft, an open picker or
+  // menu, or a text selection in the list.
+  const following = useRef(false);
+  const editing = useRef(editingId);
+  useEffect(() => { editing.current = editingId; }, [editingId]);
+  useEffect(() => {
+    messageStore.setFollowing(channelId, () => following.current && !editing.current && !interacting(scroller.current));
+    return () => { following.current = false; messageStore.setFollowing(channelId, null); };
+  }, [channelId]);
   const onBottom = useCallback((value: boolean) => {
     if (value) stick.current = true;
     else if (pointerDown.current || performance.now() - lastGesture.current < 500) stick.current = false;
     setAtBottom(value);
     if (value) setSeenBottom(true);
     onAtBottomChange(value);
+    following.current = value;
   }, [onAtBottomChange]);
 
   useEffect(() => { stick.current = true; setSeenBottom(false); setAtBottom(true); setActiveId(null); }, [channelId]);
@@ -295,3 +305,10 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     </div>}
   </div>;
 });
+
+/** A text selection inside the list, or a popout, menu or sheet open anywhere (a row may own it). */
+function interacting(list: HTMLElement | null): boolean {
+  const sel = document.getSelection();
+  if (list && sel && !sel.isCollapsed && list.contains(sel.anchorNode)) return true;
+  return !!document.querySelector('.popout, .context-menu, .sheet-layer');
+}

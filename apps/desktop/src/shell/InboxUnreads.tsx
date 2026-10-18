@@ -12,7 +12,7 @@ import { messageSnippet } from "../media/helpers";
 import { jumpToMessage } from "../media/jump";
 import { markChannelRead, markChannelsRead } from "./actions";
 import { Avatar, GuildIcon } from "./Avatar";
-import { isMutedAt, useLocalState, useMuteLapse } from "./localState";
+import { mutedTest, useMutedUntil } from "./localState";
 import { dmPath, go, guildPath } from "./nav";
 
 /** How many unread messages a card previews. */
@@ -29,13 +29,13 @@ type ReadView = Parameters<typeof isChannelUnread>[0];
 
 /**
  * Unread channels you can open, newest activity first. Categories never count; voice channels do (their text chat). A muted
- * channel (or one in a muted category) only shows while it has mentions, as the channel list and rail treat it.
+ * channel (or one in a muted category) is quiet here, as in its channel row; its mentions live on the Mentions tab.
  */
 export function unreadRows(state: ReadView, muted: (id: Snowflake) => boolean = () => false): UnreadRow[] {
   return Object.values(state.channels)
     .filter(c => c.type !== ChannelType.GuildCategory && isChannelUnread(state, c.id))
+    .filter(c => !(muted(c.id) || (c.parent_id != null && muted(c.parent_id))))
     .map(channel => ({ channel, mentions: channelMentionCount(state, channel.id) }))
-    .filter(r => r.mentions > 0 || !(muted(r.channel.id) || (r.channel.parent_id != null && muted(r.channel.parent_id))))
     .sort((a, b) => compareIds(b.channel.last_message_id as Snowflake, a.channel.last_message_id as Snowflake));
 }
 
@@ -140,9 +140,8 @@ function UnreadCard({ channel, mentions, onNavigate }: UnreadRow & { onNavigate(
 export function UnreadList({ onNavigate }: { onNavigate(): void }) {
   const channels = useStore(s => s.channels);
   const readStates = useStore(s => s.readStates);
-  const local = useLocalState();
-  const lapses = useMuteLapse(Object.values(local.mutedUntil));
-  const rows = useMemo(() => unreadRows({ channels, readStates } as ReadView, id => isMutedAt(local, id)), [channels, readStates, local, lapses]);
+  const mutedUntil = useMutedUntil();
+  const rows = useMemo(() => unreadRows({ channels, readStates } as ReadView, mutedTest({ mutedUntil })), [channels, readStates, mutedUntil]);
   if (rows.length === 0) {
     return (
       <div className="inbox-empty">

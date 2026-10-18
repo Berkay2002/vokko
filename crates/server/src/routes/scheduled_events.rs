@@ -284,8 +284,13 @@ impl Fields {
                 match self.channel_id {
                     Some(channel) if check_channel => {
                         let access = access::channel_access(state, user_id, channel).await.map_err(|_| ApiErr::invalid("channel_id", "Unknown channel."))?;
-                        if access.channel.guild_id != Some(guild) || access.channel.channel_type() != ChannelType::GuildVoice {
-                            return Err(ApiErr::invalid("channel_id", "Must be a voice channel of this guild."));
+                        // Stage events happen in a stage channel, voice events in a voice channel (as in Discord).
+                        let (wanted, message) = match self.entity_type {
+                            ScheduledEventEntityType::StageInstance => (ChannelType::GuildStage, "Must be a stage channel of this guild."),
+                            _ => (ChannelType::GuildVoice, "Must be a voice channel of this guild."),
+                        };
+                        if access.channel.guild_id != Some(guild) || access.channel.channel_type() != wanted {
+                            return Err(ApiErr::invalid("channel_id", message));
                         }
                         access.require(CONNECT)?;
                     }

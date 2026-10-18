@@ -18,6 +18,7 @@ import {
   type User,
 } from "../types";
 import { guildPermsOf } from "./access";
+import { accountState, instance } from "./accounts";
 import { db, nextId, sortedMessages, userOf, type MockChannel, type MockGuild } from "./db";
 import { MISSING_PERMISSIONS, fail, requireGuildMember } from "./ops";
 import { ID, currentAuditReason, route, str } from "./router";
@@ -310,11 +311,12 @@ export function checkSend(channel: MockChannel, userId: string, content: string)
   if (!guild || !record) return;
   const level = guild.guild.verification_level ?? VerificationLevel.None;
   const admin = hasBit(guildPermsOf(guild.guild.id, userId), Perm.ADMINISTRATOR);
-  if (level >= VerificationLevel.Medium && guild.guild.owner_id !== userId && record.roles.length === 0 && !admin) {
+  if (level >= VerificationLevel.Low && guild.guild.owner_id !== userId && record.roles.length === 0 && !admin) {
     const now = Date.now();
-    const accountOk = now - snowflakeToTimestamp(userId) >= 5 * 60_000;
-    const memberOk = now - Date.parse(record.joined_at) >= 10 * 60_000;
-    if (!accountOk || (level >= VerificationLevel.High && !memberOk)) fail(403, 50009, "Channel verification level is too high for you to gain access");
+    const emailOk = !instance.email_verification || accountState(userId).email_verified;
+    const accountOk = level < VerificationLevel.Medium || now - snowflakeToTimestamp(userId) >= 5 * 60_000;
+    const memberOk = level < VerificationLevel.High || now - Date.parse(record.joined_at) >= 10 * 60_000;
+    if (!emailOk || !accountOk || !memberOk) fail(403, 50009, "Channel verification level is too high for you to gain access. Verify your email to talk here.");
   }
   checkAutomod(channel, userId, content);
 }

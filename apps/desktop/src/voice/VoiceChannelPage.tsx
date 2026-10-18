@@ -28,7 +28,7 @@ import { StremioPanel, StremioTile, STREMIO_TILE_ID, useStremioPanel } from "../
 import { SpotifyPanel, SpotifyTile, SPOTIFY_TILE_ID, useSpotifyPanel } from "../spotify";
 import { GAME_TILE_ID, GameTile } from "../games";
 import { ActivityShelf } from "./ActivityShelf";
-import { openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
+import { canShareScreen, openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
 import { isViewerQuality, nearestChoice, viewerChoices, viewerQualityLabel, type ViewerQuality } from "./video/options";
 import "./video/video.css";
 
@@ -295,9 +295,11 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
         </BarButton>
       </div>
       <div className="voice-bar-group">
-        <BarButton label={screenOn ? "Stop streaming" : "Share your screen"} tooltip={screenOn ? "Stop Streaming" : "Share Your Screen"} active={screenOn} onClick={toggleScreenShare}>
-          <MonitorUp size={20} />
-        </BarButton>
+        {(screenOn || canShareScreen()) && (
+          <BarButton label={screenOn ? "Stop streaming" : "Share your screen"} tooltip={screenOn ? "Stop Streaming" : "Share Your Screen"} active={screenOn} onClick={toggleScreenShare}>
+            <MonitorUp size={20} />
+          </BarButton>
+        )}
         <BarButton
           label="Watch Together"
           tooltip={watching ? "Show Watch Together" : "Watch YouTube Together"}

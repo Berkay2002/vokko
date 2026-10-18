@@ -190,3 +190,36 @@ at most 10 frames). That hides the one frame of rows placed from estimated heigh
 | First open (all three) | 7-8 frames, 100-136 ms | 4-6 frames, 65-83 ms |
 | Frames with rows in the wrong place | 0 | 0 |
 | #firehose: newest row stays put for 30 frames after opening | 4-5 of 9 reopens | 9 of 9 |
+
+## Long calls (2026-10-18): an hour in a call
+
+Harness: `SOAK_MINUTES=60 SOAK_LABEL=<name> npx playwright test -c e2e/soak.config.ts` (apps/desktop; perf build on port 1446,
+results in `perf-results/soak-<name>.json` + a 30 s `.cpuprofile` at half time). Mock backend in headless Chromium: Sam in
+General with four others (speaking rings toggling every 1.5 s), Bob's camera, Alice's screen share watched, call chat open,
+a call-chat message every 3 s, #general every 7 s, typing, presence, mute toggles, a leave/rejoin every 5 min and a stream
+unwatch/rewatch every 10 min. Samples every minute; heap is after a forced GC, CPU and RAM cover every browser process
+(renderer in brackets). Run at below-normal priority on the PC (desktop CPU).
+
+| min | heap MB before / after | DOM nodes | listeners | call msgs loaded | CPU % before / after | RAM MB before / after |
+|---|---|---|---|---|---|---|
+| 0  | 17.3 / 17.3 | 2527 / 2527 | 859 / 860 | 20 / 20     | 14.9 (8.6) / 11.3 (6.6) | 212 (116) / 219 (126) |
+| 15 | 18.1 / 18.1 | 1780 / 1781 | 678 / 679 | 320 / 219   | 11.1 (6.9) / 9.2 (5.9)  | 216 (122) / 213 (122) |
+| 30 | 19.4 / 19.2 | 1780 / 1781 | 678 / 679 | 620 / 216   | 11.7 (7.8) / 10.5 (7.2) | 223 (129) / 218 (126) |
+| 60 | 20.0 / 19.7 | 1780 / 1781 | 678 / 679 | 1220 / 210  | 9.4 (5.9) / 8.9 (5.7)   | 222 (128) / 220 (128) |
+
+Minute 5–60 averages: CPU 10.4 → 9.2 %, renderer 6.5 → 5.9 %. React commits per minute (app / call): ~200 / ~140 both runs.
+
+Findings: no DOM, listener or `<video>` leak (flat from minute 5), the 30 s profile is ~95 % idle. What changed:
+- A call chat (any channel) left open while it follows the bottom keeps at most `LIVE_MAX` (300) messages: past it the oldest
+  are cut to the newest 200 and the list remounts at the bottom; scrolling up loads them again (`messageState.trimOldest`,
+  e2e/live-window.spec.ts). Before, it grew by ~1200 messages an hour.
+- A repeated SFU speaker list leaves the voice store untouched (no selector pass for every subscriber).
+- Clocks (call timer, stream card, activity lines, Watch Together / Stremio / Spotify tiles) skip ticks while the page is
+  hidden and catch up when shown; one shared `useNow`.
+- A context menu stays open when a pane beside its anchor scrolls (the call chat following a new message closed the stream
+  quality menu); only a scroll that moves the anchor closes it.
+
+Not fixed: the remaining ~2.4 MB/h heap growth is most likely the mock backend's own message store (all mock state lives in the page);
+`useChannelVoiceStates` sorts every voice state per subscriber on each store change (cheap at this size); the Composer
+re-renders on each new message. Not covered: the real WebView2 app with LiveKit (video decode CPU), measured here only
+through the mock in headless Chromium.

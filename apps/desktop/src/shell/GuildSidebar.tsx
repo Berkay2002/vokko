@@ -20,6 +20,7 @@ import { usePermissions } from "./usePermissions";
 import { openModal } from "./modalStore";
 import { NsfwHash } from "../guild/icons";
 import { useChannelDrag } from "../guild/useChannelDrag";
+import { useChannelJump } from "./ChannelJumpBar";
 import "../guild/guild.css";
 
 const COLLAPSED_KEY = "vokko.collapsedCategories";
@@ -202,6 +203,7 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
   const [scrollTop, setScrollTop] = useState(0);
   const banner = guild.banner ? resolveUrl(guild.banner) : null;
   const bannerFade = Math.min(1, scrollTop / (BANNER_HEIGHT - 49));
+  const jump = useChannelJump();
 
   return (
     <div className={`sidebar-list guild-sidebar${banner ? " with-banner" : ""}`}>
@@ -212,7 +214,8 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
           <MembersQuickLink guild={guild} />
         </>
       )}
-      <div className="sidebar-scroller channel-scroller" onScroll={banner ? e => setScrollTop(e.currentTarget.scrollTop) : undefined}>
+      <div className="sidebar-scroller channel-scroller" ref={jump.ref} onScroll={banner ? e => setScrollTop(e.currentTarget.scrollTop) : undefined}>
+        {jump.top}
         {banner && (
           <>
             <div className="guild-banner" style={{ backgroundImage: `url("${banner}")`, opacity: 1 - bannerFade }} aria-hidden="true" />
@@ -257,7 +260,7 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
                     )}
                   </div>
                 )}
-                <ul className="category-channels" ref={el => drag.markRows(el, visible)}>
+                <ul className="category-channels" aria-label={category?.name ?? undefined} ref={el => drag.markRows(el, visible)}>
                   {visible.map(c =>
                     c.type === ChannelType.GuildVoice ? (
                       <MemoVoiceChannelRow key={c.id} channel={c} guild={guild} />
@@ -270,6 +273,7 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
             );
           })}
         </ul>
+        {jump.bottom}
       </div>
     </div>
   );

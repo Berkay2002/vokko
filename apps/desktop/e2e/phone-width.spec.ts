@@ -142,6 +142,12 @@ test('friends: every tab is on screen (they wrap under the title) and Add Friend
   await expect(header.getByRole('button', { name: 'Add Friend' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.add-friend-input')).toBeVisible();
   await inside(page.locator('.add-friend-input'));
+  // the username field keeps the full width; Send Friend Request sits under it
+  const field = (await page.getByRole('textbox', { name: 'Username' }).boundingBox())!;
+  const send = (await page.getByRole('button', { name: 'Send Friend Request' }).boundingBox())!;
+  expect(field.width).toBeGreaterThan(300);
+  expect(send.y).toBeGreaterThanOrEqual(field.y + field.height);
+  await shot(page, 'add-friend-390');
   await header.getByRole('tab', { name: 'Blocked' }).tap();
   await expect(header.getByRole('tab', { name: 'Blocked' })).toHaveAttribute('aria-selected', 'true');
 });

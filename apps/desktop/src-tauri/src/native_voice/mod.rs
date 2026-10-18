@@ -6,6 +6,7 @@
 
 mod audio;
 mod gate;
+mod outgoing;
 mod video;
 
 use audio::{AudioDevice, Capture, Params, Playback, Shared};
@@ -18,6 +19,7 @@ use livekit::webrtc::audio_source::{AudioSourceOptions, RtcAudioSource};
 use livekit::webrtc::audio_stream::native::NativeAudioStream;
 use livekit::webrtc::prelude::AudioFrame;
 use livekit::webrtc::stats::RtcStats;
+use outgoing::{Kind, Outgoing, StartError, VideoPlan};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -115,6 +117,10 @@ pub enum NativeEvent {
         user_id: String,
         live: bool,
     },
+    /// Our camera / screen share capture stopped on its own (camera unplugged, the compositor's "stop sharing").
+    LocalEnded {
+        source: &'static str,
+    },
 }
 
 #[derive(Serialize)]
@@ -140,6 +146,40 @@ struct Session {
     tasks: Vec<JoinHandle<()>>,
     /// Remote microphone readers by track sid.
     readers: Arc<std::sync::Mutex<HashMap<String, JoinHandle<()>>>>,
+    /// Our camera and screen share.
+    captures: Arc<std::sync::Mutex<Captures>>,
+}
+
+/// Our live captures, and the stop flags of ones still opening (the portal's picker waits on the user), so a stop, a
+/// newer start or the room going away cancels those too.
+#[derive(Default)]
+struct Captures {
+    live: Vec<Outgoing>,
+    pending: Vec<(Kind, Arc<AtomicBool>)>,
+}
+
+impl Captures {
+    /// Cancels the pending captures of `kind` (None: every kind) and hands back the live ones to unpublish; dropping one
+    /// stops its capture.
+    fn take(&mut self, kind: Option<Kind>) -> Vec<Outgoing> {
+        let matches = |k: Kind| kind.is_none_or(|kind| kind == k);
+        for (_, stop) in self.pending.iter().filter(|(k, _)| matches(*k)) {
+            stop.store(true, Ordering::Relaxed);
+        }
+        self.pending.retain(|(k, _)| !matches(*k));
+        let (taken, kept) = std::mem::take(&mut self.live).into_iter().partition(|o| matches(o.kind));
+        self.live = kept;
+        taken
+    }
+}
+
+/// Stops all our captures (the device and the portal session are released as their threads exit) and forgets their
+/// self-view frames.
+fn stop_captures(captures: &std::sync::Mutex<Captures>, videos: &Videos) {
+    let taken = captures.lock().map(|mut captures| captures.take(None)).unwrap_or_default();
+    for outgoing in taken {
+        videos.remove(&outgoing.publication.sid().to_string());
+    }
 }
 
 pub struct NativeVoice {
@@ -350,6 +390,7 @@ impl Session {
                 handle.abort();
             }
         }
+        stop_captures(&self.captures, videos);
         shared.clear_voices();
         videos.clear();
         let _ = self.room.close().await;
@@ -439,8 +480,15 @@ async fn connect(state: &NativeVoice, url: String, token: String, init: ConnectI
     let leaving = Arc::new(AtomicBool::new(false));
     let readers = Arc::new(std::sync::Mutex::new(HashMap::new()));
     let videos = state.videos.clone();
-    let mut tasks =
-        vec![tauri::async_runtime::spawn(room_loop(room.clone(), rx, shared.clone(), videos.clone(), events.clone(), leaving.clone(), readers.clone()))];
+    let captures = Arc::new(std::sync::Mutex::new(Captures::default()));
+    let room_events = room_loop(room.clone(), rx, shared.clone(), videos.clone(), events.clone(), leaving.clone(), readers.clone());
+    let (loop_captures, loop_videos) = (captures.clone(), videos.clone());
+    let mut tasks = vec![tauri::async_runtime::spawn(async move {
+        room_events.await;
+        // The room is gone. A non-final disconnect keeps the session for the page's retry, but not our camera (its light)
+        // or screen share.
+        stop_captures(&loop_captures, &loop_videos);
+    })];
     let ping_room = room.clone();
     let ping_events = events.clone();
     tasks.push(tauri::async_runtime::spawn(async move {
@@ -449,7 +497,8 @@ async fn connect(state: &NativeVoice, url: String, token: String, init: ConnectI
             let _ = ping_events.send(NativeEvent::Ping { ms: ping_ms(&ping_room).await });
         }
     }));
-    let mut session = Session { room: room.clone(), events: events.clone(), settings: init.settings, playback: None, mic: None, leaving, tasks, readers };
+    let mut session =
+        Session { room: room.clone(), events: events.clone(), settings: init.settings, playback: None, mic: None, leaving, tasks, readers, captures };
     session.restart_playback(&shared);
     for participant in room.remote_participants().values() {
         for publication in participant.track_publications().values() {
@@ -505,6 +554,61 @@ async fn set_user_volume(state: &NativeVoice, user_id: String, volume: f32) -> R
 }
 
 /// Runs the subscription policy again for one user's publications.
+/// Stops our camera / screen share, then starts it again with `plan` when there is one. Answers the local preview's
+/// frame key, or "cancelled" (portal picker closed), "permission_denied", "not_found", "failed".
+async fn set_video(state: &NativeVoice, kind: Kind, plan: Option<VideoPlan>) -> Result<Option<String>, String> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let (room, events, captures, old) = {
+        let slot = state.session.lock().await;
+        let Some(session) = slot.as_ref() else { return if plan.is_some() { Err("failed".into()) } else { Ok(None) } };
+        let mut captures = session.captures.lock().map_err(|_| "failed")?;
+        let old = captures.take(Some(kind));
+        if plan.is_some() {
+            captures.pending.push((kind, stop.clone()));
+        }
+        drop(captures);
+        (session.room.clone(), session.events.clone(), session.captures.clone(), old)
+    };
+    for old in old {
+        let sid = old.publication.sid();
+        state.videos.remove(&sid.to_string());
+        drop(old);
+        let _ = room.local_participant().unpublish_track(&sid).await;
+    }
+    let Some(plan) = plan else { return Ok(None) };
+    // No session lock while the capture opens: the portal's picker waits for the user.
+    let ended = move || {
+        let _ = events.send(NativeEvent::LocalEnded { source: kind.name() });
+    };
+    let started = outgoing::start(&room, kind, plan, stop.clone(), ended).await;
+    let kept = {
+        let mut captures = captures.lock().map_err(|_| "failed")?;
+        captures.pending.retain(|(_, pending)| !Arc::ptr_eq(pending, &stop));
+        let (outgoing, track) = started.map_err(|error| match error {
+            StartError::Cancelled => "cancelled".to_owned(),
+            StartError::Failed(reason) => reason.to_owned(),
+        })?;
+        // Stopped, started again, left or the room went away meanwhile (each sets `stop`): this one goes.
+        if stop.load(Ordering::Relaxed) {
+            Err(outgoing)
+        } else {
+            let key = outgoing.publication.sid().to_string();
+            state.videos.insert(key.clone(), track.rtc_track());
+            captures.live.push(outgoing);
+            Ok(key)
+        }
+    };
+    match kept {
+        Ok(key) => Ok(Some(key)),
+        Err(outgoing) => {
+            let sid = outgoing.publication.sid();
+            drop(outgoing);
+            let _ = room.local_participant().unpublish_track(&sid).await;
+            Err("cancelled".into())
+        }
+    }
+}
+
 async fn reconsider(state: &NativeVoice, user_id: &str) {
     let slot = state.session.lock().await;
     let Some(session) = slot.as_ref() else { return };
@@ -625,6 +729,11 @@ pub async fn native_voice_video_quality(state: State<'_, NativeVoice>, user_id: 
 
 /// Raw bytes (an ArrayBuffer in the page): see Videos::frame.
 #[tauri::command]
+pub async fn native_voice_set_video(state: State<'_, NativeVoice>, source: Kind, plan: Option<VideoPlan>) -> Result<Option<String>, String> {
+    set_video(&state, source, plan).await
+}
+
+#[tauri::command]
 pub async fn native_voice_video_frame(state: State<'_, NativeVoice>, key: String, max_width: u32, max_height: u32) -> Result<tauri::ipc::Response, String> {
     state.videos.frame(&key, max_width, max_height).await.map(tauri::ipc::Response::new)
 }
@@ -680,6 +789,44 @@ mod tests {
                 ("undeaf", _) => set_deaf(&voice, false),
                 ("volume", user) => set_user_volume(&voice, user.to_string(), 0.0).await.unwrap(),
                 ("unvolume", user) => set_user_volume(&voice, user.to_string(), 1.0).await.unwrap(),
+                // camera=720p / screen=1080p publish with the plans options.ts makes; camera= / screen= stop.
+                (source @ ("camera" | "screen"), size) => {
+                    let layer = |w: u32, h: u32, b: u64| serde_json::json!({ "width": w, "height": h, "maxBitrate": b, "maxFramerate": 30 });
+                    let plan = match size {
+                        "720p" if source == "camera" => Some(
+                            serde_json::json!({ "width": 1280, "height": 720, "fps": 30, "maxBitrate": 1_200_000, "layers": [layer(320, 180, 150_000), layer(640, 360, 500_000)] }),
+                        ),
+                        "1080p" => Some(
+                            serde_json::json!({ "width": 1920, "height": 1080, "fps": 30, "maxBitrate": 4_000_000, "layers": [layer(640, 360, 500_000), layer(1280, 720, 2_000_000)] }),
+                        ),
+                        _ => None,
+                    };
+                    let kind = if source == "camera" { Kind::Camera } else { Kind::Screen };
+                    let plan = plan.map(|p| serde_json::from_value(p).unwrap());
+                    println!("{source}: {:?}", set_video(&voice, kind, plan).await);
+                }
+                // The room goes away under the session (what a non-final disconnect looks like before the page retries).
+                ("drop", _) => {
+                    let room = voice.session.lock().await.as_ref().map(|s| s.room.clone());
+                    println!("drop: {:?}", room.unwrap().close().await);
+                }
+                // The /dev/video* nodes this process still has open, and its capture threads.
+                ("held", _) => {
+                    let fds = std::fs::read_dir("/proc/self/fd").unwrap().filter_map(|e| std::fs::read_link(e.ok()?.path()).ok());
+                    let threads = std::fs::read_dir("/proc/self/task").unwrap().filter_map(|e| std::fs::read_to_string(e.ok()?.path().join("comm")).ok());
+                    let threads: Vec<_> = threads.filter(|name| name.starts_with("native ")).map(|name| name.trim().to_owned()).collect();
+                    println!("held {:?} threads {threads:?}", fds.filter(|p| p.to_string_lossy().starts_with("/dev/video")).collect::<Vec<_>>());
+                }
+                // Another capture (the page's preview in WebKit) streams from /dev/video0 for `ms`.
+                ("hold", ms) => {
+                    let format = linuxvideo::format::PixFormat::new(640, 480, linuxvideo::format::PixelFormat::YUYV);
+                    let stream = linuxvideo::Device::open("/dev/video0").unwrap().video_capture(format).unwrap().into_stream().unwrap();
+                    let ms = ms.parse().unwrap_or(0);
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(ms));
+                        drop(stream);
+                    });
+                }
                 _ => println!("unknown step {action}"),
             }
         }

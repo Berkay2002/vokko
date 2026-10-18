@@ -287,7 +287,7 @@ export enum NsfwLevel {
 /** Who may send messages; members with any role bypass it (Discord rule). */
 export enum VerificationLevel {
   None = 0,
-  Low = 1, // Discord: verified email. Vokko has no email verification: every account passes
+  Low = 1, // verified email (every account passes on an instance that sends no mail)
   Medium = 2, // account older than 5 minutes
   High = 3, // also a member for longer than 10 minutes
   VeryHigh = 4, // Discord: verified phone. Vokko: same as High
@@ -1252,6 +1252,7 @@ export interface InstanceInfo {
   min_age: number; // VOKKO_MIN_AGE (default 13)
   terms: string | null; // plain-text checkbox label; null = no consent checkbox
   terms_url: string | null;
+  email_verification: boolean; // the instance sends mail (SMTP): verification level Low and up need a verified email, new accounts are asked to verify
 }
 export interface UsernameAttemptRequest {
   username: string;
@@ -2232,6 +2233,7 @@ export interface GatewayEvents {
   PRESENCE_UPDATE: Presence;
   USER_UPDATE: User; // profile/avatar change; sent to the user and everyone sharing a guild, DM or relationship with them
   MESSAGE_ACK: { channel_id: Snowflake; message_id: Snowflake };
+  RECENT_MENTION_DELETE: { message_id: Snowflake }; // a dismissed Inbox > Mentions row, to the user's own sessions
   RELATIONSHIP_ADD: Relationship;
   RELATIONSHIP_REMOVE: { id: Snowflake };
   // Scheduled events: sent to every member of the guild; `user_rsvp` is filled per receiver. CREATE/UPDATE/DELETE carry the event

@@ -16,11 +16,13 @@ export interface MediaState {
   reminders: Reminder[] | null;
   /** Reminders that fired while the app was open, shown as notices until dismissed. */
   notices: Reminder[];
+  /** Rows of the open Inbox > Mentions tab; null = loading. */
+  mentions: Message[] | null;
   /** The message the Forward modal is open for. */
   forwardTarget: Message | null;
 }
 
-const initial: MediaState = { stickers: {}, favorites: null, bookmarks: null, reminders: null, notices: [], forwardTarget: null };
+const initial: MediaState = { stickers: {}, favorites: null, bookmarks: null, reminders: null, notices: [], mentions: null, forwardTarget: null };
 
 export const useMedia = create<MediaState>()(() => initial);
 const set = useMedia.setState;
@@ -32,6 +34,11 @@ const errorText = (e: unknown, fallback: string): string => (e instanceof ApiReq
 
 export const openForward = (message: Message): void => set({ forwardTarget: message });
 export const closeForward = (): void => set({ forwardTarget: null });
+
+// ---- recent mentions ----
+
+/** Drops a dismissed mention (X here, or RECENT_MENTION_DELETE from another device). */
+export const dropMention = (id: Snowflake): void => set(s => ({ mentions: s.mentions?.filter(m => m.id !== id) ?? null }));
 
 // ---- stickers ----
 
@@ -185,5 +192,6 @@ export function wireMedia(): void {
   gateway.on('BOOKMARK_REMOVE', ({ channel_id, message_id }) => set(s => ({ bookmarks: removeBookmark(s.bookmarks ?? [], channel_id, message_id) })));
   gateway.on('REMINDER_CREATE', reminder => set(s => ({ reminders: upsertReminder(s.reminders ?? [], reminder) })));
   gateway.on('REMINDER_DELETE', ({ id }) => set(s => ({ reminders: removeReminder(s.reminders ?? [], id), notices: dropNotice(s.notices, id) })));
+  gateway.on('RECENT_MENTION_DELETE', ({ message_id }) => dropMention(message_id));
   gateway.on('REMINDER_DUE', reminder => set(s => ({ reminders: upsertReminder(s.reminders ?? [], reminder), notices: pushNotice(s.notices, reminder) })));
 }

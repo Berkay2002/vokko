@@ -5,14 +5,25 @@ import { useStore } from "../api/store";
 import type { Activity, Snowflake } from "../api/types";
 import { ActivityIcon } from "./ActivityIcon";
 
-/** Re-renders every `intervalMs` while mounted; the value is Date.now(). */
-export function useNow(intervalMs: number): number {
+/**
+ * Re-renders every `intervalMs` while mounted (and `enabled`); the value is Date.now(). A hidden page (minimised window,
+ * background tab) skips the ticks and catches up when it is shown again, so clocks left on screen cost nothing meanwhile.
+ */
+export function useNow(intervalMs: number, enabled = true): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [intervalMs]);
+    if (!enabled) return;
+    const tick = () => {
+      if (!document.hidden) setNow(Date.now());
+    };
+    tick();
+    const timer = setInterval(tick, intervalMs);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, [intervalMs, enabled]);
   return now;
 }
 

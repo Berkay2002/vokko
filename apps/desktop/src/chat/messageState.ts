@@ -64,6 +64,21 @@ export function indexOfId(messages: Message[], id: Snowflake): number {
   return messages[i]?.id === id ? i : -1;
 }
 
+/** A live window (a call chat left open for hours) is cut back to its newest LIVE_KEEP messages once it holds more than LIVE_MAX. */
+export const LIVE_MAX = 300;
+export const LIVE_KEEP = 200;
+
+/**
+ * Drops the oldest messages of a window anchored at the present; scrolling up loads them again (`hasMoreBefore`). Not while an
+ * older page is in flight (it would land above the cut and leave a gap) or a jump is pending (its target could be cut away).
+ */
+export function trimOldest(s: ChannelState, max = LIVE_MAX, keep = LIVE_KEEP): ChannelState {
+  if (s.hasMoreAfter || s.loadingOlder || s.focus || s.messages.length <= max) return s;
+  const drop = s.messages.length - keep;
+  // A new window (the list remounts at the bottom): Virtuoso stops following the output when rows leave from the top.
+  return { ...s, messages: s.messages.slice(drop), hasMoreBefore: true, firstItemIndex: FIRST_INDEX, windowId: s.windowId + 1 };
+}
+
 /** Replace the whole window with `page` (any order). */
 export function replaceWindow(s: ChannelState, page: Message[], opts: { hasMoreBefore: boolean; hasMoreAfter: boolean; focusId?: Snowflake }): ChannelState {
   const sorted = [...page].sort((a, b) => compareIds(a.id, b.id));

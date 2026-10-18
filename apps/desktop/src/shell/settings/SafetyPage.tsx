@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { gateway } from "../../api/gateway";
 import { request } from "../../api/rest";
+import { fetchInstance } from "../../auth/api";
 import { appStore, useStore } from "../../api/store";
 import {
   AutoModerationActionType,
@@ -20,9 +21,10 @@ import { createAutomodRule, deleteAutomodRule, listAutomodRules, updateAutomodRu
 import { SaveBar } from "./SaveBar";
 import { errorText, roleColor } from "./shared";
 
+const LOW_NOTE = "Must have a verified email on their Vokko account.";
 const LEVELS: { value: string; label: string; note: string }[] = [
   { value: String(VerificationLevel.None), label: "None", note: "Unrestricted." },
-  { value: String(VerificationLevel.Low), label: "Low", note: "Must have a Vokko account (Vokko has no email verification, so every account passes)." },
+  { value: String(VerificationLevel.Low), label: "Low", note: LOW_NOTE },
   { value: String(VerificationLevel.Medium), label: "Medium", note: "Must be registered on Vokko for longer than 5 minutes." },
   { value: String(VerificationLevel.High), label: "High", note: "Must also be a member of this server for longer than 10 minutes." },
   { value: String(VerificationLevel.VeryHigh), label: "Highest", note: "Same as High: Vokko has no phone verification." },
@@ -46,6 +48,12 @@ export function SafetyPage({ guild, canEdit }: { guild: Guild; canEdit: boolean 
     setFilter(String(guild.explicit_content_filter ?? 0));
   }, [guild.verification_level, guild.explicit_content_filter]);
   const dirty = level !== stored.level || filter !== stored.filter;
+  // An instance that sends no mail can't verify anyone, so the server lets every account pass Low: say so.
+  const [mail, setMail] = useState(true);
+  useEffect(() => {
+    fetchInstance().then(info => setMail(info.email_verification), () => undefined);
+  }, []);
+  const levels = useMemo(() => (mail ? LEVELS : LEVELS.map(l => (l.note === LOW_NOTE ? { ...l, note: `${LOW_NOTE} This instance sends no mail, so every account passes.` } : l))), [mail]);
 
   const save = async () => {
     setBusy(true);
@@ -66,7 +74,7 @@ export function SafetyPage({ guild, canEdit }: { guild: Guild; canEdit: boolean 
       {!canEdit && <Unavailable>You need the Manage Server permission to change safety settings.</Unavailable>}
       <Category title="Verification Level">
         <p className="settings-todo">Members must meet these criteria before they can send messages. Members with a role are exempt.</p>
-        <RadioGroup<string> name="Verification level" value={level} options={LEVELS} onChange={setLevel} disabled={!canEdit} />
+        <RadioGroup<string> name="Verification level" value={level} options={levels} onChange={setLevel} disabled={!canEdit} />
       </Category>
       <Category title="Explicit Image Filter">
         <p className="settings-todo">The setting is saved for the server; Vokko does not scan media yet.</p>

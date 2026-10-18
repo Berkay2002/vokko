@@ -12,7 +12,7 @@ import { getTemplate, templateCode } from "../templates/api";
 import { TemplatePreview } from "../templates/TemplatePreview";
 import { InviteModal } from "../invites/InviteModal";
 import { ApplyToJoin } from "../invites/ApplyToJoin";
-import { blockUser } from "./menus";
+import { blockUser, firstTextChannelId } from "./menus";
 import { FullProfileModal } from "./DmProfilePanel";
 import { GuildPrivacyModal } from "./GuildPrivacyModal";
 import { DmRefusedModal } from "./DmRefusedModal";
@@ -20,7 +20,7 @@ import { ReportModal } from "./ReportModal";
 import { ReportProblemModal } from "./ReportProblemModal";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
 import { NOTIFY_LABELS, setNotifyLevel, toggleFlag, useLocalState, type NotifyLevel } from "./localState";
-import { closeModal, useModals, type ModalSpec } from "./modalStore";
+import { closeModal, openModal, useModals, type ModalSpec } from "./modalStore";
 import { QuickSwitcher } from "./QuickSwitcher";
 import { ShortcutsModal } from "./ShortcutsModal";
 import { TopicModal } from "./TopicModal";
@@ -202,7 +202,14 @@ function CreateServer() {
     }
   };
 
-  const create = () => (remote ? createGuildFromTemplate(remote.code, name.trim(), icon?.id) : createGuild(name.trim(), icon?.id, template));
+  const create = async () => {
+    const guild = await (remote ? createGuildFromTemplate(remote.code, name.trim(), icon?.id) : createGuild(name.trim(), icon?.id, template));
+    // Discord's next step: "Invite friends to <server>" over the new server's first text channel.
+    const channelId = firstTextChannelId(guild.id);
+    if (!channelId) return guild;
+    openModal({ type: "invite", channelId });
+    return null;
+  };
 
   if (step === "choose")
     return (

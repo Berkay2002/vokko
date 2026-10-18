@@ -186,6 +186,24 @@ test('channel, category and server mute, notification levels and suppress @every
   expect(await probe(page, p => p.notes.length)).toBe(before);
 });
 
+test('a muted channel does not light the server pill or the Inbox Unreads', async ({ page }) => {
+  await setup(page);
+  await boot(page);
+  await readEverything(page);
+  const general = (await channelNamed(page, 'general'))!;
+  const guildId = (await page.evaluate(id => (window as unknown as Win).__vokko.appStore.getState().channels[id]!.guild_id, general))!;
+  const railItem = page.locator(`.rail-item:has(a[href^="/channels/${guildId}"])`);
+  await page.evaluate(`import('/src/shell/localState.ts').then(m => m.muteFor(${JSON.stringify(general)}, -1))`);
+  await say(page, general, 'alice', 'muted, so no pill');
+  await page.waitForTimeout(300);
+  await expect(railItem).toHaveAttribute('data-state', 'idle');
+  await page.getByRole('button', { name: 'Inbox' }).click();
+  await expect(page.locator('.inbox-popout')).toContainText("You're all caught up");
+  await page.keyboard.press('Escape');
+  await page.evaluate(`import('/src/shell/localState.ts').then(m => m.unmute(${JSON.stringify(general)}))`);
+  await expect(railItem).toHaveAttribute('data-state', 'unread');
+});
+
 test('do-not-disturb, desktop pref off and sounds pref off', async ({ page }) => {
   await setup(page, { prefs: { desktopNotifications: false } });
   await boot(page);
