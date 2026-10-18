@@ -8,8 +8,8 @@ use sqlx::{FromRow, Postgres, Transaction};
 use vokko_protocol::api::permissions::{ALL, USE_APPLICATION_COMMANDS};
 use vokko_protocol::api::{
     AllowedMentions, Application, ApplicationCommand, ApplicationCommandOption, ApplicationCommandOptionType, ApplicationCommandRequest,
-    ApplicationCommandType, ChannelType, CommandIndexApplication, Component, ComponentEmoji, ComponentType, Embed, GatewayEvent, InstallParams, Message, MessageDelete,
-    Snowflake, User,
+    ApplicationCommandType, ChannelType, CommandIndexApplication, Component, ComponentEmoji, ComponentType, Embed, GatewayEvent, InstallParams, Message,
+    MessageDelete, Snowflake, User,
 };
 
 use crate::access::{ChannelAccess, DM_PERMISSIONS};
@@ -110,7 +110,7 @@ pub fn validate_components(components: &[Component]) -> ApiResult<Vec<Component>
         if count < min || count > max { Err(bad(path, &format!("Must be between {min} and {max} in length."))) } else { Ok(()) }
     };
     let bad_emoji = |emoji: &ComponentEmoji| {
-        emoji.name.as_deref().is_some_and(|name| name.chars().count() > 100) || (emoji.id.is_none() && emoji.name.as_deref().is_none_or(str::is_empty))
+        emoji.name.as_deref().is_some_and(|name| name.chars().count() > 32) || (emoji.id.is_none() && emoji.name.as_deref().is_none_or(str::is_empty))
     };
     if components.len() > MAX_ROWS {
         return Err(bad("", "Must be 5 or fewer in length."));
@@ -143,9 +143,11 @@ pub fn validate_components(components: &[Component]) -> ApiResult<Vec<Component>
                         return Err(bad(&path, "Invalid emoji."));
                     }
                     if style == 5 {
-                        let https = child.url.as_deref().is_some_and(|url| url.len() <= 2048 && url.trim().to_ascii_lowercase().starts_with("https://"));
-                        if !https || id.is_some() {
-                            return Err(bad(&path, "A link button needs an https url and no custom_id."));
+                        // The stored URL is the parsed form: an https URL with a host, whitespace and control characters gone.
+                        let parsed = child.url.as_deref().filter(|url| url.len() <= 2048).and_then(|url| reqwest::Url::parse(url).ok());
+                        match parsed.filter(|url| url.scheme() == "https" && url.host_str().is_some_and(|host| !host.is_empty())) {
+                            Some(url) if id.is_none() => child.url = Some(url.to_string()),
+                            _ => return Err(bad(&path, "A link button needs an https url and no custom_id.")),
                         }
                     } else if child.url.is_some() || id.is_none() {
                         return Err(bad(&path, "A button needs a custom_id and no url."));

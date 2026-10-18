@@ -350,7 +350,9 @@ async fn invoke_component(state: AppState, user_id: i64, body: InvokeInteraction
     let (channel_id, application_id) = (body.channel_id.db(), body.application_id.db());
     let access = channel_access(&state, user_id, channel_id).await?;
     // Like running a command: a member who may not use applications here may not click their buttons either.
-    access.require(vokko_protocol::api::permissions::USE_APPLICATION_COMMANDS)?;
+    if !access.is_dm() {
+        access.require(vokko_protocol::api::permissions::USE_APPLICATION_COMMANDS)?;
+    }
     // The message is a channel message, or an ephemeral one of this user.
     let message = match apps::ephemeral(&state, message_id).await? {
         Some((message, recipient)) => (recipient == user_id).then_some(message),
@@ -375,11 +377,13 @@ async fn invoke_component(state: AppState, user_id: i64, body: InvokeInteraction
     if !fits {
         return Err(ApiErr::invalid("data.values", "Pick exactly one of the options (none for a button)."));
     }
+    // The application must still be in this guild (or DM): its buttons outlive its installation, and nobody is left to answer them.
+    let app_permissions = access::channel_access(&state, application_id, channel_id).await.map_err(|_| ApiErr::unknown_message())?.permissions;
     let id = state.ids.next();
     let token = random_hex(32);
     sqlx::query(
-        "INSERT INTO interactions (id, application_id, token_hash, kind, user_id, channel_id, guild_id, command_name, command_type, target_id, nonce, custom_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, '', 1, $8, $9, $10)",
+        "INSERT INTO interactions (id, application_id, token_hash, kind, user_id, channel_id, guild_id, command_name, command_type, target_id, nonce) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, '', 1, $8, $9)",
     )
     .bind(id)
     .bind(application_id)
@@ -390,7 +394,6 @@ async fn invoke_component(state: AppState, user_id: i64, body: InvokeInteraction
     .bind(access.channel.guild_id)
     .bind(message_id)
     .bind(&body.nonce)
-    .bind(&custom_id)
     .execute(&state.db)
     .await?;
     let user = store::user(&state, user_id).await?.ok_or_else(ApiErr::unauthorized)?;
@@ -398,7 +401,6 @@ async fn invoke_component(state: AppState, user_id: i64, body: InvokeInteraction
         Some(guild_id) => store::member(&state, guild_id, user_id).await?,
         None => None,
     };
-    let app_permissions = access::channel_access(&state, application_id, channel_id).await.map_or(0, |bot| bot.permissions);
     let interaction = Interaction {
         id: Snowflake::from(id),
         application_id: Snowflake::from(application_id),
@@ -554,7 +556,7 @@ async fn callback(
     let allowed = match body.kind {
         InteractionCallbackType::ApplicationCommandAutocompleteResult => autocomplete,
         InteractionCallbackType::DeferredUpdateMessage | InteractionCallbackType::UpdateMessage => component,
-        InteractionCallbackType::DeferredChannelMessageWithSource => !autocomplete && !component,
+        InteractionCallbackType::DeferredChannelMessageWithSource => !autocomplete,
         InteractionCallbackType::ChannelMessageWithSource => !autocomplete,
     };
     if !allowed {

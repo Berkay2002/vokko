@@ -966,7 +966,10 @@ async fn message_components_are_validated_relayed_and_updated() {
     let (status, _) = app.send(Method::POST, &update, None, Some(json!({"type": 7, "data": {"content": "Confirmed", "components": []}}))).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let updated = user_gateway.wait_for("MESSAGE_UPDATE").await;
-    assert_eq!((updated["id"].as_str(), updated["content"].as_str(), updated.get("components")), (Some(message_id.as_str()), Some("Confirmed"), None));
+    assert_eq!(
+        (updated["id"].as_str(), updated["content"].as_str(), updated.get("components")),
+        (Some(message_id.as_str()), Some("Confirmed"), Some(&json!([])))
+    );
     user_gateway.wait_for("INTERACTION_SUCCESS").await;
     // it was one answer: the second is refused
     let (status, error) = app.send(Method::POST, &update, None, Some(json!({"type": 7, "data": {"content": "Again"}}))).await;
@@ -1018,4 +1021,84 @@ async fn message_components_are_validated_relayed_and_updated() {
 /// An application id that is not the message's.
 fn other_id(app_id: &str) -> String {
     (app_id.parse::<i64>().expect("id") + 1).to_string()
+}
+
+#[tokio::test]
+async fn component_clicks_respect_who_may_see_and_answer_the_message() {
+    let app = TestApp::new().await;
+    let address = app.serve().await;
+    let (owner, _) = app.register("owner").await;
+    let (member, member_user) = app.register("member").await;
+    let (outsider, _) = app.register("outsider").await;
+    let (guild, channel) = app.guild_with_channel(&owner).await;
+    join(&app, &owner, &channel, &member).await;
+    let (app_id, bot) = create_app(&app, &owner, "Echo").await;
+    add_bot(&app, &owner, &app_id, &guild).await;
+    let (status, commands) = app.put_json(&format!("/applications/{app_id}/commands"), &bot, json!([{"name": "secret", "description": "Ask"}])).await;
+    assert_eq!(status, StatusCode::OK, "{commands}");
+    let mut bot_gateway = Client::connect(&address, &bot).await;
+    let mut owner_gateway = Client::connect(&address, &owner).await;
+    let go = row(json!([button("go", "Go")]));
+
+    // a link button is stored in its parsed form
+    let messages = format!("/channels/{channel}/messages");
+    let (status, posted) =
+        app.post(&messages, &bot, json!({"components": [row(json!([{"type": 2, "style": 5, "label": "Docs", "url": " https://Example.com/a b"}]))]})).await;
+    assert_eq!((status, posted["components"][0]["components"][0]["url"].as_str()), (StatusCode::OK, Some("https://example.com/a%20b")), "{posted}");
+    let (status, _) = app.post(&messages, &bot, json!({"components": [row(json!([{"type": 2, "style": 5, "label": "Docs", "url": "https://"}]))]})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // an ephemeral message with buttons can be clicked by its recipient only
+    let (_, created) = invoke(&app, &owner, &app_id, &channel, &commands[0], json!([])).await;
+    let interaction = bot_gateway.wait_for("INTERACTION_CREATE").await;
+    assert_eq!(interaction["id"], created["id"]);
+    let callback = format!("/interactions/{}/{}/callback", id(&interaction), interaction["token"].as_str().expect("token"));
+    let (status, _) =
+        app.send(Method::POST, &callback, None, Some(json!({"type": 4, "data": {"content": "Psst", "flags": 64, "components": [go.clone()]}}))).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let secret = loop {
+        let created = owner_gateway.wait_for("MESSAGE_CREATE").await;
+        if created["content"] == "Psst" {
+            break created;
+        }
+    };
+    assert_eq!(secret["components"][0]["components"][0]["custom_id"].as_str(), Some("go"));
+    let (status, _) = click(&app, &member, &app_id, &channel, &id(&secret), json!({"custom_id": "go", "component_type": 2})).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // somebody outside the guild cannot reach the channel's messages, so not their buttons either
+    let (_, public) = app.post(&messages, &bot, json!({"content": "Ready?", "components": [go.clone()]})).await;
+    let (status, _) = click(&app, &outsider, &app_id, &channel, &id(&public), json!({"custom_id": "go", "component_type": 2})).await;
+    assert!(status == StatusCode::FORBIDDEN || status == StatusCode::NOT_FOUND, "{status}");
+
+    // a member answers with a deferred reply (5); the bot fills it in
+    let (status, _) = click(&app, &member, &app_id, &channel, &id(&public), json!({"custom_id": "go", "component_type": 2})).await;
+    assert_eq!(status, StatusCode::OK);
+    let relayed = bot_gateway.wait_for("INTERACTION_CREATE").await;
+    let token = relayed["token"].as_str().expect("token").to_owned();
+    let (status, _) = app.send(Method::POST, &format!("/interactions/{}/{token}/callback", id(&relayed)), None, Some(json!({"type": 5}))).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let thinking = loop {
+        let created = owner_gateway.wait_for("MESSAGE_CREATE").await;
+        if created["flags"].as_u64() == Some(128) {
+            break created;
+        }
+    };
+    let (status, _) = app.send(Method::PATCH, &format!("/webhooks/{app_id}/{token}/messages/@original"), None, Some(json!({"content": "Done"}))).await;
+    assert_eq!(status, StatusCode::OK);
+    let done = owner_gateway.wait_for("MESSAGE_UPDATE").await;
+    assert_eq!((done["id"].clone(), done["content"].as_str()), (thinking["id"].clone(), Some("Done")));
+
+    // buttons in a DM work for its recipient, and stop working once the application is gone from the guild
+    let (status, dm) = app.post("/users/@me/channels", &bot, json!({"recipient_id": id(&member_user)})).await;
+    assert_eq!(status, StatusCode::OK, "{dm}");
+    let (status, dm_message) = app.post(&format!("/channels/{}/messages", id(&dm)), &bot, json!({"content": "Hi", "components": [go]})).await;
+    assert_eq!(status, StatusCode::OK, "{dm_message}");
+    let (status, error) = click(&app, &member, &app_id, &id(&dm), &id(&dm_message), json!({"custom_id": "go", "component_type": 2})).await;
+    assert_eq!(status, StatusCode::OK, "{error}");
+    bot_gateway.wait_for("INTERACTION_CREATE").await;
+    let (status, _) = app.send(Method::DELETE, &format!("/guilds/{guild}/members/{app_id}"), Some(&owner), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = click(&app, &member, &app_id, &channel, &id(&public), json!({"custom_id": "go", "component_type": 2})).await;
+    assert!(status.is_client_error(), "{status}");
 }
