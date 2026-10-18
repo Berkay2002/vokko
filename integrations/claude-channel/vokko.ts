@@ -32,11 +32,13 @@ export type Message = {
   webhook_id?: string
 }
 type Channel = { id: string; type: number; guild_id?: string | null; parent_id?: string | null; recipients?: User[] }
-type Member = { user: User; nick?: string | null; roles?: string[] }
+type Member = { user: User; nick?: string | null; roles?: string[]; communication_disabled_until?: string | null }
 type GuildInfo = { id: string; owner_id: string; roles: { id: string; permissions: string }[] }
 
 export const ADMINISTRATOR = 1n << 3n
 export const MODERATE_MEMBERS = 1n << 40n
+/** What a timed-out member keeps (VIEW_CHANNEL | READ_MESSAGE_HISTORY), as in crates/server/src/access.rs. */
+const TIMEOUT_ALLOWED = (1n << 10n) | (1n << 16n)
 const ALL_PERMISSIONS = (1n << 64n) - 1n
 type Guild = { id: string; channels?: Channel[]; threads?: Channel[]; members?: Member[] }
 
@@ -275,7 +277,14 @@ export class VokkoBot {
   }
 
   loadAccess(): Access {
-    return this.bootAccess ?? this.readAccessFile()
+    if (!this.bootAccess) return this.readAccessFile()
+    // Static access stays frozen, except who answers what: dmBackend and guilds are shared with the other process on this token.
+    try {
+      const { dmBackend, guilds } = JSON.parse(readFileSync(this.accessFile, 'utf8')) as Partial<Access>
+      return { ...this.bootAccess, dmBackend, guilds }
+    } catch {
+      return this.bootAccess
+    }
   }
 
   saveAccess(a: Access): void {
@@ -599,16 +608,22 @@ export class VokkoBot {
 
   // ---- guild members (pause targets and moderator checks) ----
 
-  /** The guild's members, or null when they can't be read. */
+  private readonly memberCache = new Map<string, { at: number; list: Member[] }>()
+
+  /** The guild's members (cached for a minute), or null when they can't be read. */
   async members(guildId: string): Promise<Member[] | null> {
+    const cached = this.memberCache.get(guildId)
+    if (cached && Date.now() - cached.at < 60_000) return cached.list
     try {
       const out: Member[] = []
       for (;;) {
         const after = out.length > 0 ? `&after=${out[out.length - 1].user.id}` : ''
         const page = await this.api<Member[]>('GET', `/guilds/${snowflake(guildId)}/members?limit=1000${after}`)
         out.push(...page)
-        if (page.length < 1000) return out
+        if (page.length < 1000) break
       }
+      this.memberCache.set(guildId, { at: Date.now(), list: out })
+      return out
     } catch (err) {
       this.cfg.log(`vokko channel: cannot list members of guild ${guildId}: ${err}\n`)
       return null
@@ -624,7 +639,9 @@ export class VokkoBot {
     const roles = new Map(guild.roles.map(r => [r.id, BigInt(r.permissions)]))
     let bits = roles.get(guild.id) ?? 0n // @everyone
     for (const id of member.roles ?? []) bits |= roles.get(id) ?? 0n
-    return bits & ADMINISTRATOR ? ALL_PERMISSIONS : bits
+    if (bits & ADMINISTRATOR) return ALL_PERMISSIONS
+    const timedOut = member.communication_disabled_until != null && Date.parse(member.communication_disabled_until) > Date.now()
+    return timedOut ? bits & TIMEOUT_ALLOWED : bits
   }
 
   // ---- nickname ----
