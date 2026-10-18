@@ -387,6 +387,16 @@ export function wireStoreToGateway(): void {
   });
   gateway.on("CHANNEL_CREATE", c => s().upsertChannel(c));
   gateway.on("CHANNEL_UPDATE", c => s().upsertChannel(c));
+  gateway.on("CHANNEL_RECIPIENT_ADD", ({ channel_id, user }) => {
+    const channel = s().channels[channel_id];
+    if (!channel) return;
+    const recipients = channel.recipients ?? [];
+    if (!recipients.some(r => r.id === user.id)) s().upsertChannel({ ...channel, recipients: [...recipients, user] });
+  });
+  gateway.on("CHANNEL_RECIPIENT_REMOVE", ({ channel_id, user }) => {
+    const channel = s().channels[channel_id];
+    if (channel?.recipients) s().upsertChannel({ ...channel, recipients: channel.recipients.filter(r => r.id !== user.id) });
+  });
   gateway.on("CHANNEL_DELETE", c => {
     const open = s().route.channelId === c.id;
     s().removeChannel(c.id);

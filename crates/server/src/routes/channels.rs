@@ -1,9 +1,10 @@
 use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
-use axum::routing::patch;
+use axum::http::StatusCode;
+use axum::routing::{patch, put};
 use vokko_protocol::api::permissions::MANAGE_CHANNELS;
-use vokko_protocol::api::{AuditLogEvent, Channel, ChannelType, GatewayEvent, UpdateChannelRequest};
+use vokko_protocol::api::{AuditLogEvent, Channel, ChannelRecipient, ChannelType, GatewayEvent, Snowflake, UpdateChannelRequest};
 
 use crate::access::{self, channel_access};
 use crate::audit::{self, AuditReason, Entry};
@@ -21,7 +22,115 @@ use crate::store;
 use crate::threads;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/channels/{id}", patch(update_channel).delete(delete_channel))
+    Router::new()
+        .route("/channels/{id}", patch(update_channel).delete(delete_channel))
+        .route("/channels/{id}/recipients/{user_id}", put(add_recipient).delete(remove_recipient))
+}
+
+/// A group DM holds at most this many people (Discord's cap).
+const GROUP_DM_MAX: i64 = 10;
+
+async fn group_access(state: &AppState, user_id: i64, id: &str) -> ApiResult<access::ChannelAccess> {
+    let access = channel_access(state, user_id, channel_id(id)?).await?;
+    if access.channel.channel_type() != ChannelType::GroupDm {
+        return Err(ApiErr::wrong_channel_type());
+    }
+    Ok(access)
+}
+
+/// `PUT /channels/{id}/recipients/{user_id}`: a recipient adds one of their friends to the group DM.
+async fn add_recipient(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, target)): Path<(String, String)>) -> ApiResult<StatusCode> {
+    let access = group_access(&state, user_id, &id).await?;
+    let target = parse_id(&target).ok_or_else(ApiErr::unknown_user)?;
+    let channel_id = access.channel.id;
+    let Some(user) = store::user(&state, target).await? else { return Err(ApiErr::unknown_user()) };
+    let (member,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM channel_recipients WHERE channel_id = $1 AND user_id = $2)")
+        .bind(channel_id)
+        .bind(target)
+        .fetch_one(&state.db)
+        .await?;
+    if member {
+        return Ok(StatusCode::NO_CONTENT);
+    }
+    // Friends only; a block either way removes the friendship, so it ends up here too.
+    let (friend,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM relationships WHERE user_id = $1 AND other_id = $2 AND kind = 1)")
+        .bind(user_id)
+        .bind(target)
+        .fetch_one(&state.db)
+        .await?;
+    if !friend {
+        return Err(ApiErr::cannot_message_user());
+    }
+    // The channel row serializes concurrent adds, so the cap holds.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("SELECT 1 FROM channels WHERE id = $1 FOR UPDATE").bind(channel_id).execute(&mut *tx).await?;
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM channel_recipients WHERE channel_id = $1").bind(channel_id).fetch_one(&mut *tx).await?;
+    if count >= GROUP_DM_MAX {
+        return Err(ApiErr::conflict(30004, &format!("Maximum number of group DM recipients reached ({GROUP_DM_MAX})")));
+    }
+    let added = sqlx::query("INSERT INTO channel_recipients (channel_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+        .bind(channel_id)
+        .bind(target)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("INSERT INTO read_states (user_id, channel_id) VALUES ($1, $2) ON CONFLICT DO NOTHING").bind(target).bind(channel_id).execute(&mut *tx).await?;
+    tx.commit().await?;
+    if added.rows_affected() > 0 {
+        let others: Vec<i64> = access::channel_viewers(&state, &access.channel).await?.into_iter().filter(|viewer| *viewer != target).collect();
+        state.hub.send(&others, &GatewayEvent::ChannelRecipientAdd(ChannelRecipient { channel_id: Snowflake::from(channel_id), user }));
+        if let Some(channel) = store::channel(&state, channel_id, Some(target)).await? {
+            state.hub.send(&[target], &GatewayEvent::ChannelCreate(channel));
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /channels/{id}/recipients/{user_id}`: the owner removes someone; anyone removes themselves (= leaving).
+async fn remove_recipient(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path((id, target)): Path<(String, String)>) -> ApiResult<StatusCode> {
+    let access = group_access(&state, user_id, &id).await?;
+    let target = parse_id(&target).ok_or_else(ApiErr::unknown_user)?;
+    if target != user_id && access.channel.owner_id != Some(user_id) {
+        return Err(ApiErr::missing_permissions());
+    }
+    leave_group(&state, &access.channel, target).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Takes `target` out of the group DM: out of its call and voice room first, then the row; the rest hear CHANNEL_RECIPIENT_REMOVE,
+/// `target` CHANNEL_DELETE. An empty group goes away. A non-recipient `target` is a no-op.
+async fn leave_group(state: &AppState, row: &store::ChannelRow, target: i64) -> ApiResult<()> {
+    let id = row.id;
+    let Some(channel) = store::channel(state, id, Some(target)).await? else { return Err(ApiErr::unknown_channel()) };
+    let Some(user) = store::user(state, target).await? else { return Err(ApiErr::unknown_user()) };
+    let _eviction = crate::voice::state::dm_recipient_removed(state, id, target).await;
+    let mut tx = state.db.begin().await?;
+    // The channel row lock serializes concurrent leaves and adds: the hand-off below sees the current owner and recipients.
+    let owner: Option<i64> = sqlx::query_scalar("SELECT owner_id FROM channels WHERE id = $1 FOR UPDATE").bind(id).fetch_optional(&mut *tx).await?.flatten();
+    let removed = sqlx::query("DELETE FROM channel_recipients WHERE channel_id = $1 AND user_id = $2").bind(id).bind(target).execute(&mut *tx).await?;
+    if removed.rows_affected() == 0 {
+        return Ok(());
+    }
+    let rest: Vec<i64> =
+        sqlx::query_scalar("SELECT user_id FROM channel_recipients WHERE channel_id = $1 ORDER BY user_id").bind(id).fetch_all(&mut *tx).await?;
+    // The owner leaving hands the group to the lowest remaining id, so owner_id never points at a non-recipient.
+    let new_owner = if owner == Some(target) { rest.first().copied() } else { None };
+    if let Some(owner) = new_owner {
+        sqlx::query("UPDATE channels SET owner_id = $2 WHERE id = $1").bind(id).bind(owner).execute(&mut *tx).await?;
+    }
+    if rest.is_empty() {
+        sqlx::query("DELETE FROM channels WHERE id = $1").bind(id).execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    if !rest.is_empty() {
+        state.hub.send(&rest, &GatewayEvent::ChannelRecipientRemove(ChannelRecipient { channel_id: Snowflake::from(id), user }));
+        if new_owner.is_some()
+            && let Some(updated) = store::channel_row(state, id).await?
+        {
+            events::dispatch_channel(state, &updated, GatewayEvent::ChannelUpdate).await?;
+        }
+    }
+    state.hub.send(&[target], &GatewayEvent::ChannelDelete(channel));
+    Ok(())
 }
 
 /// Discord's slowmode ceiling: 6 hours.
@@ -192,15 +301,8 @@ async fn delete_channel(
         if access.channel.channel_type() == ChannelType::Dm {
             sqlx::query("UPDATE channel_recipients SET closed = TRUE WHERE channel_id = $1 AND user_id = $2").bind(id).bind(user_id).execute(&state.db).await?;
         } else {
-            // Out of the group's call first, so the leaver still hears about it.
-            let _eviction = crate::voice::state::dm_recipient_removed(&state, id, user_id).await;
-            sqlx::query("DELETE FROM channel_recipients WHERE channel_id = $1 AND user_id = $2").bind(id).bind(user_id).execute(&state.db).await?;
-            let (left,): (i64,) = sqlx::query_as("SELECT count(*) FROM channel_recipients WHERE channel_id = $1").bind(id).fetch_one(&state.db).await?;
-            if left == 0 {
-                sqlx::query("DELETE FROM channels WHERE id = $1").bind(id).execute(&state.db).await?;
-            } else {
-                events::dispatch_channel(&state, &access.channel, GatewayEvent::ChannelUpdate).await?;
-            }
+            leave_group(&state, &access.channel, user_id).await?;
+            return Ok(Json(channel));
         }
         state.hub.send(&[user_id], &GatewayEvent::ChannelDelete(channel.clone()));
         return Ok(Json(channel));

@@ -2349,6 +2349,13 @@ pub struct CallUpdate {
     pub ringing: Vec<Snowflake>,
 }
 
+/// CHANNEL_RECIPIENT_ADD / CHANNEL_RECIPIENT_REMOVE: someone joined or left a group DM.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChannelRecipient {
+    pub channel_id: Snowflake,
+    pub user: User,
+}
+
 /// CALL_DELETE: the call ended.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CallDelete {
@@ -5089,6 +5096,8 @@ pub enum GatewayEvent {
     ChannelCreate(Channel),
     ChannelUpdate(Channel),
     ChannelDelete(Channel),
+    ChannelRecipientAdd(ChannelRecipient),
+    ChannelRecipientRemove(ChannelRecipient),
     GuildCreate(Box<GuildWithState>),
     GuildUpdate(Guild),
     GuildDelete(IdOnly),
@@ -5185,6 +5194,8 @@ impl GatewayEvent {
             Self::ChannelCreate(_) => "CHANNEL_CREATE",
             Self::ChannelUpdate(_) => "CHANNEL_UPDATE",
             Self::ChannelDelete(_) => "CHANNEL_DELETE",
+            Self::ChannelRecipientAdd(_) => "CHANNEL_RECIPIENT_ADD",
+            Self::ChannelRecipientRemove(_) => "CHANNEL_RECIPIENT_REMOVE",
             Self::GuildCreate(_) => "GUILD_CREATE",
             Self::GuildUpdate(_) => "GUILD_UPDATE",
             Self::GuildDelete(_) => "GUILD_DELETE",
@@ -5272,6 +5283,7 @@ impl GatewayEvent {
             Self::MessageReactionAdd(value) | Self::MessageReactionRemove(value) => serde_json::to_value(value),
             Self::TypingStart(value) => serde_json::to_value(value),
             Self::ChannelCreate(value) | Self::ChannelUpdate(value) | Self::ChannelDelete(value) => serde_json::to_value(value),
+            Self::ChannelRecipientAdd(value) | Self::ChannelRecipientRemove(value) => serde_json::to_value(value),
             Self::GuildCreate(value) => serde_json::to_value(value),
             Self::GuildUpdate(value) => serde_json::to_value(value),
             Self::GuildDelete(value) | Self::RelationshipRemove(value) => serde_json::to_value(value),

@@ -469,6 +469,40 @@ route("PUT", `/channels/${ID}/voice-status`, ({ viewer, params, body }) => {
   return undefined;
 });
 
+route("PUT", `/channels/${ID}/recipients/${ID}`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const target = params[1] ?? "";
+  if (channel.type !== ChannelType.GroupDM) fail(400, 50024, "Cannot execute action on this channel type");
+  const members = (channel.participant_ids ??= []);
+  if (!db.accounts.has(target)) fail(404, 10013, "Unknown User");
+  if (members.includes(target)) return undefined;
+  if (relationship(viewer.user.id, target)?.type !== RelationshipType.Friend) fail(403, 50007, "Cannot send messages to this user");
+  if (members.length >= 10) fail(400, 30004, "Maximum number of group DM recipients reached (10)");
+  members.push(target);
+  for (const id of members) {
+    if (id === target) emit([id], "CHANNEL_CREATE", channelFor(channel, id));
+    else emit([id], "CHANNEL_RECIPIENT_ADD", { channel_id: channel.id, user: userOf(target) });
+  }
+  return undefined;
+});
+
+route("DELETE", `/channels/${ID}/recipients/${ID}`, ({ viewer, params }) => {
+  const channel = requireChannel(params[0] ?? "", viewer.user.id);
+  const target = params[1] ?? "";
+  if (channel.type !== ChannelType.GroupDM) fail(400, 50024, "Cannot execute action on this channel type");
+  if (target !== viewer.user.id && channel.owner_id !== viewer.user.id) fail(403, 50013, "You lack permissions to perform that action");
+  const members = channel.participant_ids ?? [];
+  if (!members.includes(target)) return undefined;
+  if (voiceStates.get(target)?.channel_id === channel.id) setMockVoice(target, null, emit);
+  callRecipientRemoved(channel.id, target);
+  const payload = channelFor(channel, target);
+  channel.participant_ids = members.filter(id => id !== target);
+  if (channel.owner_id === target) channel.owner_id = channel.participant_ids[0] ?? null;
+  for (const id of channel.participant_ids) emit([id], "CHANNEL_RECIPIENT_REMOVE", { channel_id: channel.id, user: userOf(target) });
+  emit([target], "CHANNEL_DELETE", payload);
+  return undefined;
+});
+
 route("DELETE", `/channels/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   if (isThreadType(channel.type)) return deleteThread(channel, viewer.user.id);

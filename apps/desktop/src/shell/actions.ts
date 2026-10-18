@@ -114,6 +114,11 @@ export async function createGroupDM(userIds: Snowflake[]): Promise<void> {
   go(dmPath(channel.id));
 }
 
+/** Adds friends to an existing group DM (a 1:1 DM keeps creating a new group instead, like Discord). */
+export async function addGroupRecipients(channelId: Snowflake, userIds: Snowflake[]): Promise<void> {
+  for (const id of userIds) await request<void>("PUT", `/channels/${channelId}/recipients/${id}`);
+}
+
 export async function closeDirectMessage(channelId: Snowflake): Promise<void> {
   await request<Channel>("DELETE", `/channels/${channelId}`);
   appStore.getState().removeChannel(channelId);
