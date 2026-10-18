@@ -275,6 +275,22 @@ pub fn geometry(probe: &Probe, max_height: u32) -> Geometry {
     Geometry { width, height, fps_arg, fps }
 }
 
+/// The lower simulcast layers as (width, height, bit/s), smallest first (the SDK takes the last one as the middle layer): a 720p middle
+/// at 40 % of the full bitrate and a 360p low at 12 %. Sizes are in the picture's 16:9 class, so a 2.39:1 film (1920x804, class height
+/// 1080) gets 1280x536 and 640x268; a layer is left out unless it is smaller than the one above it. None when simulcast is off.
+pub fn simulcast_layers(geo: &Geometry, bitrate_kbps: u32, simulcast: bool) -> Vec<(u32, u32, u64)> {
+    if !simulcast {
+        return Vec::new();
+    }
+    let class = geo.height.max((u64::from(geo.width) * 9 / 16) as u32);
+    let at = |side: u32, h: u32| ((u64::from(side) * u64::from(h) / u64::from(class)) as u32 & !1).max(2);
+    [(360, 12), (720, 40)]
+        .into_iter()
+        .filter(|&(h, _)| h < class)
+        .map(|(h, percent)| (at(geo.width, h), at(geo.height, h), u64::from(bitrate_kbps) * 1000 * percent / 100))
+        .collect()
+}
+
 /// Container formats ffmpeg may open. A playlist format (HLS, DASH, concat) would make it open further URLs the guard never saw.
 const FORMATS: &str = "mov,mp4,matroska,webm,avi,mpegts";
 
@@ -572,6 +588,18 @@ mod tests {
         let g = geometry(&probe(1920, 804, Some((25, 1))), 720);
         assert_eq!((g.width % 2, g.height % 2, g.height), (0, 0, 720));
         assert_eq!(g.width, 1718);
+    }
+
+    #[test]
+    fn simulcast_layers_step_down_from_the_source() {
+        let layers = |w, h, max| simulcast_layers(&geometry(&probe(w, h, Some((24, 1))), max), 6000, true);
+        assert_eq!(layers(1920, 1080, 1080), [(640, 360, 720_000), (1280, 720, 2_400_000)]);
+        // a 720p source has no 720p layer to add
+        assert_eq!(layers(1920, 1080, 720), [(640, 360, 720_000)]);
+        // a scope film is judged by its 16:9 class, not by its 804 rows
+        assert_eq!(layers(1920, 804, 1080), [(640, 268, 720_000), (1280, 536, 2_400_000)]);
+        assert_eq!(layers(640, 360, 1080), []);
+        assert_eq!(simulcast_layers(&geometry(&probe(1920, 1080, Some((24, 1))), 1080), 6000, false), []);
     }
 
     #[test]

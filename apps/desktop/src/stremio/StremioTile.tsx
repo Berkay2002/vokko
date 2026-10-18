@@ -135,6 +135,8 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
   const small = variant === "strip" || variant === "pip";
   const position = seeker.target ?? shownPositionMs(state, now);
   const duration = state.duration_ms ?? 0;
+  // The picture trails the bot's position by the playout buffer while it plays (a pause lets the frozen frame catch up), so text cues wait the same.
+  const cuePosition = Math.max(0, position - (state.playing && state.status === "playing" ? viewer.delayMs : 0));
   const poster = safeImage(state.item.poster);
   const showPicture = viewer.video !== null && state.status !== "error";
   const status = showPicture && (state.status === "playing" || state.status === "paused") ? "" : statusText(state, viewer.room);
@@ -244,7 +246,7 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
                 {volume === 0 || deaf ? <VolumeX size={16} aria-hidden="true" /> : <Volume2 size={16} aria-hidden="true" />}
                 <input type="range" aria-label="Stremio volume" min={0} max={100} value={volume} onChange={e => setViewerVolume(Number(e.target.value))} />
               </label>
-              <LanguagesMenu channelId={channelId} state={state} positionMs={position} controller={controller} />
+              <LanguagesMenu channelId={channelId} state={state} positionMs={cuePosition} controller={controller} />
               <ControlButton label={`Up next (${state.queue.length})`} active={queueOpen} onClick={() => setQueueOpen(o => !o)}>
                 <ListVideo size={18} />
               </ControlButton>

@@ -7,7 +7,7 @@ afterEach(() => void vi.useRealTimers());
 
 function watch() {
   const log: { status: ViewerStatus[]; video: (VideoHandle | null)[]; blocked: boolean[] } = { status: [], video: [], blocked: [] };
-  return { log, cb: { status: (s: ViewerStatus) => log.status.push(s), video: (h: VideoHandle | null) => log.video.push(h), audioBlocked: (b: boolean) => log.blocked.push(b) } };
+  return { log, cb: { status: (s: ViewerStatus) => log.status.push(s), video: (h: VideoHandle | null) => log.video.push(h), audioBlocked: (b: boolean) => log.blocked.push(b), playoutDelay: () => undefined } };
 }
 
 describe("viewer Room", () => {

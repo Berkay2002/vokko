@@ -18,6 +18,7 @@ export interface ConnectionHooks {
   room(state: RoomState): void;
   video(handle: VideoHandle | null): void;
   blocked(blocked: boolean): void;
+  delay(ms: number): void;
 }
 
 const RETRY_MS = [1500, 4000, 10000];
@@ -59,6 +60,7 @@ export class ViewerConnection {
     this.viewer = null;
     this.hooks.video(null);
     this.hooks.blocked(false);
+    this.hooks.delay(0);
   }
 
   private retry(): void {
@@ -95,7 +97,10 @@ export class ViewerConnection {
         audioBlocked: b => {
           if (!this.closed && this.viewer === current) this.hooks.blocked(b);
         },
-      });
+        playoutDelay: ms => {
+          if (!this.closed && this.viewer === current) this.hooks.delay(ms);
+        },
+      }, this.kind === "stremio");
       this.viewer = current;
       current.setVolume(this.volume);
       await current.connect(url, token, this.botIdentity);

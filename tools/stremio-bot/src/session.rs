@@ -253,9 +253,7 @@ impl Live {
     }
 
     async fn join(&mut self, d: &Desired) -> Result<mpsc::UnboundedReceiver<RoomEvent>, String> {
-        let mut options = RoomOptions::default();
-        options.auto_subscribe = false;
-        let connect = Room::connect(&d.livekit_url, &d.token, options);
+        let connect = Room::connect(&d.livekit_url, &d.token, room_options());
         let (room, events) = tokio::time::timeout(Duration::from_secs(30), connect)
             .await
             .map_err(|_| "LiveKit connect timed out".to_owned())?
@@ -408,4 +406,25 @@ async fn exited(pipeline: &mut Option<Pipeline>) -> std::io::Result<std::process
 /// Error text goes to the server and the log: take the secrets out first.
 fn redact(message: &str, d: &Desired) -> String {
     message.replace(&d.token, "<token>").replace(&d.media_url, "<media>").replace(&d.livekit_url, "<livekit>")
+}
+
+/// The bot only publishes. Dynacast stops encoding the simulcast layers no viewer is subscribed to (the SFU tells the SDK which ones are
+/// wanted), which matters because the software VP8 encoder already runs at its CPU limit with a single extra layer.
+fn room_options() -> RoomOptions {
+    let mut options = RoomOptions::default();
+    options.auto_subscribe = false;
+    options.dynacast = true;
+    options
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_room_publishes_only_and_pauses_unwatched_layers() {
+        let options = room_options();
+        assert!(!options.auto_subscribe);
+        assert!(options.dynacast);
+    }
 }
