@@ -255,8 +255,8 @@ async fn room_loop(
             RoomEvent::Disconnected { reason } => {
                 // Duplicate identity = we joined from another device; removed = kicked by a moderator. Never retried.
                 let (is_final, reason) = match reason {
-                    DisconnectReason::DuplicateIdentity => (true, Some("moved")),
-                    DisconnectReason::ParticipantRemoved => (true, Some("kicked")),
+                    livekit::DisconnectReason::DuplicateIdentity => (true, Some("moved")),
+                    livekit::DisconnectReason::ParticipantRemoved => (true, Some("kicked")),
                     _ => (false, None),
                 };
                 log::info!("native voice: room disconnected (final: {is_final})");
@@ -361,7 +361,9 @@ async fn connect(state: &NativeVoice, url: String, token: String, init: ConnectI
         *volumes = init.volumes;
     }
     let _ = events.send(NativeEvent::Status { status: "rtc_connecting" });
-    let options = RoomOptions { auto_subscribe: false, dynacast: true, ..Default::default() };
+    let mut options = RoomOptions::default();
+    options.auto_subscribe = false;
+    options.dynacast = true;
     let (room, rx) = Room::connect(&url, &token, options).await.map_err(|e| e.to_string())?;
     let room = Arc::new(room);
     let leaving = Arc::new(AtomicBool::new(false));
