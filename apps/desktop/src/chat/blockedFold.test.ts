@@ -45,6 +45,7 @@ describe('foldBlocked', () => {
     expect(f.hiddenBefore('5')).toBe(2);
     expect(f.hiddenBefore('3')).toBe(0); // 3 is hidden itself; only 4 follows it
     expect(f.hiddenBefore(null)).toBe(0);
+    expect(foldBlocked(rows, blocked, new Set(['3'])).hiddenBefore('5')).toBe(2); // Show does not change it: it is not a prepend
   });
 });
 

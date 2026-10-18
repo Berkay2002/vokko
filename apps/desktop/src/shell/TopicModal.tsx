@@ -33,7 +33,7 @@ export function TopicLine({ channelId, topic }: { channelId: Snowflake; topic: s
   return (
     <>
       <div className="channel-header-topic">
-        <button type="button" id={open} className="channel-header-topic-open" title={topic} aria-haspopup="dialog" aria-label="Channel topic:" aria-labelledby={`${open} ${text}`} onClick={() => openModal({ type: "channelTopic", channelId })} />
+        <button type="button" id={open} className="channel-header-topic-open" aria-haspopup="dialog" aria-label="Channel topic:" aria-labelledby={`${open} ${text}`} onClick={() => openModal({ type: "channelTopic", channelId })} />
         <span id={text} className="channel-header-topic-text">
           <ChatProvider channelId={channelId} actions={actions}>
             <InlineTopic topic={topic} />

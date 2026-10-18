@@ -17,7 +17,7 @@ export interface Folded {
   rows: DisplayRow[];
   /** Message id → its run, for the runs that are still closed (the message is hidden or sits behind the fold row). */
   closed: Map<Snowflake, Fold>;
-  /** How many rows older than `anchor` the closed runs removed: Virtuoso's firstItemIndex has to move with them. */
+  /** How many messages older than `anchor` a fold removes when closed (open or not): Virtuoso's firstItemIndex has to move with them on a prepend. */
   hiddenBefore(anchor: Snowflake | null): number;
 }
 
@@ -35,11 +35,9 @@ export function foldBlocked(rows: Row[], isBlocked: (authorId: Snowflake) => boo
     const ids = run.map(r => r.message.id);
     const fold: Fold = { ids, open: ids.some(id => revealed.has(id)) };
     out.push({ ...run[0]!, fold });
+    hidden.push(...ids.slice(1)); // open or not: Show and Hide must not move firstItemIndex, or Virtuoso reads them as a prepend and jumps
     if (fold.open) out.push(...run.slice(1));
-    else {
-      for (const id of ids) closed.set(id, fold);
-      hidden.push(...ids.slice(1));
-    }
+    else for (const id of ids) closed.set(id, fold);
     run = [];
   };
   for (const row of rows) {

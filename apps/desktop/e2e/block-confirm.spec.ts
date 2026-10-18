@@ -98,13 +98,8 @@ test('a blocked author folds into one "N blocked messages" row in a server; Show
   await expect(list.locator('.chat-blocked').first()).toBeVisible();
 });
 
-test('an older page that holds folded runs does not move the list (firstItemIndex follows the rows, not the messages)', async ({ page }) => {
-  await page.goto('/channels/@me?as=sam&mockLatency=0&seed=big');
-  await page.getByRole('link', { name: 'Big Server' }).click();
-  await page.getByRole('link', { name: /^firehose/ }).first().click();
-  const list = page.locator('.chat-list');
-  await expect(list.locator('.chat-msg').first()).toBeVisible();
-  // Block three of four authors in the window: the messages are full of runs of them.
+/** Blocks three of four authors of the newest 500 messages of the open channel: the window is then full of folded runs. */
+async function blockThreeOfFour(page: Page): Promise<void> {
   await page.evaluate(async () => {
     const w = window as unknown as { __vokko: { request(m: string, p: string, b?: unknown): Promise<unknown>; appStore: { getState(): { me: { id: string } | null } } } };
     const channelId = location.pathname.split('/').pop();
@@ -118,6 +113,15 @@ test('an older page that holds folded runs does not move the list (firstItemInde
     }
     for (const id of [...authors].filter((_, i) => i % 4 !== 3)) await w.__vokko.request('PUT', `/users/@me/relationships/${id}`, { type: 2 });
   });
+}
+
+test('an older page that holds folded runs does not move the list (firstItemIndex follows the rows, not the messages)', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0&seed=big');
+  await page.getByRole('link', { name: 'Big Server' }).click();
+  await page.getByRole('link', { name: /^firehose/ }).first().click();
+  const list = page.locator('.chat-list');
+  await expect(list.locator('.chat-msg').first()).toBeVisible();
+  await blockThreeOfFour(page);
   await expect(list.locator('.chat-blocked').first()).toBeVisible();
   const scroller = page.locator('.chat-scroller');
   // Load the next older page while the list is scrolled somewhere in the middle: the first row on screen must stay where it is.
@@ -147,4 +151,42 @@ test('an older page that holds folded runs does not move the list (firstItemInde
   const after = await topOf(anchor.id);
   expect(after).not.toBeNull();
   expect(Math.abs(after! - anchor.top)).toBeLessThan(4);
+});
+
+test('Show and Hide on a run of three or more keep the fold row where it is', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0&seed=big');
+  await page.getByRole('link', { name: 'Big Server' }).click();
+  await page.getByRole('link', { name: /^firehose/ }).first().click();
+  const list = page.locator('.chat-list');
+  await expect(list.locator('.chat-msg').first()).toBeVisible();
+  await blockThreeOfFour(page);
+  const scroller = page.locator('.chat-scroller');
+  await scroller.evaluate(el => { el.style.overflowAnchor = 'none'; });
+  // A wheel scroll up (a real gesture: the list stops following the bottom), then the first run of three or more that is on screen.
+  await page.mouse.move(700, 450);
+  // Wheel gestures up (the list stops following the bottom) until a run of three or more is on screen.
+  const bigId = () => page.evaluate(() => {
+    const el = [...document.querySelectorAll<HTMLElement>('.chat-blocked')].find(e => {
+      const r = e.getBoundingClientRect();
+      return /^([3-9]|\d\d+) blocked messages/.test(e.textContent ?? '') && r.top > 120 && r.bottom < innerHeight - 60;
+    });
+    return el?.dataset.messageId ?? null;
+  });
+  for (let i = 0; i < 30 && (i < 2 || !(await bigId())); i++) {
+    await page.mouse.wheel(0, -250);
+    await page.waitForTimeout(250);
+  }
+  const id = (await bigId())!;
+  expect(id).not.toBeNull();
+  const big = list.locator(`.chat-blocked[data-message-id="${id}"]`);
+  await page.waitForTimeout(500);
+  // The list row that holds the run's first message: the fold row, then the bar above the first message, then the fold row again.
+  const rowTop = () => list.locator('.chat-row', { has: page.locator(`[data-message-id="${id}"]`) }).evaluate(el => el.getBoundingClientRect().top);
+  const closedTop = await rowTop();
+  await big.getByRole('button', { name: /^Show/ }).evaluate(el => (el as HTMLElement).click()); // no scrolling into view, which would move the row
+  await page.waitForTimeout(500);
+  expect(Math.abs((await rowTop()) - closedTop)).toBeLessThan(4);
+  await list.locator('.chat-blocked-bar').first().getByRole('button', { name: 'Hide' }).evaluate(el => (el as HTMLElement).click());
+  await page.waitForTimeout(500);
+  expect(Math.abs((await rowTop()) - closedTop)).toBeLessThan(4);
 });

@@ -1489,7 +1489,8 @@
   pointer-events: auto;
 }
 
-.channel-header-topic-text .md-inline {
+.channel-header-topic-text .md-inline,
+.channel-header-topic-text .md-inline * {
   white-space: nowrap;
 }
 
