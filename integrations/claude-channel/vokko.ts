@@ -90,7 +90,7 @@ export function channelBits(guild: GuildInfo, member: Member, overwrites: Overwr
 export type Role = 'channel' | 'bridge-shared' | 'bridge'
 
 /** Owner commands (sent by the bot application's owner in a DM) belong to the bridge, never to the plugin's Claude. */
-export const OWNER_COMMAND_RE = /^\s*!(backend|model|effort|pair|pause|unpause|pauses)\b/i
+export const OWNER_COMMAND_RE = /^\s*!(backend|model|effort|pair|pause|unpause|pauses|notes)\b/i
 
 export type Config = {
   stateDir: string
@@ -571,6 +571,11 @@ export class VokkoBot {
 
   isOwnerCommand(msg: Message): boolean {
     return msg.guild_id == null && this.ownerId != null && msg.author.id === this.ownerId && OWNER_COMMAND_RE.test(msg.content)
+  }
+
+  /** The channel's type from the cache (1: a 1:1 DM, 3: a group DM, 10-12: threads); undefined when this bot has not seen the channel. */
+  channelType(channelId: string): number | undefined {
+    return this.channels.get(channelId)?.type
   }
 
   gateKey(channelId: string): string {
