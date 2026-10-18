@@ -12,7 +12,6 @@ const NO_RULES = "none";
 const MODES = [
   { label: "Invite Only", note: "People can only join with an invite link.", mode: JoinMode.InviteOnly },
   { label: "Apply to Join", note: "People fill in a form and a moderator approves them before they get in.", mode: JoinMode.ApplyToJoin },
-  { label: "Discoverable", note: "Not available yet", mode: null },
 ];
 const EMPTY_FORM: MemberVerificationForm = { description: null, form_fields: [] };
 
@@ -100,9 +99,9 @@ export function AccessPage({ guild, canEdit }: { guild: Guild; canEdit: boolean 
               type="button"
               role="radio"
               aria-checked={m.mode === joinMode}
-              aria-disabled={m.mode === null || !canEdit}
+              aria-disabled={!canEdit}
               className={`sr-row${m.mode === joinMode ? " selected" : ""}`}
-              onClick={() => m.mode !== null && canEdit && setJoinMode(m.mode)}
+              onClick={() => canEdit && setJoinMode(m.mode)}
             >
               <span className="sr-dot" />
               <span className="sr-text">

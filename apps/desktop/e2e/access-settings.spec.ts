@@ -29,7 +29,9 @@ test('age-restricted server and rules channel are saved, and the gate shows once
   await openChannel(page, 'general');
   await openAccess(page);
   await expect(page.getByRole('radio', { name: /Invite Only/ })).toBeChecked();
-  await expect(page.getByRole('radio', { name: /Discoverable/ })).toHaveAttribute('aria-disabled', 'true');
+  // No server discovery yet: neither the Access option nor the rail's Explore button is offered.
+  await expect(page.getByRole('radio', { name: /Discoverable/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Explore Discoverable Servers' })).toHaveCount(0);
   await page.getByRole('switch', { name: 'Age-Restricted Server' }).click();
   await page.getByRole('combobox', { name: 'Rules channel' }).click();
   await page.getByRole('option', { name: '# general' }).click();

@@ -325,7 +325,6 @@
   background: var(--brand-500);
 }
 
-.rail-discover:hover,
 .rail-download:hover {
   background: var(--status-online);
 }
