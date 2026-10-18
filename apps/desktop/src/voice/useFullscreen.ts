@@ -12,7 +12,7 @@ import { useVoice } from "./store";
 import { useVoiceUi } from "./uiStore";
 
 /** A phone on its side. The width breakpoint of usePhone does not match a phone at 844x390, so the landscape layout has its own query. */
-export const LANDSCAPE_QUERY = "(orientation: landscape) and (max-height: 500px)";
+export const LANDSCAPE_QUERY = "(orientation: landscape) and (max-height: 500px) and (pointer: coarse)";
 
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(
@@ -42,6 +42,8 @@ export function useVoiceFullscreen(channelId: Snowflake): { fullscreen: boolean;
 
   useEffect(() => {
     const sync = () => {
+      // A game or a video that goes full screen on top of the page replaces fullscreenElement without ending the page's full screen.
+      if (was.current && document.fullscreenElement) return;
       const on = inPageFullscreen();
       if (on === was.current) return;
       was.current = on;
@@ -66,7 +68,7 @@ export function useVoiceFullscreen(channelId: Snowflake): { fullscreen: boolean;
 
   const toggle = useCallback(() => {
     if (inPageFullscreen()) return void document.exitFullscreen().catch(() => undefined);
-    restore.current = focusForFullscreen(() => useVoiceUi.getState(), STREMIO_TILE_ID, available.current);
+    restore.current ??= focusForFullscreen(() => useVoiceUi.getState(), STREMIO_TILE_ID, available.current);
     // The window first: a maximized window keeps its webview at the work-area size otherwise (see setWindowFullscreen).
     void setWindowFullscreen(true)
       .then(() => document.documentElement.requestFullscreen())

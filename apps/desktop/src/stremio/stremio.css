@@ -1040,8 +1040,18 @@
 }
 
 .voice-page[data-cinema] :is(.voice-strip-wrap, .voice-members-toggle, .voice-pip, .voice-alone),
-.voice-page[data-cinema] > :not(.voice-stage) {
+.voice-page[data-cinema] > .voice-chat {
   display: none;
+}
+
+/* notices float over the picture instead of squeezing it */
+.voice-page[data-cinema] :is(.voice-video-error, .voice-muted-hint) {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  z-index: 4;
+  margin: 0;
+  transform: translateX(-50%);
 }
 
 /* the tile is the stage: .voice-focus-main / .voice-tiles.single are size containers, so it fills them */
@@ -1150,7 +1160,7 @@
 
 /* a phone on its side: one slim touch layout. The transport is three big circles in the middle of the picture, the seek bar and a
    row of 44px buttons sit low, and the call bar is one slim row (mic, camera, hang up, more); no volume, no pop out. */
-@media (orientation: landscape) and (max-height: 500px) {
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   .voice-page[data-cinema] {
     --callbar-h: 52px;
     --callbar-bottom: max(8px, env(safe-area-inset-bottom, 0px));

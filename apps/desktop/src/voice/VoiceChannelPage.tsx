@@ -537,6 +537,10 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
   useIdleHide(page, channel.id);
   const { fullscreen, toggle: toggleFullscreen } = useVoiceFullscreen(channel.id);
   const landscape = useMediaQuery(LANDSCAPE_QUERY);
+  // Leaving the call ends the page's full screen (the page stays mounted with its Join button).
+  useEffect(() => {
+    if (!connected && fullscreen) toggleFullscreen();
+  }, [connected, fullscreen, toggleFullscreen]);
   // Cinema: the focused Stremio tile fills the screen (full screen) or the phone on its side (landscape); both are a fixed overlay over the app.
   const cinema = !!focused?.stremio && (fullscreen || landscape);
 

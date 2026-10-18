@@ -58,7 +58,7 @@ export function bindIdleHide(stage: EventTarget, { isBar, held, set: report, ms 
     if (p.pointerType) touch = p.pointerType === "touch";
     // A touch has no hover: only its press counts, and it decides between showing and hiding.
     if (touch && e.type !== "pointerdown") return;
-    if (touch) tapHides = !idle && !isBar(e.target);
+    tapHides = touch && !idle && !isBar(e.target);
     // Chrome repeats the last pointer position when the layout under a resting mouse changes: that is not movement.
     const now = `${p.clientX},${p.clientY}`;
     if (e.type === "pointermove" && now === at) return;
