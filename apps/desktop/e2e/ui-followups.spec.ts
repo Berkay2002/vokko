@@ -58,10 +58,13 @@ test('the profile card names the sources of its Member Since dates on hover', as
   await page.locator('.chat-msg:not(.grouped):not(.system)', { hasText: 'Bobby' }).last().locator('.chat-author').click();
   const card = page.locator('.profile-card');
   await expect(card.locator('.profile-since')).toBeVisible();
+  // Focus moves into the card on open; a click-opened card must not pop the In voice info tooltip by itself.
+  await page.waitForTimeout(400);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
   await card.getByRole('img', { name: 'Vokko' }).hover();
-  await expect(page.getByRole('tooltip')).toHaveText('Vokko');
+  await expect(page.getByRole('tooltip', { name: 'Vokko', exact: true })).toBeVisible();
   await card.getByRole('img', { name: "Sam's server" }).hover();
-  await expect(page.getByRole('tooltip')).toHaveText("Sam's server");
+  await expect(page.getByRole('tooltip', { name: "Sam's server", exact: true })).toBeVisible();
   await shot(page, 'profile-member-since');
 });
 
