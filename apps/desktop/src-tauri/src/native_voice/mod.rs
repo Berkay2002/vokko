@@ -540,12 +540,17 @@ mod tests {
             }
             Ok(())
         });
-        let settings: VoiceSettings = serde_json::from_value(serde_json::json!({
+        let mut settings = serde_json::json!({
             "inputMode": "vad", "pttReleaseMs": 20, "vadThresholdDb": -60, "vadAuto": false, "inputDeviceId": "default",
             "outputDeviceId": "default", "echoCancellation": true, "noiseSuppression": true, "autoGainControl": false,
             "inputGain": 1, "rnnoise": false, "outputGain": 1, "duck": 1
-        }))
-        .unwrap();
+        });
+        // NATIVE_VOICE_SETTINGS: a JSON object of VoiceSettings fields to override.
+        if let Ok(extra) = std::env::var("NATIVE_VOICE_SETTINGS") {
+            let extra: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&extra).unwrap();
+            settings.as_object_mut().unwrap().extend(extra);
+        }
+        let settings: VoiceSettings = serde_json::from_value(settings).unwrap();
         let init = ConnectInit { self_mute: false, self_deaf: false, settings, volumes: HashMap::new() };
         connect(&voice, url, token, init, events).await.unwrap();
         println!("connected");
