@@ -164,6 +164,7 @@ describe('Markdown render', () => {
     );
     expect(html('- a\n- b')).toContain('<ul class="md-list"><li>a</li><li>b</li></ul>');
     expect(html('3. a\n4. b')).toContain('<ol class="md-list" start="3"><li>a</li><li>b</li></ol>');
+    expect(html('- item a\n  - nested b\n    - deeper c')).toContain('<ul class="md-list"><li>item a<ul class="md-list"><li>nested b<ul class="md-list"><li>deeper c</li></ul></li></ul></li></ul>');
   });
 
   it('code block: label, hljs classes, escaped content', () => {

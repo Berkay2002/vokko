@@ -1,4 +1,4 @@
-import type { Block, Inline, ParseOptions } from './ast';
+import type { Block, Inline, ListItem, ParseOptions } from './ast';
 
 /*
  * Discord-flavoured markdown parser.
@@ -51,8 +51,19 @@ export function isJumbo(blocks: Block[]): boolean {
 
 const HEADING_RE = /^(#{1,3}) +(\S.*)$/;
 const SUBTEXT_RE = /^-# +(\S.*)$/;
-const UL_RE = /^ *[-*] +(\S.*)$/;
-const OL_RE = /^ *(\d{1,9})\. +(\S.*)$/;
+const UL_RE = /^( *)[-*] +(\S.*)$/;
+const OL_RE = /^( *)(\d{1,9})\. +(\S.*)$/;
+// A list line indented 2+ spaces past its list's items nests under the previous item (like Discord), up to this depth.
+const MAX_LIST_DEPTH = 10;
+
+/** A list line: its indent, marker kind and item text; null for any other line ("-# subtext" is not a list). */
+function listLine(l: string): { indent: number; ordered: boolean; start: number; text: string } | null {
+  if (SUBTEXT_RE.test(l)) return null;
+  const ul = UL_RE.exec(l);
+  if (ul) return { indent: ul[1]!.length, ordered: false, start: 1, text: ul[2]! };
+  const ol = OL_RE.exec(l);
+  return ol ? { indent: ol[1]!.length, ordered: true, start: Number(ol[2]), text: ol[3]! } : null;
+}
 const FENCE_LANG_RE = /^([A-Za-z0-9_+\-.#]+)\n/;
 
 class BlockParser {
@@ -63,6 +74,29 @@ class BlockParser {
 
   parse(inQuote: boolean): Block[] {
     return this.parseRange(this.src, inQuote);
+  }
+
+  /** One list starting with the line at `pos` (described by `first`): its items, with deeper-indented lines as sub-lists. Returns the list and where it ended. */
+  private parseList(text: string, pos: number, first: NonNullable<ReturnType<typeof listLine>>, depth: number): [Block & { t: 'list' }, number] {
+    const items: ListItem[] = [];
+    let p = pos;
+    while (p < text.length) {
+      let e = text.indexOf('\n', p);
+      if (e < 0) e = text.length;
+      const l = listLine(text.slice(p, e));
+      if (!l || l.indent < first.indent) break;
+      const last = items[items.length - 1];
+      if (last && l.indent >= first.indent + 2 && depth < MAX_LIST_DEPTH) {
+        const [sub, q] = this.parseList(text, p, l, depth + 1);
+        (last.sub ??= []).push(sub);
+        p = q;
+        continue;
+      }
+      if (l.ordered !== first.ordered) break; // the other marker kind starts a new list
+      items.push({ c: parseInline(l.text.trimEnd(), this.shortcodes) });
+      p = e + 1;
+    }
+    return [{ t: 'list', ordered: first.ordered, start: first.start, items }, p];
   }
 
   /** Parse `text` (a whole message, or the stripped inside of a quote). */
@@ -171,26 +205,11 @@ class BlockParser {
         continue;
       }
 
-      const ul = UL_RE.exec(line);
-      const ol = ul ? null : OL_RE.exec(line);
-      if (ul || ol) {
+      const first = listLine(line);
+      if (first) {
         flushPara();
-        const ordered = ol !== null;
-        const start = ol ? Number(ol[1]) : 1;
-        const items: Inline[][] = [];
-        let p = pos;
-        while (p < n) {
-          let e = text.indexOf('\n', p);
-          if (e < 0) e = n;
-          const l = text.slice(p, e);
-          const mm = ordered ? OL_RE.exec(l) : UL_RE.exec(l);
-          if (!mm) break;
-          // "-# subtext" must not be swallowed by an unordered list
-          if (!ordered && SUBTEXT_RE.test(l)) break;
-          items.push(parseInline((ordered ? mm[2]! : mm[1]!).trimEnd(), this.shortcodes));
-          p = e + 1;
-        }
-        blocks.push({ t: 'list', ordered, start, items });
+        const [list, p] = this.parseList(text, pos, first, 0);
+        blocks.push(list);
         pos = p;
         continue;
       }

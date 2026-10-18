@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { Clock, Dog, Flag, Hand, Lightbulb, Pizza, Plane, Search, Smile, Trophy, Hash, X } from 'lucide-react';
-import { BottomSheet, Popout, scrollBehavior, usePhone } from './shell';
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from 'react';
+import { Clock, Dog, Flag, Hand, Lightbulb, Pizza, Plane, Search, Smile, Star, Trophy, Hash, X } from 'lucide-react';
+import { BottomSheet, Popout, scrollBehavior, useContextMenu, usePhone } from './shell';
 import { SuperReactToggle } from '../perks/SuperReactions';
-import { getRecentEmoji, getSkinTone, pushRecentEmoji, setSkinTone, useEmojiDb, type EmojiEntry } from './emojiData';
+import { getFavoriteEmoji, getRecentEmoji, getSkinTone, pushRecentEmoji, sameUnicodeEmoji, setSkinTone, toggleFavoriteEmoji, useEmojiDb, type EmojiEntry } from './emojiData';
 import { CustomEmojiRail, CustomEmojiSections, CustomSearchResults, hasCustomResults, usePickerSections, type CustomHover, type CustomPick } from '../emoji/PickerSections';
 
 /** Unicode (`id` null) or a server's custom emoji. */
@@ -40,6 +40,13 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   const recent = useMemo(() => getRecentEmoji(), []);
+  const [favorites, setFavorites] = useState(getFavoriteEmoji);
+  const menu = useContextMenu();
+  // Right-click on a unicode emoji: Favorite / Unfavorite, as in Discord's picker. Custom emoji have no favourites yet.
+  const favoriteMenu = (ch: string) => (ev: MouseEvent) => {
+    const isFav = favorites.some(f => sameUnicodeEmoji(f, ch));
+    menu.open(ev, [{ id: 'favorite', label: isFav ? 'Unfavorite' : 'Favorite', icon: <Star size={16} />, onSelect: () => setFavorites(toggleFavoriteEmoji(ch)) }]);
+  };
 
   useEffect(() => { if (autoFocus) input.current?.focus(); }, [autoFocus]);
 
@@ -69,8 +76,9 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
 
   const cell = (e: EmojiEntry) => {
     const ch = variant(e, tone);
-    return <button key={e.order} type="button" className="chat-emoji-cell" aria-label={e.label} onMouseEnter={() => setHover({ emoji: ch, label: e.shortcodes[0] ? `:${e.shortcodes[0]}:` : e.label })} onClick={() => pick(ch)}>{ch}</button>;
+    return <button key={e.order} type="button" className="chat-emoji-cell" aria-label={e.label} onMouseEnter={() => setHover({ emoji: ch, label: e.shortcodes[0] ? `:${e.shortcodes[0]}:` : e.label })} onClick={() => pick(ch)} onContextMenu={favoriteMenu(ch)}>{ch}</button>;
   };
+  const plainCell = (ch: string) => <button key={ch} type="button" className="chat-emoji-cell" onMouseEnter={() => setHover({ emoji: ch, label: '' })} onClick={() => pick(ch)} onContextMenu={favoriteMenu(ch)}>{ch}</button>;
 
   return <div className={`chat-emoji-picker${embedded ? ' embedded' : ''}`} role={embedded ? 'tabpanel' : 'dialog'} aria-label="Emoji picker">
     <div className="chat-emoji-top">
@@ -87,6 +95,7 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
     </div>
     <div className="chat-emoji-body">
       <nav className="chat-emoji-cats" aria-label="Categories">
+        {favorites.length > 0 && <button type="button" className={active === 'favorites' && !results ? 'active' : ''} aria-label="Favorites" title="Favorites" onClick={() => { setQuery(''); requestAnimationFrame(() => scrollTo('favorites')); }}><Star size={20} /></button>}
         <button type="button" className={active === 'recent' && !results ? 'active' : ''} aria-label="Frequently Used" title="Frequently Used" onClick={() => { setQuery(''); requestAnimationFrame(() => scrollTo('recent')); }}><Clock size={20} /></button>
         <CustomEmojiRail sections={sections} active={results ? '' : active} onJump={key => { setQuery(''); requestAnimationFrame(() => scrollTo(key)); }} />
         {(db?.categories ?? []).map(c => {
@@ -100,9 +109,10 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
           ? <section><h3 className="chat-emoji-heading">Search Results</h3><CustomSearchResults sections={sections} query={query} onPick={pickCustom} onHover={hoverCustom} /><div className="chat-emoji-grid">{results.map(cell)}</div></section>
           : <div className="chat-emoji-empty">No emoji match your search.</div>)}
         {db && !results && <>
+          {favorites.length > 0 && <section data-cat="favorites"><h3 className="chat-emoji-heading">Favorites</h3><div className="chat-emoji-grid">{favorites.map(plainCell)}</div></section>}
           <section data-cat="recent"><h3 className="chat-emoji-heading">Frequently Used</h3>
             {recent.length === 0 ? <div className="chat-emoji-none">Emoji you use will show up here.</div> :
-              <div className="chat-emoji-grid">{recent.map(ch => <button key={ch} type="button" className="chat-emoji-cell" onMouseEnter={() => setHover({ emoji: ch, label: '' })} onClick={() => pick(ch)}>{ch}</button>)}</div>}
+              <div className="chat-emoji-grid">{recent.map(plainCell)}</div>}
           </section>
           <CustomEmojiSections sections={sections} onPick={pickCustom} onHover={hoverCustom} />
           {db.categories.map(c => <section key={c.id} data-cat={c.id}><h3 className="chat-emoji-heading">{c.label}</h3><div className="chat-emoji-grid">{c.emoji.map(cell)}</div></section>)}

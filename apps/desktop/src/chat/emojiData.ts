@@ -131,6 +131,36 @@ export function pushRecentEmoji(emoji: string): void {
     localStorage.setItem(RECENT_KEY, JSON.stringify(next));
   } catch { /* storage unavailable */ }
 }
+/** Counts the unicode emoji of a sent message as used, typed `:shortcodes:` included once the database is loaded (first in the text ends up first). */
+export function recordEmojiUse(content: string): void {
+  // inline code and code blocks are not emoji use
+  const text = content.replace(/```[\s\S]*?```|`[^`\n]*`/g, ' ');
+  if (!/[\p{Extended_Pictographic}\p{Regional_Indicator}]|:\w/u.test(text)) return;
+  // custom emoji are not in the recent list; known shortcodes become their emoji
+  const plain = text.replace(/<a?:\w+:\d+>/g, ' ').replace(/:([\w+-]+):/g, (all, name: string) => db?.shortcodes.get(name.toLowerCase()) ?? all);
+  const used: string[] = [];
+  for (const { segment } of new Intl.Segmenter().segment(plain)) {
+    if (/\p{Emoji_Presentation}|\uFE0F|\p{Regional_Indicator}/u.test(segment) && !used.some(e => sameUnicodeEmoji(e, segment))) used.push(segment); // not ©, ® or ™ typed as text
+  }
+  for (const e of used.slice(0, 36).reverse()) pushRecentEmoji(e);
+}
+
+// ---- favourites (localStorage): the picker's right-click "Favorite", shown above Frequently Used ----
+
+const FAVORITE_KEY = 'vokko.emoji.favorites';
+export function getFavoriteEmoji(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(FAVORITE_KEY) ?? '[]') as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch { return []; }
+}
+/** Adds or removes a favourite and returns the new list (in the order they were added). */
+export function toggleFavoriteEmoji(emoji: string): string[] {
+  const now = getFavoriteEmoji();
+  const next = now.some(e => sameUnicodeEmoji(e, emoji)) ? now.filter(e => !sameUnicodeEmoji(e, emoji)) : [...now, emoji];
+  try { localStorage.setItem(FAVORITE_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+  return next;
+}
 export function quickReactions(): string[] {
   const recent = getRecentEmoji();
   const out: string[] = [];

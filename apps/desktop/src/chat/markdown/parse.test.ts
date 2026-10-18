@@ -280,24 +280,46 @@ describe('blocks', () => {
         t: 'list',
         ordered: false,
         start: 1,
-        items: [[text('a')], [text('b '), { t: 'bold', c: [text('x')] }], [text('c')]],
+        items: [{ c: [text('a')] }, { c: [text('b '), { t: 'bold', c: [text('x')] }] }, { c: [text('c')] }],
       },
     ]);
     expect(parseMarkdown('1. one\n2. two')).toEqual([
-      { t: 'list', ordered: true, start: 1, items: [[text('one')], [text('two')]] },
+      { t: 'list', ordered: true, start: 1, items: [{ c: [text('one')] }, { c: [text('two')] }] },
     ]);
     expect(parseMarkdown('3. three\n4. four')).toEqual([
-      { t: 'list', ordered: true, start: 3, items: [[text('three')], [text('four')]] },
+      { t: 'list', ordered: true, start: 3, items: [{ c: [text('three')] }, { c: [text('four')] }] },
     ]);
     // markers need a space: not a list
     expect(parseMarkdown('-a')).toEqual([{ t: 'paragraph', c: [text('-a')] }]);
     expect(parseMarkdown('*a*')).toEqual([{ t: 'paragraph', c: [{ t: 'italic', c: [text('a')] }] }]);
   });
 
+  it('nested lists', () => {
+    const li = (v: string, sub?: unknown[]) => (sub ? { c: [text(v)], sub } : { c: [text(v)] });
+    expect(parseMarkdown('- item a\n  - nested b\n    - deeper c\n- back d')).toEqual([
+      { t: 'list', ordered: false, start: 1, items: [
+        li('item a', [{ t: 'list', ordered: false, start: 1, items: [li('nested b', [{ t: 'list', ordered: false, start: 1, items: [li('deeper c')] }])] }]),
+        li('back d'),
+      ] },
+    ]);
+    // an ordered list under a bullet, then one space of indent is still a sibling
+    expect(parseMarkdown('- a\n  1. one\n  2. two\n - b')).toEqual([
+      { t: 'list', ordered: false, start: 1, items: [
+        li('a', [{ t: 'list', ordered: true, start: 1, items: [li('one'), li('two')] }]),
+        li('b'),
+      ] },
+    ]);
+    // a mixed marker at the same level starts a new top-level list, as before
+    expect(parseMarkdown('- a\n1. b')).toEqual([
+      { t: 'list', ordered: false, start: 1, items: [li('a')] },
+      { t: 'list', ordered: true, start: 1, items: [li('b')] },
+    ]);
+  });
+
   it('list after text, then text', () => {
     expect(parseMarkdown('intro\n- a\nafter')).toEqual([
       { t: 'paragraph', c: [text('intro')] },
-      { t: 'list', ordered: false, start: 1, items: [[text('a')]] },
+      { t: 'list', ordered: false, start: 1, items: [{ c: [text('a')] }] },
       { t: 'paragraph', c: [text('after')] },
     ]);
   });
