@@ -60,15 +60,23 @@
   white-space: nowrap;
 }
 
-.stremio-bar {
+/* The bottom stack: the subtitle line over the control bar. The stack never fades; only the bar does (see data-idle below), so the
+   subtitle stays and drops to the bottom edge instead. */
+.stremio-bottom {
   position: absolute;
   inset: auto 0 0 0;
+  pointer-events: none;
+}
+
+.stremio-bar {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 24px 10px 6px;
   color: #fff;
   background: linear-gradient(transparent, rgb(0 0 0 / 0.75));
+  pointer-events: auto;
 }
 
 /* Auto-hide while the picture plays (voice/idleHide.ts sets data-idle on the call stage): the title, the bar and the call bar fade
@@ -275,14 +283,31 @@
   margin-top: auto;
 }
 
-/* The subtitle line sits just above the control bar; the bar is its positioned parent. */
-.stremio-cue {
+/* The subtitle line sits just above the control bar; when the bar fades it drops to the bottom edge. */
+.stremio-cue-host {
   position: absolute;
-  inset: auto 12px 100% 12px;
+  right: 12px;
+  bottom: 100%;
+  left: 12px;
+  margin-bottom: 4px;
+  transition: bottom 200ms, margin-bottom 200ms;
+  pointer-events: none;
+}
+
+[data-idle] .stremio-cue-host {
+  bottom: 8px;
+  margin-bottom: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stremio-cue-host {
+    transition: none;
+  }
+}
+
+.stremio-cue {
   display: flex;
   justify-content: center;
-  margin-bottom: 4px;
-  pointer-events: none;
 }
 
 .stremio-cue span {
@@ -983,4 +1008,281 @@
   position: sticky;
   bottom: 0;
   padding-top: 8px;
+}
+
+/* ---- cinema: the focused Stremio tile over the whole screen ----
+   VoiceChannelPage sets data-cinema on the call page when the Stremio tile is focused and the page is full screen or a phone is on its
+   side. The picture goes edge to edge (letterboxed only by its own aspect), and the title, controls and call bar float over it and fade
+   with the call stage's idle hide; the controls keep to a centred column of --column on ultrawide screens. */
+.voice-page[data-cinema] {
+  /* the controls keep to a centred column: 1280px at least, and as wide as a 16:9 picture the screen's height would hold */
+  --column: max(1280px, 100cqh * 16 / 9);
+  --callbar-h: 64px;
+  --callbar-bottom: 12px;
+  --gutter: max(16px, calc((100% - var(--column)) / 2));
+}
+
+.voice-page[data-cinema] .voice-stage {
+  position: relative;
+  gap: 0;
+  padding: 0;
+}
+
+.voice-page[data-cinema] .voice-focus {
+  gap: 0;
+}
+
+.voice-page[data-cinema] .voice-focus-frame {
+  position: static;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.voice-page[data-cinema] :is(.voice-strip-wrap, .voice-members-toggle, .voice-pip, .voice-alone),
+.voice-page[data-cinema] > .voice-chat {
+  display: none;
+}
+
+/* notices float over the picture instead of squeezing it */
+.voice-page[data-cinema] :is(.voice-video-error, .voice-muted-hint) {
+  position: absolute;
+  top: 72px;
+  left: 50%;
+  z-index: 4;
+  margin: 0;
+  transform: translateX(-50%);
+}
+
+/* the tile is the stage: .voice-focus-main / .voice-tiles.single are size containers, so it fills them */
+.voice-page[data-cinema] .voice-tile.stremio {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  aspect-ratio: auto;
+  border-radius: 0;
+  container-type: size;
+}
+
+.voice-page[data-cinema] .stremio-head {
+  padding: 16px var(--gutter) 56px;
+}
+
+.voice-page[data-cinema] .stremio-title {
+  font-size: clamp(16px, 2.4cqh, 28px);
+}
+
+.voice-page[data-cinema] .stremio-by {
+  font-size: clamp(12px, 1.6cqh, 16px);
+}
+
+/* the bar's gradient reaches the bottom edge and its padding clears the call bar, which floats over it */
+.voice-page[data-cinema] .stremio-bar {
+  padding: 40px var(--gutter) calc(var(--callbar-h) + var(--callbar-bottom) + 8px);
+}
+
+.voice-page[data-cinema] .stremio-cue-host {
+  margin-bottom: -28px;
+}
+
+.voice-page[data-cinema][data-idle] .stremio-cue-host {
+  bottom: 6cqh;
+  margin-bottom: 0;
+}
+
+.voice-page[data-cinema] .stremio-cue span {
+  font-size: clamp(16px, 3.2cqh, 40px);
+}
+
+.voice-page[data-cinema] .stremio-queue {
+  inset: 64px var(--gutter) calc(var(--callbar-h) + var(--callbar-bottom) + 96px) auto;
+}
+
+.voice-page[data-cinema] .stremio-languages {
+  right: var(--gutter);
+}
+
+/* the call bar: a strip across the screen with its pieces centred; the side buttons sit at the screen's right edge */
+.voice-page[data-cinema] .voice-bar {
+  position: absolute;
+  inset: auto 0 var(--callbar-bottom) 0;
+  z-index: 3;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.voice-page[data-cinema] .voice-bar::before {
+  display: none;
+}
+
+.voice-page[data-cinema] .voice-bar > * {
+  pointer-events: auto;
+}
+
+.voice-page[data-cinema][data-idle] .voice-bar > * {
+  pointer-events: none;
+}
+
+.voice-page[data-cinema] .voice-bar-side {
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  flex: none;
+}
+
+.voice-page[data-cinema] .voice-bar-side .voice-bar-button {
+  background: rgb(0 0 0 / 0.5);
+}
+
+.stremio-transport,
+.voice-bar-pill {
+  display: contents;
+}
+
+/* the call bar's pieces sit in one rounded floating pill */
+.voice-page[data-cinema] .voice-bar-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--callbar-h);
+  padding: 0 10px;
+  border-radius: 32px;
+  background: rgb(24 24 28 / 0.72);
+  backdrop-filter: blur(16px);
+}
+
+.voice-page[data-cinema] .voice-bar-group {
+  border: 0;
+  background: transparent;
+}
+
+/* a phone on its side: one slim touch layout. The transport is three big circles in the middle of the picture, the seek bar and a
+   row of 44px buttons sit low, and the call bar is one slim row (mic, camera, hang up, more); no volume, no pop out. */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .voice-page[data-cinema] {
+    --callbar-h: 52px;
+    --callbar-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    --gutter: max(16px, env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+  }
+
+  .voice-page[data-cinema] .stremio-head {
+    padding-top: max(10px, env(safe-area-inset-top, 0px));
+  }
+
+  /* the stack covers the tile so the transport can centre on the picture */
+  .voice-page[data-cinema] .stremio-bottom {
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+  }
+
+  /* the seek bar, the row of buttons and the call bar share the bottom: time and skip left, the call bar in the middle, subtitles and more right */
+  .voice-page[data-cinema] .stremio-bar {
+    position: static;
+    padding-top: 24px;
+    padding-bottom: var(--callbar-bottom);
+  }
+
+  .voice-page[data-cinema] .stremio-cue-host {
+    bottom: calc(var(--callbar-h) + var(--callbar-bottom) + 40px);
+    margin-bottom: 0;
+  }
+
+  .voice-page[data-cinema][data-idle] .stremio-cue-host {
+    bottom: 6cqh;
+  }
+
+  .voice-page[data-cinema] .stremio-languages {
+    bottom: calc(var(--callbar-h) + var(--callbar-bottom) + 36px);
+    max-height: 60cqh;
+  }
+
+  .voice-page[data-cinema] .stremio-seek {
+    height: 28px;
+  }
+
+  .voice-page[data-cinema] .stremio-controls {
+    min-height: var(--callbar-h);
+  }
+
+  .voice-page[data-cinema] .stremio-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .voice-page[data-cinema] .stremio-transport {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    transform: translate(-50%, -50%);
+  }
+
+  .voice-page[data-cinema] .stremio-transport .stremio-button {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: rgb(20 20 24 / 0.55);
+  }
+
+  .voice-page[data-cinema] .stremio-transport > :nth-child(1) {
+    order: 2;
+  }
+
+  .voice-page[data-cinema] .stremio-transport > :nth-child(2) {
+    order: 1;
+  }
+
+  .voice-page[data-cinema] .stremio-transport > :nth-child(3) {
+    order: 3;
+  }
+
+  .voice-page[data-cinema] .stremio-transport > :nth-child(1) .stremio-button {
+    width: 72px;
+    height: 72px;
+  }
+
+  .voice-page[data-cinema] .stremio-transport svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .voice-page[data-cinema] .stremio-transport > :nth-child(1) svg {
+    width: 34px;
+    height: 34px;
+  }
+
+  .voice-page[data-cinema] .stremio-volume,
+  .voice-page[data-cinema] .stremio-by,
+  .voice-page[data-cinema] .voice-bar-side,
+  .voice-page[data-cinema] .voice-bar-button.optional {
+    display: none;
+  }
+
+  .voice-page[data-cinema] .voice-bar-pill {
+    gap: 4px;
+    padding: 0 8px;
+    border-radius: 26px;
+  }
+
+  .voice-page[data-cinema] .voice-bar-group {
+    height: var(--callbar-h);
+  }
+
+  .voice-page[data-cinema] .voice-bar-button {
+    min-width: 44px;
+    height: 44px;
+    border-radius: 50%;
+  }
+
+  .voice-page[data-cinema] .voice-hangup {
+    width: 64px;
+    height: 44px;
+    border-radius: 22px;
+  }
 }

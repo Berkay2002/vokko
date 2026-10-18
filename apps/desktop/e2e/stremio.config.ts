@@ -6,7 +6,7 @@ const PORT = Number(process.env.STREMIO_PORT ?? 1446);
 
 export default defineConfig({
   testDir: '.',
-  testMatch: /stremio(-tracks)?\.spec\.ts$/,
+  testMatch: /stremio(-tracks|-fullscreen)?\.spec\.ts$/,
   timeout: 60_000,
   fullyParallel: false,
   workers: 1,

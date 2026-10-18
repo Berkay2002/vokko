@@ -3,6 +3,7 @@
 // are this viewer's own (see ./subtitles.ts). Subtitle text is shown as React text, never HTML.
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, Languages } from "lucide-react";
 import type { Snowflake, StremioAddonSubtitles, StremioCue, StremioState } from "../api/types";
 import { Tooltip } from "../ui";
@@ -35,9 +36,12 @@ function Row({ label, hint, checked, disabled, onClick }: { label: string; hint?
   );
 }
 
-/** The Languages button with its menu, and the subtitle line. Mount inside the tile's control row. */
-/** `controller`: may change the audio and the burned-in subtitle, which are everyone's (docs/api.md "Who controls media in a call"). */
-export function LanguagesMenu({ channelId, state, positionMs, controller }: { channelId: Snowflake; state: StremioState; positionMs: number; controller: boolean }) {
+/**
+ * The Languages button with its menu, and the subtitle line. Mount inside the tile's control row.
+ * `cueHost`: where the subtitle line goes: the tile's bottom stack, outside the control bar, which fades when idle and must not take the subtitle with it.
+ * `controller`: may change the audio and the burned-in subtitle, which are everyone's (docs/api.md "Who controls media in a call").
+ */
+export function LanguagesMenu({ channelId, state, positionMs, controller, cueHost }: { channelId: Snowflake; state: StremioState; positionMs: number; controller: boolean; cueHost: HTMLElement | null }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addons, setAddons] = useState<StremioAddonSubtitles | null>(null);
@@ -115,11 +119,14 @@ export function LanguagesMenu({ channelId, state, positionMs, controller }: { ch
 
   return (
     <>
-      {cue && (
-        <div className="stremio-cue" data-testid="stremio-cue">
-          <span>{cue.text}</span>
-        </div>
-      )}
+      {cue &&
+        cueHost &&
+        createPortal(
+          <div className="stremio-cue" data-testid="stremio-cue">
+            <span>{cue.text}</span>
+          </div>,
+          cueHost,
+        )}
       <Tooltip content={label} side="top">
         <button type="button" className={`stremio-button${open ? " active" : ""}`} aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(o => !o)}>
           <Languages size={18} />
