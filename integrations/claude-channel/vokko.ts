@@ -144,9 +144,30 @@ export function ownsDms(role: Role, access: Access): boolean {
   return role === 'bridge' || (role === 'bridge-shared') === (access.dmBackend === 'api')
 }
 
-/** Whether this process answers guild messages: the plugin unless guilds is false, a shared bridge only then. */
-export function ownsGuilds(role: Role, access: Access): boolean {
-  return role === 'bridge' || (role === 'bridge-shared') === (access.guilds === false)
+/**
+ * Whether this process answers guild messages: the plugin unless guilds is false, a shared bridge only then.
+ * `bridgeUp` false (the bridge's heartbeat is stale): guilds is false but no bridge is there, so the plugin answers.
+ */
+export function ownsGuilds(role: Role, access: Access, bridgeUp = true): boolean {
+  return role === 'bridge' || (role === 'bridge-shared') === (access.guilds === false && bridgeUp)
+}
+
+/** The shared bridge rewrites this every HEARTBEAT_MS and removes it when it stops cleanly; the plugin treats guilds as its own once it is older than BRIDGE_STALE_MS. */
+export const BRIDGE_STATE = 'bridge-state.json'
+export const HEARTBEAT_MS = 30_000
+export const BRIDGE_STALE_MS = 90_000
+/** A message the bridge passes on is a file `handoff/<message id>` (JSON: channel_id); the plugin claims it by renaming it. */
+export const HANDOFF_DIR = 'handoff'
+/** How long the plugin may still reply in a channel it took a message from, whatever the bridge state does meanwhile. */
+const ADOPT_MS = 30 * 60_000
+
+export function bridgeAlive(stateDir: string, now = Date.now()): boolean {
+  try {
+    const { at } = JSON.parse(readFileSync(join(stateDir, BRIDGE_STATE), 'utf8')) as { at?: unknown }
+    return typeof at === 'number' && now - at < BRIDGE_STALE_MS
+  } catch {
+    return false
+  }
 }
 
 export const MAX_CHUNK_LIMIT = 2000
@@ -211,6 +232,12 @@ export class VokkoBot {
   private readonly accessFile: string
   private readonly approvedDir: string
   private readonly inboxDir: string
+  private readonly handoffDir: string
+  /** Message ids taken over from the bridge: the gate lets each through once, as if the plugin owned guilds. */
+  private readonly handed = new Set<string>()
+  /** channel id → until when replies there are allowed (see ADOPT_MS). */
+  private readonly adopted = new Map<string, number>()
+  private bridgeUp: boolean | null = null
   private readonly bootAccess: Access | null
   private readonly channels = new Map<string, Channel>()
   private readonly dmByUser = new Map<string, string>()
@@ -234,6 +261,7 @@ export class VokkoBot {
     this.accessFile = join(cfg.stateDir, 'access.json')
     this.approvedDir = join(cfg.stateDir, 'approved')
     this.inboxDir = join(cfg.stateDir, 'inbox')
+    this.handoffDir = join(cfg.stateDir, HANDOFF_DIR)
     // In static mode pairing would hand out codes that can never be approved, so it is downgraded to allowlist.
     this.bootAccess = cfg.staticMode
       ? (() => {
@@ -361,7 +389,7 @@ export class VokkoBot {
       return { action: 'pair', code, isResend: false }
     }
 
-    if (!ownsGuilds(this.cfg.role, access)) return { action: 'drop' }
+    if (!this.handed.delete(msg.id) && !this.guildsOwned(access)) return { action: 'drop' }
     // Keyed on channel id; threads inherit their parent's opt-in (the reply still goes to the thread).
     const policy = access.groups[this.gateKey(msg.channel_id)]
     if (!policy) return { action: 'drop' }
@@ -380,6 +408,11 @@ export class VokkoBot {
     this.ownerUser()
       .then(u => u && this.dmUser(u.id, text))
       .catch(err => this.cfg.log(`vokko channel: could not tell the owner that pairing is full: ${err}\n`))
+  }
+
+  /** ownsGuilds, with the bridge's heartbeat for the plugin. */
+  private guildsOwned(access: Access): boolean {
+    return ownsGuilds(this.cfg.role, access, this.cfg.role !== 'channel' || bridgeAlive(this.cfg.stateDir))
   }
 
   isOwnerCommand(msg: Message): boolean {
@@ -444,6 +477,59 @@ export class VokkoBot {
     }
   }
 
+  // ---- fallback: the API bridge is out, this session answers its guild messages ----
+
+  private notifyOwner(text: string): void {
+    if (this.ownerId) this.dmUser(this.ownerId, text).catch(err => this.cfg.log(`vokko channel: owner notice failed: ${err}\n`))
+  }
+
+  /** Tells the owner when the bridge goes away or comes back (only while guilds belong to it). */
+  private watchBridge(): void {
+    if (this.loadAccess().guilds !== false) {
+      this.bridgeUp = null
+      return
+    }
+    const up = bridgeAlive(this.cfg.stateDir)
+    const was = this.bridgeUp
+    this.bridgeUp = up
+    if (was == null || was === up) return
+    this.notifyOwner(up ? 'Servers are back on the API bridge.' : 'The API bridge is not running: servers are answered by your Claude Code session (subscription) until it is back.')
+  }
+
+  private checkHandoffs(): void {
+    let files: string[]
+    try {
+      files = readdirSync(this.handoffDir)
+    } catch {
+      return
+    }
+    for (const id of files) {
+      if (!/^\d{1,20}$/.test(id)) continue
+      const file = join(this.handoffDir, id)
+      const taken = `${file}.taken`
+      try {
+        renameSync(file, taken) // the claim: the bridge sees the file gone, and no second poll can take it
+      } catch {
+        continue
+      }
+      let channelId = ''
+      try {
+        channelId = String((JSON.parse(readFileSync(taken, 'utf8')) as { channel_id?: unknown }).channel_id ?? '')
+      } catch {}
+      rmSync(taken, { force: true })
+      this.adopt(id, channelId).catch(err => this.cfg.log(`vokko channel: handoff ${id} failed: ${err}\n`))
+    }
+  }
+
+  /** Fetches the message by id and runs it through the normal gate (opt-in, requireMention, allowFrom) as if guilds were ours. */
+  private async adopt(id: string, channelId: string): Promise<void> {
+    const [msg] = await this.api<Message[]>('GET', `/channels/${snowflake(channelId, 'channel_id')}/messages?around=${snowflake(id, 'message_id')}&limit=1`)
+    if (msg?.id !== id || msg.guild_id == null || msg.author.bot || msg.author.id === this.me?.id) return
+    this.handed.add(id)
+    this.adopted.set(msg.channel_id, Date.now() + ADOPT_MS)
+    this.onMessage(msg)
+  }
+
   // ---- REST ----
 
   async api<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -473,7 +559,7 @@ export class VokkoBot {
     if (ch?.type === 1) {
       const userId = ch.recipients?.find(u => u.id !== this.me?.id)?.id
       if (ownsDms(this.cfg.role, access) && userId && access.allowFrom.includes(userId)) return
-    } else if (ch && ownsGuilds(this.cfg.role, access) && this.gateKey(id) in access.groups) {
+    } else if (ch && (this.guildsOwned(access) || (this.adopted.get(id) ?? 0) > Date.now()) && this.gateKey(id) in access.groups) {
       return
     }
     throw new Error(`channel ${id} is not allowlisted — add via ${this.cfg.pairCommand.replace(/ pair$/, '')}`)
@@ -785,6 +871,10 @@ export class VokkoBot {
   start(approvals = true): void {
     this.connect()
     if (approvals && !this.cfg.staticMode) setInterval(() => this.checkApprovals(), 5000).unref()
+    if (this.cfg.role === 'channel') {
+      setInterval(() => this.checkHandoffs(), 1000).unref()
+      setInterval(() => this.watchBridge(), 10_000).unref()
+    }
   }
 
   stop(): void {
