@@ -103,3 +103,32 @@ describe("applyReactionEvent", () => {
     expect(applyReactionEvent([rx({ id: "5", name: "blob" }, 1, false)], { id: "5", name: "renamed" }, 1, false)[0]?.count).toBe(2);
   });
 });
+
+describe("plainPreview", () => {
+  const names = { user: (id: string) => (id === "1" ? "Nova" : null), role: (id: string) => (id === "2" ? "Mods" : null), channel: (id: string) => (id === "3" ? "general" : null) };
+
+  it("strips markdown markers", () => {
+    expect(plainPreview("**bold** _it_ *it* __u__ ~~gone~~ `code` snake_case_name 2*3*4")).toBe("bold it it u gone code snake_case_name 2*3*4");
+    expect(plainPreview("# Title\n> quote\n-# small\n[docs](https://x.test/a) <https://y.test>")).toBe("Title quote small docs https://y.test");
+    expect(plainPreview("```ts\nlet a = 1;\n```")).toBe("let a = 1;");
+    expect(plainPreview("psst ||the secret||")).toBe("psst [spoiler]");
+  });
+
+  it("resolves mentions and emoji, falling back to a generic word", () => {
+    expect(plainPreview("hey <@1> <@!1> <@&2> <#3> <:wave:99> <a:spin:98>", 140, names)).toBe("hey @Nova @Nova @Mods #general :wave: :spin:");
+    expect(plainPreview("<@9> <@&9> <#9>", 140, names)).toBe("@user @role #channel");
+  });
+
+  it("hides a spoiler whole even when a mentioned name contains ||", () => {
+    expect(plainPreview("||<@1> secret plans|| after", 140, { user: () => "a||b" })).toBe("[spoiler] after");
+  });
+
+  it("keeps backslash-escaped markers literal", () => {
+    expect(plainPreview("\\*not italic\\* and \\_this\\_ and \\||no spoiler\\||")).toBe("*not italic* and _this_ and ||no spoiler||");
+  });
+
+  it("collapses whitespace and cuts at max with an ellipsis", () => {
+    expect(plainPreview("a\n\n b   c")).toBe("a b c");
+    expect(plainPreview("**abcdefghij**", 5)).toBe("abcd…");
+  });
+});

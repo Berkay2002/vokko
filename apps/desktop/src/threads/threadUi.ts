@@ -27,12 +27,19 @@ export function openThread(thread: Channel): void {
   useThreadUi.setState({ openId: thread.id });
 }
 
-/** Open a thread beside its parent channel, also from elsewhere in the app (a thread's id is no route: the channel is its parent). */
-export function goToThread(thread: Channel): void {
-  if (thread.guild_id && thread.parent_id) go(guildPath(thread.guild_id, thread.parent_id));
+/**
+ * Open a thread beside its parent channel, also from elsewhere in the app (a thread's id is no route: the channel is its parent).
+ * Returns false, doing nothing, when the parent is not one we hold: no channel would mount the panel.
+ */
+export function goToThread(thread: Channel): boolean {
+  if (!thread.guild_id || !thread.parent_id || !appStore.getState().channels[thread.parent_id]) return false;
+  go(guildPath(thread.guild_id, thread.parent_id));
   openThread(thread);
-  // Phone: the channel list page would stay over the panel when the parent is already the open channel.
-  useNavDrawer.getState().setOpen(false);
+  // Phone: the channel list or details page would stay over the panel when the parent is already the open channel.
+  const nav = useNavDrawer.getState();
+  nav.setOpen(false);
+  nav.setDetails(false);
+  return true;
 }
 
 export function closeThread(): void {

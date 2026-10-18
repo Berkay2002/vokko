@@ -22,7 +22,7 @@ export const isKnownChannel = (channelId: Snowflake): boolean => !!channelOrThre
 export async function jumpToMessage(channelId: Snowflake, messageId: Snowflake, guildId?: Snowflake | null): Promise<void> {
   const thread = appStore.getState().threads[channelId];
   if (thread && !appStore.getState().channels[channelId]) {
-    goToThread(thread);
+    if (!goToThread(thread)) return;
     await waitUntilReady(channelId);
     await messageStore.jumpToMessage(channelId, messageId);
     return;

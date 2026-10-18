@@ -544,7 +544,7 @@ export function refreshActiveThreads(guildId: Snowflake): void {
           for (const thread of threads) next[thread.id] = state.threads[thread.id]?.member && !thread.member ? { ...thread, member: state.threads[thread.id]!.member } : thread;
           appStore.setState({ threads: next });
         })
-        .catch(() => undefined);
+        .catch(error => console.warn("active threads refetch failed", error));
     }, 150),
   );
 }
