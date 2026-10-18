@@ -86,6 +86,35 @@ describe('spotify', () => {
     expect(last().body).toEqual({ queue_add: { uri: TRACK, next: true } })
   })
 
+  test('uris carries a hand-picked list in one request, for play, queue and next', async () => {
+    const uris = Array.from({ length: 50 }, (_, i) => 'spotify:track:' + String(i).padStart(22, 'a'))
+    await run(CFG, GUILD_ASKER, 'spotify_play', { uris })
+    expect([last().method, last().body]).toEqual(['PUT', { uris }])
+    await run(CFG, GUILD_ASKER, 'spotify_play', { uris, mode: 'queue' })
+    expect([last().method, last().body]).toEqual(['PATCH', { queue_add: { uris } }])
+    await run(CFG, GUILD_ASKER, 'spotify_play', { uris: uris.slice(0, 2), mode: 'next' })
+    expect(last().body).toEqual({ queue_add: { uris: uris.slice(0, 2), next: true } })
+    expect(hits.filter(h => h.path.endsWith('/spotify'))).toHaveLength(3)
+  })
+
+  test('a bad list is refused before any request: not tracks, empty, over 50, or given with uri', async () => {
+    const track = (i: number) => 'spotify:track:' + String(i).padStart(22, 'a')
+    const many = Array.from({ length: 51 }, (_, i) => track(i))
+    for (const uris of [[], many, [TRACK, 'spotify:album:' + 'a'.repeat(22)], 'spotify:track:' + 'a'.repeat(22), [1]]) {
+      expect(await run(CFG, GUILD_ASKER, 'spotify_play', { uris })).toBe('"uris" must hold 1 to 50 spotify:track: uris.')
+    }
+    expect(await run(CFG, GUILD_ASKER, 'spotify_play', { uri: TRACK, uris: [TRACK] })).toBe('Send either "uri" or "uris", not both.')
+    expect(await run(CFG, GUILD_ASKER, 'spotify_play', {})).toBe('Bad or missing "uri".')
+    expect(hits).toEqual([])
+  })
+
+  test('the tool offers uris as an array of strings capped at 50 and says to batch', () => {
+    const tool = MEDIA_TOOLS.find(t => t.name === 'spotify_play')!
+    expect(tool.params.uris).toMatchObject({ type: 'array', optional: true, maxItems: 50 })
+    expect(tool.params.uri!.optional).toBe(true)
+    expect(tool.description).toContain('For several songs, pass them all in one call as uris; for a Spotify playlist or album, pass its uri.')
+  })
+
   test('control actions each map to exactly one PATCH field; stop is DELETE', async () => {
     const cases: [Record<string, unknown>, unknown][] = [
       [{ action: 'pause' }, { playing: false }],

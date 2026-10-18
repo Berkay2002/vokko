@@ -11,10 +11,11 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{post, put};
 use axum::{Json, Router};
+use futures_util::{StreamExt, TryStreamExt};
 use serde::Deserialize;
 use vokko_protocol::api::{
-    GatewayEvent, MediaControl, SPOTIFY_EVENT_QUEUE_MAX, SPOTIFY_QUEUE_MAX, SPOTIFY_QUEUE_PER_USER, Snowflake, SpotifyListenerToken, SpotifyLoop,
-    SpotifyPatchRequest, SpotifyQueueEntry, SpotifyReply, SpotifyStartRequest, SpotifyState, SpotifyStatus, SpotifyTrack, SpotifyUpdate,
+    GatewayEvent, MediaControl, SPOTIFY_EVENT_QUEUE_MAX, SPOTIFY_QUEUE_MAX, SPOTIFY_QUEUE_PER_USER, SPOTIFY_URIS_MAX, Snowflake, SpotifyListenerToken,
+    SpotifyLoop, SpotifyPatchRequest, SpotifyQueueEntry, SpotifyReply, SpotifyStartRequest, SpotifyState, SpotifyStatus, SpotifyTrack, SpotifyUpdate,
 };
 
 use super::token::{self, Claims, VideoGrant};
@@ -27,6 +28,7 @@ use crate::error::{ApiErr, ApiResult};
 use crate::extract::ApiJson;
 use crate::spotify::bot::{BotError, Desired, secrets_match};
 use crate::spotify::queue::{Back, Leave, Queue};
+use crate::spotify::webapi::CatalogError;
 use crate::spotify::{Active, Kind, active, catalog_error, parse_uri, require_usable};
 use crate::state::AppState;
 use crate::store;
@@ -359,8 +361,60 @@ async fn read(State(state): State<AppState>, Actor { user_id, .. }: Actor, Path(
 
 // ---- finding the tracks behind a URI ----
 
-/// The tracks a URI stands for, in play order: one for a track, an album's, the first `max` of a playlist's.
-async fn tracks_of(active: &Active<'_>, kind: Kind, id: &str, max: usize) -> ApiResult<Vec<SpotifyTrack>> {
+/// What `uri` or `uris` of a request names: one track, album or playlist, or a hand-picked list of track ids.
+enum Picked {
+    One(Kind, String),
+    Tracks(Vec<String>),
+}
+
+/// 400 for entry `index` of `uris`; `field` is where the list sits in the body (`uri` for a start, else `queue_add`).
+fn entry_error(field: &str, index: usize, message: &str) -> ApiErr {
+    let entry = serde_json::json!({"uris": {index.to_string(): {"_errors": [{"code": "INVALID", "message": message}]}}});
+    ApiErr::invalid(field, message).with_errors(if field == "uri" { entry } else { serde_json::json!({ field: entry }) })
+}
+
+/// Exactly one of `uri` and `uris` (1 to `SPOTIFY_URIS_MAX` track URIs); a 400 names the entry that is not one.
+fn picked(field: &str, uri: Option<&str>, uris: Option<&[String]>) -> ApiResult<Picked> {
+    match (uri, uris) {
+        (Some(uri), None) => {
+            let (kind, id) = uri_of(field, uri)?;
+            if kind == Kind::Artist {
+                return Err(ApiErr::invalid(field, "Pick a track, an album or a playlist."));
+            }
+            Ok(Picked::One(kind, id))
+        }
+        (None, Some(uris)) if (1..=SPOTIFY_URIS_MAX).contains(&uris.len()) => uris
+            .iter()
+            .enumerate()
+            .map(|(index, text)| match parse_uri(text) {
+                Some((Kind::Track, id)) => Ok(id),
+                _ => Err(entry_error(field, index, "Must be a Spotify track URI like spotify:track:<22 characters>.")),
+            })
+            .collect::<ApiResult<_>>()
+            .map(Picked::Tracks),
+        (None, Some(_)) => Err(ApiErr::invalid(field, &format!("uris must hold 1 to {SPOTIFY_URIS_MAX} track URIs."))),
+        _ => Err(ApiErr::invalid(field, "Send exactly one of uri and uris.")),
+    }
+}
+
+/// The tracks a request names, in play order: one for a track, an album's, the first `max` of a playlist's, or each of a list.
+async fn tracks_of(active: &Active<'_>, field: &str, picked: &Picked, max: usize) -> ApiResult<Vec<SpotifyTrack>> {
+    let (kind, id) = match picked {
+        // The catalog has no batch call for this token (docs/design/spotify-bot.md section 1.3): one cached lookup per id, a few at a time.
+        Picked::Tracks(ids) => {
+            return futures_util::stream::iter(ids.iter().cloned().enumerate())
+                .map(|(index, id)| async move {
+                    active.catalog.track(&id).await.map_err(|error| match error {
+                        CatalogError::NotFound => entry_error(field, index, "Spotify has no playable track for that URI."),
+                        other => catalog_error(other),
+                    })
+                })
+                .buffered(4)
+                .try_collect()
+                .await;
+        }
+        Picked::One(kind, id) => (*kind, id.as_str()),
+    };
     let found = match kind {
         Kind::Track => vec![active.catalog.track(id).await.map_err(catalog_error)?],
         Kind::Album => active.catalog.album(id).await.map_err(catalog_error)?.tracks,
@@ -392,10 +446,7 @@ async fn start(State(state): State<AppState>, actor: Actor, Path(id): Path<Strin
     let active = active(&state)?;
     let ctx = in_call(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
-    let (kind, item) = uri_of("uri", &body.uri)?;
-    if kind == Kind::Artist {
-        return Err(ApiErr::invalid("uri", "Pick a track, an album or a playlist."));
-    }
+    let picked = picked("uri", body.uri.as_deref(), body.uris.as_deref())?;
     limit(&state, "spotify-play", user_id, 3.0, 3.0 / 60.0)?;
     if lock(&state.stremio.sessions).contains_key(&channel_id) {
         return Err(ApiErr::new(StatusCode::CONFLICT, 40034, "Another media activity is running in this channel. Stop the movie first."));
@@ -409,7 +460,7 @@ async fn start(State(state): State<AppState>, actor: Actor, Path(id): Path<Strin
     if let Some(session) = lock(&state.spotify.session).as_ref().filter(|session| session.channel_id == channel_id && session.queue.current.is_some()) {
         control::require_control(&ctx, &session.control)?;
     }
-    let mut tracks = tracks_of(&active, kind, &item, SPOTIFY_QUEUE_MAX + 1).await?;
+    let mut tracks = tracks_of(&active, "uri", &picked, SPOTIFY_QUEUE_MAX + 1).await?;
     if tracks.is_empty() {
         return Err(ApiErr::invalid("uri", "There is nothing to play in that."));
     }
@@ -534,8 +585,7 @@ enum Op {
     Loop(SpotifyLoop),
     Shuffle,
     Add {
-        kind: Kind,
-        id: String,
+        picked: Picked,
         next: bool,
     },
     Remove(String),
@@ -569,11 +619,8 @@ fn one_op(body: SpotifyPatchRequest) -> ApiResult<Op> {
         ops.push(Op::Shuffle);
     }
     if let Some(add) = body.queue_add {
-        let (kind, id) = uri_of("queue_add", &add.uri)?;
-        if kind == Kind::Artist {
-            return Err(ApiErr::invalid("queue_add", "Pick a track, an album or a playlist."));
-        }
-        ops.push(Op::Add { kind, id, next: add.next });
+        let picked = picked("queue_add", add.uri.as_deref(), add.uris.as_deref())?;
+        ops.push(Op::Add { picked, next: add.next });
     }
     if let Some(qid) = body.queue_remove {
         ops.push(Op::Remove(qid));
@@ -598,15 +645,30 @@ async fn control(State(state): State<AppState>, actor: Actor, Path(id): Path<Str
     let active = active(&state)?;
     let ctx = in_call(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
-    let op = one_op(body)?;
+    let mut op = one_op(body)?;
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
+    // A list is cut to what the caller may queue before Spotify is asked for it (a controller's is not cut); the checks under the
+    // session's lock below stay the authority.
+    let mut cut = 0;
+    if let Op::Add { picked: Picked::Tracks(ids), next } = &mut op
+        && let Some(session) = lock(&state.spotify.session).as_ref().filter(|session| session.channel_id == channel_id)
+    {
+        if *next && !control::controls(&ctx, session.control.host_id) {
+            return Err(ApiErr::missing_permissions());
+        }
+        let mine = session.queue.entries.iter().filter(|entry| entry.added_by.user_id == user_id).count();
+        let allowed = control::quota(&ctx, &session.control, mine, SPOTIFY_QUEUE_PER_USER)?;
+        cut = ids.len().saturating_sub(allowed);
+        ids.truncate(allowed);
+    }
     // The tracks of a queue_add are found before the session is locked.
     let added = match &op {
-        Op::Add { kind, id, .. } => {
-            if *kind != Kind::Track {
+        Op::Add { picked, .. } => {
+            // A list costs one lookup per track, like an album or playlist.
+            if !matches!(picked, Picked::One(Kind::Track, _)) && !matches!(picked, Picked::Tracks(ids) if ids.len() == 1) {
                 limit(&state, "spotify-bulk", user_id, 5.0, 5.0 / 60.0)?;
             }
-            Some(tracks_of(&active, *kind, id, SPOTIFY_QUEUE_MAX).await?)
+            Some(tracks_of(&active, "queue_add", picked, SPOTIFY_QUEUE_MAX).await?)
         }
         _ => None,
     };
@@ -663,7 +725,7 @@ async fn control(State(state): State<AppState>, actor: Actor, Path(id): Path<Str
                 let mut tracks = added.unwrap_or_default();
                 let over_quota = tracks.len().saturating_sub(allowed);
                 tracks.truncate(allowed);
-                left_out = session.queue.add(tracks, actor, next) + over_quota;
+                left_out = session.queue.add(tracks, actor, next) + over_quota + cut;
                 if session.queue.current.is_none() && session.queue.advance(Leave::Skipped).is_some() {
                     session.new_track(&state, now);
                 } else {

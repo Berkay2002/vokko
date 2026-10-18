@@ -202,8 +202,8 @@ Responses are cached in memory (search 2 min, the rest 10 min), and a Spotify 42
 
 | Method | Path | Body → Response |
 |---|---|---|
-| PUT | /channels/{id}/spotify | `{uri}` → `SpotifyState`. Starts the bot, or replaces the current track. An album or playlist URI plays its first track now and puts the rest at the front of the queue |
-| PATCH | /channels/{id}/spotify | One op per request: `{playing}`, `{position_ms}`, `{skip: true}`, `{previous: true}`, `{loop: "off"\|"track"\|"queue"}`, `{shuffle: true}`, `{queue_add: {uri, next?: bool}}`, `{queue_remove: qid}`, `{queue_move: {qid, to}}`, `{queue_clear: true}` → `SpotifyState` |
+| PUT | /channels/{id}/spotify | `{uri}` or `{uris: [track URIs, 1 to 50]}` → `SpotifyState`. Starts the bot, or replaces the current track. An album or playlist URI plays its first track now and puts the rest at the front of the queue |
+| PATCH | /channels/{id}/spotify | One op per request: `{playing}`, `{position_ms}`, `{skip: true}`, `{previous: true}`, `{loop: "off"\|"track"\|"queue"}`, `{shuffle: true}`, `{queue_add: {uri or uris, next?: bool}}`, `{queue_remove: qid}`, `{queue_move: {qid, to}}`, `{queue_clear: true}` → `SpotifyState` |
 | DELETE | /channels/{id}/spotify | → 204, stops for everyone |
 | GET | /channels/{id}/spotify | → `SpotifyState` with the full queue |
 | POST | /channels/{id}/spotify/listener-token | → `{url, token}` (§2.2) |
@@ -229,8 +229,8 @@ loads the rest with `GET`. READY guilds, GUILD_CREATE and the `Call` object carr
 - `DELETE /session`; the server sends it at startup too.
 - `POST /internal/spotify/bot {channel_id, event: started|position|ended|error, track, position_ms, seq, reason?: unavailable|auth|io}`,
   position every 5 s. The server ignores events whose `seq` or `track` no longer match.
-- Rate limits (`limiter.check_key`): search and browse 10 then 2/s per user; `PUT` 3 per minute; `queue_add` of an album or playlist
-  5 per minute; other controls share the Watch Together bucket (10 then 2/s); listener token in that same bucket.
+- Rate limits (`limiter.check_key`): search and browse 10 then 2/s per user; `PUT` 3 per minute; `queue_add` of an album, a playlist or a list of
+  tracks 5 per minute; other controls share the Watch Together bucket (10 then 2/s); listener token in that same bucket.
 
 ### 4.3 Bot catalog reads (new after Phase 0)
 

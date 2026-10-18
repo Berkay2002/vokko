@@ -153,7 +153,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         type: 'object',
         properties: {
           message_id: { type: 'string', description: 'The message_id of the Vokko message that asked for this' },
-          ...Object.fromEntries(Object.entries(t.params).map(([k, p]) => [k, { type: p.type, description: p.description, ...(p.enum ? { enum: p.enum } : {}) }])),
+          ...Object.fromEntries(Object.entries(t.params).map(([k, p]) => [k, { type: p.type, description: p.description, ...(p.enum ? { enum: p.enum } : {}), ...(p.type === 'array' ? { items: { type: 'string' }, maxItems: p.maxItems } : {}) }])),
         },
         required: ['message_id', ...Object.entries(t.params).filter(([, p]) => !p.optional).map(([k]) => k)],
       },

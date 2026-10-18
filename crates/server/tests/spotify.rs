@@ -1621,6 +1621,103 @@ async fn a_bot_acting_for_a_controller_has_no_quota_and_for_anyone_else_the_memb
     assert_eq!((status, state["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(50035)), "{state}");
 }
 
+/// A hand-picked list of up to 50 tracks is one request, so one change of a bot's per-message budget: the PUT (25 tracks) and a
+/// queue_add (25 more) use two of the 30, 28 more fit, the 31st is refused.
+#[tokio::test]
+async fn a_list_of_tracks_is_one_change_for_a_bot_acting_for_the_owner() {
+    use axum::http::Method;
+    let w = world().await;
+    let (bot_id, bot) = w.app.bot_in(&w.owner, &w.guild, "Claude").await;
+    let mut owner = Client::identify(&w.address, &w.owner).await.0;
+    w.join(&mut owner).await;
+    let asked = w.app.say(&w.text, &w.owner, &format!("<@{bot_id}> a playlist of 50 songs")).await;
+    let uris = |range: std::ops::Range<u32>| range.map(track_uri).collect::<Vec<_>>();
+
+    let (status, state) = w.acting(Method::PUT, &w.path(), &bot, &asked, Some(json!({"uris": uris(1..26)}))).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(state["track"]["uri"], json!(track_uri(1)), "the first plays");
+    let queued: Vec<_> = state["queue"].as_array().expect("queue").iter().map(|entry| entry["uri"].clone()).collect();
+    assert_eq!(queued, uris(2..26).into_iter().map(Value::from).collect::<Vec<_>>(), "the rest queue in order");
+    assert!(state["left_out"].is_null() || state["left_out"] == 0, "{state}");
+    assert_eq!(state["queue"][0]["added_by"], json!(w.owner_id));
+
+    let (status, state) = w.acting(Method::PATCH, &w.path(), &bot, &asked, Some(json!({"queue_add": {"uris": uris(26..51)}}))).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(state["queue_len"], 49);
+
+    for n in 51..79 {
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        let (status, state) = w.acting(Method::PATCH, &w.path(), &bot, &asked, Some(json!({"queue_add": {"uri": track_uri(n)}}))).await;
+        assert_eq!(status, StatusCode::OK, "change {n}: {state}");
+    }
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let (status, error) = w.acting(Method::PATCH, &w.path(), &bot, &asked, Some(json!({"queue_add": {"uri": track_uri(79)}}))).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::TOO_MANY_REQUESTS, Some(40036)), "30 requests were 30 changes: {error}");
+}
+
+/// A member without control queues a list only as far as the quota of 10 allows, and is told how many were left out.
+#[tokio::test]
+async fn a_plain_members_list_is_cut_at_the_quota() {
+    use vokko_protocol::api::permissions::CONTROL_MEDIA;
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.playing(&mut alice, 1).await;
+    w.join(&mut carl).await;
+    let deny = json!({"type": 0, "allow": "0", "deny": CONTROL_MEDIA.to_string()});
+    assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{}", w.voice, w.guild), &w.owner, deny).await.0, StatusCode::NO_CONTENT);
+
+    let uris: Vec<_> = (2..17).map(track_uri).collect();
+    let before = w.mock.catalog_calls();
+    let (status, _) = w.patch(&w.carl, json!({"queue_add": {"uris": uris, "next": true}})).await;
+    assert_eq!((status, w.mock.catalog_calls()), (StatusCode::FORBIDDEN, before), "front of the queue is a controller's, refused before any lookup");
+    let (status, state) = w.patch(&w.carl, json!({"queue_add": {"uris": uris}})).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(w.mock.catalog_calls() - before, 10, "only the ten tracks carl may queue are looked up");
+    let by_carl = state["queue"].as_array().expect("queue").iter().filter(|entry| entry["added_by"] == w.carl_id.as_str()).count();
+    assert_eq!((by_carl, state["left_out"].as_u64()), (10, Some(5)), "{state}");
+    let (status, full) = w.patch(&w.carl, json!({"queue_add": {"uris": [track_uri(30)]}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "carl is full: {full}");
+}
+
+/// Either `uri` or `uris`, 1 to 50 track URIs; a 400 names the entry that is wrong.
+#[tokio::test]
+async fn a_bad_list_is_a_400_naming_the_entry() {
+    let w = world().await;
+    let mut alice = Client::identify(&w.address, &w.alice).await.0;
+    w.playing(&mut alice, 1).await;
+    let entry_error = |body: &Value, field: Option<&str>, index: &str| {
+        let errors = field.map_or(&body["errors"], |field| &body["errors"][field]);
+        assert!(errors["uris"][index]["_errors"][0]["message"].is_string(), "entry {index}: {body}");
+    };
+
+    let bad = [track_uri(2), "spotify:track:short".to_owned(), track_uri(3)];
+    let (status, body) = w.patch(&w.alice, json!({"queue_add": {"uris": bad}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    entry_error(&body, Some("queue_add"), "1");
+    let (status, body) = w.app.put_json(&w.path(), &w.alice, json!({"uris": [track_uri(2), track_uri(3), album_uri(1)]})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "an album is not a track in a list");
+    entry_error(&body, None, "2");
+    let (status, body) = w.patch(&w.alice, json!({"queue_add": {"uris": [track_uri(2), track_uri(0)]}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "Spotify does not know entry 1");
+    entry_error(&body, Some("queue_add"), "1");
+
+    let fifty_one: Vec<_> = (2..53).map(track_uri).collect();
+    let fifty: Vec<_> = (2..52).map(track_uri).collect();
+    for (name, body) in [
+        ("51 uris", json!({"queue_add": {"uris": fifty_one}})),
+        ("no uris", json!({"queue_add": {"uris": []}})),
+        ("both", json!({"queue_add": {"uri": track_uri(2), "uris": [track_uri(3)]}})),
+        ("neither", json!({"queue_add": {}})),
+    ] {
+        assert_eq!(w.patch(&w.alice, body).await.0, StatusCode::BAD_REQUEST, "{name}");
+    }
+    assert_eq!(w.app.put_json(&w.path(), &w.alice, json!({"uris": (2..53).map(track_uri).collect::<Vec<_>>()})).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(w.app.put_json(&w.path(), &w.alice, json!({})).await.0, StatusCode::BAD_REQUEST);
+    let (status, state) = w.patch(&w.alice, json!({"queue_add": {"uris": fifty}})).await;
+    assert_eq!((status, state["queue_len"].as_u64()), (StatusCode::OK, Some(50)), "50 is the limit: {state}");
+}
+
 #[tokio::test]
 async fn a_bot_acts_only_where_it_was_asked() {
     use axum::http::Method;
