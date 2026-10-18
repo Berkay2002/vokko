@@ -51,15 +51,13 @@ export function PopoutPage() {
       event.preventDefault();
       act(action);
     };
-    // A focused button clicks on the key's release: Space must not do it twice.
-    const up = (event: KeyboardEvent) => {
-      if (popoutKeyAction(event, controller, playing)?.type === "playing") event.preventDefault();
-    };
+    // A button or slider that was clicked keeps focus, and Space on a focused button is that button's click, not play / pause: let go of it.
+    const release = () => (document.activeElement as HTMLElement | null)?.blur();
     window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
+    window.addEventListener("pointerup", release);
     return () => {
       window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
+      window.removeEventListener("pointerup", release);
     };
   }, [session !== null, controller, playing]); // eslint-disable-line react-hooks/exhaustive-deps -- only these matter to the handlers
 
@@ -284,12 +282,9 @@ function Bar({ controller, playing, position, duration, muted, volume, onVolume,
           disabled={duration === 0 || disabled}
           style={{ "--po-fill": `${fill}%` } as CSSProperties}
           onChange={e => setDrag(Number(e.target.value))}
-          onPointerUp={e => {
-            commit();
-            e.currentTarget.blur();
-          }}
+          onPointerUp={commit}
+          onPointerCancel={() => setDrag(null)}
           onKeyUp={commit}
-          onBlur={commit}
         />
       ) : (
         <div className="po-range po-seek po-readonly" role="progressbar" aria-label="Progress" aria-valuenow={Math.round(fill)} style={{ "--po-fill": `${fill}%` } as CSSProperties} />
@@ -309,7 +304,6 @@ function Bar({ controller, playing, position, duration, muted, volume, onVolume,
           value={volume}
           style={{ "--po-fill": `${volume}%` } as CSSProperties}
           onChange={e => onVolume(Number(e.target.value))}
-          onPointerUp={e => e.currentTarget.blur()}
         />
       </label>
       <button type="button" className="po-icon" aria-label={muted ? "Unmute microphone" : "Mute microphone"} aria-pressed={muted} title={muted ? "Unmute" : "Mute"} onClick={() => act({ type: "mute" })}>

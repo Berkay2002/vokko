@@ -5,7 +5,6 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import type { Snowflake } from "../api/types";
-import { controlStremio } from "../stremio/api";
 import { StremioTile } from "../stremio/StremioTile";
 import { useVoice } from "../voice/store";
 import { WatchTile } from "../watch/WatchTile";
@@ -16,7 +15,7 @@ interface PipApi {
   requestWindow(options: { width: number; height: number }): Promise<Window>;
 }
 
-const docPip = (): PipApi | null => ((window as unknown as { documentPictureInPicture?: PipApi }).documentPictureInPicture ?? null);
+const docPip = (): PipApi | null => (typeof window === "undefined" ? null : ((window as unknown as { documentPictureInPicture?: PipApi }).documentPictureInPicture ?? null));
 
 export const canDocumentPip = (): boolean => docPip() !== null;
 /** The browser's video Picture-in-Picture: the Stremio picture only (a Watch Together player is an iframe of YouTube's). */
@@ -64,18 +63,6 @@ export async function openWebPip(channelId: Snowflake, kind: PopoutKind): Promis
   await video.requestPictureInPicture();
   useWebPipStore.setState({ channelId, kind, win: null });
   video.addEventListener("leavepictureinpicture", clear, { once: true });
-  // The little window's own buttons: the same PATCHes as the tile's.
-  const session = navigator.mediaSession;
-  for (const [action, handler] of [
-    ["play", () => void controlStremio(channelId, { playing: true })],
-    ["pause", () => void controlStremio(channelId, { playing: false })],
-  ] as const) {
-    try {
-      session.setActionHandler(action, handler);
-    } catch {
-      /* not supported */
-    }
-  }
 }
 
 export function closeWebPip(): void {

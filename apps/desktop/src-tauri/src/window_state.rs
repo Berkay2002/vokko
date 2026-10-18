@@ -37,6 +37,7 @@ fn overlap(a_start: i64, a_len: i64, b_start: i64, b_len: i64) -> i64 {
 /// Fits a saved window to the monitors connected now. A window whose title bar is still reachable on some monitor keeps its
 /// position (it may span two screens on purpose); otherwise (an unplugged screen) it is centred on the first monitor, the
 /// primary. The size is limited to that monitor and raised to the minimum.
+#[cfg(test)]
 pub fn clamp(saved: Saved, monitors: &[Area]) -> Saved {
     clamp_min(saved, monitors, MIN_SIZE)
 }

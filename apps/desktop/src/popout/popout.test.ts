@@ -8,29 +8,31 @@ const stremio = { status: "playing", playing: true, position_ms: 60_000, updated
 const watch = { video_id: "abc", playing: false, position_ms: 5_000, updated_at_ms: 1_000_000 } as unknown as WatchTogetherState;
 const input = { channelId: "c1", controller: true, muted: false, volume: 50, output: 0.5, pick: null, skipLabel: "Skip" };
 
-describe("popoutKeyAction", () => {
+describe("popoutKeyAction (the full-screen rule of stremio/keys.ts)", () => {
   const key = (k: string, extra: object = {}) => popoutKeyAction({ key: k, target: { tagName: "DIV" }, ...extra }, true, false);
   it("maps Space and the arrows for the controller", () => {
     expect(key(" ")).toEqual({ type: "playing", on: true });
-    expect(popoutKeyAction({ key: " " }, true, true)).toEqual({ type: "playing", on: false });
+    expect(popoutKeyAction({ key: " ", target: null }, true, true)).toEqual({ type: "playing", on: false });
     expect(key("ArrowLeft")).toEqual({ type: "jump", deltaMs: -JUMP_MS });
     expect(key("ArrowRight")).toEqual({ type: "jump", deltaMs: JUMP_MS });
   });
   it("gives nothing to a listener who cannot control", () => {
-    expect(popoutKeyAction({ key: " " }, false, false)).toBeNull();
+    expect(popoutKeyAction({ key: " ", target: null }, false, false)).toBeNull();
   });
   it("ignores repeats, modifiers, handled keys and other keys", () => {
     expect(key(" ", { repeat: true })).toBeNull();
+    expect(key("ArrowRight", { repeat: true })).toBeNull();
     expect(key(" ", { ctrlKey: true })).toBeNull();
     expect(key("ArrowLeft", { shiftKey: true })).toBeNull();
     expect(key(" ", { defaultPrevented: true })).toBeNull();
     expect(key("a")).toBeNull();
   });
-  it("leaves typing alone but not a range slider", () => {
+  it("leaves typing, sliders and a focused button's own Space alone", () => {
     expect(popoutKeyAction({ key: " ", target: { tagName: "INPUT", type: "text" } }, true, false)).toBeNull();
     expect(popoutKeyAction({ key: " ", target: { tagName: "TEXTAREA" } }, true, false)).toBeNull();
     expect(popoutKeyAction({ key: " ", target: { tagName: "DIV", isContentEditable: true } }, true, false)).toBeNull();
-    expect(popoutKeyAction({ key: "ArrowRight", target: { tagName: "INPUT", type: "range" } }, true, false)).toEqual({ type: "jump", deltaMs: JUMP_MS });
+    expect(popoutKeyAction({ key: "ArrowRight", target: { tagName: "INPUT", type: "range" } }, true, false)).toBeNull();
+    expect(popoutKeyAction({ key: " ", target: { tagName: "BUTTON" } }, true, false)).toBeNull();
   });
 });
 

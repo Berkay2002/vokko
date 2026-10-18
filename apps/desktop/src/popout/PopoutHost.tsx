@@ -34,7 +34,11 @@ function DesktopPopoutHost() {
     // A pop-out left over from before this page reloaded (dev) has nobody to talk to.
     void call("desktop_popout_close", undefined, undefined);
     const stop = onDesktopEvent<null>(CLOSED_EVENT, () => usePopoutStore.setState({ channelId: null, kind: null }));
-    return () => void stop.then(fn => fn());
+    return () => {
+      void stop.then(fn => fn());
+      // Logging out unmounts the shell: nobody is left to relay to.
+      void call("desktop_popout_close", undefined, undefined);
+    };
   }, []);
   return channelId && kind ? <Relay key={channelId} channelId={channelId} kind={kind} /> : null;
 }

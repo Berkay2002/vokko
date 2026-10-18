@@ -112,7 +112,8 @@ impl PopoutState {
 
 /// The monitor of the main window (else the primary one): its work area and scale factor.
 fn work_area(app: &AppHandle) -> Option<(Area, f64)> {
-    let monitor = app.get_webview_window(crate::window::MAIN_WINDOW).and_then(|w| w.current_monitor().ok().flatten()).or_else(|| app.primary_monitor().ok().flatten())?;
+    let monitor =
+        app.get_webview_window(crate::window::MAIN_WINDOW).and_then(|w| w.current_monitor().ok().flatten()).or_else(|| app.primary_monitor().ok().flatten())?;
     let work = monitor.work_area();
     Some((Area { x: work.position.x, y: work.position.y, width: work.size.width, height: work.size.height }, monitor.scale_factor()))
 }
@@ -124,8 +125,10 @@ fn work_area(app: &AppHandle) -> Option<(Area, f64)> {
 mod sizing {
     use tauri::{AppHandle, WebviewWindow};
     use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
-    use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
-    use windows::Win32::UI::WindowsAndMessaging::{WM_SIZING, WMSZ_BOTTOM, WMSZ_BOTTOMLEFT, WMSZ_BOTTOMRIGHT, WMSZ_LEFT, WMSZ_RIGHT, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT};
+    use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        WM_NCDESTROY, WM_SIZING, WMSZ_BOTTOM, WMSZ_BOTTOMLEFT, WMSZ_BOTTOMRIGHT, WMSZ_LEFT, WMSZ_RIGHT, WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT,
+    };
 
     use super::{Box4, Edge, fit_edge};
 
@@ -156,6 +159,10 @@ mod sizing {
             let fit = fit_edge(edge, Box4 { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
             *rect = RECT { left: fit.left, top: fit.top, right: fit.right, bottom: fit.bottom };
             return LRESULT(1);
+        }
+        if msg == WM_NCDESTROY {
+            // SAFETY: removes this subclass from the window that is going away, as comctl32 asks before the window is destroyed.
+            let _ = unsafe { RemoveWindowSubclass(hwnd, Some(subclass_proc), SUBCLASS_ID) };
         }
         // SAFETY: the arguments are the ones this callback was given.
         unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
