@@ -47,8 +47,8 @@ struct Mock {
     library_down: AtomicBool,
     /// The next `datastoreGet` answers late (a slow Stremio): the write-back of an earlier item must not land after a later one.
     slow_get: AtomicBool,
-    /// `second.mkv` answers late: an advance to it takes a while.
-    slow_media: AtomicBool,
+    /// `second.mkv` does not answer while this is set: an advance to it stays in progress.
+    hold_media: AtomicBool,
 }
 
 impl Mock {
@@ -183,8 +183,8 @@ async fn media_file() -> Response {
 }
 
 async fn media_second(State(mock): State<Arc<Mock>>) -> Response {
-    if mock.slow_media.load(Ordering::SeqCst) {
-        tokio::time::sleep(Duration::from_millis(600)).await;
+    while mock.hold_media.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
     media_file().await
 }
@@ -233,7 +233,7 @@ async fn start_mock() -> Arc<Mock> {
         stored: Mutex::default(),
         library_down: AtomicBool::new(false),
         slow_get: AtomicBool::new(false),
-        slow_media: AtomicBool::new(false),
+        hold_media: AtomicBool::new(false),
     });
     let router = Router::new()
         .route("/api/login", post(login))
@@ -356,7 +356,7 @@ impl Client {
 
     async fn recv(&mut self) -> Result<Value, Option<u16>> {
         loop {
-            match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await {
+            match tokio::time::timeout(common::WAIT, self.ws.next()).await {
                 Ok(Some(Ok(Message::Text(text)))) => return Ok(serde_json::from_str(&text).expect("json frame")),
                 Ok(Some(Ok(Message::Close(frame)))) => return Err(frame.map(|frame| u16::from(frame.code))),
                 Ok(Some(Ok(_))) => continue,
@@ -559,7 +559,8 @@ async fn settle() {
 }
 
 async fn until(what: &str, mut check: impl FnMut() -> bool) {
-    for _ in 0..120 {
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while tokio::time::Instant::now() < deadline {
         if check() {
             return;
         }
@@ -1139,6 +1140,7 @@ async fn the_expensive_routes_are_rate_limited() {
     w.link(&w.alice).await;
     w.join(&mut alice).await;
     let sid = World::sid(&w.streams(&w.alice).await, "A 1080p");
+    w.app.state.limiter.freeze_clock(); // sequential requests on a busy machine would refill the buckets as they go
     let mut codes = Vec::new();
     for _ in 0..5 {
         codes.push(w.app.put_json(&w.path(), &w.alice, json!({"sid": sid})).await.0);
@@ -1754,14 +1756,20 @@ async fn a_burst_of_skips_advances_one_item() {
     let (_, his) = w.app.patch(&w.path(), &w.alice, json!({"skip": true})).await;
     assert_eq!((his["added_by"].as_str(), his["queue"].as_array().map(Vec::len)), (Some(w.carl_id.as_str()), Some(1)));
 
-    // Opening the next item takes a while; carl's skips (his first as the adder, the rest votes, 1 of 2 needed) all land meanwhile.
-    w.mock.slow_media.store(true, Ordering::SeqCst);
+    // Opening the next item is held; carl's skips (his first as the adder, the rest votes, 1 of 2 needed) all land meanwhile.
+    w.mock.hold_media.store(true, Ordering::SeqCst);
     let stale = his["item_seq"].as_u64().expect("item_seq") - 1;
     assert_eq!(w.app.patch(&w.path(), &w.carl, json!({"skip": true, "item_seq": stale})).await.1["queue"].as_array().map(Vec::len), Some(1));
     let path = w.path();
-    let burst = futures_util::future::join_all((0..5).map(|_| w.app.patch(&path, &w.carl, json!({"skip": true})))).await;
-    assert!(burst.iter().all(|(status, _)| *status == StatusCode::OK), "{burst:?}");
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let mut burst: futures_util::stream::FuturesUnordered<_> = (0..5).map(|_| w.app.patch(&path, &w.carl, json!({"skip": true}))).collect();
+    // Only the skip that advances waits for the next item to open: the other four answer first, then it may open.
+    let mut replies = Vec::new();
+    while replies.len() < 4 {
+        replies.push(futures_util::StreamExt::next(&mut burst).await.expect("a reply"));
+    }
+    w.mock.hold_media.store(false, Ordering::SeqCst);
+    replies.push(futures_util::StreamExt::next(&mut burst).await.expect("a reply"));
+    assert!(replies.iter().all(|(status, _)| *status == StatusCode::OK), "{replies:?}");
     let (status, now) = w.app.patch(&w.path(), &w.carl, json!({"skip": false})).await;
     assert_eq!(status, StatusCode::OK, "the session goes on: {now}");
     assert_eq!((now["added_by"].as_str(), now["queue"].as_array().map(Vec::len)), (Some(w.carl_id.as_str()), Some(0)), "{now}");

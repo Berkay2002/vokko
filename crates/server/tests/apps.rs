@@ -525,11 +525,13 @@ async fn webhooks_execute_with_overrides_and_their_token_reaches_nothing_else() 
         app.send(Method::POST, &format!("/webhooks/{}/{}", id(&second), second["token"].as_str().expect("token")), None, Some(json!({"content": "x"}))).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // rate limit: burst 5 per webhook. Sent at once, so the refill (2.5/s) cannot keep up however slow the database is.
+    // rate limit: burst 5 per webhook. The clock is stopped: each send looks the webhook up before the check, so on a slow
+    // database the ten checks spread out and the refill (2.5/s) could keep up.
+    app.state.limiter.freeze_clock();
     let sends = (0..10).map(|n| app.send(Method::POST, &execute, None, Some(json!({"content": format!("spam {n}")}))));
     let results = futures_util::future::join_all(sends).await;
     let limited: Vec<&Value> = results.iter().filter(|(status, _)| *status == StatusCode::TOO_MANY_REQUESTS).map(|(_, body)| body).collect();
-    assert!(!limited.is_empty(), "execute is rate limited");
+    assert!(limited.len() >= 5, "at most a burst of five gets through (the sends above used some of it): {} limited", limited.len());
     assert!(limited.iter().all(|body| body["retry_after"].as_f64().is_some_and(|wait| wait > 0.0)));
 }
 
@@ -788,9 +790,12 @@ async fn followups_are_rate_limited_per_interaction() {
     let callback = format!("/interactions/{}/{token}/callback", id(&interaction));
     assert_eq!(app.send(Method::POST, &callback, None, Some(json!({"type": 4, "data": {"content": "ok"}}))).await.0, StatusCode::NO_CONTENT);
     let base = format!("/webhooks/{app_id}/{token}");
+    // A stopped clock: a burst that runs slowly (a busy machine) would otherwise refill the bucket as it goes.
+    app.state.limiter.freeze_clock();
     let sends = (0..10).map(|n| app.send(Method::POST, &base, None, Some(json!({"content": format!("flood {n}")}))));
     let results = futures_util::future::join_all(sends).await;
-    assert!(results.iter().any(|(status, _)| *status == StatusCode::TOO_MANY_REQUESTS), "followups are rate limited");
+    let limited = results.iter().filter(|(status, _)| *status == StatusCode::TOO_MANY_REQUESTS).count();
+    assert_eq!(limited, 5, "a burst of five followups, the rest rate limited: {results:?}");
 }
 
 #[tokio::test]

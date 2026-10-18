@@ -373,8 +373,13 @@ async fn the_pending_quota_counts_the_bytes_that_arrive_not_the_declared_size() 
     assert!(error["message"].as_str().expect("message").contains("100 MiB"), "{error}");
     assert_eq!(rows().await, before, "nothing was recorded");
     // nothing is left on disk either: not in storage, not in the staging directory
-    let leftovers = std::fs::read_dir(app.state.incoming_dir()).map(|dir| dir.count()).unwrap_or(0);
-    assert_eq!(leftovers, 0);
+    // (the staging file is removed off the async worker, so it can outlive the answer for a moment)
+    let leftovers = || std::fs::read_dir(app.state.incoming_dir()).map(|dir| dir.count()).unwrap_or(0);
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while leftovers() > 0 && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(leftovers(), 0);
     let stored = std::fs::read_dir(app.state.attachments_dir()).map(|dir| dir.count()).unwrap_or(0);
     assert_eq!(stored, 0);
 

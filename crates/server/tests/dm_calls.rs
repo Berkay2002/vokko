@@ -6,7 +6,7 @@ mod common;
 use std::time::Duration;
 
 use axum::http::StatusCode;
-use common::TestApp;
+use common::{TestApp, WAIT};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
 use tokio::net::TcpStream;
@@ -45,7 +45,7 @@ impl Client {
 
     async fn wait_until(&mut self, name: &str, matches: impl Fn(&Value) -> bool) -> Value {
         loop {
-            let next = tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await.unwrap_or_else(|_| panic!("timed out waiting for {name}"));
+            let next = tokio::time::timeout(WAIT, self.ws.next()).await.unwrap_or_else(|_| panic!("timed out waiting for {name}"));
             let Some(Ok(Message::Text(text))) = next else { continue };
             let frame: Value = serde_json::from_str(&text).expect("json frame");
             if frame["op"] == 0 && frame["t"] == name && matches(&frame["d"]) {
@@ -57,7 +57,7 @@ impl Client {
     /// The next VOICE_SERVER_UPDATE or VOICE_CONNECT_FAILED.
     async fn voice_answer(&mut self) -> (String, Value) {
         loop {
-            let next = tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await.expect("voice answer in time");
+            let next = tokio::time::timeout(WAIT, self.ws.next()).await.expect("voice answer in time");
             let Some(Ok(Message::Text(text))) = next else { continue };
             let frame: Value = serde_json::from_str(&text).expect("json frame");
             if frame["t"] == "VOICE_SERVER_UPDATE" || frame["t"] == "VOICE_CONNECT_FAILED" {
@@ -109,6 +109,18 @@ async fn dm(app: &TestApp, from: &User, to: &User) -> String {
     let (status, channel) = app.post("/users/@me/channels", &from.token, json!({"recipient_id": to.id})).await;
     assert_eq!(status, StatusCode::OK, "{channel}");
     channel["id"].as_str().expect("id").to_owned()
+}
+
+/// Waits until `user` has no voice state (a leave is handled after its frame is read).
+async fn left(app: &TestApp, user: &str) {
+    let id: i64 = user.parse().expect("id");
+    tokio::time::timeout(WAIT, async {
+        while app.state.voice.get(id).is_some() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("{user} still in voice"));
 }
 
 async fn messages(app: &TestApp, channel: &str, token: &str) -> Value {
@@ -179,12 +191,7 @@ async fn joining_a_dm_starts_a_call_that_rings_and_stops_ringing() {
 
     // Bob hangs up; ringing him again works even though he was in the call before.
     bob_ws.voice(None).await;
-    for _ in 0..100 {
-        if app.state.voice.get(bob.id.parse().expect("id")).is_none() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    left(&app, &bob.id).await;
     assert_eq!(app.post(&format!("/channels/{channel}/call/ring"), &alice.token, json!({})).await.0, StatusCode::NO_CONTENT);
     // (Bob's own answer left a CALL_UPDATE with nobody ringing in his queue: read until the ring shows up.)
     let mut rung = false;
@@ -234,12 +241,13 @@ async fn ringing_times_out_into_a_missed_call_and_the_last_leave_ends_it() {
     let mut alice_ws = Client::identify(&address, &alice.token).await;
     let mut bob_ws = Client::identify(&address, &bob.token).await;
 
+    // Timed from before the join: the ring timer starts during it, and CALL_CREATE can reach bob well after (slow database).
+    let started = std::time::Instant::now();
     alice_ws.voice(Some(&channel)).await;
     assert_eq!(alice_ws.voice_answer().await.0, "VOICE_SERVER_UPDATE");
     assert_eq!(bob_ws.wait_for("CALL_CREATE").await["ringing"], json!([bob.id]));
-    let started = std::time::Instant::now();
     assert_eq!(bob_ws.wait_for("CALL_UPDATE").await["ringing"], json!([]), "ringing stops on its own");
-    assert!(started.elapsed() >= Duration::from_millis(200), "not before the timeout");
+    assert!(started.elapsed() >= Duration::from_millis(300), "not before the timeout");
     assert!(app.state.voice.calls.ongoing(channel.parse().expect("id")), "the caller is still in the call");
 
     alice_ws.voice(None).await;
@@ -346,13 +354,7 @@ async fn a_call_holds_at_most_ten_people() {
     assert_eq!((name.as_str(), failed["reason"].as_str()), ("VOICE_CONNECT_FAILED", Some("channel_full")));
     // One leaves: the eleventh gets in.
     clients[0].voice(None).await;
-    let first: i64 = users[0].id.parse().expect("id");
-    for _ in 0..100 {
-        if app.state.voice.get(first).is_none() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    left(&app, &users[0].id).await;
     let last = clients.last_mut().expect("eleventh");
     last.voice(Some(&channel)).await;
     assert_eq!(last.voice_answer().await.0, "VOICE_SERVER_UPDATE");

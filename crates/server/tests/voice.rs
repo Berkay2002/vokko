@@ -48,7 +48,7 @@ impl Client {
 
     async fn recv(&mut self) -> Result<Value, Option<u16>> {
         loop {
-            match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await {
+            match tokio::time::timeout(common::WAIT, self.ws.next()).await {
                 Ok(Some(Ok(Message::Text(text)))) => return Ok(serde_json::from_str(&text).expect("json frame")),
                 Ok(Some(Ok(Message::Close(frame)))) => return Err(frame.map(|frame| u16::from(frame.code))),
                 Ok(Some(Ok(_))) => continue,
@@ -813,6 +813,7 @@ async fn watch_together_controls_are_rate_limited_per_user() {
     let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
     alice.voice(Some(&w.voice), false).await;
     alice.voice_answer().await;
+    w.app.state.limiter.freeze_clock(); // sequential requests on a busy machine would refill the bucket as they go
     let mut codes = Vec::new();
     for _ in 0..14 {
         codes.push(w.app.put_json(&path, &w.alice, json!({"video_id": "dQw4w9WgXcQ"})).await.0);
@@ -936,7 +937,7 @@ async fn an_unreachable_livekit_at_start_is_retried_and_nobody_is_kicked_meanwhi
 
     rooms.fail_lists(2);
     let lists_before = w.calls_with("ListRooms").len();
-    tokio::time::timeout(Duration::from_secs(5), vokko_server::voice::restore_with_retry(&w.app.state)).await.expect("restore finishes");
+    tokio::time::timeout(common::WAIT, vokko_server::voice::restore_with_retry(&w.app.state)).await.expect("restore finishes");
     assert_eq!(w.calls_with("ListRooms").len() - lists_before, 3, "two failures, then success");
     assert!(w.app.state.voice.restored());
     let carl = w.app.state.voice.get(w.carl_id.parse().expect("id")).expect("carl restored");
@@ -1040,6 +1041,7 @@ async fn voice_status_is_rate_limited_per_channel() {
     )
     .await;
     let path = format!("/channels/{}/voice-status", w.voice);
+    w.app.state.limiter.freeze_clock(); // ten slow requests would refill the bucket as they go
     for round in 0..10 {
         assert_eq!(w.app.put_json(&path, &w.owner, json!({"status": format!("s{round}")})).await.0, StatusCode::NO_CONTENT);
     }
@@ -1283,7 +1285,8 @@ async fn a_quota_error_sends_new_rooms_to_the_next_backend_and_live_rooms_stay_p
     for client in [&mut alice, &mut carl] {
         client.voice(None, false).await;
     }
-    for _ in 0..40 {
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while tokio::time::Instant::now() < deadline {
         if w.app.state.voice.all().is_empty() {
             break;
         }
