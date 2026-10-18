@@ -24,6 +24,7 @@ import { ProfileCardHost } from "./ProfileCard";
 import { ServerRail } from "./ServerRail";
 import { NativeMenuBridge } from "./NativeMenuBridge";
 import { TitleBar } from "./TitleBar";
+import { StaleChunkBanner } from "./staleChunks";
 import { UserPanel } from "./UserPanel";
 import { StageView, toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
 import { inChatPanel, useShortcut } from "../keyboard";
@@ -267,6 +268,7 @@ export function AppShell() {
     <div className={`app-frame${navOpen ? " nav-open" : ""}`} style={{ ["--sidebar-width" as string]: `${width}px` }}>
       <NativeMenuBridge />
       <TitleBar />
+      <StaleChunkBanner />
       <div className="app-body">
         <Rail />
         <div className="sidebar" onClick={leaveListOnSameRoute}>
