@@ -27,7 +27,8 @@ pub fn parse(url: &str) -> Option<DeepLink> {
         return None;
     }
     let (scheme, rest) = url.split_once("://")?;
-    if !scheme.eq_ignore_ascii_case("vokko") {
+    // Debug builds also take `vokko-dev://`, so a test build can register a scheme the installed app never receives.
+    if !(scheme.eq_ignore_ascii_case("vokko") || cfg!(debug_assertions) && scheme.eq_ignore_ascii_case("vokko-dev")) {
         return None;
     }
     let path = rest.split(['?', '#']).next().unwrap_or_default();
@@ -120,6 +121,7 @@ mod tests {
     fn parses_invite_links() {
         assert_eq!(parse("vokko://invite/abc123"), invite("abc123", "vokko://invite/abc123"));
         assert_eq!(parse("VOKKO://Invite/ab-c_9/"), invite("ab-c_9", "VOKKO://Invite/ab-c_9/"));
+        assert_eq!(parse("vokko-dev://invite/abc"), invite("abc", "vokko-dev://invite/abc"));
         assert_eq!(parse("vokko://invite/abc?src=web#x"), invite("abc", "vokko://invite/abc?src=web#x"));
     }
 
