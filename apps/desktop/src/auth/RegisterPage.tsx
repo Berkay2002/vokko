@@ -6,7 +6,8 @@ import { safeHttpUrl } from "../chat/embedUtil";
 import { fetchInstance } from "./api";
 import { DateOfBirth, EMPTY_DATE, isoDate, type DateParts } from "./DateOfBirth";
 import { PasswordMeter } from "./PasswordMeter";
-import { Field, Frame, fieldErrors } from "./ui";
+import { registerProblems } from "./registerRules";
+import { Field, Frame, SubmitButton, fieldErrors } from "./ui";
 import { UsernameHint, useUsernameCheck } from "./useUsernameCheck";
 import { OAuthButtons } from "./OAuthButtons";
 
@@ -44,12 +45,9 @@ export function RegisterPage() {
     event.preventDefault();
     if (busy) return;
     const date = isoDate(dob);
-    if (!date) {
-      setErrors({ date_of_birth: "Required." });
-      return;
-    }
-    if (instance?.terms && !consent) {
-      setErrors({ consent: "You need to agree to the terms." });
+    const problems = registerProblems({ email, username, password, dateOfBirth: date, consent: instance?.terms ? consent : null });
+    if (!date || Object.keys(problems).length > 0) {
+      setErrors(problems);
       return;
     }
     setBusy(true);
@@ -113,9 +111,7 @@ export function RegisterPage() {
           </label>
         )}
         {errors.consent && <p className="field-error">{errors.consent}</p>}
-        <button type="submit" className="btn btn-wide" disabled={busy}>
-          Continue
-        </button>
+        <SubmitButton busy={busy}>Continue</SubmitButton>
       </form>
       <OAuthButtons />
     </Frame>

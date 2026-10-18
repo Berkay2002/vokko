@@ -9,7 +9,7 @@ import { fetchInstance } from "./api";
 import { DateOfBirth, EMPTY_DATE, isoDate, type DateParts } from "./DateOfBirth";
 import { MfaStep } from "./LoginPage";
 import { completeOAuth } from "./oauth";
-import { Field, Frame, fieldErrors } from "./ui";
+import { Field, Frame, SubmitButton, fieldErrors } from "./ui";
 import { UsernameHint, useUsernameCheck } from "./useUsernameCheck";
 
 /** One redemption per result code, even when StrictMode runs the effect twice. */
@@ -88,9 +88,7 @@ function FinishSignUp({ registration }: { registration: OAuthRegistration }) {
             <span>{instance.terms}</span>
           </label>
         )}
-        <button type="submit" className="btn btn-wide" disabled={busy}>
-          Continue
-        </button>
+        <SubmitButton busy={busy}>Continue</SubmitButton>
       </form>
     </Frame>
   );

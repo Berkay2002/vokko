@@ -132,6 +132,17 @@ export function DmSidebar() {
             <DmRow key={c.id} channel={c} />
           ))}
         </ul>
+        {/* No conversations yet: fading placeholder rows show where they will appear, like Discord. */}
+        {privateChannels.length === 0 && (
+          <div className="dm-placeholders" aria-hidden="true">
+            {[0.6, 0.45, 0.7, 0.5, 0.4, 0.55].map((width, i) => (
+              <div key={i} className="dm-placeholder" style={{ opacity: 1 - i * 0.15 }}>
+                <span className="dm-placeholder-avatar" />
+                <span className="dm-placeholder-name" style={{ width: `${width * 100}%` }} />
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

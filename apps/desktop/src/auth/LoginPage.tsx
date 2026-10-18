@@ -4,7 +4,7 @@ import { login, mfaLogin } from "../api/auth";
 import { MOCK } from "../api/config";
 import { request } from "../api/rest";
 import type { MfaRequiredResponse } from "../api/types";
-import { Field, Frame, fieldErrors } from "./ui";
+import { Field, Frame, SubmitButton, fieldErrors } from "./ui";
 import { OAuthButtons } from "./OAuthButtons";
 
 /** Discord's "Multi-Factor Authentication" step after a correct password. */
@@ -57,9 +57,9 @@ export function MfaStep({ ticket, onBack }: { ticket: MfaRequiredResponse; onBac
             {backup ? "Use your authenticator app" : "Use a backup code"}
           </button>
         )}
-        <button type="submit" className="btn btn-wide" disabled={busy || !code.trim()}>
+        <SubmitButton busy={busy} disabled={!code.trim()}>
           Log In
-        </button>
+        </SubmitButton>
       </form>
       <OAuthButtons />
     </Frame>
@@ -132,9 +132,7 @@ export function LoginPage() {
         <button type="button" className="auth-link" onClick={() => void forgot()}>
           Forgot your password?
         </button>
-        <button type="submit" className="btn btn-wide" disabled={busy}>
-          Log In
-        </button>
+        <SubmitButton busy={busy}>Log In</SubmitButton>
       </form>
       <OAuthButtons />
     </Frame>
