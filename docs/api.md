@@ -206,7 +206,7 @@ General rules:
 | DELETE | /users/@me/gifs/favorites/{gif_id} | `gif_id` URL-encoded (it contains `:`), 204 |
 | GET | /users/@me/bookmarks?limit&before&before_id | `BookmarksPage` (newest saved first, limit 1-100, default 50; next page: `before` = last item's saved_at and `before_id` = its message id, so items saved in the same instant are neither repeated nor skipped; unreadable bookmarks are skipped before the limit applies) |
 | GET | /users/@me/mentions?limit&before&guild_id&roles&everyone | `Message[]`, Inbox > Mentions: server messages that mention the caller, newest first (limit 1-100, default 25; `before` = message id; `roles` and `everyone` default true and add role and @everyone/@here mentions; `guild_id` limits it to one server). Only channels the caller can read now; their own and dismissed messages are left out; reading a channel does not remove them |
-| DELETE | /users/@me/mentions/{message_id} | 204, removes the message from the caller's mentions (also 204 for an unknown id) |
+| DELETE | /users/@me/mentions/{message_id} | 204, removes the message from the caller's mentions (also 204 for an unknown id); a new dismissal sends `RECENT_MENTION_DELETE {message_id}` to the caller's sessions |
 | PUT | /channels/{id}/messages/{mid}/bookmark | 204; needs read access to the message; max 250 per user (30090); emits BOOKMARK_ADD to the owner |
 | DELETE | /channels/{id}/messages/{mid}/bookmark | 204 (also when not saved), BOOKMARK_REMOVE |
 | GET | /users/@me/reminders | `Reminder[]` by `remind_at` ascending (pending and delivered-but-not-dismissed) |

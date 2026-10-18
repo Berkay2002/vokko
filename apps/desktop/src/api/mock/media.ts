@@ -344,9 +344,14 @@ route("GET", "/users/@me/mentions", ({ viewer, query }) => {
 });
 
 route("DELETE", `/users/@me/mentions/${ID}`, ({ viewer, params }) => {
+  const id = params[0] ?? "";
   const set = db.mentionDismissals.get(viewer.user.id) ?? new Set<string>();
-  set.add(params[0] ?? "");
+  // Like the server: only a new dismissal of a real message is told to the user's other sessions.
+  const known = [...db.messages.values()].some(list => list.some(m => m.id === id));
+  if (!known || set.has(id)) return undefined;
+  set.add(id);
   db.mentionDismissals.set(viewer.user.id, set);
+  emit([viewer.user.id], "RECENT_MENTION_DELETE", { message_id: id });
   return undefined;
 });
 

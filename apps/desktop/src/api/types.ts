@@ -2232,6 +2232,7 @@ export interface GatewayEvents {
   PRESENCE_UPDATE: Presence;
   USER_UPDATE: User; // profile/avatar change; sent to the user and everyone sharing a guild, DM or relationship with them
   MESSAGE_ACK: { channel_id: Snowflake; message_id: Snowflake };
+  RECENT_MENTION_DELETE: { message_id: Snowflake }; // a dismissed Inbox > Mentions row, to the user's own sessions
   RELATIONSHIP_ADD: Relationship;
   RELATIONSHIP_REMOVE: { id: Snowflake };
   // Scheduled events: sent to every member of the guild; `user_rsvp` is filled per receiver. CREATE/UPDATE/DELETE carry the event

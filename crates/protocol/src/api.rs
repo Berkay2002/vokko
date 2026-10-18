@@ -4729,6 +4729,12 @@ pub struct MessageAck {
     pub message_id: Snowflake,
 }
 
+/// RECENT_MENTION_DELETE: the user dismissed this message from Inbox > Mentions (sent to their own sessions).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RecentMentionDelete {
+    pub message_id: Snowflake,
+}
+
 /// GUILD_EMOJIS_UPDATE: the guild's full emoji list after a change.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GuildEmojisUpdate {
@@ -5216,6 +5222,7 @@ pub enum GatewayEvent {
     PresenceUpdate(Presence),
     UserUpdate(User),
     MessageAck(MessageAck),
+    RecentMentionDelete(RecentMentionDelete),
     RelationshipAdd(Relationship),
     RelationshipRemove(IdOnly),
     GuildScheduledEventCreate(Box<GuildScheduledEvent>),
@@ -5312,6 +5319,7 @@ impl GatewayEvent {
             Self::PresenceUpdate(_) => "PRESENCE_UPDATE",
             Self::UserUpdate(_) => "USER_UPDATE",
             Self::MessageAck(_) => "MESSAGE_ACK",
+            Self::RecentMentionDelete(_) => "RECENT_MENTION_DELETE",
             Self::RelationshipAdd(_) => "RELATIONSHIP_ADD",
             Self::RelationshipRemove(_) => "RELATIONSHIP_REMOVE",
             Self::GuildScheduledEventCreate(_) => "GUILD_SCHEDULED_EVENT_CREATE",
@@ -5397,6 +5405,7 @@ impl GatewayEvent {
             Self::PresenceUpdate(value) => serde_json::to_value(value),
             Self::UserUpdate(value) => serde_json::to_value(value),
             Self::MessageAck(value) => serde_json::to_value(value),
+            Self::RecentMentionDelete(value) => serde_json::to_value(value),
             Self::RelationshipAdd(value) => serde_json::to_value(value),
             Self::GuildScheduledEventCreate(value) | Self::GuildScheduledEventUpdate(value) | Self::GuildScheduledEventDelete(value) => {
                 serde_json::to_value(value)
@@ -5735,6 +5744,7 @@ mod tests {
         assert_eq!((old.kind, old.burst), (ReactionType::Normal, false));
         round_trip::<TypingStart>(json!({"channel_id": "2", "user_id": "1", "timestamp": 1_760_000_000}));
         round_trip::<MessageAck>(json!({"channel_id": "2", "message_id": "3"}));
+        round_trip::<RecentMentionDelete>(json!({"message_id": "3"}));
     }
 
     #[test]
@@ -6082,6 +6092,9 @@ mod tests {
         let event = GatewayEvent::MessageAck(MessageAck { channel_id: Snowflake(2), message_id: Snowflake(3) });
         assert_eq!(event.name(), "MESSAGE_ACK");
         assert_eq!(event.data(), json!({"channel_id": "2", "message_id": "3"}));
+        let event = GatewayEvent::RecentMentionDelete(RecentMentionDelete { message_id: Snowflake(3) });
+        assert_eq!(event.name(), "RECENT_MENTION_DELETE");
+        assert_eq!(event.data(), json!({"message_id": "3"}));
     }
 
     #[test]
