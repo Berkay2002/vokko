@@ -12,7 +12,7 @@
  */
 
 import { randomBytes } from 'crypto'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, statSync, renameSync, realpathSync, chmodSync } from 'fs'
 import { basename, join, resolve as resolvePath, sep } from 'path'
 
 // ---- Vokko wire shapes (the subset used here; apps/desktop/src/api/types.ts is the source of truth) ----
@@ -180,9 +180,12 @@ function defaultAccess(): Access {
   return { dmPolicy: 'pairing', allowFrom: [], groups: {}, pending: {} }
 }
 
-/** Whether this process answers DMs: the plugin unless dmBackend is "api", a shared bridge only then. */
-export function ownsDms(role: Role, access: Access): boolean {
-  return role === 'bridge' || (role === 'bridge-shared') === (access.dmBackend === 'api')
+/**
+ * Whether this process answers a DM: the plugin unless dmBackend is "api" or the sender is not the owner, a shared bridge only then.
+ * The plugin is one conversation for everything it answers, so only the owner's DMs share it. `bridgeRan` false (no shared bridge was ever set up): the plugin keeps everyone's.
+ */
+export function ownsDms(role: Role, access: Access, fromOwner = true, bridgeRan = true): boolean {
+  return role === 'bridge' || (role === 'bridge-shared') === (access.dmBackend === 'api' || (!fromOwner && bridgeRan))
 }
 
 /**
@@ -201,6 +204,9 @@ export function ownsGuilds(role: Role, access: Access, bridgeUp = true): boolean
 export const BRIDGE_STATE = 'bridge-state.json'
 export const HEARTBEAT_MS = 10_000
 export const BRIDGE_STALE_MS = 90_000
+/** The owner hears the bridge is down only after this long, and "back" only if that notice went out (remembered in this file next to bridge-state.json). */
+const BRIDGE_DOWN_NOTICE_MS = 60_000
+const BRIDGE_DOWN_MARKER = 'bridge-down-notified.json'
 /** A message the bridge passes on is a file `handoff/<message id>` (JSON: channel_id); the plugin claims it by renaming it. */
 export const HANDOFF_DIR = 'handoff'
 /** How long the plugin may still reply in a channel it took a message from, whatever the bridge state does meanwhile. */
@@ -302,7 +308,8 @@ export class VokkoBot {
   private readonly handed = new Set<string>()
   /** channel id → until when tools may reach it (see ADOPT_MS): set when the gate delivers a message from there, so Claude only reads and writes channels someone triggered it in. */
   private readonly adopted = new Map<string, number>()
-  private bridgeUp: boolean | null = null
+  /** When the bridge was first seen down by watchBridge; null while it is up. */
+  private downSince: number | null = null
   private readonly bootAccess: Access | null
   private readonly channels = new Map<string, Channel>()
   private readonly dmByUser = new Map<string, string>()
@@ -322,6 +329,8 @@ export class VokkoBot {
   private backoff = 1000
   /** The gateway is READY (not merely open): what a bridge's heartbeat vouches for. */
   connected = false
+  /** Called at READY, after `connected` is set: a bridge writes its heartbeat then instead of waiting for the next tick. */
+  onReady?: () => void
 
   constructor(cfg: Config, private readonly onMessage: (msg: Message) => void) {
     this.cfg = cfg
@@ -434,7 +443,7 @@ export class VokkoBot {
     const senderId = msg.author.id
 
     if (msg.guild_id == null) {
-      if (!ownsDms(this.cfg.role, access)) return { action: 'drop' } // the other process answers DMs, pairing included
+      if (!this.dmsOwned(access, senderId)) return { action: 'drop' } // the other process answers DMs, pairing included
       if (this.cfg.role === 'channel' && this.isOwnerCommand(msg)) return { action: 'drop' } // a bridge's command
       if (access.allowFrom.includes(senderId)) return { action: 'deliver', access }
       if (access.dmPolicy === 'allowlist') return { action: 'drop' }
@@ -467,6 +476,8 @@ export class VokkoBot {
     if ((policy.requireMention ?? true) && !this.isMentioned(msg, access.mentionPatterns)) return { action: 'drop' }
     // Last, because it may cost API calls: the owner always may; everyone else needs Use Application Commands in this channel.
     if (senderId !== this.ownerId && !((await this.bitsIn(msg.guild_id, msg.channel_id, senderId)) & USE_APPLICATION_COMMANDS)) return { action: 'drop' }
+    // The plugin answering for a bridge that is out (a handoff, or its heartbeat gone): this session is one conversation, so only channels everyone can see.
+    if (!(await this.publicOrOwn(access, msg.guild_id, msg.channel_id))) return { action: 'drop' }
     // A channel the bot answers by default, not by a groups entry: only where it can write too (not a read-only channel).
     if (!access.groups[this.gateKey(msg.channel_id)] && this.me && !((await this.bitsIn(msg.guild_id, msg.channel_id, this.me.id)) & SEND_MESSAGES)) return { action: 'drop' }
     this.adopted.set(msg.channel_id, Date.now() + ADOPT_MS)
@@ -526,6 +537,31 @@ export class VokkoBot {
     this.ownerUser()
       .then(u => u && this.dmUser(u.id, text))
       .catch(err => this.cfg.log(`vokko channel: could not tell the owner that pairing is full: ${err}\n`))
+  }
+
+  /** Whether @everyone can view the channel (a thread follows its parent; a private thread never counts). A failed lookup says no. */
+  async publicChannel(guildId: string, channelId: string): Promise<boolean> {
+    if (this.channels.get(channelId)?.type === 12) return false
+    try {
+      const channel = this.channels.get(this.gateKey(channelId))
+      const st = channel && (await this.loadGuildState(guildId))
+      // Nobody's id and no roles: exactly @everyone.
+      return st != null && (channelBits(st.guild, { user: { id: '', username: '', global_name: null }, roles: [] }, channel!.permission_overwrites) & VIEW_CHANNEL) !== 0n
+    } catch (err) {
+      this.cfg.log(`vokko channel: cannot read permissions in guild ${guildId}: ${err}
+`)
+      return false
+    }
+  }
+
+  /** Answering a bridge's guilds as its fallback (`guilds false`): only public channels, in the gate and for tools alike. */
+  private async publicOrOwn(access: Access, guildId: string, channelId: string): Promise<boolean> {
+    return this.cfg.role !== 'channel' || access.guilds !== false || (await this.publicChannel(guildId, channelId))
+  }
+
+  /** ownsDms for this sender; a plugin with no bridge set up keeps everyone's DMs. */
+  dmsOwned(access: Access, userId: string): boolean {
+    return ownsDms(this.cfg.role, access, userId === this.ownerId, this.cfg.role !== 'channel' || bridgeState(this.cfg.stateDir) !== 'none')
   }
 
   /** ownsGuilds, with the bridge's heartbeat for the plugin. */
@@ -602,22 +638,44 @@ export class VokkoBot {
     if (this.ownerId) this.dmUser(this.ownerId, text).catch(err => this.cfg.log(`vokko channel: owner notice failed: ${err}\n`))
   }
 
-  /** Tells the owner when the bridge goes away or comes back (only while guilds belong to it). */
-  private watchBridge(): void {
-    if (this.loadAccess().guilds !== false) {
-      this.bridgeUp = null
-      return
+  /**
+   * Tells the owner when the bridge has been away for BRIDGE_DOWN_NOTICE_MS in a row (a planned restart sends nothing), and once it is back.
+   * The "down" notice is remembered in BRIDGE_DOWN_MARKER, so "back" still arrives after this plugin restarted meanwhile, and never without a "down".
+   * Only while guilds belong to the bridge.
+   */
+  private watchBridge(now = Date.now()): void {
+    const marker = join(this.cfg.stateDir, BRIDGE_DOWN_MARKER)
+    const st = this.loadAccess().guilds === false ? bridgeState(this.cfg.stateDir, now) : 'none'
+    // A marker that cannot be removed (EPERM, EBUSY) is tried again next tick, and "back" waits for it so it is sent once.
+    const clear = (): boolean => {
+      try {
+        rmSync(marker, { force: true })
+        return true
+      } catch (err) {
+        this.cfg.log(`vokko channel: cannot clear the bridge-down notice: ${err}\n`)
+        return false
+      }
     }
-    const st = bridgeState(this.cfg.stateDir)
     if (st === 'none') {
-      this.bridgeUp = null
+      this.downSince = null
+      clear()
       return
     }
-    const up = st === 'alive'
-    const was = this.bridgeUp
-    this.bridgeUp = up
-    if (was == null || was === up) return
-    this.notifyOwner(up ? 'Servers are back on the API bridge.' : 'The API bridge is not running: servers are answered by your Claude Code session (subscription) until it is back.')
+    if (st === 'alive') {
+      this.downSince = null
+      if (existsSync(marker) && clear()) this.notifyOwner('Servers are back on the API bridge.')
+      return
+    }
+    this.downSince ??= now
+    if (now - this.downSince < BRIDGE_DOWN_NOTICE_MS || existsSync(marker)) return
+    if (!this.ownerId) return // nobody to tell: a marker now would turn into a "back" without a "down"
+    try {
+      writeFileSync(`${marker}.tmp`, JSON.stringify({ at: now }), { mode: 0o600 })
+      renameSync(`${marker}.tmp`, marker)
+    } catch (err) {
+      return this.cfg.log(`vokko channel: cannot remember the bridge-down notice: ${err}\n`) // no marker, no "back" later: say nothing now either
+    }
+    this.notifyOwner('The API bridge is not running: servers are answered by your Claude Code session (subscription) until it is back.')
   }
 
   private checkHandoffs(): void {
@@ -695,8 +753,8 @@ export class VokkoBot {
     const ch = this.channels.get(id)
     if (ch?.type === 1) {
       const userId = ch.recipients?.find(u => u.id !== this.me?.id)?.id
-      if (ownsDms(this.cfg.role, access) && userId && access.allowFrom.includes(userId)) return
-    } else if (ch && ((this.guildsOwned(access) && this.gateKey(id) in access.groups) || (this.adopted.get(id) ?? 0) > Date.now())) {
+      if (userId && this.dmsOwned(access, userId) && access.allowFrom.includes(userId)) return
+    } else if (ch && ((this.guildsOwned(access) && this.gateKey(id) in access.groups) || (this.adopted.get(id) ?? 0) > Date.now()) && (await this.publicOrOwn(access, ch.guild_id ?? '', id))) {
       // a groups entry, or a channel someone triggered Claude in: not every channel it merely sees
       return
     }
@@ -927,6 +985,7 @@ export class VokkoBot {
           void this.setNickname(g)
         }
         this.cfg.log(`vokko channel: gateway connected as ${d.user.username}\n`)
+        this.onReady?.()
         break
       case 'GUILD_CREATE':
         this.cacheGuild(d)
