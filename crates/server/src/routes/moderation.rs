@@ -27,6 +27,7 @@ use crate::extract::{ApiJson, ApiQuery, parse_id};
 use crate::media;
 use crate::routes::auth::clean_text;
 use crate::routes::join_requests;
+use crate::routes::overwrites;
 use crate::routes::users::{self, ImageKind};
 use crate::state::AppState;
 use crate::store;
@@ -645,6 +646,12 @@ async fn edit_member(
             }
         }
     }
+    // The channels the member sees before a role change (the transaction's writes are not visible until it commits), so the ones
+    // it opens or closes reach them as CHANNEL_CREATE / CHANNEL_DELETE. A timeout keeps VIEW_CHANNEL and changes none.
+    let visible_before = match &roles {
+        Some(_) => Some(access::visible_guild_channels(&state, target, guild).await?),
+        None => None,
+    };
     if let Some(nick) = nick {
         sqlx::query("UPDATE guild_members SET nick = $3 WHERE guild_id = $1 AND user_id = $2").bind(guild).bind(target).bind(nick).execute(&mut *tx).await?;
     }
@@ -685,6 +692,9 @@ async fn edit_member(
     voice.store(&mut tx, guild, target).await?;
     tx.commit().await?;
     voice.apply(&state, guild, target, permissions_changed).await?;
+    if let Some(before) = visible_before {
+        overwrites::dispatch_member_visibility(&state, target, guild, &before).await?;
+    }
     let member = publish_member(&state, guild, target).await?;
     for entry in [member_entry, role_entry] {
         if !entry.changes.is_empty() {
@@ -849,6 +859,8 @@ async fn update_role(
             },
         )
     };
+    // Who sees each channel before a permission edit, so the channels it opens or closes reach those members.
+    let viewers_before = if permissions != current.permissions as u64 { Some(overwrites::guild_viewers(&state, guild).await?) } else { None };
     let row: RoleRow = sqlx::query_as(&format!(
         "UPDATE roles SET name = $2, color = $3, hoist = $4, permissions = $5, mentionable = $6, unicode_emoji = $7 WHERE id = $1 RETURNING {ROLE_COLS}"
     ))
@@ -862,6 +874,9 @@ async fn update_role(
     .fetch_one(&state.db)
     .await?;
     let role = row.api();
+    if let Some(before) = viewers_before {
+        overwrites::dispatch_guild_visibility(&state, &before).await?;
+    }
     publish_role(&state, guild, role.clone(), false).await?;
     // Cosmetic edits leave voice rights alone; recomputing holds the instance-wide admission lock.
     if permissions != current.permissions as u64 {
@@ -940,13 +955,16 @@ async fn delete_role(
     if !ctx.outranks(&current) {
         return Err(ApiErr::missing_permissions());
     }
-    // Overwrites naming the role go with it (member_roles rows cascade); the affected channels are re-sent.
+    // Overwrites naming the role go with it (member_roles rows cascade); the affected channels are re-sent, and the channels
+    // the role opened or closed reach the members who lost or gained them.
+    let viewers_before = overwrites::guild_viewers(&state, guild).await?;
     let channels: Vec<(i64,)> = sqlx::query_as("DELETE FROM permission_overwrites WHERE target_type = 0 AND target_id = $1 RETURNING channel_id")
         .bind(role_id)
         .fetch_all(&state.db)
         .await?;
     sqlx::query("DELETE FROM roles WHERE id = $1").bind(role_id).execute(&state.db).await?;
     let members = access::guild_member_ids(&state, guild).await?;
+    overwrites::dispatch_guild_visibility(&state, &viewers_before).await?;
     state.hub.send(&members, &GatewayEvent::GuildRoleDelete(GuildRoleDelete { guild_id: Snowflake::from(guild), role_id: Snowflake::from(role_id) }));
     for (channel_id,) in channels {
         if let Some(row) = store::channel_row(&state, channel_id).await? {
