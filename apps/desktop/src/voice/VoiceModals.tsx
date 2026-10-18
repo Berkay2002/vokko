@@ -7,6 +7,7 @@ import { useStore } from "../api/store";
 import { closeModal } from "../shell/modalStore";
 import { Dropdown, Modal, setPref, usePrefs } from "../ui";
 import { ApiRequestError } from "../api/rest";
+import { nativeVoice } from "../desktop";
 import { screenChoiceFromPrefs, setVoiceChannelStatus, startCamera, startScreenShare } from "./engine";
 import { useMedia } from "./mediaStore";
 import { useVoice } from "./store";
@@ -88,7 +89,8 @@ export function CameraPreviewModal() {
   const alwaysPreview = usePrefs(s => s.alwaysPreviewVideo);
   const connected = useVoice(s => s.channelId !== null && s.status === "connected");
   const resolution: CameraResolution = isCameraResolution(resolutionPref) ? resolutionPref : "720p";
-  const preview = useCameraPreview({ deviceId: deviceId === "default" ? "" : deviceId, resolution, background });
+  const native = nativeVoice();
+  const preview = useCameraPreview({ deviceId: native || deviceId === "default" ? "" : deviceId, resolution, background: native ? "none" : background });
   const [busy, setBusy] = useState(false);
   const unavailable = preview.status === "blocked" || preview.status === "missing" || preview.status === "failed";
 
@@ -131,17 +133,20 @@ export function CameraPreviewModal() {
           </div>
         )}
       </div>
-      <Dropdown
-        label="Camera"
-        icon={Camera}
-        triggerClassName="voice-camera-device"
-        value={deviceId === "default" ? "" : deviceId}
-        options={[
-          { value: "", label: "Default camera" },
-          ...preview.devices.filter(d => d.deviceId && d.deviceId !== "default").map((d, i) => ({ value: d.deviceId, label: d.label || `Camera ${i + 1}` })),
-        ]}
-        onChange={next => setPref("cameraDevice", next || "default")}
-      />
+      {/* The Linux app captures in Rust: the first camera, no background (WebKit's device ids aren't V4L2 paths). */}
+      {!native && (
+        <Dropdown
+          label="Camera"
+          icon={Camera}
+          triggerClassName="voice-camera-device"
+          value={deviceId === "default" ? "" : deviceId}
+          options={[
+            { value: "", label: "Default camera" },
+            ...preview.devices.filter(d => d.deviceId && d.deviceId !== "default").map((d, i) => ({ value: d.deviceId, label: d.label || `Camera ${i + 1}` })),
+          ]}
+          onChange={next => setPref("cameraDevice", next || "default")}
+        />
+      )}
       <Dropdown
         label="Camera resolution"
         icon={Monitor}
@@ -150,8 +155,12 @@ export function CameraPreviewModal() {
         options={CAMERA_RESOLUTIONS.map(r => ({ value: r, label: r === "720p" ? "720p (default)" : r }))}
         onChange={next => isCameraResolution(next) && setPref("cameraResolution", next)}
       />
-      <h3 className="voice-camera-heading">Video Background</h3>
-      <VideoBackgroundPicker value={background} onChange={next => setPref("videoBackground", next)} error={preview.backgroundError} />
+      {!native && (
+        <>
+          <h3 className="voice-camera-heading">Video Background</h3>
+          <VideoBackgroundPicker value={background} onChange={next => setPref("videoBackground", next)} error={preview.backgroundError} />
+        </>
+      )}
     </Modal>
   );
 }

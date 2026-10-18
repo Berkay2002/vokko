@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { Camera, ChevronDown, ChevronRight, Mic, Volume2, type LucideIcon } from "lucide-react";
 import { Dropdown, Modal, resetPrefs, setPref, usePrefs, type Prefs } from "../../ui";
+import { nativeVoice } from "../../desktop";
 import { previewSound } from "../../notify/sounds";
 import { VOICE_SOUNDS, isSoundEnabled, withSoundEnabled, type VoiceSoundId } from "../../notify/soundCatalog";
 import { fromSuppressionChoice, resolveAudio, suppressionChoice, type InputProfile } from "../../voice/audioProfile";
@@ -197,6 +198,8 @@ export function VoiceVideoPage() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [previewOn, setPreviewOn] = useState(false);
   const ids = useId();
+  // The Linux app captures in Rust: the first camera, no background (WebKit's device ids aren't V4L2 paths).
+  const native = nativeVoice();
 
   // Device names appear once a permission has been granted, which the mic test or camera test does.
   const { refresh } = devices;
@@ -206,9 +209,9 @@ export function VoiceVideoPage() {
 
   const camera = useCameraPreview({
     enabled: previewOn,
-    deviceId: cameraDevice === "default" ? "" : cameraDevice,
+    deviceId: native || cameraDevice === "default" ? "" : cameraDevice,
     resolution: (cameraResolution === "1080p" ? "1080p" : "720p") as CameraResolution,
-    background: videoBackground,
+    background: native ? "none" : videoBackground,
   });
 
   const resolved = resolveAudio({ inputProfile, noiseSuppression, noiseSuppressionKind: noiseKind, echoCancellation, autoGainControl, bypassSystemProcessing: bypass });
@@ -364,9 +367,11 @@ export function VoiceVideoPage() {
         </div>
         <SwitchRow label="Always preview video" note="Show a camera preview before you turn your camera on in a call." checked={alwaysPreview} onChange={v => setPref("alwaysPreviewVideo", v)} />
         <div className="vv-columns">
-          <Field label="Camera">
-            <DeviceSelect label="Camera" icon={Camera} value={listedDevice(devices.cameras, cameraDevice)} options={devices.cameras} onChange={v => setPref("cameraDevice", v)} disabled={noAccess} />
-          </Field>
+          {!native && (
+            <Field label="Camera">
+              <DeviceSelect label="Camera" icon={Camera} value={listedDevice(devices.cameras, cameraDevice)} options={devices.cameras} onChange={v => setPref("cameraDevice", v)} disabled={noAccess} />
+            </Field>
+          )}
           <Field label="Resolution">
             <Select<CameraResolution>
               label="Camera resolution"
@@ -376,9 +381,11 @@ export function VoiceVideoPage() {
             />
           </Field>
         </div>
-        <Field label="Video background">
-          <VideoBackgroundPicker value={videoBackground} onChange={v => setPref("videoBackground", v)} error={camera.backgroundError} />
-        </Field>
+        {!native && (
+          <Field label="Video background">
+            <VideoBackgroundPicker value={videoBackground} onChange={v => setPref("videoBackground", v)} error={camera.backgroundError} />
+          </Field>
+        )}
       </Category>
 
       <Category title="Streaming">

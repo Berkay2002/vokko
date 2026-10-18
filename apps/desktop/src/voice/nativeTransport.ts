@@ -56,6 +56,8 @@ export class NativeTransport implements VoiceTransport {
 
   async connect(endpoint: string, token: string, options: TransportOptions): Promise<void> {
     const generation = ++this.generation;
+    // Rust closes the old room's tracks without an event: our own camera / screen share tiles go with them.
+    this.dropVideos();
     this.options = options;
     this.smoother.reset();
     this.quality = "unknown";
@@ -96,6 +98,9 @@ export class NativeTransport implements VoiceTransport {
       case "closed":
         this.generation++;
         this.dropVideos();
+        // Our capture stops with the page's tile (Rust also stops it when the room goes), not at the retry's end.
+        void this.command("native_voice_set_video", { source: "camera", plan: null });
+        void this.command("native_voice_set_video", { source: "screen", plan: null });
         return this.cb.closed({ final: event.final, reason: event.reason ?? undefined });
       case "participant":
         if (this.options) this.setUserVolume(event.userId, this.options.volumeOf(event.userId));

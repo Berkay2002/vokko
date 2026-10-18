@@ -9,6 +9,11 @@ export function isDesktop(): boolean {
   return isTauri();
 }
 
+/** The Linux app: WebKitGTK has no WebRTC, so voice and our camera run in the Rust shell (voice/nativeTransport.ts). */
+export function nativeVoice(): boolean {
+  return typeof RTCPeerConnection === "undefined" && isDesktop();
+}
+
 /** Calls a Rust command; `fallback` is returned outside Tauri and when the call fails (the failure is logged, never thrown). */
 export async function call<T>(command: string, args: Record<string, unknown> | undefined, fallback: T): Promise<T> {
   if (!isDesktop()) return fallback;

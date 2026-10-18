@@ -122,6 +122,25 @@ describe("NativeTransport", () => {
     expect(cb.videoFailed).toHaveBeenCalledTimes(1);
   });
 
+  it("drops our own tiles on a reconnect and stops our captures when the room closes", async () => {
+    vi.stubGlobal("document", { createElement: () => ({}) });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const cb = { ...callbacks(), video: vi.fn() };
+    const t = new NativeTransport(cb);
+    await t.connect("wss://lk", "tok", { ...options(), selfId: "1" });
+    videoAnswer = "TR_cam";
+    await t.setCamera(true, { resolution: "720p" });
+    await t.connect("wss://lk", "tok2", { ...options(), selfId: "1" });
+    expect(cb.video).toHaveBeenLastCalledWith("1", "camera", null);
+    calls.length = 0;
+    await t.connect("wss://lk", "tok3", { ...options(), selfId: "1" });
+    channel().onmessage({ type: "closed", final: false });
+    expect(calls.filter(c => c.name === "native_voice_set_video")).toEqual([
+      { name: "native_voice_set_video", args: { source: "camera", plan: null } },
+      { name: "native_voice_set_video", args: { source: "screen", plan: null } },
+    ]);
+  });
+
   it("reports a failed connect as a retryable close, and drops events after a disconnect", async () => {
     const cb = callbacks();
     const t = new NativeTransport(cb);

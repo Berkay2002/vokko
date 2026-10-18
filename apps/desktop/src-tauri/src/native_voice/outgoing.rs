@@ -94,11 +94,20 @@ impl Drop for Outgoing {
     }
 }
 
+/// How long a capture may take to open: the portal's picker waits on the user, but not forever.
+const START_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Opens the capture, publishes it once the first frame is on its way, and calls `ended` when the capture stops on its
-/// own (camera unplugged, the portal session closed). The caller unpublishes then.
-pub async fn start(room: &Room, kind: Kind, plan: VideoPlan, ended: impl FnOnce() + Send + 'static) -> Result<(Outgoing, LocalVideoTrack), StartError> {
+/// own (camera unplugged, the portal session closed). The caller unpublishes then. The caller keeps `stop` while the
+/// capture opens: setting it cancels the start.
+pub async fn start(
+    room: &Room,
+    kind: Kind,
+    plan: VideoPlan,
+    stop: Arc<AtomicBool>,
+    ended: impl FnOnce() + Send + 'static,
+) -> Result<(Outgoing, LocalVideoTrack), StartError> {
     let source = NativeVideoSource::new(VideoResolution { width: plan.width, height: plan.height }, kind == Kind::Screen);
-    let stop = Arc::new(AtomicBool::new(false));
     let feed = Feed { source: source.clone(), width: plan.width, height: plan.height, stop: stop.clone() };
     let (ready, started) = oneshot::channel();
     let fps = plan.fps.clamp(1, 60);
@@ -117,7 +126,16 @@ pub async fn start(room: &Room, kind: Kind, plan: VideoPlan, ended: impl FnOnce(
         log::warn!("native voice: {} thread: {error}", kind.name());
         return Err(StartError::Failed("failed"));
     }
-    let result = started.await.unwrap_or(Err(StartError::Failed("failed")));
+    let result = match tokio::time::timeout(START_TIMEOUT, started).await {
+        Ok(result) => result.unwrap_or(Err(StartError::Failed("failed"))),
+        Err(_) => {
+            log::warn!("native voice: {} didn't start within {START_TIMEOUT:?}", kind.name());
+            Err(StartError::Failed("failed"))
+        }
+    };
+    if stop.load(Ordering::Relaxed) {
+        return Err(StartError::Cancelled);
+    }
     if let Err(error) = result {
         stop.store(true, Ordering::Relaxed);
         return Err(error);
@@ -182,42 +200,56 @@ fn pixel_kind(format: linuxvideo::format::PixelFormat) -> Option<Pixels> {
     }
 }
 
-fn camera(path: Option<String>, fps: u32, feed: &Feed, ready: Ready) {
+const EBUSY: i32 = 16;
+
+struct Opened {
+    stream: linuxvideo::stream::ReadStream,
+    width: u32,
+    height: u32,
+    stride: u32,
+    pixels: Pixels,
+}
+
+/// Opens the camera and starts streaming. Err(None): the device is busy.
+fn open_stream(path: Option<String>, width: u32, height: u32, fps: u32) -> Result<Opened, Option<StartError>> {
     use linuxvideo::format::{PixFormat, PixelFormat};
-    let device = match open_camera(path) {
-        Ok(device) => device,
-        Err(error) => {
-            let _ = ready.send(Err(error));
-            return;
+    let failed = |what: &str, error: std::io::Error| {
+        if error.raw_os_error() == Some(EBUSY) {
+            return None;
         }
+        log::warn!("native voice: camera {what}: {error}");
+        Some(StartError::Failed("failed"))
     };
+    let device = open_camera(path).map_err(Some)?;
     // MJPEG first: most USB cameras send 720p / 1080p at 30 fps only that way (YUYV tops out around 10 fps there).
     let formats: Vec<_> = device.formats(linuxvideo::BufType::VIDEO_CAPTURE).filter_map(|f| f.ok()).map(|f| f.pixel_format()).collect();
     let wanted = if formats.iter().any(|f| pixel_kind(*f) == Some(Pixels::Mjpeg)) { PixelFormat::MJPG } else { PixelFormat::YUYV };
-    let capture = match device.video_capture(PixFormat::new(feed.width, feed.height, wanted)) {
-        Ok(capture) => capture,
-        Err(error) => {
-            log::warn!("native voice: camera format: {error}");
-            let _ = ready.send(Err(StartError::Failed("failed")));
-            return;
-        }
-    };
+    let capture = device.video_capture(PixFormat::new(width, height, wanted)).map_err(|e| failed("format", e))?;
     let format = capture.format();
-    let (width, height, stride, pixel_format) = (format.width(), format.height(), format.bytes_per_line(), format.pixel_format());
-    let Some(pixels) = pixel_kind(pixel_format) else {
-        let _ = ready.send(Err(StartError::Failed("failed")));
-        return;
-    };
+    let (width, height, stride) = (format.width(), format.height(), format.bytes_per_line());
+    let pixels = pixel_kind(format.pixel_format()).ok_or(Some(StartError::Failed("failed")))?;
     let _ = capture.set_frame_interval(linuxvideo::Fract::new(1, fps));
-    let mut stream = match capture.into_stream() {
-        Ok(stream) => stream,
-        Err(error) => {
-            log::warn!("native voice: camera stream: {error}");
-            let busy = error.raw_os_error() == Some(16);
-            let _ = ready.send(Err(StartError::Failed(if busy { "not_found" } else { "failed" })));
-            return;
+    let stream = capture.into_stream().map_err(|e| failed("stream", e))?;
+    Ok(Opened { stream, width, height, stride, pixels })
+}
+
+fn camera(path: Option<String>, fps: u32, feed: &Feed, ready: Ready) {
+    // The page's preview (WebKit) or our previous capture may still be letting go of the device: retry for a second.
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let opened = loop {
+        match open_stream(path.clone(), feed.width, feed.height, fps) {
+            Ok(opened) => break opened,
+            Err(None) if Instant::now() < deadline && !feed.stop.load(Ordering::Relaxed) => std::thread::sleep(Duration::from_millis(50)),
+            Err(error) => {
+                if error.is_none() {
+                    log::warn!("native voice: camera busy");
+                }
+                let _ = ready.send(Err(error.unwrap_or(StartError::Failed("failed"))));
+                return;
+            }
         }
     };
+    let Opened { mut stream, width, height, stride, pixels } = opened;
     let _ = ready.send(Ok(()));
     while !feed.stop.load(Ordering::Relaxed) {
         let frame = stream.dequeue(|data| {
@@ -266,7 +298,13 @@ fn yuyv_to_i420(data: &[u8], width: u32, height: u32, stride: u32) -> Option<I42
     Some(out)
 }
 
-/// Decodes one MJPEG frame to YCbCr (no colour conversion) and subsamples the chroma to I420.
+/// JPEG's YCbCr is full range (0-255), I420 for the encoder limited range: luma 16-235 (`span` 219), chroma 16-240 (224).
+fn limited(value: u8, span: u32) -> u8 {
+    let scaled = 16 + (u32::from(value) * span + 127) / 255;
+    u8::try_from(scaled).unwrap_or(u8::MAX)
+}
+
+/// Decodes one MJPEG frame to YCbCr (no colour conversion), rescales it to limited range and subsamples the chroma to I420.
 fn mjpeg_to_i420(data: &[u8]) -> Option<I420Buffer> {
     use zune_jpeg::zune_core::colorspace::ColorSpace;
     use zune_jpeg::zune_core::options::DecoderOptions;
@@ -289,13 +327,13 @@ fn mjpeg_to_i420(data: &[u8]) -> Option<I420Buffer> {
         let line = pixels.get(row * src_width * 3..(row * src_width + width) * 3)?;
         let luma = &mut y[row * stride_y as usize..][..width];
         for (dst, px) in luma.iter_mut().zip(line.as_chunks::<3>().0) {
-            *dst = px[0];
+            *dst = limited(px[0], 219);
         }
         if row % 2 == 0 {
             let (u_row, v_row) = (&mut u[row / 2 * stride_u as usize..], &mut v[row / 2 * stride_v as usize..]);
             for (i, px) in line.as_chunks::<6>().0.iter().enumerate() {
-                u_row[i] = px[1];
-                v_row[i] = px[2];
+                u_row[i] = limited(px[1], 224);
+                v_row[i] = limited(px[2], 224);
             }
         }
     }
@@ -367,7 +405,13 @@ fn screen(fps: u32, feed: &Feed, ready: Ready) {
 
 #[cfg(test)]
 mod tests {
-    use super::yuyv_to_i420;
+    use super::{limited, yuyv_to_i420};
+
+    #[test]
+    fn full_range_maps_to_limited_range() {
+        assert_eq!([limited(0, 219), limited(128, 219), limited(255, 219)], [16, 126, 235]);
+        assert_eq!([limited(0, 224), limited(128, 224), limited(255, 224)], [16, 128, 240]);
+    }
 
     #[test]
     fn yuyv_keeps_luma_and_takes_chroma_from_even_rows() {

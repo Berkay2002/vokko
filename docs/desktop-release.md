@@ -189,11 +189,13 @@ capped at 3840x2160) and converts it to RGBA; the page pulls one frame per `nati
 queue builds up when the page is slow), paints a hidden canvas, and its `captureStream()` feeds the tile's `<video>`
 (`voice/nativeVideo.ts`). Our own camera and screen share are captured in Rust as well (`native_voice/outgoing.rs`) and sent as
 VP8 simulcast with the layers `video/options.ts` plans: cameras through V4L2 (MJPEG decoded with zune-jpeg, or YUYV; the page's
-preview capture is closed first, and a WebKit device id falls back to the first camera), screens through libwebrtc's desktop
+preview capture is closed first and a busy device is retried for a second; the first camera is used, so the camera and video
+background pickers are hidden in the Linux app), screens through libwebrtc's desktop
 capturer: the xdg-desktop-portal ScreenCast + PipeWire path on Wayland (the portal's own picker; closing it is a cancel, not an
-error), the whole X11 screen otherwise. libwebrtc loads libpipewire, libX11 and friends itself when a capture starts, so the AppImage
+error; an unanswered picker times out after 60 s), the whole X11 screen otherwise. A dropped room stops both captures at once
+(the camera light goes off) while the page retries. libwebrtc loads libpipewire, libX11 and friends itself when a capture starts, so the AppImage
 bundles nothing new; a desktop needs PipeWire and a portal backend for Wayland sharing, which GNOME and KDE ship. Not yet: screen
-share audio, a window picker on X11, resuming our camera / screen share after a reconnect, hardware encoding (H.264 over VAAPI /
+share audio, choosing a camera (V4L2 device list), video backgrounds, a window picker on X11, resuming our camera / screen share after a reconnect, hardware encoding (H.264 over VAAPI /
 NVENC), a layer list for the quality menu (only "Np" or high), and Watch Together streams; a browser without WebRTC still gets
 `webrtc_unsupported`, and the Stremio / Spotify viewer Room goes to `unsupported` instead of retrying.
 

@@ -147,7 +147,39 @@ struct Session {
     /// Remote microphone readers by track sid.
     readers: Arc<std::sync::Mutex<HashMap<String, JoinHandle<()>>>>,
     /// Our camera and screen share.
-    outgoing: Vec<Outgoing>,
+    captures: Arc<std::sync::Mutex<Captures>>,
+}
+
+/// Our live captures, and the stop flags of ones still opening (the portal's picker waits on the user), so a stop, a
+/// newer start or the room going away cancels those too.
+#[derive(Default)]
+struct Captures {
+    live: Vec<Outgoing>,
+    pending: Vec<(Kind, Arc<AtomicBool>)>,
+}
+
+impl Captures {
+    /// Cancels the pending captures of `kind` (None: every kind) and hands back the live ones to unpublish; dropping one
+    /// stops its capture.
+    fn take(&mut self, kind: Option<Kind>) -> Vec<Outgoing> {
+        let matches = |k: Kind| kind.is_none_or(|kind| kind == k);
+        for (_, stop) in self.pending.iter().filter(|(k, _)| matches(*k)) {
+            stop.store(true, Ordering::Relaxed);
+        }
+        self.pending.retain(|(k, _)| !matches(*k));
+        let (taken, kept) = std::mem::take(&mut self.live).into_iter().partition(|o| matches(o.kind));
+        self.live = kept;
+        taken
+    }
+}
+
+/// Stops all our captures (the device and the portal session are released as their threads exit) and forgets their
+/// self-view frames.
+fn stop_captures(captures: &std::sync::Mutex<Captures>, videos: &Videos) {
+    let taken = captures.lock().map(|mut captures| captures.take(None)).unwrap_or_default();
+    for outgoing in taken {
+        videos.remove(&outgoing.publication.sid().to_string());
+    }
 }
 
 pub struct NativeVoice {
@@ -358,7 +390,7 @@ impl Session {
                 handle.abort();
             }
         }
-        self.outgoing.clear();
+        stop_captures(&self.captures, videos);
         shared.clear_voices();
         videos.clear();
         let _ = self.room.close().await;
@@ -448,8 +480,15 @@ async fn connect(state: &NativeVoice, url: String, token: String, init: ConnectI
     let leaving = Arc::new(AtomicBool::new(false));
     let readers = Arc::new(std::sync::Mutex::new(HashMap::new()));
     let videos = state.videos.clone();
-    let mut tasks =
-        vec![tauri::async_runtime::spawn(room_loop(room.clone(), rx, shared.clone(), videos.clone(), events.clone(), leaving.clone(), readers.clone()))];
+    let captures = Arc::new(std::sync::Mutex::new(Captures::default()));
+    let room_events = room_loop(room.clone(), rx, shared.clone(), videos.clone(), events.clone(), leaving.clone(), readers.clone());
+    let (loop_captures, loop_videos) = (captures.clone(), videos.clone());
+    let mut tasks = vec![tauri::async_runtime::spawn(async move {
+        room_events.await;
+        // The room is gone. A non-final disconnect keeps the session for the page's retry, but not our camera (its light)
+        // or screen share.
+        stop_captures(&loop_captures, &loop_videos);
+    })];
     let ping_room = room.clone();
     let ping_events = events.clone();
     tasks.push(tauri::async_runtime::spawn(async move {
@@ -458,17 +497,8 @@ async fn connect(state: &NativeVoice, url: String, token: String, init: ConnectI
             let _ = ping_events.send(NativeEvent::Ping { ms: ping_ms(&ping_room).await });
         }
     }));
-    let mut session = Session {
-        room: room.clone(),
-        events: events.clone(),
-        settings: init.settings,
-        playback: None,
-        mic: None,
-        leaving,
-        tasks,
-        readers,
-        outgoing: Vec::new(),
-    };
+    let mut session =
+        Session { room: room.clone(), events: events.clone(), settings: init.settings, playback: None, mic: None, leaving, tasks, readers, captures };
     session.restart_playback(&shared);
     for participant in room.remote_participants().values() {
         for publication in participant.track_publications().values() {
@@ -527,13 +557,19 @@ async fn set_user_volume(state: &NativeVoice, user_id: String, volume: f32) -> R
 /// Stops our camera / screen share, then starts it again with `plan` when there is one. Answers the local preview's
 /// frame key, or "cancelled" (portal picker closed), "permission_denied", "not_found", "failed".
 async fn set_video(state: &NativeVoice, kind: Kind, plan: Option<VideoPlan>) -> Result<Option<String>, String> {
-    let (room, events, old) = {
-        let mut slot = state.session.lock().await;
-        let session = slot.as_mut().ok_or("failed")?;
-        let old = session.outgoing.iter().position(|o| o.kind == kind).map(|i| session.outgoing.remove(i));
-        (session.room.clone(), session.events.clone(), old)
+    let stop = Arc::new(AtomicBool::new(false));
+    let (room, events, captures, old) = {
+        let slot = state.session.lock().await;
+        let Some(session) = slot.as_ref() else { return if plan.is_some() { Err("failed".into()) } else { Ok(None) } };
+        let mut captures = session.captures.lock().map_err(|_| "failed")?;
+        let old = captures.take(Some(kind));
+        if plan.is_some() {
+            captures.pending.push((kind, stop.clone()));
+        }
+        drop(captures);
+        (session.room.clone(), session.events.clone(), session.captures.clone(), old)
     };
-    if let Some(old) = old {
+    for old in old {
         let sid = old.publication.sid();
         state.videos.remove(&sid.to_string());
         drop(old);
@@ -544,25 +580,31 @@ async fn set_video(state: &NativeVoice, kind: Kind, plan: Option<VideoPlan>) -> 
     let ended = move || {
         let _ = events.send(NativeEvent::LocalEnded { source: kind.name() });
     };
-    let (outgoing, track) = outgoing::start(&room, kind, plan, ended).await.map_err(|error| match error {
-        StartError::Cancelled => "cancelled".to_owned(),
-        StartError::Failed(reason) => reason.to_owned(),
-    })?;
-    let sid = outgoing.publication.sid();
-    let key = sid.to_string();
-    let mut slot = state.session.lock().await;
-    match slot.as_mut() {
-        Some(session) if Arc::ptr_eq(&session.room, &room) && !session.outgoing.iter().any(|o| o.kind == kind) => {
+    let started = outgoing::start(&room, kind, plan, stop.clone(), ended).await;
+    let kept = {
+        let mut captures = captures.lock().map_err(|_| "failed")?;
+        captures.pending.retain(|(_, pending)| !Arc::ptr_eq(pending, &stop));
+        let (outgoing, track) = started.map_err(|error| match error {
+            StartError::Cancelled => "cancelled".to_owned(),
+            StartError::Failed(reason) => reason.to_owned(),
+        })?;
+        // Stopped, started again, left or the room went away meanwhile (each sets `stop`): this one goes.
+        if stop.load(Ordering::Relaxed) {
+            Err(outgoing)
+        } else {
+            let key = outgoing.publication.sid().to_string();
             state.videos.insert(key.clone(), track.rtc_track());
-            session.outgoing.push(outgoing);
-            Ok(Some(key))
+            captures.live.push(outgoing);
+            Ok(key)
         }
-        // Left, reconnected or started twice meanwhile: this one goes.
-        _ => {
-            drop(slot);
+    };
+    match kept {
+        Ok(key) => Ok(Some(key)),
+        Err(outgoing) => {
+            let sid = outgoing.publication.sid();
             drop(outgoing);
             let _ = room.local_participant().unpublish_track(&sid).await;
-            Err("failed".into())
+            Err("cancelled".into())
         }
     }
 }
@@ -762,6 +804,28 @@ mod tests {
                     let kind = if source == "camera" { Kind::Camera } else { Kind::Screen };
                     let plan = plan.map(|p| serde_json::from_value(p).unwrap());
                     println!("{source}: {:?}", set_video(&voice, kind, plan).await);
+                }
+                // The room goes away under the session (what a non-final disconnect looks like before the page retries).
+                ("drop", _) => {
+                    let room = voice.session.lock().await.as_ref().map(|s| s.room.clone());
+                    println!("drop: {:?}", room.unwrap().close().await);
+                }
+                // The /dev/video* nodes this process still has open, and its capture threads.
+                ("held", _) => {
+                    let fds = std::fs::read_dir("/proc/self/fd").unwrap().filter_map(|e| std::fs::read_link(e.ok()?.path()).ok());
+                    let threads = std::fs::read_dir("/proc/self/task").unwrap().filter_map(|e| std::fs::read_to_string(e.ok()?.path().join("comm")).ok());
+                    let threads: Vec<_> = threads.filter(|name| name.starts_with("native ")).map(|name| name.trim().to_owned()).collect();
+                    println!("held {:?} threads {threads:?}", fds.filter(|p| p.to_string_lossy().starts_with("/dev/video")).collect::<Vec<_>>());
+                }
+                // Another capture (the page's preview in WebKit) streams from /dev/video0 for `ms`.
+                ("hold", ms) => {
+                    let format = linuxvideo::format::PixFormat::new(640, 480, linuxvideo::format::PixelFormat::YUYV);
+                    let stream = linuxvideo::Device::open("/dev/video0").unwrap().video_capture(format).unwrap().into_stream().unwrap();
+                    let ms = ms.parse().unwrap_or(0);
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(ms));
+                        drop(stream);
+                    });
                 }
                 _ => println!("unknown step {action}"),
             }
