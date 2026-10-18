@@ -341,9 +341,9 @@ async fn update_guild(
     Ok(Json(guild))
 }
 
-/// Deletes the upload behind a replaced or cleared guild banner (row and file) unless something else still shows it: another banner,
-/// an icon, an avatar, an event cover or a sticker.
-async fn release_upload(state: &AppState, path: &str) {
+/// Deletes the upload behind a replaced, cleared or orphaned guild banner or group icon (row and file) unless something else still
+/// shows it: another banner, an icon, an avatar, an event cover or a sticker.
+pub(crate) async fn release_upload(state: &AppState, path: &str) {
     let Some(upload) = path.split('/').next().and_then(|id| id.parse::<i64>().ok()) else { return };
     // Lock the row first: a claim racing with us either commits before the DELETE below (its fresh snapshot then sees the new
     // reference) or waits for our delete and fails to claim.
@@ -363,7 +363,7 @@ async fn release_upload(state: &AppState, path: &str) {
     .await;
     match deleted {
         Ok(rows) => media::remove_files(state, &rows.into_iter().map(|(id,)| id).collect::<Vec<_>>()).await,
-        Err(error) => tracing::warn!("releasing a guild banner failed: {error}"),
+        Err(error) => tracing::warn!("releasing an upload failed: {error}"),
     }
 }
 

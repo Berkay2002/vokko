@@ -15,7 +15,7 @@ use crate::extract::{ApiJson, parse_id};
 use crate::media;
 use crate::routes::auth::clean_text;
 use crate::routes::forums;
-use crate::routes::guilds::channel_name;
+use crate::routes::guilds::{channel_name, release_upload};
 use crate::routes::overwrites;
 use crate::routes::threads as threads_routes;
 use crate::routes::users::{ImageKind, image_path_on};
@@ -129,10 +129,16 @@ async fn leave_group(state: &AppState, row: &store::ChannelRow, target: i64) -> 
     if let Some(owner) = new_owner {
         sqlx::query("UPDATE channels SET owner_id = $2 WHERE id = $1").bind(id).bind(owner).execute(&mut *tx).await?;
     }
+    let mut gone_icon: Option<String> = None;
     if rest.is_empty() {
-        sqlx::query("DELETE FROM channels WHERE id = $1").bind(id).execute(&mut *tx).await?;
+        let icon: Option<(Option<String>,)> =
+            sqlx::query_as("DELETE FROM channels WHERE id = $1 RETURNING icon_path").bind(id).fetch_optional(&mut *tx).await?;
+        gone_icon = icon.and_then(|(path,)| path);
     }
     tx.commit().await?;
+    if let Some(path) = gone_icon {
+        release_upload(state, &path).await;
+    }
     if !rest.is_empty() {
         state.hub.send(&rest, &GatewayEvent::ChannelRecipientRemove(ChannelRecipient { channel_id: Snowflake::from(id), user }));
         if new_owner.is_some()
@@ -254,8 +260,8 @@ async fn update_channel(
     {
         return Err(ApiErr::invalid("parent_id", "Must be a category of this guild."));
     }
-    // Claimed like a guild icon, in the same transaction as the writes. ponytail: a replaced icon stays claimed (as guild icons do);
-    // release it like guild banners if leftover uploads ever matter.
+    // Claimed like a guild icon, in the same transaction as the writes; the icon it replaces is released after the commit.
+    let mut replaced_icon: Option<String> = None;
     if let Some(icon) = body.icon_attachment_id {
         let path = match icon {
             Some(upload) => {
@@ -264,7 +270,14 @@ async fn update_channel(
             }
             None => None,
         };
-        sqlx::query("UPDATE channels SET icon_path = $2 WHERE id = $1").bind(id).bind(path).execute(&mut *tx).await?;
+        // Swapped in one statement that hands back the icon it replaced (the channel row is locked above).
+        let (old,): (Option<String>,) =
+            sqlx::query_as("UPDATE channels c SET icon_path = $2 FROM (SELECT icon_path FROM channels WHERE id = $1) o WHERE c.id = $1 RETURNING o.icon_path")
+                .bind(id)
+                .bind(&path)
+                .fetch_one(&mut *tx)
+                .await?;
+        replaced_icon = old.filter(|old| Some(old) != path.as_ref());
     }
     if let Some(name) = name {
         sqlx::query("UPDATE channels SET name = $2 WHERE id = $1").bind(id).bind((!name.is_empty()).then_some(name)).execute(&mut *tx).await?;
@@ -295,6 +308,9 @@ async fn update_channel(
     }
     let changed_posts = parent_fields.apply(&state, &mut tx, id).await?;
     tx.commit().await?;
+    if let Some(old) = replaced_icon {
+        release_upload(&state, &old).await;
+    }
     let row = store::channel_row(&state, id).await?.ok_or_else(ApiErr::unknown_channel)?;
     match viewers_before {
         Some(before) => overwrites::dispatch_visibility(&state, &row, &before).await?,
