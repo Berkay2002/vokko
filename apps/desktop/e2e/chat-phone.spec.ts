@@ -43,6 +43,7 @@ test.describe('desktop', () => {
     await box.press('Shift+Enter');
     await box.pressSequentially('line two');
     await expect(page.getByRole('button', { name: 'Send message' })).toHaveCount(0);
+    await shot(page, 'chat-phone-composer-1440');
     await box.press('Enter');
     const sent = page.locator('.chat-msg', { hasText: 'line two' }).last();
     await expect(sent).toContainText('line one');
