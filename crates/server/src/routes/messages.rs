@@ -894,7 +894,9 @@ async fn delete_message(
         return Ok(StatusCode::NO_CONTENT);
     }
     let row = message_in_channel(&state, id, mid).await?;
-    if row.author_id != user_id && (access.is_dm() || access.permissions & MANAGE_MESSAGES == 0) {
+    // An AutoMod alert names the flagged member as its author; only moderators may remove that evidence.
+    let own = row.author_id == user_id && row.kind != i16::from(MessageType::AutoModerationAction.as_u8());
+    if !own && (access.is_dm() || access.permissions & MANAGE_MESSAGES == 0) {
         return Err(ApiErr::missing_permissions());
     }
     let viewers = access::channel_viewers(&state, &access.channel).await?;

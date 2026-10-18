@@ -54,6 +54,20 @@ describe('SystemBody', () => {
     expect(text(html)).toBe(`${before}Sam${after}`);
   });
 
+  it('AutoMod alert: what happened, the flagged message as plain text and the rule', () => {
+    const fields = [
+      { name: 'rule_name', value: 'No pings' },
+      { name: 'channel_id', value: 'gone' },
+      { name: 'decision_outcome', value: 'blocked' },
+      { name: 'keyword', value: 'bad*' },
+      { name: 'timeout_duration', value: '300' },
+    ];
+    const html = render(message(MessageType.AutoModerationAction, { embeds: [{ type: 'auto_moderation_message', description: '<b>bad</b> stuff', fields }] }));
+    expect(html).toContain('chat-system-icon automod');
+    expect(html).toContain('&lt;b&gt;bad&lt;/b&gt; stuff');
+    expect(text(html)).toBe('AutoMod has blocked a message and timed out Sam for 5 minutesSam&lt;b&gt;bad&lt;/b&gt; stuffRule: No pings · Keyword: bad*');
+  });
+
   it('thread created: thread icon, "started a thread" with the thread name as a link', () => {
     const html = render(message(MessageType.ThreadCreated, { content: 'gateway docs', message_reference: { message_id: '', channel_id: 't', guild_id: null } }));
     expect(html).toContain('chat-system-icon');

@@ -10,10 +10,10 @@ vi.mock("./socket", () => ({
 import { ApiRequestError } from "../errors";
 import { timestampToSnowflake } from "../snowflake";
 import { Perm } from "../permissions";
-import { AuditLogEvent, OverwriteType, type AuditLog, type AuditLogEntry, type AutoModerationRule, type Role } from "../types";
+import { AuditLogEvent, MessageType, OverwriteType, type AuditLog, type AuditLogEntry, type AutoModerationRule, type Role } from "../types";
 import { accountState } from "./accounts";
 import { resetAdmin } from "./admin";
-import { db } from "./db";
+import { db, sortedMessages } from "./db";
 import { addMessage, createAccount, createGuildRecord } from "./ops";
 import { handleRoute } from "./routes";
 
@@ -171,6 +171,46 @@ describe("safety and AutoMod", () => {
     expect(audit(`?action_type=${AuditLogEvent.AutoModerationBlockMessage}`)).toHaveLength(1);
     call("owner", "PATCH", `/guilds/${guildId}/auto-moderation/rules/${rule.id}`, { enabled: false });
     expect(() => send("plain", "bad")).not.toThrow();
+  });
+
+  const createRule = (body: object) => call("owner", "POST", `/guilds/${guildId}/auto-moderation/rules`, { event_type: 1, ...body }) as AutoModerationRule;
+
+  it("mention spam blocks, alerts in the alert channel and times out", () => {
+    const alerts = [...db.channels.values()].find(c => c.guild_id === guildId && c.type === 0 && c.id !== generalId) ?? db.channels.get(generalId)!;
+    expect(errorOf(() => createRule({ name: "M", trigger_type: 5, trigger_metadata: { mention_total_limit: 51 }, actions: [{ type: 1 }] })).code).toBe(50035);
+    createRule({
+      name: "Mentions",
+      trigger_type: 5,
+      trigger_metadata: { mention_total_limit: 2 },
+      actions: [{ type: 3, metadata: { duration_seconds: 60 } }, { type: 1 }, { type: 2, metadata: { channel_id: alerts.id } }],
+    });
+    expect(errorOf(() => createRule({ name: "Again", trigger_type: 5, trigger_metadata: { mention_total_limit: 3 }, actions: [{ type: 1 }] })).code).toBe(30035);
+    expect(() => send("plain", "<@1> <@!1> <@2>")).not.toThrow();
+    expect(errorOf(() => send("plain", "<@1> <@2> <@&3>")).code).toBe(200000);
+    const alert = sortedMessages(alerts.id).at(-1)!;
+    expect([alert.type, alert.author_id, alert.embeds?.[0]?.description]).toEqual([MessageType.AutoModerationAction, ids.plain, "<@1> <@2> <@&3>"]);
+    expect(alert.embeds?.[0]?.fields?.find(f => f.name === "decision_outcome")?.value).toBe("blocked");
+    expect(db.guilds.get(guildId)!.members.get(ids.plain!)?.communication_disabled_until).toBeTruthy();
+    expect(errorOf(() => call("plain", "DELETE", `/channels/${alerts.id}/messages/${alert.id}`)).code).toBe(50013);
+    for (const type of [AuditLogEvent.AutoModerationBlockMessage, AuditLogEvent.AutoModerationFlagToChannel, AuditLogEvent.AutoModerationUserCommunicationDisabled]) {
+      expect(audit(`?action_type=${type}`)).toHaveLength(1);
+    }
+  });
+
+  it("spam blocks the third copy, presets use the shared word lists", () => {
+    createRule({ name: "Spam", trigger_type: 3, actions: [{ type: 1 }] });
+    expect(errorOf(() => createRule({ name: "Spam", trigger_type: 3, actions: [{ type: 3, metadata: { duration_seconds: 5 } }] })).code).toBe(50035);
+    const text = "buy cheap stuff at example.org";
+    expect(() => send("plain", text)).not.toThrow();
+    expect(() => send("plain", text.toUpperCase())).not.toThrow();
+    expect(errorOf(() => send("plain", text)).code).toBe(200000);
+    for (let i = 0; i < 3; i++) expect(() => send("plain", "ok")).not.toThrow();
+
+    const rule = createRule({ name: "Words", trigger_type: 4, trigger_metadata: { presets: [1], allow_list: ["bullshit"] }, actions: [{ type: 1 }] });
+    expect(rule.trigger_metadata).toEqual({ keyword_filter: [], allow_list: ["bullshit"], presets: [1] });
+    expect(errorOf(() => send("plain", "oh shit")).code).toBe(200000);
+    expect(() => send("plain", "that is bullshit")).not.toThrow();
+    expect(errorOf(() => call("owner", "PATCH", `/guilds/${guildId}/auto-moderation/rules/${rule.id}`, { trigger_type: 1 })).code).toBe(50035);
   });
 
   it("verification level holds back brand-new accounts without roles", () => {

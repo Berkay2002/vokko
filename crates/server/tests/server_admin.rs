@@ -766,6 +766,9 @@ async fn automod_mention_spam_blocks_alerts_and_times_out() {
     assert_eq!(field("rule_name"), Some(json!("Mentions")));
     assert_eq!(field("channel_id"), Some(json!(w.channel)));
     assert_eq!(field("decision_outcome"), Some(json!("blocked")));
+    let alert_path = format!("/channels/{alerts}/messages/{}", alert["id"].as_str().expect("id"));
+    let (status, _) = w.app.delete(&alert_path, &member).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "the flagged member cannot delete the alert");
 
     let (timed_out,): (bool,) = sqlx::query_as("SELECT timeout_until > now() + interval '50 seconds' FROM guild_members WHERE user_id = $1")
         .bind(member_id.parse::<i64>().expect("id"))

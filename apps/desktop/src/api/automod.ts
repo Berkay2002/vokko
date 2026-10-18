@@ -1,6 +1,10 @@
 // AutoMod keyword matching (docs/api.md "AutoMod"), the same rules as the server's `safety::find_keyword`.
 // Case-insensitive whole words; `*` at the start / end of a keyword lets it extend into the word (prefix, suffix, substring).
 
+import profanity from "../../../../assets/automod/profanity.txt?raw";
+import sexual from "../../../../assets/automod/sexual.txt?raw";
+import slurs from "../../../../assets/automod/slurs.txt?raw";
+
 const isWord = (c: string | undefined): boolean => c !== undefined && /[\p{L}\p{N}_]/u.test(c);
 
 interface Pattern {
@@ -50,4 +54,24 @@ function matchesIn(text: string[], keyword: string, allowList: readonly string[]
 export function findKeyword(content: string, keywords: readonly string[], allowList: readonly string[] = []): string | null {
   const text = [...content.toLowerCase()];
   return keywords.find(keyword => matchesIn(text, keyword, allowList)) ?? null;
+}
+
+const parsePreset = (text: string): string[] =>
+  text
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith("#"));
+
+/** The built-in KEYWORD_PRESET lists (assets/automod, shared with the server), by preset number (1 profanity, 2 sexual content, 3 slurs). */
+export const PRESET_WORDS: Readonly<Record<number, readonly string[]>> = {
+  1: parsePreset(profanity),
+  2: parsePreset(sexual),
+  3: parsePreset(slurs),
+};
+
+/** Unique user and role mentions in `content`, like the server's MENTION_SPAM count (`@everyone` does not count). */
+export function mentionCount(content: string): number {
+  const ids = new Set<string>();
+  for (const match of content.matchAll(/<@([!&]?)(\d+)>/g)) ids.add(`${match[1] === "&" ? "r" : "u"}${match[2]}`);
+  return ids.size;
 }
