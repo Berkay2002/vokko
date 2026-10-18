@@ -3,6 +3,7 @@
 // layout does to them.
 
 import { useEffect } from "react";
+import { PopoutHost, usePopoutStore } from "../popout";
 import { useSpotifyVolume } from "../spotify/volume";
 import { useVoice } from "../voice/store";
 import { botOutput, readViewerStats, setViewerOutput, syncViewer, useViewerStore } from "./viewerStore";
@@ -35,9 +36,12 @@ export function StremioViewerHost() {
   const volume = kind === "spotify" ? spotifyVolume : stremioVolume;
   const output = useVoice(s => (kind ? botOutput(s, kind, volume) : 0));
 
+  // Popped out: the pop-out window has its own Room and plays the movie; this one stays up for the cues and the state, and keeps quiet.
+  const poppedOut = usePopoutStore(s => s.kind === "stremio" && s.channelId === channelId) && kind === "stremio";
+
   useEffect(() => {
-    setViewerOutput(output);
-  }, [output]);
+    setViewerOutput(poppedOut ? 0 : output);
+  }, [output, poppedOut]);
 
   useEffect(() => {
     syncViewer(channelId && bot && kind ? { channelId, bot, kind } : null);
@@ -55,5 +59,5 @@ export function StremioViewerHost() {
     };
   }, [channelId, stremioBot]);
 
-  return null;
+  return <PopoutHost />;
 }

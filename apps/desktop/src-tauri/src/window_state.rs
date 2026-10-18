@@ -38,6 +38,11 @@ fn overlap(a_start: i64, a_len: i64, b_start: i64, b_len: i64) -> i64 {
 /// position (it may span two screens on purpose); otherwise (an unplugged screen) it is centred on the first monitor, the
 /// primary. The size is limited to that monitor and raised to the minimum.
 pub fn clamp(saved: Saved, monitors: &[Area]) -> Saved {
+    clamp_min(saved, monitors, MIN_SIZE)
+}
+
+/// `clamp` for a window with its own smallest size (the pop-out).
+pub fn clamp_min(saved: Saved, monitors: &[Area], min: (u32, u32)) -> Saved {
     let Some(&primary) = monitors.first() else {
         return saved;
     };
@@ -48,8 +53,8 @@ pub fn clamp(saved: Saved, monitors: &[Area]) -> Saved {
     };
     let home = monitors.iter().find(|m| reachable(m)).copied();
     let target = home.unwrap_or(primary);
-    let width = saved.width.clamp(MIN_SIZE.0.min(target.width), target.width);
-    let height = saved.height.clamp(MIN_SIZE.1.min(target.height), target.height);
+    let width = saved.width.clamp(min.0.min(target.width), target.width);
+    let height = saved.height.clamp(min.1.min(target.height), target.height);
     let centred = |origin: i32, room: u32, size: u32| i32::try_from(i64::from(origin) + (i64::from(room) - i64::from(size)) / 2).unwrap_or(origin);
     let (x, y) = if home.is_some() { (saved.x, saved.y) } else { (centred(target.x, target.width, width), centred(target.y, target.height, height)) };
     Saved { x, y, width, height, maximized: saved.maximized }
@@ -67,7 +72,7 @@ impl WindowStateStore {
         Self { path, latest: Mutex::new(latest) }
     }
 
-    fn get(&self) -> Option<Saved> {
+    pub fn get(&self) -> Option<Saved> {
         self.latest.lock().ok().and_then(|latest| *latest)
     }
 
@@ -110,6 +115,11 @@ pub fn track<R: Runtime>(window: &WebviewWindow<R>, store: &WindowStateStore) {
 
 /// Moves and sizes the (still hidden) window to where it was, clamped to the monitors connected now.
 pub fn restore<R: Runtime>(window: &WebviewWindow<R>, store: &WindowStateStore) {
+    restore_with(window, store, MIN_SIZE);
+}
+
+/// `restore` for a window with its own smallest size (the pop-out).
+pub fn restore_with<R: Runtime>(window: &WebviewWindow<R>, store: &WindowStateStore, min: (u32, u32)) {
     let Some(saved) = store.get() else {
         return;
     };
@@ -122,7 +132,7 @@ pub fn restore<R: Runtime>(window: &WebviewWindow<R>, store: &WindowStateStore) 
     // The primary monitor goes first: it is where an off-screen window is brought back to.
     let primary = window.primary_monitor().ok().flatten().map(|m| (m.position().x, m.position().y));
     monitors.sort_by_key(|m| Some((m.x, m.y)) != primary);
-    let fitted = clamp(saved, &monitors);
+    let fitted = clamp_min(saved, &monitors, min);
     // Position first: sizing on the creation monitor and then moving to a monitor with another scale factor would rescale the size.
     if let Err(error) =
         window.set_position(PhysicalPosition::new(fitted.x, fitted.y)).and_then(|()| window.set_size(PhysicalSize::new(fitted.width, fitted.height)))
@@ -173,6 +183,14 @@ mod tests {
     fn the_size_is_limited_to_the_monitor_and_the_minimum() {
         assert_eq!(clamp(at(0, 0, 5000, 3000), &[MAIN]), at(0, 0, 1920, 1080));
         assert_eq!(clamp(at(0, 0, 100, 100), &[MAIN]), at(0, 0, 940, 500));
+    }
+
+    #[test]
+    fn a_window_with_a_smaller_minimum_keeps_its_size() {
+        assert_eq!(clamp_min(at(0, 0, 320, 180), &[MAIN], (320, 180)), at(0, 0, 320, 180));
+        assert_eq!(clamp_min(at(0, 0, 100, 100), &[MAIN], (320, 180)), at(0, 0, 320, 180));
+        // Unplugged monitor: centred on the primary, as for the main window.
+        assert_eq!(clamp_min(at(4000, 100, 480, 270), &[MAIN], (320, 180)), at(720, 405, 480, 270));
     }
 
     #[test]
