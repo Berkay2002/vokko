@@ -20,6 +20,7 @@ import {
   ChannelType,
   MessageFlags,
   MessageType,
+  RelationshipType,
   type Channel,
   type Guild,
   type GuildMember,
@@ -299,6 +300,7 @@ function clearTyping(channelId: Snowflake, userId: Snowflake): void {
 
 /** Does this message raise my unread mention counter? The server's rule: only ordinary messages, by name, @everyone or one of my roles in `mention_roles`; the Suppress toggles are per server there. */
 function mentionsMe(message: Message): boolean {
+  if (appStore.getState().relationships[message.author.id]?.type === RelationshipType.Blocked) return false;
   if (message.type !== MessageType.Default && message.type !== MessageType.Reply) return false;
   const state = appStore.getState();
   const meId = state.me?.id;
@@ -343,7 +345,7 @@ function onMessageCreate(message: Message): void {
     state.setReadState({ ...read, last_message_id: message.id, mention_count: 0 });
   } else {
     // In DMs and group DMs every ordinary message counts as a mention (the server's counter does the same).
-    const dm = !channel.guild_id && (message.type === MessageType.Default || message.type === MessageType.Reply);
+    const dm = !channel.guild_id && (message.type === MessageType.Default || message.type === MessageType.Reply) && state.relationships[message.author.id]?.type !== RelationshipType.Blocked;
     const mentioned = dm || mentionsMe(message);
     state.setReadState({ ...read, mention_count: read.mention_count + (mentioned ? 1 : 0) });
   }

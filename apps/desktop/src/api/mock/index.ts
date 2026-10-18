@@ -157,7 +157,7 @@ interface MockHooks {
   settingsOf(username: string): UserSettings;
   /** Another device of `username` saves settings: USER_SETTINGS_UPDATE reaches this client unless `silent` (then only the next PATCH learns of it, as a 409). */
   settingsFromOtherDevice(username: string, settings: UserSettingsData, opts?: { silent?: boolean }): UserSettings;
-  /** Add the seeded Echo bot (/echo, /roll, /pick, Wave at, Quote) to a server, by name (default "Sam's server"). */
+  /** Add the seeded Echo bot (/echo, /roll, /pick, /confirm, Wave at, Quote) to a server, by name (default "Sam's server"). */
   installEchoBot(guildName?: string): string;
   /** Post through a channel's first webhook (as an external service would). */
   executeWebhook(channelId: string, content: string, username?: string): string;

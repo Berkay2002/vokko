@@ -65,6 +65,8 @@ export function useGuild(guildId: Snowflake | null | undefined): Guild | undefin
 export function useGuildMembers(guildId: Snowflake | null | undefined): Record<Snowflake, GuildMember> { return useStore(s => (guildId ? s.members[guildId] : undefined)) ?? NO_MEMBERS; }
 export function useUsers(): Record<Snowflake, User> { return useStore(s => s.users); }
 export function useReadState(channelId: Snowflake): ReadState | undefined { return useStore(s => s.readStates[channelId]); }
+/** All relationships by user id (the list folds blocked authors). */
+export function useRelationships(): Record<Snowflake, Relationship> { return useStore(s => s.relationships); }
 export function useRelationship(userId: Snowflake | null | undefined): Relationship | undefined { return useStore(s => (userId ? s.relationships[userId] : undefined)); }
 export function useGuilds(): Record<Snowflake, Guild> { return useStore(s => s.guilds); }
 

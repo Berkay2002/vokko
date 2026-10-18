@@ -115,3 +115,46 @@ async fn suppressed_everyone_and_role_mentions_do_not_count() {
     assert_eq!(ready_count(&address, &dave.token, &general).await, 1);
     assert_eq!(ready_count(&address, &bob.token, &general).await, 5);
 }
+
+#[tokio::test]
+async fn a_blocked_authors_mentions_do_not_count_for_the_blocker() {
+    let app = TestApp::new().await;
+    let address = app.serve().await;
+    let (owner, _) = app.register("sam").await;
+    let (guild, general) = app.guild_with_channel(&owner).await;
+    let (_, role) = app.post(&format!("/guilds/{guild}/roles"), &owner, json!({"name": "docs", "mentionable": true})).await;
+    let role = role["id"].as_str().expect("role").to_owned();
+    let held = Some((guild.as_str(), role.as_str()));
+    let alice = join(&app, &owner, &general, "alice", held).await;
+    let bob = join(&app, &owner, &general, "bob", held).await;
+    let nova = join(&app, &owner, &general, "nova", None).await;
+    // alice blocks nova; bob does not.
+    let (status, _) = app.put_json(&format!("/users/@me/relationships/{}", nova.id), &alice.token, json!({"type": 2})).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let say = |content: String| {
+        let (app, nova, general) = (&app, &nova, &general);
+        async move {
+            let (status, message) = app.post(&format!("/channels/{general}/messages"), &nova.token, json!({"content": content})).await;
+            assert_eq!(status, StatusCode::OK, "{message}");
+        }
+    };
+
+    say(format!("<@{}> <@{}> hi", alice.id, bob.id)).await;
+    say("@everyone hi".into()).await;
+    say(format!("<@&{role}> hi")).await;
+    assert_eq!((counter(&app, &alice, &general).await, counter(&app, &bob, &general).await), (0, 3), "only the blocker is skipped");
+    // A reply to the blocker's message pings by reply: also skipped.
+    let (_, theirs) = app.post(&format!("/channels/{general}/messages"), &alice.token, json!({"content": "question"})).await;
+    let (status, reply) =
+        app.post(&format!("/channels/{general}/messages"), &nova.token, json!({"content": "answer", "message_reference": {"message_id": theirs["id"]}})).await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    assert_eq!(counter(&app, &alice, &general).await, 0);
+    assert_eq!(ready_count(&address, &alice.token, &general).await, 0);
+    assert_eq!(ready_count(&address, &bob.token, &general).await, 3);
+
+    // Unblocked, the same mention counts again.
+    let (status, _) = app.delete(&format!("/users/@me/relationships/{}", nova.id), &alice.token).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    say(format!("<@{}> hi", alice.id)).await;
+    assert_eq!(counter(&app, &alice, &general).await, 1);
+}

@@ -367,13 +367,13 @@ pub fn input_args() -> Vec<String> {
     ])
 }
 
-/// The §5 command: one ffmpeg process so audio and video share a clock, `-re` paces both and `-ss` before `-i` seeks by HTTP range
-/// (answered by the read-ahead cache). Deviation from §5: the raw streams go to loopback TCP, not FIFOs, because a reader blocked in
-/// `open()` on a FIFO cannot be cancelled when ffmpeg dies early.
+/// The §5 command: one ffmpeg process so audio and video share a clock, and `-ss` before `-i` seeks by HTTP range (answered by the
+/// read-ahead cache). Deviation from §5: the raw streams go to loopback TCP, not FIFOs, because a reader blocked in `open()` on a FIFO
+/// cannot be cancelled when ffmpeg dies early. No `-re`: the bot paces both streams itself, and ffmpeg's read rate stalled the whole
+/// demuxer for seconds when a sparse subtitle stream was the slowest one (ffmpeg 9 paces off the least advanced stream, see §12).
 pub fn ffmpeg_args(p: &FfmpegPlan<'_>) -> Vec<String> {
     let mut a = strings(&["-nostdin", "-loglevel", "warning"]);
     a.extend(input_args());
-    a.push("-re".into());
     if p.start_ms > 0 {
         a.extend(["-ss".to_owned(), format!("{}.{:03}", p.start_ms / 1000, p.start_ms % 1000)]);
     }
@@ -669,7 +669,8 @@ mod tests {
         assert_eq!(probe[pat("-tls_verify") + 1], "1");
         assert_eq!(probe.last().map(String::as_str), Some("https://cdn.example/v.mp4"));
         assert_eq!(a[at("-ss") + 1], "61.500");
-        assert!(at("-re") < at("-ss") && at("-ss") < at("-i"), "-re and -ss are input options");
+        assert!(at("-ss") < at("-i"), "-ss is an input option");
+        assert!(!a.contains(&"-re".to_owned()) && !a.contains(&"-readrate".to_owned()), "the bot paces, not ffmpeg");
         assert_eq!(a[at("-i") + 1], "https://cdn.example/v.mp4");
         assert!(!a.contains(&"-headers".to_owned()), "the headers go to the downloader, not to ffmpeg");
         assert_eq!(a[at("-vf") + 1], "scale=1280:720:flags=bicubic,fps=24/1:start_time=0,format=yuv420p");

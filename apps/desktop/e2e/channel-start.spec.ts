@@ -72,3 +72,16 @@ test('channel settings: an unsaved name blocks Esc, Close and page switches with
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 });
+
+test('the topic in the start-of-channel text is inline Markdown, not raw asterisks', async ({ page }) => {
+  await openRandom(page, 'sam');
+  await page.evaluate(async () => {
+    const w = window as unknown as { __vokko: { request(m: string, p: string, b?: unknown): Promise<unknown> } };
+    await w.__vokko.request('PATCH', `/channels/${location.pathname.split('/').pop()}`, { topic: 'Be **kind** and [read this](https://example.com/guide)' });
+  });
+  const intro = page.locator('.chat-start p').first();
+  await expect(intro).toContainText('This is the start of the #random channel. Be kind and read this');
+  await expect(intro.locator('strong')).toHaveText('kind');
+  await expect(intro.locator('a.md-link')).toHaveAttribute('href', 'https://example.com/guide');
+  await expect(intro.locator('div, p')).toHaveCount(0); // inline: nothing block-level inside the paragraph
+});

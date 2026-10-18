@@ -13,6 +13,7 @@ import { isPrivateChannel } from "./channelPrivacy";
 import { NavToggle } from "./NavToggle";
 import { muteItem, notificationItem, UNAVAILABLE } from "./menus";
 import { openModal } from "./modalStore";
+import { TopicLine } from "./TopicModal";
 import { channelSlots } from "./slots";
 import { useIsMuted } from "./localState";
 import { NsfwHash } from "../guild/icons";
@@ -121,9 +122,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
             {channel.topic && !gated && (
               <>
                 <span className="channel-header-divider" />
-                <button type="button" id={`channel-topic-${channel.id}`} className="channel-header-topic" title={channel.topic} aria-haspopup="dialog" aria-label={`Channel topic: ${channel.topic.length > 120 ? `${channel.topic.slice(0, 120)}...` : channel.topic}`} onClick={() => openModal({ type: "channelTopic", channelId: channel.id })}>
-                  {channel.topic}
-                </button>
+                <TopicLine channelId={channel.id} topic={channel.topic} />
               </>
             )}
           </>
