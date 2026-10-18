@@ -6,6 +6,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from 'react';
+import { go, messagePathOf } from '../shell';
 import type { Block, Inline } from './ast';
 import { highlightIfLoaded, useHighlighterLoaded } from './highlighter';
 import { languageLabel } from './languages';
@@ -257,14 +258,19 @@ function renderInline(nodes: Inline[], ctx: MarkdownContext, keyPrefix: string):
             title={node.masked ? href : undefined}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={
-              onLink
-                ? (e) => {
-                    e.preventDefault();
-                    onLink(href);
-                  }
-                : undefined
-            }
+            onClick={(e) => {
+              if (onLink) {
+                e.preventDefault();
+                onLink(href);
+                return;
+              }
+              // A pasted message link opens in the app, not in the system browser (the desktop webview hands _blank links to it).
+              const path = e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey ? messagePathOf(href) : null;
+              if (path) {
+                e.preventDefault();
+                go(path);
+              }
+            }}
           >
             {renderInline(node.c, ctx, `${key}.`)}
           </a>

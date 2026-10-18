@@ -123,8 +123,9 @@ pub fn restore<R: Runtime>(window: &WebviewWindow<R>, store: &WindowStateStore) 
     let primary = window.primary_monitor().ok().flatten().map(|m| (m.position().x, m.position().y));
     monitors.sort_by_key(|m| Some((m.x, m.y)) != primary);
     let fitted = clamp(saved, &monitors);
+    // Position first: sizing on the creation monitor and then moving to a monitor with another scale factor would rescale the size.
     if let Err(error) =
-        window.set_size(PhysicalSize::new(fitted.width, fitted.height)).and_then(|()| window.set_position(PhysicalPosition::new(fitted.x, fitted.y)))
+        window.set_position(PhysicalPosition::new(fitted.x, fitted.y)).and_then(|()| window.set_size(PhysicalSize::new(fitted.width, fitted.height)))
     {
         log::warn!("cannot restore the window geometry: {error}");
     }

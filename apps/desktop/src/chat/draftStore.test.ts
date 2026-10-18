@@ -69,6 +69,22 @@ describe('draft persistence', () => {
     expect(JSON.parse(localStorage.getItem(a.DRAFTS_KEY) ?? '[]')).toHaveLength(50);
   });
 
+  it('signing out, or another account taking over, wipes the drafts and their storage', async () => {
+    const a = await fresh();
+    const { appStore: store } = await import('../api/store'); // the instance the fresh draftStore subscribed to
+    store.setState({ token: 'a' });
+    a.setDraftText('c1', 'mine');
+    a.flushDrafts();
+    store.setState({ token: 'b' });
+    expect(a.getDraft('c1').text).toBe('');
+    expect(localStorage.getItem(a.DRAFTS_KEY)).toBeNull();
+    a.setDraftText('c2', 'next');
+    a.flushDrafts();
+    store.setState({ token: null });
+    expect(a.getDraft('c2').text).toBe('');
+    expect(localStorage.getItem(a.DRAFTS_KEY)).toBeNull();
+  });
+
   it('only uploads count as unsent once text is persisted', async () => {
     const a = await fresh();
     a.setDraftText('c1', 'typed');

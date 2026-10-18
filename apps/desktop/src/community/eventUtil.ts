@@ -1,4 +1,4 @@
-// Pure helpers of the scheduled-events UI: labels, time text, recurrence text, form validation. No React, no store.
+// Pure helpers of the scheduled-events UI: labels, time text, recurrence text, form validation. No React; the clock comes from chat/util (the 12/24-hour setting).
 
 import { formatTime } from "../chat/util";
 import { RecurrenceFrequency, ScheduledEventEntityType, ScheduledEventStatus, type GuildScheduledEvent, type ScheduledEventRecurrenceRule } from "../api/types";
