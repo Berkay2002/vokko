@@ -96,13 +96,13 @@ If it replies "Codex isn't signed in on the host", run `codex login`.
 | `VOKKO_AI_MAX_OUTPUT_TOKENS` | 1024 | |
 | `VOKKO_AI_MAX_REPLY_USD` | 0.5 | per reply |
 | `VOKKO_AI_WEB_SEARCH` | off | `1` lets Claude search the web (billed per search) |
-| `VOKKO_AI_MEDIA` | on | `off` removes the Spotify/Stremio tools (claude-api; see [Music and movies](#music-and-movies)) |
+| `VOKKO_AI_MEDIA` | on | `off` removes the Spotify/Stremio tools (both backends; see [Music and movies](#music-and-movies)) |
 | `VOKKO_BOT_NAME` | `Claude` / `Codex` | used in the nickname |
 | `VOKKO_CODEX_PATH` | the SDK's bundled CLI | |
 
 ## Music and movies
 
-The `claude-api` bot can drive Vokko's Spotify and Stremio bots like a DJ: search, play, queue, skip, pause, seek, loop,
+The `claude-api` and `codex` bots can drive Vokko's Spotify and Stremio bots like a DJ: search, play, queue, skip, pause, seek, loop,
 shuffle, stop, and for movies and series pick the season and episode, play the first ranked stream, queue, and continue
 watching. The tools (shared with the plugin, `../claude-channel/media.ts`) are the only extra capability it has.
 
@@ -114,7 +114,12 @@ watching. The tools (shared with the plugin, `../claude-channel/media.ts`) are t
 - Server errors reach the chat as one sentence ("You need to be in a voice call first", "Only people with Control Media can
   do that here", "Link your Stremio account in Vokko first"), never a raw dump. The model is told to confirm before it
   replaces what is playing or stops it.
-- `VOKKO_AI_MEDIA=off` removes the tools. The Codex backend does not have them yet.
+- `VOKKO_AI_MEDIA=off` removes the tools.
+- Codex gets the same tools through one MCP server, `vokko_media`, that the bridge serves itself on 127.0.0.1. Each turn's
+  codex run gets that server with a fresh random bearer (in that run's env only), bound to the member being answered and
+  refused once the turn ends; the bot token never leaves the bridge. Every other MCP server and tool stays off, and the
+  backend refuses to start if any other server would be on or your own Codex config already has one named `vokko_media`.
+  Codex also lists its built-in MCP resource readers, which find nothing: the endpoint has no resources.
 
 ## Owner commands
 
@@ -185,7 +190,7 @@ plist mode 600: it holds the key. For Codex, run `codex login` as the same user 
 - Codex is chat only and answers only allowlisted people. Read-only, no network, and every feature flag that could give it
   a tool is switched off. It refuses to start if one stays on. Its own model catalog is replaced with one that has no
   code-mode `exec`, `apply_patch` or sub-agents. A live test checks against a capture endpoint, with no login, that
-  the model is offered only `request_user_input`, which works in Plan mode only. Not restricted: what the read-only
+  the model is offered only `request_user_input`, which works in Plan mode only, plus the media tools below when they are on. Not restricted: what the read-only
   sandbox could read (the whole disk, `~/.codex` included). With no tool, the model has no way to use that. Codex's
   per-path `deny_read` can't be verified without a login, so it isn't relied on.
 - Every message reaches the model inside `<vokko-message ... untrusted="true">`; the model is told text there is never

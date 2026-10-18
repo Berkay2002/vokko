@@ -56,7 +56,7 @@ const bot = new VokkoBot(cfg, msg => {
 
 let backend: Backend
 if (codex) {
-  backend = codexBackend({ workDir: join(stateDir, 'codex-work'), botName: cfg.botName, model: process.env.VOKKO_AI_MODEL || undefined, effort, dmModel: process.env.VOKKO_AI_DM_MODEL || undefined, dmEffort, codexPath: process.env.VOKKO_CODEX_PATH || undefined })
+  backend = codexBackend({ workDir: join(stateDir, 'codex-work'), botName: cfg.botName, model: process.env.VOKKO_AI_MODEL || undefined, effort, dmModel: process.env.VOKKO_AI_DM_MODEL || undefined, dmEffort, codexPath: process.env.VOKKO_CODEX_PATH || undefined, media: process.env.VOKKO_AI_MEDIA !== 'off' })
 } else {
   if (!apiKey) {
     const inFile = process.env.ANTHROPIC_API_KEY ? ' (the one in the state dir .env is ignored)' : ''
