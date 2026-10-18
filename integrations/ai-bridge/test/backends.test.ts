@@ -100,6 +100,21 @@ describe('claude-api backend (Agent SDK stubbed at the module boundary)', () => 
     }
   })
 
+  test('remember: offered (and allowed by name, with a prompt line) only when the bridge gives the turn the hook', async () => {
+    const saved: string[] = []
+    const on = stubbed([ok])
+    await on.backend.ask(undefined, 'x', { ...ctx, remember: async n => (saved.push(n), 'Saved.') })
+    const o = on.seen[0].options
+    expect(o.allowedTools).toEqual(['mcp__vokko__pause_user', 'mcp__vokko__unpause_user', 'mcp__vokko__remember'])
+    expect(await o.canUseTool('mcp__vokko__remember', {}, {})).toMatchObject({ behavior: 'allow' })
+    expect(o.systemPrompt).toContain('remember tool')
+    expect(on.backend.notes).toBe(true)
+    const off = stubbed([ok])
+    await off.backend.ask(undefined, 'x', ctx)
+    expect(off.seen[0].options.allowedTools).not.toContain('mcp__vokko__remember')
+    expect(off.seen[0].options.systemPrompt).not.toContain('remember tool')
+  })
+
   test('effort and model: aliases, per turn, and only values the SDK accepts', async () => {
     const { backend, seen } = stubbed([ok], { model: 'haiku', effort: 'medium' })
     await backend.ask(undefined, 'x', ctx)
