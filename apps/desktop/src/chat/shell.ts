@@ -25,6 +25,8 @@ const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
 export function cacheUser(user: User): void { appStore.getState().cacheUsers([user]); }
 
 export function useMe(): User | null { return useStore(s => s.me); }
+/** The startup cache is on screen and the gateway is not ready yet: nothing can be sent. */
+export function useStale(): boolean { return useStore(s => s.stale); }
 export function useChannel(channelId: Snowflake): Channel | undefined { return useStore(s => s.channels[channelId] ?? s.threads[channelId]); }
 
 /** Fields that move with every message; a change in only these does not make a channel "different" for rendering. */

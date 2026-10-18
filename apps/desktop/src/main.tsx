@@ -25,6 +25,9 @@ import { installStaleChunkReload } from "./shell/staleChunks";
 import { preloadLazyModules } from "./ui/lazyModule";
 import { startNotify } from "./notify";
 import { installCrashReporter } from "./report/crashReporter";
+import { restoreStartupCache, startStartupCache } from "./cache/startupCache";
+import { installStartupMarks } from "./perf/startupMarks";
+import { getToken } from "./api/config";
 import { installLogCapture } from "./report/logBuffer";
 import { startThreadMuteMigration } from "./threads/muteMigration";
 import "./styles/tokens.css";
@@ -66,6 +69,10 @@ if (MOCK) (window as unknown as { __vokko: unknown }).__vokko = { gateway, deskt
 // Mock mode: the in-memory backend is a separate chunk (real builds never load it); it must be up before the session starts.
 if (MOCK) await loadMockBackend();
 
+installStartupMarks();
+// The last channel and its newest messages from IndexedDB, on screen (stale) until READY. Waits at most 400 ms.
+await restoreStartupCache(getToken()).catch(() => false);
+startStartupCache();
 bootstrap();
 startNotify();
 startThreadMuteMigration(); // old per-device thread mutes move onto the server thread member, once

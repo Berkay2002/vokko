@@ -127,3 +127,40 @@ home server M4, load average 10-44 during the runs; before = main a640f747, afte
 Unthrottled timings are within run-to-run noise on a local mock backend; the smaller entry matters on slow networks and CPUs.
 Left in the entry and under 20 kB each: `VoiceConnectionPanel` (8 kB, shows on join), `StageView` (5 kB, shares a file with the
 sidebar's live pill) and the event wizard (12 kB).
+
+## Round 4 (2026-10-18): restart cache, cold start in WebView2
+
+`cache/startupCache.ts` keeps one snapshot per user in IndexedDB (`vokko-startup-cache`). It holds a trimmed READY: every guild, but
+channels and members only for the open server, plus DMs, read states and the server layout. It also holds the open channel with its
+newest 50 messages, and only when that page reaches the end. No attachment blobs are stored; URLs only.
+- The snapshot is capped at 2 MB serialized (a bigger one deletes the record).
+- It is saved 3 s after READY, after a channel switch or after new messages there, and at once when the window is hidden.
+- Sign-out or a rejected token deletes it. A different token never reads it: the owner tag is a hash of the token.
+- At start (before React mounts, given up after 400 ms), a matching snapshot fills the store and the app opens on that channel. The
+  app is stale until READY: the composer is replaced by "Connecting… You can send messages once Vokko is back online." The real READY
+  then replaces the cached state, and the message store refetches the open channel.
+
+`apps/desktop/scripts/webview2-startup.mjs` drives a release build (`npx tauri build --no-bundle`) over CDP with its own WebView2 and
+config folders. It reports the time from process launch and from navigation start to the first painted messages
+(`vokko:first-messages`) and to READY (`vokko:ready`), the JS heap after a GC, and the private bytes of the app and its WebView2
+processes. "Before" is the same build with the cache owner removed before each exit, which is the old path: Splash, then READY, then
+Home, then click the server.
+
+Setup: PC (an 8-core desktop CPU, Windows 11, WebView2), with a real `vokko-server` (seeded) on the VPS reached through an SSH tunnel, so
+READY and the message fetch pay a real round trip. Medians of 4 runs without the cache (the first run was dropped: the owner removal
+had not been written yet) and 5 with it.
+
+| Metric | Before (no cache) | After (cache) |
+|---|---|---|
+| Launch to first channel messages | 917 ms | 600 ms |
+| Navigation start to first channel messages | 607 ms | 313 ms |
+| Navigation start to READY | 342 ms | 422 ms |
+| First contentful paint | 184 ms | 264 ms |
+| JS heap after GC | 10.4 MB | 10.6 MB |
+| Private bytes: WebView2 processes (8) / app | 404 MB / 7.2 MB | 339 MB / 7.1 MB |
+
+- The messages now paint before READY. The time saved is the network: READY, then the guild click, then the message fetch.
+- READY comes about 80 ms later because the IndexedDB read and the first render run before the gateway connects.
+- FCP moves for the same reason: the first paint is now the full channel, not the Splash.
+- The old path also renders Home on the way to the server, so it ends with about 65 MB more WebView2 memory.
+- On a slower link the gain grows with the round trip, because the cached path does not wait for the network at all.
