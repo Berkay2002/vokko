@@ -13,6 +13,8 @@ export { markGuildRead, joinGuildWithInvite, joinOrApply } from '../shell/action
 export { go, guildPath } from '../shell/nav';
 export { openModal, closeModal } from '../shell/modalStore';
 export { openProfile } from '../shell/profileStore';
+/** The user context menu's items, loaded on use: a static import of shell/menus from the chat area loops back into it. */
+export const loadUserMenu = () => import('../shell/menus').then(m => m.userContextItems);
 export { usePermissions } from '../shell/usePermissions';
 export { Perm, canSendIn } from '../api/permissions';
 export { Tooltip, Popout, Modal, BottomSheet, usePhone, useContextMenu, useLayer, useOutsideClose, placeAtPoint } from '../ui';

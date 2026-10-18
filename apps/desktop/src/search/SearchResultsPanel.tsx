@@ -3,6 +3,7 @@ import { ArrowDownUp, ChevronLeft, ChevronRight, CornerUpRight, Folder, Hash, Lo
 import type { Channel, Message } from '../api/types';
 import { Attachments } from '../chat/Attachments';
 import { Avatar } from '../chat/Avatar';
+import { useAuthorProfile } from '../chat/authorProfile';
 import { ChatProvider, useChat, type ChatActions } from '../chat/ChatContext';
 import { LinkModal } from '../chat/ChatView';
 import { Markdown } from '../chat/markdown';
@@ -133,6 +134,7 @@ function Hit({ hit, currentChannelId }: { hit: Message; currentChannelId: string
   const chat = useChat();
   const ref = hit.referenced_message;
   const color = chat.colorOf(hit);
+  const author = useAuthorProfile(chat.guildId);
   // on a phone the results cover the chat: close them so the jump lands in view (the draft stays in the box)
   const jump = () => { if (matchMedia(NARROW_QUERY).matches) searchActions.closePanel(); void jumpToHit(hit, currentChannelId); };
   return <article className="search-hit" data-message-id={hit.id} tabIndex={0}
@@ -144,10 +146,10 @@ function Hit({ hit, currentChannelId }: { hit: Message; currentChannelId: string
       <span className="search-hit-reply-text">{ref.content || 'Click to see attachment'}</span>
     </div>}
     <div className="search-hit-main">
-      <Avatar user={hit.author} size={40} />
+      <button type="button" className="chat-avatar-btn" aria-label={chat.nameOf(hit.author, hit.member)} {...author(hit.author)}><Avatar user={hit.author} size={40} /></button>
       <div className="search-hit-content">
         <header className="search-hit-header">
-          <span className="chat-author search-hit-author" style={color ? { color } : undefined}>{chat.nameOf(hit.author, hit.member)}</span>
+          <button type="button" className="chat-author search-hit-author" style={color ? { color } : undefined} {...author(hit.author)}>{chat.nameOf(hit.author, hit.member)}</button>
           <time className="chat-timestamp" dateTime={hit.timestamp}>{formatMessageTimestamp(new Date(hit.timestamp))}</time>
         </header>
         <div data-search-body>

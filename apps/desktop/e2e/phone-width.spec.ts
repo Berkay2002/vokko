@@ -146,6 +146,20 @@ test('friends: every tab is on screen (they wrap under the title) and Add Friend
   await expect(header.getByRole('tab', { name: 'Blocked' })).toHaveAttribute('aria-selected', 'true');
 });
 
+test('a tap on a message author\'s name or avatar opens the profile sheet', async ({ page }) => {
+  await openStockTalk(page);
+  const row = page.locator('.chat-msg:not(.grouped):not(.system)').last();
+  const sheet = page.getByRole('dialog', { name: 'Profile' });
+  await row.locator('.chat-author').tap();
+  await expect(sheet).toBeVisible();
+  await expect(page.locator('.message-menu, [role=menu]')).toHaveCount(0);
+  await shot(page, 'author-sheet-390');
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await row.locator('.chat-avatar-btn').tap();
+  await expect(sheet).toBeVisible();
+});
+
 // The same screens at desktop width: the phone rules must not leak (and the members dates stay on one line).
 test.describe('desktop 1440', () => {
   test.use({ viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });

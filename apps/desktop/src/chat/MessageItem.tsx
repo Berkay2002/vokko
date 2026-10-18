@@ -7,6 +7,7 @@ import { Markdown } from './markdown';
 import { Tooltip, roleIcon } from './shell';
 import { useChat } from './ChatContext';
 import { Avatar } from './Avatar';
+import { useAuthorProfile } from './authorProfile';
 import { SystemBody } from './SystemMessage';
 import { ServerTag } from './ServerTag';
 import { Attachments, PendingUpload } from './Attachments';
@@ -141,6 +142,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
   const isMine = message.author.id === chat.me.id;
   const system = isSystemMessage(message);
   const name = chat.nameOf(message.author, message.member);
+  const author = useAuthorProfile(chat.guildId);
   const color = chat.colorOf(message);
   const dot = chat.roleDotOf(message);
   const icon = roleIcon(chat.guildId, chat.members[message.author.id] ?? message.member ?? null);
@@ -212,13 +214,13 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, onSt
     <div className="chat-msg-gutter">
       {grouped || compact
         ? <Tooltip content={formatFullDate(date)}><time className="chat-timestamp compact" dateTime={message.timestamp}>{formatTime(date)}</time></Tooltip>
-        : <Avatar user={message.author} size={40} guildId={chat.guildId} />}
+        : <button type="button" className="chat-avatar-btn" aria-label={name} {...author(message.author)}><Avatar user={message.author} size={40} guildId={chat.guildId} /></button>}
     </div>
     <div className="chat-msg-body">
       {(!grouped || compact) && <h3 className="chat-msg-header">
         {dot && <span className="chat-role-dot" style={{ background: dot }} aria-hidden="true" />}
         {compact && chat.display.showCompactAvatars && <Avatar user={message.author} size={16} className="chat-compact-avatar" guildId={chat.guildId} />}
-        <span className="chat-author" style={color ? { color } : undefined}>{name}</span>
+        <button type="button" className="chat-author" style={color ? { color } : undefined} {...author(message.author)}>{name}</button>
         {icon && <span className="role-icon" role="img" aria-label={icon.name} title={icon.name}>{icon.unicode_emoji}</span>}
         <ServerTag user={chat.userById(message.author.id) ?? message.author} />
         <AppTag message={message} />

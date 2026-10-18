@@ -135,12 +135,10 @@
 .search-hit { position: relative; margin: 0 0 8px; padding: 8px 16px; border: 1px solid var(--border-normal); border-radius: 8px; background: var(--background-base-low); cursor: pointer; outline: none; }
 .search-hit:hover, .search-hit:focus-visible { background: var(--chat-message-hover); }
 .search-hit-main { display: flex; align-items: flex-start; gap: 12px; }
-.search-hit-main > .chat-avatar { flex: none; border-radius: 50%; }
+.search-hit-main > .chat-avatar-btn { flex: none; }
 .search-hit-content { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .search-hit-header { display: flex; align-items: baseline; gap: 4px; min-height: 22px; }
 .search-hit-header .chat-timestamp { margin: 0; }
-.search-hit-author { cursor: default; }
-.search-hit-author:hover { text-decoration: none; }
 .search-hit-jump { position: absolute; top: 8px; right: 16px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--chat-text); opacity: 0; }
 .search-hit:hover .search-hit-jump, .search-hit:focus-within .search-hit-jump { opacity: 1; }
 .search-hit-jump:hover { text-decoration: underline; }

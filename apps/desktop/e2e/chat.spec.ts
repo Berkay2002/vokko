@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { composer, message, openDm, send } from './helpers';
+import { composer, message, openDm, openStockTalk, send } from './helpers';
 
 test('send, edit, reply, react and delete against the mock backend', async ({ page }) => {
   await openDm(page);
@@ -81,4 +81,23 @@ test('ArrowUp in an empty composer edits the last own message; empty edit asks t
   await editor.fill('');
   await editor.press('Enter');
   await expect(page.getByRole('dialog')).toContainText('Delete Message');
+});
+
+test('a message author\'s name and avatar open the profile card; a right-click on them opens the user menu', async ({ page }) => {
+  await openStockTalk(page);
+  const row = page.locator('.chat-msg:not(.grouped):not(.system)').last();
+  const author = row.locator('.chat-author');
+  const name = await author.innerText();
+  await author.click();
+  await expect(page.locator('.profile-card')).toContainText(name);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.profile-card')).toHaveCount(0);
+
+  await row.locator('.chat-avatar-btn').click();
+  await expect(page.locator('.profile-card')).toContainText(name);
+  await page.keyboard.press('Escape');
+
+  await author.click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: 'Profile' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Reply' })).toHaveCount(0); // the user menu, not the message menu
 });
