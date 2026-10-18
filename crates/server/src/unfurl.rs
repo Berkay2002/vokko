@@ -427,6 +427,19 @@ fn theme_color(value: &str) -> Option<u32> {
     }
 }
 
+/// Spotify pages carry no og:video: `open.spotify.com/[intl-xx/]<kind>/<id>` plays from `open.spotify.com/embed/<kind>/<id>`.
+fn spotify_player(page: &Url) -> Option<EmbedMedia> {
+    if page.scheme() != "https" || page.host_str() != Some("open.spotify.com") {
+        return None;
+    }
+    let mut segments = page.path_segments()?.filter(|segment| !segment.is_empty()).skip_while(|segment| segment.starts_with("intl-"));
+    let (kind, id) = (segments.next()?, segments.next()?);
+    let valid = matches!(kind, "track" | "album" | "playlist" | "episode" | "show" | "artist")
+        && (1..=64).contains(&id.len())
+        && id.bytes().all(|byte| byte.is_ascii_alphanumeric());
+    valid.then(|| EmbedMedia { url: format!("https://open.spotify.com/embed/{kind}/{id}"), proxy_url: None, width: None, height: None })
+}
+
 /// `original` is the URL as written in the message, `page` the final URL after redirects (base for relative media URLs).
 fn embed_from_html(original: &Url, page: &Url, html: &str) -> Option<Embed> {
     let head = scan_head(html);
@@ -443,7 +456,8 @@ fn embed_from_html(original: &Url, page: &Url, html: &str) -> Option<Embed> {
         head.first(&["og:video", "og:video:url", "og:video:secure_url", "twitter:player:stream"]),
         head.first(&["og:video:width"]),
         head.first(&["og:video:height"]),
-    );
+    )
+    .or_else(|| spotify_player(page));
     if title.is_none() && description.is_none() && image.is_none() && video.is_none() {
         return None;
     }
@@ -779,6 +793,31 @@ mod tests {
         assert!(embed_from_html(&original, &original, "<html><head></head><body>hi</body></html>").is_none());
         // javascript: and data: media are dropped
         assert!(embed_from_html(&original, &original, "<head><meta property=og:image content=\"javascript:alert(1)\"></head>").is_none());
+    }
+
+    #[test]
+    fn player_pages_carry_an_embed_url() {
+        let youtube = Url::parse("https://www.youtube.com/watch?v=dQw4w9WgXcQ").expect("url");
+        let html = r#"<head><meta property="og:title" content="Song"><meta property="og:type" content="video.other">
+            <meta property="og:video:url" content="https://www.youtube.com/embed/dQw4w9WgXcQ"></head>"#;
+        let embed = embed_from_html(&youtube, &youtube, html).expect("embed");
+        assert_eq!((embed.kind, embed.video.expect("video").url.as_str()), (EmbedType::Video, "https://www.youtube.com/embed/dQw4w9WgXcQ"));
+
+        let html = r#"<head><meta property="og:title" content="Song"><meta property="og:type" content="music.song"></head>"#;
+        let spotify = |url: &str| {
+            embed_from_html(&Url::parse(url).expect("url"), &Url::parse(url).expect("url"), html).and_then(|embed| embed.video).map(|video| video.url)
+        };
+        assert_eq!(
+            spotify("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT?si=x").as_deref(),
+            Some("https://open.spotify.com/embed/track/4cOdK2wGLETKBW3PvgPWqT")
+        );
+        assert_eq!(
+            spotify("https://open.spotify.com/intl-de/album/1DFixLWuPkv3KT3TnV35m3").as_deref(),
+            Some("https://open.spotify.com/embed/album/1DFixLWuPkv3KT3TnV35m3")
+        );
+        assert_eq!(spotify("https://open.spotify.com/user/someone"), None);
+        assert_eq!(spotify("https://open.spotify.com/track/bad%2Fid"), None);
+        assert_eq!(spotify("https://spotify.example/track/4cOdK2wGLETKBW3PvgPWqT"), None);
     }
 
     #[test]

@@ -675,6 +675,9 @@ span.md-emoji { width: auto; height: auto; line-height: inherit; }
 .chat-embed-image, .chat-embed-video { display: block; width: 100%; max-height: 300px; margin-top: 16px; border-radius: 4px; object-fit: contain; background: var(--chat-bg-secondary); }
 .chat-embed-poster { position: relative; display: block; }
 .chat-embed-play { position: absolute; inset: 0; display: grid; place-items: center; color: var(--chat-on-brand); }
+.chat-embed-poster .chat-embed-play svg { box-sizing: content-box; padding: 10px; border-radius: 50%; background: rgba(0, 0, 0, 0.6); }
+.chat-embed-poster .chat-embed-image + .chat-embed-play { top: 16px; }
+.chat-embed-player { display: block; max-width: 100%; margin-top: 16px; border: 0; border-radius: 4px; background: #000; }
 .chat-embed-footer { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--chat-text-muted); }
 .chat-embed-image-only { display: block; max-width: 400px; border-radius: 8px; overflow: hidden; }
 .chat-embed-media-link { display: inline-block; max-width: 400px; color: var(--text-link); overflow-wrap: anywhere; }
