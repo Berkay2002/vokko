@@ -94,7 +94,7 @@ test('upload an image and a text file', async () => {
   await send(sam.page, `files ${RUN}`);
   const theirs = msg(carol.page, `files ${RUN}`);
   await expect(theirs.locator('.chat-image img')).toBeVisible();
-  await expect(theirs.locator('.chat-file')).toContainText(`notes-${RUN}.txt`);
+  await expect(theirs.locator('.chat-file, .chat-text-preview')).toContainText(`notes-${RUN}.txt`);
   const src = await theirs.locator('.chat-image img').getAttribute('src');
   expect(src).toBeTruthy();
   const res = await carol.page.request.get(new URL(src!, 'http://127.0.0.1:1422').href);
