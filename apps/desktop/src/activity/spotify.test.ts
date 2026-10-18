@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiRequestError } from "../api/rest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiRequestError, RateLimitedError } from "../api/rest";
 import type { SpotifySearchResults, SpotifyTrack } from "../api/types";
 import { activityListIsValid } from "../api/mock/activities";
 import type { NowPlaying } from "../desktop/spotify";
@@ -64,6 +64,10 @@ describe("spotifyActivity", () => {
     expect(sameSpotifyMoment(a, spotifyActivity(track({ position_ms: 65_000 }), 1_005_200))).toBe(true);
     expect(sameSpotifyMoment(a, spotifyActivity(track({ title: "Other" }), 1_000_000))).toBe(false);
     expect(sameSpotifyMoment(a, spotifyActivity(track({ position_ms: 120_000 }), 1_000_000))).toBe(false);
+    // the catalog filling in the id and art of a Windows track later is a change to send
+    const windows = spotifyActivity(track({ track_id: null, image_id: null }), 1_000_000);
+    expect(sameSpotifyMoment(windows, spotifyActivity(track({ image_id: null }), 1_000_000))).toBe(false);
+    expect(sameSpotifyMoment(windows, spotifyActivity(track({ track_id: null }), 1_000_000))).toBe(false);
     expect(sameSpotifyMoment(a, null)).toBe(false);
     expect(sameSpotifyMoment(null, null)).toBe(true);
   });
@@ -109,15 +113,71 @@ describe("Windows track lookup", () => {
     expect(find).toHaveBeenCalledTimes(2);
   });
 
-  it("falls back quietly: a failure is a miss, and 404 10000 turns lookups off for the session", async () => {
-    const limited = vi.fn(async () => Promise.reject(new ApiRequestError(429, { code: 0, message: "slow down" })));
-    expect(await lookUpTrack("A", "B", limited)).toBeNull();
-    const off = vi.fn(async () => Promise.reject(new ApiRequestError(404, { code: 10000, message: "Unknown" })));
-    expect(await lookUpTrack("C", "D", off)).toBeNull();
+  describe("failures", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+    const down = (): Promise<SpotifySearchResults> => Promise.reject(new ApiRequestError(502, { code: 0, message: "Bad Gateway" }));
+
+    it("are a miss that is not kept: the track is asked again after 30 s, 2 min, then 10 min", async () => {
+      const find = vi.fn(down);
+      const ask = () => lookUpTrack("One More Time", "Daft Punk", find);
+      expect(await ask()).toBeNull();
+      for (const wait of [30_000, 120_000, 600_000, 600_000]) {
+        const calls = find.mock.calls.length;
+        vi.advanceTimersByTime(wait - 1);
+        expect(await ask()).toBeNull();
+        expect(find).toHaveBeenCalledTimes(calls);
+        vi.advanceTimersByTime(1);
+        expect(await ask()).toBeNull();
+        expect(find).toHaveBeenCalledTimes(calls + 1);
+      }
+      find.mockImplementation(async () => results([hit()]));
+      vi.advanceTimersByTime(600_000);
+      expect(await ask()).toMatchObject({ sync_id: "4uLU6hMCjMI75M1A2tKUQC" });
+      expect(await ask()).toMatchObject({ sync_id: "4uLU6hMCjMI75M1A2tKUQC" });
+      expect(find).toHaveBeenCalledTimes(6);
+    });
+
+    it("back off per track, and a 429 waits out its Retry-After when that is longer", async () => {
+      const limited = vi.fn(async () => Promise.reject(new RateLimitedError(90, false)));
+      expect(await lookUpTrack("A", "B", limited)).toBeNull();
+      const find = vi.fn(async () => results([hit()]));
+      expect(await lookUpTrack("One More Time", "Daft Punk", find)).toMatchObject({ sync_id: "4uLU6hMCjMI75M1A2tKUQC" });
+      vi.advanceTimersByTime(89_999);
+      expect(await lookUpTrack("A", "B", limited)).toBeNull();
+      expect(limited).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(1);
+      await lookUpTrack("A", "B", limited);
+      expect(limited).toHaveBeenCalledTimes(2);
+    });
+
+    it("404 10000 turns every lookup off for 5 minutes", async () => {
+      const off = vi.fn(async () => Promise.reject(new ApiRequestError(404, { code: 10000, message: "Unknown" })));
+      expect(await lookUpTrack("C", "D", off)).toBeNull();
+      const find = vi.fn(async () => results([hit()]));
+      vi.advanceTimersByTime(5 * 60_000 - 1);
+      expect(await lookUpTrack("One More Time", "Daft Punk", find)).toBeNull();
+      expect(find).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(await lookUpTrack("One More Time", "Daft Punk", find)).toMatchObject({ sync_id: "4uLU6hMCjMI75M1A2tKUQC" });
+    });
+
+    it("a lookup in flight is shared, and the next poll after its failure does not ask again right away", async () => {
+      let fail: (error: unknown) => void = () => undefined;
+      const find = vi.fn(() => new Promise<SpotifySearchResults>((_, reject) => (fail = reject)));
+      const first = lookUpTrack("One More Time", "Daft Punk", find);
+      expect(lookUpTrack("One More Time", "Daft Punk", find)).toBe(first);
+      fail(new ApiRequestError(0, { code: 0, message: "offline" }));
+      expect(await first).toBeNull();
+      expect(await lookUpTrack("One More Time", "Daft Punk", find)).toBeNull();
+      expect(find).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("never asks for a query over Spotify's 100 characters", async () => {
     const find = vi.fn(async () => results([hit()]));
-    expect(await lookUpTrack("One More Time", "Daft Punk", find)).toBeNull();
-    expect(find).not.toHaveBeenCalled();
     expect(await lookUpTrack("x".repeat(100), "Daft Punk", find)).toBeNull();
+    expect(find).not.toHaveBeenCalled();
   });
 
   it("adds the id and art only to an activity without them, in a shape the server accepts", () => {
