@@ -5,9 +5,9 @@ import { ChannelType, type Channel, type User, type VoiceState } from '../api/ty
 
 // zustand hooks read their initial state during server rendering, so the stores the stage reads are replaced by plain objects.
 const fake = vi.hoisted(() => ({
-  voice: { meId: '1' as string | null, channelId: 'c1' as string | null, states: [] as unknown[], watch: {} as Record<string, unknown>, stremio: {} as Record<string, unknown>, spotify: {} as Record<string, unknown>, games: {} as Record<string, unknown> },
+  voice: { meId: '1' as string | null, channelId: 'c1' as string | null, states: [] as unknown[], error: null as { reason: string } | null, watch: {} as Record<string, unknown>, stremio: {} as Record<string, unknown>, spotify: {} as Record<string, unknown>, games: {} as Record<string, unknown> },
   media: { videos: {} as Record<string, unknown>, watching: {} as Record<string, true>, quality: {}, liveScreens: {} as Record<string, true>, cameraOn: false, screenOn: false, error: null },
-  ui: { focusedTile: null as string | null, membersHidden: false, chatOpen: false, focusStream: null as string | null },
+  ui: { focusedTile: null as string | null, membersHidden: false, chatOpen: false, focusStream: null as string | null, mutedHint: false },
 }));
 
 vi.mock('../api/store', async importOriginal => {
@@ -32,8 +32,9 @@ vi.mock('./mediaStore', async importOriginal => {
 });
 vi.mock('./uiStore', () => ({
   useVoiceUi: Object.assign((selector: (s: typeof fake.ui) => unknown) => selector(fake.ui), { getState: () => fake.ui }),
+  useMutedHint: () => fake.ui.mutedHint,
 }));
-vi.mock('./engine', () => ({ dismissVideoError: () => undefined, joinVoiceChannel: () => undefined, leaveVoice: () => undefined, setViewerQuality: () => undefined, toggleSelfMute: () => undefined, watchStream: () => undefined }));
+vi.mock('./engine', () => ({ dismissVoiceError: () => undefined, setSelfMute: () => undefined, toggleSelfDeaf: () => undefined, dismissVideoError: () => undefined, joinVoiceChannel: () => undefined, leaveVoice: () => undefined, setViewerQuality: () => undefined, toggleSelfMute: () => undefined, watchStream: () => undefined }));
 vi.mock('./VoiceChatPanel', () => ({ VoiceChatPanel: () => null }));
 vi.mock('./SoundboardPopout', () => ({ SoundboardPopout: () => null }));
 vi.mock('./deviceMenus', () => ({ useDeviceMenus: () => ({ micItems: () => [] }) }));
@@ -80,6 +81,30 @@ beforeEach(() => {
   fake.media.screenOn = false;
   fake.ui.focusedTile = null;
   fake.ui.membersHidden = false;
+  fake.ui.mutedHint = false;
+  fake.voice.error = null;
+});
+
+describe('microphone error and muted hint', () => {
+  const states = () => [voiceState('1'), voiceState('2')];
+
+  it('shows a denied microphone on the call page with Try again', () => {
+    fake.voice.states = states();
+    expect(render()).not.toContain('Try again');
+    fake.voice.error = { reason: 'permission_denied' };
+    const html = render();
+    expect(html).toContain("Microphone access was denied. Others can&#x27;t hear you.");
+    expect(html).toContain('Try again');
+    fake.voice.error = { reason: 'connection_lost' };
+    expect(render()).not.toContain('Try again');
+  });
+
+  it('shows You are muted only while the hint is raised', () => {
+    fake.voice.states = states();
+    expect(render()).not.toContain('You are muted');
+    fake.ui.mutedHint = true;
+    expect(render()).toContain('You are muted');
+  });
 });
 
 describe('stageTiles', () => {

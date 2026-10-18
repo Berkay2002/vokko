@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 // Voice UI parity e2e (mock backend) on its own fresh Vite, port 1429.
 // Run from apps/desktop: npx playwright test -c e2e/voice-ui.config.ts   (VOICE_ALL=1 runs every mock-backed spec on this port)
-const PORT = 1429;
+const PORT = Number(process.env.VOKKO_E2E_PORT ?? 1429);
 
 export default defineConfig({
   testDir: '.',

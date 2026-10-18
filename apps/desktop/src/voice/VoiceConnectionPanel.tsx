@@ -14,10 +14,10 @@ import type { ConnectionQuality, VoiceErrorReason, VoiceStatus } from "./reducer
 import { ActivityShelf } from "./ActivityShelf";
 import { SoundboardPopout } from "./SoundboardPopout";
 import { useVoice } from "./store";
-import { useVoiceUi, type PingSample } from "./uiStore";
+import { useMutedHint, useVoiceUi, type PingSample } from "./uiStore";
 import "./stream.css";
 
-const STATUS_LABEL: Record<VoiceStatus, string> = {
+export const STATUS_LABEL: Record<VoiceStatus, string> = {
   idle: "Voice Disconnected",
   connecting: "Connecting",
   rtc_connecting: "RTC Connecting",
@@ -193,6 +193,7 @@ export function VoiceConnectionPanel() {
   const [shelfOpen, setShelfOpen] = useState(false);
   const watching = useVoice(s => !!(channelId && s.watch[channelId]));
   const navigate = useNavigate();
+  const mutedHint = useMutedHint();
 
   // Moved back to the audience: the grant no longer allows camera or screen, and their buttons are gone, so stop capturing.
   useEffect(() => {
@@ -201,11 +202,12 @@ export function VoiceConnectionPanel() {
     if (screenOn) void stopScreenShare();
   }, [audience, cameraOn, screenOn]);
 
+  // In a call a microphone error stays until dismissed or retried (the call page shows it with Try again).
   useEffect(() => {
-    if (!error) return;
+    if (!error || channelId) return;
     const timer = setTimeout(dismissVoiceError, ERROR_TTL_MS);
     return () => clearTimeout(timer);
-  }, [error]);
+  }, [error, channelId]);
 
   if (!channelId && !error) return null;
   // A game's tile only shows on the call's page, so starting one from the panel takes you there.
@@ -235,6 +237,7 @@ export function VoiceConnectionPanel() {
             </span>
           )}
           {error && <span className="voice-panel-error">{VOICE_ERROR_TEXT[error.reason]}</span>}
+          {mutedHint && <span className="voice-panel-error" role="status">You are muted</span>}
         </div>
         {inCall ? (
           <>

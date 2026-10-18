@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { Bell, BellOff, ChevronRight, Hash, Lock, Megaphone, MessageCircle, MessagesSquare, Phone, Pin, Radio, Search, UserPlus, UserRound, Users, Video, Volume2 } from "lucide-react";
-import { useVoiceUi } from "../voice";
+import { useVoiceUi, VoiceChatBadge } from "../voice";
 import { useShortcut } from "../keyboard";
 import { dmName, useStore } from "../api/store";
 import { ChannelType, type Channel } from "../api/types";
@@ -156,7 +156,7 @@ export function ChannelHeader({ channel, membersOpen, onToggleMembers, profileOp
           <>
             {voice ? (
               <ToolbarButton label={chatOpen ? "Hide Chat" : "Show Chat"} active={chatOpen} onClick={() => useVoiceUi.getState().setChatOpen(!chatOpen)}>
-                <MessageCircle size={24} />
+                <MessageCircle size={24} /><VoiceChatBadge channelId={channel.id} />
               </ToolbarButton>
             ) : (
               <ThreadsToolbar channel={channel} />

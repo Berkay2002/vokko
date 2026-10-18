@@ -118,6 +118,36 @@ export class VadGate {
   }
 }
 
+/** Talking while muted: `push` returns true once the level has been above the threshold for `needMs` (gaps up to `gapMs` don't count against it), then starts over. */
+export class MutedTalkDetector {
+  private loudMs = 0;
+  private quietMs = 0;
+
+  constructor(
+    private readonly needMs = 1000,
+    private readonly gapMs = HANGOVER_MS,
+    private readonly frameMs = FRAME_MS,
+  ) {}
+
+  push(levelDb: number, thresholdDb: number): boolean {
+    if (levelDb >= thresholdDb) {
+      this.quietMs = 0;
+      this.loudMs += this.frameMs;
+      if (this.loudMs >= this.needMs) {
+        this.loudMs = 0;
+        return true;
+      }
+    } else if ((this.quietMs += this.frameMs) > this.gapMs) {
+      this.loudMs = 0;
+    }
+    return false;
+  }
+
+  reset(): void {
+    this.loudMs = this.quietMs = 0;
+  }
+}
+
 /** RMS of a block of float samples in dBFS (-100 for silence). */
 export function rmsDb(samples: ArrayLike<number>): number {
   if (samples.length === 0) return SILENCE_DB;

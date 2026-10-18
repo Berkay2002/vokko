@@ -4,7 +4,7 @@
 
 import type { AudioProcessorOptions, Track, TrackProcessor } from "livekit-client";
 import { InputChain } from "./inputChain";
-import { VadGate } from "./vad";
+import { MutedTalkDetector, VadGate } from "./vad";
 import type { VoiceSettings } from "./reducer";
 
 export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProcessorOptions> {
@@ -18,12 +18,19 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
   /** Called once when RNNoise was requested but could not start (the transport falls back to the browser's). */
   onDenoiseUnavailable: (() => void) | null = null;
   private openNow = false;
+  private muted: boolean;
+  private readonly talk = new MutedTalkDetector();
+  /** The raw track is disabled while muted (LiveKit), so the chain listens to a clone that stays live: its level feeds the "you are muted" hint, and the gate keeps nothing audible. */
+  private tap: MediaStreamTrack | null = null;
 
   constructor(
     settings: VoiceSettings,
     muted: boolean,
     private readonly onChange: (open: boolean) => void,
+    /** Called when the user has been talking for about a second while muted. */
+    private readonly onMutedSpeech?: () => void,
   ) {
+    this.muted = muted;
     this.gate = new VadGate({ mode: settings.inputMode, thresholdDb: settings.vadThresholdDb, auto: settings.vadAuto, pttReleaseMs: settings.pttReleaseMs });
     this.gate.setForcedClosed(muted);
     this.inputGain = settings.inputGain;
@@ -33,7 +40,9 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
   async init(opts: AudioProcessorOptions): Promise<void> {
     const ctx = opts.audioContext;
     this.ctx = ctx;
-    const source = ctx.createMediaStreamSource(new MediaStream([opts.track]));
+    this.tap = opts.track.clone();
+    this.tap.enabled = true;
+    const source = ctx.createMediaStreamSource(new MediaStream([this.tap]));
     const gain = ctx.createGain();
     gain.gain.value = 0;
     const dest = ctx.createMediaStreamDestination();
@@ -60,6 +69,8 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
       gain.disconnect();
       dest.stream.getTracks().forEach(t => t.stop());
     }
+    this.tap?.stop();
+    this.tap = null;
     this.nodes = null;
     this.processedTrack = undefined;
     this.set(false);
@@ -70,6 +81,8 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
   }
 
   setMuted(muted: boolean): void {
+    this.muted = muted;
+    this.talk.reset();
     this.gate.setForcedClosed(muted);
     this.set(this.gate.open);
   }
@@ -86,6 +99,7 @@ export class GateProcessor implements TrackProcessor<Track.Kind.Audio, AudioProc
 
   private frame(levelDb: number): void {
     this.set(this.gate.push(levelDb));
+    if (this.muted && this.talk.push(levelDb, this.gate.effectiveThresholdDb)) this.onMutedSpeech?.();
   }
 
   private set(open: boolean): void {

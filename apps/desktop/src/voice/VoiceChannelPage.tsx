@@ -4,7 +4,7 @@
 // Like Discord, a participant who is streaming has two tiles: their user tile (camera or avatar) and a stream tile (the screen).
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { ChevronDown, ChevronUp, Ellipsis, LayoutGrid, Maximize2, Mic, MicOff, Minimize2, Monitor, MonitorPlay, MonitorUp, Music, PhoneOff, SquareArrowOutUpRight, UserPlus, Users, Video, VideoOff, Volume2, HeadphoneOff, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Ellipsis, LayoutGrid, Maximize2, Mic, MicOff, Minimize2, Monitor, MonitorPlay, MonitorUp, Music, PhoneOff, SquareArrowOutUpRight, UserPlus, Users, Video, VideoOff, Volume2, Headphones, HeadphoneOff, X } from "lucide-react";
 import { Perm } from "../api/permissions";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
@@ -12,17 +12,18 @@ import { Avatar } from "../shell/Avatar";
 import { userContextItems } from "../shell/menus";
 import { openModal } from "../shell/modalStore";
 import { usePermissions } from "../shell/usePermissions";
-import { hasOpenLayer, Tooltip, useContextMenu, usePrefs } from "../ui";
+import { hasOpenLayer, Tooltip, useContextMenu, usePhone, usePrefs } from "../ui";
 import { useDeviceMenus } from "./deviceMenus";
 import { GRID_GAP, gridLayout } from "./gridLayout";
-import { dismissVideoError, joinVoiceChannel, leaveVoice, setViewerQuality, toggleSelfMute, watchStream } from "./engine";
+import { dismissVideoError, dismissVoiceError, joinVoiceChannel, leaveVoice, setSelfMute, setViewerQuality, toggleSelfDeaf, toggleSelfMute, watchStream } from "./engine";
 import { useMedia, useStreamingCheck, useVideo, type VideoHandle, type VideoSource } from "./mediaStore";
 import { SoundboardPopout } from "./SoundboardPopout";
 import { watchStreamFrom } from "./StreamCard";
 import { SoundEffectBadge, useSoundFlashClass } from "../soundboard";
 import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
-import { useVoiceUi } from "./uiStore";
+import { useMutedHint, useVoiceUi } from "./uiStore";
 import { VoiceChatPanel } from "./VoiceChatPanel";
+import { VOICE_ERROR_TEXT } from "./VoiceConnectionPanel";
 import { WatchTile } from "../watch";
 import { StremioPanel, StremioTile, STREMIO_TILE_ID, useStremioPanel } from "../stremio";
 import { SpotifyPanel, SpotifyTile, SPOTIFY_TILE_ID, useSpotifyPanel } from "../spotify";
@@ -276,6 +277,7 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
     if (document.fullscreenElement) void document.exitFullscreen().then(() => setFullscreen(false));
     else void el.requestFullscreen?.().then(() => setFullscreen(true), () => undefined);
   };
+  const phone = usePhone();
   const micLabel = muted || deafened ? "Unmute microphone" : "Mute microphone";
   return (
     <div className="voice-bar">
@@ -283,9 +285,15 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
         <BarButton label={micLabel} tooltip={muted ? "Unmute" : "Mute"} active={muted} onClick={toggleSelfMute}>
           {muted || deafened ? <MicOff size={20} /> : <Mic size={20} />}
         </BarButton>
+        {/* Discord's desktop bar has no Deafen (the user panel does); on a phone the panel is behind the drawer, so it lives here. */}
         <BarButton label="Input options" tooltip="Input Options" onClick={e => menu.open(below(e), micItems())}>
           <ChevronDown size={16} />
         </BarButton>
+        {phone && (
+          <BarButton label={deafened ? "Undeafen" : "Deafen"} active={deafened} onClick={toggleSelfDeaf}>
+            {deafened ? <HeadphoneOff size={20} /> : <Headphones size={20} />}
+          </BarButton>
+        )}
         <BarButton label={cameraOn ? "Turn off camera" : "Turn on camera"} tooltip={cameraOn ? "Turn Off Camera" : "Turn On Camera"} active={cameraOn} onClick={toggleCamera}>
           {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
         </BarButton>
@@ -360,6 +368,44 @@ function VideoError() {
       <span>{error}</span>
       <button type="button" className="voice-video-error-close" aria-label="Dismiss" onClick={dismissVideoError}>
         <X size={14} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+/** The microphone could not be opened (denied or missing): the call goes on listen-only; Try again re-runs the unmute. */
+function MicError() {
+  const reason = useVoice(s => (s.error?.reason === "permission_denied" || s.error?.reason === "no_microphone" ? s.error.reason : null));
+  if (!reason) return null;
+  return (
+    <div className="voice-video-error" role="alert">
+      <span>{VOICE_ERROR_TEXT[reason]}</span>
+      <button
+        type="button"
+        className="voice-video-error-retry"
+        onClick={() => {
+          dismissVoiceError();
+          setSelfMute(false);
+        }}
+      >
+        Try again
+      </button>
+      <button type="button" className="voice-video-error-close" aria-label="Dismiss" onClick={dismissVoiceError}>
+        <X size={14} aria-hidden="true" />
+      </button>
+    </div>
+  );
+}
+
+/** Raised by the local level meter when you talk with the microphone muted. */
+function MutedHint() {
+  if (!useMutedHint()) return null;
+  return (
+    <div className="voice-muted-hint" role="status">
+      <MicOff size={16} aria-hidden="true" />
+      <span>You are muted</span>
+      <button type="button" className="voice-muted-hint-unmute" onClick={toggleSelfMute}>
+        Unmute
       </button>
     </div>
   );
@@ -546,6 +592,8 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
             </div>
           )}
           {connected && <VideoError />}
+          {connected && <MicError />}
+          {connected && <MutedHint />}
           {connected && !multiple && <AloneCard channel={channel} />}
           {connected ? (
             <ControlBar channel={channel} page={page} />

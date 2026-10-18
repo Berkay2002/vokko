@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FRAME_MS, HANGOVER_MS, VadGate, rmsDb, sensitivityToDb } from "./vad";
+import { FRAME_MS, HANGOVER_MS, MutedTalkDetector, VadGate, rmsDb, sensitivityToDb } from "./vad";
 
 /** Feeds `frames` and returns the gate state after each one. */
 function run(gate: VadGate, frames: number[]): boolean[] {
@@ -118,5 +118,33 @@ describe("level helpers", () => {
     expect(sensitivityToDb(40)).toBe(-60);
     expect(sensitivityToDb(100)).toBe(0);
     expect(sensitivityToDb(150)).toBe(0);
+  });
+});
+
+describe("MutedTalkDetector", () => {
+  const loud = (d: MutedTalkDetector, n: number) => Array.from({ length: n }, () => d.push(-30, -50)).some(Boolean);
+
+  it("fires after about a second above the threshold, then starts over", () => {
+    const d = new MutedTalkDetector();
+    expect(loud(d, 99)).toBe(false);
+    expect(d.push(-30, -50)).toBe(true);
+    expect(loud(d, 99)).toBe(false);
+  });
+
+  it("bridges short gaps (speech) but a long pause starts over", () => {
+    const d = new MutedTalkDetector();
+    loud(d, 50);
+    for (let i = 0; i < HANGOVER_MS / FRAME_MS; i += 1) d.push(-90, -50);
+    expect(loud(d, 49)).toBe(false);
+    expect(d.push(-30, -50)).toBe(true);
+    const e = new MutedTalkDetector();
+    loud(e, 90);
+    for (let i = 0; i < HANGOVER_MS / FRAME_MS + 1; i += 1) e.push(-90, -50);
+    expect(loud(e, 99)).toBe(false);
+  });
+
+  it("never fires on quiet input", () => {
+    const d = new MutedTalkDetector();
+    expect(Array.from({ length: 1000 }, () => d.push(-80, -50)).some(Boolean)).toBe(false);
   });
 });

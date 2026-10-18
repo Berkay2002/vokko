@@ -413,7 +413,7 @@ export class LiveKitTransport implements VoiceTransport {
       if (this.room !== room) return;
       if (this.selfMute) await track.mute();
       this.gate?.destroy().catch(() => undefined);
-      const gate = new GateProcessor(this.settings ?? settings, this.selfMute, open => this.cb.selfSpeaking(open));
+      const gate = new GateProcessor(this.settings ?? settings, this.selfMute, open => this.cb.selfSpeaking(open), () => this.cb.mutedSpeech?.());
       gate.onDenoiseUnavailable = () => this.useBrowserDenoise(room);
       try {
         await track.setProcessor(gate);
