@@ -293,7 +293,7 @@ impl Hub {
         session
     }
 
-    /// Identify: a session that is attached to `link` and already holds `READY` as sequence 1 when it becomes visible to dispatchers,
+    /// Identify: a session that is attached to `link` and has already sent `READY` as sequence 1 (not kept in the replay buffer) when it becomes visible to dispatchers,
     /// so no event can be numbered ahead of READY or buffered without a connection. Returns it with the connection's generation.
     pub fn open_session(&self, user_id: i64, id: String, token_hash: Vec<u8>, link: Link, ready: Value) -> (Arc<Session>, u64) {
         let session = self.new_session(user_id, id, token_hash, Some(link));
