@@ -98,6 +98,8 @@ export type Config = {
   /** Server root, e.g. https://vokko.example.com (REST lives under /api/v1). */
   apiUrl: string
   gatewayUrl: string
+  /** How long a new gateway socket may take to reach READY/RESUMED before it is abandoned (default 15 s; tests shorten it). */
+  connectTimeoutMs?: number
   /** The assistant's name: guild nickname "<owner>'s <botName>", and the name used in pairing replies. */
   botName: string
   /** Overrides the owner's display name read from GET /applications/@me. */
@@ -325,6 +327,7 @@ export class VokkoBot {
   private sessionId: string | null = null
   private heartbeat: ReturnType<typeof setInterval> | null = null
   private acked = true
+  private watchdog: ReturnType<typeof setTimeout> | null = null
   private stopped = false
   private backoff = 1000
   /** The gateway is READY (not merely open): what a bridge's heartbeat vouches for. */
@@ -1035,11 +1038,22 @@ export class VokkoBot {
   private connect(): void {
     const ws = new WebSocket(this.cfg.gatewayUrl)
     this.ws = ws
+    // A socket that never opens, or never says hello, may never fire onclose (seen: close 1001 in a deploy, then silence): drop it and retry.
+    // ponytail: 15 s, a normal connect plus identify takes well under 2 s.
+    this.watchdog = setTimeout(() => {
+      ws.close()
+      onclose(4001)
+    }, this.cfg.connectTimeoutMs ?? 15_000)
     ws.onmessage = ev => {
+      if (this.ws !== ws) return
       const p = JSON.parse(String(ev.data)) as { op: number; d: any; s?: number | null; t?: string | null }
       if (p.s != null) this.seq = p.s
       switch (p.op) {
         case 0:
+          if (p.t === 'READY' || p.t === 'RESUMED') {
+            if (this.watchdog) clearTimeout(this.watchdog)
+            this.watchdog = null
+          }
           this.backoff = 1000
           this.dispatch(p.t ?? '', p.d)
           break
@@ -1071,19 +1085,24 @@ export class VokkoBot {
           break
       }
     }
-    ws.onclose = ev => {
+    const onclose = (code: number) => {
+      if (this.ws !== ws) return // a stale socket: a newer one (or none) owns the connection and the backoff
+      this.ws = null
+      if (this.watchdog) clearTimeout(this.watchdog)
+      this.watchdog = null
       this.connected = false
       if (this.heartbeat) clearInterval(this.heartbeat)
       this.heartbeat = null
       if (this.stopped) return
-      if (ev.code === 4004) {
+      if (code === 4004) {
         this.cfg.log('vokko channel: login failed (bad bot token)\n')
         process.exit(1)
       }
-      this.cfg.log(`vokko channel: gateway closed (${ev.code}), reconnecting in ${this.backoff / 1000}s\n`)
+      this.cfg.log(`vokko channel: gateway closed (${code}), reconnecting in ${this.backoff / 1000}s\n`)
       setTimeout(() => this.connect(), this.backoff)
       this.backoff = Math.min(this.backoff * 2, 60_000)
     }
+    ws.onclose = ev => onclose(ev.code)
     ws.onerror = () => {} // onclose follows and reconnects
   }
 
@@ -1100,6 +1119,7 @@ export class VokkoBot {
   stop(): void {
     this.stopped = true
     this.connected = false
+    if (this.watchdog) clearTimeout(this.watchdog)
     this.ws?.close(1000)
   }
 }
