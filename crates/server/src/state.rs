@@ -36,6 +36,8 @@ pub struct Inner {
     pub storage: Arc<dyn Storage>,
     /// In-flight uploads per user (`media::MAX_CONCURRENT_UPLOADS`).
     pub uploads: crate::media::UploadSlots,
+    /// Acting requests per message (`acting::MAX_PER_MESSAGE`).
+    pub acting_uses: crate::acting::Uses,
     /// Latest desktop release seen in `config.desktop_latest_json`.
     pub desktop_version: std::sync::Mutex<Option<String>>,
 }
@@ -99,6 +101,7 @@ impl AppState {
             soundboard: Plays::default(),
             entrances: Plays::default(),
             uploads: Default::default(),
+            acting_uses: Default::default(),
             desktop_version: Default::default(),
         }))
     }

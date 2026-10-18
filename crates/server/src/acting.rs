@@ -2,7 +2,7 @@
 //! sends `X-Vokko-Acting-For: <message_id>`, naming a fresh message in which a person asked it for something, and the request then
 //! runs as that person, with exactly their rights, limits, voice state and Stremio account.
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use axum::extract::{FromRequestParts, MatchedPath, RawPathParams};
@@ -36,12 +36,12 @@ impl From<i64> for Actor {
     }
 }
 
-/// Acting requests per message and when the message was first used.
+/// Acting requests per message and when the message was first used (`AppState::acting_uses`).
 // ponytail: in memory, per process; a restart resets the counts (the 10 minute window still bounds every message).
-static USES: LazyLock<Mutex<HashMap<i64, (u32, Instant)>>> = LazyLock::new(Mutex::default);
+pub type Uses = Mutex<HashMap<i64, (u32, Instant)>>;
 
-fn count_use(message_id: i64) -> ApiResult<()> {
-    let mut uses = lock(&USES);
+fn count_use(uses: &Uses, message_id: i64) -> ApiResult<()> {
+    let mut uses = lock(uses);
     uses.retain(|_, (_, first)| first.elapsed() < MAX_AGE);
     let (count, first) = uses.entry(message_id).or_insert((0, Instant::now()));
     if *count >= MAX_PER_MESSAGE {
@@ -69,7 +69,7 @@ impl FromRequestParts<AppState> for Actor {
             false => None,
         };
         let member = asker(state, caller, message_id, target).await?;
-        count_use(message_id)?;
+        count_use(&state.acting_uses, message_id)?;
         Ok(Self { user_id: member, via_bot: Some(caller) })
     }
 }
@@ -114,11 +114,11 @@ mod tests {
 
     #[test]
     fn a_message_allows_thirty_uses() {
-        let message = i64::MAX - 1;
+        let (uses, message) = (Uses::default(), 7);
         for _ in 0..MAX_PER_MESSAGE {
-            assert!(count_use(message).is_ok());
+            assert!(count_use(&uses, message).is_ok());
         }
-        assert!(count_use(message).is_err());
-        assert!(count_use(message - 1).is_ok(), "another message has its own count");
+        assert!(count_use(&uses, message).is_err());
+        assert!(count_use(&uses, message - 1).is_ok(), "another message has its own count");
     }
 }
