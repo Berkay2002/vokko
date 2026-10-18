@@ -429,4 +429,17 @@ describe("voice engine: no WebRTC (the Linux app's WebKitGTK)", () => {
     vi.unstubAllGlobals();
     vi.doUnmock("../api/config");
   });
+
+  it("allows the join in the desktop app, which uses native voice", async () => {
+    vi.resetModules();
+    vi.doMock("../api/config", async orig => ({ ...(await orig<typeof import("../api/config")>()), MOCK: false }));
+    vi.doMock("../desktop", async orig => ({ ...(await orig<typeof import("../desktop")>()), isDesktop: () => true }));
+    gw.handlers.clear();
+    const real = await import("./engine");
+    real.wireVoice();
+    emit("READY", { v: 1, user: { id: ME }, session_id: "gw-1", guilds: [], private_channels: [], media: { voice_enabled: true } } as unknown as GatewayEvents["READY"]);
+    expect(real.joinRefusal({ id: "30", type: ChannelType.DM } as Channel)).toBeNull();
+    vi.doUnmock("../desktop");
+    vi.doUnmock("../api/config");
+  });
 });

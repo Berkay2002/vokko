@@ -48,3 +48,11 @@ png = "0.17"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSString"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSDockTile", "NSImage", "NSImageView", "NSView", "NSControl", "NSResponder"] }
+
+# Native LiveKit voice (src/native_voice): WebKitGTK has no WebRTC. webrtc-sys downloads a prebuilt libwebrtc; cpal's
+# pure-Rust PulseAudio client also talks to PipeWire (pipewire-pulse), and its ALSA backend needs libasound2-dev to build.
+[target.'cfg(target_os = "linux")'.dependencies]
+livekit = { version = "0.9.5", features = ["rustls-tls-webpki-roots"] }
+cpal = { version = "0.18.2", features = ["pulseaudio"] }
+tokio.workspace = true
+futures-util.workspace = true
