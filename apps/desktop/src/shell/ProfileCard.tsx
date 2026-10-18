@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import { Clock, MessageCircle, UserCheck, UserPlus } from "lucide-react";
 import { appStore, displayName, roleColor, useStore } from "../api/store";
 import { request } from "../api/rest";
+import { authorizeInfo } from "../apps/api";
 import { RelationshipType, type Snowflake } from "../api/types";
 import { ProfileBanner } from "../perks/ProfileBanner";
 import { ProfileCardLayers } from "../perks/ProfileEffect";
@@ -37,6 +39,15 @@ export function TimeoutBadge({ until }: { until: string | null | undefined }) {
   );
 }
 
+// One lookup per bot, kept for the session so hovering a bot again doesn't refetch. /oauth2/authorize answers for the owner and for
+// anyone when the bot is public (GET /applications lists only your own); a private bot of someone else resolves to no description (a failed lookup is not kept, so the next hover asks again).
+const appDescriptions = new Map<Snowflake, Promise<string>>();
+const appDescription = (id: Snowflake) => {
+  let known = appDescriptions.get(id);
+  if (!known) appDescriptions.set(id, (known = authorizeInfo(id).then(info => info.application.description, () => (appDescriptions.delete(id), ""))));
+  return known;
+};
+
 /** User profile card popout (member list, message authors, DM rows). Mounted once in the shell. */
 export function ProfileCardHost() {
   const { anchor, userId, guildId, close } = useProfile();
@@ -49,6 +60,17 @@ export function ProfileCardHost() {
   const isMe = useStore(s => s.me?.id === userId);
   const relationship = useStore(s => (userId ? s.relationships[userId] : undefined));
   const open = !!anchor && !!user;
+  const [description, setDescription] = useState("");
+  const botId = user?.bot ? user.id : null;
+  useEffect(() => {
+    setDescription("");
+    if (!botId) return;
+    let live = true;
+    void appDescription(botId).then(text => live && setDescription(text));
+    return () => {
+      live = false;
+    };
+  }, [botId]);
   const roles = member && guild ? guild.roles.filter(r => member.roles.includes(r.id) && r.id !== guild.id).sort((a, b) => b.position - a.position) : [];
   const color = useCustomColor(guildId ? roleColor(guildId, member) : null);
   const look = user ? resolveProfile(user, member) : null;
@@ -71,6 +93,7 @@ export function ProfileCardHost() {
             <div className="profile-names">
               <div className="profile-name" style={color ? { color } : undefined}>
                 <StyledName styles={user.display_name_styles}>{displayName(user, member)}</StyledName>
+                {user.bot && <span className="chat-bot-tag apps-tag">APP</span>}
                 <TimeoutBadge until={member?.communication_disabled_until} />
               </div>
               <div className="pv-name-row">
@@ -79,6 +102,7 @@ export function ProfileCardHost() {
               </div>
               {look.pronouns && <div className="pv-pronouns">{look.pronouns}</div>}
             </div>
+            {user.bot && description && <p className="profile-app-description">{description}</p>}
             {presence?.custom_status && <div className="profile-status">{presence.custom_status}</div>}
             {playing && <ActivityCard activity={playing} />}
             {listening && <SpotifyCard activity={listening} />}

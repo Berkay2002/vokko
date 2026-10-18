@@ -5,7 +5,7 @@ import { BrandIcon } from "../ui/BrandIcon";
 import { Check, MessageCircle, MoreVertical, Search, UserPlus, Users, Volume2, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
-import { displayName, useStore } from "../api/store";
+import { appStore, displayName, useStore } from "../api/store";
 import { RelationshipType, type Activity, type Channel, type Guild, type Relationship, type User } from "../api/types";
 import { joinVoiceChannel } from "../voice";
 import { useChannelVoiceStates, useVoice } from "../voice/store";
@@ -124,10 +124,14 @@ function AddFriend() {
   const submit = async () => {
     const name = username.trim().toLowerCase();
     if (!name) return;
+    // The PUT is idempotent (204 for an existing friend or request), so the relationship already in the store decides the answer.
+    const known = Object.values(appStore.getState().relationships).find(r => r.user.username.toLowerCase() === name);
+    if (known?.type === RelationshipType.Friend) return setResult({ ok: false, text: `You're already friends with ${name}.` });
+    if (known?.type === RelationshipType.OutgoingRequest) return setResult({ ok: false, text: `You already sent ${name} a friend request.` });
     setBusy(true);
     try {
       await request<void>("POST", "/users/@me/relationships", { username: name });
-      setResult({ ok: true, text: `Success! Your friend request to ${name} was sent.` });
+      setResult({ ok: true, text: known?.type === RelationshipType.IncomingRequest ? `You are now friends with ${name}.` : `Success! Your friend request to ${name} was sent.` });
       setUsername("");
     } catch (error) {
       const message = error instanceof ApiRequestError && error.status === 404 ? "Hm, didn't work. Double check that the username is correct." : error instanceof ApiRequestError && error.code === 20001 ? "Bots can't be friends." : error instanceof ApiRequestError ? error.message : "Something went wrong. Try again.";
