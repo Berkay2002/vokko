@@ -125,8 +125,9 @@ function bodyOf(kind: Kind, draft: Draft): AutoModerationRuleRequest {
 }
 
 /** Why the draft cannot be saved yet, or null. */
-function draftProblem(draft: Draft): string | null {
+function draftProblem(kind: Kind, draft: Draft): string | null {
   if (!draft.name.trim()) return "Give the rule a name.";
+  if (kind.type === T.KeywordPreset && draft.presets.length === 0) return "Choose at least one category.";
   if (!draft.block && !draft.alert && !draft.timeout) return "Choose at least one response.";
   if (draft.alert && !draft.alertChannel) return "Choose a channel for the alert.";
   return null;
@@ -417,7 +418,7 @@ export function AutoModPage({ guild, canEdit }: { guild: Guild; canEdit: boolean
     ) : null;
   const toggle = (rule: AutoModerationRule) => (enabled: boolean) => void run(() => updateAutomodRule(guild.id, rule.id, { enabled }));
   const keywordRules = rules?.filter(r => r.trigger_type === T.Keyword) ?? [];
-  const problem = draft ? draftProblem(draft) : null;
+  const problem = editing && draft ? draftProblem(editing.kind, draft) : null;
 
   return (
     <Page title="AutoMod">

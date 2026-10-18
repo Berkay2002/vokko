@@ -856,4 +856,34 @@ async fn automod_keyword_presets_with_allow_list() {
     assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 50035), "the type never changes");
     let (status, body) = w.app.patch(&format!("{rules}/{rule_id}"), &w.owner, json!({"trigger_metadata": {"presets": [4]}})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "unknown preset: {body}");
+    let (status, body) = w.app.patch(&format!("{rules}/{rule_id}"), &w.owner, json!({"trigger_metadata": {"presets": []}})).await;
+    assert_eq!((status, code(&body)), (StatusCode::BAD_REQUEST, 50035), "at least one category");
+}
+
+#[tokio::test]
+async fn automod_spam_counts_parallel_sends_and_alerts_once_a_minute() {
+    let w = World::new().await;
+    let (member, _) = w.member("flooder").await;
+    let (_, alerts) = w.app.post(&w.path("/channels"), &w.owner, json!({"name": "mod-log", "type": 0})).await;
+    let alerts = alerts["id"].as_str().expect("id").to_owned();
+    let actions = json!([{"type": 1}, {"type": 2, "metadata": {"channel_id": alerts}}]);
+    let (status, rule) =
+        w.app.post(&w.path("/auto-moderation/rules"), &w.owner, json!({"name": "Spam", "event_type": 1, "trigger_type": 3, "actions": actions})).await;
+    assert_eq!(status, StatusCode::OK, "{rule}");
+
+    let messages = format!("/channels/{}/messages", w.channel);
+    let sends = (0..10).map(|_| w.app.post(&messages, &member, json!({"content": "Join my server at example.org"})));
+    let statuses: Vec<StatusCode> = futures_util::future::join_all(sends).await.into_iter().map(|(status, _)| status).collect();
+    assert_eq!(statuses.iter().filter(|status| **status == StatusCode::OK).count(), 2, "only two copies get through: {statuses:?}");
+
+    let (_, list) = w.app.get(&format!("/channels/{alerts}/messages"), &w.owner).await;
+    assert_eq!(list.as_array().expect("list").len(), 1, "eight blocks, one alert: {list}");
+    assert_eq!(w.audit("?action_type=143").await.len(), 8);
+    assert_eq!(w.audit("?action_type=144").await.len(), 1);
+
+    // Deleting the alert channel takes the alert off the rule.
+    let (status, _) = w.app.delete(&format!("/channels/{alerts}"), &w.owner).await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, rule) = w.app.get(&w.path(&format!("/auto-moderation/rules/{}", rule["id"].as_str().expect("id"))), &w.owner).await;
+    assert_eq!(rule["actions"], json!([{"type": 1}]), "{rule}");
 }

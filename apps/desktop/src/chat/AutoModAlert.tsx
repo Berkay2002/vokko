@@ -13,6 +13,7 @@ export function AutoModAlert({ message, name }: { message: Message; name: string
   const blocked = field('decision_outcome') !== 'flagged';
   const keyword = field('keyword');
   const timeout = field('timeout_duration');
+  const heldBack = Number(field('alerts_held_back') ?? 0);
   return (
     <>
       <ShieldAlert size={18} className="chat-system-icon automod" aria-hidden="true" />
@@ -27,6 +28,7 @@ export function AutoModAlert({ message, name }: { message: Message; name: string
           <span className="automod-alert-rule">
             Rule: <b>{field('rule_name') ?? 'AutoMod'}</b>
             {keyword ? <> · Keyword: <b>{keyword}</b></> : null}
+            {heldBack > 0 ? <> · {heldBack} more held back</> : null}
           </span>
         </div>
       </div>

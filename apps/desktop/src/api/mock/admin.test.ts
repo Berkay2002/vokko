@@ -199,16 +199,19 @@ describe("safety and AutoMod", () => {
   });
 
   it("spam blocks the third copy, presets use the shared word lists", () => {
-    createRule({ name: "Spam", trigger_type: 3, actions: [{ type: 1 }] });
+    createRule({ name: "Spam", trigger_type: 3, actions: [{ type: 1 }, { type: 2, metadata: { channel_id: generalId } }] });
     expect(errorOf(() => createRule({ name: "Spam", trigger_type: 3, actions: [{ type: 3, metadata: { duration_seconds: 5 } }] })).code).toBe(50035);
     const text = "buy cheap stuff at example.org";
     expect(() => send("plain", text)).not.toThrow();
     expect(() => send("plain", text.toUpperCase())).not.toThrow();
     expect(errorOf(() => send("plain", text)).code).toBe(200000);
+    expect(errorOf(() => send("plain", text)).code).toBe(200000);
+    expect(sortedMessages(generalId).filter(m => m.type === MessageType.AutoModerationAction), "one alert a minute per rule and member").toHaveLength(1);
     for (let i = 0; i < 3; i++) expect(() => send("plain", "ok")).not.toThrow();
 
     const rule = createRule({ name: "Words", trigger_type: 4, trigger_metadata: { presets: [1], allow_list: ["bullshit"] }, actions: [{ type: 1 }] });
     expect(rule.trigger_metadata).toEqual({ keyword_filter: [], allow_list: ["bullshit"], presets: [1] });
+    expect(errorOf(() => call("owner", "PATCH", `/guilds/${guildId}/auto-moderation/rules/${rule.id}`, { trigger_metadata: { presets: [] } })).code).toBe(50035);
     expect(errorOf(() => send("plain", "oh shit")).code).toBe(200000);
     expect(() => send("plain", "that is bullshit")).not.toThrow();
     expect(errorOf(() => call("owner", "PATCH", `/guilds/${guildId}/auto-moderation/rules/${rule.id}`, { trigger_type: 1 })).code).toBe(50035);

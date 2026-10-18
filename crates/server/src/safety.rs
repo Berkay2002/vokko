@@ -5,9 +5,12 @@ use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::routing::get;
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex as StdMutex, PoisonError};
+use std::time::Instant;
 use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 use vokko_protocol::api::permissions::{ADMINISTRATOR, MANAGE_GUILD};
 use vokko_protocol::api::{
     AuditEntryInfo, AuditLogEvent, AutoModerationAction, AutoModerationActionMetadata, AutoModerationActionType, AutoModerationEventType,
@@ -35,6 +38,9 @@ const MAX_TIMEOUT_SECONDS: u32 = 2_419_200;
 const SPAM_REPEATS: i64 = 3;
 const SPAM_WINDOW_MS: u64 = 30_000;
 const SPAM_MIN_CHARS: usize = 10;
+/// One alert per rule and member in this window; the ones held back are counted in the next alert.
+const ALERT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+const ALERT_FORGET: std::time::Duration = std::time::Duration::from_secs(3600);
 const MAX_EXEMPT_ROLES: usize = 20;
 const MAX_EXEMPT_CHANNELS: usize = 50;
 const MAX_CUSTOM_MESSAGE_CHARS: usize = 150;
@@ -47,11 +53,23 @@ pub fn routes() -> Router<AppState> {
 
 // ---- enforcement ----
 
-/// Verification level and AutoMod for a new message by `user_id` in a guild channel. DMs pass.
-pub async fn check_send(state: &AppState, access: &ChannelAccess, user_id: i64, content: &str) -> ApiResult<()> {
-    let Some(guild_id) = access.channel.guild_id else { return Ok(()) };
+/// Verification level, then AutoMod, for a new message by `user_id` in a guild channel; DMs pass. `screened` is everything AutoMod
+/// reads (the content plus a poll's text), `plain` the content alone (what the spam check compares with stored messages).
+/// Call it once the rest of the request is valid: a blocking rule runs its actions here and fails the send; otherwise run
+/// [`Screening::act`] after the message is stored.
+pub async fn check_send(state: &AppState, access: &ChannelAccess, user_id: i64, screened: &str, plain: &str) -> ApiResult<Screening> {
+    let Some(guild_id) = access.channel.guild_id else { return Ok(Screening::default()) };
     check_verification(state, guild_id, user_id).await?;
-    check_automod(state, access, user_id, content, false).await
+    let screening = screen(state, access, user_id, screened, plain, false).await?;
+    screening.block(state).await?;
+    Ok(screening)
+}
+
+/// AutoMod for new content on an edit: like [`check_send`] without the verification level and the spam check.
+pub async fn check_edit(state: &AppState, access: &ChannelAccess, user_id: i64, content: &str) -> ApiResult<Screening> {
+    let screening = screen(state, access, user_id, content, content, true).await?;
+    screening.block(state).await?;
+    Ok(screening)
 }
 
 /// 403 50009 when the guild's verification level is above what the member meets. Roles, administrators and the owner bypass it.
@@ -90,39 +108,58 @@ pub fn meets_level(level: VerificationLevel, email_ok: bool, created_at: OffsetD
     }
 }
 
-/// Runs the guild's enabled AutoMod rules on a new (`edit` = false) or edited message by `user_id`. Every matching rule
-/// runs its actions (alert, timeout); when one of them blocks, the send fails with 400 200000 and audit entry 143.
-pub async fn check_automod(state: &AppState, access: &ChannelAccess, user_id: i64, content: &str, edit: bool) -> ApiResult<()> {
-    let Some(guild_id) = access.channel.guild_id else { return Ok(()) };
-    if content.trim().is_empty() {
-        return Ok(());
+/// AutoMod's verdict on one message before it is stored: the rules it hit. While a spam rule applies it also holds the member's
+/// spam lock, so this copy is stored before their next send is counted; keep it alive until the insert is done.
+#[derive(Default)]
+pub struct Screening {
+    hits: Vec<Hit>,
+    guild_id: i64,
+    channel_id: i64,
+    user_id: i64,
+    content: String,
+    _spam_lock: Option<OwnedMutexGuard<()>>,
+}
+
+struct Hit {
+    rule: RuleRow,
+    /// The matched keyword; `None` for spam and mention rules.
+    keyword: Option<String>,
+}
+
+impl Screening {
+    /// When a hit rule blocks: runs every hit's actions and fails with 400 200000 (the first blocking rule's custom message).
+    async fn block(&self, state: &AppState) -> ApiResult<()> {
+        let Some(blocking) = self.hits.iter().find(|hit| hit.rule.block_message) else { return Ok(()) };
+        self.run(state).await;
+        Err(ApiErr::automod_blocked(blocking.rule.custom_message.as_deref()))
     }
-    let rules = load_rules(state, guild_id).await?;
-    let rules: Vec<RuleRow> = rules.into_iter().filter(|rule| rule.enabled).collect();
-    if rules.is_empty() {
-        return Ok(());
+
+    /// The alert and timeout actions of rules that only flag, once the message is stored. A failure is logged; the message stands.
+    pub async fn act(self, state: &AppState) {
+        self.run(state).await;
     }
-    let guild = guild_access(state, user_id, guild_id).await?;
-    if guild.owner_id == user_id || guild.permissions & (MANAGE_GUILD | ADMINISTRATOR) != 0 {
-        return Ok(());
-    }
-    // A thread is exempt when its parent is.
-    let channels = [Some(access.channel.id), access.channel.is_thread().then_some(access.channel.parent_id).flatten()];
-    let mut blocked: Option<Option<String>> = None;
-    for rule in rules {
-        if rule.exempt_roles.iter().any(|role| guild.roles.contains(role)) || channels.iter().flatten().any(|id| rule.exempt_channels.contains(id)) {
-            continue;
+
+    async fn run(&self, state: &AppState) {
+        for hit in &self.hits {
+            if let Err(error) = self.run_hit(state, hit).await {
+                tracing::warn!("automod rule {}: {error:?}", hit.rule.id);
+            }
         }
-        let Some(keyword) = rule.matches(state, guild_id, user_id, content, edit).await? else { continue };
+    }
+
+    async fn run_hit(&self, state: &AppState, hit: &Hit) -> ApiResult<()> {
+        let (rule, guild_id, user_id) = (&hit.rule, self.guild_id, self.user_id);
         let options = AuditEntryInfo {
-            channel_id: Some(Snowflake::from(access.channel.id)),
+            channel_id: Some(Snowflake::from(self.channel_id)),
             auto_moderation_rule_name: Some(rule.name.clone()),
             auto_moderation_rule_trigger_type: Some(rule.trigger_type.to_string()),
             ..Default::default()
         };
-        if let Some(alert_channel) = rule.alert_channel_id {
+        if let Some(alert_channel) = rule.alert_channel_id
+            && let Some(held_back) = alert_slot(rule.id, user_id)
+        {
             // A failed alert must not change what happens to the message.
-            match post_alert(state, guild_id, alert_channel, access.channel.id, user_id, content, &rule, keyword.as_deref()).await {
+            match post_alert(state, guild_id, alert_channel, self.channel_id, user_id, &self.content, rule, hit.keyword.as_deref(), held_back).await {
                 Ok(()) => {
                     let entry = Entry::new(guild_id, user_id, AuditLogEvent::AutoModerationFlagToChannel, user_id).options(options.clone());
                     audit::record(state, entry).await?;
@@ -141,22 +178,93 @@ pub async fn check_automod(state: &AppState, access: &ChannelAccess, user_id: i6
         }
         if rule.block_message {
             audit::record(state, Entry::new(guild_id, user_id, AuditLogEvent::AutoModerationBlockMessage, user_id).options(options)).await?;
-            blocked.get_or_insert(rule.custom_message.clone());
         }
+        Ok(())
     }
-    match blocked {
-        Some(message) => Err(ApiErr::automod_blocked(message.as_deref())),
-        None => Ok(()),
+}
+
+/// Matches the guild's enabled rules against a new (`edit` = false) or edited message by `user_id`, without acting on them.
+async fn screen(state: &AppState, access: &ChannelAccess, user_id: i64, screened: &str, plain: &str, edit: bool) -> ApiResult<Screening> {
+    let mut out = Screening { channel_id: access.channel.id, user_id, content: screened.to_owned(), ..Screening::default() };
+    let Some(guild_id) = access.channel.guild_id else { return Ok(out) };
+    out.guild_id = guild_id;
+    if screened.trim().is_empty() {
+        return Ok(out);
     }
+    let rules: Vec<RuleRow> = load_rules(state, guild_id).await?.into_iter().filter(|rule| rule.enabled).collect();
+    if rules.is_empty() {
+        return Ok(out);
+    }
+    let guild = guild_access(state, user_id, guild_id).await?;
+    if guild.owner_id == user_id || guild.permissions & (MANAGE_GUILD | ADMINISTRATOR) != 0 {
+        return Ok(out);
+    }
+    // A thread is exempt when its parent is.
+    let channels = [Some(access.channel.id), access.channel.is_thread().then_some(access.channel.parent_id).flatten()];
+    for rule in rules {
+        if rule.exempt_roles.iter().any(|role| guild.roles.contains(role)) || channels.iter().flatten().any(|id| rule.exempt_channels.contains(id)) {
+            continue;
+        }
+        let keyword = if rule.kind() == AutoModerationTriggerType::Spam {
+            // An edit is no new post, so it never counts as a repeat.
+            let Some(text) = spam_text(plain).filter(|_| !edit) else { continue };
+            if out._spam_lock.is_none() {
+                out._spam_lock = Some(spam_lock(guild_id, user_id).await);
+            }
+            if !is_repeat_spam(state, guild_id, user_id, &text).await? {
+                continue;
+            }
+            None
+        } else {
+            let Some(keyword) = rule.matches(screened) else { continue };
+            keyword
+        };
+        out.hits.push(Hit { rule, keyword });
+    }
+    Ok(out)
+}
+
+/// One lock per member and guild, held from the spam count to the insert, so parallel copies cannot all count as early ones.
+/// shortcut: in-process, which is right for the single server instance; a second instance needs a Postgres advisory lock instead.
+async fn spam_lock(guild_id: i64, user_id: i64) -> OwnedMutexGuard<()> {
+    static LOCKS: LazyLock<StdMutex<HashMap<(i64, i64), Arc<Mutex<()>>>>> = LazyLock::new(Default::default);
+    let lock = {
+        let mut locks = LOCKS.lock().unwrap_or_else(PoisonError::into_inner);
+        locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+        locks.entry((guild_id, user_id)).or_default().clone()
+    };
+    lock.lock_owned().await
+}
+
+/// At most one alert per rule and member per [`ALERT_INTERVAL`], so a member repeating a blocked message cannot flood the mod
+/// channel. `Some(n)` when this alert may post, `n` = alerts held back since the last one.
+/// shortcut: in-process like [`spam_lock`]; a second server instance would alert once per instance.
+fn alert_slot(rule_id: i64, user_id: i64) -> Option<u32> {
+    static SENT: LazyLock<StdMutex<HashMap<(i64, i64), (Instant, u32)>>> = LazyLock::new(Default::default);
+    let now = Instant::now();
+    let mut sent = SENT.lock().unwrap_or_else(PoisonError::into_inner);
+    sent.retain(|_, (at, _)| now.duration_since(*at) < ALERT_FORGET);
+    if let Some((at, held_back)) = sent.get_mut(&(rule_id, user_id)) {
+        if now.duration_since(*at) < ALERT_INTERVAL {
+            *held_back += 1;
+            return None;
+        }
+        *at = now;
+        return Some(std::mem::take(held_back));
+    }
+    sent.insert((rule_id, user_id), (now, 0));
+    Some(0)
+}
+
+/// The text the spam check compares: trimmed and lowercased, or `None` when it is too short to count.
+fn spam_text(content: &str) -> Option<String> {
+    let text = content.trim().to_lowercase();
+    (text.chars().count() >= SPAM_MIN_CHARS).then_some(text)
 }
 
 /// SPAM rule: the same text (case-insensitive, at least [`SPAM_MIN_CHARS`] characters) from one member for the
 /// [`SPAM_REPEATS`]th time within [`SPAM_WINDOW_MS`] anywhere in the guild. The copies before it were already posted.
-async fn is_repeat_spam(state: &AppState, guild_id: i64, user_id: i64, content: &str) -> ApiResult<bool> {
-    let text = content.trim().to_lowercase();
-    if text.chars().count() < SPAM_MIN_CHARS {
-        return Ok(false);
-    }
+async fn is_repeat_spam(state: &AppState, guild_id: i64, user_id: i64, text: &str) -> ApiResult<bool> {
     let since = crate::ids::at(crate::ids::now_ms().saturating_sub(SPAM_WINDOW_MS), 0, 0);
     let (count,): (i64,) = sqlx::query_as(
         "SELECT count(*) FROM messages m JOIN channels c ON c.id = m.channel_id \
@@ -165,7 +273,7 @@ async fn is_repeat_spam(state: &AppState, guild_id: i64, user_id: i64, content: 
     .bind(user_id)
     .bind(since)
     .bind(guild_id)
-    .bind(&text)
+    .bind(text)
     .fetch_one(&state.db)
     .await?;
     Ok(count + 1 >= SPAM_REPEATS)
@@ -224,11 +332,10 @@ async fn post_alert(
     content: &str,
     rule: &RuleRow,
     keyword: Option<&str>,
+    held_back: u32,
 ) -> ApiResult<()> {
-    let Some(channel) = store::channel_row(state, alert_channel).await? else { return Ok(()) };
-    if channel.guild_id != Some(guild_id) {
-        return Ok(());
-    }
+    // Deleting the channel clears the rule's alert_channel_id (ON DELETE SET NULL); a stale id still fails loudly here.
+    let channel = store::channel_row(state, alert_channel).await?.filter(|channel| channel.guild_id == Some(guild_id)).ok_or_else(ApiErr::unknown_channel)?;
     let field = |name: &str, value: String| EmbedField { name: name.to_owned(), value, inline: None };
     let mut fields = vec![
         field("rule_name", rule.name.clone()),
@@ -240,6 +347,9 @@ async fn post_alert(
     }
     if let Some(seconds) = rule.timeout_seconds {
         fields.push(field("timeout_duration", seconds.to_string()));
+    }
+    if held_back > 0 {
+        fields.push(field("alerts_held_back", held_back.to_string()));
     }
     let embed = Embed {
         kind: EmbedType::AutoModerationMessage,
@@ -368,9 +478,9 @@ impl RuleRow {
         self.presets.iter().filter_map(|value| AutoModerationKeywordPresetType::from_u8(*value as u8)).collect()
     }
 
-    /// `Some(keyword)` when the rule fires on `content`; the keyword is `None` for spam and mention rules.
-    async fn matches(&self, state: &AppState, guild_id: i64, user_id: i64, content: &str, edit: bool) -> ApiResult<Option<Option<String>>> {
-        Ok(match self.kind() {
+    /// `Some(keyword)` when the rule fires on `content`; the keyword is `None` for mention rules. Spam needs the database ([`screen`]).
+    fn matches(&self, content: &str) -> Option<Option<String>> {
+        match self.kind() {
             AutoModerationTriggerType::Keyword => find_keyword(content, &self.keyword_filter, &self.allow_list).map(|word| Some(word.to_owned())),
             AutoModerationTriggerType::KeywordPreset => {
                 self.presets().into_iter().find_map(|preset| find_keyword(content, preset_words(preset), &self.allow_list)).map(|word| Some(word.to_owned()))
@@ -379,9 +489,8 @@ impl RuleRow {
                 let limit = self.mention_total_limit.map_or(usize::MAX, |limit| limit as usize);
                 (mention_count(content) > limit).then_some(None)
             }
-            // An edit is no new post, so it never counts as a repeat.
-            AutoModerationTriggerType::Spam => (!edit && is_repeat_spam(state, guild_id, user_id, content).await?).then_some(None),
-        })
+            AutoModerationTriggerType::Spam => None,
+        }
     }
 
     fn api(&self) -> AutoModerationRule {
@@ -498,6 +607,9 @@ fn validate_trigger(kind: AutoModerationTriggerType, meta: AutoModerationTrigger
         let mut values: Vec<i16> = meta.presets.iter().map(|preset| i16::from(preset.as_u8())).collect();
         values.sort_unstable();
         values.dedup();
+        if values.is_empty() {
+            return Err(ApiErr::invalid("trigger_metadata.presets", "Choose at least one category."));
+        }
         values
     } else {
         Vec::new()

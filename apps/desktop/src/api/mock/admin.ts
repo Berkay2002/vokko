@@ -42,6 +42,7 @@ const automodRules = new Map<string, AutoModerationRule[]>();
 export function resetAdmin(): void {
   auditLog.clear();
   automodRules.clear();
+  alertsSent.clear();
 }
 
 const membersWith = (guild: MockGuild, bit: bigint): string[] => [...guild.members.keys()].filter(id => hasBit(guildPermsOf(guild.guild.id, id), bit));
@@ -211,6 +212,7 @@ const MAX_TIMEOUT_SECONDS = 2_419_200;
 const SPAM_REPEATS = 3;
 const SPAM_WINDOW_MS = 30_000;
 const SPAM_MIN_CHARS = 10;
+const ALERT_INTERVAL_MS = 60_000;
 
 /** The trigger metadata a rule of `type` keeps (docs/api.md "AutoMod"); keys its type does not use are dropped. */
 function cleanTrigger(type: AutoModerationTriggerType, raw: Record<string, unknown>): AutoModerationTriggerMetadata {
@@ -223,7 +225,8 @@ function cleanTrigger(type: AutoModerationTriggerType, raw: Record<string, unkno
     const presets = Array.isArray(raw.presets) ? raw.presets : [];
     if (presets.some(p => p !== 1 && p !== 2 && p !== 3)) invalid("trigger_metadata.presets", "Unknown preset.");
     const unique = [...new Set(presets as AutoModerationKeywordPresetType[])].sort((a, b) => a - b);
-    if (unique.length > 0) meta.presets = unique;
+    if (unique.length === 0) invalid("trigger_metadata.presets", "Choose at least one category.");
+    meta.presets = unique;
   }
   if (type === T.MentionSpam) {
     const limit = raw.mention_total_limit;
@@ -389,6 +392,21 @@ export function checkSend(channel: MockChannel, userId: string, content: string)
   checkAutomod(channel, userId, content);
 }
 
+const alertsSent = new Map<string, { at: number; heldBack: number }>();
+
+/** One alert per rule and member a minute, like the server: the count of the ones held back since the last alert, or null to hold this one back. */
+function alertSlot(ruleId: string, userId: string): number | null {
+  const key = `${ruleId}:${userId}`;
+  const now = Date.now();
+  const last = alertsSent.get(key);
+  if (last && now - last.at < ALERT_INTERVAL_MS) {
+    last.heldBack += 1;
+    return null;
+  }
+  alertsSent.set(key, { at: now, heldBack: 0 });
+  return last?.heldBack ?? 0;
+}
+
 /** SPAM: the same text (10+ chars, case-insensitive) from one member for the third time within 30 s anywhere in the guild. */
 function isRepeatSpam(guildId: string, userId: string, content: string): boolean {
   const text = content.trim().toLowerCase();
@@ -446,13 +464,15 @@ export function checkAutomod(channel: MockChannel, userId: string, content: stri
     const block = action(AutoModerationActionType.BlockMessage);
     const timeout = action(AutoModerationActionType.Timeout)?.metadata?.duration_seconds;
     const alert = db.channels.get(action(AutoModerationActionType.SendAlertMessage)?.metadata?.channel_id ?? "");
-    if (alert) {
+    const heldBack = alert ? alertSlot(rule.id, userId) : null;
+    if (alert && heldBack !== null) {
       const fields: NonNullable<Embed["fields"]> = [
         { name: "rule_name", value: rule.name },
         { name: "channel_id", value: channel.id },
         { name: "decision_outcome", value: block ? "blocked" : "flagged" },
         ...(hit[0] ? [{ name: "keyword", value: hit[0] }] : []),
         ...(timeout ? [{ name: "timeout_duration", value: String(timeout) }] : []),
+        ...(heldBack > 0 ? [{ name: "alerts_held_back", value: String(heldBack) }] : []),
       ];
       addMessage({
         channel: alert,

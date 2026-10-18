@@ -4,5 +4,5 @@ ALTER TABLE automod_rules
     ADD COLUMN presets SMALLINT[] NOT NULL DEFAULT '{}',
     ADD COLUMN mention_total_limit SMALLINT,
     ADD COLUMN block_message BOOLEAN NOT NULL DEFAULT TRUE,
-    ADD COLUMN alert_channel_id BIGINT,
+    ADD COLUMN alert_channel_id BIGINT REFERENCES channels (id) ON DELETE SET NULL,
     ADD COLUMN timeout_seconds INT;
