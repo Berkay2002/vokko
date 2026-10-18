@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { BottomSheet, usePhone } from "./BottomSheet";
 import { useLayer, useOutsideClose } from "./layers";
-import { placeAtPoint } from "./position";
+import { menuTop, placeAtPoint } from "./position";
 
 export type MenuItem =
   | {
@@ -94,7 +94,7 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
       let left = anchorRect.right + 2;
       if (left + width + 8 > window.innerWidth) left = Math.max(8, anchorRect.left - width - 2);
       const top = Math.min(anchorRect.top - 8, window.innerHeight - height - 8);
-      setPos({ left, top: Math.max(8, top) });
+      setPos({ left, top: Math.max(menuTop(), top) });
     } else {
       setPos(placeAtPoint(x ?? 0, y ?? 0, el.offsetWidth, el.offsetHeight));
     }
@@ -382,13 +382,17 @@ export function ContextMenuHost() {
   useEffect(() => {
     if (!open || phone) return;
     const close = () => hide();
+    // A long menu scrolls inside itself (.context-menu max-height); only a scroll elsewhere moves its anchor.
+    const onScroll = (event: Event) => {
+      if (!(event.target instanceof Element && event.target.closest(".context-menu"))) hide();
+    };
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
-    document.addEventListener("scroll", close, true);
+    document.addEventListener("scroll", onScroll, true);
     return () => {
       window.removeEventListener("resize", close);
       window.removeEventListener("blur", close);
-      document.removeEventListener("scroll", close, true);
+      document.removeEventListener("scroll", onScroll, true);
     };
   }, [open, hide, phone]);
   if (!open) return null;

@@ -1716,6 +1716,16 @@ pub enum GameAspect {
     Fill,
 }
 
+/// How a game runs: `sdk` talks to Vokko over the games SDK; `web` is a website game with its own lobby and servers (no SDK,
+/// a looser frame sandbox for forms, popups and fullscreen, and a shareable room link).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GameKind {
+    #[default]
+    Sdk,
+    Web,
+}
+
 /// A game that can run in a call (docs/design/games-host.md section 4): a built-in (`id` = `builtin:<name>`) or an entry of a
 /// guild's catalog (`id` = snowflake string).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1730,9 +1740,11 @@ pub struct GameManifest {
     pub max_players: u8,
     #[serde(default)]
     pub aspect: GameAspect,
+    #[serde(default)]
+    pub kind: GameKind,
 }
 
-/// `POST /guilds/{id}/games`; players default to 1-16, `aspect` to 16:9.
+/// `POST /guilds/{id}/games`; players default to 1-16, `aspect` to 16:9, `kind` to `sdk`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct CreateGameRequest {
     pub name: String,
@@ -1745,6 +1757,8 @@ pub struct CreateGameRequest {
     pub max_players: Option<u8>,
     #[serde(default)]
     pub aspect: Option<GameAspect>,
+    #[serde(default)]
+    pub kind: Option<GameKind>,
 }
 
 /// `PATCH /guilds/{id}/games/{game_id}`; `icon: null` clears the icon.
@@ -1762,6 +1776,8 @@ pub struct EditGameRequest {
     pub max_players: Option<u8>,
     #[serde(default)]
     pub aspect: Option<GameAspect>,
+    #[serde(default)]
+    pub kind: Option<GameKind>,
 }
 
 /// The game running in a voice channel or DM call (Vokko-only, in memory per channel).
@@ -1772,6 +1788,15 @@ pub struct GameSession {
     pub game: GameManifest,
     pub started_by: Snowflake,
     pub started_at_ms: i64,
+    /// A `web` game's shared room link (`PUT /channels/{id}/game/room`); every tile loads it. Always null for `sdk` games.
+    #[serde(default)]
+    pub room_url: Option<String>,
+}
+
+/// `PUT /channels/{id}/game/room`: share a room link of the running web game with the call, or clear it with null.
+#[derive(Clone, Debug, Deserialize)]
+pub struct GameRoomRequest {
+    pub url: Option<String>,
 }
 
 /// GAME_UPDATE, to everyone who can see the channel (`state: null` = the game ended), and the entries of the `games` list on

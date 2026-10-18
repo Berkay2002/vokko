@@ -132,7 +132,7 @@ async fn the_catalog_is_managed_with_manage_guild_and_validated() {
     assert_eq!(status, StatusCode::CREATED, "{created}");
     assert_eq!(
         created,
-        json!({"id": created["id"], "name": "Codenames", "url": "https://play.example.com/vokko/", "icon": "🕵️", "min_players": 2, "max_players": 8, "aspect": "4:3"})
+        json!({"id": created["id"], "name": "Codenames", "url": "https://play.example.com/vokko/", "icon": "🕵️", "min_players": 2, "max_players": 8, "aspect": "4:3", "kind": "sdk"})
     );
     assert_eq!(alice_ws.wait_for("GUILD_GAMES_UPDATE").await, json!({"guild_id": w.guild}));
     let id = created["id"].as_str().expect("id").to_owned();
@@ -142,7 +142,8 @@ async fn the_catalog_is_managed_with_manage_guild_and_validated() {
     assert_eq!((defaults["min_players"].as_u64(), defaults["max_players"].as_u64(), defaults["aspect"].as_str()), (Some(1), Some(16), Some("16:9")));
     assert!(defaults["icon"].is_null());
 
-    let bad: [(Value, &str); 12] = [
+    let bad: [(Value, &str); 13] = [
+        (json!({"kind": "native"}), "body"),
         (json!({"url": "http://play.example.com/"}), "url"),
         (json!({"url": "https://vokko.test/games/x"}), "url"),
         (json!({"url": "https://user:pw@play.example.com/"}), "url"),
@@ -311,6 +312,71 @@ async fn a_game_runs_in_the_call_and_relays_only_to_the_people_in_it() {
     owner_ws.voice(None).await;
     assert!(owner_ws.wait_for("GAME_UPDATE").await["state"].is_null());
     assert!(w.app.state.voice.game_get(w.voice.parse().expect("id")).is_none());
+}
+
+#[tokio::test]
+async fn a_web_game_shares_its_room_link_with_the_call() {
+    let w = world_with(|_| {}).await;
+    let path = format!("/channels/{}/game", w.voice);
+    let room = format!("{path}/room");
+    let (mut owner_ws, _) = Client::identify(&w.address, &w.owner).await;
+    let (mut alice_ws, _) = Client::identify(&w.address, &w.alice).await;
+    let (mut carl_ws, _) = Client::identify(&w.address, &w.carl).await;
+    alice_ws.voice(Some(&w.voice)).await;
+    carl_ws.voice(Some(&w.voice)).await;
+
+    // The catalog takes `kind`; editing it ends running sessions like a URL change.
+    let mut body = game("Party");
+    body["kind"] = json!("web");
+    let (status, web) = w.app.post(&format!("/guilds/{}/games", w.guild), &w.owner, body).await;
+    assert_eq!((status, web["kind"].as_str()), (StatusCode::CREATED, Some("web")), "{web}");
+    let web_id = web["id"].as_str().expect("id").to_owned();
+
+    let link = json!({"url": "https://play.example.com/r/abc#code"});
+    let (status, error) = w.app.put_json(&room, &w.alice, link.clone()).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(50035)), "no game: {error}");
+    w.app.put_json(&path, &w.alice, json!({"game_id": "builtin:sketch"})).await;
+    owner_ws.wait_for("GAME_UPDATE").await;
+    let (status, error) = w.app.put_json(&room, &w.alice, link.clone()).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(50035)), "an SDK game has no room: {error}");
+    w.app.delete(&path, &w.alice).await;
+    owner_ws.wait_for("GAME_UPDATE").await;
+
+    let (status, session) = w.app.put_json(&path, &w.alice, json!({"game_id": web_id})).await;
+    assert_eq!((status, session["room_url"].clone(), session["game"]["kind"].as_str()), (StatusCode::OK, Value::Null, Some("web")), "{session}");
+    owner_ws.wait_for("GAME_UPDATE").await;
+    assert_eq!(w.app.put_json(&room, &w.owner, link.clone()).await.0, StatusCode::FORBIDDEN, "not in the call");
+    for bad in ["http://play.example.com/r", "https://u@play.example.com/r", "https://elsewhere.example/r", "https://play.example.com.evil.test/"] {
+        let (status, error) = w.app.put_json(&room, &w.carl, json!({"url": bad})).await;
+        assert!(status == StatusCode::BAD_REQUEST && error["errors"].get("url").is_some(), "{bad}: {error}");
+    }
+    let (status, shared) = w.app.put_json(&room, &w.carl, link.clone()).await;
+    assert_eq!((status, shared["room_url"].as_str()), (StatusCode::OK, Some("https://play.example.com/r/abc#code")), "anyone in the call: {shared}");
+    assert_eq!(shared["session_id"], session["session_id"]);
+    assert_eq!(owner_ws.wait_for("GAME_UPDATE").await["state"], shared, "viewers get it");
+    // Alice still has the earlier starts and stops queued: the room update is the next one with a link.
+    while alice_ws.wait_for("GAME_UPDATE").await["state"]["room_url"] != shared["room_url"] {}
+    let (status, _) = w.app.put_json(&room, &w.alice, json!({"url": "https://eu.play.example.com/r/x"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "a guild game's links stay on its exact host");
+    let (status, sub) = w.app.put_json(&room, &w.alice, json!({"url": "https://play.example.com/r/x"})).await;
+    assert_eq!((status, sub["room_url"].as_str()), (StatusCode::OK, Some("https://play.example.com/r/x")), "another room");
+    owner_ws.wait_for("GAME_UPDATE").await;
+
+    // A late joiner gets the link with the session (READY); null clears it.
+    let (_, ready) = Client::identify(&w.address, &w.owner).await;
+    assert_eq!(ready["guilds"][0]["games"][0]["state"]["room_url"], "https://play.example.com/r/x");
+    let (status, cleared) = w.app.put_json(&room, &w.alice, json!({"url": null})).await;
+    assert_eq!((status, cleared["room_url"].clone()), (StatusCode::OK, Value::Null));
+    assert!(owner_ws.wait_for("GAME_UPDATE").await["state"]["room_url"].is_null());
+
+    assert_eq!(w.app.patch(&format!("/guilds/{}/games/{web_id}", w.guild), &w.owner, json!({"kind": "sdk"})).await.0, StatusCode::OK);
+    assert!(owner_ws.wait_for("GAME_UPDATE").await["state"].is_null(), "a new kind ends it");
+
+    // Built-in web games are in every call's catalog.
+    let (status, krunker) = w.app.put_json(&path, &w.alice, json!({"game_id": "builtin:krunker"})).await;
+    assert_eq!((status, krunker["game"]["url"].as_str(), krunker["game"]["kind"].as_str()), (StatusCode::OK, Some("https://krunker.io/"), Some("web")));
+    let (status, shared) = w.app.put_json(&room, &w.carl, json!({"url": "https://krunker.io/?game=FRA:abc12"})).await;
+    assert_eq!((status, shared["room_url"].as_str()), (StatusCode::OK, Some("https://krunker.io/?game=FRA:abc12")));
 }
 
 /// 50 relay sends from alice at once, so the 20/s refill cannot hide the burst limit on a loaded machine.

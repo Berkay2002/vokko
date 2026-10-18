@@ -1,15 +1,23 @@
 // The host side of the games SDK (docs/design/games-host.md sections 6 and 7). A game frame says hello on `window`; the host
 // accepts it only from that frame's window and its expected origin, then hands over one MessagePort. Everything after that
 // flows on the port and is parsed here; anything else is dropped. Nothing on the port carries tokens or Vokko ids.
+// Website games (kind "web") get no port at all: they run their own lobby, so only the frame and the room-link rule live here.
 
 import { API_ORIGIN, MOCK } from "../api/config";
 import { GAME_RELAY_MAX_BYTES, type GameManifest, type GamePlayer } from "../api/types";
-import { builtinGame, isBuiltin } from "./builtin";
+import { BUILTIN_PREFIX, builtinGame, isBuiltin, isWebGame } from "./builtin";
 
 /** Built-ins load from the app bundle without allow-same-origin, so their origin is opaque ("null"), never the app's. */
 export const SANDBOX_BUILTIN = "allow-scripts allow-pointer-lock";
 /** Third-party games keep their own https origin; the same-origin policy keeps them out of the app. */
 export const SANDBOX_THIRD_PARTY = "allow-scripts allow-same-origin allow-pointer-lock";
+/**
+ * Website games add forms (name entry, lobby settings) and popups that leave the sandbox (sign-in, a shop or a help page; the
+ * desktop app sends them to the system browser). Never top navigation, modals or downloads.
+ */
+export const SANDBOX_WEB = `${SANDBOX_THIRD_PARTY} allow-forms allow-popups allow-popups-to-escape-sandbox`;
+/** What a website game may use besides that: fullscreen and pointer lock for shooters, clipboard for invite links, sound, gamepads. */
+export const ALLOW_WEB = "fullscreen; clipboard-write; autoplay; gamepad";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -31,16 +39,28 @@ export function appOrigins(): string[] {
   return [globalThis.location?.origin ?? "", API_ORIGIN].filter(Boolean);
 }
 
-/** Where the frame loads: built-ins from this app's bundle (the server's URL for them is ignored), others from the manifest. */
-export function frameUrl(game: GameManifest, base = globalThis.location?.origin ?? "http://localhost"): string {
-  return isBuiltin(game) ? new URL(builtinGame(game.id)?.url ?? `/games/${game.id.slice("builtin:".length)}/index.html`, base).href : game.url;
+/**
+ * The manifest this client trusts: for a built-in its own copy (the server's URL and kind for it are ignored; an unknown
+ * built-in is a bundled SDK game under /games/<name>/), otherwise the server's.
+ */
+export function trustedManifest(game: GameManifest): GameManifest {
+  if (!isBuiltin(game)) return game;
+  return builtinGame(game.id) ?? { ...game, url: `/games/${game.id.slice(BUILTIN_PREFIX.length)}/index.html`, kind: "sdk" };
 }
 
-/** The origin hellos must come from: "null" for a built-in (opaque), the manifest URL's origin otherwise. */
+/** A built-in served from the app bundle with an opaque origin (not a built-in website game). */
+export const isBundled = (game: GameManifest): boolean => isBuiltin(game) && !isWebGame(trustedManifest(game));
+
+/** Where the frame loads: bundled built-ins from this app, others from the (trusted) manifest URL. */
+export function frameUrl(game: GameManifest, base = globalThis.location?.origin ?? "http://localhost"): string {
+  return new URL(trustedManifest(game).url, base).href;
+}
+
+/** The origin hellos must come from: "null" for a bundled built-in (opaque), the manifest URL's origin otherwise. */
 export function frameOrigin(game: GameManifest): string {
-  if (isBuiltin(game)) return "null";
+  if (isBundled(game)) return "null";
   try {
-    return new URL(game.url).origin;
+    return new URL(trustedManifest(game).url).origin;
   } catch {
     return "";
   }
@@ -56,24 +76,65 @@ const bareHost = (host: string) => host.replace(/\.$/, "");
  * there would hand it the app; mirrors the server's own-origin rule).
  */
 export function sandboxFor(game: GameManifest, app: string[] = appOrigins(), allowLoopback: boolean = import.meta.env.DEV || MOCK): string | null {
-  if (isBuiltin(game)) return SANDBOX_BUILTIN;
+  if (isBundled(game)) return SANDBOX_BUILTIN;
+  const trusted = trustedManifest(game);
   let url: URL;
   try {
-    url = new URL(game.url);
+    url = new URL(trusted.url);
   } catch {
     return null;
   }
   const host = bareHost(url.hostname);
   if (url.protocol !== "https:" && !(allowLoopback && url.protocol === "http:" && LOCAL_HOSTS.has(host))) return null;
   if (url.username || url.password) return null;
-  const appHosts = app.flatMap(o => {
+  if (hostsOf(app).includes(host)) return null;
+  return isWebGame(trusted) ? SANDBOX_WEB : SANDBOX_THIRD_PARTY;
+}
+
+const hostsOf = (origins: string[]): string[] =>
+  origins.flatMap(o => {
     try {
       return [bareHost(new URL(o).hostname)];
     } catch {
       return [];
     }
   });
-  return appHosts.includes(host) ? null : SANDBOX_THIRD_PARTY;
+
+/** The `allow` attribute for the game's frame: nothing for SDK games, ALLOW_WEB for website games. */
+export const frameAllow = (game: GameManifest): string => (isWebGame(trustedManifest(game)) ? ALLOW_WEB : "");
+
+const ROOM_URL_MAX_BYTES = 512;
+
+/**
+ * A room link for the website game at `gameUrl` (the server's rule for PUT /channels/{id}/game/room): https, at most 512 bytes,
+ * no user info, on the game's host (a trailing dot ignored) or, with `subdomains` (built-ins, whose hosts are known), a subdomain
+ * of it; a fragment is fine. The normalized URL, or null.
+ */
+export function checkRoomUrl(gameUrl: string, raw: string, subdomains: boolean): string | null {
+  let room: URL;
+  let game: URL;
+  try {
+    room = new URL(raw.trim());
+    game = new URL(gameUrl);
+  } catch {
+    return null;
+  }
+  if (room.protocol !== "https:" || room.username || room.password) return null;
+  const [roomHost, gameHost] = [bareHost(room.hostname), bareHost(game.hostname)];
+  if (!roomHost || !gameHost || (roomHost !== gameHost && !(subdomains && roomHost.endsWith(`.${gameHost}`)))) return null;
+  const href = room.href;
+  return new TextEncoder().encode(raw.trim()).length > ROOM_URL_MAX_BYTES || new TextEncoder().encode(href).length > ROOM_URL_MAX_BYTES ? null : href;
+}
+
+/**
+ * The room link a website game's tile may load: the server's link checked again against the client's own manifest URL, and never
+ * on one of the app's hosts or a parent or subdomain of one (a framed page on the app's origin could lift its own sandbox).
+ */
+export function roomFrameUrl(game: GameManifest, raw: string, app: string[] = appOrigins()): string | null {
+  const url = checkRoomUrl(frameUrl(game), raw, isBuiltin(game));
+  if (url === null) return null;
+  const host = bareHost(new URL(url).hostname);
+  return hostsOf(app).some(a => a === host || a.endsWith(`.${host}`) || host.endsWith(`.${a}`)) ? null : url;
 }
 
 /** The game's hello: from `frame`'s window, from `origin`, the exact shape. Anything else is not one. */
@@ -160,7 +221,7 @@ export class FrameHost {
       if (message) this.handlers.onMessage(message);
     };
     // An opaque origin can only be addressed with "*"; the window check above already pinned the receiver.
-    target.postMessage({ vokko: "init", v: PROTOCOL_VERSION }, isBuiltin(this.game) ? "*" : frameOrigin(this.game), [channel.port2]);
+    target.postMessage({ vokko: "init", v: PROTOCOL_VERSION }, isBundled(this.game) ? "*" : frameOrigin(this.game), [channel.port2]);
     this.post(this.handlers.init());
   };
 

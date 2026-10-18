@@ -7,6 +7,7 @@ import { ApiRequestError } from "../api/rest";
 import type { Channel, GameManifest, Snowflake } from "../api/types";
 import type { MenuItem } from "../ui/ContextMenu";
 import { useVoice } from "../voice/store";
+import { openModal } from "../shell/modalStore";
 import { useVoiceUi } from "../voice/uiStore";
 import { listGuildGames, startGame } from "./api";
 import { BUILTIN_GAMES } from "./builtin";
@@ -43,7 +44,7 @@ export function useGameMenuItems(channel: Pick<Channel, "id" | "guild_id">): Men
   const games = useGameCatalog(channel.guild_id ?? null);
   const running = useVoice(s => s.games[channel.id]);
   const focus = () => useVoiceUi.getState().setFocusedTile(GAME_TILE_ID);
-  return games.map(game => {
+  const rows = games.map((game): MenuItem => {
     const current = running?.game.id === game.id;
     return {
       id: `game-${game.id}`,
@@ -61,4 +62,5 @@ export function useGameMenuItems(channel: Pick<Channel, "id" | "guild_id">): Men
       },
     };
   });
+  return [...rows, { id: "game-credits", label: "Credits and licenses", sub: "The games' sources, licenses and sites", onSelect: () => openModal({ type: "gameCredits" }) }];
 }

@@ -26,6 +26,7 @@ import { RadioGroup, SwitchRow, Toggle } from "./settings/controls";
 import { SERVER_TEMPLATES, type ServerTemplate } from "./templates";
 import { CameraPreviewModal, ChannelStatusModal, ScreenSharePickerModal } from "../voice";
 import { WatchModal } from "../watch";
+import { GameCreditsModal } from "../games";
 
 // The settings screens and the profile editor are split out of the startup bundle; `preloadSettings()` fetches them at idle so opening one does not wait.
 // A failed fetch (dev server restart, stale chunk after a redeploy) is retried once; if that fails too, ChunkBoundary offers a retry.
@@ -632,6 +633,8 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
       return <ChannelStatusModal key={id} channelId={spec.channelId} />;
     case "watchTogether":
       return <WatchModal key={id} channelId={spec.channelId} />;
+    case "gameCredits":
+      return <GameCreditsModal key={id} />;
     case "cameraPreview":
       return <CameraPreviewModal key={id} />;
     case "screenShare":
