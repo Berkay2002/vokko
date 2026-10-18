@@ -18,6 +18,7 @@ import { isShiftDown } from './util';
 import { useMessageThreadActions } from '../threads/useMessageActions';
 import { MessageAppsMenu } from '../apps/menus';
 import { canEndPoll, endPollNow } from '../polls/usePollActions';
+import { rovingKey } from '../ui';
 
 export interface MessageMenuTarget {
   message: Message;
@@ -274,14 +275,7 @@ function SubMenu({ label, children, focusFirst }: { label: string; children: Rea
       if (!root) return;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
         if ((e.target as HTMLElement).matches('input, textarea, select')) { e.stopPropagation(); return; }
-        const items = subItems(root);
-        if (items.length === 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const at = items.indexOf(document.activeElement as HTMLElement);
-        const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
-          : e.key === 'ArrowDown' ? (at + 1) % items.length : at <= 0 ? items.length - 1 : at - 1;
-        items[next]?.focus();
+        if (rovingKey(e, subItems(root))) e.stopPropagation();
       } else if (e.key === 'ArrowLeft') {
         if ((e.target as HTMLElement).matches('input, textarea, select')) { e.stopPropagation(); return; }
         // the parent's handler unmounts this submenu; focus its row first so focus does not fall to <body>
