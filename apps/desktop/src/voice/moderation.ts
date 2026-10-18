@@ -25,6 +25,13 @@ export function isStageModeratorBits(bits: bigint): boolean {
 export const startStage = (channelId: Snowflake, topic: string): Promise<StageInstance> =>
   request<StageInstance>("POST", "/stage-instances", { channel_id: channelId, topic: topic.trim() });
 
+/** Starts the stage and moves the starter (already inside, suppressed like every stage join) to the speakers, as Discord does. */
+export async function startStageAsSpeaker(guildId: Snowflake, channelId: Snowflake, topic: string): Promise<StageInstance> {
+  const stage = await startStage(channelId, topic);
+  await setSuppressed(guildId, channelId, "@me", false);
+  return stage;
+}
+
 export const editStageTopic = (channelId: Snowflake, topic: string): Promise<StageInstance> =>
   request<StageInstance>("PATCH", `/stage-instances/${channelId}`, { topic: topic.trim() });
 

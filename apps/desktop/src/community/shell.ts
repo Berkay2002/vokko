@@ -12,3 +12,5 @@ export { Avatar, GuildIcon } from "../shell/Avatar";
 export { Modal, Tooltip } from "../ui";
 export { Page, Category, SwitchRow, Toggle } from "../shell/settings/controls";
 export { SaveBar } from "../shell/settings/SaveBar";
+export { joinVoiceChannel } from "../voice/engine";
+export { isStageModeratorBits } from "../voice/moderation";

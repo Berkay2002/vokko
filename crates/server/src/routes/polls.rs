@@ -62,6 +62,8 @@ async fn vote_target(state: &AppState, user_id: i64, id: &str, mid: &str, answer
     }
     // A timeout keeps view and history, which is all a vote needs above: refuse it the way a message send is refused.
     if let Some(guild_id) = access.channel.guild_id {
+        // A vote is like a reaction: held back until the rules are accepted.
+        crate::safety::check_rules_accepted(state, guild_id, user_id).await?;
         let guild = access::guild_access(state, user_id, guild_id).await?;
         if guild.timed_out && guild.owner_id != user_id && guild.permissions & ADMINISTRATOR == 0 {
             return Err(ApiErr::missing_permissions());

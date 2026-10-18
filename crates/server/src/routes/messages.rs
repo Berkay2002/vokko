@@ -790,6 +790,10 @@ async fn edit_message(
     if row.author_id != user_id {
         return Err(ApiErr::not_author());
     }
+    // A member held by the rules gate (for example one who rejoined) cannot turn old messages into new content either.
+    if let Some(guild_id) = access.channel.guild_id {
+        crate::safety::check_rules_accepted(&state, guild_id, user_id).await?;
+    }
     if !matches!(MessageType::from_u8(row.kind as u8), Some(MessageType::Default | MessageType::Reply)) {
         return Err(ApiErr::invalid("message_id", "Cannot edit a system message."));
     }

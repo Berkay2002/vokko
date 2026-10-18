@@ -16,6 +16,7 @@ import { rememberMessage, rememberMessages } from './userCache';
 import { pushRecentEmoji, recordEmojiUse, sameUnicodeEmoji } from './emojiData';
 import { newNonce } from './util';
 import { applyPollVote } from '../polls/pollState';
+import { RULES_NOT_ACCEPTED, noteRulesRefused } from '../community';
 
 const MAX_LOADED_CHANNELS = 12;
 
@@ -310,6 +311,7 @@ export const messageStore = {
       const error = e instanceof Error ? e.message : 'Failed to send';
       const errorCode = e instanceof ApiRequestError ? e.code : undefined;
       if (e instanceof RateLimitedError && e.code === SLOWMODE_CODE) startCooldown(channelId, e.retryAfter * 1000);
+      if (errorCode === RULES_NOT_ACCEPTED) noteRulesRefused(channelId); // the composer turns into the rules bar
       update(channelId, s => ({ ...s, pending: s.pending.map(x => (x.nonce === nonce ? { ...x, state: 'failed', error, errorCode } : x)) }));
     }
   },

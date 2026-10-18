@@ -22,12 +22,13 @@ import { compareIds } from "../snowflake";
 import { Perm, hasBit } from "../permissions";
 import { channelPermsOf, guildPermsOf } from "./access";
 import { db, nextId, userOf, type MockGuild } from "./db";
-import { addMemberFlags, addedByOnboarding, flagsField } from "./memberFlags";
+import { addMemberFlags, addedByOnboarding, flagsField, getMemberFlags } from "./memberFlags";
 import { addChannel, createAccount, createGuildRecord, fail, pendingAttachment, requireChannel, requireGuildMember, requireGuildPerm } from "./ops";
 import { memberProfileFields } from "./perks";
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
 import { mutualFriendsOf } from "./mutualFriends";
+import { createStage, endStage, isStageModerator, stageInstances } from "./voice";
 
 function invalid(field: string, message: string): never {
   return fail(400, 50035, "Invalid Form Body", { [field]: { code: "INVALID", message } });
@@ -41,6 +42,8 @@ interface MockEvent extends Omit<GuildScheduledEvent, "user_count" | "user_rsvp"
 }
 
 const events = new Map<string, MockEvent>();
+/** Event id to the id of the stage instance that event opened: completing the event ends only that one. */
+const eventStages = new Map<string, string>();
 const MAX_OPEN_EVENTS = 100;
 
 const isFinished = (status: ScheduledEventStatus) => status === ScheduledEventStatus.Completed || status === ScheduledEventStatus.Canceled;
@@ -281,6 +284,20 @@ route("PATCH", `/guilds/${ID}/scheduled-events/${ID}`, ({ viewer, params, body }
   const touched = "entity_type" in body || "channel_id" in body;
   checkEntity(guildId, viewer.user.id, resolved, touched, touched);
   const image = "image_attachment_id" in body ? coverUrl(body.image_attachment_id, viewer.user.id) : event.image;
+  // A stage event owns the stage it opened while it is live: starting needs a stage moderator and opens the stage (one already open is
+  // kept and stays the moderators'); completing needs only the event permissions and ends the stage the event opened when the actor moderates.
+  const stageId = entity_type === ScheduledEventEntityType.StageInstance ? resolved.channel_id : null;
+  const stageChannel = stageId ? db.channels.get(stageId) : undefined;
+  const moderates = !!stageChannel && isStageModerator(stageChannel, viewer.user.id);
+  if (stageId && status === ScheduledEventStatus.Active) {
+    if (!moderates) fail(403, 50013, "Missing Permissions");
+    if (!stageInstances.has(stageId)) eventStages.set(event.id, createStage(viewer.user.id, { channel_id: stageId, topic: resolved.name }, emit).id);
+  }
+  if (stageId && status === ScheduledEventStatus.Completed) {
+    const opened = eventStages.get(event.id);
+    eventStages.delete(event.id);
+    if (moderates && opened && stageInstances.get(stageId)?.id === opened) endStage(stageId, emit);
+  }
   const before = { ...event, interested: new Set(event.interested) };
   const viewersBefore = viewersOf(event);
   Object.assign(event, {
@@ -381,6 +398,8 @@ interface MockOnboarding {
   mode: OnboardingMode;
   default_channel_ids: string[];
   rules: GuildOnboarding["rules"];
+  /** When the rules appeared (ms): only members who joined after it are held until they accept (server: `rules_since`). */
+  rules_since: number | null;
   prompts: OnboardingPrompt[];
 }
 
@@ -388,7 +407,7 @@ const onboardings = new Map<string, MockOnboarding>();
 /** guild → user → option ids */
 const answers = new Map<string, Map<string, Set<string>>>();
 
-const emptyOnboarding = (): MockOnboarding => ({ enabled: false, mode: OnboardingMode.Default, default_channel_ids: [], rules: null, prompts: [] });
+const emptyOnboarding = (): MockOnboarding => ({ enabled: false, mode: OnboardingMode.Default, default_channel_ids: [], rules: null, rules_since: null, prompts: [] });
 const configOf = (guildId: string): MockOnboarding => onboardings.get(guildId) ?? emptyOnboarding();
 
 function onboardingView(guildId: string): GuildOnboarding {
@@ -414,7 +433,7 @@ function onboardingView(guildId: string): GuildOnboarding {
 route("GET", `/guilds/${ID}/onboarding`, ({ viewer, params }) => {
   const guildId = params[0] ?? "";
   requireGuildMember(guildId, viewer.user.id);
-  const config = onboardingView(guildId);
+  const config = { ...onboardingView(guildId), rules_pending: rulesPending(guildId, viewer.user.id) };
   // Channels the member cannot view are not theirs to learn about; editors (MANAGE_GUILD) see everything.
   if (hasBit(guildPermsOf(guildId, viewer.user.id), Perm.MANAGE_GUILD)) return config;
   const viewable = (id: string) => {
@@ -509,7 +528,8 @@ route("PUT", `/guilds/${ID}/onboarding`, ({ viewer, params, body }) => {
     }
   }
   const mode = body.mode === OnboardingMode.Advanced ? OnboardingMode.Advanced : body.mode === OnboardingMode.Default ? OnboardingMode.Default : current.mode;
-  onboardings.set(guildId, { enabled: bool(body.enabled) ?? current.enabled, mode, default_channel_ids: defaults, rules, prompts: prompts ?? current.prompts });
+  const rulesSince = !rules ? null : configOf(guildId).rules ? configOf(guildId).rules_since : Date.now();
+  onboardings.set(guildId, { enabled: bool(body.enabled) ?? current.enabled, mode, default_channel_ids: defaults, rules, rules_since: rulesSince, prompts: prompts ?? current.prompts });
   return onboardingView(guildId);
 });
 
@@ -573,6 +593,22 @@ function memberOf(guildId: string, userId: string): GuildMember {
     ...memberProfileFields(record),
     ...flagsField(guildId, userId),
   };
+}
+
+/** The member is held by the rules gate (same conditions and exemptions as the server's `rules_pending`). */
+function rulesPending(guildId: string | null | undefined, userId: string): boolean {
+  const guild = guildId ? db.guilds.get(guildId) : undefined;
+  const record = guild?.members.get(userId);
+  const config = guildId ? onboardings.get(guildId) : undefined;
+  if (!guildId || !guild || !record || !config?.enabled || !config.rules || config.rules_since === null) return false;
+  const flags = getMemberFlags(guildId, userId);
+  const held = (flags & MemberFlags.StartedOnboarding) !== 0 && (flags & MemberFlags.CompletedOnboarding) === 0 && Date.parse(record.joined_at) >= config.rules_since;
+  return held && guild.guild.owner_id !== userId && !userOf(userId).bot && !hasBit(guildPermsOf(guildId, userId), Perm.ADMINISTRATOR);
+}
+
+/** 403 150010 while the member still has to accept the guild's rules. */
+export function checkRulesAccepted(guildId: string | null | undefined, userId: string): void {
+  if (rulesPending(guildId, userId)) fail(403, 150010, "Accept the server rules to talk here");
 }
 
 /** A member joined through an invite: guilds with onboarding switched on start them in the flow. */
@@ -681,6 +717,7 @@ function finishDemoGuild(guild: MockGuild, guildId: string, byName: (name: strin
     mode: OnboardingMode.Advanced,
     default_channel_ids: [byName("general").id],
     rules: { description: "A few ground rules before you join in.", items: ["Be kind to everyone.", "No spam or self-promotion.", "Keep it friendly and on topic."] },
+    rules_since: Date.now(),
     prompts: [
       {
         id: nextId(),

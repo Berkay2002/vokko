@@ -47,6 +47,13 @@ export function statusLabel(status: ScheduledEventStatus): string {
   }
 }
 
+/** The join action of a live event: Join Stage for a stage event, Join Voice for a voice one; none for external or not-live events. */
+export function joinLabel(event: Pick<GuildScheduledEvent, "status" | "entity_type" | "channel_id">): "Join Stage" | "Join Voice" | null {
+  if (event.status !== ScheduledEventStatus.Active || !event.channel_id) return null;
+  if (event.entity_type === ScheduledEventEntityType.StageInstance) return "Join Stage";
+  return event.entity_type === ScheduledEventEntityType.Voice ? "Join Voice" : null;
+}
+
 export function entityLabel(type: ScheduledEventEntityType): string {
   return type === ScheduledEventEntityType.External ? "Somewhere else" : type === ScheduledEventEntityType.StageInstance ? "Stage" : "Voice channel";
 }

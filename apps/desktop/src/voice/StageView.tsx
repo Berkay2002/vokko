@@ -11,7 +11,7 @@ import { useContextMenu } from "../ui";
 import { Avatar } from "../shell/Avatar";
 import { userContextItems } from "../shell/menus";
 import { joinVoiceChannel, leaveVoice } from "./engine";
-import { endStage, isStageModeratorBits, setHandRaised, setSuppressed, startStage, viewerBits } from "./moderation";
+import { endStage, isStageModeratorBits, setHandRaised, setSuppressed, startStageAsSpeaker, viewerBits } from "./moderation";
 import { stageRoster } from "./reducer";
 import { useIsSpeaking, useVoice } from "./store";
 
@@ -92,7 +92,7 @@ function AudienceMember({ state, guildId, channelId, moderator }: { state: Voice
   );
 }
 
-function StartStageForm({ channelId, onError }: { channelId: Snowflake; onError(text: string | null): void }) {
+function StartStageForm({ guildId, channelId, onError }: { guildId: Snowflake; channelId: Snowflake; onError(text: string | null): void }) {
   const [topic, setTopic] = useState("");
   const [busy, setBusy] = useState(false);
   const submit = (e: FormEvent) => {
@@ -100,7 +100,7 @@ function StartStageForm({ channelId, onError }: { channelId: Snowflake; onError(
     if (!topic.trim()) return;
     setBusy(true);
     onError(null);
-    startStage(channelId, topic)
+    startStageAsSpeaker(guildId, channelId, topic)
       .catch(error => onError(errorText(error)))
       .finally(() => setBusy(false));
   };
@@ -155,7 +155,7 @@ export function StageView({ channel }: { channel: Channel }) {
         </span>
       </header>
 
-      {!stage && moderator && inside && <StartStageForm channelId={channel.id} onError={setError} />}
+      {!stage && moderator && inside && <StartStageForm guildId={guildId} channelId={channel.id} onError={setError} />}
       {!stage && !moderator && <p className="stage-hint">A stage moderator has not started this stage yet.</p>}
       {!stage && moderator && !inside && <p className="stage-hint">Join the stage to start it.</p>}
       {error && (
@@ -188,7 +188,7 @@ export function StageView({ channel }: { channel: Channel }) {
             Join Stage
           </button>
         )}
-        {mine?.suppress && hasBit(bits, Perm.REQUEST_TO_SPEAK) && (
+        {mine?.suppress && !moderator && hasBit(bits, Perm.REQUEST_TO_SPEAK) && (
           <button type="button" className={`btn${mine.request_to_speak_timestamp ? " btn-primary" : ""}`} aria-pressed={!!mine.request_to_speak_timestamp} onClick={() => act(setHandRaised(guildId, channel.id, !mine.request_to_speak_timestamp))}>
             <Hand size={16} aria-hidden="true" />
             {mine.request_to_speak_timestamp ? "Lower Hand" : "Raise Hand"}

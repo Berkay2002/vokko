@@ -140,6 +140,7 @@ pub async fn load(state: &AppState, guild: i64) -> ApiResult<GuildOnboarding> {
             enabled: false,
             mode: OnboardingMode::Default,
             rules: None,
+            rules_pending: false,
         });
     };
     let items: Option<Vec<String>> = config.rules.as_deref().and_then(|raw| serde_json::from_str(raw).ok());
@@ -150,6 +151,7 @@ pub async fn load(state: &AppState, guild: i64) -> ApiResult<GuildOnboarding> {
         enabled: config.enabled,
         mode: OnboardingMode::from_u8(config.mode as u8).unwrap_or(OnboardingMode::Default),
         rules: items.filter(|items| !items.is_empty()).map(|items| OnboardingRules { description: config.rules_description, items }),
+        rules_pending: false,
     })
 }
 
@@ -157,6 +159,7 @@ async fn get_onboarding(State(state): State<AppState>, AuthUser(user_id): AuthUs
     let guild = guild_id(&id)?;
     let access = guild_access(&state, user_id, guild).await?;
     let mut config = load(&state, guild).await?;
+    config.rules_pending = crate::safety::rules_pending(&state, guild, user_id).await?;
     // Channels the member cannot view are not theirs to learn about; editors (MANAGE_GUILD) see the whole configuration.
     if access.permissions & MANAGE_GUILD == 0 {
         let mut ids: Vec<i64> = config.default_channel_ids.iter().map(|id| id.db()).collect();
@@ -367,8 +370,10 @@ async fn put_onboarding(
     let mut tx = state.db.begin().await?;
     sqlx::query("SELECT id FROM guilds WHERE id = $1 FOR UPDATE").bind(guild).execute(&mut *tx).await?;
     sqlx::query(
-        "INSERT INTO guild_onboarding (guild_id, enabled, mode, default_channel_ids, rules_description, rules) VALUES ($1, $2, $3, $4, $5, $6) \
-         ON CONFLICT (guild_id) DO UPDATE SET enabled = $2, mode = $3, default_channel_ids = $4, rules_description = $5, rules = $6",
+        "INSERT INTO guild_onboarding (guild_id, enabled, mode, default_channel_ids, rules_description, rules, rules_since) \
+         VALUES ($1, $2, $3, $4, $5, $6::text, CASE WHEN $6::text IS NULL THEN NULL ELSE now() END) \
+         ON CONFLICT (guild_id) DO UPDATE SET enabled = $2, mode = $3, default_channel_ids = $4, rules_description = $5, rules = $6::text, \
+         rules_since = CASE WHEN $6::text IS NULL THEN NULL WHEN guild_onboarding.rules IS NULL THEN now() ELSE guild_onboarding.rules_since END",
     )
     .bind(guild)
     .bind(enabled)

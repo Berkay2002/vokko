@@ -217,6 +217,11 @@ impl ApiErr {
         Self::new(StatusCode::FORBIDDEN, 50009, "Channel verification level is too high for you to gain access. Verify your email to talk here.")
     }
 
+    /// 403 / 150010: the guild has a rules screen the member has not accepted yet.
+    pub fn rules_not_accepted() -> Self {
+        Self::new(StatusCode::FORBIDDEN, 150010, "Accept the server rules to talk here")
+    }
+
     /// 400 / 200000: an AutoMod rule blocked the message; `errors.content` carries the rule's custom message when it has one.
     pub fn automod_blocked(custom_message: Option<&str>) -> Self {
         let error = Self::new(StatusCode::BAD_REQUEST, 200000, "Message was blocked by automatic moderation");

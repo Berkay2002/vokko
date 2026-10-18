@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Hash, Plus, Trash2, Volume2 } from "lucide-react";
 import { ChannelType, OnboardingMode, OnboardingPromptType, type GuildOnboarding, type Snowflake } from "../api/types";
 import { errorText } from "./errors";
+import { setOnboardingConfig } from "./onboardingConfig";
 import { LIMITS, draftProblems, draftsEqual, emptyOption, emptyPrompt, fromConfig, ruleLines, toRequest, type Draft, type DraftOption, type DraftPrompt } from "./onboardingDraft";
 import { Category, Page, Perm, SaveBar, SwitchRow, Toggle, request, usePermissions, useStore } from "./shell";
 
@@ -158,6 +159,7 @@ export function OnboardingSettings({ guildId }: { guildId: Snowflake }) {
     setState({ busy: true, error: null, done: false });
     try {
       const config = await request<GuildOnboarding>("PUT", `/guilds/${guildId}/onboarding`, toRequest(draft));
+      setOnboardingConfig(config);
       const loaded = fromConfig(config);
       setSaved(loaded);
       setDraft(loaded);

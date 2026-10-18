@@ -23,6 +23,7 @@ import {
 } from "../types";
 import { Perm, hasBit } from "../permissions";
 import { compareIds } from "../snowflake";
+import { checkRulesAccepted } from "./community";
 import { canView, channelPermsOf } from "./access";
 import { db, nextId, sortedMessages, type MockChannel, type MockMessage } from "./db";
 import { addMessage, channelAudience, fail, messageHooks, pendingAttachment, requireChannel, requireChannelPerm, requireGuildMember, requireMessage, MISSING_PERMISSIONS } from "./ops";
@@ -247,6 +248,7 @@ route("POST", `/channels/${ID}/messages/${ID}/threads`, ({ viewer, params, body 
   const parent = requireChannel(params[0] ?? "", viewer.user.id);
   if (!hasThreads(parent)) fail(400, 50024, WRONG_TYPE);
   requireChannelPerm(parent, viewer.user.id, Perm.CREATE_PUBLIC_THREADS);
+  checkRulesAccepted(parent.guild_id, viewer.user.id);
   const message = requireMessage(parent.id, params[1] ?? "");
   const name = validName(body.name);
   const duration = archiveDuration(body.auto_archive_duration, parent.default_auto_archive_duration ?? DEFAULT_ARCHIVE);
@@ -264,6 +266,7 @@ route("POST", `/channels/${ID}/threads`, ({ viewer, params, body }) => {
   const priv = body.type === ChannelType.PrivateThread;
   if (body.type !== undefined && body.type !== ChannelType.PublicThread && body.type !== ChannelType.AnnouncementThread && !priv) invalid("type", "BASE_TYPE_CHOICES", "Value must be one of (10, 11, 12).");
   requireChannelPerm(parent, viewer.user.id, priv ? Perm.CREATE_PRIVATE_THREADS : Perm.CREATE_PUBLIC_THREADS);
+  checkRulesAccepted(parent.guild_id, viewer.user.id);
   const name = validName(body.name);
   const duration = archiveDuration(body.auto_archive_duration, parent.default_auto_archive_duration ?? DEFAULT_ARCHIVE);
   const thread = createThreadRecord({ parent, type: priv ? ChannelType.PrivateThread : undefined, name, owner_id: viewer.user.id, auto_archive_duration: duration, invitable: body.invitable === false ? false : true });

@@ -513,6 +513,22 @@ async fn edit(
     };
     let entity_touched = body.entity_type.is_some() || body.channel_id.is_some();
     fields.validate(&state, user_id, guild, entity_touched, entity_touched).await?;
+    // Starting a stage event opens its stage, which takes the same permissions as doing that by hand. This looks at the channel the event
+    // will have after this edit, not the one it has now. Completing needs only the event permissions: the stage ends with it when the
+    // actor is a stage moderator, otherwise it stays until its moderators leave or someone ends it.
+    let stage_moderator = match (fields.entity_type, fields.channel_id) {
+        (ScheduledEventEntityType::StageInstance, Some(channel)) => {
+            crate::voice::state::is_stage_moderator(access::channel_access(&state, user_id, channel).await?.permissions)
+        }
+        _ => false,
+    };
+    if new_status == Some(ScheduledEventStatus::Active)
+        && fields.entity_type == ScheduledEventEntityType::StageInstance
+        && fields.channel_id.is_some()
+        && !stage_moderator
+    {
+        return Err(ApiErr::missing_permissions());
+    }
     // The claim and the update commit together: a failing update leaves the upload unclaimed. The event row is locked first, so two
     // edits replacing the cover take turns and each releases the cover it actually replaced.
     let mut tx = state.db.begin().await?;
@@ -554,6 +570,23 @@ async fn edit(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+    // A stage event owns the stage it opened for as long as it is live: starting opens it (a stage already open is kept and stays
+    // the moderators'), completing ends the one it opened.
+    if let (Some(channel), ScheduledEventEntityType::StageInstance) = (fields.channel_id, fields.entity_type) {
+        match new_status {
+            Some(ScheduledEventStatus::Active) => {
+                if let Err(error) = crate::voice::stage::open_stage(&state, guild, channel, &fields.name, Some(row.id)).await {
+                    tracing::warn!("scheduled event {}: cannot open the stage: {error:?}", row.id);
+                }
+            }
+            Some(ScheduledEventStatus::Completed) if stage_moderator => {
+                if let Err(error) = crate::voice::stage::end_stage_of_event(&state, channel, row.id).await {
+                    tracing::warn!("scheduled event {}: cannot end the stage: {error:?}", row.id);
+                }
+            }
+            _ => {}
+        }
+    }
     // A replaced or removed cover is not needed any more.
     if let Some(old) = current_cover.as_ref().filter(|old| Some(*old) != image_path.as_ref()) {
         release_covers(&state, std::slice::from_ref(old)).await;

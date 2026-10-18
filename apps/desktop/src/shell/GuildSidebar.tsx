@@ -7,7 +7,7 @@ import { channelMentionCount, isChannelUnread, useStore } from "../api/store";
 import { StageLivePill, VoiceChannelRow, VoiceChannelUsers } from "../voice";
 import { ChannelType, type Channel, type Guild, type Snowflake } from "../api/types";
 import { Popout, Tooltip, useContextMenu } from "../ui";
-import { EventsQuickLink } from "../community";
+import { ChannelsAndRolesLink, EventsQuickLink } from "../community";
 import { MembersQuickLink } from "../members";
 import { groupChannels } from "./channels";
 import { useIsMuted, useLocalState, useMuteLapse } from "./localState";
@@ -210,6 +210,7 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
       <GuildHeader guild={guild} overBanner={!!banner && bannerFade < 1} />
       {!banner && (
         <>
+          <ChannelsAndRolesLink guildId={guild.id} />
           <EventsQuickLink guildId={guild.id} />
           <MembersQuickLink guild={guild} />
         </>
@@ -219,6 +220,7 @@ export function GuildSidebar({ guild }: { guild: Guild }) {
         {banner && (
           <>
             <div className="guild-banner" style={{ backgroundImage: `url("${banner}")`, opacity: 1 - bannerFade }} aria-hidden="true" />
+            <ChannelsAndRolesLink guildId={guild.id} />
             <EventsQuickLink guildId={guild.id} />
             <MembersQuickLink guild={guild} />
           </>

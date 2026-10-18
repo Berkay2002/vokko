@@ -11,6 +11,8 @@ import { ApiRequestError } from "../errors";
 import { DEFAULT_EVERYONE, Perm } from "../permissions";
 import { ChannelType, MemberFlags, OnboardingMode, RelationshipType, type FriendSuggestionsResponse, type GuildMember, type GuildOnboarding, type GuildScheduledEvent, type OnboardingCompletion } from "../types";
 import { db } from "./db";
+import { onboardingStartedFor } from "./community";
+import { stageInstances } from "./voice";
 import { addChannel, createAccount, createGuildRecord } from "./ops";
 import { handleRoute } from "./routes";
 import { setRelationship } from "./views";
@@ -239,6 +241,43 @@ describe("events and channel visibility", () => {
   });
 });
 
+describe("stage events", () => {
+  it("need a stage moderator to start, but any event manager can complete; completing ends only the stage the event opened", () => {
+    const stage = addChannel(guildId, { name: "town-hall", type: 13 });
+    const role = { id: "9400", name: "events", color: 0, hoist: false, position: 1, permissions: Perm.MANAGE_EVENTS.toString(), mentionable: false };
+    db.guilds.get(guildId)!.guild.roles.push(role);
+    db.guilds.get(guildId)!.members.get(ids.alice!)!.roles = [role.id];
+    const create = (name: string) =>
+      call<GuildScheduledEvent>("owner", "POST", `/guilds/${guildId}/scheduled-events`, { name, entity_type: 1, channel_id: stage.id, scheduled_start_time: inHours(3) });
+    const setStatus = (who: string, event: GuildScheduledEvent, status: number) => () => call<GuildScheduledEvent>(who, "PATCH", `/guilds/${guildId}/scheduled-events/${event.id}`, { status });
+
+    const first = create("Town hall");
+    expect(errorOf(setStatus("alice", first, 2))).toEqual({ status: 403, code: 50013 });
+    expect(stageInstances.has(stage.id)).toBe(false);
+    setStatus("owner", first, 2)();
+    expect(stageInstances.get(stage.id)?.topic).toBe("Town hall");
+    setStatus("alice", first, 3)();
+    expect(stageInstances.has(stage.id)).toBe(true);
+    setStatus("owner", create("Second"), 2)();
+    call("owner", "DELETE", `/stage-instances/${stage.id}`);
+
+    // a stage a moderator opened by hand is not the event's to end
+    call("owner", "POST", "/stage-instances", { channel_id: stage.id, topic: "By hand" });
+    const third = create("Third");
+    setStatus("owner", third, 2)();
+    setStatus("owner", third, 3)();
+    expect(stageInstances.get(stage.id)?.topic).toBe("By hand");
+
+    // an event that opened its stage ends it when a moderator completes it
+    call("owner", "DELETE", `/stage-instances/${stage.id}`);
+    const fourth = create("Fourth");
+    setStatus("owner", fourth, 2)();
+    expect(stageInstances.has(stage.id)).toBe(true);
+    setStatus("owner", fourth, 3)();
+    expect(stageInstances.has(stage.id)).toBe(false);
+  });
+});
+
 describe("onboarding", () => {
   const configure = (extra: Record<string, unknown> = {}) => {
     const gamer = { id: "9201", name: "gamer", color: 0, hoist: false, position: 1, permissions: "0", mentionable: false };
@@ -271,7 +310,7 @@ describe("onboarding", () => {
   it("only editors with MANAGE_GUILD and MANAGE_ROLES configure, roles must be below them", () => {
     expect(errorOf(() => call("alice", "PUT", `/guilds/${guildId}/onboarding`, { enabled: true })).code).toBe(50013);
     const { config } = configure();
-    expect(call<GuildOnboarding>("alice", "GET", `/guilds/${guildId}/onboarding`)).toEqual(config);
+    expect(call<GuildOnboarding>("alice", "GET", `/guilds/${guildId}/onboarding`)).toEqual({ ...config, rules_pending: false });
     const editor = { id: "9300", name: "editor", color: 0, hoist: false, position: 1, permissions: (Perm.MANAGE_GUILD | Perm.MANAGE_ROLES).toString(), mentionable: false };
     const high = { id: "9301", name: "high", color: 0, hoist: false, position: 5, permissions: "0", mentionable: false };
     db.guilds.get(guildId)!.guild.roles.push(editor, high);
@@ -315,6 +354,55 @@ describe("onboarding", () => {
     expect(errorOf(answer([games], true)).code).toBe(50035);
     join("dana");
     expect(call<GuildMember[]>("owner", "GET", `/guilds/${guildId}/members`).find(m => m.user.id === ids.dana)!.flags).toBeUndefined();
+  });
+
+  it("holds members who joined after the rules back from messages and reactions until they accept (150010)", () => {
+    const { config } = configure();
+    const games = config.prompts[0]!.options[0]!.id;
+    const posted = call<{ id: string }>("owner", "POST", `/channels/${generalId}/messages`, { content: "hello" });
+    const send = (who: string) => () => call(who, "POST", `/channels/${generalId}/messages`, { content: "hi" });
+    const react = (who: string) => () => call(who, "PUT", `/channels/${generalId}/messages/${posted.id}/reactions/${encodeURIComponent("👍")}/@me`);
+    const pending = (who: string) => call<GuildOnboarding>(who, "GET", `/guilds/${guildId}/onboarding`).rules_pending;
+
+    join("carl");
+    expect(pending("carl")).toBe(true);
+    expect(errorOf(send("carl"))).toEqual({ status: 403, code: 150010 });
+    expect(errorOf(react("carl"))).toEqual({ status: 403, code: 150010 });
+    expect(errorOf(() => call("carl", "POST", `/channels/${generalId}/threads`, { name: "side talk" }))).toEqual({ status: 403, code: 150010 });
+    expect(errorOf(() => call("carl", "POST", `/channels/${generalId}/messages/${posted.id}/threads`, { name: "side talk" }))).toEqual({ status: 403, code: 150010 });
+    // alice and bob joined before the rules existed, the owner owns the guild: none of them are held
+    for (const who of ["alice", "bob", "owner"]) {
+      expect(pending(who)).toBe(false);
+      send(who)();
+    }
+    react("alice")();
+
+    call("carl", "PUT", `/guilds/${guildId}/onboarding-responses`, { option_ids: [games], rules_accepted: true });
+    expect(pending("carl")).toBe(false);
+    send("carl")();
+    react("carl")();
+
+    // a member who leaves and joins again after the rules is held, and cannot rewrite old messages either
+    const old = call<{ id: string }>("bob", "POST", `/channels/${generalId}/messages`, { content: "old" });
+    const bob = db.guilds.get(guildId)!.members.get(ids.bob!)!;
+    bob.joined_at = new Date(Date.now() + 1000).toISOString();
+    onboardingStartedFor(guildId, ids.bob!);
+    expect(errorOf(() => call("bob", "PATCH", `/channels/${generalId}/messages/${old.id}`, { content: "new" })).code).toBe(150010);
+
+    // clearing the rules lifts the hold for members who have not accepted
+    join("dana");
+    expect(errorOf(send("dana")).code).toBe(150010);
+    call("owner", "PUT", `/guilds/${guildId}/onboarding`, { rules: null });
+    send("dana")();
+  });
+
+  it("lets a member who joined before onboarding existed save their answers (Channels & Roles)", () => {
+    const { config } = configure();
+    const games = config.prompts[0]!.options[0]!.id;
+    expect(call<GuildMember[]>("owner", "GET", `/guilds/${guildId}/members`).find(m => m.user.id === ids.alice)!.flags).toBeUndefined();
+    const done = call<OnboardingCompletion>("alice", "PUT", `/guilds/${guildId}/onboarding-responses`, { option_ids: [games], rules_accepted: true });
+    expect(done.member.roles).toHaveLength(1);
+    expect(call<{ option_ids: string[] }>("alice", "GET", `/guilds/${guildId}/onboarding-responses`).option_ids).toEqual([games]);
   });
 
   it("only takes back roles that onboarding added, even when the options changed", () => {

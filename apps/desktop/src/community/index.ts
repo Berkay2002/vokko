@@ -5,9 +5,12 @@ import { wireCommunityToGateway } from "./store";
 
 wireCommunityToGateway();
 
+export { ChannelsAndRolesLink } from "./ChannelsAndRoles";
 export { CommunityHost } from "./CommunityHost";
 export { EventsQuickLink } from "./EventsQuickLink";
 export { FriendSuggestionsTab } from "./FriendSuggestions";
 export { OnboardingSettings } from "./OnboardingSettings";
 export { WelcomeChecklist } from "./WelcomeChecklist";
 export { openCreateEvent, openEvents } from "./communityModals";
+export { resumeOnboarding } from "./OnboardingFlow";
+export { RULES_NOT_ACCEPTED, noteRulesRefused, useRulesPending } from "./rulesGate";

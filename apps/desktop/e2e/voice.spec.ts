@@ -159,7 +159,7 @@ test('server mute, move and disconnect from the user context menu', async ({ pag
   await expect(userRow(page, 'Gaming', 'Alice').getByRole('img', { name: 'Server Muted' })).toBeVisible();
 });
 
-test('stage channel: create, join the audience, start the stage, become a speaker, end it', async ({ page }) => {
+test('stage channel: create, join the audience, start the stage as its speaker, end it', async ({ page }) => {
   await openGuild(page);
   await page.getByRole('button', { name: "Sam's server", exact: true }).click();
   await page.getByRole('menuitem', { name: 'Create Channel' }).click();
@@ -183,7 +183,8 @@ test('stage channel: create, join the audience, start the stage, become a speake
   await page.evaluate(id => (window as unknown as MockWin).__vokkoMock.voice('alice', id), stageId);
   await expect(stage.getByRole('list', { name: 'Audience' }).getByLabel('Alice')).toBeVisible();
 
-  await stage.getByRole('button', { name: 'Become a Speaker' }).click();
+  // the member who starts the stage is a speaker from the first moment, the audience keeps its Raise Hand
+  await expect(stage.getByRole('button', { name: 'Become a Speaker' })).toHaveCount(0);
   const tile = stage.getByRole('list', { name: 'Speakers' }).getByLabel(/^Sam/);
   await expect(tile).toBeVisible();
   // a speaker is the call page's tile: 16:9, radius 8

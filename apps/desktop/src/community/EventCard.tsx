@@ -2,8 +2,8 @@ import { useState } from "react";
 import { CalendarDays, MapPin, Star, Users, Volume2 } from "lucide-react";
 import { ScheduledEventEntityType, ScheduledEventStatus, type GuildScheduledEvent } from "../api/types";
 import { errorText } from "./errors";
-import { formatEventRange, statusLabel } from "./eventUtil";
-import { resolveUrl, useChatLocale, useStore } from "./shell";
+import { formatEventRange, joinLabel, statusLabel } from "./eventUtil";
+import { appStore, go, guildPath, joinVoiceChannel, resolveUrl, useChatLocale, useStore } from "./shell";
 import { setInterested } from "./store";
 
 /** Where the event happens: the place for external events, else the voice channel's name. */
@@ -36,8 +36,29 @@ export function InterestedButton({ event, onError }: { event: GuildScheduledEven
   );
 }
 
+/** Join Stage / Join Voice while the event is live: opens the channel and joins it. */
+export function JoinEventButton({ event, onJoined }: { event: GuildScheduledEvent; onJoined?: () => void }) {
+  const label = joinLabel(event);
+  const channel = useStore(s => (event.channel_id ? s.channels[event.channel_id] : undefined));
+  if (!label || !channel) return null;
+  return (
+    <button
+      type="button"
+      className="btn btn-sm btn-success"
+      onClick={e => {
+        e.stopPropagation();
+        go(guildPath(event.guild_id, channel.id));
+        joinVoiceChannel(appStore.getState().channels[channel.id] ?? channel);
+        onJoined?.();
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 /** One row of the events list. The topic opens the details (and stretches over the card); Interested toggles without opening. */
-export function EventCard({ event, onOpen, onError }: { event: GuildScheduledEvent; onOpen(): void; onError?: (message: string) => void }) {
+export function EventCard({ event, onOpen, onError, onJoined }: { event: GuildScheduledEvent; onOpen(): void; onError?: (message: string) => void; onJoined?: () => void }) {
   const place = useEventPlace(event);
   const locale = useChatLocale();
   const live = event.status === ScheduledEventStatus.Active;
@@ -68,6 +89,7 @@ export function EventCard({ event, onOpen, onError }: { event: GuildScheduledEve
         </div>
         {cover && <img className="cm-event-cover" src={cover} alt="" draggable={false} />}
         <div className="cm-event-actions">
+          <JoinEventButton event={event} onJoined={onJoined} />
           <InterestedButton event={event} onError={onError} />
         </div>
       </div>

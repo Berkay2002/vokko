@@ -129,5 +129,6 @@ test('a stage topic saves on its own and a rename saves with it', async ({ page 
   await expect(dialog.getByLabel('Channel name')).toHaveValue('Town Hall');
   await expect(dialog.getByText('Saved.')).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(stage.getByRole('heading', { name: 'Both' })).toBeVisible();
+  // a stage name keeps its case (the server only slugs text, announcement and forum names), so the region is named after the new name
+  await expect(page.getByRole('region', { name: 'Town Hall stage' }).getByRole('heading', { name: 'Both' })).toBeVisible();
 });

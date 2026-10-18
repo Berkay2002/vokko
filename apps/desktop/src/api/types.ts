@@ -1755,6 +1755,7 @@ export interface GuildOnboarding {
   enabled: boolean;
   mode: OnboardingMode;
   rules: OnboardingRules | null; // when set the member must accept before completing
+  rules_pending?: boolean; // GET only: the caller is held until they accept the rules (cannot send or react)
 }
 export interface OnboardingOptionInput {
   id?: Snowflake; // keep an existing option (and the answers members gave); absent/unknown = new
