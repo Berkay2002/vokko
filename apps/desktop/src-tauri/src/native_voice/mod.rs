@@ -193,18 +193,18 @@ fn start_reader(shared: Arc<Shared>, readers: &Arc<std::sync::Mutex<HashMap<Stri
         }
         shared.drop_voice(&sid);
     });
-    if let Ok(mut readers) = readers.lock() {
-        if let Some(old) = readers.insert(key, handle) {
-            old.abort();
-        }
+    if let Ok(mut readers) = readers.lock()
+        && let Some(old) = readers.insert(key, handle)
+    {
+        old.abort();
     }
 }
 
 fn stop_reader(shared: &Shared, readers: &std::sync::Mutex<HashMap<String, JoinHandle<()>>>, sid: &str) {
-    if let Ok(mut readers) = readers.lock() {
-        if let Some(handle) = readers.remove(sid) {
-            handle.abort();
-        }
+    if let Ok(mut readers) = readers.lock()
+        && let Some(handle) = readers.remove(sid)
+    {
+        handle.abort();
     }
     shared.drop_voice(sid);
 }
@@ -334,7 +334,9 @@ impl Session {
 
     fn restart_playback(&mut self, shared: &Arc<Shared>) {
         // The microphone's dsp thread is fed by the speakers: reopen both so the echo canceller keeps its reference.
-        self.mic.take().map(|mic| mic.pump.abort());
+        if let Some(mic) = self.mic.take() {
+            mic.pump.abort();
+        }
         self.playback = match audio::start_playback(&self.settings.output_device_id, shared.clone()) {
             Ok(playback) => Some(playback),
             Err(error) => {
