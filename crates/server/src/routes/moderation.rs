@@ -261,7 +261,7 @@ pub async fn announce_removal(state: &AppState, guild_id: i64, user_id: i64, rem
 }
 
 /// Sends the member's current state to the whole guild as GUILD_MEMBER_UPDATE and returns it.
-async fn publish_member(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<GuildMember> {
+pub(crate) async fn publish_member(state: &AppState, guild_id: i64, user_id: i64) -> ApiResult<GuildMember> {
     let member = store::member(state, guild_id, user_id).await?.ok_or_else(ApiErr::unknown_member)?;
     let members = access::guild_member_ids(state, guild_id).await?;
     state.hub.send(&members, &GatewayEvent::GuildMemberUpdate(GuildMemberAdd { member: member.clone(), guild_id: Snowflake::from(guild_id) }));

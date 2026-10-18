@@ -306,7 +306,7 @@ pub async fn create_post(state: &AppState, user_id: i64, access: &ChannelAccess,
         }
     }
     let content = validate_content(first.content.as_deref().unwrap_or(""), !attachments.is_empty())?;
-    crate::safety::check_send(state, access, user_id, &content).await?;
+    let screening = crate::safety::check_send(state, access, user_id, &content, &content).await?;
     let mentions = apply_allowed(resolve_mentions(state, access, parse_mentions(&content)).await?, first.allowed_mentions.as_ref());
 
     let id = state.ids.next();
@@ -342,6 +342,7 @@ pub async fn create_post(state: &AppState, user_id: i64, access: &ChannelAccess,
                 return Err(error);
             }
         };
+    screening.act(state).await;
     let channel = created_response(state, id, user_id).await?;
     Ok(Json(ForumPost { channel, message: view.for_viewer(user_id) }))
 }

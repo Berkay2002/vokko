@@ -674,7 +674,6 @@ async fn create_message(
             ),
         None => content.clone(),
     };
-    crate::safety::check_send(&state, &access, user_id, &screened).await?;
     let stickers = stickers::resolve_for_message(&state, user_id, &access.channel, access.permissions, &sticker_ids).await?;
     let mut forward_source: Option<(i64, i64)> = None;
     let reference = match body.message_reference {
@@ -700,6 +699,9 @@ async fn create_message(
     let ping_replied = body.allowed_mentions.as_ref().and_then(|allowed| allowed.replied_user).unwrap_or(true);
     let kind = if reference.is_some() { MessageType::Reply } else { MessageType::Default };
     let mentions = if forwarding { Resolved { users: Vec::new(), roles: Vec::new(), everyone: false } } else { mentions };
+    // AutoMod after the request is validated, so a blocked message ran into no other error first; its alert and timeout wait for
+    // the insert. Slowmode deliberately comes after it: a blocked message must not use up the member's slowmode slot.
+    let screening = crate::safety::check_send(&state, &access, user_id, &screened, &content).await?;
     check_slowmode(&state, &access, user_id).await?;
     // Last step before the insert: it copies files, and nothing after it may fail without cleaning them up.
     let forward = match forward_source {
@@ -722,6 +724,7 @@ async fn create_message(
         ..Extras::default()
     };
     let view = insert_message_with(&state, &access.channel, user_id, draft, extras).await?;
+    screening.act(&state).await;
     if access.channel.is_thread() {
         // Talking in a thread joins it.
         threads::add_member(&state, &access.channel, user_id).await?;
@@ -820,9 +823,7 @@ async fn edit_message(
         return Err(ApiErr::empty_message());
     }
     let content_changed = content != row.content;
-    if content_changed {
-        crate::safety::check_automod(&state, &access, user_id, &content).await?;
-    }
+    let screening = if content_changed { Some(crate::safety::check_edit(&state, &access, user_id, &content).await?) } else { None };
     // `flags` only carries SUPPRESS_EMBEDS; omitting it keeps the current state.
     let suppress_bit = SUPPRESS_EMBEDS as i32;
     let old_flags = row.flags;
@@ -870,6 +871,9 @@ async fn edit_message(
             sqlx::query("DELETE FROM attachments WHERE id = ANY($1) AND message_id = $2").bind(&removed).bind(mid).execute(&mut *tx).await?;
         }
         tx.commit().await?;
+        if let Some(screening) = screening {
+            screening.act(&state).await;
+        }
         media::remove_files(&state, &removed).await;
         broadcast_update(&state, &access.channel, mid).await?;
         // Without EMBED_LINKS an edit adds no new link embeds.
@@ -894,7 +898,9 @@ async fn delete_message(
         return Ok(StatusCode::NO_CONTENT);
     }
     let row = message_in_channel(&state, id, mid).await?;
-    if row.author_id != user_id && (access.is_dm() || access.permissions & MANAGE_MESSAGES == 0) {
+    // An AutoMod alert names the flagged member as its author; only moderators may remove that evidence.
+    let own = row.author_id == user_id && row.kind != i16::from(MessageType::AutoModerationAction.as_u8());
+    if !own && (access.is_dm() || access.permissions & MANAGE_MESSAGES == 0) {
         return Err(ApiErr::missing_permissions());
     }
     let viewers = access::channel_viewers(&state, &access.channel).await?;

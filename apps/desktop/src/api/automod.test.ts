@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { findKeyword } from "./automod";
+import { PRESET_WORDS, findKeyword, mentionCount } from "./automod";
+
+describe("AutoMod presets and mention counting", () => {
+  it("reads the shared preset lists without comments", () => {
+    for (const preset of [1, 2, 3]) {
+      const words = PRESET_WORDS[preset] ?? [];
+      expect(words.length).toBeGreaterThanOrEqual(10);
+      expect(words.some(w => w.startsWith("#"))).toBe(false);
+    }
+    expect(findKeyword("what the FUCKING hell", PRESET_WORDS[1] ?? [])).toBe("fuck*");
+  });
+
+  it("counts unique user and role mentions, not @everyone", () => {
+    expect(mentionCount("<@1> <@!1> <@&1> @everyone <@x>")).toBe(2);
+  });
+});
 
 describe("AutoMod keyword matching (same rules as the server)", () => {
   const hit = (content: string, keyword: string, allow: string[] = []) => findKeyword(content, [keyword], allow) !== null;

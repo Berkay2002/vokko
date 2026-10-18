@@ -673,6 +673,8 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   if (message.author_id !== viewer.user.id) fail(403, 50005, "Cannot edit a message authored by another user");
+  // The AutoMod alert carries the flagged member as author; like the server, system messages can't be edited.
+  if (message.type === MessageType.AutoModerationAction) fail(400, 50035, "Invalid Form Body", { message_id: { code: "BASE_TYPE_INVALID", message: "Cannot edit a system message." } });
   assertThreadOpen(channel);
   if (isPoll(message.id)) fail(400, 520003, "Cannot edit a poll message");
   if (((message.flags ?? 0) & MessageFlags.IsVoiceMessage) !== 0) fail(400, 50035, "Invalid Form Body", { message_id: { code: "VOICE_MESSAGE_EDIT", message: "Cannot edit a voice message." } });
@@ -685,7 +687,7 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
     attachments = message.attachments.filter(a => keep.has(a.id));
   }
   if (content === "" && attachments.length === 0) fail(400, 50006, "Cannot send an empty message");
-  if (content !== message.content) checkAutomod(channel, viewer.user.id, content);
+  if (content !== message.content) checkAutomod(channel, viewer.user.id, content, true);
   message.content = content;
   message.attachments = attachments;
   message.edited_timestamp = new Date().toISOString();
@@ -699,7 +701,7 @@ route("DELETE", `/channels/${ID}/messages/${ID}`, ({ viewer, params }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   if (dismissEphemeral(channel.id, params[1] ?? "", viewer.user.id)) return undefined;
   const message = requireMessage(channel.id, params[1] ?? "");
-  if (message.author_id !== viewer.user.id) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_MESSAGES);
+  if (message.author_id !== viewer.user.id || message.type === MessageType.AutoModerationAction) requireChannelPerm(channel, viewer.user.id, Perm.MANAGE_MESSAGES);
   const list = sortedMessages(channel.id);
   list.splice(list.indexOf(message), 1);
   purgeMessageRefs(channel.id, message.id);
