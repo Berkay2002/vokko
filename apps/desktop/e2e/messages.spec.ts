@@ -579,3 +579,25 @@ test('emoji autocomplete shows a footer preview of the highlighted emoji', async
   await expect(panel.locator('.chat-autocomplete-item.selected')).toHaveCount(1);
   await box.press('Escape');
 });
+
+test('the list stays at the bottom after a dialog opens and closes', async ({ page }) => {
+  const channelId = await openStockTalk(page);
+  const scroller = page.locator('.chat-scroller');
+  const gap = () => scroller.evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight);
+  expect(await gap()).toBeLessThan(2);
+
+  await page.locator('.chat-msg').filter({ hasText: /\S/ }).last().click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Pin Message' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Pin this message?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('.chat-jump-bar')).toHaveCount(0);
+  expect(await gap()).toBeLessThan(2);
+
+  // A message arriving afterwards is followed: the list did not lose the bottom.
+  await page.evaluate(id => (window as unknown as { __vokkoMock: { say(c: string, u: string, t: string): void } }).__vokkoMock.say(id, 'alice', 'after the dialog'), channelId);
+  await expect(row(page, 'after the dialog')).toBeInViewport();
+  await expect(page.locator('.chat-jump-bar')).toHaveCount(0);
+  await expect.poll(gap).toBeLessThan(2);
+});

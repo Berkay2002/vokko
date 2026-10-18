@@ -10,7 +10,7 @@ type Win = {
 
 test('pinning a message adds a pin row: pin icon in the gutter and the bold name', async ({ page }) => {
   await openStockTalk(page);
-  const target = page.locator('.chat-msg').filter({ hasText: /\S/ }).nth(2);
+  const target = page.locator('.chat-msg').filter({ hasText: /\S/ }).last(); // on screen: an off-screen row would make the click scroll the list up
   await target.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Pin Message' }).click();
   await page.getByRole('dialog', { name: 'Pin this message?' }).getByRole('button', { name: 'Pin it' }).click();
@@ -36,7 +36,7 @@ test('pinning a message adds a pin row: pin icon in the gutter and the bold name
 
 test('a pin row: the name opens the profile card and "pinned messages" opens the pins popout', async ({ page }) => {
   await openStockTalk(page);
-  const target = page.locator('.chat-msg').filter({ hasText: /\S/ }).nth(2);
+  const target = page.locator('.chat-msg').filter({ hasText: /\S/ }).last(); // on screen: an off-screen row would make the click scroll the list up
   await target.click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Pin Message' }).click();
   await page.getByRole('dialog', { name: 'Pin this message?' }).getByRole('button', { name: 'Pin it' }).click();

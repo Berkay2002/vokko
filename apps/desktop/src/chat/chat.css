@@ -78,6 +78,7 @@
 /* ---- list ---- */
 .chat-list { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .chat-scroller { flex: 1 1 auto; min-height: 0; overflow-anchor: none; scrollbar-width: thin; scrollbar-color: var(--chat-scrollbar) transparent; }
+.chat-scroller.settling { visibility: hidden; } /* MessageList: until the first frame shows the newest row at the bottom */
 .chat-scroller:focus-visible { outline: 2px solid var(--focus-ring) !important; outline-offset: -2px; } /* Virtuoso sets an inline outline:none */
 .chat-scroller::-webkit-scrollbar { width: 14px; }
 .chat-scroller::-webkit-scrollbar-thumb { background: var(--chat-scrollbar); border: 3px solid transparent; background-clip: padding-box; border-radius: 8px; min-height: 40px; }
