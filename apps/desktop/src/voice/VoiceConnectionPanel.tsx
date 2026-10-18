@@ -7,7 +7,7 @@ import { Popout, Tooltip, setPref, usePrefs } from "../ui";
 import { resolveAudio } from "./audioProfile";
 import { dismissVoiceError, leaveVoice, stopCamera, stopScreenShare } from "./engine";
 import { useMedia } from "./mediaStore";
-import { toggleCamera, toggleScreenShare } from "./videoControls";
+import { canShareScreen, toggleCamera, toggleScreenShare } from "./videoControls";
 import type { ConnectionQuality, VoiceErrorReason, VoiceStatus } from "./reducer";
 import { SoundboardPopout } from "./SoundboardPopout";
 import { useVoice } from "./store";
@@ -258,11 +258,13 @@ export function VoiceConnectionPanel() {
                   {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
                 </button>
               </Tooltip>
-              <Tooltip content={screenOn ? "Stop Streaming" : "Share Your Screen"} side="top">
-                <button type="button" className={`voice-panel-wide${screenOn ? " active streaming" : ""}`} aria-label={screenOn ? "Stop Streaming" : "Share Your Screen"} aria-pressed={screenOn} onClick={toggleScreenShare}>
-                  {screenOn ? <MonitorX size={20} /> : <MonitorUp size={20} />}
-                </button>
-              </Tooltip>
+              {(screenOn || canShareScreen()) && (
+                <Tooltip content={screenOn ? "Stop Streaming" : "Share Your Screen"} side="top">
+                  <button type="button" className={`voice-panel-wide${screenOn ? " active streaming" : ""}`} aria-label={screenOn ? "Stop Streaming" : "Share Your Screen"} aria-pressed={screenOn} onClick={toggleScreenShare}>
+                    {screenOn ? <MonitorX size={20} /> : <MonitorUp size={20} />}
+                  </button>
+                </Tooltip>
+              )}
             </>
           )}
           <Tooltip content="Activities aren't available yet" side="top">

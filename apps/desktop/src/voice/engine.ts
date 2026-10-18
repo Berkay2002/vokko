@@ -51,7 +51,7 @@ const defaultFactory: TransportFactory = async (kind, cb) => {
 let factory: TransportFactory = defaultFactory;
 
 /** The Linux app: WebKitGTK has no WebRTC, so the room runs in the Rust shell (voice/nativeTransport.ts). */
-const nativeVoice = (): boolean => typeof RTCPeerConnection === "undefined" && isDesktop();
+export const nativeVoice = (): boolean => typeof RTCPeerConnection === "undefined" && isDesktop();
 
 /** Tests: build transports with `make` instead of FakeTransport / LiveKitTransport (null restores the default). */
 export function setTransportFactory(make: TransportFactory | null): void {
