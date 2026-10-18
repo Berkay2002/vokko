@@ -9,17 +9,21 @@ import { TagChip } from "../perks/TagChip";
 import { StyledName } from "../perks/NameStyles";
 import { ProfileBio } from "../perks/ProfileBio";
 import { useCustomColor } from "../ui/useCustomColor";
-import { Popout } from "../ui";
+import { Popout, Tooltip } from "../ui";
+import { snowflakeToTimestamp } from "../api/snowflake";
+import logo from "../../../../assets/brand/vokko-icon.svg";
 import { InVoiceCard } from "../voice";
 import { listeningActivity } from "../activity/format";
 import { ActivityCard, usePlaying } from "./ActivityLine";
 import { SpotifyCard } from "./SpotifyCard";
-import { Avatar } from "./Avatar";
+import { Avatar, GuildIcon } from "./Avatar";
 import { openDirectMessage } from "./actions";
 import { openModal } from "./modalStore";
 import { useProfile } from "./profileStore";
 
 export { openProfile } from "./profileStore";
+
+const sinceText = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 
 /** Small clock next to a name while the member is timed out. */
 export function TimeoutBadge({ until }: { until: string | null | undefined }) {
@@ -55,7 +59,7 @@ export function ProfileCardHost() {
 
   return (
     <Popout anchor={anchor} open={open} onClose={close} side="right" align="start" gap={8} className={`profile-card${aboveModal ? " above-modal" : ""}${look?.themeColors ? " pv-themed" : ""}`} style={themeVars(look?.themeColors)}
-      sheet="Profile" role={aboveModal ? "dialog" : undefined} label={aboveModal && user ? displayName(user, member) : undefined}>
+      sheet="Profile" focusSelf role={aboveModal ? "dialog" : undefined} label={aboveModal && user ? displayName(user, member) : undefined}>
       {user && look && (
         <>
           <ProfileBanner look={look} className="profile-banner" />
@@ -141,12 +145,27 @@ export function ProfileCardHost() {
                 </ul>
               </section>
             )}
-            {member && (
-              <section className="profile-section">
-                <h3>Member Since</h3>
-                <p>{new Date(member.joined_at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}</p>
-              </section>
-            )}
+            {/* Discord: the app logo with the account's age, then the server icon with the join date; each icon names its source on hover */}
+            <section className="profile-section">
+              <h3>Member Since</h3>
+              <p className="profile-since">
+                <Tooltip content="Vokko" side="top">
+                  <img className="profile-since-icon" src={logo} alt="Vokko" width={16} height={16} tabIndex={0} />
+                </Tooltip>
+                {sinceText(snowflakeToTimestamp(user.id))}
+                {member && guild && (
+                  <>
+                    <span className="profile-since-dot" aria-hidden="true" />
+                    <Tooltip content={guild.name} side="top">
+                      <span className="profile-since-icon" role="img" aria-label={guild.name} tabIndex={0}>
+                        <GuildIcon guild={guild} size={16} />
+                      </span>
+                    </Tooltip>
+                    {sinceText(Date.parse(member.joined_at))}
+                  </>
+                )}
+              </p>
+            </section>
           </div>
         </>
       )}

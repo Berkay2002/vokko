@@ -6,6 +6,7 @@ vi.mock("../desktop", () => ({ isDesktop: () => mocks.desktop }));
 
 import { setOwnActivities } from "../activity/own";
 import { gateway } from "../api/gateway";
+import { appStore, type AppState } from "../api/store";
 import { GatewayOp } from "../api/types";
 import { resendOwnStatus, setOwnStatus } from "./actions";
 
@@ -42,6 +43,13 @@ describe("setOwnStatus (op 3)", () => {
     for (const [, body] of mocks.send.mock.calls) {
       expect(body).toEqual({ status: "dnd", custom_status: null, activities: [{ name: "Factorio", type: 0, timestamps: { start: 5 } }] });
     }
+  });
+
+  it("shows the new status and note on the user's own presence at once, keeping the reported activities", () => {
+    const game = { name: "Factorio", type: 0 as const };
+    appStore.setState({ me: { id: "1", username: "me" } as AppState["me"], presences: { "1": { user_id: "1", status: "online", custom_status: null, activities: [game] } } });
+    setOwnStatus("invisible", " away ");
+    expect(appStore.getState().presences["1"]).toEqual({ user_id: "1", status: "offline", custom_status: "away", activities: [game] });
   });
 
   it("sends an empty list from the desktop app when no game is detected (that is how a game is cleared)", () => {

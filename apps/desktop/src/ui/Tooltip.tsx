@@ -15,10 +15,18 @@ export interface TooltipProps {
   gap?: number;
 }
 
+// Last input was a key. Chrome marks script focus as :focus-visible too, so a popout opened by a click that moves focus onto a
+// tooltip trigger (the profile card's In voice info icon) would otherwise open that tooltip with no hover.
+let keyed = false;
+if (typeof document !== "undefined") {
+  document.addEventListener("keydown", () => (keyed = true), true);
+  document.addEventListener("pointerdown", () => (keyed = false), true);
+}
+
 /** Keyboard focus only: a click or tap also focuses the trigger, and that must not bring the tooltip back over what it opened. */
 function keyboardFocus(target: EventTarget): boolean {
   try {
-    return target instanceof Element && target.matches(":focus-visible");
+    return keyed && target instanceof Element && target.matches(":focus-visible");
   } catch {
     return true;
   }

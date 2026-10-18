@@ -23,6 +23,8 @@ export interface PopoutProps {
    * Off for a popout that follows a text field the user keeps typing in (search suggestions).
    */
   trapFocus?: boolean;
+  /** Focus the panel itself on open instead of its first control (the first Tab goes in), as Discord's profile card does. */
+  focusSelf?: boolean;
   /** At phone widths render as a BottomSheet with this accessible name instead of a floating panel (the placement props are ignored there). */
   sheet?: string;
   children: ReactNode;
@@ -36,7 +38,7 @@ function resolve(anchor: PopoutProps["anchor"]): HTMLElement | null {
 }
 
 /** Floating panel anchored to an element: closes on Escape and on outside clicks (the anchor itself is "inside"). */
-export function Popout({ anchor, open, onClose, side = "bottom", align = "center", gap = 8, className, style, role, label, trapFocus = true, sheet, children }: PopoutProps) {
+export function Popout({ anchor, open, onClose, side = "bottom", align = "center", gap = 8, className, style, role, label, trapFocus = true, focusSelf, sheet, children }: PopoutProps) {
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const phone = usePhone();
@@ -45,7 +47,7 @@ export function Popout({ anchor, open, onClose, side = "bottom", align = "center
   useBackClose(open && !asSheet, onClose);
   useOutsideClose(open && !asSheet, () => [box.current, resolve(anchor)], onClose, layer.isTop);
   // Focus moves in only once placed: the box is visibility:hidden until then and cannot take focus.
-  useFocusTrap(open && trapFocus && !asSheet, () => box.current, pos !== null, SEARCH_FIELD);
+  useFocusTrap(open && trapFocus && !asSheet, () => box.current, pos !== null, focusSelf ? null : SEARCH_FIELD);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -68,7 +70,7 @@ export function Popout({ anchor, open, onClose, side = "bottom", align = "center
   // the classes go on an inner box: the card keeps its own look (banner, absolutely placed avatar) inside the sheet
   if (asSheet) return <BottomSheet open onClose={onClose} label={sheet}><div className={`popout-sheet ${className ?? ""}`} style={{ ...style, width: undefined }}>{children}</div></BottomSheet>;
   return createPortal(
-    <div ref={box} role={role} aria-label={label} className={`popout ${className ?? ""}`} style={{ ...style, left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}
+    <div ref={box} role={role} aria-label={label} tabIndex={focusSelf ? -1 : undefined} className={`popout ${className ?? ""}`} style={{ ...style, left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}
       onKeyDown={e => !e.defaultPrevented && rovingKey(e, [...e.currentTarget.querySelectorAll<HTMLElement>(ROVING_ITEMS)])}>
       {children}
     </div>,

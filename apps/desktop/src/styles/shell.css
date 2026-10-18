@@ -1644,7 +1644,12 @@ button.channel-header-topic:hover {
 }
 
 .profile-body {
-  padding: 48px 16px 16px;
+  padding: 60px 16px 16px; /* the avatar ring ends 52 px below the 60 px banner: the name starts 8 px under it */
+}
+
+/* Focused itself on open (focusSelf): the card is the target, not a control, so no ring. */
+.profile-card:focus-visible {
+  outline: none;
 }
 
 .profile-name {
@@ -1865,6 +1870,34 @@ img.active-card-art {
   line-height: 18px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.profile-section .profile-since {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.profile-since-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.profile-since-icon .guild-icon {
+  border-radius: 50%;
+  font-size: 8px !important; /* GuildIcon sets an inline size for 40 px icons */
+}
+
+.profile-since-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-muted);
 }
 
 .profile-roles {
@@ -2632,12 +2665,48 @@ img.active-card-art {
   vertical-align: -2px;
 }
 
-.modal-subheading {
+.modal-section-label {
   margin: 16px 0 8px;
-  color: var(--text-strong);
-  font-size: 16px;
-  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+/* Create Your Server: the "Join a Server instead" footer */
+.modal-create-server .modal-footer,
+.modal-create-server .sheet-footer {
+  justify-content: center;
+}
+
+.create-server-join {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
   text-align: center;
+}
+
+.create-server-join-heading {
+  color: var(--text-strong);
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.invite-examples {
+  margin-top: 16px;
+}
+
+.invite-examples .field-label {
+  margin-bottom: 8px;
+}
+
+.invite-examples p {
+  color: var(--text-default);
+  font-size: 14px;
+  line-height: 18px;
 }
 
 .choice-row {
