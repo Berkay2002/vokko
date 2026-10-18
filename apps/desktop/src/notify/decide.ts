@@ -33,6 +33,8 @@ export interface NotifyInput {
   myRoleIds: readonly Snowflake[];
   /** "dm" = 1:1 DM (every message is addressed to me), "group" = group DM, null = guild channel. */
   dm: "dm" | "group" | null;
+  /** The author is blocked by me: nothing rings (sound, popup, Dock bounce, overlay toast). */
+  blocked?: boolean;
   /** The author is an accepted friend (only read for 1:1 DMs; absent = unknown, treated as a friend). */
   friend?: boolean;
   /** Settings scopes nearest first: [channel, category?, guild?]. */
@@ -123,6 +125,7 @@ export function mentionKinds(
 export function decide(input: NotifyInput): NotifyDecision {
   const { message, meId, local, prefs } = input;
   if (message.author.id === meId) return NONE("own");
+  if (input.blocked) return NONE("blocked");
   if (message.type !== MessageType.Default && message.type !== MessageType.Reply) return NONE("system");
   if (input.status === "dnd") return NONE("dnd");
   if (input.scopes.some(id => isMutedAt(local, id, input.now))) return NONE("muted");

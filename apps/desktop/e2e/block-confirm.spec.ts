@@ -68,3 +68,32 @@ test('the Block dialog names a member by the nickname they have in the server, o
     await expect(dialog).toHaveCount(0);
   }
 });
+
+test('a blocked author folds into one "N blocked messages" row in a server; Show reveals the run, Hide folds it again', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.getByRole('link', { name: "Sam's server" }).click();
+  await page.getByRole('link', { name: /^general/ }).first().click();
+  const list = page.locator('.chat-list');
+  const novaRows = list.locator('.chat-msg:not(.chat-blocked)', { has: page.locator('.chat-author', { hasText: 'Nova' }) });
+  await expect(novaRows.first()).toBeVisible();
+  const shown = await list.locator('.chat-msg').count();
+
+  await page.locator('.member-list .member-row', { hasText: 'Nova' }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Block' }).click();
+  await page.getByRole('dialog', { name: 'Block Nova' }).getByRole('button', { name: 'Block' }).click();
+
+  const fold = list.locator('.chat-blocked').first();
+  await expect(fold).toHaveText(/^\d+ blocked messages? · Show$/);
+  await expect(novaRows).toHaveCount(0);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/blocked-fold-1440.png` });
+
+  await fold.getByRole('button', { name: /^Show \d+ blocked message/ }).click();
+  await expect(novaRows.first()).toBeVisible();
+  await expect(list.locator('.chat-blocked-bar')).toHaveText(/^\d+ blocked messages? · Hide$/);
+  await expect(list.locator('.chat-msg')).toHaveCount(shown);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/blocked-fold-open-1440.png` });
+
+  await list.locator('.chat-blocked-bar').getByRole('button', { name: 'Hide' }).click();
+  await expect(novaRows).toHaveCount(0);
+  await expect(list.locator('.chat-blocked').first()).toBeVisible();
+});

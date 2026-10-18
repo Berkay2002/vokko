@@ -400,6 +400,18 @@ function renderBlocks(
   });
 }
 
+/**
+ * Inline-only rendering for a one-line surface (a channel topic in the header or the channel-start sentence): line breaks become
+ * spaces and only a plain paragraph is formatted; a block (heading, quote, list, code block) shows as the raw text.
+ */
+export function InlineMarkdown({ content, ctx, className }: { content: string; ctx: MarkdownContext; className?: string }) {
+  const shortcodes = ctx.emojiShortcodes;
+  const flat = content.replace(/\s*\n\s*/g, ' ');
+  const blocks = useMemo(() => parseMarkdown(flat, shortcodes ? { emojiShortcodes: shortcodes } : undefined), [flat, shortcodes]);
+  const first = blocks[0];
+  return <span className={`md-inline${className ? ` ${className}` : ''}`}>{blocks.length === 1 && first?.t === 'paragraph' ? renderInline(first.c, ctx, 'i') : flat}</span>;
+}
+
 export function Markdown(props: {
   content: string;
   ctx: MarkdownContext;

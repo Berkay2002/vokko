@@ -32,6 +32,10 @@ describe("decide", () => {
     expect(decide(input({ message: { type: MessageType.UserJoin } })).reason).toBe("system");
   });
 
+  it("a blocked author gives no sound, popup or mention, even when mentioning me", () => {
+    expect(decide(input({ blocked: true, message: { mentions: [user(ME)] } }))).toMatchObject({ desktop: false, sound: null, kind: null, reason: "blocked" });
+  });
+
   it("notifies on every message at the default level and calls it a plain message", () => {
     const d = decide(input());
     expect(d).toMatchObject({ desktop: true, sound: "message", kind: "message", reason: "all" });

@@ -7,6 +7,7 @@ import { useChat } from './ChatContext';
 import { useChannelState } from './messageStore';
 import { WelcomeChecklist } from '../community';
 import { Avatar } from './Avatar';
+import { InlineMarkdown } from './markdown';
 
 /** Guilds shared with `userId`: GET /users/{id}/profile, falling back to the members the store already holds. */
 function useMutualGuilds(userId: Snowflake): Guild[] {
@@ -119,7 +120,7 @@ export function ChannelStart() {
   return <div className="chat-start">
     <div className="chat-start-icon">{voice ? <MessageCircle size={42} /> : <Hash size={42} />}</div>
     <h2 className="chat-start-title">Welcome to {label}!</h2>
-    <p>This is the start of the {label} channel.{ch?.topic ? ` ${ch.topic}` : ''}</p>
+    <p>This is the start of the {label} channel.{ch?.topic ? <> <InlineMarkdown content={ch.topic} ctx={chat.md} /></> : ''}</p>
     {ch?.guild_id && <EditChannelButton channel={ch} />}
     {ch && chat.guildId && <ServerChecklist guildId={chat.guildId} channelId={ch.id} />}
   </div>;

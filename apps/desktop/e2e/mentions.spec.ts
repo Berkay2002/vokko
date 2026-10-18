@@ -133,7 +133,7 @@ test('pins: user mention opens the card over the popout, channel mention navigat
 
 test('topic dialog: user mention opens the card above the dialog, channel mention closes it and navigates', async ({ page }) => {
   const ids = await setup(page, 'Read the rules, ask ALICE in GENERAL');
-  const topic = page.locator('button.channel-header-topic');
+  const topic = page.locator('.channel-header-topic-open');
   await topic.click();
   const dialog = page.getByRole('dialog', { name: /stock-talk/ });
   await chip(dialog, '@Alice').click();

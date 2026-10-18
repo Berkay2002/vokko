@@ -1444,8 +1444,8 @@
   background: var(--border-normal);
 }
 
-.channel-header-topic,
-.channel-header-sub {
+.channel-header-sub,
+.channel-header-topic-text {
   overflow: hidden;
   color: var(--text-muted);
   font-size: 14px;
@@ -1454,14 +1454,43 @@
   text-overflow: ellipsis;
 }
 
-/* The topic opens a dialog with the full text (a button, so it is keyboard reachable). */
-button.channel-header-topic {
+/* The topic opens a dialog with the full text. The button lies under the text so a link in the text is not inside the button;
+   the text lets clicks through to the button except on its own links and chips. */
+.channel-header-topic {
+  position: relative;
   min-width: 0;
-  text-align: left;
+  color: var(--text-muted);
 }
 
-button.channel-header-topic:hover {
+.channel-header-topic:hover {
   color: var(--text-default);
+}
+
+.channel-header-topic-open {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.channel-header-topic-text {
+  position: relative;
+  display: block;
+  pointer-events: none;
+}
+
+.channel-header-topic:hover .channel-header-topic-text {
+  color: var(--text-default);
+}
+
+.channel-header-topic-text a,
+.channel-header-topic-text button,
+.channel-header-topic-text [role="button"] {
+  pointer-events: auto;
+}
+
+.channel-header-topic-text .md-inline {
+  white-space: nowrap;
 }
 
 .topic-modal-text {
