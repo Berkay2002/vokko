@@ -32,6 +32,8 @@ import { IntegrationsPage } from "../apps/IntegrationsPage";
 import { EmojiSettingsPage } from "../emoji/EmojiSettingsPage";
 import { StickerSettingsPage } from "../media/StickerSettingsPage";
 import { InviteList } from "../invites/InviteList";
+import { isAnimatedImage } from "../ui/crop";
+import { ImageCropper } from "../ui/ImageCropper";
 import { GamesSettings } from "../games/GamesSettings";
 import { TemplateSettingsPage } from "../templates/TemplateSettingsPage";
 
@@ -128,6 +130,14 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
   const trimmed = name.trim();
   const dirty = owner && trimmed !== guild.name;
 
+  // The picked file waits in the cropper (an animated one uploads as picked: a canvas crop would keep one frame).
+  const [cropping, setCropping] = useState<{ kind: "icon" | "banner"; file: File } | null>(null);
+  const choose = async (kind: "icon" | "banner", selected: File | undefined) => {
+    if (!selected) return;
+    if (await isAnimatedImage(selected)) void pick(kind, selected);
+    else setCropping({ kind, file: selected });
+    for (const input of [file.current, bannerFile.current]) if (input) input.value = "";
+  };
   const pick = async (kind: "icon" | "banner", selected: File | undefined) => {
     if (!selected || !uploadChannel) return;
     setUploading(kind);
@@ -165,7 +175,7 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
               <button type="button" className="btn btn-link btn-sm" disabled={busy || !guild.icon} onClick={() => void patch({ icon_attachment_id: null })}>
                 Remove Icon
               </button>
-              <input ref={file} type="file" accept="image/*" hidden aria-label="Server icon file" onChange={e => void pick("icon", e.target.files?.[0])} />
+              <input ref={file} type="file" accept="image/*" hidden aria-label="Server icon file" onChange={e => void choose("icon", e.target.files?.[0])} />
             </div>
           )}
         </div>
@@ -181,7 +191,7 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
               <button type="button" className="btn btn-link btn-sm" disabled={busy || !guild.banner} onClick={() => void patch({ banner_attachment_id: null })}>
                 Remove Banner
               </button>
-              <input ref={bannerFile} type="file" accept="image/*" hidden aria-label="Server banner file" onChange={e => void pick("banner", e.target.files?.[0])} />
+              <input ref={bannerFile} type="file" accept="image/*" hidden aria-label="Server banner file" onChange={e => void choose("banner", e.target.files?.[0])} />
             </div>
           )}
         </div>
@@ -195,6 +205,17 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
         </div>
       </Field>
       {uploadError && <p className="field-error">{uploadError}</p>}
+      {cropping && (
+        <ImageCropper
+          {...(cropping.kind === "icon" ? { aspect: 1, maxWidth: 512 } : { aspect: 16 / 9, maxWidth: 1280 })}
+          file={cropping.file}
+          onCancel={() => setCropping(null)}
+          onApply={cropped => {
+            setCropping(null);
+            void pick(cropping.kind, cropped);
+          }}
+        />
+      )}
       {error && !dirty && <p className="field-error">{error}</p>}
       {saved && !dirty && <p className="settings-saved">Saved.</p>}
         </div>

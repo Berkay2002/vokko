@@ -7,7 +7,7 @@ import { ImagePicker } from "./ImagePicker";
 import { DecorationPicker, EffectPicker } from "./pickers";
 import { previewName } from "./previewName";
 import { registerBuiltinTile, type ProfileEditorTile, type ProfileEditorTileProps } from "./registry";
-import { useImageUpload } from "./upload";
+import { AVATAR_CROP, BANNER_CROP, useImageUpload } from "./upload";
 
 const BANNER_COLORS = ["#5865f2", "#3d9e60", "#ffcb6e", "#dc4247", "#c45bd0", "#2b8fb5", "#6d7380", "#1e1f22"];
 const DEFAULT_THEME: [number, number] = [hexToInt("#5865f2"), hexToInt("#8d96f7")];
@@ -64,7 +64,7 @@ export const ComingSoonTile = (label: string): ProfileEditorTile =>
   };
 
 function AvatarImageTile({ label, look, user, locked, uploadChannel, setDraft }: ProfileEditorTileProps & { label: string }) {
-  const upload = useImageUpload(uploadChannel);
+  const upload = useImageUpload(uploadChannel, AVATAR_CROP);
   const [picking, setPicking] = useState(false);
   const setDraftAvatar = (avatar: { id: string; url: string }) => setDraft({ avatar });
   return (
@@ -89,6 +89,7 @@ function AvatarImageTile({ label, look, user, locked, uploadChannel, setDraft }:
         data-testid={`pe-file-${label.toLowerCase().replace(/\s+/g, "-")}`}
         onChange={e => void upload.pick(e.target.files?.[0]).then(file => file && setDraft({ avatar: file }))}
       />
+      {upload.cropper}
       {upload.error && <p className="pe-field-error">{upload.error}</p>}
     </>
   );
@@ -216,7 +217,7 @@ const ThemeTile: ProfileEditorTile = ({ draft, setDraft, locked, open, setOpen }
 };
 
 const BannerImageTile: ProfileEditorTile = ({ look, locked, uploadChannel, setDraft }) => {
-  const upload = useImageUpload(uploadChannel);
+  const upload = useImageUpload(uploadChannel, BANNER_CROP);
   const [picking, setPicking] = useState(false);
   const has = !!look.banner;
   return (
@@ -250,6 +251,7 @@ const BannerImageTile: ProfileEditorTile = ({ look, locked, uploadChannel, setDr
         data-testid="pe-file-profile-banner"
         onChange={e => void upload.pick(e.target.files?.[0]).then(file => file && setDraft({ banner: file }))}
       />
+      {upload.cropper}
       {has && !locked && (
         <button type="button" className="btn btn-link btn-sm pe-remove" onClick={() => setDraft({ banner: null })}>
           Remove banner

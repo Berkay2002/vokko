@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { ChevronDown, ChevronsLeft } from "lucide-react";
-import { useStore } from "../api/store";
+import { displayName, useStore } from "../api/store";
 import type { Guild, User } from "../api/types";
 import { GuildIcon } from "../shell/Avatar";
 import { useContextMenu, type MenuItem } from "../ui";
@@ -8,6 +8,7 @@ import type { ProfileLook } from "../perks/profile";
 import type { ProfileDraft, Scope } from "./draft";
 import { resolveProfileEditorTile, type ProfileEditorTileId } from "./registry";
 import { ComingSoonTile } from "./tiles";
+import { clip } from "./widgets";
 
 interface SectionDef {
   label: string;
@@ -95,6 +96,14 @@ export function LeftColumn({ user, scope, guilds, draft, look, setDraft, setExtr
       </div>
       <div className="pe-left-body" ref={body}>
         {scope.kind === "guild" && <p className="pe-note">You are editing your profile in {guildName}. Colour, decoration, effect and name style are shared with your main profile.</p>}
+        {scope.kind === "guild" && (
+          <section className="pe-section-block">
+            <label className="pe-label" htmlFor="pe-nickname">
+              Server nickname
+            </label>
+            <input id="pe-nickname" className="input pe-nickname" value={draft.name} placeholder={displayName(user)} onChange={e => setDraft({ name: clip(e.target.value, 32) })} />
+          </section>
+        )}
         {SECTIONS.map(section => (
           <section key={section.label} className="pe-section-block" data-tiles={section.tiles.join(" ")}>
             <h3 className="pe-label">{section.label}</h3>

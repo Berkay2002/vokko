@@ -13,7 +13,7 @@ import { Avatar } from "../shell/Avatar";
 import { useContextMenu, type MenuItem } from "../ui";
 import type { ProfileDraft, Scope } from "./draft";
 import { ImagePicker } from "./ImagePicker";
-import { useImageUpload } from "./upload";
+import { AVATAR_CROP, BANNER_CROP, useImageUpload } from "./upload";
 import { clip } from "./widgets";
 
 /** Click-to-edit text: shows `display` until clicked, then an input with a focus ring. Enter (single line) or blur ends editing. */
@@ -75,8 +75,8 @@ export interface CardPreviewProps {
 export function CardPreview({ user, member, guildName, scope, draft, look, setDraft, uploadChannel, onOpenTile }: CardPreviewProps) {
   const guild = scope.kind === "guild";
   const menu = useContextMenu();
-  const upload = useImageUpload(uploadChannel);
-  const bannerUpload = useImageUpload(uploadChannel);
+  const upload = useImageUpload(uploadChannel, AVATAR_CROP);
+  const bannerUpload = useImageUpload(uploadChannel, BANNER_CROP);
   const presence = useStore(s => s.presences[user.id]);
   const guilds = useStore(s => s.guilds);
   const guildOrder = useStore(s => s.guildOrder);
@@ -146,6 +146,7 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
         data-testid="pe-file-card-banner"
         onChange={e => void bannerUpload.pick(e.target.files?.[0]).then(file => file && setDraft({ banner: file }))}
       />
+      {bannerUpload.cropper}
       <div className="pe-card-head">
         <button ref={avatarButton} type="button" className="pe-card-avatar" aria-label="Edit avatar" aria-haspopup="menu" disabled={upload.busy} onClick={openAvatarMenu}>
           <Avatar user={{ id: user.id, avatar: look.avatar }} size={120} decoration={look.decoration ?? false} status />
@@ -161,6 +162,7 @@ export function CardPreview({ user, member, guildName, scope, draft, look, setDr
           data-testid="pe-file-card-avatar"
           onChange={e => void upload.pick(e.target.files?.[0]).then(file => file && setDraft({ avatar: file }))}
         />
+        {upload.cropper}
         {statusEditing ? (
           <input
             className="pe-status-input"

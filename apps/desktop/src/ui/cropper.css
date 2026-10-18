@@ -1,0 +1,55 @@
+/* Image cropper (ui/ImageCropper.tsx): a frame the size of the result, the picture dragged inside it, a zoom slider. Tokens only. */
+.modal.cropper-modal {
+  width: min(440px, calc(100vw - 32px));
+}
+
+.cropper-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.cropper-frame {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--background-surface-high);
+  box-shadow: 0 0 0 1px var(--border-subtle);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.cropper-frame:active {
+  cursor: grabbing;
+}
+
+.cropper-frame.round {
+  border-radius: 50%;
+}
+
+.cropper-frame img {
+  position: absolute;
+  max-width: none;
+  pointer-events: none;
+}
+
+.cropper-zoom {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--interactive-normal);
+}
+
+.cropper-zoom input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--brand-500, currentColor);
+}
+
+.cropper-error {
+  margin: 0;
+  color: var(--text-danger, var(--text-strong));
+}

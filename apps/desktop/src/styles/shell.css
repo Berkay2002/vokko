@@ -1939,6 +1939,10 @@ img.active-card-art {
   background: var(--border-subtle);
 }
 
+.profile-full {
+  margin-top: 12px;
+}
+
 .profile-section h3 {
   margin-bottom: 4px;
   color: var(--text-strong);

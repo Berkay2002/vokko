@@ -64,6 +64,7 @@ test('Upload image from the picker stages a file; recent banners list the last u
   const urls: string[] = [];
   for (const [index, data] of PNGS.entries()) {
     await editor.getByTestId('pe-file-profile-banner').setInputFiles({ name: `b${index}.png`, mimeType: 'image/png', buffer: Buffer.from(data, 'base64') });
+    await page.getByRole('dialog', { name: 'Edit Image' }).getByRole('button', { name: 'Apply' }).click();
     await save(editor);
     urls.push((await banner(page)) ?? '');
   }

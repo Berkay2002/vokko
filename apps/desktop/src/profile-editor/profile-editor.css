@@ -157,6 +157,10 @@
   line-height: 20px;
 }
 
+label.pe-label {
+  display: block;
+}
+
 .pe-note {
   margin: 0 0 16px;
   color: var(--text-muted);
@@ -1050,9 +1054,63 @@ textarea.pe-inline-input {
   }
 }
 
+/* Phone: one column that scrolls: the profile switcher on top, the card preview, then the tiles; the save bar stays at the bottom. */
+.pe-scroll {
+  display: contents;
+}
+
 @media (max-width: 720px) {
+  .pe {
+    inset: 0;
+    flex-direction: column;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .pe-scroll {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
   .pe-left {
+    display: contents;
+  }
+
+  .pe-left-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    order: 0;
+    padding-right: 64px;
+    background: var(--background-base-lowest);
+  }
+
+  .pe-left-head .pe-icon-btn,
+  .pe-expand {
     display: none;
+  }
+
+  .pe-middle {
+    flex: none;
+    order: 1;
+    padding: 16px;
+    overflow: visible;
+  }
+
+  .pe-left-body {
+    flex: none;
+    order: 2;
+    padding: 0 16px 112px;
+    overflow: visible;
+  }
+
+  .pe-savebar {
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 12px;
   }
 }
 
