@@ -104,7 +104,9 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     setAtBottom(value);
     if (value) setSeenBottom(true);
     onAtBottomChange(value);
-  }, [onAtBottomChange]);
+    messageStore.setFollowing(channelId, value);
+  }, [onAtBottomChange, channelId]);
+  useEffect(() => () => messageStore.setFollowing(channelId, false), [channelId]);
 
   useEffect(() => { stick.current = true; setSeenBottom(false); setAtBottom(true); }, [channelId]);
 

@@ -10,7 +10,7 @@ import type { CreateMessageRequest, EditMessageRequest, Message, MessageReaction
 import { gateway, request, setLocalReadPointer } from './shell';
 import {
   PAGE_SIZE, TYPING_TTL_MS, appendPage, applyReaction, deleteMessage, emojiKey, emptyState, indexOfId, prependPage, replaceWindow, setTyping,
-  applyUserUpdate, normalizeMessage, updateIfPresent, upsertMessage, withLateArrivals, type ChannelState, type PendingMessage,
+  applyUserUpdate, normalizeMessage, trimOldest, updateIfPresent, upsertMessage, withLateArrivals, type ChannelState, type PendingMessage,
 } from './messageState';
 import { rememberMessage, rememberMessages } from './userCache';
 import { pushRecentEmoji, recordEmojiUse, sameUnicodeEmoji } from './emojiData';
@@ -32,6 +32,10 @@ const reactionChains =new Map<string, { tail: Promise<void>; pending: number; ti
 const reactionGuard = (messageId: Snowflake, emoji: ReactionEmoji, burst: boolean): string => `${messageId}:${emojiKey(emoji)}:${burst ? 1 : 0}`;
 /** Channels the user marked unread by hand: the automatic ack stays off until they read it again on purpose, send, or leave. */
 const heldUnread = new Set<Snowflake>();
+/** Open lists scrolled to the bottom (MessageList reports it): their oldest messages may be dropped as new ones arrive. */
+const following = new Set<Snowflake>();
+/** Nobody looks at the channel, or its list follows the bottom: trimming the top is invisible. */
+const trimmable = (channelId: Snowflake): boolean => !listeners.get(channelId)?.size || following.has(channelId);
 let currentUserId: Snowflake | null = null;
 let bound = false;
 
@@ -61,7 +65,13 @@ function evict(keep: Snowflake): void {
 function bindGateway(): void {
   if (bound) return;
   bound = true;
-  gateway.on('MESSAGE_CREATE', m => { rememberMessage(m); update(m.channel_id, s => upsertMessage(s, m)); });
+  gateway.on('MESSAGE_CREATE', m => {
+    rememberMessage(m);
+    update(m.channel_id, s => {
+      const next = upsertMessage(s, m);
+      return trimmable(m.channel_id) ? trimOldest(next) : next;
+    });
+  });
   gateway.on('MESSAGE_UPDATE', m => { rememberMessage(m); update(m.channel_id, s => updateIfPresent(s, m)); });
   gateway.on('MESSAGE_DELETE', d => update(d.channel_id, s => deleteMessage(s, d.id)));
   gateway.on('MESSAGE_DELETE_BULK', d => update(d.channel_id, s => d.ids.reduce((acc, id) => deleteMessage(acc, id), s)));
@@ -134,6 +144,11 @@ function buildRequest(nonce: string, content: string, input: SendInput): CreateM
 
 export const messageStore = {
   setCurrentUser(id: Snowflake | null): void { currentUserId = id; },
+
+  /** The open list of `channelId` is (or stopped being) scrolled to the bottom. */
+  setFollowing(channelId: Snowflake, atBottom: boolean): void {
+    if (atBottom) following.add(channelId); else following.delete(channelId);
+  },
 
   /** Ensure the channel has state and a loaded window. Safe to call repeatedly. */
   open(channelId: Snowflake, lastReadId: Snowflake | null): void {
