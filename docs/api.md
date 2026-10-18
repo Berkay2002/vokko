@@ -387,6 +387,19 @@ Forum channels take no messages, so no polls (50024).
   A vote either commits before the poll is finalised (and is counted) or is refused with 520001; counts never change after finalising.
 - **Editing** a poll message → 400 520003 `Cannot edit a poll message`. Deleting it deletes the poll and its votes (no result message).
 
+## Voice messages
+
+Discord's shape. Record, upload the file with `POST /channels/{id}/attachments`, then send `CreateMessageRequest` with `flags: 8192`
+(IS_VOICE_MESSAGE, 1<<13) and `attachments: [{id, duration_secs, waveform}]`:
+
+- Needs SEND_MESSAGES, ATTACH_FILES and SEND_VOICE_MESSAGES (1<<46; not in @everyone's default set, in DM_PERMISSIONS) → 403 50013.
+- Exactly one attachment, no `content`, stickers or poll (400 50035). The upload must be `audio/ogg`, `audio/webm`, `audio/mp4` or `audio/aac`
+  (what MediaRecorder writes: opus in ogg or webm, AAC in mp4 on Safari / WKWebView), else 400 50035.
+- `duration_secs`: 0 < seconds <= 1200 (20 minutes). `waveform`: base64 of 1-256 bytes, each an amplitude 0-255 sampled evenly over the clip.
+  Both are required (400 50035 on `attachments`) and are ignored on other messages. They come back on the `Attachment` (and in a forward's snapshot).
+- A voice message cannot be edited (400 50035 on `message_id`). Clients render it as a player (play/pause, waveform with progress, duration,
+  speed 1x/1.5x/2x) with a download link; no transcript.
+
 ## Server admin: hierarchy, prune, audit log, safety
 
 - **Hierarchy.** Roles rank by `position` (ties: older snowflake higher), @everyone always last. Everyone but the owner can only edit, delete, assign, remove or move roles strictly below their own highest role, and only move them to positions below it; role edits can only flip permission bits the actor holds. The owner bypasses all of it. Violations → 403 50013.

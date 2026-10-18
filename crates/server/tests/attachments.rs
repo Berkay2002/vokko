@@ -24,10 +24,14 @@ fn png(width: u32, height: u32) -> Vec<u8> {
 }
 
 async fn upload(app: &TestApp, token: &str, channel: &str, filename: &str) -> Value {
+    upload_as(app, token, channel, filename, "image/png", &png(8, 8)).await
+}
+
+async fn upload_as(app: &TestApp, token: &str, channel: &str, filename: &str, content_type: &str, bytes: &[u8]) -> Value {
     let boundary = "vokkoboundary7MA4YWxkTrZu0gW";
     let mut body =
-        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n").into_bytes();
-    body.extend_from_slice(&png(8, 8));
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n").into_bytes();
+    body.extend_from_slice(bytes);
     body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
     let request = Request::builder()
         .method("POST")
@@ -169,23 +173,83 @@ async fn voice_messages_need_send_voice_messages() {
     app.post(&format!("/invites/{}", invite["code"].as_str().expect("code")), &member, json!({})).await;
     let base = format!("/channels/{channel}/messages");
     const VOICE: u32 = 1 << 13;
+    let voice = |clip: &Value| json!({"attachments": [{"id": clip["id"], "duration_secs": 3.5, "waveform": "AAAAgP8="}], "flags": VOICE});
 
     // @everyone does not have SEND_VOICE_MESSAGES: refused, the same file as a plain attachment is fine
-    let clip = upload(&app, &member, &channel, "voice-message.ogg").await;
-    let (status, error) = app.post(&base, &member, json!({"attachment_ids": [clip["id"]], "flags": VOICE})).await;
+    let clip = upload_ogg(&app, &member, &channel).await;
+    let (status, error) = app.post(&base, &member, voice(&clip)).await;
     assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(50013)), "{error}");
     let (status, plain) = app.post(&base, &member, json!({"attachment_ids": [clip["id"]], "flags": 4})).await;
     assert_eq!(status, StatusCode::OK, "{plain}");
     assert_eq!(plain["flags"].as_u64().unwrap_or(0), 0, "other create flags are ignored: {plain}");
 
     // the owner holds it: one attachment and nothing else
-    let clip = upload(&app, &owner, &channel, "voice-message.ogg").await;
-    let other = upload(&app, &owner, &channel, "other.ogg").await;
+    let clip = upload_ogg(&app, &owner, &channel).await;
+    let other = upload_ogg(&app, &owner, &channel).await;
     let (status, _) = app.post(&base, &owner, json!({"attachment_ids": [clip["id"], other["id"]], "flags": VOICE})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, _) = app.post(&base, &owner, json!({"content": "hi", "attachment_ids": [clip["id"]], "flags": VOICE})).await;
+    let mut with_content = voice(&clip);
+    with_content["content"] = json!("hi");
+    let (status, _) = app.post(&base, &owner, with_content).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let (status, sent) = app.post(&base, &owner, json!({"attachment_ids": [clip["id"]], "flags": VOICE})).await;
+    let (status, sent) = app.post(&base, &owner, voice(&clip)).await;
     assert_eq!(status, StatusCode::OK, "{sent}");
     assert_eq!(sent["flags"], VOICE);
+}
+
+#[tokio::test]
+async fn voice_message_duration_and_waveform_round_trip() {
+    let (app, owner, channel) = setup().await;
+    let base = format!("/channels/{channel}/messages");
+    const VOICE: u32 = 1 << 13;
+    let send =
+        |id: &Value, duration: Value, waveform: Value| json!({"attachments": [{"id": id, "duration_secs": duration, "waveform": waveform}], "flags": VOICE});
+    let clip = upload_as(&app, &owner, &channel, "voice-message.webm", "audio/webm;codecs=opus", b"\x1a\x45\xdf\xa3webm").await;
+
+    // both fields are required and checked: (0, 1200] seconds, base64 of 1-256 bytes
+    let (status, _) = app.post(&base, &owner, json!({"attachment_ids": [clip["id"]], "flags": VOICE})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "plain ids carry no waveform");
+    for (duration, waveform) in [
+        (json!(0), json!("AAAA")),
+        (json!(1200.5), json!("AAAA")),
+        (json!(2), json!("")),
+        (json!(2), json!("not base64!")),
+        (json!(2), json!(base64_of(&[7u8; 257]))),
+    ] {
+        let (status, error) = app.post(&base, &owner, send(&clip["id"], duration.clone(), waveform)).await;
+        assert_eq!((status, error["code"].clone()), (StatusCode::BAD_REQUEST, json!(50035)), "{duration}: {error}");
+    }
+
+    // only audio: an image upload is refused
+    let image = upload(&app, &owner, &channel, "cat.png").await;
+    let (status, _) = app.post(&base, &owner, send(&image["id"], json!(2), json!("AAAA"))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let waveform = base64_of(&(0..=255u8).collect::<Vec<_>>());
+    let (status, sent) = app.post(&base, &owner, send(&clip["id"], json!(1200), json!(waveform))).await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    let attachment = &sent["attachments"][0];
+    assert_eq!(
+        (attachment["duration_secs"].clone(), attachment["waveform"].clone(), attachment["content_type"].clone()),
+        (json!(1200.0), json!(waveform), json!("audio/webm"))
+    );
+    let (_, page) = app.get(&format!("{base}?limit=1"), &owner).await;
+    assert_eq!(page[0]["attachments"][0]["waveform"], json!(waveform), "stored: {page}");
+    assert_eq!(page[0]["attachments"][0]["duration_secs"], json!(1200.0));
+
+    // a voice message cannot be edited; ordinary attachments never carry the fields
+    let (status, _) = app.patch(&format!("{base}/{}", sent["id"].as_str().expect("id")), &owner, json!({"content": "words"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let other = upload(&app, &owner, &channel, "dog.png").await;
+    let (_, plain) = app.post(&base, &owner, json!({"attachments": [{"id": other["id"], "duration_secs": 3, "waveform": "AAAA"}]})).await;
+    assert!(plain["attachments"][0].get("waveform").is_none(), "{plain}");
+}
+
+async fn upload_ogg(app: &TestApp, token: &str, channel: &str) -> Value {
+    upload_as(app, token, channel, "voice-message.ogg", "audio/ogg", b"OggS\0\x02voice").await
+}
+
+fn base64_of(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
 }

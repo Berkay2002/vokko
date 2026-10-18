@@ -147,6 +147,9 @@ pub async fn prepare(
             original.height.map(|value| value as i32),
         );
         copy.description = original.description.clone();
+        // The snapshot keeps the voice-message player data; the copied row itself does not need it.
+        copy.duration_secs = original.duration_secs;
+        copy.waveform = original.waveform.clone();
         attachments.push(copy);
         copies.push(AttachmentCopy {
             id: new_id,
