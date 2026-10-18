@@ -302,7 +302,7 @@ async function fetchStreams(c: Ctx, id: { kind: string; videoId: string }): Prom
   const r = (await c.call('GET', `/stremio/streams/${id.kind}/${id.videoId}`, undefined, LINK_FIRST)) as { streams?: StStream[]; addon_errors?: unknown[] } | undefined
   const all = list<StStream>(r?.streams)
   const streams = all.filter(s => s.playable === true && typeof s.sid === 'string' && SID.test(s.sid))
-  const note = streams.length ? '' : all.length ? `Found ${all.length} streams but none can be played here (${[...new Set(all.map(s => qt(s.unsupported, 20)).filter(Boolean))].join(', ') || 'unsupported'}).` : `No streams found${list(r?.addon_errors).length ? ` (${list(r?.addon_errors).length} of your addons failed or timed out)` : ''}.`
+  const note = streams.length ? '' : all.length ? `Found ${all.length} streams but none can be played here (${[...new Set(all.filter(s => s.unsupported).map(s => qt(s.unsupported, 20)))].join(', ') || 'unsupported'}).` : `No streams found${list(r?.addon_errors).length ? ` (${list(r?.addon_errors).length} of your addons failed or timed out)` : ''}.`
   return { streams, note }
 }
 
