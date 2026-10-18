@@ -114,7 +114,7 @@ test('the header topic opens a dialog that renders the topic as markdown (link, 
   await expect(page.getByRole('dialog', { name: 'Leaving Vokko' })).toContainText('https://example.com/rules');
   await page.getByRole('dialog', { name: 'Leaving Vokko' }).getByRole('button', { name: 'Cancel' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await topic.click();
+  await topic.click({ position: { x: 4, y: 4 } }); // the middle may be a link, which sits above the button
   const dialog = page.getByRole('dialog', { name: /stock-talk/ });
   await expect(dialog.locator('strong')).toHaveText('the rules');
   await expect(dialog.locator('a.md-link')).toHaveAttribute('href', 'https://example.com/rules');

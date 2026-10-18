@@ -134,7 +134,7 @@ test('pins: user mention opens the card over the popout, channel mention navigat
 test('topic dialog: user mention opens the card above the dialog, channel mention closes it and navigates', async ({ page }) => {
   const ids = await setup(page, 'Read the rules, ask ALICE in GENERAL');
   const topic = page.locator('.channel-header-topic-open');
-  await topic.click();
+  await topic.click({ position: { x: 4, y: 4 } }); // the middle may be a link, which sits above the button
   const dialog = page.getByRole('dialog', { name: /stock-talk/ });
   await chip(dialog, '@Alice').click();
   await expect(card(page)).toBeVisible();
