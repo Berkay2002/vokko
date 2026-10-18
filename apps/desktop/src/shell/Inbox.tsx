@@ -17,8 +17,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "reminders", label: "Reminders" },
 ];
 
-/** Inbox popout under the title-bar button. Unreads and Mentions come from read states, Bookmarks and Reminders from the server. */
-export function InboxPopout({ anchor, open }: { anchor: HTMLElement | null; open: boolean }) {
+/** Inbox popout under the title-bar button (above the account card on a phone). Unreads and Mentions come from read states, Bookmarks and Reminders from the server. */
+export function InboxPopout({ anchor, open, side = "bottom" }: { anchor: HTMLElement | null; open: boolean; side?: "top" | "bottom" }) {
   const [tab, setTab] = useState<Tab>("unreads");
   const channels = useStore(s => s.channels);
   const readStates = useStore(s => s.readStates);
@@ -37,7 +37,7 @@ export function InboxPopout({ anchor, open }: { anchor: HTMLElement | null; open
   const list = tab === "mentions" ? rows.filter(r => r.mentions > 0) : rows;
 
   return (
-    <Popout anchor={anchor} open={open} onClose={closeModal} side="bottom" align="end" gap={4} className="inbox-popout">
+    <Popout anchor={anchor} open={open} onClose={closeModal} side={side} align="end" gap={side === "top" ? 8 : 4} className="inbox-popout">
       <div className="inbox-header">
         <InboxIcon size={20} />
         <span className="inbox-title">Inbox</span>

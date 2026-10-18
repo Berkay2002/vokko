@@ -103,8 +103,8 @@ export function InviteList({ guildId, channelId, canManage }: { guildId: Snowfla
                   {invite.temporary && <span className="invite-tag">Temporary</span>}
                 </td>
                 {!channelId && <td>#{channels[invite.channel.id]?.name ?? invite.channel.name}</td>}
-                <td>{invite.max_uses > 0 ? `${invite.uses}/${invite.max_uses}` : invite.uses}</td>
-                <td>{timeLeft(invite.expires_at)}</td>
+                <td data-label="Uses">{invite.max_uses > 0 ? `${invite.uses}/${invite.max_uses}` : invite.uses}</td>
+                <td data-label="Expires">{timeLeft(invite.expires_at)}</td>
                 <td className="invite-revoke-cell">
                   <button type="button" className="invite-revoke" aria-label={`Revoke invite ${invite.code}`} title="Revoke invite" disabled={revoking === invite.code} onClick={() => void revoke(invite.code)}>
                     <X size={16} aria-hidden="true" />

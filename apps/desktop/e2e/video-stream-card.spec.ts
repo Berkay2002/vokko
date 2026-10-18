@@ -154,6 +154,37 @@ test('Watch Stream from another call moves you there and watches in the new chan
   await expect(tile.getByRole('button', { name: 'Stream quality' })).toBeVisible();
 });
 
+test('Watch Stream on the channel preview (not in the call) joins and watches', async ({ page }) => {
+  await openGuild(page);
+  await aliceStreams(page);
+  // The voice channel's page without joining (a row click joins): navigate in-app, a reload would re-seed the mock.
+  await page.evaluate(() => {
+    const w = window as unknown as Win & { __vokko: { appStore: { getState(): { channels: Record<string, { guild_id: string | null }> } } } };
+    const id = w.__vokkoMock.channelIdByName('General')!;
+    history.pushState({}, '', `/channels/${w.__vokko.appStore.getState().channels[id]!.guild_id}/${id}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  const call = page.getByRole('region', { name: /call$/ });
+  await expect(call.getByRole('button', { name: 'Join Voice' })).toBeVisible();
+  await call.getByRole('button', { name: 'Watch Stream' }).click();
+  await expect(page.getByRole('region', { name: 'Voice connection' }).getByRole('status')).toHaveText('Voice Connected');
+  const tile = call.locator('.voice-tile.focused', { hasText: 'Alice' });
+  await expect(tile.locator('video[data-source="screen"]')).toBeVisible();
+
+  // Alice stops and goes live again: like Discord, her new stream waits for another Watch Stream.
+  const live = (on: boolean) => page.evaluate(stream => {
+    const w = window as unknown as Win;
+    w.__vokkoMock.voice('alice', w.__vokkoMock.channelIdByName('General'), { selfStream: stream });
+  }, on);
+  await live(false);
+  await expect(call.locator('.voice-tile.stream')).toHaveCount(0);
+  await live(true);
+  await expect(call.getByRole('button', { name: 'Watch Stream' })).toBeVisible();
+  await expect(call.locator('video[data-source="screen"]')).toHaveCount(0);
+  // The unwatched stream tile shows only the button, not the streamer's avatar under it.
+  await expect(call.locator('.voice-tile.stream .voice-tile-avatar')).toHaveCount(0);
+});
+
 test('sharing your screen: the panel shows the share with a stop button, the user panel says so', async ({ page }) => {
   await openGuild(page);
   await page.getByRole('button', { name: 'General voice channel' }).click();

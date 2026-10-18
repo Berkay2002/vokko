@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { NavToggle } from "./NavToggle";
 import { siSpotify } from "simple-icons";
 import { BrandIcon } from "../ui/BrandIcon";
-import { Check, MessageCircle, MoreVertical, Search, Users, Volume2, X } from "lucide-react";
+import { Check, MessageCircle, MoreVertical, Search, UserPlus, Users, Volume2, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { displayName, useStore } from "../api/store";
@@ -397,6 +397,10 @@ export function FriendsPage() {
             </button>
           </div>
           <div className="friends-toolbar">
+            {/* phone only (responsive.css): the Add Friend tab becomes this icon */}
+            <button type="button" className="toolbar-button friends-add-icon" aria-label="Add Friend" aria-pressed={tab === "add"} onClick={() => setTab("add")}>
+              <UserPlus size={20} />
+            </button>
             <Tooltip content="New Group DM" side="bottom">
               <button type="button" className="toolbar-button" aria-label="New Group DM" onClick={() => openModal({ type: "createDM" })}>
                 <MessageCircle size={20} />

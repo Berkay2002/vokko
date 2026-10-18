@@ -88,7 +88,8 @@ Game manifest (server-validated; the same shape for built-ins, which are constan
 - `id`: snowflake for guild games, `builtin:sketch` for built-ins. `name`: 1-32 chars, trimmed, no `hidden_char`.
 - `url`: absolute, `https:` only (plus `http://127.0.0.1|localhost:*` when the server runs with `VOKKO_DEV=1`), no userinfo, no
   fragment, at most 512 bytes. Its origin must differ from the server's public origin and the web app origin (config
-  `public_url`); rejected with `url` "Must not be this server's own address".
+  `public_url`); rejected with `url` "Must not be this server's own address". Outside dev, loopback, private and link-local hosts
+  (`unfurl::host_allowed`: `localhost`, `.local`, `.internal` and non-public IPs) are rejected with "Must not be a local or private network address".
 - `icon`: optional, one emoji grapheme (max 16 bytes, no `hidden_char`). `min_players` 1-16, `max_players` min-16. `aspect`:
   `"16:9" | "4:3" | "1:1" | "fill"`, default `"16:9"`.
 - At most 25 games per guild. Routes (MANAGE_GUILD to write, any member to read):
@@ -192,6 +193,18 @@ Game → host:
   `allow-top-navigation*`, `allow-popups*`, `allow-modals`, `allow-forms` (games post over the SDK),
   `allow-downloads`, `allow-storage-access-by-user-activation`. `allow=""` delegates no camera, mic, geolocation, clipboard,
   fullscreen or autoplay.
+- **Website games** (`kind: "web"`, built-ins Betrayal, Shell Shockers, Smash Karts, skribbl.io, Codenames, Krunker, or a guild
+  game with the "Website game with its own lobby" box): `SANDBOX_WEB` adds `allow-forms allow-popups
+  allow-popups-to-escape-sandbox` for sign-in forms and the sites' own links; `allow="fullscreen; clipboard-write; autoplay;
+  gamepad"` and `allowfullscreen`. Still never `allow-top-navigation*`, `allow-modals` or `allow-downloads`; `credentialless`
+  stays; the referrer policy is `strict-origin` (the app origin, never a path) because Shell Shockers throws on `new URL(document.referrer)` with no referrer. No SDK: no hello, no port, and the tile shows the frame on load. Whether a game is web comes from the
+  client's own built-in list for built-ins (a server can't flip one), from the manifest for guild games.
+- **Popups in the desktop app:** `src-tauri/src/popups.rs` denies every webview new-window request and opens http/https URLs in
+  the system browser (no shell; at most one a second and three in 30 seconds). Other schemes are dropped.
+- **Room links:** `PUT /channels/{id}/game/room {url|null}` (anyone in the call, only while a web game runs, game-control rate
+  limit) stores `room_url` on the session and broadcasts GAME_UPDATE. The URL must be https, ≤ 512 bytes, no user info, on the
+  manifest's host (or a subdomain of it for built-ins only). Each tile except the sharer's reloads into the link, after checking it again against its own
+  manifest URL and refusing any of the app's hosts, their parents or subdomains (`roomFrameUrl`).
 - Below 767 px a focused game tile fills the stage and ignores `aspect`, so games must lay out for a tall frame too
   (Sketch switches to a portrait layout).
 - A Vokko-drawn header strip above the frame always shows the game name, its origin (built-ins: "Vokko"), and Close / Stop.
@@ -219,6 +232,11 @@ Game → host:
 | Relay HTML/script to other players | Relay data is opaque JSON to the host; the host never renders it. Each game is responsible for its own rendering. |
 | Hog CPU | Frame unloads when the tile closes; one game per call. Residual: a busy game can slow the user's webview while open. |
 | Admin adds a URL on the server's own origin to get `allow-same-origin` there | Server rejects own-origin URLs; client re-checks before adding the flag. |
+| Website game submits a form to phish a password | `allow-forms` only on web games (built-ins from the client's list, or a guild game an admin marked web); the header strip names the site; credentialless, so no Vokko cookies go with it. Residual: the site can still ask for its own account password, as it would in a browser tab. |
+| Website game opens popups or ad windows | Browser: a new tab, never a window over the app (no `allow-modals`, no top navigation). Desktop: every new-window request is denied in the webview; http/https go to the system browser at most once a second and three times in 30 seconds, other schemes are dropped. |
+| Website game goes fullscreen or locks the pointer to trap the user | Fullscreen and pointer lock need a click inside the frame; Escape always leaves both (browser-owned, not the page's). |
+| Call member shares a room link to a phishing page | Server and every client check https, ≤ 512 bytes, no user info, host equal to the game's host (a subdomain only for built-ins); the client also refuses the app's hosts. Shares are rate limited, broadcast with the sharer known to the call, and "Clear" removes the link. |
+| Room link on the app's own origin to lift the sandbox | `roomFrameUrl` refuses any app host, its parents and subdomains before loading; the frame keeps the web sandbox. |
 
 ## 9. Fit with other activities and bot control
 

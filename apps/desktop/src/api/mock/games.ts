@@ -5,9 +5,10 @@
 // e.g. Alice and Bob in General) play the second participant: the first of them answers {"ping":n} with {"pong":n}.
 // shortcut: no relay or control rate limits here (the server has them); add them if an e2e needs the 429 path.
 
-import { GAME_RELAY_MAX_BYTES, GUILD_GAMES_MAX, type GameAspect, type GameManifest, type GamePlayer, type GameSession, type GameUpdate } from "../types";
+import { GAME_RELAY_MAX_BYTES, GUILD_GAMES_MAX, type GameAspect, type GameKind, type GameManifest, type GamePlayer, type GameSession, type GameUpdate } from "../types";
 import { Perm, hasBit } from "../permissions";
-import { BUILTIN_GAMES } from "../../games/builtin";
+import { BUILTIN_GAMES, isBuiltin } from "../../games/builtin";
+import { checkRoomUrl } from "../../games/frameHost";
 import { canView, channelPermsOf } from "./access";
 import { db, nextId, type MockChannel } from "./db";
 import { fail, MISSING_PERMISSIONS, requireChannel, requireGuildMember, requireGuildPerm } from "./ops";
@@ -126,10 +127,24 @@ function aspect(value: unknown): GameAspect {
   return value as GameAspect;
 }
 
+function kind(value: unknown): GameKind {
+  if (value === undefined || value === null) return "sdk";
+  if (value !== "sdk" && value !== "web") return invalid("kind", 'Must be "sdk" or "web".');
+  return value;
+}
+
 function manifest(id: string, body: Record<string, unknown>, base?: GameManifest): GameManifest {
   const pick = (key: keyof GameManifest) => (key in body ? body[key] : base?.[key]);
   const min = players("min_players", pick("min_players"), 1);
-  const game: GameManifest = { id, name: name(pick("name")), url: gameUrl(pick("url")), min_players: min, max_players: players("max_players", pick("max_players"), min), aspect: aspect(pick("aspect")) };
+  const game: GameManifest = {
+    id,
+    name: name(pick("name")),
+    url: gameUrl(pick("url")),
+    min_players: min,
+    max_players: players("max_players", pick("max_players"), min),
+    aspect: aspect(pick("aspect")),
+    kind: kind(pick("kind")),
+  };
   const emoji = icon(pick("icon"));
   if (emoji) game.icon = emoji;
   return game;
@@ -159,6 +174,9 @@ route("PATCH", `/guilds/${ID}/games/${ID}`, ({ viewer, params, body }) => {
   const current = list.find(g => g.id === gameId) ?? fail(404, 10090, "Unknown Game");
   const next = manifest(gameId, body, current);
   catalogs.set(guildId, list.map(g => (g.id === gameId ? next : g)));
+  if (next.url !== current.url || next.kind !== current.kind) {
+    for (const [channelId, session] of sessions) if (session.game.id === gameId && db.channels.get(channelId)?.guild_id === guildId) endGame(channelId);
+  }
   announceCatalog(guildId);
   return copyGame(next);
 });
@@ -197,8 +215,21 @@ route("PUT", `/channels/${ID}/game`, ({ viewer, params, body }) => {
   const gameId = typeof body.game_id === "string" ? body.game_id : "";
   const game = BUILTIN_GAMES.find(g => g.id === gameId) ?? (channel.guild_id ? catalogs.get(channel.guild_id)?.find(g => g.id === gameId) : undefined) ?? fail(404, 10090, "Unknown Game");
   if (sessions.has(channel.id)) fail(409, 40090, "A game is already running");
-  const session: GameSession = { session_id: sessionId(), game: copyGame(game), started_by: viewer.user.id, started_at_ms: Date.now() };
+  const session: GameSession = { session_id: sessionId(), game: copyGame(game), started_by: viewer.user.id, started_at_ms: Date.now(), room_url: null };
   sessions.set(channel.id, session);
+  announce(channel, session);
+  return copySession(session);
+});
+
+route("PUT", `/channels/${ID}/game/room`, ({ viewer, params, body }) => {
+  const channel = connectedChannel(viewer.user.id, params[0] ?? "");
+  const session = sessions.get(channel.id);
+  if (!session || session.game.kind !== "web") return invalid("url", "No website game is running in this call.");
+  let room: string | null = null;
+  if (body.url !== null && body.url !== undefined) {
+    room = (typeof body.url === "string" ? checkRoomUrl(session.game.url, body.url, isBuiltin(session.game)) : null) ?? invalid("url", "Must be a link to this game.");
+  }
+  session.room_url = room;
   announce(channel, session);
   return copySession(session);
 });

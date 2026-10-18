@@ -18,6 +18,7 @@ import { GRID_GAP, gridLayout } from "./gridLayout";
 import { dismissVideoError, joinVoiceChannel, leaveVoice, setViewerQuality, toggleSelfMute, watchStream } from "./engine";
 import { useMedia, useStreamingCheck, useVideo, type VideoHandle, type VideoSource } from "./mediaStore";
 import { SoundboardPopout } from "./SoundboardPopout";
+import { watchStreamFrom } from "./StreamCard";
 import { SoundEffectBadge, useSoundFlashClass } from "../soundboard";
 import { useChannelVoiceStates, useIsSpeaking, useVoice } from "./store";
 import { useVoiceUi } from "./uiStore";
@@ -120,6 +121,7 @@ export function Tile({ state, guildId, variant, stream = false, onActivate }: { 
   const speaking = useIsSpeaking(state.user_id);
   const flash = useSoundFlashClass(state.user_id);
   const own = useVoice(s => s.meId === state.user_id);
+  const inCall = useVoice(s => s.channelId === state.channel_id);
   // Our own stream's quality, as chosen in Go Live (it is saved as the new default). Others' streams don't carry theirs.
   const ownSpec = usePrefs(s => `${s.streamResolution.toUpperCase()} ${s.streamFps}FPS`);
   const menu = useContextMenu();
@@ -166,7 +168,7 @@ export function Tile({ state, guildId, variant, stream = false, onActivate }: { 
         <TileVideo key="screen" handle={screen} source="screen" mirror={false} />
       ) : !stream && camera ? (
         <TileVideo key="camera" handle={camera} source="camera" mirror={own} />
-      ) : (
+      ) : stream && !own && !watching && !small ? null /* the Watch Stream button stands alone on the tile, as in Discord */ : (
         <Avatar user={user} member={member} size={AVATAR_SIZE[variant]} decoration={false} className="voice-tile-avatar" />
       )}
       {!stream && <SoundEffectBadge userId={state.user_id} />}
@@ -181,6 +183,8 @@ export function Tile({ state, guildId, variant, stream = false, onActivate }: { 
           onClick={e => {
             // Watching from the grid also focuses the stream; on the focused tile it must not return to the grid.
             e.stopPropagation();
+            // From the channel's preview (not in this call): join first, then watch, like Watch Stream in the channel list.
+            if (!inCall && state.channel_id) return watchStreamFrom(state.channel_id, state.user_id);
             watchStream(state.user_id, true);
             if (!focused) onActivate?.();
           }}

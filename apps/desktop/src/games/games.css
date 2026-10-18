@@ -227,3 +227,115 @@
 .games-number-row > * {
   flex: 1 1 0;
 }
+
+.game-button.active {
+  color: var(--text-feedback-positive, #23a55a);
+}
+
+/* "Share room to call" popover in a website game's header. */
+.game-share {
+  width: min(340px, calc(100vw - 32px));
+  padding: 12px;
+  border-radius: var(--radius-md, 8px);
+  background: var(--background-surface-higher, #2b2d31);
+  box-shadow: var(--shadow-high, 0 8px 16px rgb(0 0 0 / 0.24));
+}
+
+.game-share-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.game-share-label {
+  color: var(--text-muted, #aaa);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.game-share-hint,
+.game-share-current {
+  margin: 0;
+  color: var(--text-muted, #aaa);
+  font-size: 13px;
+}
+
+.game-share-current {
+  overflow-wrap: anywhere;
+}
+
+.game-share-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Add / Edit game: the website-game checkbox. */
+.games-kind {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 12px;
+  cursor: pointer;
+}
+
+.games-kind input {
+  margin-top: 3px;
+}
+
+.games-kind-label {
+  display: block;
+  font-weight: 600;
+}
+
+.games-kind-note {
+  display: block;
+  color: var(--text-muted, #aaa);
+  font-size: 13px;
+}
+
+/* Activities > Credits and licenses */
+.game-credits,
+.game-credits-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.game-credits-list {
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.game-credits-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 16px;
+}
+
+.game-credits-note {
+  margin: 4px 0 0;
+  color: var(--text-muted, #aaa);
+  font-size: 14px;
+}
+
+.game-credits-item {
+  font-size: 14px;
+}
+
+.game-credits-text {
+  max-height: 240px;
+  margin: 6px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--background-base-lowest, #111214);
+  font-size: 12px;
+  white-space: pre-wrap;
+}

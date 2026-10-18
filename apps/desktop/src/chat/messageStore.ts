@@ -12,6 +12,7 @@ import {
   applyUserUpdate, normalizeMessage, updateIfPresent, upsertMessage, withLateArrivals, type ChannelState, type PendingMessage,
 } from './messageState';
 import { rememberMessage, rememberMessages } from './userCache';
+import { sameUnicodeEmoji } from './emojiData';
 import { newNonce } from './util';
 import { applyPollVote } from '../polls/pollState';
 
@@ -321,6 +322,8 @@ export const messageStore = {
     const s = states.get(channelId);
     const m = s?.messages[s ? indexOfId(s.messages, messageId) : -1];
     if (!m) return;
+    // 👍 and 👍️ (with U+FE0F) are one emoji: react with the spelling already on the message, so both land on the same pill.
+    if (!emoji.id) emoji = m.reactions.find(r => !r.emoji.id && sameUnicodeEmoji(r.emoji.name, emoji.name))?.emoji ?? emoji;
     const key = emojiKey(emoji);
     const guard = reactionGuard(messageId, emoji, burst);
     // Rapid toggles are applied optimistically right away and sent in order, one request at a time per message+emoji.

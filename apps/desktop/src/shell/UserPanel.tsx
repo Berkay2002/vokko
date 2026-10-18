@@ -121,7 +121,8 @@ export function UserPanel() {
           </button>
         </Tooltip>
       </div>
-      <InboxPopout anchor={inboxAnchor} open={inboxOpen} />
+      {/* above the whole card, so it never covers the account row */}
+      <InboxPopout anchor={inboxAnchor?.closest<HTMLElement>(".user-panel") ?? null} open={inboxOpen} side="top" />
       <UserPanelPopout
         anchor={anchor}
         open={open}

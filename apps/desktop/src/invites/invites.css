@@ -144,3 +144,54 @@
 .apply-modal .apply-description {
   white-space: pre-wrap;
 }
+
+/* phone (<= 767px): each invite is a stacked row instead of a 6-column table that ran off screen (expiry and the revoke X were
+   unreachable): inviter and revoke on top (.ss-table doubled: server-settings.css loads later), the code under it, then channel, uses and expiry on one muted line */
+@media (max-width: 767px) {
+  .ss-table.invite-table thead {
+    display: none;
+  }
+
+  .ss-table.invite-table,
+  .ss-table.invite-table tbody {
+    display: block;
+  }
+
+  .ss-table.invite-table tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .ss-table.invite-table td {
+    padding: 0;
+    border: 0;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .ss-table.invite-table td:first-child {
+    flex: 1 0 calc(100% - 44px);
+    order: -2;
+    color: var(--text-default);
+    font-size: 14px;
+  }
+
+  .ss-table.invite-table .invite-revoke-cell {
+    order: -1;
+    width: auto;
+  }
+
+  .ss-table.invite-table td:nth-child(2) {
+    flex: 1 0 100%;
+    margin: 6px 0 4px;
+    color: var(--text-default);
+  }
+
+  .ss-table.invite-table td[data-label]::before {
+    content: attr(data-label) " ";
+  }
+}

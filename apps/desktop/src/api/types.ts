@@ -841,14 +841,16 @@ export interface EditCallRequest {
 export const GAME_RELAY_MAX_BYTES = 4096;
 export const GUILD_GAMES_MAX = 25;
 export type GameAspect = "16:9" | "4:3" | "1:1" | "fill";
+export type GameKind = "sdk" | "web"; // web: a website game with its own lobby (no SDK, forms/popups/fullscreen, shareable room link)
 export interface GameManifest {
   id: string; // snowflake for guild games, "builtin:<name>" for built-ins
   name: string; // 1-32 chars
-  url: string; // absolute https (built-ins: a path inside the app)
+  url: string; // absolute https (SDK built-ins: a path inside the app)
   icon?: string | null; // one emoji, or none
   min_players: number; // 1-16
   max_players: number; // min_players-16
   aspect: GameAspect;
+  kind?: GameKind; // absent = "sdk"
 }
 export type GameManifestRequest = Omit<GameManifest, "id" | "aspect"> & { aspect?: GameAspect }; // POST /guilds/{id}/games; PATCH takes any subset
 export interface GameSession {
@@ -856,6 +858,10 @@ export interface GameSession {
   game: GameManifest;
   started_by: Snowflake;
   started_at_ms: number;
+  room_url?: string | null; // a web game's shared room link (PUT /channels/{id}/game/room); every tile loads it
+}
+export interface GameRoomRequest {
+  url: string | null; // https, <= 512 bytes, no user info, on the game's host or a subdomain; null clears
 }
 export interface GameUpdate {
   channel_id: Snowflake;
