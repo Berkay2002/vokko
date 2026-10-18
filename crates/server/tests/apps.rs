@@ -137,7 +137,7 @@ async fn invoke(app: &TestApp, user: &str, app_id: &str, channel: &str, command:
 #[tokio::test]
 async fn bot_tokens_authenticate_rest_and_gateway_only_with_the_prefix() {
     let app = TestApp::new().await;
-    let (owner, _) = app.register("owner").await;
+    let (owner, owner_user) = app.register("owner").await;
     let (app_id, bot) = create_app(&app, &owner, "Echo Bot").await;
     let (status, me) = app.get("/users/@me", &bot).await;
     assert_eq!(status, StatusCode::OK);
@@ -160,6 +160,10 @@ async fn bot_tokens_authenticate_rest_and_gateway_only_with_the_prefix() {
     assert_eq!(app.get("/users/@me", &bot).await.0, StatusCode::UNAUTHORIZED, "the old token is revoked");
     let fresh = format!("Bot {}", reset["token"].as_str().expect("token"));
     assert_eq!(app.get("/users/@me", &fresh).await.0, StatusCode::OK);
+    // the bot reads its own application (owner_id); a person gets 404
+    let (status, own) = app.get("/applications/@me", &fresh).await;
+    assert_eq!((status, own["id"].as_str(), own["owner_id"].as_str()), (StatusCode::OK, Some(app_id.as_str()), owner_user["id"].as_str()));
+    assert_eq!(app.get("/applications/@me", &owner).await.0, StatusCode::NOT_FOUND);
     // only the owner sees and edits the application
     let (stranger, _) = app.register("stranger").await;
     assert_eq!(app.get(&format!("/applications/{app_id}"), &stranger).await.0, StatusCode::NOT_FOUND);
