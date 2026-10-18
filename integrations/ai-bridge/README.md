@@ -129,6 +129,7 @@ Sent by you (the bot application's owner) to the bot in a DM:
   model: the tally and per-reply cap use the cost the SDK reports. Changing the model or effort invalidates the prompt cache,
   so the first turn after it pays full input price once.
 - `!pair <code>`: approve a pairing code.
+- `!notes`, `!notes clear`: list or empty the notes of this DM (claude-api; see Notes).
 - `!pause @user <minutes>`, `!unpause @user`, `!pauses`: pause someone everywhere, lift it, list pauses.
 
 Server moderators (Moderate Members) may use `!pause` / `!unpause` in a channel the bridge answers in (every channel the bot can see, see the plugin's ACCESS.md). A
@@ -155,6 +156,18 @@ message author, not the model's word:
 
 A conversation (per DM or channel) starts over after 40 turns or 3 days, or after a reply that hit the per-reply budget
 or turn limit.
+
+## Notes (claude-api)
+
+So the bot still knows the important things after a conversation starts over, each channel (a thread: its parent, unless
+@everyone cannot view the thread: a private thread keeps its own) and each 1:1 DM has its own notes: `notes/<channel id>.md`
+or `notes/dm-<DM channel id>.md` in the state dir, one `<user id>: text` line per note, newest last, at most 2 KB (the oldest
+line goes first). Group DMs and channels the bot has not seen get no notes. Claude saves a line (200 characters) with `remember`
+when someone asks it to or for a durable fact about the channel; only you and paired people can add notes (not the untrusted
+members of an opted-in channel). When a conversation starts, that channel's notes go into its first prompt as quoted data
+with their writers' ids, never instructions; nothing is added per turn and notes never cross channels. Paused people, the
+monthly budget and the per-reply tool cap stop `remember`. You and moderators send `!notes` (list) and `!notes clear` (empty)
+in a channel; in a DM, you and every paired member can do the same for that DM's own notes. There is no per-line delete.
 
 ## Always-on Mac
 
