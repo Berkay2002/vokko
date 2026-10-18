@@ -13,6 +13,7 @@ use vokko_protocol::api::StremioSubtitleKind;
 use crate::config::Config;
 use crate::media::{self, Notify, Pipeline, Published};
 use crate::plan::{self, Action, Choice, Desired, Geometry, Lease, Probe};
+use crate::readahead::{self, ReadAhead};
 use crate::report::{Kind, Reporter, Tracks};
 
 pub enum PutError {
@@ -130,6 +131,8 @@ struct Live {
     out: Option<Published>,
     source: Option<Source>,
     pipeline: Option<Pipeline>,
+    /// The download-ahead cache of the media being played. It outlives the ffmpeg runs (pause, seek, retrack) so downloaded film stays.
+    cache: Option<ReadAhead>,
     /// Where a paused or finished session stands.
     hold_ms: u64,
     ended: bool,
@@ -150,6 +153,7 @@ impl Live {
             out: None,
             source: None,
             pipeline: None,
+            cache: None,
             hold_ms: 0,
             ended: false,
             retries: 1,
@@ -204,6 +208,10 @@ impl Live {
                         if let Some(out) = &self.out {
                             out.log_stats().await;
                         }
+                        if let Some(p) = &self.pipeline {
+                            p.reported(self.current_ms());
+                        }
+                        self.log_cache();
                     }
                 }
                 _ = keepalive_tick.tick() => {
@@ -226,6 +234,8 @@ impl Live {
     }
 
     async fn load(&mut self, d: &Desired) -> Result<(), String> {
+        // new media (or a new bot run of it): the old cache is of another file
+        self.cache = None;
         let probe = media::probe(&self.mgr.cfg, d).await.map_err(|e| redact(&e, d))?;
         let geo = plan::geometry(&probe, d.max_height);
         tracing::info!(
@@ -274,12 +284,62 @@ impl Live {
         Ok(())
     }
 
+    /// Starts the download-ahead cache of the media unless a working one is there already.
+    async fn ensure_cache(&mut self) -> Result<(), String> {
+        if self.cache.as_ref().is_some_and(|c| !c.failed()) {
+            return Ok(());
+        }
+        self.cache = None;
+        let (Some(d), Some(source)) = (&self.desired, &self.source) else { return Err("not ready".into()) };
+        let cfg = &self.mgr.cfg;
+        let cache = ReadAhead::start(readahead::Opts {
+            url: &d.media_url,
+            headers: &d.headers,
+            root: &cfg.cache_dir,
+            session: &self.channel_id,
+            cap: cfg.cache_bytes,
+            bit_rate: source.probe.bit_rate,
+            duration_ms: source.probe.duration_ms,
+        })
+        .await
+        .map_err(|e| redact(&e, d))?;
+        tracing::info!(
+            channel_id = self.channel_id,
+            cache_cap_mb = cache.cap() >> 20,
+            cache_cap_secs = cache.cap_secs(),
+            bitrate_kbps = cache.bit_rate() / 1000,
+            "read-ahead cache"
+        );
+        self.cache = Some(cache);
+        Ok(())
+    }
+
+    /// Next to the encoder's "video send" lines: how much film is buffered and how fast the source delivers it, so a stall report
+    /// shows starvation (buffer near zero) from pacing (buffer full) at a glance.
+    fn log_cache(&self) {
+        if let Some(cache) = &self.cache {
+            let s = cache.stats();
+            tracing::info!(
+                channel_id = self.channel_id,
+                buffer_secs = s.ahead_ms / 1000,
+                buffer_mb = s.ahead_bytes >> 20,
+                cached_mb = s.cached_bytes >> 20,
+                source_mbit = (s.read_mbit * 10.0).round() / 10.0,
+                requests = s.requests,
+                reconnects = s.reconnects,
+                "read-ahead"
+            );
+        }
+    }
+
     async fn start(&mut self, at_ms: u64) -> Result<(), String> {
         self.stop_pipeline().await;
-        let (Some(d), Some(source), Some(out)) = (&self.desired, &self.source, &self.out) else { return Err("not ready".into()) };
+        self.ensure_cache().await?;
+        let (Some(d), Some(source), Some(out), Some(cache)) = (&self.desired, &self.source, &self.out, &self.cache) else { return Err("not ready".into()) };
         let notify = Notify { reporter: self.mgr.reporter.clone(), channel_id: self.channel_id.clone(), duration_ms: source.probe.duration_ms };
-        let pipeline =
-            Pipeline::spawn(&self.mgr.cfg, d, &source.probe, &source.geo, self.choice, !self.text_off, at_ms, out, notify).await.map_err(|e| redact(&e, d))?;
+        let pipeline = Pipeline::spawn(&self.mgr.cfg, cache, &source.probe, &source.geo, self.choice, !self.text_off, at_ms, out, notify)
+            .await
+            .map_err(|e| redact(&e, d))?;
         self.pipeline = Some(pipeline);
         self.hold_ms = at_ms;
         self.ended = false;
@@ -301,7 +361,9 @@ impl Live {
         let Some(prev) = self.desired.clone() else { return Ok(None) };
         let playing_now = self.pipeline.is_some() || self.ended;
         let wanted = self.source.as_ref().map_or(self.choice, |s| plan::choose(&s.probe, &next));
-        let mut action = plan::reconcile(&prev, &next, self.current_ms(), playing_now, wanted != self.choice);
+        // A stalled source leaves the bot behind the position the server extrapolates; that alone is no seek (see `plan::Anchors`).
+        let explained = self.pipeline.as_ref().is_some_and(|p| p.explains(next.position_ms));
+        let mut action = plan::reconcile(&prev, &next, self.current_ms(), playing_now, wanted != self.choice, explained);
         self.choice = wanted;
         // After the end the server's position sits at the end, which can be a few seconds from where audio stopped.
         if let (true, Action::Seek(pos)) = (self.ended, action)
@@ -359,7 +421,9 @@ impl Live {
         self.hold_ms = position;
         // A clean exit that produced nothing (a seek ffmpeg could not do) is a failure, not the end, unless the seek was at the end.
         let near_end = self.duration_ms().is_some_and(|d| position + 1000 >= d);
-        if status.as_ref().is_ok_and(|s| s.success()) && (position > started_at || near_end) {
+        // ffmpeg exits cleanly after an input error too: when the source gave up, the film did not end
+        let source_failed = self.cache.as_ref().is_some_and(ReadAhead::failed);
+        if status.as_ref().is_ok_and(|s| s.success()) && !source_failed && (position > started_at || near_end) {
             tracing::info!(channel_id = self.channel_id, position, "ended");
             self.ended = true;
             self.mgr.reporter.send(&self.channel_id, Kind::Ended, position, self.duration_ms(), None);
@@ -368,7 +432,9 @@ impl Live {
         let reason = p.last_error();
         if self.retries > 0 {
             self.retries -= 1;
-            let had_text = !self.text_off && self.source.as_ref().is_some_and(|s| s.probe.subtitle_tracks.iter().any(|t| t.kind == StremioSubtitleKind::Text));
+            let had_text = !source_failed
+                && !self.text_off
+                && self.source.as_ref().is_some_and(|s| s.probe.subtitle_tracks.iter().any(|t| t.kind == StremioSubtitleKind::Text));
             if had_text {
                 // An odd text stream (a malformed ASS, say) can take the whole process down; the film plays without cues instead.
                 self.text_off = true;
@@ -392,6 +458,7 @@ impl Live {
 
     async fn teardown(&mut self) {
         self.stop_pipeline().await;
+        self.cache = None;
         self.leave().await;
     }
 }
