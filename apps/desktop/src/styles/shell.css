@@ -2326,6 +2326,28 @@ img.active-card-art {
   font-weight: 500;
 }
 
+/* Phone: the username field takes the full width and the button sits under it, full width, inside the same box. */
+@media (max-width: 767px) {
+  .add-friend {
+    padding: 16px;
+  }
+
+  .add-friend-input {
+    flex-wrap: wrap;
+    gap: 0;
+    padding-bottom: 12px;
+  }
+
+  .add-friend-input input {
+    flex: 1 1 100%;
+  }
+
+  .add-friend-input .btn {
+    flex: 1 1 100%;
+    height: 38px;
+  }
+}
+
 /* The wrapper's border shows focus, success and error; a ring on the input inside it doubles up. */
 .add-friend-input input:focus-visible {
   outline: none;
