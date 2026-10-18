@@ -303,6 +303,13 @@ test('Hide Muted Channels brings a channel back when its timed mute lapses, with
   await page.clock.install();
   await openChannel(page, 'general');
   await page.clock.resume();
+  // Any scroll closes a context menu: wait until the message list has finished scrolling to the bottom.
+  await page.evaluate(() => new Promise<void>(resolve => {
+    let timer = setTimeout(done, 600);
+    function done() { document.removeEventListener('scroll', bump, true); resolve(); }
+    function bump() { clearTimeout(timer); timer = setTimeout(done, 600); }
+    document.addEventListener('scroll', bump, true);
+  }));
   await row(page, 'memes').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Mute Channel' }).hover();
   await page.getByRole('menuitem', { name: 'For 15 Minutes' }).click();

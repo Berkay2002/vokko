@@ -12,6 +12,15 @@ async function home(page: Page): Promise<void> {
 const box = (page: Page, selector: string) => page.locator(selector).first().evaluate(e => ({ h: e.getBoundingClientRect().height, w: e.getBoundingClientRect().width }));
 const font = (page: Page, selector: string) => page.locator(selector).last().evaluate(e => { const c = getComputedStyle(e); return `${c.fontSize}/${c.lineHeight}/${c.fontWeight}`; });
 
+// A trigger re-rendered under a still pointer gets no pointerenter (tooltips are mouse-hover only): leave and hover again until it shows.
+async function hoverTip(page: Page, name: string): Promise<void> {
+  await expect(async () => {
+    await page.mouse.move(0, 0);
+    await page.getByRole('button', { name, exact: true }).hover();
+    await expect(page.getByRole('tooltip', { name })).toBeVisible({ timeout: 1000 });
+  }).toPass();
+}
+
 test('Help opens a menu: Keybinds opens the keybinds page', async ({ page }) => {
   await home(page);
   await page.getByRole('button', { name: 'Help' }).click();
@@ -50,8 +59,7 @@ test('tooltips are 14/18 w500, the rail variant 16/20 w600', async ({ page }) =>
   await home(page);
   await page.getByRole('link', { name: 'Alice' }).first().click();
   await page.locator('.chat-textarea').waitFor();
-  await page.getByRole('button', { name: 'Pinned Messages', exact: true }).hover();
-  await expect(page.locator('.tooltip')).toBeVisible();
+  await hoverTip(page, 'Pinned Messages');
   expect(await font(page, '.tooltip')).toBe('14px/18px/500');
   await page.getByRole('button', { name: 'Add a Server' }).hover();
   await expect(page.locator('.tooltip', { hasText: 'Add a Server' })).toBeVisible();
@@ -63,8 +71,7 @@ test('a click hides the tooltip and the focus it gives does not bring it back; a
   await page.getByRole('link', { name: 'Alice' }).first().click();
   await page.locator('.chat-textarea').waitFor();
   const pins = page.getByRole('button', { name: 'Pinned Messages', exact: true });
-  await pins.hover();
-  await expect(page.getByRole('tooltip', { name: 'Pinned Messages' })).toBeVisible();
+  await hoverTip(page, 'Pinned Messages');
   await pins.click();
   await expect(page.locator('.chat-pins')).toBeVisible();
   await page.waitForTimeout(400);

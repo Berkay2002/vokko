@@ -164,9 +164,9 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       data={rows}
       context={{ hasMoreBefore: state.hasMoreBefore, hasMoreAfter: state.hasMoreAfter, loading: state.loadingOlder || state.loadingNewer }}
       firstItemIndex={state.firstItemIndex}
-      // Opening at the bottom: initialScrollTop (clamped to the end) starts ~2 frames sooner than initialTopMostItemIndex, which waits 4
-      // frames before its first scroll and then paints a frame of the wrong rows.
-      {...(state.focus ? { initialTopMostItemIndex: { index: initialIndex, align: 'center' as const } } : { initialScrollTop: 1e9 })}
+      // Not initialScrollTop: 1e9 (fbf7286a, ~2 frames sooner): the list then lost the bottom on the next layout change (a pin dialog
+      // opening left it "viewing older messages" and hid the new pin row, system-messages.spec).
+      initialTopMostItemIndex={{ index: initialIndex, align: state.focus ? 'center' : 'end' }}
       alignToBottom
       defaultItemHeight={56}
       increaseViewportBy={{ top: 600, bottom: 400 }}
