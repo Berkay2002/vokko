@@ -440,8 +440,6 @@ describe("recent mentions", () => {
     events.length = 0;
     expect(call("member", "DELETE", `/users/@me/mentions/${role.id}`)).toBeUndefined();
     expect(list()).toEqual([everyone.id, direct.id]);
-    call("member", "DELETE", `/users/@me/mentions/${role.id}`);
-    call("member", "DELETE", "/users/@me/mentions/999");
     expect(eventsOf("RECENT_MENTION_DELETE")).toEqual([{ users: [ids.member], t: "RECENT_MENTION_DELETE", d: { message_id: role.id } }]);
     expect(errorOf(() => call("member", "GET", "/users/@me/mentions?limit=0"))).toEqual({ status: 400, code: 50035 });
     // losing the channel hides them

@@ -124,8 +124,8 @@ async fn dismissing_tells_the_users_other_sessions() {
     assert_eq!(event, json!({"message_id": mention}));
     assert!(next_named(&mut owner_ws, "RECENT_MENTION_DELETE", Duration::from_millis(300)).await.is_none(), "only the dismisser hears it");
 
-    // Repeats and unknown ids change nothing, so they send nothing.
-    app.delete(&format!("/users/@me/mentions/{mention}"), &member).await;
+    // Unknown ids are echoed the same way, so the event is no existence oracle.
     app.delete("/users/@me/mentions/999", &member).await;
-    assert!(next_named(&mut other_device, "RECENT_MENTION_DELETE", Duration::from_millis(300)).await.is_none());
+    let event = next_named(&mut other_device, "RECENT_MENTION_DELETE", common::WAIT).await.expect("event");
+    assert_eq!(event, json!({"message_id": "999"}));
 }
