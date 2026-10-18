@@ -628,7 +628,10 @@ route("POST", `/channels/${ID}/messages`, ({ viewer, params, body }) => {
   if (voice) checkVoiceMessage(channel, viewer.user.id, { content, attachments, metas, stickers: stickers.length, poll: body.poll !== undefined });
   if (content === "" && attachments.length === 0 && stickers.length === 0 && !forwarding && !poll) fail(400, 50035, "Invalid Form Body", { content: { code: "BASE_TYPE_REQUIRED", message: "This field is required" } });
   const forward = forwarding ? buildForward(viewer.user.id, reference, channel) : undefined;
-  if (reference?.message_id && !forwarding) requireMessage(channel.id, reference.message_id);
+  if (reference?.message_id && !forwarding) {
+    requireChannelPerm(channel, viewer.user.id, Perm.READ_MESSAGE_HISTORY);
+    requireMessage(channel.id, reference.message_id);
+  }
   checkRulesAccepted(channel.guild_id, viewer.user.id);
   checkSend(channel, viewer.user.id, content);
   for (const id of ids) db.pending.delete(id);

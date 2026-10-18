@@ -720,6 +720,8 @@ async fn create_message(
             None
         }
         Some(reference) => {
+            // The reply carries the referenced message back in referenced_message, so replying needs history access (like Discord).
+            access.require(READ_MESSAGE_HISTORY)?;
             let exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM messages WHERE id = $1 AND channel_id = $2")
                 .bind(reference.message_id.db())
                 .bind(id)
