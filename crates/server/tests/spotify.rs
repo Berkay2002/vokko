@@ -463,6 +463,8 @@ async fn world_with(tune: impl FnOnce(&mut SpotifyConfig), with_stremio: bool) -
             }];
             config.spotify = Some(spotify);
             config.stremio = stremio;
+            // No test client joins LiveKit; the tests that spread rate-limited requests over time must outlive the default 30 s.
+            config.voice_connect_timeout = Duration::from_secs(300);
         },
         FakeRoomService::new(),
     )
@@ -1553,12 +1555,70 @@ async fn a_bot_controls_spotify_only_for_the_member_who_asked_with_their_rights(
     assert_eq!((status, state["queue"][1]["added_by"].as_str()), (StatusCode::OK, Some(w.carl_id.as_str())), "{state}");
     assert_eq!(w.acting(Method::PATCH, &w.path(), &bot, &asked, Some(json!({"playing": false}))).await.0, StatusCode::OK, "alice hosts");
     assert_eq!(w.acting(Method::POST, &format!("{}/listener-token", w.path()), &bot, &asked, None).await.0, StatusCode::FORBIDDEN, "not a bot route");
+}
 
-    // One message allows 30 acting requests (alice's has had 4), then 429.
-    for _ in 4..30 {
-        assert_eq!(w.acting(Method::GET, &w.path(), &bot, &asked, None).await.0, StatusCode::OK);
+/// One message allows 30 acting requests that change something and, separately, 120 lookups (catalog, state); then 429 / 40036.
+#[tokio::test]
+async fn a_message_allows_thirty_changes_and_a_separate_budget_of_lookups() {
+    use axum::http::Method;
+    let w = world().await;
+    let (bot_id, bot) = w.app.bot_in(&w.owner, &w.guild, "Claude").await;
+    let mut owner = Client::identify(&w.address, &w.owner).await.0;
+    w.join(&mut owner).await;
+    let asked = w.app.say(&w.text, &w.owner, &format!("<@{bot_id}> a long chill playlist")).await;
+    let (status, state) = w.acting(Method::PUT, &w.path(), &bot, &asked, Some(json!({"uri": track_uri(1)}))).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    for n in 0..40 {
+        let path = if n % 2 == 0 { "/spotify/search?q=song".to_owned() } else { w.path() };
+        assert_eq!(w.acting(Method::GET, &path, &bot, &asked, None).await.0, StatusCode::OK, "read {n}");
     }
-    assert_eq!(w.acting(Method::GET, &w.path(), &bot, &asked, None).await.0, StatusCode::TOO_MANY_REQUESTS);
+    for n in 2..31 {
+        let (status, state) = w.acting(Method::PATCH, &w.path(), &bot, &asked, Some(json!({"queue_add": {"uri": track_uri(n), "next": false}}))).await;
+        assert_eq!(status, StatusCode::OK, "change {n}: {state}");
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+    }
+    let (status, error) = w.acting(Method::PATCH, &w.path(), &bot, &asked, Some(json!({"queue_add": {"uri": track_uri(31), "next": false}}))).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::TOO_MANY_REQUESTS, Some(40036)), "{error}");
+    // Lookups have a budget of their own (120): 40 are used, 80 more are fine, the 121st is refused the same way.
+    for n in 40..120 {
+        assert_eq!(w.acting(Method::GET, &w.path(), &bot, &asked, None).await.0, StatusCode::OK, "read {n}");
+    }
+    let (status, error) = w.acting(Method::GET, &w.path(), &bot, &asked, None).await;
+    assert_eq!((status, error["code"].as_u64()), (StatusCode::TOO_MANY_REQUESTS, Some(40036)), "{error}");
+}
+
+/// A bot acting for the guild's owner, who started the session and holds every permission, queues without a quota; acting for a
+/// member without CONTROL_MEDIA who is not the host, it stops at 10 like the member would.
+#[tokio::test]
+async fn a_bot_acting_for_a_controller_has_no_quota_and_for_anyone_else_the_members() {
+    use axum::http::Method;
+    use vokko_protocol::api::permissions::CONTROL_MEDIA;
+    let w = world().await;
+    let (bot_id, bot) = w.app.bot_in(&w.owner, &w.guild, "Claude").await;
+    let mut owner = Client::identify(&w.address, &w.owner).await.0;
+    let mut carl = Client::identify(&w.address, &w.carl).await.0;
+    w.join(&mut owner).await;
+    w.join(&mut carl).await;
+    let deny = json!({"type": 0, "allow": "0", "deny": CONTROL_MEDIA.to_string()});
+    assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{}", w.voice, w.guild), &w.owner, deny).await.0, StatusCode::NO_CONTENT);
+    let asked = w.app.say(&w.text, &w.owner, &format!("<@{bot_id}> a chill playlist please")).await;
+    let (status, state) = w.acting(Method::PUT, &w.path(), &bot, &asked, Some(json!({"uri": track_uri(1)}))).await;
+    assert_eq!((status, state["host_id"].as_str()), (StatusCode::OK, Some(w.owner_id.as_str())), "{state}");
+    for n in 2..17 {
+        let (status, state) = w.acting(Method::PATCH, &w.path(), &bot, &asked, Some(json!({"queue_add": {"uri": track_uri(n), "next": false}}))).await;
+        assert_eq!(status, StatusCode::OK, "add {n}: {state}");
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+    }
+    assert_eq!(w.state(&w.owner).await["queue"].as_array().map(Vec::len), Some(15));
+
+    let carls = w.app.say(&w.text, &w.carl, &format!("<@{bot_id}> add songs")).await;
+    for n in 30..40 {
+        let (status, state) = w.acting(Method::PATCH, &w.path(), &bot, &carls, Some(json!({"queue_add": {"uri": track_uri(n), "next": false}}))).await;
+        assert_eq!(status, StatusCode::OK, "add {n}: {state}");
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+    }
+    let (status, state) = w.acting(Method::PATCH, &w.path(), &bot, &carls, Some(json!({"queue_add": {"uri": track_uri(40), "next": false}}))).await;
+    assert_eq!((status, state["code"].as_u64()), (StatusCode::BAD_REQUEST, Some(50035)), "{state}");
 }
 
 #[tokio::test]

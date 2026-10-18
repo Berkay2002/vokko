@@ -217,6 +217,7 @@ describe('server errors become short sentences', () => {
     ['spotify_control', { action: 'pause' }, 400, 40033, 'Nothing is playing in your call right now (or the service is unreachable).'],
     ['spotify_control', { action: 'pause' }, 404, 10000, "Music and movies aren't set up on this server."],
     ['spotify_control', { action: 'pause' }, 429, 0, 'Vokko is rate limiting that. Try again in a moment.'],
+    ['spotify_control', { action: 'pause' }, 429, 40036, 'Vokko allows 30 changes and 120 lookups per request message; that limit is reached. Tell the member to send a new message to continue.'],
     ['spotify_control', { action: 'pause' }, 500, 0, "That didn't work (error 500)."],
   ])('%s → %d %d', async (name, args, status, code, text) => {
     routes[`PATCH /channels/555/spotify`] = err(status, code, 'raw server text <html>')

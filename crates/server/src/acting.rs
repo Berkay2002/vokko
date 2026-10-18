@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use axum::extract::{FromRequestParts, MatchedPath, RawPathParams};
+use axum::http::Method;
 use axum::http::request::Parts;
 use vokko_protocol::api::ChannelType;
 
@@ -22,6 +23,8 @@ pub const ACTING_FOR: &str = "x-vokko-acting-for";
 const MAX_AGE: Duration = Duration::from_secs(10 * 60);
 /// Acting requests one message allows, so a looping model cannot spam the call.
 pub const MAX_PER_MESSAGE: u32 = 30;
+/// 429 code of a message that has used its `MAX_PER_MESSAGE` changes or `MAX_READS_PER_MESSAGE` lookups (the plugin tells the member to send a new message).
+pub const MESSAGE_LIMIT_CODE: u32 = 40036;
 
 /// Whose request this is: the caller, or, for a bot with a valid `X-Vokko-Acting-For`, the member it acts for (`via_bot` = the bot).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -36,16 +39,27 @@ impl From<i64> for Actor {
     }
 }
 
-/// Acting requests per message and when the message was first used (`AppState::acting_uses`).
-// ponytail: in memory, per process; a restart resets the counts (the 10 minute window still bounds every message).
-pub type Uses = Mutex<HashMap<i64, (u32, Instant)>>;
+/// Lookups (GET) one message allows, a separate and larger budget: they cannot spam a call, but a looping model could burn the
+/// shared Spotify catalog quota (and with it the server-wide 429 pause) for everyone.
+// ponytail: a flat 120 per message; make it adaptive (or per member) only if real use shows it too tight or too loose.
+pub const MAX_READS_PER_MESSAGE: u32 = 120;
 
-fn count_use(uses: &Uses, message_id: i64) -> ApiResult<()> {
+/// (changes, lookups, first use) per message (`AppState::acting_uses`).
+// ponytail: in memory, per process; a restart resets the counts (the 10 minute window still bounds every message).
+pub type Uses = Mutex<HashMap<i64, (u32, u32, Instant)>>;
+
+/// Counts one acting request of the message: a change (non-GET) against `MAX_PER_MESSAGE`, a lookup against `MAX_READS_PER_MESSAGE`.
+fn count_use(uses: &Uses, message_id: i64, read: bool) -> ApiResult<()> {
     let mut uses = lock(uses);
-    uses.retain(|_, (_, first)| first.elapsed() < MAX_AGE);
-    let (count, first) = uses.entry(message_id).or_insert((0, Instant::now()));
-    if *count >= MAX_PER_MESSAGE {
-        return Err(ApiErr::rate_limited(MAX_AGE.saturating_sub(first.elapsed()).as_secs_f64()));
+    uses.retain(|_, (_, _, first)| first.elapsed() < MAX_AGE);
+    let (changes, reads, first) = uses.entry(message_id).or_insert((0, 0, Instant::now()));
+    let (count, max) = if read { (reads, MAX_READS_PER_MESSAGE) } else { (changes, MAX_PER_MESSAGE) };
+    if *count >= max {
+        let mut error = ApiErr::rate_limited(MAX_AGE.saturating_sub(first.elapsed()).as_secs_f64());
+        error.body.code = MESSAGE_LIMIT_CODE;
+        error.body.message =
+            format!("One message allows {MAX_PER_MESSAGE} changes and {MAX_READS_PER_MESSAGE} lookups through a bot; send a new message to continue.");
+        return Err(error);
     }
     *count += 1;
     Ok(())
@@ -69,7 +83,7 @@ impl FromRequestParts<AppState> for Actor {
             false => None,
         };
         let member = asker(state, caller, message_id, target).await?;
-        count_use(&state.acting_uses, message_id)?;
+        count_use(&state.acting_uses, message_id, parts.method == Method::GET)?;
         Ok(Self { user_id: member, via_bot: Some(caller) })
     }
 }
@@ -113,12 +127,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_message_allows_thirty_uses() {
+    fn a_message_allows_thirty_changes_and_a_separate_budget_of_lookups() {
         let (uses, message) = (Uses::default(), 7);
         for _ in 0..MAX_PER_MESSAGE {
-            assert!(count_use(&uses, message).is_ok());
+            assert!(count_use(&uses, message, false).is_ok());
         }
-        assert!(count_use(&uses, message).is_err());
-        assert!(count_use(&uses, message - 1).is_ok(), "another message has its own count");
+        assert!(count_use(&uses, message, false).is_err());
+        assert!(count_use(&uses, message, true).is_ok(), "lookups have their own budget");
+        for _ in 1..MAX_READS_PER_MESSAGE {
+            assert!(count_use(&uses, message, true).is_ok());
+        }
+        assert!(count_use(&uses, message, true).is_err());
+        assert!(count_use(&uses, message - 1, false).is_ok(), "another message has its own count");
     }
 }

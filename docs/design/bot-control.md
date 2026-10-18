@@ -274,6 +274,6 @@ the media routes makes the request run as the message's author (`crates/server/s
 handlers take instead of `AuthUser`). Accepted only for a person's own fresh message (at most 10 minutes old by creation time)
 addressed to this bot (mention, reply to the bot, or a 1:1 DM with it) in a channel both can see; a channel request must be in
 that channel's guild (or be that DM). Every rule in this document then applies to the member: in the call, controller or not,
-quota, votes. At most 30 acting requests per message (in memory). `MediaControl.via_bot_id` and the queue entries' `via_bot_id`
+quota, votes. At most 30 changing (non-GET) and, separately, 120 lookup (GET) acting requests per message, then 429 / 40036 (in memory). `MediaControl.via_bot_id` and the queue entries' `via_bot_id`
 name the bot. The bot finds the member's call with `GET /guilds/{id}/voice-states/{user_id}`. Full rules: docs/api.md "Acting
 for a member".
