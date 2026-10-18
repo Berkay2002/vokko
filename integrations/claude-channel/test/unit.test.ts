@@ -1,6 +1,6 @@
 // Unit checks for the security review fixes: bun test
 import { test, expect, beforeEach } from 'bun:test'
-import { mkdtempSync, writeFileSync, statSync, mkdirSync } from 'fs'
+import { mkdtempSync, writeFileSync, statSync, mkdirSync, chmodSync, rmSync, symlinkSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { VokkoBot, checkPath, type Config, type Message } from '../vokko.ts'
@@ -115,4 +115,46 @@ test('assertSendable refuses channel state but allows the inbox', () => {
   mkdirSync(join(dir, 'inbox'))
   writeFileSync(join(dir, 'inbox', 'x.txt'), 'x')
   expect(() => bot.assertSendable(join(dir, 'inbox', 'x.txt'))).not.toThrow()
+})
+
+test.skipIf(process.platform === 'win32')('assertSendable folds the given path on case-insensitive systems (/DEV/stdin)', () => {
+  const { bot } = makeBot()
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!
+  Object.defineProperty(process, 'platform', { value: 'darwin' })
+  try {
+    expect(() => bot.assertSendable('/DEV/stdin')).toThrow(/pseudo-file/)
+  } finally {
+    Object.defineProperty(process, 'platform', platform)
+  }
+})
+
+test.skipIf(process.platform === 'win32')('download tightens an inbox that already exists, and its old files', async () => {
+  const { bot, dir } = makeBot()
+  mkdirSync(join(dir, 'inbox'), { mode: 0o755 })
+  chmodSync(join(dir, 'inbox'), 0o755)
+  writeFileSync(join(dir, 'inbox', 'old.txt'), 'x', { mode: 0o644 })
+  respond = () => new Response('new')
+  await bot.download({ id: '9', filename: 'a.txt', content_type: null, size: 3, url: 'http://vokko.test/a' })
+  expect(statSync(join(dir, 'inbox')).mode & 0o777).toBe(0o700)
+  expect(statSync(join(dir, 'inbox', 'old.txt')).mode & 0o777).toBe(0o600)
+})
+
+test.skipIf(process.platform === 'win32')('reply reads every file before the first upload: a symlink swapped in later is not sent', async () => {
+  const { bot, dir } = makeBot()
+  const files = mkdtempSync(join(tmpdir(), 'vokko-files-'))
+  const [a, b] = [join(files, 'a.txt'), join(files, 'b.txt')]
+  writeFileSync(a, 'first')
+  writeFileSync(b, 'second')
+  const uploads: string[] = []
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    if (String(url).endsWith('/attachments')) {
+      uploads.push(await ((init!.body as FormData).get('file') as Blob).text())
+      rmSync(b)
+      if (uploads.length === 1) symlinkSync(join(dir, 'access.json'), b)
+      return Response.json({ id: String(uploads.length) })
+    }
+    return Response.json({ id: '99' })
+  }) as typeof fetch
+  await bot.reply(GROUP, 'files', undefined, [a, b])
+  expect(uploads).toEqual(['first', 'second'])
 })

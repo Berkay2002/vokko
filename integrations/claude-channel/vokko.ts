@@ -187,6 +187,7 @@ export class VokkoBot {
   private readonly dmByUser = new Map<string, string>()
   private owner_: User | null = null
   private pairingFullAt = -Infinity
+  private inboxLocked = false
   private ws: WebSocket | null = null
   private seq: number | null = null
   private sessionId: string | null = null
@@ -268,7 +269,7 @@ export class VokkoBot {
     const real = resolve(f)
     // /proc/self/environ holds an env-provided token; /dev and /sys are never meant as attachments.
     // The given path counts too: /dev/stdin may resolve to a pipe realpath can't name.
-    for (const p of [resolvePath(f), real]) if (p && /^\/(proc|dev|sys)(\/|$)/.test(p)) throw new Error(`refusing to send a system pseudo-file: ${f}`)
+    for (const p of [fold(resolvePath(f)), real]) if (p && /^\/(proc|dev|sys)(\/|$)/.test(p)) throw new Error(`refusing to send a system pseudo-file: ${f}`)
     if (!real) return // statSync fails properly later
     const stateReal = resolve(this.cfg.stateDir)
     if (!stateReal) return // no state dir: nothing to leak
@@ -441,10 +442,13 @@ export class VokkoBot {
   async reply(chatId: string, text: string, replyTo?: string, files: string[] = []): Promise<string[]> {
     await this.allowedChannel(chatId)
     if (files.length > 10) throw new Error('Vokko allows max 10 attachments per message')
+    // Read each file right after its check: a symlink swapped in while earlier uploads await is never sent.
+    const blobs: Blob[] = []
     for (const f of files) {
       this.assertSendable(f)
       const st = statSync(f)
       if (st.size > this.maxUploadBytes) throw new Error(`file too large: ${f} (${(st.size / 1024 / 1024).toFixed(1)}MB, max ${(this.maxUploadBytes / 1024 / 1024).toFixed(0)}MB)`)
+      blobs.push(new Blob([readFileSync(f)]))
     }
     const access = this.loadAccess()
     const limit = Math.max(1, Math.min(access.textChunkLimit ?? MAX_CHUNK_LIMIT, MAX_CHUNK_LIMIT))
@@ -453,9 +457,9 @@ export class VokkoBot {
     const sentIds: string[] = []
     try {
       const uploaded: string[] = []
-      for (const f of files) {
+      for (const [i, f] of files.entries()) {
         const form = new FormData()
-        form.append('file', new Blob([readFileSync(f)]), basename(f))
+        form.append('file', blobs[i]!, basename(f))
         uploaded.push((await this.api<Attachment>('POST', `/channels/${chatId}/attachments`, form)).id)
       }
       for (let i = 0; i < chunks.length; i++) {
@@ -528,6 +532,12 @@ export class VokkoBot {
     const ext = rawExt.replace(/[^a-zA-Z0-9]/g, '') || 'bin'
     const path = join(this.inboxDir, `${Date.now()}-${snowflake(att.id, 'attachment id')}.${ext}`)
     mkdirSync(this.inboxDir, { recursive: true, mode: 0o700 })
+    if (!this.inboxLocked) {
+      // mkdir's mode skips a dir that already exists: tighten it (and older files) once per run.
+      chmodSync(this.inboxDir, 0o700)
+      for (const name of readdirSync(this.inboxDir)) chmodSync(join(this.inboxDir, name), 0o600)
+      this.inboxLocked = true
+    }
     writeFileSync(path, Buffer.concat(parts), { mode: 0o600 })
     return path
   }
