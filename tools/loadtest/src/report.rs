@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::Args;
 use crate::stats::Snapshot;
-use crate::sys::Resources;
+use crate::sys::{QueryStat, Resources};
 
 #[derive(Serialize)]
 pub struct Report {
@@ -16,11 +16,14 @@ pub struct Report {
     pub snapshot: Snapshot,
     pub derived: BTreeMap<String, f64>,
     pub resources: Resources,
+    /// Top statements by total execution time in this window (`--pg-url`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub queries: Vec<QueryStat>,
 }
 
 impl Report {
     pub fn new(name: &str, elapsed: Duration, snapshot: &Snapshot, resources: Resources) -> Self {
-        Self { name: name.to_owned(), seconds: elapsed.as_secs_f64(), snapshot: snapshot.clone(), derived: BTreeMap::new(), resources }
+        Self { name: name.to_owned(), seconds: elapsed.as_secs_f64(), snapshot: snapshot.clone(), derived: BTreeMap::new(), resources, queries: Vec::new() }
     }
 
     pub fn derive(&mut self, name: &str, value: f64) {
@@ -33,7 +36,7 @@ impl Report {
 
     /// Ratios and rates that follow from the raw counters.
     pub fn finish(&mut self) {
-        for kind in ["message", "typing"] {
+        for kind in ["message", "typing", "dm", "reaction", "voice_state"] {
             let expected = self.counter(&format!("expected:{kind}"));
             if expected > 0.0 {
                 self.derive(&format!("delivered_ratio:{kind}"), self.counter(&format!("recv:{kind}")) / expected);
@@ -88,6 +91,12 @@ impl Report {
         line("server", &self.resources.server);
         line("postgres", &self.resources.postgres);
         line("loadgen", &self.resources.loadgen);
+        if !self.queries.is_empty() {
+            println!("  {:>8} {:>10} {:>8} {:>8}  top queries (total / mean ms)", "calls", "total", "mean", "rows");
+        }
+        for query in self.queries.iter().take(12) {
+            println!("  {:>8} {:>10.1} {:>8.3} {:>8}  {}", query.calls, query.total_ms, query.mean_ms, query.rows, query.query);
+        }
     }
 }
 
@@ -120,10 +129,14 @@ struct Config<'a> {
     duration: u64,
     send_rate: f64,
     sender_fraction: f64,
+    everyone_share: f64,
     typing_fraction: f64,
     presence_fraction: f64,
     history_fraction: f64,
     history_pages: usize,
+    dm_fraction: f64,
+    reaction_fraction: f64,
+    voice_fraction: f64,
     storm_fraction: f64,
     storm_offline_ms: u64,
     spoof: bool,
@@ -137,10 +150,14 @@ pub fn write_json(path: &str, meta: &BTreeMap<&'static str, String>, args: &Args
         duration: args.duration,
         send_rate: args.send_rate,
         sender_fraction: args.sender_fraction,
+        everyone_share: args.everyone_share,
         typing_fraction: args.typing_fraction,
         presence_fraction: args.presence_fraction,
         history_fraction: args.history_fraction,
         history_pages: args.history_pages,
+        dm_fraction: args.dm_fraction,
+        reaction_fraction: args.reaction_fraction,
+        voice_fraction: args.voice_fraction,
         storm_fraction: args.storm_fraction,
         storm_offline_ms: args.storm_offline_ms,
         spoof: args.spoof,

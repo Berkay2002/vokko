@@ -373,17 +373,18 @@ async fn insert_message_stored(
         .execute(&mut *tx)
         .await?;
     }
-    for user in &mentioned {
-        sqlx::query("INSERT INTO message_mentions (message_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+    // One statement per table, not one per mentioned user or role.
+    if !mentioned.is_empty() {
+        sqlx::query("INSERT INTO message_mentions (message_id, user_id) SELECT $1, UNNEST($2::bigint[]) ON CONFLICT DO NOTHING")
             .bind(message_id)
-            .bind(user)
+            .bind(&mentioned)
             .execute(&mut *tx)
             .await?;
     }
-    for role in &draft.mentions.roles {
-        sqlx::query("INSERT INTO message_role_mentions (message_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+    if !draft.mentions.roles.is_empty() {
+        sqlx::query("INSERT INTO message_role_mentions (message_id, role_id) SELECT $1, UNNEST($2::bigint[]) ON CONFLICT DO NOTHING")
             .bind(message_id)
-            .bind(role)
+            .bind(&draft.mentions.roles)
             .execute(&mut *tx)
             .await?;
     }
@@ -409,8 +410,12 @@ async fn insert_message_stored(
         }
     }
     // Every message restarts a thread's inactivity clock. This statement takes the row lock first, so the sweep can no longer archive the
-    // thread behind our back and the reopen below sees its final state.
-    sqlx::query("UPDATE channels SET last_message_id = $2, last_activity_at = now() WHERE id = $1").bind(channel.id).bind(message_id).execute(&mut *tx).await?;
+    // thread behind our back and the reopen below sees its final state. GREATEST: concurrent sends may commit out of id order.
+    sqlx::query("UPDATE channels SET last_message_id = GREATEST(last_message_id, $2), last_activity_at = now() WHERE id = $1")
+        .bind(channel.id)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await?;
     let reopened_thread = extras.reopen_thread
         && sqlx::query("UPDATE channels SET archived = FALSE, archive_timestamp = now() WHERE id = $1 AND archived")
             .bind(channel.id)
@@ -429,12 +434,15 @@ async fn insert_message_stored(
         .execute(&mut *tx)
         .await?;
     }
-    for user in &notify {
+    if !notify.is_empty() {
+        // Sorted so concurrent sends lock the read_states rows in the same order. One statement for @everyone in a big guild, not one per member.
+        let mut users: Vec<i64> = notify.iter().copied().collect();
+        users.sort_unstable();
         sqlx::query(
-            "INSERT INTO read_states (user_id, channel_id, mention_count) VALUES ($1, $2, 1) \
+            "INSERT INTO read_states (user_id, channel_id, mention_count) SELECT UNNEST($1::bigint[]), $2, 1 \
              ON CONFLICT (user_id, channel_id) DO UPDATE SET mention_count = read_states.mention_count + 1",
         )
-        .bind(user)
+        .bind(&users)
         .bind(channel.id)
         .execute(&mut *tx)
         .await?;
@@ -460,7 +468,7 @@ async fn insert_message_stored(
     }
     let mut view = store::message_view(state, message_id, None).await?.ok_or_else(ApiErr::internal)?;
     view.message.nonce = draft.nonce;
-    state.hub.send_with(&viewers, "MESSAGE_CREATE", |user| serde_json::to_value(view.for_viewer(user)).unwrap_or_default());
+    view.send(&state.hub, &viewers, "MESSAGE_CREATE");
     if matches!(draft.kind, MessageType::Default | MessageType::Reply | MessageType::ChatInputCommand | MessageType::ContextMenuCommand)
         && extras.embeds.is_none()
         && !extras.no_unfurl
@@ -716,7 +724,7 @@ async fn message_in_channel(state: &AppState, channel: i64, message: i64) -> Api
 pub async fn broadcast_update(state: &AppState, channel: &ChannelRow, message: i64) -> ApiResult<Option<MessageView>> {
     let Some(view) = store::message_view(state, message, None).await? else { return Ok(None) };
     let viewers = access::channel_viewers(state, channel).await?;
-    state.hub.send_with(&viewers, "MESSAGE_UPDATE", |user| serde_json::to_value(view.for_viewer(user)).unwrap_or_default());
+    view.send(&state.hub, &viewers, "MESSAGE_UPDATE");
     Ok(Some(view))
 }
 

@@ -21,8 +21,15 @@ cargo run --release -p vokko-loadtest -- --connections 200 --server-pid $(pgrep 
 | `send` | a share of each guild posts into random channels; the content carries the send time | `rest:send_message`, `delivery:message` (send → MESSAGE_CREATE at every member), delivery ratio |
 | `typing` | synchronized `POST /channels/{id}/typing` bursts, one per typer per second | `rest:typing`, delivery ratio |
 | `presence` | op 3 updates (3 per session + a clearing one) with the send time in `custom_status` | `delivery:presence`, delivery ratio |
+| `dm` | a share of users opens a DM with the next guild member and posts `dm <send time>` at `--send-rate` | `rest:open_dm`, `rest:send_dm`, `delivery:dm`, delivery ratio |
+| `reactions` | reactors post one message, then add and remove 👍 on it once per second (the add is stamped by message id) | `rest:reaction_add`, `delivery:reaction`, delivery ratio |
+| `voice` | voice users join the guild's voice channel (op 4), stay 2 s, leave, repeat; needs LiveKit configured (`run.sh` points it at a dead port: tokens are signed locally) | `voice:join_server_update`, `delivery:voice_state`, delivery ratio |
 | `history` | readers page a channel backwards, 100 per page | `rest:history_page` |
 | `reconnect` | a share of the connections is cut without a close frame, stays away, then Resumes while messages keep flowing | `resume`, `seq_out_of_order`, `seq_skips`, delivery ratio |
+
+`--pg-url` resets `pg_stat_statements` before every scenario and stores its top statements per scenario in the report (the
+cluster needs `shared_preload_libraries = 'pg_stat_statements'`). `run.sh` does a whole run on a fresh database and `compare.py`
+turns reports into a Markdown table; the commands are in `docs/load-test.md`.
 
 Respecting the server's limits (docs/api.md "Limits and abuse controls"): sends are capped at 5/s per user, typing at 1/s,
 history at ~6/s, op 3 at 4 per session, Identify once per session (storms use Resume). Every 429 and every gateway 4008 is

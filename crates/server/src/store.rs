@@ -668,6 +668,15 @@ pub struct MessageView {
 }
 
 impl MessageView {
+    /// Dispatches the message to `viewers` as `name`, serialized once when every viewer sees the same payload (no reactions, no poll).
+    pub fn send(&self, hub: &crate::hub::Hub, viewers: &[i64], name: &str) {
+        if self.message.reactions.is_empty() && self.poll.is_none() {
+            hub.send_value(viewers, name, &serde_json::to_value(&self.message).unwrap_or_default());
+        } else {
+            hub.send_with(viewers, name, |user| serde_json::to_value(self.for_viewer(user)).unwrap_or_default());
+        }
+    }
+
     pub fn for_viewer(&self, viewer: i64) -> Message {
         let mut message = self.message.clone();
         for (reaction, users) in message.reactions.iter_mut().zip(&self.reaction_users) {

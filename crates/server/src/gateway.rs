@@ -46,6 +46,8 @@ pub const MAX_CUSTOM_STATUS_CHARS: usize = 128;
 /// Presence updates (op 3) allowed per session per window.
 const PRESENCE_UPDATES: usize = 5;
 const PRESENCE_WINDOW: Duration = Duration::from_secs(60);
+/// Most queued frames written per socket flush.
+const WRITE_BATCH: usize = 64;
 /// Voice state updates (op 4, mute toggles included) allowed per session per window.
 const VOICE_UPDATES: usize = 30;
 const VOICE_WINDOW: Duration = Duration::from_secs(60);
@@ -86,6 +88,24 @@ impl Writer {
     /// False when the socket is gone or too slow.
     async fn send(&mut self, message: Message) -> bool {
         matches!(tokio::time::timeout(self.limit, self.sink.send(message)).await, Ok(Ok(())))
+    }
+
+    /// Writes `first` plus whatever else is already queued (up to `WRITE_BATCH` frames) and flushes once, so a burst of events
+    /// costs one socket write instead of one per frame.
+    async fn send_queued(&mut self, first: String, queue: &mut tokio::sync::mpsc::Receiver<String>) -> bool {
+        let mut batch = vec![first];
+        while batch.len() < WRITE_BATCH {
+            let Ok(text) = queue.try_recv() else { break };
+            batch.push(text);
+        }
+        let sink = &mut self.sink;
+        let write = async move {
+            for text in batch {
+                sink.feed(Message::Text(text.into())).await?;
+            }
+            sink.flush().await
+        };
+        matches!(tokio::time::timeout(self.limit, write).await, Ok(Ok(())))
     }
 
     async fn frame(&mut self, op: GatewayOp, data: Value) -> bool {
@@ -297,7 +317,7 @@ async fn run(state: &AppState, session: &Arc<Session>, writer: &mut Writer, stre
             },
             queued = receiver.queue.recv() => match queued {
                 Some(text) => {
-                    if !writer.send(Message::Text(text.into())).await {
+                    if !writer.send_queued(text, &mut receiver.queue).await {
                         break;
                     }
                 }

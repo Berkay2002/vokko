@@ -24,6 +24,7 @@ const OP_DISPATCH: u8 = 0;
 const OP_HEARTBEAT: u8 = 1;
 const OP_IDENTIFY: u8 = 2;
 const OP_PRESENCE: u8 = 3;
+const OP_VOICE_STATE: u8 = 4;
 const OP_RESUME: u8 = 6;
 const OP_RECONNECT: u8 = 7;
 const OP_INVALID_SESSION: u8 = 9;
@@ -41,6 +42,11 @@ pub enum Cmd {
     Presence {
         status: &'static str,
         custom_status: Option<String>,
+    },
+    /// Gateway op 4: join `channel_id` of `guild_id`, or leave with `None`.
+    Voice {
+        guild_id: String,
+        channel_id: Option<String>,
     },
     Stop,
 }
@@ -72,6 +78,17 @@ struct MessageCreate {
 }
 
 #[derive(Deserialize)]
+struct Reaction {
+    message_id: String,
+}
+
+#[derive(Deserialize)]
+struct VoiceState {
+    user_id: String,
+    channel_id: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct PresenceUpdate {
     custom_status: Option<String>,
 }
@@ -93,12 +110,14 @@ struct State {
     interval: Duration,
     session_id: String,
     seq: Option<u64>,
+    /// When the last op 4 join was sent; VOICE_SERVER_UPDATE answers it.
+    voice_sent: Option<Instant>,
 }
 
 /// Connects, identifies and waits for READY; the returned handle keeps the connection alive in a background task.
 pub async fn connect(base: &str, user: User, shared: Arc<Shared>) -> Result<Conn, String> {
     let ws_url = format!("{}/gateway", base.replacen("http", "ws", 1).trim_end_matches('/'));
-    let mut state = State { ws_url, user, shared, ws: None, interval: Duration::from_secs(41), session_id: String::new(), seq: None };
+    let mut state = State { ws_url, user, shared, ws: None, interval: Duration::from_secs(41), session_id: String::new(), seq: None, voice_sent: None };
     state.dial().await?;
     let started = Instant::now();
     match state.handshake(false).await? {
@@ -248,13 +267,37 @@ impl State {
             }
             "RESUMED" => return Outcome::Resumed,
             "MESSAGE_CREATE" => {
-                if let Ok(message) = serde_json::from_str::<MessageCreate>(data)
-                    && let Some(sent_us) = stamped(&message.content, "lt")
-                {
-                    metrics.time("delivery:message", Duration::from_micros(self.shared.now_us().saturating_sub(sent_us)));
-                    metrics.add("recv:message", 1);
+                let content = serde_json::from_str::<MessageCreate>(data).map(|message| message.content).unwrap_or_default();
+                for kind in ["message", "dm"] {
+                    if let Some(sent_us) = stamped(&content, if kind == "dm" { "dm" } else { "lt" }) {
+                        metrics.time(&format!("delivery:{kind}"), Duration::from_micros(self.shared.now_us().saturating_sub(sent_us)));
+                        metrics.add(&format!("recv:{kind}"), 1);
+                    }
                 }
             }
+            "MESSAGE_REACTION_ADD" => {
+                if let Some(elapsed) = serde_json::from_str::<Reaction>(data).ok().and_then(|reaction| self.shared.since(&format!("r:{}", reaction.message_id)))
+                {
+                    metrics.time("delivery:reaction", elapsed);
+                    metrics.add("recv:reaction", 1);
+                }
+            }
+            "MESSAGE_REACTION_REMOVE" => metrics.add("recv:reaction_remove", 1),
+            "VOICE_STATE_UPDATE" => match serde_json::from_str::<VoiceState>(data) {
+                Ok(VoiceState { user_id, channel_id: Some(_) }) => {
+                    if let Some(elapsed) = self.shared.since(&format!("v:{user_id}")) {
+                        metrics.time("delivery:voice_state", elapsed);
+                        metrics.add("recv:voice_state", 1);
+                    }
+                }
+                _ => metrics.add("recv:voice_leave", 1),
+            },
+            "VOICE_SERVER_UPDATE" => {
+                if let Some(sent) = self.voice_sent.take() {
+                    metrics.time("voice:join_server_update", sent.elapsed());
+                }
+            }
+            "VOICE_CONNECT_FAILED" => metrics.error("voice_connect_failed"),
             "TYPING_START" => metrics.add("recv:typing", 1),
             "PRESENCE_UPDATE" => match serde_json::from_str::<PresenceUpdate>(data).ok().and_then(|update| update.custom_status) {
                 Some(status) if stamped(&status, "lt").is_some() => {
@@ -350,6 +393,15 @@ impl State {
                             break;
                         }
                     }
+                    Some(Cmd::Voice { guild_id, channel_id }) => {
+                        if channel_id.is_some() {
+                            self.voice_sent = Some(Instant::now());
+                        }
+                        let d = json!({"guild_id": guild_id, "channel_id": channel_id, "self_mute": false, "self_deaf": false});
+                        if !self.send(json!({"op": OP_VOICE_STATE, "d": d})).await {
+                            break;
+                        }
+                    }
                     Some(Cmd::Stop) | None => {
                         if let Some(ws) = self.ws.as_mut() {
                             let _ = ws.close(None).await;
@@ -385,9 +437,17 @@ mod tests {
     #[test]
     fn dispatches_update_sequence_and_flag_gaps() {
         let shared = Arc::new(Shared::new());
-        let user = User { index: 0, token: "t".into(), addr: None };
-        let mut state =
-            State { ws_url: String::new(), user, shared: shared.clone(), ws: None, interval: Duration::from_secs(1), session_id: String::new(), seq: None };
+        let user = User { index: 0, id: "1".into(), token: "t".into(), addr: None };
+        let mut state = State {
+            ws_url: String::new(),
+            user,
+            shared: shared.clone(),
+            ws: None,
+            interval: Duration::from_secs(1),
+            session_id: String::new(),
+            seq: None,
+            voice_sent: None,
+        };
         let send_us = shared.now_us();
         let frame = |s: u64, name: &str, d: Value| json!({"op": 0, "s": s, "t": name, "d": d}).to_string();
         assert!(state.on_text(&frame(1, "READY", json!({"session_id": "abc"}))) == Outcome::Ready);
@@ -401,6 +461,16 @@ mod tests {
         state.on_text(&frame(3, "TYPING_START", json!({})));
         assert_eq!(metrics.counter("seq_out_of_order"), 1);
         assert_eq!(state.seq, Some(4));
+        state.on_text(&frame(5, "MESSAGE_CREATE", json!({"content": format!("dm {send_us}")})));
+        assert_eq!((metrics.counter("recv:dm"), metrics.counter("recv:message")), (1, 1));
+        shared.stamp("r:9".to_owned());
+        state.on_text(&frame(6, "MESSAGE_REACTION_ADD", json!({"message_id": "9", "user_id": "1"})));
+        state.on_text(&frame(7, "MESSAGE_REACTION_ADD", json!({"message_id": "10", "user_id": "1"})));
+        assert_eq!(metrics.counter("recv:reaction"), 1, "only stamped reactions are timed");
+        shared.stamp("v:1".to_owned());
+        state.on_text(&frame(8, "VOICE_STATE_UPDATE", json!({"user_id": "1", "channel_id": "5"})));
+        state.on_text(&frame(9, "VOICE_STATE_UPDATE", json!({"user_id": "1", "channel_id": null})));
+        assert_eq!((metrics.counter("recv:voice_state"), metrics.counter("recv:voice_leave")), (1, 1));
         assert!(state.on_text(&json!({"op": 9, "d": false}).to_string()) == Outcome::InvalidSession);
     }
 }

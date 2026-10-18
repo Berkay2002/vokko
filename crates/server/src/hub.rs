@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::{Notify, mpsc};
-use vokko_protocol::api::{Activity, GatewayEvent, GatewayOp, GatewayPayload};
+use vokko_protocol::api::{Activity, GatewayEvent};
 
 /// Close code for a connection that was replaced by a newer one of the same session.
 pub const CLOSE_REPLACED: u16 = 4000;
@@ -82,9 +82,28 @@ impl Link {
     }
 }
 
+/// One serialized dispatch, shared by every session it goes to: each session only adds its own sequence number when the frame
+/// is written, so a broadcast is serialized once and the replay buffers hold pointers, not copies.
+pub struct Event {
+    /// The event name as a JSON string (`"MESSAGE_CREATE"`).
+    name: String,
+    data: String,
+}
+
+impl Event {
+    pub fn new(name: &str, data: &Value) -> Arc<Self> {
+        Arc::new(Self { name: serde_json::to_string(name).unwrap_or_default(), data: serde_json::to_string(data).unwrap_or_else(|_| "null".to_owned()) })
+    }
+
+    /// The dispatch frame (`GatewayPayload` with op 0) for sequence `seq`.
+    fn frame(&self, seq: u64) -> String {
+        format!(r#"{{"op":0,"d":{},"s":{seq},"t":{}}}"#, self.data, self.name)
+    }
+}
+
 struct SessionInner {
     seq: u64,
-    buffer: VecDeque<(u64, String)>,
+    buffer: VecDeque<(u64, Arc<Event>)>,
     link: Option<Link>,
     detached_at: Option<Instant>,
     /// Bumped on every attach so a stale connection task knows it was replaced.
@@ -112,22 +131,23 @@ pub enum ResumeOutcome {
 }
 
 impl Session {
-    /// Assigns the next sequence number, buffers the payload and forwards it to the live connection if there is one.
-    fn push(&self, name: &str, data: Value) {
+    /// Assigns the next sequence number, buffers the event and forwards it to the live connection if there is one.
+    fn push(&self, event: &Arc<Event>) {
         let mut inner = lock(&self.inner);
-        self.push_locked(&mut inner, name, data);
+        self.push_locked(&mut inner, event, true);
     }
 
-    fn push_locked(&self, inner: &mut SessionInner, name: &str, data: Value) {
+    /// `buffered: false` numbers and sends the event but keeps it out of the replay buffer (READY: a resume never needs it).
+    fn push_locked(&self, inner: &mut SessionInner, event: &Arc<Event>, buffered: bool) {
         inner.seq += 1;
         let seq = inner.seq;
-        let payload = GatewayPayload { op: GatewayOp::Dispatch, d: data, s: Some(seq), t: Some(name.to_owned()) };
-        let Ok(text) = serde_json::to_string(&payload) else { return };
-        inner.buffer.push_back((seq, text.clone()));
-        while inner.buffer.len() > self.capacity {
-            inner.buffer.pop_front();
+        if buffered {
+            inner.buffer.push_back((seq, event.clone()));
+            while inner.buffer.len() > self.capacity {
+                inner.buffer.pop_front();
+            }
         }
-        if inner.link.as_ref().is_some_and(|link| !link.offer(text)) {
+        if inner.link.as_ref().is_some_and(|link| !link.offer(event.frame(seq))) {
             inner.link = None;
             inner.detached_at.get_or_insert_with(Instant::now);
         }
@@ -170,6 +190,7 @@ impl Session {
     /// session still had is closed like a replaced one and the caller forgets the session.
     pub fn resume(&self, link: Link, seq: u64, resumed: (&str, Value)) -> ResumeOutcome {
         let mut inner = lock(&self.inner);
+        // READY (seq 1) is never buffered, so a session that saw nothing newer resumes from an empty buffer.
         let oldest = inner.buffer.front().map(|(first, _)| *first).unwrap_or(inner.seq + 1);
         if seq > inner.seq || seq + 1 < oldest {
             if let Some(old) = inner.link.take() {
@@ -187,8 +208,8 @@ impl Session {
         let mut replayed = 0;
         let mut overflowed = false;
         if let Some(link) = &inner.link {
-            for (_, text) in inner.buffer.iter().filter(|(entry, _)| *entry > seq) {
-                if !link.offer(text.clone()) {
+            for (entry, event) in inner.buffer.iter().filter(|(entry, _)| *entry > seq) {
+                if !link.offer(event.frame(*entry)) {
                     overflowed = true;
                     break;
                 }
@@ -199,7 +220,7 @@ impl Session {
             inner.link = None;
             inner.detached_at.get_or_insert_with(Instant::now);
         }
-        self.push_locked(&mut inner, resumed.0, resumed.1);
+        self.push_locked(&mut inner, &Event::new(resumed.0, &resumed.1), true);
         ResumeOutcome::Resumed { generation, replayed }
     }
 
@@ -209,7 +230,7 @@ impl Session {
     }
 
     pub fn dispatch(&self, name: &str, data: Value) {
-        self.push(name, data);
+        self.push(&Event::new(name, &data));
     }
 }
 
@@ -276,7 +297,7 @@ impl Hub {
     /// so no event can be numbered ahead of READY or buffered without a connection. Returns it with the connection's generation.
     pub fn open_session(&self, user_id: i64, id: String, token_hash: Vec<u8>, link: Link, ready: Value) -> (Arc<Session>, u64) {
         let session = self.new_session(user_id, id, token_hash, Some(link));
-        session.push("READY", ready);
+        session.push_locked(&mut lock(&session.inner), &Event::new("READY", &ready), false);
         self.register(&session);
         let generation = lock(&session.inner).generation;
         (session, generation)
@@ -412,35 +433,81 @@ impl Hub {
 
     /// Same payload for everyone in `users`.
     pub fn send(&self, users: &[i64], event: &GatewayEvent) {
-        let data = event.data();
-        self.send_with(users, event.name(), |_| data.clone());
+        self.send_value(users, event.name(), &event.data());
+    }
+
+    /// Same payload for everyone in `users`, serialized once.
+    pub fn send_value(&self, users: &[i64], name: &str, data: &Value) {
+        let event = Event::new(name, data);
+        for session in self.sessions_of(users) {
+            session.push(&event);
+        }
     }
 
     /// Same payload for every session on the server.
     pub fn send_all(&self, event: &GatewayEvent) {
-        let data = event.data();
+        let shared = Event::new(event.name(), &event.data());
         let sessions: Vec<Arc<Session>> = lock(&self.sessions).values().cloned().collect();
         for session in sessions {
-            session.dispatch(event.name(), data.clone());
+            session.push(&shared);
         }
     }
 
-    /// Payload may depend on the receiving user (reaction `me`, DM recipients).
+    /// Payload may depend on the receiving user (reaction `me`, DM recipients); built once per user, not per session.
     pub fn send_with(&self, users: &[i64], name: &str, data: impl Fn(i64) -> Value) {
+        let mut built: HashMap<i64, Arc<Event>> = HashMap::new();
+        for session in self.sessions_of(users) {
+            let event = built.entry(session.user_id).or_insert_with(|| Event::new(name, &data(session.user_id)));
+            session.push(event);
+        }
+    }
+
+    fn sessions_of(&self, users: &[i64]) -> Vec<Arc<Session>> {
         let wanted: HashSet<i64> = users.iter().copied().collect();
         if wanted.is_empty() {
-            return;
+            return Vec::new();
         }
-        let sessions: Vec<Arc<Session>> = lock(&self.sessions).values().filter(|session| wanted.contains(&session.user_id)).cloned().collect();
-        for session in sessions {
-            session.dispatch(name, data(session.user_id));
-        }
+        lock(&self.sessions).values().filter(|session| wanted.contains(&session.user_id)).cloned().collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vokko_protocol::api::{GatewayOp, GatewayPayload};
+
+    #[test]
+    fn a_broadcast_is_one_shared_event_numbered_per_session() {
+        let hub = hub(16);
+        let (first, second) = (hub.create_session(1, "a".to_owned(), vec![1]), hub.create_session(2, "b".to_owned(), vec![2]));
+        let (link_a, mut rx_a) = hub.new_link();
+        let (link_b, mut rx_b) = hub.new_link();
+        first.attach(link_a);
+        second.attach(link_b);
+        first.dispatch("X", Value::Null);
+        hub.send_value(&[1, 2], "MESSAGE_CREATE", &serde_json::json!({"content": "hi \"there\""}));
+        let parse = |text: String| serde_json::from_str::<GatewayPayload>(&text).expect("frame");
+        let _ = rx_a.queue.try_recv();
+        for (receiver, seq) in [(&mut rx_a, 2), (&mut rx_b, 1)] {
+            let payload = parse(receiver.queue.try_recv().expect("frame"));
+            assert_eq!((payload.op, payload.s, payload.t.as_deref()), (GatewayOp::Dispatch, Some(seq), Some("MESSAGE_CREATE")));
+            assert_eq!(payload.d["content"], "hi \"there\"");
+        }
+        let shared = |session: &Session| lock(&session.inner).buffer.back().map(|(_, event)| event.clone()).expect("buffered");
+        assert!(Arc::ptr_eq(&shared(&first), &shared(&second)), "both buffers point at one serialized event");
+    }
+
+    #[test]
+    fn ready_is_sent_but_not_kept_for_replay() {
+        let hub = hub(16);
+        let (link, mut receiver) = hub.new_link();
+        let (session, _) = hub.open_session(1, "s".to_owned(), vec![1], link, serde_json::json!({"big": "ready"}));
+        assert!(receiver.queue.try_recv().is_ok_and(|text| text.contains("\"t\":\"READY\"")));
+        assert!(lock(&session.inner).buffer.is_empty());
+        let (again, mut resumed) = hub.new_link();
+        assert!(matches!(session.resume(again, 1, ("RESUMED", Value::Null)), ResumeOutcome::Resumed { replayed: 0, .. }));
+        assert!(resumed.queue.try_recv().is_ok_and(|text| text.contains("\"s\":2")));
+    }
 
     fn hub(queue: usize) -> Hub {
         Hub::new(100, Duration::from_secs(60), queue)
