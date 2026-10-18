@@ -30,7 +30,7 @@ import { StageView, toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConne
 import { inChatPanel, useShortcut } from "../keyboard";
 import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } from "../keyboard/navigation";
 import { getPrefs, setPref, usePrefs } from "../ui/prefs";
-import { useBackClose } from "../ui";
+import { useBackClose, usePhone } from "../ui";
 import { markChannelRead, markGuildRead } from "./actions";
 import { firstTextChannel } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
@@ -145,6 +145,7 @@ export function AppShell() {
   const panelOpen = useRightPanelOpen(channelId ?? "");
   const threadOpen = useThreadPanelOpen(channelId ?? "");
   const threadSplitView = usePrefs(s => s.threadSplitView);
+  const phone = usePhone(); // no room for a split on a phone: the thread always takes the channel's place
 
   useEffect(() => {
     appStore.getState().setRoute({ guildId, channelId });
@@ -291,7 +292,7 @@ export function AppShell() {
           {channel && (
             <>
               <ChannelHeader channel={channel} gated={gated} membersOpen={membersVisible && !!guild} onToggleMembers={toggleMembers} profileOpen={profileVisible && !!dmRecipient} onToggleProfile={toggleProfile} onOpenDetails={() => useNavDrawer.getState().setDetails(true)} />
-              <div className={`channel-body${threadOpen && !threadSplitView ? " thread-full" : ""}`}>
+              <div className={`channel-body${threadOpen && (!threadSplitView || phone) ? " thread-full" : ""}`}>
                 <div className="channel-chat">
                   <AgeGate key={channel.id} channel={channel}>
                     {channel.type === ChannelType.GuildForum ? (

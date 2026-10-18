@@ -73,6 +73,15 @@
   width: 180px;
 }
 
+/* phone: the sort icon joins the layout buttons on the right */
+.forum-sort-button {
+  margin-left: auto;
+}
+
+.forum-sort-button + .forum-layouts {
+  margin-left: 0;
+}
+
 .forum-sort .select-wrap {
   margin: 0;
 }

@@ -709,6 +709,15 @@
     min-height: 36px;
   }
 
+  /* an open thread or forum post has its own header (back, name, Join, overflow): the parent channel's goes */
+  .channel-header:has(+ .channel-body.thread-full) {
+    display: none;
+  }
+
+  .thread-panel .thread-panel-header {
+    padding-left: 8px;
+  }
+
   /* message toolbar (opened by tap): finger-sized buttons, 8 of them still fit a 360px row */
   .chat-toolbar {
     top: -22px;

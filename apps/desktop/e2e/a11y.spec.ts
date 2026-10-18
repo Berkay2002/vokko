@@ -313,6 +313,8 @@ test.describe('keyboard: menus', () => {
     await openGuild(page);
     await page.locator('.chat-scroller').focus();
     for (let i = 0; i < 12 && !(await focusInfo(page, '.chat-msg')).inside; i += 1) await page.keyboard.press('Tab');
+    // past the author's avatar and name: Shift+F10 on those opens the user menu
+    for (let i = 0; i < 4 && (await focusInfo(page, '.chat-avatar-btn, .chat-author')).inside; i += 1) await page.keyboard.press('Tab');
     expect((await focusInfo(page, '.chat-msg')).inside).toBe(true);
     await page.keyboard.press('Shift+F10');
     const menu = page.getByRole('menu', { name: 'Message actions' });

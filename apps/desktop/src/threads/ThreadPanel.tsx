@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { Archive, ArchiveRestore, Bell, BellOff, Copy, Lock, LockOpen, LogIn, LogOut, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Settings, Trash2, Users, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, Bell, BellOff, Copy, Lock, LockOpen, LogIn, LogOut, MessageSquareText, MoreHorizontal, Pencil, Pin, PinOff, Settings, Trash2, Users, X } from "lucide-react";
 import { editChannel, joinThread, leaveThread } from "../api/rest";
 import { appStore, useStore } from "../api/store";
 import { ChannelFlags, ChannelType, type Channel } from "../api/types";
 import { ChatView } from "../chat/ChatView";
 import { PinnedMessages } from "../chat/PinnedMessages";
 import { chatToast } from "../chat/toast";
-import { Popout, Tooltip, useBackClose, useContextMenu, type MenuItem } from "../ui";
+import { Popout, Tooltip, useBackClose, useContextMenu, usePhone, type MenuItem } from "../ui";
 import { getPrefs } from "../ui/prefs";
 import { threadBellItems, useThreadMuted } from "./mute";
 import { ThreadMembers } from "./ThreadMembers";
@@ -131,6 +131,17 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
   const archived = thread.thread_metadata?.archived === true;
   const locked = thread.thread_metadata?.locked === true;
   const forumPost = parent.type === ChannelType.GuildForum;
+  // A phone has room for back, the name, Join and one overflow button: the toolbar's icons move into the overflow menu.
+  const phone = usePhone();
+  // the pins and members popouts hang off the overflow button there
+  const moreRef = useCallback(
+    (el: HTMLButtonElement | null) => {
+      if (!phone) return;
+      setPinsAnchor(el);
+      setMembersAnchor(el);
+    },
+    [phone],
+  );
 
   const items = (): MenuItem[] => {
     const out: MenuItem[] = [];
@@ -154,6 +165,13 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
     return out;
   };
 
+  const phoneItems = (): MenuItem[] => [
+    { id: "notify", label: "Notification Settings", icon: muted ? <BellOff size={16} /> : <Bell size={16} />, children: threadBellItems(thread) },
+    { id: "pins", label: "Pinned Messages", icon: <Pin size={16} />, onSelect: () => setPinsOpen(true) },
+    { id: "members", label: "Thread Members", icon: <Users size={16} />, onSelect: () => setMembersOpen(true) },
+    { type: "separator" },
+  ];
+
   const readOnly = !rights.canSend;
   const noSend = !locked && !rights.canSend ? "You do not have permission to send messages in this thread." : null;
 
@@ -172,7 +190,13 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
         {...handle}
       />
       <header className="thread-panel-header">
-        <MessageSquareText size={22} className="thread-panel-icon" aria-hidden="true" />
+        {phone ? (
+          <button type="button" className="toolbar-button thread-panel-back" aria-label="Close thread" onClick={closeThread}>
+            <ArrowLeft size={20} />
+          </button>
+        ) : (
+          <MessageSquareText size={22} className="thread-panel-icon" aria-hidden="true" />
+        )}
         <div className="thread-panel-title">
           <h2 title={thread.name ?? undefined}>{thread.name}</h2>
           <span className="thread-panel-parent">
@@ -186,54 +210,61 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
               Join
             </button>
           )}
-          <Tooltip content="Notification Settings" side="bottom">
-            <button
-              type="button"
-              className="toolbar-button"
-              aria-label="Notification Settings"
-              onClick={e => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, threadBellItems(thread));
-              }}
-            >
-              {muted ? <BellOff size={20} /> : <Bell size={20} />}
-            </button>
-          </Tooltip>
-          <Tooltip content="Pinned Messages" side="bottom">
-            <button ref={setPinsAnchor} type="button" className={`toolbar-button${pinsOpen ? " active" : ""}`} aria-label="Pinned Messages" aria-pressed={pinsOpen} onClick={() => setPinsOpen(o => !o)}>
-              <Pin size={20} />
-            </button>
-          </Tooltip>
-          <Tooltip content="Members" side="bottom">
-            <button ref={setMembersAnchor} type="button" className={`toolbar-button${membersOpen ? " active" : ""}`} aria-label="Thread members" aria-pressed={membersOpen} onClick={() => setMembersOpen(o => !o)}>
-              <Users size={20} />
-            </button>
-          </Tooltip>
-          {rights.canEdit && (
-            <Tooltip content={forumPost ? "Post Settings" : "Thread Settings"} side="bottom">
-              <button type="button" className="toolbar-button" aria-label={forumPost ? "Post Settings" : "Thread Settings"} onClick={() => setDialog("edit")}>
-                <Settings size={20} />
-              </button>
-            </Tooltip>
+          {!phone && (
+            <>
+              <Tooltip content="Notification Settings" side="bottom">
+                <button
+                  type="button"
+                  className="toolbar-button"
+                  aria-label="Notification Settings"
+                  onClick={e => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    menu.open({ clientX: rect.left, clientY: rect.bottom + 4 }, threadBellItems(thread));
+                  }}
+                >
+                  {muted ? <BellOff size={20} /> : <Bell size={20} />}
+                </button>
+              </Tooltip>
+              <Tooltip content="Pinned Messages" side="bottom">
+                <button ref={setPinsAnchor} type="button" className={`toolbar-button${pinsOpen ? " active" : ""}`} aria-label="Pinned Messages" aria-pressed={pinsOpen} onClick={() => setPinsOpen(o => !o)}>
+                  <Pin size={20} />
+                </button>
+              </Tooltip>
+              <Tooltip content="Members" side="bottom">
+                <button ref={setMembersAnchor} type="button" className={`toolbar-button${membersOpen ? " active" : ""}`} aria-label="Thread members" aria-pressed={membersOpen} onClick={() => setMembersOpen(o => !o)}>
+                  <Users size={20} />
+                </button>
+              </Tooltip>
+              {rights.canEdit && (
+                <Tooltip content={forumPost ? "Post Settings" : "Thread Settings"} side="bottom">
+                  <button type="button" className="toolbar-button" aria-label={forumPost ? "Post Settings" : "Thread Settings"} onClick={() => setDialog("edit")}>
+                    <Settings size={20} />
+                  </button>
+                </Tooltip>
+              )}
+            </>
           )}
           <Tooltip content="More" side="bottom">
             <button
+              ref={moreRef}
               type="button"
               className="toolbar-button"
               aria-label="Thread actions"
               onClick={e => {
                 const rect = e.currentTarget.getBoundingClientRect();
-                menu.open({ clientX: rect.right - 200, clientY: rect.bottom + 4 }, items());
+                menu.open({ clientX: rect.right - 200, clientY: rect.bottom + 4 }, phone ? [...phoneItems(), ...items()] : items());
               }}
             >
               <MoreHorizontal size={20} />
             </button>
           </Tooltip>
-          <Tooltip content="Close" side="bottom">
-            <button type="button" className="toolbar-button" aria-label="Close thread" onClick={closeThread}>
-              <X size={20} />
-            </button>
-          </Tooltip>
+          {!phone && (
+            <Tooltip content="Close" side="bottom">
+              <button type="button" className="toolbar-button" aria-label="Close thread" onClick={closeThread}>
+                <X size={20} />
+              </button>
+            </Tooltip>
+          )}
         </div>
         <Popout anchor={membersAnchor} open={membersOpen} onClose={() => setMembersOpen(false)} side="bottom" align="end" gap={6} className="thread-members-host">
           <ThreadMembers thread={thread} rights={rights} />
