@@ -155,8 +155,11 @@ impl Screening {
             auto_moderation_rule_trigger_type: Some(rule.trigger_type.to_string()),
             ..Default::default()
         };
+        // Only alerts for blocked messages are throttled: those messages are gone (audit 143 still records each), while a
+        // flagged one stays up and always gets its alert.
+        let blocked = self.hits.iter().any(|hit| hit.rule.block_message);
         if let Some(alert_channel) = rule.alert_channel_id
-            && let Some(held_back) = alert_slot(rule.id, user_id)
+            && let Some(held_back) = if blocked { alert_slot(rule.id, user_id) } else { Some(0) }
         {
             // A failed alert must not change what happens to the message.
             match post_alert(state, guild_id, alert_channel, self.channel_id, user_id, &self.content, rule, hit.keyword.as_deref(), held_back).await {
@@ -164,7 +167,12 @@ impl Screening {
                     let entry = Entry::new(guild_id, user_id, AuditLogEvent::AutoModerationFlagToChannel, user_id).options(options.clone());
                     audit::record(state, entry).await?;
                 }
-                Err(error) => tracing::warn!("automod rule {}: alert failed: {error:?}", rule.id),
+                Err(error) => {
+                    if blocked {
+                        alert_release(rule.id, user_id, held_back);
+                    }
+                    tracing::warn!("automod rule {}: alert failed: {error:?}", rule.id);
+                }
             }
         }
         if let Some(seconds) = rule.timeout_seconds {
@@ -227,7 +235,8 @@ async fn screen(state: &AppState, access: &ChannelAccess, user_id: i64, screened
 /// One lock per member and guild, held from the spam count to the insert, so parallel copies cannot all count as early ones.
 /// shortcut: in-process, which is right for the single server instance; a second instance needs a Postgres advisory lock instead.
 async fn spam_lock(guild_id: i64, user_id: i64) -> OwnedMutexGuard<()> {
-    static LOCKS: LazyLock<StdMutex<HashMap<(i64, i64), Arc<Mutex<()>>>>> = LazyLock::new(Default::default);
+    type Locks = StdMutex<HashMap<(i64, i64), Arc<Mutex<()>>>>;
+    static LOCKS: LazyLock<Locks> = LazyLock::new(Default::default);
     let lock = {
         let mut locks = LOCKS.lock().unwrap_or_else(PoisonError::into_inner);
         locks.retain(|_, lock| Arc::strong_count(lock) > 1);
@@ -236,13 +245,16 @@ async fn spam_lock(guild_id: i64, user_id: i64) -> OwnedMutexGuard<()> {
     lock.lock_owned().await
 }
 
-/// At most one alert per rule and member per [`ALERT_INTERVAL`], so a member repeating a blocked message cannot flood the mod
-/// channel. `Some(n)` when this alert may post, `n` = alerts held back since the last one.
+type AlertSlots = StdMutex<HashMap<(i64, i64), (Instant, u32)>>;
+static ALERTS_SENT: LazyLock<AlertSlots> = LazyLock::new(Default::default);
+
+/// At most one alert per rule and member per [`ALERT_INTERVAL`] for blocked messages, so a member repeating one cannot flood the
+/// mod channel. `Some(n)` when this alert may post, `n` = alerts held back since the last one (shown on the next alert; no
+/// summary is posted when the window ends).
 /// shortcut: in-process like [`spam_lock`]; a second server instance would alert once per instance.
 fn alert_slot(rule_id: i64, user_id: i64) -> Option<u32> {
-    static SENT: LazyLock<StdMutex<HashMap<(i64, i64), (Instant, u32)>>> = LazyLock::new(Default::default);
     let now = Instant::now();
-    let mut sent = SENT.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut sent = ALERTS_SENT.lock().unwrap_or_else(PoisonError::into_inner);
     sent.retain(|_, (at, _)| now.duration_since(*at) < ALERT_FORGET);
     if let Some((at, held_back)) = sent.get_mut(&(rule_id, user_id)) {
         if now.duration_since(*at) < ALERT_INTERVAL {
@@ -254,6 +266,15 @@ fn alert_slot(rule_id: i64, user_id: i64) -> Option<u32> {
     }
     sent.insert((rule_id, user_id), (now, 0));
     Some(0)
+}
+
+/// The alert the slot was taken for failed: free the slot so the next blocked copy alerts, still counting the held-back ones.
+fn alert_release(rule_id: i64, user_id: i64, held_back: u32) {
+    let mut sent = ALERTS_SENT.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some((at, count)) = sent.get_mut(&(rule_id, user_id)) {
+        *at -= ALERT_INTERVAL;
+        *count += held_back;
+    }
 }
 
 /// The text the spam check compares: trimmed and lowercased, or `None` when it is too short to count.

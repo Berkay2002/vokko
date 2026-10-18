@@ -881,6 +881,17 @@ async fn automod_spam_counts_parallel_sends_and_alerts_once_a_minute() {
     assert_eq!(w.audit("?action_type=143").await.len(), 8);
     assert_eq!(w.audit("?action_type=144").await.len(), 1);
 
+    // A flagged message stays up, so its alert is never held back.
+    let flag = json!({"name": "Flag", "event_type": 1, "trigger_type": 1, "trigger_metadata": {"keyword_filter": ["flagme"]}, "actions": [{"type": 2, "metadata": {"channel_id": alerts}}]});
+    let (status, _) = w.app.post(&w.path("/auto-moderation/rules"), &w.owner, flag).await;
+    assert_eq!(status, StatusCode::OK);
+    for n in 0..3 {
+        let (status, _) = w.app.post(&messages, &member, json!({"content": format!("flagme {n}")})).await;
+        assert_eq!(status, StatusCode::OK, "flagged, not blocked");
+    }
+    let (_, list) = w.app.get(&format!("/channels/{alerts}/messages"), &w.owner).await;
+    assert_eq!(list.as_array().expect("list").len(), 4, "every flagged message alerts");
+
     // Deleting the alert channel takes the alert off the rule.
     let (status, _) = w.app.delete(&format!("/channels/{alerts}"), &w.owner).await;
     assert_eq!(status, StatusCode::OK);

@@ -454,17 +454,21 @@ export function checkAutomod(channel: MockChannel, userId: string, content: stri
   if (hasBit(bits, Perm.MANAGE_GUILD) || hasBit(bits, Perm.ADMINISTRATOR)) return;
   const channels = [channel.id, isThreadType(channel.type) ? channel.parent_id : null].filter((id): id is string => !!id);
   let blocked: { message: string | undefined } | null = null;
-  for (const rule of rulesOf(guild.guild.id)) {
-    if (!rule.enabled) continue;
-    if (rule.exempt_roles.some(id => record.roles.includes(id)) || channels.some(id => rule.exempt_channels.includes(id))) continue;
-    const hit = ruleHit(guild.guild.id, userId, rule, content, edit);
-    if (!hit) continue;
+  const hits = rulesOf(guild.guild.id)
+    .filter(rule => rule.enabled && !rule.exempt_roles.some(id => record.roles.includes(id)) && !channels.some(id => rule.exempt_channels.includes(id)))
+    .flatMap(rule => {
+      const hit = ruleHit(guild.guild.id, userId, rule, content, edit);
+      return hit ? [{ rule, hit }] : [];
+    });
+  const blocking = hits.some(({ rule }) => rule.actions.some(a => a.type === AutoModerationActionType.BlockMessage));
+  for (const { rule, hit } of hits) {
     const options = { channel_id: channel.id, auto_moderation_rule_name: rule.name, auto_moderation_rule_trigger_type: String(rule.trigger_type) };
     const action = (type: AutoModerationActionType) => rule.actions.find(a => a.type === type);
     const block = action(AutoModerationActionType.BlockMessage);
     const timeout = action(AutoModerationActionType.Timeout)?.metadata?.duration_seconds;
     const alert = db.channels.get(action(AutoModerationActionType.SendAlertMessage)?.metadata?.channel_id ?? "");
-    const heldBack = alert ? alertSlot(rule.id, userId) : null;
+    // Only blocked messages' alerts are throttled; a flagged message stays up and always gets one (as on the server).
+    const heldBack = !alert ? null : blocking ? alertSlot(rule.id, userId) : 0;
     if (alert && heldBack !== null) {
       const fields: NonNullable<Embed["fields"]> = [
         { name: "rule_name", value: rule.name },
