@@ -46,7 +46,7 @@ const shot = (page: Page, name: string) => (mkdirSync(SHOTS, { recursive: true }
 async function openStremio(page: Page): Promise<void> {
   await call(page).getByRole('button', { name: 'Activities' }).click();
   await shot(page, MOBILE ? 'm0-activities-menu.png' : '09-activities-menu.png');
-  await page.getByRole('menuitem', { name: 'Stremio' }).click();
+  await page.getByRole('menu', { name: 'Activities' }).getByRole('menuitem', { name: 'Stremio' }).click();
   await expect(panel(page)).toBeVisible();
 }
 

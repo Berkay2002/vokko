@@ -264,7 +264,6 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
   const chatOpen = useVoiceUi(s => s.chatOpen);
   const [boardAnchor, setBoardAnchor] = useState<HTMLElement | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
-  const [shelfAnchor, setShelfAnchor] = useState<HTMLElement | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const below = (e: React.MouseEvent<HTMLElement>) => {
@@ -311,7 +310,6 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
         <BarButton
           label="Activities"
           active={shelfOpen || stremioOpen || spotifyOpen}
-          buttonRef={setShelfAnchor}
           onClick={() => setShelfOpen(o => !o)}
         >
           <LayoutGrid size={20} />
@@ -349,7 +347,7 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
         </BarButton>
       </div>
       <SoundboardPopout anchor={boardAnchor} open={boardOpen} onClose={() => setBoardOpen(false)} />
-      <ActivityShelf channel={channel} anchor={shelfAnchor} open={shelfOpen} onClose={() => setShelfOpen(false)} onWatchTogether={() => watchTogether(channel, watching)} />
+      <ActivityShelf channel={channel} open={shelfOpen} onClose={() => setShelfOpen(false)} onWatchTogether={() => watchTogether(channel, watching)} />
     </div>
   );
 }
@@ -370,7 +368,6 @@ function VideoError() {
 function AloneCard({ channel }: { channel: Channel }) {
   const { can } = usePermissions(channel.guild_id, channel.id);
   const watching = useVoice(s => !!s.watch[channel.id]);
-  const [shelfAnchor, setShelfAnchor] = useState<HTMLElement | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   return (
     <div className="voice-alone">
@@ -384,11 +381,11 @@ function AloneCard({ channel }: { channel: Channel }) {
         <button type="button" className="voice-alone-button" disabled={!can(Perm.CREATE_INSTANT_INVITE)} onClick={() => openModal({ type: "invite", channelId: channel.id })}>
           <UserPlus size={18} /> Invite to Voice
         </button>
-        <button ref={setShelfAnchor} type="button" className="voice-alone-button" aria-expanded={shelfOpen} onClick={() => setShelfOpen(o => !o)}>
+        <button type="button" className="voice-alone-button" aria-expanded={shelfOpen} onClick={() => setShelfOpen(o => !o)}>
           <LayoutGrid size={18} /> Choose Activity
         </button>
       </div>
-      <ActivityShelf channel={channel} anchor={shelfAnchor} open={shelfOpen} onClose={() => setShelfOpen(false)} onWatchTogether={() => watchTogether(channel, watching)} />
+      <ActivityShelf channel={channel} open={shelfOpen} onClose={() => setShelfOpen(false)} onWatchTogether={() => watchTogether(channel, watching)} />
     </div>
   );
 }
