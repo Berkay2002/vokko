@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bindIdleHide, IDLE_HIDE_MS } from "./idleHide";
+import { bindIdleHide, IDLE_HIDE_MS, TOUCH_IDLE_HIDE_MS } from "./idleHide";
 
 beforeEach(() => void vi.useFakeTimers());
 afterEach(() => void vi.useRealTimers());
@@ -9,8 +9,8 @@ function setup(held = false) {
   const stage = new EventTarget();
   const state = { idle: false, held };
   const dispose = bindIdleHide(stage, { isBar: t => t === bar, held: () => state.held, set: idle => (state.idle = idle) });
-  const fire = (type: string, props: { clientX?: number; clientY?: number; target?: object } = {}) => {
-    const e = Object.assign(new Event(type), { clientX: props.clientX, clientY: props.clientY });
+  const fire = (type: string, props: { clientX?: number; clientY?: number; target?: object; pointerType?: string } = {}) => {
+    const e = Object.assign(new Event(type), { clientX: props.clientX, clientY: props.clientY, pointerType: props.pointerType });
     Object.defineProperty(e, "target", { value: props.target ?? stage });
     stage.dispatchEvent(e);
   };
@@ -86,5 +86,61 @@ describe("call stage auto-hide", () => {
     expect(state.idle).toBe(false);
     wait(IDLE_HIDE_MS * 2);
     expect(state.idle).toBe(false);
+  });
+});
+
+describe("call stage auto-hide on a touch screen", () => {
+  const touch = { pointerType: "touch", clientX: 1, clientY: 1 };
+
+  it("a tap on the picture hides the bars at once, and a tap while hidden brings them back for 4 s", () => {
+    const { state, fire } = setup();
+    fire("pointerdown", touch);
+    fire("click");
+    expect(state.idle).toBe(true);
+    fire("pointerleave", { pointerType: "touch" });
+    fire("pointerdown", touch);
+    fire("click");
+    expect(state.idle).toBe(false);
+    wait(TOUCH_IDLE_HIDE_MS - 1);
+    expect(state.idle).toBe(false);
+    wait(1);
+    expect(state.idle).toBe(true);
+  });
+
+  it("a tap on a bar control keeps the bars and restarts the 4 s; lifting the finger does not hide them", () => {
+    const { state, fire } = setup();
+    wait(TOUCH_IDLE_HIDE_MS - 1);
+    fire("pointerdown", { ...touch, target: bar });
+    fire("pointerleave", { pointerType: "touch" });
+    fire("click", { target: bar });
+    expect(state.idle).toBe(false);
+    wait(TOUCH_IDLE_HIDE_MS - 1);
+    expect(state.idle).toBe(false);
+    wait(1);
+    expect(state.idle).toBe(true);
+  });
+
+  it("a tap while a menu is open does not hide the bars", () => {
+    const { state, fire } = setup(true);
+    fire("pointerdown", touch);
+    fire("click");
+    expect(state.idle).toBe(false);
+  });
+
+  it("touch hover events are ignored (they are not a pointer resting on the picture)", () => {
+    const { state, fire } = setup();
+    wait(TOUCH_IDLE_HIDE_MS);
+    expect(state.idle).toBe(true);
+    fire("pointerenter", { ...touch, clientX: 3 });
+    fire("pointermove", { ...touch, clientX: 4 });
+    expect(state.idle).toBe(true);
+  });
+
+  it("a mouse after touch goes back to the 3 s timer", () => {
+    const { state, fire } = setup();
+    fire("pointerdown", { ...touch, target: bar });
+    fire("pointermove", { pointerType: "mouse", clientX: 8, clientY: 8 });
+    wait(IDLE_HIDE_MS);
+    expect(state.idle).toBe(true);
   });
 });

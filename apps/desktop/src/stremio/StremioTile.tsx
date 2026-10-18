@@ -9,7 +9,7 @@ import { useNow } from "../shell/ActivityLine";
 import { ListVideo, Maximize2, Minimize2, Pause, Play, Plus, RotateCcw, RotateCw, SkipForward, Square, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import { STREMIO_QUEUE_PER_USER, type Snowflake, type StremioState } from "../api/types";
-import { Tooltip, useContextMenu } from "../ui";
+import { hasOpenLayer, Tooltip, useContextMenu } from "../ui";
 import { MediaVotes, useHostLabel } from "../voice/MediaVotes";
 import { useVoice } from "../voice/store";
 import { volumeMenuItems } from "../voice/voiceMenus";
@@ -17,6 +17,8 @@ import { queueQuota, skipAction, useCanControlMedia, useMeId } from "../voice/us
 import { formatClock } from "../watch/youtube";
 import { controlStremio, stopStremio } from "./api";
 import { reason, safeImage, shownPositionMs, statusText } from "./format";
+import { inPageFullscreen } from "../voice/fullscreenFocus";
+import { stremioKey, type StremioKey } from "./keys";
 import { LanguagesMenu } from "./Languages";
 import { StremioIcon } from "./StremioIcon";
 import { openStremioPanel } from "./panelStore";
@@ -154,6 +156,40 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
     seeker.seek(Math.round(drag), true);
     setDrag(null);
   };
+  // Full-screen keys (Space, Left, Right) for the controller; the latest closures sit in a ref so the listener is bound once.
+  const [cueHost, setCueHost] = useState<HTMLElement | null>(null);
+  const act = useRef<(key: StremioKey) => void>(() => undefined);
+  act.current = key => {
+    if (key === "toggle") {
+      if (state.status !== "error") run(controlStremio(channelId, { playing: !state.playing }));
+    } else if (duration > 0) jump(key === "back" ? -JUMP_MS : JUMP_MS);
+  };
+  useEffect(() => {
+    if (small || !controller) return;
+    // A button a mouse click left focused is not the keyboard's: its Space must play / pause, not click it again, so it gives up focus.
+    // (Tab hands focus back to the keyboard.)
+    let pressed: EventTarget | null = null;
+    const onDown = (e: PointerEvent) => void (pressed = e.target);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Tab") pressed = null;
+      const clicked = e.target instanceof HTMLButtonElement && pressed instanceof Node && e.target.contains(pressed);
+      const key = stremioKey(clicked ? { key: e.key, target: null, repeat: e.repeat, ctrlKey: e.ctrlKey, altKey: e.altKey, metaKey: e.metaKey, shiftKey: e.shiftKey, defaultPrevented: e.defaultPrevented } : e, {
+        controller,
+        fullscreen: inPageFullscreen(),
+        blocked: hasOpenLayer() || !!document.querySelector('[role="dialog"], [role="menu"]'),
+      });
+      if (!key) return;
+      if (clicked) (e.target as HTMLElement).blur();
+      e.preventDefault();
+      act.current(key);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [small, controller]);
   const title = state.item.subtitle ? `${state.item.title}, ${state.item.subtitle}` : state.item.title;
 
   return (
@@ -202,64 +238,67 @@ function StremioTileBody({ channelId, variant, onActivate, state }: { channelId:
             </div>
           )}
           {queueOpen && <QueuePanel channelId={channelId} queue={state.queue} onAdd={openStremioPanel} controller={controller} meId={meId} />}
-          <div className="stremio-bar">
-            {controller && (
-              <input
-                className="stremio-seek"
-                type="range"
-                aria-label="Seek"
-                min={0}
-                max={Math.max(duration, 1)}
-                step={1000}
-                value={drag ?? position}
-                disabled={duration === 0 || state.status === "error"}
-                onChange={e => setDrag(Number(e.target.value))}
-                onPointerUp={commitSeek}
-                onKeyUp={commitSeek}
-                onBlur={commitSeek}
-              />
-            )}
-            <div className="stremio-controls">
+          <div className="stremio-bottom">
+            <div className="stremio-cue-host" ref={setCueHost} />
+            <div className="stremio-bar">
               {controller && (
-                <>
-                  <ControlButton label={state.playing ? "Pause" : "Play"} disabled={state.status === "error"} onClick={() => run(controlStremio(channelId, { playing: !state.playing }))}>
-                    {state.playing ? <Pause size={18} /> : <Play size={18} />}
-                  </ControlButton>
-                  <ControlButton label="Back 10 seconds" disabled={duration === 0} onClick={() => jump(-JUMP_MS)}>
-                    <RotateCcw size={18} />
-                  </ControlButton>
-                  <ControlButton label="Forward 10 seconds" disabled={duration === 0} onClick={() => jump(JUMP_MS)}>
-                    <RotateCw size={18} />
-                  </ControlButton>
-                </>
+                <input
+                  className="stremio-seek"
+                  type="range"
+                  aria-label="Seek"
+                  min={0}
+                  max={Math.max(duration, 1)}
+                  step={1000}
+                  value={drag ?? position}
+                  disabled={duration === 0 || state.status === "error"}
+                  onChange={e => setDrag(Number(e.target.value))}
+                  onPointerUp={commitSeek}
+                  onKeyUp={commitSeek}
+                  onBlur={commitSeek}
+                />
               )}
-              <ControlButton label={skip.label} tip={skip.vote ? `${skip.label}: skips when half the listeners vote` : undefined} active={skip.vote ? skip.voted : undefined} onClick={() => run(controlStremio(channelId, { skip: skip.skip, item_seq: state.item_seq }))}>
-                <SkipForward size={18} />
-                {skip.vote && <span className="media-vote-count">{state.skip_votes.length}/{state.skip_needed}</span>}
-              </ControlButton>
-              <span className="stremio-time" aria-label="Position">
-                {formatClock(drag ?? position)}
-                {duration > 0 && ` / ${formatClock(duration)}`}
-              </span>
-              <span className="stremio-spacer" />
-              <label className="stremio-volume">
-                {volume === 0 || deaf ? <VolumeX size={16} aria-hidden="true" /> : <Volume2 size={16} aria-hidden="true" />}
-                <input type="range" aria-label="Stremio volume" min={0} max={100} value={volume} onChange={e => setViewerVolume(Number(e.target.value))} />
-              </label>
-              <LanguagesMenu channelId={channelId} state={state} positionMs={cuePosition} controller={controller} />
-              <ControlButton label={`Up next (${state.queue.length})`} active={queueOpen} onClick={() => setQueueOpen(o => !o)}>
-                <ListVideo size={18} />
-              </ControlButton>
-              {onActivate && (
-                <ControlButton label={variant === "focused" ? "Back to grid" : "Focus Stremio"} onClick={onActivate}>
-                  {variant === "focused" ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+              <div className="stremio-controls">
+                {controller && (
+                  <div className="stremio-transport">
+                    <ControlButton label={state.playing ? "Pause" : "Play"} disabled={state.status === "error"} onClick={() => run(controlStremio(channelId, { playing: !state.playing }))}>
+                      {state.playing ? <Pause size={18} /> : <Play size={18} />}
+                    </ControlButton>
+                    <ControlButton label="Back 10 seconds" disabled={duration === 0} onClick={() => jump(-JUMP_MS)}>
+                      <RotateCcw size={18} />
+                    </ControlButton>
+                    <ControlButton label="Forward 10 seconds" disabled={duration === 0} onClick={() => jump(JUMP_MS)}>
+                      <RotateCw size={18} />
+                    </ControlButton>
+                  </div>
+                )}
+                <ControlButton label={skip.label} tip={skip.vote ? `${skip.label}: skips when half the listeners vote` : undefined} active={skip.vote ? skip.voted : undefined} onClick={() => run(controlStremio(channelId, { skip: skip.skip, item_seq: state.item_seq }))}>
+                  <SkipForward size={18} />
+                  {skip.vote && <span className="media-vote-count">{state.skip_votes.length}/{state.skip_needed}</span>}
                 </ControlButton>
-              )}
-              {controller && (
-                <ControlButton label="Stop Stremio" onClick={() => run(stopStremio(channelId))}>
-                  <Square size={18} />
+                <span className="stremio-time" aria-label="Position">
+                  {formatClock(drag ?? position)}
+                  {duration > 0 && ` / ${formatClock(duration)}`}
+                </span>
+                <span className="stremio-spacer" />
+                <label className="stremio-volume">
+                  {volume === 0 || deaf ? <VolumeX size={16} aria-hidden="true" /> : <Volume2 size={16} aria-hidden="true" />}
+                  <input type="range" aria-label="Stremio volume" min={0} max={100} value={volume} onChange={e => setViewerVolume(Number(e.target.value))} />
+                </label>
+                <LanguagesMenu channelId={channelId} state={state} positionMs={cuePosition} controller={controller} cueHost={cueHost} />
+                <ControlButton label={`Up next (${state.queue.length})`} active={queueOpen} onClick={() => setQueueOpen(o => !o)}>
+                  <ListVideo size={18} />
                 </ControlButton>
-              )}
+                {onActivate && (
+                  <ControlButton label={variant === "focused" ? "Back to grid" : "Focus Stremio"} onClick={onActivate}>
+                    {variant === "focused" ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+                  </ControlButton>
+                )}
+                {controller && (
+                  <ControlButton label="Stop Stremio" onClick={() => run(stopStremio(channelId))}>
+                    <Square size={18} />
+                  </ControlButton>
+                )}
+              </div>
             </div>
           </div>
         </>

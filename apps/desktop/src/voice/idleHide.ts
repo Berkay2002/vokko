@@ -8,6 +8,8 @@ import { hasOpenLayer, usePhone } from "../ui";
 import { useVoice } from "./store";
 
 export const IDLE_HIDE_MS = 3000;
+/** A touch screen has no pointer to rest, so the bars stay a little longer; a tap on the picture hides them, a tap while hidden brings them back. */
+export const TOUCH_IDLE_HIDE_MS = 4000;
 
 /** The bars: the pointer over one, or keyboard focus inside one, keeps everything shown. */
 const BARS = ".stremio-bar, .stremio-notice, .voice-bar, .dm-call-bar";
@@ -15,6 +17,8 @@ const inBars = (suffix: string) => BARS.split(", ").map(b => b + suffix).join(",
 const OPEN_IN_BARS = inBars(' [aria-expanded="true"]');
 /** A pointer that was already resting on a bar when the picture started playing never moved, so it is asked for. */
 const HOVERED_BARS = inBars(":hover");
+/** A touch screen keeps ":hover" on whatever was tapped last, which must not hold the bars up for good. */
+const canHover = () => typeof matchMedia === "function" && matchMedia("(hover: hover)").matches;
 
 interface IdleHideOptions {
   /** True for a target inside a bar. */
@@ -23,18 +27,27 @@ interface IdleHideOptions {
   held(): boolean;
   set(idle: boolean): void;
   ms?: number;
+  touchMs?: number;
 }
 
-type Pointer = Event & { clientX?: number; clientY?: number };
+type Pointer = Event & { clientX?: number; clientY?: number; pointerType?: string };
 
 /** Listens on `stage`; returns the dispose function (which also shows everything again). */
-export function bindIdleHide(stage: EventTarget, { isBar, held, set, ms = IDLE_HIDE_MS }: IdleHideOptions): () => void {
+export function bindIdleHide(stage: EventTarget, { isBar, held, set: report, ms = IDLE_HIDE_MS, touchMs = TOUCH_IDLE_HIDE_MS }: IdleHideOptions): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let overBar = false;
   let at = "";
+  let idle = false;
+  let touch = false;
+  /** The touch that just went down hides the bars when it ends as a tap (it went down on the picture while they were shown). */
+  let tapHides = false;
+  const set = (value: boolean) => {
+    idle = value;
+    report(value);
+  };
   const arm = () => {
     clearTimeout(timer);
-    timer = setTimeout(() => (overBar || held() ? arm() : set(true)), ms);
+    timer = setTimeout(() => (overBar || held() ? arm() : set(true)), touch ? touchMs : ms);
   };
   const wake = () => {
     set(false);
@@ -42,6 +55,10 @@ export function bindIdleHide(stage: EventTarget, { isBar, held, set, ms = IDLE_H
   };
   const move = (e: Event) => {
     const p = e as Pointer;
+    if (p.pointerType) touch = p.pointerType === "touch";
+    // A touch has no hover: only its press counts, and it decides between showing and hiding.
+    if (touch && e.type !== "pointerdown") return;
+    if (touch) tapHides = !idle && !isBar(e.target);
     // Chrome repeats the last pointer position when the layout under a resting mouse changes: that is not movement.
     const now = `${p.clientX},${p.clientY}`;
     if (e.type === "pointermove" && now === at) return;
@@ -49,8 +66,16 @@ export function bindIdleHide(stage: EventTarget, { isBar, held, set, ms = IDLE_H
     overBar = isBar(e.target);
     wake();
   };
-  const leave = () => {
+  const tap = () => {
+    if (!tapHides) return;
+    tapHides = false;
+    clearTimeout(timer);
+    if (!held()) set(true);
+  };
+  const leave = (e: Event) => {
     overBar = false;
+    // A finger that lifts "leaves" the stage; the bars go by the timer (or the next tap), not at once.
+    if ((e as Pointer).pointerType === "touch") return;
     clearTimeout(timer);
     if (held()) arm();
     else set(true);
@@ -59,6 +84,7 @@ export function bindIdleHide(stage: EventTarget, { isBar, held, set, ms = IDLE_H
   stage.addEventListener("pointerdown", move);
   stage.addEventListener("pointerenter", move);
   stage.addEventListener("pointerleave", leave);
+  stage.addEventListener("click", tap);
   stage.addEventListener("keydown", wake);
   stage.addEventListener("focusin", wake);
   arm();
@@ -68,6 +94,7 @@ export function bindIdleHide(stage: EventTarget, { isBar, held, set, ms = IDLE_H
     stage.removeEventListener("pointerdown", move);
     stage.removeEventListener("pointerenter", move);
     stage.removeEventListener("pointerleave", leave);
+    stage.removeEventListener("click", tap);
     stage.removeEventListener("keydown", wake);
     stage.removeEventListener("focusin", wake);
     set(false);
@@ -95,7 +122,7 @@ export function useIdleHide(stage: RefObject<HTMLElement | null>, channelId: Sno
     if (!el || !active) return;
     return bindIdleHide(el, {
       isBar: t => t instanceof Element && !!t.closest(BARS),
-      held: () => hasOpenLayer() || !!el.querySelector(HOVERED_BARS) || !!el.querySelector(`.stremio-queue, [role="menu"], ${OPEN_IN_BARS}`) || !!document.querySelector('[role="dialog"], [role="menu"]') || focusInBar(el),
+      held: () => hasOpenLayer() || (canHover() && !!el.querySelector(HOVERED_BARS)) || !!el.querySelector(`.stremio-queue, [role="menu"], ${OPEN_IN_BARS}`) || !!document.querySelector('[role="dialog"], [role="menu"]') || focusInBar(el),
       set: idle => el.toggleAttribute("data-idle", idle),
     });
   }, [stage, active]);

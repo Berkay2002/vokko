@@ -31,6 +31,7 @@ import { SpotifyPanel, SpotifyTile, SPOTIFY_TILE_ID, useSpotifyPanel } from "../
 import { GAME_TILE_ID, GameTile } from "../games";
 import { ActivityShelf } from "./ActivityShelf";
 import { useIdleHide } from "./idleHide";
+import { LANDSCAPE_QUERY, useMediaQuery, useVoiceFullscreen } from "./useFullscreen";
 import { canShareScreen, openCameraOptions, toggleCamera, toggleScreenShare } from "./videoControls";
 import { isViewerQuality, nearestChoice, viewerChoices, viewerQualityLabel, type ViewerQuality } from "./video/options";
 import "./video/video.css";
@@ -230,13 +231,13 @@ export function Tile({ state, guildId, variant, stream = false, onActivate }: { 
   );
 }
 
-export function BarButton({ label, tooltip, active, danger, disabled, onClick, buttonRef, children }: { label: string; tooltip?: string; active?: boolean; danger?: boolean; disabled?: boolean; onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void; buttonRef?: (el: HTMLButtonElement | null) => void; children: React.ReactNode }) {
+export function BarButton({ label, tooltip, active, danger, disabled, onClick, buttonRef, optional, children }: { label: string; /** Left out of the slim bar of a phone on its side. */ optional?: boolean; tooltip?: string; active?: boolean; danger?: boolean; disabled?: boolean; onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void; buttonRef?: (el: HTMLButtonElement | null) => void; children: React.ReactNode }) {
   return (
     <Tooltip content={tooltip ?? label} side="top">
       <button
         ref={buttonRef}
         type="button"
-        className={`voice-bar-button${active ? " active" : ""}${danger ? " danger" : ""}`}
+        className={`voice-bar-button${active ? " active" : ""}${danger ? " danger" : ""}${optional ? " optional" : ""}`}
         aria-label={label}
         aria-pressed={active}
         aria-disabled={disabled || undefined}
@@ -254,7 +255,7 @@ function watchTogether(channel: Channel, watching: boolean): void {
   else openModal({ type: "watchTogether", channelId: channel.id });
 }
 
-function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject<HTMLElement | null> }) {
+function ControlBar({ channel, fullscreen, onFullscreen }: { channel: Channel; fullscreen: boolean; onFullscreen(): void }) {
   const muted = useVoice(s => s.selfMute);
   const deafened = useVoice(s => s.selfDeaf);
   const cameraOn = useMedia(s => s.cameraOn);
@@ -268,91 +269,88 @@ function ControlBar({ channel, page }: { channel: Channel; page: React.RefObject
   const [boardAnchor, setBoardAnchor] = useState<HTMLElement | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
   const [shelfOpen, setShelfOpen] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
   const below = (e: React.MouseEvent<HTMLElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     return { clientX: rect.left, clientY: rect.top - 4 };
-  };
-  const toggleFullscreen = () => {
-    const el = page.current;
-    if (!el) return;
-    if (document.fullscreenElement) void document.exitFullscreen().then(() => setFullscreen(false));
-    else void el.requestFullscreen?.().then(() => setFullscreen(true), () => undefined);
   };
   const phone = usePhone();
   const micLabel = muted || deafened ? "Unmute microphone" : "Mute microphone";
   return (
     <div className="voice-bar">
-      <div className="voice-bar-group">
-        <BarButton label={micLabel} tooltip={muted ? "Unmute" : "Mute"} active={muted} onClick={toggleSelfMute}>
-          {muted || deafened ? <MicOff size={20} /> : <Mic size={20} />}
-        </BarButton>
-        {/* Discord's desktop bar has no Deafen (the user panel does); on a phone the panel is behind the drawer, so it lives here. */}
-        <BarButton label="Input options" tooltip="Input Options" onClick={e => menu.open(below(e), micItems())}>
-          <ChevronDown size={16} />
-        </BarButton>
-        {phone && (
-          <BarButton label={deafened ? "Undeafen" : "Deafen"} active={deafened} onClick={toggleSelfDeaf}>
-            {deafened ? <HeadphoneOff size={20} /> : <Headphones size={20} />}
+      <div className="voice-bar-pill">
+        <div className="voice-bar-group">
+          <BarButton label={micLabel} tooltip={muted ? "Unmute" : "Mute"} active={muted} onClick={toggleSelfMute}>
+            {muted || deafened ? <MicOff size={20} /> : <Mic size={20} />}
           </BarButton>
-        )}
-        <BarButton label={cameraOn ? "Turn off camera" : "Turn on camera"} tooltip={cameraOn ? "Turn Off Camera" : "Turn On Camera"} active={cameraOn} onClick={toggleCamera}>
-          {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
-        </BarButton>
-        <BarButton label="Camera options" tooltip="Camera Options" onClick={openCameraOptions}>
-          <ChevronDown size={16} />
-        </BarButton>
-      </div>
-      <div className="voice-bar-group">
-        {(screenOn || canShareScreen()) && (
-          <BarButton label={screenOn ? "Stop streaming" : "Share your screen"} tooltip={screenOn ? "Stop Streaming" : "Share Your Screen"} active={screenOn} onClick={toggleScreenShare}>
-            <MonitorUp size={20} />
+          {/* Discord's desktop bar has no Deafen (the user panel does); on a phone the panel is behind the drawer, so it lives here. */}
+          <BarButton optional label="Input options" tooltip="Input Options" onClick={e => menu.open(below(e), micItems())}>
+            <ChevronDown size={16} />
           </BarButton>
-        )}
-        <BarButton
-          label="Watch Together"
-          tooltip={watching ? "Show Watch Together" : "Watch YouTube Together"}
-          active={watching}
-          onClick={() => watchTogether(channel, watching)}
-        >
-          <MonitorPlay size={20} />
-        </BarButton>
-        <BarButton
-          label="Activities"
-          active={shelfOpen || stremioOpen || spotifyOpen}
-          onClick={() => setShelfOpen(o => !o)}
-        >
-          <LayoutGrid size={20} />
-        </BarButton>
-        <BarButton label="Soundboard" tooltip="Open Soundboard" active={boardOpen} buttonRef={setBoardAnchor} onClick={() => setBoardOpen(o => !o)}>
-          <Music size={20} />
-        </BarButton>
-        <BarButton
-          label="More"
-          onClick={e =>
-            menu.open(below(e), [
-              { id: "invite", label: "Invite to Voice", onSelect: () => openModal({ type: "invite", channelId: channel.id }) },
-              { type: "separator" },
-              { id: "chat", label: chatOpen ? "Hide Chat" : "Show Chat", onSelect: () => useVoiceUi.getState().setChatOpen(!chatOpen) },
-              { id: "settings", label: "Edit Channel", onSelect: () => openModal({ type: "editChannel", channelId: channel.id }) },
-              { type: "separator" },
-              { id: "voice-settings", label: "Voice & Video Settings", onSelect: () => openModal({ type: "userSettings", section: "voice" }) },
-            ])
-          }
-        >
-          <Ellipsis size={20} />
-        </BarButton>
+          {phone && (
+            <BarButton label={deafened ? "Undeafen" : "Deafen"} active={deafened} onClick={toggleSelfDeaf}>
+              {deafened ? <HeadphoneOff size={20} /> : <Headphones size={20} />}
+            </BarButton>
+          )}
+          <BarButton label={cameraOn ? "Turn off camera" : "Turn on camera"} tooltip={cameraOn ? "Turn Off Camera" : "Turn On Camera"} active={cameraOn} onClick={toggleCamera}>
+            {cameraOn ? <Video size={20} /> : <VideoOff size={20} />}
+          </BarButton>
+          <BarButton optional label="Camera options" tooltip="Camera Options" onClick={openCameraOptions}>
+            <ChevronDown size={16} />
+          </BarButton>
+        </div>
+        <div className="voice-bar-group">
+          {(screenOn || canShareScreen()) && (
+            <BarButton optional label={screenOn ? "Stop streaming" : "Share your screen"} tooltip={screenOn ? "Stop Streaming" : "Share Your Screen"} active={screenOn} onClick={toggleScreenShare}>
+              <MonitorUp size={20} />
+            </BarButton>
+          )}
+          <BarButton
+            optional
+            label="Watch Together"
+            tooltip={watching ? "Show Watch Together" : "Watch YouTube Together"}
+            active={watching}
+            onClick={() => watchTogether(channel, watching)}
+          >
+            <MonitorPlay size={20} />
+          </BarButton>
+          <BarButton
+            optional
+            label="Activities"
+            active={shelfOpen || stremioOpen || spotifyOpen}
+            onClick={() => setShelfOpen(o => !o)}
+          >
+            <LayoutGrid size={20} />
+          </BarButton>
+          <BarButton optional label="Soundboard" tooltip="Open Soundboard" active={boardOpen} buttonRef={setBoardAnchor} onClick={() => setBoardOpen(o => !o)}>
+            <Music size={20} />
+          </BarButton>
+          <BarButton
+            label="More"
+            onClick={e =>
+              menu.open(below(e), [
+                { id: "invite", label: "Invite to Voice", onSelect: () => openModal({ type: "invite", channelId: channel.id }) },
+                { type: "separator" },
+                { id: "chat", label: chatOpen ? "Hide Chat" : "Show Chat", onSelect: () => useVoiceUi.getState().setChatOpen(!chatOpen) },
+                { id: "settings", label: "Edit Channel", onSelect: () => openModal({ type: "editChannel", channelId: channel.id }) },
+                { type: "separator" },
+                { id: "voice-settings", label: "Voice & Video Settings", onSelect: () => openModal({ type: "userSettings", section: "voice" }) },
+              ])
+            }
+          >
+            <Ellipsis size={20} />
+          </BarButton>
+        </div>
+        <Tooltip content="Disconnect" side="top">
+          <button type="button" className="voice-hangup" aria-label="Leave voice channel" onClick={leaveVoice}>
+            <PhoneOff size={22} />
+          </button>
+        </Tooltip>
       </div>
-      <Tooltip content="Disconnect" side="top">
-        <button type="button" className="voice-hangup" aria-label="Leave voice channel" onClick={leaveVoice}>
-          <PhoneOff size={22} />
-        </button>
-      </Tooltip>
       <div className="voice-bar-side">
         <BarButton label="Pop out" tooltip="Pop out (coming with the desktop app)" disabled>
           <SquareArrowOutUpRight size={20} />
         </BarButton>
-        <BarButton label={fullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={toggleFullscreen}>
+        <BarButton label={fullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={onFullscreen}>
           {fullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
         </BarButton>
       </div>
@@ -537,6 +535,10 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
   const focusedId = useVoiceUi(s => s.focusedTile);
   const focused = multiple && focusedId ? tiles.find(t => t.id === focusedId) : undefined;
   useIdleHide(page, channel.id);
+  const { fullscreen, toggle: toggleFullscreen } = useVoiceFullscreen(channel.id);
+  const landscape = useMediaQuery(LANDSCAPE_QUERY);
+  // Cinema: the focused Stremio tile fills the screen (full screen) or the phone on its side (landscape); both are a fixed overlay over the app.
+  const cinema = !!focused?.stremio && (fullscreen || landscape);
 
   // One-shot request from outside the stage ("Watch Stream" in the channel list): focus that stream's tile once it is on this call's stage.
   const focusStream = useVoiceUi(s => s.focusStream);
@@ -561,7 +563,8 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
     if (!inFocus) return;
     const onKey = (e: KeyboardEvent) => {
       // Plain Escape only (Shift+Escape marks the server read), and never while a popout, menu or modal owns Escape.
-      if (e.key !== "Escape" || gameOwnsKeys() || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented || isEditable(e.target) || hasOpenLayer() || document.querySelector('[role="dialog"], [role="menu"]')) return;
+      // In full screen Escape leaves full screen (the browser takes it); the focus stays for the Stremio tile's sake.
+      if (e.key !== "Escape" || gameOwnsKeys() || document.fullscreenElement || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented || isEditable(e.target) || hasOpenLayer() || document.querySelector('[role="dialog"], [role="menu"]')) return;
       e.preventDefault();
       useVoiceUi.getState().setFocusedTile(null);
     };
@@ -570,7 +573,7 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
   }, [inFocus]);
 
   return (
-    <section ref={page} className={`voice-page${empty ? " empty" : ""}`} aria-label={`${channel.name ?? "Voice"} call`}>
+    <section ref={page} className={`voice-page${empty ? " empty" : ""}`} data-fullscreen={fullscreen || undefined} data-cinema={cinema || undefined} aria-label={`${channel.name ?? "Voice"} call`}>
       {empty ? (
         <div className="voice-stage">
           <div className="voice-empty-state">
@@ -599,7 +602,7 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
           {connected && <MutedHint />}
           {connected && !multiple && <AloneCard channel={channel} />}
           {connected ? (
-            <ControlBar channel={channel} page={page} />
+            <ControlBar channel={channel} fullscreen={fullscreen} onFullscreen={toggleFullscreen} />
           ) : (
             <div className="voice-join">
               <button type="button" className="btn btn-primary voice-join-button" onClick={() => joinVoiceChannel(channel)}>

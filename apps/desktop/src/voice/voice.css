@@ -651,7 +651,12 @@
   background: var(--background-base-lowest, #000);
 }
 
-.voice-page:fullscreen {
+/* Full screen is the whole document (so menus and tooltips in <body> stay visible); the call page covers the app. */
+.voice-page[data-fullscreen],
+.voice-page[data-cinema] {
+  position: fixed;
+  inset: 0;
+  z-index: 900; /* under --z-popout and above it all */
   background: var(--background-base-lowest, #000);
 }
 
