@@ -1,7 +1,7 @@
 //! The pure parts of the bot: request validation, ffprobe parsing, output geometry, ffmpeg arguments,
 //! position math, lease expiry and the reconcile rule for a re-sent `PUT`. No I/O, so all of it is unit-tested.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::fmt;
 use std::time::{Duration, Instant};
 
@@ -446,27 +446,23 @@ impl Lease {
     }
 }
 
-const ANCHORS_MAX: usize = 4;
-
 /// Where the server thinks the bot is. The server does not read the bot's clock: it takes the last position the bot reported (or
 /// the one it steered to) and adds the time since. After a source stall the bot is behind that guess by the length of the stall,
-/// which is no reason to seek. So the bot remembers the positions it reported lately (the server may have dropped some, so
-/// several) and a re-sent `PUT` that matches one of them moved on by the clock is the server's own extrapolation, not a viewer's seek.
+/// which is no reason to seek. So the bot remembers the newest position it told the server, and a re-sent `PUT` that matches it moved
+/// on by the clock is the server's own extrapolation, not a viewer's seek. Only the newest one: during a long stall the older reports
+/// all carry about the same frozen position, and together they would cover a window wide enough to swallow a real skip of 5 to 15 s.
 #[derive(Debug, Default)]
-pub struct Anchors(VecDeque<(u64, Instant)>);
+pub struct Anchors(Option<(u64, Instant)>);
 
 impl Anchors {
     /// The bot sent (or the server was told) this position now.
     pub fn push(&mut self, position_ms: u64, now: Instant) {
-        self.0.push_back((position_ms, now));
-        while self.0.len() > ANCHORS_MAX {
-            self.0.pop_front();
-        }
+        self.0 = Some((position_ms, now));
     }
 
-    /// `put_ms` is within `DRIFT_MS` of a remembered position moved on by the time since.
+    /// `put_ms` is within `DRIFT_MS` of the newest position moved on by the time since.
     pub fn explains(&self, put_ms: u64, now: Instant) -> bool {
-        self.0.iter().any(|&(ms, at)| (ms + now.saturating_duration_since(at).as_millis() as u64).abs_diff(put_ms) <= DRIFT_MS)
+        self.0.is_some_and(|(ms, at)| (ms + now.saturating_duration_since(at).as_millis() as u64).abs_diff(put_ms) <= DRIFT_MS)
     }
 }
 
@@ -824,11 +820,29 @@ mod tests {
         assert_eq!(seek, Action::Seek(300_000));
         // so does a seek back to the start
         assert!(!anchors.explains(0, now));
-        // only the last few reports are remembered
-        for i in 0..10 {
-            anchors.push(100_000 + i, now);
-        }
+        // only the newest report is remembered
+        anchors.push(100_000, now);
         assert!(!anchors.explains(23_000, now));
+    }
+
+    #[test]
+    fn a_viewer_skip_during_a_long_stall_still_seeks() {
+        let t0 = Instant::now();
+        let mut anchors = Anchors::default();
+        // frozen at 15 s for 15 s, with a report every 5 s
+        for i in 0..=3 {
+            anchors.push(15_000, t0 + Duration::from_secs(5 * i));
+        }
+        let now = t0 + Duration::from_secs(16);
+        let server_guess = 15_000 + 1_000;
+        assert!(anchors.explains(server_guess, now), "the plain extrapolation of the newest report");
+        let a = desired();
+        let at = |ms: u64| Desired { position_ms: ms, ..a.clone() };
+        for skip in [5_000, 10_000, 15_000] {
+            let put = server_guess + skip;
+            let action = super::reconcile(&a, &at(put), 15_000, true, false, anchors.explains(put, now));
+            assert_eq!(action, Action::Seek(put), "a +{skip} ms skip is the viewer's");
+        }
     }
 
     #[test]

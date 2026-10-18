@@ -43,6 +43,7 @@ const SKIP_MAX: u64 = 8 << 20;
 const MAX_CONNECTIONS: usize = 16;
 /// Playheads from the last seconds keep their block and the next one (a badly interleaved file makes ffmpeg alternate between two places).
 const LOCK_FILE: &str = ".lock";
+const REQUEST_WAIT: Duration = Duration::from_secs(10);
 const HEAD_KEEP: Duration = Duration::from_secs(10);
 const HEADS_MAX: usize = 4;
 const FALLBACK_BITRATE: u64 = 16_000_000;
@@ -306,6 +307,10 @@ impl Shared {
                 let mut st = self.lock();
                 st.have.remove(block * self.block, (block + 1) * self.block);
                 st.blocks.remove(&block);
+                drop(st);
+                // a file that cannot be read must not sit outside the cap, and the reader has to hear that it is missing again
+                let _ = std::fs::remove_file(self.block_path(block));
+                self.bump();
                 Read::Wait
             }
         }
@@ -421,6 +426,8 @@ async fn reader(shared: Arc<Shared>, cancel: CancellationToken) {
         let result = match shared.open(from).await {
             Ok(opened) if shared.accept(&opened) => stream(&shared, &cancel, &mut rx, opened.response, from, &mut failing, &mut attempt).await,
             Ok(_) => Pass::Fatal("the source changed while it played".into()),
+            // redirects are off, and another answer in a moment will not change that
+            Err(e) if e.starts_with("the source answered 3") => Pass::Fatal(e),
             Err(e) => Pass::Broken(e),
         };
         match result {
@@ -610,7 +617,11 @@ async fn serve_connection(shared: Arc<Shared>, socket: TcpStream) -> io::Result<
     let mut reader = BufReader::new(read);
     let mut buf = vec![0u8; SERVE_CHUNK];
     let mut rx = shared.tx.subscribe();
-    while let Some(request) = read_request(&mut reader).await? {
+    // a connection that sends nothing for a while is dropped, so idle local sockets cannot use up the connection limit (ffmpeg reconnects)
+    while let Some(request) = match tokio::time::timeout(REQUEST_WAIT, read_request(&mut reader)).await {
+        Ok(read) => read?,
+        Err(_) => None,
+    } {
         let Some(total) = shared.lock().total else { return Ok(()) };
         if request.path != format!("/{}", shared.token) {
             write.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await?;
