@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { gameOwnsKeys } from "../games/fullscreen";
 import { useModals } from "../shell/modalStore";
 import { BINDINGS, IS_MAC, matches, type Binding, type ShortcutId } from "./bindings";
 import { keysFor } from "./overrides";
@@ -37,6 +38,8 @@ export interface DispatchEnv {
 export function handleKeyDown(e: KeyboardEvent, env: DispatchEnv = { mac: IS_MAC, modalOpen }): void {
   // Handled already (a popout's Escape, the composer's autocomplete) or mid IME composition.
   if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+  // A game in full screen has the keys; one in a focused frame never sends them here, but its tile's own buttons do.
+  if (gameOwnsKeys()) return;
   for (const b of BINDINGS as readonly Binding[]) {
     const index = keysFor(b).find(k => matches(k.spec, e, env.mac))?.index ?? -1;
     if (index < 0) continue;

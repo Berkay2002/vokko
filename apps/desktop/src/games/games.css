@@ -232,6 +232,18 @@
   color: var(--text-feedback-positive, #23a55a);
 }
 
+/* Full screen: the tile itself (header strip and game box) fills the screen; only the name and the way out stay in the strip,
+   and a website game takes the whole box (the ratio is for the grid and strip). */
+.voice-tile.game[data-fullscreen] .game-button:not(.game-fs) {
+  display: none;
+}
+
+.voice-tile.game[data-fullscreen] .game-frame-box.web {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
 /* "Share room to call" popover in a website game's header. */
 .game-share {
   width: min(340px, calc(100vw - 32px));
