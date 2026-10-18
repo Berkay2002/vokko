@@ -138,15 +138,21 @@ export function StickerSettingsPage({ guildId, canEdit, channels }: { guildId: S
         <li>Max file size: 512 KiB, max 512x512 pixels</li>
         <li>Name 2-30 characters; tags 2-200 characters, comma separated</li>
       </ul>
-      {canEdit
-        ? <div className="sticker-form">
-            <input ref={file} type="file" accept={TYPES.join(',')} aria-label="Sticker file" onChange={e => pick(e.target.files?.[0])} />
+      {!canEdit ? <p className="emoji-list-empty">You need the Manage Expressions permission to add or change stickers.</p>
+        : !picked ? <button type="button" className="btn btn-primary btn-sm emoji-upload-btn" disabled={!uploadChannel} onClick={() => file.current?.click()}>
+            <Upload size={16} aria-hidden="true" /> Upload Sticker
+          </button>
+        : <div className="sticker-form">
+            <span className="sticker-file-name">{picked.name}</span>
             <Fields draft={draft} onChange={setDraft} />
-            <div><button type="button" className="btn btn-primary btn-sm emoji-upload-btn" disabled={busy || !uploadChannel} onClick={() => void upload()}>
-              <Upload size={16} aria-hidden="true" /> {busy ? 'Uploading…' : 'Upload'}
-            </button></div>
-          </div>
-        : <p className="emoji-list-empty">You need the Manage Expressions permission to add or change stickers.</p>}
+            <div className="sticker-form-actions">
+              <button type="button" className="btn btn-primary btn-sm emoji-upload-btn" disabled={busy} onClick={() => void upload()}>
+                <Upload size={16} aria-hidden="true" /> {busy ? 'Uploading…' : 'Upload'}
+              </button>
+              <button type="button" className="btn btn-link btn-sm" disabled={busy} onClick={() => { pick(undefined); setError(null); if (file.current) file.current.value = ''; }}>Cancel</button>
+            </div>
+          </div>}
+      {canEdit && <input ref={file} type="file" accept={TYPES.join(',')} hidden aria-label="Sticker file" onChange={e => pick(e.target.files?.[0])} />}
       {error && <p className="field-error" role="alert">{error}</p>}
     </section>
     <section className="emoji-list sticker-list" aria-label="Stickers">
