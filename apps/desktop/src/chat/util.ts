@@ -152,3 +152,6 @@ export function composerPlaceholder(channel: Channel | undefined, nameOf: (user:
   if (channel.type === ChannelType.GroupDM) return `Message ${channel.name || recipients.map(u => nameOf(u)).join(', ')}`;
   return `Message ${channel.type === ChannelType.GuildVoice ? channel.name ?? '' : `#${channel.name ?? ''}`}`;
 }
+
+/** Phone width with a touch screen: the soft keyboard has no Shift, so Enter starts a new line and a button sends. shortcut: a hardware keyboard on a phone also gets the newline. */
+export const softKeyboard = (): boolean => matchMedia('(max-width: 767px) and (pointer: coarse)').matches;

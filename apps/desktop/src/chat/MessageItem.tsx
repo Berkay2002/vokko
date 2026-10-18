@@ -26,7 +26,7 @@ import { quickReactions } from './emojiData';
 import { messageStore } from './messageStore';
 import { isSystemMessage, mentionsRole, type PendingMessage } from './messageState';
 import { fromDisplay, toDisplay, type MentionToken } from './mentionText';
-import { formatFullDate, formatMessageTimestamp, formatTime } from './util';
+import { formatFullDate, formatMessageTimestamp, formatTime, softKeyboard } from './util';
 import { isVoiceMessage } from './VoiceMessage';
 import { messageHotkey } from './messageKeys';
 
@@ -74,6 +74,7 @@ function InlineEdit({ message, onDone }: { message: Message; onDone(): void }) {
   const [text, setText] = useState(init.text);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const touch = softKeyboard(); // no Escape or Shift: Enter is a new line and Cancel / Save are buttons
   const area = useRef<HTMLTextAreaElement>(null);
   const emojiBtn = useRef<HTMLButtonElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -116,15 +117,19 @@ function InlineEdit({ message, onDone }: { message: Message; onDone(): void }) {
       <textarea ref={area} value={text} aria-label="Edit message" rows={1} disabled={busy} spellCheck onChange={e => { setText(e.target.value); setError(null); }}
         onKeyDown={e => {
           if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onDone(); }
-          else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void save(); }
+          else if (e.key === 'Enter' && !e.shiftKey && !touch && !e.nativeEvent.isComposing) { e.preventDefault(); void save(); }
         }} />
       <button ref={emojiBtn} type="button" className="chat-edit-emoji" aria-label="Select emoji" aria-expanded={pickerOpen} disabled={busy}
         onClick={() => { const el = area.current; caret.current = el ? [el.selectionStart, el.selectionEnd] : null; setPickerOpen(o => !o); }}><Smile size={24} /></button>
       <EmojiPickerPopout anchor={emojiBtn} open={pickerOpen} onClose={() => { setPickerOpen(false); area.current?.focus(); }} onPick={e => insertEmoji(e.name)} />
     </div>
-    <div className="chat-edit-hint">
+    {touch ? <div className="chat-edit-actions">
+      {error && <span className="chat-edit-error">{error}</span>}
+      <button type="button" className="btn btn-secondary" disabled={busy} onClick={onDone}>Cancel</button>
+      <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void save()}>Save</button>
+    </div> : <div className="chat-edit-hint">
       {error ? <span className="chat-edit-error">{error}</span> : <>escape to <button type="button" onClick={onDone}>cancel</button> • enter to <button type="button" onClick={() => void save()}>save</button></>}
-    </div>
+    </div>}
   </div>;
 }
 
