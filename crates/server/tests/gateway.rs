@@ -27,7 +27,7 @@ impl Client {
     /// Next text frame, or `Err(close code)` when the server closes.
     async fn recv(&mut self) -> Result<Value, Option<u16>> {
         loop {
-            match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await {
+            match tokio::time::timeout(common::WAIT, self.ws.next()).await {
                 Ok(Some(Ok(Message::Text(text)))) => return Ok(serde_json::from_str(&text).expect("json frame")),
                 Ok(Some(Ok(Message::Close(frame)))) => return Err(frame.map(|frame| u16::from(frame.code))),
                 Ok(Some(Ok(_))) => continue,
@@ -530,10 +530,11 @@ async fn identifies_are_throttled_per_user() {
 }
 
 #[tokio::test]
-async fn unidentified_sockets_are_capped_per_address_and_time_out() {
+async fn unidentified_sockets_are_capped_per_address() {
+    // A window nothing here waits for: with a short one the first socket could time out before it identifies on a busy machine.
     let w = world_with_config(|config| {
         config.max_preauth_per_ip = 2;
-        config.handshake_timeout = Duration::from_millis(1500);
+        config.handshake_timeout = Duration::from_secs(60);
     })
     .await;
     let mut first = Client::connect(&w.address).await;
@@ -553,9 +554,14 @@ async fn unidentified_sockets_are_capped_per_address_and_time_out() {
         }
     };
     third.hello().await;
+}
 
-    // and a socket that never identifies is dropped when the window ends
-    assert!(second.recv().await.is_err());
+#[tokio::test]
+async fn an_unidentified_socket_is_dropped_when_the_window_ends() {
+    let w = world_with_config(|config| config.handshake_timeout = Duration::from_millis(1500)).await;
+    let mut socket = Client::connect(&w.address).await;
+    socket.hello().await;
+    assert!(socket.recv().await.is_err());
 }
 
 #[tokio::test]
@@ -592,7 +598,8 @@ async fn a_client_that_stops_reading_is_dropped_without_blocking_the_server() {
     let (ws, _) = tokio_tungstenite::client_async(format!("ws://{}/gateway", w.address), MaybeTlsStream::Plain(stream)).await.expect("handshake");
     let mut slow = Client { ws };
     slow.identify(&w.member).await;
-    for _ in 0..100 {
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while tokio::time::Instant::now() < deadline {
         if w.app.state.hub.is_online(member_id) {
             break;
         }
@@ -611,7 +618,8 @@ async fn a_client_that_stops_reading_is_dropped_without_blocking_the_server() {
             break;
         }
     }
-    for _ in 0..100 {
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while tokio::time::Instant::now() < deadline {
         if dropped || !w.app.state.hub.is_online(member_id) {
             dropped = true;
             break;
@@ -628,7 +636,7 @@ async fn client_close_is_answered_with_a_close_frame() {
     client.identify(&w.member).await;
     client.ws.send(Message::Close(None)).await.expect("send close");
     loop {
-        match tokio::time::timeout(Duration::from_secs(5), client.ws.next()).await.expect("server answers") {
+        match tokio::time::timeout(common::WAIT, client.ws.next()).await.expect("server answers") {
             Some(Ok(Message::Close(_))) => break,
             Some(Ok(_)) => continue,
             other => panic!("expected a close frame, got {other:?}"),

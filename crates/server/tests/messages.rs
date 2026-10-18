@@ -378,7 +378,7 @@ async fn tts_needs_send_tts_messages() {
     assert_eq!(spoken["tts"], true);
     let mut created = None;
     while created.is_none() {
-        let frame = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await.expect("gateway frame").expect("open").expect("frame");
+        let frame = tokio::time::timeout(common::WAIT, ws.next()).await.expect("gateway frame").expect("open").expect("frame");
         if let WsMessage::Text(text) = frame {
             let frame: Value = serde_json::from_str(&text).expect("json");
             if frame["t"] == "MESSAGE_CREATE" && frame["d"]["id"] == spoken["id"] {

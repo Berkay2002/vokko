@@ -251,7 +251,7 @@ async fn gateway(address: &str, token: &str) -> tokio_tungstenite::WebSocketStre
 async fn next_event(ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, name: Option<&str>) -> Value {
     use futures_util::StreamExt;
     loop {
-        match tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await {
+        match tokio::time::timeout(common::WAIT, ws.next()).await {
             Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text)))) => {
                 let frame: Value = serde_json::from_str(&text).expect("json frame");
                 if name.is_none() || (frame["op"] == 0 && frame["t"] == name.unwrap_or_default()) {

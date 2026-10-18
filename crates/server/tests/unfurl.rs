@@ -23,7 +23,8 @@ async fn message(app: &TestApp, token: &str, channel: &str, id: &str) -> Value {
 
 /// Polls until the message has exactly `want` embeds (the unfurl runs in the background).
 async fn wait_for_embeds(app: &TestApp, token: &str, channel: &str, id: &str, want: usize) -> Vec<Value> {
-    for _ in 0..60 {
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while tokio::time::Instant::now() < deadline {
         let embeds = message(app, token, channel, id).await["embeds"].as_array().expect("embeds").clone();
         if embeds.len() == want {
             return embeds;
@@ -97,7 +98,8 @@ async fn at_most_five_urls_per_message() {
     let content = (0..8).map(|n| pages.url(&format!("/page?n={n}"))).collect::<Vec<_>>().join(" ");
     // `/page?n=…` is a 404 on the fixture server, so count requests instead of embeds.
     send(&app, &token, &channel, &content).await;
-    for _ in 0..50 {
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while tokio::time::Instant::now() < deadline {
         if pages.total() >= 5 {
             break;
         }

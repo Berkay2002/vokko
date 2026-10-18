@@ -317,7 +317,7 @@ impl Client {
 
     async fn recv(&mut self) -> Result<Value, Option<u16>> {
         loop {
-            match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await {
+            match tokio::time::timeout(common::WAIT, self.ws.next()).await {
                 Ok(Some(Ok(Message::Text(text)))) => return Ok(serde_json::from_str(&text).expect("json frame")),
                 Ok(Some(Ok(Message::Close(frame)))) => return Err(frame.map(|frame| u16::from(frame.code))),
                 Ok(Some(Ok(_))) => continue,
@@ -532,7 +532,8 @@ impl World {
 }
 
 async fn until(what: &str, mut check: impl FnMut() -> bool) {
-    for _ in 0..120 {
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while tokio::time::Instant::now() < deadline {
         if check() {
             return;
         }
