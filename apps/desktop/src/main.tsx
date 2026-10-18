@@ -9,6 +9,7 @@ import "@fontsource/noto-sans/latin-ext-600.css";
 import "@fontsource/noto-sans/latin-700.css";
 import "@fontsource/noto-sans/latin-ext-700.css";
 import { App } from "./App";
+import { Measure } from "./perf/Measure";
 import { bootstrap } from "./api/auth";
 import { MOCK } from "./api/config";
 import { loadMockBackend } from "./api/mockBackend";
@@ -89,7 +90,9 @@ const root = document.getElementById("root");
 if (root) {
   ReactDOM.createRoot(root).render(
     <React.StrictMode>
-      <App />
+      <Measure id="app">
+        <App />
+      </Measure>
     </React.StrictMode>,
   );
 }

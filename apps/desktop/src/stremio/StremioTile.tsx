@@ -5,6 +5,7 @@
 // control (useCanControlMedia) sees no play / pause, seek, +-10 s or stop, votes to skip, and removes only their own Up next entries.
 
 import { useEffect, useReducer, useRef, useState } from "react";
+import { useNow } from "../shell/ActivityLine";
 import { ListVideo, Maximize2, Minimize2, Pause, Play, Plus, RotateCcw, RotateCw, SkipForward, Square, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import { STREMIO_QUEUE_PER_USER, type Snowflake, type StremioState } from "../api/types";
@@ -28,15 +29,6 @@ import "./stremio.css";
 export type StremioVariant = "solo" | "grid" | "focused" | "strip" | "pip";
 
 const JUMP_MS = 10_000;
-
-function useNow(everyMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), everyMs);
-    return () => clearInterval(id);
-  }, [everyMs]);
-  return now;
-}
 
 
 function ControlButton({ label, tip, active, disabled, onClick, children }: { label: string; tip?: string; active?: boolean; disabled?: boolean; onClick(): void; children: React.ReactNode }) {

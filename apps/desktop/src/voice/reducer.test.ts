@@ -227,6 +227,12 @@ describe("voice reducer: speaking", () => {
     expect(isSpeaking(m, ALICE)).toBe(false);
   });
 
+  it("a repeated speaker list leaves the model untouched (no store update)", () => {
+    const m = voiceReducer(voiceReducer(joined(), update(vs(BOB, GAMING))), { type: "speaking", userIds: [ALICE, BOB] });
+    expect(voiceReducer(m, { type: "speaking", userIds: [BOB, ALICE] })).toBe(m);
+    expect(voiceReducer(m, { type: "speaking", userIds: [] })).not.toBe(m);
+  });
+
   it("remote speaker updates keep the local self-speaking flag", () => {
     let m = voiceReducer(joined(), { type: "selfSpeaking", speaking: true });
     expect(m.speaking[ME]).toBe(true);

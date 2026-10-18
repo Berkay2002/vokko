@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Message } from '../api/types';
-import { applyReaction, buildRows, type ChannelState, emptyState, mentionsRole, replaceWindow, upsertMessage, withLateArrivals } from './messageState';
+import { applyReaction, buildRows, type ChannelState, emptyState, LIVE_KEEP, LIVE_MAX, mentionsRole, replaceWindow, trimOldest, upsertMessage, withLateArrivals } from './messageState';
 import { sameDay } from './util';
 
 const BASE = Date.UTC(2026, 9, 10, 12, 0, 0);
@@ -98,5 +98,40 @@ describe('reactions from a server without super reactions', () => {
     expect(s.messages[0]!.reactions[0]).toEqual({ emoji: { id: null, name: '🔥' }, count: 2, me: true, me_burst: false, count_details: { normal: 2, burst: 0 }, burst_colors: [] });
     s = applyReaction(s, '1', { id: null, name: '🔥' }, false, true);
     expect(s.messages[0]!.reactions[0]).toMatchObject({ count: 3, count_details: { normal: 3, burst: 0 } });
+  });
+});
+
+describe('trimOldest (a call chat left open for hours)', () => {
+  const live = (n: number) => replaceWindow(emptyState(), Array.from({ length: n }, (_, i) => msg(String(1000 + i), 'a', i)), { hasMoreBefore: false, hasMoreAfter: false });
+
+  it('keeps a window up to LIVE_MAX as is', () => {
+    const s = live(LIVE_MAX);
+    expect(trimOldest(s)).toBe(s);
+  });
+
+  it('cuts a live window back to its newest LIVE_KEEP messages, older ones loadable again', () => {
+    let s = live(LIVE_MAX);
+    s = upsertMessage(s, msg('9999', 'b', LIVE_MAX));
+    const t = trimOldest(s);
+    expect(t.messages).toHaveLength(LIVE_KEEP);
+    expect(t.messages.at(-1)?.id).toBe('9999');
+    expect(t.hasMoreBefore).toBe(true);
+    // A fresh window: the list remounts at the bottom.
+    expect(t.windowId).toBe(s.windowId + 1);
+  });
+
+  it('never trims an older window (the user is reading history)', () => {
+    const s = { ...live(LIVE_MAX + 50), hasMoreAfter: true };
+    expect(trimOldest(s)).toBe(s);
+  });
+
+  it('never trims while an older page is loading (it would land above the cut, leaving a gap)', () => {
+    const s = { ...live(LIVE_MAX + 50), loadingOlder: true };
+    expect(trimOldest(s)).toBe(s);
+  });
+
+  it('never trims while a jump is pending (its target could be cut away)', () => {
+    const s = { ...live(LIVE_MAX + 50), focus: { messageId: '1010', token: 1 } };
+    expect(trimOldest(s)).toBe(s);
   });
 });

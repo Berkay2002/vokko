@@ -4,7 +4,8 @@
 // Someone without control (useCanControlMedia) sees no seek, shuffle, previous, play / pause, loop or stop, votes to skip, and
 // removes only their own Up next entries.
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useNow } from "../shell/ActivityLine";
 import { ListMusic, Maximize2, Minimize2, Pause, Play, Plus, Repeat, Repeat1, Shuffle, SkipBack, SkipForward, Square, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
 import { SPOTIFY_QUEUE_PER_USER, type Snowflake, type SpotifyLoop, type SpotifyState } from "../api/types";
@@ -32,15 +33,6 @@ export const SPOTIFY_TILE_ID = "spotify";
 
 const NEXT_LOOP: Record<SpotifyLoop, SpotifyLoop> = { off: "queue", queue: "track", track: "off" };
 const LOOP_LABEL: Record<SpotifyLoop, string> = { off: "Loop: off", queue: "Loop: queue", track: "Loop: track" };
-
-function useNow(everyMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), everyMs);
-    return () => clearInterval(id);
-  }, [everyMs]);
-  return now;
-}
 
 function ControlButton({ label, tip, active, disabled, onClick, children, primary }: { label: string; tip?: string; active?: boolean; disabled?: boolean; onClick(): void; children: React.ReactNode; primary?: boolean }) {
   return (

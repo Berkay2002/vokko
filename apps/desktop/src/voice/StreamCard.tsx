@@ -8,7 +8,7 @@ import { formatClock } from "../activity/format";
 import { appStore } from "../api/store";
 import type { Snowflake } from "../api/types";
 import { ActivityIcon } from "../shell/ActivityIcon";
-import { usePlaying } from "../shell/ActivityLine";
+import { useNow, usePlaying } from "../shell/ActivityLine";
 import { SpotifyCard } from "../shell/SpotifyCard";
 import type { Activity } from "../api/types";
 import { go, guildPath } from "../shell/nav";
@@ -77,11 +77,7 @@ function PreviewVideo({ handle }: { handle: VideoHandle }) {
 }
 
 function Elapsed({ start }: { start: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const now = useNow(1000);
   return <span className="stream-card-elapsed">{formatClock(start, now)}</span>;
 }
 
