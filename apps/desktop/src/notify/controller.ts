@@ -94,6 +94,11 @@ export function openMessage(channelId: Snowflake, guildId: Snowflake | null, mes
     return;
   }
   go(guildId ? guildPath(guildId, channelId) : dmPath(channelId));
+  jumpWhenReady(channelId, messageId);
+}
+
+/** Scrolls to the message once its channel is the open one and loaded (gives up after 4 s). */
+export function jumpWhenReady(channelId: Snowflake, messageId: Snowflake): void {
   const started = Date.now();
   const poll = () => {
     const there = appStore.getState().route.channelId === channelId;

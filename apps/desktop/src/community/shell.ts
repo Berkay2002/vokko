@@ -4,6 +4,7 @@ export { ApiRequestError } from "../api/errors";
 export { gateway } from "../api/gateway";
 export { appStore, useStore, displayName, guildIconUrl } from "../api/store";
 export { Perm, basePermissions, channelPermissions, hasBit } from "../api/permissions";
+export { useChatLocale } from "../chat/shell";
 export { go, guildPath } from "../shell/nav";
 export { openModal } from "../shell/modalStore";
 export { usePermissions } from "../shell/usePermissions";

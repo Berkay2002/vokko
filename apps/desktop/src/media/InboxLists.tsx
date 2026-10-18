@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { AtSign, Bell, Bookmark, Check, X } from 'lucide-react';
 import type { Message } from '../api/types';
 import { messageSnippet } from './helpers';
+import { formatDateTime } from '../chat/util';
 import { jumpToMessage } from './jump';
 import { sortReminders } from './lists';
 import { channelOrThread, type AppState } from '../api/store';
@@ -30,7 +31,6 @@ export function useWhere(message: Pick<Message, 'channel_id' | 'guild_id'> | nul
 
 const nameOf = (m: Message): string => m.author.global_name || m.author.username;
 
-const whenFormat = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 function BookmarkRow({ message, onNavigate, onRemove }: { message: Message; onNavigate(): void; onRemove(): void }) {
   const where = useWhere(message);
@@ -81,7 +81,7 @@ export function ReminderList({ onNavigate }: { onNavigate(): void }) {
         <span className="inbox-row-text">
           <span className="inbox-row-name">{r.message ? nameOf(r.message) : 'Message no longer available'}</span>
           {r.message && <span className="media-inbox-snippet">{messageSnippet(r.message)}</span>}
-          <span className={`inbox-row-sub${due ? ' media-due' : ''}`}>{due ? 'Reminder is due' : `Reminds you ${whenFormat.format(new Date(r.remind_at))}`}</span>
+          <span className={`inbox-row-sub${due ? ' media-due' : ''}`}>{due ? 'Reminder is due' : `Reminds you ${formatDateTime(new Date(r.remind_at))}`}</span>
         </span>
       </button>
       <button type="button" className="media-icon-btn" aria-label={due ? 'Dismiss reminder' : 'Cancel reminder'} title={due ? 'Dismiss' : 'Cancel reminder'} onClick={() => void dismissReminder(r.id)}><X size={16} /></button>
@@ -108,7 +108,7 @@ function MentionRow({ message, showWhere, onNavigate, onRemove }: { message: Mes
       <button type="button" className="inbox-row-main" aria-label={`Jump to message by ${nameOf(message)}`} onClick={() => { onNavigate(); void jumpToMessage(message.channel_id, message.id, message.guild_id); }}>
         <span className="inbox-row-icon"><Avatar user={message.author} size={32} guildId={message.guild_id} /></span>
         <span className="inbox-row-text">
-          <span className="inbox-row-name">{nameOf(message)} <span className="inbox-row-sub">{whenFormat.format(new Date(message.timestamp))}</span></span>
+          <span className="inbox-row-name">{nameOf(message)} <span className="inbox-row-sub">{formatDateTime(new Date(message.timestamp))}</span></span>
           <span className="media-inbox-snippet">{messageSnippet(message)}</span>
         </span>
       </button>

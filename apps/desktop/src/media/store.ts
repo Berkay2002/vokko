@@ -5,6 +5,7 @@ import { create } from 'zustand';
 import type { Bookmark, BookmarksPage, Gif, Message, Reminder, Snowflake, Sticker } from '../api/types';
 import type { Gone } from './lists';
 import { addFavorite, dropNotice, isBookmarked, isFavorite, purgeBookmarks, purgeReminders, pushNotice, removeBookmark, removeFavorite, removeReminder, upsertBookmark, upsertReminder } from './lists';
+import { formatDateTime } from '../chat/util';
 import { ApiRequestError, appStore, chatToast, gateway, request } from './shell';
 
 export interface MediaState {
@@ -124,14 +125,13 @@ export async function loadReminders(): Promise<void> {
   try { set({ reminders: await request<Reminder[]>('GET', '/users/@me/reminders') }); } catch { set(s => ({ reminders: s.reminders ?? [] })); }
 }
 
-const whenFormat = (at: Date): string => new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(at);
 
 /** Sets (or moves) the reminder of a message. Resolves true when it was saved. */
 export async function createReminder(message: Message, at: Date): Promise<boolean> {
   try {
     const reminder = await request<Reminder>('POST', '/users/@me/reminders', { channel_id: message.channel_id, message_id: message.id, remind_at: at.toISOString() });
     set(s => ({ reminders: upsertReminder(s.reminders ?? [], reminder), notices: dropNotice(s.notices, reminder.id) }));
-    chatToast(`Reminder set for ${whenFormat(at)}.`);
+    chatToast(`Reminder set for ${formatDateTime(at)}.`);
     return true;
   } catch (e) {
     chatToast(errorText(e, 'Could not set the reminder.'));

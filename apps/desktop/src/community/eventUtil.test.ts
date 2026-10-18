@@ -89,3 +89,17 @@ describe("validateEventForm", () => {
     expect(validateEventForm(form({ startDate: "" }), NOW).start).toBeDefined();
   });
 });
+
+describe("event times follow the clock choice", () => {
+  it("the 24-hour setting wins over the locale's habit", async () => {
+    const { usePrefs } = await import("../ui/prefs");
+    try {
+      usePrefs.setState({ timeFormat: "24" });
+      expect(formatEventStart(new Date(2026, 9, 11, 18, 0).toISOString(), NOW, "en-US")).toBe("Today at 18:00");
+      usePrefs.setState({ timeFormat: "12" });
+      expect(formatEventStart(new Date(2026, 9, 11, 18, 0).toISOString(), NOW, "sv-SE")).toMatch(/6:00\s?(PM|em)/i);
+    } finally {
+      usePrefs.setState({ timeFormat: "auto" });
+    }
+  });
+});

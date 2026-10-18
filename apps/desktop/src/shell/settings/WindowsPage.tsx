@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { DEFAULT_DESKTOP_PREFS, checkForUpdate, getAppVersion, getAutostart, getDesktopPrefs, restartToUpdate, setAutostart, setDesktopPrefs, useDesktopUpdate, useWindowChrome, type DesktopPrefs, type UpdateStatus, type WindowChrome } from "../../desktop";
+import { flushDrafts } from "../../chat/draftStore";
 import { Category, Page, SwitchRow } from "./controls";
 
 const OS_NAMES: Record<WindowChrome["platform"], string> = { windows: "Windows", macos: "macOS", linux: "Linux" };
@@ -51,6 +52,7 @@ function UpdatesCategory() {
   const restart = async () => {
     setFailed(null);
     try {
+      flushDrafts();
       await restartToUpdate();
     } catch (e) {
       setFailed(message(e));

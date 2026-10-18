@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { flushDrafts } from "../../chat/draftStore";
 import { getDesktopPrefs, isDesktop, restartApp, setDesktopPrefs } from "../../desktop";
 import { Modal, setPref, usePrefs } from "../../ui";
 import { DeveloperApps } from "../../apps/DeveloperApps";
@@ -27,7 +28,10 @@ export function DeveloperPage() {
       const saved = await setDesktopPrefs({ hardwareAcceleration: next });
       setAcceleration(saved.hardwareAcceleration);
       setPending(null);
-      if (restart) await restartApp();
+      if (restart) {
+        flushDrafts(); // a relaunch gives the page no pagehide
+        await restartApp();
+      }
     } catch (cause) {
       setError(String(cause));
       setPending(null);

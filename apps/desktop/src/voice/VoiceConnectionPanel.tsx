@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AudioLines, Bug, LayoutGrid, Lock, Monitor, MonitorUp, MonitorX, Music, PhoneOff, Signal, SignalHigh, SignalLow, SignalMedium, Upload, Video, VideoOff, X } from "lucide-react";
 import { dmName, useStore } from "../api/store";
+import { formatTime } from "../chat/util";
 import { openModal } from "../shell/modalStore";
 import { ChannelType } from "../api/types";
 import { Popout, Tooltip, setPref, usePrefs } from "../ui";
@@ -71,7 +72,7 @@ function PingChart({ samples }: { samples: PingSample[] }) {
   const x = (at: number) => ((at - last + span) / span) * (CHART_W - 28);
   const y = (ms: number) => CHART_H - 14 - (ms / max) * (CHART_H - 24);
   const points = samples.map(s => `${x(s.at).toFixed(1)},${y(s.ms).toFixed(1)}`).join(" ");
-  const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const clock = (at: number) => formatTime(new Date(at));
   return (
     <svg className="voice-quality-chart" width={CHART_W} height={CHART_H} viewBox={`0 0 ${CHART_W} ${CHART_H}`} role="img" aria-label="Ping history">
       {samples.length > 1 && <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" />}

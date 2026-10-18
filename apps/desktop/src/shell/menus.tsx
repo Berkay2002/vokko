@@ -13,6 +13,7 @@ import { closeDirectMessage, copyText, markChannelRead, markGuildRead, openDirec
 import { isMutedAt, mutedTest, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setNotifyLevel, toggleFlag, unmute, untilLabel, useLocalState, type NotifyLevel } from "./localState";
 import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
+import { inviteOrigin } from "../invites/api";
 import { openProfile } from "./ProfileCard";
 import { userAppsItems } from "../apps/menus";
 import { serverSettingsSections } from "./settings/serverSections";
@@ -249,7 +250,7 @@ export function channelContextItems(channel: Channel, guild: Guild, options: Cha
       : [];
 
   const invite = firstTextChannelId(guild.id);
-  const link = `${window.location.origin}${guildPath(guild.id, channel.id)}`;
+  const link = `${inviteOrigin()}${guildPath(guild.id, channel.id)}`;
   return groups(
     [{ id: "mark-read", label: "Mark As Read", disabled: !unread, onSelect: () => void markRead() }],
     category
