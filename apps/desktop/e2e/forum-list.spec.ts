@@ -21,7 +21,7 @@ test('unread posts are marked and turn read once opened', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Open post Idea: show joined threads under their channel (unread)' })).toBeVisible();
 
   await idea.click();
-  await expect(panel(page).getByRole('heading', { name: 'Idea: show joined threads under their channel', level: 2 })).toBeVisible();
+  await expect(panel(page).locator('.thread-panel-header').getByRole('heading', { name: 'Idea: show joined threads under their channel', level: 2 })).toBeVisible();
   await expect(idea).not.toHaveClass(/unread/, { timeout: 10_000 }); // acked after Discord's 3 s debounce
 });
 

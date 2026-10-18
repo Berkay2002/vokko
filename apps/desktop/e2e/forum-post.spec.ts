@@ -21,7 +21,7 @@ test('the composer shows the post guidelines and needs a tag when the forum requ
   await tags.getByRole('button', { name: 'Docs' }).click();
   await expect(tags.getByText('Pick at least one tag to post.')).toHaveCount(0);
   await form.getByRole('button', { name: 'Post', exact: true }).click();
-  await expect(panel(page).getByRole('heading', { name: 'Tagged post', level: 2 })).toBeVisible();
+  await expect(panel(page).locator('.thread-panel-header').getByRole('heading', { name: 'Tagged post', level: 2 })).toBeVisible();
   await expect(page.locator('.forum-post', { hasText: 'Tagged post' }).locator('.forum-tag')).toHaveText('📖Docs');
 });
 

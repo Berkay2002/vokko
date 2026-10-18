@@ -435,6 +435,7 @@ test.describe('reduced motion', () => {
     await expect(picker.locator('.media-gif-pick canvas').first()).toBeVisible();
     await expect(picker.locator('.media-gif-pick img')).toHaveCount(0);
     await picker.getByRole('button', { name: /^Send GIF:/ }).first().click();
+    await page.mouse.move(0, 0); // the picker closes on send and leaves the pointer over the new GIF, which counts as a hover
     const gif = page.locator('.chat-msg .media-gif').last();
     await expect(gif.locator('canvas')).toBeVisible();
     await expect(gif.locator('img')).toHaveCount(0);

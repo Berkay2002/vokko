@@ -26,7 +26,7 @@ test('start a thread from a message, reply in it, archive and unarchive it', asy
 
   // the panel opens next to the channel: header, the original message as the starter, the composer
   await expect(panel(page)).toBeVisible();
-  await expect(panel(page).getByRole('heading', { name: 'probe thread', level: 2 })).toBeVisible();
+  await expect(panel(page).locator('.thread-panel-header').getByRole('heading', { name: 'probe thread', level: 2 })).toBeVisible();
   await expect(panel(page).locator('.thread-starter')).toContainText(text);
   await expect(page.locator('.member-list')).toHaveCount(0);
 
@@ -43,7 +43,7 @@ test('start a thread from a message, reply in it, archive and unarchive it', asy
   await panel(page).getByRole('button', { name: 'Close thread' }).click();
   await expect(panel(page)).toHaveCount(0);
   await chip.click();
-  await expect(panel(page).getByRole('heading', { name: 'probe thread', level: 2 })).toBeVisible();
+  await expect(panel(page).locator('.thread-panel-header').getByRole('heading', { name: 'probe thread', level: 2 })).toBeVisible();
 
   // archive from the actions menu: banner, and the thread moves to the Archived tab of the threads popout
   await panel(page).getByRole('button', { name: 'Thread actions' }).click();
@@ -89,7 +89,7 @@ test('a thread started without a message posts a notice in the channel and joine
   await dialog.getByLabel('Thread name').fill('standalone talk');
   await dialog.getByRole('button', { name: 'Create Thread' }).click();
   // level 2 is the panel header; the empty thread's channel-start intro is an h1 with the same text and can appear at the same time
-  await expect(panel(page).getByRole('heading', { name: 'standalone talk', level: 2 })).toBeVisible();
+  await expect(panel(page).locator('.thread-panel-header').getByRole('heading', { name: 'standalone talk', level: 2 })).toBeVisible();
   // type 18 notice in the channel
   await expect(page.locator('.chat-msg.system', { hasText: 'started a thread' })).toContainText('standalone talk');
   // the creator is a member: the thread is listed under #general
@@ -120,7 +120,7 @@ test('forum: filter by tag, search, pinned first, create a post with a tag', asy
 
   // a post opens in the thread panel, with its starter message
   await cards.filter({ hasText: 'Gateway reconnect loop' }).click();
-  await expect(panel(page).getByRole('heading', { name: 'Gateway reconnect loop after resume', level: 2 })).toBeVisible();
+  await expect(panel(page).locator('.thread-panel-header').getByRole('heading', { name: 'Gateway reconnect loop after resume', level: 2 })).toBeVisible();
   await expect(panel(page).locator('.chat-msg').first()).toContainText('reconnects every second');
   await panel(page).getByRole('button', { name: 'Close thread' }).click();
 
@@ -131,7 +131,7 @@ test('forum: filter by tag, search, pinned first, create a post with a tag', asy
   await form.getByRole('group', { name: 'Tags' }).getByRole('button', { name: 'Question' }).click();
   await form.getByLabel('Post message').fill('Does this show up under the Question tag?');
   await form.getByRole('button', { name: 'Post', exact: true }).click();
-  await expect(panel(page).getByRole('heading', { name: 'E2E forum post', level: 2 })).toBeVisible();
+  await expect(panel(page).locator('.thread-panel-header').getByRole('heading', { name: 'E2E forum post', level: 2 })).toBeVisible();
   await expect(cards).toHaveCount(6);
   await expect(cards.filter({ hasText: 'E2E forum post' }).locator('.forum-tag')).toHaveText('❓Question');
 

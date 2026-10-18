@@ -12,7 +12,7 @@ type Win = {
 async function openGeneral(page: Page): Promise<string> {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.getByRole('link', { name: /^Sam's server/ }).click();
-  await page.getByRole('list', { name: 'Channels' }).waitFor();
+  await page.getByRole('list', { name: 'Channels', exact: true }).waitFor();
   const id = await page.evaluate(() => (window as unknown as Win).__vokkoMock.channelIdByName('general')!);
   await page.locator(`a[href$="/${id}"]`).first().click();
   await page.locator('.chat-msg').first().waitFor();
