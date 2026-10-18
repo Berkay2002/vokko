@@ -320,6 +320,7 @@ export function ChannelSettings({ channelId, section }: { channelId: Snowflake; 
 
   return (
     <FullScreenSettings
+      startOnPage={section !== undefined}
       label="Channel Settings"
       navLabel="Channel settings sections"
       eyebrow={eyebrow}

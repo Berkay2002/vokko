@@ -215,6 +215,35 @@ test('a thread\'s header replaces the channel\'s: back, name, overflow; the foru
   await expect(page.getByRole('menuitemcheckbox', { name: 'Date Posted' })).toHaveAttribute('aria-checked', 'true');
 });
 
+test('settings opened at a section show that page; back returns to the section list', async ({ page }) => {
+  await home(page);
+  await page.locator('.user-panel-account').tap();
+  await page.getByRole('dialog', { name: 'User profile' }).getByRole('menuitem', { name: 'Edit Profile' }).tap();
+  const settings = page.getByRole('dialog', { name: 'User Settings' });
+  await expect(settings.locator('.sm-title')).toHaveText('Profiles');
+  await expect(settings.getByRole('tab', { name: 'User Profile' })).toBeVisible();
+  await page.goBack();
+  await expect(settings.getByRole('button', { name: 'My Account', exact: true })).toBeVisible();
+  // without a section, Server Settings still starts at the section list
+  await openStockTalk(page);
+  await page.getByRole('button', { name: 'Show Channels' }).tap();
+  await page.locator('.sidebar').getByRole('button', { name: /Sam's server/ }).tap();
+  await page.getByRole('menuitem', { name: /Server Settings/ }).tap();
+  const server = page.getByRole('dialog', { name: /Server Settings/ });
+  await expect(server.getByRole('button', { name: 'Members', exact: true })).toBeVisible();
+});
+
+test('My Account: rows stay inside the window; Keybinds is left out like on Discord mobile', async ({ page }) => {
+  await home(page);
+  await page.getByRole('button', { name: 'User Settings' }).first().tap();
+  const settings = page.getByRole('dialog', { name: 'User Settings' });
+  await expect(settings.getByRole('button', { name: 'Keybinds', exact: true })).toHaveCount(0);
+  await settings.getByRole('button', { name: 'My Account', exact: true }).tap();
+  await expect(settings.getByRole('button', { name: 'Enable Authenticator App' })).toBeVisible();
+  for (const el of await settings.locator('.sm-row, .sm-row > *').all()) await inside(el);
+  await shot(page, 'my-account-390');
+});
+
 // The same screens at desktop width: the phone rules must not leak (and the members dates stay on one line).
 test.describe('desktop 1440', () => {
   test.use({ viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false, deviceScaleFactor: 1 });

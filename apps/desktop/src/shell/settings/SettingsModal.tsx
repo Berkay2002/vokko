@@ -24,6 +24,8 @@ export interface SettingsModalProps {
   onScroll?(event: UIEvent<HTMLDivElement>): void;
   /** Changing this resets the scroll position to the top (a different page was opened). */
   pageKey: string;
+  /** The opener asked for a section: on phone show that page first instead of the section list. */
+  startOnPage?: boolean;
 }
 
 /** Exit animation length (ms); keep in step with `.sm-layer.closing` in settings-modal.css. */
@@ -34,11 +36,11 @@ function motionReduced(): boolean {
   return document.documentElement.classList.contains("reduce-motion");
 }
 
-export function SettingsModal({ label, title, side, onClose, children, scrollRef, onScroll, pageKey }: SettingsModalProps) {
+export function SettingsModal({ label, title, side, onClose, children, scrollRef, onScroll, pageKey, startOnPage }: SettingsModalProps) {
   const root = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
   // Fullscreen phone layout (<= 485px, see styles/responsive.css): the section list and one page take turns.
-  const [pane, setPane] = useState<"nav" | "page">(() => (window.matchMedia("(max-width: 485px)").matches ? "nav" : "page"));
+  const [pane, setPane] = useState<"nav" | "page">(() => (!startOnPage && window.matchMedia("(max-width: 485px)").matches ? "nav" : "page"));
   const timer = useRef<number | undefined>(undefined);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;

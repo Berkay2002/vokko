@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Trash2 } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { Perm } from "../api/permissions";
-import { request, uploadAttachment } from "../api/rest";
+import { request, resolveUrl, uploadAttachment } from "../api/rest";
 import { appStore, useStore } from "../api/store";
 import { ChannelType, DefaultMessageNotifications, type Channel, type Guild } from "../api/types";
 import { OnboardingSettings } from "../community/OnboardingSettings";
@@ -115,27 +115,29 @@ function useCopy(): [boolean, (text: string) => void] {
 
 function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean; channels: Channel[] }) {
   const [name, setName] = useState(guild.name);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading] = useState<"icon" | "banner" | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [copied, copy] = useCopy();
   const file = useRef<HTMLInputElement>(null);
+  const bannerFile = useRef<HTMLInputElement>(null);
   const { busy, error, saved, patch } = useGuildPatch(guild.id);
+  const banner = guild.banner ? resolveUrl(guild.banner) : null;
   const uploadChannel = firstTextChannel(channels)?.id ?? channels[0]?.id;
   const trimmed = name.trim();
   const dirty = owner && trimmed !== guild.name;
 
-  const pick = async (selected: File | undefined) => {
+  const pick = async (kind: "icon" | "banner", selected: File | undefined) => {
     if (!selected || !uploadChannel) return;
-    setUploading(true);
+    setUploading(kind);
     setUploadError(null);
     try {
       const attachment = await uploadAttachment(uploadChannel, selected);
-      await patch({ icon_attachment_id: attachment.id });
+      await patch({ [`${kind}_attachment_id`]: attachment.id });
     } catch (e) {
       setUploadError(errorText(e));
     } finally {
-      setUploading(false);
-      if (file.current) file.current.value = "";
+      setUploading(null);
+      for (const input of [file.current, bannerFile.current]) if (input) input.value = "";
     }
   };
 
@@ -155,13 +157,29 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
           <GuildIcon guild={guild} size={80} />
           {owner && (
             <div className="account-inline">
-              <button type="button" className="btn btn-primary btn-sm" disabled={uploading || !uploadChannel} onClick={() => file.current?.click()}>
-                {uploading ? "Uploading…" : "Upload Image"}
+              <button type="button" className="btn btn-primary btn-sm" disabled={!!uploading || !uploadChannel} onClick={() => file.current?.click()}>
+                {uploading === "icon" ? "Uploading…" : "Upload Image"}
               </button>
               <button type="button" className="btn btn-link btn-sm" disabled={busy || !guild.icon} onClick={() => void patch({ icon_attachment_id: null })}>
                 Remove Icon
               </button>
-              <input ref={file} type="file" accept="image/*" hidden aria-label="Server icon file" onChange={e => void pick(e.target.files?.[0])} />
+              <input ref={file} type="file" accept="image/*" hidden aria-label="Server icon file" onChange={e => void pick("icon", e.target.files?.[0])} />
+            </div>
+          )}
+        </div>
+      </Field>
+      <Field label="Banner" note="Shown at the top of the channel list. We recommend an image of at least 960x540.">
+        <div className="ss-banner-row">
+          <div className="ss-banner-thumb" style={banner ? { backgroundImage: `url("${banner}")` } : undefined} />
+          {owner && (
+            <div className="account-inline">
+              <button type="button" className="btn btn-primary btn-sm" disabled={!!uploading || !uploadChannel} onClick={() => bannerFile.current?.click()}>
+                {uploading === "banner" ? "Uploading…" : "Upload Image"}
+              </button>
+              <button type="button" className="btn btn-link btn-sm" disabled={busy || !guild.banner} onClick={() => void patch({ banner_attachment_id: null })}>
+                Remove Banner
+              </button>
+              <input ref={bannerFile} type="file" accept="image/*" hidden aria-label="Server banner file" onChange={e => void pick("banner", e.target.files?.[0])} />
             </div>
           )}
         </div>
@@ -179,7 +197,7 @@ function ProfilePage({ guild, owner, channels }: { guild: Guild; owner: boolean;
       {saved && !dirty && <p className="settings-saved">Saved.</p>}
         </div>
         <aside className="ss-preview-card" aria-label="Server profile preview">
-          <div className="ss-preview-banner" />
+          <div className="ss-preview-banner" style={banner ? { backgroundImage: `url("${banner}")` } : undefined} />
           <div className="ss-preview-icon">
             <GuildIcon guild={guild} size={56} />
           </div>
@@ -339,6 +357,7 @@ export function ServerSettings({ guildId, section }: { guildId: string; section?
 
   return (
     <FullScreenSettings
+      startOnPage={section !== undefined}
       label="Server Settings"
       navLabel="Server settings sections"
       eyebrow={guild.name}

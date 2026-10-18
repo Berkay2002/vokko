@@ -2,6 +2,7 @@
 // Pure functions (unit-tested) plus thin REST wrappers for the admin pages.
 
 import { request } from "../../api/rest";
+import { formatFullDate } from "../../chat/util";
 import { snowflakeToTimestamp } from "../../api/snowflake";
 import {
   AuditLogEvent,
@@ -178,7 +179,7 @@ export function formatAuditValue(key: string, value: unknown, lookup: AuditLooku
   if (key === "$add" || key === "$remove") return Array.isArray(value) ? value.map(r => (r as { name?: string }).name ?? "?").join(", ") : "";
   if (key === "color" && typeof value === "number") return value === 0 ? "default" : `#${value.toString(16).padStart(6, "0")}`;
   if (key === "parent_id" || key === "system_channel_id" || key === "channel_id") return channelName(lookup, String(value));
-  if (key === "communication_disabled_until" && typeof value === "string") return new Date(value).toLocaleString();
+  if (key === "communication_disabled_until" && typeof value === "string") return formatFullDate(new Date(value));
   if (key === "trigger_metadata" && typeof value === "object") return ((value as { keyword_filter?: string[] }).keyword_filter ?? []).join(", ");
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
   return JSON.stringify(value);

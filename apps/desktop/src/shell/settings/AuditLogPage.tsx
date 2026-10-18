@@ -3,6 +3,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { gateway } from "../../api/gateway";
 import { displayName, useStore } from "../../api/store";
 import type { AuditLogEntry, AuditLogEvent, Guild, Snowflake, User } from "../../api/types";
+import { formatFullDate, formatMessageTimestamp } from "../../chat/util";
+import { Tooltip } from "../../ui";
 import { Avatar } from "../Avatar";
 import { Page, Select } from "./controls";
 import { AUDIT_ACTIONS, auditDiff, describeAuditEntry, fetchAuditLog, type AuditLookup } from "./admin";
@@ -22,7 +24,9 @@ function EntryRow({ entry, lookup }: { entry: AuditLogEntry; lookup: AuditLookup
         {actor ? <Avatar user={actor} size={32} /> : <span className="ss-audit-dot" aria-hidden="true" />}
         <span className="ss-audit-text">
           <span className="ss-audit-summary">{describeAuditEntry(entry, lookup)}</span>
-          <span className="ss-audit-time">{when.toLocaleString()}</span>
+          <Tooltip content={formatFullDate(when)}>
+            <time className="ss-audit-time" dateTime={when.toISOString()}>{formatMessageTimestamp(when)}</time>
+          </Tooltip>
         </span>
         {expandable && (open ? <ChevronDown size={18} aria-hidden="true" /> : <ChevronRight size={18} aria-hidden="true" />)}
       </button>

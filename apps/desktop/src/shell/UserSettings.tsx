@@ -7,6 +7,7 @@ import { appStore, displayName, useStore } from "../api/store";
 import type { InstanceInfo, User } from "../api/types";
 import { safeHttpUrl } from "../chat/embedUtil";
 import { isDesktop, useWindowChrome } from "../desktop";
+import { usePhone } from "../ui";
 import { Avatar } from "./Avatar";
 import { closeModal, openModal } from "./modalStore";
 import { AccessibilityPage } from "./settings/AccessibilityPage";
@@ -39,6 +40,8 @@ interface SectionDef {
   hidden?: boolean;
   /** Only exists in the desktop (Tauri) shell. */
   desktopOnly?: boolean;
+  /** Left out in the browser at phone width, like Discord's mobile app (no keyboard to bind). */
+  phoneHidden?: boolean;
   /** Category headings shown on pages that are not implemented, in Discord's order. */
   outline?: string[];
   /** Extra words the sidebar search matches besides the label and the outline. */
@@ -56,7 +59,7 @@ const ALL_SECTIONS: SectionDef[] = [
   { id: "appearance", label: "Appearance", icon: Palette, group: "Experience", keywords: ["theme", "dark", "light", "messages", "chat", "zoom", "font", "spellcheck"] },
   { id: "accessibility", label: "Accessibility", icon: Accessibility, group: "Experience", keywords: ["text", "readability", "density", "contrast", "motion", "screen reader", "saturation", "theme"] },
   { id: "chat", label: "Chat", icon: MessageCircle, group: "Experience", keywords: ["images", "videos", "embeds", "link previews", "emoji", "stickers", "spoilers", "markdown", "threads", "emoticons", "reactions"] },
-  { id: "keybinds", label: "Keybinds", icon: Keyboard, group: "Experience", keywords: ["shortcuts", "hotkeys", "keyboard", "system"] },
+  { id: "keybinds", label: "Keybinds", icon: Keyboard, group: "Experience", phoneHidden: true, keywords: ["shortcuts", "hotkeys", "keyboard", "system"] },
   { id: "language", label: "Language & Time", icon: Languages, group: "Experience", keywords: ["language", "locale", "time format", "12-hour", "24-hour", "clock"] },
   { id: "streamer", label: "Streamer Mode", icon: Radio, group: "Experience", keywords: ["streaming", "obs", "hide", "personal information", "invite links", "screen capture"] },
   { id: "windows", label: "Windows Settings", icon: Monitor, group: "Experience", desktopOnly: true, keywords: ["startup", "tray", "minimize", "close", "autostart", "login", "open on startup"] },
@@ -179,7 +182,9 @@ function MyAccount({ me }: { me: User }) {
 
 export function UserSettings({ section, guildId }: { section?: string; guildId?: string }) {
   const me = useStore(s => s.me);
-  const [current, setCurrent] = useState(SECTIONS.some(s => s.id === section) ? (section as string) : "account");
+  const phone = usePhone() && !isDesktop();
+  const known = SECTIONS.some(s => s.id === section && !(s.phoneHidden && phone));
+  const [current, setCurrent] = useState(known ? (section as string) : "account");
   const [subs, setSubs] = useState<string[]>([]);
   const [anchor, setAnchor] = useState(0);
   const [query, setQuery] = useState("");
@@ -201,7 +206,7 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
 
   const needle = query.trim().toLowerCase();
   const matches = (s: SectionDef) => !needle || [s.label, ...(s.outline ?? []), ...(s.keywords ?? [])].some(t => t.toLowerCase().includes(needle));
-  const sections = SECTIONS.map(s => (s.id === "windows" ? { ...s, label: desktopSettingsTitle(platform) } : s));
+  const sections = SECTIONS.filter(s => !(s.phoneHidden && phone)).map(s => (s.id === "windows" ? { ...s, label: desktopSettingsTitle(platform) } : s));
   const visible = sections.filter(s => !s.hidden && matches(s));
   const groups = [...new Set(visible.map(s => s.group))];
   const showLogOut = !needle || "log out".includes(needle);
@@ -240,7 +245,7 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
   };
 
   const page = () => {
-    switch (current) {
+    switch (active.id) {
       case "account":
         return <MyAccount me={me} />;
       case "profiles":
@@ -353,7 +358,7 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
   );
 
   return (
-    <SettingsModal label="User Settings" title={active.label} side={side} onClose={closeModal} pageKey={current} scrollRef={scroller} onScroll={trackAnchor}>
+    <SettingsModal label="User Settings" title={active.label} side={side} onClose={closeModal} pageKey={current} startOnPage={known} scrollRef={scroller} onScroll={trackAnchor}>
       {page()}
     </SettingsModal>
   );

@@ -45,6 +45,7 @@ export function FullScreenSettings({
   onSelect,
   onClose,
   children,
+  startOnPage,
 }: {
   label: string;
   navLabel: string;
@@ -55,11 +56,13 @@ export function FullScreenSettings({
   onSelect(id: string): void;
   onClose(): void;
   children: ReactNode;
+  /** The opener asked for a section: on phone show that page first instead of the section list. */
+  startOnPage?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState<FrameLayout>("narrow");
   // Phone layout (<= 485px, styles/responsive.css): the section list and one page take turns, like User Settings.
-  const [pane, setPane] = useState<"nav" | "page">(() => (window.matchMedia("(max-width: 485px)").matches ? "nav" : "page"));
+  const [pane, setPane] = useState<"nav" | "page">(() => (!startOnPage && window.matchMedia("(max-width: 485px)").matches ? "nav" : "page"));
   useLayer(true, onClose);
   useInertApp(true);
   useBackClose(true, onClose);

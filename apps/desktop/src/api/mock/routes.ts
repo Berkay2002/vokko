@@ -307,6 +307,7 @@ route("PATCH", `/guilds/${ID}`, ({ viewer, params, body }) => {
     changes: [
       change("name", before.name, after.name),
       change("icon", before.icon, after.icon),
+      change("banner", before.banner ?? null, after.banner ?? null),
       change("system_channel_id", before.system_channel_id, after.system_channel_id),
       change("verification_level", before.verification_level ?? 0, after.verification_level ?? 0),
       change("explicit_content_filter", before.explicit_content_filter ?? 0, after.explicit_content_filter ?? 0),
