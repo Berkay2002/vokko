@@ -109,6 +109,7 @@ async function startBridge(limits: Limits): Promise<VokkoBot> {
   let bridge: Bridge | null = null
   const bot = new VokkoBot(cfg, msg => void bridge?.handle(msg).catch(e => console.error(e)))
   bridge = new Bridge(bot, backend, limits)
+  bridge.startHeartbeat() // without it the plugin would take guilds over
   bot.start(false)
   await until(async () => bot.ownerId)
   return bot
@@ -192,8 +193,9 @@ try {
   const spent = JSON.parse(readFileSync(join(stateDir, 'usage-claude-api.json'), 'utf8'))
   check(Math.abs(spent.costUsd - asks.length * 0.01) < 1e-9, `the monthly cost tally is persisted ($${spent.costUsd})`)
   bot = await startBridge({ perHour: 100, monthlyUsd: spent.costUsd })
+  const toPlugin = inbound.length
   await api('POST', `/channels/${general}/messages`, nat.token, { content: `${mention} seven` })
-  check(await botSays(nat.token, general, c => c === 'Monthly budget reached. Back next month.'), 'over the monthly budget the bot says so')
+  check(await until(async () => inbound.length === toPlugin + 1), 'over the monthly budget the message goes to the plugin (the subscription)')
   check(asks.length === before, 'and never reaches the backend')
 } finally {
   bot.stop()

@@ -798,6 +798,15 @@ describe('fallback to the subscription', () => {
     expect(f.backend.calls.length).toBe(2)
   })
 
+  test('an error that may be the sender at fault (a bad request) keeps the old message and does not mark the API out', async () => {
+    const f = fb()
+    apiDown(f.backend, 'API Error: 400 invalid_request_error: prompt is too long')
+    await f.bridge.handle(guild('one'))
+    expect(f.last().text).toContain('Sorry, something went wrong')
+    expect(f.claimed).toEqual([])
+    expect(f.dms).toEqual([])
+  })
+
   test('no plugin session to take it: the sender gets the error as before, and no file is left behind', async () => {
     const f = fb('bridge-shared', undefined, false)
     apiDown(f.backend)
@@ -808,14 +817,15 @@ describe('fallback to the subscription', () => {
   })
 
   test('failureClass names the class and never echoes the error', () => {
-    const cases: [string, string][] = [
+    const cases: [string, string | null][] = [
       ['claude: success: Credit balance is too low', 'API: credit balance too low'],
       ['claude: success: Invalid API key · Please run /login', 'API: authentication failed'],
       ['API Error: 401 authentication_error sk-ant-secret', 'API: authentication failed'],
       ['API Error: 529 overloaded_error', 'API: overloaded or down'],
       ['API Error: 500 Internal server error', 'API: overloaded or down'],
       ['TypeError: fetch failed (ECONNRESET)', 'API: unreachable'],
-      ['claude: no result', 'API: unexpected error'],
+      ['claude: no result', null], // anything else keeps the old error message
+      ['API Error: 400 invalid_request_error: prompt is too long', null],
     ]
     for (const [err, cls] of cases) expect(failureClass(new Error(err))).toBe(cls)
     expect(failureClass(new Error('API Error: 401 sk-ant-secret'))).not.toContain('sk-ant')

@@ -137,14 +137,14 @@ function writeJson(file: string, value: unknown): void {
   renameSync(tmp, file)
 }
 
-/** An API failure that is not the sender's doing (a UserFacingError is), as a short class for the owner: no secrets, no raw error text. */
-export function failureClass(err: unknown): string {
+/** An API failure that is not the sender's doing (auth, credit, overload/5xx, network), as a short class for the owner: no secrets, no raw error text. Null: anything else (a bad request may be the sender's), which keeps the old error message. */
+export function failureClass(err: unknown): string | null {
   const s = String(err)
   if (/credit|billing|balance|payment/i.test(s)) return 'API: credit balance too low'
   if (/authenticat|api[ _-]?key|unauthori[sz]ed|\b40[13]\b|oauth/i.test(s)) return 'API: authentication failed'
   if (/overload|\b429\b|rate.?limit|\b5\d\d\b|server_error|unavailable/i.test(s)) return 'API: overloaded or down'
   if (/fetch failed|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|network|socket|timed? ?out/i.test(s)) return 'API: unreachable'
-  return 'API: unexpected error'
+  return null
 }
 
 /** After an API failure, guild messages go to the subscription for this long; then the next one tries the API again. */
@@ -509,10 +509,11 @@ export class Bridge {
     } catch (err) {
       this.log(`${this.backend.name} failed for ${key}: ${err}`)
       writeJson(this.sessionsFile, this.sessions)
-      // Not the sender's doing (a UserFacingError is): the plugin answers this message and the next ones for a while.
-      if (msg.guild_id != null && this.fallback && !(err instanceof UserFacingError) && !turn.authorPaused) {
-        this.markOut(failureClass(err), this.now() + COOLDOWN_MS)
-        return this.passOn(msg, 'error')
+      // Not the sender's doing: the plugin answers this message and the next ones for a while.
+      const down = msg.guild_id != null && this.fallback && !(err instanceof UserFacingError) && !turn.authorPaused ? failureClass(err) : null
+      if (down) {
+        this.markOut(down, this.now() + COOLDOWN_MS)
+        return this.passOn(msg, down)
       }
       if (!turn.authorPaused) await this.say(msg, err instanceof UserFacingError ? err.message : SORRY)
       return

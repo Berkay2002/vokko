@@ -235,12 +235,14 @@ try {
   check(inbound.length === count, 'dmBackend "api": allowlisted DMs are ignored')
   check((await tool('reply', { chat_id: dm, text: 'no' })).error, 'dmBackend "api": tools refuse DMs')
   writeAccess({ ...readAccess(), dmBackend: 'subscription', guilds: false })
+  writeFileSync(join(stateDir, 'bridge-state.json'), JSON.stringify({ at: Date.now() })) // a bridge is alive: guilds are its own
   await api('POST', `/channels/${general}/messages`, owner.token, { content: `${mention} for the bridge` })
   await sleep(1500)
   check(inbound.length === count, 'guilds false: guild messages are ignored')
   await api('POST', `/channels/${dm}/messages`, owner.token, { content: 'back to me' })
   check((await fresh(count))?.content === 'back to me', 'dmBackend "subscription": DMs reach Claude again')
   writeAccess({ ...readAccess(), guilds: true })
+  rmSync(join(stateDir, 'bridge-state.json'), { force: true })
 
   // permission relay
   await client.notification({
