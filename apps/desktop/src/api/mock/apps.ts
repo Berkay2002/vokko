@@ -5,7 +5,9 @@
 import {
   ApplicationCommandOptionType,
   ApplicationCommandType,
+  ButtonStyle,
   ChannelType,
+  ComponentType,
   InteractionCallbackType,
   InteractionType,
   MessageFlags,
@@ -20,6 +22,7 @@ import {
   type InteractionDataOption,
   type InteractionResolved,
   type Message,
+  type MessageComponent,
   type MessageInteractionMetadata,
   type User,
   type Webhook,
@@ -51,7 +54,9 @@ interface MockInteraction {
   kind: InteractionType;
   user_id: string;
   channel_id: string;
-  command: ApplicationCommand;
+  /** Null for component clicks, which name the clicked message in `message_id` instead. */
+  command: ApplicationCommand | null;
+  message_id?: string;
   target_id: string | null;
   nonce: string | null;
   created: number;
@@ -532,7 +537,8 @@ route("POST", "/interactions", ctx => {
   viewerIsBot(ctx);
   const body = ctx.body;
   const kind = body.type as InteractionType;
-  if (kind !== InteractionType.ApplicationCommand && kind !== InteractionType.ApplicationCommandAutocomplete) invalid("type", "Must be 2 or 4.");
+  if (kind === InteractionType.MessageComponent) return invokeComponent(ctx);
+  if (kind !== InteractionType.ApplicationCommand && kind !== InteractionType.ApplicationCommandAutocomplete) invalid("type", "Must be 2, 3 or 4.");
   const autocomplete = kind === InteractionType.ApplicationCommandAutocomplete;
   const channel = requireChannel(str(body.channel_id) ?? "", ctx.viewer.user.id);
   const data = (body.data ?? {}) as { id?: string; type?: ApplicationCommandType; options?: InteractionDataOption[]; target_id?: string };
@@ -647,19 +653,21 @@ function validateBody(content: unknown, embeds: unknown, allowEmpty: boolean): {
 function postMessage(interaction: MockInteraction, data: Record<string, unknown>, original: boolean, loading: boolean): Message {
   const channel = db.channels.get(interaction.channel_id);
   if (!channel) fail(404, 10003, "Unknown Channel");
-  const { content, embeds } = validateBody(data.content, data.embeds, loading);
+  const components = cleanComponents(data.components);
+  const { content, embeds } = validateBody(data.content, data.embeds, loading || components.length > 0);
   const ephemeral = ((Number(data.flags) || 0) & MessageFlags.Ephemeral) !== 0;
   const flags = (ephemeral ? MessageFlags.Ephemeral : 0) | (loading ? MessageFlags.Loading : 0);
-  const type = !original ? MessageType.Default : interaction.command.type === ApplicationCommandType.ChatInput ? MessageType.ChatInputCommand : MessageType.ContextMenuCommand;
-  const metadata: MessageInteractionMetadata | undefined = original
+  const command = original ? interaction.command : null;
+  const type = !command ? MessageType.Default : command.type === ApplicationCommandType.ChatInput ? MessageType.ChatInputCommand : MessageType.ContextMenuCommand;
+  const metadata: MessageInteractionMetadata | undefined = command
     ? {
         id: interaction.id,
         type: InteractionType.ApplicationCommand,
         user: userOf(interaction.user_id),
-        name: interaction.command.name,
-        command_type: interaction.command.type,
-        ...(interaction.command.type === ApplicationCommandType.User && interaction.target_id ? { target_user: userOf(interaction.target_id) } : {}),
-        ...(interaction.command.type === ApplicationCommandType.Message && interaction.target_id ? { target_message_id: interaction.target_id } : {}),
+        name: command.name,
+        command_type: command.type,
+        ...(command.type === ApplicationCommandType.User && interaction.target_id ? { target_user: userOf(interaction.target_id) } : {}),
+        ...(command.type === ApplicationCommandType.Message && interaction.target_id ? { target_message_id: interaction.target_id } : {}),
       }
     : undefined;
   if (ephemeral) {
@@ -677,6 +685,7 @@ function postMessage(interaction: MockInteraction, data: Record<string, unknown>
       mention_everyone: false,
       attachments: [],
       embeds,
+      components,
       reactions: [],
       pinned: false,
       tts: false,
@@ -692,7 +701,7 @@ function postMessage(interaction: MockInteraction, data: Record<string, unknown>
     emit([interaction.user_id], "MESSAGE_CREATE", message);
     return message;
   }
-  const stored = addMessage({ channel, author_id: interaction.application_id, content, type, flags, allowEveryone: false, extra: { webhook_id: interaction.application_id, application_id: interaction.application_id, interaction_metadata: metadata, embeds } });
+  const stored = addMessage({ channel, author_id: interaction.application_id, content, type, flags, allowEveryone: false, extra: { webhook_id: interaction.application_id, application_id: interaction.application_id, interaction_metadata: metadata, embeds, components } });
   return messageFor(stored, interaction.user_id);
 }
 
@@ -703,6 +712,8 @@ route("POST", `/interactions/${ID}/([^/]+)/callback`, ({ params, body }) => {
   const autocomplete = interaction.kind === InteractionType.ApplicationCommandAutocomplete;
   if ((kind === InteractionCallbackType.ApplicationCommandAutocompleteResult) !== autocomplete) invalid("type", "This response type does not fit the interaction.");
   const data = (body.data ?? {}) as Record<string, unknown>;
+  const click = interaction.kind === InteractionType.MessageComponent;
+  if ((kind === InteractionCallbackType.DeferredUpdateMessage || kind === InteractionCallbackType.UpdateMessage) && !click) invalid("type", "This response type does not fit the interaction.");
   if (interaction.responded) fail(400, 40060, "Interaction has already been acknowledged");
   if (Date.now() - interaction.created > CALLBACK_WINDOW_MS) fail(404, 10062, "Unknown interaction");
   if (kind === InteractionCallbackType.ApplicationCommandAutocompleteResult) {
@@ -712,14 +723,184 @@ route("POST", `/interactions/${ID}/([^/]+)/callback`, ({ params, body }) => {
     emit([interaction.user_id], "APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE", { id: interaction.id, nonce: interaction.nonce, choices });
     return undefined;
   }
+  if (kind === InteractionCallbackType.DeferredUpdateMessage || kind === InteractionCallbackType.UpdateMessage) {
+    const clicked = clickedMessage(interaction);
+    if (kind === InteractionCallbackType.UpdateMessage) applyEdit(clicked, data);
+    interaction.responded = true;
+    interaction.original = { id: clicked.stored?.id ?? clicked.ephemeral!.message.id, ephemeral: !!clicked.ephemeral };
+    announceClick(interaction);
+    return undefined;
+  }
   if (kind !== InteractionCallbackType.ChannelMessageWithSource && kind !== InteractionCallbackType.DeferredChannelMessageWithSource) invalid("type", "Unknown response type.");
   const loading = kind === InteractionCallbackType.DeferredChannelMessageWithSource;
-  validateBody(data.content, data.embeds, loading);
+  const components = cleanComponents(data.components);
+  validateBody(data.content, data.embeds, loading || components.length > 0);
   interaction.responded = true;
-  const message = postMessage(interaction, loading ? { flags: data.flags } : data, true, loading);
+  const message = postMessage(interaction, loading ? { flags: data.flags } : data, !click, loading);
   interaction.original = { id: message.id, ephemeral: ((message.flags ?? 0) & MessageFlags.Ephemeral) !== 0 };
+  announceClick(interaction);
   return undefined;
 });
+
+/** The user's sessions learn that a component click was answered (type 6 shows no message, so nothing else would tell them). */
+function announceClick(interaction: MockInteraction): void {
+  if (interaction.kind !== InteractionType.MessageComponent) return;
+  emit([interaction.user_id], "INTERACTION_SUCCESS", { id: interaction.id, nonce: interaction.nonce, channel_id: interaction.channel_id, application_id: interaction.application_id });
+}
+
+/** The message a click sits on (stored, or an ephemeral of the clicker). */
+function clickedMessage(interaction: MockInteraction): { stored?: MockMessage; ephemeral?: { message: Message; recipient: string } } {
+  const id = interaction.message_id ?? "";
+  const ephemeral = apps.ephemerals.get(id);
+  if (ephemeral) return { ephemeral };
+  const stored = sortedMessages(interaction.channel_id).find(m => m.id === id);
+  if (!stored) fail(404, 10008, "Unknown Message");
+  return { stored };
+}
+
+// ---- message components ----
+
+type ComponentEmoji = NonNullable<MessageComponent["emoji"]>;
+
+/** Validates what an application sent as `components` like the server's `validate_components` and returns it rebuilt from known fields. */
+function cleanComponents(raw: unknown): MessageComponent[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) invalid("components", "Must be a list.");
+  if (raw.length > 5) invalid("components", "Must be 5 or fewer in length.");
+  const ids = new Set<string>();
+  const text = (value: unknown, path: string, max: number, min = 0): string => {
+    const length = typeof value === "string" ? [...value].length : 0;
+    if (typeof value !== "string" || length > max || length < min) invalid(path, min ? `Must be between ${min} and ${max} in length.` : `Must be ${max} or fewer in length.`);
+    return value;
+  };
+  const emojiOf = (value: unknown, path: string): ComponentEmoji | undefined => {
+    if (value === undefined || value === null) return undefined;
+    const e = value as ComponentEmoji;
+    if (typeof value !== "object" || (e.id === undefined && !e.name) || (e.id !== undefined && !/^\d+$/.test(String(e.id))) || (e.name !== undefined && [...String(e.name)].length > 32)) invalid(path, "Invalid emoji.");
+    return { ...(e.id !== undefined ? { id: e.id } : {}), ...(e.name !== undefined ? { name: e.name } : {}), ...(e.animated ? { animated: true } : {}) };
+  };
+  const customId = (value: unknown, path: string): string => {
+    const id = text(value, path, 100, 1);
+    if (ids.has(id)) invalid(path, "Component custom ids must be unique.");
+    ids.add(id);
+    return id;
+  };
+  return raw.map((row: MessageComponent, r) => {
+    const at = `components.${r}`;
+    if (row?.type !== ComponentType.ActionRow) invalid(`${at}.type`, "Must be 1 (action row).");
+    const children = row.components ?? [];
+    if (children.length < 1 || children.length > 5) invalid(`${at}.components`, "Must be between 1 and 5 in length.");
+    const cleaned = children.map((child, n): MessageComponent => {
+      const path = `${at}.components.${n}`;
+      if (child.type === ComponentType.StringSelect) {
+        if (children.length > 1) invalid(path, "A select menu takes a whole row.");
+        const options = child.options ?? [];
+        if (options.length < 1 || options.length > 25) invalid(`${path}.options`, "Must be between 1 and 25 in length.");
+        const values = new Set<string>();
+        return {
+          type: ComponentType.StringSelect,
+          custom_id: customId(child.custom_id, `${path}.custom_id`),
+          options: options.map((o, i) => {
+            const value = text(o.value, `${path}.options.${i}.value`, 100, 1);
+            if (values.has(value)) invalid(`${path}.options.${i}.value`, "Option values must be unique.");
+            values.add(value);
+            const emoji = emojiOf(o.emoji, `${path}.options.${i}.emoji`);
+            return {
+              label: text(o.label, `${path}.options.${i}.label`, 100, 1),
+              value,
+              ...(o.description ? { description: text(o.description, `${path}.options.${i}.description`, 100) } : {}),
+              ...(emoji ? { emoji } : {}),
+              ...(o.default ? { default: true } : {}),
+            };
+          }),
+          ...(child.placeholder ? { placeholder: text(child.placeholder, `${path}.placeholder`, 150) } : {}),
+          min_values: 1,
+          max_values: 1,
+          ...(child.disabled ? { disabled: true } : {}),
+        };
+      }
+      if (child.type !== ComponentType.Button) invalid(`${path}.type`, "Must be 2 (button) or 3 (select menu).");
+      if (!child.style || child.style < 1 || child.style > 5) invalid(`${path}.style`, "Must be between 1 and 5.");
+      const emoji = emojiOf(child.emoji, `${path}.emoji`);
+      const label = child.label === undefined ? undefined : text(child.label, `${path}.label`, 80);
+      if (!label && !emoji) invalid(`${path}.label`, "A button needs a label or an emoji.");
+      const button: MessageComponent = { type: ComponentType.Button, style: child.style, ...(label ? { label } : {}), ...(emoji ? { emoji } : {}), ...(child.disabled ? { disabled: true } : {}) };
+      if (child.style === ButtonStyle.Link) {
+        if (child.custom_id !== undefined) invalid(`${path}.custom_id`, "A link button has no custom id.");
+        let url: URL | null = null;
+        try {
+          url = new URL(String(child.url ?? "").trim());
+        } catch {
+          url = null;
+        }
+        if (!url || url.protocol !== "https:" || !url.hostname) invalid(`${path}.url`, "Must be an https URL.");
+        return { ...button, url: url.href };
+      }
+      if (child.url !== undefined) invalid(`${path}.url`, "Only a link button has a url.");
+      return { ...button, custom_id: customId(child.custom_id, `${path}.custom_id`) };
+    });
+    return { type: ComponentType.ActionRow, components: cleaned };
+  });
+}
+
+/** POST /interactions with type 3: a click on a button or select of an application message. */
+function invokeComponent(ctx: Ctx): { id: string; nonce: string | null } {
+  const { body, viewer } = ctx;
+  const channel = requireChannel(str(body.channel_id) ?? "", viewer.user.id);
+  const applicationId = str(body.application_id) ?? "";
+  const messageId = str(body.message_id) ?? invalid("message_id", "This field is required.");
+  const data = (body.data ?? {}) as { custom_id?: unknown; component_type?: unknown; values?: unknown };
+  const ephemeral = apps.ephemerals.get(messageId);
+  const stored = ephemeral ? undefined : sortedMessages(channel.id).find(m => m.id === messageId);
+  const message = ephemeral ? (ephemeral.recipient === viewer.user.id && ephemeral.message.channel_id === channel.id ? ephemeral.message : undefined) : stored ? messageFor(stored, viewer.user.id) : undefined;
+  if (!message || message.application_id !== applicationId) fail(404, 10008, "Unknown Message");
+  if (!usableCommands(channel, viewer.user.id).apps.some(a => a.id === applicationId)) fail(channel.guild_id ? 403 : 404, channel.guild_id ? 50013 : 10002, channel.guild_id ? MISSING_PERMISSIONS : "Unknown Application");
+  const component = (message.components ?? []).flatMap(row => row.components ?? []).find(c => c.custom_id === data.custom_id);
+  if (!component || component.type !== data.component_type) invalid("data.custom_id", "Unknown component.");
+  if (component.disabled) invalid("data.custom_id", "This component is disabled.");
+  const values = data.values;
+  if (component.type === ComponentType.StringSelect) {
+    if (!Array.isArray(values) || values.length !== 1 || !component.options?.some(o => o.value === values[0])) invalid("data.values", "Choose exactly one of the options.");
+  } else if (values !== undefined) invalid("data.values", "A button takes no values.");
+  const interaction: MockInteraction = {
+    id: nextId(),
+    application_id: applicationId,
+    token: randomToken(),
+    kind: InteractionType.MessageComponent,
+    user_id: viewer.user.id,
+    channel_id: channel.id,
+    command: null,
+    message_id: message.id,
+    target_id: null,
+    nonce: str(body.nonce) ?? null,
+    created: Date.now(),
+    responded: false,
+    original: null,
+  };
+  apps.interactions.set(interaction.id, interaction);
+  const member = channel.guild_id ? membersOf(channel.guild_id).find(m => m.user.id === viewer.user.id) : undefined;
+  const payload: Interaction = {
+    id: interaction.id,
+    application_id: applicationId,
+    type: InteractionType.MessageComponent,
+    data: { custom_id: component.custom_id, component_type: component.type, ...(values ? { values: values as string[] } : {}) },
+    guild_id: channel.guild_id,
+    channel_id: channel.id,
+    ...(member ? { member } : {}),
+    user: viewer.user,
+    token: interaction.token,
+    app_permissions: channelPermsOf(channel, applicationId).toString(),
+    version: 1,
+    message,
+  };
+  emit([applicationId], "INTERACTION_CREATE", payload);
+  const handler = botHandlers.get(applicationId);
+  if (handler) setTimeout(() => handler(payload), 150);
+  setTimeout(() => {
+    if (!interaction.responded) emit([interaction.user_id], "INTERACTION_FAILURE", { id: interaction.id, nonce: interaction.nonce, channel_id: channel.id, application_id: applicationId });
+  }, CALLBACK_WINDOW_MS);
+  return { id: interaction.id, nonce: interaction.nonce };
+}
 
 // ---- ephemeral messages (hooks used by the message routes) ----
 
@@ -925,13 +1106,19 @@ route("GET", `/webhooks/${ID}/([^/]+)/messages/([^/]+)`, ({ params }) => {
 
 route("PATCH", `/webhooks/${ID}/([^/]+)/messages/([^/]+)`, ({ params, body }) => {
   const found = target(params[0] ?? "", params[1] ?? "");
-  const { stored, ephemeral } = targetMessage(found, params[2] ?? "");
+  return applyEdit(targetMessage(found, params[2] ?? ""), body);
+});
+
+/** Edits a message of an application (content, embeds, components; what is left out stays) and announces the change. */
+function applyEdit({ stored, ephemeral }: { stored?: MockMessage; ephemeral?: { message: Message; recipient: string } }, body: Record<string, unknown>): Message {
+  const components = body.components === undefined ? undefined : cleanComponents(body.components);
   if (ephemeral) {
     const message = ephemeral.message;
     const wasLoading = ((message.flags ?? 0) & MessageFlags.Loading) !== 0;
     const next = validateBody(body.content ?? message.content, body.embeds ?? message.embeds, false);
     message.content = next.content;
     message.embeds = next.embeds;
+    if (components) message.components = components;
     message.flags = (message.flags ?? 0) & ~MessageFlags.Loading;
     if (!wasLoading) message.edited_timestamp = new Date().toISOString();
     emit([ephemeral.recipient], "MESSAGE_UPDATE", { ...message });
@@ -939,16 +1126,17 @@ route("PATCH", `/webhooks/${ID}/([^/]+)/messages/([^/]+)`, ({ params, body }) =>
   }
   const message = stored!;
   const wasLoading = ((message.flags ?? 0) & MessageFlags.Loading) !== 0;
-  const next = validateBody(body.content ?? message.content, body.embeds ?? message.embeds ?? [], false);
+  const next = validateBody(body.content ?? message.content, body.embeds ?? message.embeds ?? [], (components ?? message.components ?? []).length > 0);
   message.content = next.content;
   message.embeds = next.embeds;
+  if (components) message.components = components;
   message.flags = (message.flags ?? 0) & ~MessageFlags.Loading;
   if (!message.flags) delete message.flags;
   if (!wasLoading) message.edited_timestamp = new Date().toISOString();
   const channel = db.channels.get(message.channel_id);
   if (channel) for (const id of channelAudience(channel)) emit([id], "MESSAGE_UPDATE", messageFor(message, id));
   return messageFor(message, message.author_id);
-});
+}
 
 route("DELETE", `/webhooks/${ID}/([^/]+)/messages/([^/]+)`, ({ params }) => {
   const found = target(params[0] ?? "", params[1] ?? "");
@@ -981,6 +1169,24 @@ export function echoBotHandler(interaction: Interaction): void {
     reply(InteractionCallbackType.ApplicationCommandAutocompleteResult, { choices: fruits.filter(f => f.includes(typed)).slice(0, 25).map(f => ({ name: f, value: f })) });
     return;
   }
+  if (interaction.type === InteractionType.MessageComponent) {
+    const values = interaction.data.values;
+    switch (interaction.data.custom_id) {
+      case "confirm":
+        reply(InteractionCallbackType.UpdateMessage, { content: "Confirmed. Nothing was deleted.", components: [] });
+        return;
+      case "cancel":
+        reply(InteractionCallbackType.UpdateMessage, { content: "Cancelled.", components: [] });
+        return;
+      case "later":
+        reply(InteractionCallbackType.DeferredUpdateMessage, {});
+        return;
+      case "flavor":
+        reply(InteractionCallbackType.ChannelMessageWithSource, { content: `You picked ${values?.[0] ?? "nothing"}.`, flags: MessageFlags.Ephemeral });
+        return;
+    }
+    return;
+  }
   switch (interaction.data.name) {
     case "echo":
       reply(InteractionCallbackType.ChannelMessageWithSource, { content: String(option("text") ?? ""), flags: MessageFlags.Ephemeral });
@@ -993,6 +1199,37 @@ export function echoBotHandler(interaction: Interaction): void {
       }, 600);
       return;
     }
+    case "confirm":
+      reply(InteractionCallbackType.ChannelMessageWithSource, {
+        content: "Delete everything?",
+        components: [
+          {
+            type: ComponentType.ActionRow,
+            components: [
+              { type: ComponentType.Button, style: ButtonStyle.Success, label: "Confirm", custom_id: "confirm" },
+              { type: ComponentType.Button, style: ButtonStyle.Danger, label: "Cancel", custom_id: "cancel" },
+              { type: ComponentType.Button, style: ButtonStyle.Secondary, label: "Ask later", custom_id: "later" },
+              { type: ComponentType.Button, style: ButtonStyle.Link, label: "Docs", url: "https://example.com/docs" },
+            ],
+          },
+          {
+            type: ComponentType.ActionRow,
+            components: [
+              {
+                type: ComponentType.StringSelect,
+                custom_id: "flavor",
+                placeholder: "Pick a flavor",
+                options: [
+                  { label: "Vanilla", value: "vanilla", description: "The classic" },
+                  { label: "Chocolate", value: "chocolate" },
+                  { label: "Mint", value: "mint", emoji: { name: "🌿" } },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      return;
     case "pick":
       reply(InteractionCallbackType.ChannelMessageWithSource, { content: `You picked ${String(option("fruit") ?? "nothing")}.` });
       return;
@@ -1026,6 +1263,7 @@ export const ECHO_COMMANDS: Record<string, unknown>[] = [
       { type: ApplicationCommandOptionType.String, name: "size", description: "How big", choices: [{ name: "Small", value: "s" }, { name: "Large", value: "l" }] },
     ],
   },
+  { name: "confirm", description: "Ask before doing something (buttons and a select)" },
   { name: "Wave at", type: ApplicationCommandType.User },
   { name: "Quote", type: ApplicationCommandType.Message },
 ];

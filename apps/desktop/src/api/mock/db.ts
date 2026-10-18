@@ -2,7 +2,7 @@
 
 import { DEFAULT_EVERYONE } from "../permissions";
 import { timestampToSnowflake } from "../snowflake";
-import type { JoinSourceType, Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageInteractionMetadata, MessageSnapshot, MessageType, Presence, ReactionEmoji, ReadState, Relationship, RelationshipType, Reminder, Role, SoundboardSound, Sticker, StickerItem, User, GuildLayout } from "../types";
+import type { JoinSourceType, Attachment, Channel, Embed, Gif, GifProvider, Guild, GuildMember, Message, MessageComponent, MessageInteractionMetadata, MessageSnapshot, MessageType, Presence, ReactionEmoji, ReadState, Relationship, RelationshipType, Reminder, Role, SoundboardSound, Sticker, StickerItem, User, GuildLayout } from "../types";
 import type { MockEmoji } from "./emojis";
 
 export interface MockAccount {
@@ -66,6 +66,8 @@ export interface MockMessage {
   webhook_id?: string;
   application_id?: string;
   interaction_metadata?: MessageInteractionMetadata;
+  /** Buttons and selects of application messages (mock/apps.ts validates them); absent = none. */
+  components?: MessageComponent[];
   author_name?: string;
   author_avatar?: string | null;
   /** Sticker copies (they outlive the sticker). */

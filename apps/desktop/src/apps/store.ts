@@ -6,9 +6,11 @@ import { appStore } from "../api/store";
 import {
   InteractionType,
   type ApplicationCommand,
+  type ComponentType,
   type ApplicationCommandIndex,
   type ApplicationCommandOptionChoice,
   type InteractionDataOption,
+  type Message,
   type Snowflake,
 } from "../api/types";
 import { commandIndex, invokeInteraction } from "./api";
@@ -24,6 +26,12 @@ export interface CommandRun {
   error: string | null;
 }
 
+/** A component click in flight (or failed) on one message; its components stay disabled while it is pending. */
+export interface ComponentClick {
+  nonce: string;
+  state: "sending" | "waiting" | "failed";
+}
+
 interface IndexEntry {
   data: ApplicationCommandIndex | null;
   loading: boolean;
@@ -35,11 +43,13 @@ interface AppsState {
   runs: Record<string, CommandRun>;
   /** autocomplete request nonce → choices the bot sent */
   choices: Record<string, ApplicationCommandOptionChoice[]>;
+  /** message id → its latest component click (a message has at most one pending) */
+  clicks: Record<Snowflake, ComponentClick>;
   /** Bumped by WEBHOOKS_UPDATE per channel and per guild: webhook lists refetch when it changes. */
   webhookVersion: Record<Snowflake, number>;
 }
 
-export const useAppsStore = create<AppsState>(() => ({ indexes: {}, runs: {}, choices: {}, webhookVersion: {} }));
+export const useAppsStore = create<AppsState>(() => ({ indexes: {}, runs: {}, choices: {}, clicks: {}, webhookVersion: {} }));
 
 const EMPTY_INDEX: ApplicationCommandIndex = { applications: [], application_commands: [] };
 let counter = 0;
@@ -55,9 +65,14 @@ export function bindAppsGateway(): void {
   bound = true;
   const set = useAppsStore.setState;
   const get = useAppsStore.getState;
-  gateway.on("INTERACTION_FAILURE", ({ id }) => {
+  gateway.on("INTERACTION_FAILURE", ({ id, nonce }) => {
     const run = Object.values(get().runs).find(r => r.id === id);
     if (run) set({ runs: { ...get().runs, [run.nonce]: { ...run, state: "failed", error: `${run.appName} did not respond.` } } });
+    if (nonce) failClick(nonce);
+  });
+  // A component click was answered; a type 6 answer shows no message, so this is what ends the pending state.
+  gateway.on("INTERACTION_SUCCESS", ({ nonce }) => {
+    if (nonce) settleClick(nonce);
   });
   gateway.on("MESSAGE_CREATE", message => {
     const id = message.interaction_metadata?.id;
@@ -152,6 +167,50 @@ export function runCommand(channelId: Snowflake, command: ApplicationCommand, op
     error => update({ state: "failed", error: errorText(error) }),
   );
   return nonce;
+}
+
+const settleClick = (nonce: string): void => {
+  const clicks = Object.fromEntries(Object.entries(useAppsStore.getState().clicks).filter(([, c]) => c.nonce !== nonce));
+  useAppsStore.setState({ clicks });
+};
+const failClick = (nonce: string): void => {
+  const clicks = useAppsStore.getState().clicks;
+  const entry = Object.entries(clicks).find(([, c]) => c.nonce === nonce);
+  if (!entry) return;
+  useAppsStore.setState({ clicks: { ...clicks, [entry[0]]: { nonce, state: "failed" } } });
+  setTimeout(() => settleClick(nonce), FAILURE_SHOWN_MS);
+};
+
+/** How long a click may stay pending before it counts as failed (the server reports a silent bot after 3 s; this covers a lost event). */
+const CLICK_TIMEOUT_MS = 15_000;
+const FAILURE_SHOWN_MS = 8_000;
+
+/** Clicks a button, or picks an option of a select; the answer arrives as MESSAGE_UPDATE/MESSAGE_CREATE, then INTERACTION_SUCCESS (or INTERACTION_FAILURE). */
+export function clickComponent(message: Pick<Message, "id" | "channel_id" | "application_id">, customId: string, componentType: ComponentType, values?: string[]): void {
+  const applicationId = message.application_id;
+  const pending = useAppsStore.getState().clicks[message.id];
+  if (!applicationId || pending?.state === "sending" || pending?.state === "waiting") return;
+  bindAppsGateway();
+  const nonce = newNonce();
+  const mark = (state: ComponentClick["state"]) => useAppsStore.setState(s => ({ clicks: { ...s.clicks, [message.id]: { nonce, state } } }));
+  mark("sending");
+  invokeInteraction({
+    type: InteractionType.MessageComponent,
+    application_id: applicationId,
+    channel_id: message.channel_id,
+    message_id: message.id,
+    data: { custom_id: customId, component_type: componentType, ...(values ? { values } : {}) },
+    nonce,
+  }).then(
+    () => {
+      // INTERACTION_SUCCESS or INTERACTION_FAILURE may have beaten this answer.
+      const current = () => useAppsStore.getState().clicks[message.id];
+      if (current()?.nonce !== nonce || current()?.state !== "sending") return;
+      mark("waiting");
+      setTimeout(() => current()?.nonce === nonce && current()?.state === "waiting" && failClick(nonce), CLICK_TIMEOUT_MS);
+    },
+    () => failClick(nonce),
+  );
 }
 
 /** Asks the bot for choices of the focused option; read them with `useAppsStore(s => s.choices[nonce])`. */
