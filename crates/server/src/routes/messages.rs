@@ -699,7 +699,8 @@ async fn create_message(
     let ping_replied = body.allowed_mentions.as_ref().and_then(|allowed| allowed.replied_user).unwrap_or(true);
     let kind = if reference.is_some() { MessageType::Reply } else { MessageType::Default };
     let mentions = if forwarding { Resolved { users: Vec::new(), roles: Vec::new(), everyone: false } } else { mentions };
-    // AutoMod last, so a blocked message ran into no other error first; its alert and timeout wait for the insert.
+    // AutoMod after the request is validated, so a blocked message ran into no other error first; its alert and timeout wait for
+    // the insert. Slowmode deliberately comes after it: a blocked message must not use up the member's slowmode slot.
     let screening = crate::safety::check_send(&state, &access, user_id, &screened, &content).await?;
     check_slowmode(&state, &access, user_id).await?;
     // Last step before the insert: it copies files, and nothing after it may fail without cleaning them up.

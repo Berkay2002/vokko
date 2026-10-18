@@ -245,7 +245,8 @@ async fn spam_lock(guild_id: i64, user_id: i64) -> OwnedMutexGuard<()> {
     lock.lock_owned().await
 }
 
-type AlertSlots = StdMutex<HashMap<(i64, i64), (Instant, u32)>>;
+/// Per (rule, member): when the last alert posted (`None` = the slot is free again) and how many were held back since.
+type AlertSlots = StdMutex<HashMap<(i64, i64), (Option<Instant>, u32)>>;
 static ALERTS_SENT: LazyLock<AlertSlots> = LazyLock::new(Default::default);
 
 /// At most one alert per rule and member per [`ALERT_INTERVAL`] for blocked messages, so a member repeating one cannot flood the
@@ -255,16 +256,16 @@ static ALERTS_SENT: LazyLock<AlertSlots> = LazyLock::new(Default::default);
 fn alert_slot(rule_id: i64, user_id: i64) -> Option<u32> {
     let now = Instant::now();
     let mut sent = ALERTS_SENT.lock().unwrap_or_else(PoisonError::into_inner);
-    sent.retain(|_, (at, _)| now.duration_since(*at) < ALERT_FORGET);
+    sent.retain(|_, (at, _)| at.is_none_or(|at| now.duration_since(at) < ALERT_FORGET));
     if let Some((at, held_back)) = sent.get_mut(&(rule_id, user_id)) {
-        if now.duration_since(*at) < ALERT_INTERVAL {
+        if at.is_some_and(|at| now.duration_since(at) < ALERT_INTERVAL) {
             *held_back += 1;
             return None;
         }
-        *at = now;
+        *at = Some(now);
         return Some(std::mem::take(held_back));
     }
-    sent.insert((rule_id, user_id), (now, 0));
+    sent.insert((rule_id, user_id), (Some(now), 0));
     Some(0)
 }
 
@@ -272,7 +273,7 @@ fn alert_slot(rule_id: i64, user_id: i64) -> Option<u32> {
 fn alert_release(rule_id: i64, user_id: i64, held_back: u32) {
     let mut sent = ALERTS_SENT.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some((at, count)) = sent.get_mut(&(rule_id, user_id)) {
-        *at -= ALERT_INTERVAL;
+        *at = None;
         *count += held_back;
     }
 }
