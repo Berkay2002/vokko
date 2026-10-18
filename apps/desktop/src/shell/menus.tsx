@@ -124,7 +124,7 @@ export function threadNotificationItem(member: ThreadMember | undefined, apply: 
 
 const hideMutedItem = (guild: Guild): MenuItem => ({ id: "hide-muted", label: "Hide Muted Channels", checked: !!local().hideMuted[guild.id], onSelect: () => toggleFlag("hideMuted", guild.id) });
 
-function firstTextChannelId(guildId: Snowflake): Snowflake | undefined {
+export function firstTextChannelId(guildId: Snowflake): Snowflake | undefined {
   const channels = Object.values(appStore.getState().channels).filter(c => c.guild_id === guildId && c.type === ChannelType.GuildText);
   return channels.sort((a, b) => a.position - b.position)[0]?.id;
 }

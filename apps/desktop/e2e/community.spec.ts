@@ -357,6 +357,11 @@ test('the welcome checklist guides the owner of a brand-new server', async ({ pa
   await create.getByRole('button', { name: /For me and my friends/i }).click();
   await create.getByRole('textbox').fill('Fresh start');
   await create.getByRole('button', { name: 'Create' }).click();
+  // Discord's next step: the invite dialog over the new server
+  const invite = page.getByRole('dialog', { name: 'Invite friends to Fresh start' });
+  await expect(invite.locator('#invite-link')).toHaveValue(/\w+$/);
+  await page.keyboard.press('Escape');
+  await expect(invite).toBeHidden();
 
   const checklist = page.getByRole('region', { name: 'Server setup checklist' });
   await expect(checklist).toContainText('Welcome to Fresh start');
@@ -437,6 +442,8 @@ test('the welcome checklist and the suggestions tab pass axe', async ({ page }) 
   await create.getByRole('button', { name: /For me and my friends/i }).click();
   await create.getByRole('textbox').fill('Fresh start');
   await create.getByRole('button', { name: 'Create' }).click();
+  await page.getByRole('dialog', { name: 'Invite friends to Fresh start' }).waitFor();
+  await page.keyboard.press('Escape');
   await expect(page.getByRole('region', { name: 'Server setup checklist' })).toBeVisible();
   await expectClean(page, '.cm-welcome');
   await expectClean(page, '.cm-quicklink');

@@ -74,6 +74,8 @@ test('generate, sync, preview and use a server template', async ({ page }) => {
   await expect(page.getByText('From the template Sam Club 2')).toBeVisible();
   await page.getByLabel('Server name').fill('Second copy');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Invite friends to Second copy' })).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(page.locator('.guild-header-name-button')).toContainText('Second copy');
 });
 
