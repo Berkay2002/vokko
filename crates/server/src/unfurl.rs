@@ -231,7 +231,8 @@ fn decode_entities(text: &str) -> String {
     while let Some(at) = rest.find('&') {
         out.push_str(&rest[..at]);
         rest = &rest[at..];
-        let decoded = rest[1..].find(';').filter(|end| *end <= 10).and_then(|end| {
+        // Look for ';' only in the next 11 bytes, so a run of bare '&' stays linear.
+        let decoded = rest.as_bytes()[1..].iter().take(11).position(|byte| *byte == b';').and_then(|end| {
             let entity = &rest[1..1 + end];
             let character = match entity {
                 "amp" => Some('&'),
@@ -843,5 +844,12 @@ mod tests {
         assert_eq!((theme_color("#fff"), theme_color("#5865f2"), theme_color("blue"), theme_color("#12")), (Some(0xffffff), Some(0x5865f2), None, None));
         assert_eq!(clean_text("   ", 10), None);
         assert_eq!(clean_text("abcdefghij", 5).as_deref(), Some("abcd…"));
+    }
+
+    #[test]
+    fn entities_scan_a_bounded_window() {
+        assert_eq!(decode_entities("&#000000065; &#0000000065;"), "A &#0000000065;");
+        let ampersands = "&".repeat(1 << 20);
+        assert_eq!(decode_entities(&ampersands), ampersands);
     }
 }
