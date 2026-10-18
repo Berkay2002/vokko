@@ -4557,6 +4557,8 @@ pub struct ReadyEvent {
     /// Latest desktop release this server knows of (`version` of the downloads' `latest.json`); absent when none is configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desktop_version: Option<String>,
+    /// Largest attachment this server accepts, in bytes (`VOKKO_MAX_UPLOAD_MB`); the client checks files against it before uploading.
+    pub max_upload_bytes: u64,
 }
 
 /// DESKTOP_VERSION: sent to every connected session when the server sees a new desktop release (same value as READY `desktop_version`).

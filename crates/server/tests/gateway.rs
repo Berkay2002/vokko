@@ -668,3 +668,10 @@ async fn desktop_release_reaches_every_session() {
     assert_eq!(alice.wait_for("DESKTOP_VERSION").await["version"], "0.1.9");
     assert_eq!(bob.wait_for("DESKTOP_VERSION").await["version"], "0.1.9");
 }
+
+#[tokio::test]
+async fn ready_carries_the_upload_limit() {
+    let w = world_with_config(|config| config.max_upload_bytes = 95 * 1024 * 1024).await;
+    let mut alice = Client::connect(&w.address).await;
+    assert_eq!(alice.identify(&w.member).await["max_upload_bytes"], 95 * 1024 * 1024);
+}

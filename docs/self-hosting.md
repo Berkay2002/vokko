@@ -343,6 +343,8 @@ cloudflared tunnel ingress rule https://chat.example.com
 
 and restart `cloudflared`. The `/gateway` websocket works through the tunnel without extra settings. `VOKKO_TRUSTED_PROXIES=private_ranges` lets Caddy take the client from the rightmost untrusted `X-Forwarded-For` entry (the one Cloudflare appends) and forward it to the server, so rate limits see each visitor's address rather than the tunnel's. Keep the web port on loopback: the setting trusts any private peer, and with Docker Desktop or OrbStack every peer looks private. LiveKit Cloud reaches `/internal/livekit/webhook` through the same hostname (see docs/self-hosting-free.md).
 
+Cloudflare refuses request bodies over 100 MB on the Free and Pro plans, so set `VOKKO_MAX_UPLOAD_MB=95`. The client reads the limit from READY and refuses bigger files before uploading them; with the default 500 a 100-500 MB file would upload in full and then fail at the edge.
+
 Desktop installers placed in `deploy/downloads/` are served at `/downloads/<file>` with `Content-Disposition: attachment` and no directory listing; the web client's Download Apps dialog links `Vokko-windows-setup.exe` and `Vokko-mac.dmg`. The server container mounts the same directory read-only to watch `latest.json` (`VOKKO_DESKTOP_LATEST_JSON`).
 
 ## Health check
@@ -351,7 +353,7 @@ Desktop installers placed in `deploy/downloads/` are served at `/downloads/<file
 
 ## Upload limit
 
-Every user gets Discord Nitro's upload limit for free: one file may be up to 500 MiB, or `VOKKO_MAX_UPLOAD_MB` when you set it lower, whichever is lower (values above 500 are lowered to 500). Uploads are streamed to disk and from there to the storage backend (S3 included), so a large file does not sit in memory. A message holds up to 10 files, a user streams at most 3 uploads at once, and each user may have 100 MiB of not-yet-sent uploads, or one file's worth when the per-file limit is larger (those are deleted after an hour). Budget disk accordingly: at 500 MiB that is up to 500 MiB of pending uploads per active user. Change the limit in `deploy/.env` and `docker compose up -d`. A reverse proxy in front must allow at least that much (nginx: `client_max_body_size 501m`; Caddy has no limit by default). The bundled client checks the 500 MiB limit in the composer; a file under that but over a lower server limit is refused by the server (413) and the client says so.
+Every user gets Discord Nitro's upload limit for free: one file may be up to 500 MiB, or `VOKKO_MAX_UPLOAD_MB` when you set it lower, whichever is lower (values above 500 are lowered to 500). Uploads are streamed to disk and from there to the storage backend (S3 included), so a large file does not sit in memory. A message holds up to 10 files, a user streams at most 3 uploads at once, and each user may have 100 MiB of not-yet-sent uploads, or one file's worth when the per-file limit is larger (those are deleted after an hour). Budget disk accordingly: at 500 MiB that is up to 500 MiB of pending uploads per active user. Change the limit in `deploy/.env` and `docker compose up -d`. A reverse proxy in front must allow at least that much (nginx: `client_max_body_size 501m`; Caddy has no limit by default). The bundled client gets the limit in READY (`max_upload_bytes`) and refuses a bigger file in the composer before uploading it; the server answers 413 / 40005 for anything over it.
 
 ## Problem reports
 

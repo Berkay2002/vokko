@@ -1,7 +1,7 @@
 // Composer drafts and upload tray, kept per channel outside React so they survive channel switches.
 import { useCallback, useSyncExternalStore } from 'react';
 import type { Attachment, Snowflake } from '../api/types';
-import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES } from '../api/limits';
+import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, maxUploadBytes } from '../api/limits';
 import { uploadAttachment } from './shell';
 import { uploadErrorMessage } from './util';
 import type { MentionToken } from './mentionText';
@@ -88,8 +88,9 @@ export function onUploadNotice(listener: (n: UploadNotice) => void): () => void 
 const notify = (n: UploadNotice): void => noticeListeners.forEach(l => l(n));
 
 export function addFiles(channelId: Snowflake, files: File[]): void {
-  const tooBig = files.filter(f => f.size > MAX_UPLOAD_BYTES);
-  const fits = files.filter(f => f.size <= MAX_UPLOAD_BYTES);
+  const max = maxUploadBytes();
+  const tooBig = files.filter(f => f.size > max);
+  const fits = files.filter(f => f.size <= max);
   const room = Math.max(0, MAX_ATTACHMENTS - getDraft(channelId).uploads.length);
   if (tooBig.length > 0) notify({ kind: 'too-large', names: tooBig.map(f => f.name) });
   else if (fits.length > room) notify({ kind: 'too-many' });

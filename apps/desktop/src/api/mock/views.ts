@@ -2,6 +2,7 @@
 
 import { ChannelType, MessageReferenceType, MessageType, RelationshipType, isThreadType, type Channel, type GatewayEvents, type GuildMember, type Message, type MessageSnapshot, type Reaction, type ReadState, type ReadyEvent, type Relationship, type ThreadMember } from "../types";
 import { compareIds } from "../snowflake";
+import { MAX_UPLOAD_BYTES } from "../limits";
 import { canView } from "./access";
 import { db, sortedMessages, userOf, type MockAccount, type MockChannel, type MockMessage } from "./db";
 import { flagsField } from "./memberFlags";
@@ -209,5 +210,6 @@ export function readyFor(viewerId: string, sessionId: string): ReadyEvent {
     guild_layout: account.guildLayout ?? { guild_folders: [], guild_positions: [] },
     user_guild_settings: guildSettingsFor(viewerId),
     media: { voice_enabled: true, voice_bitrate_ceiling: 128000, screenshare_qualities: ["720p30"], video_enabled: false },
+    max_upload_bytes: MAX_UPLOAD_BYTES,
   };
 }
