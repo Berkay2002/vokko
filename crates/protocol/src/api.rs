@@ -5918,8 +5918,8 @@ mod tests {
         assert_eq!((update.name(), update.data()), ("SPOTIFY_UPDATE", json!({"channel_id": "201", "state": null})));
         round_trip::<SpotifyUpdate>(json!({"channel_id": "201", "state": spotify}));
         let game = json!({
-            "session_id": "0123456789abcdef", "started_by": "7", "started_at_ms": 9,
-            "game": {"id": "builtin:sketch", "name": "Sketch", "url": "https://x.test/", "icon": "🎨", "min_players": 2, "max_players": 16, "aspect": "4:3"}
+            "session_id": "0123456789abcdef", "started_by": "7", "started_at_ms": 9, "room_url": null,
+            "game": {"id": "builtin:sketch", "name": "Sketch", "kind": "sdk", "url": "https://x.test/", "icon": "🎨", "min_players": 2, "max_players": 16, "aspect": "4:3"}
         });
         round_trip::<GameSession>(game.clone());
         round_trip::<GameUpdate>(json!({"channel_id": "201", "state": game}));
