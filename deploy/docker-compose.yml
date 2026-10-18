@@ -117,6 +117,8 @@ services:
       VOKKO_SITE_ADDRESS: ${VOKKO_SITE_ADDRESS:-:80}
       # `private_ranges` only when another proxy (cloudflared, nginx) is the sole way in; see deploy/Caddyfile.
       VOKKO_TRUSTED_PROXIES: ${VOKKO_TRUSTED_PROXIES:-127.0.0.1/32}
+      # Host of the media LiveKit (the host part of VOKKO_MEDIA_LIVEKIT_URL); the web app's CSP allows only this host for it.
+      VOKKO_MEDIA_LIVEKIT_HOST: ${VOKKO_MEDIA_LIVEKIT_HOST:-live.vokko.example.com}
     ports:
       - "${VOKKO_WEB_HTTP_PORT:-80}:80"
       - "${VOKKO_WEB_HTTPS_PORT:-443}:443"

@@ -1,0 +1,15 @@
+{
+  "bundle": { "active": true, "targets": ["nsis"], "createUpdaterArtifacts": true, "macOS": { "signingIdentity": "-" } },
+  "app": {
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; frame-src 'self' https: https://vokko.example.com http://127.0.0.1:8710 http://localhost:8710; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://i.scdn.co https://*.giphy.com https://media.tenor.com https://*.klipy.com https://vokko.example.com https://images.metahub.space https://live.metahub.space https://episodes.metahub.space https://m.media-amazon.com http://127.0.0.1:8710 http://localhost:8710; media-src 'self' blob: https://vokko.example.com; connect-src 'self' ipc: http://ipc.localhost https://vokko.example.com wss://vokko.example.com https://*.livekit.cloud wss://*.livekit.cloud https://live.vokko.example.com wss://live.vokko.example.com http://127.0.0.1:8710 http://localhost:8710 ws://127.0.0.1:8710 ws://localhost:8710"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_ME: the public key from `npx tauri signer generate` (docs/desktop-release.md)",
+      "endpoints": ["https://vokko.example.com/downloads/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

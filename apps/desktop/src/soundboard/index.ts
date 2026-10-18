@@ -1,4 +1,4 @@
-// Soundboard and entrance sounds (docs/cloud/soundboard.md). main.tsx imports this module once for its side effects (styles,
+// Soundboard and entrance sounds. main.tsx imports this module once for its side effects (styles,
 // gateway wiring); the voice UI and the settings pages import the pieces they mount from here.
 import "./soundboard.css";
 import { wireSoundboard } from "./store";

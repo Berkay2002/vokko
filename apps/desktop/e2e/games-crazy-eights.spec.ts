@@ -5,7 +5,7 @@ import { closeAll, game, seat, shots, type Side } from './gamesTable';
 // mock relay (e2e/gamesTable.ts). They take seats, deal, and play a whole round: whoever has the turn plays their first
 // playable card (a wild names the first suit) or draws. The first time someone goes down to one card they "forget" to
 // call it and the other catches them.
-// VOKKO_SHOTS_DIR=.private/artifacts/games-cards VOKKO_E2E_PORT=1455 npx playwright test e2e/games-crazy-eights.spec.ts
+// VOKKO_SHOTS_DIR=../../.private/artifacts/games-cards VOKKO_E2E_PORT=1455 npx playwright test e2e/games-crazy-eights.spec.ts
 
 const status = (s: Side) => game(s.page).locator('#status');
 const handSize = (s: Side) => game(s.page).locator('#hand .card').count();

@@ -9,7 +9,7 @@ import { join } from 'node:path';
 // Run from apps/desktop: npx playwright test -c e2e/stremio.config.ts
 
 const MOBILE = !!process.env.STREMIO_MOBILE;
-const SHOTS = process.env.STREMIO_SHOTS ?? `/srv/vokko/.claude/artifacts/vokko-stremio-desktop${MOBILE ? '/mobile' : ''}`;
+const SHOTS = process.env.STREMIO_SHOTS ?? `../../.private/artifacts/vokko-stremio-desktop${MOBILE ? '/mobile' : ''}`;
 
 // STREMIO_MOBILE=1 runs only the phone-width test (the last one) to take the mobile screenshots.
 if (MOBILE) test.use({ viewport: { width: 390, height: 844 } });

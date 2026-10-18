@@ -728,7 +728,7 @@ export function guildIconUrl(guild: Pick<Guild, "icon">): string | null {
   return guild.icon ? resolveUrl(guild.icon) : null;
 }
 
-/** "Sam's server" → "Rs" (first letter of each word, max 3), like Discord's acronym. */
+/** "Sam's server" → "Ss" (first letter of each word, max 3), like Discord's acronym. */
 export function guildInitials(name: string): string {
   return name
     .split(/\s+/)

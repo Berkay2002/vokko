@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import path from 'node:path';
 
 // Profile editor screenshots for review (mock seed users only).
-// $env:VOKKO_SHOTS_DIR='.private\artifacts\profile-editor'; npx playwright test -c e2e/profile-editor.config.ts profile-editor.shots.spec.ts
+// $env:VOKKO_SHOTS_DIR='../../.private/artifacts/profile-editor'; npx playwright test -c e2e/profile-editor.config.ts profile-editor.shots.spec.ts
 const dir = process.env.VOKKO_SHOTS_DIR;
 test.skip(!dir, 'set VOKKO_SHOTS_DIR to capture screenshots');
 

@@ -91,7 +91,7 @@ and stops when its messages are painted (median of 5, also with 4x CPU and 20 Mb
 The message list opens at the bottom with `initialScrollTop` instead of `initialTopMostItemIndex`: react-virtuoso waits four frames
 before scrolling to an initial index and then paints one frame of the wrong rows. Jump-to-message still uses the index.
 
-| Metric (home server M4, loaded machine) | Before | After |
+| Metric (M4 desktop, loaded machine) | Before | After |
 |---|---|---|
 | Initial JS | 2,166 kB (633 kB gzip) | 1,511 kB (466 kB gzip) |
 | Cold start to first channel messages | 361 ms | 305 ms |
@@ -113,7 +113,7 @@ A trace of a 250,000 px scroll through 2,450 messages shows no main-thread task 
 - `AppShell`, `Modals`, `VoiceChannelUsers` and `VoiceChannelRow` import `StremioViewerHost`, `WatchModal` and `StremioIcon` by path:
   the feature indexes import CSS, so a barrel import kept the panels in the entry.
 
-home server M4, load average 10-44 during the runs; before = main a640f747, after = this branch; 5 interleaved runs each, medians.
+M4 desktop, load average 10-44 during the runs; before = main a640f747, after = this branch; 5 interleaved runs each, medians.
 
 | Metric | Before | After |
 |---|---|---|
@@ -182,7 +182,7 @@ ResizeObserver callback, not a frame later; the "ResizeObserver loop" errors it 
 the scroller mounts with `.settling` (hidden) until the newest row ends inside the viewport (checked after layout and once per frame,
 at most 10 frames). That hides the one frame of rows placed from estimated heights.
 
-| home server M4, loaded machine; main / branch / main run back to back | main | branch |
+| M4 desktop, loaded machine; main / branch / main run back to back | main | branch |
 |---|---|---|
 | 6 messages, reopen | 5 frames, 69-71 ms | 2 frames, 24 ms |
 | 40 messages, reopen | 5 frames, 72 ms | 3-4 frames, 34-44 ms |
@@ -198,7 +198,7 @@ results in `perf-results/soak-<name>.json` + a 30 s `.cpuprofile` at half time).
 General with four others (speaking rings toggling every 1.5 s), Bob's camera, Alice's screen share watched, call chat open,
 a call-chat message every 3 s, #general every 7 s, typing, presence, mute toggles, a leave/rejoin every 5 min and a stream
 unwatch/rewatch every 10 min. Samples every minute; heap is after a forced GC, CPU and RAM cover every browser process
-(renderer in brackets). Run at below-normal priority on the PC (desktop CPU).
+(renderer in brackets). Run at below-normal priority on the PC (8-core desktop CPU).
 
 | min | heap MB before / after | DOM nodes | listeners | call msgs loaded | CPU % before / after | RAM MB before / after |
 |---|---|---|---|---|---|---|
@@ -228,7 +228,7 @@ through the mock in headless Chromium.
 
 `node scripts/share-bench/run.mjs --lk <livekit-server.exe> --exe <vokko-desktop.exe> --label after` (from apps/desktop; header
 of `scripts/share-bench/run.mjs` lists the options). It shares a "game" window (`load.html`, a full-window WebGL shader that keeps an
-desktop GPU at ~93% 3D) from the real WebView2 runtime, using the app's own `buildScreenShare` plan, through a local livekit-server 1.13.10
+a desktop GPU at ~93% 3D) from the real WebView2 runtime, using the app's own `buildScreenShare` plan, through a local livekit-server 1.13.10
 to a Playwright viewer. It records encoder stats per layer, the viewer's fps, publisher CPU, GPU 3D / VideoEncode, and the game's frame
 times alone and while shared. "Before" = `--codec vp9 --munge 0` (what main picks on Windows).
 
@@ -254,7 +254,7 @@ encoder, and hardware H.264 needs even frame sizes: odd window sizes fall back t
 rather than a black tile; an encoder that fails to open (NVENC sessions all taken, 8 on current GeForce drivers) takes the same
 software fallback in Chromium's RTCVideoEncoder (not tested).
 
-| desktop GPU / desktop CPU, loaded PC (other builds running); window capture | before: VP9 x3 libvpx | after: H.264 High x3 NVENC |
+| desktop GPU / 8-core CPU, loaded PC (other builds running); window capture | before: VP9 x3 libvpx | after: H.264 High x3 NVENC |
 |---|---|---|
 | Encoder, `powerEfficientEncoder` | libvpx, false | NVIDIA H.264 Encoder MFT, true |
 | `qualityLimitationReason` | bandwidth (all runs) | none |

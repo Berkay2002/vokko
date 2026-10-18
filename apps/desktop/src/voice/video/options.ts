@@ -108,7 +108,7 @@ export function codecOrder(resolution: ScreenResolution | CameraResolution, hard
 /**
  * Screen shares put the codecs the system encodes in hardware first at every size, not only the largest: a share is
  * mostly a game, and a software encode of a 60 fps game takes CPU from it (docs/perf.md "Game screen share": VP9 is
- * three libvpx encoders, about 1.4 cores at 1080p60 on a desktop CPU, while NVENC H.264 takes almost none).
+ * three libvpx encoders, about 1.4 cores at 1080p60 on an 8-core desktop CPU, while NVENC H.264 takes almost none).
  */
 export function screenCodecOrder(resolution: ScreenResolution, hardware?: CodecSupport["hardware"]): VideoCodecName[] {
   const order = codecOrder(resolution, hardware);

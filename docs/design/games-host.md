@@ -25,7 +25,7 @@ picked so the build could start; section 12 lists them as open questions.
   The empty-call "Choose Activity" button is a disabled stub (`VoiceChannelPage.tsx:355-359`, also `VoiceConnectionPanel.tsx:266`).
   Extra grid tiles are added at `VoiceChannelPage.tsx:80-81` (`WATCH_TILE_ID`, `STREMIO_TILE_ID`).
 - **CSP today:** dev `apps/desktop/src-tauri/tauri.conf.json:15` has `frame-src 'self' http://127.0.0.1:8710 http://localhost:8710`;
-  the packaged build `apps/desktop/release.production.json:5` has `frame-src https://vokko.example.com http://127.0.0.1:8710
+  the packaged build `apps/desktop/release.production.example.json:5` has `frame-src https://vokko.example.com http://127.0.0.1:8710
   http://localhost:8710` (no `'self'`). The web build sends **no CSP at all**: `deploy/Caddyfile:38-43` serves `/srv` with no header.
 - **"One media activity per channel"** (`docs/design/spotify-bot.md` section 2.2, on main): Stremio and Spotify exclude each other
   with a 409 because each client keeps exactly one media LiveKit `Room`; Watch Together (client side) is allowed next to either.
@@ -266,7 +266,7 @@ Game → host:
 | Part | Owns | Notes |
 |---|---|---|
 | A. Server | `crates/protocol/src/api.rs` (game types, `GuildWithState.games`, ready/call fields), `crates/server/src/voice/games.rs`, `crates/server/src/games.rs`, migration, `routes/mod.rs`, `events.rs`, `gateway.rs` ready, `voice/state.rs` (session map + end on last leave), `audit.rs`, `docs/api.md`, `crates/server/tests/games.rs` | only part that runs cargo |
-| B. Desktop host | `apps/desktop/src/games/**`, Activities entry + tile in `voice/VoiceChannelPage.tsx` (additive), `voice/reducer.ts` + `engine.ts` for GAME_UPDATE/GAME_MESSAGE, server settings nav entry, mock `src/api/mock/games.ts`, CSP in `tauri.conf.json` and `release.production.json`, `e2e/games.spec.ts` | copies the protocol types by hand into `api/types` as the repo does |
+| B. Desktop host | `apps/desktop/src/games/**`, Activities entry + tile in `voice/VoiceChannelPage.tsx` (additive), `voice/reducer.ts` + `engine.ts` for GAME_UPDATE/GAME_MESSAGE, server settings nav entry, mock `src/api/mock/games.ts`, CSP in `tauri.conf.json` and `release.production.example.json`, `e2e/games.spec.ts` | copies the protocol types by hand into `api/types` as the repo does |
 | C. SDK + games | `apps/desktop/public/games/vokko-games.js`, `public/games/sketch/**`, `public/games/mock/**`, `docs/games-sdk.md`, SDK vitest | B and C agree on section 6 only |
 
 A and C start together; B starts with them against section 5/6 and the mock. Deploy needs: release CSP rebuild, Caddyfile CSP

@@ -2,7 +2,7 @@
   "name": "vokko-ai-bridge",
   "version": "0.1.0",
   "private": true,
-  "license": "Apache-2.0",
+  "license": "AGPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "start": "bun install --no-summary && bun bridge.ts",

@@ -2,7 +2,7 @@
 # Back up a Vokko server: a pg_dump (custom format) plus the server data dir (uploads), verified and rotated.
 # Docs: docs/backups.md. Runs on macOS bash 3.2.
 #
-#   VOKKO_BACKUP_DIR=<backup dir> tools/backup.sh
+#   VOKKO_BACKUP_DIR=/srv/backups/vokko tools/backup.sh
 #
 # Environment:
 #   VOKKO_BACKUP_DIR           required: where backups go (daily/ and weekly/ under it)

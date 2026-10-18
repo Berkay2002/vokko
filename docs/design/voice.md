@@ -1,12 +1,12 @@
 # Voice, video, screenshare and stage (design)
 
 Status: proposal (design only, no product code). Decided before this doc: media goes through a self-hosted **LiveKit** SFU,
-the Rust server (`vokko-server`) stays the authority for every permission, and the target box is small (a home home server,
+the Rust server (`vokko-server`) stays the authority for every permission, and the target box is small (a small home server,
 1-2 cores / 1-2 GB RAM budget for Vokko itself), so every default is modest and every ceiling is an instance setting.
 
 Inputs: `docs/architecture.md`, `docs/api.md`, `apps/desktop/src/api/types.ts`, `docs/parity.md`, `docs/parity-inventory.md`
-(DM-001/008, GLD-007/015, SET-004/005, DESK), `docs/research/discord-client-facts.md` (gateway ops 4/13/18-22, Q1b.15
-VOICE_STATE_UPDATE, permission bits, channel keys), `docs/research/discord-nitro-perks.md` (N6, N13, N17, N24, boost table).
+(DM-001/008, GLD-007/015, SET-004/005, DESK), the maintainers' private Discord client notes (gateway ops 4/13/18-22, Q1b.15
+VOICE_STATE_UPDATE, permission bits, channel keys), the private Discord Nitro perks notes (N6, N13, N17, N24, boost table).
 "Discord does X" claims below come from those files; anything else is marked **proposal** or **verify**.
 
 ## 1. Architecture
@@ -463,10 +463,10 @@ shared via a volume). The browser client must be served over HTTPS (getUserMedia
 setups work only on localhost.
 
 Home-network caveats: CGNAT (no public IPv4) breaks inbound media; the fix is a small VPS running LiveKit (or only its TURN)
-instead of the home server. LAN clients reaching the public IP need NAT hairpinning; LiveKit also offers host candidates, but
+instead of the home machine. LAN clients reaching the public IP need NAT hairpinning; LiveKit also offers host candidates, but
 **verify** with a LAN client.
 
-### 5.2 home server note
+### 5.2 macOS host note
 Docker Desktop on macOS runs a Linux VM with userspace UDP forwarding, which adds latency and CPU for media. Recommended on
 macOS: run `livekit-server` natively (Homebrew `livekit` formula or the release binary under launchd) and keep vokko-server +
 Postgres in Docker; on a Linux host use the compose snippet below with `network_mode: host`.
@@ -553,7 +553,7 @@ Playwright). LiveKit in tests: unit/integration tests use a fake RoomService + s
 e2e tests start `livekit-server --dev` and run two Chromium contexts with `--use-fake-device-for-media-stream
 --use-fake-ui-for-media-stream` (fake mic = a beep WAV via `--use-file-for-fake-audio-capture`).
 
-**V0 spike (no product merge).** LiveKit on the home server, token minted by a throwaway script, join from: Chrome, Firefox,
+**V0 spike (no product merge).** LiveKit on the dev host, token minted by a throwaway script, join from: Chrome, Firefox,
 Safari, Tauri on Windows, macOS, Linux. Record per runtime: mic, camera, getDisplayMedia, screen audio, setSinkId, global
 hotkey option. Run `lk load-test` for the §5.5 rows. Output: a filled compatibility table appended to this doc, pinned
 LiveKit version. Acceptance: the table exists; the decision on Linux webview vs browser fallback is made.
@@ -616,7 +616,7 @@ VOICE_CHANNEL_EFFECT_SEND only to the channel's connected users.
 
 ## 8. Open questions for the user
 
-1. Does the home server have a public IPv4 (not CGNAT), and can you forward 443/TCP, 7881/TCP, 7882/UDP, 3478/UDP? What is
+1. Does the host have a public IPv4 (not CGNAT), and can you forward 443/TCP, 7881/TCP, 7882/UDP, 3478/UDP? What is
    the upload bandwidth? (This sets `limit.bytes_per_sec` and whether 1080p60 is allowed instance-wide.)
 2. LiveKit natively on macOS (recommended) or in Docker Desktop?
 3. Voice bitrate: the nitro-perks proposal says 128 kbps default / 384 kbps ceiling; this doc proposes 64 kbps per new channel

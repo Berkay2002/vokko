@@ -10,8 +10,8 @@ import { channelByName, guildByName, openGuild, openSession, type Session } from
 //   1. A beep file for the fake microphone (1 kHz, 0.5 s on / 0.5 s off, 30 s, 48 kHz mono), e.g.
 //        ffmpeg -f lavfi -i "sine=frequency=1000:sample_rate=48000:duration=30,volume='if(lt(mod(t,1),0.5),1,0)':eval=frame" -ac 1 e2e/beep.wav
 //      and point VOKKO_BEEP_WAV at it (absolute path).
-//   2. livekit-server --dev --bind 127.0.0.1        (dev keys: devkey / secret, ws://127.0.0.1:7880; the brief's
-//      livekit.yaml sets audio.update_interval 200 ms, --dev uses LiveKit's default which is still well under the timeouts below)
+//   2. livekit-server --dev --bind 127.0.0.1        (dev keys: devkey / secret, ws://127.0.0.1:7880; a LiveKit config file with
+//      audio.update_interval 200 ms; --dev uses LiveKit's default which is still well under the timeouts below)
 //   3. vokko-server with VOKKO_LIVEKIT_URL=ws://127.0.0.1:7880 VOKKO_LIVEKIT_API_KEY=devkey VOKKO_LIVEKIT_API_SECRET=secret
 //      and its webhook URL configured in LiveKit (http://127.0.0.1:8711/internal/livekit/webhook), seeded (`vokko-server seed`).
 //   4. From apps/desktop: VOKKO_REAL=1 VOKKO_BEEP_WAV=$PWD/e2e/beep.wav npx playwright test e2e/real.voice.spec.ts

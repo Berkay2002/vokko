@@ -48,7 +48,7 @@ interface SectionDef {
   keywords?: string[];
 }
 
-// Order and grouping follow Discord's User Settings sidebar (research/discord-ui-inventory.md S1, settings-modal reference).
+// Order and grouping follow Discord's User Settings sidebar (the settings-modal reference).
 // The Billing group (Nitro, Server Boost, Subscriptions, Gift Inventory, Billing) and the desktop-only game pages are left out on purpose.
 const ALL_SECTIONS: SectionDef[] = [
   { id: "account", label: "My Account", icon: UserIcon, group: "", outline: ["Account Info", "Password & Security", "Sign-in Methods"], keywords: ["username", "display name", "email", "phone", "password", "security", "devices", "disable", "delete"] },

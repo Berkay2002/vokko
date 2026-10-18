@@ -1,4 +1,4 @@
-// GIFs, stickers, forward, bookmarks and reminders (docs/cloud/media-actions.md). main.tsx imports this module once for its side
+// GIFs, stickers, forward, bookmarks and reminders. main.tsx imports this module once for its side
 // effects (styles, gateway wiring); the shell and the chat area import the pieces they mount from here.
 import './media.css';
 import { wireMedia } from './store';

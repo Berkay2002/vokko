@@ -3,6 +3,7 @@ name = "vokko-loadtest"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "Load generator for vokko-server: REST + gateway scenarios with latency percentiles"
 
 [lints]

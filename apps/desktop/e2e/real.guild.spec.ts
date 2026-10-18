@@ -54,7 +54,7 @@ test('a message with a mention is delivered live and highlights for the mentione
   await openGuild(carol.page, "Sam's server");
   await openChannel(carol.page, 'general');
   await composer(sam.page).click();
-  await composer(sam.page).fill('hey @carol0r');
+  await composer(sam.page).fill('hey @caro');
   await expect(sam.page.locator('.chat-autocomplete')).toBeVisible();
   await composer(sam.page).press('Tab');
   await composer(sam.page).pressSequentially(` standup ${RUN}`);

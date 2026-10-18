@@ -881,7 +881,7 @@ async fn a_join_cannot_slip_in_while_its_channel_is_deleted() {
     assert!(w.app.state.voice.all().is_empty());
 }
 
-// ---- Voice follow-ups (docs/cloud/voice-followups.md, part A) ----
+// ---- Voice follow-ups ----
 
 impl World {
     async fn channel_overwrite(&self, channel: &str, target: &str, kind: u8, deny: u64) {

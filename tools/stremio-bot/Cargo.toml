@@ -3,6 +3,7 @@ name = "stremio-bot"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+license.workspace = true
 description = "Stremio bot: publishes an ffmpeg-decoded stream into a LiveKit room (internal HTTP API for vokko-server)"
 
 [lints]
