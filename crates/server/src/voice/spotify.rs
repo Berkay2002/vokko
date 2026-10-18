@@ -645,8 +645,22 @@ async fn control(State(state): State<AppState>, actor: Actor, Path(id): Path<Str
     let active = active(&state)?;
     let ctx = in_call(&state, user_id, &id).await?;
     let channel_id = ctx.channel_id;
-    let op = one_op(body)?;
+    let mut op = one_op(body)?;
     limit(&state, "watch-together", user_id, CONTROL_BURST, CONTROL_PER_SECOND)?;
+    // A list is cut to what the caller may queue before Spotify is asked for it (a controller's is not cut); the checks under the
+    // session's lock below stay the authority.
+    let mut cut = 0;
+    if let Op::Add { picked: Picked::Tracks(ids), next } = &mut op
+        && let Some(session) = lock(&state.spotify.session).as_ref().filter(|session| session.channel_id == channel_id)
+    {
+        if *next && !control::controls(&ctx, session.control.host_id) {
+            return Err(ApiErr::missing_permissions());
+        }
+        let mine = session.queue.entries.iter().filter(|entry| entry.added_by.user_id == user_id).count();
+        let allowed = control::quota(&ctx, &session.control, mine, SPOTIFY_QUEUE_PER_USER)?;
+        cut = ids.len().saturating_sub(allowed);
+        ids.truncate(allowed);
+    }
     // The tracks of a queue_add are found before the session is locked.
     let added = match &op {
         Op::Add { picked, .. } => {
@@ -711,7 +725,7 @@ async fn control(State(state): State<AppState>, actor: Actor, Path(id): Path<Str
                 let mut tracks = added.unwrap_or_default();
                 let over_quota = tracks.len().saturating_sub(allowed);
                 tracks.truncate(allowed);
-                left_out = session.queue.add(tracks, actor, next) + over_quota;
+                left_out = session.queue.add(tracks, actor, next) + over_quota + cut;
                 if session.queue.current.is_none() && session.queue.advance(Leave::Skipped).is_some() {
                     session.new_track(&state, now);
                 } else {

@@ -160,7 +160,7 @@ Long sessions fill up the context: Claude Code compacts automatically, or run `/
 ### Music and movies
 
 Claude can drive Vokko's Spotify and Stremio bots from chat, in the call the asking member is in (or the DM call, in a DM):
-`spotify_search`, `spotify_details`, `spotify_now`, `spotify_play` (now, queue or next), `spotify_control` (pause, resume,
+`spotify_search`, `spotify_details`, `spotify_now`, `spotify_play` (now, queue or next; `uris` for up to 50 tracks in one call), `spotify_control` (pause, resume,
 skip, previous, shuffle, loop, seek, queue edits, stop) and `stremio_search`, `stremio_details` (seasons and episodes),
 `stremio_streams`, `stremio_play` (the first ranked playable stream unless asked otherwise; a series needs season and
 episode; queue and resume work), `stremio_control`, `stremio_now`, `stremio_continue`.

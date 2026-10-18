@@ -1668,8 +1668,12 @@ async fn a_plain_members_list_is_cut_at_the_quota() {
     assert_eq!(w.app.put_json(&format!("/channels/{}/permissions/{}", w.voice, w.guild), &w.owner, deny).await.0, StatusCode::NO_CONTENT);
 
     let uris: Vec<_> = (2..17).map(track_uri).collect();
+    let before = w.mock.catalog_calls();
+    let (status, _) = w.patch(&w.carl, json!({"queue_add": {"uris": uris, "next": true}})).await;
+    assert_eq!((status, w.mock.catalog_calls()), (StatusCode::FORBIDDEN, before), "front of the queue is a controller's, refused before any lookup");
     let (status, state) = w.patch(&w.carl, json!({"queue_add": {"uris": uris}})).await;
     assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(w.mock.catalog_calls() - before, 10, "only the ten tracks carl may queue are looked up");
     let by_carl = state["queue"].as_array().expect("queue").iter().filter(|entry| entry["added_by"] == w.carl_id.as_str()).count();
     assert_eq!((by_carl, state["left_out"].as_u64()), (10, Some(5)), "{state}");
     let (status, full) = w.patch(&w.carl, json!({"queue_add": {"uris": [track_uri(30)]}})).await;
