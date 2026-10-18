@@ -663,6 +663,54 @@ async fn threads_have_no_overwrites_and_guild_search_follows_thread_visibility()
 }
 
 #[tokio::test]
+async fn search_returns_the_threads_behind_its_hits_and_only_those_the_caller_may_read() {
+    let w = world().await;
+    let original = w.say(&w.general, &w.owner, "starter").await;
+    let public = id(&w.thread_from(&w.general, &id(&original), &w.alice, "open talk").await);
+    let (_, closed) = w.thread(&w.general, &w.alice, json!({"name": "closed", "type": 12})).await;
+    let closed = id(&closed);
+    w.say(&w.general, &w.owner, "needle in the channel").await;
+    w.say(&public, &w.alice, "needle in a public thread").await;
+    w.say(&closed, &w.alice, "needle in a private thread").await;
+    assert_eq!(w.patch(&public, &w.alice, json!({"archived": true})).await.0, StatusCode::OK);
+
+    let search = |user: &support_threads::Member| {
+        let path = format!("/guilds/{}/messages/search?content=needle", w.guild);
+        let token = user.token.clone();
+        let w = &w;
+        async move { w.app.get(&path, &token).await.1 }
+    };
+    let thread_ids = |result: &Value| -> Vec<String> { result["threads"].as_array().map(|list| list.iter().map(id).collect()).unwrap_or_default() };
+
+    // carol: the channel hit and the archived public thread, no private thread and no hit of it
+    let carol = search(&w.carol).await;
+    assert_eq!(carol["total_results"], 2);
+    assert_eq!(thread_ids(&carol), vec![public.clone()]);
+    assert_eq!(carol["threads"][0]["name"], "open talk");
+    assert_eq!(carol["threads"][0]["thread_metadata"]["archived"], true);
+    assert!(carol["members"].as_array().is_none_or(Vec::is_empty), "carol joined nothing");
+
+    // alice is in the private thread: both threads come back with her memberships
+    let alice = search(&w.alice).await;
+    assert_eq!(alice["total_results"], 3);
+    let mut found = thread_ids(&alice);
+    found.sort();
+    let mut expected = vec![public.clone(), closed.clone()];
+    expected.sort();
+    assert_eq!(found, expected);
+    let member_threads: Vec<String> = alice["members"].as_array().expect("members").iter().map(|m| m["id"].as_str().expect("thread id").to_owned()).collect();
+    assert!(member_threads.contains(&closed), "{alice}");
+
+    // MANAGE_THREADS sees the private thread without being in it
+    assert_eq!(thread_ids(&search(&w.owner).await).len(), 2);
+
+    // only the threads of the returned page: a channel hit alone carries none
+    let (_, page) = w.app.get(&format!("/guilds/{}/messages/search?content=channel", w.guild), &w.carol.token).await;
+    assert_eq!(page["total_results"], 1);
+    assert!(page.get("threads").is_none(), "{page}");
+}
+
+#[tokio::test]
 async fn an_invalid_message_does_not_reopen_an_archived_thread() {
     let w = world().await;
     let mut carol = Client::connect(&w.address, &w.carol.token).await;

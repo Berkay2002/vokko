@@ -1414,6 +1414,8 @@ export interface MessageSearchQuery {
 export interface MessageSearchResponse {
   total_results: number; // all matches the caller may read, before offset/limit
   messages: Message[][]; // each hit is a one-element array (Discord's shape)
+  threads?: Channel[]; // the threads and forum posts the hits belong to (absent when no hit is in one)
+  members?: ThreadMember[]; // the caller's memberships among `threads`
 }
 
 // ---- Members page: POST /guilds/{id}/members-search (Discord's member-safety search) ----

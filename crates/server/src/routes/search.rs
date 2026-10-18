@@ -14,7 +14,8 @@ use crate::auth::AuthUser;
 use crate::error::{ApiErr, ApiResult};
 use crate::extract::parse_id;
 use crate::state::AppState;
-use crate::store::{self, MESSAGE_SELECT, MessageRow};
+use crate::store::{self, CHANNEL_COLS, ChannelRow, MESSAGE_SELECT, MessageRow};
+use crate::threads;
 
 const MAX_LIMIT: i64 = 25;
 const MAX_OFFSET: i64 = 9975;
@@ -196,7 +197,7 @@ fn push_filters(builder: &mut QueryBuilder<'_, Postgres>, params: &Params, chann
 
 async fn run(state: &AppState, user_id: i64, params: &Params, channels: Vec<i64>) -> ApiResult<Json<MessageSearchResponse>> {
     if channels.is_empty() {
-        return Ok(Json(MessageSearchResponse { total_results: 0, messages: Vec::new() }));
+        return Ok(Json(MessageSearchResponse { total_results: 0, messages: Vec::new(), threads: Vec::new(), members: Vec::new() }));
     }
     let mut count = QueryBuilder::<Postgres>::new("SELECT count(*) FROM messages m");
     push_filters(&mut count, params, &channels);
@@ -211,8 +212,17 @@ async fn run(state: &AppState, user_id: i64, params: &Params, channels: Vec<i64>
     }
     page.push("m.id ").push(direction).push(" LIMIT ").push_bind(params.limit).push(" OFFSET ").push_bind(params.offset);
     let rows: Vec<MessageRow> = page.build_query_as().fetch_all(&state.db).await?;
+    // The hits already passed the readable-channel filter, so their threads need no second permission check.
+    let mut thread_ids: Vec<i64> = rows.iter().map(|row| row.channel_id).collect();
+    thread_ids.sort_unstable();
+    thread_ids.dedup();
+    let thread_rows: Vec<ChannelRow> = sqlx::query_as(&format!("SELECT {CHANNEL_COLS} FROM channels WHERE id = ANY($1) AND kind IN (10, 11, 12)"))
+        .bind(&thread_ids)
+        .fetch_all(&state.db)
+        .await?;
+    let found = threads::thread_list(state, user_id, thread_rows, false).await?;
     let messages = store::load_messages(state, rows, Some(user_id)).await?.into_iter().map(|view| vec![view.message]).collect();
-    Ok(Json(MessageSearchResponse { total_results: total.max(0) as u64, messages }))
+    Ok(Json(MessageSearchResponse { total_results: total.max(0) as u64, messages, threads: found.threads, members: found.members }))
 }
 
 /// Channels of the guild where `user_id` has VIEW_CHANNEL and READ_MESSAGE_HISTORY after overwrites and timeout, plus the threads

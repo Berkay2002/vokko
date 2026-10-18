@@ -43,6 +43,7 @@ function Panel({ channel }: { channel: Channel }) {
   const [sortAnchor, setSortAnchor] = useState<HTMLElement | null>(null);
   const [sortOpen, setSortOpen] = useState(false);
   const channels = useStore(s => s.channels);
+  const threads = useStore(s => s.threads);
   const groups = useMemo(() => groupByChannel(hits), [hits]);
   useBackClose(true, () => searchActions.closePanel());
 
@@ -64,6 +65,9 @@ function Panel({ channel }: { channel: Channel }) {
   useEffect(() => { body.current?.scrollTo({ top: 0 }); }, [page, sort, submitted]);
 
   const labelOf = (channelId: string): { icon: boolean; name: string; category: string | null } => {
+    const thread = threads[channelId];
+    // a thread or forum post: its title, with the channel it sits in where the category goes
+    if (thread) return { icon: true, name: thread.name ?? 'thread', category: (thread.parent_id && channels[thread.parent_id]?.name) || null };
     const c = channels[channelId];
     if (!c) return { icon: false, name: 'Unknown channel', category: null };
     if (c.guild_id) return { icon: true, name: c.name ?? 'channel', category: (c.parent_id && channels[c.parent_id]?.name) || null };
