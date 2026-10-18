@@ -5,7 +5,7 @@ import { closeCommunityModal, openEvents, useCommunityModal } from "./communityM
 import { InterestedButton, JoinEventButton, useEventPlace } from "./EventCard";
 import { errorText } from "./errors";
 import { describeRecurrence, formatEventRange, statusLabel } from "./eventUtil";
-import { Avatar, Modal, Perm, appStore, displayName, request, resolveUrl, useChatLocale, useStore, usePermissions } from "./shell";
+import { Avatar, Modal, Perm, appStore, displayName, isStageModeratorBits, request, resolveUrl, useChatLocale, useStore, usePermissions } from "./shell";
 import { deleteEvent, editEvent, useCommunity } from "./store";
 
 const AVATARS_SHOWN = 12;
@@ -88,6 +88,8 @@ export function EventDetail({ guildId, eventId, from }: { guildId: Snowflake; ev
   const { event, missing, set } = useEvent(guildId, eventId);
   const locale = useChatLocale();
   const { can } = usePermissions(guildId);
+  // Starting a stage event opens its stage, which the server only allows for stage moderators (ending the event takes the event permissions).
+  const { bits: stageBits } = usePermissions(guildId, event?.entity_type === ScheduledEventEntityType.StageInstance ? event.channel_id : null);
   const meId = useStore(s => s.me?.id);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -108,6 +110,7 @@ export function EventDetail({ guildId, eventId, from }: { guildId: Snowflake; ev
   const manage = can(Perm.MANAGE_EVENTS) || (can(Perm.CREATE_EVENTS) && event.creator_id === meId);
   const finished = event.status === ScheduledEventStatus.Completed || event.status === ScheduledEventStatus.Canceled;
   const live = event.status === ScheduledEventStatus.Active;
+  const needsStageModerator = event.entity_type === ScheduledEventEntityType.StageInstance && !!event.channel_id && !isStageModeratorBits(stageBits);
   const cover = event.image ? resolveUrl(event.image) : null;
   const rule = describeRecurrence(event.recurrence_rule);
 
@@ -181,10 +184,13 @@ export function EventDetail({ guildId, eventId, from }: { guildId: Snowflake; ev
           <InterestedButton event={event} onError={setError} />
           {manage && !finished && (
             <>
-              {event.status === ScheduledEventStatus.Scheduled && (
+              {event.status === ScheduledEventStatus.Scheduled && !needsStageModerator && (
                 <button type="button" className="btn btn-sm btn-success" disabled={busy} onClick={() => setStatus(ScheduledEventStatus.Active)}>
                   Start Event
                 </button>
+              )}
+              {event.status === ScheduledEventStatus.Scheduled && needsStageModerator && (
+                <span className="cm-muted">Starting a stage event needs Manage Channels, Mute Members and Move Members on the stage.</span>
               )}
               {live && (
                 <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={() => setStatus(ScheduledEventStatus.Completed)}>

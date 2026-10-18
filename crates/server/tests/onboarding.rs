@@ -485,8 +485,10 @@ async fn members_who_joined_after_the_rules_cannot_talk_or_react_until_they_acce
     // onboarding on without rules: a member who joins now is not held
     let (status, config) = w.app.send(axum::http::Method::PUT, &w.path("/onboarding"), Some(&w.owner), Some(json!({"enabled": true}))).await;
     assert_eq!(status, StatusCode::OK, "{config}");
-    let (before_rules, _) = w.member("before").await;
-    assert_eq!(send(before_rules.clone(), "hi").await.0, StatusCode::OK);
+    let (before_rules, before_id) = w.member("before").await;
+    let (status, hi) = send(before_rules.clone(), "hi").await;
+    assert_eq!(status, StatusCode::OK, "{hi}");
+    let hi_id = hi["id"].as_str().expect("message id").to_owned();
 
     // the rules appear: earlier members, started or not, keep talking
     let with_rules = json!({"enabled": true, "rules": {"description": "Be kind", "items": ["No spam"]}});
@@ -497,6 +499,20 @@ async fn members_who_joined_after_the_rules_cannot_talk_or_react_until_they_acce
     // saving the rules again does not move the date
     assert_eq!(w.app.send(axum::http::Method::PUT, &w.path("/onboarding"), Some(&w.owner), Some(with_rules)).await.0, StatusCode::OK);
     assert_eq!(send(before_rules.clone(), "and again").await.0, StatusCode::OK);
+
+    // a member who leaves and joins again after the rules is held too, and cannot turn old messages into new content
+    let edit = |token: String, text: &'static str| {
+        let (app, path) = (&w.app, format!("/channels/{}/messages/{hi_id}", w.general));
+        async move { app.patch(&path, &token, json!({"content": text})).await }
+    };
+    assert_eq!(edit(before_rules.clone(), "edited").await.0, StatusCode::OK);
+    sqlx::query("UPDATE guild_members SET joined_at = now() WHERE user_id = $1")
+        .bind(before_id.parse::<i64>().expect("id"))
+        .execute(&w.app.state.db)
+        .await
+        .expect("rejoin");
+    let (status, error) = edit(before_rules.clone(), "sneaky").await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(150010)), "{error}");
 
     // a member who joins now is held until they accept
     let (late, _) = w.member("late").await;

@@ -104,21 +104,23 @@ async fn create(
     require_moderator(&access)?;
     let topic = clean_topic(&body.topic)?;
     let guild_id = access.channel.guild_id.ok_or_else(ApiErr::unknown_channel)?;
-    let instance = open_stage(&state, guild_id, access.channel.id, &topic).await?.ok_or_else(|| ApiErr::conflict(150006, "Stage already open"))?;
+    let instance = open_stage(&state, guild_id, access.channel.id, &topic, None).await?.ok_or_else(|| ApiErr::conflict(150006, "Stage already open"))?;
     Ok(Json(instance))
 }
 
-/// Opens a stage on `channel_id` and announces it; `None` when one is already live there. The topic is already cleaned.
-pub async fn open_stage(state: &AppState, guild_id: i64, channel_id: i64, topic: &str) -> ApiResult<Option<StageInstance>> {
+/// Opens a stage on `channel_id` and announces it; `None` when one is already live there. The topic is already cleaned. `event_id` is the
+/// scheduled event that starts it, see [`end_stage_of_event`].
+pub async fn open_stage(state: &AppState, guild_id: i64, channel_id: i64, topic: &str, event_id: Option<i64>) -> ApiResult<Option<StageInstance>> {
     let row: Option<Row> = sqlx::query_as(
-        "INSERT INTO stage_instances (id, guild_id, channel_id, topic, privacy_level) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (channel_id) DO NOTHING \
-         RETURNING id, guild_id, channel_id, topic, privacy_level",
+        "INSERT INTO stage_instances (id, guild_id, channel_id, topic, privacy_level, scheduled_event_id) VALUES ($1, $2, $3, $4, $5, $6) \
+         ON CONFLICT (channel_id) DO NOTHING RETURNING id, guild_id, channel_id, topic, privacy_level",
     )
     .bind(state.ids.next())
     .bind(guild_id)
     .bind(channel_id)
     .bind(topic)
     .bind(i16::from(StagePrivacyLevel::GuildOnly.as_u8()))
+    .bind(event_id)
     .fetch_optional(&state.db)
     .await?;
     let Some(instance) = row.map(to_api) else { return Ok(None) };
@@ -179,6 +181,19 @@ pub async fn end_stage(state: &AppState, channel_id: i64) -> ApiResult<Option<St
         .await;
     }
     Ok(Some(instance))
+}
+
+/// Ends the live stage of `channel_id` only when scheduled event `event_id` opened it; a stage opened by hand stays.
+pub async fn end_stage_of_event(state: &AppState, channel_id: i64, event_id: i64) -> ApiResult<Option<StageInstance>> {
+    let linked: Option<(i64,)> = sqlx::query_as("SELECT id FROM stage_instances WHERE channel_id = $1 AND scheduled_event_id = $2")
+        .bind(channel_id)
+        .bind(event_id)
+        .fetch_optional(&state.db)
+        .await?;
+    if linked.is_none() {
+        return Ok(None);
+    }
+    end_stage(state, channel_id).await
 }
 
 /// Called after someone left `channel_id`: with no stage moderator left inside, a live stage ends.

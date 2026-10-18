@@ -11,6 +11,8 @@ import { ApiRequestError } from "../errors";
 import { DEFAULT_EVERYONE, Perm } from "../permissions";
 import { ChannelType, MemberFlags, OnboardingMode, RelationshipType, type FriendSuggestionsResponse, type GuildMember, type GuildOnboarding, type GuildScheduledEvent, type OnboardingCompletion } from "../types";
 import { db } from "./db";
+import { onboardingStartedFor } from "./community";
+import { stageInstances } from "./voice";
 import { addChannel, createAccount, createGuildRecord } from "./ops";
 import { handleRoute } from "./routes";
 import { setRelationship } from "./views";
@@ -239,6 +241,43 @@ describe("events and channel visibility", () => {
   });
 });
 
+describe("stage events", () => {
+  it("need a stage moderator to start, but any event manager can complete; completing ends only the stage the event opened", () => {
+    const stage = addChannel(guildId, { name: "town-hall", type: 13 });
+    const role = { id: "9400", name: "events", color: 0, hoist: false, position: 1, permissions: Perm.MANAGE_EVENTS.toString(), mentionable: false };
+    db.guilds.get(guildId)!.guild.roles.push(role);
+    db.guilds.get(guildId)!.members.get(ids.alice!)!.roles = [role.id];
+    const create = (name: string) =>
+      call<GuildScheduledEvent>("owner", "POST", `/guilds/${guildId}/scheduled-events`, { name, entity_type: 1, channel_id: stage.id, scheduled_start_time: inHours(3) });
+    const setStatus = (who: string, event: GuildScheduledEvent, status: number) => () => call<GuildScheduledEvent>(who, "PATCH", `/guilds/${guildId}/scheduled-events/${event.id}`, { status });
+
+    const first = create("Town hall");
+    expect(errorOf(setStatus("alice", first, 2))).toEqual({ status: 403, code: 50013 });
+    expect(stageInstances.has(stage.id)).toBe(false);
+    setStatus("owner", first, 2)();
+    expect(stageInstances.get(stage.id)?.topic).toBe("Town hall");
+    setStatus("alice", first, 3)();
+    expect(stageInstances.has(stage.id)).toBe(true);
+    setStatus("owner", create("Second"), 2)();
+    call("owner", "DELETE", `/stage-instances/${stage.id}`);
+
+    // a stage a moderator opened by hand is not the event's to end
+    call("owner", "POST", "/stage-instances", { channel_id: stage.id, topic: "By hand" });
+    const third = create("Third");
+    setStatus("owner", third, 2)();
+    setStatus("owner", third, 3)();
+    expect(stageInstances.get(stage.id)?.topic).toBe("By hand");
+
+    // an event that opened its stage ends it when a moderator completes it
+    call("owner", "DELETE", `/stage-instances/${stage.id}`);
+    const fourth = create("Fourth");
+    setStatus("owner", fourth, 2)();
+    expect(stageInstances.has(stage.id)).toBe(true);
+    setStatus("owner", fourth, 3)();
+    expect(stageInstances.has(stage.id)).toBe(false);
+  });
+});
+
 describe("onboarding", () => {
   const configure = (extra: Record<string, unknown> = {}) => {
     const gamer = { id: "9201", name: "gamer", color: 0, hoist: false, position: 1, permissions: "0", mentionable: false };
@@ -342,6 +381,13 @@ describe("onboarding", () => {
     expect(pending("carl")).toBe(false);
     send("carl")();
     react("carl")();
+
+    // a member who leaves and joins again after the rules is held, and cannot rewrite old messages either
+    const old = call<{ id: string }>("bob", "POST", `/channels/${generalId}/messages`, { content: "old" });
+    const bob = db.guilds.get(guildId)!.members.get(ids.bob!)!;
+    bob.joined_at = new Date(Date.now() + 1000).toISOString();
+    onboardingStartedFor(guildId, ids.bob!);
+    expect(errorOf(() => call("bob", "PATCH", `/channels/${generalId}/messages/${old.id}`, { content: "new" })).code).toBe(150010);
 
     // clearing the rules lifts the hold for members who have not accepted
     join("dana");

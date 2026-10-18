@@ -13,4 +13,4 @@ export { OnboardingSettings } from "./OnboardingSettings";
 export { WelcomeChecklist } from "./WelcomeChecklist";
 export { openCreateEvent, openEvents } from "./communityModals";
 export { resumeOnboarding } from "./OnboardingFlow";
-export { useRulesPending } from "./rulesGate";
+export { RULES_NOT_ACCEPTED, noteRulesRefused, useRulesPending } from "./rulesGate";

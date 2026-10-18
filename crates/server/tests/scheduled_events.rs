@@ -867,4 +867,25 @@ async fn a_stage_event_opens_the_stage_when_it_starts_and_ends_it_when_it_comple
     let (status, done) = w.app.patch(&event_path(&w, &event, ""), &w.owner, json!({"status": 3})).await;
     assert_eq!((status, done["status"].clone()), (StatusCode::OK, json!(3)), "{done}");
     assert_eq!(w.app.get(&live, &w.owner).await.0, StatusCode::NOT_FOUND, "completing the event ends the stage");
+
+    // an event manager who is not a stage moderator can still complete an event a moderator started; its stage stays open
+    let body = json!({"name": "Second", "entity_type": 1, "channel_id": stage, "scheduled_start_time": in_hours(3)});
+    let (status, second) = w.app.post(&w.path("/scheduled-events"), &w.owner, body).await;
+    assert_eq!(status, StatusCode::OK, "{second}");
+    assert_eq!(w.app.patch(&event_path(&w, &second, ""), &w.owner, json!({"status": 2})).await.0, StatusCode::OK);
+    assert_eq!(w.app.get(&live, &w.owner).await.0, StatusCode::OK);
+    let (status, done) = w.app.patch(&event_path(&w, &second, ""), &bob, json!({"status": 3})).await;
+    assert_eq!((status, done["status"].clone()), (StatusCode::OK, json!(3)), "{done}");
+    assert_eq!(w.app.get(&live, &w.owner).await.0, StatusCode::OK, "only a stage moderator's completion ends the stage");
+    assert_eq!(w.app.delete(&live, &w.owner).await.0, StatusCode::NO_CONTENT);
+
+    // a stage a moderator opened by hand before the event is not the event's to end
+    let (status, hand) = w.app.post("/stage-instances", &w.owner, json!({"channel_id": stage, "topic": "By hand"})).await;
+    assert_eq!(status, StatusCode::OK, "{hand}");
+    let body = json!({"name": "Third", "entity_type": 1, "channel_id": stage, "scheduled_start_time": in_hours(3)});
+    let (_, third) = w.app.post(&w.path("/scheduled-events"), &w.owner, body).await;
+    assert_eq!(w.app.patch(&event_path(&w, &third, ""), &w.owner, json!({"status": 2})).await.0, StatusCode::OK);
+    assert_eq!(w.app.patch(&event_path(&w, &third, ""), &w.owner, json!({"status": 3})).await.0, StatusCode::OK);
+    let (status, instance) = w.app.get(&live, &w.owner).await;
+    assert_eq!((status, instance["topic"].clone()), (StatusCode::OK, json!("By hand")), "{instance}");
 }

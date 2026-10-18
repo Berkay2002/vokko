@@ -42,6 +42,8 @@ interface MockEvent extends Omit<GuildScheduledEvent, "user_count" | "user_rsvp"
 }
 
 const events = new Map<string, MockEvent>();
+/** Event id to the id of the stage instance that event opened: completing the event ends only that one. */
+const eventStages = new Map<string, string>();
 const MAX_OPEN_EVENTS = 100;
 
 const isFinished = (status: ScheduledEventStatus) => status === ScheduledEventStatus.Completed || status === ScheduledEventStatus.Canceled;
@@ -282,13 +284,19 @@ route("PATCH", `/guilds/${ID}/scheduled-events/${ID}`, ({ viewer, params, body }
   const touched = "entity_type" in body || "channel_id" in body;
   checkEntity(guildId, viewer.user.id, resolved, touched, touched);
   const image = "image_attachment_id" in body ? coverUrl(body.image_attachment_id, viewer.user.id) : event.image;
-  // A stage event owns the stage while it is live: starting opens it (needs stage moderator; one already open is kept), completing ends it.
+  // A stage event owns the stage it opened while it is live: starting needs a stage moderator and opens the stage (one already open is
+  // kept and stays the moderators'); completing needs only the event permissions and ends the stage the event opened when the actor moderates.
   const stageId = entity_type === ScheduledEventEntityType.StageInstance ? resolved.channel_id : null;
-  if (stageId && status === ScheduledEventStatus.Active && !stageInstances.has(stageId)) createStage(viewer.user.id, { channel_id: stageId, topic: resolved.name }, emit);
+  const stageChannel = stageId ? db.channels.get(stageId) : undefined;
+  const moderates = !!stageChannel && isStageModerator(stageChannel, viewer.user.id);
+  if (stageId && status === ScheduledEventStatus.Active) {
+    if (!moderates) fail(403, 50013, "Missing Permissions");
+    if (!stageInstances.has(stageId)) eventStages.set(event.id, createStage(viewer.user.id, { channel_id: stageId, topic: resolved.name }, emit).id);
+  }
   if (stageId && status === ScheduledEventStatus.Completed) {
-    const channel = db.channels.get(stageId);
-    if (channel && !isStageModerator(channel, viewer.user.id)) fail(403, 50013, "Missing Permissions");
-    endStage(stageId, emit);
+    const opened = eventStages.get(event.id);
+    eventStages.delete(event.id);
+    if (moderates && opened && stageInstances.get(stageId)?.id === opened) endStage(stageId, emit);
   }
   const before = { ...event, interested: new Set(event.interested) };
   const viewersBefore = viewersOf(event);

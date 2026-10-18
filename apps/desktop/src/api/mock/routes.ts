@@ -676,7 +676,8 @@ route("PATCH", `/channels/${ID}/messages/${ID}`, ({ viewer, params, body }) => {
   const channel = requireChannel(params[0] ?? "", viewer.user.id);
   const message = requireMessage(channel.id, params[1] ?? "");
   if (message.author_id !== viewer.user.id) fail(403, 50005, "Cannot edit a message authored by another user");
-  // The AutoMod alert carries the flagged member as author; like the server, system messages can't be edited.
+  checkRulesAccepted(channel.guild_id, viewer.user.id);
+// The AutoMod alert carries the flagged member as author; like the server, system messages can't be edited.
   if (message.type === MessageType.AutoModerationAction) fail(400, 50035, "Invalid Form Body", { message_id: { code: "BASE_TYPE_INVALID", message: "Cannot edit a system message." } });
   assertThreadOpen(channel);
   if (isPoll(message.id)) fail(400, 520003, "Cannot edit a poll message");
