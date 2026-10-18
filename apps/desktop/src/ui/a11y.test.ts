@@ -6,6 +6,7 @@ import {
   TTS_RATES,
   ZOOM_STEPS,
   contrastRatio,
+  darkenToContrast,
   migrateStoredPrefs,
   nearestStep,
   parseColor,
@@ -332,5 +333,21 @@ describe("high contrast token set", () => {
         expect(resolve(merged, ref[1]!), `${name} -> ${ref[1]}`).not.toBeNull();
       }
     }
+  });
+});
+
+describe("role colours on a light background", () => {
+  const white = parseColor("#ffffff")!;
+  it("darkens a colour below the floor just enough to reach it, keeping the hue", () => {
+    const yellow = "#f1c40f"; // Discord's yellow role colour, about 1.8:1 on white
+    expect(contrastRatio(parseColor(yellow)!, white)).toBeLessThan(2);
+    const out = parseColor(darkenToContrast(yellow, white, 4.5))!;
+    expect(contrastRatio(out, white)).toBeGreaterThanOrEqual(4.45); // rounding to bytes
+    expect(contrastRatio(out, white)).toBeLessThan(4.8);
+    expect(out.r / out.g).toBeCloseTo(0xf1 / 0xc4, 1);
+  });
+  it("leaves readable colours and non-colours alone", () => {
+    expect(darkenToContrast("#1f4e8c", white, 4.5)).toBe("#1f4e8c");
+    expect(darkenToContrast("var(--x)", white, 4.5)).toBe("var(--x)");
   });
 });
