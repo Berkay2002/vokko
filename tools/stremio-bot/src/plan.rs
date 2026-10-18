@@ -1,7 +1,7 @@
 //! The pure parts of the bot: request validation, ffprobe parsing, output geometry, ffmpeg arguments,
 //! position math, lease expiry and the reconcile rule for a re-sent `PUT`. No I/O, so all of it is unit-tested.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::time::{Duration, Instant};
 
@@ -138,6 +138,8 @@ pub struct Probe {
     /// `(numerator, denominator)` of the average frame rate.
     pub fps: Option<(u32, u32)>,
     pub duration_ms: Option<u64>,
+    /// The container's overall bit rate in bit/s, when ffprobe knows it.
+    pub bit_rate: Option<u64>,
     pub hdr: bool,
     pub has_audio: bool,
     pub audio_tracks: Vec<StremioAudioTrack>,
@@ -223,6 +225,7 @@ pub fn parse_probe(json: &str) -> Result<Probe, String> {
         height,
         fps: rate("avg_frame_rate").or_else(|| rate("r_frame_rate")),
         duration_ms: v["format"]["duration"].as_str().and_then(|d| d.parse::<f64>().ok()).filter(|d| d.is_finite() && *d > 0.0).map(|d| (d * 1000.0) as u64),
+        bit_rate: v["format"]["bit_rate"].as_str().and_then(|b| b.parse::<u64>().ok()).filter(|b| *b > 0),
         hdr: matches!(transfer, "smpte2084" | "arib-std-b67"),
         has_audio: !audio_tracks.is_empty(),
         audio_tracks,
@@ -312,7 +315,7 @@ pub fn probe_args(media_url: &str, headers: &BTreeMap<String, String>) -> Vec<St
     push_headers(&mut a, headers);
     a.extend(strings(&[
         "-show_entries",
-        "stream=index,codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,color_transfer:stream_tags=language,title:stream_disposition=default,forced:format=duration",
+        "stream=index,codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,color_transfer:stream_tags=language,title:stream_disposition=default,forced:format=duration,bit_rate",
         "-of",
         "json",
     ]));
@@ -321,8 +324,8 @@ pub fn probe_args(media_url: &str, headers: &BTreeMap<String, String>) -> Vec<St
 }
 
 pub struct FfmpegPlan<'a> {
+    /// The read-ahead's loopback URL: ffmpeg never sees the media host or its headers.
     pub media_url: &'a str,
-    pub headers: &'a BTreeMap<String, String>,
     pub start_ms: u64,
     pub geo: &'a Geometry,
     pub hdr: bool,
@@ -339,35 +342,37 @@ pub struct FfmpegPlan<'a> {
 
 const TONEMAP: &str = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv";
 
-/// The §5 command: one ffmpeg process so audio and video share a clock, `-re` paces both, only https/tls/tcp may be opened
-/// and `-ss` before `-i` seeks by HTTP range. Deviation from §5: the raw streams go to loopback TCP, not FIFOs, because a
-/// reader blocked in `open()` on a FIFO cannot be cancelled when ffmpeg dies early.
-pub fn ffmpeg_args(p: &FfmpegPlan<'_>) -> Vec<String> {
-    let mut a = strings(&[
-        "-nostdin",
-        "-loglevel",
-        "error",
+/// The input options of every ffmpeg run that reads the read-ahead's loopback URL: plain http and tcp only (the bot's own downloader
+/// talks to the media host, with the checks of `Desired::validate`), the plain container formats, and `-multiple_requests` so a seek
+/// reuses the connection.
+pub fn input_args() -> Vec<String> {
+    strings(&[
         "-protocol_whitelist",
-        "https,tls,tcp",
+        "http,tcp",
         "-format_whitelist",
         FORMATS,
-        "-tls_verify",
-        "1",
-        // The server already followed the redirects to this file; one that appears now (say, only for ffmpeg's user agent) is not followed.
-        "-max_redirects",
-        "0",
         "-reconnect",
         "1",
         "-reconnect_on_network_error",
         "1",
+        "-reconnect_delay_max",
+        "5",
+        // Longer than the read-ahead waits for a silent source, so it decides when to give up, not ffmpeg.
         "-rw_timeout",
-        "15000000",
-        // A seek reads the cues at the end, goes back to the start and then to the target; one kept-alive connection saves a TLS
-        // handshake for each (measured: about 120 ms of a 1.7 s seek over a 60 ms round trip).
+        "45000000",
+        // A seek reads the cues at the end, goes back to the start and then to the target; one kept-alive connection saves a request
+        // for each.
         "-multiple_requests",
         "1",
-    ]);
-    push_headers(&mut a, p.headers);
+    ])
+}
+
+/// The §5 command: one ffmpeg process so audio and video share a clock, `-re` paces both and `-ss` before `-i` seeks by HTTP range
+/// (answered by the read-ahead cache). Deviation from §5: the raw streams go to loopback TCP, not FIFOs, because a reader blocked in
+/// `open()` on a FIFO cannot be cancelled when ffmpeg dies early.
+pub fn ffmpeg_args(p: &FfmpegPlan<'_>) -> Vec<String> {
+    let mut a = strings(&["-nostdin", "-loglevel", "warning"]);
+    a.extend(input_args());
     a.push("-re".into());
     if p.start_ms > 0 {
         a.extend(["-ss".to_owned(), format!("{}.{:03}", p.start_ms / 1000, p.start_ms % 1000)]);
@@ -441,6 +446,30 @@ impl Lease {
     }
 }
 
+const ANCHORS_MAX: usize = 4;
+
+/// Where the server thinks the bot is. The server does not read the bot's clock: it takes the last position the bot reported (or
+/// the one it steered to) and adds the time since. After a source stall the bot is behind that guess by the length of the stall,
+/// which is no reason to seek. So the bot remembers the positions it reported lately (the server may have dropped some, so
+/// several) and a re-sent `PUT` that matches one of them moved on by the clock is the server's own extrapolation, not a viewer's seek.
+#[derive(Debug, Default)]
+pub struct Anchors(VecDeque<(u64, Instant)>);
+
+impl Anchors {
+    /// The bot sent (or the server was told) this position now.
+    pub fn push(&mut self, position_ms: u64, now: Instant) {
+        self.0.push_back((position_ms, now));
+        while self.0.len() > ANCHORS_MAX {
+            self.0.pop_front();
+        }
+    }
+
+    /// `put_ms` is within `DRIFT_MS` of a remembered position moved on by the time since.
+    pub fn explains(&self, put_ms: u64, now: Instant) -> bool {
+        self.0.iter().any(|&(ms, at)| (ms + now.saturating_duration_since(at).as_millis() as u64).abs_diff(put_ms) <= DRIFT_MS)
+    }
+}
+
 /// What a re-sent `PUT` means for a running session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -461,8 +490,10 @@ pub enum Action {
     Hold(u64),
 }
 
-/// `current_ms` is where the bot is now. A token that changes alone does not matter: it only has to be valid at join time.
-pub fn reconcile(prev: &Desired, next: &Desired, current_ms: u64, playing_now: bool, retrack: bool) -> Action {
+/// `current_ms` is where the bot is now; `explained` says the request's position is just what the server extrapolates from the bot's
+/// own reports (`Anchors::explains`), which a stalled bot lags behind but must not chase with a restart. A token that changes alone
+/// does not matter: it only has to be valid at join time.
+pub fn reconcile(prev: &Desired, next: &Desired, current_ms: u64, playing_now: bool, retrack: bool, explained: bool) -> Action {
     if prev.livekit_url != next.livekit_url {
         return Action::Reconnect;
     }
@@ -475,7 +506,7 @@ pub fn reconcile(prev: &Desired, next: &Desired, current_ms: u64, playing_now: b
     match (playing_now, next.playing) {
         (true, false) => Action::Pause,
         (false, true) => Action::Resume(next.position_ms),
-        (true, true) if current_ms.abs_diff(next.position_ms) > DRIFT_MS => Action::Seek(next.position_ms),
+        (true, true) if current_ms.abs_diff(next.position_ms) > DRIFT_MS && !explained => Action::Seek(next.position_ms),
         (false, false) if current_ms.abs_diff(next.position_ms) > 500 => Action::Hold(next.position_ms),
         _ => Action::Keep,
     }
@@ -573,7 +604,17 @@ mod tests {
     }
 
     fn probe(w: u32, h: u32, fps: Option<(u32, u32)>) -> Probe {
-        Probe { width: w, height: h, fps, duration_ms: None, hdr: false, has_audio: true, audio_tracks: Vec::new(), subtitle_tracks: Vec::new() }
+        Probe {
+            width: w,
+            height: h,
+            fps,
+            duration_ms: None,
+            bit_rate: None,
+            hdr: false,
+            has_audio: true,
+            audio_tracks: Vec::new(),
+            subtitle_tracks: Vec::new(),
+        }
     }
 
     #[test]
@@ -609,7 +650,6 @@ mod tests {
         let geo = geometry(&probe(1920, 1080, Some((24, 1))), 720);
         let plan = FfmpegPlan {
             media_url: "https://cdn.example/v.mp4",
-            headers: &headers,
             start_ms: 61_500,
             geo: &geo,
             hdr: false,
@@ -622,12 +662,11 @@ mod tests {
         };
         let a = ffmpeg_args(&plan);
         let at = |flag: &str| a.iter().position(|x| x == flag).unwrap_or_else(|| panic!("{flag} missing"));
-        assert_eq!(a[at("-protocol_whitelist") + 1], "https,tls,tcp");
+        assert_eq!(a[at("-protocol_whitelist") + 1], "http,tcp", "ffmpeg opens only the loopback read-ahead");
+        assert_eq!((a[at("-loglevel") + 1].as_str(), a[at("-reconnect_delay_max") + 1].as_str()), ("warning", "5"));
         assert_eq!(a[at("-format_whitelist") + 1], "mov,mp4,matroska,webm,avi,mpegts", "no playlist formats");
-        assert_eq!(a[at("-tls_verify") + 1], "1");
-        assert_eq!(a[at("-max_redirects") + 1], "0");
         assert_eq!(a[at("-multiple_requests") + 1], "1");
-        assert!(at("-format_whitelist") < at("-i") && at("-tls_verify") < at("-i"), "input options");
+        assert!(at("-format_whitelist") < at("-i") && at("-multiple_requests") < at("-i"), "input options");
         let probe = probe_args("https://cdn.example/v.mp4", &headers);
         let pat = |flag: &str| probe.iter().position(|x| x == flag).unwrap_or_else(|| panic!("{flag} missing in the probe"));
         assert_eq!(probe[pat("-format_whitelist") + 1], "mov,mp4,matroska,webm,avi,mpegts");
@@ -636,7 +675,7 @@ mod tests {
         assert_eq!(a[at("-ss") + 1], "61.500");
         assert!(at("-re") < at("-ss") && at("-ss") < at("-i"), "-re and -ss are input options");
         assert_eq!(a[at("-i") + 1], "https://cdn.example/v.mp4");
-        assert_eq!(a[at("-headers") + 1], "Referer: https://x/\r\n");
+        assert!(!a.contains(&"-headers".to_owned()), "the headers go to the downloader, not to ffmpeg");
         assert_eq!(a[at("-vf") + 1], "scale=1280:720:flags=bicubic,fps=24/1,format=yuv420p");
         assert!(a.contains(&"tcp://127.0.0.1:5001".to_owned()) && a.contains(&"tcp://127.0.0.1:5002".to_owned()));
         assert!(a.windows(2).any(|w| w[0] == "-map" && w[1] == "0:a:0"), "no choice: the first audio stream");
@@ -758,17 +797,52 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_rules() {
-        let reconcile = |prev: &Desired, next: &Desired, current_ms, playing_now| super::reconcile(prev, next, current_ms, playing_now, false);
+    fn the_container_bit_rate_is_read_from_the_probe() {
+        let json = r#"{"streams":[{"codec_type":"video","width":640,"height":360}],"format":{"duration":"60","bit_rate":"80000000"}}"#;
+        assert_eq!(parse_probe(json).expect("probe").bit_rate, Some(80_000_000));
+        assert_eq!(parse_probe(PROBE).expect("probe").bit_rate, None);
+        assert!(probe_args("https://cdn.example/v.mp4", &BTreeMap::new()).iter().any(|x| x.ends_with("format=duration,bit_rate")));
+    }
+
+    #[test]
+    fn a_stall_is_not_a_seek_but_a_viewer_seek_is() {
+        let t0 = Instant::now();
+        let mut anchors = Anchors::default();
+        // spawned at 10 s, reported 15 s at t0+5 s; the source then froze for 8 s, so the bot is at about 15 s while the server
+        // expects 23 s and sends 23 s with its next lease renewal
+        anchors.push(10_000, t0);
+        anchors.push(15_000, t0 + Duration::from_secs(5));
+        let now = t0 + Duration::from_secs(13);
+        assert!(anchors.explains(23_000, now), "the server's extrapolation of the last report");
+        assert!(anchors.explains(23_000 + DRIFT_MS, now) && !anchors.explains(23_001 + 2 * DRIFT_MS, now));
         let a = desired();
-        assert_eq!(super::reconcile(&a, &a, 1000, true, true), Action::Retrack);
-        assert_eq!(super::reconcile(&a, &a, 1000, false, true), Action::Resume(1000), "not running: the start that follows uses the new tracks");
+        let at = |ms: u64| Desired { position_ms: ms, ..a.clone() };
+        let stalled = super::reconcile(&a, &at(23_000), 15_000, true, false, anchors.explains(23_000, now));
+        assert_eq!(stalled, Action::Keep, "the bot lags by 8 s but the server only extrapolates");
+        // a viewer seek to 300 s matches no report
+        let seek = super::reconcile(&a, &at(300_000), 15_000, true, false, anchors.explains(300_000, now));
+        assert_eq!(seek, Action::Seek(300_000));
+        // so does a seek back to the start
+        assert!(!anchors.explains(0, now));
+        // only the last few reports are remembered
+        for i in 0..10 {
+            anchors.push(100_000 + i, now);
+        }
+        assert!(!anchors.explains(23_000, now));
+    }
+
+    #[test]
+    fn reconcile_rules() {
+        let reconcile = |prev: &Desired, next: &Desired, current_ms, playing_now| super::reconcile(prev, next, current_ms, playing_now, false, false);
+        let a = desired();
+        assert_eq!(super::reconcile(&a, &a, 1000, true, true, false), Action::Retrack);
+        assert_eq!(super::reconcile(&a, &a, 1000, false, true, false), Action::Resume(1000), "not running: the start that follows uses the new tracks");
         let mut pause = a.clone();
         pause.playing = false;
-        assert_eq!(super::reconcile(&a, &pause, 1000, true, true), Action::Pause);
+        assert_eq!(super::reconcile(&a, &pause, 1000, true, true, false), Action::Pause);
         let mut moved = a.clone();
         moved.media_url = "https://cdn.example/w.mp4".into();
-        assert_eq!(super::reconcile(&a, &moved, 1000, true, true), Action::Restart);
+        assert_eq!(super::reconcile(&a, &moved, 1000, true, true, false), Action::Restart);
         let with = |edit: fn(&mut Desired)| {
             let mut d = a.clone();
             edit(&mut d);

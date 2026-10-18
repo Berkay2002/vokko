@@ -24,11 +24,14 @@ use tokio::task::JoinHandle;
 use vokko_protocol::api::{StremioCue, StremioSubtitleKind};
 
 use crate::config::{Codec, Config, Encoder};
-use crate::plan::{self, Choice, Desired, FfmpegPlan, Geometry, Probe};
+use crate::plan::{self, Anchors, Choice, Desired, FfmpegPlan, Geometry, Probe};
+use crate::readahead::{Gate, ReadAhead};
 use crate::report::{Kind, Reporter};
 use crate::subs::{Budget, VttReader};
 
 const CONNECT_WAIT: Duration = Duration::from_secs(45);
+/// Lines of ffmpeg's stderr logged per run.
+const MAX_LOGGED_LINES: usize = 40;
 /// 10 ms of 48 kHz stereo s16le.
 const AUDIO_CHUNK_BYTES: usize = 480 * 2 * 2;
 
@@ -168,6 +171,14 @@ impl Published {
 struct Counters {
     video_frames: AtomicU64,
     audio_samples: AtomicU64,
+    /// What the server has been told about the position (see `Anchors`).
+    anchors: Mutex<Anchors>,
+}
+
+impl Counters {
+    fn anchor(&self, position_ms: u64) {
+        self.anchors.lock().unwrap_or_else(|e| e.into_inner()).push(position_ms, Instant::now());
+    }
 }
 
 /// What a pipeline needs to tell the server.
@@ -193,7 +204,7 @@ impl Pipeline {
     #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         cfg: &Config,
-        d: &Desired,
+        cache: &ReadAhead,
         probe: &Probe,
         geo: &Geometry,
         choice: Choice,
@@ -212,9 +223,9 @@ impl Pipeline {
             text_listeners.push((track.id, listener));
         }
         let text_ports = text_listeners.iter().map(|(index, l)| port(l).map(|p| (*index, p))).collect::<Result<Vec<_>, _>>()?;
+        let input_url = cache.input_url();
         let args = plan::ffmpeg_args(&FfmpegPlan {
-            media_url: &d.media_url,
-            headers: &d.headers,
+            media_url: &input_url,
             start_ms,
             geo,
             hdr: probe.hdr,
@@ -234,24 +245,47 @@ impl Pipeline {
             .spawn()
             .map_err(|e| format!("cannot run ffmpeg: {e}"))?;
         let counters = Arc::new(Counters::default());
+        // the server's idea of the position starts here: it steered (or was told) start_ms when the PUT that led to this run arrived
+        counters.anchor(start_ms);
         let stderr = Arc::new(Mutex::new(String::new()));
         let mut tasks = Vec::new();
 
         if let Some(pipe) = child.stderr.take() {
-            let (stderr, url) = (stderr.clone(), d.media_url.clone());
+            let (stderr, url, channel_id) = (stderr.clone(), input_url.clone(), notify.channel_id.clone());
             tasks.push(tokio::spawn(async move {
                 let mut lines = CappedLines::new(pipe);
+                let mut logged = 0;
                 while let Ok(Some(line)) = lines.next_line().await {
-                    if let (false, Ok(mut last)) = (line.trim().is_empty(), stderr.lock()) {
-                        *last = scrub(&line, &url);
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    let line = scrub(&line, &url);
+                    // a broken file can make ffmpeg repeat one warning for every frame
+                    if logged < MAX_LOGGED_LINES {
+                        logged += 1;
+                        tracing::warn!(channel_id, %line, "ffmpeg");
+                    }
+                    if let Ok(mut last) = stderr.lock() {
+                        *last = line;
                     }
                 }
             }));
         }
         let began = Instant::now();
-        tasks.push(tokio::spawn(video_loop(video_listener, geo.clone(), out.video.clone(), out.last.clone(), counters.clone(), notify, start_ms, began)));
+        let gate = cache.gate();
+        tasks.push(tokio::spawn(video_loop(
+            video_listener,
+            geo.clone(),
+            out.video.clone(),
+            out.last.clone(),
+            counters.clone(),
+            notify,
+            start_ms,
+            began,
+            gate.clone(),
+        )));
         if probe.has_audio {
-            tasks.push(tokio::spawn(audio_loop(audio_listener, out.audio.clone(), counters.clone())));
+            tasks.push(tokio::spawn(audio_loop(audio_listener, out.audio.clone(), counters.clone(), gate)));
         }
         if !text_listeners.is_empty() {
             // try_send from the readers: a slow data channel drops cues instead of stalling ffmpeg.
@@ -262,6 +296,16 @@ impl Pipeline {
             }
         }
         Ok(Self { child, tasks, counters, start_ms, has_audio: probe.has_audio, fps: geo.fps, stderr })
+    }
+
+    /// The bot just sent the server this position.
+    pub fn reported(&self, position_ms: u64) {
+        self.counters.anchor(position_ms);
+    }
+
+    /// `put_ms` is what the server would work out itself from the positions it was given (see `Anchors`).
+    pub fn explains(&self, put_ms: u64) -> bool {
+        self.counters.anchors.lock().unwrap_or_else(|e| e.into_inner()).explains(put_ms, Instant::now())
     }
 
     pub fn position_ms(&self) -> u64 {
@@ -314,8 +358,11 @@ async fn video_loop(
     notify: Notify,
     start_ms: u64,
     began: Instant,
+    gate: Arc<Gate>,
 ) {
     let Some(mut stream) = accept(listener).await else { return };
+    // ffmpeg blocks on its output until we read: the first frame goes out once a few seconds of film are buffered
+    gate.primed().await;
     let (w, h) = (geo.width as usize, geo.height as usize);
     let (luma, chroma) = (w * h, (w / 2) * (h / 2));
     let mut raw = vec![0u8; luma + 2 * chroma];
@@ -348,12 +395,14 @@ async fn video_loop(
         if std::mem::take(&mut first) {
             tracing::info!(first_frame_ms = began.elapsed().as_millis() as u64, start_ms, "first video frame");
             notify.reporter.send(&notify.channel_id, Kind::Started, start_ms, notify.duration_ms, None);
+            counters.anchor(start_ms);
         }
     }
 }
 
-async fn audio_loop(listener: TcpListener, source: NativeAudioSource, counters: Arc<Counters>) {
+async fn audio_loop(listener: TcpListener, source: NativeAudioSource, counters: Arc<Counters>, gate: Arc<Gate>) {
     let Some(mut stream) = accept(listener).await else { return };
+    gate.primed().await;
     let mut raw = [0u8; AUDIO_CHUNK_BYTES];
     while stream.read_exact(&mut raw).await.is_ok() {
         let samples: Vec<i16> = raw.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b)).collect();

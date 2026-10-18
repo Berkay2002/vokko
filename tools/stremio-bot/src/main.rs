@@ -6,6 +6,7 @@ mod config;
 mod guard;
 mod media;
 mod plan;
+mod readahead;
 mod report;
 mod session;
 mod subs;
@@ -26,6 +27,8 @@ async fn main() {
             std::process::exit(2);
         }
     };
+    // what a bot that was killed left behind (sessions delete their own directory when they end)
+    readahead::wipe_stale(&cfg.cache_dir);
     let manager = session::Manager::new(cfg.clone(), report::Reporter::new(&cfg.server_url, &cfg.secret));
     let listener = match tokio::net::TcpListener::bind(cfg.listen).await {
         Ok(l) => l,
@@ -34,7 +37,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    tracing::info!(listen = %cfg.listen, max_sessions = cfg.max_sessions, codec = ?cfg.codec, "stremio-bot ready");
+    tracing::info!(listen = %cfg.listen, max_sessions = cfg.max_sessions, codec = ?cfg.codec, cache = %cfg.cache_dir.join(readahead::SUBDIR).display(), cache_mb = cfg.cache_bytes >> 20, "stremio-bot ready");
 
     let sweeper = manager.clone();
     tokio::spawn(async move {
