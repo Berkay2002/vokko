@@ -287,8 +287,14 @@ test('the Channels & Roles row lets a member who finished onboarding change thei
   await page.locator('button.cm-quicklink', { hasText: 'Channels & Roles' }).click();
   const modal = page.getByRole('dialog', { name: 'Channels & Roles' });
   await expect(modal.getByRole('checkbox', { name: /Games/ })).toHaveAttribute('aria-checked', 'true');
-  await modal.getByRole('button', { name: 'Cancel' }).click();
+  await modal.getByRole('checkbox', { name: /Games/ }).click();
+  await modal.getByRole('checkbox', { name: /Art/ }).click();
+  await modal.getByRole('button', { name: 'Save' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  const mine = await page.evaluate(id => (window as unknown as Win).__vokko.request('GET', `/guilds/${id}/onboarding-responses`), seeded.guildId);
+  const config = (await page.evaluate(id => (window as unknown as Win).__vokko.request('GET', `/guilds/${id}/onboarding`), seeded.guildId)) as { prompts: { options: { id: string; title: string }[] }[] };
+  const art = config.prompts.flatMap(p => p.options).find(o => /Art/.test(o.title))!;
+  expect((mine as { option_ids: string[] }).option_ids).toEqual([art.id]);
 });
 
 test('the owner sets up onboarding in server settings', async ({ page }) => {

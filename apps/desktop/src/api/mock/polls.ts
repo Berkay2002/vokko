@@ -8,6 +8,7 @@ import { db, nextId, sortedMessages, userOf, type MockChannel, type MockMessage 
 import { addMessage, channelAudience, fail, requireChannel, requireChannelPerm, requireMessage } from "./ops";
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
+import { checkRulesAccepted } from "./community";
 import { assertDmOpen } from "./settings";
 import { assertThreadOpen } from "./threads";
 import { polls, resultEmbeds, type MockPoll } from "./pollData";
@@ -123,6 +124,7 @@ function voteEvent(channel: MockChannel, userId: string, messageId: string, answ
 route("PUT", `/channels/${ID}/polls/${ID}/answers/(\\d+)/@me`, ({ viewer, params }) => {
   const { channel, message, poll, answerId } = target(viewer.user.id, params[0] ?? "", params[1] ?? "", params[2] ?? "", true);
   assertDmOpen(channel, viewer.user.id);
+  checkRulesAccepted(channel.guild_id, viewer.user.id);
   const answer = pollAnswer(poll, answerId, true);
   const me = viewer.user.id;
   if (!poll.allow_multiselect) {

@@ -504,6 +504,10 @@ async fn members_who_joined_after_the_rules_cannot_talk_or_react_until_they_acce
     assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(150010)), "{error}");
     let (status, error) = react(late.clone(), message.clone()).await;
     assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(150010)), "{error}");
+    let (status, error) = w.app.post(&format!("/channels/{}/threads", w.general), &late, json!({"name": "side talk"})).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(150010)), "free thread: {error}");
+    let (status, error) = w.app.post(&format!("/channels/{}/messages/{message}/threads", w.general), &late, json!({"name": "side talk"})).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(150010)), "thread from message: {error}");
     let pending = |token: String| {
         let (app, path) = (&w.app, w.path("/onboarding"));
         async move { app.get(&path, &token).await.1["rules_pending"].clone() }

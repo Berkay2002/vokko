@@ -115,6 +115,9 @@ async fn start_from_message(
         return Err(ApiErr::wrong_channel_type());
     }
     access.require(CREATE_PUBLIC_THREADS)?;
+    if let Some(guild_id) = parent.guild_id {
+        crate::safety::check_rules_accepted(&state, guild_id, user_id).await?;
+    }
     // The type 21 starter shows the original message, so the creator must be able to read the channel's history.
     access.require(READ_MESSAGE_HISTORY)?;
     let name = threads::thread_name(&body.name)?;
@@ -179,6 +182,9 @@ async fn start_free_thread(state: &AppState, user_id: i64, access: &ChannelAcces
         Some(_) => return Err(ApiErr::invalid("type", "Unsupported thread type for this channel.")),
     };
     access.require(if kind == ChannelType::PrivateThread { CREATE_PRIVATE_THREADS } else { CREATE_PUBLIC_THREADS })?;
+    if let Some(guild_id) = parent.guild_id {
+        crate::safety::check_rules_accepted(state, guild_id, user_id).await?;
+    }
     let name = threads::thread_name(&body.name)?;
     let duration = threads::auto_archive_for(parent, body.auto_archive_duration)?;
     let id = state.ids.next();

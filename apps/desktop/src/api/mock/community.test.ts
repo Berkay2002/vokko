@@ -329,6 +329,8 @@ describe("onboarding", () => {
     expect(pending("carl")).toBe(true);
     expect(errorOf(send("carl"))).toEqual({ status: 403, code: 150010 });
     expect(errorOf(react("carl"))).toEqual({ status: 403, code: 150010 });
+    expect(errorOf(() => call("carl", "POST", `/channels/${generalId}/threads`, { name: "side talk" }))).toEqual({ status: 403, code: 150010 });
+    expect(errorOf(() => call("carl", "POST", `/channels/${generalId}/messages/${posted.id}/threads`, { name: "side talk" }))).toEqual({ status: 403, code: 150010 });
     // alice and bob joined before the rules existed, the owner owns the guild: none of them are held
     for (const who of ["alice", "bob", "owner"]) {
       expect(pending(who)).toBe(false);
@@ -346,6 +348,15 @@ describe("onboarding", () => {
     expect(errorOf(send("dana")).code).toBe(150010);
     call("owner", "PUT", `/guilds/${guildId}/onboarding`, { rules: null });
     send("dana")();
+  });
+
+  it("lets a member who joined before onboarding existed save their answers (Channels & Roles)", () => {
+    const { config } = configure();
+    const games = config.prompts[0]!.options[0]!.id;
+    expect(call<GuildMember[]>("owner", "GET", `/guilds/${guildId}/members`).find(m => m.user.id === ids.alice)!.flags).toBeUndefined();
+    const done = call<OnboardingCompletion>("alice", "PUT", `/guilds/${guildId}/onboarding-responses`, { option_ids: [games], rules_accepted: true });
+    expect(done.member.roles).toHaveLength(1);
+    expect(call<{ option_ids: string[] }>("alice", "GET", `/guilds/${guildId}/onboarding-responses`).option_ids).toEqual([games]);
   });
 
   it("only takes back roles that onboarding added, even when the options changed", () => {
