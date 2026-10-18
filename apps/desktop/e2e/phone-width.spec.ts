@@ -331,4 +331,27 @@ test.describe('desktop 1440', () => {
     await expect(dialog.locator('.invite-table thead')).toBeVisible();
     await shot(page, 'server-settings-invites-1440');
   });
+
+  test('channel permissions and the role editor keep their side-by-side panes', async ({ page }) => {
+    await page.goto('/channels/@me?as=sam&mockLatency=0');
+    await page.getByRole('link', { name: /^Sam's server/ }).click();
+    await page.locator('.chat-msg').first().waitFor();
+    await page.locator('a.channel-row[aria-current="page"]').hover();
+    await page.locator('a.channel-row[aria-current="page"]').getByRole('button', { name: 'Edit Channel' }).click();
+    const channel = page.getByRole('dialog', { name: /Channel Settings/ });
+    await channel.getByRole('button', { name: 'Permissions', exact: true }).click();
+    await channel.getByRole('button', { name: 'Advanced Permissions' }).click();
+    const targets = (await channel.locator('.cs-targets').boundingBox())!;
+    const perms = (await channel.locator('.cs-perms').boundingBox())!;
+    expect(perms.x).toBeGreaterThan(targets.x + targets.width - 1);
+    await shot(page, 'channel-permissions-1440');
+    await page.keyboard.press('Escape');
+    await page.locator('.guild-header-name-button').click();
+    await page.getByRole('menuitem', { name: 'Server Settings' }).click();
+    const server = page.getByRole('dialog', { name: /Server Settings/ });
+    await server.getByRole('button', { name: 'Roles', exact: true }).click();
+    await server.locator('.ss-role-row.ss-role-draggable').first().click();
+    await expect(server.locator('.ss-aside-row').first()).toBeVisible();
+    await shot(page, 'role-editor-1440');
+  });
 });

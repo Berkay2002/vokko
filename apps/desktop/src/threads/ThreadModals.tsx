@@ -4,10 +4,11 @@ import { ApiRequestError } from "../api/errors";
 import { Perm } from "../api/permissions";
 import { deleteThread, editChannel, startThread, startThreadFromMessage } from "../api/rest";
 import { appStore, useStore } from "../api/store";
-import { ChannelType, type Channel, type Message, type ThreadAutoArchiveDuration } from "../api/types";
+import { ChannelFlags, ChannelType, type Channel, type Message, type ThreadAutoArchiveDuration } from "../api/types";
 import { Modal } from "../ui";
 import { Toggle, Select } from "../shell/settings/controls";
 import { usePermissions } from "../shell/usePermissions";
+import { TagChip } from "../forum/ForumPostCard";
 import { closeThread, openThread, useThreadUi } from "./threadUi";
 import { ARCHIVE_OPTIONS, NAME_MAX, previewText } from "./util";
 import "./threads.css";
@@ -16,6 +17,7 @@ function errorText(error: unknown): string {
   return error instanceof ApiRequestError ? error.message : "Something went wrong. Try again.";
 }
 
+const MAX_TAGS = 5;
 const durationOf = (value: string): ThreadAutoArchiveDuration => Number(value) as ThreadAutoArchiveDuration;
 
 /** Create Thread: from a message (name defaults to its text) or free-standing in a channel (optionally private). Opens the new thread. */
@@ -89,20 +91,29 @@ export function CreateThreadModal({ channelId, message, onClose }: { channelId: 
   );
 }
 
-/** Rename a thread and change its auto-archive duration (owner or MANAGE_THREADS). */
+/** Rename a thread and change its auto-archive duration; a forum post's tags too (owner or MANAGE_THREADS). */
 export function EditThreadModal({ thread, onClose }: { thread: Channel; onClose(): void }) {
+  const forum = useStore(s => (s.channels[thread.parent_id ?? ""]?.type === ChannelType.GuildForum ? s.channels[thread.parent_id ?? ""] : undefined));
+  const canModerateTags = usePermissions(forum?.guild_id, forum?.id).can(Perm.MANAGE_THREADS);
+  const available = forum?.available_tags ?? [];
+  const requireTag = ((forum?.flags ?? 0) & ChannelFlags.RequireTag) !== 0;
+  const savedTags = thread.applied_tags ?? [];
+  const [tags, setTags] = useState(savedTags);
+  const tagsDirty = tags.length !== savedTags.length || tags.some(t => !savedTags.includes(t));
+  const toggleTag = (id: string) => setTags(cur => (cur.includes(id) ? cur.filter(t => t !== id) : cur.length < MAX_TAGS ? [...cur, id] : cur));
   const [name, setName] = useState(thread.name ?? "");
   const [duration, setDuration] = useState(String(thread.thread_metadata?.auto_archive_duration ?? 1440));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const trimmed = name.trim();
-  const dirty = trimmed !== thread.name || duration !== String(thread.thread_metadata?.auto_archive_duration);
+  const dirty = trimmed !== thread.name || duration !== String(thread.thread_metadata?.auto_archive_duration) || tagsDirty;
+  const tagsOk = !requireTag || tags.length > 0;
 
   async function save() {
-    if (!trimmed || busy) return;
+    if (!trimmed || !tagsOk || busy) return;
     setBusy(true);
     try {
-      const updated = await editChannel(thread.id, { name: trimmed, auto_archive_duration: durationOf(duration) });
+      const updated = await editChannel(thread.id, { name: trimmed, auto_archive_duration: durationOf(duration), ...(tagsDirty ? { applied_tags: tags } : {}) });
       appStore.getState().upsertThread(updated);
       onClose();
     } catch (e) {
@@ -115,14 +126,14 @@ export function EditThreadModal({ thread, onClose }: { thread: Channel; onClose(
     <Modal
       open
       onClose={onClose}
-      title="Edit Thread"
+      title={forum ? "Edit Post" : "Edit Thread"}
       className="modal-compact"
       footer={
         <>
           <button type="button" className="btn btn-secondary" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" disabled={busy || !trimmed || !dirty} onClick={() => void save()}>
+          <button type="button" className="btn btn-primary" disabled={busy || !trimmed || !dirty || !tagsOk} onClick={() => void save()}>
             Save
           </button>
         </>
@@ -134,6 +145,21 @@ export function EditThreadModal({ thread, onClose }: { thread: Channel; onClose(
       <input id="thread-edit-name" className="input" value={name} maxLength={NAME_MAX} autoFocus onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && void save()} />
       <div className="field-label thread-modal-label">Hide after inactivity</div>
       <Select<string> label="Hide after inactivity" value={duration} options={ARCHIVE_OPTIONS} onChange={setDuration} />
+      {available.length > 0 && (
+        <>
+          <div className="field-label thread-modal-label">{requireTag ? "Tags (at least one required)" : "Tags"}</div>
+          <div className="forum-new-tags" role="group" aria-label="Tags">
+            {available.map(tag => {
+              const locked = tag.moderated && !canModerateTags && !savedTags.includes(tag.id);
+              return (
+                <span key={tag.id} className={locked ? "forum-tag-wrap disabled" : "forum-tag-wrap"} title={locked ? "Only moderators can use this tag" : undefined}>
+                  <TagChip tag={tag} selected={tags.includes(tag.id)} onClick={locked ? () => undefined : () => toggleTag(tag.id)} />
+                </span>
+              );
+            })}
+          </div>
+        </>
+      )}
       {error && <p className="field-error">{error}</p>}
     </Modal>
   );
