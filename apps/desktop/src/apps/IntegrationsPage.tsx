@@ -1,10 +1,10 @@
-// Server Settings > Integrations (bots and webhooks) and Channel Settings > Integrations (that channel's webhooks).
+// Server Settings > Integrations (bots and webhooks) and Channel Settings > Integrations (that channel's webhooks and followed channels).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, ChevronRight, Copy, Trash2, Webhook as WebhookIcon } from "lucide-react";
+import { Bot, ChevronDown, ChevronRight, Copy, Megaphone, Trash2, Webhook as WebhookIcon } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
-import { uploadAttachment } from "../api/rest";
+import { listFollowers, unfollowChannel, uploadAttachment } from "../api/rest";
 import { useStore } from "../api/store";
-import { ChannelType, type Channel, type Guild, type GuildIntegration, type Snowflake, type Webhook } from "../api/types";
+import { ChannelType, type Channel, type ChannelFollower, type Guild, type GuildIntegration, type Snowflake, type Webhook } from "../api/types";
 import { Modal } from "../ui";
 import { Avatar } from "../chat/Avatar";
 import { Category, Page } from "../shell/settings/controls";
@@ -333,6 +333,49 @@ export function IntegrationsPage({ guild, canManageGuild, canManageWebhooks }: {
   );
 }
 
+/** Announcement channels this channel follows (their published posts land here), each with Unfollow. */
+function FollowedChannelsSection({ channelId }: { channelId: Snowflake }) {
+  const [rows, setRows] = useState<ChannelFollower[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    listFollowers(channelId).then(setRows, e => {
+      setRows([]);
+      setError(errorText(e));
+    });
+  }, [channelId]);
+  useEffect(load, [load]);
+  const unfollow = (id: Snowflake) => {
+    setError(null);
+    unfollowChannel(channelId, id).then(load, e => setError(errorText(e)));
+  };
+  return (
+    <Category title="Followed Channels">
+      <p className="settings-todo">Posts published in these announcement channels show up here.</p>
+      {error && <p className="field-error">{error}</p>}
+      {rows === null && <p className="settings-todo">Loading…</p>}
+      {rows !== null && rows.length === 0 && <p className="settings-todo">This channel doesn&rsquo;t follow any announcement channels. Use Follow in an announcement channel to add one.</p>}
+      {rows !== null && rows.length > 0 && (
+        <ul className="apps-card-list" aria-label="Followed channels">
+          {rows.map(row => (
+            <li key={row.id} className="apps-card">
+              <div className="apps-card-head static">
+                <Megaphone size={20} aria-hidden="true" />
+                <span className="apps-card-title">
+                  <span className="apps-card-name">#{row.source_channel_name}</span>
+                  <span className="apps-card-sub">{row.source_guild_name}</span>
+                </span>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => unfollow(row.id)}>
+                  Unfollow
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Category>
+  );
+}
+
 export function ChannelIntegrations({ channel, canManageWebhooks }: { channel: Channel; canManageWebhooks: boolean }) {
   return (
     <Page title="Integrations">
@@ -343,9 +386,13 @@ export function ChannelIntegrations({ channel, canManageWebhooks }: { channel: C
           <p className="settings-todo">{acceptsWebhooks(channel) ? "You need the Manage Webhooks permission." : "This channel type has no webhooks."}</p>
         </Category>
       )}
-      <Category title="Followed Channels">
-        <p className="settings-todo">Not available yet.</p>
-      </Category>
+      {channel.guild_id && canManageWebhooks && acceptsWebhooks(channel) ? (
+        <FollowedChannelsSection channelId={channel.id} />
+      ) : (
+        <Category title="Followed Channels">
+          <p className="settings-todo">{acceptsWebhooks(channel) ? "You need the Manage Webhooks permission." : "Only text and announcement channels can follow announcement channels."}</p>
+        </Category>
+      )}
     </Page>
   );
 }

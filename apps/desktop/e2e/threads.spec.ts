@@ -191,4 +191,14 @@ test('announcements: follow into another channel, publish a message, the copy ar
   const copy = row(page, text);
   await expect(copy).toBeVisible();
   await expect(copy.locator('.chat-crosspost-tag')).toContainText('Published from an announcement channel');
+
+  // general's Channel Settings > Integrations lists the follow, and Unfollow removes it
+  await page.getByRole('link', { name: /^general/ }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Edit Channel' }).click();
+  await page.getByRole('button', { name: 'Integrations', exact: true }).click();
+  const followed = page.getByRole('list', { name: 'Followed channels' });
+  await expect(followed).toContainText('#announcements');
+  await expect(followed).toContainText("Sam's server");
+  await followed.getByRole('button', { name: 'Unfollow' }).click();
+  await expect(page.getByText('This channel doesn’t follow any announcement channels.', { exact: false })).toBeVisible();
 });
