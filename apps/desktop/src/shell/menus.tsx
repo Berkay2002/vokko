@@ -10,7 +10,7 @@ import { ChannelType, RelationshipType, ThreadMemberFlags, type Channel, type Gu
 import type { MenuItem } from "../ui";
 import { openCreateEvent } from "../community/communityModals";
 import { closeDirectMessage, copyText, markChannelRead, markGuildRead, openDirectMessage } from "./actions";
-import { isMutedAt, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setNotifyLevel, toggleFlag, unmute, untilLabel, useLocalState, type NotifyLevel } from "./localState";
+import { isMutedAt, mutedTest, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setNotifyLevel, toggleFlag, unmute, untilLabel, useLocalState, type NotifyLevel } from "./localState";
 import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
 import { openProfile } from "./ProfileCard";
@@ -134,7 +134,7 @@ function firstTextChannelId(guildId: Snowflake): Snowflake | undefined {
 export function guildContextItems(guild: Guild): MenuItem[] {
   const owner = isOwnerOf(guild);
   const { can } = viewerPerms(guild);
-  const unread = guildUnread(appStore.getState(), guild.id).unread;
+  const unread = guildUnread(appStore.getState(), guild.id, mutedTest(useLocalState.getState())).unread;
   const invite = firstTextChannelId(guild.id);
   return groups(
     [{ id: "mark-read", label: "Mark As Read", disabled: !unread, onSelect: () => void markGuildRead(guild.id).catch(() => undefined) }],

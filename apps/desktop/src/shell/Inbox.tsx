@@ -5,6 +5,7 @@ import { ChannelType, type Channel } from "../api/types";
 import { Popout } from "../ui";
 import { markChannelRead } from "./actions";
 import { MentionList, ReminderList, SavedMessages } from "../media/InboxLists";
+import { mutedTest, useMutedUntil } from "./localState";
 import { closeModal } from "./modalStore";
 import { dmPath, go, guildPath } from "./nav";
 
@@ -23,17 +24,21 @@ export function InboxPopout({ anchor, open, side = "bottom" }: { anchor: HTMLEle
   const channels = useStore(s => s.channels);
   const readStates = useStore(s => s.readStates);
   const guilds = useStore(s => s.guilds);
+  const mutedUntil = useMutedUntil();
   const rows = useMemo(() => {
     if (!open || tab !== "unreads") return [];
     const state = { channels, readStates } as Parameters<typeof isChannelUnread>[0];
+    const muted = mutedTest({ mutedUntil });
     const out: { channel: Channel; guildName: string | null; mentions: number }[] = [];
     for (const channel of Object.values(channels)) {
       if (channel.type === ChannelType.GuildCategory || channel.type === ChannelType.GuildVoice) continue;
       if (!isChannelUnread(state, channel.id)) continue;
+      // A muted channel (or one in a muted category) is quiet here, as in its channel row; its mentions live on the Mentions tab.
+      if (muted(channel.id) || (channel.parent_id != null && muted(channel.parent_id))) continue;
       out.push({ channel, guildName: channel.guild_id ? (guilds[channel.guild_id]?.name ?? null) : null, mentions: channelMentionCount(state, channel.id) });
     }
     return out;
-  }, [open, tab, channels, readStates, guilds]);
+  }, [open, tab, channels, readStates, guilds, mutedUntil]);
 
   return (
     <Popout anchor={anchor} open={open} onClose={closeModal} side={side} align="end" gap={side === "top" ? 8 : 4} className="inbox-popout">
