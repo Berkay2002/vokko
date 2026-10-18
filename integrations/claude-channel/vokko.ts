@@ -747,20 +747,22 @@ export class VokkoBot {
   }
 
   /** Whether the inbound gate would let this author through in this chat (ourselves included).
-   * Opted-in channels restricted with an allowFrom list still hold everyone else's messages. */
-  senderAllowed(chatId: string, authorId: string): boolean {
+   * Channels restricted with an allowFrom list, and members without Use Application Commands, still have messages here that must not reach the session. */
+  async senderAllowed(chatId: string, authorId: string): Promise<boolean> {
     if (authorId === this.me?.id) return true
     const ch = this.channels.get(chatId)
     if (ch?.type === 1) return true // a DM: the other side passed allowedChannel
     const allow = this.policyFor(this.loadAccess(), chatId)?.allowFrom ?? []
-    return allow.length === 0 || allow.includes(authorId)
+    if (allow.length > 0 && !allow.includes(authorId)) return false
+    return authorId === this.ownerId || ((await this.bitsIn(ch?.guild_id ?? null, chatId, authorId)) & USE_APPLICATION_COMMANDS) !== 0n
   }
 
   /** Newest `limit` messages, oldest first, without senders the gate would drop. */
   async history(chatId: string, limit: number): Promise<Message[]> {
     await this.allowedChannel(chatId)
     const msgs = await this.api<Message[]>('GET', `/channels/${chatId}/messages?limit=${Math.max(1, Math.min(Math.floor(limit) || 1, 100))}`)
-    return msgs.filter(m => this.senderAllowed(chatId, m.author.id)).reverse()
+    const ok = await Promise.all(msgs.map(m => this.senderAllowed(chatId, m.author.id)))
+    return msgs.filter((_, i) => ok[i]).reverse()
   }
 
   async message(chatId: string, messageId: string): Promise<Message> {
@@ -768,7 +770,7 @@ export class VokkoBot {
     snowflake(messageId, 'message_id')
     const [msg] = await this.api<Message[]>('GET', `/channels/${chatId}/messages?around=${messageId}&limit=1`)
     if (msg?.id !== messageId) throw new Error(`message ${messageId} not found`)
-    if (!this.senderAllowed(chatId, msg.author.id)) throw new Error(`message ${messageId} is from a sender not allowlisted in this channel`)
+    if (!(await this.senderAllowed(chatId, msg.author.id))) throw new Error(`message ${messageId} is from a sender not allowlisted in this channel`)
     return msg
   }
 

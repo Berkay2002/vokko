@@ -76,6 +76,21 @@ test('download never sends the token and caps the bytes read, whatever att.size 
   await expect(bot.download({ id: '10', filename: 'b', content_type: null, size: 1, url: 'http://vokko.test/x' })).rejects.toThrow(/exceeds/)
 })
 
+test('history and message leave out members without Use Application Commands, even in a channel with no allowFrom', async () => {
+  const { bot } = makeBot({ groups: { [GROUP]: { requireMention: true, allowFrom: [] } } })
+  const everyone = String(VIEW_CHANNEL | SEND_MESSAGES)
+  ;(bot as any).owner_ = { id: OWNER, username: 'owner', global_name: null }
+  ;(bot as any).guildState.set('1', {
+    at: Date.now() + 3_600_000,
+    guild: { id: '1', owner_id: '1', roles: [{ id: '1', permissions: everyone }, { id: '7', permissions: String(USE_APPLICATION_COMMANDS) }] },
+    members: [memberJson(ME), memberJson(OWNER), memberJson(FRIEND, ['7']), memberJson(STRANGER)],
+  })
+  respond = () => Response.json([msg('4', OWNER), msg('3', STRANGER), msg('2', FRIEND), msg('1', ME)])
+  expect((await bot.history(GROUP, 10)).map(m => m.id)).toEqual(['1', '2', '4']) // the owner, the role holder and itself; not the member without the bit
+  respond = () => Response.json([msg('3', STRANGER)])
+  await expect(bot.message(GROUP, '3')).rejects.toThrow(/not allowlisted/)
+})
+
 test('history and message leave out senders outside the channel allowFrom', async () => {
   const { bot } = makeBot()
   respond = () => Response.json([msg('3', STRANGER), msg('2', FRIEND), msg('1', ME)])
