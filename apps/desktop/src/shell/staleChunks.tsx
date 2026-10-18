@@ -35,7 +35,7 @@ function lastReloadAt(): number | null {
 export function onChunkError(): void {
   if (handled) return;
   handled = true;
-  const busy = hasUnsentDraft() || getVoice().channelId !== null;
+  const busy = hasUnsentDraft() || getVoice().channelId !== null || navigator.onLine === false; // offline: a reload would only show the browser's error page
   const now = Date.now();
   if (decideChunkError({ busy, lastReloadAt: lastReloadAt(), now }) === "reload") {
     try {
