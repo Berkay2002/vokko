@@ -26,7 +26,7 @@ export type { ConnectionQuality, InputMode, VoiceError, VoiceErrorReason, VoiceM
 export { VoiceChannelBadge, VoiceChannelUsers } from "./VoiceChannelUsers";
 export { StageLivePill, StageView } from "./StageView";
 export { VoiceChannelRow } from "./VoiceChannelRow";
-export { VoiceChannelPage } from "./VoiceChannelPage";
+export { VoiceChannelPage } from "./LazyVoiceChannelPage";
 export { VoiceConnectionPanel } from "./VoiceConnectionPanel";
 export { InVoiceCard } from "./InVoiceCard";
 export { CameraPreviewModal, ChannelStatusModal, ScreenSharePickerModal } from "./VoiceModals";

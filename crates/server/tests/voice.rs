@@ -263,7 +263,9 @@ async fn join_is_broadcast_only_to_those_who_can_see_the_channel() {
     let (mut carl, _) = Client::identify(&w.address, &w.carl).await;
     let (mut alice, _) = Client::identify(&w.address, &w.alice).await;
     alice.voice(Some(&w.voice), true).await;
-    assert_eq!(alice.voice_answer().await.0, "VOICE_SERVER_UPDATE");
+    let (name, answer) = alice.voice_answer().await;
+    assert_eq!(name, "VOICE_SERVER_UPDATE");
+    assert_eq!(answer["bitrate"], 64_000, "an unedited channel publishes at the default bitrate");
     let seen = owner.wait_for("VOICE_STATE_UPDATE").await;
     assert_eq!(
         (seen["user_id"].as_str(), seen["channel_id"].as_str(), seen["guild_id"].as_str()),
@@ -296,6 +298,11 @@ async fn join_is_broadcast_only_to_those_who_can_see_the_channel() {
     assert_eq!(metadata["session_id"], seen["session_id"], "same voice session");
     assert_eq!(answer["session_id"], seen["session_id"], "VOICE_SERVER_UPDATE names its session");
     assert!(owner.silent_for("VOICE_STATE_UPDATE", Duration::from_millis(300)).await);
+    // The channel's bitrate (Channel Settings) is the microphone's max bitrate on the next token.
+    let (status, _) = w.app.patch(&format!("/channels/{}", w.voice), &w.owner, json!({"bitrate": 96_000})).await;
+    assert_eq!(status, StatusCode::OK);
+    alice.voice(Some(&w.voice), false).await;
+    assert_eq!(alice.voice_answer().await.1["bitrate"], 96_000);
 }
 
 #[tokio::test]

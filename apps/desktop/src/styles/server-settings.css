@@ -1178,6 +1178,12 @@
   margin-bottom: 8px;
 }
 
+/* dates never break into "Oct 18, / 2026" */
+.ss-members-table td:nth-child(3),
+.ss-members-table td:nth-child(4) {
+  white-space: nowrap;
+}
+
 @media (max-width: 720px) {
   .ss-members-table th:nth-child(4),
   .ss-members-table td:nth-child(4),
@@ -1262,4 +1268,79 @@
 
 .jr-head .ss-member-text {
   flex: 1;
+}
+
+/* phone (<= 767px): the members table is a list of stacked rows (checkbox, name, actions; then the join date and the roles), the
+   toolbar wraps; the columns ran off screen with the roles and actions out of reach. Sorting is in the Sort select. */
+@media (max-width: 767px) {
+  .ss-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .ss-toolbar .ss-search {
+    flex: 1 0 100%;
+  }
+
+  .ss-sort {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .ss-members-table thead {
+    display: none;
+  }
+
+  .ss-members-table,
+  .ss-members-table tbody {
+    display: block;
+  }
+
+  .ss-members-table tr {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 6px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .ss-members-table td {
+    padding: 0;
+    border: 0;
+  }
+
+  .ss-members-table td:nth-child(4),
+  .ss-members-table td:nth-child(6) {
+    display: none;
+  }
+
+  .ss-members-table td:nth-child(2) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .ss-members-table td:nth-child(7) {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .ss-members-table td:nth-child(3),
+  .ss-members-table td:nth-child(5) {
+    grid-column: 2 / 4;
+    padding-left: 42px;
+  }
+
+  .ss-members-table td:nth-child(3) {
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+
+  .ss-members-table td:nth-child(3)::before {
+    content: "Member since ";
+  }
+
+  .ss-members-table td:nth-child(5):not(:has(.ss-chip-row > *)) {
+    display: none;
+  }
 }

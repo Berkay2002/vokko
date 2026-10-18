@@ -21,9 +21,10 @@ async function hoverTip(page: Page, name: string): Promise<void> {
   }).toPass();
 }
 
-test('Help menu opens the keybinds page', async ({ page }) => {
+test('Help opens a menu: Keybinds opens the keybinds page', async ({ page }) => {
   await home(page);
   await page.getByRole('button', { name: 'Help' }).click();
+  await expect(page.getByRole('menuitem')).toHaveText(['Keybinds', 'Report a Problem']);
   await page.getByRole('menuitem', { name: 'Keybinds' }).click();
   await expect(page.locator('.sm-side').getByText('Keybinds').first()).toBeVisible();
 });

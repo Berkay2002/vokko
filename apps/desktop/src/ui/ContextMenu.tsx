@@ -3,8 +3,8 @@ import { createPortal } from "react-dom";
 import { create } from "zustand";
 import { Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { BottomSheet, usePhone } from "./BottomSheet";
-import { useLayer, useOutsideClose } from "./layers";
-import { placeAtPoint } from "./position";
+import { FOCUSABLE, restoreFocus, takeOpener, useLayer, useOutsideClose } from "./layers";
+import { menuTop, placeAtPoint } from "./position";
 
 export type MenuItem =
   | {
@@ -83,6 +83,9 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [active, setActive] = useState<number>(-1);
   const [sub, setSub] = useState<{ index: number; rect: DOMRect } | null>(null);
+  // Taken on the first render, before focus moves into the menu: Escape, Tab or a picked item gives it back.
+  const [opener] = useState(() => (level === 0 ? takeOpener() : null));
+  const row = (index: number) => box.current?.querySelector<HTMLElement>(`[data-menu-row="${index}"]`) ?? null;
 
   useLayoutEffect(() => {
     const el = box.current;
@@ -94,11 +97,23 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
       let left = anchorRect.right + 2;
       if (left + width + 8 > window.innerWidth) left = Math.max(8, anchorRect.left - width - 2);
       const top = Math.min(anchorRect.top - 8, window.innerHeight - height - 8);
-      setPos({ left, top: Math.max(8, top) });
+      setPos({ left, top: Math.max(menuTop(), top) });
     } else {
       setPos(placeAtPoint(x ?? 0, y ?? 0, el.offsetWidth, el.offsetHeight));
     }
   }, [x, y, anchorRect]);
+
+  const placed = pos !== null;
+  useEffect(() => {
+    if (level > 0 || !placed) return;
+    const root = box.current;
+    if (!root?.contains(document.activeElement)) root?.focus({ preventScroll: true });
+    return () => restoreFocus(opener, root);
+  }, [level, placed, opener]);
+  useEffect(() => {
+    // DOM focus follows the highlighted row, so screen readers announce it; no scrolling (a scroll anywhere closes the menu).
+    if (level === 0 && active >= 0) row(active)?.focus({ preventScroll: true });
+  }, [level, active]);
 
   const move = (delta: number) => {
     const count = items.length;
@@ -113,11 +128,11 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
     }
   };
 
-  const activate = (index: number, row?: HTMLElement | null) => {
+  const activate = (index: number, el?: HTMLElement | null) => {
     const item = items[index];
     if (!item || !isSelectable(item)) return;
     if (item.children?.length) {
-      const rect = (row ?? box.current?.querySelectorAll<HTMLElement>("[data-menu-row]")[index])?.getBoundingClientRect();
+      const rect = (el ?? row(index))?.getBoundingClientRect();
       if (rect) setSub({ index, rect });
       return;
     }
@@ -128,6 +143,9 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
   useEffect(() => {
     if (level > 0) return;
     const onKey = (event: KeyboardEvent) => {
+      // A custom row's control (a volume slider) keeps its own keys.
+      const inControl = event.target instanceof HTMLElement && !!event.target.closest(".context-menu-custom");
+      if (inControl && event.key !== "Tab") return;
       if (event.key === "ArrowDown") {
         event.preventDefault();
         move(1);
@@ -142,9 +160,18 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
       } else if (event.key === "ArrowLeft") {
         setSub(null);
       } else if (event.key === "Tab") {
-        // The menu has no focusable rows: let Tab move on and close the menu behind it (ARIA menu pattern).
-        // A custom row (a volume slider) does hold focus; Tab there moves within the menu.
-        if (!document.activeElement?.closest(".context-menu")) onClose();
+        // Tab steps through the custom rows' controls (volume sliders) when there are any; otherwise it closes the menu and focus goes
+        // back to where it was opened from (ARIA menu pattern).
+        event.preventDefault();
+        const controls = [...(box.current?.querySelectorAll<HTMLElement>(`.context-menu-custom :is(${FOCUSABLE})`) ?? [])];
+        if (controls.length === 0) {
+          onClose();
+          return;
+        }
+        const at = controls.indexOf(document.activeElement as HTMLElement);
+        const next = event.shiftKey ? (at <= 0 ? controls.length - 1 : at - 1) : (at + 1) % controls.length;
+        setActive(-1);
+        controls[next]?.focus({ preventScroll: true });
       }
     };
     document.addEventListener("keydown", onKey);
@@ -153,12 +180,12 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
 
   return (
     <>
-      <div ref={box} className="context-menu" role="menu" style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }} onContextMenu={e => e.preventDefault()}>
+      <div ref={box} className="context-menu" role="menu" tabIndex={-1} style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }} onContextMenu={e => e.preventDefault()}>
         {items.map((item, index) => {
           if ("type" in item) return <div key={`sep-${index}`} className="context-menu-separator" role="separator" />;
           if (item.render) {
             return (
-              <div key={item.id} data-menu-row className="context-menu-custom" role="none" onMouseEnter={() => (setActive(-1), setSub(null))}>
+              <div key={item.id} data-menu-row={index} className="context-menu-custom" role="none" onMouseEnter={() => (setActive(-1), setSub(null))}>
                 {item.render()}
               </div>
             );
@@ -167,7 +194,8 @@ function MenuList({ items, onClose, level = 0, x, y, anchorRect }: { items: Menu
           return (
             <div
               key={item.id}
-              data-menu-row
+              data-menu-row={index}
+              tabIndex={-1}
               role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
               aria-checked={item.checked}
               aria-disabled={item.disabled || undefined}
@@ -382,13 +410,17 @@ export function ContextMenuHost() {
   useEffect(() => {
     if (!open || phone) return;
     const close = () => hide();
+    // A long menu scrolls inside itself (.context-menu max-height); only a scroll elsewhere moves its anchor.
+    const onScroll = (event: Event) => {
+      if (!(event.target instanceof Element && event.target.closest(".context-menu"))) hide();
+    };
     window.addEventListener("resize", close);
     window.addEventListener("blur", close);
-    document.addEventListener("scroll", close, true);
+    document.addEventListener("scroll", onScroll, true);
     return () => {
       window.removeEventListener("resize", close);
       window.removeEventListener("blur", close);
-      document.removeEventListener("scroll", close, true);
+      document.removeEventListener("scroll", onScroll, true);
     };
   }, [open, hide, phone]);
   if (!open) return null;

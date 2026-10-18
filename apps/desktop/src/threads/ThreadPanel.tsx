@@ -6,7 +6,7 @@ import { ChannelFlags, ChannelType, type Channel } from "../api/types";
 import { ChatView } from "../chat/ChatView";
 import { PinnedMessages } from "../chat/PinnedMessages";
 import { chatToast } from "../chat/toast";
-import { Popout, Tooltip, useContextMenu, type MenuItem } from "../ui";
+import { Popout, Tooltip, useBackClose, useContextMenu, type MenuItem } from "../ui";
 import { getPrefs } from "../ui/prefs";
 import { threadBellItems, useThreadMuted } from "./mute";
 import { ThreadMembers } from "./ThreadMembers";
@@ -118,6 +118,7 @@ export function ThreadPanel({ thread, parent }: { thread: Channel; parent: Chann
   const rights = useThreadRights(thread);
   const muted = useThreadMuted(thread);
   const menu = useContextMenu();
+  useBackClose(true, closeThread);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [membersAnchor, setMembersAnchor] = useState<HTMLElement | null>(null);
   const [membersOpen, setMembersOpen] = useState(false);

@@ -9,6 +9,7 @@ const catalog = (guildId: Snowflake) => `/guilds/${guildId}/games`;
 export const startGame = (channelId: Snowflake, gameId: string) => request<GameSession>("PUT", session(channelId), { game_id: gameId });
 export const stopGame = (channelId: Snowflake) => request<void>("DELETE", session(channelId));
 export const gamePlayers = (channelId: Snowflake) => request<GamePlayer[]>("GET", `${session(channelId)}/players`);
+export const shareGameRoom = (channelId: Snowflake, url: string | null) => request<GameSession>("PUT", `${session(channelId)}/room`, { url });
 export const relayGame = (channelId: Snowflake, body: GameRelayRequest) => request<void>("POST", `${session(channelId)}/messages`, body);
 
 export const listGuildGames = (guildId: Snowflake) => request<GameManifest[]>("GET", catalog(guildId));

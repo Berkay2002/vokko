@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Monitor, Smartphone } from "lucide-react";
 import { request } from "../api/rest";
+import { appStore } from "../api/store";
 import type { UserSession } from "../api/types";
 
 const MOBILE = new Set(["Android", "iOS"]);
@@ -26,19 +27,32 @@ function lastUsed(iso: string): string {
 export function DevicesList() {
   const [sessions, setSessions] = useState<UserSession[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const ready = appStore(s => s.connection === "ready");
   const load = () =>
     request<{ user_sessions: UserSession[] }>("GET", "/auth/sessions").then(
-      result => setSessions(result.user_sessions),
+      result => {
+        setSessions(result.user_sessions);
+        setError(null);
+      },
       () => setError("Couldn't load your devices."),
     );
+  // reload when the gateway comes back, like the email row
   useEffect(() => {
-    void load();
-  }, []);
+    if (ready || !sessions) void load();
+  }, [ready]);
   const logOut = async (ids: string[]) => {
     await request<void>("POST", "/auth/sessions/logout", { session_id_hashes: ids });
     await load();
   };
-  if (error) return <p className="field-error">{error}</p>;
+  if (error && !sessions)
+    return (
+      <p className="field-error">
+        {error}{" "}
+        <button type="button" className="acct-reveal" onClick={() => void load()}>
+          Retry
+        </button>
+      </p>
+    );
   if (!sessions) return <p className="sm-muted">Loading devices...</p>;
   const others = sessions.filter(s => !s.current);
   return (

@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState, type PointerEvent as Re
 import { Navigate, useNavigate, useParams } from "react-router";
 import { ChatView } from "../chat/ChatView";
 import { MediaHost } from "../media/MediaHost";
-import { StremioViewerHost } from "../stremio";
+import { StremioViewerHost } from "../stremio/ViewerHost";
 import { appStore, useStore } from "../api/store";
 import { ChannelType, type Guild, type Snowflake } from "../api/types";
 import { CommunityHost } from "../community";
@@ -24,11 +24,13 @@ import { ProfileCardHost } from "./ProfileCard";
 import { ServerRail } from "./ServerRail";
 import { NativeMenuBridge } from "./NativeMenuBridge";
 import { TitleBar } from "./TitleBar";
+import { StaleChunkBanner } from "./staleChunks";
 import { UserPanel } from "./UserPanel";
 import { StageView, toggleSelfDeaf, toggleSelfMute, VoiceChannelPage, VoiceConnectionPanel } from "../voice";
 import { inChatPanel, useShortcut } from "../keyboard";
 import { allChannelOrder, channelOrder, mentioned, step, unread, type Place } from "../keyboard/navigation";
 import { getPrefs, setPref, usePrefs } from "../ui/prefs";
+import { useBackClose } from "../ui";
 import { markChannelRead, markGuildRead } from "./actions";
 import { firstTextChannel } from "./channels";
 import { useModals, openModal, closeModal } from "./modalStore";
@@ -181,6 +183,8 @@ export function AppShell() {
   // picked in it. The details page (header name) closes with a channel change.
   const navOpen = useNavDrawer(s => s.open);
   const detailsOpen = useNavDrawer(s => s.details);
+  // the page over the list (a chat, Friends, Members) holds a history entry: back returns to the list, not to the previous route
+  useBackClose(narrow && !navOpen, () => useNavDrawer.getState().setOpen(true));
   const lastPlace = useRef({ guildId, channelId });
   useEffect(() => {
     const was = lastPlace.current;
@@ -267,6 +271,7 @@ export function AppShell() {
     <div className={`app-frame${navOpen ? " nav-open" : ""}`} style={{ ["--sidebar-width" as string]: `${width}px` }}>
       <NativeMenuBridge />
       <TitleBar />
+      <StaleChunkBanner />
       <div className="app-body">
         <Rail />
         <div className="sidebar" onClick={leaveListOnSameRoute}>

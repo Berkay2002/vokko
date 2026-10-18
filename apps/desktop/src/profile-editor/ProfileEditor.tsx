@@ -8,7 +8,7 @@ import { closeModal } from "../shell/modalStore";
 import { SaveBar } from "../shell/settings/SaveBar";
 import { mergeMemberLocal } from "../shell/settings/shared";
 import { blockedByUnsaved } from "../shell/settings/unsaved";
-import { useFocusTrap, useLayer } from "../ui";
+import { useBackClose, useFocusTrap, useLayer } from "../ui";
 import { CardPreview } from "./CardPreview";
 import { MAIN_SCOPE, initDraft, isDirty, lookOf, toPatch, validateDraft, type ProfileDraft, type Scope } from "./draft";
 import { LeftColumn, useEditorGuilds } from "./LeftColumn";
@@ -63,6 +63,7 @@ function EditorBody({ me, scope, onScope }: { me: User; scope: Scope; onScope(ne
   }, []);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   useLayer(true, requestClose);
+  useBackClose(true, requestClose);
   useFocusTrap(true, () => root.current);
 
   const reset = () => {

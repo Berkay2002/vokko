@@ -2,7 +2,7 @@
 
 import { useLocation } from "react-router";
 import { Gamepad2, Lock, MessageCircle, MonitorPlay, Pencil, Settings, UserPlus, Volume2 } from "lucide-react";
-import { StremioIcon } from "../stremio";
+import { StremioIcon } from "../stremio/StremioIcon";
 import { SpotifyIcon } from "../spotify/SpotifyIcon";
 import { Perm } from "../api/permissions";
 import { channelMentionCount, isChannelUnread, useStore } from "../api/store";

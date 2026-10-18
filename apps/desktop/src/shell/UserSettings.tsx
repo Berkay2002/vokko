@@ -1,10 +1,11 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { UIEvent } from "react";
 import { Accessibility, Bell, Code, Gamepad2, Joystick, Keyboard, Languages, LogOut, MessageCircle, Mic, MessagesSquare, Monitor, Palette, Pencil, Plug, Radio, Search, ShieldCheck, User as UserIcon, X } from "lucide-react";
 import { ApiRequestError } from "../api/errors";
 import { request } from "../api/rest";
 import { appStore, displayName, useStore } from "../api/store";
-import type { User } from "../api/types";
+import type { InstanceInfo, User } from "../api/types";
+import { safeHttpUrl } from "../chat/embedUtil";
 import { isDesktop, useWindowChrome } from "../desktop";
 import { Avatar } from "./Avatar";
 import { closeModal, openModal } from "./modalStore";
@@ -46,7 +47,7 @@ interface SectionDef {
 // Order and grouping follow Discord's User Settings sidebar (research/discord-ui-inventory.md S1, settings-modal reference).
 // The Billing group (Nitro, Server Boost, Subscriptions, Gift Inventory, Billing) and the desktop-only game pages are left out on purpose.
 const ALL_SECTIONS: SectionDef[] = [
-  { id: "account", label: "My Account", icon: UserIcon, group: "", outline: ["Account Info", "Password & Security", "Account Status"], keywords: ["username", "display name", "email", "phone", "password", "security", "devices", "disable", "delete"] },
+  { id: "account", label: "My Account", icon: UserIcon, group: "", outline: ["Account Info", "Password & Security", "Sign-in Methods"], keywords: ["username", "display name", "email", "phone", "password", "security", "devices", "disable", "delete"] },
   { id: "privacy", label: "Data & Privacy", icon: ShieldCheck, group: "", outline: ["How Vokko Uses My Data", "Profile Privacy"], keywords: ["data", "personalization", "analytics", "profile", "request my data", "export"] },
   { id: "content", label: "Content & Social", icon: MessagesSquare, group: "", outline: ["Content Filters", "Spam Filters", "Direct Message (DM) Permissions", "Friend Request Permissions", "Ignore & Block"], keywords: ["messages", "dm", "friends", "block", "filter", "explicit", "spam", "permissions", "message requests", "friend requests"] },
   { id: "notifications", label: "Notifications", icon: Bell, group: "", keywords: ["sounds", "badges", "email", "desktop", "push", "mentions"] },
@@ -170,18 +171,6 @@ function MyAccount({ me }: { me: User }) {
           <SignIn />
         </SettingsBlock>
       )}
-      <SettingsBlock anchor="status" title="Account Status">
-        <SettingsRow label="Disable Account" value={<span className="sm-muted">Not available yet</span>}>
-          <button type="button" className="sm-btn" disabled title="Not available yet">
-            Disable
-          </button>
-        </SettingsRow>
-        <SettingsRow label="Delete Account" value={<span className="sm-muted">Not available yet</span>}>
-          <button type="button" className="sm-btn" disabled title="Not available yet">
-            Delete
-          </button>
-        </SettingsRow>
-      </SettingsBlock>
     </>
   );
 }
@@ -194,6 +183,11 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
   const [query, setQuery] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
   const platform = useWindowChrome()?.platform;
+  // the instance's own terms (VOKKO_TERMS_URL) are the only legal page a Vokko server serves
+  const [termsUrl, setTermsUrl] = useState<string | null>(null);
+  useEffect(() => {
+    request<InstanceInfo>("GET", "/auth/instance").then(info => setTermsUrl(safeHttpUrl(info.terms_url)), () => setTermsUrl(null));
+  }, []);
 
   // the sub-items are the headings of the page that is open
   useLayoutEffect(() => {
@@ -211,11 +205,13 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
   const showLogOut = !needle || "log out".includes(needle);
   const active = sections.find(s => s.id === current) ?? sections[0]!;
 
-  const open = (id: string) => {
+  const open = (id: string, anchorName?: string) => {
     if (id !== current && blockedByUnsaved()) return;
     setCurrent(id);
     setAnchor(0);
     scroller.current?.scrollTo({ top: 0, behavior: "instant" });
+    // once the new page has rendered
+    if (anchorName) requestAnimationFrame(() => scroller.current?.querySelector(`[data-anchor="${anchorName}"]`)?.scrollIntoView({ block: "start" }));
   };
 
   const scrollToAnchor = (index: number) => {
@@ -254,7 +250,7 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
       case "voice":
         return <VoiceVideoPage />;
       case "appearance":
-        return <AppearancePage />;
+        return <AppearancePage onOpen={open} />;
       case "accessibility":
         return <AccessibilityPage onOpenSection={open} />;
       case "keybinds":
@@ -276,7 +272,7 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
       case "games":
         return <RegisteredGamesPage />;
       case "connections":
-        return <ConnectedAppsPage />;
+        return <ConnectedAppsPage onOpen={open} />;
       default:
         return null;
     }
@@ -340,13 +336,13 @@ export function UserSettings({ section, guildId }: { section?: string; guildId?:
           <button type="button" className="sm-build" title="Copy build info" onClick={() => void navigator.clipboard?.writeText(BUILD)}>
             {BUILD}
           </button>
-          <div className="sm-side-links">
-            <button type="button">Privacy Policy</button>
-            <span aria-hidden="true">&bull;</span>
-            <button type="button">Terms of Service</button>
-            <span aria-hidden="true">&bull;</span>
-            <button type="button">More</button>
-          </div>
+          {termsUrl && (
+            <div className="sm-side-links">
+              <a href={termsUrl} target="_blank" rel="noreferrer">
+                Terms of Service
+              </a>
+            </div>
+          )}
         </div>
       </div>
     </>

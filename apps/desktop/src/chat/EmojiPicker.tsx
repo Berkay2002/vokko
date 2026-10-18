@@ -75,7 +75,12 @@ export function EmojiPicker({ onPick, autoFocus = true, embedded = false, reacti
   return <div className={`chat-emoji-picker${embedded ? ' embedded' : ''}`} role={embedded ? 'tabpanel' : 'dialog'} aria-label="Emoji picker">
     <div className="chat-emoji-top">
       <div className="chat-emoji-search">
-        <input ref={input} value={query} onChange={e => setQuery(e.target.value)} placeholder="Find the perfect emoji" aria-label="Search emoji" spellCheck={false} />
+        <input ref={input} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => {
+          // Enter picks the top search result (the first cell shown, custom emoji included), as in Discord.
+          if (e.key !== 'Enter' || !results || e.nativeEvent.isComposing) return;
+          e.preventDefault();
+          scroller.current?.querySelector<HTMLButtonElement>('button')?.click();
+        }} placeholder="Find the perfect emoji" aria-label="Search emoji" spellCheck={false} />
         {query ? <button type="button" aria-label="Clear search" onClick={() => setQuery('')}><X size={16} /></button> : <Search size={16} aria-hidden="true" />}
       </div>
       {superReactions && <SuperReactToggle on={burst} onChange={setBurst} />}

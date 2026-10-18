@@ -88,6 +88,37 @@
   -webkit-app-region: drag;
 }
 
+/* Notice bar under the title bar (Discord's "notice" strip): a stale-chunk reload that was held back */
+.app-notice {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 36px;
+  padding: 4px 16px;
+  background: var(--notice-background-info);
+  color: var(--notice-text-info);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.app-notice-button {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.app-notice-button:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
 .title-bar-title {
   position: absolute;
   inset: 0;
@@ -294,7 +325,6 @@
   background: var(--brand-500);
 }
 
-.rail-discover:hover,
 .rail-download:hover {
   background: var(--status-online);
 }
@@ -1052,7 +1082,8 @@
   text-align: left;
 }
 
-.guild-menu-item:hover:not(:disabled) {
+.guild-menu-item:hover:not(:disabled),
+.guild-menu-item:focus-visible:not(:disabled) {
   background: var(--interactive-background-hover);
   color: var(--text-default);
 }
@@ -1964,6 +1995,10 @@ img.active-card-art {
   gap: 8px;
 }
 
+.friends-add-icon {
+  display: none;
+}
+
 /* Six tabs do not fit next to the title in a narrow column: keep the icon, hide the word (still there for screen readers) and the dot. */
 @container (max-width: 760px) {
   .friends-title h1 {
@@ -2135,6 +2170,43 @@ img.active-card-art {
   text-align: center;
 }
 
+.people-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.people-empty.pick-empty-state {
+  margin: 8px auto 16px;
+}
+
+.dm-placeholders {
+  padding: 0 8px;
+}
+
+.dm-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 42px;
+  padding: 0 8px;
+}
+
+.dm-placeholder-avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--background-mod-normal);
+}
+
+.dm-placeholder-name {
+  height: 20px;
+  border-radius: 10px;
+  background: var(--background-mod-subtle);
+}
+
 .add-friend {
   padding: 20px 30px;
 }
@@ -2183,6 +2255,11 @@ img.active-card-art {
   color: var(--text-default);
   font-size: 16px;
   font-weight: 500;
+}
+
+/* The wrapper's border shows focus, success and error; a ring on the input inside it doubles up. */
+.add-friend-input input:focus-visible {
+  outline: none;
 }
 
 .add-friend-result {

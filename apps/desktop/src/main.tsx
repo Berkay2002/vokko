@@ -21,6 +21,8 @@ import * as store from "./api/store";
 import { messageStore } from "./chat/messageStore";
 import { preloadHighlighter } from "./chat/markdown";
 import { preloadSettings } from "./shell/Modals";
+import { installStaleChunkReload } from "./shell/staleChunks";
+import { preloadLazyModules } from "./ui/lazyModule";
 import { startNotify } from "./notify";
 import { installLogCapture } from "./report/logBuffer";
 import { startThreadMuteMigration } from "./threads/muteMigration";
@@ -53,6 +55,7 @@ import "./voice";
 import "./calls";
 import "./soundboard";
 
+installStaleChunkReload(); // a tab left open across a redeploy reloads (or offers to) when an old chunk is gone
 installLogCapture(); // console warnings/errors feed "Report a problem" (scrubbed, kept in memory)
 
 // Mock mode only: expose internals to Playwright scripts and the console (no effect in real builds).
@@ -79,10 +82,11 @@ if (root) {
   );
 }
 
-// Chunks split out of the startup bundle (code highlighting, the settings screens), fetched once the first paint is done so they are
+// Chunks split out of the startup bundle (code highlighting, the settings screens, the voice page and perk art), fetched once the first paint is done so they are
 // ready before anyone needs them.
 const whenIdle = (fn: () => void) => ("requestIdleCallback" in window ? window.requestIdleCallback(fn, { timeout: 3000 }) : setTimeout(fn, 1500));
 whenIdle(() => {
   preloadHighlighter().catch(() => {}); // only a warm-up: code blocks load it again on demand
   preloadSettings();
+  void preloadLazyModules();
 });

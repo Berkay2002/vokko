@@ -94,6 +94,12 @@ pub fn channel_settings(bitrate: Option<i32>, user_limit: Option<i32>) -> (u32, 
     (bitrate.map(|value| value.max(0) as u32).unwrap_or(VOICE_BITRATE_DEFAULT), user_limit.map(|value| value.max(0) as u32).unwrap_or(0))
 }
 
+/// The microphone's max publish bitrate for a guild voice or stage channel (VOICE_SERVER_UPDATE `bitrate`): the stored
+/// value clamped to this server's limits, which may have been lowered since it was set. DM calls have none.
+pub fn publish_bitrate(config: &Config, bitrate: Option<i32>, is_dm: bool) -> Option<u32> {
+    (!is_dm).then(|| channel_settings(bitrate, None).0.clamp(VOICE_BITRATE_MIN, config.voice_bitrate_max))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +116,9 @@ mod tests {
         assert!(validate_channel_settings(&config, true, None, Some(100)).is_err());
         assert!(validate_channel_settings(&config, false, Some(64_000), None).is_err(), "text channels have no bitrate");
         assert!(validate_channel_settings(&config, false, None, None).is_ok());
+        assert_eq!(publish_bitrate(&config, None, false), Some(64_000));
+        assert_eq!(publish_bitrate(&config, Some(96_000), false), Some(96_000));
+        assert_eq!(publish_bitrate(&config, Some(384_000), false), Some(128_000), "a lowered ceiling caps an older value");
+        assert_eq!(publish_bitrate(&config, Some(64_000), true), None, "DM calls");
     }
 }

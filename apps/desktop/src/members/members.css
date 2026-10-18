@@ -546,6 +546,49 @@
   overflow-y: auto;
 }
 
+/* phone (<= 767px): the card fits the window (it had an 860px floor, so search, sort and the pager were off screen) and only the table
+   scrolls sideways, with the name column pinned so a row stays readable */
+@media (max-width: 767px) {
+  .mp-scroller {
+    padding: 12px;
+  }
+
+  .mp-card {
+    min-width: 0;
+  }
+
+  .mp-card-header,
+  .mp-tools,
+  .mp-footer {
+    flex-wrap: wrap;
+  }
+
+  .mp-tools {
+    flex: 1 0 100%;
+  }
+
+  .mp-search {
+    flex: 1;
+    width: auto;
+  }
+
+  .mp-pager {
+    flex-wrap: wrap;
+  }
+
+  .mp-table-wrap {
+    overflow-x: auto;
+  }
+
+  .mp-table .mp-col-name {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    max-width: 180px;
+    background: var(--background-base-lower);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mp-chevron {
     transition: none;

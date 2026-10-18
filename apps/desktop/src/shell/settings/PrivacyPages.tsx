@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Download, Gamepad2, Globe, Palette } from "lucide-react";
-import { siBluesky, siGithub, siReddit, siSpotify, siSteam, siTwitch, siYoutube, type SimpleIcon } from "simple-icons";
+import { Download, Gamepad2, Palette } from "lucide-react";
+import { siGithub, siGoogle, siSpotify } from "simple-icons";
 import { BrandIcon } from "../../ui/BrandIcon";
 import { ApiRequestError, RateLimitedError, request } from "../../api/rest";
 import { useStore } from "../../api/store";
@@ -252,26 +252,22 @@ export function ActivityPrivacyPage() {
   );
 }
 
-const PROVIDERS: { name: string; icon: Pick<SimpleIcon, "path"> | null }[] = [
-  { name: "Steam", icon: siSteam },
-  { name: "Twitch", icon: siTwitch },
-  { name: "YouTube", icon: siYoutube },
+// only the sign-in providers can be linked; they live in My Account > Sign-in Methods
+const PROVIDERS = [
   { name: "GitHub", icon: siGithub },
-  { name: "Reddit", icon: siReddit },
-  { name: "Bluesky", icon: siBluesky },
-  { name: "Domain", icon: null },
+  { name: "Google", icon: siGoogle },
 ];
 
-export function ConnectedAppsPage() {
+export function ConnectedAppsPage({ onOpen }: { onOpen(section: string, anchor?: string): void }) {
   return (
     <Page title="Connected Apps">
       <Category title="Connections">
-        <p className="sm-sub-note">These are accounts on other services. Linking them to Vokko is not available yet.</p>
+        <p className="sm-sub-note">Link a GitHub or Google account in My Account &gt; Sign-in Methods, then sign in with it.</p>
         <SubHeading>Add a new connection</SubHeading>
         <div className="sm-provider-grid">
           {PROVIDERS.map(({ name, icon }) => (
-            <button key={name} type="button" className="sm-provider" disabled aria-label={`Connect ${name}`} title={`${name} (not available yet)`}>
-              {icon ? <BrandIcon icon={icon} /> : <Globe size={20} aria-hidden="true" />}
+            <button key={name} type="button" className="sm-provider" aria-label={`Connect ${name}`} title={name} onClick={() => onOpen("account", "signin")}>
+              <BrandIcon icon={icon} />
             </button>
           ))}
         </div>

@@ -20,7 +20,7 @@ export function StreamerPage() {
         />
       </Category>
       <Category title="Options">
-        <SwitchRow label="Hide personal information" note="Blurs your username and account details." checked={p.streamerHidePersonal} disabled={!on} onChange={v => setPref("streamerHidePersonal", v)} />
+        <SwitchRow label="Hide personal information" note="Blurs your username, email addresses and linked accounts." checked={p.streamerHidePersonal} disabled={!on} onChange={v => setPref("streamerHidePersonal", v)} />
         <SwitchRow label="Hide invite links" note="Invite links and cards are hidden or blurred." checked={p.streamerHideInvites} disabled={!on} onChange={v => setPref("streamerHideInvites", v)} />
         <SwitchRow label="Disable sounds" note="No notification or call sounds play." checked={p.streamerDisableSounds} disabled={!on} onChange={v => setPref("streamerDisableSounds", v)} />
         <SwitchRow label="Disable notifications" note="No desktop notifications are shown." checked={p.streamerDisableNotifications} disabled={!on} onChange={v => setPref("streamerDisableNotifications", v)} />

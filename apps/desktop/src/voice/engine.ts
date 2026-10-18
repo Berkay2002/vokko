@@ -377,7 +377,7 @@ async function connect(endpoint: string, token: string): Promise<void> {
     const channelId = getVoice().channelId;
     const resume = mediaChannel !== null && mediaChannel === channelId;
     mediaChannel = channelId;
-    await t.connect(endpoint, token, { ...transportOptions(getVoice()), resume });
+    await t.connect(endpoint, token, { ...transportOptions(getVoice()), resume, audioBitrate: getVoice().server?.bitrate });
     if (activeToken !== token) return;
     // Every connect starts the transport from scratch (a new room forgets what we watch), but the media store keeps the
     // Watch Stream and quality choices across a reconnect: hand them back, or a watched stream shows only its avatar.
@@ -528,6 +528,14 @@ function sync(next: VoiceModel, prev: VoiceModel): void {
 
   // Others' cameras and screen shares follow the voice states (self_video / self_stream).
   if (next.states !== prev.states && next.channelId) transport?.syncVideo?.();
+  // A streamer who stops (and stays in the channel) is no longer watched: when they go live again, Watch Stream shows again, as in Discord.
+  if (next.states !== prev.states) {
+    for (const id of Object.keys(getMedia().watching)) {
+      const was = prev.states[id];
+      const now = next.states[id];
+      if (was?.self_stream && now && now.channel_id === was.channel_id && !now.self_stream) watchStream(id, false);
+    }
+  }
 
   if (next.volumes !== prev.volumes || next.localMutes !== prev.localMutes) {
     const ids = new Set([...Object.keys(next.volumes), ...Object.keys(prev.volumes), ...Object.keys(next.localMutes), ...Object.keys(prev.localMutes)]);
@@ -591,7 +599,7 @@ export function wireVoice(): void {
   gateway.on("GUILD_DELETE", ({ id }) => dispatch({ type: "guildDelete", guildId: id }));
   gateway.on("VOICE_STATE_UPDATE", state => dispatch({ type: "voiceStateUpdate", state }));
   gateway.on("VOICE_SERVER_UPDATE", d =>
-    dispatch({ type: "voiceServerUpdate", guildId: d.guild_id, channelId: d.channel_id, endpoint: d.endpoint, token: d.token, sessionId: d.session_id }),
+    dispatch({ type: "voiceServerUpdate", guildId: d.guild_id, channelId: d.channel_id, endpoint: d.endpoint, token: d.token, sessionId: d.session_id, bitrate: d.bitrate }),
   );
   gateway.on("VOICE_CONNECT_FAILED", d => dispatch({ type: "connectFailed", guildId: d.guild_id, channelId: d.channel_id, reason: d.reason }));
   gateway.on("VOICE_CHANNEL_STATUS_UPDATE", d => dispatch({ type: "channelStatus", channelId: d.id, status: d.status }));

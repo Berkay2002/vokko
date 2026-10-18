@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MailX, Play, Users } from 'lucide-react';
 import type { Embed, Message, Snowflake } from '../api/types';
-import { AnimatedVideo, guildIconUrl, guildInitials, joinOrApply, request, resolveUrl, useGuilds } from './shell';
+import { AnimatedImage, AnimatedVideo, guildIconUrl, guildInitials, joinOrApply, request, resolveUrl, useGuilds } from './shell';
 import { useChat } from './ChatContext';
 import { Markdown } from './markdown';
 import { embedColor, findInviteCodes, isVideoUrl, safeHttpUrl } from './embedUtil';
@@ -90,7 +90,7 @@ function InviteEmbed({ code, own }: { code: string; own: boolean }) {
 
 function Media({ url, alt, className }: { url: string | null; alt: string; className: string }) {
   if (!url) return null;
-  return <img className={className} src={resolveUrl(url)} alt={alt} loading="lazy" draggable={false} />;
+  return <AnimatedImage kind="gif" className={className} src={resolveUrl(url)} alt={alt} loading="lazy" draggable={false} />;
 }
 
 function EmbedCard({ embed }: { embed: Embed }) {
@@ -113,7 +113,7 @@ function EmbedCard({ embed }: { embed: Embed }) {
   if (embed.type === 'image') {
     const src = mediaUrl(embed.thumbnail) ?? mediaUrl(embed.image) ?? safeHttpUrl(embed.url);
     if (!src) return null;
-    return <a className="chat-embed-image-only" href={link ?? src} onClick={e => open(e, link ?? src)}><img src={resolveUrl(src)} alt={embed.title ?? 'Image'} loading="lazy" draggable={false} /></a>;
+    return <a className="chat-embed-image-only" href={link ?? src} onClick={e => open(e, link ?? src)}><AnimatedImage kind="gif" src={resolveUrl(src)} alt={embed.title ?? 'Image'} loading="lazy" draggable={false} /></a>;
   }
 
   const videoUrl = safeHttpUrl(embed.video?.url);

@@ -2,12 +2,28 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import { register } from "../api/auth";
 import type { InstanceInfo } from "../api/types";
+import { safeHttpUrl } from "../chat/embedUtil";
 import { fetchInstance } from "./api";
 import { DateOfBirth, EMPTY_DATE, isoDate, type DateParts } from "./DateOfBirth";
 import { PasswordMeter } from "./PasswordMeter";
-import { Field, Frame, fieldErrors } from "./ui";
+import { registerProblems } from "./registerRules";
+import { Field, Frame, SubmitButton, fieldErrors } from "./ui";
 import { UsernameHint, useUsernameCheck } from "./useUsernameCheck";
 import { OAuthButtons } from "./OAuthButtons";
+
+/** The instance's terms link: http(s) only, since a hostile or misconfigured instance could send a `javascript:` URL. */
+export function TermsLink({ url }: { url: string | null }) {
+  const href = safeHttpUrl(url);
+  if (!href) return null;
+  return (
+    <>
+      {" "}
+      <a href={href} target="_blank" rel="noreferrer noopener">
+        Read the terms
+      </a>
+    </>
+  );
+}
 
 export function RegisterPage() {
   const [instance, setInstance] = useState<InstanceInfo | null>(null);
@@ -29,12 +45,9 @@ export function RegisterPage() {
     event.preventDefault();
     if (busy) return;
     const date = isoDate(dob);
-    if (!date) {
-      setErrors({ date_of_birth: "Required." });
-      return;
-    }
-    if (instance?.terms && !consent) {
-      setErrors({ consent: "You need to agree to the terms." });
+    const problems = registerProblems({ email, username, password, dateOfBirth: date, consent: instance?.terms ? consent : null });
+    if (!date || Object.keys(problems).length > 0) {
+      setErrors(problems);
       return;
     }
     setBusy(true);
@@ -93,21 +106,12 @@ export function RegisterPage() {
             <input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />
             <span>
               {instance.terms}
-              {instance.terms_url && (
-                <>
-                  {" "}
-                  <a href={instance.terms_url} target="_blank" rel="noreferrer noopener">
-                    Read the terms
-                  </a>
-                </>
-              )}
+              <TermsLink url={instance.terms_url} />
             </span>
           </label>
         )}
         {errors.consent && <p className="field-error">{errors.consent}</p>}
-        <button type="submit" className="btn btn-wide" disabled={busy}>
-          Continue
-        </button>
+        <SubmitButton busy={busy}>Continue</SubmitButton>
       </form>
       <OAuthButtons />
     </Frame>

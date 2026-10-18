@@ -10,6 +10,14 @@ test('register: Discord fields, live username check, strength meter, date of bir
   await page.evaluate(() => (window as unknown as Hooks).__vokkoMockAccounts.instance({ terms: 'I agree to the house rules.', terms_url: 'https://example.test/terms' }));
   await goInApp(page, '/register');
 
+  // an empty form flags every required field at once, before any request; a malformed email is caught the same way
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.locator('.field-label-error')).toHaveText([' - Required.', ' - Required.', ' - Required.', ' - Required.']);
+  await expect(page.getByText('You need to agree to the terms.')).toBeVisible();
+  await page.getByLabel('Email').fill('not-an-email');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page.getByText('Not a well formed email address.')).toBeVisible();
+
   await page.getByLabel('Email').fill('newbie@example.test');
   await page.getByLabel('Display name').fill('New Bie');
 
@@ -290,4 +298,47 @@ test('OAuth: Continue with GitHub signs up, then Sign-in Methods keeps the last 
   await expect(page).toHaveURL(/\/channels\/@me/);
   await page.getByRole('button', { name: 'User Settings' }).click();
   await expect(settings.locator('.sm-row', { hasText: 'Username' })).toContainText('octocat');
+});
+
+test('Log In shows a busy button while a slow request runs, same size, label still its name', async ({ page }) => {
+  await page.goto('/login?mockLatency=1500');
+  await mockReady(page);
+  const button = page.getByRole('button', { name: 'Log In' });
+  const before = await button.boundingBox();
+  await button.click();
+  await expect(button).toHaveAttribute('aria-busy', 'true');
+  await expect(button.locator('.auth-dots')).toBeVisible();
+  expect(await button.boundingBox()).toEqual(before);
+  await expect(page).toHaveURL(/\/channels\/@me/);
+});
+
+test('a brand-new account gets a next step: Add Friend, a first server, placeholder DM rows', async ({ page }) => {
+  await page.goto('/login?mockLatency=0');
+  await mockReady(page);
+  await goInApp(page, '/register');
+  await page.getByLabel('Email').fill('fresh@example.test');
+  await page.getByLabel('Username').fill('fresh');
+  await page.getByLabel('Password').fill('Plain-word-longer-9');
+  await page.getByLabel('Month').selectOption('5');
+  await page.getByLabel('Day').selectOption('10');
+  await page.getByLabel('Year').selectOption('1995');
+  await page.getByRole('button', { name: 'Continue', exact: true }).click();
+  await expect(page).toHaveURL(/\/channels\/@me/);
+
+  const main = page.getByRole('main', { name: 'Friends' });
+  await expect(main.getByText('No friends or servers yet.', { exact: false })).toBeVisible();
+  await expect(page.locator('.dm-placeholder')).toHaveCount(6);
+  await main.getByRole('tab', { name: 'All' }).click();
+  await expect(main.getByRole('button', { name: 'Create or Join a Server' })).toBeVisible();
+  await main.getByRole('button', { name: 'Create or Join a Server' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Create DM with nobody to add says so and leads to Add Friend
+  await page.getByRole('button', { name: 'Create DM' }).click();
+  const pick = page.getByRole('dialog', { name: 'Select Friends' });
+  await expect(pick.getByText("You don't have any friends to add yet.")).toBeVisible();
+  await pick.getByRole('button', { name: 'Add Friend' }).click();
+  await expect(pick).toHaveCount(0);
+  await expect(main.getByRole('heading', { name: 'Add Friend' })).toBeVisible();
 });

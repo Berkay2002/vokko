@@ -153,6 +153,8 @@ pub mod message_flags {
     pub const EPHEMERAL: u32 = 1 << 6;
     /// Deferred interaction response ("is thinking...") until the bot edits `@original`.
     pub const LOADING: u32 = 1 << 7;
+    /// A voice message: one audio attachment and no content; sending one needs `SEND_VOICE_MESSAGES`.
+    pub const IS_VOICE_MESSAGE: u32 = 1 << 13;
 }
 numeric_enum!(
     /// `MessageReference.type`: 0 = reply / default, 1 = forward (`message_snapshots` carries the copy).
@@ -818,7 +820,20 @@ pub struct Guild {
     /// Access: how people get in (MANAGE_GUILD edits it).
     #[serde(default)]
     pub join_mode: JoinMode,
+    /// Engagement: the notification level of members who set none for the server (MANAGE_GUILD edits it); always sent.
+    #[serde(default)]
+    pub default_message_notifications: DefaultMessageNotifications,
 }
+
+numeric_enum!(
+    /// Discord's guild `default_message_notifications`.
+    #[derive(Default)]
+    DefaultMessageNotifications {
+        #[default]
+        AllMessages = 0,
+        OnlyMentions = 1,
+    }
+);
 
 numeric_enum!(
     /// `Invite`: an invite link is enough. `Apply`: nobody joins without an approved join request.
@@ -1412,6 +1427,10 @@ pub struct VoiceServerUpdate {
     pub token: String,
     /// The voice session this token belongs to (matches `VoiceState.session_id`).
     pub session_id: String,
+    /// Guild voice and stage channels: the channel's bitrate in bps (within the server's limits), the microphone's max
+    /// publish bitrate. Absent for DM calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bitrate: Option<u32>,
 }
 
 /// Max length of a voice channel status.
@@ -1716,6 +1735,16 @@ pub enum GameAspect {
     Fill,
 }
 
+/// How a game runs: `sdk` talks to Vokko over the games SDK; `web` is a website game with its own lobby and servers (no SDK,
+/// a looser frame sandbox for forms, popups and fullscreen, and a shareable room link).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GameKind {
+    #[default]
+    Sdk,
+    Web,
+}
+
 /// A game that can run in a call (docs/design/games-host.md section 4): a built-in (`id` = `builtin:<name>`) or an entry of a
 /// guild's catalog (`id` = snowflake string).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1730,9 +1759,11 @@ pub struct GameManifest {
     pub max_players: u8,
     #[serde(default)]
     pub aspect: GameAspect,
+    #[serde(default)]
+    pub kind: GameKind,
 }
 
-/// `POST /guilds/{id}/games`; players default to 1-16, `aspect` to 16:9.
+/// `POST /guilds/{id}/games`; players default to 1-16, `aspect` to 16:9, `kind` to `sdk`.
 #[derive(Clone, Debug, Deserialize)]
 pub struct CreateGameRequest {
     pub name: String,
@@ -1745,6 +1776,8 @@ pub struct CreateGameRequest {
     pub max_players: Option<u8>,
     #[serde(default)]
     pub aspect: Option<GameAspect>,
+    #[serde(default)]
+    pub kind: Option<GameKind>,
 }
 
 /// `PATCH /guilds/{id}/games/{game_id}`; `icon: null` clears the icon.
@@ -1762,6 +1795,8 @@ pub struct EditGameRequest {
     pub max_players: Option<u8>,
     #[serde(default)]
     pub aspect: Option<GameAspect>,
+    #[serde(default)]
+    pub kind: Option<GameKind>,
 }
 
 /// The game running in a voice channel or DM call (Vokko-only, in memory per channel).
@@ -1772,6 +1807,15 @@ pub struct GameSession {
     pub game: GameManifest,
     pub started_by: Snowflake,
     pub started_at_ms: i64,
+    /// A `web` game's shared room link (`PUT /channels/{id}/game/room`); every tile loads it. Always null for `sdk` games.
+    #[serde(default)]
+    pub room_url: Option<String>,
+}
+
+/// `PUT /channels/{id}/game/room`: share a room link of the running web game with the call, or clear it with null.
+#[derive(Clone, Debug, Deserialize)]
+pub struct GameRoomRequest {
+    pub url: Option<String>,
 }
 
 /// GAME_UPDATE, to everyone who can see the channel (`state: null` = the game ended), and the entries of the `games` list on
@@ -2428,6 +2472,9 @@ pub struct CreateMessageRequest {
     /// Read the message aloud to the viewers of the channel. Needs `SEND_TTS_MESSAGES`; without it the message is still sent, with `tts` false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tts: Option<bool>,
+    /// `message_flags`: only `IS_VOICE_MESSAGE` is read (needs `SEND_VOICE_MESSAGES`, one attachment, no content); other bits are ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u32>,
 }
 
 /// One pending upload referenced by `CreateMessageRequest.attachments`.
@@ -2709,6 +2756,9 @@ pub struct UpdateGuildRequest {
     /// `Invite` or `Apply` (anything else is 400 50035).
     #[serde(default)]
     pub join_mode: Option<JoinMode>,
+    /// 0 all messages, 1 only mentions (anything else is 400 50035).
+    #[serde(default)]
+    pub default_message_notifications: Option<DefaultMessageNotifications>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3263,8 +3313,6 @@ pub struct CreateInviteRequest {
 pub struct InviteMetadata {
     #[serde(flatten)]
     pub invite: Invite,
-    /// `null` when the inviter's account is gone.
-    pub inviter: Option<User>,
     pub uses: u32,
     pub max_uses: u32,
     pub max_age: u32,
@@ -3420,6 +3468,9 @@ pub struct Invite {
     pub guild: InviteGuild,
     pub channel: InviteChannel,
     pub expires_at: Option<String>,
+    /// `null` when the inviter's account is gone.
+    #[serde(default)]
+    pub inviter: Option<User>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3428,6 +3479,9 @@ pub struct InviteGuild {
     pub name: String,
     pub icon: Option<String>,
     pub member_count: u32,
+    /// Members online now (not offline or invisible); only on the `GET /invites/{code}` preview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_count: Option<u32>,
     #[serde(default)]
     pub join_mode: JoinMode,
 }
@@ -4353,6 +4407,9 @@ pub struct MessageReaction {
     /// `type == 1`, kept for Discord parity.
     #[serde(default)]
     pub burst: bool,
+    /// Author of the reacted message; MESSAGE_REACTION_ADD only (Discord's field), for "someone reacted to my message".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_author_id: Option<Snowflake>,
 }
 
 fn normal_reaction() -> ReactionType {
@@ -5174,12 +5231,12 @@ mod tests {
         let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false, "unicode_emoji": null});
         round_trip::<Role>(role.clone());
         round_trip::<Guild>(
-            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0}),
+            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0}),
         );
         round_trip::<Guild>(json!({
             "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null,
             "tag": {"tag": "VKO", "badge": "bolt", "color_primary": 5793266, "color_secondary": 3878800}, "theme": {"preset": null, "primary": 1, "accent": 2},
-            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201", "join_mode": 1
+            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201", "join_mode": 1, "default_message_notifications": 1
         }));
         round_trip::<GuildMember>(
             json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}),
@@ -5365,7 +5422,7 @@ mod tests {
 
     #[test]
     fn ready_and_flattened_guild_events() {
-        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0});
+        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0});
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
@@ -5610,7 +5667,7 @@ mod tests {
         round_trip::<ReactionEmoji>(json!({"id": "700", "name": "blob_wave", "animated": true}));
         round_trip::<ReactionEmoji>(json!({"id": null, "name": "👍"}));
         let guild = json!({
-            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0,
+            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0,
             "channels": [], "members": [], "member_count": 0, "stickers": [], "emojis": [emoji.clone()], "voice_states": []
         });
         round_trip::<GuildWithState>(guild);
@@ -5696,8 +5753,8 @@ mod tests {
     #[test]
     fn invite_and_settings_shapes_match_types_ts() {
         let invite = json!({
-            "code": "abc", "guild": {"id": "300", "name": "g", "icon": null, "member_count": 2, "join_mode": 1}, "channel": {"id": "200", "name": "general"},
-            "expires_at": "2026-10-12T10:00:00.000Z"
+            "code": "abc", "guild": {"id": "300", "name": "g", "icon": null, "member_count": 2, "presence_count": 1, "join_mode": 1}, "channel": {"id": "200", "name": "general"},
+            "expires_at": "2026-10-12T10:00:00.000Z", "inviter": null
         });
         round_trip::<Invite>(invite.clone());
         let mut metadata = invite;
@@ -5811,6 +5868,13 @@ mod tests {
         let guild: UpdateGuildRequest = serde_json::from_value(json!({"join_mode": 1})).expect("join mode");
         assert_eq!(guild.join_mode, Some(JoinMode::Apply));
         assert!(serde_json::from_value::<UpdateGuildRequest>(json!({"join_mode": 2})).is_err());
+        let guild: UpdateGuildRequest = serde_json::from_value(json!({"default_message_notifications": 1})).expect("notifications");
+        assert_eq!(guild.default_message_notifications, Some(DefaultMessageNotifications::OnlyMentions));
+        assert!(serde_json::from_value::<UpdateGuildRequest>(json!({"default_message_notifications": 2})).is_err());
+        round_trip::<Guild>(json!({
+            "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null,
+            "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 1
+        }));
     }
 
     #[test]
@@ -5837,10 +5901,14 @@ mod tests {
             endpoint: "wss://lk.example.org".to_owned(),
             token: "t".to_owned(),
             session_id: "abc".to_owned(),
+            bitrate: Some(96_000),
         });
         assert_eq!(
             (server.name(), server.data()),
-            ("VOICE_SERVER_UPDATE", json!({"guild_id": "300", "channel_id": "201", "endpoint": "wss://lk.example.org", "token": "t", "session_id": "abc"}))
+            (
+                "VOICE_SERVER_UPDATE",
+                json!({"guild_id": "300", "channel_id": "201", "endpoint": "wss://lk.example.org", "token": "t", "session_id": "abc", "bitrate": 96000})
+            )
         );
         let status = GatewayEvent::VoiceChannelStatusUpdate(VoiceChannelStatusUpdate { id: Snowflake(201), guild_id: Snowflake(300), status: None });
         assert_eq!((status.name(), status.data()), ("VOICE_CHANNEL_STATUS_UPDATE", json!({"id": "201", "guild_id": "300", "status": null})));
@@ -5893,8 +5961,8 @@ mod tests {
         assert_eq!((update.name(), update.data()), ("SPOTIFY_UPDATE", json!({"channel_id": "201", "state": null})));
         round_trip::<SpotifyUpdate>(json!({"channel_id": "201", "state": spotify}));
         let game = json!({
-            "session_id": "0123456789abcdef", "started_by": "7", "started_at_ms": 9,
-            "game": {"id": "builtin:sketch", "name": "Sketch", "url": "https://x.test/", "icon": "🎨", "min_players": 2, "max_players": 16, "aspect": "4:3"}
+            "session_id": "0123456789abcdef", "started_by": "7", "started_at_ms": 9, "room_url": null,
+            "game": {"id": "builtin:sketch", "name": "Sketch", "kind": "sdk", "url": "https://x.test/", "icon": "🎨", "min_players": 2, "max_players": 16, "aspect": "4:3"}
         });
         round_trip::<GameSession>(game.clone());
         round_trip::<GameUpdate>(json!({"channel_id": "201", "state": game}));

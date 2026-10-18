@@ -63,6 +63,9 @@ export function useDraft(channelId: Snowflake): Draft {
 
 export function getDraft(channelId: Snowflake): Draft { return drafts.get(channelId) ?? EMPTY; }
 
+/** True when any channel holds typed text or uploads (empty drafts are dropped from the map). */
+export function hasUnsentDraft(): boolean { return drafts.size > 0; }
+
 export function setDraftText(channelId: Snowflake, text: string, tokens?: MentionToken[]): void {
   patch(channelId, d => ({ ...d, text, tokens: tokens ?? d.tokens }));
 }

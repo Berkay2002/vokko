@@ -1,5 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { useBackClose } from "./backHistory";
 import { useFocusTrap, useLayer, useOutsideClose } from "./layers";
 import "./sheet.css";
 
@@ -42,6 +43,7 @@ export function BottomSheet({ open, onClose, label, className, dock, anchor, chi
   const openedAt = useRef(0);
   const startY = useRef<number | null>(null);
   const layer = useLayer(open, onClose);
+  useBackClose(open, onClose);
   useFocusTrap(open && !dock, () => box.current);
   useOutsideClose(open && !!dock, () => [box.current, resolve(anchor)], onClose, layer.isTop);
 

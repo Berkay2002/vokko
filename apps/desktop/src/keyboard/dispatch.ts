@@ -41,7 +41,7 @@ export function handleKeyDown(e: KeyboardEvent, env: DispatchEnv = { mac: IS_MAC
     const index = keysFor(b).find(k => matches(k.spec, e, env.mac))?.index ?? -1;
     if (index < 0) continue;
     const id = b.id as ShortcutId;
-    if (isEditable(e.target) && (b.text === "none" || (b.text === "composer" && !e.target.closest(".chat-composer")))) return;
+    if (isEditable(e.target) && (b.text === "none" || (b.text === "composer" && !e.target.closest(".chat-composer, .chat-composer-picker")))) return;
     if (!b.modal && env.modalOpen()) return;
     if (e.repeat && !b.repeat) {
       // A held Ctrl+P must not fall through to the print dialog on the second event.

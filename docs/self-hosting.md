@@ -365,7 +365,7 @@ ORDER BY r.created_at DESC LIMIT 20;
 SELECT logs FROM bug_reports WHERE id = <id>;  -- the reference the user was shown
 ```
 
-Rows are deleted 30 days after they were sent. Treat the logs as private: the client removes tokens and message text, but
+Rows are deleted 30 days after they were sent, and each user keeps at most their 20 newest reports. Treat the logs as private: the client removes tokens and message text, but
 log lines can still name channels, servers and users.
 
 ## Not production-ready yet

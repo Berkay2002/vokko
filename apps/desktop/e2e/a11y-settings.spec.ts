@@ -431,6 +431,9 @@ test.describe('reduced motion', () => {
     await page.getByRole('button', { name: 'Open GIF picker' }).click();
     const picker = page.getByRole('dialog', { name: 'Expression picker' });
     await picker.getByRole('textbox', { name: 'Search GIFs' }).fill('party');
+    // the picker's previews follow the pref too
+    await expect(picker.locator('.media-gif-pick canvas').first()).toBeVisible();
+    await expect(picker.locator('.media-gif-pick img')).toHaveCount(0);
     await picker.getByRole('button', { name: /^Send GIF:/ }).first().click();
     const gif = page.locator('.chat-msg .media-gif').last();
     await expect(gif.locator('canvas')).toBeVisible();

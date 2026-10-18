@@ -16,7 +16,7 @@ export interface Binding {
   keys: readonly string[];
   /** Fires on key auto-repeat (navigation). Toggles never do. */
   repeat?: boolean;
-  /** In a text field: "any" (default), "composer" (only the message composer; other fields keep the key, e.g. Option+Up caret moves) or "none". */
+  /** In a text field: "any" (default), "composer" (only the message composer and its emoji/GIF/sticker picker; other fields keep the key, e.g. Option+Up caret moves) or "none". */
   text?: "any" | "composer" | "none";
   /** Fires while a modal is open (the toggles that open or close one). */
   modal?: boolean;

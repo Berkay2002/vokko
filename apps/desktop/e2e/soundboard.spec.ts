@@ -173,3 +173,22 @@ test('entrance sound picker in Voice & Video plays for the channel when you join
   await expect.poll(async () => (await effects(page)).length).toBe(1);
   await expect(userRow(page, 'General', 'Sam').locator('.sb-effect.entrance')).toHaveText('🎺');
 });
+
+test('soundboard volume is the synced pref: an old local value moves over once, and Reset Voice & Video resets it', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem('seeded')) localStorage.setItem('vokko.soundboard', JSON.stringify({ favorites: [], volume: 40 }));
+    sessionStorage.setItem('seeded', '1');
+  });
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.locator('.dm-row').first().waitFor();
+  await page.getByRole('button', { name: 'User Settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'User Settings' });
+  await settings.getByRole('button', { name: 'Voice & Video' }).click();
+  const slider = settings.getByRole('slider', { name: 'Soundboard volume' });
+  await expect(slider).toHaveValue('40');
+  expect(await page.evaluate(() => localStorage.getItem('vokko.soundboard'))).toBe(JSON.stringify({ favorites: [] }));
+
+  await settings.getByRole('button', { name: 'Reset Voice & Video Settings' }).click();
+  await page.getByRole('dialog', { name: 'Reset Voice & Video Settings' }).getByRole('button', { name: 'Reset' }).click();
+  await expect(slider).toHaveValue('100');
+});

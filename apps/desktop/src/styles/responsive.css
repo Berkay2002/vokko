@@ -52,6 +52,7 @@
 }
 
 .sm-back,
+.sm-nav-close,
 .fss-back,
 .fss-nav-close {
   display: none;
@@ -108,8 +109,8 @@
     visibility: hidden;
   }
 
-  /* the account card: a pill over the list with the avatar bigger than the card, so it sticks out above and below
-     (depth); the right-hand button is the settings gear, mute and deafen only show in a call */
+  /* the account card: a pill over the list with the avatar inside it (a 72px avatar stuck out over the rail and the list);
+     the right-hand button is the settings gear, mute and deafen only show in a call */
   .app-frame.nav-open .user-panel {
     display: flex;
     z-index: 45;
@@ -131,20 +132,14 @@
   .app-frame.nav-open .user-panel-account {
     height: 56px;
     margin: 0;
-    padding: 0 4px 0 0;
-    gap: 12px;
+    padding: 0 4px 0 8px;
+    gap: 10px;
     background: none;
   }
 
   .app-frame.nav-open .user-panel-account .avatar {
-    width: 72px !important;
-    height: 72px !important;
-    margin: -8px 0;
-  }
-
-  .app-frame.nav-open .user-panel-account .avatar-status {
-    right: 2px;
-    bottom: 2px;
+    width: 40px !important;
+    height: 40px !important;
   }
 
   .app-frame.nav-open .user-panel-name-row {
@@ -256,6 +251,7 @@
   }
 
   .sm-side {
+    position: relative;
     flex: 1 0 100%;
     width: 100%;
     border-right: 0;
@@ -316,6 +312,7 @@
     width: 100%;
   }
 
+  .sm-nav-close,
   .fss-back,
   .fss-nav-close {
     position: absolute;
@@ -334,6 +331,7 @@
     left: 8px;
   }
 
+  .sm-nav-close,
   .fss-nav-close {
     right: 8px;
   }
@@ -359,8 +357,51 @@
     display: none;
   }
 
+  /* Friends: title and icons on the first row, the tabs wrap onto their own rows under it so every tab is in reach (they were cut
+     off at "S" with Blocked and Add Friend off screen); Add Friend is an icon in the header */
+  .friends-header {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    height: auto;
+    min-height: 49px;
+    padding: 8px 8px 8px 16px;
+  }
+
+  .friends-header .friends-title h1 {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+  }
+
+  .friends-toolbar {
+    margin-left: auto;
+  }
+
+  .friends-tabs {
+    flex: 1 0 100%;
+    flex-wrap: wrap;
+    order: 1;
+    margin: 0 -4px;
+    overflow: visible;
+  }
+
   .friends-tab {
     flex: none;
+  }
+
+  .friends-tab.add-friend-tab {
+    display: none;
+  }
+
+  .friends-add-icon {
+    display: flex;
+  }
+
+  .friends-add-icon[aria-pressed="true"] {
+    color: var(--text-brand);
   }
 
   /* voice: the connection card lives in the drawer next to the user panel (it floated over the messages); a green dot on the
@@ -519,8 +560,10 @@
     width: min(420px, calc(100vw - 16px));
   }
 
+  /* opened from the account card it sits above the card (UserPanel.tsx), so it is shorter than the window by the card's height */
   .inbox-popout {
     width: min(480px, calc(100vw - 16px));
+    max-height: calc(100dvh - 120px);
   }
 
   .inbox-tabs {

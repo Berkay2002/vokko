@@ -95,6 +95,9 @@
   z-index: var(--z-context);
   min-width: 221px;
   max-width: 320px;
+  /* Long menus (the Activities list) scroll instead of running off the window. Submenus are siblings, so nothing is clipped. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 4px 0;
   background: var(--background-surface-high);
   border: 0.67px solid var(--border-normal);
@@ -104,6 +107,11 @@
   line-height: 18px;
   font-weight: 500;
   user-select: none;
+}
+
+/* Below the notification banner (placeAtPoint keeps the top there too). */
+html.has-top-banner .context-menu {
+  max-height: calc(100vh - 16px - var(--notify-banner-height));
 }
 
 .context-menu-item {
@@ -121,6 +129,12 @@
 .context-menu-item.focused {
   background: var(--interactive-background-hover);
   color: var(--text-default);
+}
+
+/* Keyboard focus sits on the menu and its rows; the .focused highlight shows it (Discord draws no ring there). */
+.context-menu:focus,
+.context-menu-item:focus {
+  outline: none;
 }
 
 .context-menu-item.danger {

@@ -34,6 +34,22 @@ test('User Settings is an inset modal over the app with one close button in the 
   await expect(dialog).toHaveCount(0);
 });
 
+test('the sidebar footer links only the instance terms, and only when the server has them', async ({ page }) => {
+  await page.goto('/channels/@me?as=sam&mockLatency=0');
+  await page.locator('.dm-row').first().waitFor();
+  const dialog = page.getByRole('dialog', { name: 'User Settings' });
+  await page.getByRole('button', { name: 'User Settings' }).click();
+  await expect(dialog.locator('.sm-build')).toBeVisible();
+  await expect(dialog.locator('.sm-side-links')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  type Hooks = { __vokkoMockAccounts: { instance(patch: Record<string, unknown>): void } };
+  await page.evaluate(() => (window as unknown as Hooks).__vokkoMockAccounts.instance({ terms_url: 'https://example.test/terms' }));
+  await page.getByRole('button', { name: 'User Settings' }).click();
+  await expect(dialog.getByRole('link', { name: 'Terms of Service' })).toHaveAttribute('href', 'https://example.test/terms');
+  await expect(dialog.getByText('Privacy Policy')).toHaveCount(0);
+});
+
 test('My Account is one scrolling page: sub-items follow the sections and Display Name edits inline', async ({ page }) => {
   await page.goto('/channels/@me?as=sam&mockLatency=0');
   await page.locator('.dm-row').first().waitFor();
@@ -41,7 +57,7 @@ test('My Account is one scrolling page: sub-items follow the sections and Displa
   const dialog = page.getByRole('dialog', { name: 'User Settings' });
 
   const subs = dialog.locator('.sm-sub');
-  await expect(subs).toHaveText(['Account Info', 'Password & Security', 'Sign-in Methods', 'Account Status']);
+  await expect(subs).toHaveText(['Account Info', 'Password & Security', 'Sign-in Methods']);
   await expect(subs.first()).toHaveAttribute('aria-current', 'location');
   await subs.nth(1).click();
   // the last item takes over once the page has scrolled to its end, so only the count of current items is stable
@@ -158,4 +174,21 @@ test('new pages render: Data & Privacy, Content & Social, Activity Privacy, Conn
     await expect(h1).toHaveText(name);
   }
   await expect(dialog.getByRole('heading', { name: 'Default Keybinds', level: 2 })).toBeVisible();
+});
+
+test('Connected Apps offers only the linkable providers and sends them to My Account > Sign-in Methods', async ({ page }) => {
+  const dialog = await openSettings(page);
+  await dialog.getByRole('button', { name: 'Connected Apps', exact: true }).click();
+  await expect(dialog.locator('.sm-provider')).toHaveCount(2);
+  await expect(dialog.getByRole('button', { name: 'Connect Steam' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Connect GitHub' }).click();
+  await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('My Account');
+  await expect(dialog.getByRole('heading', { name: 'Sign-in Methods', level: 2 })).toBeInViewport();
+});
+
+test('Appearance > Advanced links to the Advanced page', async ({ page }) => {
+  const dialog = await openSettings(page);
+  await dialog.getByRole('button', { name: 'Appearance', exact: true }).click();
+  await dialog.getByRole('button', { name: /Developer mode and hardware acceleration/ }).click();
+  await expect(dialog.getByRole('heading', { level: 1 })).toHaveText('Advanced');
 });

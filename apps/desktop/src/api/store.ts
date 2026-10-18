@@ -337,12 +337,27 @@ async function refreshPrivateChannels(): Promise<void> {
   }
 }
 
+// Others' presence is unknown while the gateway is down: shown as offline until RESUMED brings the kept map back
+// (under anything replayed) or READY replaces it. The user's own presence stays.
+let hiddenPresences: Record<Snowflake, Presence> = {};
+export function applyConnection(connection: GatewayStatus): void {
+  const { presences, me, connection: previous } = appStore.getState();
+  if (previous === "ready" && connection !== "ready") {
+    hiddenPresences = presences;
+    const own = me ? presences[me.id] : undefined;
+    appStore.setState({ connection, presences: own ? { [own.user_id]: own } : {} });
+  } else if (previous !== "ready" && connection === "ready") {
+    appStore.setState({ connection, presences: { ...hiddenPresences, ...presences } });
+    hiddenPresences = {};
+  } else appStore.setState({ connection });
+}
+
 let wired = false;
 export function wireStoreToGateway(): void {
   if (wired) return;
   wired = true;
   const s = () => appStore.getState();
-  gateway.onStatus(connection => appStore.setState({ connection }));
+  gateway.onStatus(applyConnection);
   gateway.on("READY", ready => s().applyReady(ready));
   gateway.on("MESSAGE_CREATE", onMessageCreate);
   gateway.on("MESSAGE_ACK", ({ channel_id, message_id }) => {
@@ -614,6 +629,17 @@ export function roleColor(guildId: Snowflake | null | undefined, member: { roles
     if (!best || role.position > best.position) best = role;
   }
   return best ? `#${best.color.toString(16).padStart(6, "0")}` : null;
+}
+
+/** The highest role with an icon (`unicode_emoji`), shown next to the name like Discord's role icon; null when none has one. */
+export function roleIcon(guildId: Snowflake | null | undefined, member: { roles: Snowflake[] } | null | undefined): Role | null {
+  if (!guildId || !member) return null;
+  let best: Role | null = null;
+  for (const role of appStore.getState().guilds[guildId]?.roles ?? []) {
+    if (!role.unicode_emoji || !member.roles.includes(role.id)) continue;
+    if (!best || role.position > best.position) best = role;
+  }
+  return best;
 }
 
 const DEFAULT_AVATAR_COLORS = ["#5865f2", "#6d7380", "#3ba55d", "#e0a23a", "#c45bd0", "#e5484d"];

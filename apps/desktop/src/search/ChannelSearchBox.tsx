@@ -211,7 +211,7 @@ export function ChannelSearchBox({ channel }: { channel: Channel }) {
     {hasContent
       ? <button type="button" className="search-box-clear" aria-label="Clear search" onMouseDown={e => e.preventDefault()} onClick={() => { searchActions.clear(); input.current?.focus(); }}><X size={16} /></button>
       : <Search size={16} />}
-    <Popout anchor={anchor} open={open} onClose={() => { setOpen(false); setMore(false); }} side="bottom" align="end" gap={8} className="search-popout">
+    <Popout anchor={anchor} open={open} onClose={() => { setOpen(false); setMore(false); }} side="bottom" align="end" gap={8} className="search-popout" trapFocus={false}>
       <div className="search-suggest" role="listbox" aria-label="Search suggestions" onMouseDown={e => e.preventDefault()}>
         {rows.map((row, i) => {
           const section = row.section ?? 'filter';

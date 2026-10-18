@@ -8,7 +8,7 @@ use axum::routing::{get, post};
 use vokko_protocol::api::permissions::{CREATE_INSTANT_INVITE, MANAGE_CHANNELS, MANAGE_GUILD};
 use vokko_protocol::api::{
     AuditLogEvent, CreateInviteRequest, GatewayEvent, Guild, GuildMemberAdd, Invite, InviteChannel, InviteDelete, InviteGuild, InviteMetadata, JoinMode,
-    MessageType, Snowflake,
+    MessageType, Snowflake, User,
 };
 
 use crate::access::{self, channel_access, guild_access};
@@ -98,7 +98,7 @@ pub(crate) async fn live_row(state: &AppState, code: &str) -> ApiResult<InviteRo
     live_rows(state, Filter::Code(code)).await?.into_iter().next().ok_or_else(ApiErr::unknown_invite)
 }
 
-fn preview_of(state: &AppState, row: &InviteRow, member_count: u32) -> Invite {
+fn preview_of(state: &AppState, row: &InviteRow, member_count: u32, inviter: Option<User>) -> Invite {
     Invite {
         code: row.code.clone(),
         guild: InviteGuild {
@@ -106,10 +106,12 @@ fn preview_of(state: &AppState, row: &InviteRow, member_count: u32) -> Invite {
             name: row.guild_name.clone(),
             icon: row.icon_path.as_ref().map(|path| state.asset_url(path)),
             member_count,
+            presence_count: None,
             join_mode: JoinMode::from_u8(row.join_mode as u8).unwrap_or_default(),
         },
         channel: InviteChannel { id: Snowflake::from(row.channel_id), name: row.channel_name.clone() },
         expires_at: row.expires_at.map(iso),
+        inviter,
     }
 }
 
@@ -128,8 +130,7 @@ async fn metadata(state: &AppState, rows: Vec<InviteRow>) -> ApiResult<Vec<Invit
             }
         };
         out.push(InviteMetadata {
-            invite: preview_of(state, &row, member_count),
-            inviter: users.get(&row.inviter_id).cloned(),
+            invite: preview_of(state, &row, member_count, users.get(&row.inviter_id).cloned()),
             uses: row.uses.max(0) as u32,
             max_uses: row.max_uses.max(0) as u32,
             max_age: row.max_age.max(0) as u32,
@@ -266,7 +267,7 @@ async fn revoke(
         .reason(reason)
         .change("code", &code, ())
         .change("channel_id", channel_id.to_string(), ())
-        .change("inviter_id", revoked.inviter.as_ref().map(|user| user.id.to_string()), ())
+        .change("inviter_id", revoked.invite.inviter.as_ref().map(|user| user.id.to_string()), ())
         .change("uses", revoked.uses, ())
         .change("max_age", revoked.max_age, ())
         .change("max_uses", revoked.max_uses, ());
@@ -310,7 +311,15 @@ pub async fn remove_temporary_memberships(state: &AppState, user_id: i64) -> Api
 async fn preview(State(state): State<AppState>, _caller: Option<AuthUser>, Path(code): Path<String>) -> ApiResult<Json<Invite>> {
     let row = live_row(&state, &code).await?;
     let member_count = store::member_count(&state, row.guild_id).await?;
-    Ok(Json(preview_of(&state, &row, member_count)))
+    let (online,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM guild_members m JOIN presences p ON p.user_id = m.user_id WHERE m.guild_id = $1 AND p.status <> 'offline'")
+            .bind(row.guild_id)
+            .fetch_one(&state.db)
+            .await?;
+    let inviter = store::users(&state, &[row.inviter_id]).await?.remove(&row.inviter_id);
+    let mut invite = preview_of(&state, &row, member_count, inviter);
+    invite.guild.presence_count = Some(online.max(0) as u32);
+    Ok(Json(invite))
 }
 
 async fn accept(State(state): State<AppState>, AuthUser(user_id): AuthUser, Path(code): Path<String>) -> ApiResult<Json<Guild>> {

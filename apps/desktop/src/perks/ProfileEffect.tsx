@@ -3,8 +3,11 @@ import type { CSSProperties } from "react";
 import { effectById } from "./catalog";
 import type { ProfileLook } from "./profile";
 import { EFFECT_SHAPES } from "./art/effects";
-import { FRAME_ART, FrameSvg } from "./art/frames";
-import { SCENES } from "./art/scenes";
+import { lazyModule } from "../ui/lazyModule";
+
+// The frame and scene art is split out of the startup bundle; cards show without it for the moment it takes to load.
+const frameArt = lazyModule(() => import("./art/frames"));
+const sceneArt = lazyModule(() => import("./art/scenes"));
 
 /** Deterministic pseudo-random in [0, 1): the same effect always lays its particles out the same way. */
 const rand = (i: number, salt: number): number => {
@@ -19,7 +22,8 @@ export const isSceneEffect = (id: string | null | undefined): boolean => !!effec
 function ProfileScene({ id }: { id: string }) {
   const u = `fx${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   // Own keys only: ids come from other users' profiles, and "constructor" or "__proto__" would reach Object.prototype.
-  const art = Object.hasOwn(SCENES, id) ? SCENES[id] : undefined;
+  const SCENES = sceneArt.use()?.SCENES;
+  const art = SCENES && Object.hasOwn(SCENES, id) ? SCENES[id] : undefined;
   if (!art) return null;
   return (
     <div className="profile-effect pfx" aria-hidden="true" data-effect={id}>
@@ -31,11 +35,12 @@ function ProfileScene({ id }: { id: string }) {
 /** A profile frame: a drawn border over the edges and corners of the whole card (perks/art/frames.tsx). */
 export function ProfileFrame({ id }: { id: string | null | undefined }) {
   const u = `fr${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
-  const art = id && Object.hasOwn(FRAME_ART, id) ? FRAME_ART[id] : undefined;
-  if (!art || !id) return null;
+  const frames = frameArt.use();
+  const art = frames && id && Object.hasOwn(frames.FRAME_ART, id) ? frames.FRAME_ART[id] : undefined;
+  if (!frames || !art || !id) return null;
   return (
     <div className="profile-frame" aria-hidden="true" data-frame={id}>
-      <FrameSvg parts={art(u)} u={u} />
+      <frames.FrameSvg parts={art(u)} u={u} />
     </div>
   );
 }

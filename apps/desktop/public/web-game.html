@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="strict-origin" />
+<title>Vokko website game</title>
+<style>
+  html, body, iframe { margin: 0; width: 100%; height: 100%; border: 0; background: #000; overflow: hidden; display: block; }
+</style>
+</head>
+<body>
+<script>
+/*
+ * Website game frame for the WebKit desktop apps (macOS, Linux). Their page origin is tauri://localhost, and WebKit sends no
+ * Referer from a non-http(s) page, so a game framed directly sees an empty document.referrer (Shell Shockers throws on it).
+ * The app frames this page, which is on a normal https origin, and this page frames the game, so the game sees this origin.
+ *
+ * Parent -> here: {type:"load", url, sandbox, allow}. Only from the Tauri app's origins (and this page's own origin when it is
+ * served from localhost / 127.0.0.1, the dev server); only https URLs (http on localhost for dev). Nothing goes back.
+ */
+(function () {
+  "use strict";
+  var ALLOWED = ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"];
+  var LOCAL = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  if (LOCAL) ALLOWED.push(location.origin);
+  var loaded = false;
+
+  window.addEventListener("message", function (event) {
+    if (loaded || event.source !== window.parent || window.parent === window || ALLOWED.indexOf(event.origin) === -1) return;
+    var message = event.data;
+    if (!message || message.type !== "load" || typeof message.url !== "string") return;
+    var url;
+    try {
+      url = new URL(message.url);
+    } catch (_) {
+      return;
+    }
+    var loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    if (url.protocol !== "https:" && !(LOCAL && loopback && url.protocol === "http:")) return;
+    loaded = true;
+    var frame = document.createElement("iframe");
+    // The app's frame attributes again: a nested frame gets no more than its parent, but needs its own delegation.
+    if (typeof message.sandbox === "string") frame.setAttribute("sandbox", message.sandbox);
+    if (typeof message.allow === "string") frame.setAttribute("allow", message.allow);
+    frame.allowFullscreen = true;
+    frame.referrerPolicy = "strict-origin";
+    frame.setAttribute("credentialless", "");
+    frame.src = url.href;
+    document.body.appendChild(frame);
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router";
 import { useShallow } from "zustand/react/shallow";
-import { Compass, Download, Plus, Users, Volume2 } from "lucide-react";
+import { Download, Plus, Users, Volume2 } from "lucide-react";
 import { useVoice } from "../voice";
 import { useCalls } from "../calls/store";
 import logo from "../../../../assets/brand/vokko-icon.svg";
@@ -156,11 +156,6 @@ export function ServerRail() {
       <RailItem state="idle" tooltip="Add a Server">
         <button type="button" className="rail-tile rail-action rail-add" aria-label="Add a Server" onClick={() => openModal({ type: "createServer" })}>
           <Plus size={20} />
-        </button>
-      </RailItem>
-      <RailItem state="idle" tooltip="Explore Discoverable Servers">
-        <button type="button" className="rail-tile rail-action rail-discover" aria-label="Explore Discoverable Servers" aria-disabled="true">
-          <Compass size={20} />
         </button>
       </RailItem>
       {canOfferDownloads() && (

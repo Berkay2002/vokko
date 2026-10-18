@@ -342,8 +342,15 @@ test('the welcome checklist guides the owner of a brand-new server', async ({ pa
   await page.keyboard.press('Escape');
   await expect(checklist).toContainText('1 of 4 done');
 
+  // opening the icon and app steps alone ticks nothing: they need an icon and a bot
+  await checklist.getByRole('button', { name: 'Personalize your server with an icon' }).click();
+  await page.getByRole('dialog', { name: 'Server Settings' }).getByRole('button', { name: 'Close' }).click();
   await checklist.getByRole('button', { name: 'Add your first app' }).click();
-  await page.getByRole('dialog', { name: 'Apps are coming' }).getByRole('button', { name: 'Got it' }).click();
+  const settings = page.getByRole('dialog', { name: 'Server Settings' });
+  await expect(settings.getByText('Bots and Apps')).toBeVisible();
+  await settings.getByRole('button', { name: 'Close' }).click();
+  await expect(checklist).toContainText('1 of 4 done');
+  await page.evaluate(() => (window as unknown as { __vokkoMock: { installEchoBot(guild: string): string } }).__vokkoMock.installEchoBot('Fresh start'));
   await expect(checklist).toContainText('2 of 4 done');
 
   // sending a message ticks the third step

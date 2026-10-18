@@ -198,8 +198,7 @@ test.describe('settings', () => {
     const dialog = page.getByRole('dialog', { name: /User Settings/ });
     const rows = dialog.locator('.sm-item');
     await expect(rows.first()).toBeVisible();
-    // The dialog opens from scale(0.9): measure after the entrance animation.
-    await dialog.evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)));
+    await dialog.evaluate(e => Promise.all(e.getAnimations().map(a => a.finished))); // measured mid scale-in the rows read ~47px
     for (const row of await rows.all()) {
       if (!(await row.isVisible())) continue;
       expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(48);

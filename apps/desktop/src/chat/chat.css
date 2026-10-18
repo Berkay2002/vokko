@@ -66,6 +66,8 @@
   --chat-radius: 8px;
   --chat-composer-margin: 16px;
 }
+/* Onyx: the chat and the lowest background are both #000, so a hidden spoiler would vanish into the page: give it a visible block. */
+:root.theme-onyx { --chat-spoiler-hidden: var(--background-mod-strong); }
 .chat-view, .chat-pins, .chat-lightbox, .chat-emoji-picker, .chat-expression-picker, .chat-autocomplete, .chat-attach-menu, .chat-apps-panel, .chat-reactions-modal { font-family: var(--chat-font); }
 
 .chat-view { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; background: var(--background-gradient-chat, var(--chat-bg)); color: var(--chat-text); font-size: var(--chat-font-size); }
@@ -129,6 +131,7 @@
 .chat-msg-body { min-width: 0; }
 .chat-msg-header { margin: 0; display: block; font-size: var(--chat-font-size); font-weight: 500; line-height: var(--chat-line-height); min-height: var(--chat-line-height); }
 .chat-author { color: var(--chat-text-strong); font-weight: 500; cursor: pointer; }
+.role-icon { margin-left: 4px; font-size: 16px; line-height: 1; user-select: none; } /* role icon emoji after the name, chat and member list */
 .chat-author:hover { text-decoration: underline; }
 .chat-timestamp { display: inline-block; height: 1.25rem; margin-left: 0.25rem; font-size: 0.75rem; font-weight: 500; line-height: 1.375rem; color: var(--chat-text-muted); cursor: default; vertical-align: baseline; }
 .chat-timestamp.inline { margin-left: 8px; }
@@ -215,7 +218,11 @@ html.message-compact { --chat-gutter: 80px; }
 /* hover toolbar */
 .chat-toolbar { position: absolute; right: 14px; top: -16px; z-index: 2; display: none; align-items: center; gap: 1px; padding: 2px; border: 1px solid var(--chat-edge); border-radius: 8px; background: var(--chat-surface-high); box-shadow: var(--chat-shadow-low); }
 .chat-msg:focus-within .chat-toolbar, .chat-toolbar.open { display: flex; }
-@media (hover: hover) { .chat-msg:hover .chat-toolbar { display: flex; } }
+@media (hover: hover) {
+  .chat-msg:hover .chat-toolbar { display: flex; }
+  /* Only the row under the pointer, as in Discord: focus left in another row (a closed reaction picker hands it back to its button) stays, but its toolbar hides. */
+  .chat-scroller:has(.chat-msg:hover) .chat-msg:not(:hover) .chat-toolbar:not(.open) { display: none; }
+}
 /* touch: a long press opens the message menu, so rows get no text-selection callout of their own */
 @media (hover: none) { .chat-msg { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
 .chat-toolbar-sep { flex: none; width: 1px; height: 24px; margin: 0 2px; background: var(--chat-edge); }
