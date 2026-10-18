@@ -84,6 +84,7 @@ services:
       VOKKO_SPOTIFY_BOT_SECRET: ${VOKKO_SPOTIFY_BOT_SECRET:-}
       VOKKO_SPOTIFY_MARKET: ${VOKKO_SPOTIFY_MARKET:-}
       VOKKO_SPOTIFY_IDLE_MIN: ${VOKKO_SPOTIFY_IDLE_MIN:-}
+      VOKKO_SPOTIFY_OWNER_ID: ${VOKKO_SPOTIFY_OWNER_ID:-}
       VOKKO_REGISTRATION: ${VOKKO_REGISTRATION:-open}
       # `on` only when every request arrives through a reverse proxy that appends the client address (the bundled Caddy does).
       VOKKO_TRUST_PROXY: ${VOKKO_TRUST_PROXY:-off}
