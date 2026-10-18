@@ -111,5 +111,7 @@ test('the invite modal creates a limited invite and lists friends to send it to'
   const row = page.locator(`tr[data-code="${code}"]`);
   await expect(row).toContainText('0/5');
   await row.getByRole('button', { name: `Revoke invite ${code}` }).click();
+  await expect(row).toHaveCount(1); // the first click only asks
+  await row.getByRole('button', { name: `Confirm revoke invite ${code}` }).click();
   await expect(row).toHaveCount(0);
 });

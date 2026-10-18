@@ -7,7 +7,7 @@ import { chatToast } from "../chat/toast";
 import { gateway } from "../api/gateway";
 import { request } from "../api/rest";
 import { compareIds } from "../api/snowflake";
-import { appStore, channelOrThread, isChannelUnread, joinedThreads, type AppState } from "../api/store";
+import { appStore, channelOrThread, isChannelUnread, joinedThreads, selfRemoving, type AppState } from "../api/store";
 import { isThreadUnread } from "../threads/util";
 import { isDesktop } from "../desktop";
 import { ChannelType, GatewayOp, type Activity, type Channel, type Guild, type PermissionOverwrite, type PresenceStatus, type Snowflake } from "../api/types";
@@ -95,17 +95,21 @@ export async function createChannel(guildId: Snowflake, input: { name: string; t
   return channel;
 }
 
-export async function leaveGuild(guildId: Snowflake): Promise<void> {
-  await request<void>("DELETE", `/users/@me/guilds/${guildId}`);
+/** DELETE for a server this client removes itself from: marked first so the GUILD_DELETE that follows gives no "no longer in" notice. */
+async function removeSelfFrom(guildId: Snowflake, path: string): Promise<void> {
+  selfRemoving.add(guildId);
+  try {
+    await request<void>("DELETE", path);
+  } finally {
+    selfRemoving.delete(guildId);
+  }
   appStore.getState().removeGuild(guildId);
   go(dmPath());
 }
 
-export async function deleteGuild(guildId: Snowflake): Promise<void> {
-  await request<void>("DELETE", `/guilds/${guildId}`);
-  appStore.getState().removeGuild(guildId);
-  go(dmPath());
-}
+export const leaveGuild = (guildId: Snowflake): Promise<void> => removeSelfFrom(guildId, `/users/@me/guilds/${guildId}`);
+
+export const deleteGuild = (guildId: Snowflake): Promise<void> => removeSelfFrom(guildId, `/guilds/${guildId}`);
 
 /** Open (or create) the DM with `userId` and navigate to it. */
 /** Opens (or creates) the DM and navigates to it; undefined when the other side refuses DMs. */

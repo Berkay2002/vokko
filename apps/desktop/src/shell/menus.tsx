@@ -14,7 +14,10 @@ import { guildDefaultLevel } from "../notify/decide";
 import { isMutedAt, mutedTest, muteFor, MUTE_DURATIONS, mutedUntilText, NOTIFY_LABELS, setNotifyLevel, toggleFlag, unmute, untilLabel, useLocalState, type NotifyLevel } from "./localState";
 import { openModal } from "./modalStore";
 import { go, guildPath } from "./nav";
-import { inviteOrigin } from "../invites/api";
+import { DEFAULT_INVITE_SETTINGS, createInvite, inviteOrigin, sendInviteToFriend } from "../invites/api";
+import { insertDraftMention } from "../chat/draftStore";
+import { chatToast } from "../chat/toast";
+import { isDmRefused } from "../api/errors";
 import { openProfile } from "./ProfileCard";
 import { userAppsItems } from "../apps/menus";
 import { serverSettingsSections } from "./settings/serverSections";
@@ -47,6 +50,57 @@ function groups(...lists: MenuItem[][]): MenuItem[] {
     out.push(...list);
   }
   return out;
+}
+
+/** Mention: "@Name " goes into the draft of the open channel and the composer takes focus. Only offered while a composer is on screen. */
+function mentionItem(user: User, name: string, onMention?: (user: User) => void): MenuItem[] {
+  const channelId = appStore.getState().route.channelId;
+  if (onMention) return [{ id: "mention", label: "Mention", onSelect: () => onMention(user) }];
+  if (!channelId || typeof document === "undefined" || !document.querySelector(".chat-composer")) return [];
+  return [
+    {
+      id: "mention",
+      label: "Mention",
+      onSelect: () => {
+        insertDraftMention(channelId, { display: `@${name}`, raw: `<@${user.id}>` });
+        // Caret after the new mention, in the styled editor (contenteditable) and in the plain <textarea> alike.
+        const placeCaret = () => {
+          const field = document.querySelector<HTMLElement>(".chat-composer .chat-textarea");
+          if (!field) return;
+          field.focus();
+          if (field instanceof HTMLTextAreaElement) field.setSelectionRange(field.value.length, field.value.length);
+          else {
+            const selection = window.getSelection();
+            selection?.selectAllChildren(field);
+            selection?.collapseToEnd();
+          }
+        };
+        // After the menu has closed and given focus back to its trigger.
+        requestAnimationFrame(placeCaret);
+      },
+    },
+  ];
+}
+
+/** Invite to Server: a submenu of the servers the viewer can invite to and this person is not in; picking one DMs them a fresh-or-reused invite link. */
+function inviteToServerItem(user: User, name: string): MenuItem[] {
+  if (user.bot) return [];
+  const state = appStore.getState();
+  const targets = state.guildOrder
+    .map(id => state.guilds[id])
+    .filter((g): g is Guild => !!g && viewerPerms(g).can(Perm.CREATE_INSTANT_INVITE) && !state.members[g.id]?.[user.id] && !!firstTextChannelId(g.id));
+  if (targets.length === 0) return [];
+  const send = async (guild: Guild) => {
+    try {
+      const invite = await createInvite(firstTextChannelId(guild.id)!, DEFAULT_INVITE_SETTINGS);
+      await sendInviteToFriend(user.id, invite.code);
+      chatToast(`Invite to ${guild.name} sent to ${name}`);
+    } catch (e) {
+      if (isDmRefused(e)) openModal({ type: "dmRefused" });
+      else chatToast(`Could not invite ${name} to ${guild.name}`);
+    }
+  };
+  return [{ id: "invite-to-server", label: "Invite to Server", children: targets.map(g => ({ id: g.id, label: g.name, onSelect: () => void send(g) })) }];
 }
 
 const isOwnerOf = (guild: Guild) => appStore.getState().me?.id === guild.owner_id;
@@ -382,14 +436,14 @@ export function userContextItems(user: User, options: UserMenuOptions = {}): Men
   return groups(
     [
       { id: "profile", label: "Profile", onSelect: () => openModal({ type: "profile", userId: user.id, guildId: options.guildId ?? null }) },
-      options.onMention ? { id: "mention", label: "Mention", onSelect: () => options.onMention?.(user) } : unavailable("mention", "Mention"),
+      ...mentionItem(user, name, options.onMention),
       ...(isMe ? [] : [{ id: "message", label: "Message", onSelect: () => void openDirectMessage(user.id) } satisfies MenuItem, { id: "call", label: "Start a Call", onSelect: () => void callUser(user.id) } satisfies MenuItem]),
     ],
     voiceUserMenuItems(user.id),
     isMe
       ? [...(guild ? [{ id: "per-server-profile", label: "Edit Per-server Profile", onSelect: () => editServerProfile(guild.id) } satisfies MenuItem] : []), ...(mayNick ? [{ id: "change-nickname", label: "Change Nickname", onSelect: () => openModal({ type: "nickname", ...target }) } satisfies MenuItem] : [])]
       : [
-          unavailable("invite-to-server", "Invite to Server"),
+          ...inviteToServerItem(user, name),
           ...relationshipItems(user, options.guildId),
           ...(guild && member ? [{ id: "report-user", label: "Report User", danger: true, onSelect: () => openModal({ type: "report", target: { kind: "user", guildId: guild.id, userId: user.id } }) } satisfies MenuItem] : []),
           ...(mayNick ? [{ id: "change-nickname", label: "Change Nickname", onSelect: () => openModal({ type: "nickname", ...target }) } satisfies MenuItem] : []),

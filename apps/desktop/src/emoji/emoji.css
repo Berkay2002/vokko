@@ -34,6 +34,7 @@
 .emoji-row-avatar { width: 24px; height: 24px; border-radius: 50%; }
 .emoji-row-delete { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 4px; color: var(--text-muted); opacity: 0; }
 .emoji-row:hover .emoji-row-delete, .emoji-row-delete:focus-visible { opacity: 1; }
+.emoji-row-confirm { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
 .emoji-row-delete:hover { color: var(--text-feedback-critical, #f23f43); }
 .emoji-list-empty { color: var(--text-muted); font-size: 14px; }
 @media (max-width: 600px) {

@@ -95,15 +95,28 @@
   cursor: pointer;
 }
 
-.voice-user.away {
+/* People in a channel you are not in are dimmed. Only the non-text parts fade: fading the whole row (opacity: 0.5) put the name
+   and the server tag under 4.5:1 in every theme. */
+.voice-user.away .voice-user-avatar,
+.voice-user.away .voice-user-icons {
   opacity: 0.5;
 }
 
-.voice-user.away:hover {
+.voice-user.away .voice-occupant-name {
+  color: var(--text-muted);
+}
+
+.voice-user.away:hover .voice-user-avatar,
+.voice-user.away:hover .voice-user-icons {
   opacity: 1;
 }
 
+.voice-user.away:hover .voice-occupant-name {
+  color: var(--interactive-text-hover);
+}
+
 .voice-user .chat-server-tag {
+  color: var(--text-strong);
   flex: none;
   margin: 0;
   top: 0;

@@ -9,6 +9,7 @@ import { gateway, type GatewayStatus } from "./gateway";
 import { setMaxUploadBytes } from "./limits";
 import { setSpotifyOwner } from "../spotify/availability";
 import { go, guildPath } from "../shell/nav";
+import { openModal } from "../shell/modalStore";
 import { channelPermissions, hasBit, Perm } from "./permissions";
 import { listActiveThreads, request, resolveUrl } from "./rest";
 import { compareIds, maxId } from "./snowflake";
@@ -360,6 +361,9 @@ async function refreshPrivateChannels(): Promise<void> {
 /** The connection banner waits this long before appearing, and others' presences stay shown, so a quick resume never flashes either. */
 export const BANNER_GRACE_MS = 1500;
 
+/** Servers this client is leaving or deleting itself: their GUILD_DELETE (which can arrive before the HTTP answer) gets no "you're no longer in" notice. */
+export const selfRemoving = new Set<Snowflake>();
+
 // Others' presence is unknown while the gateway is down: shown as offline until RESUMED brings the kept map back
 // (under anything replayed) or READY replaces it. Like the banner, this waits BANNER_GRACE_MS, so a blip that resumes
 // inside it changes nothing. The user's own presence stays.
@@ -464,8 +468,12 @@ export function wireStoreToGateway(): void {
   gateway.on("GUILD_DELETE", ({ id }) => {
     // Kicked, banned or deleted while the guild is open: leave its (now dead) route.
     const open = s().route.guildId === id;
+    // The event carries no reason (kick, ban and deletion look the same, and the server never sends `unavailable`), so the notice is
+    // neutral. Not for our own leave or delete, nor for a repeat event or a resync that already dropped the guild.
+    const lost = selfRemoving.has(id) ? undefined : s().guilds[id];
     s().removeGuild(id);
     if (open) go("/channels/@me", { replace: true });
+    if (lost) openModal({ type: "guildGone", name: lost.name });
   });
   gateway.on("GUILD_MEMBER_UPDATE", ({ guild_id, ...member }) => {
     const state = s();

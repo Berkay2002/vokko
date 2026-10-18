@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearDraft, getDraft, setDraftText, subscribeDraft } from './draftStore';
+import { clearDraft, getDraft, insertDraftMention, setDraftText, subscribeDraft } from './draftStore';
 
 describe('draft store', () => {
   it('notifies only the edited channel and keeps the snapshot stable between edits', () => {
@@ -23,6 +23,20 @@ describe('draft store', () => {
     setDraftText('c', 'x');
     expect(l).not.toHaveBeenCalled();
     clearDraft('c');
+  });
+});
+
+describe('insertDraftMention', () => {
+  it('appends the mention after a space with its token, once per name', () => {
+    const bob = { display: '@Bob', raw: '<@2>' };
+    insertDraftMention('m', bob);
+    expect(getDraft('m')).toMatchObject({ text: '@Bob ', tokens: [bob] });
+    setDraftText('m', 'hi');
+    insertDraftMention('m', bob);
+    expect(getDraft('m')).toMatchObject({ text: 'hi @Bob ', tokens: [bob] });
+    insertDraftMention('m', bob);
+    expect(getDraft('m')).toMatchObject({ text: 'hi @Bob @Bob ', tokens: [bob] });
+    clearDraft('m');
   });
 });
 
