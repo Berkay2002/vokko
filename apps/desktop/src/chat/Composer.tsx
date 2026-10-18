@@ -14,6 +14,7 @@ import { AppLauncherPopout, AppsGlyph, useCommandComposer } from '../apps/Comman
 import { frecencyRank, useEmojiDb } from './emojiData';
 import { emojiMarkup, searchCustomEmoji } from '../emoji/store';
 import { usePickerSections } from '../emoji/PickerSections';
+import { TimeoutNote } from './TimeoutNote';
 import { addDraftToken, addFiles, clearDraft, removeUpload, setDraftText, updateUpload, useDraft } from './draftStore';
 import { ModifyAttachmentModal } from './AttachmentModals';
 import { resumeOnboarding, useRulesPending } from '../community';
@@ -410,7 +411,7 @@ export function Composer({ channelId, replyTo, mentionReply, onToggleMention, on
     <TypingIndicator channelId={channelId} />
     <div className="chat-composer-box chat-composer-locked" role="note">
       <Lock size={20} aria-hidden="true" />
-      <span>You do not have permission to send messages in this channel.</span>
+      {chat.timedOutUntil ? <TimeoutNote until={chat.timedOutUntil} /> : <span>You do not have permission to send messages in this channel.</span>}
     </div>
   </div>;
 

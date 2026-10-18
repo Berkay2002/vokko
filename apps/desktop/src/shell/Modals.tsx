@@ -17,6 +17,7 @@ import { blockUser, firstTextChannelId } from "./menus";
 import { FullProfileModal } from "./DmProfilePanel";
 import { GuildPrivacyModal } from "./GuildPrivacyModal";
 import { DmRefusedModal } from "./DmRefusedModal";
+import { GuildGoneModal } from "./GuildGoneModal";
 import { ReportModal } from "./ReportModal";
 import { ReportProblemModal } from "./ReportProblemModal";
 import { BanModal, KickModal, NicknameModal, TimeoutModal } from "./ModerationModals";
@@ -723,6 +724,8 @@ function ModalView({ spec, id }: { spec: ModalSpec; id: string }) {
       return <GuildPrivacyModal key={id} guildId={spec.guildId} />;
     case "dmRefused":
       return <DmRefusedModal key={id} />;
+    case "guildGone":
+      return <GuildGoneModal key={id} name={spec.name} />;
     case "report":
       return <ReportModal key={id} target={spec.target} />;
     case "logout":

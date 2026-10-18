@@ -35,6 +35,8 @@ export interface ChatContextValue {
   canManage: boolean;
   /** The viewer may post here (SEND_MESSAGES, or SEND_MESSAGES_IN_THREADS in a thread); otherwise the composer is locked and Reply is hidden. */
   canSend: boolean;
+  /** When the composer is locked only because the viewer is timed out: the end of the timeout (the composer says so instead of the generic text). */
+  timedOutUntil: string | null;
   md: MarkdownContext;
   roles: Role[];
   /** Channels of this guild (empty in DMs). */
@@ -158,11 +160,16 @@ export function ChatProvider({ channelId, actions, replyingId = null, onNavigate
       revealSpoilers,
       renderCustomEmoji: e => <CustomEmojiGlyph id={e.id} name={e.name} animated={e.animated} src={e.src} />,
     };
+    const self = members[me.id];
+    const canSend = canSendIn(guild, self && { id: me.id, roles: self.roles, communication_disabled_until: self.communication_disabled_until }, channel, parent);
+    // Locked by the timeout alone: without it the viewer could send, so a real permission loss keeps the generic text.
+    const timedOutUntil = !canSend && self?.communication_disabled_until && Date.parse(self.communication_disabled_until) > Date.now() && canSendIn(guild, { id: me.id, roles: self.roles }, channel, parent) ? self.communication_disabled_until : null;
     return {
       channelId, channel, guild, guildId, me, md, roles, members, channels: guildChannels, actions, userById, nameOf, replyingId, compact,
       isDm: channel?.type === ChannelType.DM || channel?.type === ChannelType.GroupDM,
       canManage,
-      canSend: canSendIn(guild, members[me.id] && { id: me.id, roles: members[me.id]!.roles, communication_disabled_until: members[me.id]!.communication_disabled_until }, channel, parent),
+      canSend,
+      timedOutUntil,
       colorOf: m => (guildId && roleColors === 'name' ? scaleColor(roleColor(guildId, members[m.author.id] ?? m.member ?? null)) : null),
       roleDotOf: m => (guildId && roleColors === 'dot' ? scaleColor(roleColor(guildId, members[m.author.id] ?? m.member ?? null)) : null),
       display: { showEmbeds, showReactions, showCompactAvatars, roleColors, hideInvites, timeFormat, inlineAttachmentMedia, inlineEmbedMedia, spoilerContent },

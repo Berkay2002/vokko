@@ -101,6 +101,11 @@
 .invite-revoke-cell {
   width: 32px;
   text-align: right;
+  white-space: nowrap;
+}
+
+.invite-revoke-cell .btn + .btn {
+  margin-left: 8px;
 }
 
 .invite-revoke {

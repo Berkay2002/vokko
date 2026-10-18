@@ -8,6 +8,7 @@ import { gateway } from "../api/gateway";
 import { displayName, useStore } from "../api/store";
 import type { InviteMetadata, Snowflake } from "../api/types";
 import { Avatar } from "../shell/Avatar";
+import { useLayer } from "../ui";
 import { listChannelInvites, listGuildInvites, revokeInvite, timeLeft } from "./api";
 import "./invites.css";
 
@@ -21,6 +22,9 @@ export function InviteList({ guildId, channelId, canManage }: { guildId: Snowfla
   const [invites, setInvites] = useState<InviteMetadata[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
+  // The code whose revoke is waiting for a second click (an invite other people are using is easy to lose by a misclick).
+  const [confirming, setConfirming] = useState<string | null>(null);
+  useLayer(confirming !== null, () => setConfirming(null));
 
   const load = useCallback(async () => {
     if (!canManage) return;
@@ -49,6 +53,7 @@ export function InviteList({ guildId, channelId, canManage }: { guildId: Snowfla
   }, [load, guildId, channelId]);
 
   const revoke = async (code: string) => {
+    setConfirming(null);
     setRevoking(code);
     setError(null);
     try {
@@ -106,9 +111,20 @@ export function InviteList({ guildId, channelId, canManage }: { guildId: Snowfla
                 <td data-label="Uses">{invite.max_uses > 0 ? `${invite.uses}/${invite.max_uses}` : invite.uses}</td>
                 <td data-label="Expires">{timeLeft(invite.expires_at)}</td>
                 <td className="invite-revoke-cell">
-                  <button type="button" className="invite-revoke" aria-label={`Revoke invite ${invite.code}`} title="Revoke invite" disabled={revoking === invite.code} onClick={() => void revoke(invite.code)}>
-                    <X size={16} aria-hidden="true" />
-                  </button>
+                  {confirming === invite.code ? (
+                    <>
+                      <button type="button" className="btn btn-danger btn-sm" autoFocus aria-label={`Confirm revoke invite ${invite.code}`} onClick={() => void revoke(invite.code)}>
+                        Revoke?
+                      </button>
+                      <button type="button" className="btn btn-sm" onClick={() => setConfirming(null)}>
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="invite-revoke" aria-label={`Revoke invite ${invite.code}`} title="Revoke invite" disabled={revoking === invite.code} onClick={() => setConfirming(invite.code)}>
+                      <X size={16} aria-hidden="true" />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

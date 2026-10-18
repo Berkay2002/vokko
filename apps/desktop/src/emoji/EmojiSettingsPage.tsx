@@ -2,6 +2,7 @@
 // up to 256 KiB, names 2-32 of [A-Za-z0-9_], 250 static + 250 animated per server, MANAGE_GUILD_EXPRESSIONS to change anything.
 import { useEffect, useRef, useState } from 'react';
 import { Trash2, Upload } from 'lucide-react';
+import { useLayer } from '../ui';
 import { ApiRequestError } from '../api/errors';
 import { request, uploadAttachment } from '../api/rest';
 import { avatarUrl, displayName } from '../api/store';
@@ -39,7 +40,10 @@ function errorText(error: unknown): string {
 
 function EmojiRow({ guildId, emoji, canEdit, onError }: { guildId: Snowflake; emoji: GuildEmoji; canEdit: boolean; onError: (text: string | null) => void }) {
   const [name, setName] = useState(emoji.name);
+  const [confirming, setConfirming] = useState(false);
   useEffect(() => setName(emoji.name), [emoji.name]);
+  // Escape cancels the delete step before it reaches the settings page.
+  useLayer(confirming, () => setConfirming(false));
   const save = async () => {
     if (name === emoji.name) return;
     if (!NAME_RE.test(name)) {
@@ -74,7 +78,11 @@ function EmojiRow({ guildId, emoji, canEdit, onError }: { guildId: Snowflake; em
     <div className="emoji-row-uploader">
       {emoji.user && <><img className="emoji-row-avatar" src={avatarUrl(emoji.user)} alt="" /><span>{displayName(emoji.user)}</span></>}
     </div>
-    {canEdit && <button type="button" className="emoji-row-delete" aria-label={`Delete ${emoji.name}`} title="Delete" onClick={() => void remove()}><Trash2 size={16} /></button>}
+    {canEdit && <button type="button" className="emoji-row-delete" aria-label={`Delete ${emoji.name}`} title="Delete" aria-expanded={confirming} onClick={() => setConfirming(true)}><Trash2 size={16} /></button>}
+    {confirming && <div className="emoji-row-confirm" role="group" aria-label={`Delete ${emoji.name}?`}>
+      <button type="button" className="btn btn-danger btn-sm" autoFocus aria-label={`Confirm delete ${emoji.name}`} onClick={() => { setConfirming(false); void remove(); }}>Delete?</button>
+      <button type="button" className="btn btn-sm" onClick={() => setConfirming(false)}>Cancel</button>
+    </div>}
   </li>;
 }
 

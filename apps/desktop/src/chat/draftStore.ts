@@ -153,6 +153,15 @@ export function addDraftToken(channelId: Snowflake, token: MentionToken): void {
   patch(channelId, d => (d.tokens.some(t => t.display === token.display) ? d : { ...d, tokens: [...d.tokens, token] }));
 }
 
+/** Appends a mention ("@Name " after a space when the text does not end in one) and its token to a channel's draft; the Mention item of the member menu. */
+export function insertDraftMention(channelId: Snowflake, token: MentionToken): void {
+  patch(channelId, d => ({
+    ...d,
+    text: `${d.text}${d.text === '' || /\s$/.test(d.text) ? '' : ' '}${token.display} `,
+    tokens: d.tokens.some(t => t.display === token.display) ? d.tokens : [...d.tokens, token],
+  }));
+}
+
 function setUpload(channelId: Snowflake, localId: string, fn: (u: Upload) => Upload): void {
   patch(channelId, d => ({ ...d, uploads: d.uploads.map(u => (u.localId === localId ? fn(u) : u)) }));
 }
