@@ -12,6 +12,7 @@ mod macos;
 mod native_voice;
 mod notifications;
 mod overlay;
+mod popout;
 mod popups;
 mod prefs;
 mod sharebar;
@@ -74,8 +75,10 @@ fn create_main_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>>
     };
     let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?.on_new_window(popups::on_new_window).on_download(downloads::on_download);
     // Settings > Advanced > hardware acceleration off: WebView2 renders without the GPU (Tauri's default flags kept).
+    let accelerated = app.state::<PrefsStore>().get().hardware_acceleration;
+    popout::remember_browser_flags(accelerated);
     #[cfg(windows)]
-    let builder = if app.state::<PrefsStore>().get().hardware_acceleration {
+    let builder = if accelerated {
         builder
     } else {
         builder.additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu --disable-gpu-compositing")
@@ -160,6 +163,7 @@ fn run_event(app: &AppHandle, event: tauri::RunEvent) {
     // Tray Quit and Cmd+Q end here, with the window possibly hidden or gone: the geometry tracked so far is what gets saved.
     if matches!(event, tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit) {
         app.state::<window_state::WindowStateStore>().save();
+        popout::save(app);
     }
     #[cfg(target_os = "macos")]
     macos::on_run_event(app, &event);
@@ -209,6 +213,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     builder
         .manage(Mutex::new(Session::demo()?))
         .manage(PrefsStore::load(config_dir.as_ref().map(|dir| dir.join("desktop.json"))))
+        .manage(popout::PopoutState::load(config_dir.as_ref().map(|dir| dir.join("popout.json"))))
         .manage(window_state::WindowStateStore::load(config_dir.map(|dir| dir.join("window.json"))))
         .manage(tray::TrayState::default())
         .manage(links::LinkState::default())
@@ -307,6 +312,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             overlay::desktop_overlay_set_interactive,
             overlay::desktop_overlay_open_main,
             overlay::desktop_overlay_set_frame,
+            popout::desktop_popout_open,
+            popout::desktop_popout_close,
+            popout::desktop_popout_pin,
+            popout::desktop_popout_back,
         ])
         .build(context)?
         .run(run_event);

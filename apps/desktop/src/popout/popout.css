@@ -1,0 +1,280 @@
+/* The Pop Out window: the picture fills it; the strips show on hover (and while a control has focus), a 2 px progress line when idle. */
+
+:root {
+  --po-text: #f2f3f5;
+  --po-muted: #b5bac1;
+  --po-strip: rgba(17, 18, 20, 0.82);
+  --po-accent: #5865f2;
+  --po-danger: #f23f42;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  font-family: "Noto Sans", Inter, system-ui, sans-serif;
+  color: var(--po-text);
+  user-select: none;
+}
+
+.po-root {
+  position: fixed;
+  inset: 0;
+  container-type: size;
+  background: #000;
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.po-video,
+.po-poster,
+.po-embed {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border: 0;
+  background: #000;
+  /* The window's own strips and drag region take the mouse, never the picture or the player. */
+  pointer-events: none;
+}
+
+.po-wait,
+.po-status {
+  position: absolute;
+  inset: 50% 12px auto;
+  transform: translateY(-50%);
+  text-align: center;
+  color: #fff;
+  font-size: clamp(13px, 4cqw, 18px);
+  font-weight: 600;
+  text-shadow: 0 1px 6px rgb(0 0 0 / 0.8);
+  pointer-events: none;
+}
+
+.po-cue {
+  position: absolute;
+  inset: auto 8px 4px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  transition: bottom 120ms;
+}
+
+.po-root:hover .po-cue,
+.po-root:focus-within .po-cue {
+  bottom: 52px;
+}
+
+.po-cue span {
+  max-width: 100%;
+  padding: 2px 8px;
+  color: #fff;
+  background: rgb(0 0 0 / 0.7);
+  border-radius: 4px;
+  font-size: clamp(11px, 3.4cqw, 20px);
+  line-height: 1.3;
+  text-align: center;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.po-line {
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  background: rgb(255 255 255 / 0.25);
+  pointer-events: none;
+}
+
+.po-line > div {
+  height: 100%;
+  background: var(--po-accent);
+}
+
+.po-top,
+.po-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--po-strip);
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.po-top {
+  top: 0;
+}
+
+.po-bottom {
+  bottom: 0;
+}
+
+.po-root:hover .po-top,
+.po-root:hover .po-bottom,
+.po-root:focus-within .po-top,
+.po-root:focus-within .po-bottom {
+  opacity: 1;
+}
+
+.po-root:hover .po-line,
+.po-root:focus-within .po-line {
+  opacity: 0;
+}
+
+.po-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.po-pill {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgb(88 101 242 / 0.3);
+  color: #dfe1ff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.po-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--po-text);
+  cursor: pointer;
+}
+
+.po-icon:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.14);
+}
+
+.po-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.po-icon[aria-pressed="true"]:not(.po-leave) {
+  color: #8f9bff;
+}
+
+.po-icon[aria-label="Unmute microphone"] {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.po-leave {
+  border-radius: 999px;
+  background: var(--po-danger);
+}
+
+.po-leave:hover:not(:disabled) {
+  background: #d83538;
+}
+
+.po-time {
+  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--po-muted);
+}
+
+.po-volume {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--po-muted);
+}
+
+.po-volume .po-range {
+  width: 72px;
+}
+
+.po-sound {
+  position: absolute;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--po-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* One look for the seek bar and the volume slider: a filled track and a round thumb. */
+.po-range {
+  --po-fill: 0%;
+  flex: 1;
+  min-width: 40px;
+  height: 14px;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.po-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--po-accent) var(--po-fill), rgb(255 255 255 / 0.28) var(--po-fill));
+}
+
+.po-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.po-range:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.po-readonly {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--po-accent) var(--po-fill), rgb(255 255 255 / 0.28) var(--po-fill));
+}
+
+/* Small windows: the buttons and the seek bar stay, the rest goes. */
+@container (max-width: 460px) {
+  .po-volume .po-range,
+  .po-pill {
+    display: none;
+  }
+}
+
+@container (max-width: 360px) {
+  .po-time {
+    display: none;
+  }
+}

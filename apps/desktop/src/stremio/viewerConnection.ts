@@ -35,6 +35,8 @@ export class ViewerConnection {
     private readonly kind: MediaKind,
     private volume: number,
     private readonly hooks: ConnectionHooks,
+    /** Where the token comes from: the API by default; the pop-out window has no login and asks the main window. */
+    private readonly tokenFor: (channelId: Snowflake) => Promise<{ url: string; token: string }> = id => (kind === "spotify" ? listenerToken : viewerToken)(id),
   ) {
     hooks.room("connecting");
     void this.open();
@@ -73,7 +75,7 @@ export class ViewerConnection {
   private async open(): Promise<void> {
     let current: Viewer | null = null;
     try {
-      const { url, token } = await (this.kind === "spotify" ? listenerToken : viewerToken)(this.channelId);
+      const { url, token } = await this.tokenFor(this.channelId);
       if (!isMockEndpoint(url) && typeof RTCPeerConnection === "undefined") {
         if (!this.closed) this.hooks.room("unsupported");
         return;

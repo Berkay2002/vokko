@@ -29,6 +29,7 @@ import { WatchTile } from "../watch";
 import { StremioPanel, StremioTile, STREMIO_TILE_ID, useStremioPanel } from "../stremio";
 import { SpotifyPanel, SpotifyTile, SPOTIFY_TILE_ID, useSpotifyPanel } from "../spotify";
 import { GAME_TILE_ID, GameTile } from "../games";
+import { usePopout } from "../popout";
 import { ActivityShelf } from "./ActivityShelf";
 import { useIdleHide } from "./idleHide";
 import { LANDSCAPE_QUERY, useMediaQuery, useVoiceFullscreen } from "./useFullscreen";
@@ -269,6 +270,7 @@ function ControlBar({ channel, fullscreen, onFullscreen }: { channel: Channel; f
   const [boardAnchor, setBoardAnchor] = useState<HTMLElement | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
   const [shelfOpen, setShelfOpen] = useState(false);
+  const popout = usePopout(channel.id);
   const below = (e: React.MouseEvent<HTMLElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     return { clientX: rect.left, clientY: rect.top - 4 };
@@ -347,7 +349,7 @@ function ControlBar({ channel, fullscreen, onFullscreen }: { channel: Channel; f
         </Tooltip>
       </div>
       <div className="voice-bar-side">
-        <BarButton label="Pop out" tooltip="Pop out (coming with the desktop app)" disabled>
+        <BarButton label="Pop out" tooltip={popout.tooltip} active={popout.active} disabled={!popout.available} onClick={popout.toggle}>
           <SquareArrowOutUpRight size={20} />
         </BarButton>
         <BarButton label={fullscreen ? "Exit fullscreen" : "Fullscreen"} onClick={onFullscreen}>

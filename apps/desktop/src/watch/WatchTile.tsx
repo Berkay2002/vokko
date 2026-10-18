@@ -8,7 +8,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNow } from "../shell/ActivityLine";
 import { ListVideo, Maximize2, Minimize2, Pause, Play, SkipForward, Square, Tv, Volume2, VolumeX, X } from "lucide-react";
 import { displayName, useStore } from "../api/store";
-import { WATCH_TOGETHER_QUEUE_PER_USER, type Snowflake, type WatchTogetherState } from "../api/types";
+import { WATCH_TOGETHER_QUEUE_PER_USER, type Snowflake, type WatchTogetherPatchRequest, type WatchTogetherState } from "../api/types";
+import { useQuiet } from "../popout/store";
 import { reason } from "../stremio/format";
 import { Tooltip } from "../ui";
 import { MediaVotes, useHostLabel } from "../voice/MediaVotes";
@@ -20,14 +21,15 @@ import { DRIFT_MS, expectedPositionMs, formatClock, needsSeek, parseYouTubeLink 
 import "./watch.css";
 
 export type WatchVariant = "solo" | "grid" | "focused" | "strip" | "pip";
+export type WatchControl = (channelId: Snowflake, patch: WatchTogetherPatchRequest) => Promise<unknown>;
 
 /** A state change someone made moves the player to within this of the shared position; the 2 s drift check handles the rest. */
 const SNAP_MS = 500;
 /** After a load or a seek the player reports odd positions while it buffers: no drift check for this long. */
 const SETTLE_MS = 3000;
-const VOLUME_KEY = "vokko.watch.volume";
+export const VOLUME_KEY = "vokko.watch.volume";
 
-function readVolume(): number {
+export function readVolume(): number {
   try {
     const value = Number(localStorage.getItem(VOLUME_KEY));
     return localStorage.getItem(VOLUME_KEY) !== null && Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 60;
@@ -36,8 +38,8 @@ function readVolume(): number {
   }
 }
 
-/** Wires the iframe player to the shared state. */
-function useWatchPlayer(channelId: Snowflake, state: WatchTogetherState, volume: number) {
+/** Wires the iframe player to the shared state. `control` sends the player's own PATCHes (the pop-out window has no login and hands them to the main window). */
+export function useWatchPlayer(channelId: Snowflake, state: WatchTogetherState, volume: number, control: WatchControl = controlWatch) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [ready, setReady] = useState(false);
   const [durationMs, setDurationMs] = useState(0);
@@ -90,7 +92,7 @@ function useWatchPlayer(channelId: Snowflake, state: WatchTogetherState, volume:
           if (message.state === "ended" && p.endedFor !== s.video_id) {
             // Everyone's player ends together; the video_id guard makes all but the first skip a no-op on the server.
             p.endedFor = s.video_id;
-            void controlWatch(channelId, { skip: true, video_id: s.video_id }).catch(() => undefined);
+            void control(channelId, { skip: true, video_id: s.video_id }).catch(() => undefined);
           }
           break;
         case "time": {
@@ -112,7 +114,7 @@ function useWatchPlayer(channelId: Snowflake, state: WatchTogetherState, volume:
           if (!title) break;
           window.setTimeout(() => {
             const now = latest.current;
-            if (now.video_id === videoId && !now.title) void controlWatch(channelId, { title }).catch(() => undefined);
+            if (now.video_id === videoId && !now.title) void control(channelId, { title }).catch(() => undefined);
           }, Math.random() * 1500);
           break;
         }
@@ -123,7 +125,7 @@ function useWatchPlayer(channelId: Snowflake, state: WatchTogetherState, volume:
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [channelId, send]);
+  }, [channelId, send, control]);
 
   // Anything the server says changed: the video, play / pause, or a seek (updated_at_ms moves with each).
   useEffect(() => {
@@ -233,7 +235,8 @@ function WatchTileBody({ channelId, variant, onActivate, state }: { channelId: S
   const [drag, setDrag] = useState<number | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const now = useNow(500);
-  const player = useWatchPlayer(channelId, state, volume);
+  // Popped out: the other copy of the player plays; this one keeps its place and its state but not the sound.
+  const player = useWatchPlayer(channelId, state, useQuiet(channelId, "watch") ? 0 : volume);
 
   const small = variant === "strip" || variant === "pip";
   const position = Math.min(expectedPositionMs(state, now), player.durationMs || Infinity);
