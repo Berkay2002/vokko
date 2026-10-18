@@ -5,11 +5,11 @@ import { describe, expect, it } from "vitest";
 import { STREMIO_IMAGE_HOSTS } from "./api/types";
 
 // The CSP only applies in the Tauri app, so a missing host shows up as broken images there and nowhere else. This keeps the
-// lists in tauri.conf.json (dev) and release.production.json (packaged) in step with every host the client loads media from.
+// lists in tauri.conf.json (dev) and release.production.example.json (packaged) in step with every host the client loads media from.
 const tauriDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src-tauri");
 const readJson = (name: string) => JSON.parse(readFileSync(join(tauriDir, name), "utf8"));
 const dev = readJson("tauri.conf.json");
-const release = readJson(join("..", "release.production.json"));
+const release = readJson(join("..", "release.production.example.json"));
 
 /** directive -> sources; a directive the policy leaves out falls back to default-src. */
 function parse(csp: string): (directive: string) => string[] {
@@ -40,7 +40,7 @@ const IMAGE_URLS = [
 
 describe.each([
   ["tauri.conf.json", dev.app.security.csp as string],
-  ["release.production.json", release.app.security.csp as string],
+  ["release.production.example.json", release.app.security.csp as string],
 ])("%s CSP", (_name, csp) => {
   const directive = parse(csp);
 

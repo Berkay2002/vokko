@@ -32,18 +32,17 @@ and the local `pg_dump`/`pg_restore` (same major version as the server or newer)
 ## Nightly on macOS (launchd)
 
 Example for a macOS host running the stack from a checkout of this repo (`<repo checkout>`) with the backup directory on a different disk than
-the one holding the Docker volumes. Install once (the plist is a template in the repo, nothing installs it for you):
+the one holding the Docker volumes. Install once (`deploy/launchd/README.md` describes the plist, nothing installs it for you):
 
 ```sh
 mkdir -p <backup dir> && chmod 700 <backup dir>
-cp <repo checkout>/deploy/launchd/<backup plist> ~/Library/LaunchAgents/
-$EDITOR ~/Library/LaunchAgents/<backup plist>   # REPLACE_ME: your user name, paths and the off-machine target
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/<backup plist>
-launchctl kickstart gui/$(id -u)/<backup label>        # first run now
+$EDITOR ~/Library/LaunchAgents/org.vokko.backup.plist   # write it from deploy/launchd/README.md (the backup row): your user name, paths and the off-machine target
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.vokko.backup.plist
+launchctl kickstart gui/$(id -u)/org.vokko.backup        # first run now
 tail ~/Library/Logs/vokko-backup.log
 ```
 
-The example plist in `deploy/launchd/` (label `org.vokko.vokko-backup`; copy and edit it) runs
+The plist you write from `deploy/launchd/README.md` (the backup row) runs
 `tools/backup.sh` every day at 04:00 (a run missed while the Mac slept starts on wake) and logs to
 `~/Library/Logs/vokko-backup.log`. The checkout must be on a commit that has `tools/backup.sh`. If the log shows
 `Operation not permitted` on an external volume, give `/bin/bash` access to removable volumes (System Settings > Privacy &

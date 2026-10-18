@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { message, send } from './helpers';
 
-// GIFs, stickers, forward, bookmarks and reminders against the in-memory mock backend (docs/cloud/media-actions.md).
+// GIFs, stickers, forward, bookmarks and reminders against the in-memory mock backend.
 // Set VOKKO_SHOTS=<dir> to also write screenshots of the pickers and the forward dialog there.
 
 const SHOTS = process.env.VOKKO_SHOTS;

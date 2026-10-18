@@ -20,3 +20,4 @@
 __pycache__/
 *.pyc
 /apps/desktop/release.production.json
+/deploy/media-livekit.local.yaml

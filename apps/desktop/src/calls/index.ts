@@ -1,4 +1,4 @@
-// DM and group DM calls (docs/cloud/dm-calls.md, docs/api.md "DM calls"): call store, gateway wiring, ring tones and the UI the
+// DM and group DM calls (docs/api.md "DM calls"): call store, gateway wiring, ring tones and the UI the
 // shell mounts through its channel slots. Importing this module (main.tsx) registers the slots and wires the gateway.
 
 import "./calls.css";

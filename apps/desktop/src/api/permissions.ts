@@ -1,4 +1,4 @@
-// Permission model (Discord bitfield, docs/research/discord-client-facts.md Q4). Pure functions shared by the UI and the mock backend.
+// Permission model (Discord bitfield, per the private client notes, Q4). Pure functions shared by the UI and the mock backend.
 
 import { OverwriteType, isThreadType, type Channel, type Guild, type GuildMember, type Role, type Snowflake } from "./types";
 

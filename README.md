@@ -76,7 +76,7 @@ npm test --workspace @vokko/desktop  # vitest
 npm run e2e --workspace @vokko/desktop  # Playwright against the mock
 ```
 
-Desktop releases and the updater are described in [docs/desktop-release.md](docs/desktop-release.md); bots in [docs/cloud/bots-commands.md](docs/cloud/bots-commands.md) and [examples/echo-bot](examples/echo-bot); web games in [docs/games-sdk.md](docs/games-sdk.md).
+Desktop releases and the updater are described in [docs/desktop-release.md](docs/desktop-release.md); bots in [docs/api.md](docs/api.md) (applications, commands, interactions) and [examples/echo-bot](examples/echo-bot); web games in [docs/games-sdk.md](docs/games-sdk.md).
 
 ## Contributing and security
 
