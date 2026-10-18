@@ -115,7 +115,7 @@ test('Notifications: permission state, per-sound switches and Disable all', asyn
   await expect(dialog.getByRole('button', { name: 'Enable all sounds' })).toBeVisible();
   await expect.poll(async () => ((await blob(page)).settings.disabled_sounds as string[] | undefined)?.length).toBe(4);
   // a disabled sound does not play (the preview button still does)
-  expect(await page.evaluate(async () => (await import('/src/notify/sounds.ts')).playSound('message', Date.now() + 10_000))).toBe(false);
+  expect(await page.evaluate(() => (window as unknown as { __vokko: { sounds: { playSound(k: string, at: number): boolean } } }).__vokko.sounds.playSound('message', Date.now() + 10_000))).toBe(false);
   await expect(dialog.getByText('Email notifications are not available on this server')).toBeVisible();
 });
 

@@ -32,6 +32,9 @@ import { getToken } from "./api/config";
 import { wireOverlay } from "./overlay/bridge";
 import { installLogCapture } from "./report/logBuffer";
 import { startThreadMuteMigration } from "./threads/muteMigration";
+import * as localState from "./shell/localState";
+import * as prefs from "./ui/prefs";
+import * as sounds from "./notify/sounds";
 import "./styles/tokens.css";
 import "./styles/themes.generated.css";
 import "./styles/base.css";
@@ -67,7 +70,8 @@ installLogCapture(); // console warnings/errors feed "Report a problem" (scrubbe
 installCrashReporter(); // uncaught errors and saved desktop panics go to POST /crash-reports (opt-out in Data & Privacy)
 
 // Mock mode only: expose internals to Playwright scripts and the console (no effect in real builds).
-if (MOCK) (window as unknown as { __vokko: unknown }).__vokko = { gateway, desktop, messageStore, ...rest, ...store };
+// Specs reach app modules through here, never import('/src/...'): after an HMR edit the app holds `?t=` instances and a bare import gets a second copy.
+if (MOCK) (window as unknown as { __vokko: unknown }).__vokko = { gateway, desktop, messageStore, localState, prefs, sounds, ...rest, ...store };
 
 // Mock mode: the in-memory backend is a separate chunk (real builds never load it); it must be up before the session starts.
 if (MOCK) await loadMockBackend();
