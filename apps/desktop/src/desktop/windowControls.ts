@@ -58,6 +58,34 @@ export const toggleMaximizeWindow = (): Promise<void> => act("toggle maximize", 
 /** Closes the window through the normal close request, so close-to-tray still applies. */
 export const closeWindow = (): Promise<void> => act("close", win => win.close());
 
+let windowFullscreen: Promise<void> = Promise.resolve();
+/** What the window was before a game took it full screen; null when it is not ours to give back. */
+let before: { maximized: boolean } | null = null;
+
+/**
+ * Borderless full screen of the native window (covers the taskbar), for a game's full screen; leaving gives back what the window
+ * was (maximized or not). Calls run one after the other so a quick enter and leave cannot cross. No-op in the browser.
+ */
+export function setWindowFullscreen(on: boolean): Promise<void> {
+  windowFullscreen = windowFullscreen.then(() =>
+    act("full screen", async win => {
+      if (on) {
+        if (before || (await win.isFullscreen())) return;
+        before = { maximized: await win.isMaximized() };
+        // A maximized window that goes full screen keeps its webview at the work-area size (the taskbar strip stays empty), so it is restored first.
+        if (before.maximized) await win.unmaximize();
+        await win.setFullscreen(true);
+      } else if (before) {
+        const { maximized } = before;
+        before = null;
+        await win.setFullscreen(false);
+        if (maximized) await win.maximize();
+      }
+    }),
+  );
+  return windowFullscreen;
+}
+
 /** Calls `handler` with the maximized state now and after every resize. Resolves to an unsubscribe function. */
 export async function watchMaximized(handler: (maximized: boolean) => void): Promise<() => void> {
   if (!isDesktop()) return () => undefined;

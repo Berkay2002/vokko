@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, Ellipsis, LayoutGrid, Maximize2, Mic, MicOff, M
 import { Perm } from "../api/permissions";
 import { displayName, useStore } from "../api/store";
 import type { Channel, Snowflake, VoiceState } from "../api/types";
+import { gameOwnsKeys } from "../games/fullscreen";
 import { Avatar } from "../shell/Avatar";
 import { userContextItems } from "../shell/menus";
 import { openModal } from "../shell/modalStore";
@@ -560,7 +561,7 @@ export function VoiceChannelPage({ channel }: { channel: Channel }) {
     if (!inFocus) return;
     const onKey = (e: KeyboardEvent) => {
       // Plain Escape only (Shift+Escape marks the server read), and never while a popout, menu or modal owns Escape.
-      if (e.key !== "Escape" || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented || isEditable(e.target) || hasOpenLayer() || document.querySelector('[role="dialog"], [role="menu"]')) return;
+      if (e.key !== "Escape" || gameOwnsKeys() || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented || isEditable(e.target) || hasOpenLayer() || document.querySelector('[role="dialog"], [role="menu"]')) return;
       e.preventDefault();
       useVoiceUi.getState().setFocusedTile(null);
     };

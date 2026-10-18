@@ -5,7 +5,7 @@
 // every other tile then loads.
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Gamepad2, Link, Square, X } from "lucide-react";
+import { Gamepad2, Link, Maximize2, Minimize2, Square, X } from "lucide-react";
 import { gateway } from "../api/gateway";
 import { Perm } from "../api/permissions";
 import { ApiRequestError } from "../api/rest";
@@ -34,6 +34,7 @@ import {
   type GameToHost,
   type Player,
 } from "./frameHost";
+import { focusGame, useGameFullscreen } from "./fullscreen";
 import { GameIcon } from "./GameIcon";
 import "./games.css";
 
@@ -112,7 +113,7 @@ function WebGameFrame({ session, sandbox }: { session: GameSession; sandbox: str
   const wrapper = webGameWrapper();
   return (
     <div className="game-stage">
-      <div className={`game-frame-box${ratio === null ? " fill" : ""}`} style={ratio === null ? undefined : ({ "--game-ar": ratio } as CSSProperties)}>
+      <div className={`game-frame-box web${ratio === null ? " fill" : ""}`} style={ratio === null ? undefined : ({ "--game-ar": ratio } as CSSProperties)}>
         {/* Keyed by URL: a room link that differs only in its #fragment must still load the page anew. */}
         <iframe
           key={src}
@@ -126,6 +127,9 @@ function WebGameFrame({ session, sandbox }: { session: GameSession; sandbox: str
           referrerPolicy="strict-origin"
           data-room={room && src === room ? "joined" : undefined}
           onLoad={event => {
+            // The game is what the player came for: its frame takes the keys unless focus is somewhere else in the app.
+            const tile = event.currentTarget.closest("[data-game-tile]");
+            if (!document.activeElement || document.activeElement === document.body || tile?.contains(document.activeElement)) focusGame(tile);
             if (wrapper) event.currentTarget.contentWindow?.postMessage({ type: "load", url: src, sandbox, allow: frameAllow(game) }, new URL(wrapper).origin);
             setReady(true);
           }}
@@ -364,6 +368,7 @@ function GameTileBody({ channelId, variant, onActivate, session }: { channelId: 
   const [failure, setFailure] = useState<string | null>(null);
   const small = variant === "strip" || variant === "pip";
   const open = variant === "focused" && !closed;
+  const full = useGameFullscreen();
   const close = () => (onActivate && variant === "focused" ? onActivate() : setClosed(true));
   const reopen = () => (onActivate && variant !== "focused" ? onActivate() : setClosed(false));
   const stop = () => {
@@ -372,9 +377,14 @@ function GameTileBody({ channelId, variant, onActivate, session }: { channelId: 
   };
 
   return (
-    <div className={`voice-tile game ${variant}`} data-game-tile data-game-id={game.id} role="group" aria-label={`Game: ${game.name}`}>
+    <div ref={full.ref} className={`voice-tile game ${variant}`} data-game-tile data-fullscreen={full.active ? "" : undefined} data-game-id={game.id} role="group" aria-label={`Game: ${game.name}`}>
       {!small && (
-        <div className="game-head">
+        <div
+          className="game-head"
+          onDoubleClick={event => {
+            if (open && !(event.target as Element).closest("button")) full.toggle();
+          }}
+        >
           <GameIcon game={game} size={20} />
           <span className="game-name">{game.name}</span>
           <span className="game-origin" title={isBundled(game) ? undefined : frameOrigin(game)}>
@@ -382,6 +392,13 @@ function GameTileBody({ channelId, variant, onActivate, session }: { channelId: 
           </span>
           <span className="game-spacer" />
           {isWebGame(trustedManifest(game)) && <ShareRoom channelId={channelId} session={session} />}
+          {open && (
+            <Tooltip content={full.active ? "Exit full screen" : "Full screen"} side="bottom">
+              <button type="button" className="game-button game-fs" aria-label={full.active ? "Exit full screen" : "Full screen"} onClick={full.toggle}>
+                {full.active ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+              </button>
+            </Tooltip>
+          )}
           {open && (
             <Tooltip content="Close (the game keeps running)" side="bottom">
               <button type="button" className="game-button" aria-label="Close game" onClick={close}>
