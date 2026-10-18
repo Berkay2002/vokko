@@ -124,4 +124,14 @@ describe('trimOldest (a call chat left open for hours)', () => {
     const s = { ...live(LIVE_MAX + 50), hasMoreAfter: true };
     expect(trimOldest(s)).toBe(s);
   });
+
+  it('never trims while an older page is loading (it would land above the cut, leaving a gap)', () => {
+    const s = { ...live(LIVE_MAX + 50), loadingOlder: true };
+    expect(trimOldest(s)).toBe(s);
+  });
+
+  it('never trims while a jump is pending (its target could be cut away)', () => {
+    const s = { ...live(LIVE_MAX + 50), focus: { messageId: '1010', token: 1 } };
+    expect(trimOldest(s)).toBe(s);
+  });
 });

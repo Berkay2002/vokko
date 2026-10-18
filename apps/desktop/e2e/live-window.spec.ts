@@ -84,3 +84,33 @@ test('scrolled up: nothing is dropped under the reader', async ({ page }) => {
   await burst(page, id, 60, 300);
   expect(await loaded(page, id)).toBe(before + 300);
 });
+
+test('editing: messages past the limit leave the draft alone (no trim under the editor); the trim waits for the edit to end', async ({ page }) => {
+  const id = await openGeneral(page);
+  await expect.poll(() => loaded(page, id)).toBeGreaterThan(0);
+  const fill = 300 - (await loaded(page, id)) - 1;
+  await page.evaluate(({ id, fill }) => {
+    const m = (window as unknown as Win).__vokkoMock;
+    for (let k = 0; k < fill; k++) m.say(id, 'alice', `fill ${k}`);
+    m.say(id, 'sam', 'mine to edit');
+  }, { id, fill });
+  const mine = page.locator('.chat-msg', { hasText: 'mine to edit' });
+  await mine.hover();
+  await mine.getByRole('button', { name: 'Edit' }).click();
+  const editor = page.getByLabel('Edit message');
+  await editor.fill('half-typed draft');
+  await page.evaluate(id => {
+    const m = (window as unknown as Win).__vokkoMock;
+    for (let k = 0; k < 3; k++) m.say(id, 'alice', `during edit ${k}`);
+  }, id);
+  await expect(page.locator('.chat-content', { hasText: 'during edit 2' })).toBeVisible();
+  expect(await loaded(page, id)).toBe(303);
+  await expect(editor).toHaveValue('half-typed draft');
+  await expect(editor).toBeFocused();
+
+  await editor.press('Escape');
+  await expect(editor).toHaveCount(0);
+  await page.evaluate(id => (window as unknown as Win).__vokkoMock.say(id, 'alice', 'after edit'), id);
+  await expect.poll(() => loaded(page, id)).toBeLessThanOrEqual(300);
+  await expect(page.locator('.chat-content', { hasText: 'after edit' })).toBeVisible();
+});

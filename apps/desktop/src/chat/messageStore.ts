@@ -32,10 +32,10 @@ const reactionChains =new Map<string, { tail: Promise<void>; pending: number; ti
 const reactionGuard = (messageId: Snowflake, emoji: ReactionEmoji, burst: boolean): string => `${messageId}:${emojiKey(emoji)}:${burst ? 1 : 0}`;
 /** Channels the user marked unread by hand: the automatic ack stays off until they read it again on purpose, send, or leave. */
 const heldUnread = new Set<Snowflake>();
-/** Open lists scrolled to the bottom (MessageList reports it): their oldest messages may be dropped as new ones arrive. */
-const following = new Set<Snowflake>();
-/** Nobody looks at the channel, or its list follows the bottom: trimming the top is invisible. */
-const trimmable = (channelId: Snowflake): boolean => !listeners.get(channelId)?.size || following.has(channelId);
+/** Open lists (MessageList registers one): true while it follows the bottom and the user is not interacting with it. */
+const following = new Map<Snowflake, () => boolean>();
+/** Nobody looks at the channel, or its list follows the bottom untouched: trimming the top is invisible. */
+const trimmable = (channelId: Snowflake): boolean => !listeners.get(channelId)?.size || !!following.get(channelId)?.();
 let currentUserId: Snowflake | null = null;
 let bound = false;
 
@@ -145,9 +145,9 @@ function buildRequest(nonce: string, content: string, input: SendInput): CreateM
 export const messageStore = {
   setCurrentUser(id: Snowflake | null): void { currentUserId = id; },
 
-  /** The open list of `channelId` is (or stopped being) scrolled to the bottom. */
-  setFollowing(channelId: Snowflake, atBottom: boolean): void {
-    if (atBottom) following.add(channelId); else following.delete(channelId);
+  /** The open list of `channelId` tells whether a trim is invisible right now (`null`: the list closed). */
+  setFollowing(channelId: Snowflake, canTrim: (() => boolean) | null): void {
+    if (canTrim) following.set(channelId, canTrim); else following.delete(channelId);
   },
 
   /** Ensure the channel has state and a loaded window. Safe to call repeatedly. */
