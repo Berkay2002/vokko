@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, ArrowRight, Download, ExternalLink, File as FileIcon, Forward, Link2, MoreHorizontal, Pencil, Trash2, ZoomIn, FileArchive, FileAudio, FileCode, FileText, FileVideo, ImageOff, X } from 'lucide-react';
 import type { Attachment, Message } from '../api/types';
@@ -11,6 +11,12 @@ import { formatBytes, formatFullDate, formatMessageTimestamp, isSpoilerName } fr
 import { VoicePlayer, isVoiceMessage } from './VoiceMessage';
 import { TextPreview } from './TextPreview';
 import { isTextPreviewable } from './textAttachment';
+import { saveMedia } from './mediaActions';
+import { RESET, type View } from './lightboxZoom';
+import { useViewerGestures } from './useViewerGestures';
+
+/** Click handler for a Download link: saves through `saveMedia` (a blob, so it also works for a file on another origin and in the desktop shell). */
+const saveOnClick = (url: string, filename: string) => (e: React.MouseEvent) => { e.preventDefault(); void saveMedia(url, filename); };
 
 export const isImage = (a: Attachment): boolean => !!a.content_type?.startsWith('image/') || /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(a.filename);
 const isVideo = (a: Attachment): boolean => !!a.content_type?.startsWith('video/');
@@ -41,7 +47,7 @@ function ImageTile({ message, attachment, index, style, className }: { message: 
   const own = message.author.id === chat.me.id && !message.id.startsWith('pending:');
   const url = resolveUrl(attachment.url);
   return <div className={`chat-image-wrap${className ? ` ${className}` : ''}`} style={style}>
-    <button type="button" className={`chat-image${spoiler ? ' spoiler' : ''}${loaded ? ' loaded' : ''}${failed ? ' failed' : ''}`} aria-label={`Open image ${attachment.filename}`}
+    <button type="button" className={`chat-image${spoiler ? ' spoiler' : ''}${loaded ? ' loaded' : ''}${failed ? ' failed' : ''}`} aria-label={`Open image ${(!spoiler && attachment.description) || attachment.filename}`} data-src={url}
       onClick={() => (spoiler ? setSpoiled(true) : chat.actions.openImage(message, index))}>
       {isAnimatable(attachment)
         ? <AnimatedImage kind="gif" src={url} alt={attachment.description || attachment.filename} loading="lazy" draggable={false} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
@@ -55,7 +61,7 @@ function ImageTile({ message, attachment, index, style, className }: { message: 
     </div>}
     {!spoiler && !own && <div className="chat-image-actions">
       <Tooltip content="Open in Browser" side="top"><a className="chat-image-action" href={url} target="_blank" rel="noopener noreferrer" aria-label="Open in Browser"><ExternalLink size={16} /></a></Tooltip>
-      <Tooltip content="Download" side="top"><a className="chat-image-action" href={url} download={attachment.filename} aria-label="Download"><Download size={16} /></a></Tooltip>
+      <Tooltip content="Download" side="top"><a className="chat-image-action" href={url} download={attachment.filename} aria-label="Download" onClick={saveOnClick(url, attachment.filename)}><Download size={16} /></a></Tooltip>
     </div>}
   </div>;
 }
@@ -141,7 +147,7 @@ export function FileCard({ attachment, plain }: { attachment: Attachment; plain?
       <a className="chat-file-name" href={resolveUrl(attachment.url)} target="_blank" rel="noopener noreferrer" title={attachment.filename}>{attachment.filename}</a>
       <span className="chat-file-size">{formatBytes(attachment.size)}</span>
     </div>
-    <a className="chat-file-download" href={resolveUrl(attachment.url)} download={attachment.filename} aria-label={`Download ${attachment.filename}`} title="Download"><Download size={24} /></a>
+    <a className="chat-file-download" href={resolveUrl(attachment.url)} download={attachment.filename} aria-label={`Download ${attachment.filename}`} title="Download" onClick={saveOnClick(resolveUrl(attachment.url), attachment.filename)}><Download size={24} /></a>
     {audio && <audio className="chat-audio" src={resolveUrl(attachment.url)} controls preload="metadata" aria-label={attachment.filename} />}
   </div>;
 }
@@ -151,15 +157,19 @@ export function Lightbox({ message, index, onClose }: { message: Message; index:
   const images = message.attachments.filter(isImage);
   const start = Math.max(0, images.findIndex(a => a.id === message.attachments[index]?.id));
   const [i, setI] = useState(start);
-  const [zoomed, setZoomed] = useState(false);
+  const [view, setView] = useState<View>(RESET);
   const [more, setMore] = useState(false);
+  const stage = useRef<HTMLDivElement>(null);
+  const img = useRef<HTMLImageElement>(null);
   const cur = images[i];
-  const go = (n: number) => { setI(Math.max(0, Math.min(images.length - 1, n))); setZoomed(false); };
+  const go = (n: number) => { setI(Math.max(0, Math.min(images.length - 1, n))); setView(RESET); };
+  const zoomed = view.scale > 1;
+  const gestures = useViewerGestures({ stage, image: img, view, setView, canSwipe: images.length > 1, step: d => go(i + d) });
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { if (more) setMore(false); else onClose(); }
-      else if (e.key === 'ArrowLeft') setI(v => Math.max(0, v - 1));
-      else if (e.key === 'ArrowRight') setI(v => Math.min(images.length - 1, v + 1));
+      else if (e.key === 'ArrowLeft') { setI(v => Math.max(0, v - 1)); setView(RESET); }
+      else if (e.key === 'ArrowRight') { setI(v => Math.min(images.length - 1, v + 1)); setView(RESET); }
     };
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
@@ -169,7 +179,7 @@ export function Lightbox({ message, index, onClose }: { message: Message; index:
   const color = chat.colorOf(message);
   const url = resolveUrl(cur.url);
   const date = new Date(message.timestamp);
-  return createPortal(<div className="chat-lightbox" role="dialog" aria-modal="true" aria-label={cur.filename} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+  return createPortal(<div className="chat-lightbox" role="dialog" aria-modal="true" aria-label={cur.description || cur.filename} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="chat-lightbox-modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
       <header className="chat-lightbox-top">
         <Avatar user={message.author} size={40} guildId={chat.guildId} />
@@ -178,22 +188,22 @@ export function Lightbox({ message, index, onClose }: { message: Message; index:
           <Tooltip content={formatFullDate(date)} side="bottom"><time className="chat-lightbox-time" dateTime={message.timestamp}>{formatMessageTimestamp(date)}</time></Tooltip>
         </div>
         <div className="chat-lightbox-actions" role="toolbar" aria-label="Image actions">
-          <Tooltip content={zoomed ? 'Zoom out' : 'Zoom in'} side="bottom"><button type="button" className="chat-lightbox-btn" aria-label={zoomed ? 'Zoom out' : 'Zoom in'} aria-pressed={zoomed} onClick={() => setZoomed(z => !z)}><ZoomIn size={20} /></button></Tooltip>
+          <Tooltip content={zoomed ? 'Zoom out' : 'Zoom in'} side="bottom"><button type="button" className="chat-lightbox-btn" aria-label={zoomed ? 'Zoom out' : 'Zoom in'} aria-pressed={zoomed} onClick={() => setView(v => (v.scale > 1 ? RESET : { ...v, scale: 2 }))}><ZoomIn size={20} /></button></Tooltip>
           <Tooltip content="Forward" side="bottom"><button type="button" className="chat-lightbox-btn" aria-label="Forward" onClick={() => openForward(message)}><Forward size={20} /></button></Tooltip>
           <Tooltip content="Open in Browser" side="bottom"><a className="chat-lightbox-btn" href={url} target="_blank" rel="noopener noreferrer" aria-label="Open in Browser"><ExternalLink size={20} /></a></Tooltip>
           <div className="chat-lightbox-more">
             <Tooltip content="More" side="bottom"><button type="button" className="chat-lightbox-btn" aria-label="More" aria-expanded={more} onClick={() => setMore(m => !m)}><MoreHorizontal size={20} /></button></Tooltip>
             {more && <div className="chat-lightbox-menu" role="menu">
-              <a role="menuitem" href={url} download={cur.filename} onClick={() => setMore(false)}><Download size={16} /> Download</a>
+              <a role="menuitem" href={url} download={cur.filename} onClick={e => { saveOnClick(url, cur.filename)(e); setMore(false); }}><Download size={16} /> Download</a>
               <button type="button" role="menuitem" onClick={() => { void navigator.clipboard?.writeText(url); setMore(false); }}><Link2 size={16} /> Copy Link</button>
             </div>}
           </div>
         </div>
         <button type="button" className="chat-lightbox-close" aria-label="Close" onClick={onClose}><X size={20} /></button>
       </header>
-      <div className={`chat-lightbox-stage${images.length > 1 ? ' with-thumbs' : ''}`} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div ref={stage} className={`chat-lightbox-stage${images.length > 1 ? ' with-thumbs' : ''}`} onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
         {i > 0 && <button type="button" className="chat-lightbox-nav prev" aria-label="Previous" onClick={() => go(i - 1)}><ArrowLeft size={20} /></button>}
-        <img className={zoomed ? 'zoomed' : undefined} src={url} alt={cur.filename} draggable={false} onClick={() => setZoomed(z => !z)} />
+        <img ref={img} className={`${zoomed ? 'zoomed' : ''}${gestures.dragging ? ' dragging' : ''}`} style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }} src={url} alt={cur.description || cur.filename} draggable={false} onClick={e => gestures.toggle(e.clientX, e.clientY)} />
         {i < images.length - 1 && <button type="button" className="chat-lightbox-nav next" aria-label="Next" onClick={() => go(i + 1)}><ArrowRight size={20} /></button>}
       </div>
       {images.length > 1 && <ul className="chat-lightbox-thumbs" aria-label="Images">

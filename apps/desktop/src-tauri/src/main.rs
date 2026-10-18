@@ -3,6 +3,7 @@
 mod appicon;
 mod appinfo;
 mod crash;
+mod downloads;
 mod games;
 mod links;
 #[cfg(target_os = "macos")]
@@ -71,7 +72,7 @@ fn create_main_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>>
     let Some(config) = app.config().app.windows.iter().find(|window| window.label == window::MAIN_WINDOW).cloned() else {
         return Err("tauri.conf.json has no main window".into());
     };
-    let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?.on_new_window(popups::on_new_window);
+    let builder = tauri::WebviewWindowBuilder::from_config(app, &config)?.on_new_window(popups::on_new_window).on_download(downloads::on_download);
     // Settings > Advanced > hardware acceleration off: WebView2 renders without the GPU (Tauri's default flags kept).
     #[cfg(windows)]
     let builder = if app.state::<PrefsStore>().get().hardware_acceleration {

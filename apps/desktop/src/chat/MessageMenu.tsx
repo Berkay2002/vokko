@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  AppWindow, Bell, ChartBarBig, Bookmark, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Fingerprint, Flag, Forward, Link2, MailOpen, Megaphone, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
+  AppWindow, Bell, ChartBarBig, Bookmark, ChevronLeft, ChevronRight, Copy, CornerUpLeft, Download, ExternalLink, Fingerprint, Flag, Forward, Link2, MailOpen, Megaphone, MessageSquareText, Pencil, Pin, PinOff, SmilePlus, Trash2, Volume2,
 } from 'lucide-react';
 import { MessageType } from '../api/types';
 import type { Message } from '../api/types';
@@ -10,7 +10,9 @@ import { emojiShortcodeLabel, frequentEmoji, quickReactions, useEmojiDb } from '
 import { messageStore } from './messageStore';
 import { isSystemMessage, type PendingMessage } from './messageState';
 import { toDisplay } from './mentionText';
-import { BottomSheet, isDeveloperMode, messageLink, openModal, useLayer, useOutsideClose, usePhone } from './shell';
+import { BottomSheet, copyText, isDeveloperMode, messageLink, openModal, resolveUrl, useLayer, useOutsideClose, usePhone } from './shell';
+import { fileNameFromUrl, type MediaTarget } from './mediaTarget';
+import { copyImage, saveMedia } from './mediaActions';
 import { comingSoon } from './toast';
 import { ReminderMenu } from '../media/ReminderMenu';
 import { openForward, toggleBookmark, useIsBookmarked } from '../media/store';
@@ -26,6 +28,8 @@ export interface MessageMenuTarget {
   pending: PendingMessage | null;
   x: number;
   y: number;
+  /** The picture, video, audio file or link the right click landed on: its actions come first. */
+  media?: MediaTarget | null;
 }
 
 interface Row {
@@ -41,6 +45,31 @@ type Entry = Row | 'separator';
 
 const ICON = 20;
 const EDGE = 8;
+
+/**
+ * Actions for the thing under the pointer, above the message's own: a picture gets Copy Image, Save Image, Open Original and
+ * Copy Link; a video or audio file Save and Copy Link; a link Open Link and Copy Link.
+ */
+export function mediaMenuItems(media: MediaTarget | null | undefined, message: Message): Row[] {
+  if (!media) return [];
+  const { kind, url, anchor } = media;
+  const name = fileNameFromUrl(url, message.attachments.find(a => resolveUrl(a.url) === url)?.filename);
+  const copyLink: Row = { id: 'media-copy-link', label: 'Copy Link', icon: <Link2 size={ICON} />, onSelect: () => copyText(url) };
+  const openOriginal = () => { window.open(url, '_blank', 'noopener,noreferrer'); };
+  if (kind === 'image') {
+    return [
+      { id: 'media-copy-image', label: 'Copy Image', icon: <Copy size={ICON} />, onSelect: () => copyImage(url) },
+      { id: 'media-save', label: 'Save Image', icon: <Download size={ICON} />, onSelect: () => void saveMedia(url, name) },
+      { id: 'media-open', label: 'Open Original', icon: <ExternalLink size={ICON} />, onSelect: openOriginal },
+      copyLink,
+    ];
+  }
+  if (kind === 'link') {
+    // Click the link itself so it keeps its handlers: in-app message and invite links, the browser hand-off in the desktop shell.
+    return [{ id: 'media-open', label: 'Open Link', icon: <ExternalLink size={ICON} />, onSelect: () => (anchor?.isConnected ? anchor.click() : openOriginal()) }, copyLink];
+  }
+  return [{ id: 'media-save', label: kind === 'video' ? 'Save Video' : 'Save Audio', icon: <Download size={ICON} />, onSelect: () => void saveMedia(url, name) }, copyLink];
+}
 
 /**
  * The menu's corner sits on the pointer. It flips to the left of the pointer when it would leave the window on the right and to above
@@ -86,6 +115,8 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
   const entries = useMemo<Entry[]>(() => {
     const out: Entry[] = [];
     const sep = () => { if (out.length > 0 && out[out.length - 1] !== 'separator') out.push('separator'); };
+    out.push(...mediaMenuItems(target.media, message));
+    sep();
     if (!pending && !system) {
       out.push({
         id: 'add-reaction', label: 'Add Reaction', icon: <SmilePlus size={ICON} />,
@@ -147,7 +178,7 @@ export function MessageMenu({ target, onClose, onMoreEmoji }: { target: MessageM
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message, pending, bookmarked, chat.guildId, chat.canManage, chat.canSend, chat.isDm, chat.me.id, threadActions.thread?.id, threadActions.canCreateThread, threadActions.canPublish, threadActions.published, threadActions.announcement]);
+  }, [message, pending, target.media, bookmarked, chat.guildId, chat.canManage, chat.canSend, chat.isDm, chat.me.id, threadActions.thread?.id, threadActions.canCreateThread, threadActions.canPublish, threadActions.published, threadActions.announcement]);
 
   useLayoutEffect(() => {
     const el = box.current;
