@@ -12,6 +12,7 @@ import { SystemBody } from './SystemMessage';
 import { ServerTag } from './ServerTag';
 import { Attachments, PendingUpload } from './Attachments';
 import { Embeds } from './Embeds';
+import { MessageComponents } from './MessageComponents';
 import { Reactions } from './Reactions';
 import { EmojiPickerPopout } from './EmojiPicker';
 import { MessageMenu } from './MessageMenu';
@@ -282,6 +283,7 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, tabS
         <StickerItems items={message.sticker_items} />
         {message.message_snapshots?.length ? <ForwardedBlock message={message} /> : null}
         {!gif && <Embeds message={message} />}
+        <MessageComponents message={message} />
         <Reactions message={message} />
         <EphemeralFooter message={message} />
         {message.thread && <ThreadChip message={message} />}

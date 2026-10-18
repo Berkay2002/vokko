@@ -54,6 +54,7 @@ export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message
     mention_everyone: m.mention_everyone,
     attachments: m.attachments.map(a => ({ ...a })),
     embeds: [...(m.embeds ?? []).map(e => ({ ...e })), ...pollEmbedsFor(m.id)],
+    components: JSON.parse(JSON.stringify(m.components ?? [])),
     reactions,
     pinned: m.pinned,
     tts: m.tts === true,

@@ -219,7 +219,7 @@ export interface NewMessage {
   /** False: the author lacks MENTION_EVERYONE, so @everyone/@here is kept as text but does not ping. Default true. */
   allowEveryone?: boolean;
   /** Webhook / interaction fields stored with the message (mock/apps.ts). */
-  extra?: Partial<Pick<MockMessage, "webhook_id" | "application_id" | "interaction_metadata" | "author_name" | "author_avatar" | "embeds">>;
+  extra?: Partial<Pick<MockMessage, "webhook_id" | "application_id" | "interaction_metadata" | "author_name" | "author_avatar" | "embeds" | "components">>;
   stickers?: StickerItem[];
   forward?: MockMessage["forward"];
 }

@@ -259,6 +259,8 @@ pub struct Extras {
     pub tts: bool,
     /// No link embeds for this message (the author lacks `EMBED_LINKS`).
     pub no_unfurl: bool,
+    /// Validated components (JSON array of `Component`) of an application's message.
+    pub components: Option<String>,
 }
 
 /// Stores a message, updates read states / unread counters, reopens closed DMs and fans MESSAGE_CREATE out.
@@ -346,8 +348,8 @@ async fn insert_message_stored(
     };
     sqlx::query(
         "INSERT INTO messages (id, channel_id, author_id, content, kind, reference_message_id, mention_everyone, flags, reference_channel_id, reference_guild_id, embeds, \
-         forward_channel_id, forward_message_id, forward_guild_id, snapshot, webhook_id, application_id, webhook_name, webhook_avatar, interaction_metadata, tts) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]')::jsonb, $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20::jsonb, $21)",
+         forward_channel_id, forward_message_id, forward_guild_id, snapshot, webhook_id, application_id, webhook_name, webhook_avatar, interaction_metadata, tts, components) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, '[]')::jsonb, $12, $13, $14, $15::jsonb, $16, $17, $18, $19, $20::jsonb, $21, COALESCE($22, '[]')::jsonb)",
     )
     .bind(message_id)
     .bind(channel.id)
@@ -370,6 +372,7 @@ async fn insert_message_stored(
     .bind(extras.identity.as_ref().and_then(|identity| identity.avatar.clone()))
     .bind(extras.identity.as_ref().and_then(|identity| identity.interaction_metadata.clone()))
     .bind(extras.tts)
+    .bind(&extras.components)
     .execute(&mut *tx)
     .await?;
     if let Some(poll) = &extras.poll {
@@ -676,7 +679,14 @@ async fn create_message(
         }
         None => None,
     };
-    let content = validate_content(body.content.as_deref().unwrap_or(""), !attachments.is_empty() || !sticker_ids.is_empty() || forwarding || poll.is_some())?;
+    let components = match &body.components {
+        Some(components) if !components.is_empty() => Some(crate::apps::bot_components(&state, user_id, components).await?),
+        _ => None,
+    };
+    let content = validate_content(
+        body.content.as_deref().unwrap_or(""),
+        !attachments.is_empty() || !sticker_ids.is_empty() || forwarding || poll.is_some() || components.is_some(),
+    )?;
     // AutoMod reads a poll's question and answers along with the content.
     let screened = match &poll {
         Some(poll) => std::iter::once(content.as_str())
@@ -736,6 +746,7 @@ async fn create_message(
         tts,
         flags: if voice_message { IS_VOICE_MESSAGE as i32 } else { 0 },
         no_unfurl: access.permissions & EMBED_LINKS == 0,
+        components: components.as_ref().map(serde_json::to_string).transpose().map_err(|_| ApiErr::internal())?,
         ..Extras::default()
     };
     let view = insert_message_with(&state, &access.channel, user_id, draft, extras).await?;
@@ -808,7 +819,12 @@ async fn edit_message(
     // below keeps just the SUPPRESS_EMBEDS bit for everyone.
     if row.author_id != user_id {
         let suppressing = body.flags.is_some_and(|flags| flags & SUPPRESS_EMBEDS != 0);
-        let moderating = body.content.is_none() && body.attachments.is_none() && suppressing && !access.is_dm() && access.permissions & MANAGE_MESSAGES != 0;
+        let moderating = body.content.is_none()
+            && body.attachments.is_none()
+            && body.components.is_none()
+            && suppressing
+            && !access.is_dm()
+            && access.permissions & MANAGE_MESSAGES != 0;
         if !moderating {
             return Err(ApiErr::not_author());
         }
@@ -842,11 +858,17 @@ async fn edit_message(
         None => Vec::new(),
     };
     let remaining = existing.len() - removed.len();
+    let components = match &body.components {
+        Some(components) if !components.is_empty() => Some(crate::apps::bot_components(&state, user_id, components).await?),
+        Some(_) => Some(Vec::new()),
+        None => None,
+    };
+    let has_components = components.as_ref().map_or(row.components != "[]", |components| !components.is_empty());
     let content = match body.content.as_deref() {
         Some(text) => validate_content(text, true)?,
         None => row.content.clone(),
     };
-    if content.is_empty() && remaining == 0 {
+    if content.is_empty() && remaining == 0 && !has_components {
         return Err(ApiErr::empty_message());
     }
     let content_changed = content != row.content;
@@ -858,7 +880,7 @@ async fn edit_message(
         Some(flags) => (old_flags & !suppress_bit) | (flags as i32 & suppress_bit),
         None => old_flags,
     };
-    if content_changed || new_flags != old_flags || !removed.is_empty() {
+    if content_changed || new_flags != old_flags || !removed.is_empty() || components.is_some() {
         let suppressed = new_flags & suppress_bit != 0;
         let current: Vec<Embed> = serde_json::from_str(&row.embeds).unwrap_or_default();
         let urls: Vec<String> = unfurl::extract_urls(&content).iter().map(ToString::to_string).collect();
@@ -867,13 +889,14 @@ async fn edit_message(
             if suppressed { Vec::new() } else { current.into_iter().filter(|embed| embed.url.as_ref().is_some_and(|url| urls.contains(url))).collect() };
         let mentions = if content_changed { Some(resolve_mentions(&state, &access, parse_mentions(&content)).await?) } else { None };
         let mut tx = state.db.begin().await?;
-        sqlx::query("UPDATE messages SET content = $2, edited_at = $3, mention_everyone = $4, flags = $5, embeds = $6::jsonb WHERE id = $1")
+        sqlx::query("UPDATE messages SET content = $2, edited_at = $3, mention_everyone = $4, flags = $5, embeds = $6::jsonb, components = COALESCE($7::jsonb, components) WHERE id = $1")
             .bind(mid)
             .bind(&content)
             .bind(if content_changed || !removed.is_empty() { Some(OffsetDateTime::now_utc()) } else { row.edited_at })
             .bind(mentions.as_ref().map_or(row.mention_everyone, |mentions| mentions.everyone))
             .bind(new_flags)
             .bind(serde_json::to_string(&kept).map_err(|_| ApiErr::internal())?)
+            .bind(components.as_ref().map(serde_json::to_string).transpose().map_err(|_| ApiErr::internal())?)
             .execute(&mut *tx)
             .await?;
         if let Some(mentions) = &mentions {

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { composer, stays } from './helpers';
+import { composer, pickOption, stays } from './helpers';
 
 // Bots, slash commands and webhooks against the in-memory mock. The seed has the Echo application (owned by sam); the tests add
 // its bot to "Sam's server" with __vokkoMock.installEchoBot(). Its handler answers like examples/echo-bot.
@@ -341,4 +341,40 @@ test("a bot's profile card on a phone", async ({ page }) => {
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${process.env.VOKKO_SHOTS_DIR}/gap8-bot-card-390.png` });
   }
+});
+
+test('/confirm posts buttons and a select: ack (6), reply (4), update (7), keyboard reachable', async ({ page }) => {
+  await openGeneral(page);
+  const box = composer(page);
+  await box.click();
+  await box.pressSequentially('/confirm');
+  await box.press('Enter'); // picks the command
+  await expect(box).toHaveText('/confirm');
+  await box.press('Enter');
+  const ask = row(page, 'Delete everything?');
+  await expect(ask).toBeVisible();
+  const components = ask.locator('.apps-components');
+  await expect(components.getByRole('button')).toHaveText(['Confirm', 'Cancel', 'Ask later']);
+  await expect(components.getByRole('link', { name: 'Docs' })).toHaveAttribute('href', 'https://example.com/docs');
+  await expect(components.getByRole('link', { name: 'Docs' })).toHaveAttribute('target', '_blank');
+
+  // a select option is a click with its value; the bot answers with an ephemeral message (4)
+  await pickOption(page, components.getByRole('combobox', { name: 'Pick a flavor' }), 'Chocolate');
+  await expect(row(page, 'You picked chocolate.')).toContainText('Only you can see this');
+  await expect(components.getByRole('button', { name: 'Confirm' })).toBeEnabled();
+
+  // "Ask later" is acknowledged (6): nothing changes and the buttons come back
+  await components.getByRole('button', { name: 'Ask later' }).click();
+  await expect(components.getByRole('button', { name: 'Confirm' })).toBeEnabled();
+  await expect(ask).toContainText('Delete everything?');
+  await expect(components.getByRole('alert')).toHaveCount(0);
+
+  // the keyboard reaches the buttons; Enter on Confirm updates the message (7) and removes the components
+  await components.getByRole('button', { name: 'Confirm' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(components.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Enter');
+  await expect(row(page, 'Confirmed. Nothing was deleted.')).toBeVisible();
+  await expect(page.locator('.chat-msg .apps-components')).toHaveCount(0);
 });

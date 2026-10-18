@@ -700,6 +700,7 @@ export interface Message {
   webhook_id?: Snowflake; // posted by a webhook (or an interaction response: then == application_id); author is then the webhook identity
   application_id?: Snowflake; // interaction responses and followups
   interaction_metadata?: MessageInteractionMetadata; // interaction responses: who used which command
+  components?: MessageComponent[]; // buttons and selects of application messages; [] (or absent in older payloads) = none
   call?: MessageCall; // type 3 only
 }
 
@@ -2301,6 +2302,7 @@ export interface GatewayEvents {
   THREAD_MEMBERS_UPDATE: { id: Snowflake; guild_id: Snowflake; member_count: number; added_members?: ThreadMember[]; removed_member_ids?: Snowflake[] };
   INTERACTION_CREATE: Interaction; // to the bot only
   INTERACTION_FAILURE: { id: Snowflake; nonce: string | null; channel_id: Snowflake; application_id: Snowflake }; // to the invoking user: no callback within 3 s
+  INTERACTION_SUCCESS: { id: Snowflake; nonce: string | null; channel_id: Snowflake; application_id: Snowflake }; // to the invoking user: a component click was answered (type 6 shows no message)
   APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE: { id: Snowflake; nonce: string | null; choices: ApplicationCommandOptionChoice[] }; // to the invoking user
   WEBHOOKS_UPDATE: { guild_id: Snowflake; channel_id: Snowflake }; // a webhook of the channel was created, edited or deleted (to MANAGE_WEBHOOKS holders)
   CALL_CREATE: Call; // to the DM's recipients when a call starts, and after READY for every ongoing call in the user's DMs
@@ -2430,6 +2432,7 @@ export interface ApplicationCommandIndex {
 export enum InteractionType {
   Ping = 1,
   ApplicationCommand = 2,
+  MessageComponent = 3,
   ApplicationCommandAutocomplete = 4,
 }
 export interface InteractionDataOption {
@@ -2446,10 +2449,13 @@ export interface InteractionResolved {
   messages?: Record<Snowflake, Message>;
 }
 export interface InteractionData {
-  id: Snowflake; // command id
-  name: string;
-  type: ApplicationCommandType;
+  id?: Snowflake; // command id (commands only; a component click has custom_id instead)
+  name?: string;
+  type?: ApplicationCommandType;
   guild_id?: Snowflake; // guild commands
+  custom_id?: string; // component clicks (type 3), with component_type and, for a select, values
+  component_type?: ComponentType;
+  values?: string[];
   options?: InteractionDataOption[];
   resolved?: InteractionResolved;
   target_id?: Snowflake; // User/Message commands: the user or message
@@ -2467,15 +2473,19 @@ export interface Interaction {
   token: string; // valid 15 minutes for callback + followups (the callback itself must come within 3 s)
   app_permissions: string; // the bot's permissions in the channel
   version: 1;
+  message?: Message; // component clicks: the message the component sits on
 }
 // POST /interactions (user auth): run a command. Answers 200 InteractionCreated; the result arrives as MESSAGE_CREATE,
 // INTERACTION_FAILURE (bot did not answer in 3 s) or APPLICATION_COMMAND_AUTOCOMPLETE_RESPONSE.
 export interface InvokeInteractionRequest {
-  type: InteractionType.ApplicationCommand | InteractionType.ApplicationCommandAutocomplete;
+  type: InteractionType.ApplicationCommand | InteractionType.MessageComponent | InteractionType.ApplicationCommandAutocomplete;
   application_id: Snowflake;
   channel_id: Snowflake;
-  data: { id: Snowflake; name: string; type: ApplicationCommandType; options?: InteractionDataOption[]; target_id?: Snowflake };
-  nonce?: string; // echoed in INTERACTION_FAILURE / autocomplete responses
+  message_id?: Snowflake; // component clicks: the message holding the component
+  data:
+    | { id: Snowflake; name: string; type: ApplicationCommandType; options?: InteractionDataOption[]; target_id?: Snowflake }
+    | { custom_id: string; component_type: ComponentType; values?: string[] }; // the second shape is a component click
+  nonce?: string; // echoed in INTERACTION_FAILURE / INTERACTION_SUCCESS / autocomplete responses
 }
 export interface InteractionCreated {
   id: Snowflake;
@@ -2484,11 +2494,14 @@ export interface InteractionCreated {
 export enum InteractionCallbackType {
   ChannelMessageWithSource = 4,
   DeferredChannelMessageWithSource = 5, // shows "<bot> is thinking..." (message flags Loading) until @original is edited
+  DeferredUpdateMessage = 6, // component clicks: acknowledge, change nothing
+  UpdateMessage = 7, // component clicks: edit the clicked message
   ApplicationCommandAutocompleteResult = 8,
 }
 export interface InteractionCallbackData {
   content?: string; // max 2000
   embeds?: Embed[]; // max 10
+  components?: MessageComponent[]; // type 7: omitted = unchanged, [] removes them
   flags?: number; // MessageFlags.Ephemeral only
   allowed_mentions?: AllowedMentions;
   choices?: ApplicationCommandOptionChoice[]; // type 8, max 25
@@ -2506,6 +2519,46 @@ export interface WebhookMessageRequest {
   username?: string; // execute only: override the webhook's name (1-80)
   avatar_url?: string; // execute only: override the avatar (http/https URL)
 }
+// Message components (docs/api.md "Message components"): up to 5 action rows of buttons or one string select. No modals.
+export enum ComponentType {
+  ActionRow = 1,
+  Button = 2,
+  StringSelect = 3,
+}
+export enum ButtonStyle {
+  Primary = 1,
+  Secondary = 2,
+  Success = 3,
+  Danger = 4,
+  Link = 5, // url instead of custom_id; opens in a new tab
+}
+export interface ComponentEmoji {
+  id?: Snowflake;
+  name?: string;
+  animated?: boolean;
+}
+export interface SelectOption {
+  label: string;
+  value: string;
+  description?: string;
+  emoji?: ComponentEmoji;
+  default?: boolean;
+}
+export interface MessageComponent {
+  type: ComponentType;
+  custom_id?: string; // 1-100; buttons (not link) and selects
+  style?: ButtonStyle;
+  label?: string; // max 80
+  emoji?: ComponentEmoji;
+  url?: string; // link buttons: https only
+  disabled?: boolean;
+  options?: SelectOption[]; // select: 1-25
+  placeholder?: string;
+  min_values?: number; // always 1
+  max_values?: number; // always 1
+  components?: MessageComponent[]; // action row
+}
+
 export interface MessageInteractionMetadata {
   id: Snowflake; // interaction id
   type: InteractionType;

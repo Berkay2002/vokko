@@ -131,6 +131,117 @@ describe("interactions", () => {
   });
 });
 
+describe("message components", () => {
+  const go = { type: 2, style: 1, label: "Go", custom_id: "go" };
+  const pick = { type: 3, custom_id: "pick", placeholder: "Pick", options: [{ label: "A", value: "a" }, { label: "B", value: "b" }] };
+  const rows = [{ type: 1, components: [go, { type: 2, style: 5, label: "Docs", url: " https://Example.com/a b" }] }, { type: 1, components: [pick] }];
+
+  /** The bot answers a /echo run with `components`; returns the app, the interaction of the run and the posted message. */
+  function postWithComponents(components: unknown): { app: ApplicationWithToken; interaction: Interaction; message: Message } {
+    const { app, commands } = setupBot();
+    grantCommandsToEveryone();
+    const echo = commands.find(c => c.name === "echo")!;
+    call("plain", "POST", "/interactions", { type: 2, application_id: app.id, channel_id: general, data: { id: echo.id, name: "echo", type: 1, options: [{ name: "text", type: 3, value: "x" }] } });
+    const interaction = eventsOf("INTERACTION_CREATE")[0]!.d as Interaction;
+    events.length = 0;
+    call(null, "POST", `/interactions/${interaction.id}/${interaction.token}/callback`, { type: 4, data: { content: "Ready?", components } });
+    return { app, interaction, message: eventsOf("MESSAGE_CREATE").map(e => e.d as Message).find(m => m.content === "Ready?")! };
+  }
+
+  const click = (app: ApplicationWithToken, message: Message, data: unknown, who = "plain") =>
+    call(who, "POST", "/interactions", { type: 3, application_id: app.id, channel_id: general, message_id: message.id, nonce: "c1", data });
+
+  it("validates components like the server and stores link URLs parsed", () => {
+    const { message } = postWithComponents(rows);
+    expect(message.components?.[0]?.components?.[1]?.url).toBe("https://example.com/a%20b");
+    expect(message.components?.[1]?.components?.[0]).toMatchObject({ type: 3, min_values: 1, max_values: 1 });
+    const { interaction } = postWithComponents([]);
+    const post = (components: unknown) => errorOf(() => call(null, "POST", `/webhooks/${interaction.application_id}/${interaction.token}`, { content: "x", components }));
+    const invalid = { status: 400, code: 50035 };
+    expect(post([{ type: 1, components: [{ ...go, style: 5, url: "http://example.com" }] }])).toEqual(invalid);
+    expect(post([{ type: 1, components: [{ ...go, style: 5, custom_id: undefined, url: "https://" }] }])).toEqual(invalid);
+    expect(post([{ type: 1, components: [go, go] }])).toEqual(invalid);
+    expect(post([{ type: 1, components: [{ ...go, label: "x".repeat(81) }] }])).toEqual(invalid);
+    expect(post([{ type: 1, components: [{ ...go, custom_id: "x".repeat(101) }] }])).toEqual(invalid);
+    expect(post(Array.from({ length: 6 }, (_, i) => ({ type: 1, components: [{ ...go, custom_id: `b${i}` }] })))).toEqual(invalid);
+    expect(post([{ type: 1, components: Array.from({ length: 6 }, (_, i) => ({ ...go, custom_id: `b${i}` })) }])).toEqual(invalid);
+    expect(post([{ type: 1, components: [pick, go] }])).toEqual(invalid);
+    expect(post([{ type: 1, components: [{ ...go, emoji: { name: "x".repeat(33) } }] }])).toEqual(invalid);
+  });
+
+  it("relays a click to the app and answers with an update (7), an acknowledgement (6) or a message (4)", () => {
+    const { app, message } = postWithComponents(rows);
+    events.length = 0;
+    expect(click(app, message, { custom_id: "go", component_type: 2 })).toMatchObject({ nonce: "c1" });
+    const created = eventsOf("INTERACTION_CREATE")[0]!;
+    expect(created.users).toEqual([app.id]);
+    const interaction = created.d as Interaction;
+    expect(interaction).toMatchObject({ type: 3, data: { custom_id: "go", component_type: 2 }, message: { id: message.id } });
+    const callback = `/interactions/${interaction.id}/${interaction.token}/callback`;
+
+    events.length = 0;
+    call(null, "POST", callback, { type: 7, data: { content: "Done" } });
+    const updated = eventsOf("MESSAGE_UPDATE").map(e => e.d as Message).find(m => m.id === message.id)!;
+    expect(updated.content).toBe("Done");
+    expect(updated.components).toHaveLength(2);
+    expect(eventsOf("INTERACTION_SUCCESS")).toEqual([{ users: [ids.plain], t: "INTERACTION_SUCCESS", d: expect.objectContaining({ id: interaction.id, nonce: "c1" }) }]);
+    expect(errorOf(() => call(null, "POST", callback, { type: 6 }))).toEqual({ status: 400, code: 40060 });
+
+    // a select needs exactly one of its options; type 7 may remove the components
+    expect(errorOf(() => click(app, message, { custom_id: "pick", component_type: 3, values: ["zzz"] }))).toEqual({ status: 400, code: 50035 });
+    expect(errorOf(() => click(app, message, { custom_id: "go", component_type: 2, values: ["a"] }))).toEqual({ status: 400, code: 50035 });
+    events.length = 0;
+    click(app, message, { custom_id: "pick", component_type: 3, values: ["b"] });
+    const picked = eventsOf("INTERACTION_CREATE")[0]!.d as Interaction;
+    expect(picked.data.values).toEqual(["b"]);
+    events.length = 0;
+    call(null, "POST", `/interactions/${picked.id}/${picked.token}/callback`, { type: 7, data: { components: [] } });
+    expect((eventsOf("MESSAGE_UPDATE")[0]!.d as Message).components).toEqual([]);
+    expect(errorOf(() => click(app, message, { custom_id: "go", component_type: 2 }))).toEqual({ status: 400, code: 50035 });
+  });
+
+  it("answers 6 without a change, 4 with a plain message, refuses 6 and 7 for commands, and fails a silent click", () => {
+    vi.useFakeTimers();
+    try {
+      const { app, interaction, message } = postWithComponents(rows);
+      expect(errorOf(() => call(null, "POST", `/interactions/${interaction.id}/${interaction.token}/callback`, { type: 7, data: { content: "no" } }))).toEqual({ status: 400, code: 50035 });
+      events.length = 0;
+      click(app, message, { custom_id: "go", component_type: 2 });
+      const first = eventsOf("INTERACTION_CREATE")[0]!.d as Interaction;
+      events.length = 0;
+      call(null, "POST", `/interactions/${first.id}/${first.token}/callback`, { type: 6 });
+      expect(eventsOf("MESSAGE_UPDATE")).toEqual([]);
+      expect(eventsOf("INTERACTION_SUCCESS")).toHaveLength(1);
+
+      click(app, message, { custom_id: "go", component_type: 2 });
+      const second = eventsOf("INTERACTION_CREATE").at(-1)!.d as Interaction;
+      events.length = 0;
+      call(null, "POST", `/interactions/${second.id}/${second.token}/callback`, { type: 4, data: { content: "Thanks" } });
+      const reply = eventsOf("MESSAGE_CREATE").map(e => e.d as Message).find(m => m.content === "Thanks")!;
+      expect(reply).toMatchObject({ type: MessageType.Default });
+      expect(reply.interaction_metadata).toBeUndefined();
+
+      events.length = 0;
+      click(app, message, { custom_id: "go", component_type: 2 });
+      vi.advanceTimersByTime(3100);
+      expect(eventsOf("INTERACTION_FAILURE")).toEqual([{ users: [ids.plain], t: "INTERACTION_FAILURE", d: expect.objectContaining({ nonce: "c1" }) }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses clicks on unknown, disabled or other people's components and messages", () => {
+    const { app, message } = postWithComponents([{ type: 1, components: [go, { ...go, custom_id: "off", disabled: true }] }]);
+    const invalid = { status: 400, code: 50035 };
+    expect(errorOf(() => click(app, message, { custom_id: "nope", component_type: 2 }))).toEqual(invalid);
+    expect(errorOf(() => click(app, message, { custom_id: "off", component_type: 2 }))).toEqual(invalid);
+    expect(errorOf(() => click(app, message, { custom_id: "go", component_type: 3, values: ["a"] }))).toEqual(invalid);
+    expect(errorOf(() => call("plain", "POST", "/interactions", { type: 3, application_id: app.id, channel_id: general, message_id: "404", data: { custom_id: "go", component_type: 2 } }))).toEqual({ status: 404, code: 10008 });
+    const plainMessage = call("plain", "POST", `/channels/${general}/messages`, { content: "hi" }) as Message;
+    expect(errorOf(() => click(app, plainMessage, { custom_id: "go", component_type: 2 }))).toEqual({ status: 404, code: 10008 });
+  });
+});
+
 describe("webhooks", () => {
   it("needs MANAGE_WEBHOOKS, executes with an override and its token unlocks nothing else", () => {
     expect(errorOf(() => call("plain", "POST", `/channels/${general}/webhooks`, { name: "Hook" }))).toEqual({ status: 403, code: 50013 });
