@@ -28,6 +28,7 @@ import { memberProfileFields } from "./perks";
 import { ID, route, str } from "./router";
 import { emit } from "./socket";
 import { mutualFriendsOf } from "./mutualFriends";
+import { createStage, endStage, stageInstances } from "./voice";
 
 function invalid(field: string, message: string): never {
   return fail(400, 50035, "Invalid Form Body", { [field]: { code: "INVALID", message } });
@@ -281,6 +282,10 @@ route("PATCH", `/guilds/${ID}/scheduled-events/${ID}`, ({ viewer, params, body }
   const touched = "entity_type" in body || "channel_id" in body;
   checkEntity(guildId, viewer.user.id, resolved, touched, touched);
   const image = "image_attachment_id" in body ? coverUrl(body.image_attachment_id, viewer.user.id) : event.image;
+  // A stage event owns the stage while it is live: starting opens it (needs stage moderator; one already open is kept), completing ends it.
+  const stageId = entity_type === ScheduledEventEntityType.StageInstance ? resolved.channel_id : null;
+  if (stageId && status === ScheduledEventStatus.Active && !stageInstances.has(stageId)) createStage(viewer.user.id, { channel_id: stageId, topic: resolved.name }, emit);
+  if (stageId && status === ScheduledEventStatus.Completed) endStage(stageId, emit);
   const before = { ...event, interested: new Set(event.interested) };
   const viewersBefore = viewersOf(event);
   Object.assign(event, {

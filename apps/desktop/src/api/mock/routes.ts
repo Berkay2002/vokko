@@ -348,7 +348,8 @@ route("POST", `/guilds/${ID}/channels`, ({ viewer, params, body }) => {
   const type = body.type;
   const creatable = [ChannelType.GuildText, ChannelType.GuildVoice, ChannelType.GuildCategory, ChannelType.GuildAnnouncement, ChannelType.GuildStage, ChannelType.GuildForum];
   if (typeof type !== "number" || !creatable.includes(type)) fail(400, 50035, "Invalid Form Body", { type: { code: "BASE_TYPE_CHOICES", message: "Value must be one of (0, 2, 4, 5, 13, 15)." } });
-  const name = (str(body.name) ?? "").trim().toLowerCase().replace(/\s+/g, "-");
+  // The server keeps names as sent; the client slugs text-like ones (shell/channels.ts).
+  const name = (str(body.name) ?? "").trim();
   if (name.length < 1 || name.length > 100) fail(400, 50035, "Invalid Form Body", { name: { code: "BASE_TYPE_BAD_LENGTH", message: "Must be between 1 and 100 in length." } });
   const parent = str(body.parent_id) ?? null;
   if (parent && db.channels.get(parent)?.guild_id !== guildId) fail(400, 50035, "Invalid Form Body", { parent_id: { code: "INVALID", message: "Unknown category" } });
@@ -430,8 +431,7 @@ route("PATCH", `/channels/${ID}`, ({ viewer, params, body }) => {
   const snapshot = { ...channel };
   applyChannelFields(channel, body);
   if (typeof body.name === "string") {
-    const keepCase = channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildCategory;
-    channel.name = (keepCase ? body.name.trim() : body.name.trim().toLowerCase().replace(/\s+/g, "-")) || channel.name;
+    channel.name = body.name.trim() || channel.name;
   }
   if ("topic" in body) channel.topic = str(body.topic)?.trim() || null;
   if (typeof body.position === "number") channel.position = body.position;

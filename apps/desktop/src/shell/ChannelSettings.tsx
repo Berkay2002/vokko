@@ -20,6 +20,7 @@ import { usePermissions } from "./usePermissions";
 import { ChannelIntegrations } from "../apps/IntegrationsPage";
 import { InviteList } from "../invites/InviteList";
 import { SLOWMODE_CHOICES, slowmodeLabel } from "../chat/slowmode";
+import { channelNameFor } from "./channels";
 
 type SectionId = "overview" | "forum" | "permissions" | "invites" | "integrations";
 
@@ -58,8 +59,7 @@ function OverviewPage({ channel, editable }: { channel: Channel; editable: boole
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  // Text channel names are slugs; voice channel and category names keep their case and spaces.
-  const slug = category || voice ? name.trim() : name.trim().toLowerCase().replace(/\s+/g, "-");
+  const slug = channelNameFor(channel.type, name);
   const nextTopic = topic.trim() || null;
   const ceiling = useVoiceUi(s => s.bitrateCeiling);
   const savedBitrate = Math.round((channel.bitrate ?? 64000) / 1000);

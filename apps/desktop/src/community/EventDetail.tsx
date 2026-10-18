@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { CalendarDays, MapPin, Pencil, Repeat, Volume2 } from "lucide-react";
 import { ScheduledEventEntityType, ScheduledEventStatus, type GuildScheduledEvent, type ScheduledEventUser, type Snowflake } from "../api/types";
 import { closeCommunityModal, openEvents, useCommunityModal } from "./communityModals";
-import { InterestedButton, useEventPlace } from "./EventCard";
+import { InterestedButton, JoinEventButton, useEventPlace } from "./EventCard";
 import { errorText } from "./errors";
 import { describeRecurrence, formatEventRange, statusLabel } from "./eventUtil";
 import { Avatar, Modal, Perm, appStore, displayName, request, resolveUrl, useStore, usePermissions } from "./shell";
@@ -176,6 +176,7 @@ export function EventDetail({ guildId, eventId, from }: { guildId: Snowflake; ev
           </div>
         )}
         <div className="cm-detail-actions">
+          <JoinEventButton event={event} onJoined={closeCommunityModal} />
           <InterestedButton event={event} onError={setError} />
           {manage && !finished && (
             <>

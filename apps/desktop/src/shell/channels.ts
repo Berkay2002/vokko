@@ -31,6 +31,12 @@ export function firstTextChannel(channels: Channel[]): Channel | undefined {
   return undefined;
 }
 
+/** Text, announcement and forum names are slugs (lowercase, spaces become dashes); voice, stage and category names keep what was typed. */
+export function channelNameFor(type: ChannelType, name: string): string {
+  const slugged = type === ChannelType.GuildText || type === ChannelType.GuildAnnouncement || type === ChannelType.GuildForum;
+  return slugged ? name.trim().toLowerCase().replace(/\s+/g, "-") : name.trim();
+}
+
 export function isTextChannel(channel: Channel | undefined, id?: Snowflake): boolean {
   return !!channel && channel.type === ChannelType.GuildText && (id === undefined || channel.id === id);
 }

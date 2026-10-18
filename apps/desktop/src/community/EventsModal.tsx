@@ -50,7 +50,7 @@ export function EventsModal({ guildId }: { guildId: Snowflake }) {
       {list.length > 0 && (
         <ul className="cm-event-list" aria-label="Upcoming events">
           {list.map(event => (
-            <EventCard key={event.id} event={event} onOpen={() => openEventDetail(guildId, event.id, "events")} onError={setError} />
+            <EventCard key={event.id} event={event} onOpen={() => openEventDetail(guildId, event.id, "events")} onError={setError} onJoined={closeCommunityModal} />
           ))}
         </ul>
       )}

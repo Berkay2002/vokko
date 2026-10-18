@@ -447,7 +447,17 @@ async fn edit(
         && row.entity_type() != ScheduledEventEntityType::External
     {
         match row.channel_id {
-            Some(channel) => access::channel_access(&state, user_id, channel).await?.require(CONNECT)?,
+            Some(channel) => {
+                let channel_access = access::channel_access(&state, user_id, channel).await?;
+                channel_access.require(CONNECT)?;
+                // Starting a stage event opens the stage, which takes the same permissions as opening it by hand.
+                if status == ScheduledEventStatus::Active
+                    && row.entity_type() == ScheduledEventEntityType::StageInstance
+                    && !crate::voice::state::is_stage_moderator(channel_access.permissions)
+                {
+                    return Err(ApiErr::missing_permissions());
+                }
+            }
             None if status == ScheduledEventStatus::Active => return Err(ApiErr::invalid("channel_id", "Pick a voice channel before starting this event.")),
             None => {}
         }
@@ -554,6 +564,22 @@ async fn edit(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+    // A stage event owns the stage for as long as it is live: starting opens it (a stage already open is kept), completing ends it.
+    if let (Some(channel), ScheduledEventEntityType::StageInstance) = (fields.channel_id, fields.entity_type) {
+        match new_status {
+            Some(ScheduledEventStatus::Active) => {
+                if let Err(error) = crate::voice::stage::open_stage(&state, guild, channel, &fields.name).await {
+                    tracing::warn!("scheduled event {}: cannot open the stage: {error:?}", row.id);
+                }
+            }
+            Some(ScheduledEventStatus::Completed) => {
+                if let Err(error) = crate::voice::stage::end_stage(&state, channel).await {
+                    tracing::warn!("scheduled event {}: cannot end the stage: {error:?}", row.id);
+                }
+            }
+            _ => {}
+        }
+    }
     // A replaced or removed cover is not needed any more.
     if let Some(old) = current_cover.as_ref().filter(|old| Some(*old) != image_path.as_ref()) {
         release_covers(&state, std::slice::from_ref(old)).await;

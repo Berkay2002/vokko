@@ -837,3 +837,34 @@ async fn two_managers_changing_the_status_at_once_cannot_both_win() {
     // the untouched one is still open
     assert_eq!(w.app.get(&path, &w.owner).await.1["status"], 1);
 }
+
+#[tokio::test]
+async fn a_stage_event_opens_the_stage_when_it_starts_and_ends_it_when_it_completes() {
+    let w = World::new().await;
+    let (status, stage) = w.app.post(&w.path("/channels"), &w.owner, json!({"name": "town-hall", "type": 13})).await;
+    assert_eq!(status, StatusCode::OK, "{stage}");
+    let stage = stage["id"].as_str().expect("id").to_owned();
+    let body = json!({"name": "Town hall", "entity_type": 1, "channel_id": stage, "scheduled_start_time": in_hours(3)});
+    let (status, event) = w.app.post(&w.path("/scheduled-events"), &w.owner, body).await;
+    assert_eq!(status, StatusCode::OK, "{event}");
+    let live = format!("/stage-instances/{stage}");
+    assert_eq!(w.app.get(&live, &w.owner).await.0, StatusCode::NOT_FOUND, "a scheduled event has no stage yet");
+
+    // a manager who is not a stage moderator cannot open the stage by starting the event
+    let (bob, bob_id) = w.member("bob").await;
+    let (_, role) = w.app.post(&w.path("/roles"), &w.owner, json!({"name": "events", "permissions": MANAGE_EVENTS.to_string()})).await;
+    let role_id = role["id"].as_str().expect("role id");
+    assert_eq!(w.app.patch(&w.path(&format!("/members/{bob_id}")), &w.owner, json!({"roles": [role_id]})).await.0, StatusCode::OK);
+    let (status, error) = w.app.patch(&event_path(&w, &event, ""), &bob, json!({"status": 2})).await;
+    assert_eq!((status, error["code"].clone()), (StatusCode::FORBIDDEN, json!(50013)), "{error}");
+    assert_eq!(w.app.get(&live, &w.owner).await.0, StatusCode::NOT_FOUND);
+
+    let (status, started) = w.app.patch(&event_path(&w, &event, ""), &w.owner, json!({"status": 2})).await;
+    assert_eq!((status, started["status"].clone()), (StatusCode::OK, json!(2)), "{started}");
+    let (status, instance) = w.app.get(&live, &w.owner).await;
+    assert_eq!((status, instance["topic"].clone()), (StatusCode::OK, json!("Town hall")), "{instance}");
+
+    let (status, done) = w.app.patch(&event_path(&w, &event, ""), &w.owner, json!({"status": 3})).await;
+    assert_eq!((status, done["status"].clone()), (StatusCode::OK, json!(3)), "{done}");
+    assert_eq!(w.app.get(&live, &w.owner).await.0, StatusCode::NOT_FOUND, "completing the event ends the stage");
+}

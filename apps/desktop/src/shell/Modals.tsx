@@ -28,6 +28,7 @@ import { RadioGroup, SwitchRow, Toggle } from "./settings/controls";
 import { SERVER_TEMPLATES, type ServerTemplate } from "./templates";
 import { EmptyState } from "./EmptyState";
 import { openAddFriend } from "./friendsTab";
+import { channelNameFor } from "./channels";
 import { CameraPreviewModal, ChannelStatusModal, ScreenSharePickerModal } from "../voice";
 import { WatchModal } from "../watch/WatchModal";
 import { GameCreditsModal } from "../games/GameCredits";
@@ -446,7 +447,7 @@ function CreateChannelModal({ guildId, parentId, channelType }: { guildId: strin
   const [isPrivate, setIsPrivate] = useState(false);
   const category = type === ChannelType.GuildCategory;
   const parent = useStore(s => (parentId ? s.channels[parentId] : undefined));
-  const slug = category ? name : name.toLowerCase().replace(/\s+/g, "-");
+  const slug = channelNameFor(type, name);
   const submit = () => {
     if (!slug.trim()) return;
     setBusy(true);
