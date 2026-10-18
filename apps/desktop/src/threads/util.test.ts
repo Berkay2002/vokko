@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { timestampToSnowflake } from "../api/snowflake";
 import { ChannelType, type Channel, type Reaction, type ReactionEmoji } from "../api/types";
-import { applyReactionEvent, clampPanelWidth, groupActiveThreads, isThreadUnread, PANEL_MIN, panelMax, sortThreads, topReaction } from "./util";
+import { applyReactionEvent, clampPanelWidth, groupActiveThreads, isThreadUnread, PANEL_MIN, panelMax, plainPreview, sortThreads, topReaction } from "./util";
 
 const T0 = Date.parse("2026-10-01T12:00:00Z");
 const MIN = 60_000;

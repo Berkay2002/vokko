@@ -4,6 +4,8 @@
 import { create } from "zustand";
 import { searchThreads } from "../api/rest";
 import { appStore, useStore } from "../api/store";
+import { useNavDrawer } from "../shell/navDrawer";
+import { go, guildPath } from "../shell/nav";
 import type { Channel, Message, Snowflake } from "../api/types";
 
 interface ThreadUiState {
@@ -23,6 +25,14 @@ export const useThreadUi = create<ThreadUiState>()(() => ({ openId: null, create
 export function openThread(thread: Channel): void {
   appStore.getState().upsertThread(thread);
   useThreadUi.setState({ openId: thread.id });
+}
+
+/** Open a thread beside its parent channel, also from elsewhere in the app (a thread's id is no route: the channel is its parent). */
+export function goToThread(thread: Channel): void {
+  if (thread.guild_id && thread.parent_id) go(guildPath(thread.guild_id, thread.parent_id));
+  openThread(thread);
+  // Phone: the channel list page would stay over the panel when the parent is already the open channel.
+  useNavDrawer.getState().setOpen(false);
 }
 
 export function closeThread(): void {

@@ -9,7 +9,8 @@ import { Modal } from "../ui";
 import { Toggle, Select } from "../shell/settings/controls";
 import { usePermissions } from "../shell/usePermissions";
 import { closeThread, openThread, useThreadUi } from "./threadUi";
-import { ARCHIVE_OPTIONS, NAME_MAX, previewText } from "./util";
+import { ARCHIVE_OPTIONS, NAME_MAX } from "./util";
+import { messagePreview } from "./preview";
 import "./threads.css";
 
 function errorText(error: unknown): string {
@@ -22,7 +23,7 @@ const durationOf = (value: string): ThreadAutoArchiveDuration => Number(value) a
 export function CreateThreadModal({ channelId, message, onClose }: { channelId: string; message: Message | null; onClose(): void }) {
   const channel = useStore(s => s.channels[channelId]);
   const { can } = usePermissions(channel?.guild_id, channelId);
-  const [name, setName] = useState(() => previewText(message?.content ?? "", 50));
+  const [name, setName] = useState(() => message ? messagePreview(message, 50) : "");
   const [duration, setDuration] = useState(String(channel?.default_auto_archive_duration ?? 1440));
   const [priv, setPriv] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -68,7 +69,7 @@ export function CreateThreadModal({ channelId, message, onClose }: { channelId: 
           <Hash size={14} aria-hidden="true" /> {channel.name}
         </p>
       )}
-      {message && message.content && <blockquote className="thread-modal-quote">{previewText(message.content, 160)}</blockquote>}
+      {message && message.content && <blockquote className="thread-modal-quote">{messagePreview(message, 160)}</blockquote>}
       <label className="field-label" htmlFor="thread-name">
         Thread name
       </label>

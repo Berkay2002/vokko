@@ -5,6 +5,7 @@ import { gateway } from "../api/gateway";
 import { avatarUrl, appStore, displayName, dmName } from "../api/store";
 import { ChannelType, RelationshipType, type Message, type MessageReactionEvent, type Snowflake } from "../api/types";
 import { messageStore } from "../chat/messageStore";
+import { jumpToMessage } from "../media/jump";
 import { dmPath, go, guildPath } from "../shell/nav";
 import { useLocalState } from "../shell/localState";
 import { getPrefs, usePrefs } from "../ui/prefs";
@@ -87,6 +88,11 @@ export function buildReactionInput(reaction: MessageReactionEvent, now = Date.no
 
 /** Navigates to the message's channel and scrolls to it once the channel has loaded. */
 export function openMessage(channelId: Snowflake, guildId: Snowflake | null, messageId: Snowflake): void {
+  // A thread is no route of its own: it opens in the panel beside its channel.
+  if (appStore.getState().threads[channelId]) {
+    void jumpToMessage(channelId, messageId, guildId);
+    return;
+  }
   go(guildId ? guildPath(guildId, channelId) : dmPath(channelId));
   const started = Date.now();
   const poll = () => {
@@ -103,8 +109,9 @@ export function openMessage(channelId: Snowflake, guildId: Snowflake | null, mes
 /** Title, body and target of a message's notification (the OS one and the in-game overlay toast). */
 function describe(message: Message) {
   const state = appStore.getState();
-  const channel = state.channels[message.channel_id];
-  const guildId = channel?.guild_id ?? message.guild_id;
+  const thread = state.channels[message.channel_id] ? undefined : state.threads[message.channel_id];
+  const channel = state.channels[message.channel_id] ?? (thread?.parent_id ? state.channels[thread.parent_id] : undefined);
+  const guildId = channel?.guild_id ?? thread?.guild_id ?? message.guild_id;
   const guild = guildId ? state.guilds[guildId] : undefined;
   const member = guildId ? (state.members[guildId]?.[message.author.id] ?? message.member ?? null) : null;
   const roles = guild?.roles ?? [];
@@ -115,6 +122,7 @@ function describe(message: Message) {
       channelName: guildId ? (channel?.name ?? "channel") : channel ? dmName(channel) : displayName(message.author),
       guildName: guild?.name ?? null,
       group: channel?.type === ChannelType.GroupDM,
+      thread: thread?.name ?? undefined,
     }),
     body: plainBody(message, {
       userName: id => {
@@ -173,9 +181,10 @@ async function onReaction(reaction: MessageReactionEvent): Promise<void> {
   notificationAdapter().show({
     title: notificationTitle({
       authorName: name,
-      channelName: guildId ? (channel?.name ?? "channel") : dmChannel ? dmName(dmChannel) : name,
+      channelName: guildId ? ((dmChannel ?? (channel?.parent_id ? state.channels[channel.parent_id] : undefined))?.name ?? "channel") : dmChannel ? dmName(dmChannel) : name,
       guildName: guild?.name ?? null,
       group: channel?.type === ChannelType.GroupDM,
+      thread: dmChannel ? undefined : (channel?.name ?? undefined),
     }),
     body: `Reacted ${emoji} to your message`,
     icon: user ? avatarUrl(user) : undefined,

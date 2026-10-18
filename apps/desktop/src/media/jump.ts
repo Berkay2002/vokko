@@ -1,4 +1,6 @@
+import { channelOrThread } from '../api/store';
 import type { Snowflake } from '../api/types';
+import { goToThread } from '../threads/threadUi';
 import { appStore, dmPath, go, guildPath, messageStore } from './shell';
 
 const POLL_MS = 40;
@@ -13,11 +15,18 @@ async function waitUntilReady(channelId: Snowflake): Promise<void> {
   }
 }
 
-/** Is the channel one this client knows (joined server or open DM)? Only then can we show "jump to original". */
-export const isKnownChannel = (channelId: Snowflake): boolean => !!appStore.getState().channels[channelId];
+/** Is the channel one this client knows (joined server, open DM or a thread we hold)? Only then can we show "jump to original". */
+export const isKnownChannel = (channelId: Snowflake): boolean => !!channelOrThread(appStore.getState(), channelId);
 
-/** Opens the channel (unless it is the one on screen) and scrolls to the message with the usual flash. */
+/** Opens the channel (unless it is the one on screen) and scrolls to the message with the usual flash. A thread opens in the panel beside its parent. */
 export async function jumpToMessage(channelId: Snowflake, messageId: Snowflake, guildId?: Snowflake | null): Promise<void> {
+  const thread = appStore.getState().threads[channelId];
+  if (thread && !appStore.getState().channels[channelId]) {
+    goToThread(thread);
+    await waitUntilReady(channelId);
+    await messageStore.jumpToMessage(channelId, messageId);
+    return;
+  }
   const route = appStore.getState().route;
   if (route.channelId !== channelId) {
     const guild = guildId ?? appStore.getState().channels[channelId]?.guild_id ?? null;
