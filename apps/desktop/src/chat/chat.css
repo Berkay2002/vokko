@@ -126,6 +126,12 @@
 .chat-msg.replying::before { background: var(--chat-brand); }
 .chat-msg.mentioned:hover { background: var(--chat-mentioned-hover); }
 .chat-msg.replying { background: color-mix(in srgb, var(--chat-brand) 16%, transparent); border-radius: 0 4px 4px 0; }
+/* A folded run of a blocked author's messages: a quiet one-line row, not a message. */
+.chat-msg.chat-blocked, .chat-blocked-bar { color: var(--chat-text-muted); font-size: 14px; }
+.chat-msg.chat-blocked { margin-top: 4px; }
+.chat-blocked-bar { padding: 4px var(--chat-pad-right) 0 var(--chat-gutter); margin-top: calc(var(--message-group-gap, 16px) + 1px); }
+.chat-blocked-toggle { color: var(--chat-link); font-size: inherit; }
+.chat-blocked-toggle:hover { text-decoration: underline; }
 .chat-msg.flash { animation: chat-flash 2.2s ease-out; }
 @keyframes chat-flash { 0%, 60% { background: var(--chat-flash-bg); } 100% { background: transparent; } }
 .chat-msg.pending .chat-content, .chat-msg.pending .chat-attachments { opacity: 0.5; }

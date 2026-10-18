@@ -75,6 +75,7 @@ export function buildInput(message: Message, now = Date.now()): NotifyInput | nu
     message,
     myRoleIds: guildId ? (state.members[guildId]?.[context.meId]?.roles ?? []) : [],
     friend: state.relationships[message.author.id]?.type === RelationshipType.Friend,
+    blocked: state.relationships[message.author.id]?.type === RelationshipType.Blocked,
   };
 }
 

@@ -93,18 +93,28 @@ test('the header topic opens a dialog that renders the topic as markdown (link, 
     const general = Object.values(w.__vokko.appStore.getState().channels).find(c => c.name === 'general')!;
     await w.__vokko.request('PATCH', `/channels/${stock.id}`, { topic: `Read **the rules** at https://example.com/rules then see <#${general.id}> :smile: ${'and a long tail of words '.repeat(12)}` });
   });
-  const topic = page.locator('button.channel-header-topic');
+  const topic = page.locator('.channel-header-topic-open');
   // The PATCH resolves before the gateway CHANNEL_UPDATE reaches the store, so the seeded one-line topic is visible until then.
-  await expect(topic).toHaveAccessibleName(/^Channel topic: Read \*\*the rules\*\*/);
+  await expect(topic).toHaveAccessibleName(/^Channel topic: Read the rules at https:\/\/example\.com\/rules then see #general/);
+  // The header renders the topic as inline markdown on one line: no asterisks, a link, a channel chip.
+  const line = page.locator('.channel-header-topic-text');
+  await expect(line.locator('strong')).toHaveText('the rules');
+  await expect(line).not.toContainText('**');
+  await expect(line.locator('p, h1, h2, h3')).toHaveCount(0);
   // The header cuts the topic, never the channel name.
   const cut = await page.evaluate(() => {
-    const t = document.querySelector('button.channel-header-topic')!;
+    const t = document.querySelector('.channel-header-topic-text')!;
     const n = document.querySelector('.channel-header-name')!;
     return { topic: t.scrollWidth > t.clientWidth, name: n.scrollWidth > n.clientWidth };
   });
   expect(cut).toEqual({ topic: true, name: false });
   await expect(topic).toHaveAttribute('aria-haspopup', 'dialog');
-  await topic.click();
+  // A link in the header asks first and does not also open the topic dialog.
+  await line.locator('a.md-link').click();
+  await expect(page.getByRole('dialog', { name: 'Leaving Vokko' })).toContainText('https://example.com/rules');
+  await page.getByRole('dialog', { name: 'Leaving Vokko' }).getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await topic.click({ position: { x: 4, y: 4 } }); // the middle may be a link, which sits above the button
   const dialog = page.getByRole('dialog', { name: /stock-talk/ });
   await expect(dialog.locator('strong')).toHaveText('the rules');
   await expect(dialog.locator('a.md-link')).toHaveAttribute('href', 'https://example.com/rules');

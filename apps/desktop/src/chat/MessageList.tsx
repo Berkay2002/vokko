@@ -1,10 +1,11 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type ItemProps, type ListProps, type VirtuosoHandle } from 'react-virtuoso';
 import { CheckCheck, Loader2 } from 'lucide-react';
-import type { Snowflake } from '../api/types';
+import { RelationshipType, type Message, type Snowflake } from '../api/types';
 import { announce } from '../ui/announce';
 import { useChat } from './ChatContext';
-import { scrollBehavior } from './shell';
+import { foldBlocked, foldLabel, type DisplayRow, type Fold } from './blockedFold';
+import { scrollBehavior, useRelationships } from './shell';
 import { ChannelStart } from './ChannelStart';
 import { MessageItem } from './MessageItem';
 import { messageStore, useChannelState } from './messageStore';
@@ -27,6 +28,9 @@ interface Props {
   onAtBottomChange(atBottom: boolean): void;
 }
 
+// Runs of blocked authors the viewer opened with Show, by message id, for the session (a channel switch keeps them).
+const revealed = new Set<Snowflake>();
+
 // The start-of-channel intro is not the list header: it is rendered inside the first row, directly above the oldest message, so
 // short conversations stay anchored to the bottom with no gap between the intro and the first message.
 const Header = memo(function Header({ context }: { context?: { hasMoreBefore: boolean; loading: boolean } }) {
@@ -41,7 +45,7 @@ const Footer = memo(function Footer({ context }: { context?: { hasMoreAfter: boo
 const List = forwardRef<HTMLDivElement, ListProps<HTMLDivElement> & { context?: { label?: string } }>(function List({ context, ...props }, ref) {
   return <div ref={ref} {...props} role="list" aria-label={context?.label} />;
 });
-function Item({ context: _context, item: _item, ...props }: ItemProps<Row> & { context?: unknown }) {
+function Item({ context: _context, item: _item, ...props }: ItemProps<DisplayRow> & { context?: unknown }) {
   return <div {...props} role="listitem" />;
 }
 
@@ -57,10 +61,27 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   const [activeId, setActiveId] = useState<Snowflake | null>(null);
   const returnTo = useRef<Snowflake[] | null>(null);
 
-  const rows = useMemo<Row[]>(
+  const relationships = useRelationships();
+  const [revealVersion, setRevealVersion] = useState(0);
+  const blockedAuthor = (m: Message) => relationships[m.author.id]?.type === RelationshipType.Blocked;
+  const built = useMemo<Row[]>(
     () => buildRows(state, formatDivider, sameDay, chat.me.id),
     [state.messages, state.pending, state.hasMoreAfter, state.lastReadAtOpen, chat.me.id],
   );
+  const folded = useMemo(
+    () => foldBlocked(built, id => relationships[id]?.type === RelationshipType.Blocked, revealed),
+    [built, relationships, revealVersion],
+  );
+  const rows = folded.rows;
+  const toggleFold = (fold: Fold) => {
+    for (const id of fold.ids) { if (fold.open) revealed.delete(id); else revealed.add(id); }
+    setRevealVersion(v => v + 1);
+  };
+  // Virtuoso counts firstItemIndex down by the rows an older page adds; the store counts messages, and a folded run is fewer rows.
+  // The newest message when the window was made stays put, so the rows hidden above it are what to add.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const anchor = useMemo(() => state.messages[state.messages.length - 1]?.id ?? null, [channelId, state.windowId]);
+  const firstIndex = state.firstItemIndex + folded.hiddenBefore(anchor);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
 
@@ -91,15 +112,22 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
   // Jump-to-message (reply click, pinned "Jump"): scroll then flash.
   const focusToken = state.focus?.token;
   const focusId = state.focus?.messageId;
+  // A jump into a folded run opens the run first, then scrolls.
+  const hiddenFocus = focusId ? folded.closed.get(focusId) : undefined;
   useEffect(() => {
-    if (!focusId) return;
+    if (!hiddenFocus) return;
+    for (const id of hiddenFocus.ids) revealed.add(id);
+    setRevealVersion(v => v + 1);
+  }, [hiddenFocus]);
+  useEffect(() => {
+    if (!focusId || hiddenFocus) return;
     stick.current = false; // a programmatic jump is not "at the bottom"; don't let list growth drag us back down
     const index = rowsRef.current.findIndex(r => r.message.id === focusId);
     if (index >= 0) virtuoso.current?.scrollToIndex({ index, align: 'center', behavior: 'auto' });
     setHighlightId(focusId);
     const t = setTimeout(() => { setHighlightId(null); messageStore.clearFocus(channelId); }, 2200);
     return () => clearTimeout(t);
-  }, [focusToken, focusId, channelId]);
+  }, [focusToken, focusId, channelId, !!hiddenFocus]);
 
   const initialIndex = useMemo(() => {
     const i = state.focus ? rows.findIndex(r => r.message.id === state.focus!.messageId) : -1;
@@ -221,7 +249,7 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
     const key = newest ? `${channelId}:${newest.id}` : null;
     const prev = lastSeen.current;
     lastSeen.current = key;
-    if (!newest || !prev || prev === key || !prev.startsWith(`${channelId}:`) || state.hasMoreAfter || newest.author.id === chat.me.id) return;
+    if (!newest || !prev || prev === key || !prev.startsWith(`${channelId}:`) || state.hasMoreAfter || newest.author.id === chat.me.id || blockedAuthor(newest)) return;
     if (compareIds(newest.id, prev.slice(channelId.length + 1)) <= 0) return; // older history loaded, or the newest was deleted
     announce(`${chat.nameOf(newest.author, newest.member)}: ${newest.content.slice(0, 200) || 'sent an attachment'}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -229,9 +257,9 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
 
   const unreadCount = useMemo(() => {
     if (!state.lastReadAtOpen) return 0;
-    return state.messages.filter(m => compareIds(m.id, state.lastReadAtOpen!) > 0 && m.author.id !== chat.me.id).length;
-  }, [state.messages, state.lastReadAtOpen, chat.me.id]);
-  const firstUnread = useMemo(() => state.messages.find(m => state.lastReadAtOpen && compareIds(m.id, state.lastReadAtOpen) > 0), [state.messages, state.lastReadAtOpen]);
+    return state.messages.filter(m => compareIds(m.id, state.lastReadAtOpen!) > 0 && m.author.id !== chat.me.id && !blockedAuthor(m)).length;
+  }, [state.messages, state.lastReadAtOpen, chat.me.id, relationships]);
+  const firstUnread = useMemo(() => state.messages.find(m => state.lastReadAtOpen && compareIds(m.id, state.lastReadAtOpen) > 0 && !blockedAuthor(m)), [state.messages, state.lastReadAtOpen, relationships]);
 
   if (state.status === 'loading' && state.messages.length === 0) {
     return <div className="chat-list chat-list-loading" aria-busy="true">{Array.from({ length: 8 }, (_, i) => <div key={i} className="chat-skeleton"><span className="a" /><span className="l1" style={{ width: `${30 + ((i * 37) % 40)}%` }} /><span className="l2" style={{ width: `${40 + ((i * 53) % 50)}%` }} /></div>)}</div>;
@@ -264,14 +292,14 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       }}>{unreadCount}{state.hasMoreBefore ? '+' : ''} new message{unreadCount === 1 ? '' : 's'} since {unreadSince}</button>
       <button type="button" className="chat-unread-bar-mark" onClick={() => { const last = state.messages[state.messages.length - 1]; if (last) messageStore.markRead(channelId, last.id); setSeenBottom(true); }}>Mark As Read <CheckCheck size={18} aria-hidden="true" /></button>
     </div>}
-    <Virtuoso<Row, { hasMoreBefore: boolean; hasMoreAfter: boolean; loading: boolean; label: string }>
+    <Virtuoso<DisplayRow, { hasMoreBefore: boolean; hasMoreAfter: boolean; loading: boolean; label: string }>
       key={`${channelId}:${state.windowId}`}
       ref={virtuoso}
       className={settling ? 'chat-scroller settling' : 'chat-scroller'}
       aria-label={listLabel}
       data={rows}
       context={{ hasMoreBefore: state.hasMoreBefore, hasMoreAfter: state.hasMoreAfter, loading: state.loadingOlder || state.loadingNewer, label: listLabel }}
-      firstItemIndex={state.firstItemIndex}
+      firstItemIndex={firstIndex}
       // Opening at the bottom: initialScrollTop (clamped to the end) paints 2 frames sooner than initialTopMostItemIndex, which waits 4
       // frames before its first scroll. Measuring in the ResizeObserver callback itself (no extra rAF) saves another frame; its
       // "ResizeObserver loop" errors are benign and the crash reporter ignores them.
@@ -300,19 +328,34 @@ export const MessageList = forwardRef<MessageListHandle, Props>(function Message
       computeItemKey={(_, row) => row.key}
       components={{ Header, Footer, List, Item }}
       itemContent={(index, row) => <div className="chat-row">
-        {index === state.firstItemIndex && !state.hasMoreBefore && <ChannelStart />}
+        {index === firstIndex && !state.hasMoreBefore && <ChannelStart />}
         {/* The new-messages divider on a day boundary is the day divider itself, in red with the pill at its right end. */}
         {row.dayLabel && <div className={`chat-day-divider${row.unreadDivider ? ' unread' : ''}`} role="separator"><span>{row.dayLabel}</span>{row.unreadDivider && <b className="chat-new-pill">NEW</b>}</div>}
         {row.unreadDivider && !row.dayLabel && <div className="chat-new-divider" role="separator"><b className="chat-new-pill">NEW</b></div>}
-        <MessageItem
-          message={row.message}
-          pending={row.pending}
-          grouped={row.grouped}
-          editing={editingId === row.message.id}
-          highlighted={highlightId === row.message.id}
-          tabStop={tabStop === row.message.id}
-          onStopEditing={onStopEditing}
-        />
+        {row.fold && !row.fold.open ? (
+          // Stands in for the run as a row of its own: the list's keyboard navigation and focus restore find it by data-message-id.
+          <div
+            className="chat-msg chat-blocked"
+            data-message-id={row.message.id}
+            tabIndex={tabStop === row.message.id ? 0 : -1}
+            onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); toggleFold(row.fold!); } }}
+          >
+            {foldLabel(row.fold.ids.length)} · <button type="button" className="chat-blocked-toggle" tabIndex={-1} aria-label={`Show ${foldLabel(row.fold.ids.length)}`} onClick={() => toggleFold(row.fold!)}>Show</button>
+          </div>
+        ) : (
+          <>
+            {row.fold && <div className="chat-blocked-bar">{foldLabel(row.fold.ids.length)} · <button type="button" className="chat-blocked-toggle" onClick={() => toggleFold(row.fold!)}>Hide</button></div>}
+            <MessageItem
+              message={row.message}
+              pending={row.pending}
+              grouped={row.grouped}
+              editing={editingId === row.message.id}
+              highlighted={highlightId === row.message.id}
+              tabStop={tabStop === row.message.id}
+              onStopEditing={onStopEditing}
+            />
+          </>
+        )}
       </div>}
     />
     {showJump && <div className="chat-jump-bar" role="status">
