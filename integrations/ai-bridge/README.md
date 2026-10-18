@@ -158,8 +158,8 @@ or turn limit.
 
 ## Notes (claude-api)
 
-So the bot still knows the important things after a conversation starts over, each channel (a thread: its parent) and each DM
-has its own notes: `notes/<channel id>.md` or `notes/dm-<user id>.md` in the state dir, one line per note, newest last, at most
+So the bot still knows the important things after a conversation starts over, each channel (a thread: its parent, unless
+@everyone cannot view the thread: a private thread keeps its own) and each DM has its own notes: `notes/<channel id>.md` or `notes/dm-<user id>.md` in the state dir, one line per note, newest last, at most
 2 KB (the oldest line goes first). Claude saves a line (200 characters) with `remember` when someone asks it to or for a durable
 fact about the channel. When a conversation starts, that channel's notes go into its first prompt as quoted data from members,
 never instructions; nothing is added per turn and notes never cross channels. Paused people, the monthly budget and the per-reply

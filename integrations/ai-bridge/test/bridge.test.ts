@@ -1397,6 +1397,21 @@ describe('channel notes (remember, !notes)', () => {
     expect(s.backend.calls.slice(-2).map(c => [c.sid !== undefined, c.prompt.includes('likes tea')])).toEqual([[true, false], [false, true]])
   })
 
+  test("a private thread keeps notes of its own: nothing said there reaches the parent, and the parent's notes stay out of it", async () => {
+    const s = setupNotes()
+    s.bot.threads.set(THREAD, GENERAL)
+    s.bot.privateChannels.add(THREAD)
+    s.bridge.notes.add(GENERAL, 'public fact')
+    remember(s, 'secret plan')
+    await s.bridge.handle(msg(NAT, 'in the private thread', { guild: GUILD, channel: THREAD }))
+    expect(s.backend.calls[0].prompt).not.toContain('public fact')
+    expect(s.bridge.notes.list(THREAD)).toEqual(['secret plan'])
+    expect(s.bridge.notes.list(GENERAL)).toEqual(['public fact'])
+    await s.bridge.handle(msg(MOD, '!notes clear', { guild: GUILD, channel: THREAD }))
+    expect(s.bridge.notes.list(THREAD)).toEqual([])
+    expect(s.bridge.notes.list(GENERAL)).toEqual(['public fact'])
+  })
+
   test('a backend without notes never reads them', async () => {
     const s = setup()
     s.bridge.notes.add(`dm-${NAT}`, 'secret')
