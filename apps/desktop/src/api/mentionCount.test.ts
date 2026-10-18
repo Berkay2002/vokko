@@ -37,6 +37,7 @@ const message = (channelId: string, id: string, extra: Partial<Message> = {}): M
   edited_timestamp: null,
   type: MessageType.Default,
   mentions: [],
+  mention_roles: [],
   mention_everyone: false,
   attachments: [],
   embeds: [],
@@ -76,7 +77,7 @@ const ready = {
 const mentions = (id: string): number => appStore.getState().readStates[id]?.mention_count ?? 0;
 const byName = [user(ME)] as unknown as Message["mentions"];
 const everyone = (id: string, to = CHANNEL) => fire("MESSAGE_CREATE", message(to, id, { mention_everyone: true }));
-const role = (id: string, to = CHANNEL) => fire("MESSAGE_CREATE", message(to, id, { content: `<@&${ROLE}> ping` }));
+const role = (id: string, to = CHANNEL) => fire("MESSAGE_CREATE", message(to, id, { mention_roles: [ROLE] }));
 
 beforeEach(() => {
   useLocalState.setState({ suppressEveryone: {}, suppressRoles: {} });
@@ -92,11 +93,9 @@ describe("unread mention counter", () => {
     expect(mentions(CHANNEL)).toBe(3);
   });
 
-  it("skips @everyone where it is suppressed (channel, category or server) but not a role mention", () => {
-    for (const scope of [CHANNEL, CATEGORY, GUILD]) {
-      useLocalState.setState({ suppressEveryone: { [scope]: true } });
-      everyone(`1${scope}`);
-    }
+  it("skips @everyone where the server suppresses it, but not a role mention", () => {
+    useLocalState.setState({ suppressEveryone: { [GUILD]: true } });
+    everyone("1");
     expect(mentions(CHANNEL)).toBe(0);
     role("2");
     expect(mentions(CHANNEL)).toBe(1);
@@ -111,15 +110,26 @@ describe("unread mention counter", () => {
   });
 
   it("ignores a role I do not have", () => {
-    fire("MESSAGE_CREATE", message(CHANNEL, "1", { content: "<@&999>" }));
+    fire("MESSAGE_CREATE", message(CHANNEL, "1", { mention_roles: ["999"] }));
     expect(mentions(CHANNEL)).toBe(0);
   });
 
-  it("applies the same rules in threads, through the parent channel's category", () => {
+  it("follows the roles the server resolved, not the text: a dropped role in the content does not count", () => {
+    fire("MESSAGE_CREATE", message(CHANNEL, "1", { content: `<@&${ROLE}> ping`, mention_roles: [] }));
+    expect(mentions(CHANNEL)).toBe(0);
+  });
+
+  it("counts replies but not system messages, like the server", () => {
+    fire("MESSAGE_CREATE", message(CHANNEL, "1", { type: MessageType.Reply, mentions: byName }));
+    fire("MESSAGE_CREATE", message(CHANNEL, "2", { type: MessageType.ChannelPinnedMessage, mentions: byName, mention_everyone: true }));
+    expect(mentions(CHANNEL)).toBe(1);
+  });
+
+  it("applies the same rules in threads", () => {
     everyone("1", THREAD);
     role("2", THREAD);
     expect(mentions(THREAD)).toBe(2);
-    useLocalState.setState({ suppressEveryone: { [CATEGORY]: true } });
+    useLocalState.setState({ suppressEveryone: { [GUILD]: true } });
     everyone("3", THREAD);
     expect(mentions(THREAD)).toBe(2);
   });

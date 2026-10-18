@@ -271,7 +271,7 @@ const SYSTEM_TYPES = new Set<number>([MessageType.RecipientAdd, MessageType.Reci
 export const isSystemMessage = (m: Message): boolean => SYSTEM_TYPES.has(m.type);
 
 /**
- * True when the raw content has an `<@&id>` mention of one of `roleIds`. The wire has no mention_roles, so the content is the source
+ * True when the raw content has an `<@&id>` mention of one of `roleIds`. The row highlight reads the content, the unread counter uses `mention_roles`
  * (the mention-of-me row highlight uses this for the viewer's own roles).
  */
 export function mentionsRole(content: string, roleIds: readonly Snowflake[]): boolean {

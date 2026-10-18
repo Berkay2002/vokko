@@ -100,7 +100,18 @@ async fn suppressed_everyone_and_role_mentions_do_not_count() {
     say(format!("<@&{role}> <@{}> <@{}>", bob.id, dave.id)).await;
     assert_eq!(counts().await, [2, 4, 2, 2], "role plus name counts once; carol still skips the role");
 
+    // A reply pings the author of the replied message whatever they suppress.
+    let (status, theirs) = app.post(&format!("/channels/{general}/messages"), &dave.token, json!({"content": "question"})).await;
+    assert_eq!(status, StatusCode::OK, "{theirs}");
+    let (status, reply) =
+        app.post(&format!("/channels/{general}/messages"), &owner, json!({"content": "answer", "message_reference": {"message_id": theirs["id"]}})).await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    assert_eq!(counts().await, [2, 4, 2, 1], "a reply to dave counts for dave (their own post had cleared the counter)");
+    // The wire says which roles the server resolved, so clients count the same ones.
+    let (_, pinged) = app.post(&format!("/channels/{general}/messages"), &owner, json!({"content": format!("<@&{role}> again")})).await;
+    assert_eq!(pinged["mention_roles"], json!([role]));
+
     assert_eq!(ready_count(&address, &carol.token, &general).await, 2);
-    assert_eq!(ready_count(&address, &dave.token, &general).await, 2);
-    assert_eq!(ready_count(&address, &bob.token, &general).await, 4);
+    assert_eq!(ready_count(&address, &dave.token, &general).await, 1);
+    assert_eq!(ready_count(&address, &bob.token, &general).await, 5);
 }

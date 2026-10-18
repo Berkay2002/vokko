@@ -9,7 +9,7 @@ const ME = "1";
 const me = { id: ME, username: "me", global_name: null, avatar: null } as unknown as User;
 const other = { id: "2", username: "other", global_name: null, avatar: null } as unknown as User;
 const channel = (id: string, extra: Partial<Channel>): Channel => ({ id, type: ChannelType.GuildText, guild_id: "g", name: id, position: 0, parent_id: null, last_message_id: null, ...extra }) as Channel;
-const message = (channelId: string): Message => ({ id: "900", channel_id: channelId, guild_id: "g", author: other, content: "hi", type: MessageType.Default, mentions: [], mention_everyone: false }) as unknown as Message;
+const message = (channelId: string): Message => ({ id: "900", channel_id: channelId, guild_id: "g", author: other, content: "hi", type: MessageType.Default, mentions: [], mention_roles: [], mention_everyone: false }) as unknown as Message;
 
 beforeEach(() => {
   appStore.setState({

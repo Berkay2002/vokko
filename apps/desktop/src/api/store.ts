@@ -295,13 +295,14 @@ function clearTyping(channelId: Snowflake, userId: Snowflake): void {
   appStore.setState({ typing: { ...state.typing, [channelId]: rest } });
 }
 
-/** Does this message raise my unread mention counter? The server's cases (my name, @everyone, one of my roles) minus what the Suppress toggles on the channel, category or server hide. */
-function mentionsMe(message: Message, scopes: (Snowflake | null | undefined)[]): boolean {
+/** Does this message raise my unread mention counter? The server's rule: only ordinary messages, by name, @everyone or one of my roles in `mention_roles`; the Suppress toggles are per server there. */
+function mentionsMe(message: Message): boolean {
+  if (message.type !== MessageType.Default && message.type !== MessageType.Reply) return false;
   const state = appStore.getState();
   const meId = state.me?.id;
   if (!meId) return false;
   const roles = message.guild_id ? (state.members[message.guild_id]?.[meId]?.roles ?? []) : [];
-  const kinds = mentionKinds(message, meId, roles, scopes.filter((id): id is Snowflake => !!id), useLocalState.getState());
+  const kinds = mentionKinds(message, meId, roles, message.guild_id ? [message.guild_id] : [], useLocalState.getState());
   return kinds.direct || kinds.everyone || kinds.role;
 }
 
@@ -312,7 +313,7 @@ function onThreadMessage(thread: Channel, message: Message): void {
   state.upsertThread({ ...thread, last_message_id: message.id, message_count: (thread.message_count ?? 0) + (counted ? 1 : 0) });
   const read = state.readStates[thread.id] ?? { channel_id: thread.id, last_message_id: thread.last_message_id, mention_count: 0 };
   if (state.me?.id === message.author.id) state.setReadState({ ...read, last_message_id: message.id, mention_count: 0 });
-  else if (mentionsMe(message, [thread.id, thread.parent_id, state.channels[thread.parent_id ?? ""]?.parent_id, thread.guild_id])) state.setReadState({ ...read, mention_count: read.mention_count + 1 });
+  else if (mentionsMe(message)) state.setReadState({ ...read, mention_count: read.mention_count + 1 });
 }
 
 function onMessageCreate(message: Message): void {
@@ -341,7 +342,7 @@ function onMessageCreate(message: Message): void {
   } else {
     // In DMs and group DMs every ordinary message counts as a mention (the server's counter does the same).
     const dm = !channel.guild_id && (message.type === MessageType.Default || message.type === MessageType.Reply);
-    const mentioned = dm || mentionsMe(message, [channel.id, channel.parent_id, channel.guild_id]);
+    const mentioned = dm || mentionsMe(message);
     state.setReadState({ ...read, mention_count: read.mention_count + (mentioned ? 1 : 0) });
   }
 }

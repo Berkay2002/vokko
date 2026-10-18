@@ -48,6 +48,7 @@ const message = (channelId: string, id: string, extra: Partial<Message> = {}): M
   edited_timestamp: null,
   type: MessageType.Default,
   mentions: [],
+  mention_roles: [],
   mention_everyone: false,
   attachments: [],
   embeds: [],

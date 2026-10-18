@@ -1221,6 +1221,9 @@ pub struct Message {
     pub kind: MessageType,
     pub mentions: Vec<User>,
     pub mention_everyone: bool,
+    /// Roles the server resolved from the content (mentionable, or the author may mention everyone); what drives role pings.
+    #[serde(default)]
+    pub mention_roles: Vec<Snowflake>,
     pub attachments: Vec<Attachment>,
     #[serde(default)]
     pub embeds: Vec<Embed>,
@@ -5638,14 +5641,14 @@ mod tests {
         round_trip::<Embed>(json!({"type": "link"}));
         let inner = json!({
             "id": "11", "channel_id": "200", "guild_id": null, "author": user(), "content": "hi", "timestamp": "2026-10-11T10:00:00.000Z",
-            "edited_timestamp": null, "type": 0, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false, "tts": false,
+            "edited_timestamp": null, "type": 0, "mentions": [], "mention_roles": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false, "tts": false,
             "message_reference": null, "referenced_message": null, "nonce": null
         });
         round_trip::<Message>(inner.clone());
         round_trip::<Message>(json!({
             "id": "12", "channel_id": "200", "guild_id": "300", "author": user(), "member": {"nick": "R", "roles": []}, "content": "re",
             "timestamp": "2026-10-11T10:01:00.000Z", "edited_timestamp": "2026-10-11T10:02:00.000Z", "type": 19, "mentions": [user()],
-            "mention_everyone": true, "attachments": [attachment], "embeds": [embed], "reactions": [reaction], "pinned": true, "tts": false,
+            "mention_roles": [], "mention_everyone": true, "attachments": [attachment], "embeds": [embed], "reactions": [reaction], "pinned": true, "tts": false,
             "message_reference": {"message_id": "11", "channel_id": "200", "guild_id": "300"}, "referenced_message": inner, "nonce": "n1"
         }));
     }
@@ -5727,7 +5730,7 @@ mod tests {
         round_trip::<MessageSnapshot>(snapshot.clone());
         round_trip::<Message>(json!({
             "id": "13", "channel_id": "201", "guild_id": null, "author": user(), "content": "", "timestamp": "2026-10-11T10:03:00.000Z",
-            "edited_timestamp": null, "type": 0, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [],
+            "edited_timestamp": null, "type": 0, "mentions": [], "mention_roles": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [],
             "pinned": false, "tts": false, "message_reference": {"type": 1, "message_id": "11", "channel_id": "200", "guild_id": "300"},
             "referenced_message": null, "nonce": null, "message_snapshots": [snapshot], "sticker_items": [item]
         }));
@@ -5914,7 +5917,7 @@ mod tests {
         round_trip::<ThreadListResponse>(json!({"threads": [thread.clone()], "members": [], "has_more": false}));
         let message = json!({
             "id": "11", "channel_id": "200", "guild_id": "300", "author": user(), "content": "start", "timestamp": "2026-10-11T10:00:00.000Z",
-            "edited_timestamp": null, "type": 0, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false, "tts": false,
+            "edited_timestamp": null, "type": 0, "mentions": [], "mention_roles": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false, "tts": false,
             "message_reference": null, "referenced_message": null, "nonce": null, "flags": 1, "thread": thread.clone()
         });
         round_trip::<Message>(message.clone());
@@ -6033,7 +6036,7 @@ mod tests {
         round_trip::<Poll>(poll.clone());
         let message = json!({
             "id": "11", "channel_id": "200", "guild_id": "300", "author": user(), "content": "", "timestamp": "2026-10-11T10:00:00.000Z",
-            "edited_timestamp": null, "type": 0, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false, "tts": false,
+            "edited_timestamp": null, "type": 0, "mentions": [], "mention_roles": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false, "tts": false,
             "message_reference": null, "referenced_message": null, "nonce": null, "poll": poll
         });
         round_trip::<Message>(message);
@@ -6355,7 +6358,7 @@ mod tests {
         assert_eq!(serde_json::to_value(MessageType::Call).expect("type"), json!(3));
         round_trip::<Message>(json!({
             "id": "9", "channel_id": "202", "guild_id": null, "author": user(), "content": "", "timestamp": "2026-10-12T18:00:00.000Z",
-            "edited_timestamp": null, "type": 3, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false, "tts": false,
+            "edited_timestamp": null, "type": 3, "mentions": [], "mention_roles": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false, "tts": false,
             "message_reference": null, "referenced_message": null, "nonce": null, "call": {"participants": ["100"], "ended_timestamp": null}
         }));
     }
@@ -6572,7 +6575,7 @@ mod tests {
         );
         let message = json!({
             "id": "801", "channel_id": "200", "guild_id": "300", "author": user(), "content": "hi", "timestamp": "2026-10-11T10:00:00.000Z",
-            "edited_timestamp": null, "type": 20, "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false, "tts": false,
+            "edited_timestamp": null, "type": 20, "mentions": [], "mention_roles": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [], "pinned": false, "tts": false,
             "message_reference": null, "referenced_message": null, "nonce": null, "flags": 64, "webhook_id": "700", "application_id": "700",
             "interaction_metadata": {"id": "800", "type": 2, "user": user(), "name": "echo", "command_type": 1}
         });
@@ -6659,7 +6662,7 @@ mod tests {
             "id": "1", "channel_id": "2", "guild_id": null,
             "author": {"id": "3", "username": "a", "discriminator": "0", "avatar": null, "bot": false},
             "content": "x", "timestamp": "2026-01-01T00:00:00.000Z", "edited_timestamp": null, "type": 0,
-            "mentions": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [],
+            "mentions": [], "mention_roles": [], "mention_everyone": false, "attachments": [], "embeds": [], "reactions": [],
             "pinned": false, "tts": true, "message_reference": null, "referenced_message": null, "nonce": null
         });
         let parsed: Message = serde_json::from_value(message.clone()).unwrap_or_else(|error| panic!("{error}"));

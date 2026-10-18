@@ -673,6 +673,7 @@ function postMessage(interaction: MockInteraction, data: Record<string, unknown>
       edited_timestamp: null,
       type,
       mentions: [],
+      mention_roles: [],
       mention_everyone: false,
       attachments: [],
       embeds,

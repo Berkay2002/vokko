@@ -27,7 +27,7 @@ export interface NotifyPrefs {
 }
 
 export interface NotifyInput {
-  message: Pick<Message, "author" | "mentions" | "mention_everyone" | "content" | "type">;
+  message: Pick<Message, "author" | "mentions" | "mention_everyone" | "mention_roles" | "type">;
   meId: Snowflake;
   /** My role ids in the message's guild (empty for DMs). */
   myRoleIds: readonly Snowflake[];
@@ -100,16 +100,14 @@ export function withThreadMember(local: NotifyLocalState, threadId: Snowflake, m
   return { ...local, mutedUntil, notify };
 }
 
-/** `<@&id>` role mention in the raw content that targets one of my roles. */
-export function mentionsMyRole(content: string, roleIds: readonly Snowflake[]): boolean {
-  if (roleIds.length === 0) return false;
-  for (const match of content.matchAll(/<@&(\d+)>/g)) if (roleIds.includes(match[1] ?? "")) return true;
-  return false;
+/** The roles the server resolved for the message (`mention_roles`) include one of mine. */
+export function mentionsMyRole(mentionRoles: readonly Snowflake[], roleIds: readonly Snowflake[]): boolean {
+  return mentionRoles.some(id => roleIds.includes(id));
 }
 
 /** How a message mentions me: by name, by @everyone / @here (unless suppressed on a scope) or by one of my roles (likewise). One rule for sounds, popups and the unread mention counters. */
 export function mentionKinds(
-  message: Pick<Message, "mentions" | "mention_everyone" | "content">,
+  message: Pick<Message, "mentions" | "mention_everyone" | "mention_roles">,
   meId: Snowflake,
   myRoleIds: readonly Snowflake[],
   scopes: readonly Snowflake[],
@@ -118,7 +116,7 @@ export function mentionKinds(
   return {
     direct: message.mentions.some(user => user.id === meId),
     everyone: message.mention_everyone && !scopes.some(id => local.suppressEveryone[id]),
-    role: mentionsMyRole(message.content, myRoleIds) && !scopes.some(id => local.suppressRoles[id]),
+    role: mentionsMyRole(message.mention_roles ?? [], myRoleIds) && !scopes.some(id => local.suppressRoles[id]),
   };
 }
 

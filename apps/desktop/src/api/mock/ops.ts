@@ -263,6 +263,7 @@ export function addMessage(input: NewMessage): MockMessage {
     type: input.type ?? (referenced ? MessageType.Reply : MessageType.Default),
     mention_ids: mentions.ids,
     mention_everyone: mentions.everyone,
+    ...(mentions.roles.length ? { mention_role_ids: mentions.roles } : {}),
     attachments: input.attachments ?? [],
     reactions: [],
     pinned: false,

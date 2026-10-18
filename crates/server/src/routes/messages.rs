@@ -311,7 +311,7 @@ async fn insert_message_stored(
             // Joined on (user_id, guild_id), the settings table's key.
             let holders: Vec<(i64,)> = sqlx::query_as(
                 "SELECT DISTINCT mr.user_id FROM member_roles mr LEFT JOIN user_guild_settings s ON s.user_id = mr.user_id AND s.guild_id = mr.guild_id \
-                 WHERE mr.guild_id = $1 AND mr.role_id = ANY($2) AND COALESCE((s.settings->>'suppress_roles')::boolean, FALSE) = FALSE",
+                 WHERE mr.guild_id = $1 AND mr.role_id = ANY($2) AND s.settings->>'suppress_roles' IS DISTINCT FROM 'true'",
             )
             .bind(guild_id)
             .bind(&draft.mentions.roles)

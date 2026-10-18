@@ -11,7 +11,7 @@ const emptyLocal = (): NotifyLocalState => ({ mutedUntil: {}, notify: {}, suppre
 function input(patch: Omit<Partial<NotifyInput>, "message"> & { message?: Partial<NotifyInput["message"]> } = {}): NotifyInput {
   const { message, ...rest } = patch;
   return {
-    message: { author: user("200"), mentions: [], mention_everyone: false, content: "hello", type: MessageType.Default, ...message },
+    message: { author: user("200"), mentions: [], mention_everyone: false, mention_roles: [], type: MessageType.Default, ...message },
     meId: ME,
     myRoleIds: [],
     dm: null,
@@ -40,8 +40,8 @@ describe("decide", () => {
   it("treats a direct mention, a reply ping, @everyone and my role as mentions", () => {
     expect(decide(input({ message: { mentions: [user(ME)] } }))).toMatchObject({ kind: "mention", sound: "mention", reason: "mention" });
     expect(decide(input({ message: { mention_everyone: true } }))).toMatchObject({ kind: "mention", reason: "everyone" });
-    expect(decide(input({ message: { content: "hey <@&55>" }, myRoleIds: ["55"] }))).toMatchObject({ kind: "mention", reason: "role" });
-    expect(decide(input({ message: { content: "hey <@&56>" }, myRoleIds: ["55"] })).kind).toBe("message");
+    expect(decide(input({ message: { mention_roles: ["55"] }, myRoleIds: ["55"] }))).toMatchObject({ kind: "mention", reason: "role" });
+    expect(decide(input({ message: { mention_roles: ["56"] }, myRoleIds: ["55"] })).kind).toBe("message");
   });
 
   it("a 1:1 DM always pings, even when the channel level is 'only mentions'", () => {
@@ -92,7 +92,7 @@ describe("decide", () => {
     const everyone = { ...emptyLocal(), suppressEveryone: { g1: true } };
     expect(decide(input({ local: everyone, message: { mention_everyone: true } })).kind).toBe("message");
     const roles = { ...emptyLocal(), suppressRoles: { g1: true } };
-    expect(decide(input({ local: roles, myRoleIds: ["55"], message: { content: "<@&55>" } })).kind).toBe("message");
+    expect(decide(input({ local: roles, myRoleIds: ["55"], message: { mention_roles: ["55"] } })).kind).toBe("message");
     // suppressed @everyone under an "only mentions" level means nothing fires at all
     const both = { ...everyone, notify: { g1: "mentions" as const } };
     expect(decide(input({ local: both, message: { mention_everyone: true } })).kind).toBeNull();
@@ -150,9 +150,9 @@ describe("shouldBounce", () => {
 
 describe("mentionsMyRole", () => {
   it("matches only my role ids", () => {
-    expect(mentionsMyRole("<@&1> and <@&2>", ["2"])).toBe(true);
-    expect(mentionsMyRole("<@&1>", [])).toBe(false);
-    expect(mentionsMyRole("@everyone", ["1"])).toBe(false);
+    expect(mentionsMyRole(["1", "2"], ["2"])).toBe(true);
+    expect(mentionsMyRole(["1"], [])).toBe(false);
+    expect(mentionsMyRole([], ["1"])).toBe(false);
   });
 });
 
