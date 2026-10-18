@@ -73,7 +73,8 @@ fn with_wrong_key(url: &str) -> String {
 
 /// Remote backends delete in the background, so wait a little for the file to go.
 async fn gone(app: &TestApp, id: &str) -> bool {
-    for _ in 0..50 {
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while tokio::time::Instant::now() < deadline {
         if !stored(app, id).await {
             return true;
         }

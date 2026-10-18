@@ -141,11 +141,13 @@ pub struct Snapshot {
 pub struct Shared {
     pub epoch: Instant,
     current: RwLock<Arc<Metrics>>,
+    /// Send times of events whose payload cannot carry a stamp (reactions, voice states), keyed by what the receiver sees.
+    stamps: Mutex<HashMap<String, u64>>,
 }
 
 impl Shared {
     pub fn new() -> Self {
-        Self { epoch: Instant::now(), current: RwLock::new(Arc::new(Metrics::default())) }
+        Self { epoch: Instant::now(), current: RwLock::new(Arc::new(Metrics::default())), stamps: Mutex::new(HashMap::new()) }
     }
 
     pub fn m(&self) -> Arc<Metrics> {
@@ -160,6 +162,18 @@ impl Shared {
 
     pub fn now_us(&self) -> u64 {
         self.epoch.elapsed().as_micros() as u64
+    }
+
+    /// Remembers that the event identified by `key` was sent now (a later stamp of the same key replaces it).
+    pub fn stamp(&self, key: String) {
+        let now = self.now_us();
+        lock(&self.stamps).insert(key, now);
+    }
+
+    /// Time since `key` was stamped.
+    pub fn since(&self, key: &str) -> Option<Duration> {
+        let sent = *lock(&self.stamps).get(key)?;
+        Some(Duration::from_micros(self.now_us().saturating_sub(sent)))
     }
 }
 
@@ -192,5 +206,13 @@ mod tests {
         assert_eq!(old.counter("x"), 2);
         assert_eq!(shared.m().counter("x"), 0);
         assert_eq!(old.snapshot().errors.get("429"), Some(&1));
+    }
+
+    #[test]
+    fn stamps_measure_time_since_the_send() {
+        let shared = Shared::new();
+        assert!(shared.since("r:1").is_none());
+        shared.stamp("r:1".to_owned());
+        assert!(shared.since("r:1").is_some_and(|elapsed| elapsed < Duration::from_secs(5)));
     }
 }

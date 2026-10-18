@@ -13,6 +13,8 @@ export { markGuildRead, joinGuildWithInvite, joinOrApply } from '../shell/action
 export { go, guildPath } from '../shell/nav';
 export { openModal, closeModal } from '../shell/modalStore';
 export { openProfile } from '../shell/profileStore';
+/** The user context menu's items, loaded on use: a static import of shell/menus from the chat area loops back into it. */
+export const loadUserMenu = () => import('../shell/menus').then(m => m.userContextItems);
 export { usePermissions } from '../shell/usePermissions';
 export { Perm, canSendIn } from '../api/permissions';
 export { Tooltip, Popout, Modal, BottomSheet, usePhone, useContextMenu, useLayer, useOutsideClose, placeAtPoint } from '../ui';
@@ -25,6 +27,8 @@ const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
 export function cacheUser(user: User): void { appStore.getState().cacheUsers([user]); }
 
 export function useMe(): User | null { return useStore(s => s.me); }
+/** The startup cache is on screen and the gateway is not ready yet: nothing can be sent. */
+export function useStale(): boolean { return useStore(s => s.stale); }
 export function useChannel(channelId: Snowflake): Channel | undefined { return useStore(s => s.channels[channelId] ?? s.threads[channelId]); }
 
 /** Fields that move with every message; a change in only these does not make a channel "different" for rendering. */

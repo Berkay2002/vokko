@@ -833,7 +833,7 @@ async fn profile_edit_without_images_does_not_wait_on_a_locked_upload() {
     sqlx::query("SELECT id FROM attachments WHERE id = $1 FOR UPDATE").bind(pending_id).execute(&mut *holder).await.expect("lock");
 
     let edit = app.patch("/users/@me", &owner, json!({"bio": "not blocked", "pronouns": "they/them"}));
-    let (status, me) = tokio::time::timeout(std::time::Duration::from_secs(5), edit).await.expect("the edit waited on a locked upload it never named");
+    let (status, me) = tokio::time::timeout(common::WAIT, edit).await.expect("the edit waited on a locked upload it never named");
     assert_eq!(status, StatusCode::OK, "{me}");
     assert_eq!(me["bio"], "not blocked");
 
@@ -853,7 +853,7 @@ async fn naming_another_users_upload_does_not_lock_it() {
     let theirs_id: i64 = theirs["id"].as_str().expect("id").parse().expect("id");
     let mut holder = app.state.db.begin().await.expect("begin");
     sqlx::query("SELECT id FROM attachments WHERE id = $1 FOR UPDATE").bind(theirs_id).execute(&mut *holder).await.expect("lock");
-    let wait = std::time::Duration::from_secs(5);
+    let wait = common::WAIT;
 
     let profile = app.patch("/users/@me", &member, json!({"avatar_attachment_id": theirs["id"], "banner_attachment_id": theirs["id"]}));
     let (status, error) = tokio::time::timeout(wait, profile).await.expect("the profile edit waited on another user's upload");

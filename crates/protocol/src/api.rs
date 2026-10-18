@@ -660,6 +660,9 @@ pub struct Channel {
     /// Guild voice only: 0 = unlimited, max 99.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_limit: Option<u32>,
+    /// Slowmode: seconds a member waits between messages (0 = off, max 21600). Guild text and voice channels only (always sent there).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_per_user: Option<u32>,
     /// Guild voice only: the shared channel status (max 500 chars), `null` when none.
     #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
     pub status: Option<Option<String>>,
@@ -823,6 +826,12 @@ pub struct Guild {
     /// Engagement: the notification level of members who set none for the server (MANAGE_GUILD edits it); always sent.
     #[serde(default)]
     pub default_message_notifications: DefaultMessageNotifications,
+    /// Discord's feature flags; `COMMUNITY` once Community is enabled (MANAGE_GUILD toggles that one through `features`).
+    #[serde(default)]
+    pub features: Vec<String>,
+    /// Community: the text channel for Vokko's community updates; always sent, `null` when unset.
+    #[serde(default)]
+    pub public_updates_channel_id: Option<Snowflake>,
 }
 
 numeric_enum!(
@@ -2346,6 +2355,13 @@ pub struct CallUpdate {
     pub ringing: Vec<Snowflake>,
 }
 
+/// CHANNEL_RECIPIENT_ADD / CHANNEL_RECIPIENT_REMOVE: someone joined or left a group DM.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChannelRecipient {
+    pub channel_id: Snowflake,
+    pub user: User,
+}
+
 /// CALL_DELETE: the call ended.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CallDelete {
@@ -2641,6 +2657,9 @@ pub struct RateLimitError {
     /// Seconds (float); also sent as the `Retry-After` header.
     pub retry_after: f64,
     pub global: bool,
+    /// 20016 when the wait is a channel's slowmode; absent for ordinary rate limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2771,6 +2790,12 @@ pub struct UpdateGuildRequest {
     /// 0 all messages, 1 only mentions (anything else is 400 50035).
     #[serde(default)]
     pub default_message_notifications: Option<DefaultMessageNotifications>,
+    /// Only `COMMUNITY` may be present; the list sets whether Community is on (any other entry is 400 50035).
+    #[serde(default)]
+    pub features: Option<Vec<String>>,
+    /// A text channel of this guild; `null` clears it.
+    #[serde(default, deserialize_with = "double_option")]
+    pub public_updates_channel_id: Option<Option<Snowflake>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2859,6 +2884,9 @@ pub struct UpdateChannelRequest {
     pub bitrate: Option<u32>,
     #[serde(default)]
     pub user_limit: Option<u32>,
+    /// Slowmode seconds (0..=21600); guild text and voice channels only (MANAGE_CHANNELS).
+    #[serde(default)]
+    pub rate_limit_per_user: Option<u32>,
     // ---- threads ----
     #[serde(default)]
     pub archived: Option<bool>,
@@ -3474,6 +3502,117 @@ pub struct UpdateGuildLayoutRequest {
     pub guild_positions: Option<Vec<Snowflake>>,
 }
 
+/// `message_notifications` values of [`UserGuildSettings`] and [`ChannelOverride`] (Discord's).
+pub mod notification_level {
+    pub const ALL_MESSAGES: u8 = 0;
+    pub const ONLY_MENTIONS: u8 = 1;
+    pub const NO_MESSAGES: u8 = 2;
+    /// The guild's default (on a guild) or the parent's setting (on a channel override).
+    pub const NULL: u8 = 3;
+    /// `flags` bit (Vokko): with ONLY_MENTIONS, unread messages still show the unread dot ("@Mentions + Unreads").
+    pub const UNREADS_ONLY_MENTIONS: u32 = 1 << 11;
+}
+
+/// One channel's (or category's) notification override inside [`UserGuildSettings`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChannelOverride {
+    pub channel_id: Snowflake,
+    #[serde(default)]
+    pub muted: bool,
+    /// `None` while muted = until turned back on.
+    #[serde(default)]
+    pub mute_config: Option<MuteConfig>,
+    /// [`notification_level`]; `NULL` = follow the parent.
+    #[serde(default = "notification_null")]
+    pub message_notifications: u8,
+    #[serde(default)]
+    pub flags: u32,
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
+const fn notification_null() -> u8 {
+    notification_level::NULL
+}
+
+/// The user's notification settings for one guild, or for DMs (`guild_id` null): `GET/PATCH /users/@me/guilds/{guild.id|@me}/settings`,
+/// READY `user_guild_settings` (only entries that were ever saved) and USER_GUILD_SETTINGS_UPDATE.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UserGuildSettings {
+    pub guild_id: Option<Snowflake>,
+    #[serde(default)]
+    pub muted: bool,
+    #[serde(default)]
+    pub mute_config: Option<MuteConfig>,
+    #[serde(default = "notification_null")]
+    pub message_notifications: u8,
+    #[serde(default)]
+    pub flags: u32,
+    #[serde(default)]
+    pub suppress_everyone: bool,
+    #[serde(default)]
+    pub suppress_roles: bool,
+    #[serde(default)]
+    pub hide_muted_channels: bool,
+    #[serde(default)]
+    pub channel_overrides: Vec<ChannelOverride>,
+}
+
+impl UserGuildSettings {
+    /// The settings of a guild nobody saved anything for.
+    pub fn new(guild_id: Option<Snowflake>) -> Self {
+        Self {
+            guild_id,
+            muted: false,
+            mute_config: None,
+            message_notifications: notification_level::NULL,
+            flags: 0,
+            suppress_everyone: false,
+            suppress_roles: false,
+            hide_muted_channels: false,
+            channel_overrides: Vec::new(),
+        }
+    }
+}
+
+/// One entry of [`UpdateUserGuildSettingsRequest::channel_overrides`]: only sent keys change.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ChannelOverridePatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+    /// `Some(None)` = explicit `null` (forever while muted).
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub mute_config: Option<Option<MuteConfig>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_notifications: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collapsed: Option<bool>,
+}
+
+/// Body of `PATCH /users/@me/guilds/{guild.id|@me}/settings`: only sent keys change; `channel_overrides` is keyed by channel id
+/// and merges per channel (an override back at all defaults is dropped).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct UpdateUserGuildSettingsRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+    #[serde(default, deserialize_with = "double_option", skip_serializing_if = "Option::is_none")]
+    pub mute_config: Option<Option<MuteConfig>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_notifications: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flags: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppress_everyone: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppress_roles: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hide_muted_channels: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_overrides: Option<std::collections::BTreeMap<Snowflake, ChannelOverridePatch>>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Invite {
     pub code: String,
@@ -4035,6 +4174,37 @@ pub struct BugReportCreated {
     pub id: Snowflake,
 }
 
+/// What raised a crash report.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CrashKind {
+    /// An uncaught JS error (`window.onerror`).
+    Error,
+    /// An unhandled promise rejection.
+    UnhandledRejection,
+    /// A Rust panic in the desktop shell, sent on the next start.
+    Panic,
+}
+
+/// `POST /crash-reports`: an automatic error report (opt-out in Settings > Data & Privacy). No user id, message text or other
+/// personal data is stored; the whole body is capped at 32 KiB.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CreateCrashReportRequest {
+    pub kind: CrashKind,
+    /// Client version, at most 64 characters.
+    pub app_version: String,
+    /// Operating system and browser, at most 256 characters.
+    pub os: String,
+    /// The client route with ids replaced (`/channels/:id/:id`), at most 256 characters.
+    #[serde(default)]
+    pub route: String,
+    /// The error message, 1-1000 characters.
+    pub message: String,
+    /// Stack trace or panic location, scrubbed by the client, at most 16,000 characters.
+    #[serde(default)]
+    pub stack: String,
+}
+
 /// `PATCH /guilds/{id}/reports/{report_id}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UpdateReportRequest {
@@ -4380,6 +4550,9 @@ pub struct ReadyEvent {
     pub relationships: Vec<Relationship>,
     #[serde(default)]
     pub guild_layout: GuildLayout,
+    /// The user's saved notification settings, one entry per guild (or DMs) that has any; omitted when none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_guild_settings: Vec<UserGuildSettings>,
     pub media: InstanceMediaConfig,
     /// Latest desktop release this server knows of (`version` of the downloads' `latest.json`); absent when none is configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4935,6 +5108,8 @@ pub enum GatewayEvent {
     ChannelCreate(Channel),
     ChannelUpdate(Channel),
     ChannelDelete(Channel),
+    ChannelRecipientAdd(ChannelRecipient),
+    ChannelRecipientRemove(ChannelRecipient),
     GuildCreate(Box<GuildWithState>),
     GuildUpdate(Guild),
     GuildDelete(IdOnly),
@@ -5008,6 +5183,8 @@ pub enum GatewayEvent {
     InviteCreate(Box<InviteMetadata>),
     InviteDelete(InviteDelete),
     GuildLayoutUpdate(GuildLayout),
+    /// The user's own sessions only.
+    UserGuildSettingsUpdate(Box<UserGuildSettings>),
     DesktopVersion(DesktopVersion),
     /// GUILD_JOIN_REQUEST_*: to the applicant and members with KICK_MEMBERS or MANAGE_GUILD.
     GuildJoinRequestCreate(Box<GuildJoinRequestEvent>),
@@ -5029,6 +5206,8 @@ impl GatewayEvent {
             Self::ChannelCreate(_) => "CHANNEL_CREATE",
             Self::ChannelUpdate(_) => "CHANNEL_UPDATE",
             Self::ChannelDelete(_) => "CHANNEL_DELETE",
+            Self::ChannelRecipientAdd(_) => "CHANNEL_RECIPIENT_ADD",
+            Self::ChannelRecipientRemove(_) => "CHANNEL_RECIPIENT_REMOVE",
             Self::GuildCreate(_) => "GUILD_CREATE",
             Self::GuildUpdate(_) => "GUILD_UPDATE",
             Self::GuildDelete(_) => "GUILD_DELETE",
@@ -5098,6 +5277,7 @@ impl GatewayEvent {
             Self::InviteCreate(_) => "INVITE_CREATE",
             Self::InviteDelete(_) => "INVITE_DELETE",
             Self::GuildLayoutUpdate(_) => "GUILD_LAYOUT_UPDATE",
+            Self::UserGuildSettingsUpdate(_) => "USER_GUILD_SETTINGS_UPDATE",
             Self::DesktopVersion(_) => "DESKTOP_VERSION",
             Self::GuildJoinRequestCreate(_) => "GUILD_JOIN_REQUEST_CREATE",
             Self::GuildJoinRequestUpdate(_) => "GUILD_JOIN_REQUEST_UPDATE",
@@ -5115,6 +5295,7 @@ impl GatewayEvent {
             Self::MessageReactionAdd(value) | Self::MessageReactionRemove(value) => serde_json::to_value(value),
             Self::TypingStart(value) => serde_json::to_value(value),
             Self::ChannelCreate(value) | Self::ChannelUpdate(value) | Self::ChannelDelete(value) => serde_json::to_value(value),
+            Self::ChannelRecipientAdd(value) | Self::ChannelRecipientRemove(value) => serde_json::to_value(value),
             Self::GuildCreate(value) => serde_json::to_value(value),
             Self::GuildUpdate(value) => serde_json::to_value(value),
             Self::GuildDelete(value) | Self::RelationshipRemove(value) => serde_json::to_value(value),
@@ -5173,6 +5354,7 @@ impl GatewayEvent {
             Self::InviteCreate(value) => serde_json::to_value(value),
             Self::InviteDelete(value) => serde_json::to_value(value),
             Self::GuildLayoutUpdate(value) => serde_json::to_value(value),
+            Self::UserGuildSettingsUpdate(value) => serde_json::to_value(value),
             Self::DesktopVersion(value) => serde_json::to_value(value),
             Self::GuildJoinRequestCreate(value) | Self::GuildJoinRequestUpdate(value) => serde_json::to_value(value),
             Self::GuildJoinRequestDelete(value) => serde_json::to_value(value),
@@ -5243,12 +5425,12 @@ mod tests {
         let role = json!({"id": "300", "name": "@everyone", "color": 0, "hoist": false, "position": 0, "permissions": "1071698660929", "mentionable": false, "unicode_emoji": null});
         round_trip::<Role>(role.clone());
         round_trip::<Guild>(
-            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0}),
+            json!({"id": "300", "name": "Sam's server", "icon": null, "banner": null, "owner_id": "100", "roles": [role], "system_channel_id": "200", "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0, "features": [], "public_updates_channel_id": null}),
         );
         round_trip::<Guild>(json!({
             "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null,
             "tag": {"tag": "VKO", "badge": "bolt", "color_primary": 5793266, "color_secondary": 3878800}, "theme": {"preset": null, "primary": 1, "accent": 2},
-            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201", "join_mode": 1, "default_message_notifications": 1
+            "verification_level": 3, "explicit_content_filter": 2, "nsfw_level": 3, "rules_channel_id": "201", "join_mode": 1, "default_message_notifications": 1, "features": ["COMMUNITY"], "public_updates_channel_id": "202"
         }));
         round_trip::<GuildMember>(
             json!({"user": user(), "nick": null, "roles": ["301"], "joined_at": "2026-10-11T10:00:00.000Z", "communication_disabled_until": null, "avatar": null, "banner": null, "bio": null, "pronouns": null, "theme_colors": null}),
@@ -5434,7 +5616,7 @@ mod tests {
 
     #[test]
     fn ready_and_flattened_guild_events() {
-        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0});
+        let guild = json!({"id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0, "features": [], "public_updates_channel_id": null});
         let with_state = {
             let mut value = guild.clone();
             value["channels"] = json!([]);
@@ -5679,7 +5861,7 @@ mod tests {
         round_trip::<ReactionEmoji>(json!({"id": "700", "name": "blob_wave", "animated": true}));
         round_trip::<ReactionEmoji>(json!({"id": null, "name": "👍"}));
         let guild = json!({
-            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0,
+            "id": "300", "name": "g", "icon": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null, "banner": null, "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 0, "features": [], "public_updates_channel_id": null,
             "channels": [], "members": [], "member_count": 0, "stickers": [], "emojis": [emoji.clone()], "voice_states": []
         });
         round_trip::<GuildWithState>(guild);
@@ -5791,6 +5973,16 @@ mod tests {
         assert!(empty.guild_folders.is_empty() && empty.guild_positions.is_empty());
         let update = GatewayEvent::GuildLayoutUpdate(empty);
         assert_eq!((update.name(), update.data()), ("GUILD_LAYOUT_UPDATE", json!({"guild_folders": [], "guild_positions": []})));
+        let settings: UserGuildSettings =
+            serde_json::from_value(json!({"guild_id": null, "channel_overrides": [{"channel_id": "5", "muted": true}]})).expect("defaults");
+        assert_eq!(settings.message_notifications, notification_level::NULL);
+        assert_eq!(settings.channel_overrides[0].message_notifications, notification_level::NULL);
+        let patch: UpdateUserGuildSettingsRequest =
+            serde_json::from_value(json!({"mute_config": null, "channel_overrides": {"5": {"message_notifications": 1}}})).expect("patch");
+        assert_eq!(patch.mute_config, Some(None));
+        assert_eq!(patch.channel_overrides.and_then(|map| map.get(&Snowflake(5)).and_then(|o| o.message_notifications)), Some(1));
+        let update = GatewayEvent::UserGuildSettingsUpdate(Box::new(UserGuildSettings::new(Some(Snowflake(300)))));
+        assert_eq!((update.name(), update.data()["guild_id"].clone()), ("USER_GUILD_SETTINGS_UPDATE", json!("300")));
         let desktop = GatewayEvent::DesktopVersion(DesktopVersion { version: "0.1.9".to_owned() });
         assert_eq!((desktop.name(), desktop.data()), ("DESKTOP_VERSION", json!({"version": "0.1.9"})));
     }
@@ -5885,7 +6077,7 @@ mod tests {
         assert!(serde_json::from_value::<UpdateGuildRequest>(json!({"default_message_notifications": 2})).is_err());
         round_trip::<Guild>(json!({
             "id": "300", "name": "g", "icon": null, "banner": null, "owner_id": "100", "roles": [], "system_channel_id": null, "tag": null, "theme": null,
-            "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 1
+            "verification_level": 0, "explicit_content_filter": 0, "nsfw_level": 0, "rules_channel_id": null, "join_mode": 0, "default_message_notifications": 1, "features": [], "public_updates_channel_id": null
         }));
     }
 

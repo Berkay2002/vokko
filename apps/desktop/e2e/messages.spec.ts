@@ -8,6 +8,16 @@ test.use({ viewport: { width: 1280, height: 900 } });
 // The row whose own text matches (not one that merely quotes it in a reply preview).
 const row = (page: Page, text: string | RegExp) => page.locator('.chat-msg').filter({ has: page.locator('.chat-content', { hasText: text }) }).last();
 
+/**
+ * The seed dates #stock-talk relative to now ("market opens" 2 h ago, the line before it 25 h ago, "reading it now" 80 min ago),
+ * so which rows share a day depends on the time of day the test runs. Pins the page's clock at noon local time (the context's
+ * timezone) of today: Date is fixed, timers keep running.
+ */
+async function pinNoon(page: Page): Promise<void> {
+  const noon = await page.evaluate(() => new Date().setHours(12, 0, 0, 0));
+  await page.clock.setFixedTime(noon);
+}
+
 /** The list is virtualised: scroll from the top until the row's text is rendered. */
 async function reveal(page: Page, text: string | RegExp): Promise<void> {
   await scrollTop(page);
@@ -263,6 +273,7 @@ test('jump pill appears when scrolled far up, sits at the bottom centre and retu
 });
 
 test.describe('new-messages divider', () => {
+  test.beforeEach(({ page }) => pinNoon(page));
   test('on a day boundary it is the day divider itself, red, with the NEW pill; sending clears it', async ({ page }) => {
     await openStockTalk(page);
     await row(page, '@everyone market opens').click({ button: 'right', position: { x: 160, y: 12 } });
@@ -288,6 +299,7 @@ test.describe('new-messages divider', () => {
 });
 
 test.describe('timestamps', () => {
+  test.beforeEach(({ page }) => pinNoon(page));
   test.describe('English', () => {
     test.use({ locale: 'en-US' });
     test('older dates use the locale format, recent ones Today/Yesterday', async ({ page }) => {

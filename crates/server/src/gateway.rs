@@ -46,6 +46,10 @@ pub const MAX_CUSTOM_STATUS_CHARS: usize = 128;
 /// Presence updates (op 3) allowed per session per window.
 const PRESENCE_UPDATES: usize = 5;
 const PRESENCE_WINDOW: Duration = Duration::from_secs(60);
+/// Most queued frames written per socket flush.
+const WRITE_BATCH: usize = 64;
+/// A batch stops growing once it holds this many bytes (it may pass it by one frame).
+const WRITE_BATCH_BYTES: usize = 256 * 1024;
 /// Voice state updates (op 4, mute toggles included) allowed per session per window.
 const VOICE_UPDATES: usize = 30;
 const VOICE_WINDOW: Duration = Duration::from_secs(60);
@@ -76,6 +80,19 @@ fn frame(op: GatewayOp, data: Value) -> Message {
     Message::Text(serde_json::to_string(&payload).unwrap_or_default().into())
 }
 
+/// `first` plus what is already queued, up to `WRITE_BATCH` frames or about `WRITE_BATCH_BYTES`: the whole batch shares one
+/// write timeout, so a burst of large frames must not turn a slow but healthy client into a timed-out one.
+fn take_batch(first: String, queue: &mut tokio::sync::mpsc::Receiver<String>) -> Vec<String> {
+    let mut bytes = first.len();
+    let mut batch = vec![first];
+    while batch.len() < WRITE_BATCH && bytes < WRITE_BATCH_BYTES {
+        let Ok(text) = queue.try_recv() else { break };
+        bytes += text.len();
+        batch.push(text);
+    }
+    batch
+}
+
 /// The socket's write half; no write may block the task for longer than `limit`.
 struct Writer {
     sink: Sink,
@@ -86,6 +103,20 @@ impl Writer {
     /// False when the socket is gone or too slow.
     async fn send(&mut self, message: Message) -> bool {
         matches!(tokio::time::timeout(self.limit, self.sink.send(message)).await, Ok(Ok(())))
+    }
+
+    /// Writes `first` plus whatever else is already queued (up to `WRITE_BATCH` frames) and flushes once, so a burst of events
+    /// costs one socket write instead of one per frame.
+    async fn send_queued(&mut self, first: String, queue: &mut tokio::sync::mpsc::Receiver<String>) -> bool {
+        let batch = take_batch(first, queue);
+        let sink = &mut self.sink;
+        let write = async move {
+            for text in batch {
+                sink.feed(Message::Text(text.into())).await?;
+            }
+            sink.flush().await
+        };
+        matches!(tokio::time::timeout(self.limit, write).await, Ok(Ok(())))
     }
 
     async fn frame(&mut self, op: GatewayOp, data: Value) -> bool {
@@ -297,7 +328,7 @@ async fn run(state: &AppState, session: &Arc<Session>, writer: &mut Writer, stre
             },
             queued = receiver.queue.recv() => match queued {
                 Some(text) => {
-                    if !writer.send(Message::Text(text.into())).await {
+                    if !writer.send_queued(text, &mut receiver.queue).await {
                         break;
                     }
                 }
@@ -375,6 +406,7 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
     }
 
     let guild_layout = crate::routes::guild_layout::load(state, user_id).await?;
+    let user_guild_settings = crate::routes::guild_settings::all(state, user_id).await?;
     Ok(ReadyEvent {
         v: 1,
         user,
@@ -385,6 +417,7 @@ pub async fn build_ready(state: &AppState, user_id: i64, session_id: &str) -> Ap
         read_states,
         relationships,
         guild_layout,
+        user_guild_settings,
         media: voice::media_config(&state.config),
         desktop_version: crate::desktop_version::current(state),
     })
@@ -401,5 +434,22 @@ mod tests {
         assert!(allowance.allow(start) && allowance.allow(start + Duration::from_secs(1)));
         assert!(!allowance.allow(start + Duration::from_secs(2)));
         assert!(allowance.allow(start + Duration::from_secs(61)), "the first one left the window");
+    }
+
+    #[test]
+    fn a_write_batch_is_capped_by_frames_and_by_bytes() {
+        let (sender, mut queue) = tokio::sync::mpsc::channel(256);
+        for _ in 0..100 {
+            let _ = sender.try_send("x".to_owned());
+        }
+        assert_eq!(take_batch("x".to_owned(), &mut queue).len(), WRITE_BATCH);
+        while queue.try_recv().is_ok() {}
+        let large = "x".repeat(100 * 1024);
+        for _ in 0..10 {
+            let _ = sender.try_send(large.clone());
+        }
+        // 100 + 100 + 100 KiB passes the 256 KiB cap: the rest waits for the next write.
+        assert_eq!(take_batch(large.clone(), &mut queue).len(), 3);
+        assert_eq!(queue.len(), 8);
     }
 }

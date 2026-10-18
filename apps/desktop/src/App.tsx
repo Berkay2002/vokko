@@ -14,9 +14,9 @@ import { setNavigator } from "./shell/nav";
 
 function Protected() {
   const token = useStore(s => s.token);
-  const ready = useStore(s => s.ready);
+  const shown = useStore(s => s.ready || s.stale);
   if (!token) return <Navigate to="/login" replace />;
-  if (!ready) return <Splash />;
+  if (!shown) return <Splash />;
   return <AppShell />;
 }
 

@@ -217,10 +217,12 @@ pub struct GuildRow {
     pub rules_channel_id: Option<i64>,
     pub join_mode: i16,
     pub default_message_notifications: i16,
+    pub community: bool,
+    pub public_updates_channel_id: Option<i64>,
 }
 
 pub const GUILD_COLS: &str = "id, name, icon_path, banner_path, owner_id, system_channel_id, tag, tag_badge, tag_color_primary, tag_color_secondary, theme_preset, \
-     theme_primary, theme_accent, verification_level, explicit_content_filter, nsfw_level, rules_channel_id, join_mode, default_message_notifications";
+     theme_primary, theme_accent, verification_level, explicit_content_filter, nsfw_level, rules_channel_id, join_mode, default_message_notifications, community, public_updates_channel_id";
 
 pub async fn guilds_from_rows(state: &AppState, rows: Vec<GuildRow>) -> ApiResult<Vec<Guild>> {
     let ids: Vec<i64> = rows.iter().map(|row| row.id).collect();
@@ -272,6 +274,8 @@ pub async fn guilds_from_rows(state: &AppState, rows: Vec<GuildRow>) -> ApiResul
                 rules_channel_id: row.rules_channel_id.map(flake),
                 join_mode: JoinMode::from_u8(row.join_mode as u8).unwrap_or_default(),
                 default_message_notifications: DefaultMessageNotifications::from_u8(row.default_message_notifications as u8).unwrap_or_default(),
+                features: if row.community { vec!["COMMUNITY".to_owned()] } else { Vec::new() },
+                public_updates_channel_id: row.public_updates_channel_id.map(flake),
             }
         })
         .collect())
@@ -288,7 +292,7 @@ pub async fn guild(state: &AppState, id: i64) -> ApiResult<Option<Guild>> {
 pub async fn guilds_of_user(state: &AppState, user_id: i64) -> ApiResult<Vec<Guild>> {
     let rows: Vec<GuildRow> = sqlx::query_as(
         "SELECT g.id, g.name, g.icon_path, g.banner_path, g.owner_id, g.system_channel_id, g.tag, g.tag_badge, g.tag_color_primary, g.tag_color_secondary, g.theme_preset, \
-         g.theme_primary, g.theme_accent, g.verification_level, g.explicit_content_filter, g.nsfw_level, g.rules_channel_id, g.join_mode, g.default_message_notifications FROM guilds g JOIN guild_members m ON m.guild_id = g.id WHERE m.user_id = $1 ORDER BY m.joined_at, g.id",
+         g.theme_primary, g.theme_accent, g.verification_level, g.explicit_content_filter, g.nsfw_level, g.rules_channel_id, g.join_mode, g.default_message_notifications, g.community, g.public_updates_channel_id FROM guilds g JOIN guild_members m ON m.guild_id = g.id WHERE m.user_id = $1 ORDER BY m.joined_at, g.id",
     )
     .bind(user_id)
     .fetch_all(&state.db)
@@ -445,11 +449,12 @@ pub struct ChannelRow {
     pub default_forum_layout: i32,
     pub created_at: OffsetDateTime,
     pub nsfw: bool,
+    pub rate_limit_per_user: i32,
 }
 
 pub const CHANNEL_COLS: &str = "id, kind, guild_id, name, topic, position, parent_id, owner_id, icon_path, last_message_id, archived, locked, invitable, \
      auto_archive_duration, default_auto_archive_duration, archive_timestamp, last_activity_at, flags, applied_tags, default_reaction_emoji_id, \
-     default_reaction_emoji_name, default_sort_order, default_forum_layout, created_at, bitrate, user_limit, voice_status, nsfw";
+     default_reaction_emoji_name, default_sort_order, default_forum_layout, created_at, bitrate, user_limit, voice_status, nsfw, rate_limit_per_user";
 
 impl ChannelRow {
     pub fn channel_type(&self) -> ChannelType {
@@ -514,6 +519,7 @@ pub async fn channels_to_api(state: &AppState, rows: Vec<ChannelRow>, viewer: Op
                 icon: (kind == ChannelType::GroupDm).then(|| row.icon_path.map(|path| state.asset_url(&path))),
                 bitrate: voice_settings.map(|(bitrate, _)| bitrate),
                 user_limit: voice_settings.map(|(_, limit)| limit),
+                rate_limit_per_user: matches!(kind, ChannelType::GuildText | ChannelType::GuildVoice).then_some(row.rate_limit_per_user as u32),
                 status: (kind == ChannelType::GuildVoice).then(|| row.voice_status.clone()),
                 thread_metadata: None,
                 member_count: None,
@@ -670,6 +676,15 @@ pub struct MessageView {
 }
 
 impl MessageView {
+    /// Dispatches the message to `viewers` as `name`, serialized once when every viewer sees the same payload (no reactions, no poll).
+    pub fn send(&self, hub: &crate::hub::Hub, viewers: &[i64], name: &str) {
+        if self.message.reactions.is_empty() && self.poll.is_none() {
+            hub.send_value(viewers, name, &serde_json::to_value(&self.message).unwrap_or_default());
+        } else {
+            hub.send_with(viewers, name, |user| serde_json::to_value(self.for_viewer(user)).unwrap_or_default());
+        }
+    }
+
     pub fn for_viewer(&self, viewer: i64) -> Message {
         let mut message = self.message.clone();
         for (reaction, users) in message.reactions.iter_mut().zip(&self.reaction_users) {

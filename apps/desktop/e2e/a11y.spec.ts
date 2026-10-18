@@ -21,7 +21,6 @@ type Known = Record<string, string>;
 // Findings shared by several screens.
 const CONTRAST: Known = { 'color-contrast': 'A11Y-07 muted text tokens (--text-muted, --chat-text-muted, group titles) are below 4.5:1' };
 const REGION: Known = { region: 'A11Y-12 sidebar list and resize handle sit outside any landmark' };
-const TARGET: Known = { 'target-size': 'A11Y-09 user-panel input/output chevrons are 16x32 and hover-only channel actions are small' };
 const HEADINGS: Known = { 'heading-order': 'A11Y-20 message author names are <h3> directly under the page <h1>' };
 const OVERLAY_MAIN: Known = { 'landmark-no-duplicate-main': 'A11Y-13 settings overlay renders a second <main> while the app shell behind it stays in the a11y tree' };
 
@@ -72,18 +71,18 @@ test.describe('axe: main screens', () => {
   test('friends / home', async ({ page }, info) => {
     await page.goto('/channels/@me?as=sam&mockLatency=0');
     await page.getByRole('heading', { name: /friends/i }).first().waitFor();
-    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...TARGET });
+    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION });
   });
 
   test('DM chat', async ({ page }, info) => {
     await openDm(page);
-    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...TARGET, ...HEADINGS });
+    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...HEADINGS });
   });
 
   test('guild channel with member list', async ({ page }, info) => {
     await openGuild(page);
     await expect(page.getByRole('complementary', { name: 'Members' })).toBeVisible();
-    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...TARGET, ...HEADINGS });
+    expectOnlyKnown(info, await scan(page), { ...CONTRAST, ...REGION, ...HEADINGS });
   });
 
   test('message context menu', async ({ page }, info) => {
@@ -118,6 +117,25 @@ test.describe('axe: main screens', () => {
     await expect(dialog).toBeVisible();
     expectOnlyKnown(info, await scan(page, '[role=dialog]'), {});
   });
+
+  test('voice call', async ({ page }, info) => {
+    await openGuild(page);
+    await page.getByRole('button', { name: 'General voice channel' }).click();
+    await expect(page.getByRole('button', { name: 'Leave voice channel' })).toBeVisible();
+    expectOnlyKnown(info, await scan(page), {
+      ...CONTRAST,
+      ...REGION,
+      'nested-interactive': 'A11Y-21 the selected voice channel row is a role=button that contains its action buttons (src/voice, vokko-call-perf)',
+      'target-size': 'A11Y-22 the voice channel status line button is under 24px tall (src/voice, vokko-call-perf)',
+    });
+  });
+
+  test('create server modal', async ({ page }, info) => {
+    await openGuild(page);
+    await page.getByRole('button', { name: 'Add a Server' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    expectOnlyKnown(info, await scan(page, '[role=dialog]'), {});
+  });
 });
 
 test.describe('axe: settings', () => {
@@ -137,11 +155,7 @@ test.describe('axe: settings', () => {
     await page.getByRole('menuitem', { name: 'Server Settings' }).click();
     await page.getByRole('button', { name: 'Roles', exact: true }).click();
     await expect(page.locator('.ss-role-list')).toBeVisible();
-    expectOnlyKnown(info, await scan(page, '[role=dialog]'), {
-      ...CONTRAST,
-      ...OVERLAY_MAIN,
-      'aria-required-children': 'A11Y-03 .ss-role-list (role=list) has a <button> child next to its listitems',
-    });
+    expectOnlyKnown(info, await scan(page, '[role=dialog]'), { ...CONTRAST, ...OVERLAY_MAIN });
   });
 
   test('channel settings', async ({ page }, info) => {
@@ -154,6 +168,43 @@ test.describe('axe: settings', () => {
 });
 
 // ---------------------------------------------------------------- keyboard only
+
+// Accessibility-tree snapshots of the key screens, for reading what a screen reader gets (not compared: mock data changes per run).
+// VOKKO_A11Y_SNAPSHOTS=<dir> also writes them there as <name>.yml.
+test.describe('accessibility tree', () => {
+  const save = async (page: Page, info: TestInfo, name: string) => {
+    const yml = await page.locator('body').ariaSnapshot();
+    await info.attach(`${name}.yml`, { body: yml, contentType: 'text/yaml' });
+    const dir = process.env.VOKKO_A11Y_SNAPSHOTS;
+    if (dir) {
+      const { mkdirSync, writeFileSync } = await import('node:fs');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(`${dir}/${name}.yml`, yml);
+    }
+    expect(yml).toContain('navigation "Servers sidebar"');
+  };
+
+  test('guild chat, voice call, user settings', async ({ page }, info) => {
+    await openGuild(page);
+    await save(page, info, 'guild-chat');
+    await page.getByRole('button', { name: 'General voice channel' }).click();
+    await expect(page.getByRole('button', { name: 'Leave voice channel' })).toBeVisible();
+    await save(page, info, 'voice-call');
+  });
+
+  test('DM and quick switcher', async ({ page }, info) => {
+    await openDm(page);
+    await save(page, info, 'dm');
+    await page.keyboard.press('ControlOrMeta+k');
+    await expect(page.locator('.quick-input')).toBeFocused();
+    await save(page, info, 'quick-switcher');
+  });
+
+  test('user settings', async ({ page }, info) => {
+    await openUserSettings(page, 'Accessibility');
+    await save(page, info, 'user-settings');
+  });
+});
 
 test.describe('keyboard: tab order and focus rings', () => {
   test('Tab visits rail, channel list, chat header, chat, composer, then the member list', async ({ page }, info) => {
@@ -200,7 +251,6 @@ test.describe('keyboard: tab order and focus rings', () => {
   });
 
   test('message list scroller shows a focus ring when tabbed to', async ({ page }) => {
-    test.fail(true, 'A11Y-08: react-virtuoso sets inline outline:none on the scroller, which is still a Tab stop');
     await openGuild(page);
     await page.locator('.chat-scroller').focus();
     await page.keyboard.press('Shift+Tab');
@@ -210,9 +260,9 @@ test.describe('keyboard: tab order and focus rings', () => {
   });
 
   test('composer shows a focus indicator on the box', async ({ page }) => {
-    test.fail(true, 'A11Y-08: chat.css:245 removes the textarea ring and nothing on .chat-composer-box replaces it (Discord shows only the caret, parity)');
     await openGuild(page);
     const box = page.locator('.chat-composer-box');
+    await page.locator('.chat-textarea').blur(); // the channel opens with the composer focused
     const before = await box.evaluate(el => { const s = getComputedStyle(el); return `${s.outlineStyle}|${s.boxShadow}|${s.borderColor}`; });
     await page.locator('.chat-textarea').focus();
     const after = await box.evaluate(el => { const s = getComputedStyle(el); return `${s.outlineStyle}|${s.boxShadow}|${s.borderColor}`; });
@@ -263,6 +313,8 @@ test.describe('keyboard: menus', () => {
     await openGuild(page);
     await page.locator('.chat-scroller').focus();
     for (let i = 0; i < 12 && !(await focusInfo(page, '.chat-msg')).inside; i += 1) await page.keyboard.press('Tab');
+    // past the author's avatar and name: Shift+F10 on those opens the user menu
+    for (let i = 0; i < 4 && (await focusInfo(page, '.chat-avatar-btn, .chat-author')).inside; i += 1) await page.keyboard.press('Tab');
     expect((await focusInfo(page, '.chat-msg')).inside).toBe(true);
     await page.keyboard.press('Shift+F10');
     const menu = page.getByRole('menu', { name: 'Message actions' });
@@ -460,11 +512,12 @@ test.describe('screen-reader structure', () => {
     await expect(page.getByRole('region', { name: 'User status and settings' })).toBeVisible();
   });
 
-  test('new messages are announced through a live region or log', async ({ page }) => {
-    test.fail(true, 'A11Y-10: the message list has no role=log / aria-live and the Virtuoso scroller (a Tab stop) has no role or name');
+  test('the message list is named and new messages from others are announced', async ({ page }) => {
     await openGuild(page);
-    const announced = await page.evaluate(() => !!document.querySelector('.chat-scroller')?.closest('[role=log], [aria-live]') || !!document.querySelector('.chat-scroller[role=log], .chat-scroller[aria-live]'));
-    expect(announced).toBe(true);
+    await expect(page.locator('.chat-scroller')).toHaveAttribute('aria-label', /^Messages in #/);
+    const channelId = page.url().split('/').pop()!;
+    await page.evaluate(id => (window as unknown as { __vokkoMock: { say(c: string, u: string, t: string): void } }).__vokkoMock.say(id, 'alice', 'a11y incoming probe'), channelId);
+    await expect(page.getByTestId('announcer')).toContainText(/: a11y incoming probe$/);
   });
 
   test('settings sidebar marks the current section', async ({ page }) => {

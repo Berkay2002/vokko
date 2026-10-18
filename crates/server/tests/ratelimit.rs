@@ -1,6 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod common;
 
+// Every test freezes the limiter's clock: buckets drain but never refill, so a burst sent slowly (a busy machine) is limited
+// at exactly its size.
+
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use common::TestApp;
@@ -15,6 +18,7 @@ fn lenient_global(route_burst: f64) -> RateLimit {
 #[tokio::test]
 async fn bursts_are_answered_with_429_and_retry_after() {
     let app = TestApp::with_config(|config| config.rate_limit = Some(lenient_global(3.0))).await;
+    app.state.limiter.freeze_clock();
     let (token, _) = app.register("sam").await;
     for _ in 0..3 {
         assert_eq!(app.get("/users/@me", &token).await.0, 200);
@@ -36,6 +40,7 @@ async fn bursts_are_answered_with_429_and_retry_after() {
 #[tokio::test]
 async fn limits_follow_the_user_not_the_header_text() {
     let app = TestApp::with_config(|config| config.rate_limit = Some(lenient_global(3.0))).await;
+    app.state.limiter.freeze_clock();
     let (first, user) = app.register("sam").await;
     let (status, login) = app.send(Method::POST, "/auth/login", None, Some(json!({"login": user["username"], "password": "correct horse battery"}))).await;
     assert_eq!(status, StatusCode::OK);
@@ -55,6 +60,7 @@ async fn limits_follow_the_user_not_the_header_text() {
 #[tokio::test]
 async fn invented_tokens_share_the_clients_bucket() {
     let app = TestApp::with_config(|config| config.rate_limit = Some(lenient_global(3.0))).await;
+    app.state.limiter.freeze_clock();
     // every request carries a different bogus Authorization value; none of them may get a fresh bucket
     let mut statuses = Vec::new();
     for n in 0..6 {
@@ -70,6 +76,7 @@ async fn auth_routes_are_limited_per_client_address() {
         config.rate_limit = Some(RateLimit { auth_burst: 3.0, auth_per_second: 0.1, ..lenient_global(30.0) });
     })
     .await;
+    app.state.limiter.freeze_clock();
     let attempt = |n: u32| {
         let app = &app;
         async move { app.send(Method::POST, "/auth/login", None, Some(json!({"login": format!("nobody{n}"), "password": "whatever you like"}))).await }
@@ -89,6 +96,7 @@ async fn auth_routes_are_limited_per_client_address() {
 async fn gif_routes_share_one_bucket_per_user_to_protect_the_provider_quota() {
     // default limits: 30 per route and 10 per second per route; the GIF bucket is 10 with 2 per second, shared by search/trending/categories
     let app = TestApp::with_config(|config| config.rate_limit = Some(RateLimit::default())).await;
+    app.state.limiter.freeze_clock();
     let (token, _) = app.register("sam").await;
     let (other, _) = app.register("alice").await;
     let mut limited_at = None;
@@ -104,7 +112,7 @@ async fn gif_routes_share_one_bucket_per_user_to_protect_the_provider_quota() {
         }
     }
     let limited_at = limited_at.expect("the shared GIF bucket ran dry");
-    assert!((10..=12).contains(&limited_at), "burst of 10 plus a little refill, got {limited_at}");
+    assert_eq!(limited_at, 10, "a burst of 10");
     assert_eq!(app.get("/gifs/trending", &other).await.0, 200, "another user has their own bucket");
     assert_eq!(app.get("/users/@me", &token).await.0, 200, "other routes are unaffected");
 }
@@ -113,6 +121,7 @@ async fn gif_routes_share_one_bucket_per_user_to_protect_the_provider_quota() {
 async fn signed_out_invite_previews_have_a_small_bucket_per_address() {
     // default limits: 30 per route; a signed-out preview gets 10 and then one every 5 seconds
     let app = TestApp::with_config(|config| config.rate_limit = Some(RateLimit::default())).await;
+    app.state.limiter.freeze_clock();
     let (token, _) = app.register("sam").await;
     let (_, channel) = app.guild_with_channel(&token).await;
     let (_, invite) = app.post(&format!("/channels/{channel}/invites"), &token, json!({})).await;
@@ -135,6 +144,7 @@ async fn ipv6_clients_are_limited_per_64_and_per_48() {
         config.rate_limit = Some(RateLimit { auth_burst: 1.0, auth_per_second: 0.01, ..lenient_global(30.0) });
     })
     .await;
+    app.state.limiter.freeze_clock();
     let login = |from: String| {
         let app = &app;
         async move {
@@ -166,6 +176,7 @@ async fn ipv6_clients_are_limited_per_64_and_per_48() {
 async fn avatar_and_banner_gif_imports_share_one_small_bucket_per_user() {
     // default limits: 30 per route; importing a GIF as an avatar or banner gets 3, then one every 5 seconds, across both routes
     let app = TestApp::with_config(|config| config.rate_limit = Some(RateLimit::default())).await;
+    app.state.limiter.freeze_clock();
     let (token, _) = app.register("sam").await;
     let (other, _) = app.register("alice").await;
     let body = json!({"channel_id": "1", "url": "https://evil.example/a.gif"});
@@ -178,7 +189,7 @@ async fn avatar_and_banner_gif_imports_share_one_small_bucket_per_user() {
         }
     }
     let limited_at = limited_at.expect("the shared import bucket ran dry");
-    assert!((3..=4).contains(&limited_at), "burst of 3 plus a little refill, got {limited_at}");
+    assert_eq!(limited_at, 3, "a burst of 3");
     assert_ne!(app.post("/users/@me/banners/gif", &other, body).await.0, 429, "another user has their own bucket");
 }
 
@@ -186,6 +197,7 @@ async fn avatar_and_banner_gif_imports_share_one_small_bucket_per_user() {
 async fn app_icon_uploads_have_a_small_bucket_and_downloads_none() {
     // default limits: 30 per route; an icon upload decodes an image, so it gets 10, then one every 2 seconds
     let app = TestApp::with_config(|config| config.rate_limit = Some(RateLimit::default())).await;
+    app.state.limiter.freeze_clock();
     let (token, _) = app.register("sam").await;
     let (other, _) = app.register("alice").await;
     let mut limited_at = None;
@@ -196,7 +208,7 @@ async fn app_icon_uploads_have_a_small_bucket_and_downloads_none() {
         }
     }
     let limited_at = limited_at.expect("the upload bucket ran dry");
-    assert!((10..=11).contains(&limited_at), "burst of 10 plus a little refill, got {limited_at}");
+    assert_eq!(limited_at, 10, "a burst of 10");
     assert_ne!(app.post_bytes("/app-icons", Some(&other), "image/png", Vec::new()).await.0, 429, "another user has their own bucket");
     for _ in 0..40 {
         let request = Request::builder().uri(format!("/api/v1/app-icons/{}", "0".repeat(64))).body(Body::empty()).unwrap();

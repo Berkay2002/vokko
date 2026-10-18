@@ -162,3 +162,18 @@ export function contrastRatio(a: Rgba, b: Rgba): number {
   const lb = relativeLuminance(b);
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
+
+/** `value` darkened towards black (hue kept) just enough to reach `ratio` against `background`; unchanged when it already does or is not a plain colour. */
+export function darkenToContrast(value: string, background: Rgba, ratio: number): string {
+  const color = parseColor(value);
+  if (!color || contrastRatio(color, background) >= ratio) return value;
+  const scaled = (k: number): Rgba => ({ r: color.r * k, g: color.g * k, b: color.b * k, a: color.a });
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 16; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (contrastRatio(scaled(mid), background) >= ratio) lo = mid;
+    else hi = mid;
+  }
+  return formatColor(scaled(lo));
+}

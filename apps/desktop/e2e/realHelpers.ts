@@ -1,4 +1,4 @@
-import type { Browser, BrowserContext, Page } from '@playwright/test';
+import { chromium, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,6 +7,8 @@ import path from 'node:path';
 
 export const API = (process.env.VOKKO_REAL_API ?? 'http://127.0.0.1:8711').replace(/\/+$/, '');
 export const REST = `${API}/api/v1`;
+/** The Vite client the sessions open (playwright.config.ts starts it on VOKKO_E2E_PORT). */
+export const WEB = `http://127.0.0.1:${process.env.VOKKO_E2E_PORT ?? '1422'}`;
 export const PASSWORD = 'vokko-dev';
 /** Unique per run: the integration database persists between runs. */
 export const RUN = Date.now().toString(36);
@@ -55,7 +57,7 @@ export async function registerUser(tag: string): Promise<{ token: string; userId
 
 /** A browser session for an existing token (e.g. from registerUser). */
 export async function openWithToken(browser: Browser, token: string, userId: string, username: string, start = '/channels/@me'): Promise<Session> {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark', baseURL: 'http://127.0.0.1:1422' });
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark', baseURL: WEB });
   await ctx.addInitScript(t => { try { localStorage.setItem('vokko.token', t); } catch { /* ignore */ } }, token);
   const page = await ctx.newPage();
   await page.goto(start);
@@ -83,7 +85,7 @@ export async function apiLogin(login: string, password = PASSWORD): Promise<{ to
 /** A fresh browser context signed in as `login` (token injected before any page script runs). */
 export async function openSession(browser: Browser, login: string, start = '/channels/@me'): Promise<Session> {
   const { token, userId } = await apiLogin(login);
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark', baseURL: 'http://127.0.0.1:1422' });
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark', baseURL: WEB });
   await ctx.addInitScript(t => { try { localStorage.setItem('vokko.token', t); } catch { /* ignore */ } }, token);
   const page = await ctx.newPage();
   await page.goto(start);
@@ -125,4 +127,34 @@ export async function restartServer(): Promise<void> {
     await new Promise(r => setTimeout(r, 500));
   }
   throw new Error('server did not come back');
+}
+
+/** The real-LiveKit specs run only when VOKKO_LIVEKIT=1 says the server has a LiveKit (see e2e/real.dmcall.spec.ts). */
+export const LIVEKIT = !!process.env.VOKKO_LIVEKIT;
+
+/** Chromium with a fake camera and microphone and an auto-accepted screen capture (must be set at launch). */
+export function launchMedia(): Promise<Browser> {
+  return chromium.launch({
+    executablePath: process.env.VOKKO_CHROMIUM || undefined,
+    args: [
+      '--use-fake-device-for-media-stream',
+      '--use-fake-ui-for-media-stream',
+      '--auto-select-desktop-capture-source=Entire screen',
+      '--auto-accept-this-tab-capture',
+      '--autoplay-policy=no-user-gesture-required',
+    ],
+  });
+}
+
+/** Both directions of a friendship through the API. */
+export async function befriend(a: { token: string; userId: string }, b: { token: string; userId: string }): Promise<void> {
+  await api(a.token, 'PUT', `/users/@me/relationships/${b.userId}`, {});
+  await api(b.token, 'PUT', `/users/@me/relationships/${a.userId}`, {});
+}
+
+/** A session on `start` with camera and microphone granted. */
+export async function openCallSession(browser: Browser, user: { token: string; userId: string; username: string }, start: string): Promise<Session> {
+  const s = await openWithToken(browser, user.token, user.userId, user.username, start);
+  await s.ctx.grantPermissions(['camera', 'microphone']);
+  return s;
 }

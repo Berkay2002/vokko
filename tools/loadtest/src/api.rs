@@ -10,6 +10,8 @@ use crate::stats::Shared;
 #[derive(Clone, Debug)]
 pub struct User {
     pub index: usize,
+    /// Snowflake as the server sends it.
+    pub id: String,
     pub token: String,
     /// Simulated client address (`X-Forwarded-For`, honoured by the server only with `VOKKO_TRUST_PROXY=on`).
     pub addr: Option<String>,
@@ -98,8 +100,9 @@ impl Api {
             Ok(response) => {
                 let status = response.status().as_u16();
                 let value: Value = serde_json::from_slice(&response.bytes().await.unwrap_or_default()).unwrap_or(Value::Null);
+                let id = value.pointer("/user/id").and_then(Value::as_str).unwrap_or_default().to_owned();
                 match (status, value.get("token").and_then(Value::as_str)) {
-                    (200, Some(token)) => Ok(User { index, token: token.to_owned(), addr }),
+                    (200, Some(token)) => Ok(User { index, id, token: token.to_owned(), addr }),
                     _ => Err(Failure { status, code: value.get("code").and_then(Value::as_u64).unwrap_or(0) }),
                 }
             }

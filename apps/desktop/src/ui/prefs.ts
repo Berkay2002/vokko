@@ -121,6 +121,8 @@ export interface Prefs {
   developerMode: boolean;
   // Content & Social / Data & Privacy (the server enforces the DM and friend request ones)
   dmsFromServerMembers: boolean;
+  /** Data & Privacy: send automatic crash and error reports to this server (report/crashReporter.ts). */
+  sendCrashReports: boolean;
   /** DMs from people who are not friends are filed as message requests and do not notify. */
   messageRequests: boolean;
   friendRequestsEveryone: boolean;
@@ -230,6 +232,7 @@ export const DEFAULT_PREFS: Prefs = {
   keybinds: [],
   developerMode: false,
   dmsFromServerMembers: true,
+  sendCrashReports: true,
   messageRequests: false,
   friendRequestsEveryone: true,
   friendRequestsMutualFriends: true,

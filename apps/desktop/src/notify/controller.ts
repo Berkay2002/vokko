@@ -16,6 +16,7 @@ import { flashTaskbar, notificationAdapter } from "./desktop";
 import { playSound, wireAudioUnlock } from "./sounds";
 import { notificationTitle, plainBody } from "./text";
 import { speakMessage } from "./tts";
+import { pushOverlayToast } from "../overlay/bridge";
 
 /**
  * Right after a (re)connect the server may replay what we missed. Replayed messages older than STALE_MS don't ping (they
@@ -99,15 +100,16 @@ export function openMessage(channelId: Snowflake, guildId: Snowflake | null, mes
   setTimeout(poll, 0);
 }
 
-function show(message: Message): void {
+/** Title, body and target of a message's notification (the OS one and the in-game overlay toast). */
+function describe(message: Message) {
   const state = appStore.getState();
   const channel = state.channels[message.channel_id];
   const guildId = channel?.guild_id ?? message.guild_id;
   const guild = guildId ? state.guilds[guildId] : undefined;
   const member = guildId ? (state.members[guildId]?.[message.author.id] ?? message.member ?? null) : null;
   const roles = guild?.roles ?? [];
-  const adapter = notificationAdapter();
-  adapter.show({
+  return {
+    guildId: guildId ?? null,
     title: notificationTitle({
       authorName: displayName(message.author, member),
       channelName: guildId ? (channel?.name ?? "channel") : channel ? dmName(channel) : displayName(message.author),
@@ -123,9 +125,12 @@ function show(message: Message): void {
       channelNameOf: id => state.channels[id]?.name ?? null,
     }),
     icon: avatarUrl(message.author),
-    tag: message.channel_id,
-    onClick: () => openMessage(message.channel_id, guildId ?? null, message.id),
-  });
+  };
+}
+
+function show(message: Message): void {
+  const { guildId, ...text } = describe(message);
+  notificationAdapter().show({ ...text, tag: message.channel_id, onClick: () => openMessage(message.channel_id, guildId, message.id) });
 }
 
 async function onMessage(message: Message): Promise<void> {
@@ -140,6 +145,11 @@ async function onMessage(message: Message): Promise<void> {
   if (shouldBounce(decision, input.focused)) void requestAttention();
   // Windows and Linux: a mention or DM in the background flashes the taskbar (desktop app, Settings > Notifications); macOS bounces the Dock above.
   if (!IS_MAC && decision.kind === "mention" && !input.focused && getPrefs().taskbarFlash) void flashTaskbar();
+  // In-game overlay: mentions and DMs, with the same mutes, levels and DND, but not tied to OS notifications being on.
+  if (decision.kind === "mention" && !input.focused && !(input.prefs.streamerMode && input.prefs.streamerDisableNotifications)) {
+    const { guildId, title, body, icon } = describe(message);
+    pushOverlayToast({ id: message.id, title, body, icon, channelId: message.channel_id, guildId, messageId: message.id });
+  }
   if (decision.desktop && (await notificationAdapter().permission()) === "granted") show(message);
 }
 

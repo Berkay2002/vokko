@@ -37,6 +37,8 @@ export interface AppState {
   token: string | null;
   /** True once READY has been applied for the current session. */
   ready: boolean;
+  /** The startup cache (cache/startupCache.ts) is on screen and READY has not arrived: show it, but nothing can be sent. */
+  stale: boolean;
   connection: GatewayStatus;
   me: User | null;
   guilds: Record<Snowflake, Guild>;
@@ -95,6 +97,7 @@ function sortPrivate(channels: Record<Snowflake, Channel>, ids: Iterable<Snowfla
 const initial = {
   token: null,
   ready: false,
+  stale: false,
   connection: "disconnected" as GatewayStatus,
   me: null,
   guilds: {},
@@ -182,6 +185,7 @@ export const appStore = create<AppState>()((set, get) => ({
     for (const [id, thread] of Object.entries(get().threads)) if (thread.thread_metadata?.archived && thread.guild_id && guilds[thread.guild_id] && !threads[id]) threads[id] = thread;
     set({
       ready: true,
+      stale: false,
       me: ready.user,
       guilds,
       guildOrder,
@@ -360,9 +364,14 @@ export function wireStoreToGateway(): void {
   gateway.onStatus(applyConnection);
   gateway.on("READY", ready => s().applyReady(ready));
   gateway.on("MESSAGE_CREATE", onMessageCreate);
+  // Also how a read on another device reaches this one (and its Dock badge). Like the server, the mention counter only
+  // resets once the ack has caught up with the newest message: a stale ack must not hide a mention that arrived after it.
   gateway.on("MESSAGE_ACK", ({ channel_id, message_id }) => {
-    const read = s().readStates[channel_id];
-    s().setReadState({ channel_id, last_message_id: maxId(read?.last_message_id, message_id), mention_count: 0 });
+    const state = s();
+    const read = state.readStates[channel_id];
+    const newest = (state.channels[channel_id] ?? state.threads[channel_id])?.last_message_id;
+    const caughtUp = !newest || compareIds(message_id, newest) >= 0;
+    state.setReadState({ channel_id, last_message_id: maxId(read?.last_message_id, message_id), mention_count: caughtUp ? 0 : (read?.mention_count ?? 0) });
   });
   gateway.on("TYPING_START", ({ channel_id, user_id }) => {
     if (user_id === s().me?.id) return;
@@ -383,6 +392,16 @@ export function wireStoreToGateway(): void {
   });
   gateway.on("CHANNEL_CREATE", c => s().upsertChannel(c));
   gateway.on("CHANNEL_UPDATE", c => s().upsertChannel(c));
+  gateway.on("CHANNEL_RECIPIENT_ADD", ({ channel_id, user }) => {
+    const channel = s().channels[channel_id];
+    if (!channel) return;
+    const recipients = channel.recipients ?? [];
+    if (!recipients.some(r => r.id === user.id)) s().upsertChannel({ ...channel, recipients: [...recipients, user] });
+  });
+  gateway.on("CHANNEL_RECIPIENT_REMOVE", ({ channel_id, user }) => {
+    const channel = s().channels[channel_id];
+    if (channel?.recipients) s().upsertChannel({ ...channel, recipients: channel.recipients.filter(r => r.id !== user.id) });
+  });
   gateway.on("CHANNEL_DELETE", c => {
     const open = s().route.channelId === c.id;
     s().removeChannel(c.id);

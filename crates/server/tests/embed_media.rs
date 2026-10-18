@@ -37,7 +37,8 @@ async fn link_preview_thumbnails_come_back_through_the_signed_proxy() {
     let (_, channel) = app.guild_with_channel(&token).await;
     app.post(&format!("/channels/{channel}/messages"), &token, json!({"content": pages.url("/page")})).await;
     let mut thumbnail = Value::Null;
-    for _ in 0..60 {
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while tokio::time::Instant::now() < deadline {
         let (_, list) = app.get(&format!("/channels/{channel}/messages?limit=5"), &token).await;
         thumbnail = list[0]["embeds"][0]["thumbnail"].clone();
         if !thumbnail.is_null() {

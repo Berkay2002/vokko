@@ -168,6 +168,121 @@
 }
 
 /* radio list */
+.community-pitch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 0;
+  text-align: center;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.community-pitch h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.community-pitch p {
+  max-width: 520px;
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.community-benefits {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  padding-top: 24px;
+}
+
+.community-benefits h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.community-benefits p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.community-steps {
+  display: flex;
+  gap: 24px;
+  margin: 0 0 24px;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+}
+
+.community-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.community-steps li.current {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.community-step-dot {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--background-base-low);
+}
+
+.community-steps li.current .community-step-dot,
+.community-steps li.done .community-step-dot {
+  background: var(--background-brand);
+  color: #fff;
+}
+
+.community-check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+
+.community-check small {
+  display: block;
+  color: var(--text-muted);
+}
+
+.community-check-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--status-positive-background);
+  color: #fff;
+}
+
+.community-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+@media (max-width: 640px) {
+  .community-benefits {
+    grid-template-columns: 1fr;
+  }
+}
+
 .sr-group {
   display: flex;
   flex-direction: column;
@@ -228,7 +343,7 @@
   width: 148px;
   padding: 0;
   border: 2px solid var(--border-normal);
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   overflow: hidden;
   text-align: left;
   background: var(--background-base-low);

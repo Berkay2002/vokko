@@ -8,6 +8,7 @@ mod attachments;
 pub mod auth;
 pub mod bug_reports;
 mod channels;
+pub mod crash_reports;
 mod embed_media;
 mod emojis;
 mod follows;
@@ -15,6 +16,7 @@ mod forums;
 mod gifs;
 pub mod guild_layout;
 pub mod guild_privacy;
+pub mod guild_settings;
 mod guilds;
 mod interactions;
 pub mod invites;
@@ -45,6 +47,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(crate::account::routes())
         .merge(users::routes())
         .merge(guild_layout::routes())
+        .merge(guild_settings::routes())
         .merge(guilds::routes())
         .merge(guild_privacy::routes())
         .merge(moderation::routes())
@@ -64,6 +67,7 @@ pub fn api(max_upload_bytes: usize) -> Router<AppState> {
         .merge(suggestions::routes())
         .merge(reports::routes())
         .merge(bug_reports::routes())
+        .merge(crash_reports::routes())
         .merge(saved::routes())
         .merge(settings::routes())
         .merge(gifs::routes())

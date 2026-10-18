@@ -2,6 +2,7 @@ import { CircleAlert } from "lucide-react";
 import type { Message } from "../api/types";
 import { Attachments } from "../chat/Attachments";
 import { Avatar } from "../chat/Avatar";
+import { useAuthorProfile } from "../chat/authorProfile";
 import { useChat } from "../chat/ChatContext";
 import { Embeds } from "../chat/Embeds";
 import { Markdown } from "../chat/markdown";
@@ -30,17 +31,20 @@ export function ThreadStarter({ message }: { message: Message }) {
     );
   }
   const color = chat.colorOf(original);
+  const author = useAuthorProfile(chat.guildId);
   const date = new Date(original.timestamp);
   return (
     <div className="chat-msg thread-starter" id={`message-${message.id}`} data-message-id={message.id} aria-label="Thread starter message">
       <div className="chat-msg-gutter">
-        <Avatar user={original.author} size={40} />
+        <button type="button" className="chat-avatar-btn" aria-label={chat.nameOf(original.author, original.member)} {...author(original.author)}>
+          <Avatar user={original.author} size={40} />
+        </button>
       </div>
       <div className="chat-msg-body">
         <h3 className="chat-msg-header">
-          <span className="chat-author" style={color ? { color } : undefined}>
+          <button type="button" className="chat-author" style={color ? { color } : undefined} {...author(original.author)}>
             {chat.nameOf(original.author, original.member)}
-          </span>
+          </button>
           <Tooltip content={date.toLocaleString()}>
             <time className="chat-timestamp" dateTime={original.timestamp}>
               {formatMessageTimestamp(date)}

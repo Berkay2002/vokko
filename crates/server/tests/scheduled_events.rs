@@ -270,7 +270,7 @@ impl Client {
 
     async fn next_frame(&mut self) -> Value {
         loop {
-            match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await {
+            match tokio::time::timeout(common::WAIT, self.ws.next()).await {
                 Ok(Some(Ok(Message::Text(text)))) => return serde_json::from_str(&text).expect("json frame"),
                 Ok(Some(Ok(_))) => continue,
                 other => panic!("gateway closed or timed out: {other:?}"),
@@ -785,7 +785,7 @@ async fn the_event_limit_lock_does_not_block_new_channels() {
     // a create in flight holds the guild row; adding a channel (which only references it) must not wait for it
     let mut tx = w.app.state.db.begin().await.expect("tx");
     sqlx::query("SELECT id FROM guilds WHERE id = $1 FOR NO KEY UPDATE").bind(w.guild.parse::<i64>().expect("id")).execute(&mut *tx).await.expect("lock");
-    let created = tokio::time::timeout(Duration::from_secs(5), w.app.post(&w.path("/channels"), &w.owner, json!({"name": "more", "type": 0})))
+    let created = tokio::time::timeout(common::WAIT, w.app.post(&w.path("/channels"), &w.owner, json!({"name": "more", "type": 0})))
         .await
         .expect("channel creation waited for the event lock");
     assert_eq!(created.0, StatusCode::OK, "{}", created.1);

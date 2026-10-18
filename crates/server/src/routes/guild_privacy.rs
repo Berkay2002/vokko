@@ -42,7 +42,7 @@ pub async fn may_dm(state: &AppState, sender: i64, target: i64) -> ApiResult<boo
 }
 
 /// The guild id when the caller is a member (404 Unknown Guild otherwise, so it does not tell which guilds exist).
-async fn member_guild(state: &AppState, user_id: i64, guild: &str) -> ApiResult<i64> {
+pub(crate) async fn member_guild(state: &AppState, user_id: i64, guild: &str) -> ApiResult<i64> {
     let guild = parse_id(guild).ok_or_else(ApiErr::unknown_guild)?;
     let (member,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM guild_members WHERE guild_id = $1 AND user_id = $2)")
         .bind(guild)

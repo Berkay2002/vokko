@@ -79,13 +79,20 @@ function RequestData() {
 }
 
 export function DataPrivacyPage({ onOpen }: { onOpen: Open }) {
+  const p = usePrefs();
   return (
     <Page title="Data & Privacy">
       <Category title="How Vokko Uses My Data">
         <SubHeading note="Vokko stores the messages, servers and direct messages you create so it can deliver them to you and the people you talk to. That is all it uses your data for.">
           Use data to make Vokko work
         </SubHeading>
-        <Unavailable>Vokko has no analytics, personalisation or sponsored content, so there is nothing to turn off here.</Unavailable>
+        <Unavailable>Vokko has no analytics, personalisation or sponsored content.</Unavailable>
+        <SwitchRow
+          label="Send crash reports"
+          note="When Vokko hits an error or crashes, send the app version, your OS, the screen you were on and the error to this server's operator. Never your messages or who you are."
+          checked={p.sendCrashReports}
+          onChange={v => setPref("sendCrashReports", v)}
+        />
         <RequestData />
       </Category>
       <Category title="Profile Privacy">

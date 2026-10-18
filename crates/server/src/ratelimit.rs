@@ -135,6 +135,8 @@ impl Buckets {
 
 pub struct RateLimiter {
     buckets: Mutex<Buckets>,
+    /// Set by `freeze_clock`: every check sees this instant, so no bucket refills.
+    frozen: std::sync::OnceLock<Instant>,
 }
 
 impl Default for RateLimiter {
@@ -170,7 +172,17 @@ fn take(buckets: &mut Buckets, key: (Caller, String), burst: f64, per_second: f6
 
 impl RateLimiter {
     fn with_cap(cap: usize) -> Self {
-        Self { buckets: Mutex::new(Buckets { map: HashMap::new(), swept: Instant::now(), cap }) }
+        Self { buckets: Mutex::new(Buckets { map: HashMap::new(), swept: Instant::now(), cap }), frozen: std::sync::OnceLock::new() }
+    }
+
+    /// Stops time for this limiter: buckets drain but never refill. For tests, which would otherwise depend on how fast the
+    /// machine runs a burst (a slow burst refills mid-way and is never limited).
+    pub fn freeze_clock(&self) {
+        let _ = self.frozen.set(Instant::now());
+    }
+
+    fn now(&self) -> Instant {
+        self.frozen.get().copied().unwrap_or_else(Instant::now)
     }
 
     /// Counts one request of `caller` against the caller-wide bucket and the bucket of `route`.
@@ -181,7 +193,7 @@ impl RateLimiter {
 
     /// Like `check`, with the route bucket's `(burst, per_second)` replaced (routes that cost the server more than they look).
     pub fn check_with(&self, caller: Caller, route: &str, limit: &RateLimit, auth: bool, route_bucket: Option<(f64, f64)>) -> Result<(), Limited> {
-        self.check_bucket_at(caller, route, limit, auth, route_bucket, Instant::now())
+        self.check_bucket_at(caller, route, limit, auth, route_bucket, self.now())
     }
 
     #[cfg(test)]
@@ -214,13 +226,13 @@ impl RateLimiter {
     /// configurable REST limits: `burst` requests, refilled at `per_second`. Returns the wait in seconds when it is used up.
     pub fn check_key(&self, key: &str, id: i64, burst: f64, per_second: f64) -> Result<(), f64> {
         let mut buckets = self.buckets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        take(&mut buckets, (Caller::User(id), format!("key:{key}")), burst, per_second, Instant::now())
+        take(&mut buckets, (Caller::User(id), format!("key:{key}")), burst, per_second, self.now())
     }
 
     /// One bucket per `(resource, kind)` shared by every caller (on top of the per-user route buckets).
     pub fn check_resource(&self, resource: i64, kind: &str, burst: f64, per_second: f64) -> Result<(), Limited> {
         let mut buckets = self.buckets.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        take(&mut buckets, (Caller::Resource(resource), kind.to_owned()), burst, per_second, Instant::now())
+        take(&mut buckets, (Caller::Resource(resource), kind.to_owned()), burst, per_second, self.now())
             .map_err(|retry_after| Limited { retry_after, global: false })
     }
 
@@ -251,7 +263,7 @@ impl RateLimiter {
 }
 
 pub fn limited_response(limited: Limited) -> Response {
-    let body = RateLimitError { message: "You are being rate limited.".to_owned(), retry_after: limited.retry_after, global: limited.global };
+    let body = RateLimitError { message: "You are being rate limited.".to_owned(), retry_after: limited.retry_after, global: limited.global, code: None };
     let mut response = (StatusCode::TOO_MANY_REQUESTS, Json(body)).into_response();
     let seconds = limited.retry_after.ceil().max(1.0) as u64;
     if let Ok(value) = HeaderValue::from_str(&seconds.to_string()) {
@@ -275,7 +287,7 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
     let auth = route.contains("/auth/");
     let mut caller = Caller::Ip(address_key(ip));
     if !auth && let Some(token) = bearer_header(request.headers()).map(str::to_owned) {
-        if let Err(limited) = state.limiter.check_address(ip, &limit, Instant::now()) {
+        if let Err(limited) = state.limiter.check_address(ip, &limit, state.limiter.now()) {
             return limited_response(limited);
         }
         if let Ok(Some(user_id)) = user_for_token(&state, &token).await {
@@ -318,7 +330,7 @@ pub async fn middleware(State(state): State<AppState>, mut request: Request, nex
         && let Some(wide) = wide_key(ip)
     {
         let (burst, per_second) = bucket.unwrap_or((limit.auth_burst, limit.auth_per_second));
-        if let Err(limited) = state.limiter.check_wide(wide, &route, burst, per_second, Instant::now()) {
+        if let Err(limited) = state.limiter.check_wide(wide, &route, burst, per_second, state.limiter.now()) {
             return limited_response(limited);
         }
     }

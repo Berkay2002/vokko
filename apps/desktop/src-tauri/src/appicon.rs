@@ -14,7 +14,8 @@ pub struct Variant {
     /// 512 px with macOS's transparent inset: Dock (only embedded on macOS).
     #[cfg(target_os = "macos")]
     pub dock: &'static [u8],
-    /// 64 px: tray (the unread dot is composited onto it).
+    /// 64 px: tray (the unread dot is composited onto it). macOS uses a template image instead (tray.rs).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub tray: &'static [u8],
 }
 

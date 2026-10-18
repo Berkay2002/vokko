@@ -175,6 +175,7 @@ export interface Channel {
   permission_overwrites?: PermissionOverwrite[]; // guild channels only
   bitrate?: number; // guild voice only: bps, 8000..guild max (default 64000)
   user_limit?: number; // guild voice only: 0 = unlimited, max 99
+  rate_limit_per_user?: number; // slowmode seconds between a member's messages (0 = off, max 21600); guild text and voice only, always sent there
   status?: string | null; // guild voice only: shared channel status (max 500 chars), null when none
   // Threads (types 10-12; parent_id = the text/announcement/forum channel; owner_id = creator; id == starter message id when started from a message or forum post)
   thread_metadata?: ThreadMetadata;
@@ -230,6 +231,8 @@ export interface Guild {
   nsfw_level?: NsfwLevel; // Access (MANAGE_GUILD); always sent by the server. AgeRestricted gates every channel of the server
   rules_channel_id?: Snowflake | null; // Access: the rules channel (a text channel of the guild); always sent, null when unset
   join_mode?: JoinMode; // Access: how people get in (MANAGE_GUILD); absent = InviteOnly
+  features?: string[]; // Discord feature flags; "COMMUNITY" once Community is enabled (PATCH `features` toggles only that one)
+  public_updates_channel_id?: Snowflake | null; // Community: the community updates channel (a text channel of the guild); always sent, null when unset
   default_message_notifications?: DefaultMessageNotifications; // Engagement: level for members with no per-server setting (MANAGE_GUILD); always sent, absent = AllMessages
 }
 /** Guild `default_message_notifications` (Discord's values). */
@@ -1468,6 +1471,7 @@ export interface RateLimitError {
   message: string;
   retry_after: number; // seconds (float); also sent as the Retry-After header
   global: boolean;
+  code?: number; // 20016 = the channel's slowmode
 }
 export interface PendingAttachmentMeta {
   id: Snowflake; // pending attachment id from POST /channels/{id}/attachments
@@ -1972,6 +1976,7 @@ export interface EditChannelRequest {
   default_sort_order?: ForumSortOrder;
   default_forum_layout?: ForumLayout;
   default_auto_archive_duration?: ThreadAutoArchiveDuration;
+  rate_limit_per_user?: number; // slowmode seconds 0..21600; guild text and voice only (MANAGE_CHANNELS)
   // ---- voice channels (MANAGE_CHANNELS) ----
   bitrate?: number; // 8000..guild max (else 400 50035)
   user_limit?: number; // 0..99
@@ -2030,6 +2035,46 @@ export interface InviteMetadata extends Invite {
   created_at: ISO8601;
 }
 
+// ---- Notification settings (GET/PATCH /users/@me/guilds/{guild.id|@me}/settings, READY user_guild_settings, USER_GUILD_SETTINGS_UPDATE) ----
+
+/** 0 all, 1 only @mentions, 2 nothing, 3 the guild's default (guild) / follow the parent (channel override). */
+export type MessageNotificationLevel = 0 | 1 | 2 | 3;
+/** `flags` bit: with level 1, unread messages still show the unread dot ("@Mentions + Unreads"). */
+export const UNREADS_ONLY_MENTIONS = 1 << 11;
+
+export interface ChannelOverride {
+  channel_id: Snowflake;
+  muted: boolean;
+  mute_config: MuteConfig | null; // null (or a null end_time) while muted = forever
+  message_notifications: MessageNotificationLevel;
+  flags: number;
+  collapsed: boolean;
+}
+
+export interface UserGuildSettings {
+  guild_id: Snowflake | null;
+  muted: boolean;
+  mute_config: MuteConfig | null;
+  message_notifications: MessageNotificationLevel;
+  flags: number;
+  suppress_everyone: boolean;
+  suppress_roles: boolean;
+  hide_muted_channels: boolean;
+  channel_overrides: ChannelOverride[];
+}
+
+/** Only sent keys change; `channel_overrides` is keyed by channel id and merges per channel. */
+export interface UpdateUserGuildSettingsRequest {
+  muted?: boolean;
+  mute_config?: MuteConfig | null;
+  message_notifications?: MessageNotificationLevel;
+  flags?: number;
+  suppress_everyone?: boolean;
+  suppress_roles?: boolean;
+  hide_muted_channels?: boolean;
+  channel_overrides?: Record<Snowflake, Partial<Omit<ChannelOverride, "channel_id">>>;
+}
+
 // ---- Guild layout: server folders and rail order (GET/PATCH /users/@me/guild-layout, READY guild_layout, GUILD_LAYOUT_UPDATE) ----
 export interface GuildFolder {
   id: Snowflake; // chosen by the client, unique among the user's folders
@@ -2082,6 +2127,7 @@ export interface ReadyEvent {
   read_states: ReadState[];
   relationships: Relationship[];
   guild_layout: GuildLayout;
+  user_guild_settings?: UserGuildSettings[]; // saved notification settings per guild (guild_id null = DMs); absent = none
   media?: InstanceMediaConfig; // always sent by the server; absent = voice unavailable
   desktop_version?: string; // latest desktop release the server knows of (its downloads' latest.json); absent = not configured
 }
@@ -2110,6 +2156,8 @@ export interface GatewayEvents {
   CHANNEL_CREATE: Channel;
   CHANNEL_UPDATE: Channel;
   CHANNEL_DELETE: Channel;
+  CHANNEL_RECIPIENT_ADD: { channel_id: Snowflake; user: User }; // someone joined a group DM (not sent to the new member, who gets CHANNEL_CREATE)
+  CHANNEL_RECIPIENT_REMOVE: { channel_id: Snowflake; user: User }; // someone left or was removed from a group DM (the removed user gets CHANNEL_DELETE)
   GUILD_CREATE: ReadyEvent["guilds"][number] & { presences?: Presence[] }; // presences of the guild's online members (Discord-style)
   GUILD_UPDATE: Guild; // roles included, no channels/members
   GUILD_DELETE: { id: Snowflake };
@@ -2185,6 +2233,7 @@ export interface GatewayEvents {
   INVITE_CREATE: InviteMetadata; // to members who can list it: MANAGE_GUILD, or MANAGE_CHANNELS on the invite's channel
   INVITE_DELETE: { code: string; guild_id: Snowflake; channel_id: Snowflake }; // same audience; revoked (not on expiry or last use)
   GUILD_LAYOUT_UPDATE: GuildLayout; // the user's own sessions only
+  USER_GUILD_SETTINGS_UPDATE: UserGuildSettings; // the user's own sessions only
   DESKTOP_VERSION: { version: string }; // every session, when the server sees a new desktop release (same value as READY desktop_version)
 }
 
@@ -2426,6 +2475,17 @@ export interface CreateBugReportRequest {
 }
 export interface BugReportCreated {
   id: Snowflake;
+}
+
+// ---- Crash reports (docs/api.md "Crash reports"): automatic, opt-out, no user id or message text stored ----
+export type CrashKind = "error" | "unhandled_rejection" | "panic";
+export interface CreateCrashReportRequest {
+  kind: CrashKind;
+  app_version: string; // at most 64
+  os: string; // at most 256
+  route: string; // ids replaced with ":id", at most 256
+  message: string; // 1-1000
+  stack: string; // scrubbed, at most 16,000; the whole body is capped at 32 KiB
 }
 
 // ---- Reports (MOD-009) ----

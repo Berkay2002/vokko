@@ -13,6 +13,7 @@ import { watchFor } from "./watch";
 import { stremioFor } from "./stremio";
 import { spotifyFor } from "./spotify";
 import { gamesFor } from "./games";
+import { guildSettingsFor } from "./guildSettings";
 
 export function messageFor(m: MockMessage, viewerId: string, depth = 0): Message {
   const guild = m.guild_id ? db.guilds.get(m.guild_id) : undefined;
@@ -91,6 +92,7 @@ export function channelFor(ch: MockChannel, viewerId: string): Channel {
   void thread_member_settings;
   const last = sortedMessages(ch.id).at(-1);
   const out: Channel = { ...rest, last_message_id: last?.id ?? null };
+  if (ch.type === ChannelType.GuildText || ch.type === ChannelType.GuildVoice) out.rate_limit_per_user = ch.rate_limit_per_user ?? 0;
   if (rest.permission_overwrites) out.permission_overwrites = rest.permission_overwrites.map(o => ({ ...o }));
   if (rest.thread_metadata) out.thread_metadata = { ...rest.thread_metadata };
   if (rest.available_tags) out.available_tags = rest.available_tags.map(t => ({ ...t }));
@@ -205,6 +207,7 @@ export function readyFor(viewerId: string, sessionId: string): ReadyEvent {
     read_states: readStatesFor(account, guilds, privateChannels),
     relationships: relationshipsFor(viewerId).filter(r => r.type !== RelationshipType.Blocked || true),
     guild_layout: account.guildLayout ?? { guild_folders: [], guild_positions: [] },
+    user_guild_settings: guildSettingsFor(viewerId),
     media: { voice_enabled: true, voice_bitrate_ceiling: 128000, screenshare_qualities: ["720p30"], video_enabled: false },
   };
 }

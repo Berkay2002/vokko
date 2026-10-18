@@ -2,8 +2,6 @@
 //! Kick, bans, member edits and role management, with the gateway events they emit.
 mod common;
 
-use std::time::Duration;
-
 use axum::http::StatusCode;
 use common::TestApp;
 use futures_util::{SinkExt, StreamExt};
@@ -35,7 +33,7 @@ impl Client {
 
     async fn recv(&mut self) -> Value {
         loop {
-            match tokio::time::timeout(Duration::from_secs(5), self.ws.next()).await {
+            match tokio::time::timeout(common::WAIT, self.ws.next()).await {
                 Ok(Some(Ok(Message::Text(text)))) => return serde_json::from_str(&text).expect("json frame"),
                 Ok(Some(Ok(_))) => continue,
                 Ok(_) => panic!("gateway closed"),

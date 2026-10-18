@@ -165,9 +165,10 @@ async fn uploads_in_db(setup: &Setup) -> i64 {
     count
 }
 
-/// Waits (the cleanup of a dropped request runs as a spawned task) until `check` holds; false after 5 s.
+/// Waits (the cleanup of a dropped request runs as a spawned task) until `check` holds; false after `common::WAIT`.
 async fn eventually<F: std::future::Future<Output = bool>>(mut check: impl FnMut() -> F) -> bool {
-    for _ in 0..100 {
+    let deadline = tokio::time::Instant::now() + common::WAIT;
+    while tokio::time::Instant::now() < deadline {
         if check().await {
             return true;
         }

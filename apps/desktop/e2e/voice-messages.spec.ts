@@ -79,6 +79,7 @@ test('record, send and play a voice message in a server channel', async ({ page 
   await expect(player.getByRole('button', { name: 'Playback speed 1.5x' })).toBeVisible();
   await player.getByRole('button', { name: 'Play', exact: true }).click();
   await expect(player.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+  await expect(player.locator('.voice-player-time')).toHaveText('0:01'); // counts up while it plays
   if (process.env.VOKKO_SHOTS_DIR) await page.screenshot({ path: path.join(process.env.VOKKO_SHOTS_DIR, 'desktop-player.png') });
   await expect(player.locator('.voice-player-wave span.played').first()).toBeVisible({ timeout: 5000 });
   await expect(player.getByRole('button', { name: 'Play', exact: true })).toBeVisible({ timeout: 5000 }); // played to the end

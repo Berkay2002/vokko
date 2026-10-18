@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { openChannel } from './threadHelpers';
 
 // Phone width (390x844, styles/responsive.css <= 767px): screens that ran off the right edge. Each test checks that what the
 // user needs is inside the window. VOKKO_SHOTS_DIR saves a screenshot per screen.
@@ -144,6 +145,74 @@ test('friends: every tab is on screen (they wrap under the title) and Add Friend
   await inside(page.locator('.add-friend-input'));
   await header.getByRole('tab', { name: 'Blocked' }).tap();
   await expect(header.getByRole('tab', { name: 'Blocked' })).toHaveAttribute('aria-selected', 'true');
+});
+
+test('a tap on a message author\'s name or avatar opens the profile sheet', async ({ page }) => {
+  await openStockTalk(page);
+  const row = page.locator('.chat-msg:not(.grouped):not(.system)').last();
+  const sheet = page.getByRole('dialog', { name: 'Profile' });
+  await row.locator('.chat-author').tap();
+  await expect(sheet).toBeVisible();
+  await expect(page.locator('.message-menu, [role=menu]')).toHaveCount(0);
+  await shot(page, 'author-sheet-390');
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await row.locator('.chat-avatar-btn').tap();
+  await expect(sheet).toBeVisible();
+});
+
+test('a thread and a forum post take the whole screen, split view or not', async ({ page }) => {
+  await openChannel(page, 'general');
+  const thread = page.locator('.thread-panel');
+  await page.getByRole('button', { name: 'general, details' }).tap();
+  await page.locator('.details-page').getByRole('tab', { name: 'Threads' }).tap();
+  await page.locator('.details-page').getByRole('button', { name: /gateway docs/ }).tap();
+  await expect(thread).toBeVisible();
+  expect((await thread.boundingBox())!.width).toBe(W);
+  await expect(page.locator('.channel-chat')).toBeHidden();
+  await shot(page, 'thread-390');
+  await thread.getByRole('button', { name: 'Close thread' }).tap();
+
+  await openChannel(page, 'support');
+  await page.locator('.forum-post-open').first().tap();
+  await expect(thread).toBeVisible();
+  expect((await thread.boundingBox())!.width).toBe(W);
+  await expect(page.locator('.channel-chat')).toBeHidden();
+  await shot(page, 'forum-post-390');
+});
+
+test('a thread\'s header replaces the channel\'s: back, name, overflow; the forum sort is an icon with a sheet', async ({ page }) => {
+  await openChannel(page, 'general');
+  const thread = page.locator('.thread-panel');
+  await page.getByRole('button', { name: 'general, details' }).tap();
+  await page.locator('.details-page').getByRole('tab', { name: 'Threads' }).tap();
+  await page.locator('.details-page').getByRole('button', { name: /gateway docs/ }).tap();
+  await expect(page.locator('.channel-header')).toBeHidden();
+  const header = thread.locator('.thread-panel-header');
+  await expect(header.getByRole('heading', { name: 'gateway docs' })).toBeVisible();
+  await expect(header.getByRole('button')).toHaveCount(2); // back and overflow (Sam already joined)
+  await inside(header.getByRole('button', { name: 'Thread actions' }));
+  await header.getByRole('button', { name: 'Thread actions' }).tap();
+  const sheet = page.getByRole('dialog', { name: 'Menu' });
+  await expect(sheet.getByRole('menuitem', { name: 'Notification Settings' })).toBeVisible();
+  await page.waitForTimeout(400); // the sheet's slide-in
+  await shot(page, 'thread-menu-390');
+  await sheet.getByRole('menuitem', { name: 'Pinned Messages' }).tap();
+  await expect(page.getByRole('dialog', { name: 'Pinned Messages' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await header.getByRole('button', { name: 'Close thread' }).tap();
+  await expect(thread).toHaveCount(0);
+  await expect(page.locator('.channel-header')).toBeVisible();
+
+  await openChannel(page, 'support');
+  await expect(page.locator('.forum-sort')).toHaveCount(0);
+  const sortBtn = page.getByRole('button', { name: 'Sort posts' });
+  await inside(sortBtn);
+  await shot(page, 'forum-390');
+  await sortBtn.tap();
+  await page.getByRole('menuitemcheckbox', { name: 'Date Posted' }).tap();
+  await sortBtn.tap();
+  await expect(page.getByRole('menuitemcheckbox', { name: 'Date Posted' })).toHaveAttribute('aria-checked', 'true');
 });
 
 // The same screens at desktop width: the phone rules must not leak (and the members dates stay on one line).
