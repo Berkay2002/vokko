@@ -179,8 +179,8 @@ function MessageItemImpl({ message, pending, grouped, editing, highlighted, tabS
   const touchRef = useRef(false);
   const press = useRef<{ x: number; y: number; timer: number; fired: boolean } | null>(null);
   const stopPress = () => { if (press.current) window.clearTimeout(press.current.timer); };
-  // a picture opens the viewer on a tap but still takes a long press (its menu has Copy Image and Save Image)
-  const ownTap = (target: EventTarget) => { const hit = (target as Element).closest(OWN_TAP); return !!hit && !hit.matches('.chat-image') && rowRef.current !== hit && !!rowRef.current?.contains(hit); };
+  // a picture or a web link acts on a tap but still takes a long press (their menu has Copy Image, Save Image, Open Link, Copy Link)
+  const ownTap = (target: EventTarget) => { const hit = (target as Element).closest(OWN_TAP); const kind = hit ? mediaTargetFrom(hit)?.kind : undefined; return !!hit && kind !== 'image' && kind !== 'link' && rowRef.current !== hit && !!rowRef.current?.contains(hit); };
   const showToolbar = !pending && !editing && !ephemeral && (armed || pickerOpen);
   const cls = ['chat-msg'];
   if (grouped) cls.push('grouped');

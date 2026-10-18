@@ -203,12 +203,27 @@ test.describe('phone 390x844', () => {
     await shot(page, 'sheet-image');
   });
 
+  test('long press on a web link opens the sheet with Open Link and Copy Link', async ({ page }) => {
+    await openStockTalk(page);
+    const row = await sendFiles(page, [await png(page, 'k.png', 100, 100, '#555')], 'phone https://example.com/some/page link');
+    const box = (await row.locator('a[href^="https://example.com"]').boundingBox())!;
+    const cdp = await page.context().newCDPSession(page);
+    await touch(cdp, 'touchStart', [{ x: box.x + box.width / 2, y: box.y + box.height / 2, id: 0 }]);
+    await page.waitForTimeout(700);
+    await touch(cdp, 'touchEnd', []);
+    await expect(page.locator('.sheet-message')).toBeVisible();
+    expect((await labels(page)).slice(0, 2)).toEqual(['Open Link', 'Copy Link']);
+    await expect(page.getByRole('dialog').filter({ hasText: 'example.com' })).toHaveCount(0); // the press did not also follow the link
+    await shot(page, 'sheet-link');
+  });
+
   test('viewer: pinch zooms, one finger pans, swipe changes picture, the page behind does not scroll', async ({ page }) => {
     await openStockTalk(page);
-    const row = await sendFiles(page, [await png(page, 'a.png', 1600, 900, '#c63'), await png(page, 'b.png', 900, 900, '#36c')], 'phone pair');
+    const row = await sendFiles(page, [await png(page, 'a.png', 1600, 900, '#c63'), await png(page, 'b.png', 900, 900, '#36c')], 'phone pair', 'the phone chart');
     await row.locator('.chat-image').first().click();
     const img = viewImg(page);
     await expect(img).toBeVisible();
+    await expect(img).toHaveAttribute('alt', 'the phone chart');
     expect(await page.locator('.chat-lightbox-stage').evaluate(el => getComputedStyle(el).touchAction)).toBe('none');
     const cdp = await page.context().newCDPSession(page);
     const b = (await img.boundingBox())!;

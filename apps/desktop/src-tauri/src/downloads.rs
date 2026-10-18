@@ -9,6 +9,17 @@ use tauri::{Emitter, Manager, Runtime, Webview};
 
 pub const DOWNLOAD_EVENT: &str = "desktop-download";
 const MAX_NAME_LEN: usize = 120;
+/// Files the OS would run or install on a double click. They are still saved, but under `<name>.download`, so opening one takes a
+/// deliberate rename instead of a click on a name the sender chose.
+const RUNNABLE: &[&str] = &[
+    "app", "appimage", "bat", "cmd", "com", "command", "cpl", "deb", "dll", "dmg", "exe", "hta", "jar", "js", "jse", "lnk", "msi", "pkg", "ps1", "reg", "rpm",
+    "scr", "sh", "vbe", "vbs", "wsf",
+];
+
+/// Zero-width and bidirectional-control characters (Unicode category Cf): they reorder or hide parts of a name ("evil\u{202E}gpj.exe").
+fn is_invisible(c: char) -> bool {
+    matches!(c, '\u{AD}' | '\u{61C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}')
+}
 
 #[derive(Clone, Serialize)]
 struct Finished {
@@ -19,7 +30,7 @@ struct Finished {
 /// names, never empty.
 fn clean_name(raw: &str) -> String {
     let last = raw.rsplit(['/', '\\']).next().unwrap_or_default();
-    let mut name: String = last.chars().filter(|c| !c.is_control() && !"<>:\"|?*".contains(*c)).collect();
+    let mut name: String = last.chars().filter(|c| !c.is_control() && !is_invisible(*c) && !"<>:\"|?*".contains(*c)).collect();
     name = name.trim_matches([' ', '.']).chars().take(MAX_NAME_LEN).collect();
     let stem = name.split('.').next().unwrap_or_default().to_ascii_uppercase();
     let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
@@ -28,6 +39,8 @@ fn clean_name(raw: &str) -> String {
         "download".to_owned()
     } else if reserved {
         format!("_{name}")
+    } else if name.rsplit_once('.').is_some_and(|(_, ext)| RUNNABLE.contains(&ext.to_ascii_lowercase().as_str())) {
+        format!("{name}.download")
     } else {
         name
     }
@@ -74,7 +87,7 @@ mod tests {
     fn names_stay_inside_the_downloads_folder() {
         assert_eq!(clean_name("cat.png"), "cat.png");
         assert_eq!(clean_name("../../etc/passwd"), "passwd");
-        assert_eq!(clean_name("C:\\Windows\\evil.exe"), "evil.exe");
+        assert_eq!(clean_name("C:\\Windows\\evil.exe"), "evil.exe.download");
         assert_eq!(clean_name("a<b>:c\"|?*.txt"), "abc.txt");
         assert_eq!(clean_name(".."), "download");
         assert_eq!(clean_name(" . "), "download");
@@ -82,6 +95,10 @@ mod tests {
         assert_eq!(clean_name("LPT1"), "_LPT1");
         assert_eq!(clean_name("com.txt"), "com.txt");
         assert_eq!(clean_name(&"x".repeat(500)).len(), MAX_NAME_LEN);
+        assert_eq!(clean_name("evil\u{202E}gpj.exe"), "evilgpj.exe.download");
+        assert_eq!(clean_name("Setup.EXE"), "Setup.EXE.download");
+        assert_eq!(clean_name("run.sh"), "run.sh.download");
+        assert_eq!(clean_name("exe"), "exe");
     }
 
     #[test]
