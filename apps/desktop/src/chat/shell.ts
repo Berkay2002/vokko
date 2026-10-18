@@ -26,8 +26,9 @@ const NO_MEMBERS: Record<Snowflake, GuildMember> = {};
 /** Puts a user into the shared store (the profile card only opens for users the store holds). */
 export function cacheUser(user: User): void { appStore.getState().cacheUsers([user]); }
 
-/** Runs `cb` when the session ends or another account takes over (a set token goes to none or to a different one). */
-export function onSignOut(cb: () => void): void { appStore.subscribe((s, prev) => { if (prev.token && s.token !== prev.token) cb(); }); }
+/** The signed-in user's id (null before the session is ready and after sign-out), and a listener for it changing. */
+export function currentUserId(): string | null { return appStore.getState().me?.id ?? null; }
+export function onUserChange(cb: (id: string | null) => void): void { appStore.subscribe((s, prev) => { if (s.me?.id !== prev.me?.id) cb(s.me?.id ?? null); }); }
 
 export function useMe(): User | null { return useStore(s => s.me); }
 

@@ -2,7 +2,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 import type { Attachment, Snowflake } from '../api/types';
 import { MAX_ATTACHMENTS, MAX_UPLOAD_BYTES, maxUploadBytes } from '../api/limits';
-import { onSignOut, uploadAttachment } from './shell';
+import { currentUserId, onUserChange, uploadAttachment } from './shell';
 import { uploadErrorMessage } from './util';
 import type { MentionToken } from './mentionText';
 
@@ -32,48 +32,68 @@ export interface Draft {
 
 const EMPTY: Draft = { text: '', tokens: [], uploads: [] };
 
-// Text and tokens (not uploads) survive a reload or restart in localStorage, newest last.
-export const DRAFTS_KEY = 'vokko.drafts';
+// Text and tokens (not uploads) survive a reload or restart in localStorage, newest last, one key per account.
+export const draftsKey = (userId: string): string => `vokko.drafts.${userId}`;
 export const MAX_SAVED_DRAFTS = 50;
 export const MAX_SAVED_TEXT = 4000;
 const SAVE_DELAY_MS = 500;
 
-function loadDrafts(): Map<Snowflake, Draft> {
-  const out = new Map<Snowflake, Draft>();
+const drafts = new Map<Snowflake, Draft>();
+let owner: string | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+/** The last write to storage threw (quota, blocked): the text then exists only in memory. */
+let lastFlushFailed = false;
+
+function loadDrafts(userId: string): void {
   try {
-    const saved: unknown = JSON.parse(localStorage.getItem(DRAFTS_KEY) ?? '[]');
-    if (!Array.isArray(saved)) return out;
+    const saved: unknown = JSON.parse(localStorage.getItem(draftsKey(userId)) ?? '[]');
+    if (!Array.isArray(saved)) return;
     for (const e of saved as Array<[Snowflake, string, MentionToken[]]>) {
       if (Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'string' && e[1] !== '') {
-        out.set(e[0], { text: e[1].slice(0, MAX_SAVED_TEXT), tokens: Array.isArray(e[2]) ? e[2] : [], uploads: [] });
+        drafts.set(e[0], { text: e[1].slice(0, MAX_SAVED_TEXT), tokens: Array.isArray(e[2]) ? e[2] : [], uploads: [] });
       }
     }
   } catch { /* no storage or a corrupt entry: start empty */ }
-  return out;
 }
 
-const drafts = loadDrafts();
-let saveTimer: ReturnType<typeof setTimeout> | undefined;
+/** Drafts belong to the account that typed them: on sign-out or an account change the previous account's are dropped and its key wiped. */
+function switchOwner(next: string | null): void {
+  if (next === owner) return;
+  clearTimeout(saveTimer);
+  saveTimer = undefined;
+  if (owner) try { localStorage.removeItem(draftsKey(owner)); } catch { /* blocked storage */ }
+  drafts.clear();
+  lastFlushFailed = false;
+  owner = next;
+  if (next) loadDrafts(next);
+  listeners.forEach(set => set.forEach(l => l()));
+}
 
 /** Writes the drafts now (also on pagehide and before "Restart to Update", where the debounce would lose the last keystrokes). */
 export function flushDrafts(): void {
   clearTimeout(saveTimer);
   saveTimer = undefined;
+  if (!owner) return;
   const entries = [...drafts].filter(([, d]) => d.text !== '').slice(-MAX_SAVED_DRAFTS).map(([id, d]) => [id, d.text.slice(0, MAX_SAVED_TEXT), d.tokens]);
   try {
-    if (entries.length === 0) localStorage.removeItem(DRAFTS_KEY); else localStorage.setItem(DRAFTS_KEY, JSON.stringify(entries));
-  } catch { /* storage full or blocked: the draft stays in memory */ }
+    if (entries.length === 0) localStorage.removeItem(draftsKey(owner)); else localStorage.setItem(draftsKey(owner), JSON.stringify(entries));
+    lastFlushFailed = false;
+  } catch { lastFlushFailed = true; /* storage full or blocked: the draft stays in memory */ }
 }
 const saveSoon = (): void => {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flushDrafts, SAVE_DELAY_MS);
 };
-if (typeof window !== 'undefined') window.addEventListener('pagehide', flushDrafts);
-// Drafts belong to the account that typed them: the next sign-in on this machine starts clean.
-onSignOut(() => { drafts.clear(); flushDrafts(); });
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  window.addEventListener('pagehide', flushDrafts);
+  // Tray Quit and Cmd+Q give the page no event: a hidden window (or tab) has at least been saved.
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushDrafts(); });
+}
 
 const listeners = new Map<Snowflake, Set<() => void>>();
 let seq = 0;
+onUserChange(switchOwner);
+switchOwner(currentUserId());
 
 function emit(channelId: Snowflake): void { listeners.get(channelId)?.forEach(l => l()); }
 function patch(channelId: Snowflake, fn: (d: Draft) => Draft): void {
@@ -105,8 +125,15 @@ export function useDraft(channelId: Snowflake): Draft {
 
 export function getDraft(channelId: Snowflake): Draft { return drafts.get(channelId) ?? EMPTY; }
 
-/** True when a channel holds uploads, which a reload loses (typed text is restored from storage). */
-export function hasUnsentDraft(): boolean { return [...drafts.values()].some(d => d.uploads.length > 0); }
+/**
+ * True when a reload would lose something: uploads, or typed text the saved copy cannot hold (longer than MAX_SAVED_TEXT, beyond the
+ * newest MAX_SAVED_DRAFTS, or a write that failed). Other typed text is restored from storage.
+ */
+export function hasUnsentDraft(): boolean {
+  flushDrafts(); // settles lastFlushFailed against what is typed right now
+  const texts = [...drafts.values()].filter(d => d.text !== '');
+  return lastFlushFailed || texts.length > MAX_SAVED_DRAFTS || [...drafts.values()].some(d => d.uploads.length > 0 || d.text.length > MAX_SAVED_TEXT);
+}
 
 export function setDraftText(channelId: Snowflake, text: string, tokens?: MentionToken[]): void {
   patch(channelId, d => ({ ...d, text, tokens: tokens ?? d.tokens }));
